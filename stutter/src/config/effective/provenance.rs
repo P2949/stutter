@@ -81,6 +81,12 @@ pub(super) fn record_layer_provenance(
         "timing.spike_threshold_ns",
         source,
     );
+    record_if_present(
+        &layer.live_diagnosis_cluster_window_ms,
+        provenance,
+        "diagnosis.live_cluster_window_ms",
+        source,
+    );
 
     record_if_present(&layer.irq_latency, provenance, "probes.irq_latency", source);
     record_if_present(&layer.irqs, provenance, "probes.irqs", source);

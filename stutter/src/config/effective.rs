@@ -338,6 +338,7 @@ mod tests {
             "timing.epoch_period_ms",
             "timing.max_duration",
             "timing.spike_threshold_ns",
+            "diagnosis.live_cluster_window_ms",
             "probes.irq_latency",
             "probes.irqs",
             "probes.hwmon",

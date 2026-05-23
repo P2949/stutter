@@ -63,6 +63,7 @@ pub struct FinalizeRecordingInput<'a> {
     pub block_io_correlation_basis: String,
     pub block_io_correlation_confidence: String,
     pub native_cgroup_filter: crate::ebpf_loader::NativeCgroupFilterStatus,
+    pub probe_activation_warnings: Vec<super::session_files::RecordedProbeActivationWarning>,
     pub drop_counters: crate::ebpf_loader::DropCountersSnapshot,
     pub cpu_perf_status: Option<CpuPerfStatus>,
     pub focus_mode: Option<String>,
@@ -170,6 +171,7 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         block_io_correlation_basis,
         block_io_correlation_confidence,
         native_cgroup_filter,
+        probe_activation_warnings,
         drop_counters,
         cpu_perf_status,
         focus_mode,
@@ -403,6 +405,7 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         block_io_correlation_basis: block_io_correlation_basis.clone(),
         block_io_correlation_confidence: block_io_correlation_confidence.clone(),
         native_cgroup_filter: native_cgroup_filter.clone(),
+        probe_activation_warnings,
         drop_counters: drop_counters.clone(),
         cpu_perf_sample_count: cpu_perf_status
             .as_ref()
@@ -432,13 +435,9 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         tasks,
         top_spikes,
     };
-
     let metadata_file = MetadataFile { core };
-
     let map_write_err = |e: anyhow::Error| -> anyhow::Error { e.context("record write failed") };
-
     let mut sync_tracker = SyncTracker::default();
-
     write_json(
         recording.run_dir.join("session.json"),
         &session,
@@ -451,7 +450,6 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         &mut sync_tracker,
     )
     .map_err(map_write_err)?;
-
     if !recorder.streams.contains(ArtifactKind::Interval) {
         write_json_stream(
             recording.run_dir.join("interval.json"),
@@ -569,6 +567,7 @@ pub fn recorded_config(config: &MonitorConfig, tree_pids: &[u32]) -> RecordedCon
         retain_intervals: config.recording.retain_intervals,
         max_tasks: config.target.max_tasks,
         spike_threshold_ns: config.timing.spike_threshold_ns,
+        live_diagnosis_cluster_window_ms: config.diagnosis.live_cluster_window_ms,
         alert_threshold_ns: config.alerts.threshold_ns,
         alert_webhook_url: config.alerts.webhook_url.clone(),
         follow_exec: config.safety.follow_exec,

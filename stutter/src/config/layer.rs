@@ -26,6 +26,7 @@ pub struct MonitorConfigLayer {
     pub epoch_period_ms: Option<Option<u64>>,
     pub max_duration: Option<Option<Duration>>,
     pub spike_threshold_ns: Option<u64>,
+    pub live_diagnosis_cluster_window_ms: Option<u64>,
 
     pub irq_latency: Option<bool>,
     pub irqs: Option<Vec<u32>>,
@@ -134,6 +135,7 @@ impl MonitorConfigLayer {
             epoch_period_ms: Some(config.timing.epoch_period_ms),
             max_duration: Some(config.timing.max_duration),
             spike_threshold_ns: Some(config.timing.spike_threshold_ns),
+            live_diagnosis_cluster_window_ms: Some(config.diagnosis.live_cluster_window_ms),
 
             irq_latency: Some(config.probes.irq_latency),
             irqs: Some(config.probes.irqs),
@@ -241,6 +243,7 @@ impl MonitorConfigLayer {
             spike_threshold_ns: user_file
                 .spike_threshold_ns
                 .or_else(|| user_file.spike_us.map(|value| value.saturating_mul(1_000))),
+            live_diagnosis_cluster_window_ms: user_file.live_diagnosis_cluster_window_ms,
             hwmon: user_file.hwmon,
             cpu_freq: match (user_file.cpu_freq, user_file.no_cpu_freq) {
                 (_, Some(true)) => Some(false),

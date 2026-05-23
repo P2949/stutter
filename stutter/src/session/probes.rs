@@ -36,4 +36,14 @@ impl ProbeRuntime {
     pub fn activation_plan(&self) -> &crate::probe_activation::ProbeActivationPlan {
         &self.loaded.activation_plan
     }
+
+    pub fn recorded_activation_warnings(
+        &self,
+    ) -> Vec<crate::recorder::RecordedProbeActivationWarning> {
+        self.activation_plan()
+            .warnings
+            .iter()
+            .map(crate::recorder::RecordedProbeActivationWarning::from)
+            .collect()
+    }
 }

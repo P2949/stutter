@@ -12,11 +12,13 @@ pub const EVENT_DRM_FENCE: u32 = 9;
 
 /// Maximum Linux CPU id tracked by the eBPF-side runnable-depth arrays.
 ///
-/// Events for CPU ids at or above this value are still safe, but target-local
-/// runnable-depth and pending-wakeup accounting is intentionally skipped and
-/// counted via `DROP_CPU_ACCOUNTING_UNTRACKED`. Keep this in sync with the
-/// eBPF map capacities for `CPU_RUNNABLE_DEPTH` and `TARGET_PENDING_WAKEUPS`.
-pub const BPF_MAX_TRACKED_CPUS: u32 = 4_096;
+/// This deliberately covers very large machines while keeping the BPF array
+/// maps bounded. Events for CPU ids at or above this value are still safe, but
+/// target-local runnable-depth and pending-wakeup accounting is intentionally
+/// skipped and counted via `DROP_CPU_ACCOUNTING_UNTRACKED`. Keep this in sync
+/// with the eBPF map capacities for `CPU_RUNNABLE_DEPTH` and
+/// `TARGET_PENDING_WAKEUPS`.
+pub const BPF_MAX_TRACKED_CPUS: u32 = 16_384;
 
 /// Fallback eBPF ring-buffer size baked into the BPF object.
 ///

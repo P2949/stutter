@@ -8,6 +8,7 @@ use crate::config::{
 pub struct MonitorConfig {
     pub target: TargetConfig,
     pub timing: TimingConfig,
+    pub diagnosis: DiagnosisConfig,
     pub probes: ProbeConfig,
     pub recording: RecordingConfig,
     pub outputs: OutputConfig,
@@ -76,6 +77,21 @@ impl Default for TimingConfig {
             epoch_period_ms: None,
             max_duration: None,
             spike_threshold_ns: 1_000_000,
+        }
+    }
+}
+
+pub const DEFAULT_LIVE_DIAGNOSIS_CLUSTER_WINDOW_MS: u64 = 5;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DiagnosisConfig {
+    pub live_cluster_window_ms: u64,
+}
+
+impl Default for DiagnosisConfig {
+    fn default() -> Self {
+        Self {
+            live_cluster_window_ms: DEFAULT_LIVE_DIAGNOSIS_CLUSTER_WINDOW_MS,
         }
     }
 }

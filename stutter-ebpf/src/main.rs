@@ -48,6 +48,7 @@ mod block_io;
 mod map_limits;
 mod trace_offsets;
 mod trace_read;
+mod wakeup_data;
 
 use map_limits::{
     PREV_FAULTS_MAP_MAX_ENTRIES, RUNNABLE_TASK_CPU_MAP_MAX_ENTRIES, TARGET_PIDS_MAP_MAX_ENTRIES,
@@ -85,7 +86,7 @@ static TARGET_CGROUP_IDS: HashMap<u64, u8> = HashMap::<u64, u8>::with_max_entrie
 static TARGET_IRQS: HashMap<u32, u8> = HashMap::<u32, u8>::with_max_entries(64, 0);
 
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 struct WakeupData {
     ts: u64,
     target_cpu: u32,
@@ -273,11 +274,10 @@ pub fn sched_process_exit(_ctx: TracePointContext) -> u32 {
 
     remove_runnable_task_if_present(tid);
 
-    if let Some(old) = unsafe { WAKEUP_DATA.get(tid).copied() } {
+    let mut old = WakeupData::default();
+    if wakeup_data::take_wakeup_data(tid, &mut old) {
         decrement_target_pending(old.target_cpu);
     }
-
-    let _ = WAKEUP_DATA.remove(tid);
     let _ = PREV_FAULTS.remove(tid);
     0
 }
@@ -563,24 +563,19 @@ fn try_sched_switch(ctx: TracePointContext) -> u32 {
 
     let pid = next_pid as u32;
 
-    let wakeup_data = match unsafe { WAKEUP_DATA.get(pid) } {
-        Some(d) => *d,
-        None => return 0,
-    };
+    let mut wakeup_data = WakeupData::default();
+    if !wakeup_data::take_wakeup_data(pid, &mut wakeup_data) {
+        return 0;
+    }
 
     if !is_target_pid(pid) {
         increment_drop_counter(DROP_WAKEUP_DATA_STALE_ENTRY);
-        let _ = WAKEUP_DATA.remove(pid);
         decrement_target_pending(wakeup_data.target_cpu);
         remove_runnable_task_if_present(pid);
         return 0;
     }
 
-    // Consume the pending wakeup before the slower tracepoint reads so a later
-    // wakeup for the same TID cannot be removed by this sched_switch instance.
-    // If the tracepoint reads fail after consume, report that explicitly rather
-    // than leaving a stale wakeup record in WAKEUP_DATA.
-    let _ = WAKEUP_DATA.remove(pid);
+    // Wakeup data is consumed before slower tracepoint reads to avoid stale state.
 
     // Read the previous task context only after the cheap relevance filters pass.
     // Offsets validated in userspace preflight assume prev_pid at 24 and prev_state at 32.

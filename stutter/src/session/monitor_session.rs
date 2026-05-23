@@ -1273,8 +1273,7 @@ impl MonitorSession {
         // Prune old telemetry (history window controlled by LiveTelemetry::max_age_ms)
         self.runtime.telemetry.prune(elapsed_ms.into());
 
-        // Form a cluster from spikes within cluster_window_ms
-        let cluster_window_ms = LIVE_DIAGNOSIS_CLUSTER_WINDOW_MS;
+        let cluster_window_ms = self.config.diagnosis.live_cluster_window_ms;
         let cluster_window_ns = cluster_window_ms * 1_000_000;
 
         let recent_spikes: Vec<_> = self
@@ -1494,6 +1493,7 @@ impl MonitorSession {
                     .block_io_correlation_confidence
                     .clone(),
                 native_cgroup_filter: self.runtime.probes.native_cgroup_filter.clone(),
+                probe_activation_warnings: self.runtime.probes.recorded_activation_warnings(),
                 focus_mode: if self.config.focus.auto_focus {
                     Some("auto".to_owned())
                 } else if self.config.has_explicit_target() {
