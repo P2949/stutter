@@ -16,6 +16,10 @@ fn collect_rs_files(dir: &Path) -> Vec<std::path::PathBuf> {
     files
 }
 
+fn count_occurrences(source: &str, needle: &str) -> usize {
+    source.match_indices(needle).count()
+}
+
 #[test]
 fn controller_does_not_compare_raw_score_totals() {
     let source = include_str!("../autotune/controller.rs");
@@ -129,7 +133,9 @@ fn no_duplicated_diagnostic_score_total_names_exist_in_source_tree() {
                 continue;
             }
 
-            if relative == "daemon/state.rs" && forbidden == "diagnostic_candidate_diagnostic_score_total" {
+            if relative == "daemon/state.rs"
+                && forbidden == "diagnostic_candidate_diagnostic_score_total"
+            {
                 continue;
             }
 
@@ -153,5 +159,46 @@ fn daemon_workload_profile_uses_candidate_raw_score_total_name() {
     assert!(
         source.contains(r#"alias = "diagnostic_candidate_diagnostic_score_total""#),
         "DaemonWorkloadProfile should keep a serde alias for old persisted state"
+    );
+}
+
+#[test]
+fn daemon_workload_profile_does_not_expose_legacy_candidate_diagnostic_field_name() {
+    let source = include_str!("../daemon/state.rs");
+
+    assert!(
+        !source.contains("pub diagnostic_candidate_diagnostic_score_total"),
+        "DaemonWorkloadProfile must not expose the old duplicated diagnostic field name"
+    );
+
+    assert!(
+        source.contains("pub diagnostic_candidate_raw_score_total: Option<u64>"),
+        "DaemonWorkloadProfile should expose diagnostic_candidate_raw_score_total"
+    );
+}
+
+#[test]
+fn daemon_state_only_mentions_legacy_candidate_diagnostic_name_for_serde_compatibility() {
+    let source = include_str!("../daemon/state.rs");
+
+    assert!(
+        source.contains(r#"#[serde(alias = "diagnostic_candidate_diagnostic_score_total")]"#),
+        "daemon/state.rs should keep the serde alias for old persisted daemon-state JSON"
+    );
+
+    assert!(
+        source.contains(r#""diagnostic_candidate_diagnostic_score_total": 850"#),
+        "daemon/state.rs should keep the legacy JSON compatibility fixture"
+    );
+
+    assert!(
+        !source.contains("pub diagnostic_candidate_diagnostic_score_total"),
+        "daemon/state.rs must not reintroduce the old field name"
+    );
+
+    assert_eq!(
+        count_occurrences(source, "diagnostic_candidate_diagnostic_score_total"),
+        3,
+        "daemon/state.rs should mention the legacy name only in the serde alias, legacy JSON test, and serialization test"
     );
 }
