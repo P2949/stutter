@@ -11,17 +11,18 @@ use aya_ebpf::{
     programs::TracePointContext,
 };
 use stutter_common::{
-    CpuFreqEvent, DRM_FENCE_EVENT_SIGNAL, DRM_FENCE_EVENT_WAIT_DONE, DRM_FENCE_EVENT_WAIT_INTERVAL,
-    DRM_FENCE_HAS_CONTEXT, DRM_FENCE_HAS_DURATION, DRM_FENCE_HAS_PID, DRM_FENCE_HAS_SEQNO,
-    DRM_FENCE_HAS_TIMELINE, DRM_FENCE_IS_EXPORTER_SIDE, DRM_FENCE_IS_IMPORTER_SIDE,
-    DROP_COUNTERS_MAX, DROP_IRQ_START_TIMES_INSERT_FAILED, DROP_RINGBUF_RESERVE_FAILED,
-    DROP_WAKEUP_DATA_INSERT_FAILED, DROP_WAKEUP_DATA_STALE_ENTRY, DrmFenceEvent, EVENT_CPU_FREQ,
-    EVENT_DRM_FENCE, EVENT_EXEC, EVENT_IRQ_LATENCY, EVENT_KMS_FLIP, EVENT_MIGRATION,
-    EVENT_RUNNABLE_LATENCY, EVENT_STAT_WAIT, ExecEvent, IrqEvent, KMS_FLIP_EVENT_INTERVAL,
-    KMS_FLIP_EVENT_PAGEFLIP_DONE, KMS_FLIP_EVENT_VBLANK, KMS_FLIP_HAS_CRTC, KMS_FLIP_HAS_DONE_NS,
-    KMS_FLIP_HAS_DURATION_NS, KMS_FLIP_HAS_REQUEST_NS, KMS_FLIP_HAS_SEQUENCE,
-    KMS_FLIP_PROVIDER_AMDGPU, KMS_FLIP_PROVIDER_DRM, KMS_FLIP_PROVIDER_I915, KmsFlipEvent,
-    MigrationEvent, SchedulerEvent, StatWaitEvent,
+    BPF_DEFAULT_EVENTS_RINGBUF_BYTES, BPF_MAX_TRACKED_CPUS, CpuFreqEvent, DRM_FENCE_EVENT_SIGNAL,
+    DRM_FENCE_EVENT_WAIT_DONE, DRM_FENCE_EVENT_WAIT_INTERVAL, DRM_FENCE_HAS_CONTEXT,
+    DRM_FENCE_HAS_DURATION, DRM_FENCE_HAS_PID, DRM_FENCE_HAS_SEQNO, DRM_FENCE_HAS_TIMELINE,
+    DRM_FENCE_IS_EXPORTER_SIDE, DRM_FENCE_IS_IMPORTER_SIDE, DROP_COUNTERS_MAX,
+    DROP_CPU_ACCOUNTING_UNTRACKED, DROP_IRQ_START_TIMES_INSERT_FAILED, DROP_RINGBUF_RESERVE_FAILED,
+    DROP_WAKEUP_DATA_INSERT_FAILED, DROP_WAKEUP_DATA_REPLACED_ENTRY, DROP_WAKEUP_DATA_STALE_ENTRY,
+    DrmFenceEvent, EVENT_CPU_FREQ, EVENT_DRM_FENCE, EVENT_EXEC, EVENT_IRQ_LATENCY, EVENT_KMS_FLIP,
+    EVENT_MIGRATION, EVENT_RUNNABLE_LATENCY, EVENT_STAT_WAIT, ExecEvent, IrqEvent,
+    KMS_FLIP_EVENT_INTERVAL, KMS_FLIP_EVENT_PAGEFLIP_DONE, KMS_FLIP_EVENT_VBLANK,
+    KMS_FLIP_HAS_CRTC, KMS_FLIP_HAS_DONE_NS, KMS_FLIP_HAS_DURATION_NS, KMS_FLIP_HAS_REQUEST_NS,
+    KMS_FLIP_HAS_SEQUENCE, KMS_FLIP_PROVIDER_AMDGPU, KMS_FLIP_PROVIDER_DRM, KMS_FLIP_PROVIDER_I915,
+    KmsFlipEvent, MigrationEvent, SchedulerEvent, StatWaitEvent,
 };
 
 // Layout:
@@ -43,9 +44,14 @@ use stutter_common::{
 // 16. License and panic handler
 
 mod block_io;
+mod map_limits;
 mod trace_offsets;
 mod trace_read;
 
+use map_limits::{
+    PREV_FAULTS_MAP_MAX_ENTRIES, RUNNABLE_TASK_CPU_MAP_MAX_ENTRIES, TARGET_PIDS_MAP_MAX_ENTRIES,
+    WAKEUP_DATA_MAP_MAX_ENTRIES,
+};
 use trace_offsets::*;
 use trace_read::{
     read_comm16, read_i32, read_i64, read_optional_u32, read_optional_u64, read_sequence_field,
@@ -56,23 +62,7 @@ use trace_read::{
 // Shared constants and map sizing
 // -----------------------------------------------------------------------------
 
-const TARGET_PIDS_MAP_MAX_ENTRIES: u32 = 1_024;
-const WAKEUP_DATA_MAP_MAX_ENTRIES: u32 = 131_072;
-const RUNNABLE_TASK_CPU_MAP_MAX_ENTRIES: u32 = 65_536;
-const PREV_FAULTS_MAP_MAX_ENTRIES: u32 = 131_072;
-
-const _: () = assert!(WAKEUP_DATA_MAP_MAX_ENTRIES >= TARGET_PIDS_MAP_MAX_ENTRIES * 128);
-const _: () = assert!(PREV_FAULTS_MAP_MAX_ENTRIES >= TARGET_PIDS_MAP_MAX_ENTRIES * 128);
-const _: () = assert!(RUNNABLE_TASK_CPU_MAP_MAX_ENTRIES >= TARGET_PIDS_MAP_MAX_ENTRIES * 64);
-
-// Capacity model:
-// TARGET_PIDS is the primary target gatekeeper. The state maps below are
-// intentionally much larger than TARGET_PIDS so wakeup timestamps,
-// runnable-task CPU state, and fault counters do not become the first
-// bottleneck under normal monitored-task churn.
-// Do not reduce WAKEUP_DATA, RUNNABLE_TASK_CPU, or PREV_FAULTS toward
-// TARGET_PIDS without updating these capacity invariants and the userspace
-// diagnostics that report target and wakeup-map capacity.
+const _: () = assert!(BPF_MAX_TRACKED_CPUS >= 1024);
 
 // -----------------------------------------------------------------------------
 // BPF maps and shared state structs
@@ -81,7 +71,7 @@ const _: () = assert!(RUNNABLE_TASK_CPU_MAP_MAX_ENTRIES >= TARGET_PIDS_MAP_MAX_E
 #[map]
 // Userspace overrides this before loading the BPF object based on the current
 // memlock limit and available memory. The value here is only a safe fallback.
-static EVENTS: RingBuf = RingBuf::with_byte_size(256 * 1024, 0);
+static EVENTS: RingBuf = RingBuf::with_byte_size(BPF_DEFAULT_EVENTS_RINGBUF_BYTES, 0);
 
 #[map]
 static TARGET_PIDS: HashMap<u32, u8> =
@@ -111,13 +101,13 @@ static IRQ_START_TIMES: HashMap<u64, u64> = HashMap::<u64, u64>::with_max_entrie
 #[map]
 // Diagnostic-only count of monitored pending wakeups for this target/task.
 // This is not CPU runqueue depth and must not be used as true CPU contention.
-static TARGET_PENDING_WAKEUPS: Array<u32> = Array::<u32>::with_max_entries(1024, 0);
+static TARGET_PENDING_WAKEUPS: Array<u32> = Array::<u32>::with_max_entries(BPF_MAX_TRACKED_CPUS, 0);
 
 #[map]
 // Approximate per-CPU runnable depth for monitored target tasks only,
 // reconstructed from sched wakeup/switch/migrate tracepoints.
 // This is not literal rq->nr_running and does not include unrelated system tasks.
-static CPU_RUNNABLE_DEPTH: Array<u32> = Array::<u32>::with_max_entries(1024, 0);
+static CPU_RUNNABLE_DEPTH: Array<u32> = Array::<u32>::with_max_entries(BPF_MAX_TRACKED_CPUS, 0);
 
 #[map]
 // Per-target-TID mapping to the CPU where the monitored task was last counted
@@ -391,7 +381,7 @@ fn increment_drop_counter(reason: u32) {
 
 #[inline(always)]
 fn valid_cpu(cpu: u32) -> bool {
-    cpu < 1024
+    cpu < BPF_MAX_TRACKED_CPUS
 }
 
 #[inline(always)]
@@ -424,7 +414,11 @@ fn decrement_cpu_runnable_depth(cpu: u32) {
 
 #[inline(always)]
 fn mark_task_runnable(pid: u32, target_cpu: u32) {
-    if pid == 0 || !valid_cpu(target_cpu) {
+    if pid == 0 {
+        return;
+    }
+    if !valid_cpu(target_cpu) {
+        increment_drop_counter(DROP_CPU_ACCOUNTING_UNTRACKED);
         return;
     }
 
@@ -474,6 +468,10 @@ fn remove_runnable_task_if_present(pid: u32) {
 }
 
 fn increment_target_pending(cpu: u32) {
+    if !valid_cpu(cpu) {
+        increment_drop_counter(DROP_CPU_ACCOUNTING_UNTRACKED);
+        return;
+    }
     if let Some(depth) = TARGET_PENDING_WAKEUPS.get_ptr_mut(cpu) {
         // Diagnostic-only increment.
         unsafe { *depth = (*depth).saturating_add(1) };
@@ -481,6 +479,9 @@ fn increment_target_pending(cpu: u32) {
 }
 
 fn decrement_target_pending(cpu: u32) {
+    if !valid_cpu(cpu) {
+        return;
+    }
     if let Some(depth) = TARGET_PENDING_WAKEUPS.get_ptr_mut(cpu) {
         // Diagnostic-only decrement.
         unsafe { *depth = (*depth).saturating_sub(1) };
@@ -535,10 +536,11 @@ fn try_sched_wakeup(ctx: TracePointContext) -> u32 {
         match old_wakeup_data {
             None => increment_target_pending(target_cpu),
             Some(old) if old.target_cpu != target_cpu => {
+                increment_drop_counter(DROP_WAKEUP_DATA_REPLACED_ENTRY);
                 decrement_target_pending(old.target_cpu);
                 increment_target_pending(target_cpu);
             }
-            Some(_) => {}
+            Some(_) => increment_drop_counter(DROP_WAKEUP_DATA_REPLACED_ENTRY),
         }
     } else {
         increment_drop_counter(DROP_WAKEUP_DATA_INSERT_FAILED);
@@ -614,7 +616,11 @@ fn try_sched_switch(ctx: TracePointContext) -> u32 {
     // originally queued. This is not kernel runqueue depth.
     decrement_target_pending(target_cpu);
 
-    let target_pending_wakeups = TARGET_PENDING_WAKEUPS.get(cpu).copied().unwrap_or(0);
+    let target_pending_wakeups = if valid_cpu(cpu) {
+        TARGET_PENDING_WAKEUPS.get(cpu).copied().unwrap_or(0)
+    } else {
+        0
+    };
 
     let switch_ns = unsafe { bpf_ktime_get_ns() };
     let latency_ns = switch_ns.saturating_sub(wakeup_ns);

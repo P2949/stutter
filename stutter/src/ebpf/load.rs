@@ -36,7 +36,8 @@ pub fn resolve_cgroup_id_best_effort(path: &Path) -> anyhow::Result<u64> {
 
     // Experimental best-effort cgroup id resolver. bpf_get_current_cgroup_id()
     // returns a kernel cgroup id; for cgroup v2 the directory inode is commonly
-    // usable, but this is not a full replacement for PID expansion.
+    // usable on supported kernels, but this is not a full replacement for PID
+    // expansion. Keep scheduler wakeup targeting backed by TARGET_PIDS.
     let metadata = fs::metadata(path)?;
     Ok(metadata.ino())
 }
@@ -293,7 +294,9 @@ pub fn load_and_attach(
         loader.override_global("DRM_FENCE_SIGNAL_GPU_ROLE", &offsets.signal_gpu_role, true);
     }
 
-    let block_io_correlation_basis = if tracepoints.block_rq_key_offset.is_some() {
+    let block_io_correlation_basis = if !tracepoints.block_rq {
+        BlockIoCorrelationBasis::Disabled
+    } else if tracepoints.block_rq_key_offset.is_some() {
         BlockIoCorrelationBasis::RequestPointer
     } else {
         BlockIoCorrelationBasis::DevSector
@@ -456,16 +459,18 @@ pub fn load_and_attach(
         // than aborting the whole profiler startup.
         if let Err(e) = attach_software_perf_event(&mut ebpf, "major_fault", FaultPerfProbe::Major)
         {
+            activation_plan.push_attach_warning(ProbeKey::Faults, "major_fault", &e);
             log::warn!(
-                "failed to attach major_fault perf event; continuing without fault probes: {}",
-                e
+                "optional_probe_attach_failed key={:?} program=major_fault err={e:#}",
+                ProbeKey::Faults
             );
         }
         if let Err(e) = attach_software_perf_event(&mut ebpf, "minor_fault", FaultPerfProbe::Minor)
         {
+            activation_plan.push_attach_warning(ProbeKey::Faults, "minor_fault", &e);
             log::warn!(
-                "failed to attach minor_fault perf event; continuing without fault probes: {}",
-                e
+                "optional_probe_attach_failed key={:?} program=minor_fault err={e:#}",
+                ProbeKey::Faults
             );
         }
     }
@@ -521,8 +526,8 @@ pub fn load_and_attach(
         .context("eBPF load failed: TARGET_CGROUP_IDS map init")?;
         map.insert(cgroup_id, 1, 0)
             .context("failed to insert TARGET_CGROUP_IDS entry")?;
-        log::info!(
-            "native_cgroup_filter enabled cgroup_path={} cgroup_id={}",
+        log::warn!(
+            "native_cgroup_filter_best_effort cgroup_path={} cgroup_id={} message=\"directory-inode cgroup id resolution is experimental; TARGET_PIDS prepopulation remains the authoritative sched_wakeup targeting path\"",
             cgroup_path.display(),
             cgroup_id
         );

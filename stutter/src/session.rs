@@ -117,9 +117,13 @@ pub use monitor_session::MonitorSession;
 #[cfg(test)]
 pub(crate) use ticks::foreground::foreground_identity_changed;
 
+/// Live diagnosis spike clustering window.
+///
+/// Default: 5 ms, matching the report-side diagnosis grouping default. This
+/// groups causes that occur inside the same frame-time disturbance without
+/// merging unrelated spikes across summary ticks. Keep this aligned with the
+/// report default unless live diagnosis gets its own CLI/config field.
 const LIVE_DIAGNOSIS_CLUSTER_WINDOW_MS: u64 = 5;
-// Keep this aligned with the report default unless live diagnosis gets
-// its own CLI/config field.
 
 async fn optional_tick(tick: Option<&mut tokio::time::Interval>) {
     if let Some(tick) = tick {

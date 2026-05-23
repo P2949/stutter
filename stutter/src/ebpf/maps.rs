@@ -1,4 +1,5 @@
 use serde::Serialize;
+use stutter_common::{BPF_DEFAULT_EVENTS_RINGBUF_BYTES, BPF_MAX_TRACKED_CPUS};
 
 use crate::{
     config::TARGET_PIDS_MAX,
@@ -32,7 +33,9 @@ pub struct EbpfMapSizingReport {
     pub events_ringbuf_bytes: u32,
     pub min_events_ringbuf_bytes: u32,
     pub max_events_ringbuf_bytes: u32,
+    pub default_events_ringbuf_bytes: u32,
     pub target_pids_max: usize,
+    pub max_tracked_cpus: u32,
     pub wakeup_data_entries: u32,
     pub wakeup_data_map_entry_budget_bytes: u64,
     pub min_wakeup_data_entries: u32,
@@ -115,7 +118,9 @@ pub fn ebpf_map_sizing_report() -> EbpfMapSizingReport {
         events_ringbuf_bytes: sizing.events_ringbuf_bytes,
         min_events_ringbuf_bytes: MIN_EVENTS_RINGBUF_BYTES,
         max_events_ringbuf_bytes: MAX_EVENTS_RINGBUF_BYTES,
+        default_events_ringbuf_bytes: BPF_DEFAULT_EVENTS_RINGBUF_BYTES,
         target_pids_max: TARGET_PIDS_MAX,
+        max_tracked_cpus: BPF_MAX_TRACKED_CPUS,
         wakeup_data_entries: sizing.wakeup_data_entries,
         wakeup_data_map_entry_budget_bytes: WAKEUP_DATA_MAP_ENTRY_BUDGET_BYTES,
         min_wakeup_data_entries: MIN_WAKEUP_DATA_ENTRIES,

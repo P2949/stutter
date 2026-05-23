@@ -66,6 +66,18 @@ fn map_sizing_report_includes_target_and_wakeup_capacities() {
             .and_then(serde_json::Value::as_u64),
         Some(MAX_EVENTS_RINGBUF_BYTES as u64)
     );
+    assert_eq!(
+        value
+            .get("default_events_ringbuf_bytes")
+            .and_then(serde_json::Value::as_u64),
+        Some(stutter_common::BPF_DEFAULT_EVENTS_RINGBUF_BYTES as u64)
+    );
+    assert_eq!(
+        value
+            .get("max_tracked_cpus")
+            .and_then(serde_json::Value::as_u64),
+        Some(stutter_common::BPF_MAX_TRACKED_CPUS as u64)
+    );
     assert!(
         value
             .get("wakeup_data_entries")
@@ -97,10 +109,12 @@ fn drop_counter_serializes_wakeup_failures_as_lost_wakeup_timestamps() {
     let snapshot = DropCountersSnapshot {
         wakeup_data_insert_failed: 7,
         wakeup_data_stale_entries: 0,
+        wakeup_data_replaced_entries: 0,
         ringbuf_reserve_failed: 0,
         irq_start_times_insert_failed: 0,
         block_start_insert_failed: 0,
         block_fallback_key_collisions: 0,
+        cpu_accounting_untracked: 0,
     };
 
     let value = serde_json::to_value(&snapshot).unwrap();
@@ -133,10 +147,12 @@ fn drop_counter_serializes_stale_wakeup_entries() {
     let snapshot = DropCountersSnapshot {
         wakeup_data_insert_failed: 0,
         wakeup_data_stale_entries: 11,
+        wakeup_data_replaced_entries: 0,
         ringbuf_reserve_failed: 0,
         irq_start_times_insert_failed: 0,
         block_start_insert_failed: 0,
         block_fallback_key_collisions: 0,
+        cpu_accounting_untracked: 0,
     };
 
     let value = serde_json::to_value(&snapshot).unwrap();
@@ -154,10 +170,12 @@ fn drop_counter_totals_include_stale_wakeup_entries() {
     let snapshot = DropCountersSnapshot {
         wakeup_data_insert_failed: 1,
         wakeup_data_stale_entries: 2,
+        wakeup_data_replaced_entries: 0,
         ringbuf_reserve_failed: 4,
         irq_start_times_insert_failed: 8,
         block_start_insert_failed: 16,
         block_fallback_key_collisions: 32,
+        cpu_accounting_untracked: 0,
     };
 
     assert_eq!(snapshot.total(), 63);

@@ -117,18 +117,52 @@ pub enum EbpfLoadError {
 
 #[derive(Debug, Error)]
 pub enum TargetError {
+    #[error("target process not found: {target}")]
+    ProcessNotFound { target: String },
+    #[error("invalid cgroup path {path}: {source:#}")]
+    InvalidCgroupPath {
+        path: PathBuf,
+        #[source]
+        source: anyhow::Error,
+    },
     #[error(transparent)]
     Source(#[from] anyhow::Error),
 }
 
 #[derive(Debug, Error)]
 pub enum EbpfError {
+    #[error("failed to load eBPF object: {source:#}")]
+    ObjectLoad {
+        #[source]
+        source: anyhow::Error,
+    },
+    #[error("failed to initialize eBPF map {map}: {source:#}")]
+    MapInit {
+        map: &'static str,
+        #[source]
+        source: anyhow::Error,
+    },
+    #[error("failed to attach eBPF program {program}: {source:#}")]
+    Attach {
+        program: &'static str,
+        #[source]
+        source: anyhow::Error,
+    },
     #[error(transparent)]
     Source(#[from] anyhow::Error),
 }
 
 #[derive(Debug, Error)]
 pub enum ProbeError {
+    #[error("probe {probe} unavailable: {reason}")]
+    Unavailable { probe: String, reason: String },
+    #[error("optional probe {probe} program {program} failed to attach: {source:#}")]
+    Attach {
+        probe: String,
+        program: &'static str,
+        #[source]
+        source: anyhow::Error,
+    },
     #[error(transparent)]
     Source(#[from] anyhow::Error),
 }

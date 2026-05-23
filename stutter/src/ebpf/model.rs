@@ -7,8 +7,8 @@ use aya::{
 use serde::{Deserialize, Serialize};
 use stutter_common::{
     DROP_BLOCK_FALLBACK_KEY_COLLISION, DROP_BLOCK_START_INSERT_FAILED,
-    DROP_IRQ_START_TIMES_INSERT_FAILED, DROP_RINGBUF_RESERVE_FAILED,
-    DROP_WAKEUP_DATA_INSERT_FAILED, DROP_WAKEUP_DATA_STALE_ENTRY,
+    DROP_CPU_ACCOUNTING_UNTRACKED, DROP_IRQ_START_TIMES_INSERT_FAILED, DROP_RINGBUF_RESERVE_FAILED,
+    DROP_WAKEUP_DATA_INSERT_FAILED, DROP_WAKEUP_DATA_REPLACED_ENTRY, DROP_WAKEUP_DATA_STALE_ENTRY,
 };
 use tokio::io::unix::AsyncFd;
 
@@ -29,6 +29,7 @@ pub struct LoadedEbpf {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BlockIoCorrelationBasis {
+    Disabled,
     DevSector,
     RequestPointer,
 }
@@ -36,6 +37,7 @@ pub enum BlockIoCorrelationBasis {
 impl BlockIoCorrelationBasis {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::Disabled => "unavailable",
             Self::DevSector => "dev+sector",
             Self::RequestPointer => "request-pointer",
         }
@@ -45,6 +47,7 @@ impl BlockIoCorrelationBasis {
         match self {
             Self::RequestPointer => "high",
             Self::DevSector => "medium",
+            Self::Disabled => "none",
         }
     }
 
@@ -54,12 +57,16 @@ impl BlockIoCorrelationBasis {
             Self::DevSector => Some(
                 "Block I/O correlation is approximate (dev+sector fallback); concurrent same-sector requests may collide. Ambiguous fallback samples are dropped, so block I/O latency coverage may be incomplete.",
             ),
+            Self::Disabled => Some(
+                "Block I/O correlation is unavailable because block_rq tracepoints were not requested, unavailable, or incompatible on this kernel.",
+            ),
         }
     }
 
     pub fn from_str(s: &str) -> Self {
         match s {
             "request-pointer" => Self::RequestPointer,
+            "unavailable" | "not_requested" => Self::Disabled,
             _ => Self::DevSector,
         }
     }
@@ -74,6 +81,8 @@ pub struct DropCountersSnapshot {
     pub wakeup_data_insert_failed: u64,
     #[serde(default)]
     pub wakeup_data_stale_entries: u64,
+    #[serde(default)]
+    pub wakeup_data_replaced_entries: u64,
     pub ringbuf_reserve_failed: u64,
     #[serde(default)]
     pub irq_start_times_insert_failed: u64,
@@ -81,23 +90,29 @@ pub struct DropCountersSnapshot {
     pub block_start_insert_failed: u64,
     #[serde(default)]
     pub block_fallback_key_collisions: u64,
+    #[serde(default)]
+    pub cpu_accounting_untracked: u64,
 }
 
 impl DropCountersSnapshot {
     pub fn total(&self) -> u64 {
         self.wakeup_data_insert_failed
             .saturating_add(self.wakeup_data_stale_entries)
+            .saturating_add(self.wakeup_data_replaced_entries)
             .saturating_add(self.ringbuf_reserve_failed)
             .saturating_add(self.irq_start_times_insert_failed)
             .saturating_add(self.block_start_insert_failed)
             .saturating_add(self.block_fallback_key_collisions)
+            .saturating_add(self.cpu_accounting_untracked)
     }
 
     pub fn total_excluding_block_io(&self) -> u64 {
         self.wakeup_data_insert_failed
             .saturating_add(self.wakeup_data_stale_entries)
+            .saturating_add(self.wakeup_data_replaced_entries)
             .saturating_add(self.ringbuf_reserve_failed)
             .saturating_add(self.irq_start_times_insert_failed)
+            .saturating_add(self.cpu_accounting_untracked)
     }
 }
 
@@ -128,6 +143,14 @@ impl LoadedEbpf {
                 &self.drop_counters,
                 DROP_BLOCK_FALLBACK_KEY_COLLISION,
             ),
+            wakeup_data_replaced_entries: drop_counter_value(
+                &self.drop_counters,
+                DROP_WAKEUP_DATA_REPLACED_ENTRY,
+            ),
+            cpu_accounting_untracked: drop_counter_value(
+                &self.drop_counters,
+                DROP_CPU_ACCOUNTING_UNTRACKED,
+            ),
         }
     }
 }
@@ -150,6 +173,22 @@ mod tests {
         assert!(warning.contains("Ambiguous fallback samples are dropped"));
         assert!(warning.contains("coverage may be incomplete"));
         assert!(!warning.contains("misattribution"));
+    }
+
+    #[test]
+    fn disabled_block_io_basis_reports_unavailable_correlation() {
+        assert_eq!(BlockIoCorrelationBasis::Disabled.as_str(), "unavailable");
+        assert_eq!(BlockIoCorrelationBasis::Disabled.confidence(), "none");
+        assert!(
+            BlockIoCorrelationBasis::Disabled
+                .warning()
+                .unwrap()
+                .contains("unavailable")
+        );
+        assert_eq!(
+            BlockIoCorrelationBasis::from_str("unavailable"),
+            BlockIoCorrelationBasis::Disabled
+        );
     }
 }
 
