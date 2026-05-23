@@ -135,7 +135,7 @@ pub(crate) fn daemon_state_for_autotune_stop(
             decision: decision.decision.clone(),
             reason: format!("stopped: {}; last_reason={}", exit.reason, decision.reason),
             unix_nanos: Some(decision.unix_nanos),
-            diagnostic_current_raw_score_total: Some(decision.diagnostic_score_total),
+            diagnostic_current_raw_score_total: Some(decision.diagnostic_raw_score_total),
             candidate_count: Some(decision.candidate_count),
             top_denied_reason: decision.top_denied_reason.clone(),
             planner: decision.planner.clone(),

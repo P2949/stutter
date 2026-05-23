@@ -70,7 +70,6 @@ pub struct TuneProfileStats {
     pub median_frame_p99_us: u64,
     pub iqr_frame_p99_us: u64,
 }
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum RankingConfidence {
     High,
@@ -90,7 +89,8 @@ pub struct TuneCandidateSummary {
     pub interval_count: usize,
     pub samples: u64,
     pub scored_samples: u64,
-    pub diagnostic_score_total: u64,
+    #[serde(alias = "diagnostic_score_total")]
+    pub diagnostic_raw_score_total: u64,
     pub over_1ms: u64,
     pub over_2ms: u64,
     pub over_5ms: u64,
@@ -454,7 +454,7 @@ async fn collect_tune_results(
                 interval_count: interval_records.len(),
                 samples: sample_count,
                 scored_samples: scored_sample_count,
-                diagnostic_score_total: score.total,
+                diagnostic_raw_score_total: score.total,
                 over_1ms: score.over_1ms,
                 over_2ms: score.over_2ms,
                 over_5ms: score.over_5ms,
@@ -904,7 +904,7 @@ pub fn aggregate_profile_rank(runs: &[TuneCandidateSummary]) -> impl Ord {
 
     let score_totals: Vec<u64> = valid_runs
         .iter()
-        .map(|r| r.diagnostic_score_total)
+        .map(|r| r.diagnostic_raw_score_total)
         .collect();
     let over_5ms: Vec<u64> = valid_runs.iter().map(|r| r.over_5ms).collect();
     let over_2ms: Vec<u64> = valid_runs.iter().map(|r| r.over_2ms).collect();
@@ -971,7 +971,7 @@ pub fn profile_stats_from_grouped(
             let valid_runs = runs.iter().filter(|run| run.valid).collect::<Vec<_>>();
             let score_totals = valid_runs
                 .iter()
-                .map(|run| run.diagnostic_score_total)
+                .map(|run| run.diagnostic_raw_score_total)
                 .collect::<Vec<_>>();
             let over_5ms = valid_runs
                 .iter()
@@ -1189,7 +1189,7 @@ mod tests {
     fn tune_candidate(
         profile: &str,
         iteration: u32,
-        diagnostic_score_total: u64,
+        diagnostic_raw_score_total: u64,
         valid: bool,
     ) -> TuneCandidateSummary {
         TuneCandidateSummary {
@@ -1202,7 +1202,7 @@ mod tests {
             interval_count: 2,
             samples: 100,
             scored_samples: 100,
-            diagnostic_score_total,
+            diagnostic_raw_score_total,
             over_1ms: 0,
             over_2ms: 0,
             over_5ms: 0,

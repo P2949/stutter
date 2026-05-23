@@ -6,7 +6,12 @@
 use std::collections::BTreeSet;
 
 use super::*;
-use crate::{process_tree::TaskClass, spike::SpikePoint};
+use crate::{
+    process_tree::TaskClass,
+    recorder::{BlockIoRecord, GpuSample, IntervalRecord, IrqEventRecord},
+    session_io::RunArtifacts,
+    spike::{SpikeCluster, SpikePoint},
+};
 
 fn spike_point(task: u32, class: TaskClass, comm: &str, latency_ns: u64) -> SpikePoint {
     let switch_ns = 100_000_000 + u64::from(task);

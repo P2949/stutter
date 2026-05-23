@@ -30,11 +30,6 @@ pub(in crate::architecture_tests) struct ExistingDirectPrintAllowance {
 pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
     &[OversizedRustFileAllowance] = &[
     OversizedRustFileAllowance {
-        path: "src/diagnosis.rs",
-        max_lines: 1_240,
-        reason: "temporary extraction stage: diagnosis/model.rs now owns config/model data; remaining file owns anchor/candidate/evidence orchestration pending the next orchestration split",
-    },
-    OversizedRustFileAllowance {
         path: "src/cli/monitor.rs",
         max_lines: 1_287,
         reason: "temporary extraction stage: owns monitor CLI args/defaults/merge/validation logic; DMABUF and GPU-engine flags are staged here until cli/monitor/args.rs exists",

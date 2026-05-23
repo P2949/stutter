@@ -748,7 +748,7 @@ fn daemon_state_snapshot_serializes_live_runtime_state() {
         top_denied_reason: None,
         planner: None,
         dry_run_plan_files: Vec::new(),
-        diagnostic_score_total: 999,
+        diagnostic_raw_score_total: 999,
         data_quality: "Low: low scored samples".to_owned(),
         data_quality_reason_codes: vec!["measurement_uncertain".to_owned()],
         decision: "faulted".to_owned(),
@@ -1074,7 +1074,7 @@ fn interval_event_updates_window_and_emits_noop_decision() {
         .unwrap();
 
     assert_eq!(emitted.decision, "observed");
-    assert_eq!(emitted.diagnostic_score_total, 143);
+    assert_eq!(emitted.diagnostic_raw_score_total, 143);
     assert_eq!(runtime.observation().score.total, 143);
     assert_eq!(runtime.observation().scored_task_count, 1);
 }

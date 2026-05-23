@@ -514,7 +514,7 @@ mod tests {
             interval_count: 1,
             samples: 100,
             scored_samples: 100,
-            diagnostic_score_total: score,
+            diagnostic_raw_score_total: score,
             over_1ms: 0,
             over_2ms: 0,
             over_5ms: score / 100,

@@ -231,14 +231,14 @@ mod tests {
         }
     }
 
-    fn observation(diagnostic_score_total: u64) -> ObservationSummary {
+    fn observation(diagnostic_raw_score_total: u64) -> ObservationSummary {
         ObservationSummary {
             target_present: true,
             active_target_count: 31,
             scored_task_count: 2,
             interval_count: 10,
             scored_samples: 100,
-            diagnostic_score_total,
+            diagnostic_raw_score_total,
             over_1ms: 0,
             over_2ms: 0,
             over_5ms: 0,

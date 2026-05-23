@@ -255,3 +255,40 @@ fn tune_profile_stats_use_raw_score_total_names_for_serialized_raw_totals() {
         assert!(source.contains(r#"alias = "worst_diagnostic_score_total""#));
     }
 }
+
+#[test]
+fn observation_summary_uses_raw_score_total_name() {
+    let source = include_str!("../autotune/history.rs");
+
+    assert!(source.contains("pub diagnostic_raw_score_total: u64"));
+    assert!(source.contains(r#"#[serde(alias = "diagnostic_score_total")]"#));
+    assert!(!source.contains("pub diagnostic_score_total: u64"));
+}
+
+#[test]
+fn decision_stream_entry_uses_raw_score_total_name() {
+    let source = include_str!("../autotune/runtime/stream.rs");
+
+    assert!(source.contains("pub diagnostic_raw_score_total: u64"));
+    assert!(source.contains(r#"#[serde(alias = "diagnostic_score_total")]"#));
+    assert!(source.contains("Serialize, Deserialize"));
+    assert!(!source.contains("pub diagnostic_score_total: u64"));
+}
+
+#[test]
+fn tune_candidate_summary_uses_raw_score_total_name() {
+    let source = include_str!("../tune/mod.rs");
+
+    assert!(source.contains("pub diagnostic_raw_score_total: u64"));
+    assert!(source.contains(r#"#[serde(alias = "diagnostic_score_total")]"#));
+    assert!(!source.contains("pub diagnostic_score_total: u64"));
+}
+
+#[test]
+fn decision_jsonl_entry_uses_raw_score_total_name() {
+    let source = include_str!("../autotune/decision_log.rs");
+
+    assert!(source.contains("pub diagnostic_raw_score_total: u64"));
+    assert!(source.contains(r#"#[serde(alias = "diagnostic_score_total")]"#));
+    assert!(!source.contains("pub diagnostic_score_total: u64"));
+}

@@ -185,8 +185,8 @@ pub async fn autotune_command(input: AutotuneCommandInput) -> anyhow::Result<()>
 
     if let Some(last_decision) = exit.last_decision {
         println!(
-            "autotune runtime finished reason=\"{}\" last_decision={} diagnostic_score_total={}",
-            exit.reason, last_decision.decision, last_decision.diagnostic_score_total
+            "autotune runtime finished reason=\"{}\" last_decision={} diagnostic_raw_score_total={}",
+            exit.reason, last_decision.decision, last_decision.diagnostic_raw_score_total
         );
     } else {
         println!("autotune runtime finished reason=\"{}\"", exit.reason);

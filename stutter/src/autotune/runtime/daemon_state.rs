@@ -53,7 +53,7 @@ impl AutotuneRuntime {
                     decision: decision.decision.clone(),
                     reason: decision.reason.clone(),
                     unix_nanos: Some(decision.unix_nanos),
-                    diagnostic_current_raw_score_total: Some(decision.diagnostic_score_total),
+                    diagnostic_current_raw_score_total: Some(decision.diagnostic_raw_score_total),
                     candidate_count: Some(decision.candidate_count),
                     top_denied_reason: decision.top_denied_reason.clone(),
                     planner: decision.planner.clone(),

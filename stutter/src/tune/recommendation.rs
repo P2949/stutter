@@ -398,7 +398,7 @@ mod tests {
         }
     }
 
-    fn candidate(profile: &str, diagnostic_score_total: u64) -> TuneCandidateSummary {
+    fn candidate(profile: &str, diagnostic_raw_score_total: u64) -> TuneCandidateSummary {
         TuneCandidateSummary {
             profile: profile.to_owned(),
             iteration: 1,
@@ -409,10 +409,10 @@ mod tests {
             interval_count: 2,
             samples: 100,
             scored_samples: 100,
-            diagnostic_score_total,
+            diagnostic_raw_score_total,
             over_1ms: 0,
             over_2ms: 0,
-            over_5ms: diagnostic_score_total / 100,
+            over_5ms: diagnostic_raw_score_total / 100,
             max_latency_ns: 0,
             frame_count: 1,
             frame_max_ms: 16.0,
