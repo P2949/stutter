@@ -1,9 +1,8 @@
 //! Single-owner daemon state storage.
 //!
 //! `DaemonStateStore` is mutated through owned daemon runtime/store paths rather than shared
-//! behind arbitrary locks. `replace` is the persistence boundary: it writes a full snapshot before
-//! swapping in-memory state. Any future locking or ownership split must update
-//! `docs/CONCURRENCY.md`.
+//! behind arbitrary locks. State changes happen in place through this owner, then the current
+//! snapshot is persisted. Any future locking or ownership split must update `docs/CONCURRENCY.md`.
 
 use super::{
     policy::DaemonMode,
@@ -40,26 +39,38 @@ impl DaemonStateStore {
         Ok(())
     }
 
-    pub fn transition(&mut self, transition: DaemonTransition) -> anyhow::Result<()> {
-        let mut state = self.state.clone();
-        state.phase = transition.to;
-        state.last_decision = Some(DaemonDecisionState {
-            decision: "daemon_transition".to_owned(),
-            reason: transition.reason,
-            unix_nanos: Some(transition.unix_nanos),
-            diagnostic_score_total: None,
-            candidate_count: None,
-            top_denied_reason: None,
-            planner: None,
-            situation: None,
-            focus_kind: None,
-        });
+    fn mutate_current(&mut self, mutate: impl FnOnce(&mut DaemonState)) -> anyhow::Result<()> {
+        mutate(&mut self.state);
+        self.persist_current()
+    }
 
-        if !transition.to.is_faulted() {
-            state.faulted = None;
+    fn persist_current(&self) -> anyhow::Result<()> {
+        if let Some(writer) = self.writer.as_ref() {
+            writer.write(&self.state)?;
         }
 
-        self.replace(state)
+        Ok(())
+    }
+
+    pub fn transition(&mut self, transition: DaemonTransition) -> anyhow::Result<()> {
+        self.mutate_current(|state| {
+            state.phase = transition.to;
+            state.last_decision = Some(DaemonDecisionState {
+                decision: "daemon_transition".to_owned(),
+                reason: transition.reason,
+                unix_nanos: Some(transition.unix_nanos),
+                diagnostic_current_raw_score_total: None,
+                candidate_count: None,
+                top_denied_reason: None,
+                planner: None,
+                situation: None,
+                focus_kind: None,
+            });
+
+            if !transition.to.is_faulted() {
+                state.faulted = None;
+            }
+        })
     }
 
     pub fn mark_fault(
@@ -68,30 +79,29 @@ impl DaemonStateStore {
         reason: String,
         manual_restore_command: Option<String>,
     ) -> anyhow::Result<()> {
-        let mut state = self.state.clone();
-        state.mode = mode;
-        state.phase = DaemonPhase::Faulted;
-        state.last_decision = Some(DaemonDecisionState {
-            decision: "daemon_fault".to_owned(),
-            reason: reason.clone(),
-            unix_nanos: Some(crate::audit::unix_nanos_now()),
-            diagnostic_score_total: None,
-            candidate_count: None,
-            top_denied_reason: None,
-            planner: None,
-            situation: None,
-            focus_kind: None,
-        });
-        state.degraded = vec![DaemonDegradedStatus {
-            category: "daemon_state_store".to_owned(),
-            message: reason.clone(),
-        }];
-        state.faulted = Some(DaemonFaultState {
-            reason,
-            manual_restore_command,
-        });
-
-        self.replace(state)
+        self.mutate_current(|state| {
+            state.mode = mode;
+            state.phase = DaemonPhase::Faulted;
+            state.last_decision = Some(DaemonDecisionState {
+                decision: "daemon_fault".to_owned(),
+                reason: reason.clone(),
+                unix_nanos: Some(crate::audit::unix_nanos_now()),
+                diagnostic_current_raw_score_total: None,
+                candidate_count: None,
+                top_denied_reason: None,
+                planner: None,
+                situation: None,
+                focus_kind: None,
+            });
+            state.degraded = vec![DaemonDegradedStatus {
+                category: "daemon_state_store".to_owned(),
+                message: reason.clone(),
+            }];
+            state.faulted = Some(DaemonFaultState {
+                reason,
+                manual_restore_command,
+            });
+        })
     }
 
     pub fn update_from_autotune_snapshot(&mut self, snapshot: DaemonState) -> anyhow::Result<()> {
@@ -99,23 +109,22 @@ impl DaemonStateStore {
     }
 
     pub fn pause(&mut self, reason: impl Into<String>) -> anyhow::Result<()> {
-        let mut state = self.state.clone();
         let reason = reason.into();
-        state.phase = DaemonPhase::Paused;
-        state.last_decision = Some(DaemonDecisionState {
-            decision: "daemon_paused".to_owned(),
-            reason,
-            unix_nanos: Some(crate::audit::unix_nanos_now()),
-            diagnostic_score_total: None,
-            candidate_count: None,
-            top_denied_reason: None,
-            planner: None,
-            situation: None,
-            focus_kind: None,
-        });
-        state.faulted = None;
-
-        self.replace(state)
+        self.mutate_current(|state| {
+            state.phase = DaemonPhase::Paused;
+            state.last_decision = Some(DaemonDecisionState {
+                decision: "daemon_paused".to_owned(),
+                reason,
+                unix_nanos: Some(crate::audit::unix_nanos_now()),
+                diagnostic_current_raw_score_total: None,
+                candidate_count: None,
+                top_denied_reason: None,
+                planner: None,
+                situation: None,
+                focus_kind: None,
+            });
+            state.faulted = None;
+        })
     }
 
     pub fn resume(&mut self, reason: impl Into<String>) -> anyhow::Result<()> {
@@ -123,46 +132,44 @@ impl DaemonStateStore {
             anyhow::bail!("cannot resume a faulted daemon state; restore first");
         }
 
-        let mut state = self.state.clone();
         let reason = reason.into();
-        state.phase = DaemonPhase::Observe;
-        state.last_decision = Some(DaemonDecisionState {
-            decision: "daemon_resumed".to_owned(),
-            reason,
-            unix_nanos: Some(crate::audit::unix_nanos_now()),
-            diagnostic_score_total: None,
-            candidate_count: None,
-            top_denied_reason: None,
-            planner: None,
-            situation: None,
-            focus_kind: None,
-        });
-
-        self.replace(state)
+        self.mutate_current(|state| {
+            state.phase = DaemonPhase::Observe;
+            state.last_decision = Some(DaemonDecisionState {
+                decision: "daemon_resumed".to_owned(),
+                reason,
+                unix_nanos: Some(crate::audit::unix_nanos_now()),
+                diagnostic_current_raw_score_total: None,
+                candidate_count: None,
+                top_denied_reason: None,
+                planner: None,
+                situation: None,
+                focus_kind: None,
+            });
+        })
     }
 
     pub fn mark_restored(&mut self, reason: impl Into<String>) -> anyhow::Result<()> {
-        let mut state = self.state.clone();
         let reason = reason.into();
-        state.phase = DaemonPhase::Observe;
-        state.active_experiment = None;
-        state.active_rollback = None;
-        state.cooldown_until_unix_nanos = None;
-        state.faulted = None;
-        state.degraded.clear();
-        state.last_decision = Some(DaemonDecisionState {
-            decision: "daemon_restored".to_owned(),
-            reason,
-            unix_nanos: Some(crate::audit::unix_nanos_now()),
-            diagnostic_score_total: None,
-            candidate_count: None,
-            top_denied_reason: None,
-            planner: None,
-            situation: None,
-            focus_kind: None,
-        });
-
-        self.replace(state)
+        self.mutate_current(|state| {
+            state.phase = DaemonPhase::Observe;
+            state.active_experiment = None;
+            state.active_rollback = None;
+            state.cooldown_until_unix_nanos = None;
+            state.faulted = None;
+            state.degraded.clear();
+            state.last_decision = Some(DaemonDecisionState {
+                decision: "daemon_restored".to_owned(),
+                reason,
+                unix_nanos: Some(crate::audit::unix_nanos_now()),
+                diagnostic_current_raw_score_total: None,
+                candidate_count: None,
+                top_denied_reason: None,
+                planner: None,
+                situation: None,
+                focus_kind: None,
+            });
+        })
     }
 }
 

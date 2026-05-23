@@ -20,7 +20,7 @@ fn load_autotune_status_prefers_daemon_state_snapshot_when_present() {
             decision: "faulted".to_owned(),
             reason: "snapshot fault wins over history".to_owned(),
             unix_nanos: Some(300),
-            diagnostic_score_total: Some(42),
+            diagnostic_current_raw_score_total: Some(42),
             candidate_count: None,
             top_denied_reason: None,
             planner: None,

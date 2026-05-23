@@ -34,6 +34,22 @@ fn candidate_with_safety_class(safety_class: SafetyClass) -> CandidateAction {
     CandidateAction::fake(ActionId::new("test".to_owned()), safety_class)
 }
 
+fn game_focus_cpu_affinity_candidate_with_name(profile_name: &str) -> CandidateAction {
+    CandidateAction::cpu_affinity_profile(
+        Profile {
+            name: profile_name.to_owned(),
+            rules: vec![ProfileRule {
+                affinity: Some(CpuMask::parse("0").unwrap()),
+                nice: None,
+                ionice: None,
+                match_class: Vec::new(),
+                match_comm: Vec::new(),
+            }],
+        },
+        1234,
+    )
+}
+
 fn high_quality_observation_with_score(
     diagnostic_score_total: u64,
     scored_samples: u64,
@@ -624,10 +640,33 @@ fn compile_focus_blocks_gaming_cpu_isolation_profile() {
 
     match decision {
         AutotuneDecision::Noop { reason } => {
-            assert!(reason.contains("compile focus"));
-            assert!(reason.contains("gaming CPU-isolation"));
+            assert!(reason.contains("Compile focus"));
+            assert!(reason.contains("game-focus-only CPU-affinity"));
         }
         other => panic!("expected Noop for compile focus gaming profile block, got {other:?}"),
+    }
+}
+
+#[test]
+fn compile_focus_blocks_cpu_affinity_profile_even_without_game_name_or_classes() {
+    let policy = ControllerPolicy::for_mode(AutotuneMode::ApplyLowRisk);
+    let state = ControllerRuntimeState::default();
+    let mut observation = high_quality_observation(100);
+    observation.focus_kind = Some(FocusGroupKind::Compile);
+    observation.primary_situation = SituationKind::CompileLoad;
+    observation.focus_reasons = vec!["compile focus selected".to_owned()];
+    let candidate = game_focus_cpu_affinity_candidate_with_name("competitive-latency");
+
+    let decision = decide_autotune_transition(&policy, &state, &observation, Some(candidate));
+
+    match decision {
+        AutotuneDecision::Noop { reason } => {
+            assert!(reason.contains("Compile focus"));
+            assert!(reason.contains("game-focus-only CPU-affinity"));
+        }
+        other => {
+            panic!("expected Noop for compile focus CPU-affinity profile block, got {other:?}")
+        }
     }
 }
 
@@ -645,10 +684,33 @@ fn browser_focus_blocks_gaming_cpu_isolation_profile() {
 
     match decision {
         AutotuneDecision::Noop { reason } => {
-            assert!(reason.contains("browser focus"));
-            assert!(reason.contains("desktop responsiveness"));
+            assert!(reason.contains("Browser focus"));
+            assert!(reason.contains("game-focus-only CPU-affinity"));
         }
         other => panic!("expected Noop for browser focus gaming profile block, got {other:?}"),
+    }
+}
+
+#[test]
+fn browser_focus_blocks_cpu_affinity_profile_even_without_game_name_or_classes() {
+    let policy = ControllerPolicy::for_mode(AutotuneMode::Suggest);
+    let state = ControllerRuntimeState::default();
+    let mut observation = high_quality_observation(100);
+    observation.focus_kind = Some(FocusGroupKind::Browser);
+    observation.primary_situation = SituationKind::BrowserFocused;
+    observation.focus_reasons = vec!["browser focus selected".to_owned()];
+    let candidate = game_focus_cpu_affinity_candidate_with_name("fps-boost");
+
+    let decision = decide_autotune_transition(&policy, &state, &observation, Some(candidate));
+
+    match decision {
+        AutotuneDecision::Noop { reason } => {
+            assert!(reason.contains("Browser focus"));
+            assert!(reason.contains("game-focus-only CPU-affinity"));
+        }
+        other => {
+            panic!("expected Noop for browser focus CPU-affinity profile block, got {other:?}")
+        }
     }
 }
 

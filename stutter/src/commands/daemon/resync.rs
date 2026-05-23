@@ -61,7 +61,7 @@ pub fn run_resync_state_command_with_path(
         decision: "daemon_resync_state".to_owned(),
         reason: "accepted external mutation and abandoned stale daemon action state".to_owned(),
         unix_nanos: Some(crate::audit::unix_nanos_now()),
-        diagnostic_score_total: None,
+        diagnostic_current_raw_score_total: None,
         candidate_count: None,
         top_denied_reason: None,
         planner: None,

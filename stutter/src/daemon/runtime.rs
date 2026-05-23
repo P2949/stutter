@@ -102,7 +102,7 @@ impl DaemonRuntime {
             decision: "daemon_transition".to_owned(),
             reason: reason.clone(),
             unix_nanos: Some(unix_nanos),
-            diagnostic_score_total: None,
+            diagnostic_current_raw_score_total: None,
             candidate_count: None,
             top_denied_reason: None,
             planner: None,
@@ -166,7 +166,7 @@ impl DaemonRuntime {
             decision: "daemon_lifecycle".to_owned(),
             reason: transition.reason.clone(),
             unix_nanos: Some(unix_nanos),
-            diagnostic_score_total: None,
+            diagnostic_current_raw_score_total: None,
             candidate_count: None,
             top_denied_reason: None,
             planner: None,
@@ -343,7 +343,7 @@ impl DaemonRuntime {
             decision: decision.decision.clone(),
             reason: decision.reason.clone(),
             unix_nanos: Some(unix_nanos),
-            diagnostic_score_total: Some(decision.diagnostic_score_total),
+            diagnostic_current_raw_score_total: Some(decision.diagnostic_score_total),
             candidate_count: Some(decision.candidate_count),
             top_denied_reason: decision.top_denied_reason.clone(),
             planner: decision.planner.clone(),
@@ -546,7 +546,7 @@ mod tests {
         assert_eq!(last_decision.decision, "daemon_transition");
         assert_eq!(last_decision.reason, "startup recovery begins");
         assert_eq!(last_decision.unix_nanos, Some(transition.unix_nanos));
-        assert_eq!(last_decision.diagnostic_score_total, None);
+        assert_eq!(last_decision.diagnostic_current_raw_score_total, None);
         assert!(runtime.state().faulted.is_none());
     }
 
@@ -782,7 +782,7 @@ mod tests {
         );
         let last_decision = runtime.state().last_decision.as_ref().unwrap();
         assert_eq!(last_decision.decision, "start_experiment");
-        assert_eq!(last_decision.diagnostic_score_total, Some(900));
+        assert_eq!(last_decision.diagnostic_current_raw_score_total, Some(900));
         assert_eq!(last_decision.unix_nanos, Some(42));
     }
 

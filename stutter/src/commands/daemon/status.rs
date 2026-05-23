@@ -239,7 +239,7 @@ pub fn render_status_text(output: &DaemonStatusOutput) -> String {
     if let Some(decision) = output.state.last_decision.as_ref() {
         text.push_str(&format!("last_decision: {}\n", decision.decision));
         text.push_str(&format!("last_reason: {}\n", decision.reason));
-        if let Some(score) = decision.diagnostic_score_total {
+        if let Some(score) = decision.diagnostic_current_raw_score_total {
             text.push_str(&format!("current_score: {score}\n"));
         }
         super::explain::append_daemon_planner_text(&mut text, decision.planner.as_ref());
@@ -370,7 +370,7 @@ mod tests {
             decision: "optimize".to_owned(),
             reason: "found better affinity".to_owned(),
             unix_nanos: Some(1_000),
-            diagnostic_score_total: Some(850),
+            diagnostic_current_raw_score_total: Some(850),
             candidate_count: None,
             top_denied_reason: None,
             planner: Some(PlannerSummary {
