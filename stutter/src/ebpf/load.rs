@@ -26,7 +26,7 @@ use crate::{
         },
     },
     error::{EbpfError, ProbeError, TargetError},
-    probe_activation::{ProbeActivationPlan, ProbeActivationWarning},
+    probe_activation::ProbeActivationPlan,
     probe_registry::ProbeKey,
     session::targeting::TargetPolicy,
 };
@@ -334,32 +334,61 @@ pub fn load_and_attach(
     })?;
 
     if activation_plan.should_attach_program("sched_wakeup_new") {
-        attach_tracepoint(&mut ebpf, "sched_wakeup_new", "sched", "sched_wakeup_new")
-            .context("eBPF load failed: attach sched_wakeup_new")?;
+        if let Err(err) =
+            attach_tracepoint(&mut ebpf, "sched_wakeup_new", "sched", "sched_wakeup_new")
+        {
+            activation_plan.push_attach_warning(
+                ProbeKey::SchedulerRunnableLatency,
+                "sched_wakeup_new",
+                &err,
+            );
+            log::warn!(
+                "optional_probe_attach_failed key={:?} program=sched_wakeup_new err={err:#}",
+                ProbeKey::SchedulerRunnableLatency
+            );
+        }
     } else {
         log::warn!(
             "optional_tracepoint_unavailable tracepoint=sched_wakeup_new coverage=reduced_new_task_wakeups message=\"sched_wakeup remains attached, but wakeups for newly created tasks may have reduced coverage\""
         );
     }
 
-    if activation_plan.should_attach_program("sched_process_exit") {
-        attach_tracepoint(
+    if activation_plan.should_attach_program("sched_process_exit")
+        && let Err(err) = attach_tracepoint(
             &mut ebpf,
             "sched_process_exit",
             "sched",
             "sched_process_exit",
         )
-        .context("eBPF load failed: attach sched_process_exit")?;
+    {
+        activation_plan.push_attach_warning(
+            ProbeKey::SchedulerRunnableLatency,
+            "sched_process_exit",
+            &err,
+        );
+        log::warn!(
+            "optional_probe_attach_failed key={:?} program=sched_process_exit err={err:#}",
+            ProbeKey::SchedulerRunnableLatency
+        );
     }
 
-    if activation_plan.should_attach_program("sched_migrate_task") {
-        attach_tracepoint(
+    if activation_plan.should_attach_program("sched_migrate_task")
+        && let Err(err) = attach_tracepoint(
             &mut ebpf,
             "sched_migrate_task",
             "sched",
             "sched_migrate_task",
         )
-        .context("eBPF load failed: attach sched_migrate_task")?;
+    {
+        activation_plan.push_attach_warning(
+            ProbeKey::SchedulerRunnableLatency,
+            "sched_migrate_task",
+            &err,
+        );
+        log::warn!(
+            "optional_probe_attach_failed key={:?} program=sched_migrate_task err={err:#}",
+            ProbeKey::SchedulerRunnableLatency
+        );
     }
 
     if activation_plan.should_attach_program("cpu_frequency")
@@ -531,8 +560,9 @@ pub fn load_and_attach(
         .transpose()
         .context("eBPF load failed: PREV_FAULTS map init")?;
 
-    let mut native_cgroup_filter = NativeCgroupFilterStatus::disabled();
-    let target_cgroup_map = if config.safety.native_cgroup_filter {
+    let native_cgroup_filter = NativeCgroupFilterStatus::disabled();
+    let target_cgroup_map = None;
+    if config.safety.native_cgroup_filter {
         let cgroup_path =
             config.target.cgroupv2.as_ref().ok_or_else(|| {
                 anyhow::anyhow!("native cgroup filtering requires --cgroupv2 PATH")
@@ -544,41 +574,17 @@ pub fn load_and_attach(
             }
         })?;
 
-        let map_data = ebpf
-            .take_map("TARGET_CGROUP_IDS")
-            .ok_or_else(|| EbpfError::MapInit {
-                map: "TARGET_CGROUP_IDS",
-                source: anyhow::anyhow!("map not found"),
-            })?;
-        let map =
-            AyaHashMap::<_, u64, u8>::try_from(map_data).map_err(|source| EbpfError::MapInit {
-                map: "TARGET_CGROUP_IDS",
-                source: source.into(),
-            })?;
-        // Keep the map FD alive, but do not insert the best-effort id. Until a
-        // runtime verifier proves this directory inode matches
-        // bpf_get_current_cgroup_id(), native cgroup matching must remain
-        // inactive and PID expansion remains authoritative.
-        native_cgroup_filter = NativeCgroupFilterStatus::unverified_directory_inode(
-            cgroup_path.display().to_string(),
+        // Refuse to start a requested-but-inactive native cgroup mode. Directory
+        // inode resolution is useful diagnostic context, but it is not a
+        // runtime-verified proof that TARGET_CGROUP_IDS will match
+        // bpf_get_current_cgroup_id() on this kernel. Keep PID expansion as the
+        // only supported cgroup target path until a real verifier exists.
+        return Err(TargetError::NativeCgroupFilterUnsupported {
+            path: cgroup_path.to_path_buf(),
             cgroup_id,
-        );
-        if let Some(warning) = &native_cgroup_filter.warning {
-            activation_plan.warnings.push(ProbeActivationWarning {
-                key: None,
-                message: warning.clone(),
-            });
-            log::warn!(
-                "native_cgroup_filter_not_activated cgroup_path={} cgroup_id={} message=\"{}\"",
-                cgroup_path.display(),
-                cgroup_id,
-                warning,
-            );
         }
-        Some(map)
-    } else {
-        None
-    };
+        .into());
+    }
 
     if let Some(cgroup_path) = &target_policy.cgroupv2 {
         // Pre-populate TARGET_PIDS from the cgroup hierarchy to avoid races

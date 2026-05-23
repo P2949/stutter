@@ -162,6 +162,39 @@ fn loader_overrides_wakeup_data_and_consumed_cursor_maps_together() {
 }
 
 #[test]
+fn scheduler_optional_tracepoint_attach_failures_degrade_through_activation_warnings() {
+    let source = include_str!("../../ebpf/load.rs");
+
+    for program in [
+        "sched_wakeup_new",
+        "sched_process_exit",
+        "sched_migrate_task",
+    ] {
+        let marker = format!("\"{program}\"");
+        let start = source
+            .find(&marker)
+            .unwrap_or_else(|| panic!("{program} attach block not found"));
+        let end = source.len().min(start + 1_200);
+        let body = &source[start..end];
+
+        assert!(body.contains("activation_plan.push_attach_warning"));
+        assert!(body.contains("ProbeKey::SchedulerRunnableLatency"));
+        assert!(body.contains("optional_probe_attach_failed"));
+        assert!(!body.contains("context(\"eBPF load failed: attach"));
+    }
+}
+
+#[test]
+fn native_cgroup_filter_is_rejected_until_runtime_verification_exists() {
+    let source = include_str!("../../ebpf/load.rs");
+
+    assert!(source.contains("NativeCgroupFilterUnsupported"));
+    assert!(source.contains("Refuse to start a requested-but-inactive native cgroup mode"));
+    assert!(!source.contains("NativeCgroupFilterStatus::unverified_directory_inode("));
+    assert!(!source.contains("native_cgroup_filter_not_activated"));
+}
+
+#[test]
 fn sched_switch_uses_consumed_cursor_instead_of_lookup_delete() {
     let source = include_str!("../../../../stutter-ebpf/src/wakeup_data.rs");
 
