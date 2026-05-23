@@ -52,12 +52,16 @@ mod wakeup_data;
 
 use map_limits::{
     PREV_FAULTS_MAP_MAX_ENTRIES, RUNNABLE_TASK_CPU_MAP_MAX_ENTRIES, TARGET_PIDS_MAP_MAX_ENTRIES,
-    WAKEUP_DATA_MAP_MAX_ENTRIES,
 };
 use trace_offsets::*;
 use trace_read::{
     read_comm16, read_i32, read_i64, read_optional_u32, read_optional_u64, read_sequence_field,
     read_u32, read_u64,
+};
+use wakeup_data::{
+    WAKEUP_CONSUME_CURSOR_INSERT_FAILED, WAKEUP_CONSUME_NONE, WAKEUP_CONSUME_OK,
+    WAKEUP_RECORD_INSERT_FAILED, WAKEUP_RECORD_NEW_PENDING,
+    WAKEUP_RECORD_REPLACED_PENDING_MOVED_CPU, WAKEUP_RECORD_REPLACED_PENDING_SAME_CPU, WakeupData,
 };
 
 // -----------------------------------------------------------------------------
@@ -84,18 +88,6 @@ static TARGET_CGROUP_IDS: HashMap<u64, u8> = HashMap::<u64, u8>::with_max_entrie
 
 #[map]
 static TARGET_IRQS: HashMap<u32, u8> = HashMap::<u32, u8>::with_max_entries(64, 0);
-
-#[repr(C)]
-#[derive(Clone, Copy, Default)]
-struct WakeupData {
-    ts: u64,
-    target_cpu: u32,
-    waker_tid: u32,
-}
-
-#[map]
-static WAKEUP_DATA: HashMap<u32, WakeupData> =
-    HashMap::<u32, WakeupData>::with_max_entries(WAKEUP_DATA_MAP_MAX_ENTRIES, 0);
 
 #[map]
 static IRQ_START_TIMES: HashMap<u64, u64> = HashMap::<u64, u64>::with_max_entries(1024, 0);
@@ -275,7 +267,7 @@ pub fn sched_process_exit(_ctx: TracePointContext) -> u32 {
     remove_runnable_task_if_present(tid);
 
     let mut old = WakeupData::default();
-    if wakeup_data::take_wakeup_data(tid, &mut old) {
+    if wakeup_data::remove_for_exit(tid, &mut old) {
         decrement_target_pending(old.target_cpu);
     }
     let _ = PREV_FAULTS.remove(tid);
@@ -531,20 +523,20 @@ fn try_sched_wakeup(ctx: TracePointContext) -> u32 {
         target_cpu,
         waker_tid,
     };
-    let old_wakeup_data = unsafe { WAKEUP_DATA.get(pid).copied() };
+    let mut old = WakeupData::default();
 
-    if WAKEUP_DATA.insert(pid, data, 0).is_ok() {
-        match old_wakeup_data {
-            None => increment_target_pending(target_cpu),
-            Some(old) if old.target_cpu != target_cpu => {
-                increment_drop_counter(DROP_WAKEUP_DATA_REPLACED_ENTRY);
-                decrement_target_pending(old.target_cpu);
-                increment_target_pending(target_cpu);
-            }
-            Some(_) => increment_drop_counter(DROP_WAKEUP_DATA_REPLACED_ENTRY),
+    match wakeup_data::record_wakeup(pid, data, &mut old) {
+        WAKEUP_RECORD_NEW_PENDING => increment_target_pending(target_cpu),
+        WAKEUP_RECORD_REPLACED_PENDING_MOVED_CPU => {
+            increment_drop_counter(DROP_WAKEUP_DATA_REPLACED_ENTRY);
+            decrement_target_pending(old.target_cpu);
+            increment_target_pending(target_cpu);
         }
-    } else {
-        increment_drop_counter(DROP_WAKEUP_DATA_INSERT_FAILED);
+        WAKEUP_RECORD_REPLACED_PENDING_SAME_CPU => {
+            increment_drop_counter(DROP_WAKEUP_DATA_REPLACED_ENTRY);
+        }
+        WAKEUP_RECORD_INSERT_FAILED => increment_drop_counter(DROP_WAKEUP_DATA_INSERT_FAILED),
+        _ => {}
     }
 
     0
@@ -564,8 +556,14 @@ fn try_sched_switch(ctx: TracePointContext) -> u32 {
     let pid = next_pid as u32;
 
     let mut wakeup_data = WakeupData::default();
-    if !wakeup_data::take_wakeup_data(pid, &mut wakeup_data) {
-        return 0;
+    match wakeup_data::consume_pending_wakeup(pid, &mut wakeup_data) {
+        WAKEUP_CONSUME_OK => {}
+        WAKEUP_CONSUME_CURSOR_INSERT_FAILED => {
+            increment_drop_counter(DROP_WAKEUP_DATA_INSERT_FAILED);
+            return 0;
+        }
+        WAKEUP_CONSUME_NONE => return 0,
+        _ => return 0,
     }
 
     if !is_target_pid(pid) {
@@ -575,7 +573,7 @@ fn try_sched_switch(ctx: TracePointContext) -> u32 {
         return 0;
     }
 
-    // Wakeup data is consumed before slower tracepoint reads to avoid stale state.
+    // Wakeup data is marked consumed before slower tracepoint reads to avoid stale state.
 
     // Read the previous task context only after the cheap relevance filters pass.
     // Offsets validated in userspace preflight assume prev_pid at 24 and prev_state at 32.
@@ -715,14 +713,11 @@ fn try_sched_migrate_task(ctx: TracePointContext) -> u32 {
 
     // If this task is currently a monitored target with a pending wakeup,
     // update its target CPU and move its diagnostic-only pending counter.
-    if let Some(data) = WAKEUP_DATA.get_ptr_mut(pid) {
-        let old_cpu = unsafe { (*data).target_cpu };
-        let new_cpu = dest_cpu as u32;
-        if old_cpu != new_cpu {
-            unsafe { (*data).target_cpu = new_cpu };
-            decrement_target_pending(old_cpu);
-            increment_target_pending(new_cpu);
-        }
+    let mut old_cpu = 0;
+    let new_cpu = dest_cpu as u32;
+    if wakeup_data::move_pending_cpu(pid, new_cpu, &mut old_cpu) {
+        decrement_target_pending(old_cpu);
+        increment_target_pending(new_cpu);
     }
 
     let Some(mut entry) = EVENTS.reserve::<MigrationEvent>(0) else {

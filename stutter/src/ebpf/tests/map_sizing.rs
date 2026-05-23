@@ -33,7 +33,7 @@ fn unknown_or_unlimited_memory_uses_default_available_memory_budget() {
     let sizing = map_sizing_from_memory(memory_snapshot(None, None));
 
     assert_eq!(sizing.events_ringbuf_bytes, 4 * 1024 * 1024);
-    assert_eq!(sizing.wakeup_data_entries, 196_608);
+    assert_eq!(sizing.wakeup_data_entries, 98_304);
     assert_eq!(sizing.locked_memory_limit_bytes, None);
     assert_eq!(sizing.available_memory_bytes, None);
 }
@@ -233,7 +233,7 @@ fn map_sizing_after_unlimited_memlock_uses_available_memory_budget() {
     let sizing = map_sizing_from_memory(memory_snapshot(report.after_limit_bytes, Some(1 << 30)));
 
     assert_eq!(sizing.events_ringbuf_bytes, 4 * 1024 * 1024);
-    assert_eq!(sizing.wakeup_data_entries, 196_608);
+    assert_eq!(sizing.wakeup_data_entries, 98_304);
     assert_eq!(sizing.locked_memory_limit_bytes, None);
 }
 
@@ -250,7 +250,7 @@ fn map_sizing_after_unknown_memlock_uses_available_memory_budget() {
     let sizing = map_sizing_from_memory(memory_snapshot(report.after_limit_bytes, Some(1 << 30)));
 
     assert_eq!(sizing.events_ringbuf_bytes, 4 * 1024 * 1024);
-    assert_eq!(sizing.wakeup_data_entries, 196_608);
+    assert_eq!(sizing.wakeup_data_entries, 98_304);
     assert_eq!(sizing.locked_memory_limit_bytes, None);
 }
 

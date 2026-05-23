@@ -152,13 +152,34 @@ field:long prev_state; offset:32; size:8; signed:1;
 }
 
 #[test]
+fn loader_overrides_wakeup_data_and_consumed_cursor_maps_together() {
+    let source = include_str!("../../ebpf/load.rs");
+
+    assert!(source.contains("map_max_entries(\"WAKEUP_DATA\", map_sizing.wakeup_data_entries)"));
+    assert!(
+        source.contains("map_max_entries(\"WAKEUP_CONSUMED\", map_sizing.wakeup_data_entries)")
+    );
+}
+
+#[test]
+fn sched_switch_uses_consumed_cursor_instead_of_lookup_delete() {
+    let source = include_str!("../../../../stutter-ebpf/src/wakeup_data.rs");
+
+    assert!(source.contains("static WAKEUP_CONSUMED"));
+    assert!(source.contains("consume_pending_wakeup"));
+    assert!(source.contains("without deleting WAKEUP_DATA"));
+}
+
+#[test]
 fn sched_switch_reads_previous_task_context_after_relevance_filters() {
     let source = include_str!("../../../../stutter-ebpf/src/main.rs");
     let start = source.find("fn try_sched_switch").unwrap();
     let end = source[start..].find("fn try_sched_migrate_task").unwrap() + start;
     let body = &source[start..end];
 
-    let wakeup_data = body.find("wakeup_data::take_wakeup_data(pid").unwrap();
+    let wakeup_data = body
+        .find("wakeup_data::consume_pending_wakeup(pid")
+        .unwrap();
     let target_filter = body.find("if !is_target_pid(pid)").unwrap();
     let prev_pid = body.find("let mut prev_pid_raw").unwrap();
     let prev_state = body.find("let mut prev_state").unwrap();
@@ -301,7 +322,7 @@ fn dynamic_map_sizing_respects_finite_memlock_budget() {
     });
 
     assert_eq!(sizing.events_ringbuf_bytes, 256 * 1024);
-    assert_eq!(sizing.wakeup_data_entries, 8_192);
+    assert_eq!(sizing.wakeup_data_entries, 4_096);
 }
 
 #[test]

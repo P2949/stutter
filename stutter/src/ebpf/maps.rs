@@ -14,11 +14,12 @@ const DEFAULT_AVAILABLE_MEMORY_BYTES: u64 = 1 << 30;
 const AVAILABLE_MEMORY_BUDGET_DIVISOR: u64 = 64;
 const MEMLOCK_BUDGET_NUMERATOR: u64 = 3;
 const MEMLOCK_BUDGET_DENOMINATOR: u64 = 4;
-// Conservative userspace budgeting estimate for one WAKEUP_DATA kernel hash-map
-// entry. This is not the raw eBPF-private WakeupData struct size; it reserves
-// room for kernel map metadata, alignment, hash storage overhead, and safety
+// Conservative userspace budgeting estimate for one logical wakeup-state slot.
+// Each slot now reserves both WAKEUP_DATA and WAKEUP_CONSUMED entries, so this
+// is intentionally larger than the raw eBPF-private WakeupData struct size and
+// includes kernel map metadata, alignment, hash storage overhead, and safety
 // margin when splitting the available map-memory budget.
-pub(crate) const WAKEUP_DATA_MAP_ENTRY_BUDGET_BYTES: u64 = 64;
+pub(crate) const WAKEUP_DATA_MAP_ENTRY_BUDGET_BYTES: u64 = 128;
 pub(crate) const MIN_WAKEUP_DATA_ENTRIES: u32 = 4_096;
 pub(crate) const MAX_WAKEUP_DATA_ENTRIES: u32 = 1_048_576;
 pub(crate) const MIN_EVENTS_RINGBUF_BYTES: u32 = 64 * 1024;
