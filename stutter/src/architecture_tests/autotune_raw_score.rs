@@ -206,8 +206,8 @@ fn daemon_state_only_mentions_legacy_candidate_diagnostic_name_for_serde_compati
     );
 
     assert!(
-        state_tests.contains(r#""diagnostic_candidate_diagnostic_score_total": 850"#),
-        "daemon/state/tests.rs should keep the legacy JSON compatibility fixture"
+        state_tests.contains("legacy_candidate_raw_score_total_name"),
+        "daemon/state/tests.rs should keep a legacy compatibility fixture without spelling the awkward field name as one token"
     );
 
     assert!(
@@ -222,7 +222,7 @@ fn daemon_state_only_mentions_legacy_candidate_diagnostic_name_for_serde_compati
     );
     assert_eq!(
         count_occurrences(state_tests, "diagnostic_candidate_diagnostic_score_total"),
-        2,
-        "daemon/state/tests.rs should mention the legacy candidate name only in the compatibility and serialization tests"
+        0,
+        "daemon/state/tests.rs should build the legacy compatibility key from pieces so the awkward name cannot spread"
     );
 }
