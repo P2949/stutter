@@ -226,3 +226,18 @@ fn daemon_state_only_mentions_legacy_candidate_diagnostic_name_for_serde_compati
         "daemon/state/tests.rs should build the legacy compatibility key from pieces so the awkward name cannot spread"
     );
 }
+
+#[test]
+fn tune_profile_stats_use_raw_score_total_names_for_serialized_raw_totals() {
+    let tune_source = include_str!("../tune/mod.rs");
+    let recommendation_source = include_str!("../tune/recommendation.rs");
+
+    for source in [tune_source, recommendation_source] {
+        assert!(source.contains("median_diagnostic_raw_score_total"));
+        assert!(source.contains("iqr_diagnostic_raw_score_total"));
+        assert!(source.contains("worst_diagnostic_raw_score_total"));
+        assert!(source.contains(r#"alias = "median_diagnostic_score_total""#));
+        assert!(source.contains(r#"alias = "iqr_diagnostic_score_total""#));
+        assert!(source.contains(r#"alias = "worst_diagnostic_score_total""#));
+    }
+}

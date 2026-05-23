@@ -1,9 +1,11 @@
 #[cfg(test)]
 pub(crate) use super::classify::{SCHED_FIFO, SCHED_RR};
 #[cfg(test)]
-pub(crate) use super::groups::apply_foreground_source_mode_to_snapshot;
+pub(crate) use super::foreground_scoring::apply_foreground_source_mode_to_snapshot;
 #[cfg(test)]
-pub(crate) use super::groups::{build_focus_groups, foreground_score_for_group, make_focus_group};
+pub(crate) use super::foreground_scoring::foreground_score_for_group;
+#[cfg(test)]
+pub(crate) use super::groups::{build_focus_groups, make_focus_group};
 #[cfg(test)]
 pub(crate) use super::score::focus_group_kind_for_class;
 #[cfg(test)]

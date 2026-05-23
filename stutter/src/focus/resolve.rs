@@ -3,7 +3,8 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    groups::{FocusGroup, apply_foreground_source_mode_to_snapshot, situation_for_group},
+    foreground_scoring::apply_foreground_source_mode_to_snapshot,
+    groups::{FocusGroup, situation_for_group},
     provider::focus_snapshot_at,
     score::priority_band_rank,
     snapshot::{FocusCache, FocusSnapshot},

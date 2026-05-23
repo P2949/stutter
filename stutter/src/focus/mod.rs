@@ -28,7 +28,9 @@
 pub(crate) mod classify;
 pub(crate) mod community_rules;
 mod foreground_match;
+mod foreground_scoring;
 pub(crate) mod group_build;
+mod group_candidates;
 pub(crate) mod groups;
 mod process_scan;
 pub(crate) mod provider;

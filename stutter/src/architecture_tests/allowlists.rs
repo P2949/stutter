@@ -56,8 +56,8 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
     },
     OversizedRustFileAllowance {
         path: "src/tune/mod.rs",
-        max_lines: 1_343,
-        reason: "Legacy tuning orchestration pending split into data collection / evaluation",
+        max_lines: 1_349,
+        reason: "Legacy tuning orchestration pending split into data collection / evaluation; raw-score compatibility aliases are staged here until tune model extraction",
     },
     OversizedRustFileAllowance {
         path: "src/metrics.rs",
@@ -73,11 +73,6 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
         path: "src/recorder/session.rs",
         max_lines: 1_011,
         reason: "existing recorder session writer implementation pending future split; display metadata capture is staged here",
-    },
-    OversizedRustFileAllowance {
-        path: "src/community_rules/importer.rs",
-        max_lines: 1_051,
-        reason: "existing community rules importer implementation pending future split",
     },
     OversizedRustFileAllowance {
         path: "src/cli/mod.rs",
@@ -98,11 +93,6 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
         path: "src/actions/ioprio.rs",
         max_lines: 1_080,
         reason: "existing I/O priority action implementation pending future split; transactional apply now prebuilds restore records before mutation and rollback verifies task identity plus best-effort write errors before restore",
-    },
-    OversizedRustFileAllowance {
-        path: "src/autotune/runtime.rs",
-        max_lines: 1_027,
-        reason: "Autotune runner thread lifecycle; pending runtime/state split",
     },
     OversizedRustFileAllowance {
         path: "src/autotune/runtime/tests.rs",
