@@ -856,7 +856,7 @@ fn daemon_state_snapshot_serializes_live_runtime_state() {
         "cpu-affinity-restore-file"
     );
     assert_eq!(
-        value["last_decision"]["diagnostic_score_total"].as_u64(),
+        value["last_decision"]["diagnostic_current_raw_score_total"].as_u64(),
         Some(999)
     );
     assert_eq!(

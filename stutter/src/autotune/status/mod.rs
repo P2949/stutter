@@ -156,7 +156,7 @@ pub fn status_from_daemon_state(path: PathBuf, state: &DaemonState) -> AutotuneS
         current_score: state
             .last_decision
             .as_ref()
-            .and_then(|decision| decision.diagnostic_score_total),
+            .and_then(|decision| decision.diagnostic_current_raw_score_total),
         active_profile: active_profile_from_daemon_state(state),
         active_candidate: active_candidate_from_daemon_state(state),
         kept_actions: kept_actions_from_daemon_state(state),

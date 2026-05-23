@@ -22,7 +22,6 @@ use crate::{
         policy::{ActionSource, DaemonMode, DaemonPolicyBuildInput, build_daemon_policy},
     },
     focus::FocusGroupKind,
-    process_tree::TaskClass,
 };
 
 pub(crate) const DEFAULT_MIN_FOCUS_CONFIDENCE: f32 = super::DEFAULT_MIN_FOCUS_CONFIDENCE;
@@ -450,67 +449,26 @@ fn focus_policy_block_reason(
 
     match observation.focus_kind {
         Some(FocusGroupKind::Game) => None,
-        Some(FocusGroupKind::Compile) => {
-            if candidate_looks_like_game_cpu_isolation_profile(candidate) {
-                Some(
-                    "compile focus must not apply gaming CPU-isolation profile candidates"
-                        .to_owned(),
-                )
-            } else {
-                None
-            }
-        }
-        Some(FocusGroupKind::Browser) => {
-            if candidate_looks_like_game_cpu_isolation_profile(candidate) {
-                Some(
-                    "browser focus avoids gaming CPU-isolation profiles that may hurt desktop responsiveness"
-                        .to_owned(),
-                )
-            } else {
-                None
-            }
-        }
         Some(FocusGroupKind::Idle) | Some(FocusGroupKind::Unknown) | None => {
             Some("focus is idle or unknown; autotune remains observe-only".to_owned())
         }
-        Some(FocusGroupKind::Desktop)
-        | Some(FocusGroupKind::Media)
-        | Some(FocusGroupKind::Recording)
-        | Some(FocusGroupKind::VirtualMachine) => None,
+        Some(focus_kind) => game_focus_required_action_block_reason(focus_kind, candidate),
     }
 }
 
-fn candidate_looks_like_game_cpu_isolation_profile(candidate: &CandidateAction) -> bool {
-    match candidate {
-        CandidateAction::CpuAffinityProfile { plan } => {
-            let lower_name = plan.profile_name.to_ascii_lowercase();
-            lower_name.contains("game")
-                || lower_name.contains("gaming")
-                || lower_name.contains("isolation")
-                || plan.profile.rules.iter().any(|rule| {
-                    rule.match_class.iter().any(|class| {
-                        matches!(
-                            class,
-                            TaskClass::Game
-                                | TaskClass::GameHelper
-                                | TaskClass::GameRenderThread
-                                | TaskClass::GameWorkerThread
-                                | TaskClass::WineServer
-                                | TaskClass::GameScope
-                        )
-                    })
-                })
-        }
-        CandidateAction::Fake { .. }
-        | CandidateAction::Nice { .. }
-        | CandidateAction::IoPrio { .. }
-        | CandidateAction::Uclamp { .. }
-        | CandidateAction::CgroupPlacement { .. }
-        | CandidateAction::IrqAffinity { .. }
-        | CandidateAction::CpuPower { .. }
-        | CandidateAction::GpuPower { .. }
-        | CandidateAction::VmKnob { .. } => false,
-    }
+fn game_focus_required_action_block_reason(
+    focus_kind: FocusGroupKind,
+    candidate: &CandidateAction,
+) -> Option<String> {
+    candidate_requires_game_focus(candidate).then(|| {
+        format!(
+            "{focus_kind:?} focus must not apply game-focus-only CPU-affinity profile candidates"
+        )
+    })
+}
+
+fn candidate_requires_game_focus(candidate: &CandidateAction) -> bool {
+    matches!(candidate, CandidateAction::CpuAffinityProfile { .. })
 }
 
 #[cfg(test)]

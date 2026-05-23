@@ -480,7 +480,7 @@ mod tests {
                 no_action: None,
             }),
             unix_nanos: Some(1),
-            diagnostic_score_total: Some(900),
+            diagnostic_current_raw_score_total: Some(900),
             candidate_count: Some(10),
             top_denied_reason: Some("high_risk".to_owned()),
             situation: Some("GameFocused".to_owned()),

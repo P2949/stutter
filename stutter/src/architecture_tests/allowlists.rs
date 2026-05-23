@@ -31,8 +31,8 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
     &[OversizedRustFileAllowance] = &[
     OversizedRustFileAllowance {
         path: "src/diagnosis.rs",
-        max_lines: 1_585,
-        reason: "temporary extraction stage: owns diagnosis config/model/anchor/candidate/evidence orchestration; next split is diagnosis/model.rs",
+        max_lines: 1_240,
+        reason: "temporary extraction stage: diagnosis/model.rs now owns config/model data; remaining file owns anchor/candidate/evidence orchestration pending the next orchestration split",
     },
     OversizedRustFileAllowance {
         path: "src/cli/monitor.rs",
@@ -78,11 +78,6 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
         path: "src/community_rules/importer.rs",
         max_lines: 1_051,
         reason: "existing community rules importer implementation pending future split",
-    },
-    OversizedRustFileAllowance {
-        path: "src/daemon/state.rs",
-        max_lines: 1_091,
-        reason: "existing daemon state implementation pending future split",
     },
     OversizedRustFileAllowance {
         path: "src/cli/mod.rs",

@@ -148,6 +148,24 @@ fn no_duplicated_diagnostic_score_total_names_exist_in_source_tree() {
 }
 
 #[test]
+fn daemon_decision_state_uses_current_raw_score_total_name() {
+    let source = include_str!("../daemon/state.rs");
+
+    assert!(
+        source.contains("pub diagnostic_current_raw_score_total: Option<u64>"),
+        "DaemonDecisionState should expose the persisted status score as diagnostic_current_raw_score_total"
+    );
+    assert!(
+        source.contains(r#"alias = "diagnostic_score_total""#),
+        "DaemonDecisionState should keep a serde alias for old persisted daemon-state JSON"
+    );
+    assert!(
+        !source.contains("pub diagnostic_score_total: Option<u64>"),
+        "DaemonDecisionState must not expose the ambiguous diagnostic_score_total field name"
+    );
+}
+
+#[test]
 fn daemon_workload_profile_uses_candidate_raw_score_total_name() {
     let source = include_str!("../daemon/state.rs");
 
@@ -179,26 +197,32 @@ fn daemon_workload_profile_does_not_expose_legacy_candidate_diagnostic_field_nam
 
 #[test]
 fn daemon_state_only_mentions_legacy_candidate_diagnostic_name_for_serde_compatibility() {
-    let source = include_str!("../daemon/state.rs");
+    let state_source = include_str!("../daemon/state.rs");
+    let state_tests = include_str!("../daemon/state/tests.rs");
 
     assert!(
-        source.contains(r#"#[serde(alias = "diagnostic_candidate_diagnostic_score_total")]"#),
+        state_source.contains(r#"#[serde(alias = "diagnostic_candidate_diagnostic_score_total")]"#),
         "daemon/state.rs should keep the serde alias for old persisted daemon-state JSON"
     );
 
     assert!(
-        source.contains(r#""diagnostic_candidate_diagnostic_score_total": 850"#),
-        "daemon/state.rs should keep the legacy JSON compatibility fixture"
+        state_tests.contains(r#""diagnostic_candidate_diagnostic_score_total": 850"#),
+        "daemon/state/tests.rs should keep the legacy JSON compatibility fixture"
     );
 
     assert!(
-        !source.contains("pub diagnostic_candidate_diagnostic_score_total"),
+        !state_source.contains("pub diagnostic_candidate_diagnostic_score_total"),
         "daemon/state.rs must not reintroduce the old field name"
     );
 
     assert_eq!(
-        count_occurrences(source, "diagnostic_candidate_diagnostic_score_total"),
-        3,
-        "daemon/state.rs should mention the legacy name only in the serde alias, legacy JSON test, and serialization test"
+        count_occurrences(state_source, "diagnostic_candidate_diagnostic_score_total"),
+        1,
+        "daemon/state.rs should mention the legacy candidate name only in the serde alias"
+    );
+    assert_eq!(
+        count_occurrences(state_tests, "diagnostic_candidate_diagnostic_score_total"),
+        2,
+        "daemon/state/tests.rs should mention the legacy candidate name only in the compatibility and serialization tests"
     );
 }

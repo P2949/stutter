@@ -36,7 +36,7 @@ fn status_from_daemon_state_reports_snapshot_fields() {
             decision: "candidate_applied".to_owned(),
             reason: "candidate is being measured".to_owned(),
             unix_nanos: Some(200),
-            diagnostic_score_total: Some(818),
+            diagnostic_current_raw_score_total: Some(818),
             candidate_count: None,
             top_denied_reason: None,
             planner: None,
@@ -183,7 +183,7 @@ fn status_from_daemon_state_includes_top_denied_reason() {
             decision: "observed".to_owned(),
             reason: "no candidate selected".to_owned(),
             unix_nanos: Some(200),
-            diagnostic_score_total: Some(818),
+            diagnostic_current_raw_score_total: Some(818),
             candidate_count: Some(1),
             top_denied_reason: Some("NoEffectiveChange".to_owned()),
             planner: None,
@@ -284,7 +284,7 @@ fn status_from_daemon_state_includes_structured_planner_summary() {
                     manual_only_suggestions: Vec::new(),
                 }),
             }),
-            diagnostic_score_total: None,
+            diagnostic_current_raw_score_total: None,
         }),
         ..DaemonState::default()
     };
