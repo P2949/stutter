@@ -2,7 +2,7 @@ use std::path::Path;
 
 use anyhow::Context;
 
-use super::fs_io::{strip_cgroup_leading_slash, write_trimmed};
+use super::fs_io::{resolve_cgroup_fs_path, write_trimmed};
 use crate::actions::{
     CgroupCpusetRestoreRecord, CgroupRestoreRecord, RestoreIdentityStatus, RollbackToken,
     restore_write::{RestoreWriteError, classify_restore_write_error},
@@ -43,6 +43,17 @@ impl RollbackHandler for CgroupRollbackHandler {
     }
 
     fn restore_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackResult> {
+        self.restore_token_at(Path::new("/proc"), Path::new("/sys/fs/cgroup"), token)
+    }
+}
+
+impl CgroupRollbackHandler {
+    pub(super) fn restore_token_at(
+        &self,
+        proc_root: &Path,
+        cgroup_root: &Path,
+        token: &RollbackToken,
+    ) -> anyhow::Result<RollbackResult> {
         let RollbackToken::CgroupRestore { records, cpuset } = token else {
             anyhow::bail!("cgroup rollback handler does not support {token:?}");
         };
@@ -57,7 +68,7 @@ impl RollbackHandler for CgroupRollbackHandler {
         for record in records {
             let identity = record.restore_identity();
             let tid = identity.tid;
-            let status = verify_task_identity(Path::new("/proc"), &identity);
+            let status = verify_task_identity(proc_root, &identity);
             match status {
                 RestoreIdentityStatus::Missing => {
                     skipped_dead += 1;
@@ -84,18 +95,19 @@ impl RollbackHandler for CgroupRollbackHandler {
                 RestoreIdentityStatus::SameTask => {}
             }
 
-            let original_cgroup = if record.original_cgroup.is_absolute() {
-                record.original_cgroup.clone()
-            } else {
-                Path::new("/sys/fs/cgroup")
-                    .join(strip_cgroup_leading_slash(&record.original_cgroup))
-            };
+            let original_cgroup = resolve_cgroup_fs_path(cgroup_root, &record.original_cgroup)
+                .with_context(|| {
+                    format!(
+                        "failed to resolve original cgroup path {}",
+                        record.original_cgroup.display()
+                    )
+                })?;
             let cgroup_procs = original_cgroup.join("cgroup.procs");
             match write_trimmed(&cgroup_procs, &tid.to_string()) {
                 Ok(()) => {
                     restored += 1;
                 }
-                Err(e) => match classify_restore_write_error(Path::new("/proc"), tid, e) {
+                Err(e) => match classify_restore_write_error(proc_root, tid, e) {
                     RestoreWriteError::MissingTask => {
                         skipped_dead += 1;
                         log::debug!("cgroup restore skipped: task tid={} is missing/dead", tid);
@@ -118,7 +130,7 @@ impl RollbackHandler for CgroupRollbackHandler {
         }
 
         if let Some(cpuset) = cpuset {
-            match restore_cpuset_record(Path::new("/sys/fs/cgroup"), cpuset) {
+            match restore_cpuset_record(cgroup_root, cpuset) {
                 Ok(restored_files) => {
                     restored += restored_files;
                 }
@@ -170,11 +182,13 @@ pub(super) fn restore_cpuset_record(
     cgroup_root: &Path,
     record: &CgroupCpusetRestoreRecord,
 ) -> anyhow::Result<usize> {
-    let cgroup_path = if record.cgroup_path.starts_with(cgroup_root) {
-        record.cgroup_path.clone()
-    } else {
-        cgroup_root.join(strip_cgroup_leading_slash(&record.cgroup_path))
-    };
+    let cgroup_path =
+        resolve_cgroup_fs_path(cgroup_root, &record.cgroup_path).with_context(|| {
+            format!(
+                "failed to resolve cgroup cpuset restore path {}",
+                record.cgroup_path.display()
+            )
+        })?;
 
     let mut restored = 0usize;
     if let Some(original) = &record.original_cpuset_cpus {
