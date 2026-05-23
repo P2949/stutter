@@ -56,9 +56,15 @@ pub struct TuneProfileStats {
     pub profile: String,
     pub valid_runs: usize,
     pub invalid_runs: usize,
-    pub median_diagnostic_score_total: u64,
-    pub iqr_diagnostic_score_total: u64,
-    pub worst_diagnostic_score_total: u64,
+    /// Raw diagnostic totals are only compared across fixed-duration tune runs.
+    /// The explicit `raw_score_total` suffix prevents these serialized fields
+    /// from being confused with normalized/rate-based comparison metrics.
+    #[serde(alias = "median_diagnostic_score_total")]
+    pub median_diagnostic_raw_score_total: u64,
+    #[serde(alias = "iqr_diagnostic_score_total")]
+    pub iqr_diagnostic_raw_score_total: u64,
+    #[serde(alias = "worst_diagnostic_score_total")]
+    pub worst_diagnostic_raw_score_total: u64,
     pub median_over_5ms: u64,
     pub iqr_over_5ms: u64,
     pub median_frame_p99_us: u64,
@@ -980,9 +986,9 @@ pub fn profile_stats_from_grouped(
                 profile: profile.clone(),
                 valid_runs: valid_runs.len(),
                 invalid_runs: runs.len().saturating_sub(valid_runs.len()),
-                median_diagnostic_score_total: median_u64(score_totals.clone()),
-                iqr_diagnostic_score_total: iqr_u64(score_totals.clone()),
-                worst_diagnostic_score_total: worst_u64(score_totals),
+                median_diagnostic_raw_score_total: median_u64(score_totals.clone()),
+                iqr_diagnostic_raw_score_total: iqr_u64(score_totals.clone()),
+                worst_diagnostic_raw_score_total: worst_u64(score_totals),
                 median_over_5ms: median_u64(over_5ms.clone()),
                 iqr_over_5ms: iqr_u64(over_5ms),
                 median_frame_p99_us: median_u64(frame_p99_us.clone()),
@@ -1003,7 +1009,7 @@ pub fn assess_ranking_confidence(
         .iter()
         .filter(|stat| stat.valid_runs > 0)
         .collect::<Vec<_>>();
-    valid_stats.sort_by_key(|stat| stat.median_diagnostic_score_total);
+    valid_stats.sort_by_key(|stat| stat.median_diagnostic_raw_score_total);
 
     if valid_stats.len() < 2 {
         notes.push("fewer than two profiles produced valid runs".to_owned());
@@ -1034,11 +1040,11 @@ pub fn assess_ranking_confidence(
     };
 
     let diff = second
-        .median_diagnostic_score_total
-        .abs_diff(best.median_diagnostic_score_total);
+        .median_diagnostic_raw_score_total
+        .abs_diff(best.median_diagnostic_raw_score_total);
     let max_iqr = best
-        .iqr_diagnostic_score_total
-        .max(second.iqr_diagnostic_score_total);
+        .iqr_diagnostic_raw_score_total
+        .max(second.iqr_diagnostic_raw_score_total);
     if diff <= max_iqr && max_iqr > 0 {
         notes.push(format!(
             "best and second-best median scores are close relative to variance (diff={diff}, max_iqr={max_iqr})"
@@ -1046,7 +1052,7 @@ pub fn assess_ranking_confidence(
         return (RankingConfidence::Unstable, notes);
     }
 
-    let five_percent_second = second.median_diagnostic_score_total / 20;
+    let five_percent_second = second.median_diagnostic_raw_score_total / 20;
     let close_to_second = diff <= five_percent_second;
 
     if runs < 3 {
@@ -1060,14 +1066,14 @@ pub fn assess_ranking_confidence(
             "best median score is within 5% of second-best (diff={diff})"
         ));
     }
-    if best.iqr_diagnostic_score_total > 0 {
+    if best.iqr_diagnostic_raw_score_total > 0 {
         notes.push("best profile score IQR is non-zero".to_owned());
     }
 
     if runs < 3 || best.invalid_runs > 0 || close_to_second {
         (RankingConfidence::Low, notes)
-    } else if best.iqr_diagnostic_score_total > 0
-        || second.iqr_diagnostic_score_total > 0
+    } else if best.iqr_diagnostic_raw_score_total > 0
+        || second.iqr_diagnostic_raw_score_total > 0
         || !notes.is_empty()
     {
         (RankingConfidence::Medium, notes)

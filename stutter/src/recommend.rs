@@ -30,7 +30,8 @@ pub struct BaselineTuneRecommendation {
     pub verdict: TuneRecommendationVerdict,
     pub summary: String,
     pub diagnostic_baseline_raw_score_total: u64,
-    pub best_median_diagnostic_score_total: Option<u64>,
+    #[serde(alias = "best_median_diagnostic_score_total")]
+    pub best_median_diagnostic_raw_score_total: Option<u64>,
     pub score_delta_abs: Option<i64>,
     pub score_delta_percent: Option<f64>,
 
@@ -110,10 +111,10 @@ pub fn build_baseline_tune_recommendation(
             .iter()
             .find(|stat| stat.profile == profile && stat.valid_runs > 0)
     });
-    let best_median_diagnostic_score_total =
-        best_stat.map(|stat| stat.median_diagnostic_score_total);
-    let score_delta_abs =
-        best_median_diagnostic_score_total.map(|best| baseline_score.total as i64 - best as i64);
+    let best_median_diagnostic_raw_score_total =
+        best_stat.map(|stat| stat.median_diagnostic_raw_score_total);
+    let score_delta_abs = best_median_diagnostic_raw_score_total
+        .map(|best| baseline_score.total as i64 - best as i64);
     let score_delta_percent = score_delta_abs.and_then(|delta| {
         (baseline_score.total > 0).then_some(delta as f64 / baseline_score.total as f64 * 100.0)
     });
@@ -180,7 +181,7 @@ pub fn build_baseline_tune_recommendation(
 
     let verdict = if summary.ranking_confidence == RankingConfidence::Unstable {
         TuneRecommendationVerdict::NoRecommendation
-    } else if let Some(best) = best_median_diagnostic_score_total {
+    } else if let Some(best) = best_median_diagnostic_raw_score_total {
         let worse_threshold = baseline_score
             .total
             .saturating_add(baseline_score.total / 20);
@@ -218,7 +219,7 @@ pub fn build_baseline_tune_recommendation(
         TuneRecommendationVerdict::NoRecommendation => {
             if summary.ranking_confidence == RankingConfidence::Unstable {
                 "No recommendation: tune ranking was unstable.".to_owned()
-            } else if let Some(best) = best_median_diagnostic_score_total {
+            } else if let Some(best) = best_median_diagnostic_raw_score_total {
                 if best > baseline_score.total {
                     "No recommendation: the best tuned candidate failed to beat baseline."
                         .to_owned()
@@ -261,7 +262,7 @@ pub fn build_baseline_tune_recommendation(
         verdict,
         summary: summary_text,
         diagnostic_baseline_raw_score_total: baseline_score.total,
-        best_median_diagnostic_score_total,
+        best_median_diagnostic_raw_score_total,
         score_delta_abs,
         score_delta_percent,
         baseline_over_5ms,
@@ -306,7 +307,7 @@ pub fn render_baseline_tune_recommendation_markdown(rec: &BaselineTuneRecommenda
         &mut out,
         format!(
             "- Best median score: {}",
-            rec.best_median_diagnostic_score_total
+            rec.best_median_diagnostic_raw_score_total
                 .map(|score| score.to_string())
                 .unwrap_or_else(|| "none".to_owned())
         ),
@@ -492,9 +493,9 @@ mod tests {
             profile: profile.to_owned(),
             valid_runs: confidence_runs,
             invalid_runs: 0,
-            median_diagnostic_score_total: score,
-            iqr_diagnostic_score_total: 0,
-            worst_diagnostic_score_total: score,
+            median_diagnostic_raw_score_total: score,
+            iqr_diagnostic_raw_score_total: 0,
+            worst_diagnostic_raw_score_total: score,
             median_over_5ms: score / 100,
             iqr_over_5ms: 0,
             median_frame_p99_us: 0,
@@ -757,9 +758,9 @@ mod tests {
                 profile: "best".to_owned(),
                 valid_runs: 3,
                 invalid_runs: 0,
-                median_diagnostic_score_total: 100,
-                iqr_diagnostic_score_total: 0,
-                worst_diagnostic_score_total: 100,
+                median_diagnostic_raw_score_total: 100,
+                iqr_diagnostic_raw_score_total: 0,
+                worst_diagnostic_raw_score_total: 100,
                 median_over_5ms: 1,
                 iqr_over_5ms: 0,
                 median_frame_p99_us: 15000, // 15ms
