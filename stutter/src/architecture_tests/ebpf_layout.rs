@@ -25,6 +25,17 @@ fn ebpf_source(relative_path: &str) -> String {
         .unwrap_or_else(|err| panic!("failed to read eBPF source {relative_path}: {err}"))
 }
 
+fn source_between<'a>(source: &'a str, start: &str, end: &str) -> &'a str {
+    let start_index = source
+        .find(start)
+        .unwrap_or_else(|| panic!("failed to find source marker {start}"));
+    let source_after_start = &source[start_index..];
+    let end_index = source_after_start
+        .find(end)
+        .unwrap_or_else(|| panic!("failed to find source marker {end}"));
+    &source_after_start[..end_index]
+}
+
 #[test]
 fn ebpf_main_keeps_extracted_layout_helpers_out_of_entrypoint_file() {
     let main = ebpf_source("main.rs");
@@ -63,6 +74,35 @@ fn ebpf_main_keeps_extracted_layout_helpers_out_of_entrypoint_file() {
     assert!(
         line_count("trace_read.rs") <= 100,
         "trace_read.rs should stay a small tracepoint field-reader module",
+    );
+}
+
+#[test]
+fn kms_sequence_offsets_uses_exhaustive_typed_provider_and_event_dispatch() {
+    let main = ebpf_source("main.rs");
+    let offsets = source_between(
+        &main,
+        "fn kms_sequence_offsets(",
+        "\n#[inline(always)]\nfn fill_kms_flip_key",
+    );
+
+    assert!(
+        main.contains("enum KmsProvider") && main.contains("enum KmsCompletionEvent"),
+        "KMS sequence dispatch must classify raw provider and event constants before matching",
+    );
+    assert!(
+        offsets.contains("provider: KmsProvider,")
+            && offsets.contains("completion_event: KmsCompletionEvent,"),
+        "kms_sequence_offsets must match typed provider and completion-event enums, not raw u32 constants",
+    );
+    assert!(
+        !offsets.contains("_ =>"),
+        "kms_sequence_offsets must not use a wildcard arm; future KMS providers/events should force an explicit sequence-offset decision",
+    );
+    assert!(
+        offsets.contains("(KmsProvider::I915, KmsCompletionEvent::Vblank)")
+            && offsets.contains("(KmsProvider::Unknown, KmsCompletionEvent::Unknown) => false"),
+        "unsupported provider/event combinations must be listed explicitly instead of hidden behind a wildcard",
     );
 }
 

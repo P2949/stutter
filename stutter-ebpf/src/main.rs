@@ -1042,13 +1042,14 @@ fn try_kms_flip_done(
     };
     let _ = KMS_FLIP_STARTS.remove(key);
 
+    let completion_event = KmsCompletionEvent::from_raw(completion_event_kind);
     let mut sequence = 0;
     let mut sequence_offset = 0;
     let mut sequence_size = 0;
     let has_sequence =
         kms_sequence_offsets(
             provider,
-            completion_event_kind,
+            completion_event,
             &mut sequence_offset,
             &mut sequence_size,
         ) && read_sequence_field(&ctx, sequence_offset, sequence_size, &mut sequence);
@@ -1093,50 +1094,76 @@ impl KmsProvider {
     }
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum KmsCompletionEvent {
+    PageflipDone,
+    Vblank,
+    Unknown,
+}
+
+impl KmsCompletionEvent {
+    #[inline(always)]
+    fn from_raw(completion_event_kind: u32) -> Self {
+        if completion_event_kind == KMS_FLIP_EVENT_PAGEFLIP_DONE {
+            Self::PageflipDone
+        } else if completion_event_kind == KMS_FLIP_EVENT_VBLANK {
+            Self::Vblank
+        } else {
+            Self::Unknown
+        }
+    }
+}
+
 #[inline(always)]
 fn kms_sequence_offsets(
     provider: KmsProvider,
-    completion_event_kind: u32,
+    completion_event: KmsCompletionEvent,
     sequence_offset: &mut u32,
     sequence_size: &mut u32,
 ) -> bool {
-    match (provider, completion_event_kind) {
-        (KmsProvider::I915, KMS_FLIP_EVENT_PAGEFLIP_DONE) => {
+    match (provider, completion_event) {
+        (KmsProvider::I915, KmsCompletionEvent::PageflipDone) => {
             *sequence_offset =
                 unsafe { core::ptr::read_volatile(&raw const I915_FLIP_DONE_SEQUENCE_OFFSET) };
             *sequence_size =
                 unsafe { core::ptr::read_volatile(&raw const I915_FLIP_DONE_SEQUENCE_SIZE) };
             true
         }
-        (KmsProvider::Drm, KMS_FLIP_EVENT_VBLANK) => {
+        (KmsProvider::Drm, KmsCompletionEvent::Vblank) => {
             *sequence_offset =
                 unsafe { core::ptr::read_volatile(&raw const DRM_VBLANK_SEQUENCE_OFFSET) };
             *sequence_size =
                 unsafe { core::ptr::read_volatile(&raw const DRM_VBLANK_SEQUENCE_SIZE) };
             true
         }
-        (KmsProvider::Drm, KMS_FLIP_EVENT_PAGEFLIP_DONE) => {
+        (KmsProvider::Drm, KmsCompletionEvent::PageflipDone) => {
             *sequence_offset =
                 unsafe { core::ptr::read_volatile(&raw const DRM_FLIP_DONE_SEQUENCE_OFFSET) };
             *sequence_size =
                 unsafe { core::ptr::read_volatile(&raw const DRM_FLIP_DONE_SEQUENCE_SIZE) };
             true
         }
-        (KmsProvider::Amdgpu, KMS_FLIP_EVENT_VBLANK) => {
+        (KmsProvider::Amdgpu, KmsCompletionEvent::Vblank) => {
             *sequence_offset =
                 unsafe { core::ptr::read_volatile(&raw const AMDGPU_VBLANK_SEQUENCE_OFFSET) };
             *sequence_size =
                 unsafe { core::ptr::read_volatile(&raw const AMDGPU_VBLANK_SEQUENCE_SIZE) };
             true
         }
-        (KmsProvider::Amdgpu, KMS_FLIP_EVENT_PAGEFLIP_DONE) => {
+        (KmsProvider::Amdgpu, KmsCompletionEvent::PageflipDone) => {
             *sequence_offset =
                 unsafe { core::ptr::read_volatile(&raw const AMDGPU_FLIP_DONE_SEQUENCE_OFFSET) };
             *sequence_size =
                 unsafe { core::ptr::read_volatile(&raw const AMDGPU_FLIP_DONE_SEQUENCE_SIZE) };
             true
         }
-        _ => false,
+        (KmsProvider::I915, KmsCompletionEvent::Vblank)
+        | (KmsProvider::I915, KmsCompletionEvent::Unknown)
+        | (KmsProvider::Drm, KmsCompletionEvent::Unknown)
+        | (KmsProvider::Amdgpu, KmsCompletionEvent::Unknown)
+        | (KmsProvider::Unknown, KmsCompletionEvent::PageflipDone)
+        | (KmsProvider::Unknown, KmsCompletionEvent::Vblank)
+        | (KmsProvider::Unknown, KmsCompletionEvent::Unknown) => false,
     }
 }
 
