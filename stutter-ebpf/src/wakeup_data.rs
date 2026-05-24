@@ -1,3 +1,16 @@
+//! Wakeup handoff state shared by sched_wakeup and sched_switch probes.
+//!
+//! `WAKEUP_DATA` stores the latest wakeup observed for a task. `WAKEUP_CONSUMED` is
+//! not a second queue; it is a cursor that records the exact `WakeupData` value a
+//! sched_switch probe already consumed. A pending wakeup is therefore defined as
+//! "present in `WAKEUP_DATA` and not byte-for-byte equal to the consumed cursor".
+//!
+//! Keeping the data map entry after consumption avoids the copy-then-delete race
+//! where sched_switch could delete a newer wakeup inserted between lookup and
+//! removal. Writers clear the consumed cursor when installing a new wakeup, task
+//! exit removes both maps, and CPU migration only mutates wakeups that are still
+//! pending under the cursor rule above.
+
 use aya_ebpf::{macros::map, maps::HashMap};
 
 use crate::map_limits::WAKEUP_DATA_MAP_MAX_ENTRIES;

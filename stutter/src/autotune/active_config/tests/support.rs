@@ -18,8 +18,8 @@ pub(super) fn active_task(tid: u32) -> ActiveTaskSnapshot {
 
 pub(super) fn active_task_with_class(tid: u32, class: TaskClass) -> ActiveTaskSnapshot {
     ActiveTaskSnapshot {
-        tid,
-        process_pid: tid,
+        tid: tid.into(),
+        process_pid: (tid).into(),
         comm: format!("task-{tid}"),
         class,
         process_starttime_ticks: Some(1),

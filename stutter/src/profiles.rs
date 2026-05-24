@@ -109,8 +109,8 @@ pub fn evaluate_profile_for_tasks(input: ProfileEvaluationInput<'_>) -> Vec<Prof
             let requested_mask = rule.affinity.as_ref()?.to_range_string();
 
             Some(ProfileTaskPlan {
-                tid: task.tid,
-                process_pid: task.process_pid,
+                tid: task.tid.as_u32(),
+                process_pid: task.process_pid.as_u32(),
                 comm: task.comm.clone(),
                 class: task.class,
                 requested_mask,
@@ -748,8 +748,8 @@ fn task_info_from_active_snapshot(
     task: &crate::autotune::observation::ActiveTaskSnapshot,
 ) -> TaskInfo {
     TaskInfo {
-        tid: task.tid.into(),
-        process_pid: task.process_pid.into(),
+        tid: task.tid,
+        process_pid: task.process_pid,
         process_ppid: 0.into(),
         comm: task.comm.clone(),
         process_comm: task.comm.clone(),

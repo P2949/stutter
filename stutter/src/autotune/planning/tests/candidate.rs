@@ -160,8 +160,8 @@ fn generate_profile_candidates_for_observation_without_target_pid_returns_no_can
     let observation = crate::autotune::observation::AutotuneObservation {
         target_root_pid: None,
         active_tasks: vec![crate::autotune::observation::ActiveTaskSnapshot {
-            tid: 1234,
-            process_pid: 1234,
+            tid: (1234).into(),
+            process_pid: (1234).into(),
             comm: "game-main".to_owned(),
             class: TaskClass::Game,
             process_starttime_ticks: Some(10),

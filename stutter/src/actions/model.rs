@@ -52,6 +52,10 @@ pub struct ActionState {
     pub warnings: Vec<ActionWarning>,
 }
 
+// The task identifiers in this section are deliberately raw `u32` values because
+// these structs are JSON rollback-token serialization boundaries. Do not copy this
+// pattern into runtime-only models; use typed IDs there and convert to raw values
+// only at procfs/syscall or persisted-schema boundaries.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TaskIdentity {
     pub tid: u32,

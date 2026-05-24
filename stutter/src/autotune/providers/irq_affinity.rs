@@ -304,7 +304,7 @@ fn add_task_cpus_to_placement(
     let cpus = active_config
         .affinity
         .per_tid
-        .get(&task.tid)
+        .get(&task.tid.as_u32())
         .and_then(|value| crate::topology::parse_cpu_list(value).ok())
         .unwrap_or_default()
         .into_iter()
@@ -743,8 +743,8 @@ mod tests {
 
     fn task(tid: u32, class: TaskClass) -> ActiveTaskSnapshot {
         ActiveTaskSnapshot {
-            tid,
-            process_pid: tid,
+            tid: tid.into(),
+            process_pid: (tid).into(),
             comm: format!("task-{tid}"),
             class,
             process_starttime_ticks: Some(1000 + tid as u64),

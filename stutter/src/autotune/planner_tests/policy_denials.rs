@@ -584,8 +584,8 @@ mod tests {
         observation.primary_situation = SituationKind::CompileCpuBound;
         observation.focus_kind = Some(FocusGroupKind::Compile);
         observation.active_tasks = vec![ActiveTaskSnapshot {
-            tid: 1234,
-            process_pid: 1234,
+            tid: (1234).into(),
+            process_pid: (1234).into(),
             comm: "rustc".to_owned(),
             class: TaskClass::Compiler,
             process_starttime_ticks: Some(10),

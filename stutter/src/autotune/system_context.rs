@@ -141,8 +141,8 @@ mod tests {
         fs::write(task_root.join("cgroup"), "0::/user.slice/test.scope\n").unwrap();
 
         let active_tasks = vec![ActiveTaskSnapshot {
-            tid: 99,
-            process_pid: 99,
+            tid: (99).into(),
+            process_pid: (99).into(),
             comm: "test".to_owned(),
             class: TaskClass::Unknown,
             process_starttime_ticks: Some(1),
