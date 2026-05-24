@@ -65,6 +65,9 @@ pub struct UserConfigFile {
     pub daemon_allow_medium_risk_apply: Option<bool>,
     pub system_wide_allowlist: Option<crate::daemon::config::DaemonSystemWideAllowlistConfig>,
     pub autotune: Option<AutotuneConfigFile>,
+    pub ebpf_sizing: Option<EbpfSizingConfigFile>,
+    pub mangohud: Option<MangoHudConfigFile>,
+    pub alerts: Option<AlertsConfigFile>,
     pub community_rules: Option<CommunityRulesConfigFile>,
     pub agent: Option<AgentConfigFile>,
 
@@ -82,11 +85,41 @@ pub struct AutotuneConfigFile {
     pub unsafe_in_process_privileged_worker: Option<bool>,
     pub manage_privileged_worker: Option<bool>,
     pub privileged_worker_restart_limit: Option<u32>,
+    pub privileged_worker_socket_ready_timeout_ms: Option<u64>,
+    pub privileged_worker_socket_ready_retry_ms: Option<u64>,
+    pub privileged_worker_shutdown_poll_ms: Option<u64>,
     pub external_mutation_policy:
         Option<crate::autotune::external_mutation::ExternalMutationPolicy>,
     pub high_risk_dry_run: Option<bool>,
     pub workload_policy: Option<DaemonWorkloadPolicyConfigFile>,
     pub workload_policy_rules: Option<Vec<WorkloadPolicyRuleConfigFile>>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct EbpfSizingConfigFile {
+    pub ringbuf_size_kb: Option<u32>,
+    pub wakeup_map_factor: Option<u32>,
+    pub target_pids_entries: Option<u32>,
+    pub target_cgroup_ids_entries: Option<u32>,
+    pub target_irqs_entries: Option<u32>,
+    pub runnable_task_cpu_factor: Option<u32>,
+    pub prev_faults_factor: Option<u32>,
+    pub irq_start_entries: Option<u32>,
+    pub block_start_entries: Option<u32>,
+    pub kms_flip_start_entries: Option<u32>,
+    pub drm_fence_wait_start_entries: Option<u32>,
+    pub drm_fence_signal_entries: Option<u32>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct MangoHudConfigFile {
+    pub tail_idle_sleep_ms: Option<u64>,
+    pub alignment_poll_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct AlertsConfigFile {
+    pub desktop_timeout_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]

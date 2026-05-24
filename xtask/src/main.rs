@@ -33,8 +33,13 @@ enum XtaskCommand {
     )]
     Preflight,
     #[command(
+        name = "ebpf-smoke",
+        about = "Run gated eBPF load smoke tests that require Linux tracefs and eBPF privileges"
+    )]
+    EbpfSmoke,
+    #[command(
         name = "privileged-ebpf-smoke",
-        about = "Run ignored eBPF load smoke tests that require Linux tracefs and eBPF privileges"
+        about = "Compatibility alias for ebpf-smoke"
     )]
     PrivilegedEbpfSmoke,
     #[command(
@@ -133,35 +138,16 @@ const CI_COMMANDS: &[CommandSpec] = &[
 ];
 
 const EBPF_BUILD_COMMAND: CommandSpec = CommandSpec {
-    program: "rustup",
-    args: &[
-        "run",
-        "nightly",
-        "cargo",
-        "build",
-        "-p",
-        "stutter-ebpf",
-        "-Z",
-        "build-std=core",
-        "--target",
-        "bpfel-unknown-none",
-    ],
+    program: "cargo",
+    args: &["build", "-p", "stutter"],
 };
 
 const PRIVILEGED_EBPF_SMOKE_TEST_COMMAND: CommandSpec = CommandSpec {
     program: "cargo",
-    args: &[
-        "test",
-        "-p",
-        "stutter",
-        "ebpf_loader::tests::load_and_attach_real_bpf_object_smoke_test",
-        "--",
-        "--ignored",
-        "--exact",
-        "--nocapture",
-    ],
+    args: &["test", "-p", "stutter", "privileged_", "--", "--nocapture"],
 };
 
+#[cfg(test)]
 const PRIVILEGED_EBPF_SMOKE_COMMANDS: &[CommandSpec] =
     &[EBPF_BUILD_COMMAND, PRIVILEGED_EBPF_SMOKE_TEST_COMMAND];
 
@@ -371,6 +357,7 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
         }
         XtaskCommand::Smoke => run_command_specs(&root, SMOKE_COMMANDS),
         XtaskCommand::Preflight => run_preflight(),
+        XtaskCommand::EbpfSmoke => run_privileged_ebpf_smoke(&root),
         XtaskCommand::PrivilegedEbpfSmoke => run_privileged_ebpf_smoke(&root),
         XtaskCommand::Validate => {
             run_preflight()?;
@@ -403,17 +390,19 @@ fn run_privileged_ebpf_smoke(root: &Path) -> anyhow::Result<()> {
     }
 
     run_preflight()?;
-    run_command_specs(root, PRIVILEGED_EBPF_SMOKE_COMMANDS)
+    run_process(root, EBPF_BUILD_COMMAND.program, EBPF_BUILD_COMMAND.args)?;
+    run_process_with_env(
+        root,
+        PRIVILEGED_EBPF_SMOKE_TEST_COMMAND.program,
+        PRIVILEGED_EBPF_SMOKE_TEST_COMMAND.args,
+        &[("STUTTER_RUN_PRIVILEGED_EBPF_TESTS", "1")],
+    )
 }
 
 fn run_preflight() -> anyhow::Result<()> {
     check_program_on_path(
         "cargo",
         "install Rust with rustup, then run this command from the repository root",
-    )?;
-    check_program_on_path(
-        "rustup",
-        "install Rust through rustup so the repository-pinned nightly toolchain can be used",
     )?;
     if env::var_os("STUTTER_USE_PREBUILT_BPF").as_deref() == Some(std::ffi::OsStr::new("1")) {
         check_prebuilt_bpf_object()?;
@@ -425,20 +414,40 @@ fn run_preflight() -> anyhow::Result<()> {
     }
 
     let toolchain = rustup_toolchain();
-    let output = ProcessCommand::new("rustup")
-        .args(["run", toolchain.as_str(), "rustc", "--version"])
-        .output()
-        .with_context(|| format!("failed to query rustup toolchain `{toolchain}`"))?;
+    let output = if let Some(path) = executable_on_path("rustup") {
+        println!("rustup OK: {}", path.display());
+        let output = ProcessCommand::new("rustup")
+            .args(["run", toolchain.as_str(), "rustc", "--version"])
+            .output()
+            .with_context(|| format!("failed to query rustup toolchain `{toolchain}`"))?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!(
-            "rustup toolchain `{}` is not usable: {}. Install it with `rustup toolchain install {}` and include rust-src/rustfmt/clippy components.",
-            toolchain,
-            stderr.trim(),
-            toolchain
-        );
-    }
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            bail!(
+                "rustup toolchain `{}` is not usable: {}. Install it with `rustup toolchain install {}` and include rust-src/rustfmt/clippy components.",
+                toolchain,
+                stderr.trim(),
+                toolchain
+            );
+        }
+        output
+    } else {
+        check_program_on_path(
+            "rustc",
+            "install Rust or include rustc on PATH so the configured toolchain can be checked",
+        )?;
+        let output = ProcessCommand::new("rustc")
+            .arg("--version")
+            .env("RUSTUP_TOOLCHAIN", toolchain.as_str())
+            .output()
+            .context("failed to query rustc version")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            bail!("rustc on PATH is not usable: {}", stderr.trim());
+        }
+        output
+    };
 
     let version = String::from_utf8_lossy(&output.stdout);
     println!("toolchain `{toolchain}` OK: {}", version.trim());
@@ -689,6 +698,15 @@ fn run_cargo(root: &Path, args: &[&str]) -> anyhow::Result<()> {
 }
 
 fn run_process(root: &Path, program: &str, args: &[&str]) -> anyhow::Result<()> {
+    run_process_with_env(root, program, args, &[])
+}
+
+fn run_process_with_env(
+    root: &Path,
+    program: &str,
+    args: &[&str],
+    extra_env: &[(&str, &str)],
+) -> anyhow::Result<()> {
     let command_text = format_command(program, args);
     println!("--- STAGE: {command_text} ---");
 
@@ -697,6 +715,9 @@ fn run_process(root: &Path, program: &str, args: &[&str]) -> anyhow::Result<()> 
         .args(args)
         .current_dir(root)
         .env("RUSTUP_TOOLCHAIN", rustup_toolchain());
+    for (key, value) in extra_env {
+        command.env(key, value);
+    }
 
     let status = command
         .status()
@@ -795,6 +816,7 @@ mod tests {
                 "ci",
                 "clippy",
                 "dependency-hygiene",
+                "ebpf-smoke",
                 "fixture-check",
                 "fixture-update",
                 "fmt",
@@ -837,7 +859,7 @@ mod tests {
                 "cargo fmt --check",
                 "cargo run -p xtask -- no-allow-attrs",
                 "cargo build",
-                "rustup run nightly cargo build -p stutter-ebpf -Z build-std=core --target bpfel-unknown-none",
+                "cargo build -p stutter",
                 "cargo clippy --all-targets -- -D warnings",
                 "cargo test",
                 "bash scripts/smoke/offline_recommendation.sh",
@@ -848,12 +870,12 @@ mod tests {
     }
 
     #[test]
-    fn privileged_ebpf_smoke_command_targets_ignored_loader_smoke() {
+    fn privileged_ebpf_smoke_command_targets_gated_loader_suite() {
         assert_eq!(
             command_texts(PRIVILEGED_EBPF_SMOKE_COMMANDS),
             vec![
-                "rustup run nightly cargo build -p stutter-ebpf -Z build-std=core --target bpfel-unknown-none",
-                "cargo test -p stutter ebpf_loader::tests::load_and_attach_real_bpf_object_smoke_test -- --ignored --exact --nocapture",
+                "cargo build -p stutter",
+                "cargo test -p stutter privileged_ -- --nocapture",
             ]
         );
     }

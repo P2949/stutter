@@ -1,5 +1,14 @@
 use serde::Serialize;
-use stutter_common::{BPF_DEFAULT_EVENTS_RINGBUF_BYTES, BPF_MAX_TRACKED_CPUS};
+use stutter_common::{
+    BPF_DEFAULT_EVENTS_RINGBUF_BYTES, BPF_MAX_TRACKED_CPUS,
+    ebpf_capacity::{
+        DEFAULT_BLOCK_START_MAP_MAX_ENTRIES, DEFAULT_FENCE_SIGNAL_TIMES_MAP_MAX_ENTRIES,
+        DEFAULT_FENCE_WAIT_STARTS_MAP_MAX_ENTRIES, DEFAULT_IRQ_START_TIMES_MAP_MAX_ENTRIES,
+        DEFAULT_KMS_FLIP_STARTS_MAP_MAX_ENTRIES, DEFAULT_PREV_FAULTS_PER_TARGET_MULTIPLIER,
+        DEFAULT_RUNNABLE_TASK_CPU_PER_TARGET_MULTIPLIER, DEFAULT_TARGET_CGROUP_IDS_MAP_MAX_ENTRIES,
+        DEFAULT_TARGET_IRQS_MAP_MAX_ENTRIES, DEFAULT_TARGET_PIDS_MAP_MAX_ENTRIES,
+    },
+};
 
 use crate::{
     config::TARGET_PIDS_MAX,
@@ -53,6 +62,16 @@ pub struct EbpfMapSizingReport {
     pub target_pids_max: usize,
     pub max_tracked_cpus: u32,
     pub wakeup_data_entries: u32,
+    pub target_pids_entries: u32,
+    pub target_cgroup_ids_entries: u32,
+    pub target_irqs_entries: u32,
+    pub runnable_task_cpu_entries: u32,
+    pub prev_faults_entries: u32,
+    pub irq_start_entries: u32,
+    pub block_start_entries: u32,
+    pub kms_flip_start_entries: u32,
+    pub drm_fence_wait_start_entries: u32,
+    pub drm_fence_signal_entries: u32,
     pub wakeup_data_map_entry_budget_bytes: u64,
     pub min_wakeup_data_entries: u32,
     pub max_wakeup_data_entries: u32,
@@ -123,6 +142,57 @@ pub(crate) fn map_sizing_for_config_from_memory(
         config.ebpf_sizing.wakeup_map_factor,
     );
 
+    let max_tasks = u32::try_from(config.target.max_tasks).unwrap_or(u32::MAX);
+    sizing.target_pids_entries = config
+        .ebpf_sizing
+        .target_pids_entries
+        .unwrap_or(DEFAULT_TARGET_PIDS_MAP_MAX_ENTRIES)
+        .max(max_tasks);
+    sizing.target_cgroup_ids_entries = config
+        .ebpf_sizing
+        .target_cgroup_ids_entries
+        .unwrap_or(DEFAULT_TARGET_CGROUP_IDS_MAP_MAX_ENTRIES);
+    sizing.target_irqs_entries = config
+        .ebpf_sizing
+        .target_irqs_entries
+        .unwrap_or(DEFAULT_TARGET_IRQS_MAP_MAX_ENTRIES);
+
+    let runnable_task_cpu_factor = config
+        .ebpf_sizing
+        .runnable_task_cpu_factor
+        .unwrap_or(DEFAULT_RUNNABLE_TASK_CPU_PER_TARGET_MULTIPLIER);
+    let prev_faults_factor = config
+        .ebpf_sizing
+        .prev_faults_factor
+        .unwrap_or(DEFAULT_PREV_FAULTS_PER_TARGET_MULTIPLIER);
+    sizing.runnable_task_cpu_entries = sizing
+        .target_pids_entries
+        .saturating_mul(runnable_task_cpu_factor);
+    sizing.prev_faults_entries = sizing
+        .target_pids_entries
+        .saturating_mul(prev_faults_factor);
+
+    sizing.irq_start_entries = config
+        .ebpf_sizing
+        .irq_start_entries
+        .unwrap_or(DEFAULT_IRQ_START_TIMES_MAP_MAX_ENTRIES);
+    sizing.block_start_entries = config
+        .ebpf_sizing
+        .block_start_entries
+        .unwrap_or(DEFAULT_BLOCK_START_MAP_MAX_ENTRIES);
+    sizing.kms_flip_start_entries = config
+        .ebpf_sizing
+        .kms_flip_start_entries
+        .unwrap_or(DEFAULT_KMS_FLIP_STARTS_MAP_MAX_ENTRIES);
+    sizing.drm_fence_wait_start_entries = config
+        .ebpf_sizing
+        .drm_fence_wait_start_entries
+        .unwrap_or(DEFAULT_FENCE_WAIT_STARTS_MAP_MAX_ENTRIES);
+    sizing.drm_fence_signal_entries = config
+        .ebpf_sizing
+        .drm_fence_signal_entries
+        .unwrap_or(DEFAULT_FENCE_SIGNAL_TIMES_MAP_MAX_ENTRIES);
+
     sizing
 }
 
@@ -138,6 +208,16 @@ pub fn ebpf_map_sizing_report() -> EbpfMapSizingReport {
         target_pids_max: TARGET_PIDS_MAX,
         max_tracked_cpus: BPF_MAX_TRACKED_CPUS,
         wakeup_data_entries: sizing.wakeup_data_entries,
+        target_pids_entries: sizing.target_pids_entries,
+        target_cgroup_ids_entries: sizing.target_cgroup_ids_entries,
+        target_irqs_entries: sizing.target_irqs_entries,
+        runnable_task_cpu_entries: sizing.runnable_task_cpu_entries,
+        prev_faults_entries: sizing.prev_faults_entries,
+        irq_start_entries: sizing.irq_start_entries,
+        block_start_entries: sizing.block_start_entries,
+        kms_flip_start_entries: sizing.kms_flip_start_entries,
+        drm_fence_wait_start_entries: sizing.drm_fence_wait_start_entries,
+        drm_fence_signal_entries: sizing.drm_fence_signal_entries,
         wakeup_data_map_entry_budget_bytes: WAKEUP_DATA_MAP_ENTRY_BUDGET_BYTES,
         min_wakeup_data_entries: MIN_WAKEUP_DATA_ENTRIES,
         max_wakeup_data_entries: MAX_WAKEUP_DATA_ENTRIES,
@@ -191,6 +271,18 @@ pub(crate) fn map_sizing_from_memory(snapshot: MemorySnapshot) -> EbpfMapSizing 
     EbpfMapSizing {
         events_ringbuf_bytes,
         wakeup_data_entries,
+        target_pids_entries: DEFAULT_TARGET_PIDS_MAP_MAX_ENTRIES,
+        target_cgroup_ids_entries: DEFAULT_TARGET_CGROUP_IDS_MAP_MAX_ENTRIES,
+        target_irqs_entries: DEFAULT_TARGET_IRQS_MAP_MAX_ENTRIES,
+        runnable_task_cpu_entries: DEFAULT_TARGET_PIDS_MAP_MAX_ENTRIES
+            * DEFAULT_RUNNABLE_TASK_CPU_PER_TARGET_MULTIPLIER,
+        prev_faults_entries: DEFAULT_TARGET_PIDS_MAP_MAX_ENTRIES
+            * DEFAULT_PREV_FAULTS_PER_TARGET_MULTIPLIER,
+        irq_start_entries: DEFAULT_IRQ_START_TIMES_MAP_MAX_ENTRIES,
+        block_start_entries: DEFAULT_BLOCK_START_MAP_MAX_ENTRIES,
+        kms_flip_start_entries: DEFAULT_KMS_FLIP_STARTS_MAP_MAX_ENTRIES,
+        drm_fence_wait_start_entries: DEFAULT_FENCE_WAIT_STARTS_MAP_MAX_ENTRIES,
+        drm_fence_signal_entries: DEFAULT_FENCE_SIGNAL_TIMES_MAP_MAX_ENTRIES,
         locked_memory_limit_bytes: snapshot.locked_memory_limit_bytes,
         available_memory_bytes: snapshot.available_memory_bytes,
     }

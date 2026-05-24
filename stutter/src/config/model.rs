@@ -235,10 +235,25 @@ impl Default for WatchConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
+pub const DEFAULT_MANGOHUD_TAIL_IDLE_SLEEP_MS: u64 = 75;
+pub const DEFAULT_MANGOHUD_ALIGNMENT_POLL_MS: u64 = 500;
+pub const DEFAULT_DESKTOP_ALERT_TIMEOUT_MS: u64 = 10_000;
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct AlertConfig {
     pub threshold_ns: Option<u64>,
     pub webhook_url: Option<String>,
+    pub desktop_timeout_ms: u64,
+}
+
+impl Default for AlertConfig {
+    fn default() -> Self {
+        Self {
+            threshold_ns: None,
+            webhook_url: None,
+            desktop_timeout_ms: DEFAULT_DESKTOP_ALERT_TIMEOUT_MS,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -256,10 +271,23 @@ pub struct HwmonConfig {
     pub render_node: Option<PathBuf>,
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MangoHudConfig {
     pub log: Option<PathBuf>,
     pub log_live: bool,
+    pub tail_idle_sleep_ms: u64,
+    pub alignment_poll_ms: u64,
+}
+
+impl Default for MangoHudConfig {
+    fn default() -> Self {
+        Self {
+            log: None,
+            log_live: false,
+            tail_idle_sleep_ms: DEFAULT_MANGOHUD_TAIL_IDLE_SLEEP_MS,
+            alignment_poll_ms: DEFAULT_MANGOHUD_ALIGNMENT_POLL_MS,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -300,6 +328,16 @@ impl Default for RuntimeSlicesConfig {
 pub struct EbpfSizingConfig {
     pub ringbuf_size_kb: Option<u32>,
     pub wakeup_map_factor: Option<u32>,
+    pub target_pids_entries: Option<u32>,
+    pub target_cgroup_ids_entries: Option<u32>,
+    pub target_irqs_entries: Option<u32>,
+    pub runnable_task_cpu_factor: Option<u32>,
+    pub prev_faults_factor: Option<u32>,
+    pub irq_start_entries: Option<u32>,
+    pub block_start_entries: Option<u32>,
+    pub kms_flip_start_entries: Option<u32>,
+    pub drm_fence_wait_start_entries: Option<u32>,
+    pub drm_fence_signal_entries: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]

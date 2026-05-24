@@ -10,11 +10,7 @@ use std::{
 
 // tokio::time::sleep removed as unused
 use super::*;
-use crate::{
-    config::model::MonitorConfig,
-    ebpf::load::{map_init_context, missing_map_context},
-    session::targeting::TargetPolicy,
-};
+use crate::ebpf::load::{map_init_context, missing_map_context};
 
 #[test]
 fn parses_tracepoint_field_offsets() {
@@ -220,15 +216,6 @@ fn map_initialization_context_names_missing_and_failed_maps() {
         map_init_context("TARGET_PIDS"),
         "eBPF load failed: TARGET_PIDS map init"
     );
-}
-
-#[tokio::test]
-#[ignore = "requires Linux tracefs and eBPF privileges"]
-async fn load_and_attach_real_bpf_object_smoke_test() {
-    let config = MonitorConfig::default();
-    let target_policy = TargetPolicy::from_monitor_config(&config).unwrap();
-
-    let _loaded = crate::ebpf::load::load_and_attach(&config, &target_policy).unwrap();
 }
 
 #[test]
@@ -639,7 +626,7 @@ fn rejects_invalid_map_tuning_values() {
     .unwrap_err();
     assert!(
         err.to_string()
-            .contains("--ringbuf-size-kb must be between 64 and 16384")
+            .contains("--ebpf-ringbuf-size-kb must be between 64 and 16384")
     );
 
     // ringbuf too large
@@ -654,7 +641,7 @@ fn rejects_invalid_map_tuning_values() {
     .unwrap_err();
     assert!(
         err.to_string()
-            .contains("--ringbuf-size-kb must be between 64 and 16384")
+            .contains("--ebpf-ringbuf-size-kb must be between 64 and 16384")
     );
 
     // wakeup factor zero
@@ -669,7 +656,7 @@ fn rejects_invalid_map_tuning_values() {
     .unwrap_err();
     assert!(
         err.to_string()
-            .contains("--wakeup-map-factor must be between 1 and 64")
+            .contains("--ebpf-wakeup-map-factor must be between 1 and 64")
     );
 
     // wakeup factor too large
@@ -684,7 +671,7 @@ fn rejects_invalid_map_tuning_values() {
     .unwrap_err();
     assert!(
         err.to_string()
-            .contains("--wakeup-map-factor must be between 1 and 64")
+            .contains("--ebpf-wakeup-map-factor must be between 1 and 64")
     );
 }
 

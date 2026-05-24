@@ -32,6 +32,43 @@ pub(super) fn ebpf_map_sizing_check() -> DoctorCheck {
             sizing.wakeup_data_entries.to_string(),
         ),
         (
+            "target_pids_entries",
+            sizing.target_pids_entries.to_string(),
+        ),
+        (
+            "target_cgroup_ids_entries",
+            sizing.target_cgroup_ids_entries.to_string(),
+        ),
+        (
+            "target_irqs_entries",
+            sizing.target_irqs_entries.to_string(),
+        ),
+        (
+            "runnable_task_cpu_entries",
+            sizing.runnable_task_cpu_entries.to_string(),
+        ),
+        (
+            "prev_faults_entries",
+            sizing.prev_faults_entries.to_string(),
+        ),
+        ("irq_start_entries", sizing.irq_start_entries.to_string()),
+        (
+            "block_start_entries",
+            sizing.block_start_entries.to_string(),
+        ),
+        (
+            "kms_flip_start_entries",
+            sizing.kms_flip_start_entries.to_string(),
+        ),
+        (
+            "drm_fence_wait_start_entries",
+            sizing.drm_fence_wait_start_entries.to_string(),
+        ),
+        (
+            "drm_fence_signal_entries",
+            sizing.drm_fence_signal_entries.to_string(),
+        ),
+        (
             "wakeup_data_map_entry_budget_bytes",
             sizing.wakeup_data_map_entry_budget_bytes.to_string(),
         ),

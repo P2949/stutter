@@ -223,6 +223,9 @@ pub(super) fn known_top_level_user_config_field(field: &str) -> bool {
             | "daemon_allow_medium_risk_apply"
             | "system_wide_allowlist"
             | "autotune"
+            | "ebpf_sizing"
+            | "mangohud"
+            | "alerts"
             | "community_rules"
             | "agent"
     )

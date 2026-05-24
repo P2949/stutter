@@ -84,6 +84,26 @@ fn map_sizing_report_includes_target_and_wakeup_capacities() {
             .and_then(serde_json::Value::as_u64)
             .is_some()
     );
+    for field in [
+        "target_pids_entries",
+        "target_cgroup_ids_entries",
+        "target_irqs_entries",
+        "runnable_task_cpu_entries",
+        "prev_faults_entries",
+        "irq_start_entries",
+        "block_start_entries",
+        "kms_flip_start_entries",
+        "drm_fence_wait_start_entries",
+        "drm_fence_signal_entries",
+    ] {
+        assert!(
+            value
+                .get(field)
+                .and_then(serde_json::Value::as_u64)
+                .is_some(),
+            "missing map sizing report field {field}"
+        );
+    }
     assert_eq!(
         value
             .get("wakeup_data_map_entry_budget_bytes")
@@ -102,6 +122,95 @@ fn map_sizing_report_includes_target_and_wakeup_capacities() {
             .and_then(serde_json::Value::as_u64),
         Some(MAX_WAKEUP_DATA_ENTRIES as u64)
     );
+}
+
+#[test]
+fn map_sizing_uses_default_extended_map_capacities() {
+    let sizing = map_sizing_for_config(&crate::config::model::MonitorConfig::default());
+
+    assert_eq!(
+        sizing.target_pids_entries,
+        stutter_common::ebpf_capacity::DEFAULT_TARGET_PIDS_MAP_MAX_ENTRIES
+    );
+    assert_eq!(
+        sizing.target_cgroup_ids_entries,
+        stutter_common::ebpf_capacity::DEFAULT_TARGET_CGROUP_IDS_MAP_MAX_ENTRIES
+    );
+    assert_eq!(
+        sizing.target_irqs_entries,
+        stutter_common::ebpf_capacity::DEFAULT_TARGET_IRQS_MAP_MAX_ENTRIES
+    );
+    assert_eq!(
+        sizing.runnable_task_cpu_entries,
+        stutter_common::ebpf_capacity::DEFAULT_TARGET_PIDS_MAP_MAX_ENTRIES
+            * stutter_common::ebpf_capacity::DEFAULT_RUNNABLE_TASK_CPU_PER_TARGET_MULTIPLIER
+    );
+    assert_eq!(
+        sizing.prev_faults_entries,
+        stutter_common::ebpf_capacity::DEFAULT_TARGET_PIDS_MAP_MAX_ENTRIES
+            * stutter_common::ebpf_capacity::DEFAULT_PREV_FAULTS_PER_TARGET_MULTIPLIER
+    );
+    assert_eq!(
+        sizing.irq_start_entries,
+        stutter_common::ebpf_capacity::DEFAULT_IRQ_START_TIMES_MAP_MAX_ENTRIES
+    );
+    assert_eq!(
+        sizing.block_start_entries,
+        stutter_common::ebpf_capacity::DEFAULT_BLOCK_START_MAP_MAX_ENTRIES
+    );
+    assert_eq!(
+        sizing.kms_flip_start_entries,
+        stutter_common::ebpf_capacity::DEFAULT_KMS_FLIP_STARTS_MAP_MAX_ENTRIES
+    );
+    assert_eq!(
+        sizing.drm_fence_wait_start_entries,
+        stutter_common::ebpf_capacity::DEFAULT_FENCE_WAIT_STARTS_MAP_MAX_ENTRIES
+    );
+    assert_eq!(
+        sizing.drm_fence_signal_entries,
+        stutter_common::ebpf_capacity::DEFAULT_FENCE_SIGNAL_TIMES_MAP_MAX_ENTRIES
+    );
+}
+
+#[test]
+fn map_sizing_applies_extended_config_overrides() {
+    let mut config = crate::config::model::MonitorConfig::default();
+    config.ebpf_sizing.target_pids_entries = Some(2_048);
+    config.ebpf_sizing.target_cgroup_ids_entries = Some(128);
+    config.ebpf_sizing.target_irqs_entries = Some(256);
+    config.ebpf_sizing.runnable_task_cpu_factor = Some(32);
+    config.ebpf_sizing.prev_faults_factor = Some(96);
+    config.ebpf_sizing.irq_start_entries = Some(4_096);
+    config.ebpf_sizing.block_start_entries = Some(32_768);
+    config.ebpf_sizing.kms_flip_start_entries = Some(8_192);
+    config.ebpf_sizing.drm_fence_wait_start_entries = Some(8_192);
+    config.ebpf_sizing.drm_fence_signal_entries = Some(16_384);
+
+    let sizing = map_sizing_for_config(&config);
+
+    assert_eq!(sizing.target_pids_entries, 2_048);
+    assert_eq!(sizing.target_cgroup_ids_entries, 128);
+    assert_eq!(sizing.target_irqs_entries, 256);
+    assert_eq!(sizing.runnable_task_cpu_entries, 65_536);
+    assert_eq!(sizing.prev_faults_entries, 196_608);
+    assert_eq!(sizing.irq_start_entries, 4_096);
+    assert_eq!(sizing.block_start_entries, 32_768);
+    assert_eq!(sizing.kms_flip_start_entries, 8_192);
+    assert_eq!(sizing.drm_fence_wait_start_entries, 8_192);
+    assert_eq!(sizing.drm_fence_signal_entries, 16_384);
+}
+
+#[test]
+fn runnable_and_fault_maps_scale_from_target_pids_entries() {
+    let mut config = crate::config::model::MonitorConfig::default();
+    config.ebpf_sizing.target_pids_entries = Some(4_096);
+    config.ebpf_sizing.runnable_task_cpu_factor = Some(8);
+    config.ebpf_sizing.prev_faults_factor = Some(16);
+
+    let sizing = map_sizing_for_config(&config);
+
+    assert_eq!(sizing.runnable_task_cpu_entries, 32_768);
+    assert_eq!(sizing.prev_faults_entries, 65_536);
 }
 
 #[test]

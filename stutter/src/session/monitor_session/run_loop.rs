@@ -102,15 +102,20 @@ impl MonitorSession {
             && let Some(offset) = run.mangohud_start_offset
         {
             let path_clone = path.clone();
+            let alignment_poll = Duration::from_millis(self.config.mangohud.alignment_poll_ms);
+            let tail_idle_sleep = Duration::from_millis(self.config.mangohud.tail_idle_sleep_ms);
             tokio::spawn(async move {
-                if let Ok(res) = mangohud::poll_alignment(&path_clone, offset).await {
+                if let Ok(res) = mangohud::poll_alignment(&path_clone, offset, alignment_poll).await
+                {
                     let _ = mangohud_tx.send(res);
                 }
             });
 
             if self.config.mangohud.log_live {
                 tokio::spawn(async move {
-                    if let Err(err) = mangohud::tail_frames(path, offset, frame_tx).await {
+                    if let Err(err) =
+                        mangohud::tail_frames(path, offset, frame_tx, tail_idle_sleep).await
+                    {
                         log::warn!("mangohud_tail_failed err={err:#}");
                     }
                 });

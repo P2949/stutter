@@ -296,11 +296,28 @@ pub(super) struct MonitorArgs {
     )]
     pub(super) preset: Option<String>,
 
-    #[arg(long = "ringbuf-size-kb", value_name = "KB")]
+    #[arg(
+        long = "ebpf-ringbuf-size-kb",
+        alias = "ringbuf-size-kb",
+        value_name = "KB"
+    )]
     pub(super) ringbuf_size_kb: Option<u32>,
 
-    #[arg(long = "wakeup-map-factor", value_name = "N")]
+    #[arg(
+        long = "ebpf-wakeup-map-factor",
+        alias = "wakeup-map-factor",
+        value_name = "N"
+    )]
     pub(super) wakeup_map_factor: Option<u32>,
+
+    #[arg(long = "ebpf-block-start-entries", value_name = "N")]
+    pub(super) block_start_entries: Option<u32>,
+
+    #[arg(long = "ebpf-drm-fence-wait-start-entries", value_name = "N")]
+    pub(super) drm_fence_wait_start_entries: Option<u32>,
+
+    #[arg(long = "ebpf-drm-fence-signal-entries", value_name = "N")]
+    pub(super) drm_fence_signal_entries: Option<u32>,
 
     #[arg(long = "otlp-endpoint", value_name = "URL")]
     pub(super) otlp_endpoint: Option<String>,

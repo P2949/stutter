@@ -23,6 +23,10 @@ candidate_window_seconds = 30
 washout_seconds = 10
 cooldown_seconds = 60
 
+privileged_worker_socket_ready_timeout_ms = 2000
+privileged_worker_socket_ready_retry_ms = 50
+privileged_worker_shutdown_poll_ms = 25
+
 min_scored_samples = 100
 min_scored_intervals = 5
 max_drop_counters = 0
@@ -68,6 +72,19 @@ apply-medium-risk:
 ```
 
 `HighRisk` actions are not enabled by any mode in this contract. They require manual approval or a separate explicit future configuration key.
+
+## Privileged Worker Timing
+
+Apply-medium-risk autotune can manage a separate privileged worker process. The timing fields under `[autotune]` tune process handoff without changing the safety policy:
+
+```toml
+[autotune]
+privileged_worker_socket_ready_timeout_ms = 2000
+privileged_worker_socket_ready_retry_ms = 50
+privileged_worker_shutdown_poll_ms = 25
+```
+
+All three values must be greater than zero. Socket-ready timeout is capped at `60000` ms; retry and shutdown poll intervals are capped at `10000` ms.
 
 ## End-to-End Dry Run
 

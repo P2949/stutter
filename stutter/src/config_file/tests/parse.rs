@@ -260,6 +260,106 @@ fn test_parse_community_rules_config_fields() {
 }
 
 #[test]
+fn config_file_parses_extended_ebpf_sizing_fields() {
+    let toml = r#"
+            [ebpf_sizing]
+            ringbuf_size_kb = 1024
+            wakeup_map_factor = 32
+            target_pids_entries = 2048
+            target_cgroup_ids_entries = 128
+            target_irqs_entries = 256
+            runnable_task_cpu_factor = 96
+            prev_faults_factor = 160
+            irq_start_entries = 4096
+            block_start_entries = 32768
+            kms_flip_start_entries = 8192
+            drm_fence_wait_start_entries = 8192
+            drm_fence_signal_entries = 8192
+        "#;
+
+    let parsed = parse_user_config_toml_versioned(toml).unwrap();
+    let ebpf_sizing = parsed.file.ebpf_sizing.as_ref().unwrap();
+
+    assert_eq!(ebpf_sizing.ringbuf_size_kb, Some(1024));
+    assert_eq!(ebpf_sizing.wakeup_map_factor, Some(32));
+    assert_eq!(ebpf_sizing.target_pids_entries, Some(2048));
+    assert_eq!(ebpf_sizing.target_cgroup_ids_entries, Some(128));
+    assert_eq!(ebpf_sizing.target_irqs_entries, Some(256));
+    assert_eq!(ebpf_sizing.runnable_task_cpu_factor, Some(96));
+    assert_eq!(ebpf_sizing.prev_faults_factor, Some(160));
+    assert_eq!(ebpf_sizing.irq_start_entries, Some(4096));
+    assert_eq!(ebpf_sizing.block_start_entries, Some(32768));
+    assert_eq!(ebpf_sizing.kms_flip_start_entries, Some(8192));
+    assert_eq!(ebpf_sizing.drm_fence_wait_start_entries, Some(8192));
+    assert_eq!(ebpf_sizing.drm_fence_signal_entries, Some(8192));
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| { diagnostic.field.as_deref() != Some("ebpf_sizing") })
+    );
+
+    let layer = crate::config::layer::MonitorConfigLayer::from_user_file(&parsed.file).unwrap();
+    assert_eq!(layer.block_start_entries, Some(Some(32768)));
+    assert_eq!(layer.drm_fence_signal_entries, Some(Some(8192)));
+}
+
+#[test]
+fn config_file_parses_mangohud_timing_overrides() {
+    let toml = r#"
+            [mangohud]
+            tail_idle_sleep_ms = 25
+            alignment_poll_ms = 125
+        "#;
+
+    let parsed = parse_user_config_toml_versioned(toml).unwrap();
+    let mangohud = parsed.file.mangohud.as_ref().unwrap();
+
+    assert_eq!(mangohud.tail_idle_sleep_ms, Some(25));
+    assert_eq!(mangohud.alignment_poll_ms, Some(125));
+
+    let layer = crate::config::layer::MonitorConfigLayer::from_user_file(&parsed.file).unwrap();
+    assert_eq!(layer.mangohud_tail_idle_sleep_ms, Some(25));
+    assert_eq!(layer.mangohud_alignment_poll_ms, Some(125));
+}
+
+#[test]
+fn config_file_parses_alert_desktop_timeout_override() {
+    let toml = r#"
+            [alerts]
+            desktop_timeout_ms = 2500
+        "#;
+
+    let parsed = parse_user_config_toml_versioned(toml).unwrap();
+    let alerts = parsed.file.alerts.as_ref().unwrap();
+
+    assert_eq!(alerts.desktop_timeout_ms, Some(2500));
+
+    let layer = crate::config::layer::MonitorConfigLayer::from_user_file(&parsed.file).unwrap();
+    assert_eq!(layer.alert_desktop_timeout_ms, Some(2500));
+}
+
+#[test]
+fn config_file_parses_autotune_privileged_worker_timing_overrides() {
+    let toml = r#"
+            [autotune]
+            privileged_worker_socket_ready_timeout_ms = 1500
+            privileged_worker_socket_ready_retry_ms = 40
+            privileged_worker_shutdown_poll_ms = 15
+        "#;
+
+    let config = parse_user_config_toml(toml).unwrap();
+    let autotune = config.autotune.as_ref().unwrap();
+
+    assert_eq!(
+        autotune.privileged_worker_socket_ready_timeout_ms,
+        Some(1500)
+    );
+    assert_eq!(autotune.privileged_worker_socket_ready_retry_ms, Some(40));
+    assert_eq!(autotune.privileged_worker_shutdown_poll_ms, Some(15));
+}
+
+#[test]
 fn test_parse_agent_autotune_limits() {
     let toml = r#"
             [agent.autotune_limits]

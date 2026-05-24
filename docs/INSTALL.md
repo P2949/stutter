@@ -91,6 +91,10 @@ stutter privileged-worker --socket /run/stutter/privileged-worker.sock
 
 The socket is created with mode `0600`. Point the daemon at a non-default path
 with `[autotune].privileged_worker_socket = "/run/stutter/privileged-worker.sock"`.
+Socket startup and shutdown poll timing can be tuned with
+`[autotune].privileged_worker_socket_ready_timeout_ms`,
+`[autotune].privileged_worker_socket_ready_retry_ms`, and
+`[autotune].privileged_worker_shutdown_poll_ms`.
 
 Agent auth supports a legacy full-access token through `STUTTER_AGENT_TOKEN`
 or `--bearer-token-file`, plus split tokens for safer clients. The packaged

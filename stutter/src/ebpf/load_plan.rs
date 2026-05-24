@@ -69,6 +69,46 @@ pub(crate) fn build_loader_plan(
                 map_name: "WAKEUP_CONSUMED",
                 entries: map_sizing.wakeup_data_entries,
             },
+            MapMaxEntriesOverride {
+                map_name: "TARGET_PIDS",
+                entries: map_sizing.target_pids_entries,
+            },
+            MapMaxEntriesOverride {
+                map_name: "TARGET_CGROUP_IDS",
+                entries: map_sizing.target_cgroup_ids_entries,
+            },
+            MapMaxEntriesOverride {
+                map_name: "TARGET_IRQS",
+                entries: map_sizing.target_irqs_entries,
+            },
+            MapMaxEntriesOverride {
+                map_name: "RUNNABLE_TASK_CPU",
+                entries: map_sizing.runnable_task_cpu_entries,
+            },
+            MapMaxEntriesOverride {
+                map_name: "PREV_FAULTS",
+                entries: map_sizing.prev_faults_entries,
+            },
+            MapMaxEntriesOverride {
+                map_name: "IRQ_START_TIMES",
+                entries: map_sizing.irq_start_entries,
+            },
+            MapMaxEntriesOverride {
+                map_name: "BLOCK_START",
+                entries: map_sizing.block_start_entries,
+            },
+            MapMaxEntriesOverride {
+                map_name: "KMS_FLIP_STARTS",
+                entries: map_sizing.kms_flip_start_entries,
+            },
+            MapMaxEntriesOverride {
+                map_name: "FENCE_WAIT_STARTS",
+                entries: map_sizing.drm_fence_wait_start_entries,
+            },
+            MapMaxEntriesOverride {
+                map_name: "FENCE_SIGNAL_TIMES",
+                entries: map_sizing.drm_fence_signal_entries,
+            },
         ],
         global_overrides: Vec::new(),
         block_io_correlation_basis: block_io_correlation_basis(tracepoints),

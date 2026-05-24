@@ -376,6 +376,12 @@ pub(super) fn record_layer_provenance(
         "alerts.webhook_url",
         source,
     );
+    record_if_present(
+        &layer.alert_desktop_timeout_ms,
+        provenance,
+        "alerts.desktop_timeout_ms",
+        source,
+    );
 
     record_if_present(&layer.csv_stream, provenance, "streams.csv", source);
     record_if_present(&layer.verbose, provenance, "streams.verbose", source);
@@ -394,6 +400,18 @@ pub(super) fn record_layer_provenance(
         &layer.mangohud_log_live,
         provenance,
         "mangohud.log_live",
+        source,
+    );
+    record_if_present(
+        &layer.mangohud_tail_idle_sleep_ms,
+        provenance,
+        "mangohud.tail_idle_sleep_ms",
+        source,
+    );
+    record_if_present(
+        &layer.mangohud_alignment_poll_ms,
+        provenance,
+        "mangohud.alignment_poll_ms",
         source,
     );
 
@@ -435,6 +453,66 @@ pub(super) fn record_layer_provenance(
         &layer.wakeup_map_factor,
         provenance,
         "ebpf_sizing.wakeup_map_factor",
+        source,
+    );
+    record_if_present(
+        &layer.target_pids_entries,
+        provenance,
+        "ebpf_sizing.target_pids_entries",
+        source,
+    );
+    record_if_present(
+        &layer.target_cgroup_ids_entries,
+        provenance,
+        "ebpf_sizing.target_cgroup_ids_entries",
+        source,
+    );
+    record_if_present(
+        &layer.target_irqs_entries,
+        provenance,
+        "ebpf_sizing.target_irqs_entries",
+        source,
+    );
+    record_if_present(
+        &layer.runnable_task_cpu_factor,
+        provenance,
+        "ebpf_sizing.runnable_task_cpu_factor",
+        source,
+    );
+    record_if_present(
+        &layer.prev_faults_factor,
+        provenance,
+        "ebpf_sizing.prev_faults_factor",
+        source,
+    );
+    record_if_present(
+        &layer.irq_start_entries,
+        provenance,
+        "ebpf_sizing.irq_start_entries",
+        source,
+    );
+    record_if_present(
+        &layer.block_start_entries,
+        provenance,
+        "ebpf_sizing.block_start_entries",
+        source,
+    );
+    record_if_present(
+        &layer.kms_flip_start_entries,
+        provenance,
+        "ebpf_sizing.kms_flip_start_entries",
+        source,
+    );
+    record_if_present(
+        &layer.drm_fence_wait_start_entries,
+        provenance,
+        "ebpf_sizing.drm_fence_wait_start_entries",
+        source,
+    );
+    record_if_present(
+        &layer.drm_fence_signal_entries,
+        provenance,
+        "ebpf_sizing.drm_fence_signal_entries",
         source,
     );
 

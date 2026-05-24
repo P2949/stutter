@@ -113,6 +113,14 @@ foreground_poll_ms = 1000
 foreground_max_stale_ms = 2500
 foreground_include_title = false
 live_diagnosis_cluster_window_ms = 5
+
+[mangohud]
+log_live = true
+tail_idle_sleep_ms = 75
+alignment_poll_ms = 500
+
+[alerts]
+desktop_timeout_ms = 10000
 ```
 
 `foreground_include_title` defaults to `false` because browser tab titles and

@@ -245,6 +245,185 @@ mod tests {
     }
 
     #[test]
+    fn ebpf_sizing_rejects_zero_extended_fields() {
+        for (expected_field, layer) in [
+            (
+                "ebpf_sizing.target_pids_entries",
+                MonitorConfigLayer {
+                    target_pids_entries: Some(Some(0)),
+                    ..Default::default()
+                },
+            ),
+            (
+                "ebpf_sizing.target_cgroup_ids_entries",
+                MonitorConfigLayer {
+                    target_cgroup_ids_entries: Some(Some(0)),
+                    ..Default::default()
+                },
+            ),
+            (
+                "ebpf_sizing.target_irqs_entries",
+                MonitorConfigLayer {
+                    target_irqs_entries: Some(Some(0)),
+                    ..Default::default()
+                },
+            ),
+            (
+                "ebpf_sizing.runnable_task_cpu_factor",
+                MonitorConfigLayer {
+                    runnable_task_cpu_factor: Some(Some(0)),
+                    ..Default::default()
+                },
+            ),
+            (
+                "ebpf_sizing.prev_faults_factor",
+                MonitorConfigLayer {
+                    prev_faults_factor: Some(Some(0)),
+                    ..Default::default()
+                },
+            ),
+            (
+                "ebpf_sizing.irq_start_entries",
+                MonitorConfigLayer {
+                    irq_start_entries: Some(Some(0)),
+                    ..Default::default()
+                },
+            ),
+            (
+                "ebpf_sizing.block_start_entries",
+                MonitorConfigLayer {
+                    block_start_entries: Some(Some(0)),
+                    ..Default::default()
+                },
+            ),
+            (
+                "ebpf_sizing.kms_flip_start_entries",
+                MonitorConfigLayer {
+                    kms_flip_start_entries: Some(Some(0)),
+                    ..Default::default()
+                },
+            ),
+            (
+                "ebpf_sizing.drm_fence_wait_start_entries",
+                MonitorConfigLayer {
+                    drm_fence_wait_start_entries: Some(Some(0)),
+                    ..Default::default()
+                },
+            ),
+            (
+                "ebpf_sizing.drm_fence_signal_entries",
+                MonitorConfigLayer {
+                    drm_fence_signal_entries: Some(Some(0)),
+                    ..Default::default()
+                },
+            ),
+        ] {
+            assert_api_override_invalid_field(layer, expected_field);
+        }
+    }
+
+    #[test]
+    fn target_pids_entries_must_cover_target_max_tasks() {
+        assert_api_override_invalid_field(
+            MonitorConfigLayer {
+                max_tasks: Some(256),
+                target_pids_entries: Some(Some(128)),
+                ..Default::default()
+            },
+            "ebpf_sizing.target_pids_entries",
+        );
+    }
+
+    #[test]
+    fn ebpf_sizing_rejects_absurd_large_correlation_maps() {
+        assert_api_override_invalid_field(
+            MonitorConfigLayer {
+                block_start_entries: Some(Some(1_048_577)),
+                ..Default::default()
+            },
+            "ebpf_sizing.block_start_entries",
+        );
+    }
+
+    #[test]
+    fn ebpf_sizing_rejects_absurd_large_scaled_maps() {
+        assert_api_override_invalid_field(
+            MonitorConfigLayer {
+                target_pids_entries: Some(Some(2_048)),
+                runnable_task_cpu_factor: Some(Some(1_000)),
+                ..Default::default()
+            },
+            "ebpf_sizing.runnable_task_cpu_factor",
+        );
+    }
+
+    #[test]
+    fn monitor_config_rejects_zero_mangohud_timing() {
+        for (expected_field, layer) in [
+            (
+                "mangohud.tail_idle_sleep_ms",
+                MonitorConfigLayer {
+                    mangohud_tail_idle_sleep_ms: Some(0),
+                    ..Default::default()
+                },
+            ),
+            (
+                "mangohud.alignment_poll_ms",
+                MonitorConfigLayer {
+                    mangohud_alignment_poll_ms: Some(0),
+                    ..Default::default()
+                },
+            ),
+        ] {
+            assert_api_override_invalid_field(layer, expected_field);
+        }
+    }
+
+    #[test]
+    fn monitor_config_rejects_absurd_mangohud_timing() {
+        for (expected_field, layer) in [
+            (
+                "mangohud.tail_idle_sleep_ms",
+                MonitorConfigLayer {
+                    mangohud_tail_idle_sleep_ms: Some(5_001),
+                    ..Default::default()
+                },
+            ),
+            (
+                "mangohud.alignment_poll_ms",
+                MonitorConfigLayer {
+                    mangohud_alignment_poll_ms: Some(10_001),
+                    ..Default::default()
+                },
+            ),
+        ] {
+            assert_api_override_invalid_field(layer, expected_field);
+        }
+    }
+
+    #[test]
+    fn monitor_config_rejects_zero_desktop_alert_timeout() {
+        assert_api_override_invalid_field(
+            MonitorConfigLayer {
+                alert_desktop_timeout_ms: Some(0),
+                ..Default::default()
+            },
+            "alerts.desktop_timeout_ms",
+        );
+    }
+
+    #[test]
+    fn monitor_config_rejects_absurd_desktop_alert_timeout() {
+        assert_api_override_invalid_field(
+            MonitorConfigLayer {
+                alert_desktop_timeout_ms: Some(120_001),
+                ..Default::default()
+            },
+            "alerts.desktop_timeout_ms",
+        );
+    }
+
+    #[test]
     fn merge_rejects_empty_otel_service_name_from_api_override() {
         assert_api_override_invalid_field(
             MonitorConfigLayer {
@@ -507,6 +686,74 @@ mod tests {
     }
 
     #[test]
+    fn ebpf_sizing_block_start_entries_runtime_override_wins() {
+        let user_file = crate::config_file::UserConfigFile {
+            ebpf_sizing: Some(crate::config_file::EbpfSizingConfigFile {
+                block_start_entries: Some(16_384),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let preset = PresetConfig {
+            layer: MonitorConfigLayer {
+                block_start_entries: Some(Some(32_768)),
+                ..Default::default()
+            },
+        };
+        let cli = CliOverrides {
+            layer: MonitorConfigLayer {
+                block_start_entries: Some(Some(65_536)),
+                ..Default::default()
+            },
+        };
+
+        let effective = merge_config_sources_effective_checked(ConfigSources {
+            defaults: DefaultConfig::default(),
+            user_file: Some(user_file),
+            preset: Some(preset),
+            overrides: cli.into(),
+        })
+        .unwrap();
+
+        assert_eq!(
+            effective.config.ebpf_sizing.block_start_entries,
+            Some(65_536)
+        );
+        assert_eq!(
+            last_source_for_field(&effective.provenance, "ebpf_sizing.block_start_entries"),
+            Some(ConfigSource::Cli)
+        );
+    }
+
+    #[test]
+    fn ebpf_sizing_target_irqs_entries_user_config_is_preserved_without_override() {
+        let user_file = crate::config_file::UserConfigFile {
+            ebpf_sizing: Some(crate::config_file::EbpfSizingConfigFile {
+                target_irqs_entries: Some(256),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let effective = merge_config_sources_effective_checked(ConfigSources {
+            defaults: DefaultConfig::default(),
+            user_file: Some(user_file),
+            preset: None,
+            overrides: CliOverrides {
+                layer: MonitorConfigLayer::default(),
+            }
+            .into(),
+        })
+        .unwrap();
+
+        assert_eq!(effective.config.ebpf_sizing.target_irqs_entries, Some(256));
+        assert_eq!(
+            last_source_for_field(&effective.provenance, "ebpf_sizing.target_irqs_entries"),
+            Some(ConfigSource::UserFile)
+        );
+    }
+
+    #[test]
     fn merge_config_sources_checked_defaults_only_matches_monitor_config_default() {
         let merged = merge_config_sources_checked(ConfigSources {
             defaults: DefaultConfig::default(),
@@ -520,6 +767,24 @@ mod tests {
         .unwrap();
 
         assert_eq!(merged, MonitorConfig::default());
+    }
+
+    #[test]
+    fn mangohud_timing_defaults_preserve_existing_behavior() {
+        let merged = merge_config_sources_checked(ConfigSources {
+            defaults: DefaultConfig::default(),
+            user_file: None,
+            preset: None,
+            overrides: CliOverrides {
+                layer: MonitorConfigLayer::default(),
+            }
+            .into(),
+        })
+        .unwrap();
+
+        assert_eq!(merged.mangohud.tail_idle_sleep_ms, 75);
+        assert_eq!(merged.mangohud.alignment_poll_ms, 500);
+        assert_eq!(merged.alerts.desktop_timeout_ms, 10_000);
     }
 
     #[test]

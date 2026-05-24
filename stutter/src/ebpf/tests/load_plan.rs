@@ -36,6 +36,16 @@ fn test_map_sizing() -> EbpfMapSizing {
     EbpfMapSizing {
         events_ringbuf_bytes: 256 * 1024,
         wakeup_data_entries: 8192,
+        target_pids_entries: 1024,
+        target_cgroup_ids_entries: 64,
+        target_irqs_entries: 64,
+        runnable_task_cpu_entries: 65_536,
+        prev_faults_entries: 131_072,
+        irq_start_entries: 1024,
+        block_start_entries: 16_384,
+        kms_flip_start_entries: 4096,
+        drm_fence_wait_start_entries: 4096,
+        drm_fence_signal_entries: 4096,
         locked_memory_limit_bytes: Some(64 * 1024 * 1024),
         available_memory_bytes: Some(8 * 1024 * 1024 * 1024),
     }
@@ -81,6 +91,36 @@ fn loader_plan_resizes_events_and_wakeup_maps_together() {
     assert_eq!(plan.map_entries("EVENTS"), Some(256 * 1024));
     assert_eq!(plan.map_entries("WAKEUP_DATA"), Some(8192));
     assert_eq!(plan.map_entries("WAKEUP_CONSUMED"), Some(8192));
+}
+
+#[test]
+fn loader_plan_resizes_all_configurable_maps() {
+    let tracepoints = attach_test_tracepoints();
+    let mut sizing = test_map_sizing();
+
+    sizing.target_pids_entries = 2_048;
+    sizing.target_cgroup_ids_entries = 128;
+    sizing.target_irqs_entries = 128;
+    sizing.runnable_task_cpu_entries = 131_072;
+    sizing.prev_faults_entries = 262_144;
+    sizing.irq_start_entries = 4_096;
+    sizing.block_start_entries = 32_768;
+    sizing.kms_flip_start_entries = 8_192;
+    sizing.drm_fence_wait_start_entries = 8_192;
+    sizing.drm_fence_signal_entries = 8_192;
+
+    let plan = build_loader_plan(&tracepoints, sizing);
+
+    assert_eq!(plan.map_entries("TARGET_PIDS"), Some(2_048));
+    assert_eq!(plan.map_entries("TARGET_CGROUP_IDS"), Some(128));
+    assert_eq!(plan.map_entries("TARGET_IRQS"), Some(128));
+    assert_eq!(plan.map_entries("RUNNABLE_TASK_CPU"), Some(131_072));
+    assert_eq!(plan.map_entries("PREV_FAULTS"), Some(262_144));
+    assert_eq!(plan.map_entries("IRQ_START_TIMES"), Some(4_096));
+    assert_eq!(plan.map_entries("BLOCK_START"), Some(32_768));
+    assert_eq!(plan.map_entries("KMS_FLIP_STARTS"), Some(8_192));
+    assert_eq!(plan.map_entries("FENCE_WAIT_STARTS"), Some(8_192));
+    assert_eq!(plan.map_entries("FENCE_SIGNAL_TIMES"), Some(8_192));
 }
 
 #[test]

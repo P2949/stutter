@@ -38,21 +38,39 @@ regression fixtures, and operator guidance. A lower multiplier can make map
 pressure look like scheduler latency loss because the BPF program will stop
 retaining the state needed to emit complete events.
 
-## Fixed-size BPF object maps
+## Default BPF object capacities and loader-time overrides
 
-These constants also live in `stutter-ebpf/src/map_limits.rs`. They size
-allowlists and short-lived correlation maps whose entries are bounded by active
-probe state rather than by the target PID multiplier.
+The default values live in `stutter-common/src/ebpf_capacity.rs` and are aliased
+by `stutter-ebpf/src/map_limits.rs` for the BPF object. Userspace can override
+the maps below before load; changes require restarting or reloading the monitor
+because BPF map capacities are fixed when the object is loaded.
 
-| Constant | Default | Controls | Rationale |
-| --- | ---: | --- | --- |
-| `TARGET_CGROUP_IDS_MAP_MAX_ENTRIES` | `64` | Experimental native cgroup-id gate. | Kept small while native cgroup filtering is runtime-disabled pending verified cgroup-id resolution. |
-| `TARGET_IRQS_MAP_MAX_ENTRIES` | `64` | IRQ allowlist map. | Operators normally monitor a small explicit IRQ set. |
-| `IRQ_START_TIMES_MAP_MAX_ENTRIES` | `1_024` | In-flight IRQ handler start records. | Tracks IRQ/cpu entries long enough to pair entry and exit tracepoints without unbounded growth. |
-| `BLOCK_START_MAP_MAX_ENTRIES` | `16_384` | In-flight block request issue records. | Block I/O can have more concurrent requests than display/fence probes, so the correlation LRU has larger headroom. |
-| `KMS_FLIP_STARTS_MAP_MAX_ENTRIES` | `4_096` | In-flight KMS flip request records. | Retains request timestamps until pageflip/vblank completion tracepoints arrive. |
-| `FENCE_WAIT_STARTS_MAP_MAX_ENTRIES` | `4_096` | In-flight DRM fence wait-start records. | Retains wait starts until wait-done tracepoints arrive. |
-| `FENCE_SIGNAL_TIMES_MAP_MAX_ENTRIES` | `4_096` | Recent DRM fence signal records. | Retains signal timestamps for wait/signal correlation without turning fence history into an unbounded cache. |
+| Map | Default | Config-file field | CLI field | Increase when | Risk of increasing |
+| --- | ---: | --- | --- | --- | --- |
+| `EVENTS` | `256 KiB` fallback, dynamically sized | `ebpf_sizing.ringbuf_size_kb` | `--ebpf-ringbuf-size-kb` | Ring-buffer reserve drops appear during bursty recordings. | More locked kernel memory. |
+| `WAKEUP_DATA`, `WAKEUP_CONSUMED` | dynamically sized | `ebpf_sizing.wakeup_map_factor` | `--ebpf-wakeup-map-factor` | Wakeup insert/replacement drops appear under target churn. | More locked kernel memory across both wakeup maps. |
+| `TARGET_PIDS` | `1_024` | `ebpf_sizing.target_pids_entries` | none | `target.max_tasks` needs to grow for very large monitored process trees. | Larger target gate and larger derived runnable/fault maps. |
+| `TARGET_CGROUP_IDS` | `64` | `ebpf_sizing.target_cgroup_ids_entries` | none | Native cgroup filtering is enabled and many cgroup ids must be allowed. | Extra locked memory for a currently experimental path. |
+| `TARGET_IRQS` | `64` | `ebpf_sizing.target_irqs_entries` | none | Monitoring many explicit IRQs. | Extra locked memory for the IRQ allowlist. |
+| `RUNNABLE_TASK_CPU` | `target_pids_entries * 64` | `ebpf_sizing.runnable_task_cpu_factor` | none | Runnable CPU-state churn causes incomplete migration/wakeup accounting. | More locked memory in an LRU map keyed by TID. |
+| `PREV_FAULTS` | `target_pids_entries * 128` | `ebpf_sizing.prev_faults_factor` | none | Page-fault delta tracking loses state under target churn. | More locked memory in a hash map keyed by TID. |
+| `IRQ_START_TIMES` | `1_024` | `ebpf_sizing.irq_start_entries` | none | IRQ entry/exit pairing drops during high IRQ concurrency. | Extra locked memory for short-lived IRQ correlation records. |
+| `BLOCK_START` | `16_384` | `ebpf_sizing.block_start_entries` | `--ebpf-block-start-entries` | Block I/O start insert drops or fallback-key collisions appear. | More locked memory; stale in-flight block requests retain slots longer. |
+| `KMS_FLIP_STARTS` | `4_096` | `ebpf_sizing.kms_flip_start_entries` | none | KMS request/done matching loses starts under heavy display activity. | More locked memory for display correlation. |
+| `FENCE_WAIT_STARTS` | `4_096` | `ebpf_sizing.drm_fence_wait_start_entries` | `--ebpf-drm-fence-wait-start-entries` | Fence wait intervals lose wait-start records. | More locked memory for fence wait correlation. |
+| `FENCE_SIGNAL_TIMES` | `4_096` | `ebpf_sizing.drm_fence_signal_entries` | `--ebpf-drm-fence-signal-entries` | Wait/signal correlation misses recent signal records. | More locked memory for recent fence signal history. |
+
+Example:
+
+```toml
+[ebpf_sizing]
+ringbuf_size_kb = 1024
+wakeup_map_factor = 64
+target_irqs_entries = 256
+block_start_entries = 32768
+drm_fence_wait_start_entries = 8192
+drm_fence_signal_entries = 8192
+```
 
 ## Userspace dynamic sizing clamps
 
@@ -81,8 +99,8 @@ Manual overrides are escape hatches for recordings that show drops or map
 pressure:
 
 ```bash
-stutter monitor --pid 1234 --ringbuf-size-kb 8192
-stutter monitor --pid 1234 --wakeup-map-factor 4
+stutter monitor --pid 1234 --ebpf-ringbuf-size-kb 8192
+stutter monitor --pid 1234 --ebpf-wakeup-map-factor 4
 ```
 
 Use larger ring buffers for bursty event loss. Use a larger wakeup-map factor

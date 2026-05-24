@@ -1,4 +1,4 @@
-use std::{fs, io::BufRead, path::Path};
+use std::{fs, io::BufRead, path::Path, time::Duration};
 
 use anyhow::Context;
 
@@ -229,6 +229,7 @@ pub async fn tail_frames(
     path: std::path::PathBuf,
     start_offset: u64,
     tx: tokio::sync::mpsc::Sender<FrameEvent>,
+    idle_sleep: Duration,
 ) -> anyhow::Result<()> {
     use tokio::io::{AsyncReadExt, AsyncSeekExt, SeekFrom};
 
@@ -256,7 +257,7 @@ pub async fn tail_frames(
     loop {
         let n = match file.read(&mut read_buf).await {
             Ok(0) => {
-                tokio::time::sleep(std::time::Duration::from_millis(75)).await;
+                tokio::time::sleep(idle_sleep).await;
                 continue;
             }
             Ok(n) => n,
@@ -294,10 +295,14 @@ pub async fn tail_frames(
     }
 }
 
-pub async fn poll_alignment(path: &Path, start_offset: u64) -> anyhow::Result<(u64, u64)> {
+pub async fn poll_alignment(
+    path: &Path,
+    start_offset: u64,
+    poll_interval: Duration,
+) -> anyhow::Result<(u64, u64)> {
     use std::io::{Read, Seek, SeekFrom};
 
-    use tokio::time::{Duration, sleep};
+    use tokio::time::sleep;
 
     let mut layout_cache: Option<MangoHudCsvLayout> = None;
 
@@ -305,7 +310,7 @@ pub async fn poll_alignment(path: &Path, start_offset: u64) -> anyhow::Result<(u
         let mut file = match fs::File::open(path) {
             Ok(file) => file,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                sleep(Duration::from_millis(500)).await;
+                sleep(poll_interval).await;
                 continue;
             }
             Err(err) => return Err(err.into()),
@@ -317,11 +322,11 @@ pub async fn poll_alignment(path: &Path, start_offset: u64) -> anyhow::Result<(u
             match try_detect_layout(path) {
                 Ok(Some(layout)) => layout_cache = Some(layout),
                 Ok(None) => {
-                    sleep(Duration::from_millis(500)).await;
+                    sleep(poll_interval).await;
                     continue;
                 }
                 Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                    sleep(Duration::from_millis(500)).await;
+                    sleep(poll_interval).await;
                     continue;
                 }
                 Err(err) => return Err(err.into()),
@@ -329,7 +334,7 @@ pub async fn poll_alignment(path: &Path, start_offset: u64) -> anyhow::Result<(u
         }
 
         let Some(layout) = layout_cache.as_ref() else {
-            sleep(Duration::from_millis(500)).await;
+            sleep(poll_interval).await;
             continue;
         };
         let schema = &layout.schema;
@@ -368,7 +373,7 @@ pub async fn poll_alignment(path: &Path, start_offset: u64) -> anyhow::Result<(u
             }
         }
 
-        sleep(Duration::from_millis(500)).await;
+        sleep(poll_interval).await;
     }
 }
 
@@ -731,7 +736,8 @@ fps,frametime,elapsed\n\
         fs::File::create(&path)?.write_all(csv.as_bytes())?;
         let layout = detect_layout(&path)?;
 
-        let (raw_ms, observed_ns) = poll_alignment(&path, layout.data_start_offset).await?;
+        let (raw_ms, observed_ns) =
+            poll_alignment(&path, layout.data_start_offset, Duration::from_millis(1)).await?;
 
         assert_eq!(raw_ms, 1065);
         assert!(observed_ns > 0);
@@ -753,7 +759,8 @@ fps,frametime,elapsed\n\
         fs::File::create(&path)?.write_all(MANGOHUD_WITH_METADATA.as_bytes())?;
         let layout = detect_layout(&path)?;
 
-        let (raw_ms, observed_ns) = poll_alignment(&path, layout.data_start_offset).await?;
+        let (raw_ms, observed_ns) =
+            poll_alignment(&path, layout.data_start_offset, Duration::from_millis(1)).await?;
 
         assert_eq!(raw_ms, 39);
         assert!(observed_ns > 0);

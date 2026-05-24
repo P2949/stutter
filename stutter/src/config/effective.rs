@@ -387,6 +387,7 @@ mod tests {
             "watch.timeout",
             "alerts.threshold_ns",
             "alerts.webhook_url",
+            "alerts.desktop_timeout_ms",
             "streams.csv",
             "streams.verbose",
             "hwmon.root",
@@ -394,6 +395,8 @@ mod tests {
             "hwmon.render_node",
             "mangohud.log",
             "mangohud.log_live",
+            "mangohud.tail_idle_sleep_ms",
+            "mangohud.alignment_poll_ms",
             "ui.tui",
             "cpu_perf.include_kernel",
             "cpu_perf.max_tasks",
@@ -401,6 +404,16 @@ mod tests {
             "runtime_slices.max_tasks",
             "ebpf_sizing.ringbuf_size_kb",
             "ebpf_sizing.wakeup_map_factor",
+            "ebpf_sizing.target_pids_entries",
+            "ebpf_sizing.target_cgroup_ids_entries",
+            "ebpf_sizing.target_irqs_entries",
+            "ebpf_sizing.runnable_task_cpu_factor",
+            "ebpf_sizing.prev_faults_factor",
+            "ebpf_sizing.irq_start_entries",
+            "ebpf_sizing.block_start_entries",
+            "ebpf_sizing.kms_flip_start_entries",
+            "ebpf_sizing.drm_fence_wait_start_entries",
+            "ebpf_sizing.drm_fence_signal_entries",
             "remote.endpoint",
         ] {
             assert_eq!(
@@ -501,6 +514,42 @@ mod tests {
         assert!(sources.contains(&ConfigSource::UserFile));
         assert!(sources.contains(&ConfigSource::Preset));
         assert!(sources.contains(&ConfigSource::Cli));
+    }
+
+    #[test]
+    fn effective_config_preserves_mangohud_timing_provenance() {
+        let user_file = crate::config_file::UserConfigFile {
+            mangohud: Some(crate::config_file::MangoHudConfigFile {
+                tail_idle_sleep_ms: Some(25),
+                alignment_poll_ms: Some(125),
+            }),
+            ..Default::default()
+        };
+        let cli = crate::config::merge::CliOverrides {
+            layer: MonitorConfigLayer {
+                mangohud_tail_idle_sleep_ms: Some(50),
+                ..Default::default()
+            },
+        };
+
+        let resolved = resolve_monitor_config_sources(crate::config::merge::ConfigSources {
+            defaults: crate::config::merge::DefaultConfig::default(),
+            user_file: Some(user_file),
+            preset: None,
+            overrides: cli.into(),
+        })
+        .unwrap();
+
+        assert_eq!(resolved.config.mangohud.tail_idle_sleep_ms, 50);
+        assert_eq!(resolved.config.mangohud.alignment_poll_ms, 125);
+        assert_eq!(
+            last_source_for_field(&resolved.provenance, "mangohud.tail_idle_sleep_ms"),
+            Some(ConfigSource::Cli)
+        );
+        assert_eq!(
+            last_source_for_field(&resolved.provenance, "mangohud.alignment_poll_ms"),
+            Some(ConfigSource::UserFile)
+        );
     }
 
     #[test]

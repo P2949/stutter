@@ -85,7 +85,10 @@ impl AlertPayload {
 /// This remains a best-effort local desktop integration. It intentionally
 /// uses an external command and may add system noise, so alert failures are
 /// logged by the caller and do not stop monitoring.
-pub async fn send_desktop_alert(payload: &AlertPayload) -> Result<(), String> {
+pub async fn send_desktop_alert(
+    payload: &AlertPayload,
+    timeout_duration: Duration,
+) -> Result<(), String> {
     let mut child = tokio::process::Command::new("notify-send")
         .args([
             "--urgency=critical",
@@ -95,9 +98,9 @@ pub async fn send_desktop_alert(payload: &AlertPayload) -> Result<(), String> {
         .spawn()
         .map_err(|err| format!("failed to spawn notify-send: {err}"))?;
 
-    let status = tokio::time::timeout(Duration::from_secs(10), child.wait())
+    let status = tokio::time::timeout(timeout_duration, child.wait())
         .await
-        .map_err(|_| "notify-send timed out after 10 seconds".to_owned())?
+        .map_err(|_| desktop_alert_timeout_message(timeout_duration))?
         .map_err(|err| format!("failed to wait for notify-send: {err}"))?;
 
     if status.success() {
@@ -105,6 +108,13 @@ pub async fn send_desktop_alert(payload: &AlertPayload) -> Result<(), String> {
     } else {
         Err(format!("notify-send exited with {status}"))
     }
+}
+
+fn desktop_alert_timeout_message(timeout_duration: Duration) -> String {
+    format!(
+        "notify-send timed out after {} ms",
+        timeout_duration.as_millis()
+    )
 }
 
 fn validate_webhook_url(url: &str) -> Result<url::Url, String> {
@@ -169,5 +179,13 @@ mod tests {
     fn validate_webhook_url_rejects_relative_urls() {
         assert!(validate_webhook_url("example.com/hook").is_err());
         assert!(validate_webhook_url("/local/path").is_err());
+    }
+
+    #[test]
+    fn desktop_alert_timeout_message_uses_configured_duration() {
+        assert_eq!(
+            desktop_alert_timeout_message(Duration::from_millis(2_500)),
+            "notify-send timed out after 2500 ms"
+        );
     }
 }

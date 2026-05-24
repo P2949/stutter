@@ -89,6 +89,37 @@ fn daemon_config_from_user_config_applies_system_wide_allowlist() {
 }
 
 #[test]
+fn daemon_config_from_user_config_applies_privileged_worker_timing() {
+    let toml = r#"
+            [autotune]
+            privileged_worker_socket_ready_timeout_ms = 1500
+            privileged_worker_socket_ready_retry_ms = 40
+            privileged_worker_shutdown_poll_ms = 15
+        "#;
+
+    let parsed = parse_user_config_toml_versioned(toml).unwrap();
+    let daemon_config =
+        daemon_config_from_user_config(Some(&parsed.file), None, ActionSource::Cli).unwrap();
+
+    assert_eq!(
+        daemon_config
+            .autotune
+            .privileged_worker_socket_ready_timeout_ms,
+        1500
+    );
+    assert_eq!(
+        daemon_config
+            .autotune
+            .privileged_worker_socket_ready_retry_ms,
+        40
+    );
+    assert_eq!(
+        daemon_config.autotune.privileged_worker_shutdown_poll_ms,
+        15
+    );
+}
+
+#[test]
 fn daemon_config_from_user_config_applies_nested_workload_policy_overrides() {
     let toml = r#"
             [autotune]

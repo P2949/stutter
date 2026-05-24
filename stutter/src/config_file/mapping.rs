@@ -203,6 +203,31 @@ pub fn apply_daemon_user_config_overrides(
     {
         daemon_config.autotune.privileged_worker_restart_limit = restart_limit;
     }
+    if let Some(timeout_ms) = user_config
+        .autotune
+        .as_ref()
+        .and_then(|autotune| autotune.privileged_worker_socket_ready_timeout_ms)
+    {
+        daemon_config
+            .autotune
+            .privileged_worker_socket_ready_timeout_ms = timeout_ms;
+    }
+    if let Some(retry_ms) = user_config
+        .autotune
+        .as_ref()
+        .and_then(|autotune| autotune.privileged_worker_socket_ready_retry_ms)
+    {
+        daemon_config
+            .autotune
+            .privileged_worker_socket_ready_retry_ms = retry_ms;
+    }
+    if let Some(poll_ms) = user_config
+        .autotune
+        .as_ref()
+        .and_then(|autotune| autotune.privileged_worker_shutdown_poll_ms)
+    {
+        daemon_config.autotune.privileged_worker_shutdown_poll_ms = poll_ms;
+    }
     if let Some(policy) = user_config
         .autotune
         .as_ref()
