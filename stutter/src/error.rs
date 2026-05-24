@@ -150,6 +150,16 @@ pub enum EbpfError {
         #[source]
         source: anyhow::Error,
     },
+    #[error(
+        "failed to attach eBPF program {program} to tracepoint {category}/{tracepoint}: {source:#}"
+    )]
+    TracepointAttach {
+        program: &'static str,
+        category: String,
+        tracepoint: String,
+        #[source]
+        source: anyhow::Error,
+    },
     #[error(transparent)]
     Source(#[from] anyhow::Error),
 }

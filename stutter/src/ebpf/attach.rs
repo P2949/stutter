@@ -11,9 +11,72 @@ use crate::{
         selected_request_format,
     },
     ebpf::tracepoints::drm_fence::DrmFenceTracepointOffsets,
+    error::EbpfError,
     probe_activation::ProbeActivationPlan,
     probe_registry::ProbeKey,
 };
+
+#[derive(Debug, thiserror::Error)]
+#[error(
+    "failed to attach eBPF program {program_name} to tracepoint {category}/{tracepoint_name}: {source:#}"
+)]
+pub(crate) struct TracepointAttachError {
+    program_name: &'static str,
+    category: String,
+    tracepoint_name: String,
+    #[source]
+    source: anyhow::Error,
+}
+
+impl TracepointAttachError {
+    pub(crate) fn new(
+        program_name: &'static str,
+        category: &str,
+        tracepoint_name: &str,
+        source: anyhow::Error,
+    ) -> Self {
+        Self {
+            program_name,
+            category: category.to_owned(),
+            tracepoint_name: tracepoint_name.to_owned(),
+            source,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn program_name(&self) -> &'static str {
+        self.program_name
+    }
+
+    #[cfg(test)]
+    pub(crate) fn category(&self) -> &str {
+        &self.category
+    }
+
+    #[cfg(test)]
+    pub(crate) fn tracepoint_name(&self) -> &str {
+        &self.tracepoint_name
+    }
+
+    pub(crate) fn source(&self) -> &anyhow::Error {
+        &self.source
+    }
+
+    fn into_ebpf_error(self) -> EbpfError {
+        EbpfError::TracepointAttach {
+            program: self.program_name,
+            category: self.category,
+            tracepoint: self.tracepoint_name,
+            source: self.source,
+        }
+    }
+}
+
+impl From<TracepointAttachError> for EbpfError {
+    fn from(error: TracepointAttachError) -> Self {
+        error.into_ebpf_error()
+    }
+}
 
 pub(crate) trait AttachOps {
     fn attach_tracepoint(
@@ -21,7 +84,7 @@ pub(crate) trait AttachOps {
         program_name: &'static str,
         category: &str,
         tracepoint_name: &str,
-    ) -> anyhow::Result<()>;
+    ) -> Result<(), TracepointAttachError>;
 
     fn attach_perf_event(
         &mut self,
@@ -46,7 +109,7 @@ impl AttachOps for AyaAttachOps<'_> {
         program_name: &'static str,
         category: &str,
         tracepoint_name: &str,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), TracepointAttachError> {
         attach_tracepoint(self.ebpf, program_name, category, tracepoint_name)
     }
 
@@ -61,18 +124,24 @@ impl AttachOps for AyaAttachOps<'_> {
 
 pub(crate) fn attach_tracepoint(
     ebpf: &mut Ebpf,
-    program_name: &str,
+    program_name: &'static str,
     category: &str,
     tracepoint_name: &str,
-) -> anyhow::Result<()> {
-    let program: &mut TracePoint = ebpf
-        .program_mut(program_name)
-        .ok_or_else(|| anyhow::anyhow!("{program_name} program not found"))?
-        .try_into()?;
+) -> Result<(), TracepointAttachError> {
+    let attach_result = (|| -> anyhow::Result<()> {
+        let program: &mut TracePoint = ebpf
+            .program_mut(program_name)
+            .ok_or_else(|| anyhow::anyhow!("{program_name} program not found"))?
+            .try_into()?;
 
-    program.load()?;
-    program.attach(category, tracepoint_name)?;
-    Ok(())
+        program.load()?;
+        program.attach(category, tracepoint_name)?;
+        Ok(())
+    })();
+
+    attach_result.map_err(|source| {
+        TracepointAttachError::new(program_name, category, tracepoint_name, source)
+    })
 }
 
 pub(crate) fn attach_kms_tracepoints(
@@ -118,13 +187,14 @@ fn attach_optional_kms_tracepoint(
             program_name,
             &tracepoint.category,
             &tracepoint.name,
-            &err,
+            err.source(),
         );
         log::warn!(
-            "optional_probe_attach_failed key={:?} program={} tracepoint={} err={err:#}",
+            "optional_probe_attach_failed key={:?} program={} tracepoint={} err={:#}",
             ProbeKey::KmsPageflipTiming,
             program_name,
-            tracepoint.ref_name()
+            tracepoint.ref_name(),
+            err.source()
         );
     }
 }
@@ -167,14 +237,15 @@ fn attach_optional_drm_fence_tracepoint(
             program_name,
             &tracepoint.category,
             &tracepoint.name,
-            &err,
+            err.source(),
         );
         log::warn!(
-            "optional_probe_attach_failed key={:?} program={} tracepoint={}/{} err={err:#}",
+            "optional_probe_attach_failed key={:?} program={} tracepoint={}/{} err={:#}",
             ProbeKey::DrmFenceLatency,
             program_name,
             tracepoint.category,
-            tracepoint.name
+            tracepoint.name,
+            err.source()
         );
     }
 }

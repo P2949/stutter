@@ -46,15 +46,9 @@ pub(crate) fn attach_required_scheduler_tracepoints(
     ops: &mut impl AttachOps,
 ) -> Result<(), EbpfError> {
     ops.attach_tracepoint("sched_wakeup", "sched", "sched_wakeup")
-        .map_err(|source| EbpfError::Attach {
-            program: "sched_wakeup",
-            source,
-        })?;
+        .map_err(EbpfError::from)?;
     ops.attach_tracepoint("sched_switch", "sched", "sched_switch")
-        .map_err(|source| EbpfError::Attach {
-            program: "sched_switch",
-            source,
-        })?;
+        .map_err(EbpfError::from)?;
 
     Ok(())
 }
@@ -70,7 +64,7 @@ pub(crate) fn attach_optional_scheduler_tracepoints(
                 "sched_wakeup_new",
                 "sched",
                 "sched_wakeup_new",
-                &err,
+                err.source(),
             );
             log::warn!(
                 "optional_probe_attach_failed key={:?} program=sched_wakeup_new tracepoint=sched/sched_wakeup_new err={err:#}",
@@ -91,7 +85,7 @@ pub(crate) fn attach_optional_scheduler_tracepoints(
             "sched_process_exit",
             "sched",
             "sched_process_exit",
-            &err,
+            err.source(),
         );
         log::warn!(
             "optional_probe_attach_failed key={:?} program=sched_process_exit tracepoint=sched/sched_process_exit err={err:#}",
@@ -107,7 +101,7 @@ pub(crate) fn attach_optional_scheduler_tracepoints(
             "sched_migrate_task",
             "sched",
             "sched_migrate_task",
-            &err,
+            err.source(),
         );
         log::warn!(
             "optional_probe_attach_failed key={:?} program=sched_migrate_task tracepoint=sched/sched_migrate_task err={err:#}",
@@ -129,7 +123,7 @@ pub(crate) fn attach_optional_probe_tracepoints(
             "cpu_frequency",
             "power",
             "cpu_frequency",
-            &err,
+            err.source(),
         );
         log::warn!(
             "optional_probe_attach_failed key={:?} program=cpu_frequency tracepoint=power/cpu_frequency err={err:#}",
@@ -145,7 +139,7 @@ pub(crate) fn attach_optional_probe_tracepoints(
             "sched_stat_wait",
             "sched",
             "sched_stat_wait",
-            &err,
+            err.source(),
         );
         log::warn!(
             "optional_probe_attach_failed key={:?} program=sched_stat_wait tracepoint=sched/sched_stat_wait err={err:#}",
@@ -160,7 +154,7 @@ pub(crate) fn attach_optional_probe_tracepoints(
                 "irq_handler_entry",
                 "irq",
                 "irq_handler_entry",
-                &err,
+                err.source(),
             );
             log::warn!(
                 "optional_probe_attach_failed key={:?} program=irq_handler_entry tracepoint=irq/irq_handler_entry err={err:#}",
@@ -173,7 +167,7 @@ pub(crate) fn attach_optional_probe_tracepoints(
                 "irq_handler_exit",
                 "irq",
                 "irq_handler_exit",
-                &err,
+                err.source(),
             );
             log::warn!(
                 "optional_probe_attach_failed key={:?} program=irq_handler_exit tracepoint=irq/irq_handler_exit err={err:#}",
@@ -189,7 +183,7 @@ pub(crate) fn attach_optional_probe_tracepoints(
                 "block_rq_issue",
                 "block",
                 "block_rq_issue",
-                &err,
+                err.source(),
             );
             log::warn!(
                 "optional_probe_attach_failed key={:?} program=block_rq_issue tracepoint=block/block_rq_issue err={err:#}",
@@ -202,7 +196,7 @@ pub(crate) fn attach_optional_probe_tracepoints(
                 "block_rq_complete",
                 "block",
                 "block_rq_complete",
-                &err,
+                err.source(),
             );
             log::warn!(
                 "optional_probe_attach_failed key={:?} program=block_rq_complete tracepoint=block/block_rq_complete err={err:#}",
@@ -238,7 +232,7 @@ pub(crate) fn attach_optional_follow_exec_tracepoint(
             "sched_process_exec",
             "sched",
             "sched_process_exec",
-            &err,
+            err.source(),
         );
         log::warn!(
             "optional_probe_attach_failed key={:?} program=sched_process_exec tracepoint=sched/sched_process_exec err={err:#}",

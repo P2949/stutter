@@ -5,7 +5,10 @@ use std::{collections::BTreeSet, path::PathBuf};
 use crate::{
     config::model::MonitorConfig,
     ebpf::{
-        attach::{AttachOps, FaultPerfProbe, attach_drm_fence_tracepoints, attach_kms_tracepoints},
+        attach::{
+            AttachOps, FaultPerfProbe, TracepointAttachError, attach_drm_fence_tracepoints,
+            attach_kms_tracepoints,
+        },
         load::{
             attach_optional_fault_perf_events, attach_optional_follow_exec_tracepoint,
             attach_optional_probe_tracepoints, attach_optional_scheduler_tracepoints,
@@ -42,7 +45,7 @@ impl AttachOps for FakeAttachOps {
         program_name: &'static str,
         category: &str,
         tracepoint_name: &str,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), TracepointAttachError> {
         self.tracepoint_calls.push((
             program_name,
             category.to_owned(),
@@ -50,7 +53,12 @@ impl AttachOps for FakeAttachOps {
         ));
 
         if self.fail_programs.contains(program_name) {
-            anyhow::bail!("{program_name} failed for test");
+            return Err(TracepointAttachError::new(
+                program_name,
+                category,
+                tracepoint_name,
+                anyhow::anyhow!("{program_name} failed for test"),
+            ));
         }
 
         Ok(())
@@ -177,6 +185,21 @@ fn scheduler_optional_tracepoint_attach_failures_degrade_through_activation_warn
         assert!(body.contains("optional_probe_attach_failed"));
         assert!(!body.contains("context(\"eBPF load failed: attach"));
     }
+}
+
+#[test]
+fn tracepoint_attach_error_carries_program_category_and_tracepoint_name() {
+    let mut fake = FakeAttachOps::fail_program("sched_wakeup");
+
+    let err = fake
+        .attach_tracepoint("sched_wakeup", "sched", "sched_wakeup")
+        .unwrap_err();
+
+    assert_eq!(err.program_name(), "sched_wakeup");
+    assert_eq!(err.category(), "sched");
+    assert_eq!(err.tracepoint_name(), "sched_wakeup");
+    assert!(err.to_string().contains("sched/sched_wakeup"));
+    assert!(err.source().to_string().contains("failed for test"));
 }
 
 #[test]
