@@ -18,12 +18,10 @@ use stutter_common::{
     DROP_CPU_ACCOUNTING_UNTRACKED, DROP_IRQ_START_TIMES_INSERT_FAILED,
     DROP_WAKEUP_DATA_CONSUMED_READ_FAILED, DROP_WAKEUP_DATA_INSERT_FAILED,
     DROP_WAKEUP_DATA_REPLACED_ENTRY, DROP_WAKEUP_DATA_STALE_ENTRY, DrmFenceEvent, EVENT_CPU_FREQ,
-    EVENT_DRM_FENCE, EVENT_EXEC, EVENT_IRQ_LATENCY, EVENT_KMS_FLIP, EVENT_MIGRATION,
-    EVENT_RUNNABLE_LATENCY, EVENT_STAT_WAIT, ExecEvent, IrqEvent, KMS_FLIP_EVENT_INTERVAL,
-    KMS_FLIP_EVENT_PAGEFLIP_DONE, KMS_FLIP_EVENT_VBLANK, KMS_FLIP_HAS_CRTC, KMS_FLIP_HAS_DONE_NS,
-    KMS_FLIP_HAS_DURATION_NS, KMS_FLIP_HAS_REQUEST_NS, KMS_FLIP_HAS_SEQUENCE,
-    KMS_FLIP_PROVIDER_AMDGPU, KMS_FLIP_PROVIDER_DRM, KMS_FLIP_PROVIDER_I915, KmsFlipEvent,
-    MigrationEvent, SchedulerEvent, StatWaitEvent,
+    EVENT_DRM_FENCE, EVENT_EXEC, EVENT_IRQ_LATENCY, EVENT_MIGRATION, EVENT_RUNNABLE_LATENCY,
+    EVENT_STAT_WAIT, ExecEvent, IrqEvent, KMS_FLIP_EVENT_PAGEFLIP_DONE, KMS_FLIP_EVENT_VBLANK,
+    KMS_FLIP_PROVIDER_AMDGPU, KMS_FLIP_PROVIDER_DRM, KMS_FLIP_PROVIDER_I915, MigrationEvent,
+    SchedulerEvent, StatWaitEvent,
 };
 
 // Layout:
@@ -45,23 +43,24 @@ use stutter_common::{
 // 16. License and panic handler
 
 macro_rules! emit_ringbuf_event {
-    ($event_ty:ty, $reserve_failed:expr, |$event:ident| $body:block) => {{
+    ($event_ty:ty, $reserve_failed:expr, $event:expr) => {{
         let Some(mut entry) = crate::EVENTS.reserve::<$event_ty>(0) else {
             crate::increment_drop_counter(stutter_common::DROP_RINGBUF_RESERVE_FAILED);
             $reserve_failed
         };
-        let $event = entry.as_mut_ptr();
-        unsafe { $body }
+        unsafe { core::ptr::write(entry.as_mut_ptr(), $event) };
         entry.submit(0);
     }};
 }
 
 mod block_io;
+mod kms_emit;
 mod map_limits;
 mod trace_offsets;
 mod trace_read;
 mod wakeup_data;
 
+use kms_emit::emit_kms_flip_event;
 use map_limits::{
     PREV_FAULTS_MAP_MAX_ENTRIES, RUNNABLE_TASK_CPU_MAP_MAX_ENTRIES, TARGET_PIDS_MAP_MAX_ENTRIES,
 };
@@ -136,7 +135,7 @@ struct FaultCounters {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-struct KmsFlipKey {
+pub(crate) struct KmsFlipKey {
     card_minor: u32,
     crtc_id: u32,
     pipe: u32,
@@ -239,14 +238,17 @@ fn try_sched_process_exec(_ctx: TracePointContext) -> u32 {
         return 0;
     }
 
-    emit_ringbuf_event!(ExecEvent, return 0, |event| {
-        (*event).kind = EVENT_EXEC;
-        (*event).pid = pid;
-        (*event).tid = tid;
-        if let Ok(comm) = aya_ebpf::helpers::bpf_get_current_comm() {
-            (*event).comm = comm;
+    let comm = aya_ebpf::helpers::bpf_get_current_comm().unwrap_or([0; 16]);
+    emit_ringbuf_event!(
+        ExecEvent,
+        return 0,
+        ExecEvent {
+            kind: EVENT_EXEC,
+            pid,
+            tid,
+            comm,
         }
-    });
+    );
 
     0
 }
@@ -656,24 +658,28 @@ fn try_sched_switch(ctx: TracePointContext) -> u32 {
         return 1;
     }
 
-    emit_ringbuf_event!(SchedulerEvent, return 0, |event| {
-        (*event).kind = EVENT_RUNNABLE_LATENCY;
-        (*event).tid = pid;
-        (*event).cpu = cpu;
-        (*event).wakeup_target_cpu = target_cpu;
-        (*event).prio = prio;
-        (*event).waker_tid = waker_tid;
-        (*event).target_pending_wakeups = target_pending_wakeups;
-        (*event).observed_runnable_depth = observed_runnable_depth;
-        (*event).maj_flt = faults.maj;
-        (*event).min_flt = faults.min;
-        (*event).wakeup_ns = wakeup_ns;
-        (*event).switch_ns = switch_ns;
-        (*event).latency_ns = latency_ns;
-        (*event).comm = comm;
-        (*event).switch_prev_pid = switch_prev_pid;
-        (*event).switch_prev_state = prev_state;
-    });
+    emit_ringbuf_event!(
+        SchedulerEvent,
+        return 0,
+        SchedulerEvent {
+            kind: EVENT_RUNNABLE_LATENCY,
+            tid: pid,
+            cpu,
+            wakeup_target_cpu: target_cpu,
+            prio,
+            waker_tid,
+            target_pending_wakeups,
+            observed_runnable_depth,
+            maj_flt: faults.maj,
+            min_flt: faults.min,
+            wakeup_ns,
+            switch_ns,
+            latency_ns,
+            comm,
+            switch_prev_pid,
+            switch_prev_state: prev_state,
+        }
+    );
 
     0
 }
@@ -723,13 +729,17 @@ fn try_sched_migrate_task(ctx: TracePointContext) -> u32 {
         increment_target_pending(new_cpu);
     }
 
-    emit_ringbuf_event!(MigrationEvent, return 0, |event| {
-        (*event).kind = EVENT_MIGRATION;
-        (*event).tid = pid;
-        (*event).from_cpu = orig_cpu as u32;
-        (*event).to_cpu = dest_cpu as u32;
-        (*event).timestamp_ns = now;
-    });
+    emit_ringbuf_event!(
+        MigrationEvent,
+        return 0,
+        MigrationEvent {
+            kind: EVENT_MIGRATION,
+            tid: pid,
+            from_cpu: orig_cpu as u32,
+            to_cpu: dest_cpu as u32,
+            timestamp_ns: now,
+        }
+    );
 
     0
 }
@@ -746,13 +756,17 @@ fn try_cpu_frequency(ctx: TracePointContext) -> u32 {
     }
     let now = unsafe { bpf_ktime_get_ns() };
 
-    emit_ringbuf_event!(CpuFreqEvent, return 0, |event| {
-        (*event).kind = EVENT_CPU_FREQ;
-        (*event).cpu = cpu_id;
-        (*event).state = state;
-        (*event)._pad = 0;
-        (*event).timestamp_ns = now;
-    });
+    emit_ringbuf_event!(
+        CpuFreqEvent,
+        return 0,
+        CpuFreqEvent {
+            kind: EVENT_CPU_FREQ,
+            cpu: cpu_id,
+            state,
+            _pad: 0,
+            timestamp_ns: now,
+        }
+    );
 
     0
 }
@@ -777,11 +791,15 @@ fn try_sched_stat_wait(ctx: TracePointContext) -> u32 {
         return 1;
     }
 
-    emit_ringbuf_event!(StatWaitEvent, return 0, |event| {
-        (*event).kind = EVENT_STAT_WAIT;
-        (*event).tid = pid;
-        (*event).delay_ns = delay;
-    });
+    emit_ringbuf_event!(
+        StatWaitEvent,
+        return 0,
+        StatWaitEvent {
+            kind: EVENT_STAT_WAIT,
+            tid: pid,
+            delay_ns: delay,
+        }
+    );
 
     0
 }
@@ -836,14 +854,18 @@ fn try_irq_handler_exit(ctx: TracePointContext) -> u32 {
     let exit_ns = unsafe { bpf_ktime_get_ns() };
     let duration_ns = exit_ns.saturating_sub(enter_ns);
 
-    emit_ringbuf_event!(IrqEvent, return 0, |event| {
-        (*event).kind = EVENT_IRQ_LATENCY;
-        (*event).irq = irq;
-        (*event).cpu = cpu;
-        (*event).enter_ns = enter_ns;
-        (*event).exit_ns = exit_ns;
-        (*event).duration_ns = duration_ns;
-    });
+    emit_ringbuf_event!(
+        IrqEvent,
+        return 0,
+        IrqEvent {
+            kind: EVENT_IRQ_LATENCY,
+            irq,
+            cpu,
+            enter_ns,
+            exit_ns,
+            duration_ns,
+        }
+    );
     0
 }
 
@@ -1281,25 +1303,29 @@ fn try_drm_fence_wait_done(ctx: TracePointContext) -> u32 {
         ),
     };
 
-    emit_ringbuf_event!(DrmFenceEvent, return 0, |event| {
-        (*event).kind = EVENT_DRM_FENCE;
-        (*event).event_kind = event_kind;
-        (*event).provider = provider;
-        (*event).flags = identity.flags | extra_flags;
-        (*event).pid = pid;
-        (*event).tid = tid;
-        (*event).cpu = bpf_get_smp_processor_id() as u32;
-        (*event).driver_id = driver_id;
-        (*event).gpu_role = gpu_role;
-        (*event).context = identity.key.context;
-        (*event).seqno = identity.key.seqno;
-        (*event).timeline_hash = identity.timeline_hash;
-        (*event).wait_start_ns = wait_start_ns;
-        (*event).wait_done_ns = now;
-        (*event).signal_ns = signal_ns;
-        (*event).duration_ns = duration_ns;
-        (*event).timestamp_ns = now;
-    });
+    emit_ringbuf_event!(
+        DrmFenceEvent,
+        return 0,
+        DrmFenceEvent {
+            kind: EVENT_DRM_FENCE,
+            event_kind,
+            provider,
+            flags: identity.flags | extra_flags,
+            pid,
+            tid,
+            cpu: bpf_get_smp_processor_id() as u32,
+            driver_id,
+            gpu_role,
+            context: identity.key.context,
+            seqno: identity.key.seqno,
+            timeline_hash: identity.timeline_hash,
+            wait_start_ns,
+            wait_done_ns: now,
+            signal_ns,
+            duration_ns,
+            timestamp_ns: now,
+        }
+    );
     0
 }
 
@@ -1343,25 +1369,29 @@ fn try_drm_fence_signal(ctx: TracePointContext) -> u32 {
         0,
     );
 
-    emit_ringbuf_event!(DrmFenceEvent, return 0, |event| {
-        (*event).kind = EVENT_DRM_FENCE;
-        (*event).event_kind = DRM_FENCE_EVENT_SIGNAL;
-        (*event).provider = provider;
-        (*event).flags = identity.flags | DRM_FENCE_IS_EXPORTER_SIDE;
-        (*event).pid = 0;
-        (*event).tid = 0;
-        (*event).cpu = bpf_get_smp_processor_id() as u32;
-        (*event).driver_id = provider;
-        (*event).gpu_role = gpu_role;
-        (*event).context = identity.key.context;
-        (*event).seqno = identity.key.seqno;
-        (*event).timeline_hash = identity.timeline_hash;
-        (*event).wait_start_ns = 0;
-        (*event).wait_done_ns = 0;
-        (*event).signal_ns = now;
-        (*event).duration_ns = 0;
-        (*event).timestamp_ns = now;
-    });
+    emit_ringbuf_event!(
+        DrmFenceEvent,
+        return 0,
+        DrmFenceEvent {
+            kind: EVENT_DRM_FENCE,
+            event_kind: DRM_FENCE_EVENT_SIGNAL,
+            provider,
+            flags: identity.flags | DRM_FENCE_IS_EXPORTER_SIDE,
+            pid: 0,
+            tid: 0,
+            cpu: bpf_get_smp_processor_id() as u32,
+            driver_id: provider,
+            gpu_role,
+            context: identity.key.context,
+            seqno: identity.key.seqno,
+            timeline_hash: identity.timeline_hash,
+            wait_start_ns: 0,
+            wait_done_ns: 0,
+            signal_ns: now,
+            duration_ns: 0,
+            timestamp_ns: now,
+        }
+    );
 
     0
 }
@@ -1407,63 +1437,6 @@ fn fill_fence_identity(
     identity.flags = flags;
     identity.timeline_hash = if has_timeline { timeline_hash } else { 0 };
     true
-}
-
-// -----------------------------------------------------------------------------
-// KMS flip event emission
-// -----------------------------------------------------------------------------
-
-#[inline(always)]
-fn emit_kms_flip_event(
-    key: &KmsFlipKey,
-    provider_and_event_kind: u32,
-    has_sequence: bool,
-    sequence: u64,
-    has_start_ns: bool,
-    start_ns: u64,
-    done_ns: u64,
-) {
-    let duration_ns = if has_start_ns {
-        done_ns.saturating_sub(start_ns)
-    } else {
-        0
-    };
-
-    let mut flags = KMS_FLIP_HAS_DONE_NS;
-    if key.crtc_id != 0 {
-        flags |= KMS_FLIP_HAS_CRTC;
-    }
-    if has_start_ns {
-        flags |= KMS_FLIP_HAS_REQUEST_NS | KMS_FLIP_HAS_DURATION_NS;
-    }
-    if has_sequence {
-        flags |= KMS_FLIP_HAS_SEQUENCE;
-    }
-
-    emit_ringbuf_event!(KmsFlipEvent, return, |event| {
-        (*event).kind = EVENT_KMS_FLIP;
-        let provider = provider_and_event_kind >> 16;
-        let completion_event_kind = provider_and_event_kind & 0xffff;
-        (*event).event_kind = if has_start_ns {
-            KMS_FLIP_EVENT_INTERVAL
-        } else {
-            completion_event_kind
-        };
-        (*event).provider = provider;
-        (*event).flags = flags;
-        let pid_tgid = bpf_get_current_pid_tgid();
-        (*event).pid = (pid_tgid >> 32) as u32;
-        (*event).tid = (pid_tgid & 0xffff_ffff) as u32;
-        (*event).cpu = bpf_get_smp_processor_id() as u32;
-        (*event).card_minor = key.card_minor;
-        (*event).crtc_id = key.crtc_id;
-        (*event).pipe = key.pipe;
-        (*event).sequence = if has_sequence { sequence } else { 0 };
-        (*event).request_ns = if has_start_ns { start_ns } else { 0 };
-        (*event).done_ns = done_ns;
-        (*event).duration_ns = duration_ns;
-        (*event).timestamp_ns = done_ns;
-    });
 }
 
 // -----------------------------------------------------------------------------

@@ -316,9 +316,7 @@ fn focus_gpu_target_pids(
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        collections::BTreeMap, fs, os::unix::fs::symlink, path::PathBuf, sync::Arc, time::Duration,
-    };
+    use std::{collections::BTreeMap, fs, os::unix::fs::symlink, path::PathBuf, time::Duration};
 
     use super::*;
     use crate::{
@@ -742,7 +740,7 @@ mod tests {
             process_pid,
             process_ppid: 0,
             comm: comm.to_owned(),
-            process_comm: Arc::<str>::from(comm),
+            process_comm: comm.to_owned(),
             process_starttime_ticks,
             task_starttime_ticks: Some(u64::from(tid)),
             exe_dev: None,

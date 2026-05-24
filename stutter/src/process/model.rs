@@ -13,6 +13,7 @@ use std::{
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use stutter_core::ids::{Pid, Tid};
 
 use crate::community_rules::CommunityRulesDb;
 
@@ -320,7 +321,7 @@ pub struct TaskInfo {
     pub process_pid: u32,
     pub process_ppid: u32,
     pub comm: String,
-    pub process_comm: std::sync::Arc<str>,
+    pub process_comm: String,
     pub process_starttime_ticks: Option<u64>,
     pub task_starttime_ticks: Option<u64>,
     pub exe_dev: Option<u64>,
@@ -328,6 +329,20 @@ pub struct TaskInfo {
     pub class: TaskClass,
     pub sched_policy: Option<u32>,
     pub from_cgroup: bool,
+}
+
+impl TaskInfo {
+    pub fn task_id(&self) -> Tid {
+        Tid::new(self.tid)
+    }
+
+    pub fn process_id(&self) -> Pid {
+        Pid::new(self.process_pid)
+    }
+
+    pub fn parent_process_id(&self) -> Pid {
+        Pid::new(self.process_ppid)
+    }
 }
 
 pub fn same_logical_task(left: &TaskInfo, right: &TaskInfo) -> bool {

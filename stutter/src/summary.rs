@@ -522,7 +522,7 @@ fn task_summary(task: &SessionTask) -> TaskSummary {
         active: task.active,
         class: task.class,
         process_pid: task.process_pid,
-        process_comm: task.process_comm.to_string(),
+        process_comm: task.process_comm.clone(),
         comm: task.comm.clone(),
         samples: task.latency.samples,
         p95_ns: task.latency.p95_ns,

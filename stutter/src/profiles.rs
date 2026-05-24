@@ -752,7 +752,7 @@ fn task_info_from_active_snapshot(
         process_pid: task.process_pid,
         process_ppid: 0,
         comm: task.comm.clone(),
-        process_comm: task.comm.clone().into(),
+        process_comm: task.comm.clone(),
         process_starttime_ticks: task.process_starttime_ticks,
         task_starttime_ticks: task.task_starttime_ticks,
         exe_dev: None,
@@ -777,7 +777,7 @@ fn matching_profile_rule_with_index<'a>(
         }
 
         if !rule.match_comm.is_empty() {
-            let comms = [&task.comm, task.process_comm.as_ref()];
+            let comms = [&task.comm, task.process_comm.as_str()];
             let mut comm_match = false;
 
             for pattern in &rule.match_comm {
@@ -825,7 +825,7 @@ pub fn profile_rule_matches_task(task: &TaskInfo, rule: &ProfileRule) -> bool {
     }
 
     if !rule.match_comm.is_empty() {
-        let comms = [&task.comm, task.process_comm.as_ref()];
+        let comms = [&task.comm, task.process_comm.as_str()];
         return rule
             .match_comm
             .iter()

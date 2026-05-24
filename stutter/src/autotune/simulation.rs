@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::collections::BTreeMap;
 
 use crate::{
     actions::{ActionId, SafetyClass},
@@ -214,7 +214,7 @@ fn task_info() -> TaskInfo {
         process_pid: 1234,
         process_ppid: 1,
         comm: "simulation-game".to_owned(),
-        process_comm: Arc::from("simulation-game"),
+        process_comm: "simulation-game".to_owned(),
         process_starttime_ticks: Some(10),
         task_starttime_ticks: Some(10),
         exe_dev: Some(1),

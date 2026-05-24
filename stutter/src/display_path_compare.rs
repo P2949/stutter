@@ -768,7 +768,7 @@ fn top_process_comm(analysis: &ReportAnalysisJson) -> Option<&str> {
         .session
         .tasks
         .first()
-        .map(|task| task.process_comm.as_ref())
+        .map(|task| task.process_comm.as_str())
 }
 
 fn display_session_type(analysis: &ReportAnalysisJson) -> Option<&str> {

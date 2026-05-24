@@ -130,7 +130,7 @@ impl SpikeEvent {
             active: stats.active,
             class: stats.class,
             process_pid: stats.process_id().map(|pid| pid.as_u32()),
-            process_comm: stats.process_comm.to_string(),
+            process_comm: stats.process_comm.clone(),
             comm: stats.comm.clone(),
             cpu: event.cpu,
             wakeup_target_cpu: event.wakeup_target_cpu,

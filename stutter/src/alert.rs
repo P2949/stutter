@@ -65,7 +65,7 @@ impl AlertPayload {
             class: stats.class,
             comm: stats.comm.clone(),
             process_pid: stats.process_pid,
-            process_comm: stats.process_comm.to_string(),
+            process_comm: stats.process_comm.clone(),
             latency_ns: event.latency_ns,
             latency_ms,
             cpu: event.cpu,

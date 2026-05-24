@@ -22,7 +22,7 @@ fn reused_tid_with_different_task_resets_stats_after_removal() {
     assert_eq!(stats.last_seen_ms, 77);
     assert_eq!(stats.session_latency.count, 0);
     assert_eq!(stats.process_pid, Some(200));
-    assert_eq!(stats.process_comm, "new-game".into());
+    assert_eq!(stats.process_comm, String::from("new-game"));
     assert_eq!(stats.comm, "new-thread");
     assert_eq!(stats.class, TaskClass::Helper);
     assert!(stats.active);
@@ -65,7 +65,7 @@ fn active_same_tid_replacement_resets_stats_even_without_remove_add_diff() {
     assert_eq!(stats.last_seen_ms, 77);
     assert_eq!(stats.session_latency.count, 0);
     assert_eq!(stats.process_pid, Some(200));
-    assert_eq!(stats.process_comm, "new-helper".into());
+    assert_eq!(stats.process_comm, String::from("new-helper"));
     assert_eq!(stats.comm, "new-worker");
     assert_eq!(stats.class, TaskClass::Helper);
     assert!(stats.active);

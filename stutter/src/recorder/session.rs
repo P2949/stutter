@@ -1,5 +1,4 @@
 use std::{
-    collections::BTreeSet,
     env, fs,
     io::Write,
     path::{Path, PathBuf},
@@ -10,7 +9,7 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    LiveRecorder, SESSION_SCHEMA_VERSION,
+    LiveRecorder, SESSION_SCHEMA_VERSION, SyncTracker,
     event_types::FrameEvent,
     retention::{
         RecordingRetentionPolicy, apply_recording_retention, ensure_min_free_space_for_path,
@@ -240,7 +239,7 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
             removed_ms: stats.removed_ms,
             class: stats.class,
             process_pid: stats.process_id().map(|pid| pid.as_u32()),
-            process_comm: stats.process_comm.to_string(),
+            process_comm: stats.process_comm.clone(),
             process_starttime_ticks: stats.process_starttime_ticks,
             task_starttime_ticks: stats.task_starttime_ticks,
             exe_dev: stats.exe_dev,
@@ -287,7 +286,7 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
                 active: stats.active,
                 class: stats.class,
                 process_pid: stats.process_id().map(|pid| pid.as_u32()),
-                process_comm: stats.process_comm.to_string(),
+                process_comm: stats.process_comm.clone(),
                 comm: stats.comm.clone(),
                 cpu: spike.cpu,
                 wakeup_target_cpu: spike.wakeup_target_cpu,
@@ -770,7 +769,7 @@ fn recorded_spike(stats: &TaskStats, spike: &SpikeRecord) -> RecordedSpike {
     RecordedSpike {
         class: stats.class,
         process_pid: stats.process_id().map(|pid| pid.as_u32()),
-        process_comm: stats.process_comm.to_string(),
+        process_comm: stats.process_comm.clone(),
         cpu: spike.cpu,
         wakeup_target_cpu: spike.wakeup_target_cpu,
         switch_prev_pid: spike.switch_prev_pid,
@@ -914,47 +913,6 @@ fn timespec_to_ns(timespec: libc::timespec) -> Option<u64> {
     }
 
     seconds.checked_mul(1_000_000_000)?.checked_add(nanos)
-}
-
-#[derive(Debug, Default)]
-pub struct SyncTracker {
-    synced_dirs: BTreeSet<PathBuf>,
-}
-
-impl SyncTracker {
-    pub fn sync_parent_once(&mut self, path: &Path) -> anyhow::Result<()> {
-        let Some(parent) = path.parent() else {
-            return Ok(());
-        };
-
-        let parent = parent.to_path_buf();
-
-        if self.synced_dirs.insert(parent.clone()) {
-            let dir = fs::File::open(&parent).with_context(|| {
-                format!(
-                    "failed to open parent directory {} for sync",
-                    parent.display()
-                )
-            })?;
-
-            dir.sync_all()
-                .with_context(|| format!("failed to sync parent directory {}", parent.display()))?;
-        }
-
-        Ok(())
-    }
-
-    #[cfg(test)]
-    fn synced_dir_count_for_test(&self) -> usize {
-        self.synced_dirs.len()
-    }
-
-    #[cfg(test)]
-    fn mark_parent_for_test(&mut self, path: &Path) {
-        if let Some(parent) = path.parent() {
-            self.synced_dirs.insert(parent.to_path_buf());
-        }
-    }
 }
 
 fn write_json<T: ?Sized + Serialize>(

@@ -614,8 +614,6 @@ fn available_fd_budget() -> Option<u64> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use super::*;
 
     fn task_info(tid: u32, class: TaskClass) -> TaskInfo {
@@ -624,7 +622,7 @@ mod tests {
             process_pid: tid,
             process_ppid: 0,
             comm: format!("task-{tid}"),
-            process_comm: Arc::from(format!("proc-{tid}")),
+            process_comm: format!("proc-{tid}"),
             process_starttime_ticks: Some(tid as u64),
             task_starttime_ticks: Some(tid as u64),
             exe_dev: None,

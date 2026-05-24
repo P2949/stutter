@@ -469,7 +469,7 @@ pub fn tune_coverage_metrics(
         let identity = if let Some(task) = tasks_by_tid.get(&tid) {
             TaskIdentity {
                 class: task.class,
-                process_comm: task.process_comm.to_string(),
+                process_comm: task.process_comm.clone(),
                 comm: task.comm.clone(),
                 process_starttime_ticks: task.process_starttime_ticks,
                 task_starttime_ticks: task.task_starttime_ticks,
@@ -479,7 +479,7 @@ pub fn tune_coverage_metrics(
         } else if let Some(record) = interval_records.iter().find(|record| record.task == tid) {
             TaskIdentity {
                 class: record.class,
-                process_comm: record.process_comm.to_string(),
+                process_comm: record.process_comm.clone(),
                 comm: record.comm.clone(),
                 process_starttime_ticks: None,
                 task_starttime_ticks: None,

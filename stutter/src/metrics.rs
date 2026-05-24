@@ -70,7 +70,7 @@ pub struct TaskStats {
     pub comm: String,
     pub class: TaskClass,
     pub process_pid: Option<u32>,
-    pub process_comm: std::sync::Arc<str>,
+    pub process_comm: String,
     pub process_starttime_ticks: Option<u64>,
     pub task_starttime_ticks: Option<u64>,
     pub exe_dev: Option<u64>,
@@ -651,7 +651,7 @@ impl TaskStats {
             comm,
             class,
             process_pid: None,
-            process_comm: std::sync::Arc::from(""),
+            process_comm: String::new(),
             process_starttime_ticks: None,
             task_starttime_ticks: None,
             exe_dev: None,
@@ -819,7 +819,7 @@ fn ratio_u128(numerator: u128, denominator: u128) -> Option<f64> {
 
 fn should_replace_comm_from_task_info(current: &str, task_info: &TaskInfo) -> bool {
     (current == "?" || current.is_empty())
-        || current == task_info.process_comm.as_ref()
+        || current == task_info.process_comm.as_str()
         || current == "wine64-preloader"
 }
 
@@ -881,7 +881,7 @@ pub fn interval_record_from_snapshot(input: IntervalRecordFromSnapshotInput) -> 
         class: stats.class,
         comm: stats.comm.clone(),
         process_pid: stats.process_pid,
-        process_comm: stats.process_comm.to_string(),
+        process_comm: stats.process_comm.clone(),
         samples: latency.count,
         stored_samples: latency.stored_samples,
         truncated_samples: latency.samples_truncated,

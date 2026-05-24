@@ -133,7 +133,7 @@ impl WashoutTaskIdentity {
             tid: task.tid,
             process_pid: task.process_pid,
             comm: task.comm.clone(),
-            process_comm: task.process_comm.to_string(),
+            process_comm: task.process_comm.clone(),
             process_starttime_ticks: task.process_starttime_ticks,
             task_starttime_ticks: task.task_starttime_ticks,
             exe_dev: task.exe_dev,
@@ -316,8 +316,6 @@ pub async fn run_washout_for_action<A: TuningAction>(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use super::*;
     use crate::{actions::ActionWarning, process_tree::TaskInfo};
 
@@ -327,7 +325,7 @@ mod tests {
             process_pid: 42,
             process_ppid: 1,
             comm: comm.to_owned(),
-            process_comm: Arc::from("Game.exe"),
+            process_comm: "Game.exe".to_owned(),
             process_starttime_ticks: Some(100),
             task_starttime_ticks: Some(200 + tid as u64),
             exe_dev: Some(1),

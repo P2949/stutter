@@ -119,7 +119,7 @@ fn aggregate_tasks(
     {
         let identity = TaskIdentitySummary {
             class: task.class,
-            process_comm: task.process_comm.to_string(),
+            process_comm: task.process_comm.clone(),
             comm: task.comm.clone(),
         };
         let entry = tasks
