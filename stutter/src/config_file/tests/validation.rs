@@ -75,6 +75,82 @@ fn daemon_user_config_validation_rejects_invalid_health_guardrails() {
 }
 
 #[test]
+fn daemon_config_rejects_zero_privileged_worker_timing() {
+    for (field, autotune) in [
+        (
+            "autotune.privileged_worker_socket_ready_timeout_ms",
+            AutotuneConfigFile {
+                privileged_worker_socket_ready_timeout_ms: Some(0),
+                ..Default::default()
+            },
+        ),
+        (
+            "autotune.privileged_worker_socket_ready_retry_ms",
+            AutotuneConfigFile {
+                privileged_worker_socket_ready_retry_ms: Some(0),
+                ..Default::default()
+            },
+        ),
+        (
+            "autotune.privileged_worker_shutdown_poll_ms",
+            AutotuneConfigFile {
+                privileged_worker_shutdown_poll_ms: Some(0),
+                ..Default::default()
+            },
+        ),
+    ] {
+        let config = UserConfigFile {
+            autotune: Some(autotune),
+            ..Default::default()
+        };
+        assert!(
+            validate_daemon_user_config(&config)
+                .unwrap_err()
+                .to_string()
+                .contains(field)
+        );
+    }
+}
+
+#[test]
+fn daemon_config_rejects_absurd_privileged_worker_timing() {
+    for (field, autotune) in [
+        (
+            "autotune.privileged_worker_socket_ready_timeout_ms",
+            AutotuneConfigFile {
+                privileged_worker_socket_ready_timeout_ms: Some(60_001),
+                ..Default::default()
+            },
+        ),
+        (
+            "autotune.privileged_worker_socket_ready_retry_ms",
+            AutotuneConfigFile {
+                privileged_worker_socket_ready_retry_ms: Some(10_001),
+                ..Default::default()
+            },
+        ),
+        (
+            "autotune.privileged_worker_shutdown_poll_ms",
+            AutotuneConfigFile {
+                privileged_worker_shutdown_poll_ms: Some(10_001),
+                ..Default::default()
+            },
+        ),
+    ] {
+        let config = UserConfigFile {
+            autotune: Some(autotune),
+            ..Default::default()
+        };
+        assert!(
+            validate_daemon_user_config(&config)
+                .unwrap_err()
+                .to_string()
+                .contains(field)
+        );
+    }
+}
+
+#[test]
 fn user_config_diagnostics_report_invalid_workload_policy_rules() {
     let toml = r#"
             [autotune]

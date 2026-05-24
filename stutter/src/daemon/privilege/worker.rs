@@ -8,6 +8,8 @@ pub struct PrivilegedWorkerHandle {
     socket_path: PathBuf,
     executable_path: PathBuf,
     restart_count: u32,
+    socket_ready_timeout: Duration,
+    socket_ready_retry_interval: Duration,
 }
 
 impl PrivilegedWorkerHandle {
@@ -16,11 +18,43 @@ impl PrivilegedWorkerHandle {
         Self::spawn_with_executable(socket_path, &executable)
     }
 
+    pub fn spawn_with_timing(
+        socket_path: &Path,
+        socket_ready_timeout: Duration,
+        socket_ready_retry_interval: Duration,
+    ) -> anyhow::Result<Self> {
+        let executable = std::env::current_exe()?;
+        Self::spawn_with_executable_and_timing(
+            socket_path,
+            &executable,
+            socket_ready_timeout,
+            socket_ready_retry_interval,
+        )
+    }
+
     pub fn spawn_with_executable(socket_path: &Path, executable: &Path) -> anyhow::Result<Self> {
+        Self::spawn_with_executable_and_timing(
+            socket_path,
+            executable,
+            default_privileged_worker_socket_ready_timeout(),
+            default_privileged_worker_socket_ready_retry_interval(),
+        )
+    }
+
+    pub fn spawn_with_executable_and_timing(
+        socket_path: &Path,
+        executable: &Path,
+        socket_ready_timeout: Duration,
+        socket_ready_retry_interval: Duration,
+    ) -> anyhow::Result<Self> {
         let _ = fs::remove_file(socket_path);
         prepare_privileged_worker_socket_path(socket_path)?;
         let child = spawn_privileged_worker_child(executable, socket_path)?;
-        wait_for_privileged_worker_socket(socket_path)?;
+        wait_for_privileged_worker_socket_with_timing(
+            socket_path,
+            socket_ready_timeout,
+            socket_ready_retry_interval,
+        )?;
         log::info!(
             "privileged_worker_started socket={} pid={}",
             socket_path.display(),
@@ -31,6 +65,8 @@ impl PrivilegedWorkerHandle {
             socket_path: socket_path.to_path_buf(),
             executable_path: executable.to_path_buf(),
             restart_count: 0,
+            socket_ready_timeout,
+            socket_ready_retry_interval,
         })
     }
 
@@ -56,7 +92,11 @@ impl PrivilegedWorkerHandle {
         self.terminate()?;
         prepare_privileged_worker_socket_path(&self.socket_path)?;
         let child = spawn_privileged_worker_child(&self.executable_path, &self.socket_path)?;
-        wait_for_privileged_worker_socket(&self.socket_path)?;
+        wait_for_privileged_worker_socket_with_timing(
+            &self.socket_path,
+            self.socket_ready_timeout,
+            self.socket_ready_retry_interval,
+        )?;
         self.restart_count = self.restart_count.saturating_add(1);
         log::info!(
             "privileged_worker_restarted socket={} restart_count={} pid={}",
@@ -68,14 +108,18 @@ impl PrivilegedWorkerHandle {
         Ok(())
     }
 
-    pub fn shutdown_gracefully(&mut self, timeout_ms: u64) -> anyhow::Result<()> {
+    pub fn shutdown_gracefully(
+        &mut self,
+        timeout: Duration,
+        poll_interval: Duration,
+    ) -> anyhow::Result<()> {
         if let Ok(mut stream) = UnixStream::connect(&self.socket_path) {
             serde_json::to_writer(&mut stream, &PrivilegedWorkerRequest::Shutdown)?;
             stream.write_all(b"\n")?;
             stream.flush()?;
         }
 
-        let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+        let deadline = Instant::now() + timeout;
         loop {
             if self.child.try_wait()?.is_some() {
                 return Ok(());
@@ -85,7 +129,7 @@ impl PrivilegedWorkerHandle {
                 self.child.wait().ok();
                 return Ok(());
             }
-            std::thread::sleep(Duration::from_millis(25));
+            std::thread::sleep(poll_interval);
         }
     }
 }
@@ -114,15 +158,12 @@ fn spawn_privileged_worker_child(executable: &Path, socket_path: &Path) -> anyho
         })
 }
 
-const PRIVILEGED_WORKER_SOCKET_READY_TIMEOUT: Duration = Duration::from_millis(2_000);
-const PRIVILEGED_WORKER_SOCKET_READY_RETRY_INTERVAL: Duration = Duration::from_millis(50);
+fn default_privileged_worker_socket_ready_timeout() -> Duration {
+    Duration::from_millis(crate::daemon::config::DEFAULT_PRIVILEGED_WORKER_SOCKET_READY_TIMEOUT_MS)
+}
 
-fn wait_for_privileged_worker_socket(socket_path: &Path) -> anyhow::Result<()> {
-    wait_for_privileged_worker_socket_with_timing(
-        socket_path,
-        PRIVILEGED_WORKER_SOCKET_READY_TIMEOUT,
-        PRIVILEGED_WORKER_SOCKET_READY_RETRY_INTERVAL,
-    )
+fn default_privileged_worker_socket_ready_retry_interval() -> Duration {
+    Duration::from_millis(crate::daemon::config::DEFAULT_PRIVILEGED_WORKER_SOCKET_READY_RETRY_MS)
 }
 
 pub(crate) fn wait_for_privileged_worker_socket_with_timing(

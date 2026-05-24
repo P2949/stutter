@@ -299,6 +299,16 @@ mod tests {
 pub(crate) struct EbpfMapSizing {
     pub(crate) events_ringbuf_bytes: u32,
     pub(crate) wakeup_data_entries: u32,
+    pub(crate) target_pids_entries: u32,
+    pub(crate) target_cgroup_ids_entries: u32,
+    pub(crate) target_irqs_entries: u32,
+    pub(crate) runnable_task_cpu_entries: u32,
+    pub(crate) prev_faults_entries: u32,
+    pub(crate) irq_start_entries: u32,
+    pub(crate) block_start_entries: u32,
+    pub(crate) kms_flip_start_entries: u32,
+    pub(crate) drm_fence_wait_start_entries: u32,
+    pub(crate) drm_fence_signal_entries: u32,
     pub(crate) locked_memory_limit_bytes: Option<u64>,
     pub(crate) available_memory_bytes: Option<u64>,
 }

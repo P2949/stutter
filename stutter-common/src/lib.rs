@@ -26,6 +26,7 @@
 //! `docs/EBPF_CAPACITY.md`.
 
 pub const EVENT_RUNNABLE_LATENCY: u32 = 1;
+pub mod ebpf_capacity;
 pub mod tracepoint_offsets;
 
 pub const EVENT_IRQ_LATENCY: u32 = 2;

@@ -136,6 +136,9 @@ impl MonitorArgs {
             metrics_port: self.metrics_port.map(Some),
             ringbuf_size_kb: self.ringbuf_size_kb.map(Some),
             wakeup_map_factor: self.wakeup_map_factor.map(Some),
+            block_start_entries: self.block_start_entries.map(Some),
+            drm_fence_wait_start_entries: self.drm_fence_wait_start_entries.map(Some),
+            drm_fence_signal_entries: self.drm_fence_signal_entries.map(Some),
             otlp_endpoint: self.otlp_endpoint.clone().map(Some),
             otel_service_name: presence
                 .otel_service_name
@@ -265,6 +268,9 @@ impl Default for MonitorArgs {
             preset: None,
             ringbuf_size_kb: None,
             wakeup_map_factor: None,
+            block_start_entries: None,
+            drm_fence_wait_start_entries: None,
+            drm_fence_signal_entries: None,
             otlp_endpoint: None,
             otel_service_name: "stutter".to_owned(),
             auto_focus: false,

@@ -248,6 +248,9 @@ fn apply_alert_layer(config: &mut AlertConfig, layer: &MonitorConfigLayer) {
     if let Some(value) = &layer.alert_webhook_url {
         config.webhook_url = value.clone();
     }
+    if let Some(value) = layer.alert_desktop_timeout_ms {
+        config.desktop_timeout_ms = value;
+    }
 }
 
 fn apply_stream_layer(config: &mut StreamConfig, layer: &MonitorConfigLayer) {
@@ -283,6 +286,12 @@ fn apply_mangohud_layer(config: &mut MangoHudConfig, layer: &MonitorConfigLayer)
     }
     if let Some(value) = layer.mangohud_log_live {
         config.log_live = value;
+    }
+    if let Some(value) = layer.mangohud_tail_idle_sleep_ms {
+        config.tail_idle_sleep_ms = value;
+    }
+    if let Some(value) = layer.mangohud_alignment_poll_ms {
+        config.alignment_poll_ms = value;
     }
 }
 
@@ -373,6 +382,36 @@ fn apply_ebpf_sizing_layer(config: &mut EbpfSizingConfig, layer: &MonitorConfigL
     }
     if let Some(value) = layer.wakeup_map_factor {
         config.wakeup_map_factor = value;
+    }
+    if let Some(value) = layer.target_pids_entries {
+        config.target_pids_entries = value;
+    }
+    if let Some(value) = layer.target_cgroup_ids_entries {
+        config.target_cgroup_ids_entries = value;
+    }
+    if let Some(value) = layer.target_irqs_entries {
+        config.target_irqs_entries = value;
+    }
+    if let Some(value) = layer.runnable_task_cpu_factor {
+        config.runnable_task_cpu_factor = value;
+    }
+    if let Some(value) = layer.prev_faults_factor {
+        config.prev_faults_factor = value;
+    }
+    if let Some(value) = layer.irq_start_entries {
+        config.irq_start_entries = value;
+    }
+    if let Some(value) = layer.block_start_entries {
+        config.block_start_entries = value;
+    }
+    if let Some(value) = layer.kms_flip_start_entries {
+        config.kms_flip_start_entries = value;
+    }
+    if let Some(value) = layer.drm_fence_wait_start_entries {
+        config.drm_fence_wait_start_entries = value;
+    }
+    if let Some(value) = layer.drm_fence_signal_entries {
+        config.drm_fence_signal_entries = value;
     }
 }
 

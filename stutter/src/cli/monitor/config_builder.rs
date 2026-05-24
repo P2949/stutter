@@ -254,13 +254,31 @@ pub(crate) fn monitor_config_from_monitor_args_with_file_and_presence(
     if let Some(kb) = args.ringbuf_size_kb
         && !(64..=16 * 1024).contains(&kb)
     {
-        anyhow::bail!("--ringbuf-size-kb must be between 64 and 16384");
+        anyhow::bail!("--ebpf-ringbuf-size-kb must be between 64 and 16384");
     }
 
     if let Some(factor) = args.wakeup_map_factor
         && (factor == 0 || factor > 64)
     {
-        anyhow::bail!("--wakeup-map-factor must be between 1 and 64");
+        anyhow::bail!("--ebpf-wakeup-map-factor must be between 1 and 64");
+    }
+
+    for (flag, value) in [
+        ("--ebpf-block-start-entries", args.block_start_entries),
+        (
+            "--ebpf-drm-fence-wait-start-entries",
+            args.drm_fence_wait_start_entries,
+        ),
+        (
+            "--ebpf-drm-fence-signal-entries",
+            args.drm_fence_signal_entries,
+        ),
+    ] {
+        if let Some(value) = value
+            && value == 0
+        {
+            anyhow::bail!("{flag} must be greater than zero");
+        }
     }
 
     if args.otlp_endpoint.is_some() && !cfg!(feature = "otel") {

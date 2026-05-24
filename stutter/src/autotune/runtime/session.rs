@@ -91,7 +91,14 @@ pub async fn run_autotune_controller_session(
 
     let monitor_result = monitor_task.await?;
     if let Some(handle) = worker_handle.as_mut() {
-        handle.shutdown_gracefully(3_000)?;
+        let shutdown_poll = Duration::from_millis(
+            runtime
+                .config()
+                .daemon_config
+                .autotune
+                .privileged_worker_shutdown_poll_ms,
+        );
+        handle.shutdown_gracefully(Duration::from_millis(3_000), shutdown_poll)?;
     }
     finish_autotune_controller_session(&mut runtime, monitor_result)
 }

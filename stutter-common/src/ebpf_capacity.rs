@@ -1,0 +1,17 @@
+//! Shared eBPF map capacity defaults.
+//!
+//! These values are the ABI-visible defaults baked into the BPF object before
+//! userspace applies loader-time map sizing overrides.
+
+pub const DEFAULT_TARGET_PIDS_MAP_MAX_ENTRIES: u32 = 1_024;
+pub const DEFAULT_TARGET_CGROUP_IDS_MAP_MAX_ENTRIES: u32 = 64;
+pub const DEFAULT_TARGET_IRQS_MAP_MAX_ENTRIES: u32 = 64;
+pub const DEFAULT_IRQ_START_TIMES_MAP_MAX_ENTRIES: u32 = 1_024;
+pub const DEFAULT_BLOCK_START_MAP_MAX_ENTRIES: u32 = 16_384;
+pub const DEFAULT_KMS_FLIP_STARTS_MAP_MAX_ENTRIES: u32 = 4_096;
+pub const DEFAULT_FENCE_WAIT_STARTS_MAP_MAX_ENTRIES: u32 = 4_096;
+pub const DEFAULT_FENCE_SIGNAL_TIMES_MAP_MAX_ENTRIES: u32 = 4_096;
+
+pub const DEFAULT_WAKEUP_DATA_PER_TARGET_MULTIPLIER: u32 = 128;
+pub const DEFAULT_RUNNABLE_TASK_CPU_PER_TARGET_MULTIPLIER: u32 = 64;
+pub const DEFAULT_PREV_FAULTS_PER_TARGET_MULTIPLIER: u32 = 128;

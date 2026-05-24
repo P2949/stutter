@@ -1,5 +1,7 @@
 //! Privileged worker startup checks for autotune runtime sessions.
 
+use std::time::Duration;
+
 use crate::{
     autotune::runtime::AutotuneRuntimeConfig,
     daemon::{
@@ -29,7 +31,24 @@ pub(crate) fn maybe_spawn_privileged_worker(
         .clone()
         .map(Ok)
         .unwrap_or_else(default_privileged_worker_socket_path)?;
-    PrivilegedWorkerHandle::spawn(&socket_path).map(Some)
+    let socket_ready_timeout = Duration::from_millis(
+        config
+            .daemon_config
+            .autotune
+            .privileged_worker_socket_ready_timeout_ms,
+    );
+    let socket_ready_retry_interval = Duration::from_millis(
+        config
+            .daemon_config
+            .autotune
+            .privileged_worker_socket_ready_retry_ms,
+    );
+    PrivilegedWorkerHandle::spawn_with_timing(
+        &socket_path,
+        socket_ready_timeout,
+        socket_ready_retry_interval,
+    )
+    .map(Some)
 }
 
 pub(crate) fn warn_if_unmanaged_privileged_worker_missing(

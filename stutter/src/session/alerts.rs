@@ -17,15 +17,16 @@ impl AlertRuntime {
             // spawned task owns network/desktop notification side effects.
             let (tx, mut rx) = tokio::sync::mpsc::channel(100);
             let webhook_url = config.alerts.webhook_url.clone();
-            let webhook_client = webhook_url.as_ref().map(|_| {
-                reqwest::Client::builder()
-                    .timeout(Duration::from_secs(10))
-                    .build()
-            });
+            let desktop_timeout = Duration::from_millis(config.alerts.desktop_timeout_ms);
+            let webhook_client = webhook_url
+                .as_ref()
+                .map(|_| reqwest::Client::builder().timeout(desktop_timeout).build());
 
             tokio::spawn(async move {
                 while let Some(payload) = rx.recv().await {
-                    if let Err(err) = crate::alert::send_desktop_alert(&payload).await {
+                    if let Err(err) =
+                        crate::alert::send_desktop_alert(&payload, desktop_timeout).await
+                    {
                         warn!("desktop_alert_failed err={err}");
                     }
                     if let Some(url) = &webhook_url {

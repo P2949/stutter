@@ -136,7 +136,34 @@ fn rejects_zero_runtime_slices_max_tasks() {
 }
 
 #[test]
-fn parses_ringbuf_size_and_wakeup_map_factor_flags() {
+fn parses_ebpf_sizing_flags() {
+    let config = parse_monitor_config_for_phase15([
+        "stutter",
+        "monitor",
+        "--pid",
+        "42",
+        "--ebpf-ringbuf-size-kb",
+        "1000",
+        "--ebpf-wakeup-map-factor",
+        "4",
+        "--ebpf-block-start-entries",
+        "32768",
+        "--ebpf-drm-fence-wait-start-entries",
+        "8192",
+        "--ebpf-drm-fence-signal-entries",
+        "8192",
+    ])
+    .unwrap();
+
+    assert_eq!(config.ebpf_sizing.ringbuf_size_kb, Some(1000));
+    assert_eq!(config.ebpf_sizing.wakeup_map_factor, Some(4));
+    assert_eq!(config.ebpf_sizing.block_start_entries, Some(32768));
+    assert_eq!(config.ebpf_sizing.drm_fence_wait_start_entries, Some(8192));
+    assert_eq!(config.ebpf_sizing.drm_fence_signal_entries, Some(8192));
+}
+
+#[test]
+fn parses_legacy_ebpf_sizing_aliases() {
     let config = parse_monitor_config_for_phase15([
         "stutter",
         "monitor",
@@ -161,14 +188,14 @@ fn rejects_invalid_ringbuf_size_bounds() {
             "monitor",
             "--pid",
             "42",
-            "--ringbuf-size-kb",
+            "--ebpf-ringbuf-size-kb",
             value,
         ])
         .unwrap_err();
 
         assert!(
             err.to_string()
-                .contains("--ringbuf-size-kb must be between 64 and 16384"),
+                .contains("--ebpf-ringbuf-size-kb must be between 64 and 16384"),
             "expected ringbuf bound rejection for {value}, got {err:#}"
         );
     }
@@ -182,15 +209,33 @@ fn rejects_invalid_wakeup_map_factor_bounds() {
             "monitor",
             "--pid",
             "42",
-            "--wakeup-map-factor",
+            "--ebpf-wakeup-map-factor",
             value,
         ])
         .unwrap_err();
 
         assert!(
             err.to_string()
-                .contains("--wakeup-map-factor must be between 1 and 64"),
+                .contains("--ebpf-wakeup-map-factor must be between 1 and 64"),
             "expected wakeup map factor rejection for {value}, got {err:#}"
+        );
+    }
+}
+
+#[test]
+fn rejects_zero_ebpf_entry_cli_overrides() {
+    for flag in [
+        "--ebpf-block-start-entries",
+        "--ebpf-drm-fence-wait-start-entries",
+        "--ebpf-drm-fence-signal-entries",
+    ] {
+        let err =
+            parse_monitor_config_for_phase15(["stutter", "monitor", "--pid", "42", flag, "0"])
+                .unwrap_err();
+
+        assert!(
+            err.to_string().contains("must be greater than zero"),
+            "expected zero rejection for {flag}, got {err:#}"
         );
     }
 }

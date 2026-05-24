@@ -195,7 +195,7 @@ fn worker_handle_restart_recovers_connectivity() -> anyhow::Result<()> {
         client.dry_run_candidate(candidate_apply_request(current_thread_nice_candidate()?))?;
     assert_eq!(dry_run.candidate_name, "socket-nice-noop");
 
-    handle.shutdown_gracefully(3_000)?;
+    handle.shutdown_gracefully(Duration::from_millis(3_000), Duration::from_millis(25))?;
     assert!(!handle.is_alive());
 
     Ok(())

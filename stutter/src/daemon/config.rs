@@ -18,6 +18,10 @@ use crate::{
     },
 };
 
+pub const DEFAULT_PRIVILEGED_WORKER_SOCKET_READY_TIMEOUT_MS: u64 = 2_000;
+pub const DEFAULT_PRIVILEGED_WORKER_SOCKET_READY_RETRY_MS: u64 = 50;
+pub const DEFAULT_PRIVILEGED_WORKER_SHUTDOWN_POLL_MS: u64 = 25;
+
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum DaemonPreset {
@@ -517,6 +521,12 @@ pub struct DaemonAutotuneConfig {
     pub manage_privileged_worker: bool,
     #[serde(default = "default_privileged_worker_restart_limit")]
     pub privileged_worker_restart_limit: u32,
+    #[serde(default = "default_privileged_worker_socket_ready_timeout_ms")]
+    pub privileged_worker_socket_ready_timeout_ms: u64,
+    #[serde(default = "default_privileged_worker_socket_ready_retry_ms")]
+    pub privileged_worker_socket_ready_retry_ms: u64,
+    #[serde(default = "default_privileged_worker_shutdown_poll_ms")]
+    pub privileged_worker_shutdown_poll_ms: u64,
     #[serde(default)]
     pub external_mutation_policy: ExternalMutationPolicy,
     #[serde(default)]
@@ -539,6 +549,11 @@ impl Default for DaemonAutotuneConfig {
             unsafe_in_process_privileged_worker: false,
             manage_privileged_worker: default_manage_privileged_worker(),
             privileged_worker_restart_limit: default_privileged_worker_restart_limit(),
+            privileged_worker_socket_ready_timeout_ms:
+                default_privileged_worker_socket_ready_timeout_ms(),
+            privileged_worker_socket_ready_retry_ms:
+                default_privileged_worker_socket_ready_retry_ms(),
+            privileged_worker_shutdown_poll_ms: default_privileged_worker_shutdown_poll_ms(),
             external_mutation_policy: ExternalMutationPolicy::default(),
             high_risk_dry_run: false,
             workload_policy: DaemonWorkloadPolicyConfig::default(),
@@ -555,6 +570,18 @@ fn default_privileged_worker_restart_limit() -> u32 {
     3
 }
 
+fn default_privileged_worker_socket_ready_timeout_ms() -> u64 {
+    DEFAULT_PRIVILEGED_WORKER_SOCKET_READY_TIMEOUT_MS
+}
+
+fn default_privileged_worker_socket_ready_retry_ms() -> u64 {
+    DEFAULT_PRIVILEGED_WORKER_SOCKET_READY_RETRY_MS
+}
+
+fn default_privileged_worker_shutdown_poll_ms() -> u64 {
+    DEFAULT_PRIVILEGED_WORKER_SHUTDOWN_POLL_MS
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -569,6 +596,24 @@ mod tests {
         assert!(json.contains("\"preset\":\"observe-only\""));
         assert!(json.contains("\"source\":\"cli\""));
         assert!(json.contains("\"retain_crash_diagnostics\":true"));
+    }
+
+    #[test]
+    fn daemon_autotune_config_defaults_privileged_worker_timing() {
+        let config = DaemonAutotuneConfig::default();
+
+        assert_eq!(
+            config.privileged_worker_socket_ready_timeout_ms,
+            DEFAULT_PRIVILEGED_WORKER_SOCKET_READY_TIMEOUT_MS
+        );
+        assert_eq!(
+            config.privileged_worker_socket_ready_retry_ms,
+            DEFAULT_PRIVILEGED_WORKER_SOCKET_READY_RETRY_MS
+        );
+        assert_eq!(
+            config.privileged_worker_shutdown_poll_ms,
+            DEFAULT_PRIVILEGED_WORKER_SHUTDOWN_POLL_MS
+        );
     }
 
     #[test]

@@ -191,6 +191,23 @@ pub fn validate_daemon_user_config(config: &UserConfigFile) -> Result<()> {
     {
         anyhow::bail!("autotune.privileged_worker_restart_limit must be greater than zero");
     }
+    if let Some(autotune) = config.autotune.as_ref() {
+        validate_optional_timing_ms(
+            "autotune.privileged_worker_socket_ready_timeout_ms",
+            autotune.privileged_worker_socket_ready_timeout_ms,
+            60_000,
+        )?;
+        validate_optional_timing_ms(
+            "autotune.privileged_worker_socket_ready_retry_ms",
+            autotune.privileged_worker_socket_ready_retry_ms,
+            10_000,
+        )?;
+        validate_optional_timing_ms(
+            "autotune.privileged_worker_shutdown_poll_ms",
+            autotune.privileged_worker_shutdown_poll_ms,
+            10_000,
+        )?;
+    }
     Ok(())
 }
 
@@ -209,6 +226,21 @@ pub(super) fn validate_optional_confidence(field: &str, confidence: Option<f32>)
         && (!confidence.is_finite() || !(0.0..=1.0).contains(&confidence))
     {
         anyhow::bail!("{field} must be a finite value between 0.0 and 1.0");
+    }
+
+    Ok(())
+}
+
+fn validate_optional_timing_ms(field: &str, value: Option<u64>, max: u64) -> Result<()> {
+    let Some(value) = value else {
+        return Ok(());
+    };
+
+    if value == 0 {
+        anyhow::bail!("{field} must be greater than zero");
+    }
+    if value > max {
+        anyhow::bail!("{field} must be <= {max}");
     }
 
     Ok(())

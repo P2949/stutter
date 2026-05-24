@@ -62,6 +62,10 @@ mod sched_wakeup_new_coverage_tests;
 mod load_plan_tests;
 
 #[cfg(test)]
+#[path = "ebpf/tests/privileged_loader.rs"]
+mod privileged_loader_tests;
+
+#[cfg(test)]
 #[path = "ebpf/tests/attach.rs"]
 mod attach_tests;
 

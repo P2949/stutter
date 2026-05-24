@@ -4,7 +4,7 @@ use std::{
     path::PathBuf,
     sync::{Arc, Mutex},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use super::*;
@@ -409,6 +409,27 @@ fn privileged_worker_socket_wait_timeout_reports_clear_error() {
     assert!(err.contains("privileged_worker_socket_not_ready"));
     assert!(err.contains("was not connectable within 40ms"));
     assert!(err.contains(socket.to_string_lossy().as_ref()));
+}
+
+#[test]
+fn privileged_worker_socket_wait_uses_supplied_retry_interval() {
+    if !unix_socket_bind_supported() {
+        return;
+    }
+
+    let socket = temp_socket_path("retry-interval");
+    let started = Instant::now();
+
+    let err = wait_for_privileged_worker_socket_with_timing(
+        &socket,
+        Duration::from_millis(5),
+        Duration::from_millis(25),
+    )
+    .unwrap_err()
+    .to_string();
+
+    assert!(started.elapsed() >= Duration::from_millis(20));
+    assert!(err.contains("privileged_worker_socket_not_ready"));
 }
 
 #[test]

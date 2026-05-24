@@ -79,6 +79,7 @@ pub struct MonitorConfigLayer {
 
     pub alert_threshold_ns: Option<Option<u64>>,
     pub alert_webhook_url: Option<Option<String>>,
+    pub alert_desktop_timeout_ms: Option<u64>,
 
     pub csv_stream: Option<Option<CsvStreamTarget>>,
     pub verbose: Option<bool>,
@@ -89,6 +90,8 @@ pub struct MonitorConfigLayer {
 
     pub mangohud_log: Option<Option<PathBuf>>,
     pub mangohud_log_live: Option<bool>,
+    pub mangohud_tail_idle_sleep_ms: Option<u64>,
+    pub mangohud_alignment_poll_ms: Option<u64>,
 
     pub tui: Option<bool>,
 
@@ -113,6 +116,16 @@ pub struct MonitorConfigLayer {
 
     pub ringbuf_size_kb: Option<Option<u32>>,
     pub wakeup_map_factor: Option<Option<u32>>,
+    pub target_pids_entries: Option<Option<u32>>,
+    pub target_cgroup_ids_entries: Option<Option<u32>>,
+    pub target_irqs_entries: Option<Option<u32>>,
+    pub runnable_task_cpu_factor: Option<Option<u32>>,
+    pub prev_faults_factor: Option<Option<u32>>,
+    pub irq_start_entries: Option<Option<u32>>,
+    pub block_start_entries: Option<Option<u32>>,
+    pub kms_flip_start_entries: Option<Option<u32>>,
+    pub drm_fence_wait_start_entries: Option<Option<u32>>,
+    pub drm_fence_signal_entries: Option<Option<u32>>,
 
     pub remote: Option<Option<String>>,
 }
@@ -188,6 +201,7 @@ impl MonitorConfigLayer {
 
             alert_threshold_ns: Some(config.alerts.threshold_ns),
             alert_webhook_url: Some(config.alerts.webhook_url),
+            alert_desktop_timeout_ms: Some(config.alerts.desktop_timeout_ms),
 
             csv_stream: Some(config.streams.csv),
             verbose: Some(config.streams.verbose),
@@ -198,6 +212,8 @@ impl MonitorConfigLayer {
 
             mangohud_log: Some(config.mangohud.log),
             mangohud_log_live: Some(config.mangohud.log_live),
+            mangohud_tail_idle_sleep_ms: Some(config.mangohud.tail_idle_sleep_ms),
+            mangohud_alignment_poll_ms: Some(config.mangohud.alignment_poll_ms),
 
             tui: Some(config.ui.tui),
 
@@ -222,6 +238,16 @@ impl MonitorConfigLayer {
 
             ringbuf_size_kb: Some(config.ebpf_sizing.ringbuf_size_kb),
             wakeup_map_factor: Some(config.ebpf_sizing.wakeup_map_factor),
+            target_pids_entries: Some(config.ebpf_sizing.target_pids_entries),
+            target_cgroup_ids_entries: Some(config.ebpf_sizing.target_cgroup_ids_entries),
+            target_irqs_entries: Some(config.ebpf_sizing.target_irqs_entries),
+            runnable_task_cpu_factor: Some(config.ebpf_sizing.runnable_task_cpu_factor),
+            prev_faults_factor: Some(config.ebpf_sizing.prev_faults_factor),
+            irq_start_entries: Some(config.ebpf_sizing.irq_start_entries),
+            block_start_entries: Some(config.ebpf_sizing.block_start_entries),
+            kms_flip_start_entries: Some(config.ebpf_sizing.kms_flip_start_entries),
+            drm_fence_wait_start_entries: Some(config.ebpf_sizing.drm_fence_wait_start_entries),
+            drm_fence_signal_entries: Some(config.ebpf_sizing.drm_fence_signal_entries),
 
             remote: Some(config.remote.endpoint),
         }
@@ -237,6 +263,10 @@ impl MonitorConfigLayer {
             Some(value) => Some(crate::config_file::parse_foreground_source_value(value)?),
             None => None,
         };
+
+        let ebpf_sizing = user_file.ebpf_sizing.as_ref();
+        let mangohud = user_file.mangohud.as_ref();
+        let alerts = user_file.alerts.as_ref();
 
         Ok(Self {
             summary_period_ms: user_file.summary_period_ms.or(user_file.summary_ms),
@@ -270,6 +300,45 @@ impl MonitorConfigLayer {
             dmabuf_log: user_file.dmabuf_log.clone().map(Some),
             gpu_engine_sampling: user_file.gpu_engine_sampling,
             display_topology: user_file.display_topology,
+            alert_desktop_timeout_ms: alerts.and_then(|config| config.desktop_timeout_ms),
+            mangohud_tail_idle_sleep_ms: mangohud.and_then(|config| config.tail_idle_sleep_ms),
+            mangohud_alignment_poll_ms: mangohud.and_then(|config| config.alignment_poll_ms),
+            ringbuf_size_kb: ebpf_sizing
+                .and_then(|config| config.ringbuf_size_kb)
+                .map(Some),
+            wakeup_map_factor: ebpf_sizing
+                .and_then(|config| config.wakeup_map_factor)
+                .map(Some),
+            target_pids_entries: ebpf_sizing
+                .and_then(|config| config.target_pids_entries)
+                .map(Some),
+            target_cgroup_ids_entries: ebpf_sizing
+                .and_then(|config| config.target_cgroup_ids_entries)
+                .map(Some),
+            target_irqs_entries: ebpf_sizing
+                .and_then(|config| config.target_irqs_entries)
+                .map(Some),
+            runnable_task_cpu_factor: ebpf_sizing
+                .and_then(|config| config.runnable_task_cpu_factor)
+                .map(Some),
+            prev_faults_factor: ebpf_sizing
+                .and_then(|config| config.prev_faults_factor)
+                .map(Some),
+            irq_start_entries: ebpf_sizing
+                .and_then(|config| config.irq_start_entries)
+                .map(Some),
+            block_start_entries: ebpf_sizing
+                .and_then(|config| config.block_start_entries)
+                .map(Some),
+            kms_flip_start_entries: ebpf_sizing
+                .and_then(|config| config.kms_flip_start_entries)
+                .map(Some),
+            drm_fence_wait_start_entries: ebpf_sizing
+                .and_then(|config| config.drm_fence_wait_start_entries)
+                .map(Some),
+            drm_fence_signal_entries: ebpf_sizing
+                .and_then(|config| config.drm_fence_signal_entries)
+                .map(Some),
             ..Self::default()
         })
     }
