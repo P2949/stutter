@@ -97,8 +97,8 @@ pub fn build_focus_snapshot_from_processes(
             .is_some_and(|pid| pid == proc_info.pid);
 
         let classification = classify_process(&ProcessIdentity {
-            pid: proc_info.pid,
-            ppid: proc_info.ppid,
+            pid: proc_info.pid.into(),
+            ppid: proc_info.ppid.into(),
             comm: &proc_info.comm,
             cmdline: &proc_info.cmdline,
             exe_path,

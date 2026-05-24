@@ -10,6 +10,7 @@ use serde::{
     Deserialize, Deserializer, Serialize, Serializer,
     de::{Error as DeError, Visitor},
 };
+use stutter_core::ids::{Pid, Tid};
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct CpuMask {
@@ -18,9 +19,9 @@ pub struct CpuMask {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AffinityRecord {
-    pub tid: u32,
+    pub tid: Tid,
     #[serde(default)]
-    pub process_pid: Option<u32>,
+    pub process_pid: Option<Pid>,
     #[serde(default)]
     pub process_starttime_ticks: Option<u64>,
     #[serde(default)]
@@ -222,6 +223,10 @@ impl<'de> Deserialize<'de> for CpuMask {
     }
 }
 
+pub fn read_allowed_mask(tid: Tid) -> io::Result<CpuMask> {
+    read_allowed_mask_raw(tid.as_u32())
+}
+
 pub fn read_allowed_mask_raw(tid: u32) -> io::Result<CpuMask> {
     let mut set = unsafe { std::mem::zeroed::<libc::cpu_set_t>() };
     let result = unsafe {
@@ -237,6 +242,10 @@ pub fn read_allowed_mask_raw(tid: u32) -> io::Result<CpuMask> {
     }
 
     Ok(CpuMask::from_cpu_set(&set))
+}
+
+pub fn set_affinity(tid: Tid, mask: &CpuMask) -> io::Result<()> {
+    set_affinity_raw(tid.as_u32(), mask)
 }
 
 pub fn set_affinity_raw(tid: u32, mask: &CpuMask) -> io::Result<()> {
@@ -313,7 +322,7 @@ fn restore_all_at(
             }
         }
 
-        match set_affinity_raw(record.tid, &record.original_mask) {
+        match set_affinity(record.tid, &record.original_mask) {
             Ok(()) => summary.restored += 1,
             Err(err) if err.raw_os_error() == Some(libc::ESRCH) => {
                 summary.skipped_dead += 1;
@@ -345,8 +354,8 @@ fn restore_record_status_at(
 
 pub(crate) fn restore_identity_status_at(
     proc_root: &Path,
-    tid: u32,
-    process_pid: Option<u32>,
+    tid: Tid,
+    process_pid: Option<Pid>,
     process_starttime_ticks: Option<u64>,
     task_starttime_ticks: Option<u64>,
 ) -> io::Result<RestoreRecordStatus> {
@@ -504,8 +513,8 @@ pub fn save_merged_restore_state(
 #[cfg(test)]
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 struct RestoreMergeKey {
-    tid: u32,
-    process_pid: Option<u32>,
+    tid: Tid,
+    process_pid: Option<Pid>,
     process_starttime_ticks: Option<u64>,
     task_starttime_ticks: Option<u64>,
 }
@@ -568,7 +577,7 @@ fn cpu_set_size() -> u32 {
     libc::CPU_SETSIZE as u32
 }
 
-fn affinity_set_error(tid: u32, err: io::Error) -> anyhow::Error {
+fn affinity_set_error(tid: Tid, err: io::Error) -> anyhow::Error {
     anyhow::anyhow!("failed to set CPU affinity for TID {tid}: {err}")
 }
 
@@ -600,6 +609,26 @@ mod tests {
 
         let legacy: CpuMask = serde_json::from_str("39").unwrap();
         assert_eq!(legacy.to_range_string(), "0-2,5");
+    }
+
+    #[test]
+    fn affinity_record_typed_ids_preserve_numeric_json_shape() {
+        let record = AffinityRecord {
+            tid: Tid::new(7),
+            process_pid: Some(Pid::new(42)),
+            process_starttime_ticks: Some(100),
+            task_starttime_ticks: Some(200),
+            original_mask: CpuMask::parse("0-3").unwrap(),
+            applied_mask: CpuMask::parse("0-1").unwrap(),
+        };
+
+        let json = serde_json::to_value(&record).unwrap();
+        assert_eq!(json["tid"], 7);
+        assert_eq!(json["process_pid"], 42);
+
+        let decoded: AffinityRecord = serde_json::from_value(json).unwrap();
+        assert_eq!(decoded.tid, Tid::new(7));
+        assert_eq!(decoded.process_pid, Some(Pid::new(42)));
     }
 
     #[test]
@@ -650,7 +679,7 @@ mod tests {
         write_fake_task_stat(&dir, 10, 11, 100, 111);
 
         let mut record = affinity_record(11, "0", "1");
-        record.process_pid = Some(10);
+        record.process_pid = Some(10.into());
         record.process_starttime_ticks = Some(100);
         record.task_starttime_ticks = Some(111);
         assert_eq!(
@@ -674,13 +703,13 @@ mod tests {
         let path = dir.join("restore.json");
 
         let mut original = affinity_record(7, "0-3", "0-1");
-        original.process_pid = Some(7);
+        original.process_pid = Some(7.into());
         original.process_starttime_ticks = Some(70);
         original.task_starttime_ticks = Some(70);
         save_restore_state(&path, &[original]).unwrap();
 
         let mut same_identity = affinity_record(7, "0-1", "0");
-        same_identity.process_pid = Some(7);
+        same_identity.process_pid = Some(7.into());
         same_identity.process_starttime_ticks = Some(70);
         same_identity.task_starttime_ticks = Some(70);
         save_merged_restore_state(&path, &[same_identity], false).unwrap();
@@ -691,7 +720,7 @@ mod tests {
         assert_eq!(state.records[0].applied_mask.to_range_string(), "0");
 
         let mut new_identity = affinity_record(7, "1-3", "1");
-        new_identity.process_pid = Some(7);
+        new_identity.process_pid = Some(7.into());
         new_identity.process_starttime_ticks = Some(70);
         new_identity.task_starttime_ticks = Some(71);
         save_merged_restore_state(&path, &[new_identity], false).unwrap();
@@ -711,7 +740,7 @@ mod tests {
         save_restore_state(&path, &[affinity_record(7, "0-3", "0-1")]).unwrap();
 
         let mut identity_record = affinity_record(7, "1-3", "1");
-        identity_record.process_pid = Some(7);
+        identity_record.process_pid = Some(7.into());
         identity_record.process_starttime_ticks = Some(70);
         identity_record.task_starttime_ticks = Some(70);
         save_merged_restore_state(&path, &[identity_record], false).unwrap();
@@ -743,7 +772,7 @@ mod tests {
 
     fn affinity_record(tid: u32, original_mask: &str, applied_mask: &str) -> AffinityRecord {
         AffinityRecord {
-            tid,
+            tid: tid.into(),
             process_pid: None,
             process_starttime_ticks: None,
             task_starttime_ticks: None,
@@ -822,7 +851,7 @@ mod tests {
 
         // New has identity record (later)
         let mut identity = affinity_record(7, "0-1", "0");
-        identity.process_pid = Some(7);
+        identity.process_pid = Some(7.into());
         identity.process_starttime_ticks = Some(70);
         identity.task_starttime_ticks = Some(70);
 

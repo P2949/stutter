@@ -47,7 +47,7 @@ pub fn handle_migration_event(
 
     let record = recorder::MigrationEventRecord {
         elapsed_ms,
-        tid: event.tid,
+        tid: event.tid.into(),
         from_cpu: event.from_cpu,
         to_cpu: event.to_cpu,
         timestamp_ns: event.timestamp_ns,
@@ -82,7 +82,7 @@ pub fn block_io_event_record(
 
     recorder::BlockIoRecord {
         elapsed_ms,
-        tid: event.tid,
+        tid: event.tid.into(),
         correlation_basis: std::borrow::Cow::Borrowed(block_io_correlation_basis),
         dev: event.dev,
         nr_sector: event.nr_sector,

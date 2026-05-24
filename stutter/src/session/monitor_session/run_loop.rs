@@ -510,9 +510,9 @@ impl MonitorSession {
                                     card,
                                     gpu_role: Some(gpu_role),
                                     pid: (event.flags & stutter_common::DRM_FENCE_HAS_PID != 0)
-                                        .then_some(event.pid),
+                                        .then_some(event.pid.into()),
                                     tid: (event.flags & stutter_common::DRM_FENCE_HAS_PID != 0)
-                                        .then_some(event.tid),
+                                        .then_some(event.tid.into()),
                                     comm: None,
                                     context: (event.flags & stutter_common::DRM_FENCE_HAS_CONTEXT
                                         != 0)

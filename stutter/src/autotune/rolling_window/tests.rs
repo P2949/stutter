@@ -33,7 +33,7 @@ fn irq_event(elapsed_ms: u64, duration_ns: u64) -> IrqEventRecord {
 fn block_io_event(elapsed_ms: u64, duration_ns: u64) -> BlockIoRecord {
     BlockIoRecord {
         elapsed_ms,
-        tid: 77,
+        tid: 77.into(),
         dev: 1,
         nr_sector: 8,
         correlation_basis: "dev-sector".into(),

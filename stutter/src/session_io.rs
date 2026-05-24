@@ -337,10 +337,10 @@ pub fn load_run_artifacts(path: &Path, selection: ArtifactSelection) -> Result<R
             .iter()
             .map(|s| SpikeEvent {
                 elapsed_ms: None,
-                task: s.task,
+                task: s.task.into(),
                 active: s.active,
                 class: s.class,
-                process_pid: s.process_pid,
+                process_pid: s.process_pid.map(stutter_core::ids::Pid::from),
                 process_comm: s.process_comm.clone(),
                 comm: s.comm.clone(),
                 cpu: s.cpu,

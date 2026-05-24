@@ -102,10 +102,10 @@ pub(crate) fn focus_report_summary(
     let confidence = final_event.map(|event| event.confidence);
     let score = final_event.map(|event| event.score);
     let roots = final_event
-        .map(|event| event.root_pids.clone())
+        .map(|event| event.root_pids.iter().map(|pid| pid.as_u32()).collect())
         .unwrap_or_default();
     let member_pids = final_event
-        .map(|event| event.member_pids.clone())
+        .map(|event| event.member_pids.iter().map(|pid| pid.as_u32()).collect())
         .unwrap_or_default();
     let reasons = final_event
         .map(|event| event.reasons.clone())

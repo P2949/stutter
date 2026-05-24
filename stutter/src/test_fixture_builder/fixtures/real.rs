@@ -261,7 +261,7 @@ pub(in crate::test_fixture_builder) fn real_block_io_overlap_fixture()
     let block_io_events = vec![
         BlockIoRecord {
             elapsed_ms: 43,
-            tid: 5402,
+            tid: 5402.into(),
             correlation_basis: Cow::Borrowed("request-pointer"),
             dev: 259,
             nr_sector: 64,
@@ -272,7 +272,7 @@ pub(in crate::test_fixture_builder) fn real_block_io_overlap_fixture()
         },
         BlockIoRecord {
             elapsed_ms: 100,
-            tid: 5401,
+            tid: 5401.into(),
             correlation_basis: Cow::Borrowed("request-pointer"),
             dev: 259,
             nr_sector: 128,

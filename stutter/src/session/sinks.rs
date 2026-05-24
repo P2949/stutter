@@ -1,5 +1,6 @@
 use std::fmt;
 
+use stutter_core::ids::Pid;
 use tokio::sync::mpsc;
 
 use crate::{
@@ -370,8 +371,8 @@ impl MonitorEventSink for RecorderSink {
                     action: "changed".to_owned(),
                     old_kind: old_kind.map(|kind| format!("{kind:?}")),
                     kind: Some(format!("{new_kind:?}")),
-                    root_pids: root_pids.to_vec(),
-                    member_pids: member_pids.to_vec(),
+                    root_pids: root_pids.iter().copied().map(Pid::new).collect(),
+                    member_pids: member_pids.iter().copied().map(Pid::new).collect(),
                     confidence: *confidence,
                     score: *score,
                     situation: Some(*situation),
@@ -643,7 +644,7 @@ mod tests {
 
         let spike = SpikeEvent {
             elapsed_ms: Some(5),
-            task: 10,
+            task: 10.into(),
             latency_ns: 2_000_000,
             ..Default::default()
         };

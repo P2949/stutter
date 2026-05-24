@@ -62,10 +62,10 @@ fn recorded_time_accepts_legacy_local_field() {
 fn scx_correlation_spike_event_serialization() {
     let event = SpikeEvent {
         elapsed_ms: Some(100),
-        task: 123,
+        task: 123.into(),
         active: true,
         class: TaskClass::Game,
-        process_pid: Some(123),
+        process_pid: Some(123.into()),
         process_comm: "game".into(),
         comm: "game".to_owned(),
         cpu: 1,

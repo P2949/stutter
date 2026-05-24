@@ -60,10 +60,10 @@ fn spike_events_capture_only_threshold_crossing_events() {
     let spike_events_slice = recorder.buffers.spike_events.as_ref().unwrap().as_slice();
     assert_eq!(spike_events_slice.len(), 1);
     let spike = &spike_events_slice[0];
-    assert_eq!(spike.task, 7);
+    assert_eq!(spike.task.as_u32(), 7);
     assert!(spike.active);
     assert_eq!(spike.class, TaskClass::Game);
-    assert_eq!(spike.process_pid, Some(77));
+    assert_eq!(spike.process_pid.map(|pid| pid.as_u32()), Some(77));
     assert_eq!(spike.process_comm, "KingdomCome.exe");
     assert_eq!(spike.comm, "RenderThread");
     assert_eq!(spike.cpu, 0);

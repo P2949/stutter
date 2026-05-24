@@ -127,7 +127,7 @@ mod tests {
             cpu,
             latency_ns,
             class: TaskClass::Game,
-            task: 123,
+            task: 123.into(),
             active: true,
             ..Default::default()
         }

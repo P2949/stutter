@@ -94,3 +94,39 @@ fn autotune_observation_task_snapshots_use_typed_ids() {
         "autotune observation task snapshots must keep internal task/process IDs typed and convert to raw u32 only at external boundaries",
     );
 }
+
+#[test]
+fn remaining_task_process_identity_models_use_typed_ids() {
+    for relative_path in [
+        "focus/classify.rs",
+        "affinity.rs",
+        "profile_restore.rs",
+        "autotune/washout.rs",
+        "profiles.rs",
+    ] {
+        let source = source(relative_path);
+        assert!(
+            !source.contains("pub tid: u32")
+                && !source.contains("pub process_pid: u32")
+                && !source.contains("pub process_pid: Option<u32>")
+                && !source.contains("pub pid: u32")
+                && !source.contains("pub ppid: u32"),
+            "{relative_path} must use Tid/Pid for public or persisted task/process identity fields"
+        );
+    }
+}
+
+#[test]
+fn recorder_artifact_task_process_ids_use_typed_ids_but_common_abi_stays_raw() {
+    let recorder = source("recorder/event_types.rs");
+    assert!(
+        recorder.contains("use stutter_core::ids::{Pid, Tid};")
+            && recorder.contains("pub tid: Tid")
+            && recorder.contains("pub process_pid: Pid")
+            && recorder.contains("pub process_pid: Option<Pid>")
+            && recorder.contains("pub task: Tid")
+            && recorder.contains("pub waker_tid: Tid")
+            && recorder.contains("pub client_pid: Option<Pid>"),
+        "recorder artifact DTOs should keep Rust-side task/process IDs typed while serde preserves numeric JSON"
+    );
+}

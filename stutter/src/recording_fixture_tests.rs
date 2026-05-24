@@ -384,10 +384,10 @@ fn spike_event(
     let switch_ns = 100_000_000 + offset_ns;
     SpikeEvent {
         elapsed_ms: Some(100),
-        task,
+        task: task.into(),
         active: true,
         class,
-        process_pid: Some(task),
+        process_pid: Some(task.into()),
         process_comm: comm.into(),
         comm: comm.to_owned(),
         cpu: 0,
@@ -415,10 +415,10 @@ fn clustered_spikes(
 fn apply_spike_session_fields(session: &mut SessionFile, spikes: &[SpikeEvent]) {
     session.core.spike_events_retained_count = spikes.len() as u64;
     session.core.active_target_pids_count = spikes.len() as u64;
-    session.core.active_expanded_tasks = spikes.iter().map(|spike| spike.task).collect();
+    session.core.active_expanded_tasks = spikes.iter().map(|spike| spike.task.as_u32()).collect();
     session.tasks = spikes
         .iter()
-        .map(|spike| task_for_fixture(spike.task, spike.class, &spike.comm))
+        .map(|spike| task_for_fixture(spike.task.as_u32(), spike.class, &spike.comm))
         .collect();
 }
 
@@ -706,7 +706,7 @@ fn report_replay_fixture_block_io_overlap_candidate() {
     ];
     let io_events = vec![BlockIoRecord {
         elapsed_ms: 100,
-        tid: 100,
+        tid: 100.into(),
         correlation_basis: std::borrow::Cow::Borrowed("request-pointer"),
         dev: 1,
         nr_sector: 8,

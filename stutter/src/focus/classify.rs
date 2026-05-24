@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use stutter_core::ids::{Pid, Tid};
 
 use super::community_rules::try_community_rules_classification;
 use crate::{ascii_match::AsciiCase, process_tree::TaskClass as SystemTaskClass};
@@ -28,8 +29,8 @@ pub struct Classification {
 
 #[derive(Debug, Clone)]
 pub struct ProcessIdentity<'a> {
-    pub pid: u32,
-    pub ppid: u32,
+    pub pid: Pid,
+    pub ppid: Pid,
     pub comm: &'a str,
     pub cmdline: &'a str,
     pub exe_path: Option<&'a str>,
@@ -39,8 +40,8 @@ pub struct ProcessIdentity<'a> {
 
 #[derive(Debug, Clone)]
 pub struct ThreadIdentity<'a> {
-    pub tid: u32,
-    pub process_pid: u32,
+    pub tid: Tid,
+    pub process_pid: Pid,
     pub process_class: SystemTaskClass,
     pub thread_comm: &'a str,
     pub process_comm: &'a str,
@@ -63,7 +64,10 @@ pub fn classify_process(identity: &ProcessIdentity<'_>) -> Classification {
     {
         reasons.push(format!("comm '{}' looks like an IRQ thread", identity.comm));
         (SystemTaskClass::IrqThread, 0.95)
-    } else if identity.ppid == 2 || comm.starts_with("kworker") || comm.starts_with("ksoftirqd") {
+    } else if identity.ppid == Pid::new(2)
+        || comm.starts_with("kworker")
+        || comm.starts_with("ksoftirqd")
+    {
         reasons.push(format!(
             "pid={} ppid={} comm='{}' looks like a kernel thread",
             identity.pid, identity.ppid, identity.comm
@@ -238,7 +242,7 @@ pub fn classify_process(identity: &ProcessIdentity<'_>) -> Classification {
             identity.comm
         ));
         (SystemTaskClass::VirtualMachine, 0.85)
-    } else if identity.pid != 1
+    } else if identity.pid != Pid::new(1)
         && !cgroup_path_fold.contains(".service")
         && !cgroup_path_fold.contains("/system.slice/")
         && let Some(res) = try_community_rules_classification(&mut reasons, identity, cgroup_path)
@@ -257,7 +261,7 @@ pub fn classify_process(identity: &ProcessIdentity<'_>) -> Classification {
             identity.comm
         ));
         (SystemTaskClass::Unknown, 0.35)
-    } else if identity.pid == 1
+    } else if identity.pid == Pid::new(1)
         || cgroup_path_fold.contains(".service")
         || cgroup_path_fold.contains("/system.slice/")
     {

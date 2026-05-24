@@ -328,8 +328,8 @@ mod tests {
         affinity::save_restore_state(
             &affinity_path,
             &[affinity::AffinityRecord {
-                tid: 123,
-                process_pid: Some(123),
+                tid: 123.into(),
+                process_pid: Some(123.into()),
                 process_starttime_ticks: None,
                 task_starttime_ticks: None,
                 original_mask: affinity::CpuMask::parse("0").unwrap(),
@@ -343,8 +343,8 @@ mod tests {
                 schema_version: profile_restore::PROFILE_RESTORE_SCHEMA_VERSION,
                 affinity_records: Vec::new(),
                 nice_records: vec![profile_restore::NiceRestoreRecordV2 {
-                    tid: 123,
-                    process_pid: Some(123),
+                    tid: 123.into(),
+                    process_pid: Some(123.into()),
                     process_starttime_ticks: None,
                     task_starttime_ticks: None,
                     comm: Some("game".to_owned()),
