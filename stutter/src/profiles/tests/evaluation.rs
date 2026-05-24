@@ -190,10 +190,10 @@ fn profile_evaluation_matches_apply_plan_rule_order_and_masks() {
     assert_eq!(
         evaluated,
         vec![
-            (11, "0".to_owned(), 0),
-            (12, "1".to_owned(), 1),
-            (13, "1".to_owned(), 1),
-            (14, "2".to_owned(), 2),
+            (11.into(), "0".to_owned(), 0),
+            (12.into(), "1".to_owned(), 1),
+            (13.into(), "1".to_owned(), 1),
+            (14.into(), "2".to_owned(), 2),
         ]
     );
 

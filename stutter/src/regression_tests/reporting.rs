@@ -40,10 +40,10 @@ fn report_reads_recorded_session_and_spike_events() {
     let stats_by_task = BTreeMap::from([(7, stats)]);
     let spike_events = vec![SpikeEvent {
         elapsed_ms: Some(16),
-        task: 7,
+        task: 7.into(),
         active: true,
         class: TaskClass::Game,
-        process_pid: Some(7),
+        process_pid: Some(7.into()),
         process_comm: "KingdomCome.exe".into(),
         comm: "RenderThread".into(),
         cpu: 0,
@@ -145,10 +145,10 @@ fn report_cluster_output_caps_inline_points() {
     let spike_events = (0..10)
         .map(|idx| SpikeEvent {
             elapsed_ms: Some(idx as u64),
-            task: 100 + idx as u32,
+            task: (100 + idx as u32).into(),
             active: true,
             class: TaskClass::Helper,
-            process_pid: Some(100 + idx as u32),
+            process_pid: Some((100 + idx as u32).into()),
             process_comm: format!("proc-{}", idx),
             comm: format!("worker-{}", idx),
             cpu: idx as u32 % 4,
@@ -229,10 +229,10 @@ fn report_correlates_artifacts_with_spike_clusters() {
     let spike_events = (0..3)
         .map(|idx| SpikeEvent {
             elapsed_ms: Some(10 + idx as u64),
-            task: 10 + idx as u32,
+            task: (10 + idx as u32).into(),
             active: true,
             class: TaskClass::Game,
-            process_pid: Some(10 + idx as u32),
+            process_pid: Some((10 + idx as u32).into()),
             process_comm: "game".to_owned(),
             comm: if idx == 0 {
                 "RenderThread".to_owned()

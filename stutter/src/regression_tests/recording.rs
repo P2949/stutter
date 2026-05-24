@@ -36,9 +36,9 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
     stats.session_latency.record(2_000_000);
     let stats_by_task = BTreeMap::from([(7, stats)]);
     let spike_events = [SpikeEvent {
-        task: 7,
+        task: 7.into(),
         class: TaskClass::Helper,
-        process_pid: Some(7),
+        process_pid: Some(7.into()),
         process_comm: "task-7".into(),
         comm: "worker".into(),
         cpu: 1,
@@ -47,7 +47,7 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
         latency_ns: 2_000_000,
         wakeup_ns: 10,
         switch_ns: 2_000_010,
-        switch_prev_pid: 12345,
+        switch_prev_pid: 12345.into(),
         switch_prev_state: 2, // TASK_UNINTERRUPTIBLE
         switch_prev_state_label: "voluntary_sleep_uninterruptible".to_owned(),
         active: true,

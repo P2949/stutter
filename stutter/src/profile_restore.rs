@@ -6,6 +6,7 @@ use std::{
 
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
+use stutter_core::ids::{Pid, Tid};
 
 use crate::affinity::{self, AffinityRecord, RestoreRecordStatus};
 
@@ -24,9 +25,9 @@ pub struct ProfileRestoreState {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct NiceRestoreRecordV2 {
-    pub tid: u32,
+    pub tid: Tid,
     #[serde(default)]
-    pub process_pid: Option<u32>,
+    pub process_pid: Option<Pid>,
     #[serde(default)]
     pub process_starttime_ticks: Option<u64>,
     #[serde(default)]
@@ -39,9 +40,9 @@ pub struct NiceRestoreRecordV2 {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct IoPrioRestoreRecordV2 {
-    pub tid: u32,
+    pub tid: Tid,
     #[serde(default)]
-    pub process_pid: Option<u32>,
+    pub process_pid: Option<Pid>,
     #[serde(default)]
     pub process_starttime_ticks: Option<u64>,
     #[serde(default)]
@@ -150,10 +151,13 @@ fn restore_all_at(
     restore_all_at_with_ops(
         proc_root,
         state,
-        affinity::set_affinity_raw,
-        |tid, nice| crate::actions::nice::set_task_nice(tid, nice).map_err(anyhow_to_io_error),
+        affinity::set_affinity,
+        |tid, nice| {
+            crate::actions::nice::set_task_nice(tid.as_u32(), nice).map_err(anyhow_to_io_error)
+        },
         |tid, ioprio| {
-            crate::actions::ioprio::set_task_ioprio(tid, ioprio).map_err(anyhow_to_io_error)
+            crate::actions::ioprio::set_task_ioprio(tid.as_u32(), ioprio)
+                .map_err(anyhow_to_io_error)
         },
     )
 }
@@ -166,9 +170,9 @@ fn restore_all_at_with_ops<FA, FN, FI>(
     mut set_ioprio: FI,
 ) -> (ProfileRestoreSummary, Vec<anyhow::Error>)
 where
-    FA: FnMut(u32, &crate::affinity::CpuMask) -> io::Result<()>,
-    FN: FnMut(u32, i32) -> io::Result<()>,
-    FI: FnMut(u32, i32) -> io::Result<()>,
+    FA: FnMut(Tid, &crate::affinity::CpuMask) -> io::Result<()>,
+    FN: FnMut(Tid, i32) -> io::Result<()>,
+    FI: FnMut(Tid, i32) -> io::Result<()>,
 {
     let mut summary = ProfileRestoreSummary::default();
     let mut errors = Vec::new();
@@ -272,7 +276,7 @@ where
 
 fn restore_priority_identity(
     proc_root: &Path,
-    tid: u32,
+    tid: Tid,
     identity: RestoreIdentity,
     summary: &mut ProfileRestoreSummary,
     errors: &mut Vec<anyhow::Error>,
@@ -303,8 +307,8 @@ fn restore_priority_identity(
 
 fn restore_record_status(
     proc_root: &Path,
-    tid: u32,
-    process_pid: Option<u32>,
+    tid: Tid,
+    process_pid: Option<Pid>,
     process_starttime_ticks: Option<u64>,
     task_starttime_ticks: Option<u64>,
 ) -> io::Result<RestoreRecordStatus> {
@@ -319,7 +323,7 @@ fn restore_record_status(
 
 #[derive(Clone, Copy)]
 struct RestoreIdentity {
-    process_pid: Option<u32>,
+    process_pid: Option<Pid>,
     process_starttime_ticks: Option<u64>,
     task_starttime_ticks: Option<u64>,
 }
@@ -346,8 +350,8 @@ impl IoPrioRestoreRecordV2 {
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 struct RestoreMergeKey {
-    tid: u32,
-    process_pid: Option<u32>,
+    tid: Tid,
+    process_pid: Option<Pid>,
     process_starttime_ticks: Option<u64>,
     task_starttime_ticks: Option<u64>,
 }
@@ -507,7 +511,7 @@ mod tests {
 
         assert!(errors.is_empty());
         assert_eq!(summary.nice, 1);
-        assert_eq!(restored, vec![(11, 5)]);
+        assert_eq!(restored, vec![(Tid::new(11), 5)]);
         fs::remove_dir_all(dir).ok();
     }
 
@@ -564,8 +568,47 @@ mod tests {
 
         assert!(errors.is_empty());
         assert_eq!(summary.ionice, 1);
-        assert_eq!(restored, vec![(11, 0)]);
+        assert_eq!(restored, vec![(Tid::new(11), 0)]);
         fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn profile_restore_v2_typed_ids_preserve_numeric_json_shape() {
+        let nice = NiceRestoreRecordV2 {
+            tid: Tid::new(11),
+            process_pid: Some(Pid::new(10)),
+            process_starttime_ticks: Some(100),
+            task_starttime_ticks: Some(111),
+            comm: Some("task".to_owned()),
+            original_nice: 5,
+            applied_nice: 10,
+        };
+
+        let json = serde_json::to_value(&nice).unwrap();
+        assert_eq!(json["tid"], 11);
+        assert_eq!(json["process_pid"], 10);
+
+        let decoded: NiceRestoreRecordV2 = serde_json::from_value(json).unwrap();
+        assert_eq!(decoded.tid, Tid::new(11));
+        assert_eq!(decoded.process_pid, Some(Pid::new(10)));
+
+        let ionice = IoPrioRestoreRecordV2 {
+            tid: Tid::new(12),
+            process_pid: Some(Pid::new(10)),
+            process_starttime_ticks: Some(100),
+            task_starttime_ticks: Some(112),
+            comm: Some("io-task".to_owned()),
+            original_ioprio: 0,
+            applied_ioprio: 16_388,
+        };
+
+        let json = serde_json::to_value(&ionice).unwrap();
+        assert_eq!(json["tid"], 12);
+        assert_eq!(json["process_pid"], 10);
+
+        let decoded: IoPrioRestoreRecordV2 = serde_json::from_value(json).unwrap();
+        assert_eq!(decoded.tid, Tid::new(12));
+        assert_eq!(decoded.process_pid, Some(Pid::new(10)));
     }
 
     #[test]
@@ -596,8 +639,8 @@ mod tests {
         applied_nice: i32,
     ) -> NiceRestoreRecordV2 {
         NiceRestoreRecordV2 {
-            tid,
-            process_pid: Some(process_pid),
+            tid: tid.into(),
+            process_pid: Some(process_pid.into()),
             process_starttime_ticks: Some(process_starttime_ticks),
             task_starttime_ticks: Some(task_starttime_ticks),
             comm: Some("task".to_owned()),
@@ -615,8 +658,8 @@ mod tests {
         applied_ioprio: i32,
     ) -> IoPrioRestoreRecordV2 {
         IoPrioRestoreRecordV2 {
-            tid,
-            process_pid: Some(process_pid),
+            tid: tid.into(),
+            process_pid: Some(process_pid.into()),
             process_starttime_ticks: Some(process_starttime_ticks),
             task_starttime_ticks: Some(task_starttime_ticks),
             comm: Some("task".to_owned()),

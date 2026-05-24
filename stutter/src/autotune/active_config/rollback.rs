@@ -348,13 +348,15 @@ fn verify_cpu_affinity_rollback(
     }
 
     for task in &planned_tasks {
-        let Some(expected) = baseline.affinity.per_tid.get(&task.tid) else {
+        let tid = task.tid.as_u32();
+
+        let Some(expected) = baseline.affinity.per_tid.get(&tid) else {
             return RollbackVerification::unavailable(format!(
                 "tid={} baseline CPU affinity missing",
                 task.tid
             ));
         };
-        let Some(actual) = post_rollback.affinity.per_tid.get(&task.tid) else {
+        let Some(actual) = post_rollback.affinity.per_tid.get(&tid) else {
             return RollbackVerification::mismatch(
                 format!("tid={} cpu_affinity={expected}", task.tid),
                 format!("tid={} cpu_affinity=missing", task.tid),

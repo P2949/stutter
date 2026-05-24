@@ -303,10 +303,10 @@ pub(super) fn scheduler_event_with_latency(
 pub(super) fn spike_event(task: u32, switch_ns: u64) -> SpikeEvent {
     SpikeEvent {
         elapsed_ms: Some(switch_ns / 1_000_000),
-        task,
+        task: task.into(),
         active: true,
         class: TaskClass::Game,
-        process_pid: Some(task),
+        process_pid: Some(task.into()),
         process_comm: "game".into(),
         comm: "game".to_owned(),
         latency_ns: 1_000_000,

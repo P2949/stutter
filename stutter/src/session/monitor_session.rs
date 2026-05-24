@@ -728,9 +728,9 @@ impl MonitorSession {
         let mut points = Vec::new();
         for s in &recent_spikes {
             points.push(crate::spike::SpikePoint {
-                task: s.task,
+                task: s.task.as_u32(),
                 class: s.class,
-                process_pid: s.process_pid,
+                process_pid: s.process_pid.map(|pid| pid.as_u32()),
                 comm: s.comm.clone(),
                 cpu: s.cpu,
                 wakeup_target_cpu: s.wakeup_target_cpu,
@@ -739,7 +739,7 @@ impl MonitorSession {
                 switch_ns: s.switch_ns,
                 target_pending_wakeups: s.target_pending_wakeups,
                 observed_runnable_depth: s.observed_runnable_depth,
-                switch_prev_pid: s.switch_prev_pid,
+                switch_prev_pid: s.switch_prev_pid.as_u32(),
                 switch_prev_state: s.switch_prev_state,
                 elapsed_ms: s.elapsed_ms,
                 scx_ops: s.scx_ops.clone(),

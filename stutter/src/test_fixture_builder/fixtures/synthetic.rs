@@ -87,7 +87,7 @@ pub(in crate::test_fixture_builder) fn block_io_stall_fixture() -> (SessionFile,
     let intervals = vec![interval_record(100, 100, "worker-a", 0.0)];
     let block_io_events = vec![BlockIoRecord {
         elapsed_ms: 100,
-        tid: 100,
+        tid: 100.into(),
         correlation_basis: Cow::Borrowed("request-pointer"),
         dev: 1,
         nr_sector: 8,

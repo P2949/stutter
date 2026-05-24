@@ -14,8 +14,8 @@ mod tests {
         assert_eq!(fake_process.sched_policy, Some(SCHED_FIFO));
 
         let classification = classify_process(&ProcessIdentity {
-            pid: 1400,
-            ppid: 1,
+            pid: 1400.into(),
+            ppid: 1.into(),
             comm: "pipewire",
             cmdline: "pipewire",
             exe_path: None,
@@ -37,8 +37,8 @@ mod tests {
     fn compositor_not_background() {
         for comm in ["sway", "kwin_wayland", "mutter", "gnome-shell"] {
             let classification = classify_process(&ProcessIdentity {
-                pid: 1500,
-                ppid: 1,
+                pid: 1500.into(),
+                ppid: 1.into(),
                 comm,
                 cmdline: comm,
                 exe_path: None,
@@ -63,8 +63,8 @@ mod tests {
     #[test]
     fn focus_classification_uses_community_rule_reason_for_proton_game() {
         let classification = classify_process(&ProcessIdentity {
-            pid: 1600,
-            ppid: 1,
+            pid: 1600.into(),
+            ppid: 1.into(),
             comm: "KingdomCome",
             cmdline: "/home/me/.steam/steamapps/compatdata/379430/pfx/drive_c/KingdomCome.exe --game",
             exe_path: Some("/usr/bin/wine"),
@@ -89,8 +89,8 @@ mod tests {
     #[test]
     fn focus_ambiguous_exe_without_context_is_not_game() {
         let classification = classify_process(&ProcessIdentity {
-            pid: 1601,
-            ppid: 1,
+            pid: 1601.into(),
+            ppid: 1.into(),
             comm: "build.exe",
             cmdline: "/tmp/build.exe --compile",
             exe_path: Some("/tmp/build.exe"),
@@ -104,8 +104,8 @@ mod tests {
     #[test]
     fn focus_hardcoded_audio_classification_wins_over_community_context() {
         let classification = classify_process(&ProcessIdentity {
-            pid: 1602,
-            ppid: 1,
+            pid: 1602.into(),
+            ppid: 1.into(),
             comm: "pipewire",
             cmdline: "/home/me/.steam/steamapps/compatdata/379430/pfx/drive_c/KingdomCome.exe",
             exe_path: Some("/home/me/.steam/steamapps/common/KingdomCome/KingdomCome.exe"),

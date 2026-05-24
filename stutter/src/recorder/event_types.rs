@@ -2,8 +2,13 @@ use std::borrow::Cow;
 
 use serde::{Deserialize, Serialize};
 use stutter_common::SchedulerEvent;
+use stutter_core::ids::{Pid, Tid};
 
 use crate::{metrics::TaskStats, process_tree::TaskClass};
+
+// These are recorder artifact DTOs, not the eBPF ring-buffer ABI. Keep field
+// names and JSON numeric shape stable; convert to raw u32 only at ABI,
+// procfs/syscall, or report-template boundaries.
 
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]
 pub struct FocusEvent {
@@ -11,8 +16,8 @@ pub struct FocusEvent {
     pub action: String,
     pub old_kind: Option<String>,
     pub kind: Option<String>,
-    pub root_pids: Vec<u32>,
-    pub member_pids: Vec<u32>,
+    pub root_pids: Vec<Pid>,
+    pub member_pids: Vec<Pid>,
     pub confidence: f32,
     pub score: f32,
     pub situation: Option<crate::autotune::state::SituationKind>,
@@ -23,9 +28,9 @@ pub struct FocusEvent {
 pub struct TreeEvent {
     pub elapsed_ms: u64,
     pub action: String,
-    pub tid: u32,
-    pub process_pid: u32,
-    pub process_ppid: u32,
+    pub tid: Tid,
+    pub process_pid: Pid,
+    pub process_ppid: Pid,
     pub comm: String,
     pub process_comm: String,
     pub class: TaskClass,
@@ -36,10 +41,10 @@ pub struct TreeEvent {
 pub struct SpikeEvent {
     #[serde(default)]
     pub elapsed_ms: Option<u64>,
-    pub task: u32,
+    pub task: Tid,
     pub active: bool,
     pub class: TaskClass,
-    pub process_pid: Option<u32>,
+    pub process_pid: Option<Pid>,
     pub process_comm: String,
     pub comm: String,
     pub cpu: u32,
@@ -50,7 +55,7 @@ pub struct SpikeEvent {
     pub wakeup_ns: u64,
     pub switch_ns: u64,
     #[serde(default)]
-    pub switch_prev_pid: u32,
+    pub switch_prev_pid: Tid,
     #[serde(default)]
     pub switch_prev_state: i64,
     #[serde(default)]
@@ -75,7 +80,7 @@ pub struct SpikeEvent {
     pub scx_enable_seq: Option<String>,
 
     #[serde(default)]
-    pub waker_tid: u32,
+    pub waker_tid: Tid,
     #[serde(default)]
     pub waker_comm: String,
 
@@ -89,7 +94,7 @@ pub struct SpikeEvent {
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]
 pub struct MigrationEventRecord {
     pub elapsed_ms: u64,
-    pub tid: u32,
+    pub tid: Tid,
     pub from_cpu: u32,
     pub to_cpu: u32,
     pub timestamp_ns: u64,
@@ -109,7 +114,7 @@ pub struct SpikeDiagnosticContext {
     pub scx_enable_seq: Option<String>,
     pub cause_tags: Vec<String>,
     pub primary_cause: Option<String>,
-    pub waker_tid: u32,
+    pub waker_tid: Tid,
     pub waker_comm: String,
 }
 
@@ -126,10 +131,10 @@ impl SpikeEvent {
                 monotonic_start_ns,
                 event.switch_ns,
             ),
-            task: stutter_core::ids::Tid::new(event.tid).as_u32(),
+            task: Tid::new(event.tid),
             active: stats.active,
             class: stats.class,
-            process_pid: stats.process_id().map(|pid| pid.as_u32()),
+            process_pid: stats.process_id(),
             process_comm: stats.process_comm.clone(),
             comm: stats.comm.clone(),
             cpu: event.cpu,
@@ -138,7 +143,7 @@ impl SpikeEvent {
             latency_ns: event.latency_ns,
             wakeup_ns: event.wakeup_ns,
             switch_ns: event.switch_ns,
-            switch_prev_pid: event.switch_prev_pid,
+            switch_prev_pid: Tid::new(event.switch_prev_pid),
             switch_prev_state: event.switch_prev_state,
             switch_prev_state_label: crate::sched_state::classify_switch_prev_state(
                 event.switch_prev_state,
@@ -198,7 +203,7 @@ pub struct FrameEvent {
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]
 pub struct BlockIoRecord {
     pub elapsed_ms: u64,
-    pub tid: u32,
+    pub tid: Tid,
     #[serde(default = "default_block_io_correlation_basis")]
     pub correlation_basis: Cow<'static, str>,
     pub dev: u32,
@@ -236,8 +241,8 @@ pub struct DrmFenceEventRecord {
     pub driver: Option<String>,
     pub card: Option<String>,
     pub gpu_role: Option<String>,
-    pub pid: Option<u32>,
-    pub tid: Option<u32>,
+    pub pid: Option<Pid>,
+    pub tid: Option<Tid>,
     pub comm: Option<String>,
     pub context: Option<u64>,
     pub seqno: Option<u64>,
@@ -351,7 +356,7 @@ pub struct GpuEngineSample {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub busy_percent: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub client_pid: Option<u32>,
+    pub client_pid: Option<Pid>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_comm: Option<String>,
     /// Sampling source: hwmon, pmu, fdinfo, debugfs
@@ -370,8 +375,8 @@ mod tests {
             action: "changed".to_owned(),
             old_kind: Some("Browser".to_owned()),
             kind: Some("Game".to_owned()),
-            root_pids: vec![10],
-            member_pids: vec![10, 11],
+            root_pids: vec![10.into()],
+            member_pids: vec![10.into(), 11.into()],
             confidence: 0.75,
             score: 0.82,
             situation: Some(crate::autotune::state::SituationKind::GameFocused),
@@ -394,7 +399,7 @@ mod tests {
     #[test]
     fn spike_event_defaults_switch_prev_fields_for_old_json() {
         let s = SpikeEvent {
-            task: 1,
+            task: 1.into(),
             class: crate::process_tree::TaskClass::Game,
             comm: "test".to_owned(),
             process_comm: "test".into(),
@@ -412,7 +417,7 @@ mod tests {
 
         let json = serde_json::to_string(&val).unwrap();
         let decoded: SpikeEvent = serde_json::from_str(&json).unwrap();
-        assert_eq!(decoded.switch_prev_pid, 0);
+        assert_eq!(decoded.switch_prev_pid, Tid::new(0));
         assert_eq!(decoded.switch_prev_state, 0);
         assert_eq!(decoded.switch_prev_state_label, "");
     }
@@ -422,10 +427,10 @@ mod tests {
         let mut buf = crate::recorder::SpikeEventBuffer::with_max_events(1);
         let event = SpikeEvent {
             elapsed_ms: Some(0),
-            task: 1,
+            task: 1.into(),
             active: true,
             class: TaskClass::Unknown,
-            process_pid: Some(1),
+            process_pid: Some(1.into()),
             process_comm: "test".into(),
             comm: "test".to_owned(),
             latency_ns: 1000,
@@ -444,10 +449,10 @@ mod tests {
     fn test_spike_event_serialization() {
         let event = SpikeEvent {
             elapsed_ms: Some(100),
-            task: 123,
+            task: 123.into(),
             active: true,
             class: TaskClass::Game,
-            process_pid: Some(123),
+            process_pid: Some(123.into()),
             process_comm: "game".into(),
             comm: "game".to_owned(),
             cpu: 1,
@@ -484,10 +489,37 @@ mod tests {
     }
 
     #[test]
+    fn spike_event_typed_ids_preserve_legacy_numeric_json() {
+        let json = r#"{
+            "elapsed_ms": 1,
+            "task": 1234,
+            "active": true,
+            "class": "Game",
+            "process_pid": 1000,
+            "process_comm": "Game.exe",
+            "comm": "render",
+            "cpu": 2,
+            "prio": 120,
+            "latency_ns": 5000,
+            "wakeup_ns": 10,
+            "switch_ns": 20,
+            "target_pending_wakeups": 1
+        }"#;
+
+        let event: SpikeEvent = serde_json::from_str(json).unwrap();
+        assert_eq!(event.task, Tid::new(1234));
+        assert_eq!(event.process_pid, Some(Pid::new(1000)));
+
+        let encoded = serde_json::to_value(&event).unwrap();
+        assert_eq!(encoded["task"], 1234);
+        assert_eq!(encoded["process_pid"], 1000);
+    }
+
+    #[test]
     fn block_io_record_correlation_basis_serializes_as_string() {
         let record = BlockIoRecord {
             elapsed_ms: 1,
-            tid: 42,
+            tid: 42.into(),
             correlation_basis: Cow::Borrowed("dev+sector"),
             dev: 1,
             nr_sector: 8,

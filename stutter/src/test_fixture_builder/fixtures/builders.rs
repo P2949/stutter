@@ -67,10 +67,10 @@ pub(in crate::test_fixture_builder) fn spike_event(
     let switch_ns = 100_000_000 + offset_ns;
     SpikeEvent {
         elapsed_ms: Some(100),
-        task,
+        task: task.into(),
         active: true,
         class,
-        process_pid: Some(task),
+        process_pid: Some(task.into()),
         process_comm: comm.into(),
         comm: comm.to_owned(),
         cpu: 0,
@@ -79,7 +79,7 @@ pub(in crate::test_fixture_builder) fn spike_event(
         latency_ns,
         wakeup_ns: switch_ns.saturating_sub(latency_ns),
         switch_ns,
-        switch_prev_pid: 0,
+        switch_prev_pid: 0.into(),
         switch_prev_state: 0,
         switch_prev_state_label: "running".to_owned(),
         ..Default::default()
@@ -187,10 +187,18 @@ pub(in crate::test_fixture_builder) fn apply_spike_session_fields(
     spikes: &[SpikeEvent],
 ) {
     session.core.active_target_pids_count = spikes.len() as u64;
-    session.core.active_expanded_tasks = spikes.iter().map(|spike| spike.task).collect();
+    session.core.active_expanded_tasks = spikes.iter().map(|spike| spike.task.as_u32()).collect();
     session.tasks = spikes
         .iter()
-        .map(|spike| task_for_fixture(spike.task, spike.class, &spike.comm, 10, spike.latency_ns))
+        .map(|spike| {
+            task_for_fixture(
+                spike.task.as_u32(),
+                spike.class,
+                &spike.comm,
+                10,
+                spike.latency_ns,
+            )
+        })
         .collect();
 }
 

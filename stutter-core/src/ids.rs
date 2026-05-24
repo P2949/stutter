@@ -6,7 +6,17 @@ macro_rules! numeric_id {
     ($name:ident, $doc:literal) => {
         #[doc = $doc]
         #[derive(
-            Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize,
+            Clone,
+            Copy,
+            Debug,
+            Default,
+            Eq,
+            PartialEq,
+            Ord,
+            PartialOrd,
+            Hash,
+            Serialize,
+            Deserialize,
         )]
         #[serde(transparent)]
         pub struct $name(u32);

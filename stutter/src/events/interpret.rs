@@ -236,7 +236,7 @@ pub fn interpret_scheduler_event(input: SchedulerEventInput<'_>) -> SchedulerSam
                 scx_enable_seq: diagnostics.scx_enable_seq.map(str::to_owned),
                 cause_tags,
                 primary_cause,
-                waker_tid: event.waker_tid,
+                waker_tid: event.waker_tid.into(),
                 waker_comm,
             },
         );

@@ -442,7 +442,9 @@ pub fn cpu_affinity_profile_match(
     }
 
     for task in &planned_tasks {
-        let Some(current) = snapshot.affinity.per_tid.get(&task.tid) else {
+        let tid = task.tid.as_u32();
+
+        let Some(current) = snapshot.affinity.per_tid.get(&tid) else {
             return ActiveConfigMatch::Unknown {
                 summary: format!("tid={} active CPU affinity missing", task.tid),
             };

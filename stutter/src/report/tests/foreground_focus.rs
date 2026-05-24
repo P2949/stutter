@@ -666,8 +666,8 @@ fn focus_report_summary_prefers_latest_changed_focus_event() {
             kind: Some("Browser".to_owned()),
             confidence: 0.62,
             situation: Some(SituationKind::BrowserFocused),
-            root_pids: vec![111],
-            member_pids: vec![111, 112],
+            root_pids: vec![111.into()],
+            member_pids: vec![111.into(), 112.into()],
             reasons: vec!["browser parent with active renderer".to_owned()],
             ..Default::default()
         },
@@ -678,8 +678,8 @@ fn focus_report_summary_prefers_latest_changed_focus_event() {
             confidence: 0.87,
             score: 0.91,
             situation: Some(SituationKind::CompileLoad),
-            root_pids: vec![1234],
-            member_pids: vec![1234, 1235],
+            root_pids: vec![1234.into()],
+            member_pids: vec![1234.into(), 1235.into()],
             reasons: vec![
                 "cargo root with 14 active compiler descendants".to_owned(),
                 "linker/write IO evidence observed".to_owned(),

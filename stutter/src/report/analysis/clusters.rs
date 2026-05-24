@@ -148,9 +148,9 @@ pub(crate) fn flatten_spike_events(
     spike_events
         .iter()
         .map(|spike| SpikePoint {
-            task: spike.task,
+            task: spike.task.as_u32(),
             class: spike.class,
-            process_pid: spike.process_pid,
+            process_pid: spike.process_pid.map(|pid| pid.as_u32()),
             comm: spike.comm.clone(),
             cpu: spike.cpu,
             wakeup_target_cpu: spike.wakeup_target_cpu,
@@ -159,14 +159,14 @@ pub(crate) fn flatten_spike_events(
             switch_ns: spike.switch_ns,
             target_pending_wakeups: spike.target_pending_wakeups,
             observed_runnable_depth: spike.observed_runnable_depth,
-            switch_prev_pid: spike.switch_prev_pid,
+            switch_prev_pid: spike.switch_prev_pid.as_u32(),
             switch_prev_state: spike.switch_prev_state,
             switch_prev_state_label: classify_switch_prev_state(spike.switch_prev_state).to_owned(),
             elapsed_ms: elapsed_ms(session.core.monotonic_start_ns, spike.switch_ns)
                 .or(spike.elapsed_ms),
             scx_ops: spike.scx_ops.clone(),
             scx_state: spike.scx_state.clone(),
-            waker_tid: spike.waker_tid,
+            waker_tid: spike.waker_tid.as_u32(),
             waker_comm: spike.waker_comm.clone(),
             cause_tags: spike.cause_tags.clone(),
             primary_cause: spike.primary_cause.clone(),

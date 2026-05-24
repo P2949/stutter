@@ -80,7 +80,7 @@ pub async fn apply_low_risk_command(
 
     run_washout_for_action(
         &action,
-        action.tree_pid,
+        action.tree_pid.into(),
         WashoutWindowConfig::default()
             .with_washout(input.washout_seconds, input.washout_verify_interval_ms),
     )

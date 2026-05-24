@@ -54,10 +54,10 @@ mod enabled {
             Self {
                 wakeup_ns: spike.wakeup_ns,
                 switch_ns: spike.switch_ns,
-                task_tid: spike.task,
+                task_tid: spike.task.as_u32(),
                 task_comm: spike.comm.clone(),
                 task_class: spike.class.to_string(),
-                process_pid: spike.process_pid.unwrap_or(0),
+                process_pid: spike.process_pid.map(|pid| pid.as_u32()).unwrap_or(0),
                 process_comm: spike.process_comm.clone(),
                 cpu: spike.cpu,
                 wakeup_target_cpu: spike.wakeup_target_cpu,
