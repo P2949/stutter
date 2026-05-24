@@ -35,29 +35,9 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
         reason: "temporary extraction stage: owns monitor CLI args/defaults/merge/validation logic; DMABUF, GPU-engine, and live-diagnosis tuning flags are staged here until cli/monitor/args.rs exists",
     },
     OversizedRustFileAllowance {
-        path: "src/session/monitor_session.rs",
-        max_lines: 1_545,
-        reason: "temporary extraction stage: owns MonitorSession run loop and remaining tick handlers after facade split; DMABUF and GPU-engine ingestion are staged here until display-path tick handling is split",
-    },
-    OversizedRustFileAllowance {
         path: "src/report/render/text.rs",
         max_lines: 1_207,
         reason: "existing text report renderer pending future split",
-    },
-    OversizedRustFileAllowance {
-        path: "src/cli/report.rs",
-        max_lines: 1_546,
-        reason: "existing report CLI argument surface pending future split; display-path compare strict/expect parsing and rules Args-to-Input conversion are staged here",
-    },
-    OversizedRustFileAllowance {
-        path: "src/tune/mod.rs",
-        max_lines: 1_349,
-        reason: "Legacy tuning orchestration pending split into data collection / evaluation; raw-score compatibility aliases are staged here until tune model extraction",
-    },
-    OversizedRustFileAllowance {
-        path: "src/metrics.rs",
-        max_lines: 1_264,
-        reason: "existing metrics model and tests pending future split; PSI delta and fallback-collision counter fields are staged here",
     },
     OversizedRustFileAllowance {
         path: "src/recorder/session.rs",

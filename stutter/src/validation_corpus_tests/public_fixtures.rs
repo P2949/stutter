@@ -64,5 +64,5 @@ fn validation_corpus_community_rules_classification() {
         .expect("missing community-classified task");
 
     assert_eq!(task.class, crate::process_tree::TaskClass::Game);
-    assert_eq!(task.process_comm.as_ref(), "community-game");
+    assert_eq!(task.process_comm.as_str(), "community-game");
 }

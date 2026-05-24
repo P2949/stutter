@@ -15,7 +15,7 @@ use stutter_common::{
     DRM_FENCE_EVENT_WAIT_DONE, DRM_FENCE_EVENT_WAIT_INTERVAL, DRM_FENCE_HAS_CONTEXT,
     DRM_FENCE_HAS_DURATION, DRM_FENCE_HAS_PID, DRM_FENCE_HAS_SEQNO, DRM_FENCE_HAS_TIMELINE,
     DRM_FENCE_IS_EXPORTER_SIDE, DRM_FENCE_IS_IMPORTER_SIDE, DROP_COUNTERS_MAX,
-    DROP_CPU_ACCOUNTING_UNTRACKED, DROP_IRQ_START_TIMES_INSERT_FAILED, DROP_RINGBUF_RESERVE_FAILED,
+    DROP_CPU_ACCOUNTING_UNTRACKED, DROP_IRQ_START_TIMES_INSERT_FAILED,
     DROP_WAKEUP_DATA_CONSUMED_READ_FAILED, DROP_WAKEUP_DATA_INSERT_FAILED,
     DROP_WAKEUP_DATA_REPLACED_ENTRY, DROP_WAKEUP_DATA_STALE_ENTRY, DrmFenceEvent, EVENT_CPU_FREQ,
     EVENT_DRM_FENCE, EVENT_EXEC, EVENT_IRQ_LATENCY, EVENT_KMS_FLIP, EVENT_MIGRATION,
@@ -44,6 +44,18 @@ use stutter_common::{
 // 15. Tracepoint field readers
 // 16. License and panic handler
 
+macro_rules! emit_ringbuf_event {
+    ($event_ty:ty, $reserve_failed:expr, |$event:ident| $body:block) => {{
+        let Some(mut entry) = crate::EVENTS.reserve::<$event_ty>(0) else {
+            crate::increment_drop_counter(stutter_common::DROP_RINGBUF_RESERVE_FAILED);
+            $reserve_failed
+        };
+        let $event = entry.as_mut_ptr();
+        unsafe { $body }
+        entry.submit(0);
+    }};
+}
+
 mod block_io;
 mod map_limits;
 mod trace_offsets;
@@ -69,6 +81,11 @@ use wakeup_data::{
 // -----------------------------------------------------------------------------
 
 const _: () = assert!(BPF_MAX_TRACKED_CPUS >= 1024);
+const SCHED_SWITCH_PREV_PID_OFFSET: usize = 24;
+const SCHED_SWITCH_PREV_STATE_OFFSET: usize = 32;
+const SCHED_SWITCH_NEXT_COMM_OFFSET: usize = 40;
+const SCHED_SWITCH_NEXT_PID_OFFSET: usize = 56;
+const SCHED_SWITCH_NEXT_PRIO_OFFSET: usize = 60;
 
 // -----------------------------------------------------------------------------
 // BPF maps and shared state structs
@@ -222,20 +239,14 @@ fn try_sched_process_exec(_ctx: TracePointContext) -> u32 {
         return 0;
     }
 
-    if let Some(mut entry) = EVENTS.reserve::<ExecEvent>(0) {
-        let p = entry.as_mut_ptr();
-        unsafe {
-            (*p).kind = EVENT_EXEC;
-            (*p).pid = pid;
-            (*p).tid = tid;
-            if let Ok(comm) = aya_ebpf::helpers::bpf_get_current_comm() {
-                (*p).comm = comm;
-            }
+    emit_ringbuf_event!(ExecEvent, return 0, |event| {
+        (*event).kind = EVENT_EXEC;
+        (*event).pid = pid;
+        (*event).tid = tid;
+        if let Ok(comm) = aya_ebpf::helpers::bpf_get_current_comm() {
+            (*event).comm = comm;
         }
-        entry.submit(0);
-    } else {
-        increment_drop_counter(DROP_RINGBUF_RESERVE_FAILED);
-    }
+    });
 
     0
 }
@@ -545,7 +556,7 @@ fn try_sched_wakeup(ctx: TracePointContext) -> u32 {
 #[inline(always)]
 fn try_sched_switch(ctx: TracePointContext) -> u32 {
     let mut next_pid: i32 = 0;
-    if !read_i32(&ctx, 56, &mut next_pid) {
+    if !read_i32(&ctx, SCHED_SWITCH_NEXT_PID_OFFSET, &mut next_pid) {
         return 1;
     }
 
@@ -576,16 +587,16 @@ fn try_sched_switch(ctx: TracePointContext) -> u32 {
     // Wakeup data is marked consumed before slower tracepoint reads to avoid stale state.
 
     // Read the previous task context only after the cheap relevance filters pass.
-    // Offsets validated in userspace preflight assume prev_pid at 24 and prev_state at 32.
+    // Offsets are named above and validated in userspace preflight before load.
     let mut prev_pid_raw: i32 = 0;
-    if !read_i32(&ctx, 24, &mut prev_pid_raw) {
+    if !read_i32(&ctx, SCHED_SWITCH_PREV_PID_OFFSET, &mut prev_pid_raw) {
         increment_drop_counter(DROP_WAKEUP_DATA_CONSUMED_READ_FAILED);
         decrement_target_pending(wakeup_data.target_cpu);
         remove_runnable_task_if_present(pid);
         return 1;
     }
     let mut prev_state: i64 = 0;
-    if !read_i64(&ctx, 32, &mut prev_state) {
+    if !read_i64(&ctx, SCHED_SWITCH_PREV_STATE_OFFSET, &mut prev_state) {
         increment_drop_counter(DROP_WAKEUP_DATA_CONSUMED_READ_FAILED);
         decrement_target_pending(wakeup_data.target_cpu);
         remove_runnable_task_if_present(pid);
@@ -637,21 +648,15 @@ fn try_sched_switch(ctx: TracePointContext) -> u32 {
     };
 
     let mut prio: i32 = 0;
-    if !read_i32(&ctx, 60, &mut prio) {
+    if !read_i32(&ctx, SCHED_SWITCH_NEXT_PRIO_OFFSET, &mut prio) {
         return 1;
     }
     let mut comm: [u8; 16] = [0; 16];
-    if !read_comm16(&ctx, 40, &mut comm) {
+    if !read_comm16(&ctx, SCHED_SWITCH_NEXT_COMM_OFFSET, &mut comm) {
         return 1;
     }
 
-    let Some(mut entry) = EVENTS.reserve::<SchedulerEvent>(0) else {
-        increment_drop_counter(DROP_RINGBUF_RESERVE_FAILED);
-        return 0;
-    };
-    let event = entry.as_mut_ptr();
-
-    unsafe {
+    emit_ringbuf_event!(SchedulerEvent, return 0, |event| {
         (*event).kind = EVENT_RUNNABLE_LATENCY;
         (*event).tid = pid;
         (*event).cpu = cpu;
@@ -668,9 +673,7 @@ fn try_sched_switch(ctx: TracePointContext) -> u32 {
         (*event).comm = comm;
         (*event).switch_prev_pid = switch_prev_pid;
         (*event).switch_prev_state = prev_state;
-    }
-
-    entry.submit(0);
+    });
 
     0
 }
@@ -720,21 +723,13 @@ fn try_sched_migrate_task(ctx: TracePointContext) -> u32 {
         increment_target_pending(new_cpu);
     }
 
-    let Some(mut entry) = EVENTS.reserve::<MigrationEvent>(0) else {
-        increment_drop_counter(DROP_RINGBUF_RESERVE_FAILED);
-        return 0;
-    };
-    let event = entry.as_mut_ptr();
-
-    unsafe {
+    emit_ringbuf_event!(MigrationEvent, return 0, |event| {
         (*event).kind = EVENT_MIGRATION;
         (*event).tid = pid;
         (*event).from_cpu = orig_cpu as u32;
         (*event).to_cpu = dest_cpu as u32;
         (*event).timestamp_ns = now;
-    }
-
-    entry.submit(0);
+    });
 
     0
 }
@@ -751,21 +746,13 @@ fn try_cpu_frequency(ctx: TracePointContext) -> u32 {
     }
     let now = unsafe { bpf_ktime_get_ns() };
 
-    let Some(mut entry) = EVENTS.reserve::<CpuFreqEvent>(0) else {
-        increment_drop_counter(DROP_RINGBUF_RESERVE_FAILED);
-        return 0;
-    };
-    let event = entry.as_mut_ptr();
-
-    unsafe {
+    emit_ringbuf_event!(CpuFreqEvent, return 0, |event| {
         (*event).kind = EVENT_CPU_FREQ;
         (*event).cpu = cpu_id;
         (*event).state = state;
         (*event)._pad = 0;
         (*event).timestamp_ns = now;
-    }
-
-    entry.submit(0);
+    });
 
     0
 }
@@ -790,19 +777,11 @@ fn try_sched_stat_wait(ctx: TracePointContext) -> u32 {
         return 1;
     }
 
-    let Some(mut entry) = EVENTS.reserve::<StatWaitEvent>(0) else {
-        increment_drop_counter(DROP_RINGBUF_RESERVE_FAILED);
-        return 0;
-    };
-    let event = entry.as_mut_ptr();
-
-    unsafe {
+    emit_ringbuf_event!(StatWaitEvent, return 0, |event| {
         (*event).kind = EVENT_STAT_WAIT;
         (*event).tid = pid;
         (*event).delay_ns = delay;
-    }
-
-    entry.submit(0);
+    });
 
     0
 }
@@ -857,22 +836,14 @@ fn try_irq_handler_exit(ctx: TracePointContext) -> u32 {
     let exit_ns = unsafe { bpf_ktime_get_ns() };
     let duration_ns = exit_ns.saturating_sub(enter_ns);
 
-    let Some(mut entry) = EVENTS.reserve::<IrqEvent>(0) else {
-        increment_drop_counter(DROP_RINGBUF_RESERVE_FAILED);
-        return 0;
-    };
-    let event = entry.as_mut_ptr();
-
-    unsafe {
+    emit_ringbuf_event!(IrqEvent, return 0, |event| {
         (*event).kind = EVENT_IRQ_LATENCY;
         (*event).irq = irq;
         (*event).cpu = cpu;
         (*event).enter_ns = enter_ns;
         (*event).exit_ns = exit_ns;
         (*event).duration_ns = duration_ns;
-    }
-
-    entry.submit(0);
+    });
     0
 }
 
@@ -1024,7 +995,7 @@ fn try_kms_flip_done(
     provider_and_event_kind: u32,
     offset_pair: u64,
 ) -> u32 {
-    let provider = provider_and_event_kind >> 16;
+    let provider = KmsProvider::from_raw(provider_and_event_kind >> 16);
     let completion_event_kind = provider_and_event_kind & 0xffff;
     let crtc_offset = (offset_pair >> 32) as u32;
     let pipe_offset = offset_pair as u32;
@@ -1049,9 +1020,16 @@ fn try_kms_flip_done(
     };
     let _ = KMS_FLIP_STARTS.remove(key);
 
-    let (sequence_offset, sequence_size) = kms_sequence_offsets(provider, completion_event_kind);
     let mut sequence = 0;
-    let has_sequence = read_sequence_field(&ctx, sequence_offset, sequence_size, &mut sequence);
+    let mut sequence_offset = 0;
+    let mut sequence_size = 0;
+    let has_sequence =
+        kms_sequence_offsets(
+            provider,
+            completion_event_kind,
+            &mut sequence_offset,
+            &mut sequence_size,
+        ) && read_sequence_field(&ctx, sequence_offset, sequence_size, &mut sequence);
 
     emit_kms_flip_event(
         &key,
@@ -1070,37 +1048,73 @@ fn kms_offset_pair(crtc_offset: u32, pipe_offset: u32) -> u64 {
     ((crtc_offset as u64) << 32) | (pipe_offset as u64)
 }
 
-fn kms_sequence_offsets(provider: u32, completion_event_kind: u32) -> (u32, u32) {
-    if provider == KMS_FLIP_PROVIDER_I915 {
-        return (
-            unsafe { core::ptr::read_volatile(&raw const I915_FLIP_DONE_SEQUENCE_OFFSET) },
-            unsafe { core::ptr::read_volatile(&raw const I915_FLIP_DONE_SEQUENCE_SIZE) },
-        );
-    }
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum KmsProvider {
+    I915,
+    Drm,
+    Amdgpu,
+    Unknown,
+}
 
-    if provider == KMS_FLIP_PROVIDER_DRM {
-        if completion_event_kind == KMS_FLIP_EVENT_VBLANK {
-            return (
-                unsafe { core::ptr::read_volatile(&raw const DRM_VBLANK_SEQUENCE_OFFSET) },
-                unsafe { core::ptr::read_volatile(&raw const DRM_VBLANK_SEQUENCE_SIZE) },
-            );
+impl KmsProvider {
+    #[inline(always)]
+    fn from_raw(provider: u32) -> Self {
+        if provider == KMS_FLIP_PROVIDER_I915 {
+            Self::I915
+        } else if provider == KMS_FLIP_PROVIDER_DRM {
+            Self::Drm
+        } else if provider == KMS_FLIP_PROVIDER_AMDGPU {
+            Self::Amdgpu
+        } else {
+            Self::Unknown
         }
-        return (
-            unsafe { core::ptr::read_volatile(&raw const DRM_FLIP_DONE_SEQUENCE_OFFSET) },
-            unsafe { core::ptr::read_volatile(&raw const DRM_FLIP_DONE_SEQUENCE_SIZE) },
-        );
     }
+}
 
-    if completion_event_kind == KMS_FLIP_EVENT_VBLANK {
-        (
-            unsafe { core::ptr::read_volatile(&raw const AMDGPU_VBLANK_SEQUENCE_OFFSET) },
-            unsafe { core::ptr::read_volatile(&raw const AMDGPU_VBLANK_SEQUENCE_SIZE) },
-        )
-    } else {
-        (
-            unsafe { core::ptr::read_volatile(&raw const AMDGPU_FLIP_DONE_SEQUENCE_OFFSET) },
-            unsafe { core::ptr::read_volatile(&raw const AMDGPU_FLIP_DONE_SEQUENCE_SIZE) },
-        )
+#[inline(always)]
+fn kms_sequence_offsets(
+    provider: KmsProvider,
+    completion_event_kind: u32,
+    sequence_offset: &mut u32,
+    sequence_size: &mut u32,
+) -> bool {
+    match (provider, completion_event_kind) {
+        (KmsProvider::I915, KMS_FLIP_EVENT_PAGEFLIP_DONE) => {
+            *sequence_offset =
+                unsafe { core::ptr::read_volatile(&raw const I915_FLIP_DONE_SEQUENCE_OFFSET) };
+            *sequence_size =
+                unsafe { core::ptr::read_volatile(&raw const I915_FLIP_DONE_SEQUENCE_SIZE) };
+            true
+        }
+        (KmsProvider::Drm, KMS_FLIP_EVENT_VBLANK) => {
+            *sequence_offset =
+                unsafe { core::ptr::read_volatile(&raw const DRM_VBLANK_SEQUENCE_OFFSET) };
+            *sequence_size =
+                unsafe { core::ptr::read_volatile(&raw const DRM_VBLANK_SEQUENCE_SIZE) };
+            true
+        }
+        (KmsProvider::Drm, KMS_FLIP_EVENT_PAGEFLIP_DONE) => {
+            *sequence_offset =
+                unsafe { core::ptr::read_volatile(&raw const DRM_FLIP_DONE_SEQUENCE_OFFSET) };
+            *sequence_size =
+                unsafe { core::ptr::read_volatile(&raw const DRM_FLIP_DONE_SEQUENCE_SIZE) };
+            true
+        }
+        (KmsProvider::Amdgpu, KMS_FLIP_EVENT_VBLANK) => {
+            *sequence_offset =
+                unsafe { core::ptr::read_volatile(&raw const AMDGPU_VBLANK_SEQUENCE_OFFSET) };
+            *sequence_size =
+                unsafe { core::ptr::read_volatile(&raw const AMDGPU_VBLANK_SEQUENCE_SIZE) };
+            true
+        }
+        (KmsProvider::Amdgpu, KMS_FLIP_EVENT_PAGEFLIP_DONE) => {
+            *sequence_offset =
+                unsafe { core::ptr::read_volatile(&raw const AMDGPU_FLIP_DONE_SEQUENCE_OFFSET) };
+            *sequence_size =
+                unsafe { core::ptr::read_volatile(&raw const AMDGPU_FLIP_DONE_SEQUENCE_SIZE) };
+            true
+        }
+        _ => false,
     }
 }
 
@@ -1211,12 +1225,6 @@ fn try_drm_fence_wait_done(ctx: TracePointContext) -> u32 {
     let signal = unsafe { FENCE_SIGNAL_TIMES.get(identity.key).copied() };
     let _ = FENCE_SIGNAL_TIMES.remove(identity.key);
 
-    let Some(mut entry) = EVENTS.reserve::<DrmFenceEvent>(0) else {
-        increment_drop_counter(DROP_RINGBUF_RESERVE_FAILED);
-        return 0;
-    };
-    let event = entry.as_mut_ptr();
-
     let (
         event_kind,
         wait_start_ns,
@@ -1273,7 +1281,7 @@ fn try_drm_fence_wait_done(ctx: TracePointContext) -> u32 {
         ),
     };
 
-    unsafe {
+    emit_ringbuf_event!(DrmFenceEvent, return 0, |event| {
         (*event).kind = EVENT_DRM_FENCE;
         (*event).event_kind = event_kind;
         (*event).provider = provider;
@@ -1291,9 +1299,7 @@ fn try_drm_fence_wait_done(ctx: TracePointContext) -> u32 {
         (*event).signal_ns = signal_ns;
         (*event).duration_ns = duration_ns;
         (*event).timestamp_ns = now;
-    }
-
-    entry.submit(0);
+    });
     0
 }
 
@@ -1337,12 +1343,7 @@ fn try_drm_fence_signal(ctx: TracePointContext) -> u32 {
         0,
     );
 
-    let Some(mut entry) = EVENTS.reserve::<DrmFenceEvent>(0) else {
-        increment_drop_counter(DROP_RINGBUF_RESERVE_FAILED);
-        return 0;
-    };
-    let event = entry.as_mut_ptr();
-    unsafe {
+    emit_ringbuf_event!(DrmFenceEvent, return 0, |event| {
         (*event).kind = EVENT_DRM_FENCE;
         (*event).event_kind = DRM_FENCE_EVENT_SIGNAL;
         (*event).provider = provider;
@@ -1360,8 +1361,7 @@ fn try_drm_fence_signal(ctx: TracePointContext) -> u32 {
         (*event).signal_ns = now;
         (*event).duration_ns = 0;
         (*event).timestamp_ns = now;
-    }
-    entry.submit(0);
+    });
 
     0
 }
@@ -1423,12 +1423,6 @@ fn emit_kms_flip_event(
     start_ns: u64,
     done_ns: u64,
 ) {
-    let Some(mut entry) = EVENTS.reserve::<KmsFlipEvent>(0) else {
-        increment_drop_counter(DROP_RINGBUF_RESERVE_FAILED);
-        return;
-    };
-
-    let event = entry.as_mut_ptr();
     let duration_ns = if has_start_ns {
         done_ns.saturating_sub(start_ns)
     } else {
@@ -1446,7 +1440,7 @@ fn emit_kms_flip_event(
         flags |= KMS_FLIP_HAS_SEQUENCE;
     }
 
-    unsafe {
+    emit_ringbuf_event!(KmsFlipEvent, return, |event| {
         (*event).kind = EVENT_KMS_FLIP;
         let provider = provider_and_event_kind >> 16;
         let completion_event_kind = provider_and_event_kind & 0xffff;
@@ -1469,9 +1463,7 @@ fn emit_kms_flip_event(
         (*event).done_ns = done_ns;
         (*event).duration_ns = duration_ns;
         (*event).timestamp_ns = done_ns;
-    }
-
-    entry.submit(0);
+    });
 }
 
 // -----------------------------------------------------------------------------
