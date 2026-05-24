@@ -395,7 +395,7 @@ fn daemon_target_from_snapshot(
     let comm = active_targets
         .values()
         .next()
-        .map(|task| task.process_comm.to_string());
+        .map(|task| task.process_comm.clone());
 
     root_pid.map(|root_pid| DaemonTargetState {
         root_pid: Some(root_pid),
@@ -484,7 +484,7 @@ fn replace_degraded_status(statuses: &mut Vec<DaemonDegradedStatus>, status: Dae
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::BTreeMap, sync::Arc};
+    use std::collections::BTreeMap;
 
     use super::*;
     use crate::{
@@ -814,7 +814,7 @@ mod tests {
             process_pid,
             process_ppid: 1,
             comm: comm.to_owned(),
-            process_comm: Arc::<str>::from(comm),
+            process_comm: comm.to_owned(),
             process_starttime_ticks: Some(100),
             task_starttime_ticks: Some(100 + u64::from(tid)),
             exe_dev: None,

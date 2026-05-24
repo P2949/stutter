@@ -28,63 +28,7 @@ pub(in crate::architecture_tests) struct ExistingDirectPrintAllowance {
 }
 
 pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
-    &[OversizedRustFileAllowance] = &[
-    OversizedRustFileAllowance {
-        path: "src/cli/monitor.rs",
-        max_lines: 1_308,
-        reason: "temporary extraction stage: owns monitor CLI args/defaults/merge/validation logic; DMABUF, GPU-engine, and live-diagnosis tuning flags are staged here until cli/monitor/args.rs exists",
-    },
-    OversizedRustFileAllowance {
-        path: "src/report/render/text.rs",
-        max_lines: 1_207,
-        reason: "existing text report renderer pending future split",
-    },
-    OversizedRustFileAllowance {
-        path: "src/recorder/session.rs",
-        max_lines: 1_010,
-        reason: "existing recorder session writer implementation pending future split; display metadata capture is staged here",
-    },
-    OversizedRustFileAllowance {
-        path: "src/cli/mod.rs",
-        max_lines: 1_089,
-        reason: "existing top-level CLI parser implementation pending future split; Clap command tree, compare expect/strict command coverage, dry-run-all-safe parsing, and agent Unix socket cap/timeout validation are staged here",
-    },
-    OversizedRustFileAllowance {
-        path: "src/actions/cpu_power.rs",
-        max_lines: 1_032,
-        reason: "existing CPU power action implementation pending future split; rollback handler registration, medium-risk EPP classification, and policy-backed factory execution are staged here",
-    },
-    OversizedRustFileAllowance {
-        path: "src/actions/gpu_power.rs",
-        max_lines: 1_060,
-        reason: "existing GPU power action implementation pending future split; rollback handler registration and medium-risk profile classification are staged here",
-    },
-    OversizedRustFileAllowance {
-        path: "src/actions/ioprio.rs",
-        max_lines: 1_080,
-        reason: "existing I/O priority action implementation pending future split; transactional apply now prebuilds restore records before mutation and rollback verifies task identity plus best-effort write errors before restore",
-    },
-    OversizedRustFileAllowance {
-        path: "src/autotune/runtime/tests.rs",
-        max_lines: 1_147,
-        reason: "Extensive lifecycle integration tests",
-    },
-    OversizedRustFileAllowance {
-        path: "src/actions/uclamp.rs",
-        max_lines: 1_178,
-        reason: "existing uclamp action implementation pending future split; transactional apply now prebuilds restore records before mutation and rollback verifies task identity plus best-effort write errors before restore",
-    },
-    OversizedRustFileAllowance {
-        path: "src/actions/vm_knobs.rs",
-        max_lines: 1_133,
-        reason: "existing VM knob action implementation pending future split; rollback handler registration, safe-value medium-risk guards, and executable plan serialization are staged here",
-    },
-    OversizedRustFileAllowance {
-        path: "src/doctor.rs",
-        max_lines: 1_114,
-        reason: "doctor command still owns broad diagnostic orchestration; eBPF map sizing was split to doctor/ebpf_map_sizing.rs",
-    },
-];
+    &[OversizedRustFileAllowance] = &[];
 
 pub(in crate::architecture_tests) fn allowlisted_file_size(
     path: &str,

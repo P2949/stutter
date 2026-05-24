@@ -113,7 +113,7 @@ pub(crate) fn task_html_row(task: &SessionTask) -> TaskHtmlRow {
         active: task.active,
         class: task.class,
         process_pid: task.process_pid,
-        process_comm: task.process_comm.to_string(),
+        process_comm: task.process_comm.clone(),
         comm: task.comm.clone(),
         samples: task.latency.samples,
         spike_count: task.latency.over_1ms,

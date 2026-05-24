@@ -96,7 +96,7 @@ pub(crate) fn top_runtime_threads(
             process_pid: record.process_pid,
             class: record.class,
             comm: record.comm.clone(),
-            process_comm: record.process_comm.to_string(),
+            process_comm: record.process_comm.clone(),
             max_runtime_ratio: record.runtime_ratio.unwrap_or(0.0),
             max_wait_ratio: record.wait_ratio,
             max_runtime_delta_ns: record.runtime_delta_ns,

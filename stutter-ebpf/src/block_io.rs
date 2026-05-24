@@ -152,16 +152,20 @@ pub(crate) fn try_block_rq_complete(ctx: TracePointContext) -> u32 {
         [0u8; 8]
     };
 
-    emit_ringbuf_event!(BlockIoEvent, return 0, |event| {
-        (*event).kind = EVENT_BLOCK_IO;
-        (*event).tid = start.tid;
-        (*event).dev = dev;
-        (*event).nr_sector = nr_sector;
-        (*event).sector = sector;
-        (*event).duration_ns = duration_ns;
-        (*event).timestamp_ns = now;
-        (*event).rwbs = rwbs;
-    });
+    emit_ringbuf_event!(
+        BlockIoEvent,
+        return 0,
+        BlockIoEvent {
+            kind: EVENT_BLOCK_IO,
+            tid: start.tid,
+            dev,
+            nr_sector,
+            sector,
+            duration_ns,
+            timestamp_ns: now,
+            rwbs,
+        }
+    );
 
     0
 }

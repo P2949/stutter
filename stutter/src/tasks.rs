@@ -128,7 +128,7 @@ impl TaskTracker {
         }
 
         for (action, task) in diffs {
-            let tid = task.tid;
+            let tid = task.task_id().as_u32();
             match action {
                 TargetDiffAction::Added => {
                     input.target_pid_map.insert(tid, 1, 0)?;
@@ -143,10 +143,10 @@ impl TaskTracker {
                         elapsed_ms: input.elapsed_ms,
                         action: action_name.to_owned(),
                         tid,
-                        process_pid: task.process_pid,
-                        process_ppid: task.process_ppid,
+                        process_pid: task.process_id().as_u32(),
+                        process_ppid: task.parent_process_id().as_u32(),
                         comm: task.comm.clone(),
-                        process_comm: task.process_comm.to_string(),
+                        process_comm: task.process_comm.clone(),
                         class: task.class,
                         from_cgroup: task.from_cgroup,
                     });
@@ -175,10 +175,10 @@ impl TaskTracker {
                         elapsed_ms: input.elapsed_ms,
                         action: action_name.to_owned(),
                         tid,
-                        process_pid: task.process_pid,
-                        process_ppid: task.process_ppid,
+                        process_pid: task.process_id().as_u32(),
+                        process_ppid: task.parent_process_id().as_u32(),
                         comm: task.comm.clone(),
-                        process_comm: task.process_comm.to_string(),
+                        process_comm: task.process_comm.clone(),
                         class: task.class,
                         from_cgroup: task.from_cgroup,
                     });
@@ -230,10 +230,10 @@ impl TaskTracker {
                     elapsed_ms,
                     action: "replaced".to_owned(),
                     tid: *tid,
-                    process_pid: desired.process_pid,
-                    process_ppid: desired.process_ppid,
+                    process_pid: desired.process_id().as_u32(),
+                    process_ppid: desired.parent_process_id().as_u32(),
                     comm: desired.comm.clone(),
-                    process_comm: desired.process_comm.to_string(),
+                    process_comm: desired.process_comm.clone(),
                     class: desired.class,
                     from_cgroup: desired.from_cgroup,
                 });

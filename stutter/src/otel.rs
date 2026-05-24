@@ -58,7 +58,7 @@ mod enabled {
                 task_comm: spike.comm.clone(),
                 task_class: spike.class.to_string(),
                 process_pid: spike.process_pid.unwrap_or(0),
-                process_comm: spike.process_comm.to_string(),
+                process_comm: spike.process_comm.clone(),
                 cpu: spike.cpu,
                 wakeup_target_cpu: spike.wakeup_target_cpu,
                 latency_ns: spike.latency_ns,

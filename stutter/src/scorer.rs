@@ -190,7 +190,7 @@ mod tests {
             active: true,
             class: TaskClass::Game,
             comm: "game".into(),
-            process_pid: Some(1), // This is a u32, not Arc<str>
+            process_pid: Some(1),
             process_comm: "game".into(),
             samples: 1,
             stored_samples: 1,

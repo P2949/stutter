@@ -29,6 +29,7 @@ mod retention;
 mod session;
 mod session_files;
 mod spike_buffer;
+mod sync_tracker;
 mod writers;
 
 pub const SESSION_SCHEMA_VERSION: u32 = 22;
@@ -56,9 +57,8 @@ pub(crate) use session::monotonic_now_ns;
 pub(crate) use session::saturating_u128_to_u64;
 // Re-export from session.rs - these were pub in the original recorder.rs
 pub use session::{
-    CpuPerfStatus, FinalizeRecordingInput, RecordingRun, SyncTracker, finalize_recording,
-    prepare_recording, print_recording_warnings, recorded_config, recorded_time,
-    recording_warnings,
+    CpuPerfStatus, FinalizeRecordingInput, RecordingRun, finalize_recording, prepare_recording,
+    print_recording_warnings, recorded_config, recorded_time, recording_warnings,
 };
 // Re-export from session_files.rs - these were pub in the original recorder.rs
 #[cfg(test)]
@@ -70,6 +70,7 @@ pub use session_files::{
 };
 // Re-export from spike_buffer.rs - these were pub in the original recorder.rs
 pub use spike_buffer::{MAX_SPIKE_EVENTS, SpikeEventBuffer, SpikePushResult};
+pub use sync_tracker::SyncTracker;
 // Re-export test helper
 #[cfg(test)]
 pub use writers::write_interval_csv;

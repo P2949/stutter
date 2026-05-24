@@ -429,7 +429,7 @@ fn task_info_from_session_task(task: &SessionTask) -> TaskInfo {
         process_pid: task.process_pid.unwrap_or(task.task),
         process_ppid: 0,
         comm: task.comm.clone(),
-        process_comm: task.process_comm.clone().into(),
+        process_comm: task.process_comm.clone(),
         process_starttime_ticks: task.process_starttime_ticks,
         task_starttime_ticks: task.task_starttime_ticks,
         exe_dev: task.exe_dev,

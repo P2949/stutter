@@ -31,9 +31,10 @@ fn ebpf_main_keeps_extracted_layout_helpers_out_of_entrypoint_file() {
 
     assert!(
         main.contains("mod block_io;")
+            && main.contains("mod kms_emit;")
             && main.contains("mod trace_offsets;")
             && main.contains("mod trace_read;"),
-        "stutter-ebpf/src/main.rs must keep block I/O, tracepoint offset globals, and field readers in helper modules",
+        "stutter-ebpf/src/main.rs must keep block I/O, KMS event emission, tracepoint offset globals, and field readers in helper modules",
     );
     assert!(
         !main.contains("static mut BLOCK_RQ_KEY_OFFSET"),
@@ -52,6 +53,10 @@ fn ebpf_main_keeps_extracted_layout_helpers_out_of_entrypoint_file() {
         "block_io.rs should stay a focused block request correlation module",
     );
     assert!(
+        line_count("kms_emit.rs") <= 120,
+        "kms_emit.rs should stay a focused KMS flip event emission module",
+    );
+    assert!(
         line_count("trace_offsets.rs") <= 160,
         "trace_offsets.rs should stay a small offset/export table",
     );
@@ -63,7 +68,7 @@ fn ebpf_main_keeps_extracted_layout_helpers_out_of_entrypoint_file() {
 
 #[test]
 fn ebpf_helpers_do_not_return_aggregate_shapes() {
-    for relative_path in ["main.rs", "block_io.rs", "trace_read.rs"] {
+    for relative_path in ["main.rs", "block_io.rs", "kms_emit.rs", "trace_read.rs"] {
         let source = ebpf_source(relative_path);
 
         assert!(
@@ -75,4 +80,22 @@ fn ebpf_helpers_do_not_return_aggregate_shapes() {
             "eBPF helper functions in {relative_path} must not return Option; use bool plus out-parameters instead",
         );
     }
+}
+
+#[test]
+fn ebpf_ringbuf_events_are_emitted_from_struct_literals() {
+    for relative_path in ["main.rs", "block_io.rs", "kms_emit.rs"] {
+        let source = ebpf_source(relative_path);
+
+        assert!(
+            !source.contains("(*event)."),
+            "eBPF event emission in {relative_path} must build a complete event value and submit it through emit_ringbuf_event!, not mutate raw event pointers field-by-field",
+        );
+    }
+
+    let main = ebpf_source("main.rs");
+    assert!(
+        main.contains("core::ptr::write(entry.as_mut_ptr(), $event)"),
+        "emit_ringbuf_event! must keep the single raw ring-buffer write site centralized",
+    );
 }
