@@ -12,89 +12,9 @@ use std::{
 use super::*;
 use crate::{
     config::model::MonitorConfig,
-    ebpf::{
-        attach::{AttachOps, FaultPerfProbe, attach_kms_tracepoints},
-        load::{
-            attach_optional_scheduler_tracepoints, attach_required_scheduler_tracepoints,
-            map_init_context, missing_map_context,
-        },
-        preflight::TracepointAvailability,
-    },
-    probe_activation::ProbeActivationPlan,
+    ebpf::load::{map_init_context, missing_map_context},
     session::targeting::TargetPolicy,
 };
-
-#[derive(Default)]
-struct FakeAttachOps {
-    fail_program: Option<&'static str>,
-    tracepoint_calls: Vec<(&'static str, String, String)>,
-    perf_calls: Vec<(&'static str, FaultPerfProbe)>,
-}
-
-impl FakeAttachOps {
-    fn fail_program(program: &'static str) -> Self {
-        Self {
-            fail_program: Some(program),
-            ..Self::default()
-        }
-    }
-}
-
-impl AttachOps for FakeAttachOps {
-    fn attach_tracepoint(
-        &mut self,
-        program_name: &'static str,
-        category: &str,
-        tracepoint_name: &str,
-    ) -> anyhow::Result<()> {
-        self.tracepoint_calls.push((
-            program_name,
-            category.to_owned(),
-            tracepoint_name.to_owned(),
-        ));
-
-        if self.fail_program == Some(program_name) {
-            anyhow::bail!("{program_name} failed for test");
-        }
-
-        Ok(())
-    }
-
-    fn attach_perf_event(
-        &mut self,
-        program_name: &'static str,
-        probe: FaultPerfProbe,
-    ) -> anyhow::Result<()> {
-        self.perf_calls.push((program_name, probe));
-
-        if self.fail_program == Some(program_name) {
-            anyhow::bail!("{program_name} failed for test");
-        }
-
-        Ok(())
-    }
-}
-
-fn attach_test_tracepoints() -> TracepointAvailability {
-    TracepointAvailability {
-        sched_wakeup_new: true,
-        sched_migrate_task: true,
-        cpu_frequency: false,
-        sched_stat_wait: false,
-        irq_handler: false,
-        block_rq: false,
-        block_rq_has_rwbs: false,
-        block_rq_key_offset: None,
-        block_rq_issue_nr_sector_offset: None,
-        block_rq_issue_rwbs_offset: None,
-        block_rq_complete_nr_sector_offset: None,
-        block_rq_complete_rwbs_offset: None,
-        kms: crate::drm_tracepoints::KmsTracepointAvailability::unavailable(),
-        drm_fence: None,
-        sched_process_exit: true,
-        sched_process_exec: true,
-    }
-}
 
 #[test]
 fn parses_tracepoint_field_offsets() {
@@ -287,99 +207,6 @@ field:long prev_state; offset:32; size:8; signed:1;
 }
 
 #[test]
-fn loader_overrides_wakeup_data_and_consumed_cursor_maps_together() {
-    let source = include_str!("../../ebpf/load.rs");
-
-    assert!(source.contains("map_max_entries(\"WAKEUP_DATA\", map_sizing.wakeup_data_entries)"));
-    assert!(
-        source.contains("map_max_entries(\"WAKEUP_CONSUMED\", map_sizing.wakeup_data_entries)")
-    );
-}
-
-#[test]
-fn scheduler_optional_tracepoint_attach_failures_degrade_through_activation_warnings() {
-    let source = include_str!("../../ebpf/load.rs");
-
-    for program in [
-        "sched_wakeup_new",
-        "sched_process_exit",
-        "sched_migrate_task",
-    ] {
-        let marker = format!("\"{program}\"");
-        let start = source
-            .find(&marker)
-            .unwrap_or_else(|| panic!("{program} attach block not found"));
-        let end = source.len().min(start + 1_200);
-        let body = &source[start..end];
-
-        assert!(body.contains("activation_plan.push_tracepoint_attach_warning"));
-        assert!(body.contains("ProbeKey::SchedulerRunnableLatency"));
-        assert!(body.contains("optional_probe_attach_failed"));
-        assert!(!body.contains("context(\"eBPF load failed: attach"));
-    }
-}
-
-#[test]
-fn required_sched_wakeup_attach_failure_aborts_load_plan() {
-    let mut fake = FakeAttachOps::fail_program("sched_wakeup");
-
-    let err = attach_required_scheduler_tracepoints(&mut fake).unwrap_err();
-
-    assert!(err.to_string().contains("sched_wakeup"));
-    assert_eq!(fake.tracepoint_calls.len(), 1);
-    assert_eq!(fake.tracepoint_calls[0].0, "sched_wakeup");
-}
-
-#[test]
-fn optional_sched_wakeup_new_attach_failure_records_warning_and_continues() {
-    let config = MonitorConfig::default();
-    let mut plan = ProbeActivationPlan::from_config(&config, &attach_test_tracepoints()).unwrap();
-    let mut fake = FakeAttachOps::fail_program("sched_wakeup_new");
-
-    attach_optional_scheduler_tracepoints(&mut fake, &mut plan);
-
-    assert!(
-        fake.tracepoint_calls
-            .iter()
-            .any(|(program, _, _)| *program == "sched_process_exit"),
-    );
-    assert!(plan.warnings.iter().any(|warning| {
-        warning.message.contains("sched/sched_wakeup_new")
-            && warning.message.contains("sched_wakeup_new")
-    }));
-}
-
-#[test]
-fn kms_optional_attach_warning_names_actual_tracepoint() {
-    let mut plan =
-        ProbeActivationPlan::from_config(&MonitorConfig::default(), &attach_test_tracepoints())
-            .unwrap();
-    let kms = crate::drm_tracepoints::KmsTracepointAvailability {
-        pageflip_request: None,
-        pageflip_done: None,
-        vblank_event: Some(crate::drm_tracepoints::parse_drm_tracepoint_format(
-            "drm",
-            "drm_vblank_event",
-            "field:unsigned int crtc_id;\toffset:8;\tsize:4;\tsigned:0;\n",
-        )),
-        atomic_commit: None,
-        provider: crate::drm_tracepoints::KmsTracepointProvider::GenericDrm,
-        generic_drm: Vec::new(),
-        i915: Vec::new(),
-        amdgpu: Vec::new(),
-        warnings: Vec::new(),
-    };
-    let mut fake = FakeAttachOps::fail_program("drm_vblank_event");
-
-    attach_kms_tracepoints(&mut fake, &mut plan, &kms);
-
-    assert!(plan.warnings.iter().any(|warning| {
-        warning.message.contains("drm/drm_vblank_event")
-            && warning.message.contains("drm_vblank_event")
-    }));
-}
-
-#[test]
 fn map_initialization_context_names_missing_and_failed_maps() {
     assert_eq!(
         missing_map_context("EVENTS"),
@@ -395,9 +222,9 @@ fn map_initialization_context_names_missing_and_failed_maps() {
     );
 }
 
-#[test]
+#[tokio::test]
 #[ignore = "requires Linux tracefs and eBPF privileges"]
-fn load_and_attach_real_bpf_object_smoke_test() {
+async fn load_and_attach_real_bpf_object_smoke_test() {
     let config = MonitorConfig::default();
     let target_policy = TargetPolicy::from_monitor_config(&config).unwrap();
 

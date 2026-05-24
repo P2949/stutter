@@ -28,6 +28,16 @@ This repository uses `xtask` commands as the local development gate. Run them wi
    RUSTUP_TOOLCHAIN=nightly cargo run -p xtask -- preflight
    ```
 
+## Privileged eBPF smoke
+
+The normal `ci` and `validate` gates are non-root. For changes that affect eBPF loading, eBPF map names or types, tracepoint attach logic, or BPF object build/load behavior, also run the ignored privileged loader smoke test on a Linux machine with tracefs mounted and eBPF privileges:
+
+```sh
+sudo -E env PATH="$PATH" RUSTUP_TOOLCHAIN=nightly cargo run -p xtask -- privileged-ebpf-smoke
+```
+
+Run this before merging loader-sensitive changes. It intentionally stays outside the default validation flow because it requires kernel facilities and privileges that regular CI and local non-root checks should not assume.
+
 ## What the gates run
 
 `cargo run -p xtask -- ci` runs:
@@ -47,6 +57,12 @@ cargo test -p stutter architecture_tests
 
 ```text
 rustup run nightly cargo build -p stutter-ebpf -Z build-std=core --target bpfel-unknown-none
+```
+
+`cargo run -p xtask -- privileged-ebpf-smoke` first runs preflight, then builds the eBPF crate and runs:
+
+```text
+cargo test -p stutter ebpf_loader::tests::load_and_attach_real_bpf_object_smoke_test -- --ignored --exact --nocapture
 ```
 
 ## CI mapping

@@ -58,6 +58,14 @@ mod block_io_tracepoint_validation_tests;
 mod sched_wakeup_new_coverage_tests;
 
 #[cfg(test)]
+#[path = "ebpf/tests/load_plan.rs"]
+mod load_plan_tests;
+
+#[cfg(test)]
+#[path = "ebpf/tests/attach.rs"]
+mod attach_tests;
+
+#[cfg(test)]
 fn parse_tracepoint_offsets(format_content: &str) -> BTreeMap<String, TracepointField> {
     parse_tracepoint_format(PathBuf::from("tracepoint"), format_content).fields
 }
