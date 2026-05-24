@@ -5,7 +5,10 @@
 
 use std::path::Path;
 
-use crate::{config::model::MonitorConfig, session::targeting::TargetPolicy};
+use crate::{
+    config::{model::MonitorConfig, validation::validate_monitor_config},
+    session::targeting::TargetPolicy,
+};
 
 fn privileged_ebpf_tests_enabled() -> bool {
     std::env::var_os("STUTTER_RUN_PRIVILEGED_EBPF_TESTS").is_some()
@@ -87,7 +90,7 @@ async fn privileged_load_accepts_custom_map_sizing() -> anyhow::Result<()> {
 
     let mut config = MonitorConfig::default();
     config.ebpf_sizing.ringbuf_size_kb = Some(256);
-    config.ebpf_sizing.wakeup_map_factor = Some(256);
+    config.ebpf_sizing.wakeup_map_factor = Some(64);
     config.ebpf_sizing.target_irqs_entries = Some(128);
     config.ebpf_sizing.irq_start_entries = Some(4_096);
     config.ebpf_sizing.block_start_entries = Some(32_768);
@@ -95,7 +98,24 @@ async fn privileged_load_accepts_custom_map_sizing() -> anyhow::Result<()> {
     config.ebpf_sizing.drm_fence_wait_start_entries = Some(8_192);
     config.ebpf_sizing.drm_fence_signal_entries = Some(8_192);
 
+    validate_monitor_config(&config)?;
     load_attach_and_drop(&config)
+}
+
+#[test]
+fn privileged_custom_map_sizing_fixture_is_valid_monitor_config() {
+    let mut config = MonitorConfig::default();
+
+    config.ebpf_sizing.ringbuf_size_kb = Some(256);
+    config.ebpf_sizing.wakeup_map_factor = Some(64);
+    config.ebpf_sizing.target_irqs_entries = Some(128);
+    config.ebpf_sizing.irq_start_entries = Some(4_096);
+    config.ebpf_sizing.block_start_entries = Some(32_768);
+    config.ebpf_sizing.kms_flip_start_entries = Some(8_192);
+    config.ebpf_sizing.drm_fence_wait_start_entries = Some(8_192);
+    config.ebpf_sizing.drm_fence_signal_entries = Some(8_192);
+
+    validate_monitor_config(&config).unwrap();
 }
 
 #[tokio::test]
