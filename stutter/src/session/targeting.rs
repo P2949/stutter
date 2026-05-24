@@ -200,6 +200,10 @@ pub(crate) fn needs_tree_tick_from_parts(
     had_tree_roots || watch_process_active || cgroupv2_active
 }
 
+pub(crate) fn tree_tick_interval_ms(config: &MonitorConfig) -> u64 {
+    config.watch.poll_ms
+}
+
 fn foreground_capture_enabled(config: &MonitorConfig) -> bool {
     config.focus.foreground_window
         || (config.focus.auto_focus && config.focus.focus_source != FocusSource::Heuristic)
