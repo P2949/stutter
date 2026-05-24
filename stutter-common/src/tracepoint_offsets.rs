@@ -57,3 +57,18 @@ pub const SCHED_STAT_WAIT_FIELDS: &[(&str, usize)] = &[
 
 #[cfg(feature = "user")]
 pub const IRQ_HANDLER_FIELDS: &[(&str, usize)] = &[("irq", IRQ_HANDLER_IRQ_OFFSET)];
+
+pub const BLOCK_RQ_DEV_OFFSET: usize = 8;
+pub const BLOCK_RQ_SECTOR_OFFSET: usize = 16;
+
+pub const BLOCK_RQ_DEV_MIN_SIZE: u32 = 4;
+pub const BLOCK_RQ_SECTOR_MIN_SIZE: u32 = 8;
+pub const BLOCK_RQ_REQUEST_POINTER_MIN_SIZE: u32 = 8;
+pub const BLOCK_RQ_NR_SECTOR_MIN_SIZE: u32 = 4;
+pub const BLOCK_RQ_RWBS_MIN_SIZE: u32 = 8;
+
+#[cfg(feature = "user")]
+pub const BLOCK_RQ_REQUIRED_METADATA_FIELDS: &[(&str, usize, u32)] = &[
+    ("dev", BLOCK_RQ_DEV_OFFSET, BLOCK_RQ_DEV_MIN_SIZE),
+    ("sector", BLOCK_RQ_SECTOR_OFFSET, BLOCK_RQ_SECTOR_MIN_SIZE),
+];

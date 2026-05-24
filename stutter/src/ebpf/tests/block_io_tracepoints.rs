@@ -302,3 +302,36 @@ fn parse_tracepoint_format_extracts_field_size_offset_and_signed_flag() {
         })
     );
 }
+
+#[test]
+fn ebpf_block_io_uses_shared_fixed_metadata_offsets() {
+    let source = include_str!("../../../../stutter-ebpf/src/block_io.rs");
+
+    assert!(source.contains("BLOCK_RQ_DEV_OFFSET"));
+    assert!(source.contains("BLOCK_RQ_SECTOR_OFFSET"));
+
+    assert!(
+        !source.contains("read_u32(&ctx, 8, &mut dev)"),
+        "block_io eBPF must use BLOCK_RQ_DEV_OFFSET, not a raw dev offset"
+    );
+    assert!(
+        !source.contains("read_u64(&ctx, 16, &mut sector)"),
+        "block_io eBPF must use BLOCK_RQ_SECTOR_OFFSET, not a raw sector offset"
+    );
+}
+
+#[test]
+fn ebpf_block_io_complete_uses_loader_injected_nr_sector_offset() {
+    let source = include_str!("../../../../stutter-ebpf/src/block_io.rs");
+
+    assert!(source.contains("BLOCK_RQ_COMPLETE_NR_SECTOR_OFFSET"));
+    assert!(
+        !source.contains("read_u32(&ctx, 24, &mut nr_sector)"),
+        "block_rq_complete must not hardcode nr_sector at offset 24"
+    );
+    assert!(
+        source.contains("read_optional_u32(&ctx, nr_sector_offset)")
+            || source.contains("ctx.read_at::<u32>(nr_sector_offset as usize)"),
+        "block_rq_complete should read nr_sector through the complete tracepoint offset"
+    );
+}
