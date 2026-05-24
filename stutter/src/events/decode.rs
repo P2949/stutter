@@ -74,6 +74,7 @@ mod tests {
             latency_ns: 1000,
             comm: [0; 16],
             switch_prev_pid: 0,
+            _pad0: 0,
             switch_prev_state: 0,
         };
 

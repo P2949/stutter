@@ -58,6 +58,31 @@ pub(crate) const RUNNABLE_TASK_CPU_MAP_MAX_ENTRIES: u32 =
 pub(crate) const PREV_FAULTS_MAP_MAX_ENTRIES: u32 =
     TARGET_PIDS_MAP_MAX_ENTRIES * PREV_FAULTS_PER_TARGET_MULTIPLIER;
 
+/// Maximum cgroup ids accepted by the experimental native cgroup gate.
+///
+/// Native cgroup filtering is refused at runtime until cgroup-id resolution is
+/// verified, so this remains a small diagnostic/future-use capacity rather than
+/// a public tuning knob.
+pub(crate) const TARGET_CGROUP_IDS_MAP_MAX_ENTRIES: u32 = 64;
+
+/// Maximum IRQ numbers that can be allowlisted in the eBPF target IRQ map.
+pub(crate) const TARGET_IRQS_MAP_MAX_ENTRIES: u32 = 64;
+
+/// Number of in-flight IRQ handler entries tracked by IRQ/cpu key.
+pub(crate) const IRQ_START_TIMES_MAP_MAX_ENTRIES: u32 = 1_024;
+
+/// Number of in-flight block request starts retained for issue/complete matching.
+pub(crate) const BLOCK_START_MAP_MAX_ENTRIES: u32 = 16_384;
+
+/// Number of in-flight KMS flip request records retained for request/done matching.
+pub(crate) const KMS_FLIP_STARTS_MAP_MAX_ENTRIES: u32 = 4_096;
+
+/// Number of in-flight DRM fence wait-start records retained for wait interval matching.
+pub(crate) const FENCE_WAIT_STARTS_MAP_MAX_ENTRIES: u32 = 4_096;
+
+/// Number of recent DRM fence signal records retained for wait/signal correlation.
+pub(crate) const FENCE_SIGNAL_TIMES_MAP_MAX_ENTRIES: u32 = 4_096;
+
 const _: () = assert!(WAKEUP_DATA_MAP_MAX_ENTRIES >= TARGET_PIDS_MAP_MAX_ENTRIES * 128);
 const _: () = assert!(PREV_FAULTS_MAP_MAX_ENTRIES >= TARGET_PIDS_MAP_MAX_ENTRIES * 128);
 const _: () = assert!(RUNNABLE_TASK_CPU_MAP_MAX_ENTRIES >= TARGET_PIDS_MAP_MAX_ENTRIES * 64);

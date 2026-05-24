@@ -214,6 +214,22 @@ impl ProbeActivationPlan {
             ),
         });
     }
+
+    pub fn push_tracepoint_attach_warning(
+        &mut self,
+        key: ProbeKey,
+        program_name: &'static str,
+        category: &str,
+        tracepoint_name: &str,
+        error: impl std::fmt::Display,
+    ) {
+        self.warnings.push(ProbeActivationWarning {
+            key: Some(key),
+            message: format!(
+                "optional probe program {program_name} failed to attach to {category}/{tracepoint_name}; probe evidence is degraded: {error}"
+            ),
+        });
+    }
 }
 
 fn probe_requested(key: ProbeKey, config: &MonitorConfig) -> bool {
@@ -607,6 +623,26 @@ mod tests {
         assert!(plan.warnings.iter().any(|warning| {
             warning.key == Some(ProbeKey::CpuFreq)
                 && warning.message.contains("cpu_frequency")
+                && warning.message.contains("permission denied")
+        }));
+    }
+
+    #[test]
+    fn tracepoint_attach_warning_includes_category_and_name() {
+        let mut plan = ProbeActivationPlan::from_config(&config(), &tracepoints()).unwrap();
+
+        plan.push_tracepoint_attach_warning(
+            ProbeKey::KmsPageflipTiming,
+            "drm_flip_request",
+            "drm",
+            "drm_vblank_event",
+            "permission denied for test",
+        );
+
+        assert!(plan.warnings.iter().any(|warning| {
+            warning.key == Some(ProbeKey::KmsPageflipTiming)
+                && warning.message.contains("drm/drm_vblank_event")
+                && warning.message.contains("drm_flip_request")
                 && warning.message.contains("permission denied")
         }));
     }

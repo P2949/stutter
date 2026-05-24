@@ -38,6 +38,22 @@ regression fixtures, and operator guidance. A lower multiplier can make map
 pressure look like scheduler latency loss because the BPF program will stop
 retaining the state needed to emit complete events.
 
+## Fixed-size BPF object maps
+
+These constants also live in `stutter-ebpf/src/map_limits.rs`. They size
+allowlists and short-lived correlation maps whose entries are bounded by active
+probe state rather than by the target PID multiplier.
+
+| Constant | Default | Controls | Rationale |
+| --- | ---: | --- | --- |
+| `TARGET_CGROUP_IDS_MAP_MAX_ENTRIES` | `64` | Experimental native cgroup-id gate. | Kept small while native cgroup filtering is runtime-disabled pending verified cgroup-id resolution. |
+| `TARGET_IRQS_MAP_MAX_ENTRIES` | `64` | IRQ allowlist map. | Operators normally monitor a small explicit IRQ set. |
+| `IRQ_START_TIMES_MAP_MAX_ENTRIES` | `1_024` | In-flight IRQ handler start records. | Tracks IRQ/cpu entries long enough to pair entry and exit tracepoints without unbounded growth. |
+| `BLOCK_START_MAP_MAX_ENTRIES` | `16_384` | In-flight block request issue records. | Block I/O can have more concurrent requests than display/fence probes, so the correlation LRU has larger headroom. |
+| `KMS_FLIP_STARTS_MAP_MAX_ENTRIES` | `4_096` | In-flight KMS flip request records. | Retains request timestamps until pageflip/vblank completion tracepoints arrive. |
+| `FENCE_WAIT_STARTS_MAP_MAX_ENTRIES` | `4_096` | In-flight DRM fence wait-start records. | Retains wait starts until wait-done tracepoints arrive. |
+| `FENCE_SIGNAL_TIMES_MAP_MAX_ENTRIES` | `4_096` | Recent DRM fence signal records. | Retains signal timestamps for wait/signal correlation without turning fence history into an unbounded cache. |
+
 ## Userspace dynamic sizing clamps
 
 These constants live in `stutter/src/ebpf/maps.rs` and apply when the loader
@@ -50,6 +66,15 @@ sizes maps before loading the BPF object.
 | `MIN_WAKEUP_DATA_ENTRIES` | `4_096` | Minimum wakeup-map entries after userspace sizing. | Lower bound for automatic sizing and `--wakeup-map-factor`. |
 | `MAX_WAKEUP_DATA_ENTRIES` | `1_048_576` | Maximum wakeup-map entries after userspace sizing. | Upper bound for automatic sizing and `--wakeup-map-factor`. |
 | `WAKEUP_DATA_MAP_ENTRY_BUDGET_BYTES` | `128` | Conservative userspace budget per logical wakeup slot. | Includes both wakeup maps, kernel metadata, alignment, and margin. |
+
+The automatic sizing budget ratios are intentionally conservative:
+
+| Constant | Default | Controls | Rationale |
+| --- | ---: | --- | --- |
+| `DEFAULT_AVAILABLE_MEMORY_BYTES` | `1 GiB` | Fallback memory input when MemAvailable is unknown. | Avoids assuming unlimited memory on unusual systems. |
+| `AVAILABLE_MEMORY_BUDGET_DIVISOR` | `64` | Fraction of MemAvailable eligible for automatic eBPF map sizing. | Caps automatic sizing at 1/64 of available memory; manual overrides remain available after observing drops. |
+| `MEMLOCK_BUDGET_NUMERATOR` / `MEMLOCK_BUDGET_DENOMINATOR` | `3 / 4` | Fraction of finite RLIMIT_MEMLOCK eligible for stutter maps. | Leaves margin for page rounding, other BPF objects, and kernel accounting overhead. |
+| `EVENTS_BUDGET_NUMERATOR` / `EVENTS_BUDGET_DENOMINATOR` | `2 / 5` | Share of the computed budget reserved for the ring buffer. | Keeps roughly 40% for bursty event delivery and leaves the rest for wakeup/cursor maps. |
 
 Automatic sizing uses a conservative fraction of available memory and memlock.
 Manual overrides are escape hatches for recordings that show drops or map

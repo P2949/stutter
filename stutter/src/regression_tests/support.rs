@@ -295,6 +295,7 @@ pub(super) fn scheduler_event_with_latency(
         maj_flt: 0,
         min_flt: 0,
         switch_prev_pid: 0,
+        _pad0: 0,
         switch_prev_state: 0,
     }
 }

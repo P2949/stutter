@@ -23,6 +23,7 @@ mod latency_bookkeeping_tests {
             latency_ns: 100,
             comm: [0; 16],
             switch_prev_pid: 0,
+            _pad0: 0,
             switch_prev_state: 0,
         };
 
@@ -100,6 +101,7 @@ mod latency_bookkeeping_tests {
             latency_ns: 1_000,
             comm: [0; 16],
             switch_prev_pid: 0,
+            _pad0: 0,
             switch_prev_state: 0,
         };
         stats.record(&event, 1_000_000, 0, None);

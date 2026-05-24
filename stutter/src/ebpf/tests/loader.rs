@@ -10,6 +10,91 @@ use std::{
 
 // tokio::time::sleep removed as unused
 use super::*;
+use crate::{
+    config::model::MonitorConfig,
+    ebpf::{
+        attach::{AttachOps, FaultPerfProbe, attach_kms_tracepoints},
+        load::{
+            attach_optional_scheduler_tracepoints, attach_required_scheduler_tracepoints,
+            map_init_context, missing_map_context,
+        },
+        preflight::TracepointAvailability,
+    },
+    probe_activation::ProbeActivationPlan,
+    session::targeting::TargetPolicy,
+};
+
+#[derive(Default)]
+struct FakeAttachOps {
+    fail_program: Option<&'static str>,
+    tracepoint_calls: Vec<(&'static str, String, String)>,
+    perf_calls: Vec<(&'static str, FaultPerfProbe)>,
+}
+
+impl FakeAttachOps {
+    fn fail_program(program: &'static str) -> Self {
+        Self {
+            fail_program: Some(program),
+            ..Self::default()
+        }
+    }
+}
+
+impl AttachOps for FakeAttachOps {
+    fn attach_tracepoint(
+        &mut self,
+        program_name: &'static str,
+        category: &str,
+        tracepoint_name: &str,
+    ) -> anyhow::Result<()> {
+        self.tracepoint_calls.push((
+            program_name,
+            category.to_owned(),
+            tracepoint_name.to_owned(),
+        ));
+
+        if self.fail_program == Some(program_name) {
+            anyhow::bail!("{program_name} failed for test");
+        }
+
+        Ok(())
+    }
+
+    fn attach_perf_event(
+        &mut self,
+        program_name: &'static str,
+        probe: FaultPerfProbe,
+    ) -> anyhow::Result<()> {
+        self.perf_calls.push((program_name, probe));
+
+        if self.fail_program == Some(program_name) {
+            anyhow::bail!("{program_name} failed for test");
+        }
+
+        Ok(())
+    }
+}
+
+fn attach_test_tracepoints() -> TracepointAvailability {
+    TracepointAvailability {
+        sched_wakeup_new: true,
+        sched_migrate_task: true,
+        cpu_frequency: false,
+        sched_stat_wait: false,
+        irq_handler: false,
+        block_rq: false,
+        block_rq_has_rwbs: false,
+        block_rq_key_offset: None,
+        block_rq_issue_nr_sector_offset: None,
+        block_rq_issue_rwbs_offset: None,
+        block_rq_complete_nr_sector_offset: None,
+        block_rq_complete_rwbs_offset: None,
+        kms: crate::drm_tracepoints::KmsTracepointAvailability::unavailable(),
+        drm_fence: None,
+        sched_process_exit: true,
+        sched_process_exec: true,
+    }
+}
 
 #[test]
 fn parses_tracepoint_field_offsets() {
@@ -110,6 +195,56 @@ field:int next_prio; offset:60; size:4; signed:1;
 }
 
 #[test]
+fn shared_tracepoint_offset_tables_expose_reader_offsets() {
+    use stutter_common::tracepoint_offsets as offsets;
+
+    assert_eq!(
+        offsets::SCHED_WAKEUP_FIELDS,
+        &[
+            ("pid", offsets::SCHED_WAKEUP_PID_OFFSET),
+            ("prio", offsets::SCHED_WAKEUP_PRIO_OFFSET),
+            ("target_cpu", offsets::SCHED_WAKEUP_TARGET_CPU_OFFSET),
+        ],
+    );
+    assert_eq!(
+        offsets::SCHED_SWITCH_FIELDS,
+        &[
+            ("prev_pid", offsets::SCHED_SWITCH_PREV_PID_OFFSET),
+            ("prev_state", offsets::SCHED_SWITCH_PREV_STATE_OFFSET),
+            ("next_comm", offsets::SCHED_SWITCH_NEXT_COMM_OFFSET),
+            ("next_pid", offsets::SCHED_SWITCH_NEXT_PID_OFFSET),
+            ("next_prio", offsets::SCHED_SWITCH_NEXT_PRIO_OFFSET),
+        ],
+    );
+    assert_eq!(
+        offsets::SCHED_MIGRATE_TASK_FIELDS,
+        &[
+            ("pid", offsets::SCHED_MIGRATE_TASK_PID_OFFSET),
+            ("orig_cpu", offsets::SCHED_MIGRATE_TASK_ORIG_CPU_OFFSET),
+            ("dest_cpu", offsets::SCHED_MIGRATE_TASK_DEST_CPU_OFFSET),
+        ],
+    );
+    assert_eq!(
+        offsets::CPU_FREQUENCY_FIELDS,
+        &[
+            ("state", offsets::CPU_FREQUENCY_STATE_OFFSET),
+            ("cpu_id", offsets::CPU_FREQUENCY_CPU_ID_OFFSET),
+        ],
+    );
+    assert_eq!(
+        offsets::SCHED_STAT_WAIT_FIELDS,
+        &[
+            ("pid", offsets::SCHED_STAT_WAIT_PID_OFFSET),
+            ("delay", offsets::SCHED_STAT_WAIT_DELAY_OFFSET),
+        ],
+    );
+    assert_eq!(
+        offsets::IRQ_HANDLER_FIELDS,
+        &[("irq", offsets::IRQ_HANDLER_IRQ_OFFSET)],
+    );
+}
+
+#[test]
 fn tracepoint_mismatch_error_includes_declaration_and_sched_switch_hint() {
     let format = r#"
     field:char prev_comm[16]; offset:8; size:16; signed:1;
@@ -177,11 +312,96 @@ fn scheduler_optional_tracepoint_attach_failures_degrade_through_activation_warn
         let end = source.len().min(start + 1_200);
         let body = &source[start..end];
 
-        assert!(body.contains("activation_plan.push_attach_warning"));
+        assert!(body.contains("activation_plan.push_tracepoint_attach_warning"));
         assert!(body.contains("ProbeKey::SchedulerRunnableLatency"));
         assert!(body.contains("optional_probe_attach_failed"));
         assert!(!body.contains("context(\"eBPF load failed: attach"));
     }
+}
+
+#[test]
+fn required_sched_wakeup_attach_failure_aborts_load_plan() {
+    let mut fake = FakeAttachOps::fail_program("sched_wakeup");
+
+    let err = attach_required_scheduler_tracepoints(&mut fake).unwrap_err();
+
+    assert!(err.to_string().contains("sched_wakeup"));
+    assert_eq!(fake.tracepoint_calls.len(), 1);
+    assert_eq!(fake.tracepoint_calls[0].0, "sched_wakeup");
+}
+
+#[test]
+fn optional_sched_wakeup_new_attach_failure_records_warning_and_continues() {
+    let config = MonitorConfig::default();
+    let mut plan = ProbeActivationPlan::from_config(&config, &attach_test_tracepoints()).unwrap();
+    let mut fake = FakeAttachOps::fail_program("sched_wakeup_new");
+
+    attach_optional_scheduler_tracepoints(&mut fake, &mut plan);
+
+    assert!(
+        fake.tracepoint_calls
+            .iter()
+            .any(|(program, _, _)| *program == "sched_process_exit"),
+    );
+    assert!(plan.warnings.iter().any(|warning| {
+        warning.message.contains("sched/sched_wakeup_new")
+            && warning.message.contains("sched_wakeup_new")
+    }));
+}
+
+#[test]
+fn kms_optional_attach_warning_names_actual_tracepoint() {
+    let mut plan =
+        ProbeActivationPlan::from_config(&MonitorConfig::default(), &attach_test_tracepoints())
+            .unwrap();
+    let kms = crate::drm_tracepoints::KmsTracepointAvailability {
+        pageflip_request: None,
+        pageflip_done: None,
+        vblank_event: Some(crate::drm_tracepoints::parse_drm_tracepoint_format(
+            "drm",
+            "drm_vblank_event",
+            "field:unsigned int crtc_id;\toffset:8;\tsize:4;\tsigned:0;\n",
+        )),
+        atomic_commit: None,
+        provider: crate::drm_tracepoints::KmsTracepointProvider::GenericDrm,
+        generic_drm: Vec::new(),
+        i915: Vec::new(),
+        amdgpu: Vec::new(),
+        warnings: Vec::new(),
+    };
+    let mut fake = FakeAttachOps::fail_program("drm_vblank_event");
+
+    attach_kms_tracepoints(&mut fake, &mut plan, &kms);
+
+    assert!(plan.warnings.iter().any(|warning| {
+        warning.message.contains("drm/drm_vblank_event")
+            && warning.message.contains("drm_vblank_event")
+    }));
+}
+
+#[test]
+fn map_initialization_context_names_missing_and_failed_maps() {
+    assert_eq!(
+        missing_map_context("EVENTS"),
+        "eBPF load failed: EVENTS map not found"
+    );
+    assert_eq!(
+        missing_map_context("DROP_COUNTERS"),
+        "eBPF load failed: DROP_COUNTERS map not found"
+    );
+    assert_eq!(
+        map_init_context("TARGET_PIDS"),
+        "eBPF load failed: TARGET_PIDS map init"
+    );
+}
+
+#[test]
+#[ignore = "requires Linux tracefs and eBPF privileges"]
+fn load_and_attach_real_bpf_object_smoke_test() {
+    let config = MonitorConfig::default();
+    let target_policy = TargetPolicy::from_monitor_config(&config).unwrap();
+
+    let _loaded = crate::ebpf::load::load_and_attach(&config, &target_policy).unwrap();
 }
 
 #[test]
@@ -565,7 +785,7 @@ fn wakeup_map_factor_applies_and_clamps() {
         "--wakeup-map-factor",
         "10",
         "--max-tasks",
-        "2000",
+        "1024",
     ])
     .unwrap()
     {
@@ -573,8 +793,8 @@ fn wakeup_map_factor_applies_and_clamps() {
         _ => unreachable!(),
     };
     let sizing2 = map_sizing_for_config(&config2);
-    // 2000 * 10 = 20000.
-    assert_eq!(sizing2.wakeup_data_entries, 20000);
+    // 1024 * 10 = 10240.
+    assert_eq!(sizing2.wakeup_data_entries, 10240);
 }
 
 #[test]
