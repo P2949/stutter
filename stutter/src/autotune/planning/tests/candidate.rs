@@ -330,8 +330,8 @@ fn generic_candidate_variant_reports_descriptor_scope_and_objective() {
             name: "nice-root-1234-to-5".to_owned(),
             action: crate::actions::nice::NiceAction {
                 targets: vec![crate::actions::TaskIdentity {
-                    tid: 1234,
-                    process_pid: Some(1234),
+                    tid: (1234).into(),
+                    process_pid: Some((1234).into()),
                     comm: None,
                     starttime_ticks: None,
                 }],

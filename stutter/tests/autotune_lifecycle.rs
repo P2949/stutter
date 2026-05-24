@@ -114,8 +114,8 @@ fn current_thread_nice_candidate() -> anyhow::Result<(CandidateAction, u32)> {
         .map(|comm| comm.trim().to_owned())
         .filter(|comm| !comm.is_empty());
     let target = TaskIdentity {
-        tid,
-        process_pid: Some(std::process::id()),
+        tid: tid.into(),
+        process_pid: Some(std::process::id().into()),
         comm,
         starttime_ticks: Some(starttime_ticks),
     };

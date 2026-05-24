@@ -297,8 +297,8 @@ fn fallback_root_snapshot(observation: &AutotuneObservation) -> Option<ActiveTas
 
 fn task_identity_from_snapshot(task: ActiveTaskSnapshot) -> TaskIdentity {
     TaskIdentity {
-        tid: task.tid.as_u32(),
-        process_pid: Some(task.process_pid.as_u32()),
+        tid: (task.tid.as_u32()).into(),
+        process_pid: Some(task.process_pid),
         comm: Some(task.comm),
         starttime_ticks: task.task_starttime_ticks.or(task.process_starttime_ticks),
     }
@@ -406,7 +406,10 @@ mod tests {
         );
 
         assert_eq!(
-            targets.iter().map(|target| target.tid).collect::<Vec<_>>(),
+            targets
+                .iter()
+                .map(|target| target.tid.as_u32())
+                .collect::<Vec<_>>(),
             vec![20]
         );
     }
@@ -430,7 +433,10 @@ mod tests {
         );
 
         assert_eq!(
-            targets.iter().map(|target| target.tid).collect::<Vec<_>>(),
+            targets
+                .iter()
+                .map(|target| target.tid.as_u32())
+                .collect::<Vec<_>>(),
             vec![10, 11, 12]
         );
     }
@@ -505,7 +511,10 @@ mod tests {
         );
 
         assert_eq!(
-            targets.iter().map(|target| target.tid).collect::<Vec<_>>(),
+            targets
+                .iter()
+                .map(|target| target.tid.as_u32())
+                .collect::<Vec<_>>(),
             vec![10]
         );
     }
@@ -580,7 +589,10 @@ mod tests {
         );
 
         assert_eq!(
-            targets.iter().map(|target| target.tid).collect::<Vec<_>>(),
+            targets
+                .iter()
+                .map(|target| target.tid.as_u32())
+                .collect::<Vec<_>>(),
             vec![10, 11, 14]
         );
     }
@@ -608,7 +620,7 @@ mod tests {
             selection
                 .items
                 .iter()
-                .map(|target| target.identity.tid)
+                .map(|target| target.identity.tid.as_u32())
                 .collect::<Vec<_>>(),
             vec![10, 11]
         );
@@ -620,7 +632,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![TaskClass::VirtualMachine, TaskClass::Helper]
         );
-        assert_eq!(selection.items[0].identity.process_pid, Some(10));
+        assert_eq!(selection.items[0].identity.process_pid, Some(10.into()));
         assert_eq!(selection.items[0].identity.starttime_ticks, Some(10));
         assert!(!selection.used_fallback_root);
         assert!(!selection.missing_active_snapshots);

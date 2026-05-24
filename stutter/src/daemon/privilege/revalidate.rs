@@ -100,15 +100,17 @@ fn revalidate_task_identity(
     target: &TaskIdentity,
     proc_root: &Path,
 ) -> Result<(), TargetRevalidationError> {
-    let live = read_live_task_identity(proc_root, target)
-        .ok_or(TargetRevalidationError::MissingTid { tid: target.tid })?;
+    let live =
+        read_live_task_identity(proc_root, target).ok_or(TargetRevalidationError::MissingTid {
+            tid: target.tid.as_u32(),
+        })?;
 
     if let Some(expected_pid) = target.process_pid
-        && live.process_pid != Some(expected_pid)
+        && live.process_pid != Some(expected_pid.as_u32())
     {
         return Err(TargetRevalidationError::ProcessPidMismatch {
-            tid: target.tid,
-            expected: expected_pid,
+            tid: target.tid.as_u32(),
+            expected: expected_pid.as_u32(),
             actual: live.process_pid,
         });
     }
@@ -117,7 +119,7 @@ fn revalidate_task_identity(
         && live.starttime_ticks != Some(expected_starttime)
     {
         return Err(TargetRevalidationError::StarttimeMismatch {
-            tid: target.tid,
+            tid: target.tid.as_u32(),
             expected: expected_starttime,
             actual: live.starttime_ticks,
         });
@@ -127,7 +129,7 @@ fn revalidate_task_identity(
         && live.comm.as_deref() != Some(expected_comm)
     {
         return Err(TargetRevalidationError::CommMismatch {
-            tid: target.tid,
+            tid: target.tid.as_u32(),
             expected: expected_comm.to_owned(),
             actual: live.comm,
         });
@@ -148,8 +150,8 @@ fn candidate_task_identities(candidate: &CandidateAction) -> Vec<TaskIdentity> {
             .map(|target| target.identity.clone())
             .collect(),
         CandidateAction::CpuAffinityProfile { plan } => vec![TaskIdentity {
-            tid: plan.tree_pid,
-            process_pid: Some(plan.tree_pid),
+            tid: (plan.tree_pid).into(),
+            process_pid: Some((plan.tree_pid).into()),
             comm: None,
             starttime_ticks: None,
         }],
@@ -164,11 +166,13 @@ fn read_live_task_identity(proc_root: &Path, target: &TaskIdentity) -> Option<Li
             .join("task")
             .join(target.tid.to_string())
             .join("stat");
-        if let Some(identity) = read_identity_from_stat(&task_stat, target.tid, Some(process_pid)) {
+        if let Some(identity) =
+            read_identity_from_stat(&task_stat, target.tid.as_u32(), Some(process_pid.as_u32()))
+        {
             return Some(identity);
         }
 
-        let actual = read_top_level_task_identity(proc_root, target.tid);
+        let actual = read_top_level_task_identity(proc_root, target.tid.as_u32());
         if actual.is_some() {
             return actual;
         }
@@ -176,7 +180,7 @@ fn read_live_task_identity(proc_root: &Path, target: &TaskIdentity) -> Option<Li
         return None;
     }
 
-    read_top_level_task_identity(proc_root, target.tid)
+    read_top_level_task_identity(proc_root, target.tid.as_u32())
 }
 
 fn read_top_level_task_identity(proc_root: &Path, tid: u32) -> Option<LiveTaskIdentity> {

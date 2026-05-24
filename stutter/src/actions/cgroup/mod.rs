@@ -111,7 +111,7 @@ impl CgroupPlacementAction {
         let mut pending_changes = 0usize;
 
         for target in &self.targets {
-            if !task_exists(proc_root, target.identity.tid) {
+            if !task_exists(proc_root, target.identity.tid.as_u32()) {
                 warnings.push(ActionWarning {
                     message: format!(
                         "target tid={} exited before cgroup placement verify completed",
@@ -122,8 +122,8 @@ impl CgroupPlacementAction {
             }
 
             checked_tasks += 1;
-            let current =
-                read_proc_cgroup_path_at(proc_root, target.identity.tid).with_context(|| {
+            let current = read_proc_cgroup_path_at(proc_root, target.identity.tid.as_u32())
+                .with_context(|| {
                     format!(
                         "failed to read current cgroup for tid={}",
                         target.identity.tid
@@ -238,7 +238,7 @@ impl CgroupPlacementAction {
 
         for record in records {
             let identity = record.restore_identity();
-            let tid = identity.tid;
+            let tid = identity.tid.as_u32();
             match verify_task_identity(proc_root, &identity) {
                 RestoreIdentityStatus::SameTask => {}
                 RestoreIdentityStatus::UnknownLegacy => {

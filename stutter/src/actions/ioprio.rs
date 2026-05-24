@@ -195,7 +195,7 @@ impl RollbackHandler for IoPrioRollbackHandler {
 
         for record in records {
             let identity = record.restore_identity();
-            let tid = identity.tid;
+            let tid = identity.tid.as_u32();
             let status = verify_task_identity(Path::new("/proc"), &identity);
             match status {
                 RestoreIdentityStatus::Missing => {
@@ -450,7 +450,7 @@ impl TuningAction for IoPrioAction {
 
         for record in records {
             let identity = record.restore_identity();
-            let tid = identity.tid;
+            let tid = identity.tid.as_u32();
             match verify_task_identity(Path::new("/proc"), &identity) {
                 RestoreIdentityStatus::SameTask => {}
                 RestoreIdentityStatus::UnknownLegacy => {
@@ -616,7 +616,7 @@ fn read_target_snapshot_at(
         .filter(|comm| !comm.is_empty());
     let exe = fs::read_link(proc_root.join(target.tid.to_string()).join("exe")).ok();
 
-    let current_ioprio = read_task_ioprio(target.tid)
+    let current_ioprio = read_task_ioprio(target.tid.as_u32())
         .with_context(|| format!("current I/O priority is unreadable for tid={}", target.tid))?;
     let current_value = IoPrioValue::decode(current_ioprio).with_context(|| {
         format!(
@@ -626,8 +626,8 @@ fn read_target_snapshot_at(
     })?;
 
     Ok(IoPrioTargetSnapshot {
-        tid: target.tid,
-        process_pid: target.process_pid,
+        tid: target.tid.as_u32(),
+        process_pid: target.process_pid.map(|pid| pid.as_u32()),
         comm,
         starttime_ticks: Some(starttime_ticks),
         exe,

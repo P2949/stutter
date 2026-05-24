@@ -52,33 +52,33 @@ fn process_comm_runtime_models_no_longer_depend_on_serializable_arc_str() {
 }
 
 #[test]
-fn action_restore_raw_ids_are_explicit_serialization_boundary_fields() {
+fn action_restore_models_use_typed_ids_at_json_boundaries() {
     let actions_model = source("actions/model.rs");
     assert!(
-        actions_model.contains("JSON rollback-token serialization boundaries"),
-        "actions/model.rs raw task IDs must carry an explicit serialization-boundary note"
+        actions_model.contains("pub use stutter_core::ids::{ActionId, Pid, Tid};"),
+        "actions/model.rs must import typed process/task IDs for rollback-token identity models"
     );
 
-    let expected_structs = [
-        "pub struct TaskIdentity {\n    pub tid: u32,",
-        "pub struct TaskRestoreIdentity {\n    pub tid: u32,",
-        "pub struct NiceRestoreRecord {\n    #[serde(default)]\n    pub tid: u32,",
-        "pub struct UclampRestoreRecord {\n    #[serde(default)]\n    pub tid: u32,",
-        "pub struct IoPrioRestoreRecord {\n    #[serde(default)]\n    pub tid: u32,",
-        "pub struct CgroupRestoreRecord {\n    #[serde(default)]\n    pub tid: u32,",
-    ];
-
-    for expected in expected_structs {
+    for expected in [
+        "pub struct TaskIdentity {\n    pub tid: Tid,",
+        "pub struct TaskIdentity {\n    pub tid: Tid,\n    pub process_pid: Option<Pid>,",
+        "pub struct TaskRestoreIdentity {\n    pub tid: Tid,",
+        "pub struct TaskRestoreIdentity {\n    pub tid: Tid,\n    #[serde(default)]\n    pub process_pid: Option<Pid>,",
+        "pub struct NiceRestoreRecord {\n    #[serde(default = \"zero_tid\")]\n    pub tid: Tid,",
+        "pub struct UclampRestoreRecord {\n    #[serde(default = \"zero_tid\")]\n    pub tid: Tid,",
+        "pub struct IoPrioRestoreRecord {\n    #[serde(default = \"zero_tid\")]\n    pub tid: Tid,",
+        "pub struct CgroupRestoreRecord {\n    #[serde(default = \"zero_tid\")]\n    pub tid: Tid,",
+    ] {
         assert!(
             actions_model.contains(expected),
-            "actions/model.rs raw `pub tid: u32` is allowed only in known rollback-token serialization-boundary structs; missing expected marker: {expected}"
+            "actions/model.rs rollback identity models must use typed IDs while preserving numeric serde shape; missing expected marker: {expected}"
         );
     }
 
-    assert_eq!(
-        actions_model.matches("pub tid: u32").count(),
-        expected_structs.len(),
-        "new raw `pub tid: u32` fields in actions/model.rs need an explicit typed-ID or serialization-boundary decision"
+    assert!(
+        !actions_model.contains("pub tid: u32")
+            && !actions_model.contains("pub process_pid: Option<u32>"),
+        "actions/model.rs must not expose raw public task/process ID fields; convert to u32 only at procfs/syscall or persisted compatibility accessors"
     );
 }
 

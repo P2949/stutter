@@ -84,8 +84,8 @@ fn compare_keep_result_rejects_io_candidate_when_live_io_signal_regresses() {
                 name: "fake-io".to_owned(),
                 action: crate::actions::ioprio::IoPrioAction {
                     targets: vec![crate::actions::TaskIdentity {
-                        tid: 99999,
-                        process_pid: Some(99999),
+                        tid: (99999).into(),
+                        process_pid: Some((99999).into()),
                         comm: Some("fake-io".to_owned()),
                         starttime_ticks: None,
                     }],

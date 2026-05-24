@@ -253,8 +253,8 @@ fn profile_plan_constructs_task_identity_for_priority_targets() {
     .unwrap();
     let identity = &plan.nice_groups.get(&10).unwrap()[0];
 
-    assert_eq!(identity.tid, 42);
-    assert_eq!(identity.process_pid, Some(42));
+    assert_eq!(identity.tid.as_u32(), 42);
+    assert_eq!(identity.process_pid.map(|pid| pid.as_u32()), Some(42));
     assert_eq!(identity.comm.as_deref(), Some("indexer"));
     assert_eq!(identity.starttime_ticks, Some(421));
 }

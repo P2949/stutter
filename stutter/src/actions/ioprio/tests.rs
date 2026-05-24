@@ -10,8 +10,8 @@ use super::*;
 
 fn target(tid: u32, comm: &str, starttime_ticks: u64) -> TaskIdentity {
     TaskIdentity {
-        tid,
-        process_pid: Some(tid),
+        tid: tid.into(),
+        process_pid: Some((tid).into()),
         comm: Some(comm.to_owned()),
         starttime_ticks: Some(starttime_ticks),
     }
@@ -19,7 +19,7 @@ fn target(tid: u32, comm: &str, starttime_ticks: u64) -> TaskIdentity {
 
 fn target_without_process_pid(tid: u32, comm: &str, starttime_ticks: u64) -> TaskIdentity {
     TaskIdentity {
-        tid,
+        tid: tid.into(),
         process_pid: None,
         comm: Some(comm.to_owned()),
         starttime_ticks: Some(starttime_ticks),
