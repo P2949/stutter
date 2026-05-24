@@ -1,5 +1,30 @@
 #![no_std]
 
+//! Shared userspace/eBPF ABI constants and event records.
+//!
+//! # eBPF capacity constants
+//!
+//! The public capacity constants in this crate are part of the userspace/eBPF
+//! contract. Keep the values here in sync with the private map capacities in
+//! `stutter-ebpf/src/map_limits.rs` and the userspace sizing clamps in
+//! `stutter/src/ebpf/maps.rs`.
+//!
+//! * [`BPF_MAX_TRACKED_CPUS`] controls the length of the eBPF per-CPU
+//!   accounting arrays. Raising it increases pinned kernel memory for every
+//!   array keyed by CPU id. Lowering it is safe only when every supported CPU id
+//!   is still below the new limit; out-of-range CPUs skip runnable-depth and
+//!   pending-wakeup accounting and increment
+//!   [`DROP_CPU_ACCOUNTING_UNTRACKED`].
+//! * [`BPF_DEFAULT_EVENTS_RINGBUF_BYTES`] is only the fallback `EVENTS`
+//!   ring-buffer size compiled into the BPF object. Userspace normally replaces
+//!   it before load using the automatic map-sizing policy or
+//!   `--ringbuf-size-kb`.
+//! * [`DROP_COUNTERS_MAX`] is the number of slots in the shared drop-counter
+//!   ABI. It must remain greater than the largest `DROP_*` counter index.
+//!
+//! Detailed sizing rationale, memory impact, and tuning rules live in
+//! `docs/EBPF_CAPACITY.md`.
+
 pub const EVENT_RUNNABLE_LATENCY: u32 = 1;
 pub const EVENT_IRQ_LATENCY: u32 = 2;
 pub const EVENT_MIGRATION: u32 = 3;
@@ -15,16 +40,29 @@ pub const EVENT_DRM_FENCE: u32 = 9;
 /// This deliberately covers very large machines while keeping the BPF array
 /// maps bounded. Events for CPU ids at or above this value are still safe, but
 /// target-local runnable-depth and pending-wakeup accounting is intentionally
-/// skipped and counted via `DROP_CPU_ACCOUNTING_UNTRACKED`. Keep this in sync
+/// skipped and counted via [`DROP_CPU_ACCOUNTING_UNTRACKED`]. Keep this in sync
 /// with the eBPF map capacities for `CPU_RUNNABLE_DEPTH` and
 /// `TARGET_PENDING_WAKEUPS`.
+///
+/// Memory impact: each additional tracked CPU adds one slot to each CPU-indexed
+/// BPF array that uses this limit. The current eBPF object uses it for runnable
+/// depth and target-pending-wakeup accounting, so raising it should be treated
+/// as a kernel-memory capacity change rather than a cosmetic constant change.
+/// Lowering it below `1024` is intentionally rejected by a BPF-side compile-time
+/// assertion.
 pub const BPF_MAX_TRACKED_CPUS: u32 = 16_384;
 
 /// Fallback eBPF ring-buffer size baked into the BPF object.
 ///
 /// Userspace normally overrides the `EVENTS` map size before loading based on
 /// memlock and available memory. This value is the safe fallback used only if
-/// that loader-side sizing path is bypassed.
+/// that loader-side sizing path is bypassed. It must stay within the userspace
+/// clamp documented by `MIN_EVENTS_RINGBUF_BYTES` and
+/// `MAX_EVENTS_RINGBUF_BYTES` in `stutter/src/ebpf/maps.rs`.
+///
+/// Memory impact: ring-buffer bytes are locked kernel memory. Raising this
+/// fallback can help only when userspace sizing is unavailable; normal tuning
+/// should use `--ringbuf-size-kb` instead.
 pub const BPF_DEFAULT_EVENTS_RINGBUF_BYTES: u32 = 256 * 1024;
 
 pub const KMS_FLIP_HAS_REQUEST_NS: u32 = 1 << 0;
@@ -76,6 +114,18 @@ pub const DROP_WAKEUP_DATA_REPLACED_ENTRY: u32 = 6;
 pub const DROP_WAKEUP_DATA_CONSUMED_READ_FAILED: u32 = 7;
 /// Runnable-depth or pending-wakeup CPU accounting skipped an out-of-range CPU id.
 pub const DROP_CPU_ACCOUNTING_UNTRACKED: u32 = 8;
+
+/// Number of per-CPU drop-counter slots shared by the BPF object and userspace.
+///
+/// This is a count, not the highest valid index. It must always be greater than
+/// every `DROP_*` index above. When adding a new drop reason, add its constant
+/// immediately before this one, increment this count, and update userspace
+/// decoding/tests so the new slot is reported instead of silently ignored.
+///
+/// Memory impact: the BPF `DROP_COUNTERS` map is a per-CPU array, so each extra
+/// slot consumes one `u64` per possible CPU plus kernel map metadata. The cost is
+/// small compared with the wakeup maps and ring buffer, but the ABI count still
+/// needs to stay exact.
 pub const DROP_COUNTERS_MAX: u32 = 9;
 
 #[repr(C)]

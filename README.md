@@ -112,10 +112,25 @@ foreground_source = "auto"
 foreground_poll_ms = 1000
 foreground_max_stale_ms = 2500
 foreground_include_title = false
+live_diagnosis_cluster_window_ms = 5
 ```
 
 `foreground_include_title` defaults to `false` because browser tab titles and
 terminal titles can leak private data.
+
+`live_diagnosis_cluster_window_ms` controls how close live diagnosis evidence
+items must be to be grouped into the same candidate window. The default is `5`.
+Increase it when correlated events are slightly farther apart on a noisy system;
+decrease it when separate short spikes are being grouped together.
+
+The same setting is available as an explicit CLI override:
+
+```bash
+stutter monitor --preset diagnosis --pid 1234 --live-diagnosis-cluster-window-ms 10
+```
+
+The value must be greater than zero. Config-file values are overridden by
+presets and explicit CLI flags according to the precedence rules below.
 
 ### Monitor presets
 
@@ -166,6 +181,9 @@ Valid ranges:
 
 * `--ringbuf-size-kb`: `64..=16384`
 * `--wakeup-map-factor`: `1..=64`
+
+The shared capacity constants, BPF map multipliers, memory-budget assumptions,
+and change checklist are documented in [docs/EBPF_CAPACITY.md](docs/EBPF_CAPACITY.md).
 
 These flags are escape hatches. The automatic defaults are usually correct.
 
