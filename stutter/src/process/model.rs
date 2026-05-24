@@ -317,9 +317,9 @@ impl fmt::Display for TaskClass {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskInfo {
-    pub tid: u32,
-    pub process_pid: u32,
-    pub process_ppid: u32,
+    pub tid: Tid,
+    pub process_pid: Pid,
+    pub process_ppid: Pid,
     pub comm: String,
     pub process_comm: String,
     pub process_starttime_ticks: Option<u64>,
@@ -333,15 +333,15 @@ pub struct TaskInfo {
 
 impl TaskInfo {
     pub fn task_id(&self) -> Tid {
-        Tid::new(self.tid)
+        self.tid
     }
 
     pub fn process_id(&self) -> Pid {
-        Pid::new(self.process_pid)
+        self.process_pid
     }
 
     pub fn parent_process_id(&self) -> Pid {
-        Pid::new(self.process_ppid)
+        self.process_ppid
     }
 }
 

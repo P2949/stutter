@@ -210,9 +210,9 @@ fn event_for_step(step: FakeDaemonStep, elapsed_ms: u64) -> Option<MonitorEvent>
 
 fn task_info() -> TaskInfo {
     TaskInfo {
-        tid: 1234,
-        process_pid: 1234,
-        process_ppid: 1,
+        tid: 1234.into(),
+        process_pid: 1234.into(),
+        process_ppid: 1.into(),
         comm: "simulation-game".to_owned(),
         process_comm: "simulation-game".to_owned(),
         process_starttime_ticks: Some(10),

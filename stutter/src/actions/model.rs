@@ -63,8 +63,8 @@ pub struct TaskIdentity {
 impl TaskIdentity {
     pub fn from_task_info(task: &crate::process_tree::TaskInfo) -> Self {
         Self {
-            tid: task.tid,
-            process_pid: Some(task.process_pid),
+            tid: task.task_id().as_u32(),
+            process_pid: Some(task.process_id().as_u32()),
             comm: Some(task.comm.clone()),
             starttime_ticks: task.task_starttime_ticks,
         }
@@ -89,8 +89,8 @@ pub struct TaskRestoreIdentity {
 impl TaskRestoreIdentity {
     pub fn from_task_info(task: &crate::process_tree::TaskInfo) -> Self {
         Self {
-            tid: task.tid,
-            process_pid: Some(task.process_pid),
+            tid: task.task_id().as_u32(),
+            process_pid: Some(task.process_id().as_u32()),
             starttime_ticks: task.task_starttime_ticks,
             comm: Some(task.comm.clone()),
             exe: None,

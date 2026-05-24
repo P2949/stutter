@@ -180,9 +180,9 @@ pub fn target_snapshot(input: TargetSnapshotInput) -> TargetSnapshot {
 
     for pid in missing_manual_pids {
         let task = TaskInfo {
-            tid: pid,
-            process_pid: pid,
-            process_ppid: 0,
+            tid: pid.into(),
+            process_pid: pid.into(),
+            process_ppid: 0.into(),
             comm: "?".to_owned(),
             process_comm: "?".to_owned(),
             process_starttime_ticks: None,
@@ -199,18 +199,20 @@ pub fn target_snapshot(input: TargetSnapshotInput) -> TargetSnapshot {
     }
 
     for task in tasks.values_mut() {
-        if cgroup_roots.contains(&task.tid) {
+        if cgroup_roots.contains(&task.task_id().as_u32()) {
             task.from_cgroup = true;
         }
 
         if task.class == TaskClass::Unknown
             && let Some(db) = community_rules
-            && let Some(proc_info) = processes.get(&task.process_pid)
+            && let Some(proc_info) = processes.get(&task.process_id().as_u32())
         {
             apply_community_rules_to_unknown_task(task, proc_info, db);
         }
 
-        if task.class == TaskClass::Unknown && !requested_roots.contains(&task.process_pid) {
+        if task.class == TaskClass::Unknown
+            && !requested_roots.contains(&task.process_id().as_u32())
+        {
             task.class = TaskClass::Helper;
         }
     }
@@ -253,7 +255,7 @@ pub fn diff_tasks_ref<'a>(
             TargetDiffAction::Removed => 0,
             TargetDiffAction::Added => 1,
         };
-        (action_rank, diff.task.tid)
+        (action_rank, diff.task.task_id().as_u32())
     });
 
     diffs
@@ -458,9 +460,9 @@ fn task_info_from_parts(
     sched_policy: Option<u32>,
 ) -> TaskInfo {
     TaskInfo {
-        tid,
-        process_pid,
-        process_ppid: proc_info.ppid,
+        tid: tid.into(),
+        process_pid: process_pid.into(),
+        process_ppid: proc_info.ppid.into(),
         comm: comm.to_owned(),
         process_comm: proc_info.comm.clone(),
         process_starttime_ticks: proc_info.starttime_ticks,

@@ -144,9 +144,9 @@ fn current_thread_nice_candidate() -> anyhow::Result<(CandidateAction, u32)> {
 
 fn game_task(tid: u32) -> TaskInfo {
     TaskInfo {
-        tid,
-        process_pid: 1234,
-        process_ppid: 1,
+        tid: tid.into(),
+        process_pid: 1234.into(),
+        process_ppid: 1.into(),
         comm: "lifecycle-game".to_owned(),
         process_comm: "lifecycle-game".into(),
         process_starttime_ticks: Some(10_000),
@@ -161,9 +161,9 @@ fn game_task(tid: u32) -> TaskInfo {
 
 fn current_process_game_task(tid: u32) -> TaskInfo {
     TaskInfo {
-        tid,
-        process_pid: std::process::id(),
-        process_ppid: 1,
+        tid: tid.into(),
+        process_pid: std::process::id().into(),
+        process_ppid: 1.into(),
         comm: "lifecycle-game".to_owned(),
         process_comm: "lifecycle-game".into(),
         process_starttime_ticks: None,

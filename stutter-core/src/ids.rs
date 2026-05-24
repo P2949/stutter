@@ -1,3 +1,5 @@
+use std::{borrow::Borrow, fmt};
+
 use serde::{Deserialize, Serialize};
 
 macro_rules! numeric_id {
@@ -28,6 +30,42 @@ macro_rules! numeric_id {
         impl From<$name> for u32 {
             fn from(value: $name) -> Self {
                 value.0
+            }
+        }
+
+        impl From<$name> for u64 {
+            fn from(value: $name) -> Self {
+                u64::from(value.0)
+            }
+        }
+
+        impl From<$name> for usize {
+            fn from(value: $name) -> Self {
+                value.0 as usize
+            }
+        }
+
+        impl PartialEq<u32> for $name {
+            fn eq(&self, other: &u32) -> bool {
+                self.0 == *other
+            }
+        }
+
+        impl PartialEq<$name> for u32 {
+            fn eq(&self, other: &$name) -> bool {
+                *self == other.0
+            }
+        }
+
+        impl Borrow<u32> for $name {
+            fn borrow(&self) -> &u32 {
+                &self.0
+            }
+        }
+
+        impl fmt::Display for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                self.0.fmt(f)
             }
         }
 
@@ -148,12 +186,19 @@ mod tests {
 
         assert_eq!(pid.as_u32(), 1_234);
         assert_eq!(u32::from(pid), 1_234);
+        assert_eq!(u64::from(pid), 1_234);
+        assert_eq!(pid, 1_234);
+        assert_eq!(format!("{pid}"), "1234");
         assert_eq!(tid.as_u32(), 1_235);
         assert_eq!(u32::from(tid), 1_235);
+        assert_eq!(usize::from(tid), 1_235);
+        assert_eq!(tid, 1_235);
         assert_eq!(cpu.as_u32(), 7);
         assert_eq!(u32::from(cpu), 7);
+        assert_eq!(cpu, 7);
         assert_eq!(irq.as_u32(), 42);
         assert_eq!(u32::from(irq), 42);
+        assert_eq!(irq, 42);
     }
 
     #[test]

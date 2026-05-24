@@ -30,9 +30,9 @@ fn profile_match_class_sees_community_rule_game_class() {
         None,
     );
     let task = TaskInfo {
-        tid: 379430,
-        process_pid: 379430,
-        process_ppid: 1,
+        tid: 379430.into(),
+        process_pid: 379430.into(),
+        process_ppid: 1.into(),
         comm: "KingdomCome".into(),
         process_comm: "KingdomCome".into(),
         process_starttime_ticks: Some(379430),
@@ -61,9 +61,9 @@ fn profile_match_class_sees_community_rule_game_class() {
 #[test]
 fn profile_apply_summary_counts_matching_tasks_and_pending_changes() {
     let task_correct = TaskInfo {
-        tid: 7,
-        process_pid: 7,
-        process_ppid: 1,
+        tid: 7.into(),
+        process_pid: 7.into(),
+        process_ppid: 1.into(),
         comm: "RenderThread".into(),
         process_comm: "game".into(),
         process_starttime_ticks: Some(70),
@@ -75,9 +75,9 @@ fn profile_apply_summary_counts_matching_tasks_and_pending_changes() {
         from_cgroup: false,
     };
     let task_pending = TaskInfo {
-        tid: 8,
-        process_pid: 8,
-        process_ppid: 1,
+        tid: 8.into(),
+        process_pid: 8.into(),
+        process_ppid: 1.into(),
         comm: "WorkerThread".into(),
         process_comm: "game".into(),
         process_starttime_ticks: Some(80),
@@ -89,9 +89,9 @@ fn profile_apply_summary_counts_matching_tasks_and_pending_changes() {
         from_cgroup: false,
     };
     let task_unmatched = TaskInfo {
-        tid: 9,
-        process_pid: 9,
-        process_ppid: 1,
+        tid: 9.into(),
+        process_pid: 9.into(),
+        process_ppid: 1.into(),
         comm: "Compositor".into(),
         process_comm: "sway".into(),
         process_starttime_ticks: Some(90),
@@ -142,11 +142,11 @@ fn profile_evaluation_matches_apply_plan_rule_order_and_masks() {
     let compositor = test_task(14, TaskClass::Compositor, "kwin_wayland");
     let service = test_task(15, TaskClass::Service, "dbus-daemon");
     let tasks = BTreeMap::from([
-        (main.tid, main.clone()),
-        (render.tid, render.clone()),
-        (worker.tid, worker.clone()),
-        (compositor.tid, compositor.clone()),
-        (service.tid, service.clone()),
+        (main.task_id().as_u32(), main.clone()),
+        (render.task_id().as_u32(), render.clone()),
+        (worker.task_id().as_u32(), worker.clone()),
+        (compositor.task_id().as_u32(), compositor.clone()),
+        (service.task_id().as_u32(), service.clone()),
     ]);
     let profile = Profile {
         name: "rule-order".to_owned(),
@@ -298,9 +298,9 @@ fn profile_apply_summary_counts_priority_actions_without_double_counting_tasks()
 #[test]
 fn profile_matched_task_count_counts_only_matching_rules() {
     let game_task = TaskInfo {
-        tid: 7,
-        process_pid: 7,
-        process_ppid: 1,
+        tid: 7.into(),
+        process_pid: 7.into(),
+        process_ppid: 1.into(),
         comm: "RenderThread".into(),
         process_comm: "game".into(),
         process_starttime_ticks: Some(70),
@@ -312,9 +312,9 @@ fn profile_matched_task_count_counts_only_matching_rules() {
         from_cgroup: false,
     };
     let compositor_task = TaskInfo {
-        tid: 8,
-        process_pid: 8,
-        process_ppid: 1,
+        tid: 8.into(),
+        process_pid: 8.into(),
+        process_ppid: 1.into(),
         comm: "Compositor".into(),
         process_comm: "sway".into(),
         process_starttime_ticks: Some(80),

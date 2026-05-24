@@ -53,7 +53,7 @@ impl AlertPayload {
             stats.comm,
             format_latency(event.latency_ns),
             event.cpu,
-            stats.process_pid,
+            stats.process_id().map(|pid| pid.as_u32()),
             stats.process_comm
         );
 
@@ -64,7 +64,7 @@ impl AlertPayload {
             active: stats.active,
             class: stats.class,
             comm: stats.comm.clone(),
-            process_pid: stats.process_pid,
+            process_pid: stats.process_id().map(|pid| pid.as_u32()),
             process_comm: stats.process_comm.clone(),
             latency_ns: event.latency_ns,
             latency_ms,

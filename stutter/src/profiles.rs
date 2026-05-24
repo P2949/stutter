@@ -344,7 +344,7 @@ where
         let mut task_pending = false;
 
         if let Some(desired_mask) = &rule.affinity {
-            let original_mask = match read_allowed_mask(task.tid) {
+            let original_mask = match read_allowed_mask(task.task_id().as_u32()) {
                 Ok(mask) => mask,
                 Err(err) if err.raw_os_error() == Some(libc::ESRCH) => {
                     continue; // Task is dead, skip it.
@@ -367,12 +367,12 @@ where
                     );
                 } else {
                     plan.summary.pending_affinity += 1;
-                    pending_tids.insert(task.tid);
+                    pending_tids.insert(task.task_id().as_u32());
                     task_pending = true;
                     plan.affinity_changes.push(PlannedAffinityChange {
                         record: AffinityRecord {
-                            tid: task.tid,
-                            process_pid: Some(task.process_pid),
+                            tid: task.task_id().as_u32(),
+                            process_pid: Some(task.process_id().as_u32()),
                             process_starttime_ticks: task.process_starttime_ticks,
                             task_starttime_ticks: task.task_starttime_ticks,
                             original_mask,
@@ -384,7 +384,7 @@ where
         }
 
         if let Some(desired_nice) = rule.nice {
-            let original_nice = match read_nice(task.tid) {
+            let original_nice = match read_nice(task.task_id().as_u32()) {
                 Ok(nice) => nice,
                 Err(err) if anyhow_raw_os_error(&err) == Some(libc::ESRCH) => continue,
                 Err(err) => {
@@ -404,15 +404,15 @@ where
                     );
                 } else {
                     plan.summary.pending_nice += 1;
-                    pending_tids.insert(task.tid);
+                    pending_tids.insert(task.task_id().as_u32());
                     task_pending = true;
                     plan.nice_groups
                         .entry(desired_nice)
                         .or_default()
                         .push(TaskIdentity::from_task_info(task));
                     plan.nice_records.push(NiceRestoreRecordV2 {
-                        tid: task.tid,
-                        process_pid: Some(task.process_pid),
+                        tid: task.task_id().as_u32(),
+                        process_pid: Some(task.process_id().as_u32()),
                         process_starttime_ticks: task.process_starttime_ticks,
                         task_starttime_ticks: task.task_starttime_ticks,
                         comm: Some(task.comm.clone()),
@@ -424,7 +424,7 @@ where
         }
 
         if let Some(desired_ioprio) = rule.ionice {
-            let original_ioprio = match read_ioprio(task.tid) {
+            let original_ioprio = match read_ioprio(task.task_id().as_u32()) {
                 Ok(ioprio) => ioprio,
                 Err(err) if anyhow_raw_os_error(&err) == Some(libc::ESRCH) => continue,
                 Err(err) => {
@@ -448,15 +448,15 @@ where
                     );
                 } else {
                     plan.summary.pending_ionice += 1;
-                    pending_tids.insert(task.tid);
+                    pending_tids.insert(task.task_id().as_u32());
                     task_pending = true;
                     plan.ionice_groups
                         .entry(desired_ioprio)
                         .or_default()
                         .push(TaskIdentity::from_task_info(task));
                     plan.ionice_records.push(IoPrioRestoreRecordV2 {
-                        tid: task.tid,
-                        process_pid: Some(task.process_pid),
+                        tid: task.task_id().as_u32(),
+                        process_pid: Some(task.process_id().as_u32()),
                         process_starttime_ticks: task.process_starttime_ticks,
                         task_starttime_ticks: task.task_starttime_ticks,
                         comm: Some(task.comm.clone()),
@@ -544,7 +544,7 @@ where
         summary.checked_tasks += 1;
 
         if let Some(desired_mask) = &rule.affinity {
-            let original_mask = match read_allowed_mask(task.tid) {
+            let original_mask = match read_allowed_mask(task.task_id().as_u32()) {
                 Ok(mask) => mask,
                 Err(err) if err.raw_os_error() == Some(libc::ESRCH) => {
                     continue;
@@ -559,12 +559,12 @@ where
 
             if original_mask != *desired_mask {
                 summary.pending_affinity += 1;
-                pending_tids.insert(task.tid);
+                pending_tids.insert(task.task_id().as_u32());
             }
         }
 
         if let Some(desired_nice) = rule.nice {
-            let original_nice = match read_nice(task.tid) {
+            let original_nice = match read_nice(task.task_id().as_u32()) {
                 Ok(nice) => nice,
                 Err(err) if anyhow_raw_os_error(&err) == Some(libc::ESRCH) => continue,
                 Err(err) => return Err(err),
@@ -572,12 +572,12 @@ where
 
             if original_nice != desired_nice {
                 summary.pending_nice += 1;
-                pending_tids.insert(task.tid);
+                pending_tids.insert(task.task_id().as_u32());
             }
         }
 
         if let Some(desired_ioprio) = rule.ionice {
-            let original_ioprio = match read_ioprio(task.tid) {
+            let original_ioprio = match read_ioprio(task.task_id().as_u32()) {
                 Ok(ioprio) => ioprio,
                 Err(err) if anyhow_raw_os_error(&err) == Some(libc::ESRCH) => continue,
                 Err(err) => return Err(err),
@@ -585,7 +585,7 @@ where
 
             if original_ioprio != desired_ioprio.encode()? {
                 summary.pending_ionice += 1;
-                pending_tids.insert(task.tid);
+                pending_tids.insert(task.task_id().as_u32());
             }
         }
     }
@@ -748,9 +748,9 @@ fn task_info_from_active_snapshot(
     task: &crate::autotune::observation::ActiveTaskSnapshot,
 ) -> TaskInfo {
     TaskInfo {
-        tid: task.tid,
-        process_pid: task.process_pid,
-        process_ppid: 0,
+        tid: task.tid.into(),
+        process_pid: task.process_pid.into(),
+        process_ppid: 0.into(),
         comm: task.comm.clone(),
         process_comm: task.comm.clone(),
         process_starttime_ticks: task.process_starttime_ticks,
@@ -838,7 +838,7 @@ pub fn profile_rule_matches_task(task: &TaskInfo, rule: &ProfileRule) -> bool {
 impl ProfileApplyCacheKey {
     fn new(task: &TaskInfo, rule: &ProfileRule) -> Self {
         Self {
-            tid: task.tid,
+            tid: task.task_id().as_u32(),
             process_starttime_ticks: task.process_starttime_ticks,
             task_starttime_ticks: task.task_starttime_ticks,
             desired_affinity: rule.affinity.clone(),

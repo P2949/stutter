@@ -2,9 +2,9 @@ use super::super::*;
 
 pub(super) fn test_task(tid: u32, class: TaskClass, comm: &str) -> TaskInfo {
     TaskInfo {
-        tid,
-        process_pid: tid,
-        process_ppid: 1,
+        tid: tid.into(),
+        process_pid: tid.into(),
+        process_ppid: 1.into(),
         comm: comm.into(),
         process_comm: "process".into(),
         process_starttime_ticks: Some(u64::from(tid) * 10),
@@ -21,8 +21,8 @@ pub(super) fn active_task_from_task(
     task: &TaskInfo,
 ) -> crate::autotune::observation::ActiveTaskSnapshot {
     crate::autotune::observation::ActiveTaskSnapshot {
-        tid: task.tid,
-        process_pid: task.process_pid,
+        tid: task.task_id().as_u32(),
+        process_pid: task.process_id().as_u32(),
         comm: task.comm.clone(),
         class: task.class,
         process_starttime_ticks: task.process_starttime_ticks,

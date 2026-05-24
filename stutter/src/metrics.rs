@@ -66,10 +66,10 @@ pub struct SpikeRecordDiagnostics {
 
 #[derive(Clone)]
 pub struct TaskStats {
-    pub task: u32,
+    pub task: Tid,
     pub comm: String,
     pub class: TaskClass,
-    pub process_pid: Option<u32>,
+    pub process_pid: Option<Pid>,
     pub process_comm: String,
     pub process_starttime_ticks: Option<u64>,
     pub task_starttime_ticks: Option<u64>,
@@ -636,18 +636,18 @@ impl CpuLine {
 
 impl TaskStats {
     pub fn task_id(&self) -> Tid {
-        Tid::new(self.task)
+        self.task
     }
 
     pub fn process_id(&self) -> Option<Pid> {
-        self.process_pid.map(Pid::new)
+        self.process_pid
     }
 
     pub fn new(task: u32, comm: String, elapsed_ms: u64) -> Self {
         let class = crate::process_tree::classify_task(&comm, &comm, "");
 
         Self {
-            task,
+            task: Tid::new(task),
             comm,
             class,
             process_pid: None,
@@ -681,7 +681,7 @@ impl TaskStats {
     }
 
     pub fn apply_task_info(&mut self, task_info: &TaskInfo) {
-        self.process_pid = Some(task_info.process_pid);
+        self.process_pid = Some(task_info.process_id());
         self.process_comm = task_info.process_comm.clone();
         self.process_starttime_ticks = task_info.process_starttime_ticks;
         self.task_starttime_ticks = task_info.task_starttime_ticks;
@@ -704,9 +704,9 @@ impl TaskStats {
 
     pub fn task_info(&self) -> TaskInfo {
         TaskInfo {
-            tid: self.task,
-            process_pid: self.process_pid.unwrap_or(0),
-            process_ppid: 0, // ppid is not tracked in TaskStats
+            tid: self.task_id(),
+            process_pid: self.process_id().unwrap_or_else(|| Pid::new(0)),
+            process_ppid: Pid::new(0), // ppid is not tracked in TaskStats
             comm: self.comm.clone(),
             process_comm: self.process_comm.clone(),
             process_starttime_ticks: self.process_starttime_ticks,
@@ -880,7 +880,7 @@ pub fn interval_record_from_snapshot(input: IntervalRecordFromSnapshotInput) -> 
         active: stats.active,
         class: stats.class,
         comm: stats.comm.clone(),
-        process_pid: stats.process_pid,
+        process_pid: stats.process_pid.map(Pid::as_u32),
         process_comm: stats.process_comm.clone(),
         samples: latency.count,
         stored_samples: latency.stored_samples,

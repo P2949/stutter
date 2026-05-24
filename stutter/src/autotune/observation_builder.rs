@@ -150,8 +150,8 @@ fn protected_tasks_from_active_tasks(active_tasks: &BTreeMap<u32, TaskInfo>) -> 
         .values()
         .filter(|task| is_protected_task_class(task.class))
         .map(|task| ProtectedTask {
-            tid: task.tid,
-            process_pid: task.process_pid,
+            tid: task.task_id().as_u32(),
+            process_pid: task.process_id().as_u32(),
             comm: task.comm.clone(),
             class: task.class,
             reason: protected_task_reason(task.class).to_owned(),
@@ -166,13 +166,13 @@ fn active_task_snapshots_from_active_tasks(
     active_tasks
         .values()
         .map(|task| ActiveTaskSnapshot {
-            tid: task.tid,
-            process_pid: task.process_pid,
+            tid: task.task_id().as_u32(),
+            process_pid: task.process_id().as_u32(),
             comm: task.comm.clone(),
             class: task.class,
             process_starttime_ticks: task.process_starttime_ticks,
             task_starttime_ticks: task.task_starttime_ticks,
-            cgroup_path: read_proc_cgroup_path(proc_root, task.tid),
+            cgroup_path: read_proc_cgroup_path(proc_root, task.task_id().as_u32()),
         })
         .collect()
 }
@@ -186,7 +186,7 @@ fn workload_identity_from_runtime_context(
     let root_pid = root_pid?;
     let root_task = active_tasks
         .values()
-        .find(|task| task.process_pid == root_pid || task.tid == root_pid);
+        .find(|task| task.process_id() == root_pid || task.task_id() == root_pid);
     let process_starttime_ticks = root_task
         .and_then(|task| task.process_starttime_ticks)
         .or_else(|| crate::process_tree::process_starttime_at(proc_root, root_pid));
@@ -736,9 +736,9 @@ mod tests {
         process_starttime_ticks: Option<u64>,
     ) -> TaskInfo {
         TaskInfo {
-            tid,
-            process_pid,
-            process_ppid: 0,
+            tid: tid.into(),
+            process_pid: process_pid.into(),
+            process_ppid: 0.into(),
             comm: comm.to_owned(),
             process_comm: comm.to_owned(),
             process_starttime_ticks,

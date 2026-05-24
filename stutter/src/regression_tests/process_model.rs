@@ -17,7 +17,7 @@ fn diff_tasks_orders_removed_before_added_by_tid() {
 
     let actions_and_tids = diffs
         .iter()
-        .map(|diff| (&diff.action, diff.task.tid))
+        .map(|diff| (&diff.action, diff.task.task_id().as_u32()))
         .collect::<Vec<_>>();
     assert_eq!(
         actions_and_tids,
