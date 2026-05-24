@@ -23,7 +23,9 @@ impl MonitorSession {
             self.runtime.targeting.watch_config.is_active(),
             self.config.target.cgroupv2.is_some(),
         ) {
-            let mut tick = interval(Duration::from_millis(2_000));
+            let mut tick = interval(Duration::from_millis(
+                crate::session::targeting::tree_tick_interval_ms(&self.config),
+            ));
             tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
             Some(tick)
         } else {

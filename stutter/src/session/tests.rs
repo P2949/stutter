@@ -6,6 +6,17 @@ fn tree_tick_not_needed_for_direct_pid_only() {
 }
 
 #[test]
+fn tree_tick_interval_uses_watch_poll_ms() {
+    let mut config = MonitorConfig::default();
+    config.watch.poll_ms = 1_337;
+
+    assert_eq!(
+        crate::session::targeting::tree_tick_interval_ms(&config),
+        1_337
+    );
+}
+
+#[test]
 fn tree_tick_needed_for_tree_roots() {
     assert!(needs_tree_tick_from_parts(true, false, false));
 }
