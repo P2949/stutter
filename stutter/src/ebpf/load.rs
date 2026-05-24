@@ -12,15 +12,15 @@ use crate::{
     drm_tracepoints::KmsTracepointProvider,
     ebpf::{
         attach::{
-            FaultPerfProbe, attach_drm_fence_tracepoints, attach_kms_tracepoints,
-            attach_software_perf_event, attach_tracepoint,
+            AttachOps, AyaAttachOps, FaultPerfProbe, attach_drm_fence_tracepoints,
+            attach_kms_tracepoints,
         },
         maps::map_sizing_for_config_after_memlock,
         memlock::{log_memlock_policy_report, raise_memlock_limit},
         memory::format_optional_bytes,
         model::{BlockIoCorrelationBasis, LoadedEbpf, NativeCgroupFilterStatus},
         object::ebpf_object_bytes,
-        preflight::validate_tracepoint_formats,
+        preflight::{TracepointAvailability, validate_tracepoint_formats},
         tracepoints::{
             drm_fence::drm_fence_tracepoint_offsets, kms::kms_provider_tracepoint_offsets,
         },
@@ -46,6 +46,256 @@ pub fn resolve_cgroup_id_best_effort(path: &Path) -> anyhow::Result<u64> {
 #[cfg(not(unix))]
 pub fn resolve_cgroup_id_best_effort(_path: &Path) -> anyhow::Result<u64> {
     anyhow::bail!("native cgroup filtering is only supported on Unix/Linux");
+}
+
+pub(crate) fn attach_required_scheduler_tracepoints(
+    ops: &mut impl AttachOps,
+) -> Result<(), EbpfError> {
+    ops.attach_tracepoint("sched_wakeup", "sched", "sched_wakeup")
+        .map_err(|source| EbpfError::Attach {
+            program: "sched_wakeup",
+            source,
+        })?;
+    ops.attach_tracepoint("sched_switch", "sched", "sched_switch")
+        .map_err(|source| EbpfError::Attach {
+            program: "sched_switch",
+            source,
+        })?;
+
+    Ok(())
+}
+
+pub(crate) fn attach_optional_scheduler_tracepoints(
+    ops: &mut impl AttachOps,
+    activation_plan: &mut ProbeActivationPlan,
+) {
+    if activation_plan.should_attach_program("sched_wakeup_new") {
+        if let Err(err) = ops.attach_tracepoint("sched_wakeup_new", "sched", "sched_wakeup_new") {
+            activation_plan.push_tracepoint_attach_warning(
+                ProbeKey::SchedulerRunnableLatency,
+                "sched_wakeup_new",
+                "sched",
+                "sched_wakeup_new",
+                &err,
+            );
+            log::warn!(
+                "optional_probe_attach_failed key={:?} program=sched_wakeup_new tracepoint=sched/sched_wakeup_new err={err:#}",
+                ProbeKey::SchedulerRunnableLatency
+            );
+        }
+    } else {
+        log::warn!(
+            "optional_tracepoint_unavailable tracepoint=sched_wakeup_new coverage=reduced_new_task_wakeups message=\"sched_wakeup remains attached, but wakeups for newly created tasks may have reduced coverage\""
+        );
+    }
+
+    if activation_plan.should_attach_program("sched_process_exit")
+        && let Err(err) = ops.attach_tracepoint("sched_process_exit", "sched", "sched_process_exit")
+    {
+        activation_plan.push_tracepoint_attach_warning(
+            ProbeKey::SchedulerRunnableLatency,
+            "sched_process_exit",
+            "sched",
+            "sched_process_exit",
+            &err,
+        );
+        log::warn!(
+            "optional_probe_attach_failed key={:?} program=sched_process_exit tracepoint=sched/sched_process_exit err={err:#}",
+            ProbeKey::SchedulerRunnableLatency
+        );
+    }
+
+    if activation_plan.should_attach_program("sched_migrate_task")
+        && let Err(err) = ops.attach_tracepoint("sched_migrate_task", "sched", "sched_migrate_task")
+    {
+        activation_plan.push_tracepoint_attach_warning(
+            ProbeKey::SchedulerRunnableLatency,
+            "sched_migrate_task",
+            "sched",
+            "sched_migrate_task",
+            &err,
+        );
+        log::warn!(
+            "optional_probe_attach_failed key={:?} program=sched_migrate_task tracepoint=sched/sched_migrate_task err={err:#}",
+            ProbeKey::SchedulerRunnableLatency
+        );
+    }
+}
+
+fn attach_optional_probe_tracepoints(
+    ops: &mut impl AttachOps,
+    activation_plan: &mut ProbeActivationPlan,
+    tracepoints: &TracepointAvailability,
+) {
+    if activation_plan.should_attach_program("cpu_frequency")
+        && let Err(err) = ops.attach_tracepoint("cpu_frequency", "power", "cpu_frequency")
+    {
+        activation_plan.push_tracepoint_attach_warning(
+            ProbeKey::CpuFreq,
+            "cpu_frequency",
+            "power",
+            "cpu_frequency",
+            &err,
+        );
+        log::warn!(
+            "optional_probe_attach_failed key={:?} program=cpu_frequency tracepoint=power/cpu_frequency err={err:#}",
+            ProbeKey::CpuFreq
+        );
+    }
+
+    if activation_plan.should_attach_stat_wait()
+        && let Err(err) = ops.attach_tracepoint("sched_stat_wait", "sched", "sched_stat_wait")
+    {
+        activation_plan.push_tracepoint_attach_warning(
+            ProbeKey::Faults,
+            "sched_stat_wait",
+            "sched",
+            "sched_stat_wait",
+            &err,
+        );
+        log::warn!(
+            "optional_probe_attach_failed key={:?} program=sched_stat_wait tracepoint=sched/sched_stat_wait err={err:#}",
+            ProbeKey::Faults
+        );
+    }
+
+    if activation_plan.has_probe(ProbeKey::IrqLatency) {
+        if let Err(err) = ops.attach_tracepoint("irq_handler_entry", "irq", "irq_handler_entry") {
+            activation_plan.push_tracepoint_attach_warning(
+                ProbeKey::IrqLatency,
+                "irq_handler_entry",
+                "irq",
+                "irq_handler_entry",
+                &err,
+            );
+            log::warn!(
+                "optional_probe_attach_failed key={:?} program=irq_handler_entry tracepoint=irq/irq_handler_entry err={err:#}",
+                ProbeKey::IrqLatency
+            );
+        }
+        if let Err(err) = ops.attach_tracepoint("irq_handler_exit", "irq", "irq_handler_exit") {
+            activation_plan.push_tracepoint_attach_warning(
+                ProbeKey::IrqLatency,
+                "irq_handler_exit",
+                "irq",
+                "irq_handler_exit",
+                &err,
+            );
+            log::warn!(
+                "optional_probe_attach_failed key={:?} program=irq_handler_exit tracepoint=irq/irq_handler_exit err={err:#}",
+                ProbeKey::IrqLatency
+            );
+        }
+    }
+
+    if activation_plan.has_probe(ProbeKey::BlockIo) {
+        if let Err(err) = ops.attach_tracepoint("block_rq_issue", "block", "block_rq_issue") {
+            activation_plan.push_tracepoint_attach_warning(
+                ProbeKey::BlockIo,
+                "block_rq_issue",
+                "block",
+                "block_rq_issue",
+                &err,
+            );
+            log::warn!(
+                "optional_probe_attach_failed key={:?} program=block_rq_issue tracepoint=block/block_rq_issue err={err:#}",
+                ProbeKey::BlockIo
+            );
+        }
+        if let Err(err) = ops.attach_tracepoint("block_rq_complete", "block", "block_rq_complete") {
+            activation_plan.push_tracepoint_attach_warning(
+                ProbeKey::BlockIo,
+                "block_rq_complete",
+                "block",
+                "block_rq_complete",
+                &err,
+            );
+            log::warn!(
+                "optional_probe_attach_failed key={:?} program=block_rq_complete tracepoint=block/block_rq_complete err={err:#}",
+                ProbeKey::BlockIo
+            );
+        }
+
+        if let Some(offset) = tracepoints.block_rq_key_offset {
+            log::info!("Block I/O correlation using request pointer identity at offset {offset}");
+        } else {
+            log::warn!(
+                "Block I/O correlation is approximate: using dev+sector hashing instead of request pointers. Concurrent same-sector requests may collide; stutter drops ambiguous fallback samples, so block I/O latency coverage may be incomplete."
+            );
+        }
+
+        if !tracepoints.block_rq_has_rwbs {
+            log::warn!(
+                "block_rq tracepoints missing `rwbs`; block I/O correlation will continue but read/write flags are unavailable"
+            );
+        }
+    }
+}
+
+fn attach_optional_follow_exec_tracepoint(
+    ops: &mut impl AttachOps,
+    activation_plan: &mut ProbeActivationPlan,
+) {
+    if activation_plan.should_attach_follow_exec()
+        && let Err(err) = ops.attach_tracepoint("sched_process_exec", "sched", "sched_process_exec")
+    {
+        activation_plan.push_tracepoint_attach_warning(
+            ProbeKey::SchedulerRunnableLatency,
+            "sched_process_exec",
+            "sched",
+            "sched_process_exec",
+            &err,
+        );
+        log::warn!(
+            "optional_probe_attach_failed key={:?} program=sched_process_exec tracepoint=sched/sched_process_exec err={err:#}",
+            ProbeKey::SchedulerRunnableLatency
+        );
+    }
+}
+
+fn attach_optional_fault_perf_events(
+    ops: &mut impl AttachOps,
+    activation_plan: &mut ProbeActivationPlan,
+) {
+    if !activation_plan.should_attach_fault_perf() {
+        return;
+    }
+
+    // Fault perf events are optional correlation probes. If perf_event_open is
+    // blocked by policy or capabilities, log a warning and continue rather than
+    // aborting the whole profiler startup.
+    if let Err(e) = ops.attach_perf_event("major_fault", FaultPerfProbe::Major) {
+        let err = ProbeError::Attach {
+            probe: "faults".to_owned(),
+            program: "major_fault",
+            source: e,
+        };
+        activation_plan.push_attach_warning(ProbeKey::Faults, "major_fault", &err);
+        log::warn!(
+            "optional_probe_attach_failed key={:?} program=major_fault err={err:#}",
+            ProbeKey::Faults
+        );
+    }
+    if let Err(e) = ops.attach_perf_event("minor_fault", FaultPerfProbe::Minor) {
+        let err = ProbeError::Attach {
+            probe: "faults".to_owned(),
+            program: "minor_fault",
+            source: e,
+        };
+        activation_plan.push_attach_warning(ProbeKey::Faults, "minor_fault", &err);
+        log::warn!(
+            "optional_probe_attach_failed key={:?} program=minor_fault err={err:#}",
+            ProbeKey::Faults
+        );
+    }
+}
+
+pub(crate) fn missing_map_context(map: &'static str) -> String {
+    format!("eBPF load failed: {map} map not found")
+}
+
+pub(crate) fn map_init_context(map: &'static str) -> String {
+    format!("eBPF load failed: {map} map init")
 }
 
 pub fn load_and_attach(
@@ -320,237 +570,50 @@ pub fn load_and_attach(
         );
     }
 
-    attach_tracepoint(&mut ebpf, "sched_wakeup", "sched", "sched_wakeup").map_err(|source| {
-        EbpfError::Attach {
-            program: "sched_wakeup",
-            source,
-        }
-    })?;
-    attach_tracepoint(&mut ebpf, "sched_switch", "sched", "sched_switch").map_err(|source| {
-        EbpfError::Attach {
-            program: "sched_switch",
-            source,
-        }
-    })?;
-
-    if activation_plan.should_attach_program("sched_wakeup_new") {
-        if let Err(err) =
-            attach_tracepoint(&mut ebpf, "sched_wakeup_new", "sched", "sched_wakeup_new")
-        {
-            activation_plan.push_attach_warning(
-                ProbeKey::SchedulerRunnableLatency,
-                "sched_wakeup_new",
-                &err,
-            );
-            log::warn!(
-                "optional_probe_attach_failed key={:?} program=sched_wakeup_new err={err:#}",
-                ProbeKey::SchedulerRunnableLatency
-            );
-        }
-    } else {
-        log::warn!(
-            "optional_tracepoint_unavailable tracepoint=sched_wakeup_new coverage=reduced_new_task_wakeups message=\"sched_wakeup remains attached, but wakeups for newly created tasks may have reduced coverage\""
-        );
-    }
-
-    if activation_plan.should_attach_program("sched_process_exit")
-        && let Err(err) = attach_tracepoint(
-            &mut ebpf,
-            "sched_process_exit",
-            "sched",
-            "sched_process_exit",
-        )
     {
-        activation_plan.push_attach_warning(
-            ProbeKey::SchedulerRunnableLatency,
-            "sched_process_exit",
-            &err,
-        );
-        log::warn!(
-            "optional_probe_attach_failed key={:?} program=sched_process_exit err={err:#}",
-            ProbeKey::SchedulerRunnableLatency
-        );
-    }
+        let mut attach_ops = AyaAttachOps::new(&mut ebpf);
 
-    if activation_plan.should_attach_program("sched_migrate_task")
-        && let Err(err) = attach_tracepoint(
-            &mut ebpf,
-            "sched_migrate_task",
-            "sched",
-            "sched_migrate_task",
-        )
-    {
-        activation_plan.push_attach_warning(
-            ProbeKey::SchedulerRunnableLatency,
-            "sched_migrate_task",
-            &err,
-        );
-        log::warn!(
-            "optional_probe_attach_failed key={:?} program=sched_migrate_task err={err:#}",
-            ProbeKey::SchedulerRunnableLatency
-        );
-    }
+        attach_required_scheduler_tracepoints(&mut attach_ops)?;
+        attach_optional_scheduler_tracepoints(&mut attach_ops, &mut activation_plan);
+        attach_optional_probe_tracepoints(&mut attach_ops, &mut activation_plan, &tracepoints);
 
-    if activation_plan.should_attach_program("cpu_frequency")
-        && let Err(err) = attach_tracepoint(&mut ebpf, "cpu_frequency", "power", "cpu_frequency")
-    {
-        activation_plan.push_attach_warning(ProbeKey::CpuFreq, "cpu_frequency", &err);
-        log::warn!(
-            "optional_probe_attach_failed key={:?} program=cpu_frequency err={err:#}",
-            ProbeKey::CpuFreq
-        );
-    }
+        if activation_plan.has_probe(ProbeKey::KmsPageflipTiming) {
+            attach_kms_tracepoints(&mut attach_ops, &mut activation_plan, &tracepoints.kms);
+        }
 
-    if activation_plan.should_attach_stat_wait()
-        && let Err(err) =
-            attach_tracepoint(&mut ebpf, "sched_stat_wait", "sched", "sched_stat_wait")
-    {
-        activation_plan.push_attach_warning(ProbeKey::Faults, "sched_stat_wait", &err);
-        log::warn!(
-            "optional_probe_attach_failed key={:?} program=sched_stat_wait err={err:#}",
-            ProbeKey::Faults
-        );
-    }
-
-    if activation_plan.has_probe(ProbeKey::IrqLatency) {
-        if let Err(err) =
-            attach_tracepoint(&mut ebpf, "irq_handler_entry", "irq", "irq_handler_entry")
+        if activation_plan.has_probe(ProbeKey::DrmFenceLatency)
+            && let (Some(discovery), Some(offsets)) = (&tracepoints.drm_fence, drm_fence_offsets)
         {
-            activation_plan.push_attach_warning(ProbeKey::IrqLatency, "irq_handler_entry", &err);
-            log::warn!(
-                "optional_probe_attach_failed key={:?} program=irq_handler_entry err={err:#}",
-                ProbeKey::IrqLatency
-            );
-        }
-        if let Err(err) =
-            attach_tracepoint(&mut ebpf, "irq_handler_exit", "irq", "irq_handler_exit")
-        {
-            activation_plan.push_attach_warning(ProbeKey::IrqLatency, "irq_handler_exit", &err);
-            log::warn!(
-                "optional_probe_attach_failed key={:?} program=irq_handler_exit err={err:#}",
-                ProbeKey::IrqLatency
-            );
-        }
-    }
-
-    if activation_plan.has_probe(ProbeKey::BlockIo) {
-        if let Err(err) = attach_tracepoint(&mut ebpf, "block_rq_issue", "block", "block_rq_issue")
-        {
-            activation_plan.push_attach_warning(ProbeKey::BlockIo, "block_rq_issue", &err);
-            log::warn!(
-                "optional_probe_attach_failed key={:?} program=block_rq_issue err={err:#}",
-                ProbeKey::BlockIo
-            );
-        }
-        if let Err(err) =
-            attach_tracepoint(&mut ebpf, "block_rq_complete", "block", "block_rq_complete")
-        {
-            activation_plan.push_attach_warning(ProbeKey::BlockIo, "block_rq_complete", &err);
-            log::warn!(
-                "optional_probe_attach_failed key={:?} program=block_rq_complete err={err:#}",
-                ProbeKey::BlockIo
-            );
+            attach_drm_fence_tracepoints(&mut attach_ops, &mut activation_plan, discovery, offsets);
         }
 
-        if let Some(offset) = tracepoints.block_rq_key_offset {
-            log::info!("Block I/O correlation using request pointer identity at offset {offset}");
-        } else {
-            log::warn!(
-                "Block I/O correlation is approximate: using dev+sector hashing instead of request pointers. Concurrent same-sector requests may collide; stutter drops ambiguous fallback samples, so block I/O latency coverage may be incomplete."
-            );
-        }
-
-        if !tracepoints.block_rq_has_rwbs {
-            log::warn!(
-                "block_rq tracepoints missing `rwbs`; block I/O correlation will continue but read/write flags are unavailable"
-            );
-        }
-    }
-
-    if activation_plan.has_probe(ProbeKey::KmsPageflipTiming) {
-        attach_kms_tracepoints(&mut ebpf, &mut activation_plan, &tracepoints.kms);
-    }
-
-    if activation_plan.has_probe(ProbeKey::DrmFenceLatency)
-        && let (Some(discovery), Some(offsets)) = (&tracepoints.drm_fence, drm_fence_offsets)
-    {
-        attach_drm_fence_tracepoints(&mut ebpf, &mut activation_plan, discovery, offsets);
-    }
-
-    if activation_plan.should_attach_follow_exec()
-        && let Err(err) = attach_tracepoint(
-            &mut ebpf,
-            "sched_process_exec",
-            "sched",
-            "sched_process_exec",
-        )
-    {
-        activation_plan.push_attach_warning(
-            ProbeKey::SchedulerRunnableLatency,
-            "sched_process_exec",
-            &err,
-        );
-        log::warn!(
-            "optional_probe_attach_failed key={:?} program=sched_process_exec err={err:#}",
-            ProbeKey::SchedulerRunnableLatency
-        );
-    }
-
-    if activation_plan.should_attach_fault_perf() {
-        // Fault perf events are optional correlation probes. If perf_event_open
-        // is blocked by policy or capabilities, log a warning and continue rather
-        // than aborting the whole profiler startup.
-        if let Err(e) = attach_software_perf_event(&mut ebpf, "major_fault", FaultPerfProbe::Major)
-        {
-            let err = ProbeError::Attach {
-                probe: "faults".to_owned(),
-                program: "major_fault",
-                source: e,
-            };
-            activation_plan.push_attach_warning(ProbeKey::Faults, "major_fault", &err);
-            log::warn!(
-                "optional_probe_attach_failed key={:?} program=major_fault err={err:#}",
-                ProbeKey::Faults
-            );
-        }
-        if let Err(e) = attach_software_perf_event(&mut ebpf, "minor_fault", FaultPerfProbe::Minor)
-        {
-            let err = ProbeError::Attach {
-                probe: "faults".to_owned(),
-                program: "minor_fault",
-                source: e,
-            };
-            activation_plan.push_attach_warning(ProbeKey::Faults, "minor_fault", &err);
-            log::warn!(
-                "optional_probe_attach_failed key={:?} program=minor_fault err={err:#}",
-                ProbeKey::Faults
-            );
-        }
+        attach_optional_follow_exec_tracepoint(&mut attach_ops, &mut activation_plan);
+        attach_optional_fault_perf_events(&mut attach_ops, &mut activation_plan);
     }
 
     let mut target_pid_map = AyaHashMap::try_from(
         ebpf.take_map("TARGET_PIDS")
-            .context("eBPF load failed: TARGET_PIDS map not found")?,
+            .context(missing_map_context("TARGET_PIDS"))?,
     )
-    .context("eBPF load failed: TARGET_PIDS map init")?;
+    .context(map_init_context("TARGET_PIDS"))?;
 
     let target_irq_map = ebpf
         .take_map("TARGET_IRQS")
         .map(AyaHashMap::try_from)
         .transpose()
-        .context("eBPF load failed: TARGET_IRQS map init")?;
+        .context(map_init_context("TARGET_IRQS"))?;
 
     let drop_counters = PerCpuArray::try_from(
         ebpf.take_map("DROP_COUNTERS")
-            .context("eBPF load failed: DROP_COUNTERS map not found")?,
+            .context(missing_map_context("DROP_COUNTERS"))?,
     )
-    .context("eBPF load failed: DROP_COUNTERS map init")?;
+    .context(map_init_context("DROP_COUNTERS"))?;
 
     let events = RingBuf::try_from(
         ebpf.take_map("EVENTS")
-            .context("eBPF load failed: EVENTS map not found")?,
+            .context(missing_map_context("EVENTS"))?,
     )
-    .context("eBPF load failed: EVENTS map init")?;
+    .context(map_init_context("EVENTS"))?;
 
     let events = AsyncFd::new(events).context("eBPF load failed: events ringbuf async fd")?;
 
@@ -558,7 +621,7 @@ pub fn load_and_attach(
         .take_map("PREV_FAULTS")
         .map(AyaHashMap::try_from)
         .transpose()
-        .context("eBPF load failed: PREV_FAULTS map init")?;
+        .context(map_init_context("PREV_FAULTS"))?;
 
     let native_cgroup_filter = NativeCgroupFilterStatus::disabled();
     let target_cgroup_map = None;

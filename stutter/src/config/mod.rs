@@ -5,6 +5,7 @@ pub mod model;
 pub mod schema;
 pub mod source;
 pub mod types;
+pub(crate) mod validation;
 
 pub use types::{
     CsvStreamTarget, FocusSource, ForegroundSource, TARGET_PIDS_MAX, WaylandPresentationSource,

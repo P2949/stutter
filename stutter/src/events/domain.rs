@@ -34,6 +34,7 @@ mod tests {
             kind: EVENT_IRQ_LATENCY,
             irq: 9,
             cpu: 2,
+            _pad0: 0,
             enter_ns: 10,
             exit_ns: 40,
             duration_ns: 30,

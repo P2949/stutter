@@ -8,6 +8,7 @@ use crate::config::{
     model::MonitorConfig,
     schema::ConfigDiagnostic,
     source::{ConfigSource, FieldProvenance},
+    validation::validate_monitor_config,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -73,11 +74,15 @@ impl EffectiveMonitorConfig {
 
         apply_layer_with_provenance(&mut config, overrides, overrides_source, &mut provenance);
 
-        Ok(Self {
+        let resolved = Self {
             config,
             provenance,
             diagnostics,
-        })
+        };
+
+        validate_monitor_config(&resolved.config)?;
+
+        Ok(resolved)
     }
 
     pub fn into_monitor_config(self) -> MonitorConfig {

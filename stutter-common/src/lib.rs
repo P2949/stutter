@@ -26,6 +26,8 @@
 //! `docs/EBPF_CAPACITY.md`.
 
 pub const EVENT_RUNNABLE_LATENCY: u32 = 1;
+pub mod tracepoint_offsets;
+
 pub const EVENT_IRQ_LATENCY: u32 = 2;
 pub const EVENT_MIGRATION: u32 = 3;
 pub const EVENT_CPU_FREQ: u32 = 4;
@@ -161,12 +163,19 @@ pub struct SchedulerEvent {
     /// This is sched_switch.prev_pid, not necessarily the task that experienced
     /// wakeup latency.
     pub switch_prev_pid: u32,
+    pub _pad0: u32,
 
     /// Raw sched_switch.prev_state for switch_prev_pid.
     /// This describes the task switched out, not the task switched in.
     pub switch_prev_state: i64,
 }
 
+// SAFETY: SchedulerEvent is a #[repr(C)] eBPF/userspace ABI record. It contains
+// only fixed-width integers and byte arrays, has no references, pointers, Drop
+// implementation, or invalid bit patterns, and padding is represented by the
+// explicit `_pad0` field initialized by the eBPF producer. The size and critical
+// offsets are pinned by compile-time assertions below and must stay in sync with
+// eBPF writers.
 #[cfg(feature = "user")]
 unsafe impl aya::Pod for SchedulerEvent {}
 
@@ -191,11 +200,17 @@ pub struct IrqEvent {
     pub kind: u32,
     pub irq: u32,
     pub cpu: u32,
+    pub _pad0: u32,
     pub enter_ns: u64,
     pub exit_ns: u64,
     pub duration_ns: u64,
 }
 
+// SAFETY: IrqEvent is a #[repr(C)] eBPF/userspace ABI record containing only
+// fixed-width integer fields. It has no references, pointers, Drop
+// implementation, or invalid bit patterns, and its alignment padding is made
+// explicit by `_pad0`, which eBPF initializes before emission. Layout is pinned
+// by the compile-time assertions below.
 #[cfg(feature = "user")]
 unsafe impl aya::Pod for IrqEvent {}
 
@@ -209,6 +224,9 @@ pub struct MigrationEvent {
     pub timestamp_ns: u64,
 }
 
+// SAFETY: MigrationEvent is a #[repr(C)] eBPF/userspace ABI record made only of
+// fixed-width integers. It has no references, pointers, Drop implementation, or
+// invalid bit patterns, and its size is pinned by a compile-time assertion.
 #[cfg(feature = "user")]
 unsafe impl aya::Pod for MigrationEvent {}
 
@@ -222,6 +240,10 @@ pub struct CpuFreqEvent {
     pub timestamp_ns: u64,
 }
 
+// SAFETY: CpuFreqEvent is a #[repr(C)] eBPF/userspace ABI record containing only
+// fixed-width integers. It has no references, pointers, Drop implementation, or
+// invalid bit patterns, and padding is represented by the explicit `_pad` field.
+// Layout is pinned by a compile-time size assertion.
 #[cfg(feature = "user")]
 unsafe impl aya::Pod for CpuFreqEvent {}
 
@@ -233,6 +255,9 @@ pub struct StatWaitEvent {
     pub delay_ns: u64,
 }
 
+// SAFETY: StatWaitEvent is a #[repr(C)] eBPF/userspace ABI record made only of
+// fixed-width integers. It has no references, pointers, Drop implementation, or
+// invalid bit patterns, and its size is pinned by a compile-time assertion.
 #[cfg(feature = "user")]
 unsafe impl aya::Pod for StatWaitEvent {}
 
@@ -249,6 +274,10 @@ pub struct BlockIoEvent {
     pub rwbs: [u8; 8],
 }
 
+// SAFETY: BlockIoEvent is a #[repr(C)] eBPF/userspace ABI record containing only
+// fixed-width integers and a byte array. It has no references, pointers, Drop
+// implementation, or invalid bit patterns, and its size is pinned by a
+// compile-time assertion.
 #[cfg(feature = "user")]
 unsafe impl aya::Pod for BlockIoEvent {}
 
@@ -261,6 +290,10 @@ pub struct ExecEvent {
     pub comm: [u8; 16],
 }
 
+// SAFETY: ExecEvent is a #[repr(C)] eBPF/userspace ABI record containing only
+// fixed-width integers and a byte array. It has no references, pointers, Drop
+// implementation, or invalid bit patterns, and its size is pinned by a
+// compile-time assertion.
 #[cfg(feature = "user")]
 unsafe impl aya::Pod for ExecEvent {}
 
@@ -284,6 +317,9 @@ pub struct KmsFlipEvent {
     pub timestamp_ns: u64,
 }
 
+// SAFETY: KmsFlipEvent is a #[repr(C)] eBPF/userspace ABI record made only of
+// fixed-width integers. It has no references, pointers, Drop implementation, or
+// invalid bit patterns, and its size is pinned by a compile-time assertion.
 #[cfg(feature = "user")]
 unsafe impl aya::Pod for KmsFlipEvent {}
 
@@ -299,6 +335,7 @@ pub struct DrmFenceEvent {
     pub cpu: u32,
     pub driver_id: u32,
     pub gpu_role: u32,
+    pub _pad0: u32,
     pub context: u64,
     pub seqno: u64,
     pub timeline_hash: u64,
@@ -309,6 +346,11 @@ pub struct DrmFenceEvent {
     pub timestamp_ns: u64,
 }
 
+// SAFETY: DrmFenceEvent is a #[repr(C)] eBPF/userspace ABI record containing
+// only fixed-width integers. It has no references, pointers, Drop
+// implementation, or invalid bit patterns, and padding is represented by the
+// explicit `_pad0` field initialized by the eBPF producer. Layout is pinned by
+// the compile-time assertions below.
 #[cfg(feature = "user")]
 unsafe impl aya::Pod for DrmFenceEvent {}
 
@@ -323,3 +365,15 @@ const _: [(); core::mem::size_of::<BlockIoEvent>()] = [(); 48];
 const _: [(); core::mem::size_of::<ExecEvent>()] = [(); 28];
 const _: [(); core::mem::size_of::<KmsFlipEvent>()] = [(); 80];
 const _: [(); core::mem::size_of::<DrmFenceEvent>()] = [(); 104];
+
+const _: () = {
+    assert!(core::mem::offset_of!(SchedulerEvent, switch_prev_pid) == 88);
+    assert!(core::mem::offset_of!(SchedulerEvent, _pad0) == 92);
+    assert!(core::mem::offset_of!(SchedulerEvent, switch_prev_state) == 96);
+    assert!(core::mem::offset_of!(IrqEvent, cpu) == 8);
+    assert!(core::mem::offset_of!(IrqEvent, _pad0) == 12);
+    assert!(core::mem::offset_of!(IrqEvent, enter_ns) == 16);
+    assert!(core::mem::offset_of!(DrmFenceEvent, gpu_role) == 32);
+    assert!(core::mem::offset_of!(DrmFenceEvent, _pad0) == 36);
+    assert!(core::mem::offset_of!(DrmFenceEvent, context) == 40);
+};

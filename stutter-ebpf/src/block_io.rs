@@ -14,6 +14,7 @@ use stutter_common::{
 
 use crate::{
     increment_drop_counter, is_target_pid_or_current_cgroup,
+    map_limits::BLOCK_START_MAP_MAX_ENTRIES,
     trace_offsets::{
         BLOCK_RQ_COMPLETE_NR_SECTOR_OFFSET, BLOCK_RQ_COMPLETE_RWBS_OFFSET,
         BLOCK_RQ_ISSUE_NR_SECTOR_OFFSET, BLOCK_RQ_ISSUE_RWBS_OFFSET, BLOCK_RQ_KEY_OFFSET,
@@ -30,7 +31,7 @@ struct IoStart {
 
 #[map]
 static BLOCK_START: LruHashMap<u64, IoStart> =
-    LruHashMap::<u64, IoStart>::with_max_entries(16384, 0);
+    LruHashMap::<u64, IoStart>::with_max_entries(BLOCK_START_MAP_MAX_ENTRIES, 0);
 
 #[inline(always)]
 fn block_rq_fallback_key(

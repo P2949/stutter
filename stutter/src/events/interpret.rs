@@ -298,6 +298,7 @@ mod tests {
             latency_ns,
             comm: [0; 16],
             switch_prev_pid: 0,
+            _pad0: 0,
             switch_prev_state: 0,
         }
     }
@@ -335,6 +336,7 @@ mod tests {
             latency_ns: 1000,
             comm: [0; 16],
             switch_prev_pid: 0,
+            _pad0: 0,
             switch_prev_state: 0,
         };
         let stats = metrics::TaskStats::new(123, "test".to_string(), 0);
@@ -447,6 +449,7 @@ mod tests {
             latency_ns: 2_000_000,
             comm: [0; 16],
             switch_prev_pid: 0,
+            _pad0: 0,
             switch_prev_state: 0,
         };
 

@@ -111,7 +111,7 @@ fn merge_config_sources_lossy_for_tests(sources: ConfigSources) -> MonitorConfig
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{FocusSource, ForegroundSource};
+    use crate::config::{FocusSource, ForegroundSource, TARGET_PIDS_MAX};
 
     fn last_source_for_field(
         provenance: &[crate::config::source::FieldProvenance],
@@ -122,6 +122,21 @@ mod tests {
             .rev()
             .find(|entry| entry.field == field)
             .map(|entry| entry.source)
+    }
+
+    fn assert_api_override_invalid_field(layer: MonitorConfigLayer, expected_field: &'static str) {
+        let err = merge_config_sources_checked(ConfigSources {
+            defaults: DefaultConfig::default(),
+            user_file: None,
+            preset: None,
+            overrides: ApiOverrides { layer }.into(),
+        })
+        .unwrap_err();
+
+        match err {
+            ConfigError::InvalidValue { field, .. } => assert_eq!(field, expected_field),
+            other => panic!("expected InvalidValue for {expected_field}, got {other:?}"),
+        }
     }
 
     #[test]
@@ -172,6 +187,83 @@ mod tests {
             err,
             crate::config::ConfigError::InvalidUserLayer(_)
         ));
+    }
+
+    #[test]
+    fn merge_rejects_zero_summary_period_from_api_override() {
+        assert_api_override_invalid_field(
+            MonitorConfigLayer {
+                summary_period_ms: Some(0),
+                ..Default::default()
+            },
+            "timing.summary_period_ms",
+        );
+    }
+
+    #[test]
+    fn merge_rejects_zero_target_max_tasks_from_api_override() {
+        assert_api_override_invalid_field(
+            MonitorConfigLayer {
+                max_tasks: Some(0),
+                ..Default::default()
+            },
+            "target.max_tasks",
+        );
+    }
+
+    #[test]
+    fn merge_rejects_target_max_tasks_above_shared_limit_from_api_override() {
+        assert_api_override_invalid_field(
+            MonitorConfigLayer {
+                max_tasks: Some(TARGET_PIDS_MAX + 1),
+                ..Default::default()
+            },
+            "target.max_tasks",
+        );
+    }
+
+    #[test]
+    fn merge_rejects_ringbuf_size_below_loader_minimum_from_api_override() {
+        assert_api_override_invalid_field(
+            MonitorConfigLayer {
+                ringbuf_size_kb: Some(Some(63)),
+                ..Default::default()
+            },
+            "ebpf_sizing.ringbuf_size_kb",
+        );
+    }
+
+    #[test]
+    fn merge_rejects_zero_wakeup_map_factor_from_api_override() {
+        assert_api_override_invalid_field(
+            MonitorConfigLayer {
+                wakeup_map_factor: Some(Some(0)),
+                ..Default::default()
+            },
+            "ebpf_sizing.wakeup_map_factor",
+        );
+    }
+
+    #[test]
+    fn merge_rejects_empty_otel_service_name_from_api_override() {
+        assert_api_override_invalid_field(
+            MonitorConfigLayer {
+                otel_service_name: Some("  ".to_owned()),
+                ..Default::default()
+            },
+            "outputs.otel_service_name",
+        );
+    }
+
+    #[test]
+    fn merge_rejects_zero_live_diagnosis_window_from_api_override() {
+        assert_api_override_invalid_field(
+            MonitorConfigLayer {
+                live_diagnosis_cluster_window_ms: Some(0),
+                ..Default::default()
+            },
+            "diagnosis.live_cluster_window_ms",
+        );
     }
 
     #[test]

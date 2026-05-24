@@ -1,6 +1,10 @@
 use std::path::Path;
 
 use serde::Serialize;
+use stutter_common::tracepoint_offsets::{
+    CPU_FREQUENCY_FIELDS, IRQ_HANDLER_FIELDS, SCHED_MIGRATE_TASK_FIELDS, SCHED_STAT_WAIT_FIELDS,
+    SCHED_SWITCH_FIELDS, SCHED_WAKEUP_FIELDS,
+};
 
 use crate::{
     drm_fence_tracepoints::DrmFenceTracepointDiscovery,
@@ -66,46 +70,40 @@ pub fn tracepoint_preflight(
 
     let sched_wakeup = required_tracepoint_status(
         &events_root.join("sched/sched_wakeup/format"),
-        &[("pid", 24), ("prio", 28), ("target_cpu", 32)],
+        SCHED_WAKEUP_FIELDS,
         "sched_wakeup",
         &mut errors,
     );
     let sched_switch = required_tracepoint_status(
         &events_root.join("sched/sched_switch/format"),
-        &[
-            ("prev_pid", 24),
-            ("prev_state", 32),
-            ("next_comm", 40),
-            ("next_pid", 56),
-            ("next_prio", 60),
-        ],
+        SCHED_SWITCH_FIELDS,
         "sched_switch",
         &mut errors,
     );
     let sched_wakeup_new = optional_tracepoint_status(
         &events_root.join("sched/sched_wakeup_new/format"),
-        &[("pid", 24), ("prio", 28), ("target_cpu", 32)],
+        SCHED_WAKEUP_FIELDS,
         "sched_wakeup_new",
         true,
         &mut warnings,
     );
     let sched_migrate_task = optional_tracepoint_status(
         &events_root.join("sched/sched_migrate_task/format"),
-        &[("pid", 12), ("orig_cpu", 20), ("dest_cpu", 24)],
+        SCHED_MIGRATE_TASK_FIELDS,
         "sched_migrate_task",
         true,
         &mut warnings,
     );
     let cpu_frequency = optional_tracepoint_status(
         &events_root.join("power/cpu_frequency/format"),
-        &[("state", 8), ("cpu_id", 12)],
+        CPU_FREQUENCY_FIELDS,
         "cpu_frequency",
         wants_cpu_freq,
         &mut warnings,
     );
     let sched_stat_wait = optional_tracepoint_status(
         &events_root.join("sched/sched_stat_wait/format"),
-        &[("pid", 8), ("delay", 16)],
+        SCHED_STAT_WAIT_FIELDS,
         "sched_stat_wait",
         wants_stat_wait,
         &mut warnings,
@@ -116,11 +114,14 @@ pub fn tracepoint_preflight(
     let irq_handler = if !wants_irq_latency {
         "not_requested".to_owned()
     } else if irq_entry.exists() && irq_exit.exists() {
-        let entry_ok =
-            validate_tracepoint_format_at_named(&irq_entry, "irq_handler_entry", &[("irq", 8)])
-                .is_ok();
+        let entry_ok = validate_tracepoint_format_at_named(
+            &irq_entry,
+            "irq_handler_entry",
+            IRQ_HANDLER_FIELDS,
+        )
+        .is_ok();
         let exit_ok =
-            validate_tracepoint_format_at_named(&irq_exit, "irq_handler_exit", &[("irq", 8)])
+            validate_tracepoint_format_at_named(&irq_exit, "irq_handler_exit", IRQ_HANDLER_FIELDS)
                 .is_ok()
                 && require_tracepoint_field(&irq_exit, "ret").is_ok();
         if entry_ok && exit_ok {
@@ -264,37 +265,31 @@ pub(crate) fn validate_tracepoint_formats(
 ) -> anyhow::Result<TracepointAvailability> {
     validate_tracepoint_format_at(
         &events_root.join("sched/sched_wakeup/format"),
-        &[("pid", 24), ("prio", 28), ("target_cpu", 32)],
+        SCHED_WAKEUP_FIELDS,
     )?;
     let sched_wakeup_new = validate_optional_tracepoint_format_at(
         &events_root.join("sched/sched_wakeup_new/format"),
         "sched_wakeup_new",
-        &[("pid", 24), ("prio", 28), ("target_cpu", 32)],
+        SCHED_WAKEUP_FIELDS,
         true,
     )?;
     validate_tracepoint_format_at_named(
         &events_root.join("sched/sched_switch/format"),
         "sched_switch",
-        &[
-            ("prev_pid", 24),
-            ("prev_state", 32),
-            ("next_comm", 40),
-            ("next_pid", 56),
-            ("next_prio", 60),
-        ],
+        SCHED_SWITCH_FIELDS,
     )?;
 
     let sched_migrate_task = validate_optional_tracepoint_format_at(
         &events_root.join("sched/sched_migrate_task/format"),
         "sched_migrate_task",
-        &[("pid", 12), ("orig_cpu", 20), ("dest_cpu", 24)],
+        SCHED_MIGRATE_TASK_FIELDS,
         true,
     )?;
     let cpu_frequency = if config.probes.cpu_freq {
         validate_optional_tracepoint_format_at(
             &events_root.join("power/cpu_frequency/format"),
             "cpu_frequency",
-            &[("state", 8), ("cpu_id", 12)],
+            CPU_FREQUENCY_FIELDS,
             true,
         )?
     } else {
@@ -304,7 +299,7 @@ pub(crate) fn validate_tracepoint_formats(
         validate_optional_tracepoint_format_at(
             &events_root.join("sched/sched_stat_wait/format"),
             "sched_stat_wait",
-            &[("pid", 8), ("delay", 16)],
+            SCHED_STAT_WAIT_FIELDS,
             true,
         )?
     } else {
@@ -314,8 +309,8 @@ pub(crate) fn validate_tracepoint_formats(
     let irq_entry = events_root.join("irq/irq_handler_entry/format");
     let irq_exit = events_root.join("irq/irq_handler_exit/format");
     let irq_handler = if config.probes.irq_latency && irq_entry.exists() && irq_exit.exists() {
-        validate_tracepoint_format_at_named(&irq_entry, "irq_handler_entry", &[("irq", 8)])?;
-        validate_tracepoint_format_at_named(&irq_exit, "irq_handler_exit", &[("irq", 8)])?;
+        validate_tracepoint_format_at_named(&irq_entry, "irq_handler_entry", IRQ_HANDLER_FIELDS)?;
+        validate_tracepoint_format_at_named(&irq_exit, "irq_handler_exit", IRQ_HANDLER_FIELDS)?;
 
         // Validation-only for now. The eBPF program does not currently read
         // irq_handler_exit.ret, but the field must exist for kernels where IRQ exit

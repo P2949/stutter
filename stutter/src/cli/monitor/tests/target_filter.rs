@@ -149,11 +149,26 @@ fn parses_max_tasks() {
         "--pid",
         "42",
         "--max-tasks",
-        "2048",
+        "1024",
     ])
     .unwrap();
 
-    assert_eq!(config.target.max_tasks, 2048);
+    assert_eq!(config.target.max_tasks, crate::config::TARGET_PIDS_MAX);
+}
+
+#[test]
+fn rejects_max_tasks_above_target_pid_capacity() {
+    let err = parse_monitor_config_for_phase15([
+        "stutter",
+        "monitor",
+        "--pid",
+        "42",
+        "--max-tasks",
+        "1025",
+    ])
+    .unwrap_err();
+
+    assert!(err.to_string().contains("target.max_tasks"));
 }
 
 #[test]

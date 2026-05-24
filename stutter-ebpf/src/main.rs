@@ -22,6 +22,14 @@ use stutter_common::{
     EVENT_STAT_WAIT, ExecEvent, IrqEvent, KMS_FLIP_EVENT_PAGEFLIP_DONE, KMS_FLIP_EVENT_VBLANK,
     KMS_FLIP_PROVIDER_AMDGPU, KMS_FLIP_PROVIDER_DRM, KMS_FLIP_PROVIDER_I915, MigrationEvent,
     SchedulerEvent, StatWaitEvent,
+    tracepoint_offsets::{
+        CPU_FREQUENCY_CPU_ID_OFFSET, CPU_FREQUENCY_STATE_OFFSET, IRQ_HANDLER_IRQ_OFFSET,
+        SCHED_MIGRATE_TASK_DEST_CPU_OFFSET, SCHED_MIGRATE_TASK_ORIG_CPU_OFFSET,
+        SCHED_MIGRATE_TASK_PID_OFFSET, SCHED_STAT_WAIT_DELAY_OFFSET, SCHED_STAT_WAIT_PID_OFFSET,
+        SCHED_SWITCH_NEXT_COMM_OFFSET, SCHED_SWITCH_NEXT_PID_OFFSET, SCHED_SWITCH_NEXT_PRIO_OFFSET,
+        SCHED_SWITCH_PREV_PID_OFFSET, SCHED_SWITCH_PREV_STATE_OFFSET, SCHED_WAKEUP_PID_OFFSET,
+        SCHED_WAKEUP_TARGET_CPU_OFFSET,
+    },
 };
 
 // Layout:
@@ -62,7 +70,10 @@ mod wakeup_data;
 
 use kms_emit::emit_kms_flip_event;
 use map_limits::{
-    PREV_FAULTS_MAP_MAX_ENTRIES, RUNNABLE_TASK_CPU_MAP_MAX_ENTRIES, TARGET_PIDS_MAP_MAX_ENTRIES,
+    FENCE_SIGNAL_TIMES_MAP_MAX_ENTRIES, FENCE_WAIT_STARTS_MAP_MAX_ENTRIES,
+    IRQ_START_TIMES_MAP_MAX_ENTRIES, KMS_FLIP_STARTS_MAP_MAX_ENTRIES, PREV_FAULTS_MAP_MAX_ENTRIES,
+    RUNNABLE_TASK_CPU_MAP_MAX_ENTRIES, TARGET_CGROUP_IDS_MAP_MAX_ENTRIES,
+    TARGET_IRQS_MAP_MAX_ENTRIES, TARGET_PIDS_MAP_MAX_ENTRIES,
 };
 use trace_offsets::*;
 use trace_read::{
@@ -80,11 +91,6 @@ use wakeup_data::{
 // -----------------------------------------------------------------------------
 
 const _: () = assert!(BPF_MAX_TRACKED_CPUS >= 1024);
-const SCHED_SWITCH_PREV_PID_OFFSET: usize = 24;
-const SCHED_SWITCH_PREV_STATE_OFFSET: usize = 32;
-const SCHED_SWITCH_NEXT_COMM_OFFSET: usize = 40;
-const SCHED_SWITCH_NEXT_PID_OFFSET: usize = 56;
-const SCHED_SWITCH_NEXT_PRIO_OFFSET: usize = 60;
 
 // -----------------------------------------------------------------------------
 // BPF maps and shared state structs
@@ -100,13 +106,16 @@ static TARGET_PIDS: HashMap<u32, u8> =
     HashMap::<u32, u8>::with_max_entries(TARGET_PIDS_MAP_MAX_ENTRIES, 0);
 
 #[map]
-static TARGET_CGROUP_IDS: HashMap<u64, u8> = HashMap::<u64, u8>::with_max_entries(64, 0);
+static TARGET_CGROUP_IDS: HashMap<u64, u8> =
+    HashMap::<u64, u8>::with_max_entries(TARGET_CGROUP_IDS_MAP_MAX_ENTRIES, 0);
 
 #[map]
-static TARGET_IRQS: HashMap<u32, u8> = HashMap::<u32, u8>::with_max_entries(64, 0);
+static TARGET_IRQS: HashMap<u32, u8> =
+    HashMap::<u32, u8>::with_max_entries(TARGET_IRQS_MAP_MAX_ENTRIES, 0);
 
 #[map]
-static IRQ_START_TIMES: HashMap<u64, u64> = HashMap::<u64, u64>::with_max_entries(1024, 0);
+static IRQ_START_TIMES: HashMap<u64, u64> =
+    HashMap::<u64, u64>::with_max_entries(IRQ_START_TIMES_MAP_MAX_ENTRIES, 0);
 
 #[map]
 // Diagnostic-only count of monitored pending wakeups for this target/task.
@@ -172,15 +181,15 @@ static PREV_FAULTS: HashMap<u32, FaultCounters> =
 
 #[map]
 static KMS_FLIP_STARTS: HashMap<KmsFlipKey, u64> =
-    HashMap::<KmsFlipKey, u64>::with_max_entries(4096, 0);
+    HashMap::<KmsFlipKey, u64>::with_max_entries(KMS_FLIP_STARTS_MAP_MAX_ENTRIES, 0);
 
 #[map]
 static FENCE_WAIT_STARTS: HashMap<FenceKey, FenceWaitStart> =
-    HashMap::<FenceKey, FenceWaitStart>::with_max_entries(4096, 0);
+    HashMap::<FenceKey, FenceWaitStart>::with_max_entries(FENCE_WAIT_STARTS_MAP_MAX_ENTRIES, 0);
 
 #[map]
 static FENCE_SIGNAL_TIMES: HashMap<FenceKey, FenceSignal> =
-    HashMap::<FenceKey, FenceSignal>::with_max_entries(4096, 0);
+    HashMap::<FenceKey, FenceSignal>::with_max_entries(FENCE_SIGNAL_TIMES_MAP_MAX_ENTRIES, 0);
 
 #[map]
 static DROP_COUNTERS: PerCpuArray<u64> = PerCpuArray::<u64>::with_max_entries(DROP_COUNTERS_MAX, 0);
@@ -501,11 +510,11 @@ fn decrement_target_pending(cpu: u32) {
 #[inline(always)]
 fn try_sched_wakeup(ctx: TracePointContext) -> u32 {
     let mut pid: i32 = 0;
-    if !read_i32(&ctx, 24, &mut pid) {
+    if !read_i32(&ctx, SCHED_WAKEUP_PID_OFFSET, &mut pid) {
         return 1;
     }
     let mut target_cpu: u32 = 0;
-    if !read_u32(&ctx, 32, &mut target_cpu) {
+    if !read_u32(&ctx, SCHED_WAKEUP_TARGET_CPU_OFFSET, &mut target_cpu) {
         return 1;
     }
 
@@ -677,6 +686,7 @@ fn try_sched_switch(ctx: TracePointContext) -> u32 {
             latency_ns,
             comm,
             switch_prev_pid,
+            _pad0: 0,
             switch_prev_state: prev_state,
         }
     );
@@ -687,7 +697,7 @@ fn try_sched_switch(ctx: TracePointContext) -> u32 {
 #[inline(always)]
 fn try_sched_migrate_task(ctx: TracePointContext) -> u32 {
     let mut pid: i32 = 0;
-    if !read_i32(&ctx, 12, &mut pid) {
+    if !read_i32(&ctx, SCHED_MIGRATE_TASK_PID_OFFSET, &mut pid) {
         return 1;
     }
     if pid <= 0 {
@@ -700,11 +710,11 @@ fn try_sched_migrate_task(ctx: TracePointContext) -> u32 {
     }
 
     let mut orig_cpu: i32 = 0;
-    if !read_i32(&ctx, 20, &mut orig_cpu) {
+    if !read_i32(&ctx, SCHED_MIGRATE_TASK_ORIG_CPU_OFFSET, &mut orig_cpu) {
         return 1;
     }
     let mut dest_cpu: i32 = 0;
-    if !read_i32(&ctx, 24, &mut dest_cpu) {
+    if !read_i32(&ctx, SCHED_MIGRATE_TASK_DEST_CPU_OFFSET, &mut dest_cpu) {
         return 1;
     }
     let now = unsafe { bpf_ktime_get_ns() };
@@ -747,11 +757,11 @@ fn try_sched_migrate_task(ctx: TracePointContext) -> u32 {
 #[inline(always)]
 fn try_cpu_frequency(ctx: TracePointContext) -> u32 {
     let mut state: u32 = 0;
-    if !read_u32(&ctx, 8, &mut state) {
+    if !read_u32(&ctx, CPU_FREQUENCY_STATE_OFFSET, &mut state) {
         return 1;
     }
     let mut cpu_id: u32 = 0;
-    if !read_u32(&ctx, 12, &mut cpu_id) {
+    if !read_u32(&ctx, CPU_FREQUENCY_CPU_ID_OFFSET, &mut cpu_id) {
         return 1;
     }
     let now = unsafe { bpf_ktime_get_ns() };
@@ -774,7 +784,7 @@ fn try_cpu_frequency(ctx: TracePointContext) -> u32 {
 #[inline(always)]
 fn try_sched_stat_wait(ctx: TracePointContext) -> u32 {
     let mut pid: i32 = 0;
-    if !read_i32(&ctx, 8, &mut pid) {
+    if !read_i32(&ctx, SCHED_STAT_WAIT_PID_OFFSET, &mut pid) {
         return 1;
     }
     if pid <= 0 {
@@ -787,7 +797,7 @@ fn try_sched_stat_wait(ctx: TracePointContext) -> u32 {
     }
 
     let mut delay: u64 = 0;
-    if !read_u64(&ctx, 16, &mut delay) {
+    if !read_u64(&ctx, SCHED_STAT_WAIT_DELAY_OFFSET, &mut delay) {
         return 1;
     }
 
@@ -807,7 +817,7 @@ fn try_sched_stat_wait(ctx: TracePointContext) -> u32 {
 #[inline(always)]
 fn try_irq_handler_entry(ctx: TracePointContext) -> u32 {
     let mut irq: i32 = 0;
-    if !read_i32(&ctx, 8, &mut irq) {
+    if !read_i32(&ctx, IRQ_HANDLER_IRQ_OFFSET, &mut irq) {
         return 1;
     }
     if irq < 0 {
@@ -831,7 +841,7 @@ fn try_irq_handler_entry(ctx: TracePointContext) -> u32 {
 #[inline(always)]
 fn try_irq_handler_exit(ctx: TracePointContext) -> u32 {
     let mut irq: i32 = 0;
-    if !read_i32(&ctx, 8, &mut irq) {
+    if !read_i32(&ctx, IRQ_HANDLER_IRQ_OFFSET, &mut irq) {
         return 1;
     }
     if irq < 0 {
@@ -861,6 +871,7 @@ fn try_irq_handler_exit(ctx: TracePointContext) -> u32 {
             kind: EVENT_IRQ_LATENCY,
             irq,
             cpu,
+            _pad0: 0,
             enter_ns,
             exit_ns,
             duration_ns,
@@ -1343,6 +1354,7 @@ fn try_drm_fence_wait_done(ctx: TracePointContext) -> u32 {
             cpu: bpf_get_smp_processor_id() as u32,
             driver_id,
             gpu_role,
+            _pad0: 0,
             context: identity.key.context,
             seqno: identity.key.seqno,
             timeline_hash: identity.timeline_hash,
@@ -1409,6 +1421,7 @@ fn try_drm_fence_signal(ctx: TracePointContext) -> u32 {
             cpu: bpf_get_smp_processor_id() as u32,
             driver_id: provider,
             gpu_role,
+            _pad0: 0,
             context: identity.key.context,
             seqno: identity.key.seqno,
             timeline_hash: identity.timeline_hash,

@@ -10,10 +10,22 @@ use crate::{
     },
 };
 
+/// Fallback when `/proc/meminfo` cannot provide MemAvailable.
+///
+/// Keeps auto-sizing conservative on unusual systems instead of assuming
+/// unlimited memory.
 const DEFAULT_AVAILABLE_MEMORY_BYTES: u64 = 1 << 30;
+
+/// Use at most 1/64 of available system memory for automatic eBPF map sizing.
+///
+/// Manual CLI overrides remain available for recordings that show drops.
 const AVAILABLE_MEMORY_BUDGET_DIVISOR: u64 = 64;
+
+/// When RLIMIT_MEMLOCK is finite, reserve only 75% of it for stutter maps so
+/// page rounding, other BPF objects, and kernel accounting overhead have margin.
 const MEMLOCK_BUDGET_NUMERATOR: u64 = 3;
 const MEMLOCK_BUDGET_DENOMINATOR: u64 = 4;
+
 // Conservative userspace budgeting estimate for one logical wakeup-state slot.
 // Each slot now reserves both WAKEUP_DATA and WAKEUP_CONSUMED entries, so this
 // is intentionally larger than the raw eBPF-private WakeupData struct size and
@@ -24,6 +36,9 @@ pub(crate) const MIN_WAKEUP_DATA_ENTRIES: u32 = 4_096;
 pub(crate) const MAX_WAKEUP_DATA_ENTRIES: u32 = 1_048_576;
 pub(crate) const MIN_EVENTS_RINGBUF_BYTES: u32 = 64 * 1024;
 pub(crate) const MAX_EVENTS_RINGBUF_BYTES: u32 = 16 * 1024 * 1024;
+
+/// Split the computed budget so roughly 40% is reserved for the ring buffer and
+/// the rest is available for wakeup/cursor maps.
 const EVENTS_BUDGET_NUMERATOR: u64 = 2;
 const EVENTS_BUDGET_DENOMINATOR: u64 = 5;
 

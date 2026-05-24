@@ -338,6 +338,7 @@ mod tests {
                 latency_ns: 10,
                 comm: [0; 16],
                 switch_prev_pid: 0,
+                _pad0: 0,
                 switch_prev_state: 0,
             }),
             comm: "test".to_owned(),
