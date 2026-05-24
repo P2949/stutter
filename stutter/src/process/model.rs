@@ -15,7 +15,10 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use stutter_core::ids::{Pid, Tid};
 
-use crate::community_rules::CommunityRulesDb;
+use crate::{
+    ascii_match::{contains_ignore_ascii_case, normalized_eq_ignore_ascii_case},
+    community_rules::CommunityRulesDb,
+};
 
 pub const DEFAULT_MAX_PROC_SCAN_MS: u64 = 50;
 pub const DEFAULT_MAX_THREADS_PER_PROCESS: usize = 4096;
@@ -204,50 +207,45 @@ impl TaskClass {
     }
 
     pub fn from_str_opt(s: &str) -> Option<Self> {
-        let normalized = s
-            .chars()
-            .filter(|ch| *ch != '_' && *ch != '-' && !ch.is_whitespace())
-            .collect::<String>()
-            .to_ascii_lowercase();
-
-        match normalized.as_str() {
-            "audiorealtime" => Some(Self::AudioRealtime),
-            "input" => Some(Self::Input),
-            "game" => Some(Self::Game),
-            "gamehelper" => Some(Self::GameHelper),
-            "gamerenderthread" => Some(Self::GameRenderThread),
-            "gameworkerthread" => Some(Self::GameWorkerThread),
-            "launcher" => Some(Self::Launcher),
-            "wineserver" => Some(Self::WineServer),
-            "gamescope" => Some(Self::GameScope),
-            "compositor" => Some(Self::Compositor),
-            "browserforeground" => Some(Self::BrowserForeground),
-            "browserbackground" => Some(Self::BrowserBackground),
-            "browserrenderer" => Some(Self::BrowserRenderer),
-            "browsergpu" => Some(Self::BrowserGpu),
-            "browsernetwork" => Some(Self::BrowserNetwork),
-            "buildjob" => Some(Self::BuildJob),
-            "compiler" => Some(Self::Compiler),
-            "linker" => Some(Self::Linker),
-            "indexer" => Some(Self::Indexer),
-            "packagemanager" => Some(Self::PackageManager),
-            "editor" => Some(Self::Editor),
-            "terminal" => Some(Self::Terminal),
-            "shell" => Some(Self::Shell),
-            "media" => Some(Self::Media),
-            "recorder" => Some(Self::Recorder),
-            "virtualmachine" => Some(Self::VirtualMachine),
-            "kernelthread" => Some(Self::KernelThread),
-            "irqthread" => Some(Self::IrqThread),
-            "service" => Some(Self::Service),
-            "networkdaemon" => Some(Self::NetworkDaemon),
-            "storagedaemon" => Some(Self::StorageDaemon),
-            "steamruntime" => Some(Self::SteamRuntime),
-            "render" => Some(Self::Render),
-            "helper" => Some(Self::Helper),
-            "unknown" => Some(Self::Unknown),
-            _ => None,
-        }
+        [
+            ("audiorealtime", Self::AudioRealtime),
+            ("input", Self::Input),
+            ("game", Self::Game),
+            ("gamehelper", Self::GameHelper),
+            ("gamerenderthread", Self::GameRenderThread),
+            ("gameworkerthread", Self::GameWorkerThread),
+            ("launcher", Self::Launcher),
+            ("wineserver", Self::WineServer),
+            ("gamescope", Self::GameScope),
+            ("compositor", Self::Compositor),
+            ("browserforeground", Self::BrowserForeground),
+            ("browserbackground", Self::BrowserBackground),
+            ("browserrenderer", Self::BrowserRenderer),
+            ("browsergpu", Self::BrowserGpu),
+            ("browsernetwork", Self::BrowserNetwork),
+            ("buildjob", Self::BuildJob),
+            ("compiler", Self::Compiler),
+            ("linker", Self::Linker),
+            ("indexer", Self::Indexer),
+            ("packagemanager", Self::PackageManager),
+            ("editor", Self::Editor),
+            ("terminal", Self::Terminal),
+            ("shell", Self::Shell),
+            ("media", Self::Media),
+            ("recorder", Self::Recorder),
+            ("virtualmachine", Self::VirtualMachine),
+            ("kernelthread", Self::KernelThread),
+            ("irqthread", Self::IrqThread),
+            ("service", Self::Service),
+            ("networkdaemon", Self::NetworkDaemon),
+            ("storagedaemon", Self::StorageDaemon),
+            ("steamruntime", Self::SteamRuntime),
+            ("render", Self::Render),
+            ("helper", Self::Helper),
+            ("unknown", Self::Unknown),
+        ]
+        .into_iter()
+        .find_map(|(expected, class)| normalized_eq_ignore_ascii_case(s, expected).then_some(class))
     }
 }
 
@@ -500,7 +498,6 @@ pub struct TaskFilters {
 #[derive(Clone, Debug, Default)]
 pub struct CompiledPattern {
     pub raw: String,
-    pub lower_raw: String,
     pub regex: Option<Regex>,
 }
 
@@ -515,12 +512,7 @@ impl CompiledPattern {
             None
         };
 
-        let lower_raw = raw.to_ascii_lowercase();
-        Ok(Self {
-            raw,
-            lower_raw,
-            regex,
-        })
+        Ok(Self { raw, regex })
     }
 
     pub fn raw(&self) -> &str {
@@ -531,16 +523,12 @@ impl CompiledPattern {
         if let Some(regex) = &self.regex {
             regex.is_match(value)
         } else {
-            value.to_ascii_lowercase().contains(&self.lower_raw)
+            contains_ignore_ascii_case(value, &self.raw)
         }
     }
 
-    pub fn matches_with_lower(&self, value: &str, lower_value: &str) -> bool {
-        if let Some(regex) = &self.regex {
-            regex.is_match(value)
-        } else {
-            lower_value.contains(&self.lower_raw)
-        }
+    pub fn matches_with_lower(&self, value: &str, _lower_value: &str) -> bool {
+        self.matches(value)
     }
 }
 
@@ -558,21 +546,19 @@ impl TaskFilters {
             return true;
         }
 
-        let lower_comm = task.comm.to_ascii_lowercase();
-        let lower_process_comm = task.process_comm.to_ascii_lowercase();
-
-        if self.exclude_comm.iter().any(|pattern| {
-            pattern.matches_with_lower(&task.comm, &lower_comm)
-                || pattern.matches_with_lower(&task.process_comm, &lower_process_comm)
-        }) {
+        if self
+            .exclude_comm
+            .iter()
+            .any(|pattern| pattern.matches(&task.comm) || pattern.matches(&task.process_comm))
+        {
             return false;
         }
 
         self.include_comm.is_empty()
-            || self.include_comm.iter().any(|pattern| {
-                pattern.matches_with_lower(&task.comm, &lower_comm)
-                    || pattern.matches_with_lower(&task.process_comm, &lower_process_comm)
-            })
+            || self
+                .include_comm
+                .iter()
+                .any(|pattern| pattern.matches(&task.comm) || pattern.matches(&task.process_comm))
     }
 }
 
