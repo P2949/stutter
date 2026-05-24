@@ -150,8 +150,8 @@ fn protected_tasks_from_active_tasks(active_tasks: &BTreeMap<u32, TaskInfo>) -> 
         .values()
         .filter(|task| is_protected_task_class(task.class))
         .map(|task| ProtectedTask {
-            tid: task.task_id().as_u32(),
-            process_pid: task.process_id().as_u32(),
+            tid: task.task_id(),
+            process_pid: task.process_id(),
             comm: task.comm.clone(),
             class: task.class,
             reason: protected_task_reason(task.class).to_owned(),
@@ -166,8 +166,8 @@ fn active_task_snapshots_from_active_tasks(
     active_tasks
         .values()
         .map(|task| ActiveTaskSnapshot {
-            tid: task.task_id().as_u32(),
-            process_pid: task.process_id().as_u32(),
+            tid: task.task_id(),
+            process_pid: task.process_id(),
             comm: task.comm.clone(),
             class: task.class,
             process_starttime_ticks: task.process_starttime_ticks,
@@ -307,8 +307,8 @@ fn focus_gpu_target_pids(
     active_tasks: &[ActiveTaskSnapshot],
 ) -> Vec<u32> {
     let mut pids = target_root_pid.into_iter().collect::<Vec<_>>();
-    pids.extend(active_tasks.iter().map(|task| task.process_pid));
-    pids.extend(active_tasks.iter().map(|task| task.tid));
+    pids.extend(active_tasks.iter().map(|task| task.process_pid.as_u32()));
+    pids.extend(active_tasks.iter().map(|task| task.tid.as_u32()));
     pids.sort_unstable();
     pids.dedup();
     pids
@@ -400,12 +400,12 @@ mod tests {
             observation
                 .active_tasks
                 .iter()
-                .find(|task| task.tid == 1234)
+                .find(|task| task.tid.as_u32() == 1234)
                 .and_then(|task| task.cgroup_path.as_deref()),
             Some("/user.slice/game.scope")
         );
         assert_eq!(observation.protected_tasks.len(), 1);
-        assert_eq!(observation.protected_tasks[0].tid, 1235);
+        assert_eq!(observation.protected_tasks[0].tid.as_u32(), 1235);
         assert!(observation.workload_identity.is_some());
         assert!(observation.system_context.is_some());
         assert!(observation.active_config_snapshot.is_some());

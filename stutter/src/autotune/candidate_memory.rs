@@ -486,7 +486,7 @@ fn target_executable_inode_from_snapshot(
     };
 
     for task in snapshot.tasks.values() {
-        if task.process_pid == target_root_pid || task.tid == target_root_pid {
+        if task.process_pid.as_u32() == target_root_pid || task.tid.as_u32() == target_root_pid {
             return (task.exe_dev, task.exe_ino);
         }
     }

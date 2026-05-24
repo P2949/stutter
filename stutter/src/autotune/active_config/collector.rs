@@ -69,7 +69,7 @@ pub fn collect_active_config(input: ActiveConfigCollectorInput<'_>) -> ActiveCon
 fn sorted_active_tids(active_tasks: &[ActiveTaskSnapshot]) -> Vec<u32> {
     active_tasks
         .iter()
-        .map(|task| task.tid)
+        .map(|task| task.tid.as_u32())
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect()

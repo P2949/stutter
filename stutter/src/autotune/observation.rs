@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
+use stutter_core::ids::{Pid, Tid};
 
 use super::{
     activity::ActivityLevel,
@@ -32,8 +33,8 @@ pub struct WorkloadIdentity {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProtectedTask {
-    pub tid: u32,
-    pub process_pid: u32,
+    pub tid: Tid,
+    pub process_pid: Pid,
     pub comm: String,
     pub class: TaskClass,
     pub reason: String,
@@ -41,8 +42,8 @@ pub struct ProtectedTask {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ActiveTaskSnapshot {
-    pub tid: u32,
-    pub process_pid: u32,
+    pub tid: Tid,
+    pub process_pid: Pid,
     pub comm: String,
     pub class: TaskClass,
     pub process_starttime_ticks: Option<u64>,

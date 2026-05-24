@@ -50,3 +50,47 @@ fn process_comm_runtime_models_no_longer_depend_on_serializable_arc_str() {
         );
     }
 }
+
+#[test]
+fn action_restore_raw_ids_are_explicit_serialization_boundary_fields() {
+    let actions_model = source("actions/model.rs");
+    assert!(
+        actions_model.contains("JSON rollback-token serialization boundaries"),
+        "actions/model.rs raw task IDs must carry an explicit serialization-boundary note"
+    );
+
+    let expected_structs = [
+        "pub struct TaskIdentity {\n    pub tid: u32,",
+        "pub struct TaskRestoreIdentity {\n    pub tid: u32,",
+        "pub struct NiceRestoreRecord {\n    #[serde(default)]\n    pub tid: u32,",
+        "pub struct UclampRestoreRecord {\n    #[serde(default)]\n    pub tid: u32,",
+        "pub struct IoPrioRestoreRecord {\n    #[serde(default)]\n    pub tid: u32,",
+        "pub struct CgroupRestoreRecord {\n    #[serde(default)]\n    pub tid: u32,",
+    ];
+
+    for expected in expected_structs {
+        assert!(
+            actions_model.contains(expected),
+            "actions/model.rs raw `pub tid: u32` is allowed only in known rollback-token serialization-boundary structs; missing expected marker: {expected}"
+        );
+    }
+
+    assert_eq!(
+        actions_model.matches("pub tid: u32").count(),
+        expected_structs.len(),
+        "new raw `pub tid: u32` fields in actions/model.rs need an explicit typed-ID or serialization-boundary decision"
+    );
+}
+
+#[test]
+fn autotune_observation_task_snapshots_use_typed_ids() {
+    let observation = source("autotune/observation.rs");
+    assert!(
+        observation.contains("use stutter_core::ids::{Pid, Tid};")
+            && observation.contains("pub struct ProtectedTask")
+            && observation.contains("pub struct ActiveTaskSnapshot")
+            && observation.matches("pub tid: Tid").count() >= 2
+            && observation.matches("pub process_pid: Pid").count() >= 2,
+        "autotune observation task snapshots must keep internal task/process IDs typed and convert to raw u32 only at external boundaries",
+    );
+}

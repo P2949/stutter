@@ -97,8 +97,8 @@ fn calibration_proposal(provider: &'static str, confidence: f32) -> CandidatePro
 
 fn active_task_snapshot() -> ActiveTaskSnapshot {
     ActiveTaskSnapshot {
-        tid: 1234,
-        process_pid: 1234,
+        tid: (1234).into(),
+        process_pid: (1234).into(),
         comm: "game".to_owned(),
         class: TaskClass::Game,
         process_starttime_ticks: Some(10),
@@ -409,8 +409,8 @@ fn cgroup_provider_moves_only_allowed_non_protected_target_tasks() {
         focus_confidence: 0.95,
         active_tasks: vec![
             ActiveTaskSnapshot {
-                tid: 1234,
-                process_pid: 1234,
+                tid: (1234).into(),
+                process_pid: (1234).into(),
                 comm: "rustc".to_owned(),
                 class: TaskClass::Compiler,
                 process_starttime_ticks: Some(10),
@@ -418,8 +418,8 @@ fn cgroup_provider_moves_only_allowed_non_protected_target_tasks() {
                 cgroup_path: Some("/user.slice/app.scope".to_owned()),
             },
             ActiveTaskSnapshot {
-                tid: 1235,
-                process_pid: 1234,
+                tid: (1235).into(),
+                process_pid: (1234).into(),
                 comm: "ld.lld".to_owned(),
                 class: TaskClass::Linker,
                 process_starttime_ticks: Some(10),
@@ -427,8 +427,8 @@ fn cgroup_provider_moves_only_allowed_non_protected_target_tasks() {
                 cgroup_path: Some("/user.slice/app.scope".to_owned()),
             },
             ActiveTaskSnapshot {
-                tid: 77,
-                process_pid: 77,
+                tid: (77).into(),
+                process_pid: (77).into(),
                 comm: "pipewire".to_owned(),
                 class: TaskClass::AudioRealtime,
                 process_starttime_ticks: Some(20),
@@ -437,8 +437,8 @@ fn cgroup_provider_moves_only_allowed_non_protected_target_tasks() {
             },
         ],
         protected_tasks: vec![ProtectedTask {
-            tid: 77,
-            process_pid: 77,
+            tid: (77).into(),
+            process_pid: (77).into(),
             comm: "pipewire".to_owned(),
             class: TaskClass::AudioRealtime,
             reason: "audio realtime task".to_owned(),
@@ -694,8 +694,8 @@ fn provider_task(tid: u32, process_pid: u32, comm: &str, class: TaskClass) -> Ac
     };
 
     ActiveTaskSnapshot {
-        tid,
-        process_pid,
+        tid: tid.into(),
+        process_pid: process_pid.into(),
         comm: comm.to_owned(),
         class,
         process_starttime_ticks,

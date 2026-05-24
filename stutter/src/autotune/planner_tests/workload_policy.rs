@@ -765,18 +765,22 @@ mod tests {
             active_config
                 .affinity
                 .per_tid
-                .entry(task.tid)
+                .entry(task.tid.as_u32())
                 .or_insert_with(|| "0-3".to_owned());
-            active_config.nice.per_tid.entry(task.tid).or_insert(0);
+            active_config
+                .nice
+                .per_tid
+                .entry(task.tid.as_u32())
+                .or_insert(0);
             active_config
                 .ionice
                 .per_tid
-                .entry(task.tid)
+                .entry(task.tid.as_u32())
                 .or_insert_with(|| "best-effort:4".to_owned());
             active_config
                 .uclamp
                 .per_tid
-                .entry(task.tid)
+                .entry(task.tid.as_u32())
                 .or_insert(UclampValues {
                     sched_util_min: Some(0),
                     sched_util_max: Some(1024),
@@ -785,7 +789,7 @@ mod tests {
                 active_config
                     .cgroup
                     .per_tid
-                    .entry(task.tid)
+                    .entry(task.tid.as_u32())
                     .or_insert_with(|| cgroup_path.clone());
             }
         }
@@ -797,7 +801,7 @@ mod tests {
     ) -> ActiveConfigSnapshot {
         let mut snapshot = ActiveConfigSnapshot::default();
         for task in active_tasks {
-            snapshot.nice.per_tid.insert(task.tid, nice);
+            snapshot.nice.per_tid.insert(task.tid.as_u32(), nice);
         }
         snapshot
     }
@@ -851,8 +855,8 @@ mod tests {
         };
 
         ActiveTaskSnapshot {
-            tid,
-            process_pid: 1234,
+            tid: tid.into(),
+            process_pid: (1234).into(),
             comm: comm.to_owned(),
             class,
             process_starttime_ticks,

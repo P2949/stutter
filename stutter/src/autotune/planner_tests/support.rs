@@ -116,8 +116,8 @@ pub(crate) fn observation_with_cpu_affinity(mask: &str) -> AutotuneObservation {
         FocusGroupKind::Game,
     );
     observation.active_tasks = vec![ActiveTaskSnapshot {
-        tid: 1234,
-        process_pid: 1234,
+        tid: (1234).into(),
+        process_pid: (1234).into(),
         comm: "game-main".to_owned(),
         class: TaskClass::Game,
         process_starttime_ticks: Some(10),

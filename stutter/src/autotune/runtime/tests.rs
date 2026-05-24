@@ -105,8 +105,8 @@ fn active_task_snapshot(
     class: TaskClass,
 ) -> crate::autotune::observation::ActiveTaskSnapshot {
     crate::autotune::observation::ActiveTaskSnapshot {
-        tid,
-        process_pid,
+        tid: tid.into(),
+        process_pid: process_pid.into(),
         comm: comm.to_owned(),
         class,
         process_starttime_ticks: Some(u64::from(process_pid)),

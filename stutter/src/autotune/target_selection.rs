@@ -181,7 +181,7 @@ fn mutable_task_matches_workload_starttime(
         return false;
     }
 
-    if task.tid == task.process_pid
+    if task.tid.as_u32() == task.process_pid.as_u32()
         && let Some(task_starttime_ticks) = task.task_starttime_ticks
         && task_starttime_ticks != expected_process_starttime_ticks
     {
@@ -196,10 +196,15 @@ fn is_explicitly_protected_task(
     observation: &AutotuneObservation,
 ) -> bool {
     observation.protected_tasks.iter().any(|protected| {
-        protected.tid == task.tid
-            || protected.tid == task.process_pid
-            || protected.process_pid == task.tid
-            || protected.process_pid == task.process_pid
+        let task_tid = task.tid.as_u32();
+        let task_process_pid = task.process_pid.as_u32();
+        let protected_tid = protected.tid.as_u32();
+        let protected_process_pid = protected.process_pid.as_u32();
+
+        protected_tid == task_tid
+            || protected_tid == task_process_pid
+            || protected_process_pid == task_tid
+            || protected_process_pid == task_process_pid
     })
 }
 
@@ -210,7 +215,7 @@ fn mutable_task_allowed(
     target_root_pid: Option<u32>,
     observation: &AutotuneObservation,
 ) -> bool {
-    if task.tid == 0
+    if task.tid.as_u32() == 0
         || is_protected_task_class(task.class)
         || is_explicitly_protected_task(task, observation)
     {
@@ -219,14 +224,15 @@ fn mutable_task_allowed(
 
     if allow_unknown_fallback_root
         && task.class == TaskClass::Unknown
-        && task.tid == task.process_pid
+        && task.tid.as_u32() == task.process_pid.as_u32()
     {
         return true;
     }
 
     match selector {
         TaskTargetSelector::ForegroundRootOnly => {
-            Some(task.tid) == target_root_pid && task.tid == task.process_pid
+            Some(task.tid.as_u32()) == target_root_pid
+                && task.tid.as_u32() == task.process_pid.as_u32()
         }
         TaskTargetSelector::FullTargetTree => !matches!(task.class, TaskClass::Unknown),
         TaskTargetSelector::CompilerAndLinker => matches!(
@@ -266,8 +272,8 @@ fn mutable_task_allowed(
 fn fallback_root_snapshot(observation: &AutotuneObservation) -> Option<ActiveTaskSnapshot> {
     let root_pid = observation.target_root_pid?;
     Some(ActiveTaskSnapshot {
-        tid: root_pid,
-        process_pid: root_pid,
+        tid: root_pid.into(),
+        process_pid: root_pid.into(),
         comm: observation
             .workload_identity
             .as_ref()
@@ -291,8 +297,8 @@ fn fallback_root_snapshot(observation: &AutotuneObservation) -> Option<ActiveTas
 
 fn task_identity_from_snapshot(task: ActiveTaskSnapshot) -> TaskIdentity {
     TaskIdentity {
-        tid: task.tid,
-        process_pid: Some(task.process_pid),
+        tid: task.tid.as_u32(),
+        process_pid: Some(task.process_pid.as_u32()),
         comm: Some(task.comm),
         starttime_ticks: task.task_starttime_ticks.or(task.process_starttime_ticks),
     }
@@ -305,8 +311,8 @@ mod tests {
 
     fn task(tid: u32, class: TaskClass) -> ActiveTaskSnapshot {
         ActiveTaskSnapshot {
-            tid,
-            process_pid: 10,
+            tid: tid.into(),
+            process_pid: (10).into(),
             comm: format!("{class:?}"),
             class,
             process_starttime_ticks: Some(100),
@@ -348,8 +354,8 @@ mod tests {
             target_root_pid: Some(10),
             active_tasks: vec![
                 ActiveTaskSnapshot {
-                    tid: 10,
-                    process_pid: 10,
+                    tid: (10).into(),
+                    process_pid: (10).into(),
                     comm: "game-root".to_owned(),
                     class: TaskClass::Game,
                     process_starttime_ticks: Some(100),
@@ -357,8 +363,8 @@ mod tests {
                     cgroup_path: None,
                 },
                 ActiveTaskSnapshot {
-                    tid: 11,
-                    process_pid: 10,
+                    tid: (11).into(),
+                    process_pid: (10).into(),
                     comm: "protected-worker".to_owned(),
                     class: TaskClass::GameWorkerThread,
                     process_starttime_ticks: Some(100),
@@ -366,8 +372,8 @@ mod tests {
                     cgroup_path: None,
                 },
                 ActiveTaskSnapshot {
-                    tid: 12,
-                    process_pid: 10,
+                    tid: (12).into(),
+                    process_pid: (10).into(),
                     comm: "same-process-helper".to_owned(),
                     class: TaskClass::Helper,
                     process_starttime_ticks: Some(100),
@@ -375,8 +381,8 @@ mod tests {
                     cgroup_path: None,
                 },
                 ActiveTaskSnapshot {
-                    tid: 20,
-                    process_pid: 20,
+                    tid: (20).into(),
+                    process_pid: (20).into(),
                     comm: "unprotected-helper".to_owned(),
                     class: TaskClass::Helper,
                     process_starttime_ticks: Some(200),
@@ -385,8 +391,8 @@ mod tests {
                 },
             ],
             protected_tasks: vec![ProtectedTask {
-                tid: 11,
-                process_pid: 10,
+                tid: (11).into(),
+                process_pid: (10).into(),
                 comm: "protected-worker".to_owned(),
                 class: TaskClass::GameWorkerThread,
                 reason: "explicit protected task".to_owned(),
@@ -448,10 +454,13 @@ mod tests {
         );
 
         assert_eq!(
-            snapshots.iter().map(|task| task.tid).collect::<Vec<_>>(),
+            snapshots
+                .iter()
+                .map(|task| task.tid.as_u32())
+                .collect::<Vec<_>>(),
             vec![10, 11, 12]
         );
-        assert!(snapshots.iter().all(|task| task.process_pid == 10));
+        assert!(snapshots.iter().all(|task| task.process_pid.as_u32() == 10));
     }
 
     #[test]
@@ -460,8 +469,8 @@ mod tests {
             target_root_pid: Some(10),
             active_tasks: vec![
                 ActiveTaskSnapshot {
-                    tid: 10,
-                    process_pid: 10,
+                    tid: (10).into(),
+                    process_pid: (10).into(),
                     comm: "foreground-root".to_owned(),
                     class: TaskClass::Game,
                     process_starttime_ticks: Some(100),
@@ -469,8 +478,8 @@ mod tests {
                     cgroup_path: None,
                 },
                 ActiveTaskSnapshot {
-                    tid: 11,
-                    process_pid: 11,
+                    tid: (11).into(),
+                    process_pid: (11).into(),
                     comm: "child-process-main-thread".to_owned(),
                     class: TaskClass::GameWorkerThread,
                     process_starttime_ticks: Some(101),
@@ -478,8 +487,8 @@ mod tests {
                     cgroup_path: None,
                 },
                 ActiveTaskSnapshot {
-                    tid: 12,
-                    process_pid: 10,
+                    tid: (12).into(),
+                    process_pid: (10).into(),
                     comm: "foreground-worker-thread".to_owned(),
                     class: TaskClass::GameWorkerThread,
                     process_starttime_ticks: Some(100),
@@ -517,8 +526,8 @@ mod tests {
             }),
             active_tasks: vec![
                 ActiveTaskSnapshot {
-                    tid: 10,
-                    process_pid: 10,
+                    tid: (10).into(),
+                    process_pid: (10).into(),
                     comm: "current-root".to_owned(),
                     class: TaskClass::Game,
                     process_starttime_ticks: Some(100),
@@ -526,8 +535,8 @@ mod tests {
                     cgroup_path: None,
                 },
                 ActiveTaskSnapshot {
-                    tid: 11,
-                    process_pid: 10,
+                    tid: (11).into(),
+                    process_pid: (10).into(),
                     comm: "current-worker".to_owned(),
                     class: TaskClass::GameWorkerThread,
                     process_starttime_ticks: Some(100),
@@ -535,8 +544,8 @@ mod tests {
                     cgroup_path: None,
                 },
                 ActiveTaskSnapshot {
-                    tid: 12,
-                    process_pid: 10,
+                    tid: (12).into(),
+                    process_pid: (10).into(),
                     comm: "stale-worker".to_owned(),
                     class: TaskClass::GameWorkerThread,
                     process_starttime_ticks: Some(99),
@@ -544,8 +553,8 @@ mod tests {
                     cgroup_path: None,
                 },
                 ActiveTaskSnapshot {
-                    tid: 13,
-                    process_pid: 13,
+                    tid: (13).into(),
+                    process_pid: (13).into(),
                     comm: "stale-root".to_owned(),
                     class: TaskClass::Game,
                     process_starttime_ticks: Some(99),
@@ -553,8 +562,8 @@ mod tests {
                     cgroup_path: None,
                 },
                 ActiveTaskSnapshot {
-                    tid: 14,
-                    process_pid: 10,
+                    tid: (14).into(),
+                    process_pid: (10).into(),
                     comm: "missing-starttime-worker".to_owned(),
                     class: TaskClass::GameWorkerThread,
                     process_starttime_ticks: None,

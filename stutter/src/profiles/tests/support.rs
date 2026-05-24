@@ -21,8 +21,8 @@ pub(super) fn active_task_from_task(
     task: &TaskInfo,
 ) -> crate::autotune::observation::ActiveTaskSnapshot {
     crate::autotune::observation::ActiveTaskSnapshot {
-        tid: task.task_id().as_u32(),
-        process_pid: task.process_id().as_u32(),
+        tid: (task.task_id().as_u32()).into(),
+        process_pid: (task.process_id().as_u32()).into(),
         comm: task.comm.clone(),
         class: task.class,
         process_starttime_ticks: task.process_starttime_ticks,
