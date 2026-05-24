@@ -6,6 +6,7 @@ pub(crate) mod attach;
 pub(crate) mod errors;
 pub(crate) mod load;
 pub(crate) mod load_plan;
+pub(crate) mod map_init;
 pub(crate) mod maps;
 pub(crate) mod memlock;
 pub(crate) mod memory;
