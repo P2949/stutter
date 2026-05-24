@@ -9,7 +9,9 @@ use aya_ebpf::{
     programs::TracePointContext,
 };
 use stutter_common::{
-    BlockIoEvent, DROP_BLOCK_FALLBACK_KEY_COLLISION, DROP_BLOCK_START_INSERT_FAILED, EVENT_BLOCK_IO,
+    BlockIoEvent, DROP_BLOCK_FALLBACK_KEY_COLLISION, DROP_BLOCK_START_INSERT_FAILED,
+    EVENT_BLOCK_IO,
+    tracepoint_offsets::{BLOCK_RQ_DEV_OFFSET, BLOCK_RQ_SECTOR_OFFSET},
 };
 
 use crate::{
@@ -60,13 +62,22 @@ fn block_rq_fallback_key(
 }
 
 #[inline(always)]
+fn read_optional_u32(ctx: &TracePointContext, offset: u32) -> u32 {
+    if offset == 0 {
+        return 0;
+    }
+
+    unsafe { ctx.read_at::<u32>(offset as usize).unwrap_or(0) }
+}
+
+#[inline(always)]
 pub(crate) fn try_block_rq_issue(ctx: TracePointContext) -> u32 {
     let mut dev: u32 = 0;
-    if !read_u32(&ctx, 8, &mut dev) {
+    if !read_u32(&ctx, BLOCK_RQ_DEV_OFFSET, &mut dev) {
         return 1;
     }
     let mut sector: u64 = 0;
-    if !read_u64(&ctx, 16, &mut sector) {
+    if !read_u64(&ctx, BLOCK_RQ_SECTOR_OFFSET, &mut sector) {
         return 1;
     }
     let tid = (bpf_get_current_pid_tgid() & 0xffff_ffff) as u32;
@@ -107,26 +118,23 @@ pub(crate) fn try_block_rq_issue(ctx: TracePointContext) -> u32 {
 #[inline(always)]
 pub(crate) fn try_block_rq_complete(ctx: TracePointContext) -> u32 {
     let mut dev: u32 = 0;
-    if !read_u32(&ctx, 8, &mut dev) {
+    if !read_u32(&ctx, BLOCK_RQ_DEV_OFFSET, &mut dev) {
         return 1;
     }
     let mut sector: u64 = 0;
-    if !read_u64(&ctx, 16, &mut sector) {
-        return 1;
-    }
-    let mut nr_sector: u32 = 0;
-    if !read_u32(&ctx, 24, &mut nr_sector) {
+    if !read_u64(&ctx, BLOCK_RQ_SECTOR_OFFSET, &mut sector) {
         return 1;
     }
 
-    let key = if unsafe { core::ptr::read_volatile(&raw const BLOCK_RQ_KEY_OFFSET) } != 0 {
-        unsafe {
-            ctx.read_at::<u64>(core::ptr::read_volatile(&raw const BLOCK_RQ_KEY_OFFSET) as usize)
-                .unwrap_or(0)
-        }
+    let nr_sector_offset =
+        unsafe { core::ptr::read_volatile(&raw const BLOCK_RQ_COMPLETE_NR_SECTOR_OFFSET) };
+    let nr_sector = read_optional_u32(&ctx, nr_sector_offset);
+
+    let request_key_offset = unsafe { core::ptr::read_volatile(&raw const BLOCK_RQ_KEY_OFFSET) };
+
+    let key = if request_key_offset != 0 {
+        unsafe { ctx.read_at::<u64>(request_key_offset as usize).unwrap_or(0) }
     } else {
-        let nr_sector_offset =
-            unsafe { core::ptr::read_volatile(&raw const BLOCK_RQ_COMPLETE_NR_SECTOR_OFFSET) };
         let rwbs_offset =
             unsafe { core::ptr::read_volatile(&raw const BLOCK_RQ_COMPLETE_RWBS_OFFSET) };
 

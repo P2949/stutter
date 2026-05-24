@@ -89,10 +89,10 @@ fn loader_plan_uses_request_pointer_block_correlation_when_key_offset_exists() {
     tracepoints.block_rq = true;
     tracepoints.block_rq_has_rwbs = true;
     tracepoints.block_rq_key_offset = Some(40);
-    tracepoints.block_rq_issue_nr_sector_offset = Some(24);
-    tracepoints.block_rq_issue_rwbs_offset = Some(32);
-    tracepoints.block_rq_complete_nr_sector_offset = Some(24);
-    tracepoints.block_rq_complete_rwbs_offset = Some(32);
+    tracepoints.block_rq_issue_nr_sector_offset = Some(48);
+    tracepoints.block_rq_issue_rwbs_offset = Some(56);
+    tracepoints.block_rq_complete_nr_sector_offset = Some(48);
+    tracepoints.block_rq_complete_rwbs_offset = Some(56);
 
     let plan = build_loader_plan(&tracepoints, test_map_sizing());
 
@@ -103,14 +103,14 @@ fn loader_plan_uses_request_pointer_block_correlation_when_key_offset_exists() {
     assert_eq!(plan.global_value("BLOCK_RQ_KEY_OFFSET"), Some(40));
     assert_eq!(
         plan.global_value("BLOCK_RQ_ISSUE_NR_SECTOR_OFFSET"),
-        Some(24)
+        Some(48)
     );
-    assert_eq!(plan.global_value("BLOCK_RQ_ISSUE_RWBS_OFFSET"), Some(32));
+    assert_eq!(plan.global_value("BLOCK_RQ_ISSUE_RWBS_OFFSET"), Some(56));
     assert_eq!(
         plan.global_value("BLOCK_RQ_COMPLETE_NR_SECTOR_OFFSET"),
-        Some(24)
+        Some(48)
     );
-    assert_eq!(plan.global_value("BLOCK_RQ_COMPLETE_RWBS_OFFSET"), Some(32));
+    assert_eq!(plan.global_value("BLOCK_RQ_COMPLETE_RWBS_OFFSET"), Some(56));
 }
 
 #[test]
