@@ -97,7 +97,7 @@ impl CandidateAction {
                 }
 
                 for target in &plan.action.targets {
-                    match snapshot.nice.per_tid.get(&target.tid) {
+                    match snapshot.nice.per_tid.get(&target.tid.as_u32()) {
                         Some(current) if *current == plan.action.nice => {}
                         Some(current) => {
                             return ActiveConfigMatch::Differs {
@@ -126,7 +126,7 @@ impl CandidateAction {
 
                 let requested = plan.action.ioprio.label();
                 for target in &plan.action.targets {
-                    match snapshot.ionice.per_tid.get(&target.tid) {
+                    match snapshot.ionice.per_tid.get(&target.tid.as_u32()) {
                         Some(current) if current == &requested => {}
                         Some(current) => {
                             return ActiveConfigMatch::Differs {
@@ -154,7 +154,7 @@ impl CandidateAction {
                 }
 
                 for target in &plan.action.targets {
-                    match snapshot.uclamp.per_tid.get(&target.tid) {
+                    match snapshot.uclamp.per_tid.get(&target.tid.as_u32()) {
                         Some(current) if uclamp_matches_request(*current, plan.action.values) => {}
                         Some(current) => {
                             return ActiveConfigMatch::Differs {
@@ -191,7 +191,7 @@ impl CandidateAction {
 
                 let requested = normalize_cgroup_path(&plan.action.target_cgroup);
                 for target in &plan.action.targets {
-                    match snapshot.cgroup.per_tid.get(&target.identity.tid) {
+                    match snapshot.cgroup.per_tid.get(&target.identity.tid.as_u32()) {
                         Some(current) if normalize_cgroup_str(current) == requested => {}
                         Some(current) => {
                             return ActiveConfigMatch::Differs {

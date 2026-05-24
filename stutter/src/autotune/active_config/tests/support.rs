@@ -115,8 +115,8 @@ pub(super) fn nice_candidate_for_rollback() -> CandidateAction {
             name: "nice-rollback-verification".to_owned(),
             action: crate::actions::nice::NiceAction {
                 targets: vec![crate::actions::TaskIdentity {
-                    tid: 42,
-                    process_pid: Some(42),
+                    tid: (42).into(),
+                    process_pid: Some((42).into()),
                     comm: Some("game".to_owned()),
                     starttime_ticks: Some(1),
                 }],

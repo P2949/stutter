@@ -231,8 +231,8 @@ pub(crate) fn cgroup_candidate(target_cgroup: &str) -> CandidateAction {
                 target_cgroup: std::path::PathBuf::from(target_cgroup),
                 targets: vec![CgroupPlacementTarget {
                     identity: TaskIdentity {
-                        tid: 1234,
-                        process_pid: Some(1234),
+                        tid: (1234).into(),
+                        process_pid: Some((1234).into()),
                         comm: Some("rustc".to_owned()),
                         starttime_ticks: None,
                     },
@@ -254,8 +254,8 @@ pub(crate) fn nice_candidate() -> CandidateAction {
             name: "nice-background-compile".to_owned(),
             action: NiceAction {
                 targets: vec![TaskIdentity {
-                    tid: 1234,
-                    process_pid: Some(1234),
+                    tid: (1234).into(),
+                    process_pid: Some((1234).into()),
                     comm: Some("rustc".to_owned()),
                     starttime_ticks: None,
                 }],
@@ -271,8 +271,8 @@ pub(crate) fn nice_candidate() -> CandidateAction {
 
 pub(crate) fn task_identity() -> TaskIdentity {
     TaskIdentity {
-        tid: 1234,
-        process_pid: Some(1234),
+        tid: (1234).into(),
+        process_pid: Some((1234).into()),
         comm: Some("stutter-test".to_owned()),
         starttime_ticks: None,
     }

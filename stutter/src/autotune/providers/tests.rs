@@ -470,7 +470,7 @@ fn cgroup_provider_moves_only_allowed_non_protected_target_tasks() {
         .action
         .targets
         .iter()
-        .map(|target| target.identity.tid)
+        .map(|target| target.identity.tid.as_u32())
         .collect::<Vec<_>>();
     assert_eq!(tids, vec![1234, 1235]);
 }
@@ -582,7 +582,7 @@ fn nice_provider_targets_compile_active_tasks_not_only_root_pid() {
         plan.action
             .targets
             .iter()
-            .map(|target| target.tid)
+            .map(|target| target.tid.as_u32())
             .collect::<Vec<_>>(),
         vec![1234, 1235, 1236]
     );
@@ -590,7 +590,7 @@ fn nice_provider_targets_compile_active_tasks_not_only_root_pid() {
         plan.action
             .targets
             .iter()
-            .map(|target| target.process_pid)
+            .map(|target| target.process_pid.map(|pid| pid.as_u32()))
             .collect::<Vec<_>>(),
         vec![Some(1234), Some(1234), Some(1234)]
     );
@@ -632,7 +632,7 @@ fn ionice_provider_targets_active_tree_and_excludes_protected_or_unknown_tasks()
         plan.action
             .targets
             .iter()
-            .map(|target| target.tid)
+            .map(|target| target.tid.as_u32())
             .collect::<Vec<_>>(),
         vec![1234, 1235, 1236]
     );
@@ -678,7 +678,7 @@ fn uclamp_provider_targets_game_render_and_worker_active_tasks_not_only_root_pid
         plan.action
             .targets
             .iter()
-            .map(|target| target.tid)
+            .map(|target| target.tid.as_u32())
             .collect::<Vec<_>>(),
         vec![1234, 1235, 1236]
     );

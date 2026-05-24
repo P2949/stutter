@@ -174,8 +174,8 @@ mod tests {
         assert_eq!(
             records[0].identity,
             Some(TaskRestoreIdentity {
-                tid: 55,
-                process_pid: Some(50),
+                tid: (55).into(),
+                process_pid: Some((50).into()),
                 starttime_ticks: Some(9001),
                 comm: Some("game-main".to_owned()),
                 exe: Some(PathBuf::from("/usr/bin/game")),

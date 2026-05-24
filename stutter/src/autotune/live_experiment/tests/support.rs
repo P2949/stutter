@@ -139,8 +139,8 @@ pub(super) fn medium_risk_candidate() -> CandidateAction {
             name: "medium-nice".to_owned(),
             action: crate::actions::nice::NiceAction {
                 targets: vec![TaskIdentity {
-                    tid: 42,
-                    process_pid: Some(42),
+                    tid: (42).into(),
+                    process_pid: Some((42).into()),
                     comm: Some("game".to_owned()),
                     starttime_ticks: Some(1),
                 }],

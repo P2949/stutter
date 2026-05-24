@@ -14,7 +14,7 @@ pub fn verify_task_identity(
     proc_root: &Path,
     identity: &TaskRestoreIdentity,
 ) -> RestoreIdentityStatus {
-    let tid = identity.tid;
+    let tid = identity.tid.as_u32();
     let stat_path = proc_root.join(tid.to_string()).join("stat");
 
     let Ok(stat_content) = fs::read_to_string(&stat_path) else {
@@ -45,7 +45,7 @@ pub fn verify_task_identity(
 
     if let Some(expected_process_pid) = identity.process_pid {
         match read_proc_status_tgid(proc_root, tid) {
-            Ok(Some(actual_process_pid)) if actual_process_pid != expected_process_pid => {
+            Ok(Some(actual_process_pid)) if actual_process_pid != expected_process_pid.as_u32() => {
                 return RestoreIdentityStatus::Mismatch {
                     reason: format!(
                         "process_pid mismatch: expected={expected_process_pid} actual={actual_process_pid}"
@@ -196,8 +196,8 @@ mod tests {
         starttime_ticks: Option<u64>,
     ) -> TaskRestoreIdentity {
         TaskRestoreIdentity {
-            tid,
-            process_pid,
+            tid: tid.into(),
+            process_pid: process_pid.map(Into::into),
             starttime_ticks,
             comm: Some("game".to_owned()),
             exe: None,

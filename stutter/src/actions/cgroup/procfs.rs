@@ -44,12 +44,12 @@ pub(super) fn read_target_snapshot_at(
         .filter(|comm| !comm.is_empty());
     let exe = fs::read_link(proc_root.join(target.tid.to_string()).join("exe")).ok();
 
-    let original_cgroup = read_proc_cgroup_path_at(proc_root, target.tid)
+    let original_cgroup = read_proc_cgroup_path_at(proc_root, target.tid.as_u32())
         .with_context(|| format!("failed to read cgroup path for tid={}", target.tid))?;
 
     Ok(CgroupTargetSnapshot {
-        tid: target.tid,
-        process_pid: target.process_pid,
+        tid: target.tid.as_u32(),
+        process_pid: target.process_pid.map(|pid| pid.as_u32()),
         comm,
         starttime_ticks: Some(starttime_ticks),
         exe,

@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
-pub use stutter_core::ids::ActionId;
+pub use stutter_core::ids::{ActionId, Pid, Tid};
 
 use crate::actions::token::RollbackToken;
 
@@ -52,14 +52,13 @@ pub struct ActionState {
     pub warnings: Vec<ActionWarning>,
 }
 
-// The task identifiers in this section are deliberately raw `u32` values because
-// these structs are JSON rollback-token serialization boundaries. Do not copy this
-// pattern into runtime-only models; use typed IDs there and convert to raw values
-// only at procfs/syscall or persisted-schema boundaries.
+// These task identifiers sit on JSON rollback-token serialization boundaries.
+// Keep the Rust model typed and rely on the transparent serde representation of
+// `Tid` and `Pid` so persisted rollback tokens retain their legacy numeric shape.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TaskIdentity {
-    pub tid: u32,
-    pub process_pid: Option<u32>,
+    pub tid: Tid,
+    pub process_pid: Option<Pid>,
     pub comm: Option<String>,
     pub starttime_ticks: Option<u64>,
 }
@@ -67,8 +66,8 @@ pub struct TaskIdentity {
 impl TaskIdentity {
     pub fn from_task_info(task: &crate::process_tree::TaskInfo) -> Self {
         Self {
-            tid: task.task_id().as_u32(),
-            process_pid: Some(task.process_id().as_u32()),
+            tid: task.task_id(),
+            process_pid: Some(task.process_id()),
             comm: Some(task.comm.clone()),
             starttime_ticks: task.task_starttime_ticks,
         }
@@ -77,9 +76,9 @@ impl TaskIdentity {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TaskRestoreIdentity {
-    pub tid: u32,
+    pub tid: Tid,
     #[serde(default)]
-    pub process_pid: Option<u32>,
+    pub process_pid: Option<Pid>,
     #[serde(default, alias = "task_starttime_ticks")]
     pub starttime_ticks: Option<u64>,
     #[serde(default)]
@@ -93,8 +92,8 @@ pub struct TaskRestoreIdentity {
 impl TaskRestoreIdentity {
     pub fn from_task_info(task: &crate::process_tree::TaskInfo) -> Self {
         Self {
-            tid: task.task_id().as_u32(),
-            process_pid: Some(task.process_id().as_u32()),
+            tid: task.task_id(),
+            process_pid: Some(task.process_id()),
             starttime_ticks: task.task_starttime_ticks,
             comm: Some(task.comm.clone()),
             exe: None,
@@ -121,8 +120,8 @@ impl TaskRestoreIdentity {
         exe: Option<PathBuf>,
     ) -> Self {
         Self {
-            tid,
-            process_pid,
+            tid: tid.into(),
+            process_pid: process_pid.map(Into::into),
             starttime_ticks,
             comm,
             exe,
@@ -132,7 +131,7 @@ impl TaskRestoreIdentity {
 
     pub fn legacy(tid: u32) -> Self {
         Self {
-            tid,
+            tid: tid.into(),
             process_pid: None,
             starttime_ticks: None,
             comm: None,
@@ -142,10 +141,14 @@ impl TaskRestoreIdentity {
     }
 }
 
+fn zero_tid() -> Tid {
+    Tid::new(0)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct NiceRestoreRecord {
-    #[serde(default)]
-    pub tid: u32,
+    #[serde(default = "zero_tid")]
+    pub tid: Tid,
     pub original_nice: i32,
     #[serde(default)]
     pub identity: Option<TaskRestoreIdentity>,
@@ -163,20 +166,20 @@ impl NiceRestoreRecord {
     pub fn tid(&self) -> u32 {
         self.identity
             .as_ref()
-            .map_or(self.tid, |identity| identity.tid)
+            .map_or(self.tid.as_u32(), |identity| identity.tid.as_u32())
     }
 
     pub fn restore_identity(&self) -> TaskRestoreIdentity {
         self.identity
             .clone()
-            .unwrap_or_else(|| TaskRestoreIdentity::legacy(self.tid))
+            .unwrap_or_else(|| TaskRestoreIdentity::legacy(self.tid.as_u32()))
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct UclampRestoreRecord {
-    #[serde(default)]
-    pub tid: u32,
+    #[serde(default = "zero_tid")]
+    pub tid: Tid,
     pub original_util_min: u32,
     pub original_util_max: u32,
     #[serde(default)]
@@ -200,13 +203,13 @@ impl UclampRestoreRecord {
     pub fn tid(&self) -> u32 {
         self.identity
             .as_ref()
-            .map_or(self.tid, |identity| identity.tid)
+            .map_or(self.tid.as_u32(), |identity| identity.tid.as_u32())
     }
 
     pub fn restore_identity(&self) -> TaskRestoreIdentity {
         self.identity
             .clone()
-            .unwrap_or_else(|| TaskRestoreIdentity::legacy(self.tid))
+            .unwrap_or_else(|| TaskRestoreIdentity::legacy(self.tid.as_u32()))
     }
 }
 
@@ -219,8 +222,8 @@ pub struct IrqAffinityRestoreRecord {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct IoPrioRestoreRecord {
-    #[serde(default)]
-    pub tid: u32,
+    #[serde(default = "zero_tid")]
+    pub tid: Tid,
     pub original_ioprio: i32,
     #[serde(default)]
     pub identity: Option<TaskRestoreIdentity>,
@@ -238,13 +241,13 @@ impl IoPrioRestoreRecord {
     pub fn tid(&self) -> u32 {
         self.identity
             .as_ref()
-            .map_or(self.tid, |identity| identity.tid)
+            .map_or(self.tid.as_u32(), |identity| identity.tid.as_u32())
     }
 
     pub fn restore_identity(&self) -> TaskRestoreIdentity {
         self.identity
             .clone()
-            .unwrap_or_else(|| TaskRestoreIdentity::legacy(self.tid))
+            .unwrap_or_else(|| TaskRestoreIdentity::legacy(self.tid.as_u32()))
     }
 }
 
@@ -268,8 +271,8 @@ pub struct CpuPowerRestoreRecord {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CgroupRestoreRecord {
-    #[serde(default)]
-    pub tid: u32,
+    #[serde(default = "zero_tid")]
+    pub tid: Tid,
     pub original_cgroup: PathBuf,
     #[serde(default)]
     pub identity: Option<TaskRestoreIdentity>,
@@ -287,13 +290,13 @@ impl CgroupRestoreRecord {
     pub fn tid(&self) -> u32 {
         self.identity
             .as_ref()
-            .map_or(self.tid, |identity| identity.tid)
+            .map_or(self.tid.as_u32(), |identity| identity.tid.as_u32())
     }
 
     pub fn restore_identity(&self) -> TaskRestoreIdentity {
         self.identity
             .clone()
-            .unwrap_or_else(|| TaskRestoreIdentity::legacy(self.tid))
+            .unwrap_or_else(|| TaskRestoreIdentity::legacy(self.tid.as_u32()))
     }
 }
 

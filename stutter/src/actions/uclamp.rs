@@ -153,7 +153,7 @@ impl RollbackHandler for UclampRollbackHandler {
 
         for record in records {
             let identity = record.restore_identity();
-            let tid = identity.tid;
+            let tid = identity.tid.as_u32();
             let status = verify_task_identity(Path::new("/proc"), &identity);
             match status {
                 RestoreIdentityStatus::Missing => {
@@ -423,7 +423,7 @@ impl TuningAction for UclampAction {
 
         for record in records {
             let identity = record.restore_identity();
-            let tid = identity.tid;
+            let tid = identity.tid.as_u32();
             match verify_task_identity(Path::new("/proc"), &identity) {
                 RestoreIdentityStatus::SameTask => {}
                 RestoreIdentityStatus::UnknownLegacy => {
@@ -614,16 +614,16 @@ fn read_target_snapshot_at(
     let exe = fs::read_link(proc_root.join(target.tid.to_string()).join("exe")).ok();
 
     let current = if proc_root == Path::new("/proc") {
-        read_task_uclamp(target.tid)
-            .or_else(|_| read_task_uclamp_from_sched_at(proc_root, target.tid))
+        read_task_uclamp(target.tid.as_u32())
+            .or_else(|_| read_task_uclamp_from_sched_at(proc_root, target.tid.as_u32()))
     } else {
-        read_task_uclamp_from_sched_at(proc_root, target.tid)
+        read_task_uclamp_from_sched_at(proc_root, target.tid.as_u32())
     }
     .with_context(|| format!("current uclamp is unreadable for tid={}", target.tid))?;
 
     Ok(UclampTargetSnapshot {
-        tid: target.tid,
-        process_pid: target.process_pid,
+        tid: target.tid.as_u32(),
+        process_pid: target.process_pid.map(|pid| pid.as_u32()),
         comm,
         starttime_ticks: Some(starttime_ticks),
         exe,

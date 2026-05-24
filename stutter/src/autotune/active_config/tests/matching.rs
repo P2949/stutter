@@ -63,8 +63,8 @@ fn candidate_active_config_match_reports_difference_for_task_actions() {
             name: "nice-diff".to_owned(),
             action: crate::actions::nice::NiceAction {
                 targets: vec![crate::actions::TaskIdentity {
-                    tid: 77,
-                    process_pid: Some(77),
+                    tid: (77).into(),
+                    process_pid: Some((77).into()),
                     comm: Some("worker".to_owned()),
                     starttime_ticks: Some(1),
                 }],
@@ -132,8 +132,8 @@ fn candidate_noop_helper_matches_typed_snapshot_for_task_actions() {
             name: "nice-noop".to_owned(),
             action: crate::actions::nice::NiceAction {
                 targets: vec![crate::actions::TaskIdentity {
-                    tid: 77,
-                    process_pid: Some(77),
+                    tid: (77).into(),
+                    process_pid: Some((77).into()),
                     comm: Some("worker".to_owned()),
                     starttime_ticks: Some(1),
                 }],

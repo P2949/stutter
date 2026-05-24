@@ -566,8 +566,8 @@ mod tests {
             target_cgroup: PathBuf::from("/stutter/game.slice"),
             targets: vec![CgroupPlacementTarget {
                 identity: TaskIdentity {
-                    tid: 42,
-                    process_pid: Some(42),
+                    tid: (42).into(),
+                    process_pid: Some((42).into()),
                     comm: Some("game-thread".to_owned()),
                     starttime_ticks: Some(12_345),
                 },

@@ -20,8 +20,8 @@ use crate::{
 
 fn target(tid: u32, comm: &str, starttime_ticks: u64) -> TaskIdentity {
     TaskIdentity {
-        tid,
-        process_pid: Some(tid),
+        tid: tid.into(),
+        process_pid: Some((tid).into()),
         comm: Some(comm.to_owned()),
         starttime_ticks: Some(starttime_ticks),
     }

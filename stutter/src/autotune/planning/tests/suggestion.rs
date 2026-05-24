@@ -58,8 +58,8 @@ fn generic_candidate_suggestion_writes_plan_file_and_uses_apply_candidate_comman
             name: "nice-browser-helper".to_owned(),
             action: NiceAction {
                 targets: vec![TaskIdentity {
-                    tid: 1234,
-                    process_pid: Some(1234),
+                    tid: (1234).into(),
+                    process_pid: Some((1234).into()),
                     comm: Some("browser".to_owned()),
                     starttime_ticks: Some(77),
                 }],
@@ -263,8 +263,8 @@ fn candidate_plan_file_can_embed_executable_process_local_payload() {
             name: "nice-browser-helper".to_owned(),
             action: NiceAction {
                 targets: vec![TaskIdentity {
-                    tid: 1234,
-                    process_pid: Some(1234),
+                    tid: (1234).into(),
+                    process_pid: Some((1234).into()),
                     comm: Some("browser".to_owned()),
                     starttime_ticks: Some(77),
                 }],

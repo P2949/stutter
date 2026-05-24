@@ -35,11 +35,15 @@ pub fn verify_rollback_restored_baseline(
             for target in &plan.action.targets {
                 if let Some(verification) = compare_required_text(
                     format!("tid={} nice", target.tid),
-                    baseline.nice.per_tid.get(&target.tid).map(i32::to_string),
+                    baseline
+                        .nice
+                        .per_tid
+                        .get(&target.tid.as_u32())
+                        .map(i32::to_string),
                     post_rollback
                         .nice
                         .per_tid
-                        .get(&target.tid)
+                        .get(&target.tid.as_u32())
                         .map(i32::to_string),
                 ) {
                     return verification;
@@ -59,8 +63,12 @@ pub fn verify_rollback_restored_baseline(
             for target in &plan.action.targets {
                 if let Some(verification) = compare_required_text(
                     format!("tid={} ionice", target.tid),
-                    baseline.ionice.per_tid.get(&target.tid).cloned(),
-                    post_rollback.ionice.per_tid.get(&target.tid).cloned(),
+                    baseline.ionice.per_tid.get(&target.tid.as_u32()).cloned(),
+                    post_rollback
+                        .ionice
+                        .per_tid
+                        .get(&target.tid.as_u32())
+                        .cloned(),
                 ) {
                     return verification;
                 }
@@ -82,12 +90,12 @@ pub fn verify_rollback_restored_baseline(
                     baseline
                         .uclamp
                         .per_tid
-                        .get(&target.tid)
+                        .get(&target.tid.as_u32())
                         .map(format_debug_value),
                     post_rollback
                         .uclamp
                         .per_tid
-                        .get(&target.tid)
+                        .get(&target.tid.as_u32())
                         .map(format_debug_value),
                 ) {
                     return verification;
@@ -110,12 +118,12 @@ pub fn verify_rollback_restored_baseline(
                     baseline
                         .cgroup
                         .per_tid
-                        .get(&target.identity.tid)
+                        .get(&target.identity.tid.as_u32())
                         .map(|value| normalize_cgroup_str(value)),
                     post_rollback
                         .cgroup
                         .per_tid
-                        .get(&target.identity.tid)
+                        .get(&target.identity.tid.as_u32())
                         .map(|value| normalize_cgroup_str(value)),
                 ) {
                     return verification;

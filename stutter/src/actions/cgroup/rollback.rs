@@ -67,7 +67,7 @@ impl CgroupRollbackHandler {
 
         for record in records {
             let identity = record.restore_identity();
-            let tid = identity.tid;
+            let tid = identity.tid.as_u32();
             let status = verify_task_identity(proc_root, &identity);
             match status {
                 RestoreIdentityStatus::Missing => {

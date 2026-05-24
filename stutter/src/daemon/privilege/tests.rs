@@ -185,8 +185,8 @@ fn nice_apply_request(candidate: CandidateAction) -> CandidateApplyRequest {
 
 fn target(tid: u32, process_pid: u32, comm: &str, starttime: u64) -> TaskIdentity {
     TaskIdentity {
-        tid,
-        process_pid: Some(process_pid),
+        tid: tid.into(),
+        process_pid: Some((process_pid).into()),
         comm: Some(comm.to_owned()),
         starttime_ticks: Some(starttime),
     }
