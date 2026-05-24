@@ -9,21 +9,18 @@ use tokio::io::unix::AsyncFd;
 
 use crate::{
     config::TARGET_PIDS_MAX,
-    drm_tracepoints::KmsTracepointProvider,
     ebpf::{
         attach::{
             AttachOps, AyaAttachOps, FaultPerfProbe, attach_drm_fence_tracepoints,
             attach_kms_tracepoints,
         },
+        load_plan::{apply_loader_plan, build_loader_plan},
         maps::map_sizing_for_config_after_memlock,
         memlock::{log_memlock_policy_report, raise_memlock_limit},
         memory::format_optional_bytes,
-        model::{BlockIoCorrelationBasis, LoadedEbpf, NativeCgroupFilterStatus},
+        model::{LoadedEbpf, NativeCgroupFilterStatus},
         object::ebpf_object_bytes,
         preflight::{TracepointAvailability, validate_tracepoint_formats},
-        tracepoints::{
-            drm_fence::drm_fence_tracepoint_offsets, kms::kms_provider_tracepoint_offsets,
-        },
     },
     error::{EbpfError, ProbeError, TargetError},
     probe_activation::ProbeActivationPlan,
@@ -122,7 +119,7 @@ pub(crate) fn attach_optional_scheduler_tracepoints(
     }
 }
 
-fn attach_optional_probe_tracepoints(
+pub(crate) fn attach_optional_probe_tracepoints(
     ops: &mut impl AttachOps,
     activation_plan: &mut ProbeActivationPlan,
     tracepoints: &TracepointAvailability,
@@ -232,7 +229,7 @@ fn attach_optional_probe_tracepoints(
     }
 }
 
-fn attach_optional_follow_exec_tracepoint(
+pub(crate) fn attach_optional_follow_exec_tracepoint(
     ops: &mut impl AttachOps,
     activation_plan: &mut ProbeActivationPlan,
 ) {
@@ -253,7 +250,7 @@ fn attach_optional_follow_exec_tracepoint(
     }
 }
 
-fn attach_optional_fault_perf_events(
+pub(crate) fn attach_optional_fault_perf_events(
     ops: &mut impl AttachOps,
     activation_plan: &mut ProbeActivationPlan,
 ) {
@@ -315,244 +312,11 @@ pub fn load_and_attach(
     let tracepoints = validate_tracepoint_formats(Path::new("/sys/kernel/tracing/events"), config)
         .context("tracepoint offset mismatch")?;
 
+    let loader_plan = build_loader_plan(&tracepoints, map_sizing);
+    let block_io_correlation_basis = loader_plan.block_io_correlation_basis;
+    let drm_fence_offsets = loader_plan.drm_fence_offsets;
     let mut loader = EbpfLoader::new();
-    loader
-        .map_max_entries("EVENTS", map_sizing.events_ringbuf_bytes)
-        .map_max_entries("WAKEUP_DATA", map_sizing.wakeup_data_entries)
-        .map_max_entries("WAKEUP_CONSUMED", map_sizing.wakeup_data_entries);
-
-    if let Some(ref offset) = tracepoints.block_rq_key_offset {
-        loader.override_global("BLOCK_RQ_KEY_OFFSET", offset, true);
-    }
-    if let Some(ref offset) = tracepoints.block_rq_issue_nr_sector_offset {
-        loader.override_global("BLOCK_RQ_ISSUE_NR_SECTOR_OFFSET", offset, true);
-    }
-    if let Some(ref offset) = tracepoints.block_rq_issue_rwbs_offset {
-        loader.override_global("BLOCK_RQ_ISSUE_RWBS_OFFSET", offset, true);
-    }
-    if let Some(ref offset) = tracepoints.block_rq_complete_nr_sector_offset {
-        loader.override_global("BLOCK_RQ_COMPLETE_NR_SECTOR_OFFSET", offset, true);
-    }
-    if let Some(ref offset) = tracepoints.block_rq_complete_rwbs_offset {
-        loader.override_global("BLOCK_RQ_COMPLETE_RWBS_OFFSET", offset, true);
-    }
-
-    let kms_offsets = kms_provider_tracepoint_offsets(&tracepoints.kms);
-    if let Some(ref offsets) = kms_offsets {
-        match tracepoints.kms.provider {
-            KmsTracepointProvider::I915 => {
-                loader.override_global(
-                    "I915_FLIP_REQUEST_CRTC_OFFSET",
-                    &offsets.request_crtc_offset,
-                    true,
-                );
-                loader.override_global(
-                    "I915_FLIP_REQUEST_PIPE_OFFSET",
-                    &offsets.request_pipe_offset,
-                    true,
-                );
-                loader.override_global(
-                    "I915_FLIP_DONE_CRTC_OFFSET",
-                    &offsets.done_crtc_offset,
-                    true,
-                );
-                loader.override_global(
-                    "I915_FLIP_DONE_PIPE_OFFSET",
-                    &offsets.done_pipe_offset,
-                    true,
-                );
-                loader.override_global(
-                    "I915_FLIP_DONE_SEQUENCE_OFFSET",
-                    &offsets.done_sequence_offset,
-                    true,
-                );
-                loader.override_global(
-                    "I915_FLIP_DONE_SEQUENCE_SIZE",
-                    &offsets.done_sequence_size,
-                    true,
-                );
-            }
-            KmsTracepointProvider::GenericDrm => {
-                loader.override_global(
-                    "DRM_FLIP_REQUEST_CRTC_OFFSET",
-                    &offsets.request_crtc_offset,
-                    true,
-                );
-                loader.override_global(
-                    "DRM_FLIP_REQUEST_PIPE_OFFSET",
-                    &offsets.request_pipe_offset,
-                    true,
-                );
-                loader.override_global(
-                    "DRM_FLIP_DONE_CRTC_OFFSET",
-                    &offsets.done_crtc_offset,
-                    true,
-                );
-                loader.override_global(
-                    "DRM_FLIP_DONE_PIPE_OFFSET",
-                    &offsets.done_pipe_offset,
-                    true,
-                );
-                loader.override_global(
-                    "DRM_FLIP_DONE_SEQUENCE_OFFSET",
-                    &offsets.done_sequence_offset,
-                    true,
-                );
-                loader.override_global(
-                    "DRM_FLIP_DONE_SEQUENCE_SIZE",
-                    &offsets.done_sequence_size,
-                    true,
-                );
-                loader.override_global("DRM_VBLANK_CRTC_OFFSET", &offsets.vblank_crtc_offset, true);
-                loader.override_global("DRM_VBLANK_PIPE_OFFSET", &offsets.vblank_pipe_offset, true);
-                loader.override_global(
-                    "DRM_VBLANK_SEQUENCE_OFFSET",
-                    &offsets.vblank_sequence_offset,
-                    true,
-                );
-                loader.override_global(
-                    "DRM_VBLANK_SEQUENCE_SIZE",
-                    &offsets.vblank_sequence_size,
-                    true,
-                );
-            }
-            KmsTracepointProvider::Amdgpu => {
-                loader.override_global(
-                    "AMDGPU_FLIP_REQUEST_CRTC_OFFSET",
-                    &offsets.request_crtc_offset,
-                    true,
-                );
-                loader.override_global(
-                    "AMDGPU_FLIP_REQUEST_PIPE_OFFSET",
-                    &offsets.request_pipe_offset,
-                    true,
-                );
-                loader.override_global(
-                    "AMDGPU_FLIP_DONE_CRTC_OFFSET",
-                    &offsets.done_crtc_offset,
-                    true,
-                );
-                loader.override_global(
-                    "AMDGPU_FLIP_DONE_PIPE_OFFSET",
-                    &offsets.done_pipe_offset,
-                    true,
-                );
-                loader.override_global(
-                    "AMDGPU_FLIP_DONE_SEQUENCE_OFFSET",
-                    &offsets.done_sequence_offset,
-                    true,
-                );
-                loader.override_global(
-                    "AMDGPU_FLIP_DONE_SEQUENCE_SIZE",
-                    &offsets.done_sequence_size,
-                    true,
-                );
-                loader.override_global(
-                    "AMDGPU_VBLANK_CRTC_OFFSET",
-                    &offsets.vblank_crtc_offset,
-                    true,
-                );
-                loader.override_global(
-                    "AMDGPU_VBLANK_PIPE_OFFSET",
-                    &offsets.vblank_pipe_offset,
-                    true,
-                );
-                loader.override_global(
-                    "AMDGPU_VBLANK_SEQUENCE_OFFSET",
-                    &offsets.vblank_sequence_offset,
-                    true,
-                );
-                loader.override_global(
-                    "AMDGPU_VBLANK_SEQUENCE_SIZE",
-                    &offsets.vblank_sequence_size,
-                    true,
-                );
-            }
-            KmsTracepointProvider::Mixed | KmsTracepointProvider::Unavailable => {}
-        }
-    }
-
-    let drm_fence_offsets = tracepoints
-        .drm_fence
-        .as_ref()
-        .and_then(drm_fence_tracepoint_offsets);
-    if let Some(ref offsets) = drm_fence_offsets {
-        loader.override_global(
-            "DRM_FENCE_WAIT_START_CONTEXT_OFFSET",
-            &offsets.wait_start_context_offset,
-            true,
-        );
-        loader.override_global(
-            "DRM_FENCE_WAIT_START_SEQNO_OFFSET",
-            &offsets.wait_start_seqno_offset,
-            true,
-        );
-        loader.override_global(
-            "DRM_FENCE_WAIT_START_TIMELINE_OFFSET",
-            &offsets.wait_start_timeline_offset,
-            true,
-        );
-        loader.override_global(
-            "DRM_FENCE_WAIT_DONE_CONTEXT_OFFSET",
-            &offsets.wait_done_context_offset,
-            true,
-        );
-        loader.override_global(
-            "DRM_FENCE_WAIT_DONE_SEQNO_OFFSET",
-            &offsets.wait_done_seqno_offset,
-            true,
-        );
-        loader.override_global(
-            "DRM_FENCE_WAIT_DONE_TIMELINE_OFFSET",
-            &offsets.wait_done_timeline_offset,
-            true,
-        );
-        loader.override_global(
-            "DRM_FENCE_SIGNAL_CONTEXT_OFFSET",
-            &offsets.signal_context_offset,
-            true,
-        );
-        loader.override_global(
-            "DRM_FENCE_SIGNAL_SEQNO_OFFSET",
-            &offsets.signal_seqno_offset,
-            true,
-        );
-        loader.override_global(
-            "DRM_FENCE_SIGNAL_TIMELINE_OFFSET",
-            &offsets.signal_timeline_offset,
-            true,
-        );
-        loader.override_global(
-            "DRM_FENCE_WAIT_START_PROVIDER",
-            &offsets.wait_start_provider,
-            true,
-        );
-        loader.override_global(
-            "DRM_FENCE_WAIT_START_GPU_ROLE",
-            &offsets.wait_start_gpu_role,
-            true,
-        );
-        loader.override_global(
-            "DRM_FENCE_WAIT_DONE_PROVIDER",
-            &offsets.wait_done_provider,
-            true,
-        );
-        loader.override_global(
-            "DRM_FENCE_WAIT_DONE_GPU_ROLE",
-            &offsets.wait_done_gpu_role,
-            true,
-        );
-        loader.override_global("DRM_FENCE_SIGNAL_PROVIDER", &offsets.signal_provider, true);
-        loader.override_global("DRM_FENCE_SIGNAL_GPU_ROLE", &offsets.signal_gpu_role, true);
-    }
-
-    let block_io_correlation_basis = if !tracepoints.block_rq {
-        BlockIoCorrelationBasis::Disabled
-    } else if tracepoints.block_rq_key_offset.is_some() {
-        BlockIoCorrelationBasis::RequestPointer
-    } else {
-        BlockIoCorrelationBasis::DevSector
-    };
+    apply_loader_plan(&mut loader, &loader_plan);
 
     let object = ebpf_object_bytes()?;
     let mut ebpf = loader

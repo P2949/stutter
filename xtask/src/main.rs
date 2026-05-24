@@ -33,6 +33,11 @@ enum XtaskCommand {
     )]
     Preflight,
     #[command(
+        name = "privileged-ebpf-smoke",
+        about = "Run ignored eBPF load smoke tests that require Linux tracefs and eBPF privileges"
+    )]
+    PrivilegedEbpfSmoke,
+    #[command(
         name = "validate",
         about = "Run the complete non-root validation gate, including an explicit eBPF build"
     )]
@@ -142,6 +147,23 @@ const EBPF_BUILD_COMMAND: CommandSpec = CommandSpec {
         "bpfel-unknown-none",
     ],
 };
+
+const PRIVILEGED_EBPF_SMOKE_TEST_COMMAND: CommandSpec = CommandSpec {
+    program: "cargo",
+    args: &[
+        "test",
+        "-p",
+        "stutter",
+        "ebpf_loader::tests::load_and_attach_real_bpf_object_smoke_test",
+        "--",
+        "--ignored",
+        "--exact",
+        "--nocapture",
+    ],
+};
+
+const PRIVILEGED_EBPF_SMOKE_COMMANDS: &[CommandSpec] =
+    &[EBPF_BUILD_COMMAND, PRIVILEGED_EBPF_SMOKE_TEST_COMMAND];
 
 const VALIDATION_COMMANDS: &[CommandSpec] = &[
     CommandSpec {
@@ -349,6 +371,7 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
         }
         XtaskCommand::Smoke => run_command_specs(&root, SMOKE_COMMANDS),
         XtaskCommand::Preflight => run_preflight(),
+        XtaskCommand::PrivilegedEbpfSmoke => run_privileged_ebpf_smoke(&root),
         XtaskCommand::Validate => {
             run_preflight()?;
             run_command_specs(&root, VALIDATION_COMMANDS)
@@ -372,6 +395,15 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
             Ok(())
         }
     }
+}
+
+fn run_privileged_ebpf_smoke(root: &Path) -> anyhow::Result<()> {
+    if !cfg!(target_os = "linux") {
+        bail!("privileged eBPF smoke tests require Linux");
+    }
+
+    run_preflight()?;
+    run_command_specs(root, PRIVILEGED_EBPF_SMOKE_COMMANDS)
 }
 
 fn run_preflight() -> anyhow::Result<()> {
@@ -743,9 +775,10 @@ mod tests {
         APPROVED_DUPLICATE_PACKAGES, CI_COMMANDS, Cli, DEPENDENCY_HYGIENE_COMMANDS,
         DEPENDENCY_HYGIENE_WORKFLOW, DUPLICATE_DEPENDENCY_COMMAND, FIXTURE_CHECK_COMMANDS,
         FIXTURE_CHECK_WORKFLOW, FIXTURE_UPDATE_COMMANDS, FIXTURE_UPDATE_WORKFLOW,
-        REPORT_GOLDEN_UPDATE_COMMANDS, REPORT_GOLDEN_UPDATE_WORKFLOW, SCHEMA_CHECK_COMMANDS,
-        SCHEMA_CHECK_WORKFLOW, SMOKE_COMMANDS, VALIDATION_COMMANDS, duplicate_package_names,
-        format_command, scan_allow_attribute_file,
+        PRIVILEGED_EBPF_SMOKE_COMMANDS, REPORT_GOLDEN_UPDATE_COMMANDS,
+        REPORT_GOLDEN_UPDATE_WORKFLOW, SCHEMA_CHECK_COMMANDS, SCHEMA_CHECK_WORKFLOW,
+        SMOKE_COMMANDS, VALIDATION_COMMANDS, duplicate_package_names, format_command,
+        scan_allow_attribute_file,
     };
 
     #[test]
@@ -770,6 +803,7 @@ mod tests {
                 "no-allow-attrs",
                 "package",
                 "preflight",
+                "privileged-ebpf-smoke",
                 "report-golden-update",
                 "schema-check",
                 "smoke",
@@ -809,6 +843,17 @@ mod tests {
                 "bash scripts/smoke/offline_recommendation.sh",
                 "bash scripts/smoke/advisor_offline.sh",
                 "cargo test -p stutter architecture_tests",
+            ]
+        );
+    }
+
+    #[test]
+    fn privileged_ebpf_smoke_command_targets_ignored_loader_smoke() {
+        assert_eq!(
+            command_texts(PRIVILEGED_EBPF_SMOKE_COMMANDS),
+            vec![
+                "rustup run nightly cargo build -p stutter-ebpf -Z build-std=core --target bpfel-unknown-none",
+                "cargo test -p stutter ebpf_loader::tests::load_and_attach_real_bpf_object_smoke_test -- --ignored --exact --nocapture",
             ]
         );
     }
