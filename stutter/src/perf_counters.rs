@@ -618,9 +618,9 @@ mod tests {
 
     fn task_info(tid: u32, class: TaskClass) -> TaskInfo {
         TaskInfo {
-            tid,
-            process_pid: tid,
-            process_ppid: 0,
+            tid: tid.into(),
+            process_pid: tid.into(),
+            process_ppid: 0.into(),
             comm: format!("task-{tid}"),
             process_comm: format!("proc-{tid}"),
             process_starttime_ticks: Some(tid as u64),

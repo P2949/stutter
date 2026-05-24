@@ -73,7 +73,7 @@ impl RuntimeSliceSampler {
         let mut active_tids = BTreeSet::new();
 
         for task in tasks.iter().take(max_tasks) {
-            active_tids.insert(task.tid);
+            active_tids.insert(task.task_id().as_u32());
             batch.scanned_tasks += 1;
 
             let snapshot = match read_snapshot(&self.proc_root, self.clock_ticks_per_second, task) {
@@ -85,14 +85,17 @@ impl RuntimeSliceSampler {
                         task.tid,
                         task.process_pid
                     );
-                    self.previous.remove(&task.tid);
+                    self.previous.remove(&task.task_id().as_u32());
                     continue;
                 }
             };
 
             batch.schedstat_available |= snapshot.source == RuntimeSliceSource::ProcSchedstat;
 
-            let Some(previous) = self.previous.insert(task.tid, snapshot.clone()) else {
+            let Some(previous) = self
+                .previous
+                .insert(task.task_id().as_u32(), snapshot.clone())
+            else {
                 continue;
             };
 
@@ -146,17 +149,17 @@ fn read_snapshot(
     task: &TaskInfo,
 ) -> Result<RuntimeSliceSnapshot> {
     let task_dir = proc_root
-        .join(task.process_pid.to_string())
+        .join(task.process_id().as_u32().to_string())
         .join("task")
-        .join(task.tid.to_string());
+        .join(task.task_id().as_u32().to_string());
     let schedstat_path = task_dir.join("schedstat");
 
     if let Ok(contents) = fs::read_to_string(&schedstat_path) {
         let (runtime_ns, wait_ns, timeslices) = parse_schedstat(&contents)
             .with_context(|| format!("malformed {}", schedstat_path.display()))?;
         return Ok(RuntimeSliceSnapshot {
-            task: task.tid,
-            process_pid: task.process_pid,
+            task: task.task_id().as_u32(),
+            process_pid: task.process_id().as_u32(),
             process_starttime_ticks: task.process_starttime_ticks,
             task_starttime_ticks: task.task_starttime_ticks,
             source: RuntimeSliceSource::ProcSchedstat,
@@ -177,8 +180,8 @@ fn read_snapshot(
     let system_runtime_ns = ticks_to_ns(system_ticks, clock_ticks_per_second);
 
     Ok(RuntimeSliceSnapshot {
-        task: task.tid,
-        process_pid: task.process_pid,
+        task: task.task_id().as_u32(),
+        process_pid: task.process_id().as_u32(),
         process_starttime_ticks: task.process_starttime_ticks,
         task_starttime_ticks: task.task_starttime_ticks,
         source: RuntimeSliceSource::ProcStatFallback,
@@ -227,8 +230,8 @@ fn build_record(
 
     Some(RuntimeSliceRecord {
         elapsed_ms,
-        task: task.tid,
-        process_pid: (task.process_pid != 0).then_some(task.process_pid),
+        task: task.task_id().as_u32(),
+        process_pid: (task.process_id().as_u32() != 0).then_some(task.process_id().as_u32()),
         class: task.class,
         comm: task.comm.clone(),
         process_comm: task.process_comm.clone(),
@@ -316,9 +319,9 @@ mod tests {
 
     fn task_info(tid: u32, process_pid: u32) -> TaskInfo {
         TaskInfo {
-            tid,
-            process_pid,
-            process_ppid: 1,
+            tid: tid.into(),
+            process_pid: process_pid.into(),
+            process_ppid: 1.into(),
             comm: "GameThread".to_owned(),
             process_comm: "Game.exe".to_owned(),
             process_starttime_ticks: Some(10),

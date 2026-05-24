@@ -250,9 +250,9 @@ pub(super) fn task_info(
     class: TaskClass,
 ) -> TaskInfo {
     TaskInfo {
-        tid,
-        process_pid,
-        process_ppid: 1,
+        tid: tid.into(),
+        process_pid: process_pid.into(),
+        process_ppid: 1.into(),
         comm: comm.into(),
         process_comm: process_comm.into(),
         process_starttime_ticks: Some(u64::from(process_pid) * 10),

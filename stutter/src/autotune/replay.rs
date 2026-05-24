@@ -425,9 +425,9 @@ fn removed_targets_from_session_tasks(tasks: &[SessionTask]) -> Vec<u32> {
 
 fn task_info_from_session_task(task: &SessionTask) -> TaskInfo {
     TaskInfo {
-        tid: task.task,
-        process_pid: task.process_pid.unwrap_or(task.task),
-        process_ppid: 0,
+        tid: task.task.into(),
+        process_pid: task.process_pid.unwrap_or(task.task).into(),
+        process_ppid: 0.into(),
         comm: task.comm.clone(),
         process_comm: task.process_comm.clone(),
         process_starttime_ticks: task.process_starttime_ticks,

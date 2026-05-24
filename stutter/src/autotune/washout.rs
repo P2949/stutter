@@ -130,8 +130,8 @@ pub struct WashoutTaskIdentity {
 impl WashoutTaskIdentity {
     pub fn from_task_info(task: &TaskInfo) -> Self {
         Self {
-            tid: task.tid,
-            process_pid: task.process_pid,
+            tid: task.task_id().as_u32(),
+            process_pid: task.process_id().as_u32(),
             comm: task.comm.clone(),
             process_comm: task.process_comm.clone(),
             process_starttime_ticks: task.process_starttime_ticks,
@@ -321,9 +321,9 @@ mod tests {
 
     fn task(tid: u32, comm: &str) -> TaskInfo {
         TaskInfo {
-            tid,
-            process_pid: 42,
-            process_ppid: 1,
+            tid: tid.into(),
+            process_pid: 42.into(),
+            process_ppid: 1.into(),
             comm: comm.to_owned(),
             process_comm: "Game.exe".to_owned(),
             process_starttime_ticks: Some(100),

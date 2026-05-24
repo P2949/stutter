@@ -407,9 +407,9 @@ mod tests {
         class: TaskClass,
     ) -> TaskInfo {
         TaskInfo {
-            tid,
-            process_pid,
-            process_ppid: 1,
+            tid: tid.into(),
+            process_pid: process_pid.into(),
+            process_ppid: 1.into(),
             comm: comm.into(),
             process_comm: process_comm.into(),
             process_starttime_ticks: Some(u64::from(process_pid) * 10),
@@ -431,9 +431,9 @@ mod tests {
         assert!(crate::process_tree::same_logical_task(&t1, &t2));
 
         // different pid => not same
-        t2.process_pid = 101;
+        t2.process_pid = 101.into();
         assert!(!crate::process_tree::same_logical_task(&t1, &t2));
-        t2.process_pid = 100;
+        t2.process_pid = 100.into();
 
         // same pid + all starttimes None + different exe inode => not same
         t1.process_starttime_ticks = None;

@@ -391,7 +391,10 @@ fn recovered_phase_for_mode(mode: crate::daemon::policy::DaemonMode) -> DaemonPh
 fn daemon_target_from_snapshot(
     active_targets: &std::collections::BTreeMap<u32, crate::process_tree::TaskInfo>,
 ) -> Option<DaemonTargetState> {
-    let root_pid = active_targets.values().map(|task| task.process_pid).min();
+    let root_pid = active_targets
+        .values()
+        .map(|task| task.process_id().as_u32())
+        .min();
     let comm = active_targets
         .values()
         .next()
@@ -810,9 +813,9 @@ mod tests {
 
     fn task_info(tid: u32, process_pid: u32, comm: &str) -> TaskInfo {
         TaskInfo {
-            tid,
-            process_pid,
-            process_ppid: 1,
+            tid: tid.into(),
+            process_pid: process_pid.into(),
+            process_ppid: 1.into(),
             comm: comm.to_owned(),
             process_comm: comm.to_owned(),
             process_starttime_ticks: Some(100),

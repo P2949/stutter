@@ -10,23 +10,28 @@ fn source(relative_path: &str) -> String {
 }
 
 #[test]
-fn core_typed_ids_are_adopted_at_process_and_metrics_boundaries() {
+fn core_typed_ids_are_load_bearing_in_process_and_metrics_models() {
     let process_model = source("process/model.rs");
     assert!(
         process_model.contains("use stutter_core::ids::{Pid, Tid};")
+            && process_model.contains("pub tid: Tid")
+            && process_model.contains("pub process_pid: Pid")
+            && process_model.contains("pub process_ppid: Pid")
             && process_model.contains("pub fn task_id(&self) -> Tid")
             && process_model.contains("pub fn process_id(&self) -> Pid")
             && process_model.contains("pub fn parent_process_id(&self) -> Pid"),
-        "TaskInfo must expose stutter-core typed ID accessors at the process-model boundary",
+        "TaskInfo must store task/process identifiers as stutter-core typed IDs, not raw u32 plus accessor wrappers",
     );
 
     let metrics = source("metrics.rs");
     assert!(
         metrics.contains("use stutter_core::ids::{CpuId, Pid, Tid};")
+            && metrics.contains("pub task: Tid")
+            && metrics.contains("pub process_pid: Option<Pid>")
             && metrics.contains("pub fn cpu_id(&self) -> CpuId")
             && metrics.contains("pub fn task_id(&self) -> Tid")
             && metrics.contains("pub fn process_id(&self) -> Option<Pid>"),
-        "metrics domain records must expose stutter-core typed ID accessors instead of only raw u32 identifiers",
+        "TaskStats must store task/process identifiers as stutter-core typed IDs while converting to raw u32 only at external DTO/eBPF boundaries",
     );
 }
 

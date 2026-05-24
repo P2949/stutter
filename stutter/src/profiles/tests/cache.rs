@@ -155,9 +155,9 @@ fn profile_apply_cache_invalidates_when_desired_ionice_changes() {
 #[test]
 fn profile_apply_cache_skips_unchanged_known_correct_tasks() {
     let task = TaskInfo {
-        tid: 7,
-        process_pid: 7,
-        process_ppid: 1,
+        tid: 7.into(),
+        process_pid: 7.into(),
+        process_ppid: 1.into(),
         comm: "RenderThread".into(),
         process_comm: "game".into(),
         process_starttime_ticks: Some(70),
