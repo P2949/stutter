@@ -9,7 +9,10 @@ use std::sync::OnceLock;
 use super::{CommunityRule, CommunityRulesDb, normalize_process_name};
 #[cfg(test)]
 use super::{CommunityRulesSourceKind, load_community_rules_db};
-use crate::process_tree::TaskClass;
+use crate::{
+    ascii_match::{any_contains_ignore_ascii_case, contains_ignore_ascii_case},
+    process_tree::TaskClass,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommunityRuleIdentitySource {
@@ -276,14 +279,11 @@ fn confidence_cap_for_rule(
 }
 
 fn service_rule_source_path_is_specific(rule: &CommunityRule) -> bool {
-    let source_path = rule.source_path.to_ascii_lowercase();
+    let source_path = rule.source_path.as_str();
 
-    if source_path.contains("systemd")
-        || source_path.contains("dbus")
-        || source_path.contains("network")
-        || source_path.contains("storage")
-        || source_path.contains("daemon")
-        || source_path.contains("service")
+    if ["systemd", "dbus", "network", "storage", "daemon", "service"]
+        .iter()
+        .any(|needle| contains_ignore_ascii_case(source_path, needle))
     {
         return true;
     }
@@ -301,10 +301,7 @@ pub(crate) fn rule_requires_context(rule: &CommunityRule) -> bool {
             .context
             .iter()
             .any(|context| context == "wine_or_proton_or_steam")
-        || rule
-            .source_path
-            .to_ascii_lowercase()
-            .contains("wine_proton")
+        || contains_ignore_ascii_case(&rule.source_path, "wine_proton")
 }
 
 fn gaming_runtime_context_signal(identity: &CommunityProcessIdentity<'_>) -> Option<&'static str> {
@@ -312,21 +309,12 @@ fn gaming_runtime_context_signal(identity: &CommunityProcessIdentity<'_>) -> Opt
         return Some(signal);
     }
 
-    let combined = [
-        identity.cmdline,
-        identity.exe_path,
-        identity.cgroup_path,
-        identity.process_comm,
-        identity.thread_comm,
-    ]
-    .join(" ")
-    .to_ascii_lowercase();
-
-    if combined.contains("steam-runtime") {
+    let fields = identity_context_fields(identity);
+    if any_contains_ignore_ascii_case(&fields, "steam-runtime") {
         Some("steam-runtime")
-    } else if combined.contains("steamrt") {
+    } else if any_contains_ignore_ascii_case(&fields, "steamrt") {
         Some("steamrt")
-    } else if combined.contains("steam-runtime-tools") {
+    } else if any_contains_ignore_ascii_case(&fields, "steam-runtime-tools") {
         Some("steam-runtime-tools")
     } else {
         None
@@ -334,40 +322,41 @@ fn gaming_runtime_context_signal(identity: &CommunityProcessIdentity<'_>) -> Opt
 }
 
 fn game_context_signal(identity: &CommunityProcessIdentity<'_>) -> Option<&'static str> {
-    let cmdline = identity.cmdline.to_ascii_lowercase();
-    let exe_path = identity.exe_path.to_ascii_lowercase();
-    let cgroup_path = identity.cgroup_path.to_ascii_lowercase();
-    let process_comm = identity.process_comm.to_ascii_lowercase();
-    let thread_comm = identity.thread_comm.to_ascii_lowercase();
+    let fields = identity_context_fields(identity);
 
-    let combined = [
-        cmdline.as_str(),
-        exe_path.as_str(),
-        cgroup_path.as_str(),
-        process_comm.as_str(),
-        thread_comm.as_str(),
-    ]
-    .join(" ");
-
-    if combined.contains("steamapps/") || combined.contains("\\steamapps\\") {
+    if any_contains_ignore_ascii_case(&fields, "steamapps/")
+        || any_contains_ignore_ascii_case(&fields, "\\steamapps\\")
+    {
         Some("steamapps")
-    } else if combined.contains("compatdata/") || combined.contains("\\compatdata\\") {
+    } else if any_contains_ignore_ascii_case(&fields, "compatdata/")
+        || any_contains_ignore_ascii_case(&fields, "\\compatdata\\")
+    {
         Some("compatdata")
-    } else if combined.contains("app-steam") {
+    } else if any_contains_ignore_ascii_case(&fields, "app-steam") {
         Some("app-steam")
-    } else if combined.contains("pressure-vessel") {
+    } else if any_contains_ignore_ascii_case(&fields, "pressure-vessel") {
         Some("pressure-vessel")
-    } else if combined.contains("pv-bwrap") {
+    } else if any_contains_ignore_ascii_case(&fields, "pv-bwrap") {
         Some("pv-bwrap")
-    } else if combined.contains("gamescope") {
+    } else if any_contains_ignore_ascii_case(&fields, "gamescope") {
         Some("gamescope")
-    } else if combined.contains("wineserver") {
+    } else if any_contains_ignore_ascii_case(&fields, "wineserver") {
         Some("wineserver")
-    } else if combined.contains("proton") {
+    } else if any_contains_ignore_ascii_case(&fields, "proton") {
         Some("proton")
-    } else if combined.contains("wine") {
+    } else if any_contains_ignore_ascii_case(&fields, "wine") {
         Some("wine")
     } else {
         None
     }
+}
+
+fn identity_context_fields<'a>(identity: &CommunityProcessIdentity<'a>) -> [&'a str; 5] {
+    [
+        identity.cmdline,
+        identity.exe_path,
+        identity.cgroup_path,
+        identity.process_comm,
+        identity.thread_comm,
+    ]
 }
