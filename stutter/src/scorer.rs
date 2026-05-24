@@ -148,7 +148,7 @@ mod tests {
             class,
             comm: format!("{class:?}"),
             process_pid: Some(1),
-            process_comm: format!("{class:?}").into(),
+            process_comm: format!("{class:?}"),
             samples: 1,
             stored_samples: 1,
             truncated_samples: 0,

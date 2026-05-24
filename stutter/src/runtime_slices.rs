@@ -231,7 +231,7 @@ fn build_record(
         process_pid: (task.process_pid != 0).then_some(task.process_pid),
         class: task.class,
         comm: task.comm.clone(),
-        process_comm: task.process_comm.clone(),
+        process_comm: task.process_comm.to_string(),
         source: snapshot.source,
         interval_ms,
         runtime_delta_ns,

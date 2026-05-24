@@ -376,7 +376,7 @@ fn validation_corpus_real_community_rules_classification() {
         crate::process_tree::TaskClass::Game,
         "report fixture should contain final class Game for the community-rule-classified task"
     );
-    assert_eq!(classified_task.process_comm.as_ref(), "community-game");
+    assert_eq!(classified_task.process_comm.as_str(), "community-game");
 
     assert_primary_anchor_class_in(
         &analysis,

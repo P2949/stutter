@@ -149,7 +149,7 @@ fn report_cluster_output_caps_inline_points() {
             active: true,
             class: TaskClass::Helper,
             process_pid: Some(100 + idx as u32),
-            process_comm: format!("proc-{}", idx).into(),
+            process_comm: format!("proc-{}", idx),
             comm: format!("worker-{}", idx),
             cpu: idx as u32 % 4,
             wakeup_target_cpu: idx as u32 % 4,
@@ -233,7 +233,7 @@ fn report_correlates_artifacts_with_spike_clusters() {
             active: true,
             class: TaskClass::Game,
             process_pid: Some(10 + idx as u32),
-            process_comm: "game".to_owned().into(),
+            process_comm: "game".to_owned(),
             comm: if idx == 0 {
                 "RenderThread".to_owned()
             } else {

@@ -1,8 +1,8 @@
 use std::{collections::BTreeMap, fmt};
 
-use log::info;
 use serde::{Deserialize, Serialize};
 use stutter_common::SchedulerEvent;
+use stutter_core::ids::{CpuId, Pid, Tid};
 
 use crate::process_tree::{TaskClass, TaskInfo};
 
@@ -212,7 +212,7 @@ pub struct IntervalRecord {
     pub class: TaskClass,
     pub comm: String,
     pub process_pid: Option<u32>,
-    pub process_comm: std::sync::Arc<str>,
+    pub process_comm: String,
     pub samples: u64,
     pub stored_samples: u64,
     pub truncated_samples: u64,
@@ -289,7 +289,7 @@ pub struct RuntimeSliceRecord {
     #[serde(default)]
     pub comm: String,
     #[serde(default)]
-    pub process_comm: std::sync::Arc<str>,
+    pub process_comm: String,
 
     #[serde(default)]
     pub source: RuntimeSliceSource,
@@ -628,7 +628,21 @@ impl CpuPerfAccumulator {
     }
 }
 
+impl CpuLine {
+    pub fn cpu_id(&self) -> CpuId {
+        CpuId::new(self.cpu)
+    }
+}
+
 impl TaskStats {
+    pub fn task_id(&self) -> Tid {
+        Tid::new(self.task)
+    }
+
+    pub fn process_id(&self) -> Option<Pid> {
+        self.process_pid.map(Pid::new)
+    }
+
     pub fn new(task: u32, comm: String, elapsed_ms: u64) -> Self {
         let class = crate::process_tree::classify_task(&comm, &comm, "");
 
@@ -835,189 +849,8 @@ pub fn format_latency(ns: u64) -> String {
     }
 }
 
-fn format_cpu(cpu: Option<u32>) -> String {
-    match cpu {
-        Some(cpu) => cpu.to_string(),
-        None => "-".to_owned(),
-    }
-}
-
-pub fn print_event(event: &SchedulerEvent, comm: &str, label: &str) {
-    let latency_us = event.latency_ns as f64 / 1_000.0;
-    let latency_ms = event.latency_ns as f64 / 1_000_000.0;
-
-    info!(
-        "{label} runnable_latency={latency_us:.3}us ({latency_ms:.6}ms) task={} cpu={} wakeup_target_cpu={} prio={} comm={} wakeup_ns={} switch_ns={}",
-        event.tid,
-        event.cpu,
-        event.wakeup_target_cpu,
-        event.prio,
-        comm,
-        event.wakeup_ns,
-        event.switch_ns,
-    );
-}
-
-pub fn print_latency_line(
-    label: &str,
-    task: u32,
-    comm: &str,
-    latency: &LatencySnapshot,
-    cpu: &CpuSnapshot,
-) {
-    let percentile_note = if latency.samples_truncated > 0 {
-        format!(" percentile_scope={}", latency.percentile_scope)
-    } else {
-        String::new()
-    };
-
-    info!(
-        "{label} task={} comm={} samples={} stored_samples={} truncated_samples={} min={} avg={} p95={} p99={} max={} over_1ms={} over_2ms={} over_5ms={} busiest_cpu={} busiest_cpu_samples={} worst_cpu={} worst_cpu_max={} spikiest_cpu={} spikiest_cpu_spikes={}{}",
-        task,
-        comm,
-        latency.count,
-        latency.stored_samples,
-        latency.samples_truncated,
-        format_latency(latency.min_ns),
-        format_latency(latency.avg_ns),
-        format_latency(latency.p95_ns),
-        format_latency(latency.p99_ns),
-        format_latency(latency.max_ns),
-        latency.over_1ms,
-        latency.over_2ms,
-        latency.over_5ms,
-        format_cpu(cpu.busiest_cpu),
-        cpu.busiest_cpu_samples,
-        format_cpu(cpu.worst_cpu),
-        format_latency(cpu.worst_cpu_max_ns),
-        format_cpu(cpu.spikiest_cpu),
-        cpu.spikiest_cpu_spikes,
-        percentile_note,
-    );
-}
-
-pub fn collect_interval_summaries_labeled(
-    label: &str,
-    stats_by_task: &mut BTreeMap<u32, TaskStats>,
-    elapsed_ms: u64,
-    drop_counters: &crate::ebpf_loader::DropCountersSnapshot,
-    prev_faults_map: Option<&aya::maps::HashMap<aya::maps::MapData, u32, [u64; 2]>>,
-    psi_snapshot: Option<&crate::psi::PsiDelta>,
-    prev_faults_snapshot: &mut BTreeMap<u32, (u64, u64)>,
-) -> Vec<IntervalRecord> {
-    if prev_faults_map.is_none() {
-        prev_faults_snapshot.clear();
-    }
-
-    let mut interval_records = Vec::new();
-
-    for (task, stats) in stats_by_task.iter_mut() {
-        // Read cumulative fault counters from the eBPF map (if present),
-        // compute the interval delta relative to the previous snapshot, and
-        // update both the stats and the snapshot for next interval.
-        let mut maj_delta = 0u64;
-        let mut min_delta = 0u64;
-        let mut counters = None;
-
-        if let Some(map) = prev_faults_map
-            && let Ok(c) = map.get(task, 0)
-        {
-            let current_maj = c[0];
-            let current_min = c[1];
-            let prev = prev_faults_snapshot
-                .get(task)
-                .copied()
-                .unwrap_or((current_maj, current_min));
-
-            maj_delta = current_maj.saturating_sub(prev.0);
-            min_delta = current_min.saturating_sub(prev.1);
-            counters = Some((current_maj, current_min));
-
-            // We no longer update stats.last_spike_major_faults here, as interval
-            // summarization and spike recording now use separate baselines.
-            // Spikes track their own cumulative counts to compute deltas since
-            // the previous spike (or task start).
-        }
-
-        let Some(latency) = stats.interval_latency.snapshot_and_reset() else {
-            if let Some(perf) = stats.interval_cpu_perf.as_mut() {
-                let _ = perf.snapshot_and_reset();
-            }
-            continue;
-        };
-
-        if let Some((current_maj, current_min)) = counters {
-            prev_faults_snapshot.insert(*task, (current_maj, current_min));
-        } else {
-            // If we didn't get a fresh reading from the eBPF map this interval
-            // (either because the map is globally missing or this task was absent),
-            // we must clear any previous snapshot state for this task.
-            prev_faults_snapshot.remove(task);
-        }
-
-        let cpu = stats.interval_cpu.snapshot_and_reset();
-
-        print_latency_line(label, *task, &stats.comm, &latency, &cpu);
-        interval_records.push(interval_record_from_snapshot(
-            IntervalRecordFromSnapshotInput {
-                task: *task,
-                stats,
-                latency: &latency,
-                cpu: &cpu,
-                elapsed_ms,
-                drop_counters,
-                psi: psi_snapshot,
-                faults_delta: (maj_delta, min_delta),
-            },
-        ));
-    }
-
-    interval_records
-}
-
-pub fn print_session_summaries(stats_by_task: &mut BTreeMap<u32, TaskStats>) {
-    for (task, stats) in stats_by_task.iter_mut() {
-        let Some(latency) = stats.session_latency.snapshot() else {
-            continue;
-        };
-
-        let cpu = stats.session_cpu.snapshot();
-
-        print_latency_line("session", *task, &stats.comm, &latency, &cpu);
-
-        if latency.samples_truncated > 0 {
-            info!(
-                "session_percentile_warning task={} comm={} truncated_samples={} percentile_scope={} note=\"p95/p99 are histogram estimates across the full session; prefer max and over_1ms/over_2ms/over_5ms for exact spike counts\"",
-                task, stats.comm, latency.samples_truncated, latency.percentile_scope
-            );
-        }
-
-        for cpu_line in cpu.per_cpu {
-            info!(
-                "session_task_cpu task={} comm={} cpu={} samples={} max={} spikes={}",
-                task,
-                stats.comm,
-                cpu_line.cpu,
-                cpu_line.samples,
-                format_latency(cpu_line.max_ns),
-                cpu_line.spikes,
-            );
-        }
-
-        for spike in &stats.top_spikes {
-            info!(
-                "session_spike task={} comm={} cpu={} prio={} latency={} wakeup_ns={} switch_ns={}",
-                task,
-                stats.comm,
-                spike.cpu,
-                spike.prio,
-                format_latency(spike.latency_ns),
-                spike.wakeup_ns,
-                spike.switch_ns,
-            );
-        }
-    }
-}
+mod output;
+pub use output::{collect_interval_summaries_labeled, print_event, print_session_summaries};
 
 pub struct IntervalRecordFromSnapshotInput<'a> {
     pub task: u32,
@@ -1048,7 +881,7 @@ pub fn interval_record_from_snapshot(input: IntervalRecordFromSnapshotInput) -> 
         class: stats.class,
         comm: stats.comm.clone(),
         process_pid: stats.process_pid,
-        process_comm: stats.process_comm.clone(),
+        process_comm: stats.process_comm.to_string(),
         samples: latency.count,
         stored_samples: latency.stored_samples,
         truncated_samples: latency.samples_truncated,
@@ -1114,151 +947,4 @@ pub fn log_drop_counters(drop_counters: &crate::ebpf_loader::DropCountersSnapsho
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_fault_delta_bookkeeping_separation() {
-        let mut stats = TaskStats::new(123, "test".to_string(), 0);
-        let mut event = SchedulerEvent {
-            kind: stutter_common::EVENT_RUNNABLE_LATENCY,
-            tid: 123,
-            cpu: 0,
-            wakeup_target_cpu: 0,
-            prio: 120,
-            waker_tid: 0,
-            target_pending_wakeups: 0,
-            observed_runnable_depth: 0,
-            maj_flt: 0,
-            min_flt: 0,
-            wakeup_ns: 100,
-            switch_ns: 200,
-            latency_ns: 100,
-            comm: [0; 16],
-            switch_prev_pid: 0,
-            switch_prev_state: 0,
-        };
-
-        // 1. First event establishes baseline: 10 faults
-        event.maj_flt = 10;
-        event.latency_ns = 100; // Not a spike
-        stats.record(&event, 1000, 0, None);
-        assert_eq!(stats.last_spike_major_faults, 10);
-
-        // 2. Interval summary happens. It sees 10 faults.
-        // It should NOT update stats.last_spike_major_faults.
-        let mut stats_by_task = BTreeMap::new();
-        stats_by_task.insert(123, stats);
-        let mut prev_faults_snapshot = BTreeMap::new();
-        prev_faults_snapshot.insert(123, (10, 0));
-
-        // Simulate 2 more faults happening before interval summary reading eBPF map
-        // (In reality, collect_interval_summaries_labeled reads from eBPF map)
-        // Let's say eBPF map now has 12.
-        // We simulate this by NOT passing a map, but we want to check that IF it were updated, it wouldn't affect stats.
-
-        // Actually, the bug was that collect_interval_summaries_labeled updated stats.major_faults.
-        // But now it doesn't have that field, and collect_interval_summaries_labeled doesn't touch last_spike_major_faults.
-
-        // To properly test the "separation", we just need to ensure that
-        // after ANY number of interval summaries, last_spike_major_faults remains 10
-        // until the NEXT spike.
-
-        // Simulate interval summary logic WITHOUT the bug:
-        // (maj_delta = 12 - 10 = 2)
-        // prev_faults_snapshot.insert(123, (12, 0));
-        // stats is NOT updated.
-
-        let stats = stats_by_task.get_mut(&123).unwrap();
-        assert_eq!(stats.last_spike_major_faults, 10);
-
-        // 3. Next spike event with 12 faults
-        event.maj_flt = 12;
-        event.latency_ns = 2000; // Spike!
-        let (maj_delta, _) = stats.record(&event, 1000, 0, None);
-
-        // Delta should be 12 - 10 = 2.
-        // If interval summary had reset the baseline to 12, delta would be 0.
-        assert_eq!(maj_delta, 2);
-        assert_eq!(stats.last_spike_major_faults, 12);
-        assert_eq!(stats.top_spikes[0].major_faults, 2);
-    }
-
-    #[test]
-    fn cpu_perf_records_interval_once_and_session_cumulative() {
-        let mut stats = TaskStats::new(123, "test".to_string(), 0);
-        let delta = crate::perf_counters::CpuPerfDelta {
-            cycles: Some(100),
-            instructions: Some(200),
-            cache_misses: Some(10),
-            time_enabled_ns: Some(1_000),
-            time_running_ns: Some(1_000),
-            ..Default::default()
-        };
-        stats.record_cpu_perf(&delta);
-
-        let event = SchedulerEvent {
-            kind: stutter_common::EVENT_RUNNABLE_LATENCY,
-            tid: 123,
-            cpu: 0,
-            wakeup_target_cpu: 0,
-            prio: 120,
-            waker_tid: 0,
-            target_pending_wakeups: 0,
-            observed_runnable_depth: 0,
-            maj_flt: 0,
-            min_flt: 0,
-            wakeup_ns: 1000,
-            switch_ns: 2000,
-            latency_ns: 1_000,
-            comm: [0; 16],
-            switch_prev_pid: 0,
-            switch_prev_state: 0,
-        };
-        stats.record(&event, 1_000_000, 0, None);
-
-        let mut stats_by_task = BTreeMap::from([(123, stats)]);
-        let mut prev_faults_snapshot = BTreeMap::new();
-        let records = collect_interval_summaries_labeled(
-            "summary",
-            &mut stats_by_task,
-            1_000,
-            &Default::default(),
-            None,
-            None,
-            &mut prev_faults_snapshot,
-        );
-
-        assert_eq!(records.len(), 1);
-        let perf = records[0].cpu_perf.as_ref().unwrap();
-        assert_eq!(perf.cycles, Some(100));
-        assert_eq!(perf.instructions, Some(200));
-        assert_eq!(perf.ipc, Some(2.0));
-        assert_eq!(perf.cache_mpki, Some(50.0));
-
-        let stats = stats_by_task.get_mut(&123).unwrap();
-        stats.record(&event, 1_000_000, 2_000, None);
-        let records = collect_interval_summaries_labeled(
-            "summary",
-            &mut stats_by_task,
-            2_000,
-            &Default::default(),
-            None,
-            None,
-            &mut prev_faults_snapshot,
-        );
-
-        assert_eq!(records.len(), 1);
-        assert!(records[0].cpu_perf.is_none());
-
-        let session_perf = stats_by_task
-            .get(&123)
-            .unwrap()
-            .session_cpu_perf
-            .as_ref()
-            .and_then(|perf| perf.snapshot())
-            .unwrap();
-        assert_eq!(session_perf.cycles, Some(100));
-        assert_eq!(session_perf.instructions, Some(200));
-    }
-}
+mod tests;

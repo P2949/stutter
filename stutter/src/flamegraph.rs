@@ -89,8 +89,6 @@ pub fn render_flamegraph_svg_from_folded_lines(lines: &[String]) -> Result<Strin
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use super::*;
     use crate::process_tree::TaskClass;
 
@@ -124,7 +122,7 @@ mod tests {
 
     fn test_spike(process: &str, comm: &str, cpu: u32, latency_ns: u64) -> SpikeEvent {
         SpikeEvent {
-            process_comm: Arc::from(process),
+            process_comm: process.to_owned(),
             comm: comm.to_string(),
             cpu,
             latency_ns,

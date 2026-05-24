@@ -211,7 +211,7 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
     let mut tasks = Vec::new();
     let mut top_spikes = Vec::new();
 
-    for (task, stats) in stats_by_task {
+    for stats in stats_by_task.values() {
         let mut session_latency = stats.session_latency.clone();
         let Some(latency) = session_latency.snapshot() else {
             continue;
@@ -233,14 +233,14 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         };
 
         tasks.push(SessionTask {
-            task: *task,
+            task: stats.task_id().as_u32(),
             active: stats.active,
             first_seen_ms: stats.first_seen_ms,
             last_seen_ms: stats.last_seen_ms,
             removed_ms: stats.removed_ms,
             class: stats.class,
-            process_pid: stats.process_pid,
-            process_comm: stats.process_comm.clone(),
+            process_pid: stats.process_id().map(|pid| pid.as_u32()),
+            process_comm: stats.process_comm.to_string(),
             process_starttime_ticks: stats.process_starttime_ticks,
             task_starttime_ticks: stats.task_starttime_ticks,
             exe_dev: stats.exe_dev,
@@ -283,11 +283,11 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
 
         for spike in &stats.top_spikes {
             top_spikes.push(SessionSpike {
-                task: *task,
+                task: stats.task_id().as_u32(),
                 active: stats.active,
                 class: stats.class,
-                process_pid: stats.process_pid,
-                process_comm: stats.process_comm.clone(),
+                process_pid: stats.process_id().map(|pid| pid.as_u32()),
+                process_comm: stats.process_comm.to_string(),
                 comm: stats.comm.clone(),
                 cpu: spike.cpu,
                 wakeup_target_cpu: spike.wakeup_target_cpu,
@@ -769,8 +769,8 @@ fn recorded_cpu(cpu: CpuSnapshot) -> RecordedCpuSnapshot {
 fn recorded_spike(stats: &TaskStats, spike: &SpikeRecord) -> RecordedSpike {
     RecordedSpike {
         class: stats.class,
-        process_pid: stats.process_pid,
-        process_comm: stats.process_comm.clone(),
+        process_pid: stats.process_id().map(|pid| pid.as_u32()),
+        process_comm: stats.process_comm.to_string(),
         cpu: spike.cpu,
         wakeup_target_cpu: spike.wakeup_target_cpu,
         switch_prev_pid: spike.switch_prev_pid,

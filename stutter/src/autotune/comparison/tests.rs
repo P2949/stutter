@@ -361,7 +361,6 @@ fn score_comparison_config_default_matches_existing_conservative_policy() {
     assert_eq!(config.max_regression_percent, 7.5);
     assert_eq!(config.max_frame_p99_regression_ms, 2.0);
     assert_eq!(config.max_over_5ms_regression_per_1k_samples, 0.0);
-    assert_eq!(config.max_over_5ms_regression, 0);
 
     assert!((config.min_improvement_percent - policy_config.min_improvement_percent).abs() < 1e-9);
     assert!((config.max_regression_percent - policy_config.max_regression_percent).abs() < 1e-9);
@@ -372,10 +371,6 @@ fn score_comparison_config_default_matches_existing_conservative_policy() {
     assert_eq!(
         config.max_over_5ms_regression_per_1k_samples,
         policy_config.max_over_5ms_regression_per_1k_samples
-    );
-    assert_eq!(
-        config.max_over_5ms_regression,
-        policy_config.max_over_5ms_regression
     );
 }
 
@@ -396,7 +391,6 @@ fn compare_scores_improves_when_min_percent_threshold_is_met() {
             max_regression_percent: 7.5,
             max_frame_p99_regression_ms: 2.0,
             max_over_5ms_regression_per_1k_samples: 0.0,
-            max_over_5ms_regression: 0,
         },
         None,
     );
@@ -426,7 +420,6 @@ fn compare_scores_is_inconclusive_when_improvement_percent_is_too_small() {
             max_regression_percent: 7.5,
             max_frame_p99_regression_ms: 2.0,
             max_over_5ms_regression_per_1k_samples: 0.0,
-            max_over_5ms_regression: 0,
         },
         None,
     );
@@ -463,7 +456,6 @@ fn compare_scores_regresses_when_max_regression_percent_is_exceeded() {
             max_regression_percent: 7.5,
             max_frame_p99_regression_ms: 2.0,
             max_over_5ms_regression_per_1k_samples: 0.0,
-            max_over_5ms_regression: 0,
         },
         None,
     );
@@ -493,7 +485,6 @@ fn compare_scores_regresses_when_frame_p99_regression_exceeds_config() {
             max_regression_percent: 7.5,
             max_frame_p99_regression_ms: 2.0,
             max_over_5ms_regression_per_1k_samples: 0.0,
-            max_over_5ms_regression: 0,
         },
         None,
     );
@@ -518,7 +509,6 @@ fn compare_scores_regresses_when_over_5ms_regression_exceeds_config() {
             max_regression_percent: 7.5,
             max_frame_p99_regression_ms: 2.0,
             max_over_5ms_regression_per_1k_samples: 10.0,
-            max_over_5ms_regression: 1,
         },
         None,
     );
@@ -544,7 +534,6 @@ fn compare_scores_improvement_requires_no_over_5ms_increase_even_when_regression
             max_regression_percent: 7.5,
             max_frame_p99_regression_ms: 2.0,
             max_over_5ms_regression_per_1k_samples: 10.0,
-            max_over_5ms_regression: 1,
         },
         None,
     );
@@ -569,7 +558,6 @@ fn compare_scores_rejects_invalid_config() {
             max_regression_percent: 7.5,
             max_frame_p99_regression_ms: 2.0,
             max_over_5ms_regression_per_1k_samples: 0.0,
-            max_over_5ms_regression: 0,
         },
         None,
     );
@@ -638,7 +626,6 @@ fn compare_scores_can_use_threshold_policy() {
             max_regression_percent: 7.5,
             max_frame_p99_regression_ms: 2.0,
             max_over_5ms_regression_per_1k_samples: 0.0,
-            max_over_5ms_regression: 0,
         },
         Some(&ThresholdPolicy::default_tiers()),
     );

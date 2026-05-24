@@ -9,12 +9,11 @@ use aya_ebpf::{
     programs::TracePointContext,
 };
 use stutter_common::{
-    BlockIoEvent, DROP_BLOCK_FALLBACK_KEY_COLLISION, DROP_BLOCK_START_INSERT_FAILED,
-    DROP_RINGBUF_RESERVE_FAILED, EVENT_BLOCK_IO,
+    BlockIoEvent, DROP_BLOCK_FALLBACK_KEY_COLLISION, DROP_BLOCK_START_INSERT_FAILED, EVENT_BLOCK_IO,
 };
 
 use crate::{
-    EVENTS, increment_drop_counter, is_target_pid_or_current_cgroup,
+    increment_drop_counter, is_target_pid_or_current_cgroup,
     trace_offsets::{
         BLOCK_RQ_COMPLETE_NR_SECTOR_OFFSET, BLOCK_RQ_COMPLETE_RWBS_OFFSET,
         BLOCK_RQ_ISSUE_NR_SECTOR_OFFSET, BLOCK_RQ_ISSUE_RWBS_OFFSET, BLOCK_RQ_KEY_OFFSET,
@@ -146,12 +145,6 @@ pub(crate) fn try_block_rq_complete(ctx: TracePointContext) -> u32 {
     let now = unsafe { bpf_ktime_get_ns() };
     let duration_ns = now.saturating_sub(start.ts);
 
-    let Some(mut entry) = EVENTS.reserve::<BlockIoEvent>(0) else {
-        increment_drop_counter(DROP_RINGBUF_RESERVE_FAILED);
-        return 0;
-    };
-    let event = entry.as_mut_ptr();
-
     let rwbs_offset = unsafe { core::ptr::read_volatile(&raw const BLOCK_RQ_COMPLETE_RWBS_OFFSET) };
     let rwbs = if rwbs_offset != 0 {
         unsafe { ctx.read_at(rwbs_offset as usize).unwrap_or([0u8; 8]) }
@@ -159,7 +152,7 @@ pub(crate) fn try_block_rq_complete(ctx: TracePointContext) -> u32 {
         [0u8; 8]
     };
 
-    unsafe {
+    emit_ringbuf_event!(BlockIoEvent, return 0, |event| {
         (*event).kind = EVENT_BLOCK_IO;
         (*event).tid = start.tid;
         (*event).dev = dev;
@@ -168,9 +161,7 @@ pub(crate) fn try_block_rq_complete(ctx: TracePointContext) -> u32 {
         (*event).duration_ns = duration_ns;
         (*event).timestamp_ns = now;
         (*event).rwbs = rwbs;
-    }
-
-    entry.submit(0);
+    });
 
     0
 }

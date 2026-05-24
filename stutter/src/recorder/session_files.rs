@@ -407,7 +407,7 @@ pub struct SessionTask {
     pub removed_ms: Option<u64>,
     pub class: TaskClass,
     pub process_pid: Option<u32>,
-    pub process_comm: std::sync::Arc<str>,
+    pub process_comm: String,
     #[serde(default)]
     pub process_starttime_ticks: Option<u64>,
     #[serde(default)]
@@ -478,7 +478,7 @@ pub struct RecordedCpuSnapshot {
 pub struct RecordedSpike {
     pub class: TaskClass,
     pub process_pid: Option<u32>,
-    pub process_comm: std::sync::Arc<str>,
+    pub process_comm: String,
     pub cpu: u32,
     #[serde(default)]
     pub wakeup_target_cpu: u32,
@@ -529,7 +529,7 @@ pub struct SessionSpike {
     pub active: bool,
     pub class: TaskClass,
     pub process_pid: Option<u32>,
-    pub process_comm: std::sync::Arc<str>,
+    pub process_comm: String,
     pub comm: String,
     pub cpu: u32,
     #[serde(default)]

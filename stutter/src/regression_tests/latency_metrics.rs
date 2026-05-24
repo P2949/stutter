@@ -64,7 +64,7 @@ fn spike_events_capture_only_threshold_crossing_events() {
     assert!(spike.active);
     assert_eq!(spike.class, TaskClass::Game);
     assert_eq!(spike.process_pid, Some(77));
-    assert_eq!(spike.process_comm, "KingdomCome.exe".into());
+    assert_eq!(spike.process_comm, "KingdomCome.exe");
     assert_eq!(spike.comm, "RenderThread");
     assert_eq!(spike.cpu, 0);
     assert_eq!(spike.prio, 120);

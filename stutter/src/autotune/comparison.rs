@@ -39,8 +39,6 @@ pub struct ScoreComparisonConfig {
     pub max_regression_percent: f64,
     pub max_frame_p99_regression_ms: f64,
     pub max_over_5ms_regression_per_1k_samples: f64,
-    // Raw-count compatibility field for older callers. Keep decision logic on normalized rates.
-    pub max_over_5ms_regression: u64,
 }
 
 pub(crate) const DEFAULT_SCORE_COMPARISON_CONFIG: ScoreComparisonConfig = ScoreComparisonConfig {
@@ -48,7 +46,6 @@ pub(crate) const DEFAULT_SCORE_COMPARISON_CONFIG: ScoreComparisonConfig = ScoreC
     max_regression_percent: 7.5,
     max_frame_p99_regression_ms: 2.0,
     max_over_5ms_regression_per_1k_samples: 0.0,
-    max_over_5ms_regression: 0,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -155,7 +152,6 @@ impl ExperimentComparisonPolicy {
             max_frame_p99_regression_ms: self.regressed_frame_p99_slack_ms,
             max_over_5ms_regression_per_1k_samples: DEFAULT_SCORE_COMPARISON_CONFIG
                 .max_over_5ms_regression_per_1k_samples,
-            max_over_5ms_regression: DEFAULT_SCORE_COMPARISON_CONFIG.max_over_5ms_regression,
         }
     }
 }

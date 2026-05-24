@@ -146,7 +146,7 @@ impl TaskTracker {
                         process_pid: task.process_pid,
                         process_ppid: task.process_ppid,
                         comm: task.comm.clone(),
-                        process_comm: task.process_comm.clone(),
+                        process_comm: task.process_comm.to_string(),
                         class: task.class,
                         from_cgroup: task.from_cgroup,
                     });
@@ -178,7 +178,7 @@ impl TaskTracker {
                         process_pid: task.process_pid,
                         process_ppid: task.process_ppid,
                         comm: task.comm.clone(),
-                        process_comm: task.process_comm.clone(),
+                        process_comm: task.process_comm.to_string(),
                         class: task.class,
                         from_cgroup: task.from_cgroup,
                     });
@@ -233,7 +233,7 @@ impl TaskTracker {
                     process_pid: desired.process_pid,
                     process_ppid: desired.process_ppid,
                     comm: desired.comm.clone(),
-                    process_comm: desired.process_comm.clone(),
+                    process_comm: desired.process_comm.to_string(),
                     class: desired.class,
                     from_cgroup: desired.from_cgroup,
                 });

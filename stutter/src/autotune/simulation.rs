@@ -251,7 +251,7 @@ fn interval_record_with_drops(
         class: TaskClass::Game,
         comm: "simulation-game".to_owned(),
         process_pid: Some(1234),
-        process_comm: Arc::from("simulation-game"),
+        process_comm: "simulation-game".to_owned(),
         samples,
         stored_samples: samples,
         max_ns: if diagnostic_raw_score_total > 0 {
