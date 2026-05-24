@@ -66,6 +66,10 @@ mod load_plan_tests;
 mod attach_tests;
 
 #[cfg(test)]
+#[path = "ebpf/tests/map_init.rs"]
+mod map_init_tests;
+
+#[cfg(test)]
 fn parse_tracepoint_offsets(format_content: &str) -> BTreeMap<String, TracepointField> {
     parse_tracepoint_format(PathBuf::from("tracepoint"), format_content).fields
 }

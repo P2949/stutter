@@ -1,11 +1,7 @@
 use std::{fs, path::Path};
 
 use anyhow::Context;
-use aya::{
-    EbpfLoader,
-    maps::{HashMap as AyaHashMap, PerCpuArray, RingBuf},
-};
-use tokio::io::unix::AsyncFd;
+use aya::EbpfLoader;
 
 use crate::{
     config::TARGET_PIDS_MAX,
@@ -15,6 +11,7 @@ use crate::{
             attach_kms_tracepoints,
         },
         load_plan::{apply_loader_plan, build_loader_plan},
+        map_init::{AyaMapInitOps, InitializedEbpfMaps, initialize_ebpf_maps},
         maps::map_sizing_for_config_after_memlock,
         memlock::{log_memlock_policy_report, raise_memlock_limit},
         memory::format_optional_bytes,
@@ -287,13 +284,8 @@ pub(crate) fn attach_optional_fault_perf_events(
     }
 }
 
-pub(crate) fn missing_map_context(map: &'static str) -> String {
-    format!("eBPF load failed: {map} map not found")
-}
-
-pub(crate) fn map_init_context(map: &'static str) -> String {
-    format!("eBPF load failed: {map} map init")
-}
+#[cfg(test)]
+pub(crate) use crate::ebpf::map_init::{map_init_context, missing_map_context};
 
 pub fn load_and_attach(
     config: &crate::config::model::MonitorConfig,
@@ -355,37 +347,16 @@ pub fn load_and_attach(
         attach_optional_fault_perf_events(&mut attach_ops, &mut activation_plan);
     }
 
-    let mut target_pid_map = AyaHashMap::try_from(
-        ebpf.take_map("TARGET_PIDS")
-            .context(missing_map_context("TARGET_PIDS"))?,
-    )
-    .context(map_init_context("TARGET_PIDS"))?;
-
-    let target_irq_map = ebpf
-        .take_map("TARGET_IRQS")
-        .map(AyaHashMap::try_from)
-        .transpose()
-        .context(map_init_context("TARGET_IRQS"))?;
-
-    let drop_counters = PerCpuArray::try_from(
-        ebpf.take_map("DROP_COUNTERS")
-            .context(missing_map_context("DROP_COUNTERS"))?,
-    )
-    .context(map_init_context("DROP_COUNTERS"))?;
-
-    let events = RingBuf::try_from(
-        ebpf.take_map("EVENTS")
-            .context(missing_map_context("EVENTS"))?,
-    )
-    .context(map_init_context("EVENTS"))?;
-
-    let events = AsyncFd::new(events).context("eBPF load failed: events ringbuf async fd")?;
-
-    let prev_faults_map = ebpf
-        .take_map("PREV_FAULTS")
-        .map(AyaHashMap::try_from)
-        .transpose()
-        .context(map_init_context("PREV_FAULTS"))?;
+    let InitializedEbpfMaps {
+        mut target_pid_map,
+        target_irq_map,
+        drop_counters,
+        events,
+        prev_faults_map,
+    } = {
+        let mut map_ops = AyaMapInitOps::new(&mut ebpf);
+        initialize_ebpf_maps(&mut map_ops)?
+    };
 
     let native_cgroup_filter = NativeCgroupFilterStatus::disabled();
     let target_cgroup_map = None;
