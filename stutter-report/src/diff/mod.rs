@@ -24,7 +24,7 @@ impl ReportDiff {
 
 /// Compare two skeleton report models.
 pub fn diff_report_models(baseline: &ReportModel, current: &ReportModel) -> ReportDiff {
-    if baseline == current {
+    if baseline.run_id == current.run_id {
         ReportDiff::unchanged()
     } else {
         ReportDiff::with_changes()

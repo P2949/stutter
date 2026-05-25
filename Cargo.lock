@@ -2674,6 +2674,7 @@ dependencies = [
  "stutter-common",
  "stutter-core",
  "stutter-ebpf",
+ "stutter-report",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -2723,7 +2724,9 @@ name = "stutter-report"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "serde_json",
  "stutter-core",
+ "tempfile",
  "thiserror 2.0.18",
 ]
 
