@@ -225,6 +225,8 @@ fn drop_counter_serializes_wakeup_failures_as_lost_wakeup_timestamps() {
         block_start_insert_failed: 0,
         block_fallback_key_collisions: 0,
         cpu_accounting_untracked: 0,
+        block_zero_keys: 0,
+        drm_fence_missing_start: 0,
     };
 
     let value = serde_json::to_value(&snapshot).unwrap();
@@ -264,6 +266,8 @@ fn drop_counter_serializes_stale_wakeup_entries() {
         block_start_insert_failed: 0,
         block_fallback_key_collisions: 0,
         cpu_accounting_untracked: 0,
+        block_zero_keys: 0,
+        drm_fence_missing_start: 0,
     };
 
     let value = serde_json::to_value(&snapshot).unwrap();
@@ -288,9 +292,11 @@ fn drop_counter_totals_include_stale_wakeup_entries() {
         block_start_insert_failed: 16,
         block_fallback_key_collisions: 32,
         cpu_accounting_untracked: 0,
+        block_zero_keys: 2,
+        drm_fence_missing_start: 0,
     };
 
-    assert_eq!(snapshot.total(), 63);
+    assert_eq!(snapshot.total(), 65);
     assert_eq!(snapshot.total_excluding_block_io(), 15);
 }
 
@@ -306,6 +312,8 @@ fn drop_counter_totals_include_new_wakeup_and_cpu_accounting_counters() {
         block_start_insert_failed: 0,
         block_fallback_key_collisions: 7,
         cpu_accounting_untracked: 11,
+        block_zero_keys: 0,
+        drm_fence_missing_start: 0,
     };
 
     assert_eq!(snapshot.total(), 26);

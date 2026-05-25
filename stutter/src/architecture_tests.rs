@@ -8,6 +8,7 @@ mod autotune_raw_score;
 mod cgroup_imports;
 mod concurrency;
 mod daemon_state;
+mod decode_coverage;
 mod dependencies;
 mod direct_prints;
 mod ebpf_layout;

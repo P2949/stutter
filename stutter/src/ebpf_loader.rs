@@ -35,9 +35,8 @@ use crate::ebpf::{
     object::read_prebuilt_bpf_object,
     preflight::{sched_wakeup_new_coverage_status, validate_tracepoint_formats},
     tracepoint_format::{
-        TracepointField, parse_tracepoint_field_offset, parse_tracepoint_format,
-        validate_optional_tracepoint_format_at, validate_tracepoint_format,
-        validate_tracepoint_format_named,
+        TracepointField, parse_tracepoint_format, validate_optional_tracepoint_format_at,
+        validate_tracepoint_format, validate_tracepoint_format_named,
     },
     tracepoints::{
         block_io::validate_block_io_tracepoint_offsets, drm_fence::drm_fence_tracepoint_offsets,

@@ -1,6 +1,8 @@
 use stutter_common::{
-    BlockIoEvent, CpuFreqEvent, EVENT_BLOCK_IO, EVENT_CPU_FREQ, EVENT_EXEC, EVENT_IRQ_LATENCY,
-    EVENT_MIGRATION, EVENT_RUNNABLE_LATENCY, ExecEvent, IrqEvent, MigrationEvent, SchedulerEvent,
+    BlockIoEvent, CpuFreqEvent, DrmFenceEvent, EVENT_BLOCK_IO, EVENT_CPU_FREQ, EVENT_DRM_FENCE,
+    EVENT_EXEC, EVENT_IRQ_LATENCY, EVENT_KMS_FLIP, EVENT_MIGRATION, EVENT_RUNNABLE_LATENCY,
+    EVENT_STAT_WAIT, ExecEvent, IrqEvent, KmsFlipEvent, MigrationEvent, SchedulerEvent,
+    StatWaitEvent,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -9,8 +11,11 @@ pub enum DecodedEbpfEvent {
     Irq(IrqEvent),
     Migration(MigrationEvent),
     CpuFreq(CpuFreqEvent),
+    StatWait(StatWaitEvent),
     BlockIo(BlockIoEvent),
     Exec(ExecEvent),
+    KmsFlip(KmsFlipEvent),
+    DrmFence(DrmFenceEvent),
     Unknown { kind: u32 },
     Short { kind: u32, len: usize },
 }
@@ -21,8 +26,11 @@ pub fn decode_ebpf_event(kind: u32, bytes: &[u8]) -> DecodedEbpfEvent {
         EVENT_IRQ_LATENCY => decode_or_short(bytes, kind, DecodedEbpfEvent::Irq),
         EVENT_MIGRATION => decode_or_short(bytes, kind, DecodedEbpfEvent::Migration),
         EVENT_CPU_FREQ => decode_or_short(bytes, kind, DecodedEbpfEvent::CpuFreq),
+        EVENT_STAT_WAIT => decode_or_short(bytes, kind, DecodedEbpfEvent::StatWait),
         EVENT_BLOCK_IO => decode_or_short(bytes, kind, DecodedEbpfEvent::BlockIo),
         EVENT_EXEC => decode_or_short(bytes, kind, DecodedEbpfEvent::Exec),
+        EVENT_KMS_FLIP => decode_or_short(bytes, kind, DecodedEbpfEvent::KmsFlip),
+        EVENT_DRM_FENCE => decode_or_short(bytes, kind, DecodedEbpfEvent::DrmFence),
         other => DecodedEbpfEvent::Unknown { kind: other },
     }
 }
@@ -111,5 +119,122 @@ mod tests {
         let decoded = decode_ebpf_event(9999, &[1, 2, 3]);
 
         assert!(matches!(decoded, DecodedEbpfEvent::Unknown { kind: 9999 }));
+    }
+
+    #[test]
+    fn decode_stat_wait_event_reports_stat_wait() {
+        let event = StatWaitEvent {
+            kind: EVENT_STAT_WAIT,
+            tid: 123,
+            delay_ns: 1000,
+        };
+        let bytes = unsafe {
+            std::slice::from_raw_parts(
+                &event as *const StatWaitEvent as *const u8,
+                std::mem::size_of::<StatWaitEvent>(),
+            )
+        };
+        let decoded = decode_ebpf_event(EVENT_STAT_WAIT, bytes);
+        assert!(matches!(decoded, DecodedEbpfEvent::StatWait(_)));
+        if let DecodedEbpfEvent::StatWait(d) = decoded {
+            assert_eq!(d.kind, EVENT_STAT_WAIT);
+        }
+    }
+
+    #[test]
+    fn decode_kms_flip_event_reports_kms_flip() {
+        let event = KmsFlipEvent {
+            kind: EVENT_KMS_FLIP,
+            event_kind: 1,
+            provider: 1,
+            flags: 0,
+            pid: 123,
+            tid: 123,
+            cpu: 1,
+            card_minor: 0,
+            crtc_id: 1,
+            pipe: 0,
+            sequence: 1,
+            request_ns: 1000,
+            done_ns: 2000,
+            duration_ns: 1000,
+            timestamp_ns: 3000,
+        };
+        let bytes = unsafe {
+            std::slice::from_raw_parts(
+                &event as *const KmsFlipEvent as *const u8,
+                std::mem::size_of::<KmsFlipEvent>(),
+            )
+        };
+        let decoded = decode_ebpf_event(EVENT_KMS_FLIP, bytes);
+        assert!(matches!(decoded, DecodedEbpfEvent::KmsFlip(_)));
+        if let DecodedEbpfEvent::KmsFlip(d) = decoded {
+            assert_eq!(d.kind, EVENT_KMS_FLIP);
+        }
+    }
+
+    #[test]
+    fn decode_drm_fence_event_reports_drm_fence() {
+        let event = DrmFenceEvent {
+            kind: EVENT_DRM_FENCE,
+            event_kind: 1,
+            provider: 1,
+            flags: 0,
+            pid: 123,
+            tid: 123,
+            cpu: 1,
+            driver_id: 1,
+            gpu_role: 0,
+            _pad0: 0,
+            context: 1,
+            seqno: 1,
+            timeline_hash: 0,
+            wait_start_ns: 1000,
+            wait_done_ns: 2000,
+            signal_ns: 1500,
+            duration_ns: 1000,
+            timestamp_ns: 3000,
+        };
+        let bytes = unsafe {
+            std::slice::from_raw_parts(
+                &event as *const DrmFenceEvent as *const u8,
+                std::mem::size_of::<DrmFenceEvent>(),
+            )
+        };
+        let decoded = decode_ebpf_event(EVENT_DRM_FENCE, bytes);
+        assert!(matches!(decoded, DecodedEbpfEvent::DrmFence(_)));
+        if let DecodedEbpfEvent::DrmFence(d) = decoded {
+            assert_eq!(d.kind, EVENT_DRM_FENCE);
+        }
+    }
+
+    #[test]
+    fn short_new_events_report_short() {
+        let decoded = decode_ebpf_event(EVENT_STAT_WAIT, &[1, 2, 3]);
+        assert!(matches!(
+            decoded,
+            DecodedEbpfEvent::Short {
+                kind: EVENT_STAT_WAIT,
+                len: 3
+            }
+        ));
+
+        let decoded = decode_ebpf_event(EVENT_KMS_FLIP, &[1, 2, 3]);
+        assert!(matches!(
+            decoded,
+            DecodedEbpfEvent::Short {
+                kind: EVENT_KMS_FLIP,
+                len: 3
+            }
+        ));
+
+        let decoded = decode_ebpf_event(EVENT_DRM_FENCE, &[1, 2, 3]);
+        assert!(matches!(
+            decoded,
+            DecodedEbpfEvent::Short {
+                kind: EVENT_DRM_FENCE,
+                len: 3
+            }
+        ));
     }
 }

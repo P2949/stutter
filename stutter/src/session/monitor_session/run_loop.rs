@@ -516,6 +516,8 @@ impl MonitorSession {
                                     driver,
                                     card,
                                     gpu_role: Some(gpu_role),
+                                    // WAIT_DONE_WITHOUT_START means pid/tid are intentionally absent
+                                    // even though the event is classified as importer-side.
                                     pid: (event.flags & stutter_common::DRM_FENCE_HAS_PID != 0)
                                         .then_some(event.pid.into()),
                                     tid: (event.flags & stutter_common::DRM_FENCE_HAS_PID != 0)

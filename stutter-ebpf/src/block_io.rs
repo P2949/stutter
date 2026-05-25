@@ -10,7 +10,7 @@ use aya_ebpf::{
 };
 use stutter_common::{
     BlockIoEvent, DROP_BLOCK_FALLBACK_KEY_COLLISION, DROP_BLOCK_START_INSERT_FAILED,
-    EVENT_BLOCK_IO,
+    DROP_BLOCK_ZERO_KEY, EVENT_BLOCK_IO,
     tracepoint_offsets::{BLOCK_RQ_DEV_OFFSET, BLOCK_RQ_SECTOR_OFFSET},
 };
 
@@ -102,13 +102,18 @@ pub(crate) fn try_block_rq_issue(ctx: TracePointContext) -> u32 {
         block_rq_fallback_key(&ctx, sector, dev, nr_sector_offset, rwbs_offset)
     };
 
-    if key != 0 && using_fallback_key && unsafe { BLOCK_START.get(key).is_some() } {
+    if key == 0 {
+        increment_drop_counter(DROP_BLOCK_ZERO_KEY);
+        return 0;
+    }
+
+    if using_fallback_key && unsafe { BLOCK_START.get(key).is_some() } {
         increment_drop_counter(DROP_BLOCK_FALLBACK_KEY_COLLISION);
         let _ = BLOCK_START.remove(key);
         return 0;
     }
 
-    if key != 0 && BLOCK_START.insert(key, IoStart { ts, tid }, 0).is_err() {
+    if BLOCK_START.insert(key, IoStart { ts, tid }, 0).is_err() {
         increment_drop_counter(DROP_BLOCK_START_INSERT_FAILED);
     }
 
@@ -141,11 +146,12 @@ pub(crate) fn try_block_rq_complete(ctx: TracePointContext) -> u32 {
         block_rq_fallback_key(&ctx, sector, dev, nr_sector_offset, rwbs_offset)
     };
 
-    let start = match if key != 0 {
-        unsafe { BLOCK_START.get(key) }
-    } else {
-        None
-    } {
+    if key == 0 {
+        increment_drop_counter(DROP_BLOCK_ZERO_KEY);
+        return 0;
+    }
+
+    let start = match unsafe { BLOCK_START.get(key) } {
         Some(s) => *s,
         None => return 0,
     };
