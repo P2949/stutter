@@ -5,7 +5,7 @@ This document tracks the migration of report-related functionality from the main
 ## Migration Status
 
 - [ ] `stutter-report/src/lib.rs`: Remove "placeholder" / "future migration" warnings
-- [ ] `stutter-report/src/model/`: Move pure report model structs from main crate
+- [x] `stutter-report/src/model/`: Move pure report model structs from main crate
 - [ ] `stutter-report/src/load.rs`: Implement real file loading and return `ReportModel`
 - [ ] `stutter-report/src/render/text/`: Split text rendering into smaller modules (header, quality, cluster, correlation, frame, diagnosis)
 - [ ] `stutter-report/src/diff/mod.rs`: Implement diff logic based on real report model
