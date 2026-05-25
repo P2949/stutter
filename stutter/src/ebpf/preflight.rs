@@ -1,9 +1,12 @@
-use std::path::Path;
+use std::{fs, path::Path};
 
 use serde::Serialize;
-use stutter_common::tracepoint_offsets::{
-    CPU_FREQUENCY_FIELDS, IRQ_HANDLER_FIELDS, SCHED_MIGRATE_TASK_FIELDS, SCHED_STAT_WAIT_FIELDS,
-    SCHED_SWITCH_FIELDS, SCHED_WAKEUP_FIELDS,
+use stutter_common::{
+    BPF_MAX_TRACKED_CPUS,
+    tracepoint_offsets::{
+        CPU_FREQUENCY_FIELDS, IRQ_HANDLER_FIELDS, SCHED_MIGRATE_TASK_FIELDS,
+        SCHED_STAT_WAIT_FIELDS, SCHED_SWITCH_FIELDS, SCHED_WAKEUP_FIELDS,
+    },
 };
 
 use crate::{
@@ -20,6 +23,8 @@ use crate::{
         },
     },
 };
+
+const CPU_POSSIBLE_PATH: &str = "/sys/devices/system/cpu/possible";
 
 #[derive(Debug, Clone)]
 pub struct TracepointAvailability {
@@ -67,6 +72,12 @@ pub fn tracepoint_preflight(
 ) -> TracepointPreflightReport {
     let mut warnings = Vec::new();
     let mut errors = Vec::new();
+
+    if let Some(warning) =
+        cpu_tracking_limit_warning_from_possible_path(Path::new(CPU_POSSIBLE_PATH))
+    {
+        warnings.push(warning);
+    }
 
     let sched_wakeup = required_tracepoint_status(
         &events_root.join("sched/sched_wakeup/format"),
@@ -265,6 +276,12 @@ pub(crate) fn validate_tracepoint_formats(
     events_root: &Path,
     config: &crate::config::model::MonitorConfig,
 ) -> anyhow::Result<TracepointAvailability> {
+    if let Some(warning) =
+        cpu_tracking_limit_warning_from_possible_path(Path::new(CPU_POSSIBLE_PATH))
+    {
+        log::warn!("{warning}");
+    }
+
     validate_tracepoint_format_at(
         &events_root.join("sched/sched_wakeup/format"),
         SCHED_WAKEUP_FIELDS,
@@ -401,4 +418,86 @@ pub(crate) fn validate_tracepoint_formats(
         sched_process_exit,
         sched_process_exec,
     })
+}
+
+fn parse_cpu_range_list_max_id(value: &str) -> Option<u32> {
+    let mut max_id = None;
+
+    for raw_part in value.trim().split(',') {
+        let part = raw_part.trim();
+        if part.is_empty() {
+            return None;
+        }
+
+        let part_max = if let Some((start, end)) = part.split_once('-') {
+            let start = start.parse::<u32>().ok()?;
+            let end = end.parse::<u32>().ok()?;
+            if start > end {
+                return None;
+            }
+            end
+        } else {
+            part.parse::<u32>().ok()?
+        };
+
+        max_id = Some(max_id.map_or(part_max, |current: u32| current.max(part_max)));
+    }
+
+    max_id
+}
+
+fn cpu_tracking_limit_warning(max_possible_cpu_id: u32) -> Option<String> {
+    if max_possible_cpu_id < BPF_MAX_TRACKED_CPUS {
+        return None;
+    }
+
+    Some(format!(
+        "possible CPU id {max_possible_cpu_id} exceeds eBPF CPU accounting limit {}; \
+         runnable-depth and target-pending-wakeup accounting will be skipped for CPU ids >= {} \
+         and counted via DROP_CPU_ACCOUNTING_UNTRACKED",
+        BPF_MAX_TRACKED_CPUS - 1,
+        BPF_MAX_TRACKED_CPUS
+    ))
+}
+
+fn cpu_tracking_limit_warning_from_possible_path(path: &Path) -> Option<String> {
+    let possible = fs::read_to_string(path).ok()?;
+    let max_possible_cpu_id = parse_cpu_range_list_max_id(&possible)?;
+    cpu_tracking_limit_warning(max_possible_cpu_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cpu_range_list_max_id_parses_single_range() {
+        assert_eq!(parse_cpu_range_list_max_id("0-7"), Some(7));
+    }
+
+    #[test]
+    fn cpu_range_list_max_id_parses_sparse_ranges() {
+        assert_eq!(parse_cpu_range_list_max_id("0-3,8,16-19"), Some(19));
+    }
+
+    #[test]
+    fn cpu_range_list_max_id_rejects_malformed_ranges() {
+        assert_eq!(parse_cpu_range_list_max_id("7-0"), None);
+        assert_eq!(parse_cpu_range_list_max_id("0-"), None);
+        assert_eq!(parse_cpu_range_list_max_id(""), None);
+    }
+
+    #[test]
+    fn cpu_tracking_limit_warning_allows_highest_valid_cpu_id() {
+        assert!(cpu_tracking_limit_warning(BPF_MAX_TRACKED_CPUS - 1).is_none());
+    }
+
+    #[test]
+    fn cpu_tracking_limit_warning_triggers_at_first_untracked_cpu_id() {
+        let warning = cpu_tracking_limit_warning(BPF_MAX_TRACKED_CPUS)
+            .expect("first untracked CPU id should warn");
+
+        assert!(warning.contains("DROP_CPU_ACCOUNTING_UNTRACKED"));
+        assert!(warning.contains(&BPF_MAX_TRACKED_CPUS.to_string()));
+    }
 }

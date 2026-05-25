@@ -207,7 +207,11 @@ pub fn sched_wakeup(ctx: TracePointContext) -> u32 {
 
 #[tracepoint]
 /// Tracepoint entry for sched_wakeup_new.
-/// Uses the same target wakeup accounting as sched_wakeup.
+///
+/// Runnable-latency measurement treats sched_wakeup and sched_wakeup_new the
+/// same way because both mean the wakee became runnable. The "new task"
+/// distinction is useful for coverage diagnostics, but it does not change the
+/// wakeup-to-switch latency calculation or target-local runnable accounting.
 pub fn sched_wakeup_new(ctx: TracePointContext) -> u32 {
     try_sched_wakeup(ctx)
 }
@@ -428,13 +432,13 @@ fn decrement_cpu_runnable_depth(cpu: u32) {
 }
 
 #[inline(always)]
-fn mark_task_runnable(pid: u32, target_cpu: u32) {
+fn mark_task_runnable(pid: u32, target_cpu: u32) -> bool {
     if pid == 0 {
-        return;
+        return false;
     }
     if !valid_cpu(target_cpu) {
         increment_drop_counter(DROP_CPU_ACCOUNTING_UNTRACKED);
-        return;
+        return false;
     }
 
     match unsafe { RUNNABLE_TASK_CPU.get(pid).copied() } {
@@ -452,6 +456,8 @@ fn mark_task_runnable(pid: u32, target_cpu: u32) {
             let _ = RUNNABLE_TASK_CPU.insert(pid, target_cpu, 0);
         }
     }
+
+    true
 }
 
 #[inline(always)]
@@ -535,7 +541,7 @@ fn try_sched_wakeup(ctx: TracePointContext) -> u32 {
     // Count only monitored target tasks as runnable. This keeps the increment path
     // aligned with sched_switch, which only decrements after consuming WAKEUP_DATA
     // for a monitored target task.
-    mark_task_runnable(pid, target_cpu);
+    let target_cpu_tracked = mark_task_runnable(pid, target_cpu);
 
     let now = unsafe { bpf_ktime_get_ns() };
     let waker_tid = (bpf_get_current_pid_tgid() & 0xffff_ffff) as u32;
@@ -550,11 +556,17 @@ fn try_sched_wakeup(ctx: TracePointContext) -> u32 {
     let mut old = WakeupData::default();
 
     match wakeup_data::record_wakeup(pid, data, &mut old) {
-        WAKEUP_RECORD_NEW_PENDING => increment_target_pending(target_cpu),
+        WAKEUP_RECORD_NEW_PENDING => {
+            if target_cpu_tracked {
+                increment_target_pending(target_cpu);
+            }
+        }
         WAKEUP_RECORD_REPLACED_PENDING_MOVED_CPU => {
             increment_drop_counter(DROP_WAKEUP_DATA_REPLACED_ENTRY);
             decrement_target_pending(old.target_cpu);
-            increment_target_pending(target_cpu);
+            if target_cpu_tracked {
+                increment_target_pending(target_cpu);
+            }
         }
         WAKEUP_RECORD_REPLACED_PENDING_SAME_CPU => {
             increment_drop_counter(DROP_WAKEUP_DATA_REPLACED_ENTRY);
@@ -662,10 +674,12 @@ fn try_sched_switch(ctx: TracePointContext) -> u32 {
 
     let mut prio: i32 = 0;
     if !read_i32(&ctx, SCHED_SWITCH_NEXT_PRIO_OFFSET, &mut prio) {
+        increment_drop_counter(DROP_WAKEUP_DATA_CONSUMED_READ_FAILED);
         return 1;
     }
     let mut comm: [u8; 16] = [0; 16];
     if !read_comm16(&ctx, SCHED_SWITCH_NEXT_COMM_OFFSET, &mut comm) {
+        increment_drop_counter(DROP_WAKEUP_DATA_CONSUMED_READ_FAILED);
         return 1;
     }
 
