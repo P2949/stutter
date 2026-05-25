@@ -57,6 +57,7 @@ pub(crate) fn data_quality_summary(
         .warnings
         .iter()
         .any(|warning| warning.starts_with("DRM fence "))
+        || session.core.drop_counters.drm_fence_missing_start > 0
     {
         level = downgrade_quality(level, DataQualityLevel::Medium);
         reasons.push("DRM fence latency evidence is degraded or incomplete".to_owned());
@@ -171,6 +172,13 @@ pub(crate) fn data_quality_summary(
 
         if drop_counters.block_zero_keys > 0 {
             reasons.push(format!("block_zero_keys={}", drop_counters.block_zero_keys));
+        }
+
+        if drop_counters.drm_fence_missing_start > 0 {
+            reasons.push(format!(
+                "drm_fence_missing_start={}",
+                drop_counters.drm_fence_missing_start
+            ));
         }
 
         if drop_counters.cpu_accounting_untracked > 0 {
