@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 stutter-common = { path = "../stutter-common", features = ["user"] }
 stutter-core = { path = "../stutter-core" }
+stutter-report = { path = "../stutter-report" }
 
 anyhow = { workspace = true, default-features = true }
 aya = { workspace = true }
