@@ -194,34 +194,6 @@ pub(crate) fn validate_tracepoint_format_at_named(
     )
 }
 
-pub(crate) fn require_tracepoint_field(
-    format_path: &Path,
-    field_name: &str,
-) -> anyhow::Result<u32> {
-    let contents = fs::read_to_string(format_path)
-        .with_context(|| format!("failed to read tracepoint format {}", format_path.display()))?;
-
-    parse_tracepoint_field_offset(&contents, field_name).with_context(|| {
-        format!(
-            "tracepoint format {} is missing required field {:?}",
-            format_path.display(),
-            field_name
-        )
-    })
-}
-
-pub(crate) fn parse_tracepoint_field_offset(
-    format_content: &str,
-    field_name: &str,
-) -> anyhow::Result<u32> {
-    let format = parse_tracepoint_format(PathBuf::from("tracepoint"), format_content);
-    format
-        .fields
-        .get(field_name)
-        .map(|f| f.offset)
-        .ok_or_else(|| anyhow::anyhow!("missing tracepoint field {:?}", field_name))
-}
-
 #[cfg(test)]
 pub(crate) fn validate_tracepoint_format(
     format: &str,

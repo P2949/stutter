@@ -3,13 +3,17 @@
 //! `WAKEUP_DATA` stores the latest wakeup observed for a task. `WAKEUP_CONSUMED` is
 //! not a second queue; it is a cursor that records the exact `WakeupData` value a
 //! sched_switch probe already consumed. A pending wakeup is therefore defined as
-//! "present in `WAKEUP_DATA` and not byte-for-byte equal to the consumed cursor".
+//! "present in `WAKEUP_DATA` and not exactly equal to the consumed cursor".
 //!
 //! Keeping the data map entry after consumption avoids the copy-then-delete race
 //! where sched_switch could delete a newer wakeup inserted between lookup and
 //! removal. Writers clear the consumed cursor when installing a new wakeup, task
 //! exit removes both maps, and CPU migration only mutates wakeups that are still
 //! pending under the cursor rule above.
+//!
+//! To prevent ABA collisions where a new wakeup happens to have the same exact
+//! timestamp, CPU, and waker TID as a previously consumed wakeup, `WakeupData`
+//! includes a per-TID monotonically increasing sequence number `seq`.
 
 use aya_ebpf::{macros::map, maps::HashMap};
 
@@ -21,6 +25,7 @@ pub(crate) struct WakeupData {
     pub(crate) ts: u64,
     pub(crate) target_cpu: u32,
     pub(crate) waker_tid: u32,
+    pub(crate) seq: u32,
 }
 
 #[map]
@@ -30,6 +35,21 @@ static WAKEUP_DATA: HashMap<u32, WakeupData> =
 #[map]
 static WAKEUP_CONSUMED: HashMap<u32, WakeupData> =
     HashMap::<u32, WakeupData>::with_max_entries(WAKEUP_DATA_MAP_MAX_ENTRIES, 0);
+
+#[map]
+static WAKEUP_SEQ: HashMap<u32, u32> =
+    HashMap::<u32, u32>::with_max_entries(WAKEUP_DATA_MAP_MAX_ENTRIES, 0);
+
+#[inline(always)]
+pub(crate) fn next_wakeup_seq(pid: u32) -> u32 {
+    let next = match unsafe { WAKEUP_SEQ.get(pid) } {
+        Some(seq) => seq.wrapping_add(1),
+        None => 1,
+    };
+
+    let _ = WAKEUP_SEQ.insert(pid, next, 0);
+    next
+}
 
 pub(crate) const WAKEUP_RECORD_INSERT_FAILED: u32 = 0;
 pub(crate) const WAKEUP_RECORD_NEW_PENDING: u32 = 1;
@@ -52,8 +72,9 @@ pub(crate) fn record_wakeup(pid: u32, data: WakeupData, old: &mut WakeupData) ->
         return WAKEUP_RECORD_INSERT_FAILED;
     }
 
-    // A new wakeup supersedes any cursor for an older consumed wakeup. If a
-    // concurrent sched_switch later records the older wakeup as consumed, the
+    // A new wakeup supersedes any cursor for an older consumed wakeup. Since
+    // each new wakeup gets a unique sequence number via `next_wakeup_seq`, if a
+    // concurrent sched_switch later records an older wakeup as consumed, the
     // cursor still will not match this newer map value.
     let _ = WAKEUP_CONSUMED.remove(pid);
 
@@ -100,6 +121,7 @@ pub(crate) fn remove_for_exit(pid: u32, out: &mut WakeupData) -> bool {
     }
 
     let _ = WAKEUP_CONSUMED.remove(pid);
+    let _ = WAKEUP_SEQ.remove(pid);
     was_pending
 }
 
@@ -126,6 +148,7 @@ fn same_wakeup_consumed(pid: u32, data: &WakeupData) -> bool {
             consumed.ts == data.ts
                 && consumed.target_cpu == data.target_cpu
                 && consumed.waker_tid == data.waker_tid
+                && consumed.seq == data.seq
         }
         None => false,
     }
