@@ -69,7 +69,7 @@ fn diagnosis(elapsed_ms: u64, cause: StutterCause) -> LiveDiagnosisEntry {
 fn default_window_is_thirty_seconds() {
     let window = RollingWindow::default();
 
-    assert_eq!(window.duration, Duration::from_secs(30));
+    assert_eq!(window.duration(), Duration::from_secs(30));
     assert!(window.is_empty());
 }
 
