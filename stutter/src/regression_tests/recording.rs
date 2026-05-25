@@ -64,6 +64,8 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
         block_start_insert_failed: 0,
         block_fallback_key_collisions: 0,
         cpu_accounting_untracked: 0,
+        block_zero_keys: 0,
+        drm_fence_missing_start: 0,
     };
 
     let task_tracker = tasks::TaskTracker {

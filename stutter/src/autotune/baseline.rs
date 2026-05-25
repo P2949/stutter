@@ -502,6 +502,8 @@ mod tests {
             block_start_insert_failed: 0,
             block_fallback_key_collisions: 0,
             cpu_accounting_untracked: 0,
+            block_zero_keys: 0,
+            drm_fence_missing_start: 0,
         };
 
         for idx in 0..10 {
@@ -612,6 +614,8 @@ mod tests {
             block_start_insert_failed: 0,
             block_fallback_key_collisions: 0,
             cpu_accounting_untracked: 0,
+            block_zero_keys: 0,
+            drm_fence_missing_start: 0,
         };
         let records = vec![record(1_000, 7, 10, TaskClass::Game)];
         let status = state.observe_interval(

@@ -12,10 +12,10 @@ use aya_ebpf::{
 };
 use stutter_common::{
     BPF_DEFAULT_EVENTS_RINGBUF_BYTES, BPF_MAX_TRACKED_CPUS, CpuFreqEvent, DRM_FENCE_EVENT_SIGNAL,
-    DRM_FENCE_EVENT_WAIT_DONE, DRM_FENCE_EVENT_WAIT_INTERVAL, DRM_FENCE_HAS_CONTEXT,
-    DRM_FENCE_HAS_DURATION, DRM_FENCE_HAS_PID, DRM_FENCE_HAS_SEQNO, DRM_FENCE_HAS_TIMELINE,
-    DRM_FENCE_IS_EXPORTER_SIDE, DRM_FENCE_IS_IMPORTER_SIDE, DROP_COUNTERS_MAX,
-    DROP_CPU_ACCOUNTING_UNTRACKED, DROP_IRQ_START_TIMES_INSERT_FAILED,
+    DRM_FENCE_EVENT_WAIT_INTERVAL, DRM_FENCE_HAS_CONTEXT, DRM_FENCE_HAS_DURATION,
+    DRM_FENCE_HAS_PID, DRM_FENCE_HAS_SEQNO, DRM_FENCE_HAS_TIMELINE, DRM_FENCE_IS_EXPORTER_SIDE,
+    DRM_FENCE_IS_IMPORTER_SIDE, DRM_FENCE_WAIT_DONE_WITHOUT_START, DROP_COUNTERS_MAX, DROP_CPU_ACCOUNTING_UNTRACKED,
+    DROP_IRQ_START_TIMES_INSERT_FAILED, DRM_FENCE_EVENT_WAIT_DONE,
     DROP_WAKEUP_DATA_CONSUMED_READ_FAILED, DROP_WAKEUP_DATA_INSERT_FAILED,
     DROP_WAKEUP_DATA_REPLACED_ENTRY, DROP_WAKEUP_DATA_STALE_ENTRY, DrmFenceEvent, EVENT_CPU_FREQ,
     EVENT_DRM_FENCE, EVENT_EXEC, EVENT_IRQ_LATENCY, EVENT_MIGRATION, EVENT_RUNNABLE_LATENCY,
@@ -540,10 +540,12 @@ fn try_sched_wakeup(ctx: TracePointContext) -> u32 {
     let now = unsafe { bpf_ktime_get_ns() };
     let waker_tid = (bpf_get_current_pid_tgid() & 0xffff_ffff) as u32;
 
+    let seq = wakeup_data::next_wakeup_seq(pid);
     let data = WakeupData {
         ts: now,
         target_cpu,
         waker_tid,
+        seq,
     };
     let mut old = WakeupData::default();
 
@@ -1324,15 +1326,12 @@ fn try_drm_fence_wait_done(ctx: TracePointContext) -> u32 {
             0,
             0,
             0,
-            unsafe { core::ptr::read_volatile(&raw const DRM_FENCE_WAIT_DONE_PROVIDER) },
-            unsafe { core::ptr::read_volatile(&raw const DRM_FENCE_WAIT_DONE_GPU_ROLE) },
+            signal.map(|signal| signal.provider).unwrap_or(0),
+            0,
             signal.map(|signal| signal.ts).unwrap_or(0),
-            signal
-                .map(|signal| signal.provider)
-                .unwrap_or_else(|| unsafe {
-                    core::ptr::read_volatile(&raw const DRM_FENCE_WAIT_DONE_PROVIDER)
-                }),
-            DRM_FENCE_IS_IMPORTER_SIDE
+            signal.map(|signal| signal.provider).unwrap_or(0),
+            DRM_FENCE_WAIT_DONE_WITHOUT_START
+                | DRM_FENCE_IS_IMPORTER_SIDE
                 | if signal.is_some() {
                     DRM_FENCE_IS_EXPORTER_SIDE
                 } else {

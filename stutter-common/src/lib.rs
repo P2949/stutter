@@ -90,6 +90,8 @@ pub const DRM_FENCE_HAS_DURATION: u32 = 1 << 3;
 pub const DRM_FENCE_HAS_PID: u32 = 1 << 4;
 pub const DRM_FENCE_IS_IMPORTER_SIDE: u32 = 1 << 5;
 pub const DRM_FENCE_IS_EXPORTER_SIDE: u32 = 1 << 6;
+/// Wait-done was observed without a matching wait-start record.
+pub const DRM_FENCE_WAIT_DONE_WITHOUT_START: u32 = 1 << 7;
 
 pub const DRM_FENCE_EVENT_WAIT_START: u32 = 1;
 pub const DRM_FENCE_EVENT_WAIT_DONE: u32 = 2;
@@ -117,6 +119,9 @@ pub const DROP_WAKEUP_DATA_REPLACED_ENTRY: u32 = 6;
 pub const DROP_WAKEUP_DATA_CONSUMED_READ_FAILED: u32 = 7;
 /// Runnable-depth or pending-wakeup CPU accounting skipped an out-of-range CPU id.
 pub const DROP_CPU_ACCOUNTING_UNTRACKED: u32 = 8;
+/// A block I/O request produced key 0, which is reserved as "untrackable".
+pub const DROP_BLOCK_ZERO_KEY: u32 = 9;
+pub const DROP_DRM_FENCE_MISSING_START: u32 = 10;
 
 /// Number of per-CPU drop-counter slots shared by the BPF object and userspace.
 ///
@@ -129,7 +134,7 @@ pub const DROP_CPU_ACCOUNTING_UNTRACKED: u32 = 8;
 /// slot consumes one `u64` per possible CPU plus kernel map metadata. The cost is
 /// small compared with the wakeup maps and ring buffer, but the ABI count still
 /// needs to stay exact.
-pub const DROP_COUNTERS_MAX: u32 = 9;
+pub const DROP_COUNTERS_MAX: u32 = 11;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]

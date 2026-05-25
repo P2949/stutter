@@ -238,6 +238,16 @@ fn sched_switch_uses_consumed_cursor_instead_of_lookup_delete() {
 }
 
 #[test]
+fn wakeup_consumed_cursor_uses_sequence_identity() {
+    let source = include_str!("../../../../stutter-ebpf/src/wakeup_data.rs");
+
+    assert!(source.contains("pub(crate) seq: u32"));
+    assert!(source.contains("consumed.seq == data.seq"));
+    assert!(source.contains("static WAKEUP_SEQ"));
+    assert!(source.contains("WAKEUP_SEQ.remove"));
+}
+
+#[test]
 fn sched_switch_reads_previous_task_context_after_relevance_filters() {
     let source = include_str!("../../../../stutter-ebpf/src/main.rs");
     let start = source.find("fn try_sched_switch").unwrap();
@@ -289,59 +299,59 @@ fn rejects_bad_irq_tracepoint_offsets() {
     assert!(err.to_string().contains("expected offset 8, got 12"));
 }
 
-const IRQ_HANDLER_EXIT_FORMAT_WITH_RET: &str = r#"
-name: irq_handler_exit
-ID: 1234
-format:
-	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
-	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
-	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
-	field:int common_pid;	offset:4;	size:4;	signed:1;
-
-	field:int irq;	offset:8;	size:4;	signed:1;
-	field:int ret;	offset:12;	size:4;	signed:1;
-
-print fmt: "irq=%d ret=%d", REC->irq, REC->ret
-"#;
-
-const IRQ_HANDLER_EXIT_FORMAT_MISSING_RET: &str = r#"
-name: irq_handler_exit
-ID: 1234
-format:
-	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
-	field:int common_pid;	offset:4;	size:4;	signed:1;
-	field:int irq;	offset:8;	size:4;	signed:1;
-"#;
-
 #[test]
-fn parse_tracepoint_field_offset_finds_irq_and_ret() {
-    assert_eq!(
-        parse_tracepoint_field_offset(IRQ_HANDLER_EXIT_FORMAT_WITH_RET, "irq").unwrap(),
-        8
-    );
+fn validates_irq_tracepoint_without_ret() {
+    let _lock = crate::test_support::TEST_MUTEX.lock().unwrap();
+    let dir = temp_dir("irq-without-ret");
+    fs::create_dir_all(&dir).unwrap();
 
-    assert_eq!(
-        parse_tracepoint_field_offset(IRQ_HANDLER_EXIT_FORMAT_WITH_RET, "ret").unwrap(),
-        12
-    );
-}
+    let irq_entry_dir = dir.join("irq/irq_handler_entry");
+    fs::create_dir_all(&irq_entry_dir).unwrap();
+    fs::write(
+        irq_entry_dir.join("format"),
+        "field:int irq; offset:8; size:4; signed:1;",
+    )
+    .unwrap();
 
-#[test]
-fn parse_tracepoint_field_offset_errors_when_ret_missing() {
-    let err =
-        parse_tracepoint_field_offset(IRQ_HANDLER_EXIT_FORMAT_MISSING_RET, "ret").unwrap_err();
+    let irq_exit_dir = dir.join("irq/irq_handler_exit");
+    fs::create_dir_all(&irq_exit_dir).unwrap();
+    fs::write(
+        irq_exit_dir.join("format"),
+        "field:int irq; offset:8; size:4; signed:1;",
+    )
+    .unwrap();
 
-    assert!(err.to_string().contains("ret"));
-}
+    // Add required sched/sched_wakeup and sched/sched_switch
+    let sched_wakeup = dir.join("sched/sched_wakeup");
+    fs::create_dir_all(&sched_wakeup).unwrap();
+    fs::write(
+            sched_wakeup.join("format"),
+            "field:pid_t pid; offset:24; size:4; signed:1;\nfield:int prio; offset:28; size:4; signed:1;\nfield:int target_cpu; offset:32; size:4; signed:1;",
+        ).unwrap();
 
-#[test]
-fn parse_tracepoint_field_offset_matches_exact_field_name() {
-    let format = r#"
-	field:int return_code;	offset:8;	size:4;	signed:1;
-	field:int ret;	offset:12;	size:4;	signed:1;
-"#;
+    let sched_switch = dir.join("sched/sched_switch");
+    fs::create_dir_all(&sched_switch).unwrap();
+    fs::write(
+            sched_switch.join("format"),
+            "field:char prev_comm[16]; offset:8; size:16; signed:1;\nfield:pid_t prev_pid; offset:24; size:4; signed:1;\nfield:int prev_prio; offset:28; size:4; signed:1;\nfield:long prev_state; offset:32; size:8; signed:1;\nfield:char next_comm[16]; offset:40; size:16; signed:1;\nfield:pid_t next_pid; offset:56; size:4; signed:1;\nfield:int next_prio; offset:60; size:4; signed:1;",
+        ).unwrap();
 
-    assert_eq!(parse_tracepoint_field_offset(format, "ret").unwrap(), 12);
+    let mut config =
+        match crate::cli::parse_app_command_from(["stutter", "monitor", "--pid", "42"]).unwrap() {
+            crate::commands::AppCommand::Monitor(c) => (*c.config).clone(),
+            _ => unreachable!(),
+        };
+
+    config.probes.irq_latency = true;
+
+    let availability = validate_tracepoint_formats(&dir, &config).unwrap();
+    assert!(availability.irq_handler);
+
+    let preflight =
+        crate::ebpf::preflight::tracepoint_preflight(&dir, false, false, true, false, false);
+    assert_eq!(preflight.irq_handler, "ok");
+
+    fs::remove_dir_all(dir).ok();
 }
 
 #[test]

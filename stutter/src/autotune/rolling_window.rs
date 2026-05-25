@@ -116,7 +116,7 @@ impl RollingWindow {
 
     pub fn push_interval(&mut self, record: IntervalRecord) {
         let elapsed_ms = record.elapsed_ms;
-        self.intervals.push_back(record);
+        push_sorted_by_elapsed(&mut self.intervals, record, |record| record.elapsed_ms);
         self.prune_to(elapsed_ms);
     }
 
@@ -145,7 +145,7 @@ impl RollingWindow {
             return;
         }
 
-        self.frames.push_back(frame);
+        push_sorted_by_elapsed(&mut self.frames, frame, |frame| frame.elapsed_ms);
         self.prune_to(elapsed_ms);
     }
 
@@ -154,61 +154,63 @@ impl RollingWindow {
             return;
         };
         event.elapsed_ms = Some(elapsed_ms);
-        self.irq_events.push_back(event);
+        push_sorted_by_elapsed(&mut self.irq_events, event, |event| {
+            event.elapsed_ms.unwrap_or(0)
+        });
         self.prune_to(elapsed_ms);
     }
 
     pub fn push_block_io_event(&mut self, event: BlockIoRecord) {
         let elapsed_ms = event.elapsed_ms;
-        self.block_io_events.push_back(event);
+        push_sorted_by_elapsed(&mut self.block_io_events, event, |event| event.elapsed_ms);
         self.prune_to(elapsed_ms);
     }
 
     pub fn push_gpu_sample(&mut self, sample: GpuSample) {
         let elapsed_ms = sample.elapsed_ms;
-        self.gpu_samples.push_back(sample);
+        push_sorted_by_elapsed(&mut self.gpu_samples, sample, |sample| sample.elapsed_ms);
         self.prune_to(elapsed_ms);
     }
 
     pub fn push_cpu_freq_event(&mut self, event: CpuFreqRecord) {
         let elapsed_ms = event.elapsed_ms;
-        self.cpu_freq_events.push_back(event);
+        push_sorted_by_elapsed(&mut self.cpu_freq_events, event, |event| event.elapsed_ms);
         self.prune_to(elapsed_ms);
     }
 
     pub fn push_foreground_event(&mut self, event: ForegroundEvent) {
         let elapsed_ms = event.elapsed_ms;
-        self.foreground_events.push_back(event);
+        push_sorted_by_elapsed(&mut self.foreground_events, event, |event| event.elapsed_ms);
         self.prune_to(elapsed_ms);
     }
 
     pub fn push_diagnosis(&mut self, diagnosis: LiveDiagnosisEntry) {
         let elapsed_ms = diagnosis.elapsed_ms;
-        self.diagnoses.push_back(diagnosis);
+        push_sorted_by_elapsed(&mut self.diagnoses, diagnosis, |diagnosis| {
+            diagnosis.elapsed_ms
+        });
         self.prune_to(elapsed_ms);
     }
 
     pub fn prune_to(&mut self, now_elapsed_ms: u64) {
         let start_ms = self.window_start_ms_for(now_elapsed_ms);
 
-        retain_by_elapsed(&mut self.intervals, start_ms, |record| record.elapsed_ms);
-        retain_by_elapsed(&mut self.frames, start_ms, |frame| frame.elapsed_ms);
-        retain_by_elapsed(&mut self.diagnoses, start_ms, |diagnosis| {
+        drain_front_before_elapsed(&mut self.intervals, start_ms, |record| record.elapsed_ms);
+        drain_front_before_elapsed(&mut self.frames, start_ms, |frame| frame.elapsed_ms);
+        drain_front_before_elapsed(&mut self.diagnoses, start_ms, |diagnosis| {
             diagnosis.elapsed_ms
         });
-        self.irq_events.retain(|event| {
-            event
-                .elapsed_ms
-                .is_some_and(|elapsed_ms| elapsed_ms >= start_ms)
+        drain_front_before_elapsed(&mut self.irq_events, start_ms, |event| {
+            event.elapsed_ms.unwrap_or(0)
         });
-        retain_by_elapsed(&mut self.block_io_events, start_ms, |event| {
+        drain_front_before_elapsed(&mut self.block_io_events, start_ms, |event| {
             event.elapsed_ms
         });
-        retain_by_elapsed(&mut self.gpu_samples, start_ms, |sample| sample.elapsed_ms);
-        retain_by_elapsed(&mut self.cpu_freq_events, start_ms, |event| {
+        drain_front_before_elapsed(&mut self.gpu_samples, start_ms, |sample| sample.elapsed_ms);
+        drain_front_before_elapsed(&mut self.cpu_freq_events, start_ms, |event| {
             event.elapsed_ms
         });
-        retain_by_elapsed(&mut self.foreground_events, start_ms, |event| {
+        drain_front_before_elapsed(&mut self.foreground_events, start_ms, |event| {
             event.elapsed_ms
         });
     }
@@ -602,11 +604,31 @@ fn source_quality_for_block_io_basis(basis: Option<&str>) -> ObjectiveSignalQual
     }
 }
 
-fn retain_by_elapsed<T, F>(items: &mut VecDeque<T>, start_ms: u64, elapsed_ms: F)
+fn drain_front_before_elapsed<T, F>(items: &mut VecDeque<T>, start_ms: u64, elapsed_ms: F)
 where
     F: Fn(&T) -> u64,
 {
-    items.retain(|item| elapsed_ms(item) >= start_ms);
+    while items
+        .front()
+        .is_some_and(|item| elapsed_ms(item) < start_ms)
+    {
+        items.pop_front();
+    }
+}
+
+fn push_sorted_by_elapsed<T, F>(items: &mut VecDeque<T>, item: T, elapsed_ms: F)
+where
+    F: Fn(&T) -> u64,
+{
+    let item_elapsed_ms = elapsed_ms(&item);
+
+    match items
+        .iter()
+        .rposition(|existing| elapsed_ms(existing) <= item_elapsed_ms)
+    {
+        Some(index) => items.insert(index + 1, item),
+        None => items.push_front(item),
+    }
 }
 
 fn sort_intervals_by_elapsed(intervals: &mut VecDeque<IntervalRecord>) {
