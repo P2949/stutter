@@ -1,5 +1,7 @@
 use crate::model::ReportModel;
 
+pub mod text;
+
 /// Supported report render targets for the future rendering layer.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ReportRenderFormat {

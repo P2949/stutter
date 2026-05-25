@@ -17,12 +17,12 @@ mod objectives;
 mod public_api;
 mod rolling_window_privacy;
 mod scanners;
+mod scratch_dir;
 mod test_layout;
 mod transitional;
 mod transitional_allowlist;
 mod typed_ids;
 mod unwrap_expect;
-mod scratch_dir;
 
 const RUST_FILE_SIZE_LIMIT_LINES: usize = 1_000;
 

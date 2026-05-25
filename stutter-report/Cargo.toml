@@ -9,7 +9,11 @@ license.workspace = true
 stutter-core = { path = "../stutter-core" }
 
 serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
 
 [lib]
 path = "src/lib.rs"

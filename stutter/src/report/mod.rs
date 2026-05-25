@@ -105,7 +105,7 @@ pub(crate) use render::html::render_html_report;
 pub(crate) use render::text::render_check_summary;
 #[cfg(test)]
 pub(crate) use render::text::{
-    TextReportRenderInput, render_cluster, render_focus_summary_text,
+    TextReportRenderInput, render_focus_summary_text,
     render_foreground_summary_text, render_report,
 };
 pub use text::{PrintReportInput, print_report};

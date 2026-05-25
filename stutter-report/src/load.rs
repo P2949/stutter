@@ -1,4 +1,8 @@
-use std::path::{Path, PathBuf};
+use serde::de::DeserializeOwned;
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use crate::{error::ReportError, model::ReportModel};
 
@@ -18,23 +22,26 @@ impl ReportLoadRequest {
     }
 }
 
-/// Placeholder load entry point for the future report migration.
+pub(crate) fn load_json_file<T: DeserializeOwned>(path: &Path) -> Result<T, ReportError> {
+    let file = fs::File::open(path).map_err(|source| ReportError::Load {
+        path: path.to_path_buf(),
+        error: source,
+    })?;
+    serde_json::from_reader(file).map_err(|e| ReportError::invalid_model(e.to_string()))
+}
+
+/// Load a report model from the requested path.
 pub fn load_report_model(request: &ReportLoadRequest) -> Result<ReportModel, ReportError> {
-    Err(ReportError::unsupported_operation(
-        "load_report_model",
-        format!(
-            "report loading for '{}' has not been migrated into stutter-report yet",
-            request.path().display()
-        ),
-    ))
+    load_json_file(request.path())
 }
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::{fs, path::Path};
 
     use super::{ReportLoadRequest, load_report_model};
-    use crate::error::ReportError;
+    use crate::model::ReportModel;
+    use tempfile::tempdir;
 
     #[test]
     fn load_request_preserves_source_path() {
@@ -44,20 +51,14 @@ mod tests {
     }
 
     #[test]
-    fn load_report_model_is_explicitly_not_migrated_yet() {
-        let request = ReportLoadRequest::from_path("runs/run-001");
-        let error = match load_report_model(&request) {
-            Ok(_) => panic!("loading should not be implemented in the skeleton crate"),
-            Err(error) => error,
-        };
+    fn load_report_model_reads_json_file() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("report.json");
+        let model = ReportModel::new();
+        fs::write(&path, serde_json::to_string(&model).unwrap()).unwrap();
 
-        match error {
-            ReportError::UnsupportedOperation { operation, reason } => {
-                assert_eq!(operation, "load_report_model");
-                assert!(reason.contains("runs/run-001"));
-                assert!(reason.contains("not been migrated"));
-            }
-            other => panic!("expected unsupported operation error, got {other}"),
-        }
+        let request = ReportLoadRequest::from_path(&path);
+        let loaded = load_report_model(&request).unwrap();
+        assert_eq!(loaded.run_id, model.run_id);
     }
 }

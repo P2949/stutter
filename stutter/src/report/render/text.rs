@@ -64,182 +64,63 @@ pub(crate) fn render_report(input: TextReportRenderInput<'_>) -> String {
         output.push_str(&render_display_path_diagnosis_text(display_path_diagnosis));
     }
 
-    pushln(&mut output, format!("file: {}", path.display()));
-    pushln(
-        &mut output,
-        format!("schema: {}", session.core.schema_version),
-    );
-    pushln(
-        &mut output,
-        format!("expected_schema: {}", SESSION_SCHEMA_VERSION),
-    );
-    pushln(
-        &mut output,
-        format!("run: {}", session.core.run_name.as_deref().unwrap_or("-")),
-    );
-    pushln(
-        &mut output,
-        format!("duration_ms: {}", session.core.duration_ms),
-    );
-    pushln(&mut output, format!("stop_reason: {}", session.stop_reason));
-    pushln(
-        &mut output,
-        format!("manual_pids: {:?}", session.config.manual_pids),
-    );
-    pushln(
-        &mut output,
-        format!("tree_roots: {:?}", session.config.tree_roots),
-    );
-    pushln(
-        &mut output,
-        format!("include_comm: {:?}", session.config.include_comm),
-    );
-    pushln(
-        &mut output,
-        format!("exclude_comm: {:?}", session.config.exclude_comm),
-    );
+    let header_summary = stutter_report::model::ReportHeaderSummary {
+        file_path: path.display().to_string(),
+        schema_version: session.core.schema_version,
+        expected_schema_version: SESSION_SCHEMA_VERSION,
+        run_name: session.core.run_name.clone().unwrap_or_else(|| "-".to_owned()),
+        duration_ms: session.core.duration_ms,
+        stop_reason: session.stop_reason.clone(),
+        manual_pids: session.config.manual_pids.clone(),
+        tree_roots: session.config.tree_roots.clone(),
+        include_comm: session.config.include_comm.clone(),
+        exclude_comm: session.config.exclude_comm.clone(),
+        event_stream_warning: event_stream_warning(
+            session.core.event_stream_write_errors,
+            session.core.first_event_stream_write_error.as_deref(),
+        ),
+        watch_process: session.config.watch_process.clone().unwrap_or_else(|| "-".to_owned()),
+        persistent: session.config.persistent,
+        csv_stream: match &session.config.csv_stream {
+            Some(crate::config::CsvStreamTarget::File(path)) => path.display().to_string(),
+            Some(crate::config::CsvStreamTarget::Stdout) => "stdout".to_owned(),
+            None => "-".to_owned(),
+        },
+        active_target_pids_count: session.core.active_target_pids_count,
+    };
+    output.push_str(&stutter_report::render::text::header::render_header(&header_summary));
 
-    if let Some(warning) = event_stream_warning(
-        session.core.event_stream_write_errors,
-        session.core.first_event_stream_write_error.as_deref(),
-    ) {
-        pushln(&mut output, warning);
-        pushln(&mut output, "");
-    }
-    pushln(
-        &mut output,
-        format!(
-            "watch_process: {}",
-            session.config.watch_process.as_deref().unwrap_or("-")
-        ),
-    );
-    pushln(
-        &mut output,
-        format!("persistent: {}", session.config.persistent),
-    );
-    pushln(
-        &mut output,
-        format!(
-            "csv_stream: {}",
-            match &session.config.csv_stream {
-                Some(crate::config::CsvStreamTarget::File(path)) => path.display().to_string(),
-                Some(crate::config::CsvStreamTarget::Stdout) => "stdout".to_owned(),
-                None => "-".to_owned(),
-            }
-        ),
-    );
-    pushln(
-        &mut output,
-        format!(
-            "active_tasks_at_end: {}",
-            session.core.active_target_pids_count
-        ),
-    );
-    pushln(&mut output, "");
-
-    pushln(&mut output, "data quality");
-    pushln(&mut output, "------------");
-    pushln(&mut output, format!("level: {:?}", data_quality.level));
-    pushln(
-        &mut output,
-        format!(
-            "schema: {} expected={}",
-            data_quality.schema_version, data_quality.expected_schema_version
-        ),
-    );
-    pushln(
-        &mut output,
-        format!(
-            "event_stream_write_errors: {}",
-            data_quality.event_stream_write_errors
-        ),
-    );
-    pushln(
-        &mut output,
-        format!(
-            "spike_events: retained={} dropped={} truncated={}",
-            data_quality.spike_events_retained_count,
-            data_quality.spike_events_dropped_count,
-            data_quality.spike_events_truncated
-        ),
-    );
-    pushln(
-        &mut output,
-        format!("interval_records: {}", data_quality.interval_record_count),
-    );
-    pushln(
-        &mut output,
-        format!(
-            "active_target_pids: {}",
-            data_quality.active_target_pids_count
-        ),
-    );
-    pushln(
-        &mut output,
-        format!(
-            "drop_counters_nonzero: {}",
-            data_quality.drop_counters_nonzero
-        ),
-    );
-    pushln(
-        &mut output,
-        format!(
-            "percentile_scope_counts: {:?}",
-            data_quality.percentile_scope_counts
-        ),
-    );
-    pushln(
-        &mut output,
-        format!(
-            "block_io_correlation_basis: {} (confidence: {})",
-            data_quality.block_io_correlation_basis, data_quality.block_io_correlation_confidence
-        ),
-    );
-    pushln(
-        &mut output,
-        format!(
-            "frame_timestamp_alignment: {}",
-            data_quality.frame_timestamp_alignment
-        ),
-    );
-    pushln(
-        &mut output,
-        format!(
-            "cpu_perf: requested={} open_errors={} read_errors={} skipped_tasks={}",
-            data_quality.cpu_perf_requested,
-            data_quality.cpu_perf_open_errors,
-            data_quality.cpu_perf_read_errors,
-            data_quality.cpu_perf_skipped_tasks
-        ),
-    );
-
-    for reason in &data_quality.reasons {
-        pushln(&mut output, format!("reason: {reason}"));
-    }
-
-    if !data_quality.missing_optional_files.is_empty() {
-        pushln(
-            &mut output,
-            format!(
-                "missing_optional_files: {:?}",
-                data_quality.missing_optional_files
-            ),
-        );
-    }
-
-    if !data_quality.validation_warnings.is_empty() {
-        for warning in &data_quality.validation_warnings {
-            pushln(&mut output, format!("validation_warning: {warning}"));
-        }
-    }
-
-    if !data_quality.validation_errors.is_empty() {
-        for error in &data_quality.validation_errors {
-            pushln(&mut output, format!("validation_error: {error}"));
-        }
-    }
-
-    pushln(&mut output, "");
+    let mapped_data_quality = stutter_report::model::DataQualitySummary {
+        level: match data_quality.level {
+            crate::report::model::DataQualityLevel::High => stutter_report::model::DataQualityLevel::High,
+            crate::report::model::DataQualityLevel::Medium => stutter_report::model::DataQualityLevel::Medium,
+            crate::report::model::DataQualityLevel::Low => stutter_report::model::DataQualityLevel::Low,
+        },
+        schema_version: data_quality.schema_version,
+        expected_schema_version: data_quality.expected_schema_version,
+        event_stream_write_errors: data_quality.event_stream_write_errors,
+        spike_events_retained_count: data_quality.spike_events_retained_count,
+        spike_events_dropped_count: data_quality.spike_events_dropped_count,
+        spike_events_truncated: data_quality.spike_events_truncated,
+        interval_record_count: data_quality.interval_record_count,
+        active_target_pids_count: data_quality.active_target_pids_count,
+        drop_counters_nonzero: data_quality.drop_counters_nonzero,
+        percentile_scope_counts: data_quality.percentile_scope_counts.iter().map(|(k, &v)| (k.clone(), v as u64)).collect(),
+        block_io_correlation_basis: data_quality.block_io_correlation_basis.to_string(),
+        block_io_correlation_confidence: data_quality.block_io_correlation_confidence.to_string(),
+        block_io_correlation_warning: data_quality.block_io_correlation_warning.clone(),
+        probe_activation_warnings: data_quality.probe_activation_warnings.clone(),
+        frame_timestamp_alignment: data_quality.frame_timestamp_alignment.to_string(),
+        cpu_perf_requested: data_quality.cpu_perf_requested,
+        cpu_perf_open_errors: data_quality.cpu_perf_open_errors,
+        cpu_perf_read_errors: data_quality.cpu_perf_read_errors,
+        cpu_perf_skipped_tasks: data_quality.cpu_perf_skipped_tasks,
+        reasons: data_quality.reasons.clone(),
+        missing_optional_files: data_quality.missing_optional_files.clone(),
+        validation_warnings: data_quality.validation_warnings.clone(),
+        validation_errors: data_quality.validation_errors.clone(),
+    };
+    output.push_str(&stutter_report::render::text::quality::render_data_quality(&mapped_data_quality));
 
     if pressure_timeline_has_pressure(pressure_timeline) {
         output.push_str(&render_pressure_timeline_summary(pressure_timeline));
@@ -519,7 +400,14 @@ pub(crate) fn render_report(input: TextReportRenderInput<'_>) -> String {
     pushln(&mut output, "--------------");
     pushln(
         &mut output,
-        render_cluster_source(cluster_analysis, cluster_window_ms),
+        stutter_report::render::text::cluster::render_cluster_source(&stutter_report::model::SpikeClusterAnalysis {
+            source: match cluster_analysis.source {
+                crate::report::model::SpikeClusterSource::SpikeEvents => stutter_report::model::SpikeClusterSource::SpikeEvents,
+                crate::report::model::SpikeClusterSource::TopSpikesFallback => stutter_report::model::SpikeClusterSource::TopSpikesFallback,
+            },
+            source_count: cluster_analysis.source_count,
+            clusters: vec![],
+        }, cluster_window_ms),
     );
     pushln(
         &mut output,
@@ -544,7 +432,8 @@ pub(crate) fn render_report(input: TextReportRenderInput<'_>) -> String {
         );
     } else {
         for (rank, cluster) in cluster_analysis.clusters.iter().take(top).enumerate() {
-            pushln(&mut output, render_cluster(rank + 1, cluster));
+            let mapped_cluster = map_cluster(cluster);
+            pushln(&mut output, stutter_report::render::text::cluster::render_cluster(rank + 1, &mapped_cluster));
         }
     }
     pushln(&mut output, "");
@@ -553,12 +442,23 @@ pub(crate) fn render_report(input: TextReportRenderInput<'_>) -> String {
         pushln(&mut output, "frame spike diagnoses");
         pushln(&mut output, "---------------------");
         for (rank, diag) in frame_diagnoses.iter().take(top).enumerate() {
-            pushln(&mut output, render_frame_diagnosis(rank + 1, diag));
+            let mapped_diag = stutter_report::model::FrameDiagnosis {
+                frame_elapsed_ms: diag.frame_elapsed_ms,
+                frametime_ms: diag.frametime_ms,
+                diagnosis: map_diagnosis(&diag.diagnosis),
+            };
+            pushln(&mut output, stutter_report::render::text::frame::render_frame_diagnosis(rank + 1, &mapped_diag));
         }
         pushln(&mut output, "");
     }
 
-    render_correlation_sections(&mut output, correlation_sections);
+    let mapped_correlation_sections = stutter_report::model::TextReportCorrelationSections {
+        sections: correlation_sections.sections.iter().map(|s| stutter_report::model::TextReportCorrelationSection {
+            title: s.title.clone(),
+            lines: s.lines.clone(),
+        }).collect(),
+    };
+    stutter_report::render::text::correlation::render_correlation_sections(&mut output, &mapped_correlation_sections);
 
     output
 }
@@ -671,256 +571,79 @@ pub(crate) fn render_runtime_slice_summary(
     output
 }
 
-pub(crate) fn render_cluster_source(
-    analysis: &SpikeClusterAnalysis,
-    cluster_window_ms: u64,
-) -> String {
-    let source = match analysis.source {
-        SpikeClusterSource::SpikeEvents => "source=spike_events",
-        SpikeClusterSource::TopSpikesFallback => "source=top_spikes fallback",
-    };
-    format!(
-        "{source} count={} window_ms={} min_tasks={}",
-        analysis.source_count, cluster_window_ms, MIN_CLUSTER_TASKS
-    )
-}
-
-pub(crate) fn render_correlation_sections(
-    output: &mut String,
-    correlations: &TextReportCorrelationSections,
-) {
-    for section in &correlations.sections {
-        pushln(output, &section.title);
-        pushln(output, "-".repeat(section.title.len()));
-        for line in &section.lines {
-            pushln(output, line);
-        }
-        pushln(output, "");
+fn map_diagnosis(d: &crate::diagnosis::Diagnosis) -> stutter_report::model::Diagnosis {
+    stutter_report::model::Diagnosis {
+        primary: d.primary.as_ref().map(|p| stutter_report::model::DiagnosisPrimary {
+            cause: format!("{:?}", p.cause),
+            confidence: format!("{:?}", p.confidence),
+            score: p.score,
+            evidence: p.evidence.iter().map(|e| stutter_report::model::DiagnosisEvidence {
+                kind: format!("{:?}", e.kind),
+                strength: e.strength,
+                message: e.message.clone(),
+            }).collect(),
+        }),
+        candidates: d.candidates.iter().map(|c| stutter_report::model::DiagnosisCandidate {
+            cause: format!("{:?}", c.cause),
+            confidence: format!("{:?}", c.confidence),
+            score: c.score,
+            evidence: c.evidence.iter().map(|e| stutter_report::model::DiagnosisEvidence {
+                kind: format!("{:?}", e.kind),
+                strength: e.strength,
+                message: e.message.clone(),
+            }).collect(),
+        }).collect(),
+        missing_evidence: d.missing_evidence.clone(),
+        candidate_rejections: d.candidate_rejections.iter().map(|r| stutter_report::model::DiagnosisRejection {
+            cause: format!("{:?}", r.cause),
+            score: r.score,
+            confidence: format!("{:?}", r.confidence),
+            reasons: r.reasons.clone(),
+        }).collect(),
+        secondary_causes: d.secondary_causes.iter().map(|s| format!("{:?}", s)).collect(),
+        report_summary: d.report_summary().to_owned(),
     }
 }
 
-pub(crate) fn render_cluster(rank: usize, cluster: &SpikeCluster) -> String {
-    let labels = cluster_labels(cluster);
-    let labels = if labels.is_empty() {
-        "-".to_owned()
-    } else {
-        labels.join(",")
-    };
-    let span_ns = cluster.max_switch_ns.saturating_sub(cluster.min_switch_ns);
-    let elapsed = cluster_elapsed(cluster);
-    let cpu_list = cluster
-        .points
-        .iter()
-        .map(|point| point.cpu)
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .map(|cpu| cpu.to_string())
-        .collect::<Vec<_>>()
-        .join(",");
-    let shown_points = cluster.points.len().min(MAX_INLINE_CLUSTER_POINTS);
-    let omitted_points = cluster.points.len().saturating_sub(shown_points);
-    let points = cluster
-        .points
-        .iter()
-        .take(MAX_INLINE_CLUSTER_POINTS)
-        .map(render_cluster_point)
-        .collect::<Vec<_>>()
-        .join(" ");
-
-    let diagnosis_line = if let Some(d) = &cluster.diagnosis {
-        format!("\n{}", render_diagnosis_lines(d, "  "))
-    } else {
-        String::new()
-    };
-
-    let wake_block = if cluster.wake_graph.is_empty() {
-        String::new()
-    } else {
-        let mut wake_lines = Vec::new();
-        wake_lines.push("\n  wake relationships:".to_owned());
-        for edge in &cluster.wake_graph {
-            wake_lines.push(format!(
-                "    {} [{}] woke {} [{}] (count={}, max_lat={})",
-                edge.waker_comm,
-                edge.waker_tid,
-                edge.wakee_comm,
-                edge.wakee_tid,
-                edge.count,
-                format_latency(edge.max_latency_ns)
-            ));
-        }
-        wake_lines.join("\n")
-    };
-
-    format!(
-        "#{rank} elapsed={} span={} tasks={} total_spikes={} shown_points={} omitted_points={} cpus={} labels={} max={} switch_ns={}..{} points={}{}{}",
-        format_elapsed(elapsed),
-        format_latency(span_ns),
-        cluster.distinct_tasks,
-        cluster.points.len(),
-        shown_points,
-        omitted_points,
-        cpu_list,
-        labels,
-        format_latency(cluster.max_latency_ns),
-        cluster.min_switch_ns,
-        cluster.max_switch_ns,
-        points,
-        diagnosis_line,
-        wake_block
-    )
+pub(crate) fn map_spike_point(p: &crate::spike::SpikePoint) -> stutter_report::model::SpikePoint {
+    stutter_report::model::SpikePoint {
+        task: p.task,
+        class: format!("{:?}", p.class),
+        process_pid: p.process_pid,
+        comm: p.comm.clone(),
+        cpu: p.cpu,
+        wakeup_target_cpu: p.wakeup_target_cpu,
+        latency_ns: p.latency_ns,
+        wakeup_ns: p.wakeup_ns,
+        switch_ns: p.switch_ns,
+        target_pending_wakeups: p.target_pending_wakeups,
+        observed_runnable_depth: p.observed_runnable_depth,
+        switch_prev_pid: p.switch_prev_pid,
+        switch_prev_state: p.switch_prev_state,
+        switch_prev_state_label: p.switch_prev_state_label.clone(),
+        scx_ops: p.scx_ops.clone(),
+        primary_cause: p.primary_cause.clone(),
+        cause_tags: p.cause_tags.clone(),
+    }
 }
 
-pub(crate) fn render_diagnosis_lines(diagnosis: &Diagnosis, indent: &str) -> String {
-    let mut output = String::new();
-    pushln(
-        &mut output,
-        format!("{indent}diagnosis: {}", diagnosis.report_summary()),
-    );
-    output.push_str(&render_diagnosis_detail_lines(diagnosis, indent));
-    output.trim_end().to_owned()
-}
-
-pub(crate) fn render_diagnosis_detail_lines(diagnosis: &Diagnosis, indent: &str) -> String {
-    let mut output = String::new();
-    if !diagnosis.secondary_causes.is_empty() {
-        pushln(
-            &mut output,
-            format!(
-                "{indent}diagnosis_secondary causes={:?}",
-                diagnosis.secondary_causes
-            ),
-        );
+pub(crate) fn map_cluster(c: &crate::spike::SpikeCluster) -> stutter_report::model::SpikeCluster {
+    stutter_report::model::SpikeCluster {
+        points: c.points.iter().map(map_spike_point).collect(),
+        distinct_tasks: c.distinct_tasks,
+        min_switch_ns: c.min_switch_ns,
+        max_switch_ns: c.max_switch_ns,
+        max_latency_ns: c.max_latency_ns,
+        diagnosis: c.diagnosis.as_ref().map(map_diagnosis),
+        wake_graph: c.wake_graph.iter().map(|w| stutter_report::model::WakeGraphEdge {
+            waker_tid: w.waker_tid,
+            waker_comm: w.waker_comm.clone(),
+            wakee_tid: w.wakee_tid,
+            wakee_comm: w.wakee_comm.clone(),
+            count: w.count,
+            max_latency_ns: w.max_latency_ns,
+        }).collect(),
     }
-
-    pushln(
-        &mut output,
-        format!("{indent}why this diagnosis was chosen:"),
-    );
-    if let Some(primary) = &diagnosis.primary {
-        pushln(
-            &mut output,
-            format!(
-                "{indent}  - primary={:?} confidence={:?} score={:.2}",
-                primary.cause, primary.confidence, primary.score
-            ),
-        );
-        for evidence in primary.evidence.iter().take(6) {
-            pushln(
-                &mut output,
-                format!(
-                    "{indent}  - evidence kind={:?} strength={:.2} msg={}",
-                    evidence.kind, evidence.strength, evidence.message
-                ),
-            );
-        }
-    } else {
-        pushln(
-            &mut output,
-            format!("{indent}  - no primary candidate met the reporting threshold"),
-        );
-    }
-
-    pushln(
-        &mut output,
-        format!("{indent}evidence missing / not strong enough:"),
-    );
-    if diagnosis.missing_evidence.is_empty() {
-        pushln(&mut output, format!("{indent}  - none recorded"));
-    } else {
-        for missing in diagnosis.missing_evidence.iter().take(6) {
-            pushln(&mut output, format!("{indent}  - {missing}"));
-        }
-    }
-
-    if !diagnosis.candidate_rejections.is_empty() {
-        pushln(&mut output, format!("{indent}why not primary:"));
-        for rejection in diagnosis.candidate_rejections.iter().take(3) {
-            pushln(
-                &mut output,
-                format!(
-                    "{indent}  - {:?} score={:.2} confidence={:?}",
-                    rejection.cause, rejection.score, rejection.confidence
-                ),
-            );
-            for reason in rejection.reasons.iter().take(3) {
-                pushln(&mut output, format!("{indent}    - {reason}"));
-            }
-        }
-    }
-
-    pushln(&mut output, format!("{indent}diagnosis candidates:"));
-    for candidate in diagnosis.candidates.iter().take(3) {
-        pushln(
-            &mut output,
-            format!(
-                "{indent}  - diagnosis_candidate cause={:?} confidence={:?} score={:.2} evidence_items={}",
-                candidate.cause,
-                candidate.confidence,
-                candidate.score,
-                candidate.evidence.len()
-            ),
-        );
-    }
-
-    if diagnosis.candidates.is_empty() {
-        pushln(&mut output, format!("{indent}  - none recorded"));
-    }
-
-    output.trim_end().to_owned()
-}
-
-pub(crate) fn render_cluster_point(point: &SpikePoint) -> String {
-    let scx = if let Some(ops) = &point.scx_ops {
-        format!(" scx_ops={ops}")
-    } else {
-        String::new()
-    };
-    let prev_label = classify_switch_prev_state(point.switch_prev_state);
-    format!(
-        "{}({:?}:{} cpu={} wakeup_target_cpu={} latency={} switch_ns={} process_pid={} wakeup_ns={} observed_runnable_depth={} target_pending_wakeups={}(diag) switch_prev_pid={} switch_prev_state={} switch_prev_state_label={}{}{}{})",
-        point.task,
-        point.class,
-        point.comm,
-        point.cpu,
-        point.wakeup_target_cpu,
-        format_latency(point.latency_ns),
-        point.switch_ns,
-        format_process_pid(point.process_pid),
-        point.wakeup_ns,
-        point.observed_runnable_depth,
-        point.target_pending_wakeups,
-        point.switch_prev_pid,
-        point.switch_prev_state,
-        prev_label,
-        scx,
-        if let Some(p) = &point.primary_cause {
-            format!(" primary_cause={}", p)
-        } else {
-            String::new()
-        },
-        if !point.cause_tags.is_empty() {
-            format!(" tags={}", point.cause_tags.join(","))
-        } else {
-            String::new()
-        }
-    )
-}
-
-pub(crate) fn render_frame_diagnosis(rank: usize, diag: &FrameDiagnosis) -> String {
-    let mut output = String::new();
-    pushln(
-        &mut output,
-        format!(
-            "{}. elapsed={}ms frametime={:.1}ms diagnosis: {}",
-            rank,
-            diag.frame_elapsed_ms,
-            diag.frametime_ms,
-            diag.diagnosis.report_summary()
-        ),
-    );
-    output.push_str(&render_diagnosis_detail_lines(&diag.diagnosis, "  "));
-    output.trim_end().to_owned()
 }
 
 fn pressure_timeline_has_pressure(summary: &PressureTimelineSummary) -> bool {

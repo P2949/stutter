@@ -55,16 +55,15 @@ mod tests {
         assert_eq!(request.path(), Path::new("runs/run-001"));
 
         let error = match load_report_model(&request) {
-            Ok(_) => panic!("loading should remain an explicit migration placeholder"),
+            Ok(_) => panic!("loading a missing file should return an error"),
             Err(error) => error,
         };
 
         match error {
-            ReportError::UnsupportedOperation { operation, reason } => {
-                assert_eq!(operation, "load_report_model");
-                assert!(reason.contains("not been migrated"));
+            ReportError::Load { path, .. } => {
+                assert_eq!(path, Path::new("runs/run-001"));
             }
-            other => panic!("expected unsupported loading placeholder, got {other}"),
+            other => panic!("expected load error, got {other}"),
         }
     }
 }

@@ -42,7 +42,7 @@ fn render_cluster_uses_cautious_diagnosis_wording() {
         0,
     ));
 
-    let output = render_cluster(1, &cluster);
+    let output = stutter_report::render::text::cluster::render_cluster(1, &crate::report::render::text::map_cluster(&cluster));
 
     assert!(output.contains("diagnosis: GameThreadSchedulerDelay: strong candidate"));
     assert!(output.contains("profiler inference"));

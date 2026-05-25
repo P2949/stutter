@@ -1,0 +1,28 @@
+file: minimal.json
+schema: 22
+expected_schema: 22
+run: -
+duration_ms: 1000
+stop_reason: user
+manual_pids: []
+tree_roots: []
+include_comm: []
+exclude_comm: []
+watch_process: -
+persistent: false
+csv_stream: -
+active_tasks_at_end: 0
+
+data quality
+------------
+level: High
+schema: 22 expected=22
+event_stream_write_errors: 0
+spike_events: retained=0 dropped=0 truncated=false
+interval_records: 0
+active_target_pids: 0
+drop_counters_nonzero: false
+percentile_scope_counts: {}
+block_io_correlation_basis: none (confidence: high)
+frame_timestamp_alignment: none
+cpu_perf: requested=false open_errors=0 read_errors=0 skipped_tasks=0

@@ -4,19 +4,50 @@ use serde::{Deserialize, Serialize};
 use stutter_core::{ids::RunId, paths::LogicalPath, units::UnixNanoseconds};
 
 /// Minimal report domain model placeholder for future report migration.
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ReportModel {
     pub run_id: Option<RunId>,
     pub source_path: Option<LogicalPath>,
     pub generated_at_unix_nanos: Option<UnixNanoseconds>,
+    pub header: Option<ReportHeaderSummary>,
+    pub data_quality: Option<DataQualitySummary>,
+    #[serde(default)]
+    pub clusters: Vec<SpikeCluster>,
+    #[serde(default)]
+    pub frames: Vec<FrameDiagnosis>,
+    pub correlations: Option<TextReportCorrelationSections>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ReportHeaderSummary {
+    pub file_path: String,
+    pub schema_version: u32,
+    pub expected_schema_version: u32,
+    pub run_name: String,
+    pub duration_ms: u64,
+    pub stop_reason: String,
+    pub manual_pids: Vec<u32>,
+    pub tree_roots: Vec<u32>,
+    pub include_comm: Vec<String>,
+    pub exclude_comm: Vec<String>,
+    pub event_stream_warning: Option<String>,
+    pub watch_process: String,
+    pub persistent: bool,
+    pub csv_stream: String,
+    pub active_target_pids_count: u64,
 }
 
 impl ReportModel {
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             run_id: None,
             source_path: None,
             generated_at_unix_nanos: None,
+            header: None,
+            data_quality: None,
+            clusters: Vec::new(),
+            frames: Vec::new(),
+            correlations: None,
         }
     }
 
@@ -52,7 +83,7 @@ impl ReportModel {
 }
 
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpikeDensityBucket {
     pub start_ms: u64,
     pub end_ms: u64,
@@ -61,13 +92,13 @@ pub struct SpikeDensityBucket {
     pub p99_latency_ms: f64,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum SpikeClusterSource {
     SpikeEvents,
     TopSpikesFallback,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ArtifactsSummary {
     pub spike_count: u64,
     pub frame_count: u64,
@@ -89,7 +120,7 @@ pub struct ArtifactsSummary {
     pub gpu_engine_sample_count: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct KmsTimingSummary {
     pub event_count: usize,
     pub duration_count: usize,
@@ -101,7 +132,7 @@ pub struct KmsTimingSummary {
     pub notes: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ScanoutWindowEstimate {
     pub estimate_count: usize,
     pub refresh_period_ns: Option<u64>,
@@ -113,7 +144,7 @@ pub struct ScanoutWindowEstimate {
     pub notes: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DrmFenceTimingSummary {
     pub event_count: usize,
     pub wait_interval_count: usize,
@@ -131,7 +162,7 @@ pub struct DrmFenceTimingSummary {
     pub confidence: String,
 }
 
-#[derive(Debug, Clone, Serialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DrmFenceWaitSummary {
     pub elapsed_ms: u64,
     pub duration_ms: Option<f64>,
@@ -143,7 +174,7 @@ pub struct DrmFenceWaitSummary {
     pub confidence: String,
 }
 
-#[derive(Debug, Clone, Serialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CrossGpuFenceSummary {
     pub candidate_count: usize,
     pub high_confidence_count: usize,
@@ -158,7 +189,7 @@ pub struct CrossGpuFenceSummary {
     pub notes: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CrossGpuFenceCandidate {
     pub elapsed_ms: u64,
     pub duration_ms: Option<f64>,
@@ -175,7 +206,7 @@ pub struct CrossGpuFenceCandidate {
     pub confidence: String,
 }
 
-#[derive(Debug, Clone, Serialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct WaylandPresentationSummary {
     pub event_count: usize,
     pub presented_count: usize,
@@ -195,7 +226,7 @@ pub struct WaylandPresentationSummary {
     pub notes: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DirectScanoutSummary {
     pub status: String,
     pub confidence: String,
@@ -207,7 +238,7 @@ pub struct DirectScanoutSummary {
     pub notes: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DmaBufPathSummary {
     pub event_count: usize,
     pub linear_count: usize,
@@ -219,7 +250,7 @@ pub struct DmaBufPathSummary {
     pub notes: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GpuEngineActivitySummary {
     pub sample_count: usize,
     pub active_sample_count: usize,
@@ -234,7 +265,7 @@ pub struct GpuEngineActivitySummary {
     pub notes: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DisplayPathDiagnosisSummary {
     pub verdict: String,
     pub suspicion_score: f64,
@@ -261,14 +292,14 @@ pub struct DisplayPathDiagnosisSummary {
     pub notes: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DisplayPathComponent {
     pub status: String,
     pub score: f64,
     pub evidence: Vec<String>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DataQualitySummary {
     pub level: DataQualityLevel,
     pub reasons: Vec<String>,
@@ -303,7 +334,7 @@ pub enum DataQualityLevel {
     Low,
 }
 
-#[derive(Debug, Clone, Serialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ForegroundReportSummary {
     pub enabled: bool,
     pub source: Option<String>,
@@ -338,7 +369,7 @@ impl ForegroundReportSummary {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct FocusReportSummary {
     pub mode: Option<String>,
     pub final_focus: Option<String>,
@@ -364,7 +395,7 @@ impl FocusReportSummary {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PressureTimelineSummary {
     pub sample_count: usize,
     pub max_cpu_some: f64,
@@ -378,7 +409,7 @@ pub struct PressureTimelineSummary {
     pub coverage: PressureTimelineCoverage,
 }
 
-#[derive(Debug, Clone, Serialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PressureTimelineCoverage {
     pub interval_records_loaded: usize,
     pub has_cpu_psi: bool,
@@ -387,7 +418,7 @@ pub struct PressureTimelineCoverage {
     pub has_near_spike_windows: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PressurePeakWindow {
     pub elapsed_ms: u64,
     pub pressure_kind: PressureKind,
@@ -395,7 +426,7 @@ pub struct PressurePeakWindow {
     pub near_spike: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PressureKind {
     CpuSome,
     MemSome,
@@ -404,7 +435,7 @@ pub enum PressureKind {
     IoFull,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PressureWindow {
     pub elapsed_ms: u64,
     pub cpu_some: f64,
@@ -415,7 +446,7 @@ pub struct PressureWindow {
     pub near_spike: bool,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct TextReportCorrelationSections {
     pub sections: Vec<TextReportCorrelationSection>,
 }
@@ -432,10 +463,115 @@ impl TextReportCorrelationSections {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TextReportCorrelationSection {
     pub title: String,
     pub lines: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Diagnosis {
+    pub primary: Option<DiagnosisPrimary>,
+    pub candidates: Vec<DiagnosisCandidate>,
+    pub missing_evidence: Vec<String>,
+    pub candidate_rejections: Vec<DiagnosisRejection>,
+    pub secondary_causes: Vec<String>,
+    pub report_summary: String,
+}
+
+impl Diagnosis {
+    pub fn report_summary(&self) -> &str {
+        &self.report_summary
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DiagnosisPrimary {
+    pub cause: String,
+    pub confidence: String,
+    pub score: f32,
+    pub evidence: Vec<DiagnosisEvidence>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DiagnosisCandidate {
+    pub cause: String,
+    pub confidence: String,
+    pub score: f32,
+    pub evidence: Vec<DiagnosisEvidence>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DiagnosisRejection {
+    pub cause: String,
+    pub score: f32,
+    pub confidence: String,
+    pub reasons: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DiagnosisEvidence {
+    pub kind: String,
+    pub strength: f32,
+    pub message: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SpikeClusterAnalysis {
+    pub source: SpikeClusterSource,
+    pub source_count: usize,
+    pub clusters: Vec<SpikeCluster>,
+}
+
+pub const MIN_CLUSTER_TASKS: usize = 3;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SpikeCluster {
+    pub points: Vec<SpikePoint>,
+    pub distinct_tasks: usize,
+    pub min_switch_ns: u64,
+    pub max_switch_ns: u64,
+    pub max_latency_ns: u64,
+    pub diagnosis: Option<Diagnosis>,
+    pub wake_graph: Vec<WakeGraphEdge>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct WakeGraphEdge {
+    pub waker_tid: u32,
+    pub waker_comm: String,
+    pub wakee_tid: u32,
+    pub wakee_comm: String,
+    pub count: u64,
+    pub max_latency_ns: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SpikePoint {
+    pub task: u32,
+    pub class: String,
+    pub process_pid: Option<u32>,
+    pub comm: String,
+    pub cpu: u32,
+    pub wakeup_target_cpu: u32,
+    pub latency_ns: u64,
+    pub wakeup_ns: u64,
+    pub switch_ns: u64,
+    pub target_pending_wakeups: u32,
+    pub observed_runnable_depth: u32,
+    pub switch_prev_pid: u32,
+    pub switch_prev_state: i64,
+    pub switch_prev_state_label: String,
+    pub scx_ops: Option<String>,
+    pub primary_cause: Option<String>,
+    pub cause_tags: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct FrameDiagnosis {
+    pub frame_elapsed_ms: u64,
+    pub frametime_ms: f64,
+    pub diagnosis: Diagnosis,
 }
 
 impl TextReportCorrelationSection {

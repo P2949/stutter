@@ -1,5 +1,4 @@
-use std::path::Path;
-use std::fs;
+use std::{fs, path::Path};
 
 fn check_dir(dir: &Path, violations: &mut Vec<String>) {
     if let Ok(entries) = fs::read_dir(dir) {
@@ -25,6 +24,9 @@ fn test_no_scratch_dirs() {
     check_dir(workspace_root, &mut violations);
 
     if !violations.is_empty() {
-        panic!("Found forbidden 'scratch' directories in repository:\n{:#?}", violations);
+        panic!(
+            "Found forbidden 'scratch' directories in repository:\n{:#?}",
+            violations
+        );
     }
 }
