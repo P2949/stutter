@@ -12,16 +12,16 @@ use aya_ebpf::{
 };
 use stutter_common::{
     BPF_DEFAULT_EVENTS_RINGBUF_BYTES, BPF_MAX_TRACKED_CPUS, CpuFreqEvent, DRM_FENCE_EVENT_SIGNAL,
-    DRM_FENCE_EVENT_WAIT_INTERVAL, DRM_FENCE_HAS_CONTEXT, DRM_FENCE_HAS_DURATION,
-    DRM_FENCE_HAS_PID, DRM_FENCE_HAS_SEQNO, DRM_FENCE_HAS_TIMELINE, DRM_FENCE_IS_EXPORTER_SIDE,
-    DRM_FENCE_IS_IMPORTER_SIDE, DRM_FENCE_WAIT_DONE_WITHOUT_START, DROP_COUNTERS_MAX, DROP_CPU_ACCOUNTING_UNTRACKED,
-    DROP_IRQ_START_TIMES_INSERT_FAILED, DRM_FENCE_EVENT_WAIT_DONE,
-    DROP_WAKEUP_DATA_CONSUMED_READ_FAILED, DROP_WAKEUP_DATA_INSERT_FAILED,
-    DROP_WAKEUP_DATA_REPLACED_ENTRY, DROP_WAKEUP_DATA_STALE_ENTRY, DrmFenceEvent, EVENT_CPU_FREQ,
-    EVENT_DRM_FENCE, EVENT_EXEC, EVENT_IRQ_LATENCY, EVENT_MIGRATION, EVENT_RUNNABLE_LATENCY,
-    EVENT_STAT_WAIT, ExecEvent, IrqEvent, KMS_FLIP_EVENT_PAGEFLIP_DONE, KMS_FLIP_EVENT_VBLANK,
-    KMS_FLIP_PROVIDER_AMDGPU, KMS_FLIP_PROVIDER_DRM, KMS_FLIP_PROVIDER_I915, MigrationEvent,
-    SchedulerEvent, StatWaitEvent,
+    DRM_FENCE_EVENT_WAIT_DONE, DRM_FENCE_EVENT_WAIT_INTERVAL, DRM_FENCE_HAS_CONTEXT,
+    DRM_FENCE_HAS_DURATION, DRM_FENCE_HAS_PID, DRM_FENCE_HAS_SEQNO, DRM_FENCE_HAS_TIMELINE,
+    DRM_FENCE_IS_EXPORTER_SIDE, DRM_FENCE_IS_IMPORTER_SIDE, DRM_FENCE_WAIT_DONE_WITHOUT_START,
+    DROP_COUNTERS_MAX, DROP_CPU_ACCOUNTING_UNTRACKED, DROP_DRM_FENCE_MISSING_START,
+    DROP_IRQ_START_TIMES_INSERT_FAILED, DROP_WAKEUP_DATA_CONSUMED_READ_FAILED,
+    DROP_WAKEUP_DATA_INSERT_FAILED, DROP_WAKEUP_DATA_REPLACED_ENTRY, DROP_WAKEUP_DATA_STALE_ENTRY,
+    DrmFenceEvent, EVENT_CPU_FREQ, EVENT_DRM_FENCE, EVENT_EXEC, EVENT_IRQ_LATENCY, EVENT_MIGRATION,
+    EVENT_RUNNABLE_LATENCY, EVENT_STAT_WAIT, ExecEvent, IrqEvent, KMS_FLIP_EVENT_PAGEFLIP_DONE,
+    KMS_FLIP_EVENT_VBLANK, KMS_FLIP_PROVIDER_AMDGPU, KMS_FLIP_PROVIDER_DRM, KMS_FLIP_PROVIDER_I915,
+    MigrationEvent, SchedulerEvent, StatWaitEvent,
     tracepoint_offsets::{
         CPU_FREQUENCY_CPU_ID_OFFSET, CPU_FREQUENCY_STATE_OFFSET, IRQ_HANDLER_IRQ_OFFSET,
         SCHED_MIGRATE_TASK_DEST_CPU_OFFSET, SCHED_MIGRATE_TASK_ORIG_CPU_OFFSET,
@@ -1320,24 +1320,27 @@ fn try_drm_fence_wait_done(ctx: TracePointContext) -> u32 {
                     0
                 },
         ),
-        None => (
-            DRM_FENCE_EVENT_WAIT_DONE,
-            0,
-            0,
-            0,
-            0,
-            signal.map(|signal| signal.provider).unwrap_or(0),
-            0,
-            signal.map(|signal| signal.ts).unwrap_or(0),
-            signal.map(|signal| signal.provider).unwrap_or(0),
-            DRM_FENCE_WAIT_DONE_WITHOUT_START
-                | DRM_FENCE_IS_IMPORTER_SIDE
-                | if signal.is_some() {
-                    DRM_FENCE_IS_EXPORTER_SIDE
-                } else {
-                    0
-                },
-        ),
+        None => {
+            increment_drop_counter(DROP_DRM_FENCE_MISSING_START);
+            (
+                DRM_FENCE_EVENT_WAIT_DONE,
+                0,
+                0,
+                0,
+                0,
+                signal.map(|signal| signal.provider).unwrap_or(0),
+                0,
+                signal.map(|signal| signal.ts).unwrap_or(0),
+                signal.map(|signal| signal.provider).unwrap_or(0),
+                DRM_FENCE_WAIT_DONE_WITHOUT_START
+                    | DRM_FENCE_IS_IMPORTER_SIDE
+                    | if signal.is_some() {
+                        DRM_FENCE_IS_EXPORTER_SIDE
+                    } else {
+                        0
+                    },
+            )
+        }
     };
 
     emit_ringbuf_event!(
