@@ -15,6 +15,7 @@ mod ebpf_layout;
 mod file_size;
 mod objectives;
 mod public_api;
+mod rolling_window_privacy;
 mod scanners;
 mod test_layout;
 mod transitional;

@@ -615,12 +615,17 @@ fn data_quality_warns_on_drm_fence_missing_start() {
         data_quality_summary(&session, &crate::session_io::RunValidationReport::default());
 
     assert_eq!(summary.level, DataQualityLevel::Medium);
-    assert!(summary.reasons.iter().any(|reason| {
-        reason.contains("drm_fence_missing_start=5")
-    }));
-    assert!(summary.reasons.iter().any(|reason| {
-        reason.contains("DRM fence latency evidence is degraded or incomplete")
-    }));
+    assert!(
+        summary
+            .reasons
+            .iter()
+            .any(|reason| { reason.contains("drm_fence_missing_start=5") })
+    );
+    assert!(
+        summary.reasons.iter().any(|reason| {
+            reason.contains("DRM fence latency evidence is degraded or incomplete")
+        })
+    );
 }
 
 #[test]
@@ -631,7 +636,7 @@ fn text_rendering_includes_drm_fence_missing_start_warning() {
     session.core.drop_counters.drm_fence_missing_start = 7;
     let artifacts = session_io::RunArtifacts::default();
     let data_quality = data_quality_summary(&session, &artifacts.validation);
-    
+
     let rendered = render_report(TextReportRenderInput {
         path: Path::new("session.json"),
         session: &session,
@@ -655,5 +660,9 @@ fn text_rendering_includes_drm_fence_missing_start_warning() {
 
     assert!(rendered.contains("drm fence warning"));
     assert!(rendered.contains("drm_fence_missing_start=7"));
-    assert!(rendered.contains("DRM fence wait-done events were observed without matching wait-start records"));
+    assert!(
+        rendered.contains(
+            "DRM fence wait-done events were observed without matching wait-start records"
+        )
+    );
 }
