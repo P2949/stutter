@@ -9,6 +9,7 @@ pub mod dependency_hygiene;
 pub mod ebpf_smoke;
 pub mod fixtures;
 pub mod preflight;
+pub mod maturity_report;
 
 use crate::workflow::{CommandSpec, run_workflow, run_command_specs};
 use crate::process::run_cargo;
@@ -17,6 +18,7 @@ use crate::dependency_hygiene::run_dependency_hygiene;
 use crate::ebpf_smoke::{run_privileged_ebpf_smoke, EBPF_BUILD_COMMAND};
 use crate::fixtures::{SCHEMA_CHECK_WORKFLOW, FIXTURE_CHECK_WORKFLOW, FIXTURE_UPDATE_WORKFLOW, REPORT_GOLDEN_UPDATE_WORKFLOW};
 use crate::preflight::run_preflight;
+use crate::maturity_report::run_maturity_report;
 
 #[derive(Debug, Parser)]
 #[command(name = "xtask", about = "Stutter development workflow tasks")]
@@ -94,6 +96,8 @@ pub enum XtaskCommand {
     GenerateCompletions,
     #[command(about = "Scaffold for package build workflow")]
     Package,
+    #[command(name = "maturity-report", about = "Print maturity progress report")]
+    MaturityReport,
 }
 
 pub const CI_COMMANDS: &[CommandSpec] = &[
@@ -221,6 +225,7 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
             scaffold_only("package");
             Ok(())
         }
+        XtaskCommand::MaturityReport => run_maturity_report(&root),
     }
 }
 
@@ -278,6 +283,7 @@ mod tests {
                 "fmt",
                 "generate-completions",
                 "generate-man",
+                "maturity-report",
                 "no-allow-attrs",
                 "package",
                 "preflight",
