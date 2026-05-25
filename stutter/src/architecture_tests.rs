@@ -22,6 +22,7 @@ mod transitional;
 mod transitional_allowlist;
 mod typed_ids;
 mod unwrap_expect;
+mod scratch_dir;
 
 const RUST_FILE_SIZE_LIMIT_LINES: usize = 1_000;
 
