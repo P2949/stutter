@@ -605,3 +605,55 @@ fn runtime_slice_summary_reports_sources_and_top_threads() {
     assert_eq!(summary.source_counts.get("proc_schedstat"), Some(&1));
     assert_eq!(summary.high_runtime_threads[0].task, 42);
 }
+
+#[test]
+fn data_quality_warns_on_drm_fence_missing_start() {
+    let mut session = minimal_session_for_report_test();
+    session.core.drop_counters.drm_fence_missing_start = 5;
+
+    let summary =
+        data_quality_summary(&session, &crate::session_io::RunValidationReport::default());
+
+    assert_eq!(summary.level, DataQualityLevel::Medium);
+    assert!(summary.reasons.iter().any(|reason| {
+        reason.contains("drm_fence_missing_start=5")
+    }));
+    assert!(summary.reasons.iter().any(|reason| {
+        reason.contains("DRM fence latency evidence is degraded or incomplete")
+    }));
+}
+
+#[test]
+fn text_rendering_includes_drm_fence_missing_start_warning() {
+    use super::render::text::{TextReportRenderInput, render_report};
+
+    let mut session = minimal_session_for_report_test();
+    session.core.drop_counters.drm_fence_missing_start = 7;
+    let artifacts = session_io::RunArtifacts::default();
+    let data_quality = data_quality_summary(&session, &artifacts.validation);
+    
+    let rendered = render_report(TextReportRenderInput {
+        path: Path::new("session.json"),
+        session: &session,
+        cluster_analysis: &SpikeClusterAnalysis {
+            source: SpikeClusterSource::TopSpikesFallback,
+            source_count: 0,
+            clusters: vec![],
+        },
+        frame_diagnoses: &[],
+        data_quality: &data_quality,
+        pressure_timeline: &PressureTimelineSummary::default(),
+        runtime_slice_summary: &RuntimeSliceAnalysisSummary::default(),
+        correlation_sections: &TextReportCorrelationSections::new(),
+        focus_summary: &FocusReportSummary::default(),
+        foreground_summary: &ForegroundReportSummary::default(),
+        display_path_diagnosis: None,
+        top: 10,
+        cluster_window_ms: 500,
+        filter_class: None,
+    });
+
+    assert!(rendered.contains("drm fence warning"));
+    assert!(rendered.contains("drm_fence_missing_start=7"));
+    assert!(rendered.contains("DRM fence wait-done events were observed without matching wait-start records"));
+}
