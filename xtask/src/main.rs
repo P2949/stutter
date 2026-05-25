@@ -1,24 +1,32 @@
-use std::{
-    collections::BTreeSet,
-    env, fs,
-    path::{Path, PathBuf},
-    process::Command as ProcessCommand,
-};
-
+use std::{env, path::PathBuf};
 use anyhow::{Context, bail};
 use clap::{Parser, Subcommand};
 
-const DEFAULT_TOOLCHAIN: &str = "nightly";
+pub mod process;
+pub mod workflow;
+pub mod no_allow_attrs;
+pub mod dependency_hygiene;
+pub mod ebpf_smoke;
+pub mod fixtures;
+pub mod preflight;
+
+use crate::workflow::{CommandSpec, run_workflow, run_command_specs};
+use crate::process::run_cargo;
+use crate::no_allow_attrs::run_no_allow_attrs;
+use crate::dependency_hygiene::run_dependency_hygiene;
+use crate::ebpf_smoke::{run_privileged_ebpf_smoke, EBPF_BUILD_COMMAND};
+use crate::fixtures::{SCHEMA_CHECK_WORKFLOW, FIXTURE_CHECK_WORKFLOW, FIXTURE_UPDATE_WORKFLOW, REPORT_GOLDEN_UPDATE_WORKFLOW};
+use crate::preflight::run_preflight;
 
 #[derive(Debug, Parser)]
 #[command(name = "xtask", about = "Stutter development workflow tasks")]
-struct Cli {
+pub struct Cli {
     #[command(subcommand)]
-    command: XtaskCommand,
+    pub command: XtaskCommand,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Subcommand)]
-enum XtaskCommand {
+pub enum XtaskCommand {
     #[command(about = "Run the non-root CI workflow used by local development")]
     Ci,
     #[command(about = "Check Rust formatting")]
@@ -88,21 +96,7 @@ enum XtaskCommand {
     Package,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct CommandSpec {
-    program: &'static str,
-    args: &'static [&'static str],
-}
-
-#[derive(Clone, Copy, Debug)]
-struct WorkflowSpec {
-    name: &'static str,
-    description: &'static str,
-    affected_paths: &'static [&'static str],
-    commands: &'static [CommandSpec],
-}
-
-const CI_COMMANDS: &[CommandSpec] = &[
+pub const CI_COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         program: "cargo",
         args: &["fmt", "--check"],
@@ -137,21 +131,7 @@ const CI_COMMANDS: &[CommandSpec] = &[
     },
 ];
 
-const EBPF_BUILD_COMMAND: CommandSpec = CommandSpec {
-    program: "cargo",
-    args: &["build", "-p", "stutter"],
-};
-
-const PRIVILEGED_EBPF_SMOKE_TEST_COMMAND: CommandSpec = CommandSpec {
-    program: "cargo",
-    args: &["test", "-p", "stutter", "privileged_", "--", "--nocapture"],
-};
-
-#[cfg(test)]
-const PRIVILEGED_EBPF_SMOKE_COMMANDS: &[CommandSpec] =
-    &[EBPF_BUILD_COMMAND, PRIVILEGED_EBPF_SMOKE_TEST_COMMAND];
-
-const VALIDATION_COMMANDS: &[CommandSpec] = &[
+pub const VALIDATION_COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         program: "cargo",
         args: &["fmt", "--check"],
@@ -187,7 +167,7 @@ const VALIDATION_COMMANDS: &[CommandSpec] = &[
     },
 ];
 
-const SMOKE_COMMANDS: &[CommandSpec] = &[
+pub const SMOKE_COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         program: "bash",
         args: &["scripts/smoke/build.sh"],
@@ -201,146 +181,6 @@ const SMOKE_COMMANDS: &[CommandSpec] = &[
         args: &["scripts/smoke/advisor_offline.sh"],
     },
 ];
-
-const DEPENDENCY_HYGIENE_COMMANDS: &[CommandSpec] = &[CommandSpec {
-    program: "cargo",
-    args: &["deny", "check"],
-}];
-
-const DUPLICATE_DEPENDENCY_COMMAND: CommandSpec = CommandSpec {
-    program: "cargo",
-    args: &["tree", "-d"],
-};
-
-const APPROVED_DUPLICATE_PACKAGES: &[&str] = &[
-    "bitflags",
-    "either",
-    "foldhash",
-    "getrandom",
-    "hashbrown",
-    "indexmap",
-    "linux-raw-sys",
-    "memchr",
-    "r-efi",
-    "rand",
-    "rand_chacha",
-    "rand_core",
-    "rustix",
-    "serde",
-    "serde_core",
-    "serde_json",
-    "socket2",
-    "stutter-common",
-    "syn",
-    "thiserror",
-    "thiserror-impl",
-    "tower",
-    "which",
-    "windows-sys",
-    "wit-bindgen",
-];
-
-const SCHEMA_CHECK_COMMANDS: &[CommandSpec] = &[CommandSpec {
-    program: "cargo",
-    args: &["test", "-p", "stutter", "artifact_contract_tests"],
-}];
-
-const FIXTURE_CHECK_COMMANDS: &[CommandSpec] = &[CommandSpec {
-    program: "cargo",
-    args: &["test", "-p", "stutter", "validation_corpus"],
-}];
-
-const FIXTURE_UPDATE_COMMANDS: &[CommandSpec] = &[
-    CommandSpec {
-        program: "cargo",
-        args: &[
-            "test",
-            "-p",
-            "stutter",
-            "validation_corpus_tests::regenerate_validation_corpus",
-            "--",
-            "--ignored",
-            "--exact",
-        ],
-    },
-    CommandSpec {
-        program: "cargo",
-        args: &[
-            "test",
-            "-p",
-            "stutter",
-            "validation_corpus_tests::regenerate_public_examples_v22",
-            "--",
-            "--ignored",
-            "--exact",
-        ],
-    },
-];
-
-const REPORT_GOLDEN_UPDATE_COMMANDS: &[CommandSpec] = &[CommandSpec {
-    program: "cargo",
-    args: &[
-        "test",
-        "-p",
-        "stutter",
-        "report::tests::report_text_rendering_matches_snapshot_fixture",
-        "--",
-        "--exact",
-    ],
-}];
-
-const DEPENDENCY_HYGIENE_WORKFLOW: WorkflowSpec = WorkflowSpec {
-    name: "dependency-hygiene",
-    description: "validates cargo-deny policy and rejects newly introduced duplicate dependency families",
-    affected_paths: &[
-        "Cargo.toml",
-        "Cargo.lock",
-        "deny.toml",
-        "*/Cargo.toml",
-        "xtask/src/main.rs",
-    ],
-    commands: DEPENDENCY_HYGIENE_COMMANDS,
-};
-
-const SCHEMA_CHECK_WORKFLOW: WorkflowSpec = WorkflowSpec {
-    name: "schema-check",
-    description: "validates artifact contract tests and public example artifact schema expectations",
-    affected_paths: &[
-        "stutter/src/artifact_contract_tests.rs",
-        "docs/examples/artifacts/v22/**",
-    ],
-    commands: SCHEMA_CHECK_COMMANDS,
-};
-
-const FIXTURE_CHECK_WORKFLOW: WorkflowSpec = WorkflowSpec {
-    name: "fixture-check",
-    description: "validates committed validation corpus fixtures and fixture metadata",
-    affected_paths: &[
-        "stutter/src/validation_corpus_tests/",
-        "stutter/tests/fixtures/runs/**",
-    ],
-    commands: FIXTURE_CHECK_COMMANDS,
-};
-
-const FIXTURE_UPDATE_WORKFLOW: WorkflowSpec = WorkflowSpec {
-    name: "fixture-update",
-    description: "updates validation corpus fixtures and public v22 example artifact fixtures",
-    affected_paths: &[
-        "stutter/tests/fixtures/runs/**",
-        "docs/examples/artifacts/v22/**",
-    ],
-    commands: FIXTURE_UPDATE_COMMANDS,
-};
-
-const REPORT_GOLDEN_UPDATE_WORKFLOW: WorkflowSpec = WorkflowSpec {
-    name: "report-golden-update",
-    description: "validates the committed report text golden output fixture",
-    affected_paths: &[
-        "stutter/src/report/snapshots/text_report_minimal.snap",
-        "stutter/src/report/mod.rs",
-    ],
-    commands: REPORT_GOLDEN_UPDATE_COMMANDS,
-};
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
@@ -384,392 +224,8 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
     }
 }
 
-fn run_privileged_ebpf_smoke(root: &Path) -> anyhow::Result<()> {
-    if !cfg!(target_os = "linux") {
-        bail!("privileged eBPF smoke tests require Linux");
-    }
-
-    run_preflight()?;
-    run_process(root, EBPF_BUILD_COMMAND.program, EBPF_BUILD_COMMAND.args)?;
-    run_process_with_env(
-        root,
-        PRIVILEGED_EBPF_SMOKE_TEST_COMMAND.program,
-        PRIVILEGED_EBPF_SMOKE_TEST_COMMAND.args,
-        &[("STUTTER_RUN_PRIVILEGED_EBPF_TESTS", "1")],
-    )
-}
-
-fn run_preflight() -> anyhow::Result<()> {
-    check_program_on_path(
-        "cargo",
-        "install Rust with rustup, then run this command from the repository root",
-    )?;
-    if env::var_os("STUTTER_USE_PREBUILT_BPF").as_deref() == Some(std::ffi::OsStr::new("1")) {
-        check_prebuilt_bpf_object()?;
-    } else {
-        check_program_on_path(
-            "bpf-linker",
-            "install it with `cargo install bpf-linker`, or build stutter with STUTTER_USE_PREBUILT_BPF=1 and STUTTER_BPF_OBJECT=/path/to/stutter",
-        )?;
-    }
-
-    let toolchain = rustup_toolchain();
-    let output = if let Some(path) = executable_on_path("rustup") {
-        println!("rustup OK: {}", path.display());
-        let output = ProcessCommand::new("rustup")
-            .args(["run", toolchain.as_str(), "rustc", "--version"])
-            .output()
-            .with_context(|| format!("failed to query rustup toolchain `{toolchain}`"))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!(
-                "rustup toolchain `{}` is not usable: {}. Install it with `rustup toolchain install {}` and include rust-src/rustfmt/clippy components.",
-                toolchain,
-                stderr.trim(),
-                toolchain
-            );
-        }
-        output
-    } else {
-        check_program_on_path(
-            "rustc",
-            "install Rust or include rustc on PATH so the configured toolchain can be checked",
-        )?;
-        let output = ProcessCommand::new("rustc")
-            .arg("--version")
-            .env("RUSTUP_TOOLCHAIN", toolchain.as_str())
-            .output()
-            .context("failed to query rustc version")?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!("rustc on PATH is not usable: {}", stderr.trim());
-        }
-        output
-    };
-
-    let version = String::from_utf8_lossy(&output.stdout);
-    println!("toolchain `{toolchain}` OK: {}", version.trim());
-    println!(
-        "preflight OK: build as your normal user, then run the built binary with sudo/doas when eBPF loading needs privileges"
-    );
-    Ok(())
-}
-
-fn check_prebuilt_bpf_object() -> anyhow::Result<()> {
-    let object = env::var_os("STUTTER_BPF_OBJECT")
-        .map(PathBuf::from)
-        .ok_or_else(|| anyhow::anyhow!("STUTTER_USE_PREBUILT_BPF=1 requires STUTTER_BPF_OBJECT"))?;
-
-    if !object.is_file() {
-        bail!(
-            "STUTTER_BPF_OBJECT must point at an existing BPF object file: {}",
-            object.display()
-        );
-    }
-
-    println!("prebuilt BPF object OK: {}", object.display());
-    Ok(())
-}
-
-fn check_program_on_path(program: &str, hint: &str) -> anyhow::Result<PathBuf> {
-    if let Some(path) = executable_on_path(program) {
-        println!("{program} OK: {}", path.display());
-        return Ok(path);
-    }
-
-    bail!("required program `{program}` was not found on PATH; {hint}")
-}
-
-fn executable_on_path(program: &str) -> Option<PathBuf> {
-    let paths = env::var_os("PATH")?;
-    env::split_paths(&paths)
-        .map(|dir| dir.join(program))
-        .find(|path| path.is_file())
-}
-
-fn run_no_allow_attrs(root: &Path) -> anyhow::Result<()> {
-    let matches = find_allow_attributes(root)?;
-    if matches.is_empty() {
-        return Ok(());
-    }
-
-    println!("Rust allow attributes are forbidden:");
-    for allow_match in matches {
-        println!(
-            "{}:{}: {}",
-            allow_match.path.display(),
-            allow_match.line,
-            allow_match.text.trim()
-        );
-    }
-
-    bail!("remove Rust allow attributes and fix the lint directly")
-}
-
-#[derive(Debug, Eq, PartialEq)]
-struct AllowAttributeMatch {
-    path: PathBuf,
-    line: usize,
-    text: String,
-}
-
-fn find_allow_attributes(root: &Path) -> anyhow::Result<Vec<AllowAttributeMatch>> {
-    let mut matches = Vec::new();
-    for source_dir in rust_source_roots(root) {
-        collect_allow_attributes(root, &source_dir, &mut matches)?;
-    }
-    Ok(matches)
-}
-
-fn rust_source_roots(root: &Path) -> Vec<PathBuf> {
-    [
-        "stutter",
-        "stutter-common",
-        "stutter-config",
-        "stutter-core",
-        "stutter-ebpf",
-        "stutter-report",
-        "xtask",
-    ]
-    .into_iter()
-    .map(|path| root.join(path))
-    .collect()
-}
-
-fn collect_allow_attributes(
-    root: &Path,
-    dir: &Path,
-    matches: &mut Vec<AllowAttributeMatch>,
-) -> anyhow::Result<()> {
-    if !dir.exists() {
-        return Ok(());
-    }
-
-    for entry in fs::read_dir(dir).with_context(|| format!("failed to read {}", dir.display()))? {
-        let entry = entry.with_context(|| format!("failed to read entry in {}", dir.display()))?;
-        let path = entry.path();
-        let file_type = entry
-            .file_type()
-            .with_context(|| format!("failed to read file type for {}", path.display()))?;
-
-        if file_type.is_dir() {
-            collect_allow_attributes(root, &path, matches)?;
-        } else if path.extension().is_some_and(|extension| extension == "rs") {
-            scan_allow_attribute_file(root, &path, matches)?;
-        }
-    }
-
-    Ok(())
-}
-
-const OUTER_ATTR_PREFIX: &str = "#[";
-const INNER_ATTR_PREFIX: &str = "#![";
-const ALLOW_CALL: &str = "allow(";
-
-fn scan_allow_attribute_file(
-    root: &Path,
-    path: &Path,
-    matches: &mut Vec<AllowAttributeMatch>,
-) -> anyhow::Result<()> {
-    let content =
-        fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
-    let relative_path = path.strip_prefix(root).unwrap_or(path);
-
-    let inner_allow = format!("{INNER_ATTR_PREFIX}{ALLOW_CALL}");
-    let outer_allow = format!("{OUTER_ATTR_PREFIX}{ALLOW_CALL}");
-
-    for (line_index, line) in content.lines().enumerate() {
-        let compact = line.split_whitespace().collect::<String>();
-        if compact.contains(&inner_allow)
-            || compact.contains(&outer_allow)
-            || (compact.contains("cfg_attr(") && compact.contains(ALLOW_CALL))
-        {
-            matches.push(AllowAttributeMatch {
-                path: relative_path.to_path_buf(),
-                line: line_index + 1,
-                text: line.to_owned(),
-            });
-        }
-    }
-
-    Ok(())
-}
-
-fn run_dependency_hygiene(root: &Path) -> anyhow::Result<()> {
-    print_workflow_header(DEPENDENCY_HYGIENE_WORKFLOW);
-    run_command_specs(root, DEPENDENCY_HYGIENE_WORKFLOW.commands)
-        .with_context(|| workflow_failure_message(DEPENDENCY_HYGIENE_WORKFLOW))?;
-    run_duplicate_dependency_check(root)
-        .with_context(|| workflow_failure_message(DEPENDENCY_HYGIENE_WORKFLOW))
-}
-
-fn run_workflow(root: &Path, workflow: WorkflowSpec) -> anyhow::Result<()> {
-    print_workflow_header(workflow);
-    run_command_specs(root, workflow.commands).with_context(|| workflow_failure_message(workflow))
-}
-
-fn print_workflow_header(workflow: WorkflowSpec) {
-    println!("xtask {}: {}", workflow.name, workflow.description);
-    println!("xtask {} affected paths:", workflow.name);
-    for path in workflow.affected_paths {
-        println!("  - {path}");
-    }
-}
-
-fn workflow_failure_message(workflow: WorkflowSpec) -> String {
-    format!(
-        "xtask {} failed while processing affected paths: {}",
-        workflow.name,
-        workflow.affected_paths.join(", ")
-    )
-}
-
-fn run_command_specs(root: &Path, commands: &[CommandSpec]) -> anyhow::Result<()> {
-    for command in commands {
-        run_process(root, command.program, command.args)?;
-    }
-    Ok(())
-}
-
-fn run_duplicate_dependency_check(root: &Path) -> anyhow::Result<()> {
-    let output = run_process_capture_stdout(
-        root,
-        DUPLICATE_DEPENDENCY_COMMAND.program,
-        DUPLICATE_DEPENDENCY_COMMAND.args,
-    )?;
-    let duplicate_names = duplicate_package_names(&output);
-    let approved_names = APPROVED_DUPLICATE_PACKAGES
-        .iter()
-        .copied()
-        .collect::<BTreeSet<_>>();
-
-    let unexpected_names = duplicate_names
-        .iter()
-        .filter(|name| !approved_names.contains(name.as_str()))
-        .cloned()
-        .collect::<Vec<_>>();
-
-    if !unexpected_names.is_empty() {
-        bail!(
-            "duplicate dependency check found unapproved duplicate packages: {}. Inspect `cargo tree -d` and either unify versions or add a deliberate allowlist entry in xtask/src/main.rs.",
-            unexpected_names.join(", ")
-        );
-    }
-
-    Ok(())
-}
-
-fn duplicate_package_names(output: &str) -> Vec<String> {
-    let mut names = BTreeSet::new();
-
-    for line in output.lines() {
-        let Some(first) = line.chars().next() else {
-            continue;
-        };
-
-        if first.is_whitespace() || matches!(first, '├' | '└' | '│') {
-            continue;
-        }
-
-        let Some((name, version_tail)) = line.split_once(" v") else {
-            continue;
-        };
-
-        if version_tail
-            .chars()
-            .next()
-            .is_some_and(|character| character.is_ascii_digit())
-        {
-            names.insert(name.to_owned());
-        }
-    }
-
-    names.into_iter().collect()
-}
-
 fn scaffold_only(name: &str) {
     println!("xtask {name}: scaffold only; workflow not wired yet");
-}
-
-fn run_cargo(root: &Path, args: &[&str]) -> anyhow::Result<()> {
-    run_process(root, "cargo", args)
-}
-
-fn run_process(root: &Path, program: &str, args: &[&str]) -> anyhow::Result<()> {
-    run_process_with_env(root, program, args, &[])
-}
-
-fn run_process_with_env(
-    root: &Path,
-    program: &str,
-    args: &[&str],
-    extra_env: &[(&str, &str)],
-) -> anyhow::Result<()> {
-    let command_text = format_command(program, args);
-    println!("--- STAGE: {command_text} ---");
-
-    let mut command = ProcessCommand::new(program);
-    command
-        .args(args)
-        .current_dir(root)
-        .env("RUSTUP_TOOLCHAIN", rustup_toolchain());
-    for (key, value) in extra_env {
-        command.env(key, value);
-    }
-
-    let status = command
-        .status()
-        .with_context(|| format!("failed to start `{command_text}`"))?;
-
-    if !status.success() {
-        bail!("command `{command_text}` failed with status {status}");
-    }
-
-    Ok(())
-}
-
-fn run_process_capture_stdout(root: &Path, program: &str, args: &[&str]) -> anyhow::Result<String> {
-    let command_text = format_command(program, args);
-    println!("--- STAGE: {command_text} ---");
-
-    let output = ProcessCommand::new(program)
-        .args(args)
-        .current_dir(root)
-        .env("RUSTUP_TOOLCHAIN", rustup_toolchain())
-        .output()
-        .with_context(|| format!("failed to start `{command_text}`"))?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-
-    if !stdout.is_empty() {
-        print!("{stdout}");
-    }
-    if !stderr.is_empty() {
-        eprint!("{stderr}");
-    }
-
-    if !output.status.success() {
-        bail!(
-            "command `{command_text}` failed with status {}",
-            output.status
-        );
-    }
-
-    Ok(stdout)
-}
-
-fn rustup_toolchain() -> String {
-    env::var("RUSTUP_TOOLCHAIN").unwrap_or_else(|_| DEFAULT_TOOLCHAIN.to_owned())
-}
-
-fn format_command(program: &str, args: &[&str]) -> String {
-    std::iter::once(program)
-        .chain(args.iter().copied())
-        .collect::<Vec<_>>()
-        .join(" ")
 }
 
 fn repo_root() -> anyhow::Result<PathBuf> {
@@ -792,14 +248,14 @@ fn repo_root() -> anyhow::Result<PathBuf> {
 mod tests {
     use clap::CommandFactory;
 
+    use crate::dependency_hygiene::{APPROVED_DUPLICATE_PACKAGES, DEPENDENCY_HYGIENE_COMMANDS, DEPENDENCY_HYGIENE_WORKFLOW, DUPLICATE_DEPENDENCY_COMMAND, duplicate_package_names};
+    use crate::ebpf_smoke::PRIVILEGED_EBPF_SMOKE_COMMANDS;
+    use crate::fixtures::{SCHEMA_CHECK_COMMANDS, SCHEMA_CHECK_WORKFLOW, FIXTURE_CHECK_COMMANDS, FIXTURE_CHECK_WORKFLOW, FIXTURE_UPDATE_COMMANDS, FIXTURE_UPDATE_WORKFLOW, REPORT_GOLDEN_UPDATE_COMMANDS, REPORT_GOLDEN_UPDATE_WORKFLOW};
+    use crate::no_allow_attrs::scan_allow_attribute_file;
+    use crate::process::format_command;
+
     use super::{
-        APPROVED_DUPLICATE_PACKAGES, CI_COMMANDS, Cli, DEPENDENCY_HYGIENE_COMMANDS,
-        DEPENDENCY_HYGIENE_WORKFLOW, DUPLICATE_DEPENDENCY_COMMAND, FIXTURE_CHECK_COMMANDS,
-        FIXTURE_CHECK_WORKFLOW, FIXTURE_UPDATE_COMMANDS, FIXTURE_UPDATE_WORKFLOW,
-        PRIVILEGED_EBPF_SMOKE_COMMANDS, REPORT_GOLDEN_UPDATE_COMMANDS,
-        REPORT_GOLDEN_UPDATE_WORKFLOW, SCHEMA_CHECK_COMMANDS, SCHEMA_CHECK_WORKFLOW,
-        SMOKE_COMMANDS, VALIDATION_COMMANDS, duplicate_package_names, format_command,
-        scan_allow_attribute_file,
+        CI_COMMANDS, Cli, SMOKE_COMMANDS, VALIDATION_COMMANDS
     };
 
     #[test]
@@ -1046,7 +502,7 @@ syn v2.0.117
         );
     }
 
-    fn command_texts(commands: &[super::CommandSpec]) -> Vec<String> {
+    fn command_texts(commands: &[crate::workflow::CommandSpec]) -> Vec<String> {
         commands
             .iter()
             .map(|command| format_command(command.program, command.args))
