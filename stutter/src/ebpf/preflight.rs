@@ -110,16 +110,23 @@ pub fn tracepoint_preflight(
     );
 
     let irq_entry = events_root.join("irq/irq_handler_entry/format");
+    let irq_exit = events_root.join("irq/irq_handler_exit/format");
+
     let irq_handler = if !wants_irq_latency {
         "not_requested".to_owned()
-    } else if irq_entry.exists() {
+    } else if irq_entry.exists() && irq_exit.exists() {
         let entry_ok = validate_tracepoint_format_at_named(
             &irq_entry,
             "irq_handler_entry",
             IRQ_HANDLER_FIELDS,
         )
         .is_ok();
-        if entry_ok {
+
+        let exit_ok =
+            validate_tracepoint_format_at_named(&irq_exit, "irq_handler_exit", IRQ_HANDLER_FIELDS)
+                .is_ok();
+
+        if entry_ok && exit_ok {
             "ok".to_owned()
         } else {
             warnings.push("IRQ tracepoint formats are present but layouts differ".to_owned());
@@ -302,14 +309,20 @@ pub(crate) fn validate_tracepoint_formats(
     };
 
     let irq_entry = events_root.join("irq/irq_handler_entry/format");
-    let irq_handler = if config.probes.irq_latency && irq_entry.exists() {
+    let irq_exit = events_root.join("irq/irq_handler_exit/format");
+
+    let irq_handler = if config.probes.irq_latency && irq_entry.exists() && irq_exit.exists() {
         validate_tracepoint_format_at_named(&irq_entry, "irq_handler_entry", IRQ_HANDLER_FIELDS)?;
+        validate_tracepoint_format_at_named(&irq_exit, "irq_handler_exit", IRQ_HANDLER_FIELDS)?;
         true
     } else {
         false
     };
+
     if !irq_handler && config.probes.irq_latency {
-        log::warn!("IRQ tracepoint formats missing; continuing without IRQ latency probe");
+        log::warn!(
+            "IRQ tracepoint formats missing; irq_handler_entry and irq_handler_exit are both required; continuing without IRQ latency probe"
+        );
     }
 
     let block_io = if config.probes.block_io {

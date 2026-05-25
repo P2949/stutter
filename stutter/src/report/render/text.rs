@@ -376,6 +376,19 @@ pub(crate) fn render_report(input: TextReportRenderInput<'_>) -> String {
         }
     }
 
+    let drm_fence_missing_start = session.core.drop_counters.drm_fence_missing_start;
+    if drm_fence_missing_start > 0 {
+        pushln(&mut output, "drm fence warning");
+        pushln(&mut output, "-----------------");
+        pushln(
+            &mut output,
+            format!(
+                "note: drm_fence_missing_start={drm_fence_missing_start}; DRM fence wait-done events were observed without matching wait-start records, so some fence latency durations are incomplete."
+            ),
+        );
+        pushln(&mut output, "");
+    }
+
     let truncated = session
         .tasks
         .iter()

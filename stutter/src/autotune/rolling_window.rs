@@ -40,15 +40,15 @@ const GPU_POWER_LIMIT_LOW_CLOCK_MHZ: u32 = 300;
 #[derive(Debug, Clone)]
 pub struct RollingWindow {
     pub duration: Duration,
-    pub intervals: VecDeque<IntervalRecord>,
-    pub frames: VecDeque<FrameEvent>,
-    pub diagnoses: VecDeque<LiveDiagnosisEntry>,
-    pub irq_events: VecDeque<IrqEventRecord>,
-    pub block_io_events: VecDeque<BlockIoRecord>,
-    pub gpu_samples: VecDeque<GpuSample>,
-    pub cpu_freq_events: VecDeque<CpuFreqRecord>,
-    pub foreground_events: VecDeque<ForegroundEvent>,
-    pub dropped_invalid_frames: u64,
+    intervals: VecDeque<IntervalRecord>,
+    frames: VecDeque<FrameEvent>,
+    diagnoses: VecDeque<LiveDiagnosisEntry>,
+    irq_events: VecDeque<IrqEventRecord>,
+    block_io_events: VecDeque<BlockIoRecord>,
+    gpu_samples: VecDeque<GpuSample>,
+    cpu_freq_events: VecDeque<CpuFreqRecord>,
+    foreground_events: VecDeque<ForegroundEvent>,
+    dropped_invalid_frames: u64,
 }
 
 impl RollingWindow {
@@ -66,6 +66,15 @@ impl RollingWindow {
             dropped_invalid_frames: 0,
         }
     }
+
+    pub fn intervals(&self) -> &VecDeque<IntervalRecord> { &self.intervals }
+    pub fn frames(&self) -> &VecDeque<FrameEvent> { &self.frames }
+    pub fn diagnoses(&self) -> &VecDeque<LiveDiagnosisEntry> { &self.diagnoses }
+    pub fn irq_events(&self) -> &VecDeque<IrqEventRecord> { &self.irq_events }
+    pub fn block_io_events(&self) -> &VecDeque<BlockIoRecord> { &self.block_io_events }
+    pub fn gpu_samples(&self) -> &VecDeque<GpuSample> { &self.gpu_samples }
+    pub fn cpu_freq_events(&self) -> &VecDeque<CpuFreqRecord> { &self.cpu_freq_events }
+    pub fn foreground_events(&self) -> &VecDeque<ForegroundEvent> { &self.foreground_events }
 
     pub fn duration_ms(&self) -> u64 {
         self.duration.as_millis().min(u128::from(u64::MAX)) as u64
