@@ -6,8 +6,9 @@ use aya::{
 };
 use serde::{Deserialize, Serialize};
 use stutter_common::{
-    DROP_BLOCK_FALLBACK_KEY_COLLISION, DROP_BLOCK_START_INSERT_FAILED,
-    DROP_CPU_ACCOUNTING_UNTRACKED, DROP_IRQ_START_TIMES_INSERT_FAILED, DROP_RINGBUF_RESERVE_FAILED,
+    DROP_BLOCK_FALLBACK_KEY_COLLISION, DROP_BLOCK_START_INSERT_FAILED, DROP_BLOCK_ZERO_KEY,
+    DROP_CPU_ACCOUNTING_UNTRACKED, DROP_DRM_FENCE_MISSING_START,
+    DROP_IRQ_START_TIMES_INSERT_FAILED, DROP_RINGBUF_RESERVE_FAILED,
     DROP_WAKEUP_DATA_CONSUMED_READ_FAILED, DROP_WAKEUP_DATA_INSERT_FAILED,
     DROP_WAKEUP_DATA_REPLACED_ENTRY, DROP_WAKEUP_DATA_STALE_ENTRY,
 };
@@ -158,6 +159,10 @@ pub struct DropCountersSnapshot {
     pub block_fallback_key_collisions: u64,
     #[serde(default)]
     pub cpu_accounting_untracked: u64,
+    #[serde(default)]
+    pub block_zero_keys: u64,
+    #[serde(default)]
+    pub drm_fence_missing_start: u64,
 }
 
 impl DropCountersSnapshot {
@@ -171,6 +176,8 @@ impl DropCountersSnapshot {
             .saturating_add(self.block_start_insert_failed)
             .saturating_add(self.block_fallback_key_collisions)
             .saturating_add(self.cpu_accounting_untracked)
+            .saturating_add(self.block_zero_keys)
+            .saturating_add(self.drm_fence_missing_start)
     }
 
     pub fn total_excluding_block_io(&self) -> u64 {
@@ -181,6 +188,7 @@ impl DropCountersSnapshot {
             .saturating_add(self.ringbuf_reserve_failed)
             .saturating_add(self.irq_start_times_insert_failed)
             .saturating_add(self.cpu_accounting_untracked)
+            .saturating_add(self.drm_fence_missing_start)
     }
 }
 
@@ -222,6 +230,11 @@ impl LoadedEbpf {
             cpu_accounting_untracked: drop_counter_value(
                 &self.drop_counters,
                 DROP_CPU_ACCOUNTING_UNTRACKED,
+            ),
+            block_zero_keys: drop_counter_value(&self.drop_counters, DROP_BLOCK_ZERO_KEY),
+            drm_fence_missing_start: drop_counter_value(
+                &self.drop_counters,
+                DROP_DRM_FENCE_MISSING_START,
             ),
         }
     }

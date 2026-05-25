@@ -342,9 +342,12 @@ pub(crate) fn render_report(input: TextReportRenderInput<'_>) -> String {
 
         let block_fallback_key_collisions =
             session.core.drop_counters.block_fallback_key_collisions;
+        let block_zero_keys = session.core.drop_counters.block_zero_keys;
         let basis = block_io_correlation_basis(session);
         let has_block_fallback_warning = basis == "dev+sector"
-            && (session.core.block_io_event_count > 0 || block_fallback_key_collisions > 0);
+            && (session.core.block_io_event_count > 0
+                || block_fallback_key_collisions > 0
+                || block_zero_keys > 0);
         let should_show_block_io_warning =
             has_block_fallback_warning || (basis == "unavailable" && session.config.block_io);
         if should_show_block_io_warning {
@@ -352,6 +355,14 @@ pub(crate) fn render_report(input: TextReportRenderInput<'_>) -> String {
             pushln(&mut output, "----------------------------");
             if let Some(warning) = block_io_correlation_warning(session) {
                 pushln(&mut output, format!("note: {warning}"));
+            }
+            if block_zero_keys > 0 {
+                pushln(
+                    &mut output,
+                    format!(
+                        "note: block_zero_keys={block_zero_keys}; block I/O samples with reserved zero keys were dropped, so block I/O latency coverage may be incomplete."
+                    ),
+                );
             }
             if block_fallback_key_collisions > 0 {
                 pushln(

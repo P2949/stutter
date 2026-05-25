@@ -11,8 +11,8 @@ use crate::{
     drm_tracepoints::KmsTracepointAvailability,
     ebpf::{
         tracepoint_format::{
-            require_tracepoint_field, validate_optional_tracepoint_format_at,
-            validate_tracepoint_format_at, validate_tracepoint_format_at_named,
+            validate_optional_tracepoint_format_at, validate_tracepoint_format_at,
+            validate_tracepoint_format_at_named,
         },
         tracepoints::{
             block_io::{BlockIoTracepointOffsets, validate_block_io_tracepoint_offsets},
@@ -110,21 +110,16 @@ pub fn tracepoint_preflight(
     );
 
     let irq_entry = events_root.join("irq/irq_handler_entry/format");
-    let irq_exit = events_root.join("irq/irq_handler_exit/format");
     let irq_handler = if !wants_irq_latency {
         "not_requested".to_owned()
-    } else if irq_entry.exists() && irq_exit.exists() {
+    } else if irq_entry.exists() {
         let entry_ok = validate_tracepoint_format_at_named(
             &irq_entry,
             "irq_handler_entry",
             IRQ_HANDLER_FIELDS,
         )
         .is_ok();
-        let exit_ok =
-            validate_tracepoint_format_at_named(&irq_exit, "irq_handler_exit", IRQ_HANDLER_FIELDS)
-                .is_ok()
-                && require_tracepoint_field(&irq_exit, "ret").is_ok();
-        if entry_ok && exit_ok {
+        if entry_ok {
             "ok".to_owned()
         } else {
             warnings.push("IRQ tracepoint formats are present but layouts differ".to_owned());
@@ -307,16 +302,8 @@ pub(crate) fn validate_tracepoint_formats(
     };
 
     let irq_entry = events_root.join("irq/irq_handler_entry/format");
-    let irq_exit = events_root.join("irq/irq_handler_exit/format");
-    let irq_handler = if config.probes.irq_latency && irq_entry.exists() && irq_exit.exists() {
+    let irq_handler = if config.probes.irq_latency && irq_entry.exists() {
         validate_tracepoint_format_at_named(&irq_entry, "irq_handler_entry", IRQ_HANDLER_FIELDS)?;
-        validate_tracepoint_format_at_named(&irq_exit, "irq_handler_exit", IRQ_HANDLER_FIELDS)?;
-
-        // Validation-only for now. The eBPF program does not currently read
-        // irq_handler_exit.ret, but the field must exist for kernels where IRQ exit
-        // semantics are expected by the IRQ tracing path.
-        let _ret_offset = require_tracepoint_field(&irq_exit, "ret")?;
-
         true
     } else {
         false
