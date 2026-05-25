@@ -13,6 +13,12 @@ or `stutter/src/ebpf/maps.rs`.
 | `BPF_DEFAULT_EVENTS_RINGBUF_BYTES` | `stutter-common/src/lib.rs` | `256 KiB` | Fallback `EVENTS` ring-buffer size baked into the BPF object. | Locked kernel memory equal to the ring-buffer byte size, rounded by kernel/page constraints. | Prefer userspace auto-sizing or `--ringbuf-size-kb`; change the fallback only for loader-bypass scenarios. Keep it inside the userspace clamp. |
 | `DROP_COUNTERS_MAX` | `stutter-common/src/lib.rs` | `9` | Number of slots in the shared per-CPU drop-counter ABI. | One `u64` per counter slot per possible CPU, plus kernel map metadata. | Must be greater than the highest `DROP_*` index. Increment it whenever a new drop reason is added. |
 
+Startup diagnostics read `/sys/devices/system/cpu/possible` and warn when the
+maximum possible CPU id is outside `BPF_MAX_TRACKED_CPUS`. This is intentionally
+a warning rather than a hard failure: runnable-latency events remain safe, while
+CPU-indexed runnable-depth and target-pending-wakeup accounting are skipped for
+untracked CPU ids and counted through `DROP_CPU_ACCOUNTING_UNTRACKED`.
+
 ## BPF object map multipliers
 
 These constants live in `stutter-ebpf/src/map_limits.rs`. They are deliberately
