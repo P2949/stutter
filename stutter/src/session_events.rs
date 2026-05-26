@@ -1,12 +1,10 @@
-use std::collections::BTreeMap;
-
 use stutter_common::SchedulerEvent;
 
 use crate::{
     alert::AlertPayload,
     diagnosis::LiveDiagnosisEntry,
     focus::FocusGroupKind,
-    process_tree::TaskInfo,
+    process_tree::TaskMap,
     recorder::{
         BlockIoRecord, CpuFreqRecord, DmaBufEventRecord, DrmFenceEventRecord, FocusEvent,
         ForegroundEvent, FrameEvent, GpuEngineSample, GpuSample, IrqEventRecord,
@@ -22,7 +20,7 @@ pub type DaemonEvent = MonitorEvent;
 pub enum MonitorEvent {
     TargetSnapshot {
         elapsed_ms: u64,
-        active_targets: BTreeMap<u32, TaskInfo>,
+        active_targets: TaskMap,
         removed_targets: Vec<u32>,
     },
     Interval {

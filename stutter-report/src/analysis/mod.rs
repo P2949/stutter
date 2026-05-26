@@ -2,7 +2,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::model::ReportModel;
 
-/// Minimal analysis summary placeholder for future report analysis migration.
+/// Migration-boundary analysis summary for crate-local report tests.
+///
+/// Full report analysis still lives in the main crate until the migration
+/// checklist moves each analyzer behind this crate.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ReportAnalysis {
     pub run_id: Option<String>,
@@ -18,7 +21,7 @@ impl ReportAnalysis {
     }
 }
 
-/// Build a minimal analysis summary from the skeleton report model.
+/// Build the currently migrated analysis summary from the report model.
 pub fn analyze_report_model(model: &ReportModel) -> ReportAnalysis {
     ReportAnalysis::from_model(model)
 }

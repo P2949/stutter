@@ -26,8 +26,8 @@ pub use crate::process::{
     model::{
         CachedProcInfo, CompiledPattern, DEFAULT_MAX_PROC_SCAN_MS, DEFAULT_MAX_THREADS_PER_PROCESS,
         ProcInfo, ProcessCache, ScanBudget, ScanBudgetReport, TargetDiffAction, TargetDiffRef,
-        TargetSnapshot, TargetSnapshotInput, TaskClass, TaskFilters, TaskInfo, same_logical_task,
-        sched_policy_name,
+        TargetSnapshot, TargetSnapshotInput, TaskClass, TaskFilters, TaskInfo, TaskMap,
+        same_logical_task, sched_policy_name,
     },
     procfs::{
         descendants_of, scan_processes_at, task_comm_at, thread_ids_of_at, thread_ids_of_at_limited,

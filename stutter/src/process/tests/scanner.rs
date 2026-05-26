@@ -6,6 +6,7 @@
 use std::{fs, path::Path};
 
 use super::*;
+use crate::process::model::ProcScanWarningKind;
 
 #[test]
 fn detects_gamescope_as_auto_target() {
@@ -255,4 +256,98 @@ fn process_cache_replaced_when_pid_recreated_with_new_comm() {
     let third = scan_processes_at(proc_root, &mut cache, &budget, &mut budget_report3);
     assert_eq!(third.get(&100).unwrap().comm, "new");
     assert_eq!(cache.entries.get(&100).unwrap().info.comm, "new");
+}
+
+#[test]
+fn scan_processes_warns_for_partial_procfs_records() {
+    let temp = tempfile::tempdir().unwrap();
+    let proc_root = temp.path();
+    let pid_dir = proc_root.join("300");
+    fs::create_dir_all(&pid_dir).unwrap();
+    fs::write(pid_dir.join("status"), "Name:\tpartial\nPPid:\t1\n").unwrap();
+    fs::write(
+        pid_dir.join("stat"),
+        "300 (partial) S 1 300 0 0 -1 0 0 0 0 0 0 0 0 20 0 1 0 1000 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n",
+    )
+    .unwrap();
+
+    let mut cache = ProcessCache::default();
+    let budget = ScanBudget::default_proc_scan();
+    let mut report = ScanBudgetReport::default();
+
+    let processes = scan_processes_at(proc_root, &mut cache, &budget, &mut report);
+
+    assert_eq!(
+        processes.get(&300).map(|info| info.comm.as_str()),
+        Some("partial")
+    );
+    assert!(has_warning(
+        &report,
+        300,
+        None,
+        ProcScanWarningKind::Cmdline
+    ));
+    assert!(has_warning(&report, 300, None, ProcScanWarningKind::Cgroup));
+    assert!(has_warning(
+        &report,
+        300,
+        None,
+        ProcScanWarningKind::ExePath
+    ));
+}
+
+#[test]
+fn scan_processes_warns_and_skips_disappeared_process_dirs() {
+    let temp = tempfile::tempdir().unwrap();
+    let proc_root = temp.path();
+    fs::create_dir_all(proc_root.join("301")).unwrap();
+
+    let mut cache = ProcessCache::default();
+    let budget = ScanBudget::default_proc_scan();
+    let mut report = ScanBudgetReport::default();
+
+    let processes = scan_processes_at(proc_root, &mut cache, &budget, &mut report);
+
+    assert!(!processes.contains_key(&301));
+    assert!(has_warning(
+        &report,
+        301,
+        None,
+        ProcScanWarningKind::ProcessInfo
+    ));
+}
+
+#[test]
+fn target_snapshot_warns_when_task_comm_disappears() {
+    let temp = tempfile::tempdir().unwrap();
+    let proc_root = temp.path();
+    write_fake_process(proc_root, 302, "game", "game-cmd").unwrap();
+    fs::create_dir_all(proc_root.join("302").join("task").join("302")).unwrap();
+
+    let snapshot = target_snapshot(
+        TargetSnapshotInput::default()
+            .proc_root(proc_root)
+            .tree_pids(&[302]),
+    );
+
+    let task = snapshot.tasks.get(&302).unwrap();
+    assert_eq!(task.comm, "game");
+    assert!(has_warning(
+        &snapshot.budget_report,
+        302,
+        Some(302),
+        ProcScanWarningKind::TaskComm
+    ));
+}
+
+fn has_warning(
+    report: &ScanBudgetReport,
+    pid: u32,
+    tid: Option<u32>,
+    kind: ProcScanWarningKind,
+) -> bool {
+    report
+        .warnings
+        .iter()
+        .any(|warning| warning.pid == pid && warning.tid == tid && warning.kind == kind)
 }

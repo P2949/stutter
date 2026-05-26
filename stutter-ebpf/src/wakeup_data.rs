@@ -25,8 +25,18 @@ pub(crate) struct WakeupData {
     pub(crate) ts: u64,
     pub(crate) target_cpu: u32,
     pub(crate) waker_tid: u32,
+    // `seq` distinguishes repeated wakeups for the same PID so WAKEUP_CONSUMED
+    // does not suppress a newer wakeup after an older one was consumed.
     pub(crate) seq: u32,
 }
+
+const _: [(); core::mem::size_of::<WakeupData>()] = [(); 24];
+const _: () = {
+    assert!(core::mem::offset_of!(WakeupData, ts) == 0);
+    assert!(core::mem::offset_of!(WakeupData, target_cpu) == 8);
+    assert!(core::mem::offset_of!(WakeupData, waker_tid) == 12);
+    assert!(core::mem::offset_of!(WakeupData, seq) == 16);
+};
 
 #[map]
 static WAKEUP_DATA: HashMap<u32, WakeupData> =

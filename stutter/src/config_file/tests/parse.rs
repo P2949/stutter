@@ -37,6 +37,38 @@ fn parse_user_config_toml_versioned_accepts_explicit_v1() {
 }
 
 #[test]
+fn parse_user_config_toml_versioned_accepts_schema_version_alias() {
+    let toml = r#"
+            schema_version = 1
+            summary_period_ms = 250
+        "#;
+
+    let parsed = parse_user_config_toml_versioned(toml).unwrap();
+
+    assert_eq!(parsed.version, 1);
+    assert_eq!(parsed.file.config_version, Some(1));
+    assert_eq!(parsed.file.summary_period_ms, Some(250));
+    assert!(parsed.diagnostics.is_empty());
+}
+
+#[test]
+fn parse_user_config_toml_versioned_rejects_conflicting_version_keys() {
+    let toml = r#"
+            config_version = 1
+            schema_version = 2
+        "#;
+
+    let err = parse_user_config_toml_versioned(toml).unwrap_err();
+
+    match err {
+        ConfigError::InvalidConfigVersion { message } => {
+            assert!(message.contains("must match"));
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
+
+#[test]
 fn parse_user_config_toml_versioned_rejects_future_version() {
     let toml = r#"
             config_version = 2
@@ -410,6 +442,8 @@ struct EnvGuard {
 impl EnvGuard {
     fn set(key: &'static str, value: &str) -> Self {
         let old = std::env::var(key).ok();
+        // SAFETY: this guard is used by tests that serialize environment
+        // mutation through the crate test mutex.
         unsafe {
             std::env::set_var(key, value);
         }
@@ -420,10 +454,14 @@ impl EnvGuard {
 impl Drop for EnvGuard {
     fn drop(&mut self) {
         if let Some(old) = &self.old {
+            // SAFETY: this restores process environment while the owning
+            // test still holds the serialization lock.
             unsafe {
                 std::env::set_var(self.key, old);
             }
         } else {
+            // SAFETY: this restores process environment while the owning
+            // test still holds the serialization lock.
             unsafe {
                 std::env::remove_var(self.key);
             }

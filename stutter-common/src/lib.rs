@@ -123,18 +123,95 @@ pub const DROP_CPU_ACCOUNTING_UNTRACKED: u32 = 8;
 pub const DROP_BLOCK_ZERO_KEY: u32 = 9;
 pub const DROP_DRM_FENCE_MISSING_START: u32 = 10;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DropCounterMetadata {
+    pub index: u32,
+    pub constant_name: &'static str,
+    pub field_name: &'static str,
+    pub label: &'static str,
+}
+
 /// Number of per-CPU drop-counter slots shared by the BPF object and userspace.
 ///
 /// This is a count, not the highest valid index. It must always be greater than
 /// every `DROP_*` index above. When adding a new drop reason, add its constant
-/// immediately before this one, increment this count, and update userspace
-/// decoding/tests so the new slot is reported instead of silently ignored.
+/// immediately before this one, increment this count, and update
+/// [`DROP_COUNTER_METADATA`] so docs and report labels cannot silently drift.
 ///
 /// Memory impact: the BPF `DROP_COUNTERS` map is a per-CPU array, so each extra
 /// slot consumes one `u64` per possible CPU plus kernel map metadata. The cost is
 /// small compared with the wakeup maps and ring buffer, but the ABI count still
 /// needs to stay exact.
 pub const DROP_COUNTERS_MAX: u32 = 11;
+
+pub const DROP_COUNTER_METADATA: [DropCounterMetadata; DROP_COUNTERS_MAX as usize] = [
+    DropCounterMetadata {
+        index: DROP_WAKEUP_DATA_INSERT_FAILED,
+        constant_name: "DROP_WAKEUP_DATA_INSERT_FAILED",
+        field_name: "wakeup_data_insert_failed",
+        label: "wakeup data insert failed",
+    },
+    DropCounterMetadata {
+        index: DROP_RINGBUF_RESERVE_FAILED,
+        constant_name: "DROP_RINGBUF_RESERVE_FAILED",
+        field_name: "ringbuf_reserve_failed",
+        label: "ring buffer reserve failed",
+    },
+    DropCounterMetadata {
+        index: DROP_IRQ_START_TIMES_INSERT_FAILED,
+        constant_name: "DROP_IRQ_START_TIMES_INSERT_FAILED",
+        field_name: "irq_start_times_insert_failed",
+        label: "IRQ start-time insert failed",
+    },
+    DropCounterMetadata {
+        index: DROP_BLOCK_START_INSERT_FAILED,
+        constant_name: "DROP_BLOCK_START_INSERT_FAILED",
+        field_name: "block_start_insert_failed",
+        label: "block I/O start insert failed",
+    },
+    DropCounterMetadata {
+        index: DROP_WAKEUP_DATA_STALE_ENTRY,
+        constant_name: "DROP_WAKEUP_DATA_STALE_ENTRY",
+        field_name: "wakeup_data_stale_entries",
+        label: "stale wakeup data entry",
+    },
+    DropCounterMetadata {
+        index: DROP_BLOCK_FALLBACK_KEY_COLLISION,
+        constant_name: "DROP_BLOCK_FALLBACK_KEY_COLLISION",
+        field_name: "block_fallback_key_collisions",
+        label: "block I/O fallback key collision",
+    },
+    DropCounterMetadata {
+        index: DROP_WAKEUP_DATA_REPLACED_ENTRY,
+        constant_name: "DROP_WAKEUP_DATA_REPLACED_ENTRY",
+        field_name: "wakeup_data_replaced_entries",
+        label: "wakeup data replaced before consumption",
+    },
+    DropCounterMetadata {
+        index: DROP_WAKEUP_DATA_CONSUMED_READ_FAILED,
+        constant_name: "DROP_WAKEUP_DATA_CONSUMED_READ_FAILED",
+        field_name: "wakeup_data_consumed_read_failed",
+        label: "consumed wakeup read failed",
+    },
+    DropCounterMetadata {
+        index: DROP_CPU_ACCOUNTING_UNTRACKED,
+        constant_name: "DROP_CPU_ACCOUNTING_UNTRACKED",
+        field_name: "cpu_accounting_untracked",
+        label: "CPU accounting untracked",
+    },
+    DropCounterMetadata {
+        index: DROP_BLOCK_ZERO_KEY,
+        constant_name: "DROP_BLOCK_ZERO_KEY",
+        field_name: "block_zero_keys",
+        label: "block I/O zero key",
+    },
+    DropCounterMetadata {
+        index: DROP_DRM_FENCE_MISSING_START,
+        constant_name: "DROP_DRM_FENCE_MISSING_START",
+        field_name: "drm_fence_missing_start",
+        label: "DRM fence missing wait start",
+    },
+];
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
@@ -383,3 +460,53 @@ const _: () = {
     assert!(core::mem::offset_of!(DrmFenceEvent, _pad0) == 36);
     assert!(core::mem::offset_of!(DrmFenceEvent, context) == 40);
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn drop_counter_metadata_covers_every_slot_with_labels() {
+        assert_eq!(
+            DROP_COUNTER_METADATA.len(),
+            DROP_COUNTERS_MAX as usize,
+            "drop counter metadata must cover every shared ABI slot"
+        );
+
+        let mut seen = [false; DROP_COUNTERS_MAX as usize];
+        for metadata in DROP_COUNTER_METADATA {
+            assert!(
+                (metadata.index as usize) < seen.len(),
+                "{} index {} exceeds DROP_COUNTERS_MAX {}",
+                metadata.constant_name,
+                metadata.index,
+                DROP_COUNTERS_MAX
+            );
+            assert!(
+                !seen[metadata.index as usize],
+                "duplicate drop counter metadata index {}",
+                metadata.index
+            );
+            seen[metadata.index as usize] = true;
+            assert!(
+                !metadata.constant_name.is_empty(),
+                "drop counter metadata must name the constant"
+            );
+            assert!(
+                !metadata.field_name.is_empty(),
+                "{} must have a serialized field name",
+                metadata.constant_name
+            );
+            assert!(
+                !metadata.label.is_empty(),
+                "{} must have a human-readable label",
+                metadata.constant_name
+            );
+        }
+
+        assert!(
+            seen.iter().all(|slot| *slot),
+            "drop counter metadata must not leave ABI slots unlabeled"
+        );
+    }
+}

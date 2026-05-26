@@ -1,0 +1,24 @@
+{
+  "verdict": "reject",
+  "decision": {
+    "kind": "rejected",
+    "rejection": {
+      "kind": "intent_not_allowed",
+      "mode": "observe",
+      "intent": "apply"
+    }
+  },
+  "intent": "apply",
+  "action_id": "test-action",
+  "action_kind": "test",
+  "mode": "observe",
+  "source": "test",
+  "evaluated_rules": [
+    {
+      "rule": "intent_allowed",
+      "passed": false,
+      "reason": "apply intent is not allowed in daemon mode observe"
+    }
+  ],
+  "final_reason": "intent Apply is not allowed in daemon mode observe"
+}

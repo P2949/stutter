@@ -20,6 +20,29 @@ pub enum DecodedEbpfEvent {
     Short { kind: u32, len: usize },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EventDecodeLayout {
+    pub size: usize,
+    pub align: usize,
+}
+
+impl EventDecodeLayout {
+    fn of<T>() -> Self {
+        Self {
+            size: std::mem::size_of::<T>(),
+            align: std::mem::align_of::<T>(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EventDecodeError {
+    Short {
+        actual_len: usize,
+        layout: EventDecodeLayout,
+    },
+}
+
 pub fn decode_ebpf_event(kind: u32, bytes: &[u8]) -> DecodedEbpfEvent {
     match kind {
         EVENT_RUNNABLE_LATENCY => decode_or_short(bytes, kind, DecodedEbpfEvent::Scheduler),
@@ -35,12 +58,33 @@ pub fn decode_ebpf_event(kind: u32, bytes: &[u8]) -> DecodedEbpfEvent {
     }
 }
 
-pub fn read_event_unaligned<T: aya::Pod + Copy>(data: &[u8]) -> Option<T> {
-    if data.len() < std::mem::size_of::<T>() {
+pub fn read_u32_unaligned(data: &[u8]) -> Option<u32> {
+    if data.len() < std::mem::size_of::<u32>() {
         return None;
     }
+    // SAFETY: data length is checked to be at least 4 bytes. read_unaligned handles alignment.
+    Some(unsafe { (data.as_ptr() as *const u32).read_unaligned() })
+}
 
-    Some(unsafe { (data.as_ptr() as *const T).read_unaligned() })
+pub fn read_event_unaligned<T: aya::Pod + Copy>(data: &[u8]) -> Option<T> {
+    read_event_unaligned_checked(data).ok()
+}
+
+pub fn read_event_unaligned_checked<T: aya::Pod + Copy>(
+    data: &[u8],
+) -> Result<T, EventDecodeError> {
+    let layout = EventDecodeLayout::of::<T>();
+    if data.len() < layout.size {
+        return Err(EventDecodeError::Short {
+            actual_len: data.len(),
+            layout,
+        });
+    }
+    debug_assert!(layout.align.is_power_of_two());
+
+    // SAFETY: length is checked above, T is Pod + Copy, and read_unaligned is
+    // used because ring-buffer bytes may not be naturally aligned for T.
+    Ok(unsafe { (data.as_ptr() as *const T).read_unaligned() })
 }
 
 fn decode_or_short<T>(
@@ -51,9 +95,9 @@ fn decode_or_short<T>(
 where
     T: aya::Pod + Copy,
 {
-    match read_event_unaligned::<T>(bytes) {
-        Some(event) => constructor(event),
-        None => DecodedEbpfEvent::Short {
+    match read_event_unaligned_checked::<T>(bytes) {
+        Ok(event) => constructor(event),
+        Err(EventDecodeError::Short { .. }) => DecodedEbpfEvent::Short {
             kind,
             len: bytes.len(),
         },
@@ -61,8 +105,15 @@ where
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
+
+    pub fn as_bytes<T: aya::Pod>(val: &T) -> &[u8] {
+        // SAFETY: val is a Pod, so it is safe to view as bytes.
+        unsafe {
+            std::slice::from_raw_parts((val as *const T).cast::<u8>(), std::mem::size_of::<T>())
+        }
+    }
 
     #[test]
     fn test_unaligned_event_decoding() {
@@ -86,12 +137,7 @@ mod tests {
             switch_prev_state: 0,
         };
 
-        let bytes = unsafe {
-            std::slice::from_raw_parts(
-                &event as *const SchedulerEvent as *const u8,
-                std::mem::size_of::<SchedulerEvent>(),
-            )
-        };
+        let bytes = as_bytes(&event);
 
         let mut misaligned = vec![0u8];
         misaligned.extend_from_slice(bytes);
@@ -115,6 +161,22 @@ mod tests {
     }
 
     #[test]
+    fn checked_decode_reports_required_layout_for_short_input() {
+        let err = read_event_unaligned_checked::<SchedulerEvent>(&[1, 2, 3]).unwrap_err();
+
+        assert_eq!(
+            err,
+            EventDecodeError::Short {
+                actual_len: 3,
+                layout: EventDecodeLayout {
+                    size: std::mem::size_of::<SchedulerEvent>(),
+                    align: std::mem::align_of::<SchedulerEvent>(),
+                },
+            }
+        );
+    }
+
+    #[test]
     fn unknown_event_kind_reports_unknown() {
         let decoded = decode_ebpf_event(9999, &[1, 2, 3]);
 
@@ -128,12 +190,7 @@ mod tests {
             tid: 123,
             delay_ns: 1000,
         };
-        let bytes = unsafe {
-            std::slice::from_raw_parts(
-                &event as *const StatWaitEvent as *const u8,
-                std::mem::size_of::<StatWaitEvent>(),
-            )
-        };
+        let bytes = as_bytes(&event);
         let decoded = decode_ebpf_event(EVENT_STAT_WAIT, bytes);
         assert!(matches!(decoded, DecodedEbpfEvent::StatWait(_)));
         if let DecodedEbpfEvent::StatWait(d) = decoded {
@@ -160,12 +217,7 @@ mod tests {
             duration_ns: 1000,
             timestamp_ns: 3000,
         };
-        let bytes = unsafe {
-            std::slice::from_raw_parts(
-                &event as *const KmsFlipEvent as *const u8,
-                std::mem::size_of::<KmsFlipEvent>(),
-            )
-        };
+        let bytes = as_bytes(&event);
         let decoded = decode_ebpf_event(EVENT_KMS_FLIP, bytes);
         assert!(matches!(decoded, DecodedEbpfEvent::KmsFlip(_)));
         if let DecodedEbpfEvent::KmsFlip(d) = decoded {
@@ -195,12 +247,7 @@ mod tests {
             duration_ns: 1000,
             timestamp_ns: 3000,
         };
-        let bytes = unsafe {
-            std::slice::from_raw_parts(
-                &event as *const DrmFenceEvent as *const u8,
-                std::mem::size_of::<DrmFenceEvent>(),
-            )
-        };
+        let bytes = as_bytes(&event);
         let decoded = decode_ebpf_event(EVENT_DRM_FENCE, bytes);
         assert!(matches!(decoded, DecodedEbpfEvent::DrmFence(_)));
         if let DecodedEbpfEvent::DrmFence(d) = decoded {

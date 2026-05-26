@@ -2,73 +2,62 @@ use stutter_common::ebpf_capacity::{
     DEFAULT_PREV_FAULTS_PER_TARGET_MULTIPLIER, DEFAULT_RUNNABLE_TASK_CPU_PER_TARGET_MULTIPLIER,
     DEFAULT_TARGET_PIDS_MAP_MAX_ENTRIES,
 };
+use stutter_config::{
+    StaticAlertConfig, StaticDiagnosisConfig, StaticFocusConfig, StaticMangoHudConfig,
+    StaticMonitorConfig, StaticOutputConfig, StaticTargetConfig, StaticTimingConfig,
+    StaticWatchConfig,
+};
 
-use crate::config::{ConfigError, TARGET_PIDS_MAX, model::MonitorConfig};
+use crate::config::{ConfigError, model::MonitorConfig};
 
 const MAX_OPERATOR_MAP_ENTRIES: u32 = 1_048_576;
 const MAX_TARGET_IRQS_ENTRIES: u32 = 65_536;
 const MAX_TARGET_CGROUP_IDS_ENTRIES: u32 = 65_536;
 
 pub(crate) fn validate_monitor_config(config: &MonitorConfig) -> Result<(), ConfigError> {
-    require_nonzero("timing.summary_period_ms", config.timing.summary_period_ms)?;
-    require_nonzero(
-        "timing.spike_threshold_ns",
-        config.timing.spike_threshold_ns,
-    )?;
+    validate_static_config(config)?;
+    validate_runtime_config(config)?;
 
-    if matches!(config.timing.epoch_period_ms, Some(0)) {
-        return invalid(
-            "timing.epoch_period_ms",
-            "must be greater than zero when set",
-        );
-    }
+    Ok(())
+}
 
-    require_nonzero(
-        "diagnosis.live_cluster_window_ms",
-        config.diagnosis.live_cluster_window_ms,
-    )?;
-    require_nonzero_usize("target.max_tasks", config.target.max_tasks)?;
+fn validate_static_config(config: &MonitorConfig) -> Result<(), ConfigError> {
+    stutter_config::validate_static_config(&StaticMonitorConfig {
+        timing: StaticTimingConfig {
+            summary_period_ms: config.timing.summary_period_ms,
+            epoch_period_ms: config.timing.epoch_period_ms,
+            spike_threshold_ns: config.timing.spike_threshold_ns,
+        },
+        diagnosis: StaticDiagnosisConfig {
+            live_cluster_window_ms: config.diagnosis.live_cluster_window_ms,
+        },
+        target: StaticTargetConfig::new(config.target.max_tasks),
+        focus: StaticFocusConfig {
+            foreground_poll_ms: config.focus.foreground_poll_ms,
+            auto_focus_poll_ms: config.focus.auto_focus_poll_ms,
+        },
+        watch: StaticWatchConfig {
+            poll_ms: config.watch.poll_ms,
+        },
+        alerts: StaticAlertConfig {
+            threshold_ns: config.alerts.threshold_ns,
+            desktop_timeout_ms: config.alerts.desktop_timeout_ms,
+        },
+        mangohud: StaticMangoHudConfig {
+            tail_idle_sleep_ms: config.mangohud.tail_idle_sleep_ms,
+            alignment_poll_ms: config.mangohud.alignment_poll_ms,
+        },
+        outputs: StaticOutputConfig {
+            otel_service_name: &config.outputs.otel_service_name,
+            otlp_endpoint: config.outputs.otlp_endpoint.as_deref(),
+        },
+    })
+    .map_err(ConfigError::from)
+}
 
-    if config.target.max_tasks > TARGET_PIDS_MAX {
-        return invalid("target.max_tasks", "must not exceed TARGET_PIDS_MAX");
-    }
-
-    require_nonzero("focus.foreground_poll_ms", config.focus.foreground_poll_ms)?;
-    require_nonzero("focus.auto_focus_poll_ms", config.focus.auto_focus_poll_ms)?;
-    require_nonzero("watch.poll_ms", config.watch.poll_ms)?;
+fn validate_runtime_config(config: &MonitorConfig) -> Result<(), ConfigError> {
     require_nonzero_usize("cpu_perf.max_tasks", config.cpu_perf.max_tasks)?;
     require_nonzero_usize("runtime_slices.max_tasks", config.runtime_slices.max_tasks)?;
-
-    if let Some(threshold_ns) = config.alerts.threshold_ns {
-        require_nonzero("alerts.threshold_ns", threshold_ns)?;
-    }
-    require_nonzero(
-        "alerts.desktop_timeout_ms",
-        config.alerts.desktop_timeout_ms,
-    )?;
-    require_at_most(
-        "alerts.desktop_timeout_ms",
-        config.alerts.desktop_timeout_ms,
-        120_000,
-    )?;
-    require_nonzero(
-        "mangohud.tail_idle_sleep_ms",
-        config.mangohud.tail_idle_sleep_ms,
-    )?;
-    require_at_most(
-        "mangohud.tail_idle_sleep_ms",
-        config.mangohud.tail_idle_sleep_ms,
-        5_000,
-    )?;
-    require_nonzero(
-        "mangohud.alignment_poll_ms",
-        config.mangohud.alignment_poll_ms,
-    )?;
-    require_at_most(
-        "mangohud.alignment_poll_ms",
-        config.mangohud.alignment_poll_ms,
-        10_000,
-    )?;
 
     if let Some(kb) = config.ebpf_sizing.ringbuf_size_kb
         && !(64..=16 * 1024).contains(&kb)
@@ -86,17 +75,6 @@ pub(crate) fn validate_monitor_config(config: &MonitorConfig) -> Result<(), Conf
     }
 
     validate_extended_ebpf_sizing(config)?;
-
-    if config.outputs.otel_service_name.trim().is_empty() {
-        return invalid("outputs.otel_service_name", "must not be empty");
-    }
-
-    if matches!(
-        config.outputs.otlp_endpoint.as_deref().map(str::trim),
-        Some("")
-    ) {
-        return invalid("outputs.otlp_endpoint", "must not be empty when set");
-    }
 
     Ok(())
 }
@@ -210,22 +188,6 @@ fn validate_extended_ebpf_sizing(config: &MonitorConfig) -> Result<(), ConfigErr
     Ok(())
 }
 
-fn require_nonzero(field: &'static str, value: u64) -> Result<(), ConfigError> {
-    if value == 0 {
-        invalid(field, "must be greater than zero")
-    } else {
-        Ok(())
-    }
-}
-
-fn require_at_most(field: &'static str, value: u64, max: u64) -> Result<(), ConfigError> {
-    if value > max {
-        invalid(field, format!("must be <= {max}"))
-    } else {
-        Ok(())
-    }
-}
-
 fn require_nonzero_usize(field: &'static str, value: usize) -> Result<(), ConfigError> {
     if value == 0 {
         invalid(field, "must be greater than zero")
@@ -280,7 +242,7 @@ fn require_scaled_map_entries_at_most(
 
 fn invalid<T>(field: &'static str, message: impl Into<String>) -> Result<T, ConfigError> {
     Err(ConfigError::InvalidValue {
-        field,
+        field: field.to_owned(),
         message: message.into(),
     })
 }

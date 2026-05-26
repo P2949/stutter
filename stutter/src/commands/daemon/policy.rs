@@ -242,7 +242,9 @@ mod tests {
 
         assert_eq!(value["error_count"], 0);
         assert!(value["lints"].as_array().unwrap().iter().any(|lint| {
-            lint["reason_code"] == "empty_autonomous_families" && lint["severity"] == "warning"
+            lint["kind"] == "empty_autonomous_families"
+                && lint["reason_code"] == "empty_autonomous_families"
+                && lint["severity"] == "warning"
         }));
     }
 }

@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 mod allow_attributes;
 mod allowlists;
+mod artifact_paths;
 mod autotune_facades;
 mod autotune_focus_policy;
 mod autotune_raw_score;
@@ -13,8 +14,11 @@ mod dependencies;
 mod direct_prints;
 mod ebpf_layout;
 mod file_size;
+mod mutation_paths;
 mod objectives;
+mod panic_paths;
 mod public_api;
+mod raw_ids;
 mod rolling_window_privacy;
 mod scanners;
 mod scratch_dir;
@@ -22,9 +26,11 @@ mod test_layout;
 mod transitional;
 mod transitional_allowlist;
 mod typed_ids;
+mod unsafe_safety;
 mod unwrap_expect;
 
-const RUST_FILE_SIZE_LIMIT_LINES: usize = 1_000;
+const PRODUCTION_RUST_FILE_SIZE_LIMIT_LINES: usize = 700;
+const TEST_RUST_FILE_SIZE_LIMIT_LINES: usize = 1_000;
 
 fn crate_src_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src")

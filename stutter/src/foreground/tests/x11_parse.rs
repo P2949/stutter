@@ -22,12 +22,47 @@ WM_NAME(STRING) = "Kingdom Come: Deliverance"
 
         assert_eq!(snapshot.source, Some(ForegroundSource::X11));
         assert_eq!(snapshot.status, ForegroundProviderStatus::Available);
-        assert_eq!(snapshot.pid, Some(12345));
-        assert_eq!(snapshot.app_id.as_deref(), Some("steam_app_379430"));
-        assert_eq!(snapshot.class.as_deref(), Some("steam_app_379430"));
-        assert_eq!(snapshot.window_id.as_deref(), Some("0x4600007"));
-        assert_eq!(snapshot.title.as_deref(), Some("Kingdom Come: Deliverance"));
-        assert!((snapshot.confidence - 0.90).abs() < f32::EPSILON);
+        assert_eq!(
+            snapshot.decision.target.as_ref().and_then(|t| t.pid),
+            Some(12345)
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.app_id.clone())
+                .as_deref(),
+            Some("steam_app_379430")
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.class.clone())
+                .as_deref(),
+            Some("steam_app_379430")
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.window_id.clone())
+                .as_deref(),
+            Some("0x4600007")
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.title.clone())
+                .as_deref(),
+            Some("Kingdom Come: Deliverance")
+        );
+        assert!((snapshot.decision.confidence - 0.95).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -35,6 +70,7 @@ WM_NAME(STRING) = "Kingdom Come: Deliverance"
         let _lock = crate::test_support::TEST_MUTEX.lock().unwrap();
         let previous = std::env::var_os("DISPLAY");
 
+        // SAFETY: TEST_MUTEX serializes process environment mutation in this test.
         unsafe {
             std::env::remove_var("DISPLAY");
         }
@@ -44,9 +80,18 @@ WM_NAME(STRING) = "Kingdom Come: Deliverance"
 
         assert_eq!(snapshot.source, Some(ForegroundSource::X11));
         assert_eq!(snapshot.status, ForegroundProviderStatus::Unavailable);
-        assert_eq!(snapshot.confidence, 0.0);
-        assert!(snapshot.reason.contains("DISPLAY is not set"));
+        assert_eq!(snapshot.decision.confidence, 0.0);
+        assert!(
+            snapshot
+                .decision
+                .reasons
+                .first()
+                .map(|r| r.reason.clone())
+                .unwrap_or_default()
+                .contains("DISPLAY is not set")
+        );
 
+        // SAFETY: TEST_MUTEX is still held and previous was captured before mutation.
         unsafe {
             if let Some(previous) = previous {
                 std::env::set_var("DISPLAY", previous);
@@ -61,6 +106,7 @@ WM_NAME(STRING) = "Kingdom Come: Deliverance"
         let _lock = crate::test_support::TEST_MUTEX.lock().unwrap();
         let previous = std::env::var_os("DISPLAY");
 
+        // SAFETY: TEST_MUTEX serializes process environment mutation in this test.
         unsafe {
             std::env::set_var("DISPLAY", ":99");
         }
@@ -71,14 +117,25 @@ WM_NAME(STRING) = "Kingdom Come: Deliverance"
 
         assert_eq!(snapshot.source, Some(ForegroundSource::X11));
         assert_eq!(snapshot.status, ForegroundProviderStatus::Unavailable);
-        assert_eq!(snapshot.confidence, 0.0);
+        assert_eq!(snapshot.decision.confidence, 0.0);
         assert!(
             snapshot
-                .reason
+                .decision
+                .primary_reason()
+                .unwrap_or_default()
                 .contains("stutter-definitely-missing-xprop-binary")
         );
-        assert!(snapshot.reason.contains("trusted foreground helper paths"));
+        assert!(
+            snapshot
+                .decision
+                .reasons
+                .first()
+                .map(|r| r.reason.clone())
+                .unwrap_or_default()
+                .contains("trusted foreground helper paths")
+        );
 
+        // SAFETY: TEST_MUTEX is still held and previous was captured before mutation.
         unsafe {
             if let Some(previous) = previous {
                 std::env::set_var("DISPLAY", previous);
@@ -104,14 +161,64 @@ WM_NAME(STRING) = "fallback title"
         assert_eq!(snapshot.elapsed_ms, 2_000);
         assert_eq!(snapshot.source, Some(ForegroundSource::X11));
         assert_eq!(snapshot.status, ForegroundProviderStatus::Available);
-        assert_eq!(snapshot.pid, Some(12345));
-        assert_eq!(snapshot.app_id.as_deref(), Some("steam_app_379430"));
-        assert_eq!(snapshot.class.as_deref(), Some("steam_app_379430"));
-        assert_eq!(snapshot.title.as_deref(), Some("Kingdom Come: Deliverance"));
-        assert_eq!(snapshot.window_id.as_deref(), Some("0x4600007"));
-        assert_eq!(snapshot.workspace, None);
-        assert_eq!(snapshot.confidence, 0.90);
-        assert_eq!(snapshot.reason, "active X11 window from xprop");
+        assert_eq!(
+            snapshot.decision.target.as_ref().and_then(|t| t.pid),
+            Some(12345)
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.app_id.clone())
+                .as_deref(),
+            Some("steam_app_379430")
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.class.clone())
+                .as_deref(),
+            Some("steam_app_379430")
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.title.clone())
+                .as_deref(),
+            Some("Kingdom Come: Deliverance")
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.window_id.clone())
+                .as_deref(),
+            Some("0x4600007")
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.workspace.clone()),
+            None
+        );
+        assert_eq!(snapshot.decision.confidence, 0.95);
+        assert_eq!(
+            snapshot
+                .decision
+                .reasons
+                .first()
+                .map(|r| r.reason.clone())
+                .unwrap_or_default(),
+            "active X11 window from xprop"
+        );
     }
 
     #[test]
@@ -126,11 +233,35 @@ WM_NAME(STRING) = "terminal title"
         let snapshot = provider.sample_from_xprop_outputs(3_000, active, props);
 
         assert_eq!(snapshot.status, ForegroundProviderStatus::Available);
-        assert_eq!(snapshot.pid, None);
-        assert_eq!(snapshot.app_id.as_deref(), Some("foot"));
-        assert_eq!(snapshot.class.as_deref(), Some("foot"));
-        assert_eq!(snapshot.title.as_deref(), Some("terminal title"));
-        assert_eq!(snapshot.confidence, 0.55);
+        assert_eq!(snapshot.decision.target.as_ref().and_then(|t| t.pid), None);
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.app_id.clone())
+                .as_deref(),
+            Some("foot")
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.class.clone())
+                .as_deref(),
+            Some("foot")
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.title.clone())
+                .as_deref(),
+            Some("terminal title")
+        );
+        assert_eq!(snapshot.decision.confidence, 0.65);
     }
 
     #[test]
@@ -145,11 +276,35 @@ _NET_WM_NAME(UTF8_STRING) = "Private browser tab"
         let snapshot = provider.sample_from_xprop_outputs(4_000, active, props);
 
         assert_eq!(snapshot.status, ForegroundProviderStatus::Available);
-        assert_eq!(snapshot.pid, None);
-        assert_eq!(snapshot.app_id.as_deref(), Some("Navigator"));
-        assert_eq!(snapshot.class.as_deref(), Some("Firefox"));
-        assert_eq!(snapshot.title.as_deref(), Some("Private browser tab"));
-        assert_eq!(snapshot.confidence, 0.55);
+        assert_eq!(snapshot.decision.target.as_ref().and_then(|t| t.pid), None);
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.app_id.clone())
+                .as_deref(),
+            Some("Navigator")
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.class.clone())
+                .as_deref(),
+            Some("Firefox")
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.title.clone())
+                .as_deref(),
+            Some("Private browser tab")
+        );
+        assert_eq!(snapshot.decision.confidence, 0.65);
     }
 
     #[test]
@@ -169,10 +324,12 @@ _NET_WM_NAME(UTF8_STRING) = "Private browser tab"
 
             assert_eq!(snapshot.source, Some(ForegroundSource::X11));
             assert_eq!(snapshot.status, ForegroundProviderStatus::Unavailable);
-            assert_eq!(snapshot.confidence, 0.0);
+            assert_eq!(snapshot.decision.confidence, 0.0);
             assert!(
                 snapshot
-                    .reason
+                    .decision
+                    .primary_reason()
+                    .unwrap_or_default()
                     .contains("did not contain an active X11 window")
             );
         }
@@ -192,20 +349,21 @@ _NET_WM_NAME(UTF8_STRING) = "Private browser tab"
     fn x11_provider_titles_are_redacted_by_resolver_default() {
         let provider = SequenceProvider::new(
             ForegroundSource::X11,
-            vec![ForegroundWindowSnapshot {
-                elapsed_ms: 0,
-                source: Some(ForegroundSource::X11),
-                status: ForegroundProviderStatus::Available,
-                pid: Some(12345),
-                app_id: Some("steam_app_379430".to_owned()),
-                class: Some("steam_app_379430".to_owned()),
-                title: Some("Kingdom Come: Deliverance".to_owned()),
-                window_id: Some("0x4600007".to_owned()),
-                workspace: None,
-                confidence: 0.90,
-                stale_ms: None,
-                reason: "test x11 provider snapshot".to_owned(),
-            }],
+            vec![ForegroundWindowSnapshot::available(
+                ForegroundAvailableInput {
+                    elapsed_ms: 0,
+                    source: ForegroundSource::X11,
+                    pid: Some(12345),
+                    app_id: Some("steam_app_379430".to_owned()),
+                    class: Some("steam_app_379430".to_owned()),
+                    title: Some("Kingdom Come: Deliverance".to_owned()),
+                    include_title: true,
+                    window_id: Some("0x4600007".to_owned()),
+                    workspace: None,
+                    confidence: 0.90,
+                    reason: "test x11 provider snapshot".to_owned(),
+                },
+            )],
         );
         let mut resolver = ForegroundResolver::new(Box::new(provider));
 
@@ -213,6 +371,13 @@ _NET_WM_NAME(UTF8_STRING) = "Private browser tab"
 
         assert_eq!(snapshot.source, Some(ForegroundSource::X11));
         assert_eq!(snapshot.status, ForegroundProviderStatus::Available);
-        assert_eq!(snapshot.title, None);
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.title.clone()),
+            None
+        );
     }
 }

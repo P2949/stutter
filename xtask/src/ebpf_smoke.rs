@@ -1,9 +1,12 @@
 use std::path::Path;
+
 use anyhow::bail;
 
-use crate::workflow::CommandSpec;
-use crate::process::{run_process, run_process_with_env};
-use crate::preflight::run_preflight;
+use crate::{
+    preflight::run_preflight,
+    process::{run_process, run_process_with_env},
+    workflow::CommandSpec,
+};
 
 pub const EBPF_BUILD_COMMAND: CommandSpec = CommandSpec {
     program: "cargo",

@@ -43,6 +43,69 @@ pub struct ActionWarning {
     pub message: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ActionBlocker {
+    pub message: String,
+}
+
+impl ActionBlocker {
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActionPreflightReport {
+    pub action_id: ActionId,
+    pub blockers: Vec<ActionBlocker>,
+    pub warnings: Vec<ActionWarning>,
+}
+
+impl ActionPreflightReport {
+    pub fn passed(action_id: ActionId, warnings: Vec<ActionWarning>) -> Self {
+        Self {
+            action_id,
+            blockers: Vec::new(),
+            warnings,
+        }
+    }
+
+    pub fn blocked(action_id: ActionId, blocker: impl Into<String>) -> Self {
+        Self {
+            action_id,
+            blockers: vec![ActionBlocker::new(blocker)],
+            warnings: Vec::new(),
+        }
+    }
+
+    pub fn from_preflight_result<E>(
+        action_id: ActionId,
+        result: Result<Vec<ActionWarning>, E>,
+    ) -> Self
+    where
+        E: std::fmt::Display,
+    {
+        match result {
+            Ok(warnings) => Self::passed(action_id, warnings),
+            Err(err) => Self::blocked(action_id, err.to_string()),
+        }
+    }
+
+    pub fn is_blocked(&self) -> bool {
+        !self.blockers.is_empty()
+    }
+
+    pub fn blocker_messages(&self) -> String {
+        self.blockers
+            .iter()
+            .map(|blocker| blocker.message.as_str())
+            .collect::<Vec<_>>()
+            .join("; ")
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActionState {
     pub applied: bool,
@@ -317,4 +380,36 @@ pub struct ActionOutcome {
     pub rollback: Option<RollbackToken>,
     pub started_unix_nanos: u128,
     pub finished_unix_nanos: u128,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ActionId, ActionPreflightReport, ActionWarning};
+
+    #[test]
+    fn action_preflight_report_preserves_success_warnings() {
+        let report = ActionPreflightReport::from_preflight_result(
+            ActionId::new("test-action"),
+            Ok::<_, anyhow::Error>(vec![ActionWarning {
+                message: "soft warning".to_owned(),
+            }]),
+        );
+
+        assert_eq!(report.action_id.as_str(), "test-action");
+        assert!(!report.is_blocked());
+        assert_eq!(report.warnings.len(), 1);
+        assert!(report.blocker_messages().is_empty());
+    }
+
+    #[test]
+    fn action_preflight_report_converts_errors_to_blockers() {
+        let report = ActionPreflightReport::from_preflight_result(
+            ActionId::new("test-action"),
+            Err::<Vec<ActionWarning>, _>(anyhow::anyhow!("policy rejected")),
+        );
+
+        assert!(report.is_blocked());
+        assert!(report.warnings.is_empty());
+        assert_eq!(report.blocker_messages(), "policy rejected");
+    }
 }

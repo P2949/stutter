@@ -1,7 +1,6 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    path::Path,
-};
+use std::{collections::BTreeMap, path::Path};
+
+use stutter_report::diff::{ReportDiffTask, ReportTaskDelta, diff_report_task_sets};
 
 use super::model::{RunDiffSummary, TaskDeltaSummary};
 use crate::{
@@ -36,56 +35,16 @@ pub fn run_diff_summary_from_sessions(
 ) -> RunDiffSummary {
     let baseline_tasks = aggregate_tasks(baseline, filter_class);
     let current_tasks = aggregate_tasks(current, filter_class);
-    let mut compared_tasks = 0;
-    let mut regressions = Vec::new();
-    let mut improvements = Vec::new();
-
-    for (identity, baseline_task) in &baseline_tasks {
-        if let Some(current_task) = current_tasks.get(identity) {
-            compared_tasks += 1;
-            let delta = task_delta(identity.clone(), baseline_task, current_task);
-            if delta.delta_max_ns > 0 || delta.delta_p99_ns > 0 || delta.delta_over_1ms > 0 {
-                regressions.push(delta);
-            } else if delta.delta_max_ns < 0 || delta.delta_p99_ns < 0 || delta.delta_over_1ms < 0 {
-                improvements.push(delta);
-            }
-        }
-    }
-
-    regressions.sort_by(|left, right| compare_regression(right, left));
-    improvements.sort_by(compare_improvement);
-
-    let worst_p99_regression = regressions
-        .iter()
-        .filter(|delta| delta.delta_p99_ns > 0)
-        .max_by_key(|delta| delta.delta_p99_ns)
-        .cloned();
-    let worst_max_regression = regressions
-        .iter()
-        .filter(|delta| delta.delta_max_ns > 0)
-        .max_by_key(|delta| delta.delta_max_ns)
-        .cloned();
-
-    let current_keys = current_tasks.keys().cloned().collect::<BTreeSet<_>>();
-    let baseline_keys = baseline_tasks.keys().cloned().collect::<BTreeSet<_>>();
-
-    let mut new_tasks = current_keys
-        .difference(&baseline_keys)
-        .filter_map(|identity| current_tasks.get(identity).cloned())
-        .collect::<Vec<_>>();
-    new_tasks.sort_by_key(|task| std::cmp::Reverse(task.max_ns));
-
-    let new_scored_tasks = new_tasks
-        .iter()
-        .filter(|task| task.scored)
-        .cloned()
-        .collect::<Vec<_>>();
-
-    let mut removed_tasks = baseline_keys
-        .difference(&current_keys)
-        .filter_map(|identity| baseline_tasks.get(identity).cloned())
-        .collect::<Vec<_>>();
-    removed_tasks.sort_by_key(|task| std::cmp::Reverse(task.max_ns));
+    let diff = diff_report_task_sets(
+        baseline_tasks
+            .values()
+            .map(report_task_from_aggregate)
+            .collect(),
+        current_tasks
+            .values()
+            .map(report_task_from_aggregate)
+            .collect(),
+    );
 
     RunDiffSummary {
         baseline_path: baseline_path.to_path_buf(),
@@ -95,14 +54,34 @@ pub fn run_diff_summary_from_sessions(
         baseline_duration_ms: baseline.core.duration_ms,
         current_duration_ms: current.core.duration_ms,
         filter_class,
-        compared_tasks,
-        worst_p99_regression,
-        worst_max_regression,
-        regressions,
-        improvements,
-        new_scored_tasks,
-        new_tasks,
-        removed_tasks,
+        compared_tasks: diff.compared_tasks,
+        worst_p99_regression: diff.worst_p99_regression.map(task_delta_from_report),
+        worst_max_regression: diff.worst_max_regression.map(task_delta_from_report),
+        regressions: diff
+            .regressions
+            .into_iter()
+            .map(task_delta_from_report)
+            .collect(),
+        improvements: diff
+            .improvements
+            .into_iter()
+            .map(task_delta_from_report)
+            .collect(),
+        new_scored_tasks: diff
+            .new_scored_tasks
+            .into_iter()
+            .map(aggregate_from_report_task)
+            .collect(),
+        new_tasks: diff
+            .new_tasks
+            .into_iter()
+            .map(aggregate_from_report_task)
+            .collect(),
+        removed_tasks: diff
+            .removed_tasks
+            .into_iter()
+            .map(aggregate_from_report_task)
+            .collect(),
     }
 }
 
@@ -144,53 +123,46 @@ fn aggregate_tasks(
     tasks
 }
 
-fn task_delta(
-    identity: TaskIdentitySummary,
-    baseline: &AggregatedTaskSummary,
-    current: &AggregatedTaskSummary,
-) -> TaskDeltaSummary {
-    TaskDeltaSummary {
-        identity,
-        baseline_samples: baseline.samples,
-        current_samples: current.samples,
-        baseline_p99_ns: baseline.p99_ns,
-        current_p99_ns: current.p99_ns,
-        delta_p99_ns: current.p99_ns as i64 - baseline.p99_ns as i64,
-        baseline_max_ns: baseline.max_ns,
-        current_max_ns: current.max_ns,
-        delta_max_ns: current.max_ns as i64 - baseline.max_ns as i64,
-        baseline_over_1ms: baseline.over_1ms,
-        current_over_1ms: current.over_1ms,
-        delta_over_1ms: current.over_1ms as i64 - baseline.over_1ms as i64,
+fn report_task_from_aggregate(task: &AggregatedTaskSummary) -> ReportDiffTask<TaskIdentitySummary> {
+    ReportDiffTask {
+        identity: task.identity.clone(),
+        samples: task.samples,
+        p95_ns: 0,
+        p99_ns: task.p99_ns,
+        max_ns: task.max_ns,
+        over_1ms: task.over_1ms,
+        over_2ms: task.over_2ms,
+        over_5ms: task.over_5ms,
+        scored: task.scored,
     }
 }
 
-fn compare_regression(left: &TaskDeltaSummary, right: &TaskDeltaSummary) -> std::cmp::Ordering {
-    (
-        left.delta_max_ns.max(0),
-        left.delta_p99_ns.max(0),
-        left.delta_over_1ms.max(0),
-        &left.identity,
-    )
-        .cmp(&(
-            right.delta_max_ns.max(0),
-            right.delta_p99_ns.max(0),
-            right.delta_over_1ms.max(0),
-            &right.identity,
-        ))
+fn aggregate_from_report_task(task: ReportDiffTask<TaskIdentitySummary>) -> AggregatedTaskSummary {
+    AggregatedTaskSummary {
+        identity: task.identity,
+        samples: task.samples,
+        p99_ns: task.p99_ns,
+        max_ns: task.max_ns,
+        over_1ms: task.over_1ms,
+        over_2ms: task.over_2ms,
+        over_5ms: task.over_5ms,
+        scored: task.scored,
+    }
 }
 
-fn compare_improvement(left: &TaskDeltaSummary, right: &TaskDeltaSummary) -> std::cmp::Ordering {
-    (
-        left.delta_max_ns.min(0),
-        left.delta_p99_ns.min(0),
-        left.delta_over_1ms.min(0),
-        &left.identity,
-    )
-        .cmp(&(
-            right.delta_max_ns.min(0),
-            right.delta_p99_ns.min(0),
-            right.delta_over_1ms.min(0),
-            &right.identity,
-        ))
+fn task_delta_from_report(delta: ReportTaskDelta<TaskIdentitySummary>) -> TaskDeltaSummary {
+    TaskDeltaSummary {
+        identity: delta.identity,
+        baseline_samples: delta.baseline_samples,
+        current_samples: delta.current_samples,
+        baseline_p99_ns: delta.baseline_p99_ns,
+        current_p99_ns: delta.current_p99_ns,
+        delta_p99_ns: delta.delta_p99_ns,
+        baseline_max_ns: delta.baseline_max_ns,
+        current_max_ns: delta.current_max_ns,
+        delta_max_ns: delta.delta_max_ns,
+        baseline_over_1ms: delta.baseline_over_1ms,
+        current_over_1ms: delta.current_over_1ms,
+        delta_over_1ms: delta.delta_over_1ms,
+    }
 }

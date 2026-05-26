@@ -1,27 +1,27 @@
 //! Public corpus-writing entry points and fixture file serialization.
 
 use super::{fixtures::*, metadata::fixture_metadata_for, *};
+use crate::artifacts::{ArtifactKind, artifact_alias_paths, artifact_path};
 
-const OPTIONAL_ARTIFACT_FILES: &[&str] = &[
-    "spike_events.json",
-    "interval.json",
-    "tree_events.json",
-    "irq_events.json",
-    "gpu_samples.json",
-    "frame_correlation.json",
-    "frame_events.json",
-    "migration_events.json",
-    "cpu_freq_samples.json",
-    "io_events.json",
-    "scx_events.json",
-    "focus_events.json",
-    "foreground_events.json",
-    "runtime_slices.json",
-    "kms_flip_events.json",
-    "drm_fence_events.json",
-    "wayland_presentation_events.json",
-    "dmabuf_events.json",
-    "gpu_engine_samples.json",
+const OPTIONAL_ARTIFACT_KINDS: &[ArtifactKind] = &[
+    ArtifactKind::SpikeEvents,
+    ArtifactKind::Interval,
+    ArtifactKind::TreeEvents,
+    ArtifactKind::IrqEvents,
+    ArtifactKind::GpuSamples,
+    ArtifactKind::FrameEvents,
+    ArtifactKind::MigrationEvents,
+    ArtifactKind::CpuFreqSamples,
+    ArtifactKind::BlockIoEvents,
+    ArtifactKind::ScxEvents,
+    ArtifactKind::FocusEvents,
+    ArtifactKind::ForegroundEvents,
+    ArtifactKind::RuntimeSlices,
+    ArtifactKind::KmsFlipEvents,
+    ArtifactKind::DrmFenceEvents,
+    ArtifactKind::WaylandPresentationEvents,
+    ArtifactKind::DmaBufEvents,
+    ArtifactKind::GpuEngineSamples,
 ];
 
 pub(crate) fn write_validation_corpus(root: &Path) -> anyhow::Result<()> {
@@ -219,44 +219,71 @@ fn write_fixture(
     let fixture_metadata = fixture_metadata_for(name, &artifacts);
 
     write_toml_pretty(dir.join("fixture.toml"), &fixture_metadata)?;
-    write_json_pretty(dir.join("session.json"), &session)?;
+    write_json_pretty(artifact_path(&dir, ArtifactKind::Session), &session)?;
     write_json_pretty(
-        dir.join("metadata.json"),
+        artifact_path(&dir, ArtifactKind::Metadata),
         &MetadataFile {
             core: session.core.clone(),
         },
     )?;
     write_json_pretty(
-        dir.join("display_topology.json"),
+        artifact_path(&dir, ArtifactKind::DisplayTopology),
         &artifacts.display_topology.clone().unwrap_or_default(),
     )?;
 
-    for file in OPTIONAL_ARTIFACT_FILES {
-        write_ndjson_values::<serde_json::Value>(dir.join(file), &[])?;
+    for kind in OPTIONAL_ARTIFACT_KINDS {
+        write_ndjson_values::<serde_json::Value>(artifact_path(&dir, *kind), &[])?;
+    }
+    for path in artifact_alias_paths(&dir, ArtifactKind::FrameEvents) {
+        write_ndjson_values::<serde_json::Value>(path, &[])?;
     }
 
-    write_ndjson_values(dir.join("spike_events.json"), &artifacts.spikes)?;
-    write_ndjson_values(dir.join("interval.json"), &artifacts.intervals)?;
-    write_ndjson_values(dir.join("irq_events.json"), &artifacts.irq_events)?;
-    write_ndjson_values(dir.join("gpu_samples.json"), &artifacts.gpu_samples)?;
-    write_ndjson_values(dir.join("frame_correlation.json"), &artifacts.frame_events)?;
-    write_ndjson_values(dir.join("io_events.json"), &artifacts.block_io_events)?;
     write_ndjson_values(
-        dir.join("foreground_events.json"),
+        artifact_path(&dir, ArtifactKind::SpikeEvents),
+        &artifacts.spikes,
+    )?;
+    write_ndjson_values(
+        artifact_path(&dir, ArtifactKind::Interval),
+        &artifacts.intervals,
+    )?;
+    write_ndjson_values(
+        artifact_path(&dir, ArtifactKind::IrqEvents),
+        &artifacts.irq_events,
+    )?;
+    write_ndjson_values(
+        artifact_path(&dir, ArtifactKind::GpuSamples),
+        &artifacts.gpu_samples,
+    )?;
+    write_ndjson_values(
+        artifact_path(&dir, ArtifactKind::FrameEvents),
+        &artifacts.frame_events,
+    )?;
+    write_ndjson_values(
+        artifact_path(&dir, ArtifactKind::BlockIoEvents),
+        &artifacts.block_io_events,
+    )?;
+    write_ndjson_values(
+        artifact_path(&dir, ArtifactKind::ForegroundEvents),
         &artifacts.foreground_events,
     )?;
-    write_ndjson_values(dir.join("kms_flip_events.json"), &artifacts.kms_flip_events)?;
     write_ndjson_values(
-        dir.join("drm_fence_events.json"),
+        artifact_path(&dir, ArtifactKind::KmsFlipEvents),
+        &artifacts.kms_flip_events,
+    )?;
+    write_ndjson_values(
+        artifact_path(&dir, ArtifactKind::DrmFenceEvents),
         &artifacts.drm_fence_events,
     )?;
     write_ndjson_values(
-        dir.join("wayland_presentation_events.json"),
+        artifact_path(&dir, ArtifactKind::WaylandPresentationEvents),
         &artifacts.wayland_presentation_events,
     )?;
-    write_ndjson_values(dir.join("dmabuf_events.json"), &artifacts.dmabuf_events)?;
     write_ndjson_values(
-        dir.join("gpu_engine_samples.json"),
+        artifact_path(&dir, ArtifactKind::DmaBufEvents),
+        &artifacts.dmabuf_events,
+    )?;
+    write_ndjson_values(
+        artifact_path(&dir, ArtifactKind::GpuEngineSamples),
         &artifacts.gpu_engine_samples,
     )?;
 

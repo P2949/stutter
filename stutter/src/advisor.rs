@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use tokio::time::sleep;
 
 use crate::{
+    artifacts::{ArtifactKind, artifact_path},
     diagnosis::{Confidence, StutterCause},
     report::{self, DataQualityLevel, ReportAnalysisJson},
 };
@@ -431,7 +432,7 @@ pub fn completed_run_dirs_with_min_age(
         if !path.is_dir() || processed.contains(&path) {
             continue;
         }
-        let session_path = path.join("session.json");
+        let session_path = artifact_path(&path, ArtifactKind::Session);
         if !session_path.exists() {
             continue;
         }

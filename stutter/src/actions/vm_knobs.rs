@@ -76,48 +76,44 @@ impl RollbackHandler for VmKnobRollbackHandler {
     }
 
     fn supports_token(&self, token: &RollbackToken) -> bool {
-        matches!(
-            token,
-            RollbackToken::VmKnobRestore { .. } | RollbackToken::SysfsRestore { .. }
-        )
+        token.as_vm_knob_restore().is_some() || token.as_sysfs_restore().is_some()
     }
 
     fn dry_run_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackPreview> {
-        let rollback_kind = match token {
-            RollbackToken::VmKnobRestore { .. } => "vm-knob-restore",
-            RollbackToken::SysfsRestore { .. } => "sysfs-restore",
-            _ => anyhow::bail!("VM knob/sysfs rollback handler does not support {token:?}"),
+        let rollback_kind = if token.as_vm_knob_restore().is_some() {
+            "vm-knob-restore"
+        } else if token.as_sysfs_restore().is_some() {
+            "sysfs-restore"
+        } else {
+            anyhow::bail!("VM knob/sysfs rollback handler does not support {token:?}");
         };
         Ok(token_dry_run_preview(self.id(), token, rollback_kind))
     }
 
     fn restore_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackResult> {
-        match token {
-            RollbackToken::VmKnobRestore { records } => {
-                rollback_vm_knob_records(records)?;
-                Ok(token_restore_result(
-                    self.id(),
-                    token,
-                    records.len(),
-                    0,
-                    Vec::new(),
-                ))
-            }
-            RollbackToken::SysfsRestore {
-                path,
-                original_value,
-            } => {
-                write_trimmed(path, original_value)?;
-                Ok(token_restore_result(
-                    self.id(),
-                    token,
-                    1,
-                    0,
-                    vec![format!("restored sysfs value {}", path.display())],
-                ))
-            }
-            _ => anyhow::bail!("VM knob/sysfs rollback handler does not support {token:?}"),
+        if let Some(records) = token.as_vm_knob_restore() {
+            rollback_vm_knob_records(records)?;
+            return Ok(token_restore_result(
+                self.id(),
+                token,
+                records.len(),
+                0,
+                Vec::new(),
+            ));
         }
+
+        if let Some((path, original_value)) = token.as_sysfs_restore() {
+            write_trimmed(path, original_value)?;
+            return Ok(token_restore_result(
+                self.id(),
+                token,
+                1,
+                0,
+                vec![format!("restored sysfs value {}", path.display())],
+            ));
+        }
+
+        anyhow::bail!("VM knob/sysfs rollback handler does not support {token:?}")
     }
 }
 
@@ -333,8 +329,11 @@ impl TuningAction for VmKnobAction {
     }
 
     fn rollback(&self, token: &RollbackToken) -> anyhow::Result<()> {
-        let RollbackToken::VmKnobRestore { records } = token else {
-            anyhow::bail!("rollback token is not a VM knob restore token");
+        let Some(records) = token.as_vm_knob_restore() else {
+            return Err(crate::actions::ActionError::invalid_rollback_token_kind(
+                token.kind_error("vm-knob-restore"),
+            )
+            .into());
         };
 
         rollback_vm_knob_records(records)

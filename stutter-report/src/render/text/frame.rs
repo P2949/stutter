@@ -1,6 +1,5 @@
+use super::{diagnosis::render_diagnosis_detail_lines, pushln};
 use crate::model::FrameDiagnosis;
-use super::diagnosis::render_diagnosis_detail_lines;
-use super::pushln;
 
 pub fn render_frame_diagnosis(rank: usize, diag: &FrameDiagnosis) -> String {
     let mut output = String::new();

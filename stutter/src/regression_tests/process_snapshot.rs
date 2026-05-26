@@ -173,6 +173,7 @@ fn process_cache_invalidates_when_pid_starttime_changes() {
 
     fs::remove_dir_all(dir.join("10")).unwrap();
     // Recreate the process to simulate PID reuse.
+    std::thread::sleep(std::time::Duration::from_millis(10));
     create_fake_proc(&dir, 10, 1, "new-name", "new-name", &[10]);
     // Manually overwrite stat to match the test's expected starttime.
     fs::write(dir.join("10/stat"), fake_stat("new-name", 999)).unwrap();
@@ -306,7 +307,10 @@ fn target_snapshot_respects_exclude_tree_pids() {
     assert!(snapshot.tasks.contains_key(&101));
     assert!(!snapshot.tasks.contains_key(&102));
     assert!(!snapshot.tasks.contains_key(&103));
-    assert_eq!(snapshot.process_roots, [100, 101].into_iter().collect());
+    assert_eq!(
+        snapshot.process_roots,
+        [100.into(), 101.into()].into_iter().collect()
+    );
     fs::remove_dir_all(dir).ok();
 }
 

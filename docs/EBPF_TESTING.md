@@ -26,5 +26,20 @@ The xtask wrapper builds the BPF object first and then runs the privileged
 suite:
 
 ```bash
-RUSTUP_TOOLCHAIN=nightly cargo run -p xtask -- ebpf-smoke
+RUSTUP_TOOLCHAIN=nightly cargo xtask ebpf-smoke
 ```
+
+## Release Privileged Smoke Recipe
+
+Before a release or after eBPF/action-facing refactors, run a real-machine smoke
+pass in addition to the skip-aware CI tests:
+
+```bash
+RUSTUP_TOOLCHAIN=nightly cargo xtask privileged-ebpf-smoke
+sudo stutter doctor
+sudo stutter monitor --duration 5s --target-pid "$PID"
+```
+
+Use a short-lived target process for `$PID`, such as a shell `sleep` command or a
+known game/test workload. Save the generated run directory if any probe reports
+missing tracepoints, nonzero drop counters, or degraded evidence.

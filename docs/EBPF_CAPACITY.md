@@ -11,7 +11,12 @@ or `stutter/src/ebpf/maps.rs`.
 | --- | --- | ---: | --- | --- | --- |
 | `BPF_MAX_TRACKED_CPUS` | `stutter-common/src/lib.rs` | `16_384` | CPU-indexed BPF arrays used for runnable-depth and pending-wakeup accounting. | One slot per tracked CPU for each CPU-indexed array, plus kernel map metadata. | Do not lower below the highest CPU id expected on supported systems. The eBPF object asserts this stays at least `1024`. Out-of-range CPUs are skipped and counted with `DROP_CPU_ACCOUNTING_UNTRACKED`. |
 | `BPF_DEFAULT_EVENTS_RINGBUF_BYTES` | `stutter-common/src/lib.rs` | `256 KiB` | Fallback `EVENTS` ring-buffer size baked into the BPF object. | Locked kernel memory equal to the ring-buffer byte size, rounded by kernel/page constraints. | Prefer userspace auto-sizing or `--ringbuf-size-kb`; change the fallback only for loader-bypass scenarios. Keep it inside the userspace clamp. |
-| `DROP_COUNTERS_MAX` | `stutter-common/src/lib.rs` | `9` | Number of slots in the shared per-CPU drop-counter ABI. | One `u64` per counter slot per possible CPU, plus kernel map metadata. | Must be greater than the highest `DROP_*` index. Increment it whenever a new drop reason is added. |
+| `DROP_COUNTERS_MAX` | `stutter-common/src/lib.rs` | `11` | Number of slots in the shared per-CPU drop-counter ABI. | One `u64` per counter slot per possible CPU, plus kernel map metadata. | Must match `DROP_COUNTER_METADATA.len()` and be greater than the highest `DROP_*` index. Increment it whenever a new drop reason is added. |
+
+Drop-counter labels and serialized field names live in
+`stutter_common::DROP_COUNTER_METADATA`. The metadata array is deliberately the
+same length as `DROP_COUNTERS_MAX`; tests fail if a new ABI slot is added without
+a label.
 
 Startup diagnostics read `/sys/devices/system/cpu/possible` and warn when the
 maximum possible CPU id is outside `BPF_MAX_TRACKED_CPUS`. This is intentionally

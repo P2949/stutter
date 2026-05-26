@@ -3,7 +3,10 @@
 //! Owns the provider abstraction used by the resolver plus the explicit unsupported provider. Does
 //! not own compositor-specific command execution or parser logic.
 
-use super::model::{ForegroundProviderStatus, ForegroundSource, ForegroundWindowSnapshot};
+use super::model::{
+    CONFIDENCE_ZERO, ForegroundDecision, ForegroundProviderStatus, ForegroundReason,
+    ForegroundSource, ForegroundWindowSnapshot,
+};
 
 pub trait ForegroundProvider {
     fn source(&self) -> ForegroundSource;
@@ -50,9 +53,15 @@ impl ForegroundProvider for UnsupportedForegroundProvider {
             elapsed_ms,
             source: Some(ForegroundSource::Unsupported),
             status: ForegroundProviderStatus::Unsupported,
-            confidence: 0.0,
-            reason: self.reason().to_owned(),
-            ..ForegroundWindowSnapshot::default()
+            decision: ForegroundDecision {
+                target: None,
+                confidence: CONFIDENCE_ZERO,
+                reasons: vec![ForegroundReason {
+                    reason: self.reason().to_owned(),
+                }],
+                rejected_candidates: Vec::new(),
+            },
+            stale_ms: None,
         }
     }
 }

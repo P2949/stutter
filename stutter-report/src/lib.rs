@@ -1,9 +1,10 @@
 #![forbid(unsafe_code)]
 
-//! Report model, loading, analysis, diffing, and rendering scaffolding.
+//! Report model, loading, analysis, diffing, and rendering migration boundary.
 //!
 //! This crate is intentionally independent from the main `stutter` runtime crate.
-//! Existing report implementation remains in `stutter::report` until a future migration.
+//! The remaining main-crate report logic is tracked in
+//! `docs/REPORT_CRATE_MIGRATION.md`.
 
 pub mod analysis;
 pub mod diff;

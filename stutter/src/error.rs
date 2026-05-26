@@ -62,10 +62,22 @@ pub enum ConfigError {
         source: anyhow::Error,
     },
     #[error("invalid config value for {field}: {message}")]
-    InvalidValue {
-        field: &'static str,
-        message: String,
-    },
+    InvalidValue { field: String, message: String },
+}
+
+impl From<stutter_config::ConfigError> for ConfigError {
+    fn from(error: stutter_config::ConfigError) -> Self {
+        match error {
+            stutter_config::ConfigError::InvalidValue { field, reason, .. } => Self::InvalidValue {
+                field,
+                message: reason,
+            },
+            other => Self::InvalidValue {
+                field: "static_config".to_owned(),
+                message: other.to_string(),
+            },
+        }
+    }
 }
 
 #[derive(Debug, Error)]

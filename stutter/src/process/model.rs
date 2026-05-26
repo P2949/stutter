@@ -22,6 +22,11 @@ use crate::{
 
 pub const DEFAULT_MAX_PROC_SCAN_MS: u64 = 50;
 pub const DEFAULT_MAX_THREADS_PER_PROCESS: usize = 4096;
+const MAX_PROC_SCAN_WARNINGS: usize = 64;
+
+pub type ProcessMap = BTreeMap<Pid, ProcInfo>;
+pub type ProcessSet = BTreeSet<Pid>;
+pub type TaskMap = BTreeMap<Tid, TaskInfo>;
 
 #[derive(Debug, Clone)]
 pub struct ScanBudget {
@@ -39,6 +44,48 @@ pub struct ScanBudgetReport {
     pub thread_entries_seen: usize,
     pub thread_entries_skipped: usize,
     pub processes_thread_limited: usize,
+    pub warnings: Vec<ProcScanWarning>,
+}
+
+impl ScanBudgetReport {
+    pub(crate) fn push_warning(&mut self, warning: ProcScanWarning) {
+        if self.warnings.len() < MAX_PROC_SCAN_WARNINGS {
+            self.warnings.push(warning);
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProcScanWarning {
+    pub pid: u32,
+    pub tid: Option<u32>,
+    pub kind: ProcScanWarningKind,
+    pub message: String,
+}
+
+impl ProcScanWarning {
+    pub fn new(
+        pid: u32,
+        tid: Option<u32>,
+        kind: ProcScanWarningKind,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            pid,
+            tid,
+            kind,
+            message: message.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProcScanWarningKind {
+    ProcessInfo,
+    Cmdline,
+    Cgroup,
+    ExePath,
+    TaskComm,
 }
 
 impl ScanBudget {
@@ -78,7 +125,7 @@ impl ScanBudget {
 
 #[derive(Debug, Clone)]
 pub struct ProcessCache {
-    pub entries: BTreeMap<u32, CachedProcInfo>,
+    pub entries: BTreeMap<Pid, CachedProcInfo>,
     pub generation: u64,
     pub max_cached_generations: u64,
 }
@@ -95,7 +142,7 @@ impl Default for ProcessCache {
 
 impl ProcessCache {
     pub fn invalidate(&mut self, pid: u32) {
-        self.entries.remove(&pid);
+        self.entries.remove(&Pid::new(pid));
     }
 
     pub fn comm_for_tid(&self, tid: u32) -> Option<String> {
@@ -380,8 +427,8 @@ pub fn sched_policy_name(policy: u32) -> Option<&'static str> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TargetSnapshot {
-    pub process_roots: BTreeSet<u32>,
-    pub tasks: BTreeMap<u32, TaskInfo>,
+    pub process_roots: ProcessSet,
+    pub tasks: TaskMap,
     pub budget_report: ScanBudgetReport,
 }
 
@@ -409,7 +456,7 @@ pub struct TargetSnapshotInput<'a> {
     /// An optional cache to speed up repeated scans.
     pub cache: Option<&'a mut ProcessCache>,
     /// An optional map of previous tasks to help preserve task information.
-    pub previous_tasks: Option<&'a BTreeMap<u32, TaskInfo>>,
+    pub previous_tasks: Option<&'a TaskMap>,
     /// Maximum duration allowed for scanning processes.
     pub max_scan_duration: Option<Duration>,
     /// Maximum number of threads to scan per process.
@@ -478,7 +525,7 @@ impl<'a> TargetSnapshotInput<'a> {
         self
     }
 
-    pub fn previous_tasks(mut self, tasks: Option<&'a BTreeMap<u32, TaskInfo>>) -> Self {
+    pub fn previous_tasks(mut self, tasks: Option<&'a TaskMap>) -> Self {
         self.previous_tasks = tasks;
         self
     }

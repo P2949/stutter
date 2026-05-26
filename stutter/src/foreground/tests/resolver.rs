@@ -55,14 +55,9 @@ mod tests {
             confidence: 0.95,
             reason: "focused Sway node from swaymsg get_tree".to_owned(),
         });
-        let error = ForegroundWindowSnapshot {
-            elapsed_ms: 1_500,
-            source: Some(ForegroundSource::Sway),
-            status: ForegroundProviderStatus::Error,
-            confidence: 0.0,
-            reason: "swaymsg failed".to_owned(),
-            ..ForegroundWindowSnapshot::default()
-        };
+        let mut error =
+            ForegroundWindowSnapshot::unavailable(1_500, ForegroundSource::Sway, "swaymsg failed");
+        error.status = ForegroundProviderStatus::Error;
         let provider = ScriptedForegroundProvider::new(ForegroundSource::Sway, vec![good, error]);
         let mut resolver = ForegroundResolver::new(Box::new(provider))
             .with_include_title(false)
@@ -73,15 +68,21 @@ mod tests {
 
         assert_eq!(first.status, ForegroundProviderStatus::Available);
         assert_eq!(stale.status, ForegroundProviderStatus::Available);
-        assert_eq!(stale.pid, Some(4242));
-        assert_eq!(stale.title, None);
+        assert_eq!(
+            stale.decision.target.as_ref().and_then(|t| t.pid),
+            Some(4242)
+        );
+        assert_eq!(
+            stale.decision.target.as_ref().and_then(|t| t.title.clone()),
+            None
+        );
         assert_eq!(stale.stale_ms, Some(500));
-        assert!(stale.confidence < first.confidence);
-        assert!(
-            stale
+        assert!(stale.decision.confidence < first.decision.confidence);
+        assert!(stale.decision.reasons.iter().any(|reason| {
+            reason
                 .reason
                 .contains("using stale foreground snapshot from 500ms ago")
-        );
+        }));
     }
 
     #[test]
@@ -99,14 +100,9 @@ mod tests {
             confidence: 0.90,
             reason: "active X11 window from xprop".to_owned(),
         });
-        let error = ForegroundWindowSnapshot {
-            elapsed_ms: 4_000,
-            source: Some(ForegroundSource::X11),
-            status: ForegroundProviderStatus::Error,
-            confidence: 0.0,
-            reason: "xprop failed".to_owned(),
-            ..ForegroundWindowSnapshot::default()
-        };
+        let mut error =
+            ForegroundWindowSnapshot::unavailable(4_000, ForegroundSource::X11, "xprop failed");
+        error.status = ForegroundProviderStatus::Error;
         let provider = ScriptedForegroundProvider::new(ForegroundSource::X11, vec![good, error]);
         let mut resolver = ForegroundResolver::new(Box::new(provider))
             .with_include_title(false)
@@ -117,9 +113,16 @@ mod tests {
 
         assert_eq!(first.status, ForegroundProviderStatus::Available);
         assert_eq!(dropped.status, ForegroundProviderStatus::Error);
-        assert_eq!(dropped.pid, None);
+        assert_eq!(
+            dropped
+                .decision
+                .target
+                .as_ref()
+                .and_then(|target| target.pid),
+            None
+        );
         assert_eq!(dropped.stale_ms, None);
-        assert_eq!(dropped.reason, "xprop failed");
+        assert_eq!(dropped.decision.primary_reason(), Some("xprop failed"));
     }
 
     #[test]
@@ -148,9 +151,19 @@ mod tests {
 
         assert_eq!(snapshot.status, ForegroundProviderStatus::Available);
         assert_eq!(snapshot.source, Some(ForegroundSource::Sway));
-        assert_eq!(snapshot.title, None);
-        assert_eq!(snapshot.pid, Some(1234));
-        assert_eq!(snapshot.confidence, 0.95);
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.title.clone()),
+            None
+        );
+        assert_eq!(
+            snapshot.decision.target.as_ref().and_then(|t| t.pid),
+            Some(1234)
+        );
+        assert_eq!(snapshot.decision.confidence, 0.95);
         assert_eq!(snapshot.stale_ms, None);
     }
 
@@ -178,7 +191,15 @@ mod tests {
 
         let snapshot = resolver.sample(1_000);
 
-        assert_eq!(snapshot.title.as_deref(), Some("terminal private title"));
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.title.clone())
+                .as_deref(),
+            Some("terminal private title")
+        );
     }
 
     #[test]
@@ -213,17 +234,37 @@ mod tests {
 
         assert_eq!(first.status, ForegroundProviderStatus::Available);
         assert_eq!(stale.status, ForegroundProviderStatus::Available);
-        assert_eq!(stale.pid, Some(2222));
-        assert_eq!(stale.app_id.as_deref(), Some("steam"));
-        assert_eq!(stale.title, None);
-        assert_eq!(stale.stale_ms, Some(1_000));
-        assert!(stale.confidence < first.confidence);
-        assert!(
+        assert_eq!(
+            stale.decision.target.as_ref().and_then(|t| t.pid),
+            Some(2222)
+        );
+        assert_eq!(
             stale
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.app_id.clone())
+                .as_deref(),
+            Some("steam")
+        );
+        assert_eq!(
+            stale.decision.target.as_ref().and_then(|t| t.title.clone()),
+            None
+        );
+        assert_eq!(stale.stale_ms, Some(1_000));
+        assert!(stale.decision.confidence < first.decision.confidence);
+        assert!(stale.decision.reasons.iter().any(|reason| {
+            reason
                 .reason
                 .contains("using stale foreground snapshot from 1000ms ago")
+        }));
+        assert!(
+            stale
+                .decision
+                .reasons
+                .iter()
+                .any(|reason| reason.reason.contains("sway IPC timed out"))
         );
-        assert!(stale.reason.contains("sway IPC timed out"));
     }
 
     #[test]
@@ -258,7 +299,7 @@ mod tests {
 
         assert_eq!(first.status, ForegroundProviderStatus::Available);
         assert_eq!(second.status, ForegroundProviderStatus::Unavailable);
-        assert_eq!(second.reason, "sway IPC timed out");
+        assert_eq!(second.decision.primary_reason(), Some("sway IPC timed out"));
         assert_eq!(second.stale_ms, None);
     }
 
@@ -293,10 +334,13 @@ mod tests {
         let unavailable = resolver.sample(1_500);
 
         assert_eq!(low_confidence.status, ForegroundProviderStatus::Available);
-        assert_eq!(low_confidence.confidence, 0.50);
+        assert_eq!(low_confidence.decision.confidence, 0.50);
         assert!(resolver.last_snapshot().is_none());
         assert_eq!(unavailable.status, ForegroundProviderStatus::Unavailable);
-        assert_eq!(unavailable.reason, "xprop unavailable");
+        assert_eq!(
+            unavailable.decision.primary_reason(),
+            Some("xprop unavailable")
+        );
     }
 
     #[test]

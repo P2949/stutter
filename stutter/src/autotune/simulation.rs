@@ -169,7 +169,7 @@ fn event_for_step(step: FakeDaemonStep, elapsed_ms: u64) -> Option<MonitorEvent>
         }),
         FakeDaemonStep::TargetPresent => Some(MonitorEvent::TargetSnapshot {
             elapsed_ms,
-            active_targets: BTreeMap::from([(1234, task_info())]),
+            active_targets: BTreeMap::from([(1234.into(), task_info())]),
             removed_targets: Vec::new(),
         }),
         FakeDaemonStep::TargetMissing => Some(MonitorEvent::TargetSnapshot {

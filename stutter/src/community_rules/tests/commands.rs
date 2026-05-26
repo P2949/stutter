@@ -17,6 +17,8 @@ struct EnvGuard {
 impl EnvGuard {
     fn set(key: &'static str, value: &str) -> Self {
         let old = std::env::var(key).ok();
+        // SAFETY: callers hold TEST_MUTEX before mutating the process
+        // environment, keeping these tests serialized.
         unsafe {
             std::env::set_var(key, value);
         }
@@ -25,6 +27,8 @@ impl EnvGuard {
 
     fn unset(key: &'static str) -> Self {
         let old = std::env::var(key).ok();
+        // SAFETY: callers hold TEST_MUTEX before mutating the process
+        // environment, keeping these tests serialized.
         unsafe {
             std::env::remove_var(key);
         }
@@ -35,10 +39,14 @@ impl EnvGuard {
 impl Drop for EnvGuard {
     fn drop(&mut self) {
         if let Some(old) = &self.old {
+            // SAFETY: EnvGuard is dropped while TEST_MUTEX is held, so
+            // restore mutations remain serialized.
             unsafe {
                 std::env::set_var(self.key, old);
             }
         } else {
+            // SAFETY: EnvGuard is dropped while TEST_MUTEX is held, so
+            // restore mutations remain serialized.
             unsafe {
                 std::env::remove_var(self.key);
             }

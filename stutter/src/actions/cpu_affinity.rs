@@ -28,7 +28,7 @@ impl RollbackHandler for CpuAffinityRollbackHandler {
     }
 
     fn supports_token(&self, token: &RollbackToken) -> bool {
-        matches!(token, RollbackToken::CpuAffinityRestoreFile { .. })
+        token.as_cpu_affinity_restore_file().is_some()
     }
 
     fn dry_run_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackPreview> {
@@ -43,7 +43,7 @@ impl RollbackHandler for CpuAffinityRollbackHandler {
     }
 
     fn restore_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackResult> {
-        let RollbackToken::CpuAffinityRestoreFile { path, .. } = token else {
+        let Some((path, _)) = token.as_cpu_affinity_restore_file() else {
             anyhow::bail!("CPU affinity rollback handler does not support {token:?}");
         };
 
@@ -241,8 +241,11 @@ impl TuningAction for CpuAffinityProfileAction {
     }
 
     fn rollback(&self, token: &RollbackToken) -> anyhow::Result<()> {
-        let RollbackToken::CpuAffinityRestoreFile { path, .. } = token else {
-            anyhow::bail!("rollback token is not a CPU affinity restore file");
+        let Some((path, _)) = token.as_cpu_affinity_restore_file() else {
+            return Err(crate::actions::ActionError::invalid_rollback_token_kind(
+                token.kind_error("cpu-affinity-restore-file"),
+            )
+            .into());
         };
         crate::profile_restore::restore_saved(path)
             .map(|_| ())

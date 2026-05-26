@@ -600,7 +600,7 @@ mod runtime_decoupling_tests {
                 include_str!("../ebpf_loader.rs"),
             ),
             ("stutter/src/remote.rs", include_str!("../remote.rs")),
-            ("stutter/src/agent.rs", include_str!("../agent.rs")),
+            ("stutter/src/agent/mod.rs", include_str!("../agent/mod.rs")),
             (
                 "stutter/src/config/layer.rs",
                 include_str!("../config/layer.rs"),
@@ -610,8 +610,8 @@ mod runtime_decoupling_tests {
                 include_str!("../config/effective.rs"),
             ),
             (
-                "stutter/src/config/merge.rs",
-                include_str!("../config/merge.rs"),
+                "stutter/src/config/merge/mod.rs",
+                include_str!("../config/merge/mod.rs"),
             ),
         ];
 

@@ -8,6 +8,7 @@ mod explain;
 mod mode;
 mod remote;
 mod safety;
+mod snapshots;
 
 use super::*;
 use crate::{actions::ActionId, daemon::capabilities::DaemonCapabilities};

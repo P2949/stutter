@@ -1,0 +1,61 @@
+Usage: stutter autotune [OPTIONS] [COMMAND]
+
+Commands:
+  generate-profiles  
+  apply-candidate    
+  replay             
+  replay-history     
+  restore            
+  help               Print this message or the help of the given subcommand(s)
+
+Options:
+      --config <PATH>
+          
+      --watch-process <COMM>
+          
+      --tree-pid <PID>
+          
+      --profiles <FILE>
+          
+      --mode <MODE>
+          Autotune mode: observe, suggest, apply-low-risk, apply-medium-risk, or apply-high-risk. Live autotune supports observe, suggest, apply-low-risk, and apply-medium-risk when --allow-medium-risk is set; apply-medium-risk is limited to reversible process-local/cgroup candidates, and apply-high-risk is not implemented. [default: observe]
+      --decision-log <PATH>
+          
+      --duration-seconds <DURATION_SECONDS>
+          
+      --washout-seconds <WASHOUT_SECONDS>
+          [default: 10]
+      --washout-verify-interval-ms <WASHOUT_VERIFY_INTERVAL_MS>
+          [default: 1000]
+      --summary-ms <SUMMARY_MS>
+          [default: 1000]
+      --preset <PRESET>
+          [default: diagnosis]
+      --hwmon
+          
+      --mangohud-log <MANGOHUD_LOG>
+          
+      --auto-focus
+          Allow autotune observe/suggest to classify the whole system and follow the selected focus group
+      --min-focus-confidence <MIN_FOCUS_CONFIDENCE>
+          Minimum focus confidence required before live autotune can suggest or apply candidates [default: 0.7]
+      --focus-source <FOCUS_SOURCE>
+          Autotune focus source: heuristic, foreground, or hybrid [default: hybrid] [possible values: heuristic, foreground, hybrid]
+      --foreground-window
+          Collect foreground-window context for autotune focus classification
+      --foreground-source <FOREGROUND_SOURCE>
+          Foreground-window provider for autotune focus: auto, sway, hyprland, x11 [default: auto] [possible values: auto, sway, hyprland, x11]
+      --foreground-poll-ms <FOREGROUND_POLL_MS>
+          [default: 1000]
+      --foreground-max-stale-ms <FOREGROUND_MAX_STALE_MS>
+          [default: 2500]
+      --allow-system-wide-suggestions
+          Allow autotune to suggest system-wide candidates when in suggest mode
+      --allow-medium-risk
+          Explicitly unlock live apply-medium-risk for reversible process-local candidates
+      --high-risk-dry-run
+          In suggest mode, run dry-run diagnostics for manual-only high-risk candidates without enabling apply
+      --dry-run-all-safe
+          In suggest mode, run safe candidate dry-runs, write candidate plan files, and never apply changes
+  -h, --help
+          Print help

@@ -340,7 +340,9 @@ fn rollback_rejects_wrong_token_kind() {
 
     let err = action.rollback(&token).unwrap_err().to_string();
 
-    assert!(err.contains("rollback token is not an I/O priority restore token"));
+    assert!(err.contains("invalid rollback token"));
+    assert!(err.contains("expected ioprio-restore"));
+    assert!(err.contains("actual nice-restore"));
 }
 
 #[test]

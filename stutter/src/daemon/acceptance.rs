@@ -167,6 +167,7 @@ pub fn run_fake_daemon_acceptance_suite() -> DaemonAcceptanceReport {
         &ReleaseReadinessInputs {
             soak_tests: true,
             stronger_tests: true,
+            real_machine_validation: true,
             ..ReleaseReadinessInputs::default()
         },
     );

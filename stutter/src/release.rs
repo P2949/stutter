@@ -59,6 +59,7 @@ pub struct ReleaseReadinessInputs {
     pub per_action_opt_in: bool,
     pub stronger_tests: bool,
     pub manual_confirmation_or_explicit_config: bool,
+    pub real_machine_validation: bool,
 }
 
 impl Default for ReleaseReadinessInputs {
@@ -77,6 +78,7 @@ impl Default for ReleaseReadinessInputs {
             per_action_opt_in: true,
             stronger_tests: false,
             manual_confirmation_or_explicit_config: true,
+            real_machine_validation: false,
         }
     }
 }
@@ -158,6 +160,12 @@ pub fn evaluate_release_readiness(
                 true,
                 inputs.soak_tests,
                 "low-risk-stable requires long-running soak evidence",
+            ),
+            gate(
+                "real_machine_validation",
+                true,
+                inputs.real_machine_validation,
+                "low-risk-stable requires real-machine validation",
             ),
             gate(
                 "service_packaging",

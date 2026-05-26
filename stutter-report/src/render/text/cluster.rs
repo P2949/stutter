@@ -1,17 +1,11 @@
 use std::collections::BTreeSet;
 
-use crate::model::{
-    SpikeCluster, SpikeClusterAnalysis, SpikeClusterSource, MIN_CLUSTER_TASKS,
-};
 use super::diagnosis::render_diagnosis_lines;
-
+use crate::model::{MIN_CLUSTER_TASKS, SpikeCluster, SpikeClusterAnalysis, SpikeClusterSource};
 
 const MAX_INLINE_CLUSTER_POINTS: usize = 8;
 
-pub fn render_cluster_source(
-    analysis: &SpikeClusterAnalysis,
-    cluster_window_ms: u64,
-) -> String {
+pub fn render_cluster_source(analysis: &SpikeClusterAnalysis, cluster_window_ms: u64) -> String {
     let source = match analysis.source {
         SpikeClusterSource::SpikeEvents => "source=spike_events",
         SpikeClusterSource::TopSpikesFallback => "source=top_spikes fallback",
@@ -109,7 +103,10 @@ pub fn render_cluster_point(point: &crate::model::SpikePoint) -> String {
         point.wakeup_target_cpu,
         format_latency(point.latency_ns),
         point.switch_ns,
-        point.process_pid.map(|pid| pid.to_string()).unwrap_or_else(|| "-".to_owned()),
+        point
+            .process_pid
+            .map(|pid| pid.to_string())
+            .unwrap_or_else(|| "-".to_owned()),
         point.wakeup_ns,
         point.observed_runnable_depth,
         point.target_pending_wakeups,

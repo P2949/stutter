@@ -90,6 +90,7 @@ impl ActiveAutotuneActionRegistry {
     pub fn register(&self, action: ActiveAutotuneAction) {
         self.actions
             .lock()
+            // invariant: registry lock is not poisoned
             .expect("active autotune action registry poisoned")
             .push(action);
     }
@@ -97,6 +98,7 @@ impl ActiveAutotuneActionRegistry {
     pub fn len(&self) -> usize {
         self.actions
             .lock()
+            // invariant: registry lock is not poisoned
             .expect("active autotune action registry poisoned")
             .len()
     }
@@ -108,6 +110,7 @@ impl ActiveAutotuneActionRegistry {
     pub fn drain(&self) -> Vec<ActiveAutotuneAction> {
         self.actions
             .lock()
+            // invariant: registry lock is not poisoned
             .expect("active autotune action registry poisoned")
             .drain(..)
             .collect()
@@ -116,6 +119,7 @@ impl ActiveAutotuneActionRegistry {
     pub fn snapshot(&self) -> Vec<ActiveAutotuneAction> {
         self.actions
             .lock()
+            // invariant: registry lock is not poisoned
             .expect("active autotune action registry poisoned")
             .clone()
     }
@@ -375,6 +379,7 @@ pub fn rollback_active_low_risk_actions_on_exit_with_audit_path_for_tests<
                 0,
                 "rollback skipped because keep_on_exit is true".to_owned(),
             )
+            // invariant: test audit write should succeed in test fixtures
             .expect("test audit write should succeed");
         }
         write_exit_decision_event(
@@ -404,6 +409,7 @@ pub fn rollback_active_low_risk_actions_on_exit_with_audit_path_for_tests<
                         restored
                     ),
                 )
+                // invariant: test audit write should succeed in test fixtures
                 .expect("test audit write should succeed");
             }
             Err(err) => {
@@ -420,6 +426,7 @@ pub fn rollback_active_low_risk_actions_on_exit_with_audit_path_for_tests<
                         reason.as_str()
                     ),
                 )
+                // invariant: test audit write should succeed in test fixtures
                 .expect("test audit write should succeed");
             }
         }

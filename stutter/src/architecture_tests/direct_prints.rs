@@ -25,15 +25,27 @@ struct DirectPrintMacroCall {
 fn direct_print_forbidden_files() -> Vec<PathBuf> {
     let root = crate_src_root();
     let mut files = vec![
-        root.join("agent.rs"),
         root.join("autotune/mod.rs"),
-        root.join("autotune/runtime.rs"),
         root.join("autotune/planner/mod.rs"),
         root.join("report/analysis.rs"),
         root.join("process_tree.rs"),
     ];
 
+    files.extend(
+        rust_files_under(&root.join("agent"))
+            .into_iter()
+            .filter(|path| {
+                !path
+                    .components()
+                    .any(|component| component.as_os_str().to_str() == Some("tests"))
+            }),
+    );
     files.extend(rust_files_under(&root.join("actions")));
+    files.extend(
+        rust_files_under(&root.join("autotune/runtime"))
+            .into_iter()
+            .filter(|path| path.file_name().and_then(|name| name.to_str()) != Some("stream.rs")),
+    );
     files.extend(rust_files_under(&root.join("daemon")));
     files.extend(rust_files_under(&root.join("focus")));
 

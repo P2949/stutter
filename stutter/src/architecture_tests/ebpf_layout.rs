@@ -42,10 +42,18 @@ fn ebpf_main_keeps_extracted_layout_helpers_out_of_entrypoint_file() {
 
     assert!(
         main.contains("mod block_io;")
+            && main.contains("mod maps;")
+            && main.contains("mod target_filter;")
+            && main.contains("mod drop_counters;")
+            && main.contains("mod runnable_depth;")
+            && main.contains("mod scheduler;")
+            && main.contains("mod process_lifecycle;")
+            && main.contains("mod irq;")
+            && main.contains("mod cpu_frequency;")
             && main.contains("mod kms_emit;")
             && main.contains("mod trace_offsets;")
             && main.contains("mod trace_read;"),
-        "stutter-ebpf/src/main.rs must keep block I/O, KMS event emission, tracepoint offset globals, and field readers in helper modules",
+        "stutter-ebpf/src/main.rs must keep maps, target filters, drop counters, runnable-depth accounting, scheduler/process/IRQ/CPU tracepoint logic, block I/O, KMS event emission, tracepoint offset globals, and field readers in helper modules",
     );
     assert!(
         !main.contains("static mut BLOCK_RQ_KEY_OFFSET"),
@@ -56,9 +64,25 @@ fn ebpf_main_keeps_extracted_layout_helpers_out_of_entrypoint_file() {
         "tracepoint field readers belong in trace_read.rs, not main.rs",
     );
     assert!(
-        line_count("main.rs") <= 1_550,
-        "stutter-ebpf/src/main.rs grew beyond the post-block-I/O-split ceiling; extract another tracepoint family before adding more logic",
+        !main.contains("pub static TARGET_PIDS")
+            && !main.contains("fn is_target_pid")
+            && !main.contains("fn increment_drop_counter")
+            && !main.contains("fn read_cpu_runnable_depth"),
+        "map declarations, target filtering, drop counters, and runnable-depth helpers must stay out of main.rs",
     );
+    for entry in fs::read_dir(ebpf_src_root()).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().unwrap_or_default() == "rs" {
+            let filename = path.file_name().unwrap().to_str().unwrap();
+            let count = line_count(filename);
+            assert!(
+                count <= 800,
+                "stutter-ebpf/src/{} has {} lines, exceeding the 800 line limit; please split it further",
+                filename,
+                count
+            );
+        }
+    }
     assert!(
         line_count("block_io.rs") <= 200,
         "block_io.rs should stay a focused block request correlation module",

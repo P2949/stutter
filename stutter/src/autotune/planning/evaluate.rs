@@ -165,7 +165,7 @@ pub(crate) fn evaluate_proposal_static(
     let memory_context =
         CandidateContextHashInput::from_observation(&proposal.candidate, input.observation, None);
 
-    if memory_context.workload_hash.is_none()
+    if !memory_context.has_workload_identity()
         && input
             .controller_state
             .candidate_memory

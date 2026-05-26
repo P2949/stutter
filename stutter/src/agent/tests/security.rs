@@ -1,6 +1,215 @@
 //! Agent binding, authentication, privilege, and title-capture security tests.
 
+use tower::ServiceExt as _;
+
 use super::{support::*, *};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct RouteAuthExpectation {
+    route: &'static str,
+    request_path: &'static str,
+    method: &'static str,
+    body: RouteAuthBody,
+    requires_auth: bool,
+    rejects_non_loopback_apply: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RouteAuthBody {
+    Empty,
+    RecordStart,
+    AutotuneStartApplyLowRisk,
+}
+
+const ROUTE_AUTH_EXPECTATIONS: &[RouteAuthExpectation] = &[
+    route_auth_row(
+        "GET",
+        "/health",
+        "/health",
+        RouteAuthBody::Empty,
+        false,
+        false,
+    ),
+    route_auth_row(
+        "GET",
+        "/version",
+        "/version",
+        RouteAuthBody::Empty,
+        false,
+        false,
+    ),
+    route_auth_row(
+        "GET",
+        "/capabilities",
+        "/capabilities",
+        RouteAuthBody::Empty,
+        false,
+        false,
+    ),
+    route_auth_row(
+        "POST",
+        "/record/start",
+        "/record/start",
+        RouteAuthBody::RecordStart,
+        true,
+        true,
+    ),
+    route_auth_row(
+        "POST",
+        "/record/stop",
+        "/record/stop",
+        RouteAuthBody::Empty,
+        true,
+        true,
+    ),
+    route_auth_row(
+        "GET",
+        "/record/status",
+        "/record/status",
+        RouteAuthBody::Empty,
+        true,
+        false,
+    ),
+    route_auth_row(
+        "GET",
+        "/autotune/status",
+        "/autotune/status",
+        RouteAuthBody::Empty,
+        true,
+        false,
+    ),
+    route_auth_row(
+        "POST",
+        "/autotune/start",
+        "/autotune/start",
+        RouteAuthBody::AutotuneStartApplyLowRisk,
+        true,
+        true,
+    ),
+    route_auth_row(
+        "POST",
+        "/autotune/stop",
+        "/autotune/stop",
+        RouteAuthBody::Empty,
+        true,
+        true,
+    ),
+    route_auth_row(
+        "POST",
+        "/autotune/restore",
+        "/autotune/restore",
+        RouteAuthBody::Empty,
+        true,
+        true,
+    ),
+    route_auth_row(
+        "GET",
+        "/autotune/history",
+        "/autotune/history",
+        RouteAuthBody::Empty,
+        true,
+        false,
+    ),
+    route_auth_row(
+        "GET",
+        "/autotune/config",
+        "/autotune/config",
+        RouteAuthBody::Empty,
+        true,
+        false,
+    ),
+    route_auth_row(
+        "GET",
+        "/daemon/status",
+        "/daemon/status",
+        RouteAuthBody::Empty,
+        true,
+        false,
+    ),
+    route_auth_row(
+        "GET",
+        "/daemon/health",
+        "/daemon/health",
+        RouteAuthBody::Empty,
+        true,
+        false,
+    ),
+    route_auth_row(
+        "GET",
+        "/daemon/policy",
+        "/daemon/policy",
+        RouteAuthBody::Empty,
+        true,
+        false,
+    ),
+    route_auth_row(
+        "GET",
+        "/daemon/explain",
+        "/daemon/explain",
+        RouteAuthBody::Empty,
+        true,
+        false,
+    ),
+    route_auth_row(
+        "POST",
+        "/daemon/pause",
+        "/daemon/pause",
+        RouteAuthBody::Empty,
+        true,
+        true,
+    ),
+    route_auth_row(
+        "POST",
+        "/daemon/resume",
+        "/daemon/resume",
+        RouteAuthBody::Empty,
+        true,
+        true,
+    ),
+    route_auth_row(
+        "POST",
+        "/daemon/restore",
+        "/daemon/restore",
+        RouteAuthBody::Empty,
+        true,
+        true,
+    ),
+    route_auth_row("GET", "/runs", "/runs", RouteAuthBody::Empty, true, false),
+    route_auth_row(
+        "GET",
+        "/runs/:id/session.json",
+        "/runs/run-123/session.json",
+        RouteAuthBody::Empty,
+        true,
+        false,
+    ),
+    route_auth_row(
+        "GET",
+        "/runs/:id/artifact/:name",
+        "/runs/run-123/artifact/session.json",
+        RouteAuthBody::Empty,
+        true,
+        false,
+    ),
+];
+
+const fn route_auth_row(
+    method: &'static str,
+    route: &'static str,
+    request_path: &'static str,
+    body: RouteAuthBody,
+    requires_auth: bool,
+    rejects_non_loopback_apply: bool,
+) -> RouteAuthExpectation {
+    RouteAuthExpectation {
+        route,
+        request_path,
+        method,
+        body,
+        requires_auth,
+        rejects_non_loopback_apply,
+    }
+}
 
 #[test]
 fn validate_id_rejects_path_traversal() {
@@ -25,6 +234,122 @@ fn artifact_allowlist_accepts_known_artifacts() {
     assert!(validate_artifact_name("session.json").is_ok());
     assert!(validate_artifact_name("metadata.json").is_ok());
     assert!(validate_artifact_name("spike_events.json").is_ok());
+}
+
+#[test]
+fn route_auth_matrix_covers_capability_routes() {
+    let state = test_agent_state_custom("127.0.0.1:0".parse().unwrap(), Some("secret".to_owned()));
+    let supported_routes = routes::capabilities_response(&state).supported_routes;
+    let matrix_routes = ROUTE_AUTH_EXPECTATIONS
+        .iter()
+        .map(|row| row.route.to_owned())
+        .collect::<Vec<_>>();
+
+    assert_eq!(matrix_routes, supported_routes);
+}
+
+#[tokio::test]
+async fn route_auth_matrix_rejects_missing_auth_where_required() {
+    for row in ROUTE_AUTH_EXPECTATIONS {
+        let mut state =
+            test_agent_state_custom("127.0.0.1:0".parse().unwrap(), Some("secret".to_owned()));
+        state.unix_socket = None;
+
+        let status = route_auth_status(*row, state, None).await;
+        if row.requires_auth {
+            assert_eq!(
+                status,
+                StatusCode::UNAUTHORIZED,
+                "route {} {} should require auth",
+                row.method,
+                row.route
+            );
+        } else {
+            assert_ne!(
+                status,
+                StatusCode::UNAUTHORIZED,
+                "route {} {} should be public",
+                row.method,
+                row.route
+            );
+            assert_ne!(
+                status,
+                StatusCode::FORBIDDEN,
+                "route {} {} should be public",
+                row.method,
+                row.route
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn route_auth_matrix_rejects_non_loopback_apply_routes() {
+    for row in ROUTE_AUTH_EXPECTATIONS
+        .iter()
+        .copied()
+        .filter(|row| row.rejects_non_loopback_apply)
+    {
+        let mut state =
+            test_agent_state_custom("0.0.0.0:0".parse().unwrap(), Some("secret".to_owned()));
+        state.unix_socket = None;
+
+        let status = route_auth_status(row, state, Some("secret")).await;
+        assert_eq!(
+            status,
+            StatusCode::FORBIDDEN,
+            "route {} {} should reject non-loopback state changes",
+            row.method,
+            row.route
+        );
+    }
+}
+
+async fn route_auth_status(
+    row: RouteAuthExpectation,
+    state: AgentState,
+    bearer_token: Option<&str>,
+) -> StatusCode {
+    let router = routes::build_agent_router(
+        Arc::new(state),
+        Arc::new(AgentRateLimiter::new(usize::MAX, Duration::from_secs(60))),
+    );
+    let mut builder = Request::builder().method(row.method).uri(row.request_path);
+    if let Some(token) = bearer_token {
+        builder = builder.header(axum::http::header::AUTHORIZATION, format!("Bearer {token}"));
+    }
+    if route_auth_body_is_json(row.body) {
+        builder = builder.header(axum::http::header::CONTENT_TYPE, "application/json");
+    }
+
+    let response = router
+        .oneshot(
+            builder
+                .body(route_auth_body(row.body))
+                .expect("route auth test request should build"),
+        )
+        .await
+        .expect("route auth test request should run");
+    response.status()
+}
+
+fn route_auth_body_is_json(body: RouteAuthBody) -> bool {
+    matches!(
+        body,
+        RouteAuthBody::RecordStart | RouteAuthBody::AutotuneStartApplyLowRisk
+    )
+}
+
+fn route_auth_body(body: RouteAuthBody) -> Body {
+    match body {
+        RouteAuthBody::Empty => Body::empty(),
+        RouteAuthBody::RecordStart => {
+            Body::from(serde_json::to_vec(&minimal_remote_request()).unwrap())
+        }
+        RouteAuthBody::AutotuneStartApplyLowRisk => {
+            Body::from(serde_json::to_vec(&autotune_request("apply-low-risk")).unwrap())
+        }
+    }
 }
 
 #[test]

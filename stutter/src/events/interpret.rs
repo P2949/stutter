@@ -157,7 +157,7 @@ pub fn interpret_scheduler_event(input: SchedulerEventInput<'_>) -> SchedulerSam
 
     let stats = tasks
         .stats_by_task
-        .entry(event.tid)
+        .entry(event.tid.into())
         .or_insert_with(|| metrics::TaskStats::new(event.tid, comm.clone(), elapsed_ms));
 
     if should_replace_unknown_comm(&stats.comm, &comm) {
@@ -223,6 +223,7 @@ pub fn interpret_scheduler_event(input: SchedulerEventInput<'_>) -> SchedulerSam
 
     if is_spike {
         let (cause_tags, primary_cause) = spike_cause_tags_and_primary
+            // invariant: spike cause tags are always computed when is_spike is true
             .expect("spike cause tags must be computed for spike events");
 
         let event_record = recorder::SpikeEvent::from_task_stats(

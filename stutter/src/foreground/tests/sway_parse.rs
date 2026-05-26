@@ -51,12 +51,47 @@ mod tests {
 
         assert_eq!(snapshot.source, Some(ForegroundSource::Sway));
         assert_eq!(snapshot.status, ForegroundProviderStatus::Available);
-        assert_eq!(snapshot.pid, Some(4242));
-        assert_eq!(snapshot.app_id.as_deref(), Some("steam_app_379430"));
-        assert_eq!(snapshot.class.as_deref(), Some("steam_app_379430"));
-        assert_eq!(snapshot.window_id.as_deref(), Some("73400327"));
-        assert_eq!(snapshot.workspace.as_deref(), Some("gaming"));
-        assert!((snapshot.confidence - 0.95).abs() < f32::EPSILON);
+        assert_eq!(
+            snapshot.decision.target.as_ref().and_then(|t| t.pid),
+            Some(4242)
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.app_id.clone())
+                .as_deref(),
+            Some("steam_app_379430")
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.class.clone())
+                .as_deref(),
+            Some("steam_app_379430")
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.window_id.clone())
+                .as_deref(),
+            Some("73400327")
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.workspace.clone())
+                .as_deref(),
+            Some("gaming")
+        );
+        assert!((snapshot.decision.confidence - 0.95).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -102,12 +137,55 @@ mod tests {
         let snapshot = provider.sample_from_tree_json(2_000, json);
         let event = snapshot.to_event(false).unwrap();
 
-        assert_eq!(snapshot.app_id.as_deref(), Some("firefox"));
-        assert_eq!(snapshot.class.as_deref(), Some("Navigator"));
-        assert_eq!(snapshot.title.as_deref(), Some("Private browser tab title"));
-        assert_eq!(event.app_id.as_deref(), Some("firefox"));
-        assert_eq!(event.class.as_deref(), Some("Navigator"));
-        assert_eq!(event.title, None);
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.app_id.clone())
+                .as_deref(),
+            Some("firefox")
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.class.clone())
+                .as_deref(),
+            Some("Navigator")
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.title.clone())
+                .as_deref(),
+            Some("Private browser tab title")
+        );
+        assert_eq!(
+            event
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.app_id.clone())
+                .as_deref(),
+            Some("firefox")
+        );
+        assert_eq!(
+            event
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.class.clone())
+                .as_deref(),
+            Some("Navigator")
+        );
+        assert_eq!(
+            event.decision.target.as_ref().and_then(|t| t.title.clone()),
+            None
+        );
     }
 
     #[test]
@@ -153,10 +231,37 @@ mod tests {
         let snapshot = provider.sample_from_tree_json(1_000, json);
 
         assert_eq!(snapshot.status, ForegroundProviderStatus::Available);
-        assert_eq!(snapshot.pid, Some(4242));
-        assert_eq!(snapshot.app_id.as_deref(), Some("steam_app_379430"));
-        assert_eq!(snapshot.window_id.as_deref(), Some("42"));
-        assert_eq!(snapshot.workspace.as_deref(), Some("games"));
+        assert_eq!(
+            snapshot.decision.target.as_ref().and_then(|t| t.pid),
+            Some(4242)
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.app_id.clone())
+                .as_deref(),
+            Some("steam_app_379430")
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.window_id.clone())
+                .as_deref(),
+            Some("42")
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.workspace.clone())
+                .as_deref(),
+            Some("games")
+        );
     }
 
     #[test]
@@ -185,9 +290,23 @@ mod tests {
         let snapshot = provider.sample_from_tree_json(1_000, json);
 
         assert_eq!(snapshot.status, ForegroundProviderStatus::Unavailable);
-        assert_eq!(snapshot.pid, None);
-        assert_eq!(snapshot.app_id, None);
-        assert_eq!(snapshot.window_id, None);
+        assert_eq!(snapshot.decision.target.as_ref().and_then(|t| t.pid), None);
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.app_id.clone()),
+            None
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.window_id.clone()),
+            None
+        );
     }
 
     #[test]
@@ -238,9 +357,28 @@ mod tests {
         let snapshot = provider.sample_from_tree_json(1_000, json);
 
         assert_eq!(snapshot.status, ForegroundProviderStatus::Available);
-        assert_eq!(snapshot.pid, Some(9001));
-        assert_eq!(snapshot.window_id.as_deref(), Some("11"));
-        assert_eq!(snapshot.workspace.as_deref(), Some("dev"));
+        assert_eq!(
+            snapshot.decision.target.as_ref().and_then(|t| t.pid),
+            Some(9001)
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.window_id.clone())
+                .as_deref(),
+            Some("11")
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.workspace.clone())
+                .as_deref(),
+            Some("dev")
+        );
     }
 
     #[test]
@@ -248,16 +386,19 @@ mod tests {
         let _lock = crate::test_support::TEST_MUTEX.lock().unwrap();
         let previous = std::env::var_os("SWAYSOCK");
 
+        // SAFETY: TEST_MUTEX serializes process environment mutation in this test.
         unsafe {
             std::env::remove_var("SWAYSOCK");
         }
         assert!(!SwayForegroundProvider::is_detected());
 
+        // SAFETY: TEST_MUTEX serializes process environment mutation in this test.
         unsafe {
             std::env::set_var("SWAYSOCK", "/tmp/sway-ipc.sock");
         }
         assert!(SwayForegroundProvider::is_detected());
 
+        // SAFETY: TEST_MUTEX is still held and previous was captured before mutation.
         unsafe {
             if let Some(previous) = previous {
                 std::env::set_var("SWAYSOCK", previous);
@@ -312,13 +453,56 @@ mod tests {
         assert_eq!(snapshot.elapsed_ms, 2_000);
         assert_eq!(snapshot.source, Some(ForegroundSource::Sway));
         assert_eq!(snapshot.status, ForegroundProviderStatus::Available);
-        assert_eq!(snapshot.pid, Some(4242));
-        assert_eq!(snapshot.app_id.as_deref(), Some("steam"));
-        assert_eq!(snapshot.class.as_deref(), Some("Steam"));
-        assert_eq!(snapshot.title.as_deref(), Some("Steam - private title"));
-        assert_eq!(snapshot.window_id.as_deref(), Some("12345"));
-        assert_eq!(snapshot.workspace.as_deref(), Some("games"));
-        assert_eq!(snapshot.confidence, 0.95);
+        assert_eq!(
+            snapshot.decision.target.as_ref().and_then(|t| t.pid),
+            Some(4242)
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.app_id.clone())
+                .as_deref(),
+            Some("steam")
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.class.clone())
+                .as_deref(),
+            Some("Steam")
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.title.clone())
+                .as_deref(),
+            Some("Steam - private title")
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.window_id.clone())
+                .as_deref(),
+            Some("12345")
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.workspace.clone())
+                .as_deref(),
+            Some("games")
+        );
+        assert_eq!(snapshot.decision.confidence, 0.95);
     }
 
     #[test]
@@ -364,11 +548,38 @@ mod tests {
         let snapshot = provider.sample_from_tree_json(3_000, json);
 
         assert_eq!(snapshot.status, ForegroundProviderStatus::Available);
-        assert_eq!(snapshot.pid, Some(7777));
-        assert_eq!(snapshot.app_id.as_deref(), Some("foot"));
-        assert_eq!(snapshot.window_id.as_deref(), Some("9"));
-        assert_eq!(snapshot.workspace.as_deref(), Some("dev"));
-        assert_eq!(snapshot.confidence, 0.95);
+        assert_eq!(
+            snapshot.decision.target.as_ref().and_then(|t| t.pid),
+            Some(7777)
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.app_id.clone())
+                .as_deref(),
+            Some("foot")
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.window_id.clone())
+                .as_deref(),
+            Some("9")
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.workspace.clone())
+                .as_deref(),
+            Some("dev")
+        );
+        assert_eq!(snapshot.decision.confidence, 0.95);
     }
 
     #[test]
@@ -414,10 +625,26 @@ mod tests {
         let snapshot = provider.sample_from_tree_json(4_000, json);
 
         assert_eq!(snapshot.status, ForegroundProviderStatus::Available);
-        assert_eq!(snapshot.pid, None);
-        assert_eq!(snapshot.app_id.as_deref(), Some("firefox"));
-        assert_eq!(snapshot.class.as_deref(), Some("Firefox"));
-        assert_eq!(snapshot.confidence, 0.65);
+        assert_eq!(snapshot.decision.target.as_ref().and_then(|t| t.pid), None);
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.app_id.clone())
+                .as_deref(),
+            Some("firefox")
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.class.clone())
+                .as_deref(),
+            Some("Firefox")
+        );
+        assert_eq!(snapshot.decision.confidence, 0.65);
     }
 
     #[test]
@@ -459,12 +686,42 @@ mod tests {
         let snapshot = provider.sample_from_tree_json(5_000, json);
 
         assert_eq!(snapshot.status, ForegroundProviderStatus::Available);
-        assert_eq!(snapshot.pid, None);
-        assert_eq!(snapshot.app_id, None);
-        assert_eq!(snapshot.class, None);
-        assert_eq!(snapshot.title.as_deref(), Some("unknown window"));
-        assert_eq!(snapshot.window_id.as_deref(), Some("9988"));
-        assert_eq!(snapshot.confidence, 0.35);
+        assert_eq!(snapshot.decision.target.as_ref().and_then(|t| t.pid), None);
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.app_id.clone()),
+            None
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.class.clone()),
+            None
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.title.clone())
+                .as_deref(),
+            Some("unknown window")
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.window_id.clone())
+                .as_deref(),
+            Some("9988")
+        );
+        assert_eq!(snapshot.decision.confidence, 0.35);
     }
 
     #[test]
@@ -510,8 +767,8 @@ mod tests {
         let snapshot = provider.sample_from_tree_json(5_500, json);
 
         assert_eq!(snapshot.status, ForegroundProviderStatus::Available);
-        assert_eq!(snapshot.pid, None);
-        assert_eq!(snapshot.confidence, 0.35);
+        assert_eq!(snapshot.decision.target.as_ref().and_then(|t| t.pid), None);
+        assert_eq!(snapshot.decision.confidence, 0.35);
     }
 
     #[test]
@@ -532,8 +789,16 @@ mod tests {
 
         assert_eq!(snapshot.source, Some(ForegroundSource::Sway));
         assert_eq!(snapshot.status, ForegroundProviderStatus::Unavailable);
-        assert_eq!(snapshot.confidence, 0.0);
-        assert!(snapshot.reason.contains("did not contain a focused node"));
+        assert_eq!(snapshot.decision.confidence, 0.0);
+        assert!(
+            snapshot
+                .decision
+                .reasons
+                .first()
+                .map(|r| r.reason.clone())
+                .unwrap_or_default()
+                .contains("did not contain a focused node")
+        );
     }
 
     #[test]
@@ -543,10 +808,12 @@ mod tests {
 
         assert_eq!(snapshot.source, Some(ForegroundSource::Sway));
         assert_eq!(snapshot.status, ForegroundProviderStatus::Error);
-        assert_eq!(snapshot.confidence, 0.0);
+        assert_eq!(snapshot.decision.confidence, 0.0);
         assert!(
             snapshot
-                .reason
+                .decision
+                .primary_reason()
+                .unwrap_or_default()
                 .contains("failed to parse swaymsg get_tree JSON")
         );
     }
@@ -555,20 +822,21 @@ mod tests {
     fn sway_provider_titles_are_redacted_by_resolver_default() {
         let provider = SequenceProvider::new(
             ForegroundSource::Sway,
-            vec![ForegroundWindowSnapshot {
-                elapsed_ms: 0,
-                source: Some(ForegroundSource::Sway),
-                status: ForegroundProviderStatus::Available,
-                pid: Some(4242),
-                app_id: Some("steam".to_owned()),
-                class: Some("Steam".to_owned()),
-                title: Some("Sensitive foreground title".to_owned()),
-                window_id: Some("12345".to_owned()),
-                workspace: Some("games".to_owned()),
-                confidence: 0.95,
-                stale_ms: None,
-                reason: "test sway provider snapshot".to_owned(),
-            }],
+            vec![ForegroundWindowSnapshot::available(
+                ForegroundAvailableInput {
+                    elapsed_ms: 0,
+                    source: ForegroundSource::Sway,
+                    pid: Some(4242),
+                    app_id: Some("steam".to_owned()),
+                    class: Some("Steam".to_owned()),
+                    title: Some("Sensitive foreground title".to_owned()),
+                    include_title: true,
+                    window_id: Some("12345".to_owned()),
+                    workspace: Some("games".to_owned()),
+                    confidence: 0.95,
+                    reason: "test sway provider snapshot".to_owned(),
+                },
+            )],
         );
         let mut resolver = ForegroundResolver::new(Box::new(provider));
 
@@ -576,7 +844,14 @@ mod tests {
 
         assert_eq!(snapshot.source, Some(ForegroundSource::Sway));
         assert_eq!(snapshot.status, ForegroundProviderStatus::Available);
-        assert_eq!(snapshot.title, None);
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.title.clone()),
+            None
+        );
     }
 
     #[test]
@@ -586,6 +861,7 @@ mod tests {
         let previous_swaysock = std::env::var_os("SWAYSOCK");
         let previous_hyprland = std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE");
 
+        // SAFETY: TEST_MUTEX serializes process environment mutation in this test.
         unsafe {
             std::env::set_var("WAYLAND_DISPLAY", "wayland-1");
             std::env::set_var("SWAYSOCK", "/tmp/sway-ipc.sock");
@@ -594,6 +870,7 @@ mod tests {
 
         assert!(!is_generic_wayland_without_supported_foreground_api());
 
+        // SAFETY: TEST_MUTEX is still held and previous values were captured before mutation.
         unsafe {
             restore_env_var("WAYLAND_DISPLAY", previous_wayland_display);
             restore_env_var("SWAYSOCK", previous_swaysock);

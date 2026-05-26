@@ -723,6 +723,48 @@ fn objective_signals_collect_io_irq_thermal_and_power_indicators() {
 }
 
 #[test]
+fn objective_signals_source_compile_throughput_from_progress_intervals() {
+    let mut window = RollingWindow::new(Duration::from_secs(30));
+    window.push_interval(IntervalRecord {
+        elapsed_ms: 1_000,
+        samples: 10,
+        class: TaskClass::BuildJob,
+        ..IntervalRecord::default()
+    });
+    window.push_interval(IntervalRecord {
+        elapsed_ms: 1_000,
+        samples: 25,
+        class: TaskClass::Compiler,
+        ..IntervalRecord::default()
+    });
+    window.push_interval(IntervalRecord {
+        elapsed_ms: 2_000,
+        samples: 5,
+        class: TaskClass::Linker,
+        ..IntervalRecord::default()
+    });
+    window.push_interval(IntervalRecord {
+        elapsed_ms: 3_000,
+        samples: 50,
+        class: TaskClass::Indexer,
+        ..IntervalRecord::default()
+    });
+
+    let signals = window.objective_signals();
+
+    assert_eq!(signals.compile_progress_intervals, Some(2));
+    assert_eq!(signals.compile_progress_samples, Some(40));
+    assert_eq!(
+        signals.compile_progress_source.as_deref(),
+        Some("build-compiler-linker-intervals")
+    );
+    assert_eq!(
+        signals.signal_quality.compile_throughput,
+        ObjectiveSignalQuality::Direct
+    );
+}
+
+#[test]
 fn objective_signals_preserve_gpu_identity_when_sample_has_it() {
     let mut window = RollingWindow::new(Duration::from_secs(30));
     window.push_gpu_sample(GpuSample {

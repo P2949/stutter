@@ -274,17 +274,12 @@ mod tests {
             tid: 99,
             comm,
         };
-        let bytes = unsafe {
-            std::slice::from_raw_parts(
-                (&raw as *const ExecEvent).cast::<u8>(),
-                std::mem::size_of::<ExecEvent>(),
-            )
-        };
+        let bytes = crate::events::decode::tests::as_bytes(&raw);
 
         let mut tasks = TaskTracker::default();
         tasks
             .stats_by_task
-            .insert(99, metrics::TaskStats::new(99, "?".to_owned(), 0));
+            .insert(99.into(), metrics::TaskStats::new(99, "?".to_owned(), 0));
 
         let event = handle_exec_event(bytes, &mut tasks, 1234).unwrap();
 

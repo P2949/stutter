@@ -207,7 +207,7 @@ fn generated_profile_plan_rejects_render_mask_below_minimum() {
         rejected.profile_name == "game-isolate-render"
             && rejected
                 .reason
-                .contains("render/main game work fewer than minimum CPUs")
+                .contains("render/main game missing minimum CPUs")
     }));
 }
 
@@ -228,7 +228,7 @@ fn generated_profile_plan_rejects_background_helper_single_cpu_overload() {
     assert!(plan.rejected.iter().any(|rejected| {
         rejected
             .reason
-            .contains("background/helper work onto too few CPUs")
+            .contains("background/helper capacity too low")
     }));
 }
 

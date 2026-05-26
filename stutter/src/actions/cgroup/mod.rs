@@ -229,8 +229,11 @@ impl CgroupPlacementAction {
         proc_root: &Path,
         token: &RollbackToken,
     ) -> anyhow::Result<()> {
-        let RollbackToken::CgroupRestore { records, cpuset } = token else {
-            anyhow::bail!("rollback token is not a cgroup restore token");
+        let Some((records, cpuset)) = token.as_cgroup_restore() else {
+            return Err(crate::actions::ActionError::invalid_rollback_token_kind(
+                token.kind_error("cgroup-restore"),
+            )
+            .into());
         };
 
         let mut failures = Vec::new();

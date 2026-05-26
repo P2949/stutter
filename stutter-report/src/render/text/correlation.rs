@@ -1,5 +1,5 @@
-use crate::model::TextReportCorrelationSections;
 use super::pushln;
+use crate::model::TextReportCorrelationSections;
 
 pub fn render_correlation_sections(
     output: &mut String,

@@ -28,13 +28,6 @@ pub(crate) fn format_task_cpu_perf(task: &SessionTask) -> String {
     format!(" cpu_perf: {}", parts.join(" "))
 }
 
-pub(crate) fn format_elapsed(elapsed_ms: Option<u64>) -> String {
-    match elapsed_ms {
-        Some(elapsed_ms) => format!("{elapsed_ms}ms"),
-        None => "-".to_owned(),
-    }
-}
-
 pub(crate) fn cluster_elapsed_ms(cluster: &SpikeCluster) -> Option<u64> {
     cluster
         .points
@@ -61,57 +54,12 @@ pub(crate) fn format_option<T: std::fmt::Display>(value: Option<T>) -> String {
         .unwrap_or_else(|| "-".to_owned())
 }
 
-pub(crate) fn format_process_pid(process_pid: Option<u32>) -> String {
-    match process_pid {
-        Some(process_pid) => process_pid.to_string(),
-        None => "-".to_owned(),
-    }
-}
-
 pub(crate) fn cluster_elapsed(cluster: &SpikeCluster) -> Option<u64> {
     cluster
         .points
         .iter()
         .filter_map(|point| point.elapsed_ms)
         .min()
-}
-
-pub(crate) fn cluster_labels(cluster: &SpikeCluster) -> Vec<&'static str> {
-    let mut labels = Vec::new();
-
-    if cluster
-        .points
-        .iter()
-        .any(|point| point.comm == "RenderThread" || point.comm == "Main")
-    {
-        labels.push("render-main");
-    }
-
-    if cluster
-        .points
-        .iter()
-        .any(|point| point.comm.starts_with("dxvk-"))
-    {
-        labels.push("dxvk");
-    }
-
-    if cluster
-        .points
-        .iter()
-        .any(|point| point.comm == "wineserver" || point.comm.contains("winedevice"))
-    {
-        labels.push("wine");
-    }
-
-    if cluster
-        .points
-        .iter()
-        .any(|point| point.comm == "AudioThread")
-    {
-        labels.push("audio");
-    }
-
-    labels
 }
 
 pub(crate) fn percentile_warning_note(percentile_scope: &str) -> &'static str {
@@ -125,5 +73,12 @@ pub(crate) fn percentile_warning_note(percentile_scope: &str) -> &'static str {
         _ => {
             "p95/p99 may be capped because this session predates histogram percentiles; prefer max and threshold counters"
         }
+    }
+}
+
+pub(crate) fn format_elapsed(elapsed_ms: Option<u64>) -> String {
+    match elapsed_ms {
+        Some(elapsed_ms) => format!("{elapsed_ms}ms"),
+        None => "-".to_owned(),
     }
 }

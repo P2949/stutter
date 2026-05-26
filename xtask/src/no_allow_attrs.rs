@@ -1,4 +1,8 @@
-use std::{fs, path::{Path, PathBuf}};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
+
 use anyhow::{Context, bail};
 
 pub fn run_no_allow_attrs(root: &Path) -> anyhow::Result<()> {

@@ -14,6 +14,9 @@ fn core_typed_ids_are_load_bearing_in_process_and_metrics_models() {
     let process_model = source("process/model.rs");
     assert!(
         process_model.contains("use stutter_core::ids::{Pid, Tid};")
+            && process_model.contains("pub type ProcessMap = BTreeMap<Pid, ProcInfo>;")
+            && process_model.contains("pub type ProcessSet = BTreeSet<Pid>;")
+            && process_model.contains("pub type TaskMap = BTreeMap<Tid, TaskInfo>;")
             && process_model.contains("pub tid: Tid")
             && process_model.contains("pub process_pid: Pid")
             && process_model.contains("pub process_ppid: Pid")
@@ -23,15 +26,37 @@ fn core_typed_ids_are_load_bearing_in_process_and_metrics_models() {
         "TaskInfo must store task/process identifiers as stutter-core typed IDs, not raw u32 plus accessor wrappers",
     );
 
-    let metrics = source("metrics.rs");
+    let task_stats = source("metrics/task_stats.rs");
+    let cpu_stats = source("metrics/cpu_stats.rs");
+    let perf_counters = source("perf_counters/mod.rs");
+    let tasks = source("tasks.rs");
     assert!(
-        metrics.contains("use stutter_core::ids::{CpuId, Pid, Tid};")
-            && metrics.contains("pub task: Tid")
-            && metrics.contains("pub process_pid: Option<Pid>")
-            && metrics.contains("pub fn cpu_id(&self) -> CpuId")
-            && metrics.contains("pub fn task_id(&self) -> Tid")
-            && metrics.contains("pub fn process_id(&self) -> Option<Pid>"),
+        task_stats.contains("use stutter_core::ids::{CpuId, Pid, Tid};")
+            && task_stats.contains("pub type TaskStatsMap = BTreeMap<Tid, TaskStats>;")
+            && task_stats.contains("pub task: Tid")
+            && task_stats.contains("pub process_pid: Option<Pid>")
+            && task_stats.contains("pub cpu: CpuId")
+            && task_stats.contains("pub switch_prev_pid: Pid")
+            && task_stats.contains("pub waker_counts: BTreeMap<Tid, u64>")
+            && task_stats.contains("pub fn task_id(&self) -> Tid")
+            && task_stats.contains("pub fn process_id(&self) -> Option<Pid>")
+            && cpu_stats.contains("use stutter_core::ids::CpuId;")
+            && cpu_stats.contains("pub by_cpu: BTreeMap<CpuId, CpuStats>")
+            && cpu_stats.contains("pub fn cpu_id(&self) -> CpuId"),
         "TaskStats must store task/process identifiers as stutter-core typed IDs while converting to raw u32 only at external DTO/eBPF boundaries",
+    );
+    assert!(
+        tasks.contains("pub active_targets: ProcessTaskMap")
+            && tasks.contains("pub known_targets: ProcessTaskMap")
+            && tasks.contains("pub stats_by_task: TaskStatsMap"),
+        "TaskTracker live task maps must be keyed by typed task IDs, with raw u32 only at eBPF/DTO boundaries",
+    );
+    assert!(
+        perf_counters.contains("groups: BTreeMap<Tid, PerfCounterGroup>")
+            && perf_counters.contains("skipped_tasks: BTreeSet<Tid>")
+            && perf_counters
+                .contains("pub fn sample_interval(&mut self) -> BTreeMap<Tid, CpuPerfDelta>"),
+        "perf counter sampling must keep selected task identities typed after target selection",
     );
 }
 
@@ -39,7 +64,7 @@ fn core_typed_ids_are_load_bearing_in_process_and_metrics_models() {
 fn process_comm_runtime_models_no_longer_depend_on_serializable_arc_str() {
     for relative_path in [
         "process/model.rs",
-        "metrics.rs",
+        "metrics/task_stats.rs",
         "recorder/event_types.rs",
         "recorder/session_files.rs",
     ] {
@@ -99,10 +124,10 @@ fn autotune_observation_task_snapshots_use_typed_ids() {
 fn remaining_task_process_identity_models_use_typed_ids() {
     for relative_path in [
         "focus/classify.rs",
-        "affinity.rs",
+        "affinity/restore_record.rs",
         "profile_restore.rs",
         "autotune/washout.rs",
-        "profiles.rs",
+        "profiles/plan.rs",
     ] {
         let source = source(relative_path);
         assert!(

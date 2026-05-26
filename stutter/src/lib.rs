@@ -1,4 +1,5 @@
 pub mod api;
+pub(crate) mod syscall;
 
 pub(crate) mod actions;
 pub(crate) mod agent;

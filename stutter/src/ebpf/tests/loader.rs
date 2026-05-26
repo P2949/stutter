@@ -8,6 +8,8 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use stutter_common::tracepoint_offsets::{TracepointFieldSpec, TracepointName};
+
 // tokio::time::sleep removed as unused
 use super::*;
 use crate::ebpf::load::{map_init_context, missing_map_context};
@@ -105,7 +107,11 @@ field:int next_prio; offset:60; size:4; signed:1;
 
     validate_tracepoint_format(
         format,
-        &[("next_comm", 40), ("next_pid", 56), ("next_prio", 60)],
+        &[
+            TracepointFieldSpec::new("next_comm", 40),
+            TracepointFieldSpec::new("next_pid", 56),
+            TracepointFieldSpec::new("next_prio", 60),
+        ],
     )
     .unwrap();
 }
@@ -117,46 +123,49 @@ fn shared_tracepoint_offset_tables_expose_reader_offsets() {
     assert_eq!(
         offsets::SCHED_WAKEUP_FIELDS,
         &[
-            ("pid", offsets::SCHED_WAKEUP_PID_OFFSET),
-            ("prio", offsets::SCHED_WAKEUP_PRIO_OFFSET),
-            ("target_cpu", offsets::SCHED_WAKEUP_TARGET_CPU_OFFSET),
+            TracepointFieldSpec::new("pid", offsets::SCHED_WAKEUP_PID_OFFSET),
+            TracepointFieldSpec::new("prio", offsets::SCHED_WAKEUP_PRIO_OFFSET),
+            TracepointFieldSpec::new("target_cpu", offsets::SCHED_WAKEUP_TARGET_CPU_OFFSET),
         ],
     );
     assert_eq!(
         offsets::SCHED_SWITCH_FIELDS,
         &[
-            ("prev_pid", offsets::SCHED_SWITCH_PREV_PID_OFFSET),
-            ("prev_state", offsets::SCHED_SWITCH_PREV_STATE_OFFSET),
-            ("next_comm", offsets::SCHED_SWITCH_NEXT_COMM_OFFSET),
-            ("next_pid", offsets::SCHED_SWITCH_NEXT_PID_OFFSET),
-            ("next_prio", offsets::SCHED_SWITCH_NEXT_PRIO_OFFSET),
+            TracepointFieldSpec::new("prev_pid", offsets::SCHED_SWITCH_PREV_PID_OFFSET),
+            TracepointFieldSpec::new("prev_state", offsets::SCHED_SWITCH_PREV_STATE_OFFSET),
+            TracepointFieldSpec::new("next_comm", offsets::SCHED_SWITCH_NEXT_COMM_OFFSET),
+            TracepointFieldSpec::new("next_pid", offsets::SCHED_SWITCH_NEXT_PID_OFFSET),
+            TracepointFieldSpec::new("next_prio", offsets::SCHED_SWITCH_NEXT_PRIO_OFFSET),
         ],
     );
     assert_eq!(
         offsets::SCHED_MIGRATE_TASK_FIELDS,
         &[
-            ("pid", offsets::SCHED_MIGRATE_TASK_PID_OFFSET),
-            ("orig_cpu", offsets::SCHED_MIGRATE_TASK_ORIG_CPU_OFFSET),
-            ("dest_cpu", offsets::SCHED_MIGRATE_TASK_DEST_CPU_OFFSET),
+            TracepointFieldSpec::new("pid", offsets::SCHED_MIGRATE_TASK_PID_OFFSET),
+            TracepointFieldSpec::new("orig_cpu", offsets::SCHED_MIGRATE_TASK_ORIG_CPU_OFFSET),
+            TracepointFieldSpec::new("dest_cpu", offsets::SCHED_MIGRATE_TASK_DEST_CPU_OFFSET),
         ],
     );
     assert_eq!(
         offsets::CPU_FREQUENCY_FIELDS,
         &[
-            ("state", offsets::CPU_FREQUENCY_STATE_OFFSET),
-            ("cpu_id", offsets::CPU_FREQUENCY_CPU_ID_OFFSET),
+            TracepointFieldSpec::new("state", offsets::CPU_FREQUENCY_STATE_OFFSET),
+            TracepointFieldSpec::new("cpu_id", offsets::CPU_FREQUENCY_CPU_ID_OFFSET),
         ],
     );
     assert_eq!(
         offsets::SCHED_STAT_WAIT_FIELDS,
         &[
-            ("pid", offsets::SCHED_STAT_WAIT_PID_OFFSET),
-            ("delay", offsets::SCHED_STAT_WAIT_DELAY_OFFSET),
+            TracepointFieldSpec::new("pid", offsets::SCHED_STAT_WAIT_PID_OFFSET),
+            TracepointFieldSpec::new("delay", offsets::SCHED_STAT_WAIT_DELAY_OFFSET),
         ],
     );
     assert_eq!(
         offsets::IRQ_HANDLER_FIELDS,
-        &[("irq", offsets::IRQ_HANDLER_IRQ_OFFSET)],
+        &[TracepointFieldSpec::new(
+            "irq",
+            offsets::IRQ_HANDLER_IRQ_OFFSET
+        )],
     );
 }
 
@@ -172,8 +181,12 @@ fn tracepoint_mismatch_error_includes_declaration_and_sched_switch_hint() {
     field:int next_prio; offset:56; size:4; signed:1;
 "#;
 
-    let err =
-        validate_tracepoint_format_named("sched_switch", format, &[("next_pid", 56)]).unwrap_err();
+    let err = validate_tracepoint_format_named(
+        TracepointName::new("sched_switch"),
+        format,
+        &[TracepointFieldSpec::new("next_pid", 56)],
+    )
+    .unwrap_err();
     let text = err.to_string();
 
     assert!(text.contains("sched_switch"));
@@ -192,8 +205,12 @@ field:pid_t prev_pid; offset:24; size:4; signed:1;
 field:long prev_state; offset:32; size:8; signed:1;
 "#;
 
-    let err =
-        validate_tracepoint_format_named("sched_switch", format, &[("next_pid", 56)]).unwrap_err();
+    let err = validate_tracepoint_format_named(
+        TracepointName::new("sched_switch"),
+        format,
+        &[TracepointFieldSpec::new("next_pid", 56)],
+    )
+    .unwrap_err();
     let text = err.to_string();
 
     assert!(text.contains("missing expected field"));
@@ -249,7 +266,7 @@ fn wakeup_consumed_cursor_uses_sequence_identity() {
 
 #[test]
 fn sched_switch_reads_previous_task_context_after_relevance_filters() {
-    let source = include_str!("../../../../stutter-ebpf/src/main.rs");
+    let source = include_str!("../../../../stutter-ebpf/src/scheduler.rs");
     let start = source.find("fn try_sched_switch").unwrap();
     let end = source[start..].find("fn try_sched_migrate_task").unwrap() + start;
     let body = &source[start..end];
@@ -269,9 +286,12 @@ fn sched_switch_reads_previous_task_context_after_relevance_filters() {
 
 #[test]
 fn irq_key_documents_full_u32_irq_cpu_packing_without_overlap_guard() {
-    let source = include_str!("../../../../stutter-ebpf/src/main.rs");
-    let start = source.find("fn irq_key").unwrap();
-    let end = source[start..].find("fn increment_drop_counter").unwrap() + start;
+    let source = include_str!("../../../../stutter-ebpf/src/irq.rs");
+    let start = source.find("pub(crate) fn irq_key").unwrap();
+    let end = source[start..]
+        .find("pub(crate) fn try_irq_handler_entry")
+        .unwrap()
+        + start;
     let body = &source[start..end];
 
     assert!(body.contains("High 32 bits: IRQ number. Low 32 bits: CPU ID."));
@@ -288,14 +308,15 @@ field:unsigned short common_type; offset:0; size:2; signed:0;
 field:int irq; offset:8; size:4; signed:1;
 "#;
 
-    validate_tracepoint_format(format, &[("irq", 8)]).unwrap();
+    validate_tracepoint_format(format, &[TracepointFieldSpec::new("irq", 8)]).unwrap();
 }
 
 #[test]
 fn rejects_bad_irq_tracepoint_offsets() {
     let format = "field:int irq; offset:12; size:4; signed:1;";
 
-    let err = validate_tracepoint_format(format, &[("irq", 8)]).unwrap_err();
+    let err =
+        validate_tracepoint_format(format, &[TracepointFieldSpec::new("irq", 8)]).unwrap_err();
     assert!(err.to_string().contains("expected offset 8, got 12"));
 }
 
@@ -469,8 +490,8 @@ fn optional_tracepoint_format_missing_is_not_an_error() {
 
     let available = validate_optional_tracepoint_format_at(
         &dir.join("missing/format"),
-        "missing",
-        &[("pid", 24)],
+        TracepointName::new("missing"),
+        &[TracepointFieldSpec::new("pid", 24)],
         true,
     )
     .unwrap();

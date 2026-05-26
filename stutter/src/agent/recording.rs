@@ -419,7 +419,10 @@ pub(crate) async fn get_session_handler(
         return (StatusCode::BAD_REQUEST, e.to_string()).into_response();
     }
 
-    let path = state.runs_dir.join(&id).join("session.json");
+    let path = crate::artifacts::artifact_path(
+        &state.runs_dir.join(&id),
+        crate::artifacts::ArtifactKind::Session,
+    );
     if !path.exists() {
         return StatusCode::NOT_FOUND.into_response();
     }

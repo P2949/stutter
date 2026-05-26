@@ -91,7 +91,7 @@ mod tests {
     }
 
     #[test]
-    fn planned_loop_returns_partial_token_for_applied_prefix() {
+    fn planned_loop_returns_partial_token_for_applied_prefix() -> anyhow::Result<()> {
         let err = ApplyTransaction::new()
             .apply_planned_loop(
                 vec!["first", "second", "third"],
@@ -116,11 +116,18 @@ mod tests {
 
         assert!(format!("{:#}", err.source).contains("second failed"));
         let rollback = err.rollback.expect("partial rollback token");
-        let RollbackToken::VmKnobRestore { records } = rollback else {
-            panic!("unexpected rollback token");
+        let records = match rollback {
+            RollbackToken::VmKnobRestore { records } => records,
+            other => {
+                anyhow::bail!(
+                    "unexpected rollback token: expected vm-knob-restore, actual {}",
+                    other.kind()
+                );
+            }
         };
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].path, std::path::PathBuf::from("first"));
+        Ok(())
     }
 
     #[test]
@@ -140,7 +147,7 @@ mod tests {
     }
 
     #[test]
-    fn nice_partial_token_contains_applied_restore_records() {
+    fn nice_partial_token_contains_applied_restore_records() -> anyhow::Result<()> {
         let records = vec![
             NiceRestoreRecord::new(identity(42, "game-thread"), 0),
             NiceRestoreRecord::new(identity(43, "game-worker"), 5),
@@ -159,19 +166,25 @@ mod tests {
             )
             .unwrap_err();
 
-        let RollbackToken::NiceRestore { records } =
-            err.rollback.expect("partial nice rollback token")
-        else {
-            panic!("unexpected rollback token");
+        let rollback = err.rollback.expect("partial nice rollback token");
+        let records = match rollback {
+            RollbackToken::NiceRestore { records } => records,
+            other => {
+                anyhow::bail!(
+                    "unexpected rollback token: expected nice-restore, actual {}",
+                    other.kind()
+                );
+            }
         };
 
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].tid(), 42);
         assert_eq!(records[0].original_nice, 0);
+        Ok(())
     }
 
     #[test]
-    fn ioprio_partial_token_contains_applied_restore_records() {
+    fn ioprio_partial_token_contains_applied_restore_records() -> anyhow::Result<()> {
         let records = vec![
             IoPrioRestoreRecord::new(identity(42, "storage-worker"), 4),
             IoPrioRestoreRecord::new(identity(43, "storage-helper"), 7),
@@ -190,19 +203,25 @@ mod tests {
             )
             .unwrap_err();
 
-        let RollbackToken::IoPrioRestore { records } =
-            err.rollback.expect("partial ioprio rollback token")
-        else {
-            panic!("unexpected rollback token");
+        let rollback = err.rollback.expect("partial ioprio rollback token");
+        let records = match rollback {
+            RollbackToken::IoPrioRestore { records } => records,
+            other => {
+                anyhow::bail!(
+                    "unexpected rollback token: expected ioprio-restore, actual {}",
+                    other.kind()
+                );
+            }
         };
 
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].tid(), 42);
         assert_eq!(records[0].original_ioprio, 4);
+        Ok(())
     }
 
     #[test]
-    fn uclamp_partial_token_contains_applied_restore_records() {
+    fn uclamp_partial_token_contains_applied_restore_records() -> anyhow::Result<()> {
         let records = vec![
             UclampRestoreRecord::new(identity(42, "game-thread"), 0, 1024),
             UclampRestoreRecord::new(identity(43, "game-worker"), 128, 900),
@@ -221,15 +240,21 @@ mod tests {
             )
             .unwrap_err();
 
-        let RollbackToken::UclampRestore { records } =
-            err.rollback.expect("partial uclamp rollback token")
-        else {
-            panic!("unexpected rollback token");
+        let rollback = err.rollback.expect("partial uclamp rollback token");
+        let records = match rollback {
+            RollbackToken::UclampRestore { records } => records,
+            other => {
+                anyhow::bail!(
+                    "unexpected rollback token: expected uclamp-restore, actual {}",
+                    other.kind()
+                );
+            }
         };
 
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].tid(), 42);
         assert_eq!(records[0].original_util_min, 0);
         assert_eq!(records[0].original_util_max, 1024);
+        Ok(())
     }
 }

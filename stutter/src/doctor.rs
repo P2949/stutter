@@ -10,18 +10,21 @@ use serde::Serialize;
 use crate::{
     daemon::capabilities::{CapabilityProbe, DaemonCapabilities},
     drm_tracepoints::{self, DrmTracepointFormat},
-    ebpf_loader, hwmon,
+    hwmon,
     probe_catalog::ProbeStatus,
     probe_registry::PROBE_REGISTRY,
 };
 
 mod ebpf_map_sizing;
+mod tracepoints;
 
 use ebpf_map_sizing::ebpf_map_sizing_check;
+use tracepoints::tracepoint_check;
 
 #[derive(Debug, Clone)]
 pub struct DoctorInput {
     pub json: bool,
+    pub tracepoint_dump: bool,
     pub hwmon: bool,
     pub hwmon_root: Option<PathBuf>,
     pub hwmon_drm_card: Option<String>,
@@ -57,6 +60,10 @@ pub struct DoctorCheck {
 }
 
 pub fn doctor_command(input: DoctorInput) -> anyhow::Result<()> {
+    if input.tracepoint_dump {
+        return tracepoints::tracepoint_dump_command(input.json);
+    }
+
     let report = build_doctor_report(&input);
 
     if input.json {
@@ -146,12 +153,12 @@ fn ebpf_build_check() -> DoctorCheck {
 }
 
 fn ebpf_runtime_permission_check() -> DoctorCheck {
-    let euid = unsafe { libc::geteuid() };
-    let rlimit = current_memlock_limit();
+    let euid = crate::syscall::geteuid();
+    let rlimit = crate::syscall::get_memlock_rlimit().ok();
     let unprivileged_bpf_disabled =
         read_trimmed(Path::new("/proc/sys/kernel/unprivileged_bpf_disabled"));
 
-    ebpf_runtime_permission_check_from_parts(euid, rlimit, unprivileged_bpf_disabled)
+    ebpf_runtime_permission_check_from_parts(euid as libc::uid_t, rlimit, unprivileged_bpf_disabled)
 }
 
 fn ebpf_runtime_permission_check_from_parts(
@@ -212,16 +219,6 @@ fn ebpf_runtime_permission_check_from_parts(
         message,
         details,
     }
-}
-
-fn current_memlock_limit() -> Option<(u64, u64)> {
-    let mut limit = std::mem::MaybeUninit::<libc::rlimit>::uninit();
-    let rc = unsafe { libc::getrlimit(libc::RLIMIT_MEMLOCK, limit.as_mut_ptr()) };
-    if rc != 0 {
-        return None;
-    }
-    let limit = unsafe { limit.assume_init() };
-    Some((limit.rlim_cur, limit.rlim_max))
 }
 
 fn format_rlimit_bytes(value: u64) -> String {
@@ -359,72 +356,6 @@ fn probe_registry_check(input: &DoctorInput) -> DoctorCheck {
         name: "probe_registry".to_owned(),
         status: DoctorStatus::Pass,
         message: "probe metadata is loaded from PROBE_REGISTRY".to_owned(),
-        details,
-    }
-}
-
-fn tracepoint_check(input: &DoctorInput) -> DoctorCheck {
-    let report = ebpf_loader::tracepoint_preflight(
-        Path::new("/sys/kernel/tracing/events"),
-        true,
-        false,
-        input.irq_latency,
-        input.block_io,
-        true,
-    );
-
-    let mut details = BTreeMap::new();
-    details.insert("sched_wakeup".to_owned(), report.sched_wakeup);
-    details.insert("sched_switch".to_owned(), report.sched_switch);
-    details.insert("sched_wakeup_new".to_owned(), report.sched_wakeup_new);
-    details.insert(
-        "sched_wakeup_new_coverage".to_owned(),
-        report.sched_wakeup_new_coverage,
-    );
-    details.insert("sched_migrate_task".to_owned(), report.sched_migrate_task);
-    details.insert("cpu_frequency".to_owned(), report.cpu_frequency);
-    details.insert("sched_stat_wait".to_owned(), report.sched_stat_wait);
-    details.insert("irq_handler".to_owned(), report.irq_handler);
-    details.insert("block_rq".to_owned(), report.block_rq);
-    details.insert(
-        "block_io_correlation_basis".to_owned(),
-        report.block_io_correlation_basis.clone(),
-    );
-    if !report.block_io_correlation_basis.is_empty() {
-        details.insert(
-            "block_io_correlation_confidence".to_owned(),
-            ebpf_loader::BlockIoCorrelationBasis::from_str(&report.block_io_correlation_basis)
-                .confidence()
-                .to_owned(),
-        );
-    }
-    for (idx, warning) in report.warnings.iter().enumerate() {
-        details.insert(format!("warning_{idx}"), warning.clone());
-    }
-    for (idx, error) in report.errors.iter().enumerate() {
-        details.insert(format!("error_{idx}"), error.clone());
-    }
-
-    let status = if !report.errors.is_empty() {
-        DoctorStatus::Fail
-    } else if !report.warnings.is_empty() {
-        DoctorStatus::Warn
-    } else {
-        DoctorStatus::Pass
-    };
-
-    DoctorCheck {
-        name: "tracepoint_formats".to_owned(),
-        status,
-        message: match status {
-            DoctorStatus::Pass => "required tracepoint formats look compatible".to_owned(),
-            DoctorStatus::Warn => {
-                "required tracepoints look usable, but optional probes may be degraded".to_owned()
-            }
-            DoctorStatus::Fail => {
-                "required scheduler tracepoint formats are missing or incompatible".to_owned()
-            }
-        },
         details,
     }
 }

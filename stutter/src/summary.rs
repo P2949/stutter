@@ -9,6 +9,7 @@ use serde::Serialize;
 #[cfg(test)]
 use crate::report::diff::run_diff_summary_from_sessions;
 use crate::{
+    artifacts::{ArtifactKind, artifact_path},
     metrics::format_latency,
     process_tree::TaskClass,
     recorder::{SESSION_SCHEMA_VERSION, SessionFile, SessionTask},
@@ -202,8 +203,8 @@ pub fn compact_run_summary_from_session(
 
     CompactRunSummary {
         path: path.to_path_buf(),
-        schema_version: session.core.schema_version,
-        expected_schema_version: SESSION_SCHEMA_VERSION,
+        schema_version: session.core.schema_version.get(),
+        expected_schema_version: SESSION_SCHEMA_VERSION.get(),
         run_name: session.core.run_name.clone(),
         duration_ms: session.core.duration_ms,
         stop_reason: session.stop_reason.clone(),
@@ -508,7 +509,7 @@ fn discover_run_dirs(batch_dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
         let entry =
             entry.with_context(|| format!("failed to read entry in {}", batch_dir.display()))?;
         let path = entry.path();
-        if path.is_dir() && path.join("session.json").exists() {
+        if path.is_dir() && artifact_path(&path, ArtifactKind::Session).exists() {
             dirs.push(path);
         }
     }

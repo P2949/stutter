@@ -7,7 +7,13 @@ license.workspace = true
 
 [dependencies]
 stutter-core = { path = "../stutter-core" }
+clap = { workspace = true, optional = true }
+serde = { workspace = true }
 thiserror = { workspace = true }
+
+[features]
+default = []
+cli = ["dep:clap"]
 
 [lib]
 path = "src/lib.rs"

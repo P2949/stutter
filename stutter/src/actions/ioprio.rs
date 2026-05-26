@@ -13,7 +13,6 @@ use crate::actions::{
     verify_task_identity,
 };
 
-const IOPRIO_WHO_PROCESS: libc::c_int = 1;
 const IOPRIO_CLASS_SHIFT: i32 = 13;
 const IOPRIO_PRIO_MASK: i32 = (1 << IOPRIO_CLASS_SHIFT) - 1;
 
@@ -171,7 +170,7 @@ impl RollbackHandler for IoPrioRollbackHandler {
     }
 
     fn supports_token(&self, token: &RollbackToken) -> bool {
-        matches!(token, RollbackToken::IoPrioRestore { .. })
+        token.as_ioprio_restore().is_some()
     }
 
     fn dry_run_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackPreview> {
@@ -182,7 +181,7 @@ impl RollbackHandler for IoPrioRollbackHandler {
     }
 
     fn restore_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackResult> {
-        let RollbackToken::IoPrioRestore { records } = token else {
+        let Some(records) = token.as_ioprio_restore() else {
             anyhow::bail!("I/O priority rollback handler does not support {token:?}");
         };
 
@@ -441,8 +440,11 @@ impl TuningAction for IoPrioAction {
     }
 
     fn rollback(&self, token: &RollbackToken) -> anyhow::Result<()> {
-        let RollbackToken::IoPrioRestore { records } = token else {
-            anyhow::bail!("rollback token is not an I/O priority restore token");
+        let Some(records) = token.as_ioprio_restore() else {
+            return Err(crate::actions::ActionError::invalid_rollback_token_kind(
+                token.kind_error("ioprio-restore"),
+            )
+            .into());
         };
 
         let mut summary = RestoreSummary::default();
@@ -680,38 +682,19 @@ fn parse_stat_starttime(stat: &str) -> anyhow::Result<u64> {
 }
 
 pub(crate) fn read_task_ioprio(tid: u32) -> anyhow::Result<i32> {
-    let rc = unsafe { libc::syscall(libc::SYS_ioprio_get, IOPRIO_WHO_PROCESS, tid as libc::c_int) };
-
-    if rc < 0 {
-        return Err(std::io::Error::last_os_error())
-            .with_context(|| format!("ioprio_get(IOPRIO_WHO_PROCESS, {tid}) failed"));
-    }
-
-    Ok(rc as i32)
+    crate::actions::syscalls::ioprio_get_process(tid)
+        .with_context(|| format!("ioprio_get(IOPRIO_WHO_PROCESS, {tid}) failed"))
 }
 
 pub(crate) fn set_task_ioprio(tid: u32, encoded_ioprio: i32) -> anyhow::Result<()> {
     IoPrioValue::decode(encoded_ioprio)?;
 
-    let rc = unsafe {
-        libc::syscall(
-            libc::SYS_ioprio_set,
-            IOPRIO_WHO_PROCESS,
-            tid as libc::c_int,
-            encoded_ioprio as libc::c_int,
+    crate::actions::syscalls::ioprio_set_process(tid, encoded_ioprio).with_context(|| {
+        format!(
+            "ioprio_set(IOPRIO_WHO_PROCESS, {}, {}) failed",
+            tid, encoded_ioprio
         )
-    };
-
-    if rc != 0 {
-        return Err(std::io::Error::last_os_error()).with_context(|| {
-            format!(
-                "ioprio_set(IOPRIO_WHO_PROCESS, {}, {}) failed",
-                tid, encoded_ioprio
-            )
-        });
-    }
-
-    Ok(())
+    })
 }
 #[cfg(test)]
 #[path = "ioprio/tests.rs"]

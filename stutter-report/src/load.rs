@@ -1,8 +1,9 @@
-use serde::de::DeserializeOwned;
 use std::{
     fs,
     path::{Path, PathBuf},
 };
+
+use serde::de::DeserializeOwned;
 
 use crate::{error::ReportError, model::ReportModel};
 
@@ -39,9 +40,10 @@ pub fn load_report_model(request: &ReportLoadRequest) -> Result<ReportModel, Rep
 mod tests {
     use std::{fs, path::Path};
 
+    use tempfile::tempdir;
+
     use super::{ReportLoadRequest, load_report_model};
     use crate::model::ReportModel;
-    use tempfile::tempdir;
 
     #[test]
     fn load_request_preserves_source_path() {

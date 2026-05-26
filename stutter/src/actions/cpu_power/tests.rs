@@ -438,7 +438,9 @@ fn rollback_rejects_wrong_token_kind() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("rollback token is not a CPU power restore token"));
+    assert!(err.contains("invalid rollback token"));
+    assert!(err.contains("expected cpu-power-restore"));
+    assert!(err.contains("actual nice-restore"));
     fs::remove_dir_all(root).ok();
 }
 

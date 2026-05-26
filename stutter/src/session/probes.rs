@@ -1,5 +1,4 @@
 pub struct ProbeRuntime {
-    pub loaded: crate::ebpf_loader::LoadedEbpf,
     pub block_io_correlation_basis: String,
     pub block_io_correlation_confidence: String,
     pub native_cgroup_filter: crate::ebpf_loader::NativeCgroupFilterStatus,
@@ -11,7 +10,6 @@ pub struct ProbeRuntime {
 
 impl ProbeRuntime {
     pub fn new(
-        loaded: crate::ebpf_loader::LoadedEbpf,
         block_io_correlation_basis: String,
         block_io_correlation_confidence: String,
         native_cgroup_filter: crate::ebpf_loader::NativeCgroupFilterStatus,
@@ -22,7 +20,6 @@ impl ProbeRuntime {
         scx_tracker.sample(0);
 
         Self {
-            loaded,
             block_io_correlation_basis,
             block_io_correlation_confidence,
             native_cgroup_filter,
@@ -31,19 +28,5 @@ impl ProbeRuntime {
             psi_reader: crate::psi::PsiReader::new(),
             scx_tracker,
         }
-    }
-
-    pub fn activation_plan(&self) -> &crate::probe_activation::ProbeActivationPlan {
-        &self.loaded.activation_plan
-    }
-
-    pub fn recorded_activation_warnings(
-        &self,
-    ) -> Vec<crate::recorder::RecordedProbeActivationWarning> {
-        self.activation_plan()
-            .warnings
-            .iter()
-            .map(crate::recorder::RecordedProbeActivationWarning::from)
-            .collect()
     }
 }

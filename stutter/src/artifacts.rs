@@ -74,6 +74,43 @@ pub struct ArtifactSpec {
     pub counter_field: Option<ArtifactCounter>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArtifactPath {
+    kind: ArtifactKind,
+    path: PathBuf,
+}
+
+impl ArtifactPath {
+    pub fn new(run_dir: impl AsRef<Path>, kind: ArtifactKind) -> Self {
+        Self {
+            kind,
+            path: run_dir.as_ref().join(artifact_file_name(kind)),
+        }
+    }
+
+    pub fn kind(&self) -> ArtifactKind {
+        self.kind
+    }
+
+    pub fn file_name(&self) -> &'static str {
+        artifact_file_name(self.kind)
+    }
+
+    pub fn as_path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn into_path_buf(self) -> PathBuf {
+        self.path
+    }
+}
+
+impl AsRef<Path> for ArtifactPath {
+    fn as_ref(&self) -> &Path {
+        self.as_path()
+    }
+}
+
 pub const ARTIFACT_SPECS: &[ArtifactSpec] = &[
     ArtifactSpec {
         kind: ArtifactKind::Session,
@@ -274,7 +311,7 @@ impl ArtifactStreamRegistry {
         if spec.encoding != ArtifactEncoding::Ndjson {
             anyhow::bail!("artifact {:?} is not an NDJSON stream", kind);
         }
-        self.insert(kind, NdjsonWriter::create(run_dir.join(spec.file_name))?);
+        self.insert(kind, NdjsonWriter::create(artifact_path(run_dir, kind))?);
         Ok(())
     }
 
@@ -302,6 +339,7 @@ pub fn artifact_spec(kind: ArtifactKind) -> &'static ArtifactSpec {
     ARTIFACT_SPECS
         .iter()
         .find(|spec| spec.kind == kind)
+        // invariant: ArtifactKind enum elements are exhaustively mapped in ARTIFACT_SPECS
         .expect("ArtifactKind must have an ArtifactSpec")
 }
 
@@ -326,7 +364,7 @@ pub fn optional_artifact_kinds() -> BTreeSet<ArtifactKind> {
 }
 
 pub fn artifact_path(run_dir: &Path, kind: ArtifactKind) -> PathBuf {
-    run_dir.join(artifact_file_name(kind))
+    ArtifactPath::new(run_dir, kind).into_path_buf()
 }
 
 pub fn artifact_alias_paths(run_dir: &Path, kind: ArtifactKind) -> Vec<PathBuf> {

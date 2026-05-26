@@ -84,7 +84,7 @@ pub fn render_replay_timeline(entries: &[ReplayTimelineEntry]) -> String {
 fn event_to_timeline_text(event: &AutotuneHistoryEvent) -> Vec<String> {
     let mut out = Vec::new();
     let decision = event.decision.decision.as_str();
-    let reason_lower = event.reason.to_ascii_lowercase();
+    let reason_lower = event.reason.clone().to_ascii_lowercase();
 
     if event.phase == ControllerPhase::Observing && reason_lower.contains("baseline") {
         out.push("observing baseline".to_owned());
@@ -129,10 +129,10 @@ fn event_to_timeline_text(event: &AutotuneHistoryEvent) -> Vec<String> {
 
 fn fallback_timeline_text(event: &AutotuneHistoryEvent) -> String {
     let decision = humanize_decision(&event.decision.decision);
-    if event.reason.trim().is_empty() {
+    if event.reason.clone().trim().is_empty() {
         decision
     } else {
-        format!("{decision}: {}", event.reason)
+        format!("{decision}: {}", event.reason.clone())
     }
 }
 
@@ -151,7 +151,7 @@ fn is_improved_event(event: &AutotuneHistoryEvent) -> bool {
         return true;
     }
 
-    let reason = event.reason.to_ascii_lowercase();
+    let reason = event.reason.clone().to_ascii_lowercase();
     reason.contains("improved")
 }
 
@@ -159,7 +159,7 @@ fn is_kept_event(event: &AutotuneHistoryEvent) -> bool {
     matches!(
         event.decision.decision.as_str(),
         "KeepCurrent" | "Kept" | "Keep"
-    ) || event.reason.to_ascii_lowercase().contains("kept")
+    ) || event.reason.clone().to_ascii_lowercase().contains("kept")
 }
 
 fn push_deduped_entry(entries: &mut Vec<ReplayTimelineEntry>, entry: ReplayTimelineEntry) {

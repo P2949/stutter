@@ -1,14 +1,21 @@
 use std::collections::BTreeMap;
-use serde::{Deserialize, Serialize};
 
+use serde::{Deserialize, Serialize};
 use stutter_core::{ids::RunId, paths::LogicalPath, units::UnixNanoseconds};
 
-/// Minimal report domain model placeholder for future report migration.
+/// Report-domain model migrated far enough to support crate-local load/render tests.
+///
+/// Remaining fields still derived by the main crate are tracked in
+/// `docs/REPORT_CRATE_MIGRATION.md`.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ReportModel {
     pub run_id: Option<RunId>,
     pub source_path: Option<LogicalPath>,
     pub generated_at_unix_nanos: Option<UnixNanoseconds>,
+    pub score: Option<f64>,
+    pub p95_latency_ns: Option<u64>,
+    pub p99_latency_ns: Option<u64>,
+    pub top_culprit: Option<String>,
     pub header: Option<ReportHeaderSummary>,
     pub data_quality: Option<DataQualitySummary>,
     #[serde(default)]
@@ -43,6 +50,10 @@ impl ReportModel {
             run_id: None,
             source_path: None,
             generated_at_unix_nanos: None,
+            score: None,
+            p95_latency_ns: None,
+            p99_latency_ns: None,
+            top_culprit: None,
             header: None,
             data_quality: None,
             clusters: Vec::new(),
@@ -82,7 +93,6 @@ impl ReportModel {
     }
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpikeDensityBucket {
     pub start_ms: u64,
@@ -120,8 +130,27 @@ pub struct ArtifactsSummary {
     pub gpu_engine_sample_count: u64,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EvidenceQuality {
+    Direct,
+    Derived,
+    Approximate { reason: String },
+    Missing { reason: String },
+}
+
+impl Default for EvidenceQuality {
+    fn default() -> Self {
+        Self::Missing {
+            reason: "not evaluated".to_owned(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct KmsTimingSummary {
+    #[serde(default)]
+    pub evidence_quality: EvidenceQuality,
     pub event_count: usize,
     pub duration_count: usize,
     pub median_flip_ms: Option<f64>,
@@ -134,6 +163,8 @@ pub struct KmsTimingSummary {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ScanoutWindowEstimate {
+    #[serde(default)]
+    pub evidence_quality: EvidenceQuality,
     pub estimate_count: usize,
     pub refresh_period_ns: Option<u64>,
     pub refresh_period_ms: Option<f64>,
@@ -146,6 +177,8 @@ pub struct ScanoutWindowEstimate {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DrmFenceTimingSummary {
+    #[serde(default)]
+    pub evidence_quality: EvidenceQuality,
     pub event_count: usize,
     pub wait_interval_count: usize,
     pub median_wait_ms: Option<f64>,
@@ -176,6 +209,8 @@ pub struct DrmFenceWaitSummary {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CrossGpuFenceSummary {
+    #[serde(default)]
+    pub evidence_quality: EvidenceQuality,
     pub candidate_count: usize,
     pub high_confidence_count: usize,
     pub display_side_wait_count: usize,
@@ -208,6 +243,8 @@ pub struct CrossGpuFenceCandidate {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct WaylandPresentationSummary {
+    #[serde(default)]
+    pub evidence_quality: EvidenceQuality,
     pub event_count: usize,
     pub presented_count: usize,
     pub discarded_count: usize,
@@ -228,6 +265,8 @@ pub struct WaylandPresentationSummary {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DirectScanoutSummary {
+    #[serde(default)]
+    pub evidence_quality: EvidenceQuality,
     pub status: String,
     pub confidence: String,
     pub zero_copy_ratio: Option<f64>,
@@ -240,6 +279,8 @@ pub struct DirectScanoutSummary {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DmaBufPathSummary {
+    #[serde(default)]
+    pub evidence_quality: EvidenceQuality,
     pub event_count: usize,
     pub linear_count: usize,
     pub scanout_capable_count: usize,
@@ -252,6 +293,8 @@ pub struct DmaBufPathSummary {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GpuEngineActivitySummary {
+    #[serde(default)]
+    pub evidence_quality: EvidenceQuality,
     pub sample_count: usize,
     pub active_sample_count: usize,
     pub engine_counts: BTreeMap<String, usize>,
@@ -593,7 +636,6 @@ pub enum RegressionMetric {
     P99,
     Max,
 }
-
 
 #[cfg(test)]
 mod tests {

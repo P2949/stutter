@@ -38,12 +38,42 @@ mod tests {
 
         assert_eq!(snapshot.source, Some(ForegroundSource::Hyprland));
         assert_eq!(snapshot.status, ForegroundProviderStatus::Available);
-        assert_eq!(snapshot.pid, Some(4242));
-        assert_eq!(snapshot.class.as_deref(), Some("steam_app_379430"));
-        assert_eq!(snapshot.workspace.as_deref(), Some("gaming"));
-        assert_eq!(snapshot.window_id.as_deref(), Some("0x123456789abcdef"));
-        assert!((snapshot.confidence - 0.95).abs() < f32::EPSILON);
-        assert_eq!(event.title, None);
+        assert_eq!(
+            snapshot.decision.target.as_ref().and_then(|t| t.pid),
+            Some(4242)
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.class.clone())
+                .as_deref(),
+            Some("steam_app_379430")
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.workspace.clone())
+                .as_deref(),
+            Some("gaming")
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.window_id.clone())
+                .as_deref(),
+            Some("0x123456789abcdef")
+        );
+        assert!((snapshot.decision.confidence - 0.95).abs() < f32::EPSILON);
+        assert_eq!(
+            event.decision.target.as_ref().and_then(|t| t.title.clone()),
+            None
+        );
     }
 
     #[test]
@@ -51,12 +81,14 @@ mod tests {
         let _lock = crate::test_support::TEST_MUTEX.lock().unwrap();
         let previous_hyprland = std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE");
 
+        // SAFETY: TEST_MUTEX serializes process environment mutation in this test.
         unsafe {
             std::env::set_var("HYPRLAND_INSTANCE_SIGNATURE", "fake-hyprland-instance");
         }
 
         assert!(HyprlandForegroundProvider::is_detected());
 
+        // SAFETY: TEST_MUTEX is still held and previous_hyprland was captured before mutation.
         unsafe {
             restore_env_var("HYPRLAND_INSTANCE_SIGNATURE", previous_hyprland);
         }
@@ -87,6 +119,7 @@ JSON
         permissions.set_mode(0o755);
         fs::set_permissions(&hyprctl, permissions).unwrap();
 
+        // SAFETY: TEST_MUTEX serializes process environment mutation in this test.
         unsafe {
             std::env::set_var("HYPRLAND_INSTANCE_SIGNATURE", "fake-hyprland-instance");
         }
@@ -98,11 +131,39 @@ JSON
         assert_eq!(provider.source(), ForegroundSource::Hyprland);
         assert_eq!(snapshot.elapsed_ms, 4_500);
         assert_eq!(snapshot.status, ForegroundProviderStatus::Available);
-        assert_eq!(snapshot.pid, Some(8128));
-        assert_eq!(snapshot.class.as_deref(), Some("kitty"));
-        assert_eq!(snapshot.workspace.as_deref(), Some("dev"));
-        assert_eq!(snapshot.window_id.as_deref(), Some("0xabcdef"));
+        assert_eq!(
+            snapshot.decision.target.as_ref().and_then(|t| t.pid),
+            Some(8128)
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.class.clone())
+                .as_deref(),
+            Some("kitty")
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.workspace.clone())
+                .as_deref(),
+            Some("dev")
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.window_id.clone())
+                .as_deref(),
+            Some("0xabcdef")
+        );
 
+        // SAFETY: TEST_MUTEX is still held and previous_hyprland was captured before mutation.
         unsafe {
             restore_env_var("HYPRLAND_INSTANCE_SIGNATURE", previous_hyprland);
         }
@@ -113,6 +174,7 @@ JSON
         let _lock = crate::test_support::TEST_MUTEX.lock().unwrap();
         let previous_hyprland = std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE");
 
+        // SAFETY: TEST_MUTEX serializes process environment mutation in this test.
         unsafe {
             std::env::set_var("HYPRLAND_INSTANCE_SIGNATURE", "fake-hyprland-instance");
         }
@@ -123,9 +185,26 @@ JSON
 
         assert_eq!(snapshot.source, Some(ForegroundSource::Hyprland));
         assert_eq!(snapshot.status, ForegroundProviderStatus::Unavailable);
-        assert!(snapshot.reason.contains("stutter-missing-hyprctl-helper"));
-        assert!(snapshot.reason.contains("trusted foreground helper paths"));
+        assert!(
+            snapshot
+                .decision
+                .reasons
+                .first()
+                .map(|r| r.reason.clone())
+                .unwrap_or_default()
+                .contains("stutter-missing-hyprctl-helper")
+        );
+        assert!(
+            snapshot
+                .decision
+                .reasons
+                .first()
+                .map(|r| r.reason.clone())
+                .unwrap_or_default()
+                .contains("trusted foreground helper paths")
+        );
 
+        // SAFETY: TEST_MUTEX is still held and previous_hyprland was captured before mutation.
         unsafe {
             restore_env_var("HYPRLAND_INSTANCE_SIGNATURE", previous_hyprland);
         }
@@ -140,14 +219,57 @@ JSON
         assert_eq!(snapshot.elapsed_ms, 1_234);
         assert_eq!(snapshot.source, Some(ForegroundSource::Unsupported));
         assert_eq!(snapshot.status, ForegroundProviderStatus::Unsupported);
-        assert_eq!(snapshot.pid, None);
-        assert_eq!(snapshot.app_id, None);
-        assert_eq!(snapshot.class, None);
-        assert_eq!(snapshot.title, None);
-        assert_eq!(snapshot.window_id, None);
-        assert_eq!(snapshot.workspace, None);
-        assert_eq!(snapshot.confidence, 0.0);
-        assert_eq!(snapshot.reason, GENERIC_WAYLAND_UNSUPPORTED_REASON);
+        assert_eq!(snapshot.decision.target.as_ref().and_then(|t| t.pid), None);
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.app_id.clone()),
+            None
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.class.clone()),
+            None
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.title.clone()),
+            None
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.window_id.clone()),
+            None
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.workspace.clone()),
+            None
+        );
+        assert_eq!(snapshot.decision.confidence, 0.0);
+        assert_eq!(
+            snapshot
+                .decision
+                .reasons
+                .first()
+                .map(|r| r.reason.clone())
+                .unwrap_or_default(),
+            GENERIC_WAYLAND_UNSUPPORTED_REASON
+        );
     }
 
     #[test]
@@ -159,6 +281,7 @@ JSON
         let previous_display = std::env::var_os("DISPLAY");
         let previous_desktop = std::env::var_os("XDG_CURRENT_DESKTOP");
 
+        // SAFETY: TEST_MUTEX serializes process environment mutation in this test.
         unsafe {
             std::env::set_var("WAYLAND_DISPLAY", "wayland-0");
             std::env::remove_var("SWAYSOCK");
@@ -177,11 +300,24 @@ JSON
         assert_eq!(snapshot.source, Some(ForegroundSource::Unsupported));
         assert_eq!(snapshot.status, ForegroundProviderStatus::Unsupported);
         assert_eq!(
-            snapshot.reason,
+            snapshot
+                .decision
+                .reasons
+                .first()
+                .map(|r| r.reason.clone())
+                .unwrap_or_default(),
             "GNOME/KDE Wayland session detected, but no safe generic Wayland foreground-window API is available"
         );
-        assert_eq!(snapshot.title, None);
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.title.clone()),
+            None
+        );
 
+        // SAFETY: TEST_MUTEX is still held and previous values were captured before mutation.
         unsafe {
             restore_env_var("WAYLAND_DISPLAY", previous_wayland_display);
             restore_env_var("SWAYSOCK", previous_swaysock);
@@ -200,6 +336,7 @@ JSON
         let previous_display = std::env::var_os("DISPLAY");
         let previous_desktop = std::env::var_os("XDG_CURRENT_DESKTOP");
 
+        // SAFETY: TEST_MUTEX serializes process environment mutation in this test.
         unsafe {
             std::env::set_var("WAYLAND_DISPLAY", "wayland-0");
             std::env::remove_var("SWAYSOCK");
@@ -217,10 +354,16 @@ JSON
         assert_eq!(provider.source(), ForegroundSource::Unsupported);
         assert_eq!(snapshot.status, ForegroundProviderStatus::Unsupported);
         assert_eq!(
-            snapshot.reason,
+            snapshot
+                .decision
+                .reasons
+                .first()
+                .map(|r| r.reason.clone())
+                .unwrap_or_default(),
             "GNOME/KDE Wayland session detected, but no safe generic Wayland foreground-window API is available"
         );
 
+        // SAFETY: TEST_MUTEX is still held and previous values were captured before mutation.
         unsafe {
             restore_env_var("WAYLAND_DISPLAY", previous_wayland_display);
             restore_env_var("SWAYSOCK", previous_swaysock);
@@ -237,6 +380,7 @@ JSON
         let previous_swaysock = std::env::var_os("SWAYSOCK");
         let previous_hyprland = std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE");
 
+        // SAFETY: TEST_MUTEX serializes process environment mutation in this test.
         unsafe {
             std::env::set_var("WAYLAND_DISPLAY", "wayland-1");
             std::env::remove_var("SWAYSOCK");
@@ -249,6 +393,7 @@ JSON
         let provider = auto_foreground_provider();
         assert_eq!(provider.source(), ForegroundSource::Hyprland);
 
+        // SAFETY: TEST_MUTEX is still held and previous values were captured before mutation.
         unsafe {
             restore_env_var("WAYLAND_DISPLAY", previous_wayland_display);
             restore_env_var("SWAYSOCK", previous_swaysock);

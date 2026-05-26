@@ -2,7 +2,7 @@ use crate::model::ReportModel;
 
 pub mod text;
 
-/// Supported report render targets for the future rendering layer.
+/// Supported report render targets for the migrated rendering boundary.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ReportRenderFormat {
     Text,
@@ -18,7 +18,7 @@ impl ReportRenderFormat {
     }
 }
 
-/// Render a minimal skeleton report model.
+/// Render the currently migrated report identity fields.
 pub fn render_report_model(model: &ReportModel, format: ReportRenderFormat) -> String {
     let run_id = model
         .run_id()

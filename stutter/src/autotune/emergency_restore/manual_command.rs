@@ -1,6 +1,5 @@
 use std::path::{Path, PathBuf};
 
-use super::executors::IOPRIO_WHO_PROCESS;
 use crate::actions::{RollbackToken, SafetyClass};
 
 pub fn manual_restore_command_for_token(token: &RollbackToken) -> String {
@@ -34,7 +33,7 @@ pub fn manual_restore_command_for_token(token: &RollbackToken) -> String {
                 format!(
                     "sudo python3 -c 'import os; os.syscall({},{},{},{})'",
                     libc::SYS_ioprio_set,
-                    IOPRIO_WHO_PROCESS,
+                    1, // IOPRIO_WHO_PROCESS
                     record.tid(),
                     record.original_ioprio
                 )

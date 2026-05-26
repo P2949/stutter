@@ -11,6 +11,8 @@ use std::{
     time::Duration,
 };
 
+use stutter_core::ids::{Pid, Tid};
+
 use crate::{
     community_rules::{
         CommunityProcessIdentity, CommunityRulesDb, classify_process_identity_with_db,
@@ -19,9 +21,10 @@ use crate::{
         cgroup::collect_cgroup_pids_at,
         classify::{classify_task_with_context, contains_likely_game_cmdline},
         model::{
-            DEFAULT_MAX_PROC_SCAN_MS, DEFAULT_MAX_THREADS_PER_PROCESS, ProcInfo, ProcessCache,
-            ScanBudget, ScanBudgetReport, TargetDiffAction, TargetDiffRef, TargetSnapshot,
-            TargetSnapshotInput, TaskClass, TaskFilters, TaskInfo,
+            DEFAULT_MAX_PROC_SCAN_MS, DEFAULT_MAX_THREADS_PER_PROCESS, ProcInfo, ProcScanWarning,
+            ProcScanWarningKind, ProcessCache, ScanBudget, ScanBudgetReport, TargetDiffAction,
+            TargetDiffRef, TargetSnapshot, TargetSnapshotInput, TaskClass, TaskFilters, TaskInfo,
+            TaskMap,
         },
     },
     process_tree::{
@@ -111,8 +114,8 @@ pub fn target_snapshot(input: TargetSnapshotInput) -> TargetSnapshot {
         collect_cgroup_pids_at(cgroup_path, &mut cgroup_roots);
         for pid in &cgroup_roots {
             if processes.contains_key(pid) {
-                requested_roots.insert(*pid);
-                process_roots.insert(*pid);
+                requested_roots.insert(Pid::new(*pid));
+                process_roots.insert(Pid::new(*pid));
             } else {
                 unresolved_manual_pids.push(*pid);
             }
@@ -121,26 +124,34 @@ pub fn target_snapshot(input: TargetSnapshotInput) -> TargetSnapshot {
 
     for pid in manual_pids {
         if processes.contains_key(pid) {
-            requested_roots.insert(*pid);
-            process_roots.insert(*pid);
+            requested_roots.insert(Pid::new(*pid));
+            process_roots.insert(Pid::new(*pid));
         } else {
             unresolved_manual_pids.push(*pid);
         }
     }
 
     for root_pid in tree_pids {
-        requested_roots.insert(*root_pid);
+        requested_roots.insert(Pid::new(*root_pid));
         if processes.contains_key(root_pid) {
-            process_roots.insert(*root_pid);
-            process_roots.extend(descendants_of(*root_pid, &children_by_parent));
+            process_roots.insert(Pid::new(*root_pid));
+            process_roots.extend(
+                descendants_of(*root_pid, &children_by_parent)
+                    .into_iter()
+                    .map(Pid::new),
+            );
         }
     }
 
     let mut excluded_pids = BTreeSet::new();
     for root_pid in exclude_tree_pids {
         if processes.contains_key(root_pid) {
-            excluded_pids.insert(*root_pid);
-            excluded_pids.extend(descendants_of(*root_pid, &children_by_parent));
+            excluded_pids.insert(Pid::new(*root_pid));
+            excluded_pids.extend(
+                descendants_of(*root_pid, &children_by_parent)
+                    .into_iter()
+                    .map(Pid::new),
+            );
         }
     }
     process_roots.retain(|pid| !excluded_pids.contains(pid));
@@ -159,20 +170,27 @@ pub fn target_snapshot(input: TargetSnapshotInput) -> TargetSnapshot {
             thread_owner_index_at(proc_root, &processes, &budget, &mut budget_report);
         for tid in unresolved_manual_pids {
             if let Some(process_pid) = thread_owner_by_tid.get(&tid).copied()
-                && !excluded_pids.contains(&process_pid)
+                && !excluded_pids.contains(&Pid::new(process_pid))
                 && let Some(proc_info) = processes.get(&process_pid)
             {
-                requested_roots.insert(process_pid);
+                requested_roots.insert(Pid::new(process_pid));
                 tasks.insert(
-                    tid,
-                    task_info_from_tid_at(proc_root, tid, process_pid, proc_info, previous_tasks),
+                    Tid::new(tid),
+                    task_info_from_tid_at(
+                        proc_root,
+                        tid,
+                        process_pid,
+                        proc_info,
+                        previous_tasks,
+                        &mut budget_report,
+                    ),
                 );
                 continue;
             }
 
             log::warn!("manual_pid_not_found pid={tid}");
             if keep_missing_pid {
-                requested_roots.insert(tid);
+                requested_roots.insert(Pid::new(tid));
                 missing_manual_pids.push(tid);
             }
         }
@@ -194,7 +212,7 @@ pub fn target_snapshot(input: TargetSnapshotInput) -> TargetSnapshot {
             from_cgroup: false,
         };
         if filters.allows(&task) {
-            tasks.insert(pid, task);
+            tasks.insert(Tid::new(pid), task);
         }
     }
 
@@ -210,9 +228,7 @@ pub fn target_snapshot(input: TargetSnapshotInput) -> TargetSnapshot {
             apply_community_rules_to_unknown_task(task, proc_info, db);
         }
 
-        if task.class == TaskClass::Unknown
-            && !requested_roots.contains(&task.process_id().as_u32())
-        {
+        if task.class == TaskClass::Unknown && !requested_roots.contains(&task.process_id()) {
             task.class = TaskClass::Helper;
         }
     }
@@ -227,8 +243,8 @@ pub fn target_snapshot(input: TargetSnapshotInput) -> TargetSnapshot {
 }
 
 pub fn diff_tasks_ref<'a>(
-    old_tasks: &'a BTreeMap<u32, TaskInfo>,
-    new_tasks: &'a BTreeMap<u32, TaskInfo>,
+    old_tasks: &'a TaskMap,
+    new_tasks: &'a TaskMap,
 ) -> Vec<TargetDiffRef<'a>> {
     let mut diffs = Vec::new();
 
@@ -340,12 +356,12 @@ pub fn find_auto_target_pids(proc_root: &Path) -> Vec<(u32, TaskClass)> {
 
 pub fn expand_tasks_at(
     proc_root: &Path,
-    process_pids: &BTreeSet<u32>,
-    processes: &BTreeMap<u32, ProcInfo>,
-    previous_tasks: Option<&BTreeMap<u32, TaskInfo>>,
+    process_pids: &BTreeSet<Pid>,
+    processes: &BTreeMap<Pid, ProcInfo>,
+    previous_tasks: Option<&TaskMap>,
     budget: &ScanBudget,
     budget_report: &mut ScanBudgetReport,
-) -> BTreeMap<u32, TaskInfo> {
+) -> TaskMap {
     let mut tasks = BTreeMap::new();
 
     for pid in process_pids {
@@ -355,23 +371,36 @@ pub fn expand_tasks_at(
 
         let tids = thread_ids_of_at_limited(
             proc_root,
-            *pid,
+            pid.as_u32(),
             budget.max_threads_per_process(),
             budget_report,
         );
 
         if tids.is_empty() {
             tasks.insert(
-                *pid,
-                task_info_from_proc(proc_root, *pid, *pid, &proc_info.comm, proc_info),
+                Tid::new(pid.as_u32()),
+                task_info_from_proc(
+                    proc_root,
+                    pid.as_u32(),
+                    pid.as_u32(),
+                    &proc_info.comm,
+                    proc_info,
+                ),
             );
             continue;
         }
 
         for tid in tids {
             tasks.insert(
-                tid,
-                task_info_from_tid_at(proc_root, tid, *pid, proc_info, previous_tasks),
+                Tid::new(tid),
+                task_info_from_tid_at(
+                    proc_root,
+                    tid,
+                    pid.as_u32(),
+                    proc_info,
+                    previous_tasks,
+                    budget_report,
+                ),
             );
         }
     }
@@ -381,7 +410,7 @@ pub fn expand_tasks_at(
 
 fn thread_owner_index_at(
     proc_root: &Path,
-    processes: &BTreeMap<u32, ProcInfo>,
+    processes: &BTreeMap<Pid, ProcInfo>,
     budget: &ScanBudget,
     budget_report: &mut ScanBudgetReport,
 ) -> BTreeMap<u32, u32> {
@@ -389,12 +418,12 @@ fn thread_owner_index_at(
     for pid in processes.keys() {
         let tids = thread_ids_of_at_limited(
             proc_root,
-            *pid,
+            pid.as_u32(),
             budget.max_threads_per_process(),
             budget_report,
         );
         for tid in tids {
-            owners.insert(tid, *pid);
+            owners.insert(tid, pid.as_u32());
         }
     }
     owners
@@ -405,21 +434,29 @@ fn task_info_from_tid_at(
     tid: u32,
     process_pid: u32,
     proc_info: &ProcInfo,
-    previous_tasks: Option<&BTreeMap<u32, TaskInfo>>,
+    previous_tasks: Option<&TaskMap>,
+    budget_report: &mut ScanBudgetReport,
 ) -> TaskInfo {
     let (task_starttime_ticks, sched_policy) =
         task_starttime_and_policy_at(proc_root, process_pid, tid, proc_info);
-    let comm = task_comm_at(proc_root, process_pid, tid)
-        .or_else(|| {
-            previous_tasks
-                .and_then(|tasks| tasks.get(&tid))
-                .filter(|prev| {
-                    prev.process_pid == process_pid
-                        && prev.task_starttime_ticks == task_starttime_ticks
-                })
-                .map(|prev| prev.comm.clone())
-        })
-        .unwrap_or_else(|| proc_info.comm.clone());
+    let comm = match task_comm_at(proc_root, process_pid, tid) {
+        Some(comm) => comm,
+        None => previous_tasks
+            .and_then(|tasks| tasks.get(&tid))
+            .filter(|prev| {
+                prev.process_pid == process_pid && prev.task_starttime_ticks == task_starttime_ticks
+            })
+            .map(|prev| prev.comm.clone())
+            .unwrap_or_else(|| {
+                budget_report.push_warning(ProcScanWarning::new(
+                    process_pid,
+                    Some(tid),
+                    ProcScanWarningKind::TaskComm,
+                    format!("failed to read task comm for pid={process_pid} tid={tid}"),
+                ));
+                proc_info.comm.clone()
+            }),
+    };
 
     task_info_from_parts(
         tid,
@@ -527,4 +564,50 @@ pub(crate) fn stat_starttime_and_policy_at(path: &Path) -> (Option<u64>, Option<
 pub fn parse_proc_stat_policy(stat: &str) -> Option<u32> {
     let (_, after_comm) = stat.rsplit_once(") ")?;
     after_comm.split_whitespace().nth(38)?.parse().ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Instant;
+
+    use super::*;
+
+    #[test]
+    #[ignore = "benchmark"]
+    fn bench_process_snapshot_5k_tasks() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let proc_root = temp_dir.path();
+
+        for pid in 1..=5000 {
+            let pid_dir = proc_root.join(pid.to_string());
+            std::fs::create_dir(&pid_dir).unwrap();
+            std::fs::write(pid_dir.join("comm"), "fake_game\n").unwrap();
+            std::fs::write(pid_dir.join("status"), "Name:\tfake_game\nPPid:\t1\n").unwrap();
+            std::fs::write(pid_dir.join("cmdline"), "fake_game\0--arg\0\0").unwrap();
+            std::fs::write(
+                pid_dir.join("stat"),
+                format!("{} (fake_game) R 1 1 1 0 -1 4194560 0 0 0 0 0 0 0 0 20 0 1 0 12345 0 0 18446744073709551615 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0", pid),
+            )
+            .unwrap();
+            // Create a fake task directory so we don't have to scan threads
+            std::fs::create_dir(pid_dir.join("task")).unwrap();
+            std::fs::create_dir(pid_dir.join("task").join(pid.to_string())).unwrap();
+        }
+
+        let start = Instant::now();
+        let mut cache = ProcessCache::default();
+        let tree_pids: Vec<u32> = (1..=5000).collect();
+        let input = TargetSnapshotInput {
+            proc_root,
+            tree_pids: &tree_pids,
+            cache: Some(&mut cache),
+            max_scan_duration: Some(std::time::Duration::from_secs(10)),
+            ..Default::default()
+        };
+        let snapshot = target_snapshot(input);
+        let duration = start.elapsed();
+
+        assert_eq!(snapshot.tasks.len(), 5000);
+        println!("Scanned 5k tasks in {:?}", duration);
+    }
 }

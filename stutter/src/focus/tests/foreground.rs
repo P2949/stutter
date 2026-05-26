@@ -90,7 +90,7 @@ mod tests {
     fn hybrid_source_falls_back_when_provider_unavailable() {
         let mut unavailable = foreground_snapshot(Some(11));
         unavailable.status = crate::foreground::ForegroundProviderStatus::Unavailable;
-        unavailable.confidence = 0.0;
+        unavailable.decision.confidence = 0.0;
         let mut snapshot = foreground_scoring_snapshot(
             Some(unavailable),
             vec![
@@ -363,8 +363,10 @@ mod tests {
     #[test]
     fn foreground_missing_process_pid_does_not_boost_or_create_focus_group_in_hybrid_mode() {
         let mut foreground = foreground_snapshot(Some(9999));
-        foreground.window_id = Some("163".to_owned());
-        foreground.workspace = Some("5".to_owned());
+        if let Some(target) = foreground.decision.target.as_mut() {
+            target.window_id = Some("163".to_owned());
+            target.workspace = Some("5".to_owned());
+        }
 
         let mut snapshot = foreground_scoring_snapshot(
             Some(foreground),
@@ -507,7 +509,7 @@ mod tests {
     fn foreground_source_clears_groups_when_provider_unavailable() {
         let mut unavailable = foreground_snapshot(Some(11));
         unavailable.status = crate::foreground::ForegroundProviderStatus::Unavailable;
-        unavailable.confidence = 0.0;
+        unavailable.decision.confidence = 0.0;
         let mut snapshot = foreground_scoring_snapshot(
             Some(unavailable),
             vec![
@@ -697,14 +699,20 @@ mod tests {
         let snapshot = focus_snapshot_at(proc.path(), &mut cache, 1_000, Some(&foreground));
 
         assert_eq!(
-            snapshot.foreground.as_ref().and_then(|fg| fg.pid),
+            snapshot.foreground.as_ref().and_then(|fg| fg
+                .decision
+                .target
+                .as_ref()
+                .and_then(|target| target.pid)),
             Some(4242)
         );
         assert_eq!(
-            snapshot
-                .foreground
-                .as_ref()
-                .and_then(|fg| fg.app_id.as_deref()),
+            snapshot.foreground.as_ref().and_then(|fg| {
+                fg.decision
+                    .target
+                    .as_ref()
+                    .and_then(|target| target.app_id.as_deref())
+            }),
             Some("steam")
         );
     }

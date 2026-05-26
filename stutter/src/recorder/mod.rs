@@ -32,7 +32,7 @@ mod spike_buffer;
 mod sync_tracker;
 mod writers;
 
-pub const SESSION_SCHEMA_VERSION: u32 = 22;
+pub const SESSION_SCHEMA_VERSION: ArtifactSchemaVersion = ArtifactSchemaVersion::new(22);
 
 // Re-export types from metrics
 pub type IntervalRecord = crate::metrics::IntervalRecord;
@@ -57,14 +57,15 @@ pub(crate) use session::monotonic_now_ns;
 pub(crate) use session::saturating_u128_to_u64;
 // Re-export from session.rs - these were pub in the original recorder.rs
 pub use session::{
-    CpuPerfStatus, FinalizeRecordingInput, RecordingRun, finalize_recording, prepare_recording,
-    print_recording_warnings, recorded_config, recorded_time, recording_warnings,
+    CpuPerfStatus, FinalizeRecordingInput, RecordingRun, RecordingWarning, RecordingWarningKind,
+    finalize_recording, prepare_recording, print_recording_warnings, recorded_config,
+    recorded_time, recording_warnings,
 };
 // Re-export from session_files.rs - these were pub in the original recorder.rs
 #[cfg(test)]
 pub use session_files::DisplayPathMetadata;
 pub use session_files::{
-    MetadataFile, RecordedConfig, RecordedCpuSnapshot, RecordedLatency,
+    ArtifactSchemaVersion, MetadataFile, RecordedConfig, RecordedCpuSnapshot, RecordedLatency,
     RecordedProbeActivationWarning, RecordedSpike, RecordedTime, SessionFile, SessionMetadataCore,
     SessionSpike, SessionTask, WakerEntry,
 };

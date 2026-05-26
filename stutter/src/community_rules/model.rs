@@ -44,6 +44,16 @@ pub struct CommunityRule {
     pub comment: Option<String>,
     #[serde(default)]
     pub ambiguous: bool,
+    #[serde(default)]
+    pub specificity: RuleSpecificity,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq, Eq)]
+pub struct RuleSpecificity {
+    pub exact_exe: bool,
+    pub exact_comm: bool,
+    pub regex_count: usize,
+    pub wildcard_count: usize,
 }
 
 #[derive(Debug, Clone)]

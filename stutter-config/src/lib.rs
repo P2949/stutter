@@ -8,6 +8,18 @@ pub mod error;
 pub mod layer;
 pub mod model;
 pub mod resolve;
+pub mod types;
+pub mod validation;
+
+pub use error::ConfigError;
+pub use types::{
+    CsvStreamTarget, FocusSource, ForegroundSource, TARGET_PIDS_MAX, WaylandPresentationSource,
+};
+pub use validation::{
+    StaticAlertConfig, StaticDiagnosisConfig, StaticFocusConfig, StaticMangoHudConfig,
+    StaticMonitorConfig, StaticOutputConfig, StaticTargetConfig, StaticTimingConfig,
+    StaticWatchConfig, validate_static_config, validate_target_max_tasks,
+};
 
 #[cfg(test)]
 mod tests {

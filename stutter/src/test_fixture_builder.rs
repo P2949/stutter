@@ -14,11 +14,11 @@ use crate::{
     metadata::SystemMetadata,
     process_tree::TaskClass,
     recorder::{
-        BlockIoRecord, DisplayPathMetadata, DmaBufEventRecord, DrmFenceEventRecord,
-        ForegroundEvent, FrameEvent, GpuEngineSample, GpuSample, IntervalRecord, IrqEventRecord,
-        KmsFlipEventRecord, MetadataFile, RecordedConfig, RecordedCpuSnapshot, RecordedLatency,
-        RecordedTime, SESSION_SCHEMA_VERSION, SessionFile, SessionTask, SpikeEvent,
-        WaylandPresentationEventRecord,
+        ArtifactSchemaVersion, BlockIoRecord, DisplayPathMetadata, DmaBufEventRecord,
+        DrmFenceEventRecord, ForegroundEvent, FrameEvent, GpuEngineSample, GpuSample,
+        IntervalRecord, IrqEventRecord, KmsFlipEventRecord, MetadataFile, RecordedConfig,
+        RecordedCpuSnapshot, RecordedLatency, RecordedTime, SESSION_SCHEMA_VERSION, SessionFile,
+        SessionTask, SpikeEvent, WaylandPresentationEventRecord,
     },
 };
 

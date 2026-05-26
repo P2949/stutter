@@ -288,13 +288,13 @@ fn decision_in_seconds_from_event(
         ));
     }
 
-    if let Some(remaining_ms) = parse_u64_after_key(&event.reason, "remaining_ms=") {
+    if let Some(remaining_ms) = parse_u64_after_key(&event.reason.clone(), "remaining_ms=") {
         return Some(ms_to_ceil_seconds(remaining_ms));
     }
 
     if let (Some(elapsed_ms), Some(required_ms)) = (
-        parse_u64_after_key(&event.reason, "elapsed_ms="),
-        parse_u64_after_key(&event.reason, "required_ms="),
+        parse_u64_after_key(&event.reason.clone(), "elapsed_ms="),
+        parse_u64_after_key(&event.reason.clone(), "required_ms="),
     ) {
         return Some(ms_to_ceil_seconds(required_ms.saturating_sub(elapsed_ms)));
     }

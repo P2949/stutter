@@ -125,6 +125,7 @@ fn ebpf_runtime_permission_check_warns_for_non_root() {
 fn doctor_report_includes_runtime_permission_check() {
     let input = DoctorInput {
         json: false,
+        tracepoint_dump: false,
         hwmon: false,
         hwmon_root: None,
         hwmon_drm_card: None,
@@ -181,6 +182,7 @@ fn daemon_capability_check_reports_missing_required_features_as_warning() {
 fn doctor_tracepoint_check_reports_sched_wakeup_new_coverage() {
     let input = DoctorInput {
         json: false,
+        tracepoint_dump: false,
         hwmon: false,
         hwmon_root: None,
         hwmon_drm_card: None,
@@ -207,6 +209,39 @@ fn doctor_tracepoint_check_reports_sched_wakeup_new_coverage() {
             .details
             .contains_key("sched_wakeup_new_coverage")
     );
+}
+
+#[test]
+fn tracepoint_dump_includes_exact_kernel_format_text() {
+    let dir = temp_dir("doctor-tracepoint-dump");
+    let sched_wakeup = dir.join("sched/sched_wakeup");
+    fs::create_dir_all(&sched_wakeup).unwrap();
+    let format =
+        "name: sched_wakeup\nID: 1\nformat:\nfield:int pid; offset:24; size:4; signed:1;\n";
+    fs::write(sched_wakeup.join("format"), format).unwrap();
+
+    let dump = tracepoints::build_tracepoint_format_dump(&dir);
+    let wakeup = dump
+        .entries
+        .iter()
+        .find(|entry| entry.tracepoint == "sched/sched_wakeup")
+        .expect("sched_wakeup should be included in the tracepoint dump");
+    assert_eq!(wakeup.status, "ok");
+    assert_eq!(wakeup.format.as_deref(), Some(format));
+
+    let switch = dump
+        .entries
+        .iter()
+        .find(|entry| entry.tracepoint == "sched/sched_switch")
+        .expect("sched_switch should be included in the tracepoint dump");
+    assert_eq!(switch.status, "missing");
+
+    let text = tracepoints::render_tracepoint_format_dump_text(&dump);
+    assert!(text.contains("stutter doctor tracepoints --dump"));
+    assert!(text.contains(format));
+    assert!(text.contains("sched/sched_switch"));
+
+    fs::remove_dir_all(dir).ok();
 }
 
 #[test]

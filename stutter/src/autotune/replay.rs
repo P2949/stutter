@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fs, path::PathBuf};
+use std::{fs, path::PathBuf};
 
 use anyhow::Context;
 use serde::Serialize;
@@ -6,7 +6,7 @@ use serde::Serialize;
 use crate::{
     artifacts::ArtifactSelection,
     ebpf_loader::DropCountersSnapshot,
-    process_tree::{TaskClass, TaskInfo},
+    process_tree::{TaskClass, TaskInfo, TaskMap},
     recorder::SessionTask,
     session_events::MonitorEvent,
     session_io,
@@ -407,11 +407,11 @@ fn final_drop_counters(drop_counters: &DropCountersSnapshot) -> DropCountersSnap
     drop_counters.clone()
 }
 
-fn active_targets_from_session_tasks(tasks: &[SessionTask]) -> BTreeMap<u32, TaskInfo> {
+fn active_targets_from_session_tasks(tasks: &[SessionTask]) -> TaskMap {
     tasks
         .iter()
         .filter(|task| task.active)
-        .map(|task| (task.task, task_info_from_session_task(task)))
+        .map(|task| (task.task.into(), task_info_from_session_task(task)))
         .collect()
 }
 

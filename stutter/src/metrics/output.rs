@@ -1,8 +1,15 @@
+use std::collections::BTreeMap;
+
 use log::info;
+use stutter_common::SchedulerEvent;
+use stutter_core::ids::CpuId;
 
-use super::*;
+use super::{
+    CpuSnapshot, IntervalRecord, IntervalRecordFromSnapshotInput, LatencySnapshot, TaskStatsMap,
+    format_latency, interval_record_from_snapshot,
+};
 
-fn format_cpu(cpu: Option<u32>) -> String {
+fn format_cpu(cpu: Option<CpuId>) -> String {
     match cpu {
         Some(cpu) => cpu.to_string(),
         None => "-".to_owned(),
@@ -65,7 +72,7 @@ pub fn print_latency_line(
 
 pub fn collect_interval_summaries_labeled(
     label: &str,
-    stats_by_task: &mut BTreeMap<u32, TaskStats>,
+    stats_by_task: &mut TaskStatsMap,
     elapsed_ms: u64,
     drop_counters: &crate::ebpf_loader::DropCountersSnapshot,
     prev_faults_map: Option<&aya::maps::HashMap<aya::maps::MapData, u32, [u64; 2]>>,
@@ -79,6 +86,7 @@ pub fn collect_interval_summaries_labeled(
     let mut interval_records = Vec::new();
 
     for (task, stats) in stats_by_task.iter_mut() {
+        let task_raw = task.as_u32();
         // Read cumulative fault counters from the eBPF map (if present),
         // compute the interval delta relative to the previous snapshot, and
         // update both the stats and the snapshot for next interval.
@@ -87,12 +95,12 @@ pub fn collect_interval_summaries_labeled(
         let mut counters = None;
 
         if let Some(map) = prev_faults_map
-            && let Ok(c) = map.get(task, 0)
+            && let Ok(c) = map.get(&task_raw, 0)
         {
             let current_maj = c[0];
             let current_min = c[1];
             let prev = prev_faults_snapshot
-                .get(task)
+                .get(&task_raw)
                 .copied()
                 .unwrap_or((current_maj, current_min));
 
@@ -114,20 +122,20 @@ pub fn collect_interval_summaries_labeled(
         };
 
         if let Some((current_maj, current_min)) = counters {
-            prev_faults_snapshot.insert(*task, (current_maj, current_min));
+            prev_faults_snapshot.insert(task_raw, (current_maj, current_min));
         } else {
             // If we didn't get a fresh reading from the eBPF map this interval
             // (either because the map is globally missing or this task was absent),
             // we must clear any previous snapshot state for this task.
-            prev_faults_snapshot.remove(task);
+            prev_faults_snapshot.remove(&task_raw);
         }
 
         let cpu = stats.interval_cpu.snapshot_and_reset();
 
-        print_latency_line(label, *task, &stats.comm, &latency, &cpu);
+        print_latency_line(label, task_raw, &stats.comm, &latency, &cpu);
         interval_records.push(interval_record_from_snapshot(
             IntervalRecordFromSnapshotInput {
-                task: *task,
+                task: task_raw,
                 stats,
                 latency: &latency,
                 cpu: &cpu,
@@ -142,15 +150,16 @@ pub fn collect_interval_summaries_labeled(
     interval_records
 }
 
-pub fn print_session_summaries(stats_by_task: &mut BTreeMap<u32, TaskStats>) {
+pub fn print_session_summaries(stats_by_task: &mut TaskStatsMap) {
     for (task, stats) in stats_by_task.iter_mut() {
+        let task_raw = task.as_u32();
         let Some(latency) = stats.session_latency.snapshot() else {
             continue;
         };
 
         let cpu = stats.session_cpu.snapshot();
 
-        print_latency_line("session", *task, &stats.comm, &latency, &cpu);
+        print_latency_line("session", task_raw, &stats.comm, &latency, &cpu);
 
         if latency.samples_truncated > 0 {
             info!(

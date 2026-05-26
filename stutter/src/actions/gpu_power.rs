@@ -82,7 +82,7 @@ impl RollbackHandler for GpuPowerRollbackHandler {
     }
 
     fn supports_token(&self, token: &RollbackToken) -> bool {
-        matches!(token, RollbackToken::GpuPowerRestore { .. })
+        token.as_gpu_power_restore().is_some()
     }
 
     fn dry_run_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackPreview> {
@@ -93,7 +93,7 @@ impl RollbackHandler for GpuPowerRollbackHandler {
     }
 
     fn restore_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackResult> {
-        let RollbackToken::GpuPowerRestore { records } = token else {
+        let Some(records) = token.as_gpu_power_restore() else {
             anyhow::bail!("GPU power rollback handler does not support {token:?}");
         };
 
@@ -324,8 +324,11 @@ impl TuningAction for GpuPowerAction {
     }
 
     fn rollback(&self, token: &RollbackToken) -> anyhow::Result<()> {
-        let RollbackToken::GpuPowerRestore { records } = token else {
-            anyhow::bail!("rollback token is not a GPU power restore token");
+        let Some(records) = token.as_gpu_power_restore() else {
+            return Err(crate::actions::ActionError::invalid_rollback_token_kind(
+                token.kind_error("gpu-power-restore"),
+            )
+            .into());
         };
 
         rollback_gpu_power_records(records)

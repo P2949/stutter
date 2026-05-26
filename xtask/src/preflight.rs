@@ -1,7 +1,8 @@
 use std::{env, process::Command as ProcessCommand};
+
 use anyhow::{Context, bail};
 
-use crate::process::{check_program_on_path, check_prebuilt_bpf_object};
+use crate::process::{check_prebuilt_bpf_object, check_program_on_path};
 
 pub fn run_preflight() -> anyhow::Result<()> {
     check_program_on_path(
