@@ -186,6 +186,11 @@ fn append_kms_overrides(
         KmsTracepointProvider::I915 => {
             push_global(
                 plan,
+                "I915_FLIP_REQUEST_CARD_MINOR_OFFSET",
+                offsets.request_card_minor_offset,
+            );
+            push_global(
+                plan,
                 "I915_FLIP_REQUEST_CRTC_OFFSET",
                 offsets.request_crtc_offset,
             );
@@ -193,6 +198,11 @@ fn append_kms_overrides(
                 plan,
                 "I915_FLIP_REQUEST_PIPE_OFFSET",
                 offsets.request_pipe_offset,
+            );
+            push_global(
+                plan,
+                "I915_FLIP_DONE_CARD_MINOR_OFFSET",
+                offsets.done_card_minor_offset,
             );
             push_global(plan, "I915_FLIP_DONE_CRTC_OFFSET", offsets.done_crtc_offset);
             push_global(plan, "I915_FLIP_DONE_PIPE_OFFSET", offsets.done_pipe_offset);
@@ -210,6 +220,11 @@ fn append_kms_overrides(
         KmsTracepointProvider::GenericDrm => {
             push_global(
                 plan,
+                "DRM_FLIP_REQUEST_CARD_MINOR_OFFSET",
+                offsets.request_card_minor_offset,
+            );
+            push_global(
+                plan,
                 "DRM_FLIP_REQUEST_CRTC_OFFSET",
                 offsets.request_crtc_offset,
             );
@@ -217,6 +232,11 @@ fn append_kms_overrides(
                 plan,
                 "DRM_FLIP_REQUEST_PIPE_OFFSET",
                 offsets.request_pipe_offset,
+            );
+            push_global(
+                plan,
+                "DRM_FLIP_DONE_CARD_MINOR_OFFSET",
+                offsets.done_card_minor_offset,
             );
             push_global(plan, "DRM_FLIP_DONE_CRTC_OFFSET", offsets.done_crtc_offset);
             push_global(plan, "DRM_FLIP_DONE_PIPE_OFFSET", offsets.done_pipe_offset);
@@ -229,6 +249,11 @@ fn append_kms_overrides(
                 plan,
                 "DRM_FLIP_DONE_SEQUENCE_SIZE",
                 offsets.done_sequence_size,
+            );
+            push_global(
+                plan,
+                "DRM_VBLANK_CARD_MINOR_OFFSET",
+                offsets.vblank_card_minor_offset,
             );
             push_global(plan, "DRM_VBLANK_CRTC_OFFSET", offsets.vblank_crtc_offset);
             push_global(plan, "DRM_VBLANK_PIPE_OFFSET", offsets.vblank_pipe_offset);
@@ -246,6 +271,11 @@ fn append_kms_overrides(
         KmsTracepointProvider::Amdgpu => {
             push_global(
                 plan,
+                "AMDGPU_FLIP_REQUEST_CARD_MINOR_OFFSET",
+                offsets.request_card_minor_offset,
+            );
+            push_global(
+                plan,
                 "AMDGPU_FLIP_REQUEST_CRTC_OFFSET",
                 offsets.request_crtc_offset,
             );
@@ -253,6 +283,11 @@ fn append_kms_overrides(
                 plan,
                 "AMDGPU_FLIP_REQUEST_PIPE_OFFSET",
                 offsets.request_pipe_offset,
+            );
+            push_global(
+                plan,
+                "AMDGPU_FLIP_DONE_CARD_MINOR_OFFSET",
+                offsets.done_card_minor_offset,
             );
             push_global(
                 plan,
@@ -273,6 +308,11 @@ fn append_kms_overrides(
                 plan,
                 "AMDGPU_FLIP_DONE_SEQUENCE_SIZE",
                 offsets.done_sequence_size,
+            );
+            push_global(
+                plan,
+                "AMDGPU_VBLANK_CARD_MINOR_OFFSET",
+                offsets.vblank_card_minor_offset,
             );
             push_global(
                 plan,

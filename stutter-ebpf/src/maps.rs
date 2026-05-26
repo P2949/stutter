@@ -54,6 +54,7 @@ pub struct FaultCounters {
 #[derive(Clone, Copy)]
 pub struct KmsFlipKey {
     pub provider: u32,
+    pub card_minor_known: u32,
     pub card_minor: u32,
     pub crtc_id: u32,
     pub pipe: u32,
