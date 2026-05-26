@@ -14,7 +14,6 @@ pub mod run;
 
 pub use run::*;
 
-pub use comparability::TuneCoverageMetrics;
 use ranking::select_best_profile;
 pub(crate) use ranking::{assess_ranking_confidence, profile_stats_from_grouped};
 pub const TUNE_RUN_STALE_AFTER: Duration = Duration::from_secs(24 * 60 * 60);
