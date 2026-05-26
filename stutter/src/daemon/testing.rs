@@ -3,7 +3,7 @@
 //! These helpers are intentionally kept out of the daemon root façade and out of
 //! the public `api::daemon` production contract.
 
-pub use crate::daemon::{
+pub(crate) use crate::daemon::{
     acceptance::{DaemonAcceptanceReport, run_fake_daemon_acceptance_suite},
     soak::{
         DaemonSoakBudget, DaemonSoakConfig, DaemonSoakProfile, DaemonSoakReport,
@@ -11,7 +11,7 @@ pub use crate::daemon::{
     },
 };
 #[cfg(test)]
-pub use crate::{
+pub(crate) use crate::{
     autotune::simulation::{
         FakeDaemonScenario, FakeDaemonSimulationReport, FakeDaemonStep,
         assert_no_apply_without_rollback, run_fake_daemon_scenario,
