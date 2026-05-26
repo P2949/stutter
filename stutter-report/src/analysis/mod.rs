@@ -42,7 +42,10 @@ impl ReportAnalysis {
             p95_latency_ns: model.p95_latency_ns,
             p99_latency_ns: model.p99_latency_ns,
             top_culprit: model.top_culprit.clone(),
-            data_quality_level: model.data_quality.as_ref().map(|q| format!("{:?}", q.level)),
+            data_quality_level: model
+                .data_quality
+                .as_ref()
+                .map(|q| format!("{:?}", q.level)),
             has_header: model.header.is_some(),
             cluster_count: model.clusters.len(),
             frame_count: model.frames.len(),
@@ -64,7 +67,9 @@ mod tests {
     use stutter_core::{ids::RunId, paths::LogicalPath};
 
     use super::analyze_report_model;
-    use crate::model::{DataQualityLevel, DataQualitySummary, ReportModel, SpikeCluster, SpikePoint};
+    use crate::model::{
+        DataQualityLevel, DataQualitySummary, ReportModel, SpikeCluster, SpikePoint,
+    };
 
     fn minimal_data_quality(level: DataQualityLevel) -> DataQualitySummary {
         DataQualitySummary {

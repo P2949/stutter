@@ -606,10 +606,6 @@ mod runtime_decoupling_tests {
                 include_str!("../config/layer.rs"),
             ),
             (
-                "stutter/src/config/effective.rs",
-                include_str!("../config/effective.rs"),
-            ),
-            (
                 "stutter/src/config/merge/mod.rs",
                 include_str!("../config/merge/mod.rs"),
             ),

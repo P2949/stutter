@@ -1,25 +1,39 @@
 #![forbid(unsafe_code)]
 
-//! Configuration model scaffolding shared by future `stutter` crates.
+//! Canonical configuration model and validation for the `stutter` workspace.
+//!
+//! This crate owns the authoritative configuration types and pure validation
+//! logic. Runtime checks that require OS probing, eBPF availability, or
+//! kernel feature detection remain in the main `stutter` crate.
 //!
 //! This crate must remain independent from the main `stutter` application crate.
 
+pub mod config_model;
+pub mod effective;
 pub mod error;
 pub mod layer;
 pub mod model;
+pub mod monitor_layer;
 pub mod resolve;
+pub mod schema;
+pub mod source;
 pub mod types;
 pub mod validation;
 
+pub use config_model::{
+    AlertConfig, CpuPerfConfig, DEFAULT_DESKTOP_ALERT_TIMEOUT_MS, DEFAULT_FOREGROUND_POLL_MS,
+    DEFAULT_LIVE_DIAGNOSIS_CLUSTER_WINDOW_MS, DEFAULT_MANGOHUD_ALIGNMENT_POLL_MS,
+    DEFAULT_MANGOHUD_TAIL_IDLE_SLEEP_MS, DiagnosisConfig, DisplayPathConfig, DmaBufConfig,
+    DrmFenceConfig, EbpfSizingConfig, FocusConfig, HwmonConfig, KmsTimingConfig, MangoHudConfig,
+    MonitorConfig, OutputConfig, ProbeConfig, RecordingConfig, RecordingRetentionConfig,
+    RemoteConfig, RuntimeSlicesConfig, SafetyConfig, StreamConfig, TargetConfig, TimingConfig,
+    UiConfig, WatchConfig, WaylandPresentationConfig,
+};
 pub use error::ConfigError;
 pub use types::{
     CsvStreamTarget, FocusSource, ForegroundSource, TARGET_PIDS_MAX, WaylandPresentationSource,
 };
-pub use validation::{
-    StaticAlertConfig, StaticDiagnosisConfig, StaticFocusConfig, StaticMangoHudConfig,
-    StaticMonitorConfig, StaticOutputConfig, StaticTargetConfig, StaticTimingConfig,
-    StaticWatchConfig, validate_static_config, validate_target_max_tasks,
-};
+pub use validation::{validate_static_config, validate_target_max_tasks};
 
 #[cfg(test)]
 mod tests {
@@ -28,7 +42,8 @@ mod tests {
     use stutter_core::paths::StutterPaths;
 
     use super::{
-        error::ConfigError, layer::ConfigLayer, model::ConfigModel, resolve::resolve_layers,
+        MonitorConfig, config_model::DEFAULT_FOREGROUND_POLL_MS, error::ConfigError,
+        layer::ConfigLayer, model::ConfigModel, resolve::resolve_layers,
     };
 
     fn test_paths(root: &str) -> StutterPaths {
@@ -74,5 +89,15 @@ mod tests {
             error.to_string(),
             "missing required config field 'paths.runs_dir'"
         );
+    }
+
+    #[test]
+    fn config_crate_exposes_monitor_config() {
+        // Verify the MonitorConfig is accessible and has sensible defaults.
+        let config = MonitorConfig::default();
+        assert_eq!(config.timing.summary_period_ms, 1_000);
+        assert_eq!(config.focus.foreground_poll_ms, DEFAULT_FOREGROUND_POLL_MS);
+        assert!(!config.has_explicit_target());
+        assert!(!config.focus.auto_focus);
     }
 }

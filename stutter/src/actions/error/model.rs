@@ -70,8 +70,6 @@ pub struct ScopeLimitExceeded {
     pub max_affected_tasks: usize,
 }
 
-
-
 impl ActionError {
     pub fn from_failure(failure: ActionFailure) -> Self {
         Self { failure }
@@ -455,4 +453,3 @@ impl From<anyhow::Error> for PartialApplyError {
 }
 
 pub type ApplyResult = Result<crate::actions::RollbackToken, PartialApplyError>;
-

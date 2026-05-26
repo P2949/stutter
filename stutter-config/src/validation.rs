@@ -1,70 +1,6 @@
-use crate::{TARGET_PIDS_MAX, error::ConfigError};
+use crate::{TARGET_PIDS_MAX, config_model::MonitorConfig, error::ConfigError};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct StaticMonitorConfig<'a> {
-    pub timing: StaticTimingConfig,
-    pub diagnosis: StaticDiagnosisConfig,
-    pub target: StaticTargetConfig,
-    pub focus: StaticFocusConfig,
-    pub watch: StaticWatchConfig,
-    pub alerts: StaticAlertConfig,
-    pub mangohud: StaticMangoHudConfig,
-    pub outputs: StaticOutputConfig<'a>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct StaticTimingConfig {
-    pub summary_period_ms: u64,
-    pub epoch_period_ms: Option<u64>,
-    pub spike_threshold_ns: u64,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct StaticDiagnosisConfig {
-    pub live_cluster_window_ms: u64,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct StaticTargetConfig {
-    pub max_tasks: usize,
-}
-
-impl StaticTargetConfig {
-    pub const fn new(max_tasks: usize) -> Self {
-        Self { max_tasks }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct StaticFocusConfig {
-    pub foreground_poll_ms: u64,
-    pub auto_focus_poll_ms: u64,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct StaticWatchConfig {
-    pub poll_ms: u64,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct StaticAlertConfig {
-    pub threshold_ns: Option<u64>,
-    pub desktop_timeout_ms: u64,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct StaticMangoHudConfig {
-    pub tail_idle_sleep_ms: u64,
-    pub alignment_poll_ms: u64,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct StaticOutputConfig<'a> {
-    pub otel_service_name: &'a str,
-    pub otlp_endpoint: Option<&'a str>,
-}
-
-pub fn validate_static_config(config: &StaticMonitorConfig<'_>) -> Result<(), ConfigError> {
+pub fn validate_static_config(config: &MonitorConfig) -> Result<(), ConfigError> {
     require_nonzero("timing.summary_period_ms", config.timing.summary_period_ms)?;
     require_nonzero(
         "timing.spike_threshold_ns",
@@ -125,12 +61,15 @@ pub fn validate_static_config(config: &StaticMonitorConfig<'_>) -> Result<(), Co
     if config.outputs.otel_service_name.trim().is_empty() {
         return invalid(
             "outputs.otel_service_name",
-            config.outputs.otel_service_name,
+            &config.outputs.otel_service_name,
             "must not be empty",
         );
     }
 
-    if matches!(config.outputs.otlp_endpoint.map(str::trim), Some("")) {
+    if matches!(
+        config.outputs.otlp_endpoint.as_deref().map(str::trim),
+        Some("")
+    ) {
         return invalid("outputs.otlp_endpoint", "", "must not be empty when set");
     }
 
@@ -183,42 +122,11 @@ fn invalid<T>(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        StaticAlertConfig, StaticDiagnosisConfig, StaticFocusConfig, StaticMangoHudConfig,
-        StaticMonitorConfig, StaticOutputConfig, StaticTargetConfig, StaticTimingConfig,
-        StaticWatchConfig, validate_static_config, validate_target_max_tasks,
-    };
-    use crate::{TARGET_PIDS_MAX, error::ConfigError};
+    use super::{validate_static_config, validate_target_max_tasks};
+    use crate::{TARGET_PIDS_MAX, config_model::MonitorConfig, error::ConfigError};
 
-    fn valid_static_config() -> StaticMonitorConfig<'static> {
-        StaticMonitorConfig {
-            timing: StaticTimingConfig {
-                summary_period_ms: 1_000,
-                epoch_period_ms: None,
-                spike_threshold_ns: 1_000_000,
-            },
-            diagnosis: StaticDiagnosisConfig {
-                live_cluster_window_ms: 5,
-            },
-            target: StaticTargetConfig::new(TARGET_PIDS_MAX),
-            focus: StaticFocusConfig {
-                foreground_poll_ms: 500,
-                auto_focus_poll_ms: 1_000,
-            },
-            watch: StaticWatchConfig { poll_ms: 2_000 },
-            alerts: StaticAlertConfig {
-                threshold_ns: None,
-                desktop_timeout_ms: 10_000,
-            },
-            mangohud: StaticMangoHudConfig {
-                tail_idle_sleep_ms: 75,
-                alignment_poll_ms: 500,
-            },
-            outputs: StaticOutputConfig {
-                otel_service_name: "stutter",
-                otlp_endpoint: None,
-            },
-        }
+    fn valid_static_config() -> MonitorConfig {
+        MonitorConfig::default()
     }
 
     fn invalid_field(error: ConfigError) -> String {
@@ -255,7 +163,7 @@ mod tests {
         );
 
         let mut config = valid_static_config();
-        config.outputs.otel_service_name = " ";
+        config.outputs.otel_service_name = " ".to_owned();
         assert_eq!(
             invalid_field(validate_static_config(&config).unwrap_err()),
             "outputs.otel_service_name"

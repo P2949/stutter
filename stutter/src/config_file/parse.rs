@@ -1,13 +1,13 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
+use stutter_config::source::ConfigSource;
 
 use super::*;
 use crate::{
     config::{
         FocusSource, ForegroundSource,
         schema::{CURRENT_CONFIG_VERSION, ConfigDiagnostic, ParsedUserConfigFile, RawConfigFile},
-        source::ConfigSource,
     },
     error::ConfigError,
 };

@@ -1,4 +1,5 @@
 use std::{fmt, path::PathBuf, str::FromStr};
+
 use serde::Serialize;
 
 const SYSTEMD_AGENT_UNIT: &str = include_str!(concat!(
@@ -239,4 +240,3 @@ pub fn user_systemd_dir() -> PathBuf {
         .join("systemd")
         .join("user")
 }
-

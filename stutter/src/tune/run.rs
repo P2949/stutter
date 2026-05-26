@@ -8,18 +8,21 @@ use std::{
     },
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
+
 use log::{debug, info, warn};
 use tokio::time::sleep;
 
+use super::{
+    TUNE_PROFILE_REFRESH_MS, TUNE_RUN_STALE_AFTER, comparability,
+    model::{
+        TuneCandidateSummary, TuneControl, TuneIterationOrder, TuneMeasureResult,
+        TuneProfileRefreshInput, TuneSummary,
+    },
+    recommendation, retain_after_warmup, unix_nanos_now,
+};
 use crate::{
     artifacts::ArtifactSelection, config::model::MonitorConfig, hwmon, profiles,
     recorder::IntervalRecord, scorer, session::run_monitor, session_io,
-};
-
-use super::{
-    comparability,
-    model::{TuneCandidateSummary, TuneIterationOrder, TuneMeasureResult, TuneProfileRefreshInput, TuneSummary, TuneControl},
-    recommendation, retain_after_warmup, unix_nanos_now, TUNE_RUN_STALE_AFTER, TUNE_PROFILE_REFRESH_MS
 };
 
 pub fn candidate_order_for_iteration(profile_count: usize, iteration: u32) -> Vec<usize> {
@@ -39,7 +42,10 @@ pub fn candidate_order_for_iteration(profile_count: usize, iteration: u32) -> Ve
     order
 }
 
-pub(super) fn tune_candidate_order(profiles: &[profiles::Profile], runs: u32) -> Vec<TuneIterationOrder> {
+pub(super) fn tune_candidate_order(
+    profiles: &[profiles::Profile],
+    runs: u32,
+) -> Vec<TuneIterationOrder> {
     (1..=runs)
         .map(|iteration| TuneIterationOrder {
             iteration,

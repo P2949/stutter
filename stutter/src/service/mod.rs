@@ -1,6 +1,6 @@
-pub mod model;
 pub mod command;
+pub mod model;
 mod tests;
 
-pub use model::*;
 pub use command::*;
+pub use model::*;

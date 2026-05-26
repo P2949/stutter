@@ -3,14 +3,13 @@ mod provenance;
 
 use std::collections::BTreeMap;
 
-use crate::config::{
-    ConfigError,
-    layer::MonitorConfigLayer,
-    merge::{self, ConfigSources},
-    model::MonitorConfig,
+use crate::{
+    config_model::MonitorConfig,
+    error::ConfigError,
+    monitor_layer::MonitorConfigLayer,
     schema::ConfigDiagnostic,
     source::{ConfigMergeTrace, ConfigSource, FieldProvenance, MergeReason},
-    validation::validate_monitor_config,
+    validation::validate_static_config,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -86,7 +85,7 @@ impl EffectiveMonitorConfig {
             diagnostics,
         };
 
-        validate_monitor_config(&resolved.config)?;
+        validate_static_config(&resolved.config)?;
 
         Ok(resolved)
     }
@@ -94,19 +93,6 @@ impl EffectiveMonitorConfig {
     pub fn into_monitor_config(self) -> MonitorConfig {
         self.config
     }
-}
-
-pub fn resolve_monitor_config_sources(
-    sources: ConfigSources,
-) -> Result<ResolvedMonitorConfig, ConfigError> {
-    let effective = merge::merge_config_sources_effective_checked(sources)?;
-
-    Ok(ResolvedMonitorConfig {
-        config: effective.config,
-        provenance: effective.provenance,
-        merge_trace: effective.merge_trace,
-        diagnostics: effective.diagnostics,
-    })
 }
 
 pub fn apply_layer(config: &mut MonitorConfig, layer: MonitorConfigLayer) {
@@ -150,7 +136,7 @@ fn merge_trace_from_provenance(provenance: &[FieldProvenance]) -> Vec<ConfigMerg
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{FocusSource, ForegroundSource};
+    use crate::types::{FocusSource, ForegroundSource};
 
     fn last_source_for_field(
         provenance: &[FieldProvenance],
@@ -452,167 +438,5 @@ mod tests {
                 "missing default provenance for {field}"
             );
         }
-    }
-
-    #[test]
-    fn resolve_monitor_config_sources_returns_full_precedence_provenance() {
-        let user_file = crate::config_file::UserConfigFile {
-            summary_period_ms: Some(250),
-            ..Default::default()
-        };
-        let preset = crate::config::merge::PresetConfig {
-            layer: MonitorConfigLayer {
-                summary_period_ms: Some(500),
-                ..Default::default()
-            },
-        };
-        let api = crate::config::merge::ApiOverrides {
-            layer: MonitorConfigLayer {
-                summary_period_ms: Some(750),
-                ..Default::default()
-            },
-        };
-
-        let resolved = resolve_monitor_config_sources(crate::config::merge::ConfigSources {
-            defaults: crate::config::merge::DefaultConfig::default(),
-            user_file: Some(user_file),
-            preset: Some(preset),
-            overrides: api.into(),
-        })
-        .unwrap();
-
-        assert_eq!(resolved.config.timing.summary_period_ms, 750);
-        assert_eq!(
-            last_source_for_field(&resolved.provenance, "timing.summary_period_ms"),
-            Some(ConfigSource::Api)
-        );
-
-        let sources: Vec<_> = resolved
-            .provenance
-            .iter()
-            .filter(|entry| entry.field == "timing.summary_period_ms")
-            .map(|entry| entry.source)
-            .collect();
-
-        assert!(sources.contains(&ConfigSource::Default));
-        assert!(sources.contains(&ConfigSource::UserFile));
-        assert!(sources.contains(&ConfigSource::Preset));
-        assert!(sources.contains(&ConfigSource::Api));
-    }
-
-    #[test]
-    fn resolve_monitor_config_sources_returns_cli_precedence_provenance() {
-        let user_file = crate::config_file::UserConfigFile {
-            summary_period_ms: Some(250),
-            ..Default::default()
-        };
-        let preset = crate::config::merge::PresetConfig {
-            layer: MonitorConfigLayer {
-                summary_period_ms: Some(500),
-                ..Default::default()
-            },
-        };
-        let cli = crate::config::merge::CliOverrides {
-            layer: MonitorConfigLayer {
-                summary_period_ms: Some(1_000),
-                ..Default::default()
-            },
-        };
-
-        let resolved = resolve_monitor_config_sources(crate::config::merge::ConfigSources {
-            defaults: crate::config::merge::DefaultConfig::default(),
-            user_file: Some(user_file),
-            preset: Some(preset),
-            overrides: cli.into(),
-        })
-        .unwrap();
-
-        assert_eq!(resolved.config.timing.summary_period_ms, 1_000);
-        assert_eq!(
-            last_source_for_field(&resolved.provenance, "timing.summary_period_ms"),
-            Some(ConfigSource::Cli)
-        );
-
-        let sources: Vec<_> = resolved
-            .provenance
-            .iter()
-            .filter(|entry| entry.field == "timing.summary_period_ms")
-            .map(|entry| entry.source)
-            .collect();
-
-        assert!(sources.contains(&ConfigSource::Default));
-        assert!(sources.contains(&ConfigSource::UserFile));
-        assert!(sources.contains(&ConfigSource::Preset));
-        assert!(sources.contains(&ConfigSource::Cli));
-    }
-
-    #[test]
-    fn effective_config_preserves_mangohud_timing_provenance() {
-        let user_file = crate::config_file::UserConfigFile {
-            mangohud: Some(crate::config_file::MangoHudConfigFile {
-                tail_idle_sleep_ms: Some(25),
-                alignment_poll_ms: Some(125),
-            }),
-            ..Default::default()
-        };
-        let cli = crate::config::merge::CliOverrides {
-            layer: MonitorConfigLayer {
-                mangohud_tail_idle_sleep_ms: Some(50),
-                ..Default::default()
-            },
-        };
-
-        let resolved = resolve_monitor_config_sources(crate::config::merge::ConfigSources {
-            defaults: crate::config::merge::DefaultConfig::default(),
-            user_file: Some(user_file),
-            preset: None,
-            overrides: cli.into(),
-        })
-        .unwrap();
-
-        assert_eq!(resolved.config.mangohud.tail_idle_sleep_ms, 50);
-        assert_eq!(resolved.config.mangohud.alignment_poll_ms, 125);
-        assert_eq!(
-            last_source_for_field(&resolved.provenance, "mangohud.tail_idle_sleep_ms"),
-            Some(ConfigSource::Cli)
-        );
-        assert_eq!(
-            last_source_for_field(&resolved.provenance, "mangohud.alignment_poll_ms"),
-            Some(ConfigSource::UserFile)
-        );
-    }
-
-    #[test]
-    fn resolve_monitor_config_sources_carries_user_file_diagnostics_and_provenance() {
-        let mut user_file = crate::config_file::UserConfigFile {
-            summary_period_ms: Some(250),
-            ..Default::default()
-        };
-        user_file
-            .diagnostics
-            .push(crate::config::schema::ConfigDiagnostic::warning(
-                crate::config::source::ConfigSource::UserFile,
-                Some("summary_ms".to_owned()),
-                "`summary_ms` is deprecated; use `summary_period_ms`",
-            ));
-
-        let resolved = resolve_monitor_config_sources(crate::config::merge::ConfigSources {
-            defaults: crate::config::merge::DefaultConfig::default(),
-            user_file: Some(user_file),
-            preset: None,
-            overrides: crate::config::merge::CliOverrides {
-                layer: MonitorConfigLayer::default(),
-            }
-            .into(),
-        })
-        .unwrap();
-
-        assert_eq!(resolved.config.timing.summary_period_ms, 250);
-        assert_eq!(resolved.diagnostics.len(), 1);
-        assert_eq!(resolved.diagnostics[0].field.as_deref(), Some("summary_ms"));
-        assert_eq!(
-            last_source_for_field(&resolved.provenance, "timing.summary_period_ms"),
-            Some(ConfigSource::UserFile)
-        );
     }
 }

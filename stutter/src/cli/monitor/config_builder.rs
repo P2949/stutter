@@ -483,7 +483,7 @@ pub(crate) fn monitor_config_from_monitor_args_with_file_and_presence(
         },
         user_file,
         preset: preset.map(|preset| PresetConfig {
-            layer: MonitorConfigLayer::from_preset_defaults(preset.defaults()),
+            layer: crate::config::layer::layer_from_preset_defaults(preset.defaults()),
         }),
         overrides: CliOverrides { layer }.into(),
     })?;

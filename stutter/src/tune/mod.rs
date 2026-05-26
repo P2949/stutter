@@ -12,11 +12,10 @@ mod ranking;
 pub mod recommendation;
 pub mod run;
 
-pub use run::*;
-
 pub use comparability::TuneCoverageMetrics;
 use ranking::select_best_profile;
 pub(crate) use ranking::{assess_ranking_confidence, profile_stats_from_grouped};
+pub use run::*;
 pub const TUNE_RUN_STALE_AFTER: Duration = Duration::from_secs(24 * 60 * 60);
 pub const TUNE_PROFILE_REFRESH_MS: u64 = 1_000;
 
@@ -151,8 +150,6 @@ pub async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
 
     Ok(())
 }
-
-
 
 pub fn unix_nanos_now() -> u128 {
     SystemTime::now()

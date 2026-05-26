@@ -3,9 +3,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use log::warn;
 use serde::{Deserialize, Serialize};
 
-use crate::tune::model::TuneCandidateSummary;
-use crate::tune::ranking::median_u64;
-use crate::{process_tree::TaskClass, recorder, scorer};
+use crate::{
+    process_tree::TaskClass,
+    recorder, scorer,
+    tune::{model::TuneCandidateSummary, ranking::median_u64},
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TuneComparabilityWarning {
@@ -507,4 +509,3 @@ pub fn tune_coverage_metrics(
         scored_identity_counts: scored_identity_map_to_counts(scored_identity_counts),
     }
 }
-
