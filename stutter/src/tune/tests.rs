@@ -49,6 +49,8 @@ mod keep_best_policy_tests {
 
 #[cfg(test)]
 mod ranking_tests {
+    use std::path::{Path, PathBuf};
+
     use super::{
         ranking::{iqr_u64, percentile_nearest_rank_u64},
         *,

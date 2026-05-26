@@ -248,7 +248,7 @@ fn daemon_state_only_mentions_legacy_candidate_diagnostic_name_for_serde_compati
 
 #[test]
 fn tune_profile_stats_use_raw_score_total_names_for_serialized_raw_totals() {
-    let tune_source = include_str!("../tune/mod.rs");
+    let tune_source = include_str!("../tune/model.rs");
     let recommendation_source = include_str!("../tune/recommendation.rs");
 
     for source in [tune_source, recommendation_source] {
@@ -282,7 +282,7 @@ fn decision_stream_entry_uses_raw_score_total_name() {
 
 #[test]
 fn tune_candidate_summary_uses_raw_score_total_name() {
-    let source = include_str!("../tune/mod.rs");
+    let source = include_str!("../tune/model.rs");
 
     assert!(source.contains("pub diagnostic_raw_score_total: u64"));
     assert!(source.contains(r#"#[serde(alias = "diagnostic_score_total")]"#));
