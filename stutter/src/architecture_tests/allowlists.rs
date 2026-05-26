@@ -48,11 +48,6 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
         reason: "pending autotune controller journaling split; baseline pinned for the 800-line production gate",
     },
     OversizedRustFileAllowance {
-        path: "src/daemon/runtime.rs",
-        max_lines: 829,
-        reason: "pending daemon runtime lifecycle split; baseline pinned for the 800-line production gate",
-    },
-    OversizedRustFileAllowance {
         path: "src/service.rs",
         max_lines: 825,
         reason: "pending service command split; baseline pinned for the 800-line production gate",
