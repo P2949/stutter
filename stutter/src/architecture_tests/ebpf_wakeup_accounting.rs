@@ -7,8 +7,7 @@ fn try_sched_wakeup_preserves_wakeup_data_and_gates_accounting() {
         .unwrap();
     let scheduler_rs = workspace_root.join("stutter-ebpf/src/scheduler.rs");
 
-    let content = fs::read_to_string(&scheduler_rs)
-        .expect("failed to read scheduler.rs");
+    let content = fs::read_to_string(&scheduler_rs).expect("failed to read scheduler.rs");
 
     let try_sched_wakeup_start = content
         .find("pub(crate) fn try_sched_wakeup")
@@ -21,7 +20,8 @@ fn try_sched_wakeup_preserves_wakeup_data_and_gates_accounting() {
 
     // 1. Check that mark_task_runnable returns target_cpu_tracked
     assert!(
-        try_sched_wakeup_body.contains("let target_cpu_tracked = mark_task_runnable(pid, target_cpu);"),
+        try_sched_wakeup_body
+            .contains("let target_cpu_tracked = mark_task_runnable(pid, target_cpu);"),
         "try_sched_wakeup must track if mark_task_runnable succeeded"
     );
 
