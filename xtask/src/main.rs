@@ -14,7 +14,7 @@ pub mod workflow;
 
 use crate::{
     dependency_hygiene::run_dependency_hygiene,
-    ebpf_smoke::{EBPF_BUILD_COMMAND, run_privileged_ebpf_smoke},
+    ebpf_smoke::{EBPF_BUILD_COMMAND, run_privileged_ebpf_smoke, run_unprivileged_ebpf_smoke},
     fixtures::{
         FIXTURE_CHECK_WORKFLOW, FIXTURE_UPDATE_WORKFLOW, REPORT_GOLDEN_UPDATE_WORKFLOW,
         SCHEMA_CHECK_WORKFLOW,
@@ -50,12 +50,12 @@ pub enum XtaskCommand {
     Preflight,
     #[command(
         name = "ebpf-smoke",
-        about = "Run gated eBPF load smoke tests that require Linux tracefs and eBPF privileges"
+        about = "Build eBPF object and check toolchain without requiring root."
     )]
     EbpfSmoke,
     #[command(
         name = "privileged-ebpf-smoke",
-        about = "Compatibility alias for ebpf-smoke"
+        about = "Build and run privileged eBPF loader tests."
     )]
     PrivilegedEbpfSmoke,
     #[command(
@@ -207,7 +207,7 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
         }
         XtaskCommand::Smoke => run_command_specs(&root, SMOKE_COMMANDS),
         XtaskCommand::Preflight => run_preflight(),
-        XtaskCommand::EbpfSmoke => run_privileged_ebpf_smoke(&root),
+        XtaskCommand::EbpfSmoke => run_unprivileged_ebpf_smoke(&root),
         XtaskCommand::PrivilegedEbpfSmoke => run_privileged_ebpf_smoke(&root),
         XtaskCommand::Validate => {
             run_preflight()?;
@@ -351,6 +351,14 @@ mod tests {
                 "cargo build -p stutter",
                 "cargo test -p stutter privileged_ -- --nocapture",
             ]
+        );
+    }
+
+    #[test]
+    fn unprivileged_ebpf_smoke_command_targets_build_only() {
+        assert_eq!(
+            command_texts(crate::ebpf_smoke::UNPRIVILEGED_EBPF_SMOKE_COMMANDS),
+            vec!["cargo build -p stutter"]
         );
     }
 

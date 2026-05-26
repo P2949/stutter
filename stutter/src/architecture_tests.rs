@@ -12,6 +12,7 @@ mod daemon_state;
 mod decode_coverage;
 mod dependencies;
 mod direct_prints;
+mod documentation;
 mod ebpf_layout;
 mod file_size;
 mod mutation_paths;
