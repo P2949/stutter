@@ -17,6 +17,7 @@ mod ebpf_layout;
 mod ebpf_switch_accounting;
 mod ebpf_wakeup_accounting;
 mod file_size;
+mod module_layout;
 mod mutation_paths;
 mod objectives;
 mod panic_paths;

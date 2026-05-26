@@ -60,7 +60,7 @@ mod tests {
     }
 
     #[test]
-    fn report_crate_exposes_requested_skeleton_modules() {
+    fn report_crate_exposes_core_module_interfaces() {
         let model = ReportModel::new()
             .with_run_id(RunId::new("run-001"))
             .with_source_path(LogicalPath::new("runs/run-001"))

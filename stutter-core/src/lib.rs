@@ -16,7 +16,7 @@ mod tests {
     use crate::clock::Clock;
 
     #[test]
-    fn skeleton_modules_expose_minimal_primitives() {
+    fn core_modules_expose_domain_primitives() {
         let id = ids::StableId::new("candidate/cpu-affinity");
         assert_eq!(id.as_str(), "candidate/cpu-affinity");
 
