@@ -1,196 +1,13 @@
-use std::{fmt, str::FromStr};
-
-use serde::{Deserialize, Serialize};
-
 use crate::{
-    actions::SafetyClass,
     autotune::simulation::{
         FakeDaemonScenario, FakeDaemonSimulationReport, FakeDaemonStep,
         run_fake_daemon_scenario_with_safety,
     },
-    daemon::{DaemonPhase, policy::DaemonMode},
+    daemon::DaemonPhase,
+    actions::SafetyClass,
 };
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
-pub enum DaemonSoakProfile {
-    ObserveOnly,
-    ApplyLowRiskFake,
-}
-
-impl DaemonSoakProfile {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::ObserveOnly => "observe-only",
-            Self::ApplyLowRiskFake => "apply-low-risk-fake",
-        }
-    }
-}
-
-impl fmt::Display for DaemonSoakProfile {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl FromStr for DaemonSoakProfile {
-    type Err = anyhow::Error;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value.trim() {
-            "observe-only" | "observe" => Ok(Self::ObserveOnly),
-            "apply-low-risk-fake" | "low-risk-fake" => Ok(Self::ApplyLowRiskFake),
-            other => anyhow::bail!(
-                "unknown soak profile {other:?}; expected observe-only or apply-low-risk-fake"
-            ),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct DaemonSoakConfig {
-    pub profile: DaemonSoakProfile,
-    pub duration_seconds: u64,
-    pub tick_millis: u64,
-    pub budget: DaemonSoakBudget,
-}
-
-impl Default for DaemonSoakConfig {
-    fn default() -> Self {
-        Self {
-            profile: DaemonSoakProfile::ObserveOnly,
-            duration_seconds: 60,
-            tick_millis: 1_000,
-            budget: DaemonSoakBudget::default(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct DaemonSoakBudget {
-    pub max_memory_growth_bytes: u64,
-    pub max_file_descriptors: u64,
-    pub max_disk_growth_bytes: u64,
-    pub max_event_queue_len: u64,
-    pub max_task_count: u64,
-    pub max_history_bytes: u64,
-    pub max_cpu_millis_per_second: u64,
-    pub max_wakeups_per_second: u64,
-    pub max_event_drops: u64,
-}
-
-impl Default for DaemonSoakBudget {
-    fn default() -> Self {
-        Self {
-            max_memory_growth_bytes: 8 * 1024 * 1024,
-            max_file_descriptors: 128,
-            max_disk_growth_bytes: 32 * 1024 * 1024,
-            max_event_queue_len: 4096,
-            max_task_count: 2048,
-            max_history_bytes: 16 * 1024 * 1024,
-            max_cpu_millis_per_second: 25,
-            max_wakeups_per_second: 30,
-            max_event_drops: 0,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct DaemonSoakReport {
-    pub profile: DaemonSoakProfile,
-    pub duration_seconds: u64,
-    pub ticks: u64,
-    pub passed: bool,
-    pub metrics: DaemonSoakMetrics,
-    pub failures: Vec<DaemonSoakFailure>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub scenarios: Vec<DaemonSoakScenarioReport>,
-}
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct DaemonSoakMetrics {
-    pub scenario_count: u64,
-    pub planner_decisions: u64,
-    pub memory_growth_bytes: u64,
-    pub file_descriptors: u64,
-    pub disk_growth_bytes: u64,
-    pub max_event_queue_len: u64,
-    pub task_count: u64,
-    pub history_bytes: u64,
-    pub cpu_millis_per_second: u64,
-    pub wakeups_per_second: u64,
-    pub event_drops: u64,
-    pub fake_actions_started: u64,
-    pub fake_rollbacks: u64,
-    pub max_active_experiments: u64,
-    pub low_data_quality_ticks: u64,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct DaemonSoakFailure {
-    pub reason_code: String,
-    pub message: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct DaemonSoakScenarioReport {
-    pub name: String,
-    pub mode: DaemonMode,
-    pub ticks: u64,
-    pub decisions: Vec<String>,
-    pub passed: bool,
-    pub failures: Vec<DaemonSoakFailure>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct SoakScenario {
-    pub name: String,
-    pub mode: DaemonMode,
-    #[serde(default = "default_soak_candidate_safety_class")]
-    pub candidate_safety_class: SafetyClass,
-    pub ticks: Vec<SoakTick>,
-    #[serde(default)]
-    pub assertions: Vec<SoakAssertion>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum SoakTick {
-    FocusGame {
-        #[serde(default = "default_focus_confidence")]
-        confidence: f32,
-    },
-    FocusCleared {
-        #[serde(default = "default_focus_clear_reason")]
-        reason: String,
-    },
-    TargetPresent,
-    TargetMissing,
-    Interval {
-        diagnostic_score_total: u64,
-        samples: u64,
-    },
-    DroppedInterval {
-        dropped_events: u64,
-    },
-    EvaluationTick {
-        reason: String,
-    },
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum SoakAssertion {
-    OneActiveExperimentMaximum,
-    NoHighRiskAutonomousApply,
-    NoApplyDuringLowDataQuality,
-    NoProtectedTaskMutation,
-    RollbackTokenBeforeApply,
-    ShutdownRestoresActiveActions,
-    CooldownRespected,
-    FocusFlappingDoesNotCauseActionFlapping,
-    HighRiskManualOnly,
-}
+use super::model::*;
 
 pub fn run_fake_daemon_soak(config: &DaemonSoakConfig) -> DaemonSoakReport {
     run_scenario_daemon_soak(config, &default_soak_scenarios(config.profile))
@@ -541,7 +358,7 @@ fn history_growth_per_scenario(scenario: &SoakScenario) -> u64 {
     scenario.ticks.len() as u64 * 192
 }
 
-fn low_data_quality_ticks(scenario: &SoakScenario) -> u64 {
+pub fn low_data_quality_ticks(scenario: &SoakScenario) -> u64 {
     scenario
         .ticks
         .iter()
@@ -553,7 +370,7 @@ fn default_soak_scenarios(profile: DaemonSoakProfile) -> Vec<SoakScenario> {
     match profile {
         DaemonSoakProfile::ObserveOnly => vec![SoakScenario {
             name: "observe_only_no_apply".to_owned(),
-            mode: DaemonMode::Observe,
+            mode: crate::daemon::policy::DaemonMode::Observe,
             candidate_safety_class: SafetyClass::ReversibleLowRisk,
             ticks: vec![
                 SoakTick::FocusGame { confidence: 0.95 },
@@ -571,7 +388,7 @@ fn default_soak_scenarios(profile: DaemonSoakProfile) -> Vec<SoakScenario> {
         }],
         DaemonSoakProfile::ApplyLowRiskFake => vec![SoakScenario {
             name: "apply_low_risk_revert".to_owned(),
-            mode: DaemonMode::ApplyLowRisk,
+            mode: crate::daemon::policy::DaemonMode::ApplyLowRisk,
             candidate_safety_class: SafetyClass::ReversibleLowRisk,
             ticks: vec![
                 SoakTick::FocusGame { confidence: 0.95 },
@@ -593,18 +410,6 @@ fn default_soak_scenarios(profile: DaemonSoakProfile) -> Vec<SoakScenario> {
             ],
         }],
     }
-}
-
-fn default_focus_confidence() -> f32 {
-    0.95
-}
-
-fn default_focus_clear_reason() -> String {
-    "focus cleared".to_owned()
-}
-
-fn default_soak_candidate_safety_class() -> SafetyClass {
-    SafetyClass::ReversibleLowRisk
 }
 
 fn evaluate_soak_failures(
@@ -685,117 +490,4 @@ fn check_budget(
         reason_code: reason_code.to_owned(),
         message: format!("observed {observed} exceeds budget {limit}"),
     });
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn observe_only_fake_soak_passes_default_budgets() {
-        let report = run_fake_daemon_soak(&DaemonSoakConfig {
-            duration_seconds: 60,
-            ..DaemonSoakConfig::default()
-        });
-
-        assert!(report.passed);
-        assert_eq!(report.profile, DaemonSoakProfile::ObserveOnly);
-        assert_eq!(report.metrics.event_drops, 0);
-        assert_eq!(report.metrics.scenario_count, 1);
-    }
-
-    #[test]
-    fn fake_low_risk_soak_tracks_actions_and_rollbacks() {
-        let report = run_fake_daemon_soak(&DaemonSoakConfig {
-            profile: DaemonSoakProfile::ApplyLowRiskFake,
-            duration_seconds: 120,
-            ..DaemonSoakConfig::default()
-        });
-
-        assert!(report.passed);
-        assert!(report.metrics.fake_actions_started >= 1);
-        assert!(report.metrics.fake_rollbacks >= 1);
-    }
-
-    #[test]
-    fn fake_soak_fails_when_budget_is_too_small() {
-        let report = run_fake_daemon_soak(&DaemonSoakConfig {
-            duration_seconds: 60,
-            budget: DaemonSoakBudget {
-                max_disk_growth_bytes: 1,
-                ..DaemonSoakBudget::default()
-            },
-            ..DaemonSoakConfig::default()
-        });
-
-        assert!(!report.passed);
-        assert!(
-            report
-                .failures
-                .iter()
-                .any(|failure| failure.reason_code == "disk_growth")
-        );
-    }
-
-    #[test]
-    fn soak_profile_parses_aliases() {
-        assert_eq!(
-            "low-risk-fake".parse::<DaemonSoakProfile>().unwrap(),
-            DaemonSoakProfile::ApplyLowRiskFake
-        );
-    }
-
-    #[test]
-    fn scenario_driven_soak_fixtures_preserve_safety_invariants() {
-        let fixture_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .join("testdata/autotune/soak");
-        let mut paths = std::fs::read_dir(&fixture_dir)
-            .unwrap()
-            .map(|entry| entry.unwrap().path())
-            .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("json"))
-            .collect::<Vec<_>>();
-        paths.sort();
-
-        assert_eq!(paths.len(), 12);
-
-        for path in paths {
-            let text = std::fs::read_to_string(&path).unwrap();
-            let scenario: SoakScenario = serde_json::from_str(&text)
-                .unwrap_or_else(|err| panic!("failed to parse {}: {err}", path.display()));
-            let report = run_scenario_daemon_soak(
-                &DaemonSoakConfig {
-                    profile: DaemonSoakProfile::ApplyLowRiskFake,
-                    duration_seconds: scenario.ticks.len() as u64,
-                    ..DaemonSoakConfig::default()
-                },
-                std::slice::from_ref(&scenario),
-            );
-
-            assert!(
-                report.passed,
-                "{} failed: {:?}",
-                scenario.name, report.failures
-            );
-            assert!(
-                report.metrics.event_drops <= DaemonSoakBudget::default().max_event_drops,
-                "{} event drops exceeded budget",
-                scenario.name
-            );
-            assert!(
-                report.metrics.max_event_queue_len
-                    <= DaemonSoakBudget::default().max_event_queue_len,
-                "{} queue accounting should stay bounded",
-                scenario.name
-            );
-            assert!(
-                report.metrics.max_active_experiments <= 1,
-                "{} active experiment invariant failed",
-                scenario.name
-            );
-            assert_eq!(report.scenarios.len(), 1);
-            assert!(report.scenarios[0].passed);
-        }
-    }
 }
