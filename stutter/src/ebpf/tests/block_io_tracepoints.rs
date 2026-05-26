@@ -330,7 +330,7 @@ fn ebpf_block_io_complete_uses_loader_injected_nr_sector_offset() {
         "block_rq_complete must not hardcode nr_sector at offset 24"
     );
     assert!(
-        source.contains("read_optional_u32(&ctx, nr_sector_offset)")
+        source.contains("read_u32_or_zero(&ctx, nr_sector_offset)")
             || source.contains("ctx.read_at::<u32>(nr_sector_offset as usize)"),
         "block_rq_complete should read nr_sector through the complete tracepoint offset"
     );

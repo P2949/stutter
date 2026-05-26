@@ -1,6 +1,6 @@
 use aya_ebpf::{
     macros::map,
-    maps::{Array, HashMap, LruHashMap, PerCpuArray, RingBuf},
+    maps::{Array, HashMap, PerCpuArray, RingBuf},
 };
 use stutter_common::{BPF_DEFAULT_EVENTS_RINGBUF_BYTES, BPF_MAX_TRACKED_CPUS, DROP_COUNTERS_MAX};
 
@@ -40,8 +40,8 @@ pub static CPU_RUNNABLE_DEPTH: Array<u32> = Array::<u32>::with_max_entries(BPF_M
 // Per-target-TID mapping to the CPU where the monitored task was last counted
 // as runnable. Used to move monitored runnable counts during migration and
 // avoid double-counting duplicate wakeups.
-pub static RUNNABLE_TASK_CPU: LruHashMap<u32, u32> =
-    LruHashMap::<u32, u32>::with_max_entries(RUNNABLE_TASK_CPU_MAP_MAX_ENTRIES, 0);
+pub static RUNNABLE_TASK_CPU: HashMap<u32, u32> =
+    HashMap::<u32, u32>::with_max_entries(RUNNABLE_TASK_CPU_MAP_MAX_ENTRIES, 0);
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -53,6 +53,7 @@ pub struct FaultCounters {
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct KmsFlipKey {
+    pub provider: u32,
     pub card_minor: u32,
     pub crtc_id: u32,
     pub pipe: u32,

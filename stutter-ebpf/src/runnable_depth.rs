@@ -47,20 +47,30 @@ pub(crate) fn mark_task_runnable(pid: u32, target_cpu: u32) -> bool {
     match unsafe { RUNNABLE_TASK_CPU.get(pid).copied() } {
         Some(old_cpu) if old_cpu == target_cpu => {
             // Already counted on the same CPU.
+            true
         }
         Some(old_cpu) => {
-            // Migrated while runnable.
+            // Migrated while runnable. Update the reverse map before moving the
+            // depth count so insert failure cannot leave the old CPU undercounted.
+            if RUNNABLE_TASK_CPU.insert(pid, target_cpu, 0).is_err() {
+                increment_drop_counter(DROP_CPU_ACCOUNTING_UNTRACKED);
+                return false;
+            }
             decrement_cpu_runnable_depth(old_cpu);
             increment_cpu_runnable_depth(target_cpu);
-            let _ = RUNNABLE_TASK_CPU.insert(pid, target_cpu, 0);
+            true
         }
         None => {
+            // Install the reverse map before incrementing depth so map pressure
+            // cannot create a count that no later switch/exit path can remove.
+            if RUNNABLE_TASK_CPU.insert(pid, target_cpu, 0).is_err() {
+                increment_drop_counter(DROP_CPU_ACCOUNTING_UNTRACKED);
+                return false;
+            }
             increment_cpu_runnable_depth(target_cpu);
-            let _ = RUNNABLE_TASK_CPU.insert(pid, target_cpu, 0);
+            true
         }
     }
-
-    true
 }
 
 #[inline(always)]
