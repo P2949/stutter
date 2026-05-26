@@ -1,4 +1,6 @@
-pub use stutter_config::schema::{ConfigDiagnostic, ConfigDiagnosticLevel};
+pub use stutter_config::schema::ConfigDiagnostic;
+#[cfg(test)]
+pub(crate) use stutter_config::schema::ConfigDiagnosticLevel;
 
 use crate::config_file::UserConfigFile;
 

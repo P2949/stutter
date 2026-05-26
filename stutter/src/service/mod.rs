@@ -1,6 +1,8 @@
 pub mod command;
 pub mod model;
-mod tests;
+#[cfg(test)]
+#[path = "tests.rs"]
+mod service_tests;
 
 pub use command::*;
 pub use model::*;

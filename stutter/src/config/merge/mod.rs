@@ -85,7 +85,7 @@ pub fn merge_config_sources_effective_checked(
     let preset_layer = sources.preset.map(|preset| preset.layer);
     let (override_layer, override_source) = sources.overrides.into_parts();
 
-    let mut effective = EffectiveMonitorConfig::from_layers_with_sources(
+    let effective = EffectiveMonitorConfig::from_layers_with_sources(
         default_config,
         user_layer,
         preset_layer,
