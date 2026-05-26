@@ -48,11 +48,6 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
         reason: "pending IRQ-affinity provider split; baseline pinned for the 800-line production gate",
     },
     OversizedRustFileAllowance {
-        path: "src/tune/comparability.rs",
-        max_lines: 804,
-        reason: "pending tune comparability split; baseline pinned for the 800-line production gate",
-    },
-    OversizedRustFileAllowance {
         path: "src/recommend.rs",
         max_lines: 792,
         reason: "pending recommend split; baseline pinned for the 700-line production gate",
