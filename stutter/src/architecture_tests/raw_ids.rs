@@ -41,8 +41,12 @@ const RAW_ID_ALLOWED_PATHS: &[RawIdAllowedPath] = &[
         reason: "baseline identity keys retain persisted numeric compatibility",
     },
     RawIdAllowedPath {
-        path: "src/autotune/providers/irq_affinity.rs",
+        path: "src/autotune/providers/irq_affinity/model.rs",
         reason: "IRQ provider evidence mirrors kernel IRQ numbering",
+    },
+    RawIdAllowedPath {
+        path: "src/actions/nice/model.rs",
+        reason: "Nice action model preserves numeric task identity at the action boundary",
     },
     RawIdAllowedPath {
         path: "src/autotune/status/mod.rs",

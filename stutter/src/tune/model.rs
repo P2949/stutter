@@ -1,6 +1,6 @@
 use std::{path::PathBuf, sync::{Arc, atomic::{AtomicBool, AtomicUsize}}};
 use serde::{Deserialize, Serialize};
-use crate::{profiles, recorder::IntervalRecord, daemon_policy::DaemonPolicy};
+use crate::{profiles, recorder::IntervalRecord};
 use super::comparability::{TuneComparabilityWarning, TuneCoverageMetrics};
 #[derive(Serialize, Deserialize)]
 pub struct TuneSummary {
