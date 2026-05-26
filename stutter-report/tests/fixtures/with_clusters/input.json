@@ -1,0 +1,143 @@
+{
+  "header": {
+    "file_path": "with_clusters.json",
+    "schema_version": 22,
+    "expected_schema_version": 22,
+    "run_name": "game-session",
+    "duration_ms": 5000,
+    "stop_reason": "user",
+    "manual_pids": [],
+    "tree_roots": [1234],
+    "include_comm": ["game"],
+    "exclude_comm": [],
+    "event_stream_warning": null,
+    "watch_process": "game",
+    "persistent": false,
+    "csv_stream": "-",
+    "active_target_pids_count": 2
+  },
+  "data_quality": {
+    "level": "Medium",
+    "reasons": ["spike_events_dropped"],
+    "missing_optional_files": [],
+    "validation_errors": [],
+    "validation_warnings": [],
+    "probe_activation_warnings": [],
+    "schema_version": 22,
+    "expected_schema_version": 22,
+    "event_stream_write_errors": 0,
+    "spike_events_truncated": false,
+    "spike_events_retained_count": 10,
+    "spike_events_dropped_count": 2,
+    "interval_record_count": 50,
+    "active_target_pids_count": 2,
+    "drop_counters_nonzero": true,
+    "percentile_scope_counts": {},
+    "block_io_correlation_basis": "none",
+    "block_io_correlation_confidence": "high",
+    "block_io_correlation_warning": null,
+    "frame_timestamp_alignment": "none",
+    "cpu_perf_requested": false,
+    "cpu_perf_open_errors": 0,
+    "cpu_perf_read_errors": 0,
+    "cpu_perf_skipped_tasks": 0
+  },
+  "clusters": [
+    {
+      "points": [
+        {
+          "task": 1234,
+          "class": "game",
+          "process_pid": 1234,
+          "comm": "RenderThread",
+          "cpu": 2,
+          "wakeup_target_cpu": 2,
+          "latency_ns": 3500000,
+          "wakeup_ns": 1000000000,
+          "switch_ns": 1003500000,
+          "target_pending_wakeups": 0,
+          "observed_runnable_depth": 1,
+          "switch_prev_pid": 0,
+          "switch_prev_state": 1,
+          "switch_prev_state_label": "S",
+          "scx_ops": null,
+          "primary_cause": "runnable_wait",
+          "cause_tags": ["cpu_contention"]
+        },
+        {
+          "task": 1235,
+          "class": "game",
+          "process_pid": 1234,
+          "comm": "Main",
+          "cpu": 3,
+          "wakeup_target_cpu": 3,
+          "latency_ns": 2100000,
+          "wakeup_ns": 1000500000,
+          "switch_ns": 1002600000,
+          "target_pending_wakeups": 1,
+          "observed_runnable_depth": 0,
+          "switch_prev_pid": 5,
+          "switch_prev_state": 1,
+          "switch_prev_state_label": "S",
+          "scx_ops": null,
+          "primary_cause": null,
+          "cause_tags": []
+        },
+        {
+          "task": 1236,
+          "class": "game",
+          "process_pid": 1234,
+          "comm": "AudioThread",
+          "cpu": 0,
+          "wakeup_target_cpu": 0,
+          "latency_ns": 1800000,
+          "wakeup_ns": 1001000000,
+          "switch_ns": 1002800000,
+          "target_pending_wakeups": 0,
+          "observed_runnable_depth": 0,
+          "switch_prev_pid": 3,
+          "switch_prev_state": 1,
+          "switch_prev_state_label": "S",
+          "scx_ops": null,
+          "primary_cause": null,
+          "cause_tags": []
+        }
+      ],
+      "distinct_tasks": 3,
+      "min_switch_ns": 1002600000,
+      "max_switch_ns": 1003500000,
+      "max_latency_ns": 3500000,
+      "diagnosis": {
+        "primary": {
+          "cause": "cpu_contention",
+          "confidence": "medium",
+          "score": 0.65,
+          "evidence": [
+            {
+              "kind": "runnable_wait",
+              "strength": 0.7,
+              "message": "render thread waited 3.5ms while runnable"
+            }
+          ]
+        },
+        "candidates": [],
+        "missing_evidence": [],
+        "candidate_rejections": [],
+        "secondary_causes": [],
+        "report_summary": "cpu contention likely during frame render"
+      },
+      "wake_graph": [
+        {
+          "waker_tid": 1235,
+          "waker_comm": "Main",
+          "wakee_tid": 1234,
+          "wakee_comm": "RenderThread",
+          "count": 3,
+          "max_latency_ns": 3500000
+        }
+      ]
+    }
+  ],
+  "frames": [],
+  "correlations": null
+}

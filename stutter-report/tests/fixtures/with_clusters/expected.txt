@@ -1,0 +1,43 @@
+file: with_clusters.json
+schema: 22
+expected_schema: 22
+run: game-session
+duration_ms: 5000
+stop_reason: user
+manual_pids: []
+tree_roots: [1234]
+include_comm: ["game"]
+exclude_comm: []
+watch_process: game
+persistent: false
+csv_stream: -
+active_tasks_at_end: 2
+
+data quality
+------------
+level: Medium
+schema: 22 expected=22
+event_stream_write_errors: 0
+spike_events: retained=10 dropped=2 truncated=false
+interval_records: 50
+active_target_pids: 2
+drop_counters_nonzero: true
+percentile_scope_counts: {}
+block_io_correlation_basis: none (confidence: high)
+frame_timestamp_alignment: none
+cpu_perf: requested=false open_errors=0 read_errors=0 skipped_tasks=0
+reason: spike_events_dropped
+
+spike clusters
+--------------
+#1 elapsed=0.997s span=900.000us tasks=3 total_spikes=3 shown_points=3 omitted_points=0 cpus=0,2,3 labels=render-main,audio max=3.500ms switch_ns=1002600000..1003500000 points=1234(game:RenderThread cpu=2 wakeup_target_cpu=2 latency=3.500ms switch_ns=1003500000 process_pid=1234 wakeup_ns=1000000000 observed_runnable_depth=1 target_pending_wakeups=0(diag) switch_prev_pid=0 switch_prev_state=1 switch_prev_state_label=S primary_cause=runnable_wait tags=cpu_contention) 1235(game:Main cpu=3 wakeup_target_cpu=3 latency=2.100ms switch_ns=1002600000 process_pid=1234 wakeup_ns=1000500000 observed_runnable_depth=0 target_pending_wakeups=1(diag) switch_prev_pid=5 switch_prev_state=1 switch_prev_state_label=S) 1236(game:AudioThread cpu=0 wakeup_target_cpu=0 latency=1.800ms switch_ns=1002800000 process_pid=1234 wakeup_ns=1001000000 observed_runnable_depth=0 target_pending_wakeups=0(diag) switch_prev_pid=3 switch_prev_state=1 switch_prev_state_label=S)
+  diagnosis: cpu contention likely during frame render
+  why this diagnosis was chosen:
+    - primary=cpu_contention confidence=medium score=0.65
+    - evidence kind=runnable_wait strength=0.70 msg=render thread waited 3.5ms while runnable
+  evidence missing / not strong enough:
+    - none recorded
+  diagnosis candidates:
+    - none recorded
+  wake relationships:
+    Main [1235] woke RenderThread [1234] (count=3, max_lat=3.500ms)
