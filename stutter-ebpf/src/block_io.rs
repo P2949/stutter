@@ -63,7 +63,7 @@ fn block_rq_fallback_key(
 }
 
 #[inline(always)]
-fn read_optional_u32(ctx: &TracePointContext, offset: u32) -> u32 {
+fn read_u32_or_zero(ctx: &TracePointContext, offset: u32) -> u32 {
     if offset == 0 {
         return 0;
     }
@@ -134,7 +134,7 @@ pub(crate) fn try_block_rq_complete(ctx: TracePointContext) -> u32 {
 
     let nr_sector_offset =
         unsafe { core::ptr::read_volatile(&raw const BLOCK_RQ_COMPLETE_NR_SECTOR_OFFSET) };
-    let nr_sector = read_optional_u32(&ctx, nr_sector_offset);
+    let nr_sector = read_u32_or_zero(&ctx, nr_sector_offset);
 
     let request_key_offset = unsafe { core::ptr::read_volatile(&raw const BLOCK_RQ_KEY_OFFSET) };
 

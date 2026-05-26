@@ -51,14 +51,18 @@ static WAKEUP_SEQ: HashMap<u32, u32> =
     HashMap::<u32, u32>::with_max_entries(WAKEUP_DATA_MAP_MAX_ENTRIES, 0);
 
 #[inline(always)]
-pub(crate) fn next_wakeup_seq(pid: u32) -> u32 {
+pub(crate) fn next_wakeup_seq(pid: u32, out: &mut u32) -> bool {
     let next = match unsafe { WAKEUP_SEQ.get(pid) } {
         Some(seq) => seq.wrapping_add(1),
         None => 1,
     };
 
-    let _ = WAKEUP_SEQ.insert(pid, next, 0);
-    next
+    if WAKEUP_SEQ.insert(pid, next, 0).is_err() {
+        return false;
+    }
+
+    *out = next;
+    true
 }
 
 pub(crate) const WAKEUP_RECORD_INSERT_FAILED: u32 = 0;
@@ -121,6 +125,29 @@ pub(crate) fn consume_pending_wakeup(pid: u32, out: &mut WakeupData) -> u32 {
 }
 
 #[inline(always)]
+pub(crate) fn drop_pending_wakeup_after_cursor_failure(pid: u32, expected: &WakeupData) -> bool {
+    let Some(current) = (unsafe { WAKEUP_DATA.get(pid) }) else {
+        return false;
+    };
+
+    if !same_wakeup_value(current, expected) || same_wakeup_consumed(pid, expected) {
+        return false;
+    }
+
+    // This path runs only after WAKEUP_CONSUMED insertion failed, so the normal
+    // cursor-not-delete protocol cannot safely mark the wakeup as consumed. The
+    // value check avoids cleanup after another consumer already marked this
+    // wakeup; the final remove is still a rare best-effort fallback because BPF
+    // maps do not provide compare-and-remove by value.
+    if WAKEUP_DATA.remove(pid).is_err() {
+        return false;
+    }
+
+    let _ = WAKEUP_CONSUMED.remove(pid);
+    true
+}
+
+#[inline(always)]
 pub(crate) fn remove_for_exit(pid: u32, out: &mut WakeupData) -> bool {
     let mut was_pending = false;
 
@@ -152,14 +179,17 @@ pub(crate) fn move_pending_cpu(pid: u32, new_cpu: u32, old_cpu: &mut u32) -> boo
 }
 
 #[inline(always)]
+fn same_wakeup_value(consumed: &WakeupData, data: &WakeupData) -> bool {
+    consumed.ts == data.ts
+        && consumed.target_cpu == data.target_cpu
+        && consumed.waker_tid == data.waker_tid
+        && consumed.seq == data.seq
+}
+
+#[inline(always)]
 fn same_wakeup_consumed(pid: u32, data: &WakeupData) -> bool {
     match unsafe { WAKEUP_CONSUMED.get(pid) } {
-        Some(consumed) => {
-            consumed.ts == data.ts
-                && consumed.target_cpu == data.target_cpu
-                && consumed.waker_tid == data.waker_tid
-                && consumed.seq == data.seq
-        }
+        Some(consumed) => same_wakeup_value(consumed, data),
         None => false,
     }
 }
