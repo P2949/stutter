@@ -13,7 +13,10 @@ use super::{
 enum RustFileKind {
     Production,
     Test,
+    Ebpf,
 }
+
+const EBPF_RUST_FILE_SIZE_LIMIT_LINES: usize = 500;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct RustFileLineCount {
@@ -27,11 +30,13 @@ impl RustFileLineCount {
         match self.kind {
             RustFileKind::Production => PRODUCTION_RUST_FILE_SIZE_LIMIT_LINES,
             RustFileKind::Test => TEST_RUST_FILE_SIZE_LIMIT_LINES,
+            RustFileKind::Ebpf => EBPF_RUST_FILE_SIZE_LIMIT_LINES,
         }
     }
 }
 
 fn rust_file_kind(path: &str) -> RustFileKind {
+    let is_ebpf = path.contains("stutter-ebpf/src/");
     let is_test_only = path == "src/architecture_tests.rs"
         || path == "src/artifact_contract_tests.rs"
         || path == "src/recording_fixture_tests.rs"
@@ -44,7 +49,9 @@ fn rust_file_kind(path: &str) -> RustFileKind {
         || path.ends_with("/tests.rs")
         || path.ends_with("_tests.rs");
 
-    if is_test_only {
+    if is_ebpf {
+        RustFileKind::Ebpf
+    } else if is_test_only {
         RustFileKind::Test
     } else {
         RustFileKind::Production
@@ -94,7 +101,14 @@ fn rust_source_file_sizes_do_not_grow_without_architecture_allowlist() {
         );
     }
 
-    let counts = rust_file_line_counts_under(&crate_src_root());
+    let mut counts = rust_file_line_counts_under(&crate_src_root());
+    let ebpf_src = crate_src_root()
+        .parent()
+        .unwrap()
+        .join("stutter-ebpf")
+        .join("src");
+    counts.extend(rust_file_line_counts_under(&ebpf_src));
+
     let largest_files = largest_rust_files(&counts, 20).join("\n");
     let mut violations = Vec::new();
 

@@ -2896,7 +2896,7 @@ cargo xtask workflow
 For eBPF-affecting phases also run:
 
 ```bash
-RUSTUP_TOOLCHAIN=nightly cargo build -p stutter-ebpf --release
+cargo run -p xtask -- ebpf-smoke
 cargo xtask preflight
 ```
 

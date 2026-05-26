@@ -22,6 +22,20 @@ pub const PRIVILEGED_EBPF_SMOKE_TEST_COMMAND: CommandSpec = CommandSpec {
 pub const PRIVILEGED_EBPF_SMOKE_COMMANDS: &[CommandSpec] =
     &[EBPF_BUILD_COMMAND, PRIVILEGED_EBPF_SMOKE_TEST_COMMAND];
 
+#[cfg(test)]
+pub const UNPRIVILEGED_EBPF_SMOKE_COMMANDS: &[CommandSpec] = &[EBPF_BUILD_COMMAND];
+
+pub fn run_unprivileged_ebpf_smoke(root: &Path) -> anyhow::Result<()> {
+    run_preflight()?;
+    run_process(root, EBPF_BUILD_COMMAND.program, EBPF_BUILD_COMMAND.args)?;
+    println!("non-privileged eBPF build smoke passed");
+    println!("to run loader tests, use:");
+    println!(
+        "doas env HOME=\"$HOME\" CARGO_HOME=\"$HOME/.cargo\" RUSTUP_HOME=\"$HOME/.rustup\" PATH=\"$PATH\" RUSTUP_TOOLCHAIN=nightly cargo run -p xtask -- privileged-ebpf-smoke"
+    );
+    Ok(())
+}
+
 pub fn run_privileged_ebpf_smoke(root: &Path) -> anyhow::Result<()> {
     if !cfg!(target_os = "linux") {
         bail!("privileged eBPF smoke tests require Linux");

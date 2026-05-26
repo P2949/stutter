@@ -57,9 +57,23 @@ fn hwmon_malformed_numbers_fixture_ignores_bad_data() {
 
 #[test]
 fn hwmon_permission_denied_fixture_ignores_unreadable_files() {
-    let root = hwmon_fixture_path("permission_denied");
-    let mut reader =
-        HwmonReader::from_hwmon_root_with_identity(root.join("device/hwmon/hwmon4"), None, None);
+    let tempdir = tempfile::tempdir().unwrap();
+    let root = tempdir.path().join("device/hwmon/hwmon4");
+    std::fs::create_dir_all(&root).unwrap();
+    let file_path = root.join("gpu_busy_percent");
+    std::fs::write(&file_path, "99\n").unwrap();
+
+    let mut perms = std::fs::metadata(&file_path).unwrap().permissions();
+    use std::os::unix::fs::PermissionsExt;
+    perms.set_mode(0o000);
+    std::fs::set_permissions(&file_path, perms).unwrap();
+
+    if std::fs::read_to_string(&file_path).is_ok() {
+        // running as root, bypasses permissions
+        return;
+    }
+
+    let mut reader = HwmonReader::from_hwmon_root_with_identity(root, None, None);
     let sample = reader.sample(10);
     assert_eq!(sample.gpu_busy_percent, None);
 }

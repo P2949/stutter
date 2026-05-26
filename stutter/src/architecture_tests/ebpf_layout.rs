@@ -51,9 +51,11 @@ fn ebpf_main_keeps_extracted_layout_helpers_out_of_entrypoint_file() {
             && main.contains("mod irq;")
             && main.contains("mod cpu_frequency;")
             && main.contains("mod kms_emit;")
+            && main.contains("mod kms;")
+            && main.contains("mod drm_fence;")
             && main.contains("mod trace_offsets;")
             && main.contains("mod trace_read;"),
-        "stutter-ebpf/src/main.rs must keep maps, target filters, drop counters, runnable-depth accounting, scheduler/process/IRQ/CPU tracepoint logic, block I/O, KMS event emission, tracepoint offset globals, and field readers in helper modules",
+        "stutter-ebpf/src/main.rs must keep maps, target filters, drop counters, runnable-depth accounting, scheduler/process/IRQ/CPU tracepoint logic, block I/O, KMS event emission, KMS/DRM fence tracepoint logic, tracepoint offset globals, and field readers in helper modules",
     );
     assert!(
         !main.contains("static mut BLOCK_RQ_KEY_OFFSET"),
@@ -76,8 +78,8 @@ fn ebpf_main_keeps_extracted_layout_helpers_out_of_entrypoint_file() {
             let filename = path.file_name().unwrap().to_str().unwrap();
             let count = line_count(filename);
             assert!(
-                count <= 800,
-                "stutter-ebpf/src/{} has {} lines, exceeding the 800 line limit; please split it further",
+                count <= 500,
+                "stutter-ebpf/src/{} has {} lines, exceeding the 500 line limit; please split it further",
                 filename,
                 count
             );
@@ -103,15 +105,15 @@ fn ebpf_main_keeps_extracted_layout_helpers_out_of_entrypoint_file() {
 
 #[test]
 fn kms_sequence_offsets_uses_exhaustive_typed_provider_and_event_dispatch() {
-    let main = ebpf_source("main.rs");
+    let kms = ebpf_source("kms.rs");
     let offsets = source_between(
-        &main,
+        &kms,
         "fn kms_sequence_offsets(",
         "\n#[inline(always)]\nfn fill_kms_flip_key",
     );
 
     assert!(
-        main.contains("enum KmsProvider") && main.contains("enum KmsCompletionEvent"),
+        kms.contains("enum KmsProvider") && kms.contains("enum KmsCompletionEvent"),
         "KMS sequence dispatch must classify raw provider and event constants before matching",
     );
     assert!(
@@ -132,7 +134,14 @@ fn kms_sequence_offsets_uses_exhaustive_typed_provider_and_event_dispatch() {
 
 #[test]
 fn ebpf_helpers_do_not_return_aggregate_shapes() {
-    for relative_path in ["main.rs", "block_io.rs", "kms_emit.rs", "trace_read.rs"] {
+    for relative_path in [
+        "main.rs",
+        "block_io.rs",
+        "kms_emit.rs",
+        "trace_read.rs",
+        "kms.rs",
+        "drm_fence.rs",
+    ] {
         let source = ebpf_source(relative_path);
 
         assert!(
@@ -148,7 +157,7 @@ fn ebpf_helpers_do_not_return_aggregate_shapes() {
 
 #[test]
 fn ebpf_ringbuf_events_are_emitted_from_struct_literals() {
-    for relative_path in ["main.rs", "block_io.rs", "kms_emit.rs"] {
+    for relative_path in ["main.rs", "block_io.rs", "kms_emit.rs", "drm_fence.rs"] {
         let source = ebpf_source(relative_path);
 
         assert!(
