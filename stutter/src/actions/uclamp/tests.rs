@@ -352,7 +352,9 @@ fn rollback_rejects_wrong_token_kind() {
 
     let err = action.rollback(&token).unwrap_err().to_string();
 
-    assert!(err.contains("rollback token is not a uclamp restore token"));
+    assert!(err.contains("invalid rollback token"));
+    assert!(err.contains("expected uclamp-restore"));
+    assert!(err.contains("actual ioprio-restore"));
 }
 
 #[test]

@@ -3,34 +3,18 @@ use std::collections::BTreeMap;
 use serde::Serialize;
 
 use crate::{
-    diagnosis::{DiagnosisThresholdDoc, FrameDiagnosis},
+    diagnosis::DiagnosisThresholdDoc,
     process_tree::TaskClass,
     recorder::{FrameEvent, GpuSample, SessionFile, SpikeEvent},
     session_io::{self},
-    spike::SpikeCluster,
 };
-
-
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SpikeClusterAnalysis {
     pub(crate) source: SpikeClusterSource,
     pub(crate) source_count: usize,
-    pub(crate) clusters: Vec<SpikeCluster>,
+    pub(crate) clusters: Vec<crate::spike::SpikeCluster>,
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 #[derive(Debug, Clone, Serialize, Default)]
 pub struct RuntimeSliceAnalysisSummary {
@@ -58,17 +42,11 @@ pub struct RuntimeThreadSummary {
     pub elapsed_ms: u64,
 }
 
-
-
-
-
-
-
 #[derive(Debug, Clone, Serialize)]
 pub struct ReportAnalysisJson {
     pub session: SessionFile,
     pub cluster_analysis: SpikeClusterAnalysis,
-    pub frame_diagnoses: Vec<FrameDiagnosis>,
+    pub frame_diagnoses: Vec<crate::diagnosis::FrameDiagnosis>,
     pub frame_pacing: FramePacingSummary,
     pub pressure_timeline: PressureTimelineSummary,
     pub runtime_slices: RuntimeSliceAnalysisSummary,
@@ -86,11 +64,6 @@ pub struct ReportAnalysisJson {
     pub gpu_engine_activity: GpuEngineActivitySummary,
     pub display_path_diagnosis: DisplayPathDiagnosisSummary,
 }
-
-
-
-
-
 
 #[derive(Debug, Clone, Serialize, Default)]
 pub struct FramePacingSummary {
@@ -149,7 +122,7 @@ pub struct HtmlReportModel {
     pub session: SessionFile,
     pub data_quality: DataQualitySummary,
     pub cluster_analysis: SpikeClusterAnalysis,
-    pub frame_diagnoses: Vec<FrameDiagnosis>,
+    pub frame_diagnoses: Vec<crate::diagnosis::FrameDiagnosis>,
     pub frame_pacing: FramePacingSummary,
     pub pressure_timeline: PressureTimelineSummary,
     pub runtime_slices: RuntimeSliceAnalysisSummary,
@@ -170,10 +143,6 @@ pub struct HtmlReportModel {
 }
 
 // Old RunArtifacts removed in favor of session_io::RunArtifacts
-
-
-
-
 
 pub(crate) struct ReportInputModel {
     artifacts: session_io::RunArtifacts,

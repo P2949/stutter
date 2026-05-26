@@ -1,13 +1,15 @@
 mod appliers;
 mod provenance;
 
+use std::collections::BTreeMap;
+
 use crate::config::{
     ConfigError,
     layer::MonitorConfigLayer,
     merge::{self, ConfigSources},
     model::MonitorConfig,
     schema::ConfigDiagnostic,
-    source::{ConfigSource, FieldProvenance},
+    source::{ConfigMergeTrace, ConfigSource, FieldProvenance, MergeReason},
     validation::validate_monitor_config,
 };
 
@@ -15,6 +17,7 @@ use crate::config::{
 pub struct EffectiveMonitorConfig {
     pub config: MonitorConfig,
     pub provenance: Vec<FieldProvenance>,
+    pub merge_trace: Vec<ConfigMergeTrace>,
     pub diagnostics: Vec<ConfigDiagnostic>,
 }
 
@@ -22,6 +25,7 @@ pub struct EffectiveMonitorConfig {
 pub struct ResolvedMonitorConfig {
     pub config: MonitorConfig,
     pub provenance: Vec<FieldProvenance>,
+    pub merge_trace: Vec<ConfigMergeTrace>,
     pub diagnostics: Vec<ConfigDiagnostic>,
 }
 
@@ -74,9 +78,11 @@ impl EffectiveMonitorConfig {
 
         apply_layer_with_provenance(&mut config, overrides, overrides_source, &mut provenance);
 
+        let merge_trace = merge_trace_from_provenance(&provenance);
         let resolved = Self {
             config,
             provenance,
+            merge_trace,
             diagnostics,
         };
 
@@ -98,6 +104,7 @@ pub fn resolve_monitor_config_sources(
     Ok(ResolvedMonitorConfig {
         config: effective.config,
         provenance: effective.provenance,
+        merge_trace: effective.merge_trace,
         diagnostics: effective.diagnostics,
     })
 }
@@ -115,6 +122,29 @@ fn apply_layer_with_provenance(
 ) {
     provenance::record_layer_provenance(&layer, source, provenance);
     appliers::apply_config_layer(config, &layer);
+}
+
+fn merge_trace_from_provenance(provenance: &[FieldProvenance]) -> Vec<ConfigMergeTrace> {
+    let mut selected = BTreeMap::<&'static str, (ConfigSource, usize)>::new();
+    for entry in provenance {
+        let selected_entry = selected.entry(entry.field).or_insert((entry.source, 0));
+        selected_entry.0 = entry.source;
+        selected_entry.1 += 1;
+    }
+
+    selected
+        .into_iter()
+        .map(|(field, (source, count))| {
+            let reason = if source == ConfigSource::Default {
+                MergeReason::DefaultValue
+            } else if count > 1 {
+                MergeReason::LaterLayerOverride
+            } else {
+                MergeReason::LayerValue
+            };
+            ConfigMergeTrace::new(field, source, reason)
+        })
+        .collect()
 }
 
 #[cfg(test)]

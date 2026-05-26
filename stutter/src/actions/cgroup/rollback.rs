@@ -32,7 +32,7 @@ impl RollbackHandler for CgroupRollbackHandler {
     }
 
     fn supports_token(&self, token: &RollbackToken) -> bool {
-        matches!(token, RollbackToken::CgroupRestore { .. })
+        token.as_cgroup_restore().is_some()
     }
 
     fn dry_run_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackPreview> {
@@ -54,7 +54,7 @@ impl CgroupRollbackHandler {
         cgroup_root: &Path,
         token: &RollbackToken,
     ) -> anyhow::Result<RollbackResult> {
-        let RollbackToken::CgroupRestore { records, cpuset } = token else {
+        let Some((records, cpuset)) = token.as_cgroup_restore() else {
             anyhow::bail!("cgroup rollback handler does not support {token:?}");
         };
 

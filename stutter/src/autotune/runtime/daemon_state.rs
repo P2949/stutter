@@ -82,7 +82,7 @@ impl AutotuneRuntime {
             .candidate_memory
             .records
             .iter()
-            .filter(|record| record.result == CandidateMemoryResult::Kept)
+            .filter(|record| record.result == CandidateMemoryResult::Kept && !record.is_degraded())
             .map(|record| {
                 let (action_kind, safety_class) =
                     daemon_profile_action_kind_and_safety_class(record.action_id.as_str());
@@ -198,6 +198,18 @@ impl AutotuneRuntime {
                     "{:?} {:?} anchored on {}",
                     diagnosis.confidence, diagnosis.cause, diagnosis.anchor_comm
                 ),
+            });
+        }
+
+        for diagnostic in self
+            .controller
+            .state
+            .candidate_memory
+            .degraded_diagnostics()
+        {
+            degraded.push(DaemonDegradedStatus {
+                category: "candidate_memory".to_owned(),
+                message: diagnostic,
             });
         }
 

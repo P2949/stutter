@@ -2672,6 +2672,7 @@ dependencies = [
  "serde",
  "serde_json",
  "stutter-common",
+ "stutter-config",
  "stutter-core",
  "stutter-ebpf",
  "stutter-report",
@@ -2697,6 +2698,8 @@ dependencies = [
 name = "stutter-config"
 version = "0.1.0"
 dependencies = [
+ "clap",
+ "serde",
  "stutter-core",
  "thiserror 2.0.18",
 ]
@@ -3820,6 +3823,7 @@ name = "xtask"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "cargo_metadata",
  "clap",
 ]
 

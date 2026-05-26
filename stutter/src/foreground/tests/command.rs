@@ -27,6 +27,7 @@ mod tests {
         let malicious_swaymsg = root.join("swaymsg");
         write_executable(&malicious_swaymsg, "#!/bin/sh\nexit 99\n");
 
+        // SAFETY: TEST_MUTEX serializes process environment mutation in this test.
         unsafe {
             std::env::set_var("PATH", root.path().as_os_str());
         }
@@ -34,6 +35,7 @@ mod tests {
         let resolved = resolve_trusted_foreground_helper("swaymsg");
 
         assert_ne!(resolved.as_deref(), Some(malicious_swaymsg.as_path()));
+        // SAFETY: TEST_MUTEX is still held and previous_path was captured before mutation.
         unsafe {
             restore_env_var("PATH", previous_path);
         }
@@ -65,9 +67,10 @@ mod tests {
 printf 'PATH=%s\n' "$PATH"
 printf 'SWAYSOCK=%s\n' "$SWAYSOCK"
 printf 'LD_PRELOAD=%s\n' "$LD_PRELOAD"
-"#,
+            "#,
         );
 
+        // SAFETY: TEST_MUTEX serializes process environment mutation in this test.
         unsafe {
             std::env::set_var("PATH", root.path().as_os_str());
             std::env::set_var("LD_PRELOAD", "/tmp/stutter-unsafe-preload.so");
@@ -83,6 +86,7 @@ printf 'LD_PRELOAD=%s\n' "$LD_PRELOAD"
         assert!(stdout.contains("LD_PRELOAD="));
         assert!(!stdout.contains("/tmp/stutter-unsafe-preload.so"));
 
+        // SAFETY: TEST_MUTEX is still held and previous values were captured before mutation.
         unsafe {
             restore_env_var("PATH", previous_path);
             restore_env_var("LD_PRELOAD", previous_ld_preload);

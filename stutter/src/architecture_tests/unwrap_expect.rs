@@ -4,8 +4,9 @@ use std::{fs, path::Path};
 
 use super::{
     allowlists::{
-        EXISTING_PRODUCTION_UNWRAP_EXPECT_FILE_ALLOWLIST,
-        allowlisted_existing_production_unwrap_expect_file,
+        CFG_TEST_OR_FIXTURE_UNWRAP_EXPECT_FILE_ALLOWLIST,
+        EXISTING_RUNTIME_UNWRAP_EXPECT_FILE_ALLOWLIST, UnwrapExpectAllowanceCategory,
+        allowlisted_existing_unwrap_expect_file,
     },
     crate_src_root, relative_to_crate_root,
     scanners::{production_code_lines_outside_cfg_test_modules, rust_files_under},
@@ -129,10 +130,31 @@ mod tests {
 
 #[test]
 fn new_production_unwrap_expect_calls_require_invariant_or_allowlist() {
-    for allowance in EXISTING_PRODUCTION_UNWRAP_EXPECT_FILE_ALLOWLIST {
+    for (category, allowances) in [
+        (
+            UnwrapExpectAllowanceCategory::Runtime,
+            EXISTING_RUNTIME_UNWRAP_EXPECT_FILE_ALLOWLIST,
+        ),
+        (
+            UnwrapExpectAllowanceCategory::CfgTestOrFixture,
+            CFG_TEST_OR_FIXTURE_UNWRAP_EXPECT_FILE_ALLOWLIST,
+        ),
+    ] {
+        for allowance in allowances {
+            assert!(
+                !allowance.reason.trim().is_empty(),
+                "{} unwrap/expect allowlist entry '{}' must have a reason",
+                category.label(),
+                allowance.path
+            );
+        }
+    }
+
+    for allowance in EXISTING_RUNTIME_UNWRAP_EXPECT_FILE_ALLOWLIST {
         assert!(
-            !allowance.reason.trim().is_empty(),
-            "existing production unwrap/expect allowlist entry '{}' must have a reason",
+            allowance.reason.contains("migration target:")
+                || allowance.reason.contains("why impossible:"),
+            "runtime unwrap/expect allowlist entry '{}' must explain a 'migration target:' or 'why impossible:'",
             allowance.path
         );
     }
@@ -141,13 +163,13 @@ fn new_production_unwrap_expect_calls_require_invariant_or_allowlist() {
 
     for file in rust_files_under(&crate_src_root()) {
         let relative_path = relative_to_crate_root(&file);
-        if allowlisted_existing_production_unwrap_expect_file(&relative_path).is_some() {
+        if allowlisted_existing_unwrap_expect_file(&relative_path).is_some() {
             continue;
         }
 
         for call in production_unwrap_expect_calls_in_file(&file) {
             violations.push(format!(
-                "{}:{} uses {} without preceding '// invariant:' comment: {}",
+                "{}:{} category=unallowlisted-production uses {} without preceding '// invariant:' comment: {}",
                 call.path, call.line_number, call.call, call.line
             ));
         }

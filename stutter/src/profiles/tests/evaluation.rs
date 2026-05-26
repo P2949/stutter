@@ -102,7 +102,11 @@ fn profile_apply_summary_counts_matching_tasks_and_pending_changes() {
         sched_policy: None,
         from_cgroup: false,
     };
-    let tasks = BTreeMap::from([(7, task_correct), (8, task_pending), (9, task_unmatched)]);
+    let tasks = BTreeMap::from([
+        (7.into(), task_correct),
+        (8.into(), task_pending),
+        (9.into(), task_unmatched),
+    ]);
     let profile = Profile {
         name: "test".to_owned(),
         rules: vec![ProfileRule {
@@ -142,11 +146,11 @@ fn profile_evaluation_matches_apply_plan_rule_order_and_masks() {
     let compositor = test_task(14, TaskClass::Compositor, "kwin_wayland");
     let service = test_task(15, TaskClass::Service, "dbus-daemon");
     let tasks = BTreeMap::from([
-        (main.task_id().as_u32(), main.clone()),
-        (render.task_id().as_u32(), render.clone()),
-        (worker.task_id().as_u32(), worker.clone()),
-        (compositor.task_id().as_u32(), compositor.clone()),
-        (service.task_id().as_u32(), service.clone()),
+        (main.task_id(), main.clone()),
+        (render.task_id(), render.clone()),
+        (worker.task_id(), worker.clone()),
+        (compositor.task_id(), compositor.clone()),
+        (service.task_id(), service.clone()),
     ]);
     let profile = Profile {
         name: "rule-order".to_owned(),
@@ -230,7 +234,7 @@ fn profile_evaluation_matches_apply_plan_rule_order_and_masks() {
 #[test]
 fn profile_plan_constructs_task_identity_for_priority_targets() {
     let task = test_task(42, TaskClass::Indexer, "indexer");
-    let tasks = BTreeMap::from([(42, task)]);
+    let tasks = BTreeMap::from([(42.into(), task)]);
     let profile = Profile {
         name: "priority".to_owned(),
         rules: vec![ProfileRule {
@@ -262,7 +266,7 @@ fn profile_plan_constructs_task_identity_for_priority_targets() {
 #[test]
 fn profile_apply_summary_counts_priority_actions_without_double_counting_tasks() {
     let task = test_task(42, TaskClass::PackageManager, "pacman");
-    let tasks = BTreeMap::from([(42, task)]);
+    let tasks = BTreeMap::from([(42.into(), task)]);
     let profile = Profile {
         name: "priority".to_owned(),
         rules: vec![ProfileRule {
@@ -325,7 +329,7 @@ fn profile_matched_task_count_counts_only_matching_rules() {
         sched_policy: None,
         from_cgroup: false,
     };
-    let tasks = BTreeMap::from([(7, game_task), (8, compositor_task)]);
+    let tasks = BTreeMap::from([(7.into(), game_task), (8.into(), compositor_task)]);
     let profile = Profile {
         name: "game-render".to_owned(),
         rules: vec![ProfileRule {

@@ -64,7 +64,11 @@ pub(crate) fn data_quality_summary(
     }
 
     if session.core.schema_version != SESSION_SCHEMA_VERSION {
-        if session.core.schema_version > SESSION_SCHEMA_VERSION {
+        if session
+            .core
+            .schema_version
+            .is_newer_than(SESSION_SCHEMA_VERSION)
+        {
             level = DataQualityLevel::Low;
             reasons.push("session schema is newer than this stutter binary".to_owned());
         } else {
@@ -313,8 +317,8 @@ pub(crate) fn data_quality_summary(
             .iter()
             .map(|warning| warning.message.clone())
             .collect(),
-        schema_version: session.core.schema_version,
-        expected_schema_version: SESSION_SCHEMA_VERSION,
+        schema_version: session.core.schema_version.get(),
+        expected_schema_version: SESSION_SCHEMA_VERSION.get(),
         event_stream_write_errors: session.core.event_stream_write_errors,
         spike_events_truncated: session.core.spike_events_truncated,
         spike_events_retained_count: session.core.spike_events_retained_count,

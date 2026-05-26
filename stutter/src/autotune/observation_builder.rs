@@ -17,7 +17,7 @@ use crate::{
     diagnosis::LiveDiagnosisEntry,
     ebpf_loader::DropCountersSnapshot,
     focus::FocusGroupKind,
-    process_tree::TaskInfo,
+    process_tree::TaskMap,
     scorer::StutterScore,
 };
 
@@ -39,7 +39,7 @@ pub struct AutotuneObservationBuilderInput<'a> {
     pub focus: Option<&'a AutotuneObservationFocus>,
     pub root_pid: Option<u32>,
     pub active_target_count: usize,
-    pub active_tasks: &'a BTreeMap<u32, TaskInfo>,
+    pub active_tasks: &'a TaskMap,
     pub recent_diagnoses: Vec<LiveDiagnosisEntry>,
     pub drop_counters: DropCountersSnapshot,
     pub proc_root: &'a Path,
@@ -145,7 +145,7 @@ impl AutotuneObservationBuilder {
     }
 }
 
-fn protected_tasks_from_active_tasks(active_tasks: &BTreeMap<u32, TaskInfo>) -> Vec<ProtectedTask> {
+fn protected_tasks_from_active_tasks(active_tasks: &TaskMap) -> Vec<ProtectedTask> {
     active_tasks
         .values()
         .filter(|task| is_protected_task_class(task.class))
@@ -161,7 +161,7 @@ fn protected_tasks_from_active_tasks(active_tasks: &BTreeMap<u32, TaskInfo>) -> 
 
 fn active_task_snapshots_from_active_tasks(
     proc_root: &Path,
-    active_tasks: &BTreeMap<u32, TaskInfo>,
+    active_tasks: &TaskMap,
 ) -> Vec<ActiveTaskSnapshot> {
     active_tasks
         .values()
@@ -181,7 +181,7 @@ fn workload_identity_from_runtime_context(
     proc_root: &Path,
     root_pid: Option<u32>,
     focus_kind: Option<FocusGroupKind>,
-    active_tasks: &BTreeMap<u32, TaskInfo>,
+    active_tasks: &TaskMap,
 ) -> Option<WorkloadIdentity> {
     let root_pid = root_pid?;
     let root_task = active_tasks
@@ -241,9 +241,7 @@ fn read_proc_cgroup_path(proc_root: &Path, pid: u32) -> Option<String> {
         .map(str::to_owned)
 }
 
-fn class_distribution_from_tasks(
-    active_tasks: &BTreeMap<u32, TaskInfo>,
-) -> BTreeMap<String, usize> {
+fn class_distribution_from_tasks(active_tasks: &TaskMap) -> BTreeMap<String, usize> {
     let mut classes = BTreeMap::new();
     for task in active_tasks.values() {
         *classes.entry(task.class.as_str().to_owned()).or_insert(0) += 1;
@@ -322,7 +320,7 @@ mod tests {
     use crate::{
         diagnosis::{Confidence, StutterCause},
         ebpf_loader::DropCountersSnapshot,
-        process_tree::TaskClass,
+        process_tree::{TaskClass, TaskInfo},
         recorder::{IntervalRecord, IrqEventRecord},
         test_support::TestRoot,
     };
@@ -364,11 +362,11 @@ mod tests {
 
         let active_tasks = BTreeMap::from([
             (
-                1234,
+                1234.into(),
                 task_info(1234, 1234, "game-main", TaskClass::Game, Some(10)),
             ),
             (
-                1235,
+                1235.into(),
                 task_info(1235, 1235, "input", TaskClass::Input, Some(11)),
             ),
         ]);
@@ -491,7 +489,7 @@ mod tests {
             reasons: vec!["game runnable latency above 5ms".to_owned()],
         };
         let active_tasks = BTreeMap::from([(
-            4_242,
+            4_242.into(),
             task_info(4_242, 4_242, "game-main", TaskClass::Game, Some(42)),
         )]);
 
@@ -589,7 +587,7 @@ mod tests {
             ..IntervalRecord::default()
         });
         let active_tasks = BTreeMap::from([(
-            9_001,
+            9_001.into(),
             task_info(9_001, 9_001, "service", TaskClass::Service, Some(9)),
         )]);
 
@@ -623,7 +621,7 @@ mod tests {
             ..IntervalRecord::default()
         });
         let active_tasks = BTreeMap::from([(
-            77,
+            77.into(),
             task_info(77, 77, "kwin_wayland", TaskClass::Compositor, Some(77)),
         )]);
 
@@ -664,7 +662,7 @@ mod tests {
             ..IntervalRecord::default()
         });
         let active_tasks = BTreeMap::from([(
-            1234,
+            1234.into(),
             task_info(1234, 1234, "game", TaskClass::Game, Some(1234)),
         )]);
 

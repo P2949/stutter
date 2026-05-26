@@ -7,7 +7,11 @@ use serde::Deserialize;
 
 use crate::foreground::{
     command::{resolve_trusted_foreground_helper, trusted_foreground_command},
-    model::{ForegroundProviderStatus, ForegroundSource, ForegroundWindowSnapshot},
+    model::{
+        CONFIDENCE_HIGH, CONFIDENCE_LOW, CONFIDENCE_MEDIUM, CONFIDENCE_ZERO, ForegroundDecision,
+        ForegroundProviderStatus, ForegroundReason, ForegroundSource, ForegroundTarget,
+        ForegroundWindowSnapshot,
+    },
     provider::ForegroundProvider,
 };
 
@@ -38,37 +42,50 @@ pub(crate) fn hyprland_snapshot_from_activewindow_json(
                 elapsed_ms,
                 source: Some(ForegroundSource::Hyprland),
                 status: ForegroundProviderStatus::Error,
-                confidence: 0.0,
-                reason: format!("failed to parse hyprctl activewindow JSON: {err}"),
-                ..ForegroundWindowSnapshot::default()
+                decision: ForegroundDecision {
+                    target: None,
+                    confidence: CONFIDENCE_ZERO,
+                    reasons: vec![ForegroundReason {
+                        reason: format!("failed to parse hyprctl activewindow JSON: {err}"),
+                    }],
+                    rejected_candidates: Vec::new(),
+                },
+                stale_ms: None,
             };
         }
     };
 
     let class = active_window.class.or(active_window.initial_class);
     let confidence = if active_window.pid.is_some() {
-        0.95
+        CONFIDENCE_HIGH
     } else if class.is_some() {
-        0.65
+        CONFIDENCE_MEDIUM
     } else if active_window.title.is_some() || active_window.address.is_some() {
-        0.35
+        CONFIDENCE_LOW
     } else {
-        0.0
+        CONFIDENCE_ZERO
     };
 
     ForegroundWindowSnapshot {
         elapsed_ms,
         source: Some(ForegroundSource::Hyprland),
         status: ForegroundProviderStatus::Available,
-        pid: active_window.pid,
-        app_id: None,
-        class,
-        title: active_window.title,
-        window_id: active_window.address,
-        workspace: active_window.workspace.and_then(|workspace| workspace.name),
-        confidence,
+        decision: ForegroundDecision {
+            target: Some(ForegroundTarget {
+                pid: active_window.pid,
+                app_id: None,
+                class,
+                title: active_window.title,
+                window_id: active_window.address,
+                workspace: active_window.workspace.and_then(|workspace| workspace.name),
+            }),
+            confidence,
+            reasons: vec![ForegroundReason {
+                reason: "active Hyprland window from hyprctl activewindow".to_owned(),
+            }],
+            rejected_candidates: Vec::new(),
+        },
         stale_ms: None,
-        reason: "active Hyprland window from hyprctl activewindow".to_owned(),
     }
 }
 
@@ -112,9 +129,13 @@ impl ForegroundProvider for HyprlandForegroundProvider {
                 elapsed_ms,
                 source: Some(ForegroundSource::Hyprland),
                 status: ForegroundProviderStatus::Unavailable,
-                confidence: 0.0,
-                reason: "HYPRLAND_INSTANCE_SIGNATURE is not set; Hyprland foreground provider is unavailable".to_owned(),
-                ..ForegroundWindowSnapshot::default()
+                decision: ForegroundDecision {
+                    target: None,
+                    confidence: CONFIDENCE_ZERO,
+                    reasons: vec![ForegroundReason { reason: "HYPRLAND_INSTANCE_SIGNATURE is not set; Hyprland foreground provider is unavailable".to_owned() }],
+                    rejected_candidates: Vec::new(),
+                },
+                stale_ms: None,
             };
         }
 
@@ -123,12 +144,18 @@ impl ForegroundProvider for HyprlandForegroundProvider {
                 elapsed_ms,
                 source: Some(ForegroundSource::Hyprland),
                 status: ForegroundProviderStatus::Unavailable,
-                confidence: 0.0,
-                reason: format!(
-                    "{} was not found in trusted foreground helper paths; Hyprland foreground provider is unavailable",
-                    self.hyprctl
-                ),
-                ..ForegroundWindowSnapshot::default()
+                decision: ForegroundDecision {
+                    target: None,
+                    confidence: CONFIDENCE_ZERO,
+                    reasons: vec![ForegroundReason {
+                        reason: format!(
+                            "{} was not found in trusted foreground helper paths; Hyprland foreground provider is unavailable",
+                            self.hyprctl
+                        ),
+                    }],
+                    rejected_candidates: Vec::new(),
+                },
+                stale_ms: None,
             };
         };
 
@@ -142,9 +169,18 @@ impl ForegroundProvider for HyprlandForegroundProvider {
                     elapsed_ms,
                     source: Some(ForegroundSource::Hyprland),
                     status: ForegroundProviderStatus::Error,
-                    confidence: 0.0,
-                    reason: format!("failed to run {} activewindow -j: {err}", hyprctl.display()),
-                    ..ForegroundWindowSnapshot::default()
+                    decision: ForegroundDecision {
+                        target: None,
+                        confidence: CONFIDENCE_ZERO,
+                        reasons: vec![ForegroundReason {
+                            reason: format!(
+                                "failed to run {} activewindow -j: {err}",
+                                hyprctl.display()
+                            ),
+                        }],
+                        rejected_candidates: Vec::new(),
+                    },
+                    stale_ms: None,
                 };
             }
         };
@@ -155,14 +191,20 @@ impl ForegroundProvider for HyprlandForegroundProvider {
                 elapsed_ms,
                 source: Some(ForegroundSource::Hyprland),
                 status: ForegroundProviderStatus::Error,
-                confidence: 0.0,
-                reason: format!(
-                    "{} activewindow -j exited with status {}; stderr={}",
-                    hyprctl.display(),
-                    output.status,
-                    stderr.trim()
-                ),
-                ..ForegroundWindowSnapshot::default()
+                decision: ForegroundDecision {
+                    target: None,
+                    confidence: CONFIDENCE_ZERO,
+                    reasons: vec![ForegroundReason {
+                        reason: format!(
+                            "{} activewindow -j exited with status {}; stderr={}",
+                            hyprctl.display(),
+                            output.status,
+                            stderr.trim()
+                        ),
+                    }],
+                    rejected_candidates: Vec::new(),
+                },
+                stale_ms: None,
             };
         }
 
@@ -172,9 +214,17 @@ impl ForegroundProvider for HyprlandForegroundProvider {
                 elapsed_ms,
                 source: Some(ForegroundSource::Hyprland),
                 status: ForegroundProviderStatus::Error,
-                confidence: 0.0,
-                reason: format!("hyprctl activewindow JSON output was not valid UTF-8: {err}"),
-                ..ForegroundWindowSnapshot::default()
+                decision: ForegroundDecision {
+                    target: None,
+                    confidence: CONFIDENCE_ZERO,
+                    reasons: vec![ForegroundReason {
+                        reason: format!(
+                            "hyprctl activewindow JSON output was not valid UTF-8: {err}"
+                        ),
+                    }],
+                    rejected_candidates: Vec::new(),
+                },
+                stale_ms: None,
             },
         }
     }

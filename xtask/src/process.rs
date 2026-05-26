@@ -3,6 +3,7 @@ use std::{
     path::{Path, PathBuf},
     process::Command as ProcessCommand,
 };
+
 use anyhow::{Context, bail};
 
 pub const DEFAULT_TOOLCHAIN: &str = "nightly";
@@ -44,7 +45,11 @@ pub fn run_process_with_env(
     Ok(())
 }
 
-pub fn run_process_capture_stdout(root: &Path, program: &str, args: &[&str]) -> anyhow::Result<String> {
+pub fn run_process_capture_stdout(
+    root: &Path,
+    program: &str,
+    args: &[&str],
+) -> anyhow::Result<String> {
     let command_text = format_command(program, args);
     println!("--- STAGE: {command_text} ---");
 

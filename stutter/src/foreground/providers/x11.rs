@@ -5,7 +5,10 @@
 
 use crate::foreground::{
     command::{resolve_trusted_foreground_helper, trusted_foreground_command},
-    model::{ForegroundProviderStatus, ForegroundSource, ForegroundWindowSnapshot},
+    model::{
+        CONFIDENCE_ZERO, ForegroundDecision, ForegroundProviderStatus, ForegroundReason,
+        ForegroundSource, ForegroundTarget, ForegroundWindowSnapshot,
+    },
     parse::x11::{parse_x11_active_window_id, parse_x11_window_properties, x11_confidence},
     provider::ForegroundProvider,
 };
@@ -49,9 +52,15 @@ impl X11ForegroundProvider {
                 elapsed_ms,
                 source: Some(ForegroundSource::X11),
                 status: ForegroundProviderStatus::Unavailable,
-                confidence: 0.0,
-                reason: "xprop root output did not contain an active X11 window".to_owned(),
-                ..ForegroundWindowSnapshot::default()
+                decision: ForegroundDecision {
+                    target: None,
+                    confidence: CONFIDENCE_ZERO,
+                    reasons: vec![ForegroundReason {
+                        reason: "xprop root output did not contain an active X11 window".to_owned(),
+                    }],
+                    rejected_candidates: Vec::new(),
+                },
+                stale_ms: None,
             };
         };
 
@@ -62,15 +71,22 @@ impl X11ForegroundProvider {
             elapsed_ms,
             source: Some(ForegroundSource::X11),
             status: ForegroundProviderStatus::Available,
-            pid: properties.pid,
-            app_id: properties.instance,
-            class: properties.class,
-            title: properties.net_wm_name.or(properties.wm_name),
-            window_id: Some(window_id),
-            workspace: None,
-            confidence,
+            decision: ForegroundDecision {
+                target: Some(ForegroundTarget {
+                    pid: properties.pid,
+                    app_id: properties.instance,
+                    class: properties.class,
+                    title: properties.net_wm_name.or(properties.wm_name),
+                    window_id: Some(window_id),
+                    workspace: None,
+                }),
+                confidence,
+                reasons: vec![ForegroundReason {
+                    reason: "active X11 window from xprop".to_owned(),
+                }],
+                rejected_candidates: Vec::new(),
+            },
             stale_ms: None,
-            reason: "active X11 window from xprop".to_owned(),
         }
     }
 }
@@ -86,9 +102,16 @@ impl ForegroundProvider for X11ForegroundProvider {
                 elapsed_ms,
                 source: Some(ForegroundSource::X11),
                 status: ForegroundProviderStatus::Unavailable,
-                confidence: 0.0,
-                reason: "DISPLAY is not set; X11 foreground provider is unavailable".to_owned(),
-                ..ForegroundWindowSnapshot::default()
+                decision: ForegroundDecision {
+                    target: None,
+                    confidence: CONFIDENCE_ZERO,
+                    reasons: vec![ForegroundReason {
+                        reason: "DISPLAY is not set; X11 foreground provider is unavailable"
+                            .to_owned(),
+                    }],
+                    rejected_candidates: Vec::new(),
+                },
+                stale_ms: None,
             };
         }
 
@@ -97,12 +120,18 @@ impl ForegroundProvider for X11ForegroundProvider {
                 elapsed_ms,
                 source: Some(ForegroundSource::X11),
                 status: ForegroundProviderStatus::Unavailable,
-                confidence: 0.0,
-                reason: format!(
-                    "{} was not found in trusted foreground helper paths; X11 foreground provider is unavailable",
-                    self.xprop
-                ),
-                ..ForegroundWindowSnapshot::default()
+                decision: ForegroundDecision {
+                    target: None,
+                    confidence: CONFIDENCE_ZERO,
+                    reasons: vec![ForegroundReason {
+                        reason: format!(
+                            "{} was not found in trusted foreground helper paths; X11 foreground provider is unavailable",
+                            self.xprop
+                        ),
+                    }],
+                    rejected_candidates: Vec::new(),
+                },
+                stale_ms: None,
             };
         };
 
@@ -116,12 +145,18 @@ impl ForegroundProvider for X11ForegroundProvider {
                     elapsed_ms,
                     source: Some(ForegroundSource::X11),
                     status: ForegroundProviderStatus::Error,
-                    confidence: 0.0,
-                    reason: format!(
-                        "failed to run {} -root _NET_ACTIVE_WINDOW: {err}",
-                        xprop.display()
-                    ),
-                    ..ForegroundWindowSnapshot::default()
+                    decision: ForegroundDecision {
+                        target: None,
+                        confidence: CONFIDENCE_ZERO,
+                        reasons: vec![ForegroundReason {
+                            reason: format!(
+                                "failed to run {} -root _NET_ACTIVE_WINDOW: {err}",
+                                xprop.display()
+                            ),
+                        }],
+                        rejected_candidates: Vec::new(),
+                    },
+                    stale_ms: None,
                 };
             }
         };
@@ -132,14 +167,20 @@ impl ForegroundProvider for X11ForegroundProvider {
                 elapsed_ms,
                 source: Some(ForegroundSource::X11),
                 status: ForegroundProviderStatus::Error,
-                confidence: 0.0,
-                reason: format!(
-                    "{} -root _NET_ACTIVE_WINDOW exited with status {}; stderr={}",
-                    xprop.display(),
-                    active_output.status,
-                    stderr.trim()
-                ),
-                ..ForegroundWindowSnapshot::default()
+                decision: ForegroundDecision {
+                    target: None,
+                    confidence: CONFIDENCE_ZERO,
+                    reasons: vec![ForegroundReason {
+                        reason: format!(
+                            "{} -root _NET_ACTIVE_WINDOW exited with status {}; stderr={}",
+                            xprop.display(),
+                            active_output.status,
+                            stderr.trim()
+                        ),
+                    }],
+                    rejected_candidates: Vec::new(),
+                },
+                stale_ms: None,
             };
         }
 
@@ -150,9 +191,17 @@ impl ForegroundProvider for X11ForegroundProvider {
                     elapsed_ms,
                     source: Some(ForegroundSource::X11),
                     status: ForegroundProviderStatus::Error,
-                    confidence: 0.0,
-                    reason: format!("xprop _NET_ACTIVE_WINDOW output was not valid UTF-8: {err}"),
-                    ..ForegroundWindowSnapshot::default()
+                    decision: ForegroundDecision {
+                        target: None,
+                        confidence: CONFIDENCE_ZERO,
+                        reasons: vec![ForegroundReason {
+                            reason: format!(
+                                "xprop _NET_ACTIVE_WINDOW output was not valid UTF-8: {err}"
+                            ),
+                        }],
+                        rejected_candidates: Vec::new(),
+                    },
+                    stale_ms: None,
                 };
             }
         };
@@ -162,9 +211,15 @@ impl ForegroundProvider for X11ForegroundProvider {
                 elapsed_ms,
                 source: Some(ForegroundSource::X11),
                 status: ForegroundProviderStatus::Unavailable,
-                confidence: 0.0,
-                reason: "xprop root output did not contain an active X11 window".to_owned(),
-                ..ForegroundWindowSnapshot::default()
+                decision: ForegroundDecision {
+                    target: None,
+                    confidence: CONFIDENCE_ZERO,
+                    reasons: vec![ForegroundReason {
+                        reason: "xprop root output did not contain an active X11 window".to_owned(),
+                    }],
+                    rejected_candidates: Vec::new(),
+                },
+                stale_ms: None,
             };
         };
 
@@ -185,13 +240,19 @@ impl ForegroundProvider for X11ForegroundProvider {
                     elapsed_ms,
                     source: Some(ForegroundSource::X11),
                     status: ForegroundProviderStatus::Error,
-                    confidence: 0.0,
-                    reason: format!(
-                        "failed to run {} -id {} _NET_WM_PID WM_CLASS _NET_WM_NAME WM_NAME: {err}",
-                        xprop.display(),
-                        window_id
-                    ),
-                    ..ForegroundWindowSnapshot::default()
+                    decision: ForegroundDecision {
+                        target: None,
+                        confidence: CONFIDENCE_ZERO,
+                        reasons: vec![ForegroundReason {
+                            reason: format!(
+                                "failed to run {} -id {} _NET_WM_PID WM_CLASS _NET_WM_NAME WM_NAME: {err}",
+                                xprop.display(),
+                                window_id
+                            ),
+                        }],
+                        rejected_candidates: Vec::new(),
+                    },
+                    stale_ms: None,
                 };
             }
         };
@@ -202,15 +263,21 @@ impl ForegroundProvider for X11ForegroundProvider {
                 elapsed_ms,
                 source: Some(ForegroundSource::X11),
                 status: ForegroundProviderStatus::Error,
-                confidence: 0.0,
-                reason: format!(
-                    "{} -id {} _NET_WM_PID WM_CLASS _NET_WM_NAME WM_NAME exited with status {}; stderr={}",
-                    xprop.display(),
-                    window_id,
-                    properties_output.status,
-                    stderr.trim()
-                ),
-                ..ForegroundWindowSnapshot::default()
+                decision: ForegroundDecision {
+                    target: None,
+                    confidence: CONFIDENCE_ZERO,
+                    reasons: vec![ForegroundReason {
+                        reason: format!(
+                            "{} -id {} _NET_WM_PID WM_CLASS _NET_WM_NAME WM_NAME exited with status {}; stderr={}",
+                            xprop.display(),
+                            window_id,
+                            properties_output.status,
+                            stderr.trim()
+                        ),
+                    }],
+                    rejected_candidates: Vec::new(),
+                },
+                stale_ms: None,
             };
         }
 
@@ -220,9 +287,17 @@ impl ForegroundProvider for X11ForegroundProvider {
                 elapsed_ms,
                 source: Some(ForegroundSource::X11),
                 status: ForegroundProviderStatus::Error,
-                confidence: 0.0,
-                reason: format!("xprop active window properties output was not valid UTF-8: {err}"),
-                ..ForegroundWindowSnapshot::default()
+                decision: ForegroundDecision {
+                    target: None,
+                    confidence: CONFIDENCE_ZERO,
+                    reasons: vec![ForegroundReason {
+                        reason: format!(
+                            "xprop active window properties output was not valid UTF-8: {err}"
+                        ),
+                    }],
+                    rejected_candidates: Vec::new(),
+                },
+                stale_ms: None,
             },
         }
     }

@@ -25,16 +25,25 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
     config.recording.retain_intervals = Some(8);
     config.hwmon.root = Some(PathBuf::from("/tmp/hwmon"));
     let active_targets = BTreeMap::from([
-        (9, task_info(9, 9, "task-9", "task-9", TaskClass::Helper)),
-        (1, task_info(1, 1, "task-1", "task-1", TaskClass::Helper)),
-        (4, task_info(4, 4, "task-4", "task-4", TaskClass::Helper)),
+        (
+            9.into(),
+            task_info(9, 9, "task-9", "task-9", TaskClass::Helper),
+        ),
+        (
+            1.into(),
+            task_info(1, 1, "task-1", "task-1", TaskClass::Helper),
+        ),
+        (
+            4.into(),
+            task_info(4, 4, "task-4", "task-4", TaskClass::Helper),
+        ),
     ]);
 
     let mut stats = metrics::TaskStats::new(7, "worker".to_owned(), 0);
     stats.apply_task_info(&task_info(7, 7, "task-7", "worker", TaskClass::Helper));
     stats.session_latency.record(1_000);
     stats.session_latency.record(2_000_000);
-    let stats_by_task = BTreeMap::from([(7, stats)]);
+    let stats_by_task = BTreeMap::from([(7.into(), stats)]);
     let spike_events = [SpikeEvent {
         task: 7.into(),
         class: TaskClass::Helper,

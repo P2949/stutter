@@ -299,6 +299,34 @@ fn community_rule_from_json_object(
     let context = context_hints_for_rule(&normalized_name, source_path);
     let evidence = comment_evidence(object, &parsed.preceding_comments);
 
+    let mut regex_count = 0;
+    let mut wildcard_count = 0;
+    for ch in name.chars() {
+        match ch {
+            '*' | '?' => wildcard_count += 1,
+            '[' | ']' | '^' | '$' | '|' | '(' | ')' | '+' => regex_count += 1,
+            _ => {}
+        }
+    }
+
+    let exact_exe = name.ends_with(".exe") || name.ends_with(".bin");
+    let exact_comm = regex_count == 0 && wildcard_count == 0 && !exact_exe;
+    let specificity = crate::community_rules::model::RuleSpecificity {
+        exact_exe,
+        exact_comm,
+        regex_count,
+        wildcard_count,
+    };
+
+    if regex_count > 0 || wildcard_count > 0 {
+        log::warn!(
+            "overbroad community rule detected: {} (regex: {}, wildcard: {})",
+            name,
+            regex_count,
+            wildcard_count
+        );
+    }
+
     RuleImportDecision::Import(Box::new(CommunityRule {
         name: name.to_owned(),
         normalized_name,
@@ -311,6 +339,7 @@ fn community_rule_from_json_object(
         source_url: evidence.source_url,
         comment: evidence.comment,
         ambiguous,
+        specificity,
     }))
 }
 

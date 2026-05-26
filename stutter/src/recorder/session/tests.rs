@@ -18,12 +18,12 @@ fn spike_point_preserves_switch_prev_context() {
     let stats = crate::metrics::TaskStats::new(42, "t".to_owned(), 0);
     let spike = crate::metrics::SpikeRecord {
         latency_ns: 100,
-        cpu: 1,
-        wakeup_target_cpu: 0,
+        cpu: 1.into(),
+        wakeup_target_cpu: 0.into(),
         prio: 0,
         wakeup_ns: 10,
         switch_ns: 110,
-        switch_prev_pid: 99,
+        switch_prev_pid: 99.into(),
         switch_prev_state: 1,
         switch_prev_state_label: "voluntary_sleep_interruptible".to_owned(),
         ..crate::metrics::SpikeRecord::default()
@@ -47,8 +47,13 @@ fn recording_warnings_include_intervals_dropped() {
     let warnings = recording_warnings(&recorder);
 
     assert_eq!(warnings.len(), 1);
-    assert!(warnings[0].contains("3 interval record(s) were dropped"));
-    assert!(warnings[0].contains("--retain-intervals"));
+    assert_eq!(warnings[0].kind, RecordingWarningKind::IntervalsDropped);
+    assert!(
+        warnings[0]
+            .message
+            .contains("3 interval record(s) were dropped")
+    );
+    assert!(warnings[0].message.contains("--retain-intervals"));
 }
 
 #[test]
@@ -64,7 +69,8 @@ fn recording_warnings_include_spike_events_dropped() {
     let warnings = recording_warnings(&recorder);
 
     assert_eq!(warnings.len(), 1);
-    assert!(warnings[0].contains("2 spike event record(s)"));
+    assert_eq!(warnings[0].kind, RecordingWarningKind::SpikeEventsDropped);
+    assert!(warnings[0].message.contains("2 spike event record(s)"));
 }
 
 #[test]
@@ -80,8 +86,16 @@ fn recording_warnings_include_event_stream_write_errors() {
     let warnings = recording_warnings(&recorder);
 
     assert_eq!(warnings.len(), 1);
-    assert!(warnings[0].contains("4 event stream write error(s)"));
-    assert!(warnings[0].contains("incomplete"));
+    assert_eq!(
+        warnings[0].kind,
+        RecordingWarningKind::EventStreamWriteErrors
+    );
+    assert!(
+        warnings[0]
+            .message
+            .contains("4 event stream write error(s)")
+    );
+    assert!(warnings[0].message.contains("incomplete"));
 }
 
 #[test]
@@ -99,6 +113,17 @@ fn recording_warnings_include_all_recording_problems() {
     let warnings = recording_warnings(&recorder);
 
     assert_eq!(warnings.len(), 3);
+    assert_eq!(
+        warnings
+            .iter()
+            .map(|warning| warning.kind)
+            .collect::<Vec<_>>(),
+        vec![
+            RecordingWarningKind::IntervalsDropped,
+            RecordingWarningKind::SpikeEventsDropped,
+            RecordingWarningKind::EventStreamWriteErrors,
+        ]
+    );
 }
 
 #[test]
@@ -147,7 +172,7 @@ fn finalize_recording_persists_full_final_foreground_identity() {
     };
     let config = MonitorConfig::default();
     let tasks = crate::tasks::TaskTracker::default();
-    let foreground = ForegroundEvent {
+    let foreground = ForegroundEvent::new(crate::foreground::ForegroundEventInput {
         elapsed_ms: 1_000,
         source: crate::foreground::ForegroundSource::Sway,
         status: crate::foreground::ForegroundProviderStatus::Available,
@@ -155,12 +180,13 @@ fn finalize_recording_persists_full_final_foreground_identity() {
         app_id: Some("steam_app_379430".to_owned()),
         class: Some("steam_app_379430".to_owned()),
         title: None,
+        include_title: false,
         window_id: Some("163".to_owned()),
         workspace: Some("5".to_owned()),
         confidence: 0.95,
         stale_ms: Some(500),
         reason: "focused Sway node from swaymsg get_tree".to_owned(),
-    };
+    });
 
     finalize_recording(FinalizeRecordingInput {
         recorder: &recorder,
@@ -272,7 +298,7 @@ fn live_recorder_writes_foreground_event_to_dedicated_stream() {
         .create_stream(&dir, ArtifactKind::ForegroundEvents)
         .unwrap();
 
-    let event = ForegroundEvent {
+    let event = ForegroundEvent::new(crate::foreground::ForegroundEventInput {
         elapsed_ms: 42,
         source: crate::foreground::ForegroundSource::X11,
         status: crate::foreground::ForegroundProviderStatus::Available,
@@ -280,19 +306,27 @@ fn live_recorder_writes_foreground_event_to_dedicated_stream() {
         app_id: Some("Navigator".to_owned()),
         class: Some("Firefox".to_owned()),
         title: None,
+        include_title: false,
         window_id: Some("0x1200007".to_owned()),
         workspace: None,
         confidence: 0.90,
         stale_ms: None,
         reason: "active X11 window from xprop".to_owned(),
-    };
+    });
 
     recorder.write_foreground_event(event.clone()).unwrap();
     recorder.streams.finish_all().unwrap();
 
     assert_eq!(recorder.counters.foreground_event_count, 1);
     assert_eq!(
-        recorder.last_foreground_event.as_ref().unwrap().pid,
+        recorder
+            .last_foreground_event
+            .as_ref()
+            .unwrap()
+            .decision
+            .target
+            .as_ref()
+            .and_then(|target| target.pid),
         Some(1000)
     );
 

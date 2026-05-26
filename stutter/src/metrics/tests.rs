@@ -1,3 +1,7 @@
+use std::collections::BTreeMap;
+
+use stutter_common::SchedulerEvent;
+
 use super::*;
 
 #[cfg(test)]
@@ -35,8 +39,8 @@ mod latency_bookkeeping_tests {
 
         // 2. Interval summary happens. It sees 10 faults.
         // It should NOT update stats.last_spike_major_faults.
-        let mut stats_by_task = BTreeMap::new();
-        stats_by_task.insert(123, stats);
+        let mut stats_by_task = TaskStatsMap::new();
+        stats_by_task.insert(123.into(), stats);
         let mut prev_faults_snapshot = BTreeMap::new();
         prev_faults_snapshot.insert(123, (10, 0));
 
@@ -106,7 +110,7 @@ mod latency_bookkeeping_tests {
         };
         stats.record(&event, 1_000_000, 0, None);
 
-        let mut stats_by_task = BTreeMap::from([(123, stats)]);
+        let mut stats_by_task = BTreeMap::from([(123.into(), stats)]);
         let mut prev_faults_snapshot = BTreeMap::new();
         let records = collect_interval_summaries_labeled(
             "summary",

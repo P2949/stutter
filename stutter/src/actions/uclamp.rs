@@ -1,4 +1,4 @@
-use std::{fs, mem, path::Path};
+use std::{fs, path::Path};
 
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
@@ -10,47 +10,12 @@ use crate::actions::{
     rollback::{
         RollbackCandidate, RollbackHandler, RollbackPreview, RollbackResult, token_dry_run_preview,
     },
+    syscalls::SchedUclamp,
     verify_task_identity,
 };
 
 const UCLAMP_MIN_VALUE: u32 = 0;
 const UCLAMP_MAX_VALUE: u32 = 1024;
-const SCHED_FLAG_KEEP_POLICY: u64 = 0x08;
-const SCHED_FLAG_KEEP_PARAMS: u64 = 0x10;
-const SCHED_FLAG_UTIL_CLAMP_MIN: u64 = 0x20;
-const SCHED_FLAG_UTIL_CLAMP_MAX: u64 = 0x40;
-
-#[repr(C)]
-#[derive(Debug, Clone, Copy)]
-struct SchedAttr {
-    size: u32,
-    sched_policy: u32,
-    sched_flags: u64,
-    sched_nice: i32,
-    sched_priority: u32,
-    sched_runtime: u64,
-    sched_deadline: u64,
-    sched_period: u64,
-    sched_util_min: u32,
-    sched_util_max: u32,
-}
-
-impl Default for SchedAttr {
-    fn default() -> Self {
-        Self {
-            size: mem::size_of::<SchedAttr>() as u32,
-            sched_policy: 0,
-            sched_flags: 0,
-            sched_nice: 0,
-            sched_priority: 0,
-            sched_runtime: 0,
-            sched_deadline: 0,
-            sched_period: 0,
-            sched_util_min: UCLAMP_MIN_VALUE,
-            sched_util_max: UCLAMP_MAX_VALUE,
-        }
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct UclampValues {
@@ -129,7 +94,7 @@ impl RollbackHandler for UclampRollbackHandler {
     }
 
     fn supports_token(&self, token: &RollbackToken) -> bool {
-        matches!(token, RollbackToken::UclampRestore { .. })
+        token.as_uclamp_restore().is_some()
     }
 
     fn dry_run_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackPreview> {
@@ -140,7 +105,7 @@ impl RollbackHandler for UclampRollbackHandler {
     }
 
     fn restore_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackResult> {
-        let RollbackToken::UclampRestore { records } = token else {
+        let Some(records) = token.as_uclamp_restore() else {
             anyhow::bail!("uclamp rollback handler does not support {token:?}");
         };
 
@@ -414,8 +379,11 @@ impl TuningAction for UclampAction {
     }
 
     fn rollback(&self, token: &RollbackToken) -> anyhow::Result<()> {
-        let RollbackToken::UclampRestore { records } = token else {
-            anyhow::bail!("rollback token is not a uclamp restore token");
+        let Some(records) = token.as_uclamp_restore() else {
+            return Err(crate::actions::ActionError::invalid_rollback_token_kind(
+                token.kind_error("uclamp-restore"),
+            )
+            .into());
         };
 
         let mut summary = RestoreSummary::default();
@@ -675,25 +643,12 @@ fn parse_stat_starttime(stat: &str) -> anyhow::Result<u64> {
 }
 
 fn read_task_uclamp(tid: u32) -> anyhow::Result<UclampCurrentValues> {
-    let mut attr = SchedAttr::default();
-    let rc = unsafe {
-        libc::syscall(
-            libc::SYS_sched_getattr,
-            tid as libc::pid_t,
-            &mut attr as *mut SchedAttr,
-            mem::size_of::<SchedAttr>() as u32,
-            0u32,
-        )
-    };
-
-    if rc != 0 {
-        return Err(std::io::Error::last_os_error())
-            .with_context(|| format!("sched_getattr({tid}) failed"));
-    }
+    let attr = crate::actions::syscalls::sched_getattr(tid)
+        .with_context(|| format!("sched_getattr({tid}) failed"))?;
 
     Ok(UclampCurrentValues {
-        sched_util_min: attr.sched_util_min,
-        sched_util_max: attr.sched_util_max,
+        sched_util_min: attr.util_min,
+        sched_util_max: attr.util_max,
     })
 }
 
@@ -709,35 +664,19 @@ fn set_task_uclamp(tid: u32, values: UclampCurrentValues) -> anyhow::Result<()> 
         );
     }
 
-    let mut attr = SchedAttr {
-        sched_flags: SCHED_FLAG_KEEP_POLICY
-            | SCHED_FLAG_KEEP_PARAMS
-            | SCHED_FLAG_UTIL_CLAMP_MIN
-            | SCHED_FLAG_UTIL_CLAMP_MAX,
-        sched_util_min: values.sched_util_min,
-        sched_util_max: values.sched_util_max,
-        ..SchedAttr::default()
-    };
-
-    let rc = unsafe {
-        libc::syscall(
-            libc::SYS_sched_setattr,
-            tid as libc::pid_t,
-            &mut attr as *mut SchedAttr,
-            0u32,
+    crate::actions::syscalls::sched_setattr(
+        tid,
+        SchedUclamp {
+            util_min: values.sched_util_min,
+            util_max: values.sched_util_max,
+        },
+    )
+    .with_context(|| {
+        format!(
+            "sched_setattr({}, util_min={}, util_max={}) failed",
+            tid, values.sched_util_min, values.sched_util_max
         )
-    };
-
-    if rc != 0 {
-        return Err(std::io::Error::last_os_error()).with_context(|| {
-            format!(
-                "sched_setattr({}, util_min={}, util_max={}) failed",
-                tid, values.sched_util_min, values.sched_util_max
-            )
-        });
-    }
-
-    Ok(())
+    })
 }
 
 fn read_task_uclamp_from_sched_at(

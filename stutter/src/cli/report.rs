@@ -251,6 +251,9 @@ pub(super) struct ReleaseCheckArgs {
     #[arg(long = "stronger-tests")]
     pub(super) stronger_tests: bool,
 
+    #[arg(long = "real-machine-validation")]
+    pub(super) real_machine_validation: bool,
+
     #[arg(long)]
     pub(super) json: bool,
 
@@ -299,6 +302,9 @@ pub(super) struct DoctorArgs {
     #[arg(long)]
     pub(super) json: bool,
 
+    #[command(subcommand)]
+    pub(super) command: Option<DoctorSubcommand>,
+
     #[arg(long = "hwmon", id = "hwmon")]
     pub(super) hwmon: bool,
 
@@ -331,6 +337,47 @@ pub(super) struct DoctorArgs {
 
     #[arg(long = "mangohud-log", value_name = "PATH")]
     pub(super) mangohud_log: Option<PathBuf>,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub(super) enum DoctorSubcommand {
+    Tracepoints(DoctorTracepointsArgs),
+}
+
+#[derive(Args, Debug, Clone)]
+pub(super) struct DoctorTracepointsArgs {
+    #[arg(long)]
+    pub(super) dump: bool,
+}
+
+impl DoctorArgs {
+    pub(super) fn into_input(self) -> anyhow::Result<crate::doctor::DoctorInput> {
+        let tracepoint_dump = match self.command {
+            Some(DoctorSubcommand::Tracepoints(tracepoints)) => {
+                if !tracepoints.dump {
+                    anyhow::bail!("doctor tracepoints requires --dump");
+                }
+                true
+            }
+            None => false,
+        };
+
+        Ok(crate::doctor::DoctorInput {
+            json: self.json,
+            tracepoint_dump,
+            hwmon: self.hwmon,
+            hwmon_root: self.hwmon_root,
+            hwmon_drm_card: self.hwmon_drm_card,
+            hwmon_render_node: self.hwmon_render_node,
+            irq_latency: self.irq_latency,
+            irqs: self.irqs,
+            block_io: self.block_io,
+            kms_timing: self.kms_timing,
+            faults: self.faults,
+            cpu_perf: self.cpu_perf,
+            mangohud_log: self.mangohud_log,
+        })
+    }
 }
 
 #[derive(Args, Debug, Clone)]
@@ -588,4 +635,5 @@ pub(super) struct ScenarioPathArgs {
 }
 
 #[cfg(test)]
+#[path = "tests/report.rs"]
 mod tests;

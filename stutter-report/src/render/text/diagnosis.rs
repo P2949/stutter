@@ -1,5 +1,5 @@
-use crate::model::Diagnosis;
 use super::pushln;
+use crate::model::Diagnosis;
 
 pub fn render_diagnosis_lines(diagnosis: &Diagnosis, indent: &str) -> String {
     let mut output = String::new();

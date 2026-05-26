@@ -6,7 +6,9 @@
 use serde::Deserialize;
 
 use crate::foreground::model::{
-    ForegroundProviderStatus, ForegroundSource, ForegroundWindowSnapshot,
+    CONFIDENCE_HIGH, CONFIDENCE_LOW, CONFIDENCE_MEDIUM, CONFIDENCE_ZERO, Confidence,
+    ForegroundDecision, ForegroundProviderStatus, ForegroundReason, ForegroundSource,
+    ForegroundTarget, ForegroundWindowSnapshot,
 };
 
 #[derive(Debug, Deserialize)]
@@ -40,9 +42,15 @@ pub(crate) fn focused_sway_snapshot_from_tree(
             elapsed_ms,
             source: Some(ForegroundSource::Sway),
             status: ForegroundProviderStatus::Unavailable,
-            confidence: 0.0,
-            reason: "sway tree did not contain a focused node".to_owned(),
-            ..ForegroundWindowSnapshot::default()
+            decision: ForegroundDecision {
+                target: None,
+                confidence: CONFIDENCE_ZERO,
+                reasons: vec![ForegroundReason {
+                    reason: "sway tree did not contain a focused node".to_owned(),
+                }],
+                rejected_candidates: Vec::new(),
+            },
+            stale_ms: None,
         };
     };
 
@@ -71,15 +79,22 @@ pub(crate) fn focused_sway_snapshot_from_tree(
         elapsed_ms,
         source: Some(ForegroundSource::Sway),
         status: ForegroundProviderStatus::Available,
-        pid: focused.pid,
-        app_id: focused.app_id.clone(),
-        class,
-        title,
-        window_id,
-        workspace: workspace.cloned(),
-        confidence,
+        decision: ForegroundDecision {
+            target: Some(ForegroundTarget {
+                pid: focused.pid,
+                app_id: focused.app_id.clone(),
+                class,
+                title,
+                window_id,
+                workspace: workspace.cloned(),
+            }),
+            confidence,
+            reasons: vec![ForegroundReason {
+                reason: "focused Sway node from swaymsg get_tree".to_owned(),
+            }],
+            rejected_candidates: Vec::new(),
+        },
         stale_ms: None,
-        reason: "focused Sway node from swaymsg get_tree".to_owned(),
     }
 }
 
@@ -143,19 +158,19 @@ fn non_empty_sway_text(value: Option<&str>) -> bool {
     value.is_some_and(|value| !value.trim().is_empty())
 }
 
-fn sway_confidence(node: &SwayNode) -> f32 {
+fn sway_confidence(node: &SwayNode) -> Confidence {
     if node.pid.is_some() {
-        0.95
+        CONFIDENCE_HIGH
     } else if non_empty_sway_text(node.app_id.as_deref())
         || node.window_properties.as_ref().is_some_and(|properties| {
             non_empty_sway_text(properties.class.as_deref())
                 || non_empty_sway_text(properties.instance.as_deref())
         })
     {
-        0.65
+        CONFIDENCE_MEDIUM
     } else if non_empty_sway_text(node.name.as_deref()) || node.window.is_some() {
-        0.35
+        CONFIDENCE_LOW
     } else {
-        0.0
+        CONFIDENCE_ZERO
     }
 }

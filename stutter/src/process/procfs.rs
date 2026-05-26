@@ -11,9 +11,14 @@ use std::{
     path::Path,
 };
 
+use stutter_core::ids::Pid;
+
 use crate::{
     process::{
-        model::{CachedProcInfo, ProcInfo, ProcessCache, ScanBudget, ScanBudgetReport},
+        model::{
+            CachedProcInfo, ProcInfo, ProcScanWarning, ProcScanWarningKind, ProcessCache,
+            ProcessMap, ScanBudget, ScanBudgetReport,
+        },
         snapshot::stat_starttime_and_policy_at,
     },
     procfs as procfs_helpers,
@@ -24,7 +29,7 @@ pub fn scan_processes_at(
     cache: &mut ProcessCache,
     budget: &ScanBudget,
     budget_report: &mut ScanBudgetReport,
-) -> BTreeMap<u32, ProcInfo> {
+) -> ProcessMap {
     let start = std::time::Instant::now();
     let mut processes = BTreeMap::new();
 
@@ -72,7 +77,9 @@ pub fn scan_processes_at(
         let ctime_sec = metadata.ctime();
         let ctime_nsec = metadata.ctime_nsec();
 
-        if let Some(cached) = cache.entries.get(&pid) {
+        let typed_pid = Pid::new(pid);
+
+        if let Some(cached) = cache.entries.get(&typed_pid) {
             let cache_fresh_enough =
                 generation.saturating_sub(cached.scan_generation) <= cache.max_cached_generations;
 
@@ -80,14 +87,14 @@ pub fn scan_processes_at(
                 && cached.ctime_sec == ctime_sec
                 && cached.ctime_nsec == ctime_nsec
             {
-                processes.insert(pid, cached.info.clone());
+                processes.insert(typed_pid, cached.info.clone());
                 continue;
             }
         }
 
-        if let Some(info) = read_proc_info_at(proc_root, pid) {
+        if let Some(info) = read_proc_info_with_report_at(proc_root, pid, Some(budget_report)) {
             cache.entries.insert(
-                pid,
+                typed_pid,
                 CachedProcInfo {
                     ctime_sec,
                     ctime_nsec,
@@ -95,7 +102,7 @@ pub fn scan_processes_at(
                     info: info.clone(),
                 },
             );
-            processes.insert(pid, info);
+            processes.insert(typed_pid, info);
         }
     }
 
@@ -115,8 +122,28 @@ pub fn scan_processes_at(
 }
 
 pub(crate) fn read_proc_info_at(proc_root: &Path, pid: u32) -> Option<ProcInfo> {
+    read_proc_info_with_report_at(proc_root, pid, None)
+}
+
+fn read_proc_info_with_report_at(
+    proc_root: &Path,
+    pid: u32,
+    mut report: Option<&mut ScanBudgetReport>,
+) -> Option<ProcInfo> {
     let status_path = proc_root.join(pid.to_string()).join("status");
-    let status = fs::read_to_string(status_path).ok()?;
+    let status = match fs::read_to_string(&status_path) {
+        Ok(status) => status,
+        Err(err) => {
+            push_proc_warning(
+                report.as_deref_mut(),
+                pid,
+                None,
+                ProcScanWarningKind::ProcessInfo,
+                format!("failed to read {}: {err}", status_path.display()),
+            );
+            return None;
+        }
+    };
 
     let mut ppid = None;
     let mut comm = None;
@@ -130,22 +157,29 @@ pub(crate) fn read_proc_info_at(proc_root: &Path, pid: u32) -> Option<ProcInfo> 
     }
 
     let cmdline_path = proc_root.join(pid.to_string()).join("cmdline");
-    let cmdline = fs::read(cmdline_path)
-        .ok()
-        .map(|bytes| {
-            bytes
-                .split(|b| *b == 0)
-                .filter(|part| !part.is_empty())
-                .map(|part| String::from_utf8_lossy(part))
-                .collect::<Vec<_>>()
-                .join(" ")
-        })
-        .unwrap_or_default();
+    let cmdline = match fs::read(&cmdline_path) {
+        Ok(bytes) => bytes
+            .split(|b| *b == 0)
+            .filter(|part| !part.is_empty())
+            .map(|part| String::from_utf8_lossy(part))
+            .collect::<Vec<_>>()
+            .join(" "),
+        Err(err) => {
+            push_proc_warning(
+                report.as_deref_mut(),
+                pid,
+                None,
+                ProcScanWarningKind::Cmdline,
+                format!("failed to read {}: {err}", cmdline_path.display()),
+            );
+            String::new()
+        }
+    };
 
     let stat_path = proc_root.join(pid.to_string()).join("stat");
     let (starttime_ticks, sched_policy) = stat_starttime_and_policy_at(&stat_path);
-    let exe_path = exe_path_at(proc_root, pid).unwrap_or_default();
-    let cgroup_path = read_proc_cgroup_path_at(proc_root, pid);
+    let exe_path = exe_path_at(proc_root, pid, report.as_deref_mut());
+    let cgroup_path = read_proc_cgroup_path_at(proc_root, pid, report);
     let (exe_dev, exe_ino) = exe_metadata_at(proc_root, pid)
         .map(|metadata| (Some(metadata.dev()), Some(metadata.ino())))
         .unwrap_or((None, None));
@@ -164,16 +198,41 @@ pub(crate) fn read_proc_info_at(proc_root: &Path, pid: u32) -> Option<ProcInfo> 
     })
 }
 
-fn exe_path_at(proc_root: &Path, pid: u32) -> Option<String> {
-    fs::read_link(proc_root.join(pid.to_string()).join("exe"))
-        .ok()
-        .map(|path| path.to_string_lossy().into_owned())
+fn exe_path_at(proc_root: &Path, pid: u32, report: Option<&mut ScanBudgetReport>) -> String {
+    let exe_path = proc_root.join(pid.to_string()).join("exe");
+    match fs::read_link(&exe_path) {
+        Ok(path) => path.to_string_lossy().into_owned(),
+        Err(err) => {
+            push_proc_warning(
+                report,
+                pid,
+                None,
+                ProcScanWarningKind::ExePath,
+                format!("failed to read {}: {err}", exe_path.display()),
+            );
+            String::new()
+        }
+    }
 }
 
-fn read_proc_cgroup_path_at(proc_root: &Path, pid: u32) -> String {
+fn read_proc_cgroup_path_at(
+    proc_root: &Path,
+    pid: u32,
+    report: Option<&mut ScanBudgetReport>,
+) -> String {
     let cgroup_path = proc_root.join(pid.to_string()).join("cgroup");
-    let Ok(contents) = fs::read_to_string(cgroup_path) else {
-        return String::new();
+    let contents = match fs::read_to_string(&cgroup_path) {
+        Ok(contents) => contents,
+        Err(err) => {
+            push_proc_warning(
+                report,
+                pid,
+                None,
+                ProcScanWarningKind::Cgroup,
+                format!("failed to read {}: {err}", cgroup_path.display()),
+            );
+            return String::new();
+        }
     };
 
     contents
@@ -187,6 +246,18 @@ fn read_proc_cgroup_path_at(proc_root: &Path, pid: u32) -> String {
 
 fn exe_metadata_at(proc_root: &Path, pid: u32) -> Option<fs::Metadata> {
     fs::metadata(proc_root.join(pid.to_string()).join("exe")).ok()
+}
+
+fn push_proc_warning(
+    report: Option<&mut ScanBudgetReport>,
+    pid: u32,
+    tid: Option<u32>,
+    kind: ProcScanWarningKind,
+    message: String,
+) {
+    if let Some(report) = report {
+        report.push_warning(ProcScanWarning::new(pid, tid, kind, message));
+    }
 }
 
 pub fn descendants_of(

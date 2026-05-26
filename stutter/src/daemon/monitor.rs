@@ -44,8 +44,8 @@ impl MonitorSubsystem {
     }
 
     pub async fn shutdown(mut self) -> anyhow::Result<MonitorShutdownSummary> {
-        let otel_exporter_existed = self.session.runtime.outputs.otel_exporter.is_some();
-        let prometheus_task_existed = self.session.runtime.outputs.prometheus_task.is_some();
+        let otel_exporter_existed = self.session.handles.exporters.otel_exporter.is_some();
+        let prometheus_task_existed = self.session.handles.exporters.prometheus_task.is_some();
 
         self.flush().await?;
 

@@ -12,6 +12,7 @@ use crate::{
 
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct UserConfigFile {
+    #[serde(alias = "schema_version")]
     pub config_version: Option<u32>,
 
     pub experimental: Option<bool>,

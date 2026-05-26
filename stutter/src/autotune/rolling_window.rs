@@ -408,6 +408,20 @@ impl RollingWindow {
                 .map(|record| u64::from(record.mem_psi_spike))
                 .fold(0_u64, u64::saturating_add)
         });
+        let compile_progress_elapsed = self
+            .intervals
+            .iter()
+            .filter(|record| is_compile_progress_record(record))
+            .map(|record| record.elapsed_ms)
+            .collect::<BTreeSet<_>>();
+        let compile_progress_intervals = compile_progress_elapsed.len() as u64;
+        let compile_progress_samples = self
+            .intervals
+            .iter()
+            .filter(|record| is_compile_progress_record(record))
+            .map(|record| record.samples)
+            .fold(0_u64, u64::saturating_add);
+        let has_compile_progress = compile_progress_intervals > 0;
 
         let gpu_active_render_node = latest_gpu.and_then(|sample| sample.render_node.clone());
         let gpu_drm_card = latest_gpu.and_then(|sample| sample.drm_card.clone());
@@ -459,6 +473,11 @@ impl RollingWindow {
                 ObjectiveSignalQuality::Missing
             } else {
                 ObjectiveSignalQuality::Derived
+            },
+            compile_throughput: if has_compile_progress {
+                ObjectiveSignalQuality::Direct
+            } else {
+                ObjectiveSignalQuality::Missing
             },
         };
 
@@ -514,6 +533,10 @@ impl RollingWindow {
                     .map(|record| record.over_5ms)
                     .fold(0_u64, u64::saturating_add),
             ),
+            compile_progress_intervals: has_compile_progress.then_some(compile_progress_intervals),
+            compile_progress_samples: has_compile_progress.then_some(compile_progress_samples),
+            compile_progress_source: has_compile_progress
+                .then(|| "build-compiler-linker-intervals".to_owned()),
             signal_quality,
         }
     }
@@ -668,6 +691,16 @@ fn sort_intervals_by_elapsed(intervals: &mut VecDeque<IntervalRecord>) {
 
 fn is_valid_frametime_ms(value: f64) -> bool {
     value.is_finite() && value > 0.0
+}
+
+fn is_compile_progress_record(record: &IntervalRecord) -> bool {
+    record.samples > 0
+        && matches!(
+            record.class,
+            crate::process_tree::TaskClass::BuildJob
+                | crate::process_tree::TaskClass::Compiler
+                | crate::process_tree::TaskClass::Linker
+        )
 }
 
 fn percentile_f64(mut values: Vec<f64>, percentile: f64) -> f64 {

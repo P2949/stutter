@@ -17,11 +17,48 @@ pub(crate) fn foreground_identity_changed(
 
     old.source != new.source
         || old.status != new.status
-        || old.pid != new.pid
-        || old.app_id.as_deref() != new.app_id.as_deref()
-        || old.class.as_deref() != new.class.as_deref()
-        || old.window_id.as_deref() != new.window_id.as_deref()
-        || old.workspace.as_deref() != new.workspace.as_deref()
+        || old.decision.target.as_ref().and_then(|t| t.pid)
+            != new.decision.target.as_ref().and_then(|t| t.pid)
+        || old
+            .decision
+            .target
+            .as_ref()
+            .and_then(|t| t.app_id.as_deref())
+            != new
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.app_id.as_deref())
+        || old
+            .decision
+            .target
+            .as_ref()
+            .and_then(|t| t.class.as_deref())
+            != new
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.class.as_deref())
+        || old
+            .decision
+            .target
+            .as_ref()
+            .and_then(|t| t.window_id.as_deref())
+            != new
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.window_id.as_deref())
+        || old
+            .decision
+            .target
+            .as_ref()
+            .and_then(|t| t.workspace.as_deref())
+            != new
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.workspace.as_deref())
         || foreground_stale_state(old) != foreground_stale_state(new)
 }
 
@@ -46,7 +83,7 @@ impl MonitorSession {
     }
     pub(crate) async fn handle_foreground_tick(&mut self) -> anyhow::Result<()> {
         let elapsed_ms = self.started.elapsed().as_millis() as u64;
-        let Some(resolver) = self.foreground_resolver.as_mut() else {
+        let Some(resolver) = self.handles.target_refresh.foreground_resolver.as_mut() else {
             return Ok(());
         };
 

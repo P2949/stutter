@@ -72,7 +72,7 @@ impl MonitorSession {
 
     pub(crate) async fn handle_focus_tick(&mut self) -> anyhow::Result<()> {
         let elapsed_ms = self.started.elapsed().as_millis() as u64;
-        let Some(resolver) = self.focus_resolver.as_mut() else {
+        let Some(resolver) = self.handles.target_refresh.focus_resolver.as_mut() else {
             return Ok(());
         };
 

@@ -649,7 +649,7 @@ fn last_fault_from_events(events: &[AutotuneHistoryEvent]) -> Option<String> {
         }
 
         if matches!(event.phase, ControllerPhase::Faulted) || decision == "faulted" {
-            return Some(event.reason.clone());
+            return Some(event.reason.clone().clone());
         }
     }
 
@@ -702,8 +702,8 @@ fn format_last_decision(event: &AutotuneHistoryEvent) -> String {
         return format!("{decision}, rollback performed");
     }
 
-    if !event.reason.trim().is_empty() {
-        return format!("{decision}: {}", event.reason);
+    if !event.reason.clone().trim().is_empty() {
+        return format!("{decision}: {}", event.reason.clone());
     }
 
     decision

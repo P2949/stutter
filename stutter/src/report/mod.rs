@@ -85,13 +85,13 @@ pub(crate) use load::{load_report_input, load_report_session};
 pub use model::{
     ArtifactsSummary, CrossGpuFenceCandidate, CrossGpuFenceSummary, DataQualityLevel,
     DataQualitySummary, DirectScanoutSummary, DisplayPathComponent, DisplayPathDiagnosisSummary,
-    DmaBufPathSummary, DrmFenceTimingSummary, DrmFenceWaitSummary, FocusReportSummary,
-    ForegroundReportSummary, FrameOutlierView, FramePacingSummary, GpuEngineActivitySummary,
-    HtmlChartArtifacts, HtmlReportModel, KmsTimingSummary, PressureKind, PressurePeakWindow,
-    PressureTimelineCoverage, PressureTimelineSummary, PressureWindow, RegressionMetric,
-    ReportAnalysisJson, RuntimeSliceAnalysisSummary, RuntimeThreadSummary, ScanoutWindowEstimate,
-    SpikeClusterAnalysis, SpikeClusterSource, SpikeDensityBucket, TaskHtmlRow,
-    WaylandPresentationSummary,
+    DmaBufPathSummary, DrmFenceTimingSummary, DrmFenceWaitSummary, EvidenceQuality,
+    FocusReportSummary, ForegroundReportSummary, FrameOutlierView, FramePacingSummary,
+    GpuEngineActivitySummary, HtmlChartArtifacts, HtmlReportModel, KmsTimingSummary, PressureKind,
+    PressurePeakWindow, PressureTimelineCoverage, PressureTimelineSummary, PressureWindow,
+    RegressionMetric, ReportAnalysisJson, RuntimeSliceAnalysisSummary, RuntimeThreadSummary,
+    ScanoutWindowEstimate, SpikeClusterAnalysis, SpikeClusterSource, SpikeDensityBucket,
+    TaskHtmlRow, WaylandPresentationSummary,
 };
 pub(crate) use model::{
     ReportBuildResult, ReportInputModel, SpikeClusterCandidate, TextReportCorrelationSection,
@@ -105,13 +105,11 @@ pub(crate) use render::html::render_html_report;
 pub(crate) use render::text::render_check_summary;
 #[cfg(test)]
 pub(crate) use render::text::{
-    TextReportRenderInput, render_focus_summary_text,
-    render_foreground_summary_text, render_report,
+    TextReportRenderInput, render_focus_summary_text, render_foreground_summary_text, render_report,
 };
 pub use text::{PrintReportInput, print_report};
 
 const MIN_CLUSTER_TASKS: usize = 3;
-const MAX_INLINE_CLUSTER_POINTS: usize = 8;
 const MAX_CLUSTER_CANDIDATES: usize = 4096;
 const PRESSURE_NOTE_CPU_SOME: f64 = 50.0;
 const PRESSURE_NOTE_MEM_SOME: f64 = 20.0;

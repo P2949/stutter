@@ -9,23 +9,22 @@ use std::{
 };
 
 use super::*;
-use crate::foreground::{ForegroundProviderStatus, ForegroundSource, ForegroundWindowSnapshot};
+use crate::foreground::{ForegroundAvailableInput, ForegroundSource, ForegroundWindowSnapshot};
 
 pub(crate) fn foreground_snapshot(pid: Option<u32>) -> ForegroundWindowSnapshot {
-    ForegroundWindowSnapshot {
+    ForegroundWindowSnapshot::available(ForegroundAvailableInput {
         elapsed_ms: 1_000,
-        source: Some(ForegroundSource::Sway),
-        status: ForegroundProviderStatus::Available,
+        source: ForegroundSource::Sway,
         pid,
         app_id: Some("steam".to_owned()),
         class: Some("Steam".to_owned()),
         title: None,
+        include_title: false,
         window_id: Some("7".to_owned()),
         workspace: Some("games".to_owned()),
         confidence: 0.95,
-        stale_ms: None,
         reason: "test foreground snapshot".to_owned(),
-    }
+    })
 }
 
 fn foreground_test_classification(

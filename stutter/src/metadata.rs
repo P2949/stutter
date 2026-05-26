@@ -118,8 +118,13 @@ mod tests {
     fn build_feature_labels_report_only_optional_integrations_or_default() {
         let labels = build_feature_labels();
 
-        if cfg!(feature = "otel") {
-            assert!(labels.contains(&"otel"));
+        if cfg!(feature = "otel") || cfg!(feature = "wayland-probe") {
+            if cfg!(feature = "otel") {
+                assert!(labels.contains(&"otel"));
+            }
+            if cfg!(feature = "wayland-probe") {
+                assert!(labels.contains(&"wayland-probe"));
+            }
         } else {
             assert_eq!(labels, vec!["default"]);
         }

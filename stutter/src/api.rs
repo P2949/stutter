@@ -26,9 +26,9 @@ pub mod actions {
         IrqAffinityEvidence, IrqAffinityPolicy, IrqAffinityRestoreRecord, IrqAffinityRisk,
         NiceAction, NicePolicy, NiceRestoreRecord, PhaseFailure, RestoreAllInput,
         RestoreAllSummary, RollbackCandidate, RollbackHandler, RollbackOutcome, RollbackPreview,
-        RollbackRegistry, RollbackResult, RollbackToken, SafetyClass, ScopeLimitExceeded,
-        TaskIdentity, TuningAction, UclampRestoreRecord, VmKnobAction, VmKnobChange, VmKnobMode,
-        VmKnobPolicy, VmKnobRestoreRecord,
+        RollbackRegistry, RollbackResult, RollbackToken, RollbackTokenKindError, SafetyClass,
+        ScopeLimitExceeded, TaskIdentity, TuningAction, UclampRestoreRecord, VmKnobAction,
+        VmKnobChange, VmKnobMode, VmKnobPolicy, VmKnobRestoreRecord,
     };
 }
 
@@ -57,10 +57,10 @@ pub mod artifacts {
     //! Public artifact kind, selection, path, and stream metadata contracts.
 
     pub use crate::artifacts::{
-        ARTIFACT_SPECS, ArtifactCounter, ArtifactEncoding, ArtifactKind, ArtifactSelection,
-        ArtifactSpec, ArtifactStreamRegistry, artifact_alias_paths, artifact_counter_label,
-        artifact_file_name, artifact_is_ndjson_stream, artifact_kinds, artifact_path,
-        artifact_primary_and_alias_paths, artifact_spec, optional_artifact_kinds,
+        ARTIFACT_SPECS, ArtifactCounter, ArtifactEncoding, ArtifactKind, ArtifactPath,
+        ArtifactSelection, ArtifactSpec, ArtifactStreamRegistry, artifact_alias_paths,
+        artifact_counter_label, artifact_file_name, artifact_is_ndjson_stream, artifact_kinds,
+        artifact_path, artifact_primary_and_alias_paths, artifact_spec, optional_artifact_kinds,
         push_artifact_event,
     };
 }
@@ -503,18 +503,18 @@ pub mod recorder {
     //! Public recording artifact schema, live recorder, retention, and writer contracts.
 
     pub use crate::recorder::{
-        BlockIoRecord, CpuFreqRecord, CpuPerfStatus, CsvOutput, ExporterState,
-        FinalizeRecordingInput, FocusEvent, ForegroundEvent, FrameEvent, GpuSample,
+        ArtifactSchemaVersion, BlockIoRecord, CpuFreqRecord, CpuPerfStatus, CsvOutput,
+        ExporterState, FinalizeRecordingInput, FocusEvent, ForegroundEvent, FrameEvent, GpuSample,
         IntervalCsvWriter, IntervalRecord, IrqEventRecord, LiveBuffers, LiveRecorder,
         MAX_SPIKE_EVENTS, MetadataFile, MigrationEventRecord, NdjsonWriter, RecordedConfig,
         RecordedCpuSnapshot, RecordedLatency, RecordedSpike, RecordedTime, RecordingCounters,
-        RecordingRetentionPolicy, RecordingRetentionSummary, RecordingRun, RuntimeSliceRecord,
-        SESSION_SCHEMA_VERSION, ScxEvent, SessionFile, SessionMetadataCore, SessionSpike,
-        SessionTask, SpikeDiagnosticContext, SpikeEvent, SpikeEventBuffer, SpikePushResult,
-        StdoutJsonStream, SyncTracker, TreeEvent, WakerEntry, apply_recording_retention,
-        ensure_min_free_space_for_path, finalize_recording, prepare_recording,
-        print_recording_warnings, recorded_config, recorded_time, recording_warnings,
-        write_ndjson_value,
+        RecordingRetentionPolicy, RecordingRetentionSummary, RecordingRun, RecordingWarning,
+        RecordingWarningKind, RuntimeSliceRecord, SESSION_SCHEMA_VERSION, ScxEvent, SessionFile,
+        SessionMetadataCore, SessionSpike, SessionTask, SpikeDiagnosticContext, SpikeEvent,
+        SpikeEventBuffer, SpikePushResult, StdoutJsonStream, SyncTracker, TreeEvent, WakerEntry,
+        apply_recording_retention, ensure_min_free_space_for_path, finalize_recording,
+        prepare_recording, print_recording_warnings, recorded_config, recorded_time,
+        recording_warnings, write_ndjson_value,
     };
 }
 
@@ -523,7 +523,7 @@ pub mod report {
 
     pub use crate::report::{
         ArtifactsSummary, DataQualityLevel, DataQualitySummary, DisplayPathComponent,
-        DisplayPathDiagnosisSummary, DmaBufPathSummary, FocusReportSummary,
+        DisplayPathDiagnosisSummary, DmaBufPathSummary, EvidenceQuality, FocusReportSummary,
         ForegroundReportSummary, FrameOutlierView, FramePacingSummary, GpuEngineActivitySummary,
         HtmlChartArtifacts, HtmlReportModel, PressureKind, PressurePeakWindow,
         PressureTimelineCoverage, PressureTimelineSummary, PressureWindow, RegressionCheckSummary,

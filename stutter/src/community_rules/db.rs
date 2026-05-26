@@ -50,6 +50,21 @@ impl CommunityRulesDb {
                 rule.ambiguous = true;
             }
 
+            if let Some(existing_rules) = self.rules_by_name.get(&rule.normalized_name) {
+                for existing in existing_rules {
+                    if existing.stutter_class != rule.stutter_class {
+                        log::warn!(
+                            "community rule conflict: '{}' maps to both '{}' (from {}) and '{}' (from {})",
+                            rule.normalized_name,
+                            existing.stutter_class,
+                            existing.source_path,
+                            rule.stutter_class,
+                            rule.source_path
+                        );
+                    }
+                }
+            }
+
             self.rules_by_name
                 .entry(rule.normalized_name.clone())
                 .or_default()

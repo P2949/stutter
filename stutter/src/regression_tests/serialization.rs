@@ -103,7 +103,7 @@ fn scx_correlation_backward_compatibility() {
 #[test]
 fn session_file_serializes_metadata_core_flat() {
     let mut session = crate::recorder::SessionFile::default();
-    session.core.schema_version = 123;
+    session.core.schema_version = crate::recorder::ArtifactSchemaVersion::new(123);
     session.core.run_name = Some("flat-test".to_string());
     session.stop_reason = "test".to_string();
 
@@ -121,7 +121,7 @@ fn session_file_serializes_metadata_core_flat() {
 #[test]
 fn metadata_file_serializes_metadata_core_flat() {
     let mut metadata = crate::recorder::MetadataFile::default();
-    metadata.core.schema_version = 123;
+    metadata.core.schema_version = crate::recorder::ArtifactSchemaVersion::new(123);
     metadata.core.run_name = Some("flat-test".to_string());
 
     let value = serde_json::to_value(&metadata).unwrap();
@@ -137,7 +137,7 @@ fn metadata_file_serializes_metadata_core_flat() {
 #[test]
 fn metadata_file_deserializes_flat_json_into_core() {
     let mut metadata = crate::recorder::MetadataFile::default();
-    metadata.core.schema_version = 123;
+    metadata.core.schema_version = crate::recorder::ArtifactSchemaVersion::new(123);
     metadata.core.run_name = Some("flat-test".to_string());
 
     let json = serde_json::to_value(&metadata).unwrap();

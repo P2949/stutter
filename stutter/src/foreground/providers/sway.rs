@@ -5,7 +5,10 @@
 
 use crate::foreground::{
     command::{resolve_trusted_foreground_helper, trusted_foreground_command},
-    model::{ForegroundProviderStatus, ForegroundSource, ForegroundWindowSnapshot},
+    model::{
+        CONFIDENCE_ZERO, ForegroundDecision, ForegroundProviderStatus, ForegroundReason,
+        ForegroundSource, ForegroundWindowSnapshot,
+    },
     parse::sway::{SwayNode, focused_sway_snapshot_from_tree},
     provider::ForegroundProvider,
 };
@@ -49,9 +52,15 @@ impl SwayForegroundProvider {
                 elapsed_ms,
                 source: Some(ForegroundSource::Sway),
                 status: ForegroundProviderStatus::Error,
-                confidence: 0.0,
-                reason: format!("failed to parse swaymsg get_tree JSON: {err}"),
-                ..ForegroundWindowSnapshot::default()
+                decision: ForegroundDecision {
+                    target: None,
+                    confidence: CONFIDENCE_ZERO,
+                    reasons: vec![ForegroundReason {
+                        reason: format!("failed to parse swaymsg get_tree JSON: {err}"),
+                    }],
+                    rejected_candidates: Vec::new(),
+                },
+                stale_ms: None,
             },
         }
     }
@@ -68,9 +77,16 @@ impl ForegroundProvider for SwayForegroundProvider {
                 elapsed_ms,
                 source: Some(ForegroundSource::Sway),
                 status: ForegroundProviderStatus::Unavailable,
-                confidence: 0.0,
-                reason: "SWAYSOCK is not set; Sway foreground provider is unavailable".to_owned(),
-                ..ForegroundWindowSnapshot::default()
+                decision: ForegroundDecision {
+                    target: None,
+                    confidence: CONFIDENCE_ZERO,
+                    reasons: vec![ForegroundReason {
+                        reason: "SWAYSOCK is not set; Sway foreground provider is unavailable"
+                            .to_owned(),
+                    }],
+                    rejected_candidates: Vec::new(),
+                },
+                stale_ms: None,
             };
         }
 
@@ -79,12 +95,18 @@ impl ForegroundProvider for SwayForegroundProvider {
                 elapsed_ms,
                 source: Some(ForegroundSource::Sway),
                 status: ForegroundProviderStatus::Unavailable,
-                confidence: 0.0,
-                reason: format!(
-                    "{} was not found in trusted foreground helper paths; Sway foreground provider is unavailable",
-                    self.swaymsg
-                ),
-                ..ForegroundWindowSnapshot::default()
+                decision: ForegroundDecision {
+                    target: None,
+                    confidence: CONFIDENCE_ZERO,
+                    reasons: vec![ForegroundReason {
+                        reason: format!(
+                            "{} was not found in trusted foreground helper paths; Sway foreground provider is unavailable",
+                            self.swaymsg
+                        ),
+                    }],
+                    rejected_candidates: Vec::new(),
+                },
+                stale_ms: None,
             };
         };
 
@@ -98,9 +120,18 @@ impl ForegroundProvider for SwayForegroundProvider {
                     elapsed_ms,
                     source: Some(ForegroundSource::Sway),
                     status: ForegroundProviderStatus::Error,
-                    confidence: 0.0,
-                    reason: format!("failed to run {} -t get_tree -r: {err}", swaymsg.display()),
-                    ..ForegroundWindowSnapshot::default()
+                    decision: ForegroundDecision {
+                        target: None,
+                        confidence: CONFIDENCE_ZERO,
+                        reasons: vec![ForegroundReason {
+                            reason: format!(
+                                "failed to run {} -t get_tree -r: {err}",
+                                swaymsg.display()
+                            ),
+                        }],
+                        rejected_candidates: Vec::new(),
+                    },
+                    stale_ms: None,
                 };
             }
         };
@@ -111,14 +142,20 @@ impl ForegroundProvider for SwayForegroundProvider {
                 elapsed_ms,
                 source: Some(ForegroundSource::Sway),
                 status: ForegroundProviderStatus::Error,
-                confidence: 0.0,
-                reason: format!(
-                    "{} -t get_tree -r exited with status {}; stderr={}",
-                    swaymsg.display(),
-                    output.status,
-                    stderr.trim()
-                ),
-                ..ForegroundWindowSnapshot::default()
+                decision: ForegroundDecision {
+                    target: None,
+                    confidence: CONFIDENCE_ZERO,
+                    reasons: vec![ForegroundReason {
+                        reason: format!(
+                            "{} -t get_tree -r exited with status {}; stderr={}",
+                            swaymsg.display(),
+                            output.status,
+                            stderr.trim()
+                        ),
+                    }],
+                    rejected_candidates: Vec::new(),
+                },
+                stale_ms: None,
             };
         }
 
@@ -128,9 +165,15 @@ impl ForegroundProvider for SwayForegroundProvider {
                 elapsed_ms,
                 source: Some(ForegroundSource::Sway),
                 status: ForegroundProviderStatus::Error,
-                confidence: 0.0,
-                reason: format!("swaymsg get_tree output was not valid UTF-8: {err}"),
-                ..ForegroundWindowSnapshot::default()
+                decision: ForegroundDecision {
+                    target: None,
+                    confidence: CONFIDENCE_ZERO,
+                    reasons: vec![ForegroundReason {
+                        reason: format!("swaymsg get_tree output was not valid UTF-8: {err}"),
+                    }],
+                    rejected_candidates: Vec::new(),
+                },
+                stale_ms: None,
             },
         }
     }

@@ -45,7 +45,7 @@ use crate::{
     diagnosis::{LiveDiagnosisEntry, diagnose_cluster},
     dmabuf_log::DmaBufLogReader,
     ebpf_loader,
-    focus::{FocusResolver, ResolvedFocus},
+    focus::ResolvedFocus,
     gpu_engine::EngineSampler,
     hwmon, mangohud,
     metrics::{collect_interval_summaries_labeled, log_drop_counters, print_session_summaries},
@@ -91,7 +91,7 @@ pub(crate) mod hwmon_stage;
 pub(crate) mod live_telemetry;
 #[path = "session/mangohud_frames.rs"]
 pub(crate) mod mangohud_frames;
-#[path = "session/monitor_session.rs"]
+#[path = "session/monitor_session/mod.rs"]
 pub(crate) mod monitor_session;
 #[path = "session/outputs.rs"]
 pub(crate) mod outputs;
@@ -101,6 +101,8 @@ pub(crate) mod probes;
 pub(crate) mod recording;
 #[path = "session/runtime.rs"]
 pub(crate) mod runtime;
+#[path = "session/runtime_handles.rs"]
+pub(crate) mod runtime_handles;
 #[path = "session/sampler.rs"]
 pub(crate) mod sampler;
 #[path = "session/sinks.rs"]
@@ -151,51 +153,51 @@ impl SessionProbePlan {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct TargetTickContext {
+pub(crate) struct TargetTickContext {
     event: TargetTickEvent,
 }
 
 #[derive(Debug, Clone, Copy)]
-enum TargetTickEvent {
+pub(crate) enum TargetTickEvent {
     Tree,
     Watch,
 }
 
 #[derive(Debug, Clone, Copy)]
-struct SummaryTickContext;
+pub(crate) struct SummaryTickContext;
 
 #[derive(Debug, Clone, Copy)]
-struct ProbeDrainContext;
+pub(crate) struct ProbeDrainContext;
 
 #[derive(Debug)]
-struct FrameTickContext {
+pub(crate) struct FrameTickContext {
     frame: recorder::FrameEvent,
 }
 
 #[derive(Debug)]
-struct WaylandPresentationTickContext {
+pub(crate) struct WaylandPresentationTickContext {
     event: recorder::WaylandPresentationEventRecord,
 }
 
 #[derive(Debug)]
-struct DmaBufTickContext {
+pub(crate) struct DmaBufTickContext {
     event: recorder::DmaBufEventRecord,
 }
 
 #[derive(Debug, Clone, Copy)]
-struct TelemetryTickContext {
+pub(crate) struct TelemetryTickContext {
     event: TelemetryTickEvent,
 }
 
 #[derive(Debug, Clone, Copy)]
-enum TelemetryTickEvent {
+pub(crate) enum TelemetryTickEvent {
     MangoHudAlignment { raw_ms: u64, monotonic_ns: u64 },
     Scx,
     Hwmon,
 }
 
 #[derive(Debug)]
-struct UiTickContext {
+pub(crate) struct UiTickContext {
     event: Event,
 }
 

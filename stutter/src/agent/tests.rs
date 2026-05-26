@@ -12,5 +12,6 @@ mod recording;
 mod remote_policy;
 mod remote_policy_limits;
 mod remote_request;
+mod schema;
 mod security;
 mod unix_socket;

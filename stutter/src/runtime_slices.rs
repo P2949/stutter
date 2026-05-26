@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fs,
+    fs, io,
     path::{Path, PathBuf},
 };
 
@@ -10,6 +10,8 @@ use crate::{
     metrics::{RuntimeSliceRecord, RuntimeSliceSource},
     process_tree::TaskInfo,
 };
+
+const DEFAULT_CLOCK_TICKS_PER_SECOND: u64 = 100;
 
 #[derive(Debug)]
 pub struct RuntimeSliceSampler {
@@ -45,7 +47,12 @@ impl RuntimeSliceSampler {
     pub fn new() -> Self {
         Self {
             proc_root: PathBuf::from("/proc"),
-            clock_ticks_per_second: clock_ticks_per_second(),
+            clock_ticks_per_second: clock_ticks_per_second().unwrap_or_else(|err| {
+                log::debug!(
+                    "clock_ticks_per_second_unavailable err={err}; using fallback {DEFAULT_CLOCK_TICKS_PER_SECOND}"
+                );
+                DEFAULT_CLOCK_TICKS_PER_SECOND
+            }),
             previous: BTreeMap::new(),
         }
     }
@@ -54,7 +61,8 @@ impl RuntimeSliceSampler {
     pub fn with_proc_root(proc_root: PathBuf) -> Self {
         Self {
             proc_root,
-            clock_ticks_per_second: clock_ticks_per_second(),
+            clock_ticks_per_second: clock_ticks_per_second()
+                .unwrap_or(DEFAULT_CLOCK_TICKS_PER_SECOND),
             previous: BTreeMap::new(),
         }
     }
@@ -307,9 +315,8 @@ fn ticks_to_ns(ticks: u64, clock_ticks_per_second: u64) -> u64 {
     ((ticks as u128).saturating_mul(1_000_000_000) / clock_ticks_per_second as u128) as u64
 }
 
-fn clock_ticks_per_second() -> u64 {
-    let ticks = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
-    if ticks > 0 { ticks as u64 } else { 100 }
+fn clock_ticks_per_second() -> io::Result<u64> {
+    Ok(crate::syscall::clock_ticks_per_second())
 }
 
 #[cfg(test)]

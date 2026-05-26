@@ -508,28 +508,23 @@ pub(super) use config_builder::{
 };
 
 #[cfg(test)]
-fn parse_monitor_config_for_phase15<const N: usize>(
-    args: [&str; N],
-) -> anyhow::Result<Arc<crate::config::model::MonitorConfig>> {
-    let _lock = crate::test_support::TEST_MUTEX.lock().unwrap();
-    match super::parse_app_command_from(args.iter().map(OsString::from))? {
-        AppCommand::Monitor(input) => Ok(input.config.clone()),
-        other => anyhow::bail!("expected AppCommand::Monitor, got {other:?}"),
-    }
-}
+#[path = "tests/monitor/support.rs"]
+mod monitor_test_support;
+#[cfg(test)]
+pub(super) use monitor_test_support::parse_monitor_config_for_phase15;
 
 #[cfg(test)]
-#[path = "monitor/tests/target_filter.rs"]
+#[path = "tests/monitor/target_filter.rs"]
 mod monitor_target_filter_cli_tests;
 
 #[cfg(test)]
-#[path = "monitor/tests/record_check_performance.rs"]
+#[path = "tests/monitor/record_check_performance.rs"]
 mod monitor_record_check_performance_cli_tests;
 
 #[cfg(test)]
-#[path = "monitor/tests/bench.rs"]
+#[path = "tests/monitor/bench.rs"]
 mod bench_cli_tests;
 
 #[cfg(test)]
-#[path = "monitor/tests/auto_focus.rs"]
+#[path = "tests/monitor/auto_focus.rs"]
 mod auto_focus_cli_tests;

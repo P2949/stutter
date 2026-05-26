@@ -5,12 +5,18 @@ use super::{support::*, *};
 #[test]
 fn diff_tasks_orders_removed_before_added_by_tid() {
     let old_tasks = BTreeMap::from([
-        (2, task_info(2, 20, "old", "old-2", TaskClass::Helper)),
-        (4, task_info(4, 40, "old", "old-4", TaskClass::Helper)),
+        (
+            2.into(),
+            task_info(2, 20, "old", "old-2", TaskClass::Helper),
+        ),
+        (
+            4.into(),
+            task_info(4, 40, "old", "old-4", TaskClass::Helper),
+        ),
     ]);
     let new_tasks = BTreeMap::from([
-        (1, task_info(1, 10, "new", "new-1", TaskClass::Game)),
-        (3, task_info(3, 30, "new", "new-3", TaskClass::Game)),
+        (1.into(), task_info(1, 10, "new", "new-1", TaskClass::Game)),
+        (3.into(), task_info(3, 30, "new", "new-3", TaskClass::Game)),
     ]);
 
     let diffs = process_tree::diff_tasks_ref(&old_tasks, &new_tasks);

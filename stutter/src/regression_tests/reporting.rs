@@ -19,7 +19,7 @@ fn report_reads_recorded_session_and_spike_events() {
     };
     let config = test_config(vec![7], vec![], Some(Duration::from_secs(1)));
     let active_targets = BTreeMap::from([(
-        7,
+        7.into(),
         task_info(7, 7, "KingdomCome.exe", "RenderThread", TaskClass::Game),
     )]);
     let mut stats = metrics::TaskStats::new(7, "RenderThread".to_owned(), 0);
@@ -27,17 +27,17 @@ fn report_reads_recorded_session_and_spike_events() {
     stats.session_latency.record(6_000_000);
     stats.top_spikes.push(metrics::SpikeRecord {
         latency_ns: 6_000_000,
-        cpu: 0,
-        wakeup_target_cpu: 0,
+        cpu: 0.into(),
+        wakeup_target_cpu: 0.into(),
         prio: 120,
         wakeup_ns: 1_010_000_000,
         switch_ns: 1_016_000_000,
-        switch_prev_pid: 0,
+        switch_prev_pid: 0.into(),
         switch_prev_state: 0,
         switch_prev_state_label: "".to_owned(),
         ..metrics::SpikeRecord::default()
     });
-    let stats_by_task = BTreeMap::from([(7, stats)]);
+    let stats_by_task = BTreeMap::from([(7.into(), stats)]);
     let spike_events = vec![SpikeEvent {
         elapsed_ms: Some(16),
         task: 7.into(),
@@ -139,8 +139,8 @@ fn report_cluster_output_caps_inline_points() {
     };
 
     let config = test_config(vec![7], vec![], Some(Duration::from_secs(1)));
-    let active_targets: BTreeMap<u32, TaskInfo> = BTreeMap::new();
-    let stats_by_task: BTreeMap<u32, metrics::TaskStats> = BTreeMap::new();
+    let active_targets: process_tree::TaskMap = BTreeMap::new();
+    let stats_by_task: metrics::TaskStatsMap = BTreeMap::new();
 
     let spike_events = (0..10)
         .map(|idx| SpikeEvent {

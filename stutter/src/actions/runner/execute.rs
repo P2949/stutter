@@ -13,7 +13,7 @@ use super::{
     rollback::{rollback_after_apply_hook_failure, rollback_after_timeout, total_timeout_error},
 };
 use crate::{
-    actions::{ActionError, ActionPhase, TuningAction},
+    actions::{ActionError, ActionPhase, ActionPreflightReport, TuningAction},
     audit::{AuditEvent, unix_nanos_now},
     daemon_policy::PolicyIntent,
 };
@@ -104,7 +104,12 @@ where
 
     let result = (|| -> Result<AuditedActionResult, ActionError> {
         audit_event.action_phase = Some(crate::actions::ActionPhase::Preflight);
-        let preflight_warnings = action.preflight().map_err(ActionError::preflight)?;
+        let preflight_report =
+            ActionPreflightReport::from_preflight_result(action_id.clone(), action.preflight());
+        if preflight_report.is_blocked() {
+            return Err(ActionError::preflight(preflight_report.blocker_messages()));
+        }
+        let preflight_warnings = preflight_report.warnings;
         let preflight_message = if preflight_warnings.is_empty() {
             "preflight successful".to_owned()
         } else {

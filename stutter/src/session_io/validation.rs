@@ -1,4 +1,27 @@
-use super::*;
+use std::path::Path;
+
+use anyhow::Result;
+
+use super::{
+    artifact_counts::warn_if_artifact_count_mismatch,
+    load_json::{count_ndjson_file, load_json_file},
+    paths::{artifact_input_path, file_name_for_path, push_unique_string, run_dir_for},
+    required::load_session,
+    run_artifacts::RunValidationReport,
+};
+use crate::{
+    artifacts::{
+        ArtifactEncoding, ArtifactKind, ArtifactSelection, artifact_file_name, artifact_kinds,
+        artifact_path, artifact_primary_and_alias_paths, artifact_spec,
+    },
+    recorder::{
+        BlockIoRecord, CpuFreqRecord, DmaBufEventRecord, DrmFenceEventRecord, FocusEvent,
+        ForegroundEvent, FrameEvent, GpuEngineSample, GpuSample, IntervalRecord, IrqEventRecord,
+        KmsFlipEventRecord, MetadataFile, MigrationEventRecord, RuntimeSliceRecord,
+        SESSION_SCHEMA_VERSION, ScxEvent, SessionFile, SpikeEvent, TreeEvent,
+        WaylandPresentationEventRecord,
+    },
+};
 
 pub fn validate_run_dir(path: &Path) -> Result<RunValidationReport> {
     let _selection = ArtifactSelection::validate_only();
@@ -38,12 +61,20 @@ fn validate_metadata_file(report: &mut RunValidationReport) {
         match load_json_file::<MetadataFile>(&path) {
             Ok(metadata) => {
                 push_unique_string(&mut report.present_files, file_name);
-                if metadata.core.schema_version < SESSION_SCHEMA_VERSION {
+                if metadata
+                    .core
+                    .schema_version
+                    .is_older_than(SESSION_SCHEMA_VERSION)
+                {
                     report.warnings.push(format!(
                         "metadata schema version {} is older than current {}",
                         metadata.core.schema_version, SESSION_SCHEMA_VERSION
                     ));
-                } else if metadata.core.schema_version > SESSION_SCHEMA_VERSION {
+                } else if metadata
+                    .core
+                    .schema_version
+                    .is_newer_than(SESSION_SCHEMA_VERSION)
+                {
                     report.errors.push(format!(
                         "metadata schema version {} is newer than current {}",
                         metadata.core.schema_version, SESSION_SCHEMA_VERSION
@@ -74,12 +105,20 @@ fn validate_session_file(path: &Path, report: &mut RunValidationReport) -> Resul
     let session = load_session(path)?;
     push_unique_string(&mut report.present_files, file_name);
 
-    if session.core.schema_version < SESSION_SCHEMA_VERSION {
+    if session
+        .core
+        .schema_version
+        .is_older_than(SESSION_SCHEMA_VERSION)
+    {
         report.warnings.push(format!(
             "session schema version {} is older than current {}",
             session.core.schema_version, SESSION_SCHEMA_VERSION
         ));
-    } else if session.core.schema_version > SESSION_SCHEMA_VERSION {
+    } else if session
+        .core
+        .schema_version
+        .is_newer_than(SESSION_SCHEMA_VERSION)
+    {
         report.errors.push(format!(
             "session schema version {} is newer than current {}",
             session.core.schema_version, SESSION_SCHEMA_VERSION

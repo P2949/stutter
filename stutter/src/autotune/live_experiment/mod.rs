@@ -16,7 +16,7 @@ use crate::{
         decision::AutotuneDecision,
         experiment::{ExperimentId, WindowScore},
         kept::{ActiveProfileState, KeptCandidateState},
-        objective::{ObjectiveComparisonInput, compare_for_objective},
+        objective::{ObjectiveComparisonInput, compare_for_objective, explain_for_objective},
         observation::AutotuneObservation,
         planning::candidate::CandidateAction,
         state::ControllerPhase,
@@ -525,6 +525,16 @@ impl LiveExperimentManager {
         let candidate_score = window_score_from_observation(observation);
         validate_window_score_for_apply("candidate", &candidate_score)?;
         let result = Self::compare_keep_result(&experiment, &candidate_score, observation);
+        let objective_decision = explain_for_objective(ObjectiveComparisonInput {
+            objective: experiment.candidate.objective(),
+            baseline: &experiment.baseline_score,
+            candidate: &candidate_score,
+            baseline_signals: &experiment.baseline_signals,
+            candidate_signals: &observation.objective_signals,
+            data_quality: experiment_data_quality(&observation.data_quality),
+            target_disappeared: !observation.target_present,
+        });
+        debug_assert_eq!(result, objective_decision.experiment_result());
 
         match result {
             ExperimentResult::Improved { .. } => {
@@ -608,7 +618,10 @@ impl LiveExperimentManager {
                     controller_state,
                     observation,
                     observation.now_unix_nanos,
-                    &format!("candidate was not improved at keep point: {other:?}"),
+                    &format!(
+                        "candidate was not improved at keep point: {other:?}; {}",
+                        objective_decision.summary()
+                    ),
                     executor,
                 )
             }

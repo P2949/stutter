@@ -26,7 +26,7 @@ pub(super) fn add_foreground_fallback_group_if_needed(snapshot: &mut FocusSnapsh
         return;
     };
 
-    let Some(pid) = foreground.pid else {
+    let Some(pid) = foreground.decision.target.as_ref().and_then(|t| t.pid) else {
         return;
     };
 
@@ -47,7 +47,7 @@ pub(super) fn add_foreground_fallback_group_if_needed(snapshot: &mut FocusSnapsh
     }
 
     let member_pids = descendants_of_process(snapshot, pid);
-    let confidence = (foreground.confidence * 0.75).clamp(0.0, 1.0);
+    let confidence = (foreground.decision.confidence * 0.75).clamp(0.0, 1.0);
     let display_name = if process.comm.trim().is_empty() {
         format!("foreground:{pid}")
     } else {

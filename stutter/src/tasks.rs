@@ -2,10 +2,11 @@ use std::{collections::BTreeMap, time::Instant};
 
 use aya::maps::{HashMap as AyaHashMap, MapData};
 use log::info;
+use stutter_core::ids::Tid;
 
 use crate::{
-    metrics,
-    process_tree::{TargetDiffAction, TargetSnapshotInput, TaskInfo},
+    metrics::{self, TaskStatsMap},
+    process_tree::{TargetDiffAction, TargetSnapshotInput, TaskInfo, TaskMap as ProcessTaskMap},
     recorder::TreeEvent,
 };
 
@@ -29,27 +30,27 @@ pub struct RefreshInternalInput<'a> {
     pub elapsed_ms: u64,
     pub recording_started: Option<Instant>,
     pub prev_faults_map: Option<&'a mut AyaHashMap<MapData, u32, [u64; 2]>>,
-    pub target_pid_map: &'a mut dyn TaskMap,
+    pub target_pid_map: &'a mut dyn BpfTaskMap,
 }
 
 pub type TaskExeInodesMap = BTreeMap<u32, (Option<u64>, Option<u64>, Option<u64>)>;
 
 #[derive(Default)]
 pub struct TaskTracker {
-    pub active_targets: BTreeMap<u32, TaskInfo>,
-    pub known_targets: BTreeMap<u32, TaskInfo>,
-    pub stats_by_task: BTreeMap<u32, metrics::TaskStats>,
+    pub active_targets: ProcessTaskMap,
+    pub known_targets: ProcessTaskMap,
+    pub stats_by_task: TaskStatsMap,
     pub prev_faults_snapshot: BTreeMap<u32, (u64, u64)>,
     pub task_exe_inodes: TaskExeInodesMap,
     pub cache: crate::process_tree::ProcessCache,
 }
 
-pub trait TaskMap: Send {
+pub trait BpfTaskMap: Send {
     fn insert(&mut self, k: u32, v: u8, f: u64) -> anyhow::Result<()>;
     fn remove(&mut self, k: &u32) -> anyhow::Result<()>;
 }
 
-impl TaskMap for AyaHashMap<MapData, u32, u8> {
+impl BpfTaskMap for AyaHashMap<MapData, u32, u8> {
     fn insert(&mut self, k: u32, v: u8, f: u64) -> anyhow::Result<()> {
         AyaHashMap::insert(self, k, v, f).map_err(|e| anyhow::anyhow!(e))
     }
@@ -128,10 +129,11 @@ impl TaskTracker {
         }
 
         for (action, task) in diffs {
-            let tid = task.task_id().as_u32();
+            let tid = task.task_id();
+            let tid_raw = tid.as_u32();
             match action {
                 TargetDiffAction::Added => {
-                    input.target_pid_map.insert(tid, 1, 0)?;
+                    input.target_pid_map.insert(tid_raw, 1, 0)?;
 
                     let action_name = target_event_action(task.from_cgroup, "added");
                     info!(
@@ -159,7 +161,7 @@ impl TaskTracker {
                         input.elapsed_ms,
                     );
 
-                    update_task_exe_info(&mut self.task_exe_inodes, tid, &task);
+                    update_task_exe_info(&mut self.task_exe_inodes, tid_raw, &task);
 
                     self.active_targets.insert(tid, task.clone());
                     self.known_targets.insert(tid, task);
@@ -191,10 +193,10 @@ impl TaskTracker {
                     remove_prev_faults_state(
                         &mut prev_faults_map,
                         &mut self.prev_faults_snapshot,
-                        tid,
+                        tid_raw,
                     );
 
-                    input.target_pid_map.remove(&tid)?;
+                    input.target_pid_map.remove(&tid_raw)?;
                     self.active_targets.remove(&tid);
                 }
             }
@@ -205,7 +207,7 @@ impl TaskTracker {
 
     pub fn handle_replacements(
         &mut self,
-        desired_tasks: &BTreeMap<u32, TaskInfo>,
+        desired_tasks: &ProcessTaskMap,
         tree_events: &mut Vec<TreeEvent>,
         prev_faults_map: &mut Option<&mut AyaHashMap<MapData, u32, [u64; 2]>>,
         elapsed_ms: u64,
@@ -215,6 +217,7 @@ impl TaskTracker {
             if let Some(active) = self.active_targets.get(tid)
                 && !crate::process_tree::same_logical_task(active, desired)
             {
+                let tid_raw = tid.as_u32();
                 info!(
                     "target_replaced tid={} old_pid={} new_pid={} old_comm={} new_comm={} old_class={:?} new_class={:?}",
                     tid,
@@ -246,9 +249,9 @@ impl TaskTracker {
                     elapsed_ms,
                 );
 
-                update_task_exe_info(&mut self.task_exe_inodes, *tid, desired);
+                update_task_exe_info(&mut self.task_exe_inodes, tid_raw, desired);
 
-                remove_prev_faults_state(prev_faults_map, &mut self.prev_faults_snapshot, *tid);
+                remove_prev_faults_state(prev_faults_map, &mut self.prev_faults_snapshot, tid_raw);
 
                 self.active_targets.insert(*tid, desired.clone());
                 self.known_targets.insert(*tid, desired.clone());
@@ -269,13 +272,13 @@ pub fn remove_prev_faults_state(
 }
 
 pub fn reset_stats_for_task_change(
-    stats_by_task: &mut BTreeMap<u32, metrics::TaskStats>,
+    stats_by_task: &mut TaskStatsMap,
     recording_started: Option<Instant>,
-    tid: u32,
+    tid: Tid,
     task_info: &TaskInfo,
     elapsed_ms: u64,
 ) {
-    let mut stats = metrics::TaskStats::new(tid, task_info.comm.clone(), elapsed_ms);
+    let mut stats = metrics::TaskStats::new(tid.as_u32(), task_info.comm.clone(), elapsed_ms);
     stats.apply_task_info(task_info);
     if let Some(_started) = recording_started {
         stats.recording_started(elapsed_ms);
@@ -284,9 +287,9 @@ pub fn reset_stats_for_task_change(
 }
 
 pub fn reactivate_or_reset_stats_inner(
-    stats_by_task: &mut BTreeMap<u32, metrics::TaskStats>,
+    stats_by_task: &mut TaskStatsMap,
     recording_started: Option<Instant>,
-    tid: u32,
+    tid: Tid,
     task_info: &TaskInfo,
     elapsed_ms: u64,
 ) {
@@ -354,17 +357,23 @@ mod tests {
         config.target.max_tasks = 1;
 
         let mut tasks = BTreeMap::new();
-        tasks.insert(1, task_info(1, 100, "proc1", "task1", TaskClass::Game));
-        tasks.insert(2, task_info(2, 100, "proc1", "task2", TaskClass::Game));
+        tasks.insert(
+            1.into(),
+            task_info(1, 100, "proc1", "task1", TaskClass::Game),
+        );
+        tasks.insert(
+            2.into(),
+            task_info(2, 100, "proc1", "task2", TaskClass::Game),
+        );
 
         let snapshot = TargetSnapshot {
             tasks,
-            process_roots: std::collections::BTreeSet::from([100]),
+            process_roots: std::collections::BTreeSet::from([100.into()]),
             budget_report: crate::process_tree::ScanBudgetReport::default(),
         };
 
         struct MockMap;
-        impl TaskMap for MockMap {
+        impl BpfTaskMap for MockMap {
             fn insert(&mut self, _: u32, _: u8, _: u64) -> anyhow::Result<()> {
                 Ok(())
             }
@@ -463,17 +472,18 @@ mod tests {
         // 1. active_targets contains tid=7 comm="old" starttime=10
         let mut old_task = task_info(tid, 100, "old_proc", "old", TaskClass::Game);
         old_task.task_starttime_ticks = Some(10);
-        tracker.active_targets.insert(tid, old_task.clone());
-        tracker.known_targets.insert(tid, old_task.clone());
-        tracker
-            .stats_by_task
-            .insert(tid, metrics::TaskStats::new(tid, "old".to_string(), 0));
+        tracker.active_targets.insert(tid.into(), old_task.clone());
+        tracker.known_targets.insert(tid.into(), old_task.clone());
+        tracker.stats_by_task.insert(
+            tid.into(),
+            metrics::TaskStats::new(tid, "old".to_string(), 0),
+        );
 
         // 2. desired snapshot contains tid=7 comm="new" starttime=20
         let mut new_task = task_info(tid, 101, "new_proc", "new", TaskClass::Game);
         new_task.task_starttime_ticks = Some(20);
         let mut desired = BTreeMap::new();
-        desired.insert(tid, new_task.clone());
+        desired.insert(tid.into(), new_task.clone());
 
         // 3. call handle_replacements
         let mut tree_events = Vec::new();

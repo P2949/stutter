@@ -66,7 +66,7 @@ pub fn build_focus_snapshot_from_processes(
     proc_root: &Path,
     cache: &mut FocusCache,
     elapsed_ms: u64,
-    processes: BTreeMap<u32, crate::process_tree::ProcInfo>,
+    processes: crate::process::model::ProcessMap,
     foreground: Option<ForegroundWindowSnapshot>,
 ) -> FocusSnapshot {
     let mut children_by_parent: BTreeMap<u32, Vec<u32>> = BTreeMap::new();
@@ -93,7 +93,7 @@ pub fn build_focus_snapshot_from_processes(
         let cgroup_path = non_empty_str(&proc_info.cgroup_path);
         let is_foreground_window_process = foreground
             .as_ref()
-            .and_then(|fg| fg.pid)
+            .and_then(|fg| fg.decision.target.as_ref().and_then(|t| t.pid))
             .is_some_and(|pid| pid == proc_info.pid);
 
         let classification = classify_process(&ProcessIdentity {

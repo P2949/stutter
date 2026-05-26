@@ -1,0 +1,26 @@
+Usage: stutter daemon <COMMAND>
+
+Commands:
+  config             
+  policy             
+  policy-lint        
+  profiles           
+  explain            
+  why-not-optimize   
+  what-changed       
+  status             
+  watch              
+  doctor             
+  reset-state        
+  bench-overhead     
+  soak               
+  acceptance         
+  pause              
+  resume             
+  resync-state       
+  restore            
+  emergency-restore  
+  help               Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help

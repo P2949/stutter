@@ -74,7 +74,7 @@ impl RollbackHandler for CpuPowerRollbackHandler {
     }
 
     fn supports_token(&self, token: &RollbackToken) -> bool {
-        matches!(token, RollbackToken::CpuPowerRestore { .. })
+        token.as_cpu_power_restore().is_some()
     }
 
     fn dry_run_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackPreview> {
@@ -85,7 +85,7 @@ impl RollbackHandler for CpuPowerRollbackHandler {
     }
 
     fn restore_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackResult> {
-        let RollbackToken::CpuPowerRestore { records } = token else {
+        let Some(records) = token.as_cpu_power_restore() else {
             anyhow::bail!("CPU power rollback handler does not support {token:?}");
         };
 
@@ -302,8 +302,11 @@ impl TuningAction for CpuPowerAction {
     }
 
     fn rollback(&self, token: &RollbackToken) -> anyhow::Result<()> {
-        let RollbackToken::CpuPowerRestore { records } = token else {
-            anyhow::bail!("rollback token is not a CPU power restore token");
+        let Some(records) = token.as_cpu_power_restore() else {
+            return Err(crate::actions::ActionError::invalid_rollback_token_kind(
+                token.kind_error("cpu-power-restore"),
+            )
+            .into());
         };
 
         rollback_cpu_power_records(records)

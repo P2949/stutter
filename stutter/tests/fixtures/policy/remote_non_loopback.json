@@ -1,0 +1,97 @@
+{
+  "verdict": "reject",
+  "decision": {
+    "kind": "rejected",
+    "rejection": {
+      "kind": "remote_apply_requires_loopback_bind"
+    }
+  },
+  "intent": "apply",
+  "action_id": "test-action",
+  "action_kind": "test",
+  "mode": "apply-low-risk",
+  "source": "remote_agent",
+  "evaluated_rules": [
+    {
+      "rule": "intent_allowed",
+      "passed": true,
+      "reason": "apply intent is allowed in daemon mode apply-low-risk"
+    },
+    {
+      "rule": "remote_apply_enabled",
+      "passed": true,
+      "reason": "remote apply is enabled by daemon configuration"
+    },
+    {
+      "rule": "remote_auth_configured",
+      "passed": true,
+      "reason": "remote apply has configured bearer-token authentication"
+    },
+    {
+      "rule": "remote_request_authorized",
+      "passed": true,
+      "reason": "remote apply request is authorized"
+    },
+    {
+      "rule": "remote_loopback_bind",
+      "passed": false,
+      "reason": "remote apply bind address is not loopback"
+    },
+    {
+      "rule": "remote_mode_supported",
+      "passed": true,
+      "reason": "remote mode apply-low-risk is within configured remote limits"
+    },
+    {
+      "rule": "remote_target_count",
+      "passed": true,
+      "reason": "remote target count 1 is within max_targets 1"
+    },
+    {
+      "rule": "safety_class_allowed",
+      "passed": true,
+      "reason": "safety class ReversibleLowRisk is allowed in daemon mode apply-low-risk"
+    },
+    {
+      "rule": "effect_scope_allowed",
+      "passed": true,
+      "reason": "effect scope LocalProcessTree is allowed in daemon mode apply-low-risk"
+    },
+    {
+      "rule": "system_wide_apply_permission",
+      "passed": true,
+      "reason": "system-wide apply permission is satisfied"
+    },
+    {
+      "rule": "persistent_effect_permission",
+      "passed": true,
+      "reason": "persistent effect permission is satisfied"
+    },
+    {
+      "rule": "action_family_enabled",
+      "passed": true,
+      "reason": "action family is enabled by daemon policy"
+    },
+    {
+      "rule": "action_family_not_denied",
+      "passed": true,
+      "reason": "action family is not denied by daemon policy"
+    },
+    {
+      "rule": "rollback_available",
+      "passed": true,
+      "reason": "rollback is available before apply"
+    },
+    {
+      "rule": "explicit_target_scope",
+      "passed": true,
+      "reason": "explicit target requirement is satisfied"
+    },
+    {
+      "rule": "confidence_threshold",
+      "passed": true,
+      "reason": "action confidence 0.900 meets required minimum 0.700"
+    }
+  ],
+  "final_reason": "remote autotune apply mode is only allowed on loopback binds"
+}

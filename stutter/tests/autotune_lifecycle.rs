@@ -554,7 +554,7 @@ async fn medium_risk_apply_through_unix_socket_lifecycle() -> anyhow::Result<()>
 
     let mut runtime = AutotuneRuntime::new(config);
     let mut active_targets = BTreeMap::new();
-    active_targets.insert(root_pid, current_process_game_task(tid));
+    active_targets.insert(root_pid.into(), current_process_game_task(tid));
 
     runtime.on_event(MonitorEvent::TargetSnapshot {
         elapsed_ms: 0,
@@ -668,7 +668,7 @@ async fn apply_low_risk_fake_candidate_lifecycle_keeps_and_cleans_journal() -> a
 
     let mut runtime = AutotuneRuntime::new(config);
     let mut active_targets = BTreeMap::new();
-    active_targets.insert(1234, game_task(1234));
+    active_targets.insert(1234.into(), game_task(1234));
 
     runtime.on_event(MonitorEvent::TargetSnapshot {
         elapsed_ms: 0,

@@ -2,34 +2,17 @@
 #![no_main]
 
 use aya_ebpf::{
-    helpers::{
-        bpf_get_current_cgroup_id, bpf_get_current_pid_tgid, bpf_get_smp_processor_id,
-        bpf_ktime_get_ns,
-    },
-    macros::{map, tracepoint},
-    maps::{Array, HashMap, LruHashMap, PerCpuArray, RingBuf},
+    helpers::{bpf_get_current_pid_tgid, bpf_get_smp_processor_id, bpf_ktime_get_ns},
+    macros::tracepoint,
     programs::TracePointContext,
 };
 use stutter_common::{
-    BPF_DEFAULT_EVENTS_RINGBUF_BYTES, BPF_MAX_TRACKED_CPUS, CpuFreqEvent, DRM_FENCE_EVENT_SIGNAL,
-    DRM_FENCE_EVENT_WAIT_DONE, DRM_FENCE_EVENT_WAIT_INTERVAL, DRM_FENCE_HAS_CONTEXT,
-    DRM_FENCE_HAS_DURATION, DRM_FENCE_HAS_PID, DRM_FENCE_HAS_SEQNO, DRM_FENCE_HAS_TIMELINE,
-    DRM_FENCE_IS_EXPORTER_SIDE, DRM_FENCE_IS_IMPORTER_SIDE, DRM_FENCE_WAIT_DONE_WITHOUT_START,
-    DROP_COUNTERS_MAX, DROP_CPU_ACCOUNTING_UNTRACKED, DROP_DRM_FENCE_MISSING_START,
-    DROP_IRQ_START_TIMES_INSERT_FAILED, DROP_WAKEUP_DATA_CONSUMED_READ_FAILED,
-    DROP_WAKEUP_DATA_INSERT_FAILED, DROP_WAKEUP_DATA_REPLACED_ENTRY, DROP_WAKEUP_DATA_STALE_ENTRY,
-    DrmFenceEvent, EVENT_CPU_FREQ, EVENT_DRM_FENCE, EVENT_EXEC, EVENT_IRQ_LATENCY, EVENT_MIGRATION,
-    EVENT_RUNNABLE_LATENCY, EVENT_STAT_WAIT, ExecEvent, IrqEvent, KMS_FLIP_EVENT_PAGEFLIP_DONE,
-    KMS_FLIP_EVENT_VBLANK, KMS_FLIP_PROVIDER_AMDGPU, KMS_FLIP_PROVIDER_DRM, KMS_FLIP_PROVIDER_I915,
-    MigrationEvent, SchedulerEvent, StatWaitEvent,
-    tracepoint_offsets::{
-        CPU_FREQUENCY_CPU_ID_OFFSET, CPU_FREQUENCY_STATE_OFFSET, IRQ_HANDLER_IRQ_OFFSET,
-        SCHED_MIGRATE_TASK_DEST_CPU_OFFSET, SCHED_MIGRATE_TASK_ORIG_CPU_OFFSET,
-        SCHED_MIGRATE_TASK_PID_OFFSET, SCHED_STAT_WAIT_DELAY_OFFSET, SCHED_STAT_WAIT_PID_OFFSET,
-        SCHED_SWITCH_NEXT_COMM_OFFSET, SCHED_SWITCH_NEXT_PID_OFFSET, SCHED_SWITCH_NEXT_PRIO_OFFSET,
-        SCHED_SWITCH_PREV_PID_OFFSET, SCHED_SWITCH_PREV_STATE_OFFSET, SCHED_WAKEUP_PID_OFFSET,
-        SCHED_WAKEUP_TARGET_CPU_OFFSET,
-    },
+    BPF_MAX_TRACKED_CPUS, DRM_FENCE_EVENT_SIGNAL, DRM_FENCE_EVENT_WAIT_DONE,
+    DRM_FENCE_EVENT_WAIT_INTERVAL, DRM_FENCE_HAS_CONTEXT, DRM_FENCE_HAS_DURATION,
+    DRM_FENCE_HAS_PID, DRM_FENCE_HAS_SEQNO, DRM_FENCE_HAS_TIMELINE, DRM_FENCE_IS_EXPORTER_SIDE,
+    DRM_FENCE_IS_IMPORTER_SIDE, DRM_FENCE_WAIT_DONE_WITHOUT_START, DROP_DRM_FENCE_MISSING_START,
+    DrmFenceEvent, EVENT_DRM_FENCE, KMS_FLIP_EVENT_PAGEFLIP_DONE, KMS_FLIP_EVENT_VBLANK,
+    KMS_FLIP_PROVIDER_AMDGPU, KMS_FLIP_PROVIDER_DRM, KMS_FLIP_PROVIDER_I915,
 };
 
 // Layout:
@@ -62,6 +45,7 @@ macro_rules! emit_ringbuf_event {
 }
 
 mod block_io;
+mod drop_counters;
 mod kms_emit;
 mod map_limits;
 mod trace_offsets;
@@ -69,130 +53,28 @@ mod trace_read;
 mod wakeup_data;
 
 use kms_emit::emit_kms_flip_event;
-use map_limits::{
-    FENCE_SIGNAL_TIMES_MAP_MAX_ENTRIES, FENCE_WAIT_STARTS_MAP_MAX_ENTRIES,
-    IRQ_START_TIMES_MAP_MAX_ENTRIES, KMS_FLIP_STARTS_MAP_MAX_ENTRIES, PREV_FAULTS_MAP_MAX_ENTRIES,
-    RUNNABLE_TASK_CPU_MAP_MAX_ENTRIES, TARGET_CGROUP_IDS_MAP_MAX_ENTRIES,
-    TARGET_IRQS_MAP_MAX_ENTRIES, TARGET_PIDS_MAP_MAX_ENTRIES,
-};
+mod process_lifecycle;
+mod runnable_depth;
+use process_lifecycle::*;
+mod cpu_frequency;
+use cpu_frequency::*;
+use drop_counters::increment_drop_counter;
+mod irq;
+use irq::*;
+mod scheduler;
+use scheduler::*;
+mod target_filter;
 use trace_offsets::*;
-use trace_read::{
-    read_comm16, read_i32, read_i64, read_optional_u32, read_optional_u64, read_sequence_field,
-    read_u32, read_u64,
-};
-use wakeup_data::{
-    WAKEUP_CONSUME_CURSOR_INSERT_FAILED, WAKEUP_CONSUME_NONE, WAKEUP_CONSUME_OK,
-    WAKEUP_RECORD_INSERT_FAILED, WAKEUP_RECORD_NEW_PENDING,
-    WAKEUP_RECORD_REPLACED_PENDING_MOVED_CPU, WAKEUP_RECORD_REPLACED_PENDING_SAME_CPU, WakeupData,
-};
+use trace_read::{read_optional_u32, read_optional_u64, read_sequence_field};
+
+mod maps;
+use maps::*;
 
 // -----------------------------------------------------------------------------
 // Shared constants and map sizing
 // -----------------------------------------------------------------------------
 
 const _: () = assert!(BPF_MAX_TRACKED_CPUS >= 1024);
-
-// -----------------------------------------------------------------------------
-// BPF maps and shared state structs
-// -----------------------------------------------------------------------------
-
-#[map]
-// Userspace overrides this before loading the BPF object based on the current
-// memlock limit and available memory. The value here is only a safe fallback.
-static EVENTS: RingBuf = RingBuf::with_byte_size(BPF_DEFAULT_EVENTS_RINGBUF_BYTES, 0);
-
-#[map]
-static TARGET_PIDS: HashMap<u32, u8> =
-    HashMap::<u32, u8>::with_max_entries(TARGET_PIDS_MAP_MAX_ENTRIES, 0);
-
-#[map]
-static TARGET_CGROUP_IDS: HashMap<u64, u8> =
-    HashMap::<u64, u8>::with_max_entries(TARGET_CGROUP_IDS_MAP_MAX_ENTRIES, 0);
-
-#[map]
-static TARGET_IRQS: HashMap<u32, u8> =
-    HashMap::<u32, u8>::with_max_entries(TARGET_IRQS_MAP_MAX_ENTRIES, 0);
-
-#[map]
-static IRQ_START_TIMES: HashMap<u64, u64> =
-    HashMap::<u64, u64>::with_max_entries(IRQ_START_TIMES_MAP_MAX_ENTRIES, 0);
-
-#[map]
-// Diagnostic-only count of monitored pending wakeups for this target/task.
-// This is not CPU runqueue depth and must not be used as true CPU contention.
-static TARGET_PENDING_WAKEUPS: Array<u32> = Array::<u32>::with_max_entries(BPF_MAX_TRACKED_CPUS, 0);
-
-#[map]
-// Approximate per-CPU runnable depth for monitored target tasks only,
-// reconstructed from sched wakeup/switch/migrate tracepoints.
-// This is not literal rq->nr_running and does not include unrelated system tasks.
-static CPU_RUNNABLE_DEPTH: Array<u32> = Array::<u32>::with_max_entries(BPF_MAX_TRACKED_CPUS, 0);
-
-#[map]
-// Per-target-TID mapping to the CPU where the monitored task was last counted
-// as runnable. Used to move monitored runnable counts during migration and
-// avoid double-counting duplicate wakeups.
-static RUNNABLE_TASK_CPU: LruHashMap<u32, u32> =
-    LruHashMap::<u32, u32>::with_max_entries(RUNNABLE_TASK_CPU_MAP_MAX_ENTRIES, 0);
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct FaultCounters {
-    maj: u64,
-    min: u64,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub(crate) struct KmsFlipKey {
-    card_minor: u32,
-    crtc_id: u32,
-    pipe: u32,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct FenceKey {
-    context: u64,
-    seqno: u64,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct FenceWaitStart {
-    ts: u64,
-    pid: u32,
-    tid: u32,
-    provider: u32,
-    gpu_role: u32,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct FenceSignal {
-    ts: u64,
-    provider: u32,
-    gpu_role: u32,
-}
-
-#[map]
-static PREV_FAULTS: HashMap<u32, FaultCounters> =
-    HashMap::<u32, FaultCounters>::with_max_entries(PREV_FAULTS_MAP_MAX_ENTRIES, 0);
-
-#[map]
-static KMS_FLIP_STARTS: HashMap<KmsFlipKey, u64> =
-    HashMap::<KmsFlipKey, u64>::with_max_entries(KMS_FLIP_STARTS_MAP_MAX_ENTRIES, 0);
-
-#[map]
-static FENCE_WAIT_STARTS: HashMap<FenceKey, FenceWaitStart> =
-    HashMap::<FenceKey, FenceWaitStart>::with_max_entries(FENCE_WAIT_STARTS_MAP_MAX_ENTRIES, 0);
-
-#[map]
-static FENCE_SIGNAL_TIMES: HashMap<FenceKey, FenceSignal> =
-    HashMap::<FenceKey, FenceSignal>::with_max_entries(FENCE_SIGNAL_TIMES_MAP_MAX_ENTRIES, 0);
-
-#[map]
-static DROP_COUNTERS: PerCpuArray<u64> = PerCpuArray::<u64>::with_max_entries(DROP_COUNTERS_MAX, 0);
 
 // -----------------------------------------------------------------------------
 // Scheduler entrypoints
@@ -241,31 +123,6 @@ pub fn sched_process_exec(ctx: TracePointContext) -> u32 {
     try_sched_process_exec(ctx)
 }
 
-#[inline(always)]
-fn try_sched_process_exec(_ctx: TracePointContext) -> u32 {
-    let pid_tgid = bpf_get_current_pid_tgid();
-    let pid = (pid_tgid >> 32) as u32;
-    let tid = (pid_tgid & 0xffff_ffff) as u32;
-
-    if !is_target_pid(pid) && !is_target_pid_or_current_cgroup(tid) {
-        return 0;
-    }
-
-    let comm = aya_ebpf::helpers::bpf_get_current_comm().unwrap_or([0; 16]);
-    emit_ringbuf_event!(
-        ExecEvent,
-        return 0,
-        ExecEvent {
-            kind: EVENT_EXEC,
-            pid,
-            tid,
-            comm,
-        }
-    );
-
-    0
-}
-
 // -----------------------------------------------------------------------------
 // CPU frequency and scheduler wait tracepoints
 // -----------------------------------------------------------------------------
@@ -287,17 +144,8 @@ pub fn sched_stat_wait(ctx: TracePointContext) -> u32 {
 #[tracepoint]
 /// Tracepoint entry for sched_process_exit.
 /// Clears per-task wakeup, runnable, and fault state.
-pub fn sched_process_exit(_ctx: TracePointContext) -> u32 {
-    let tid = (bpf_get_current_pid_tgid() & 0xffff_ffff) as u32;
-
-    remove_runnable_task_if_present(tid);
-
-    let mut old = WakeupData::default();
-    if wakeup_data::remove_for_exit(tid, &mut old) {
-        decrement_target_pending(old.target_cpu);
-    }
-    let _ = PREV_FAULTS.remove(tid);
-    0
+pub fn sched_process_exit(ctx: TracePointContext) -> u32 {
+    try_sched_process_exit(ctx)
 }
 
 // -----------------------------------------------------------------------------
@@ -307,31 +155,15 @@ pub fn sched_process_exit(_ctx: TracePointContext) -> u32 {
 #[aya_ebpf::macros::perf_event]
 /// Perf-event entry for major page faults.
 /// Increments per-target fault counters used on later scheduler events.
-pub fn major_fault(_ctx: aya_ebpf::programs::PerfEventContext) -> u32 {
-    let tid = (bpf_get_current_pid_tgid() & 0xffff_ffff) as u32;
-    if is_target_pid_or_current_cgroup(tid) {
-        if let Some(counters) = PREV_FAULTS.get_ptr_mut(tid) {
-            unsafe { (*counters).maj += 1 };
-        } else {
-            let _ = PREV_FAULTS.insert(tid, FaultCounters { maj: 1, min: 0 }, 0);
-        }
-    }
-    0
+pub fn major_fault(ctx: aya_ebpf::programs::PerfEventContext) -> u32 {
+    try_major_fault(ctx)
 }
 
 #[aya_ebpf::macros::perf_event]
 /// Perf-event entry for minor page faults.
 /// Increments per-target fault counters used on later scheduler events.
-pub fn minor_fault(_ctx: aya_ebpf::programs::PerfEventContext) -> u32 {
-    let tid = (bpf_get_current_pid_tgid() & 0xffff_ffff) as u32;
-    if is_target_pid_or_current_cgroup(tid) {
-        if let Some(counters) = PREV_FAULTS.get_ptr_mut(tid) {
-            unsafe { (*counters).min += 1 };
-        } else {
-            let _ = PREV_FAULTS.insert(tid, FaultCounters { maj: 0, min: 1 }, 0);
-        }
-    }
-    0
+pub fn minor_fault(ctx: aya_ebpf::programs::PerfEventContext) -> u32 {
+    try_minor_fault(ctx)
 }
 
 // -----------------------------------------------------------------------------
@@ -350,550 +182,6 @@ pub fn irq_handler_entry(ctx: TracePointContext) -> u32 {
 /// Emits IRQ duration for matching target IRQ starts.
 pub fn irq_handler_exit(ctx: TracePointContext) -> u32 {
     try_irq_handler_exit(ctx)
-}
-
-// -----------------------------------------------------------------------------
-// Target filtering, runnable-depth accounting, and drop accounting
-// -----------------------------------------------------------------------------
-
-#[inline(always)]
-fn is_target_current_cgroup() -> bool {
-    // Experimental current-task filter. This must not be used for wakee pid
-    // fields from scheduler tracepoints.
-    let cgroup_id = unsafe { bpf_get_current_cgroup_id() };
-    unsafe { TARGET_CGROUP_IDS.get(cgroup_id).is_some() }
-}
-
-#[inline(always)]
-fn is_target_pid(pid: u32) -> bool {
-    // Only consider explicit per-TID entries populated from userspace.
-    // Avoid relying on eBPF cgroup heuristics for discovery — userspace
-    // periodically refreshes `TARGET_PIDS` from the cgroup tree.
-    unsafe { TARGET_PIDS.get(pid).is_some() }
-}
-
-#[inline(always)]
-fn is_target_pid_or_current_cgroup(pid: u32) -> bool {
-    is_target_pid(pid) || is_target_current_cgroup()
-}
-
-fn is_target_irq(irq: u32) -> bool {
-    unsafe { TARGET_IRQS.get(irq).is_some() }
-}
-
-fn irq_key(irq: u32, cpu: u32) -> u64 {
-    // High 32 bits: IRQ number. Low 32 bits: CPU ID.
-    // CPU IDs such as 65_536 remain entirely in the low half and do not collide
-    // with the IRQ half of the packed key.
-    ((irq as u64) << 32) | cpu as u64
-}
-
-fn increment_drop_counter(reason: u32) {
-    let Some(counter) = DROP_COUNTERS.get_ptr_mut(reason) else {
-        return;
-    };
-
-    unsafe {
-        *counter = (*counter).saturating_add(1);
-    }
-}
-
-#[inline(always)]
-fn valid_cpu(cpu: u32) -> bool {
-    cpu < BPF_MAX_TRACKED_CPUS
-}
-
-#[inline(always)]
-fn read_cpu_runnable_depth(cpu: u32) -> u32 {
-    if !valid_cpu(cpu) {
-        return 0;
-    }
-    CPU_RUNNABLE_DEPTH.get(cpu).copied().unwrap_or(0)
-}
-
-#[inline(always)]
-fn increment_cpu_runnable_depth(cpu: u32) {
-    if !valid_cpu(cpu) {
-        return;
-    }
-    if let Some(depth) = CPU_RUNNABLE_DEPTH.get_ptr_mut(cpu) {
-        unsafe { *depth = (*depth).saturating_add(1) };
-    }
-}
-
-#[inline(always)]
-fn decrement_cpu_runnable_depth(cpu: u32) {
-    if !valid_cpu(cpu) {
-        return;
-    }
-    if let Some(depth) = CPU_RUNNABLE_DEPTH.get_ptr_mut(cpu) {
-        unsafe { *depth = (*depth).saturating_sub(1) };
-    }
-}
-
-#[inline(always)]
-fn mark_task_runnable(pid: u32, target_cpu: u32) -> bool {
-    if pid == 0 {
-        return false;
-    }
-    if !valid_cpu(target_cpu) {
-        increment_drop_counter(DROP_CPU_ACCOUNTING_UNTRACKED);
-        return false;
-    }
-
-    match unsafe { RUNNABLE_TASK_CPU.get(pid).copied() } {
-        Some(old_cpu) if old_cpu == target_cpu => {
-            // Already counted on the same CPU.
-        }
-        Some(old_cpu) => {
-            // Migrated while runnable.
-            decrement_cpu_runnable_depth(old_cpu);
-            increment_cpu_runnable_depth(target_cpu);
-            let _ = RUNNABLE_TASK_CPU.insert(pid, target_cpu, 0);
-        }
-        None => {
-            increment_cpu_runnable_depth(target_cpu);
-            let _ = RUNNABLE_TASK_CPU.insert(pid, target_cpu, 0);
-        }
-    }
-
-    true
-}
-
-#[inline(always)]
-fn mark_task_running(pid: u32, current_cpu: u32) {
-    if pid == 0 {
-        return;
-    }
-
-    if let Some(stored_cpu) = unsafe { RUNNABLE_TASK_CPU.get(pid).copied() } {
-        let cpu_to_decrement = if valid_cpu(stored_cpu) {
-            stored_cpu
-        } else {
-            current_cpu
-        };
-        decrement_cpu_runnable_depth(cpu_to_decrement);
-        let _ = RUNNABLE_TASK_CPU.remove(pid);
-    }
-}
-
-#[inline(always)]
-fn remove_runnable_task_if_present(pid: u32) {
-    if pid == 0 {
-        return;
-    }
-    if let Some(cpu) = unsafe { RUNNABLE_TASK_CPU.get(pid).copied() } {
-        decrement_cpu_runnable_depth(cpu);
-        let _ = RUNNABLE_TASK_CPU.remove(pid);
-    }
-}
-
-fn increment_target_pending(cpu: u32) {
-    if !valid_cpu(cpu) {
-        increment_drop_counter(DROP_CPU_ACCOUNTING_UNTRACKED);
-        return;
-    }
-    if let Some(depth) = TARGET_PENDING_WAKEUPS.get_ptr_mut(cpu) {
-        // Diagnostic-only increment.
-        unsafe { *depth = (*depth).saturating_add(1) };
-    }
-}
-
-fn decrement_target_pending(cpu: u32) {
-    if !valid_cpu(cpu) {
-        return;
-    }
-    if let Some(depth) = TARGET_PENDING_WAKEUPS.get_ptr_mut(cpu) {
-        // Diagnostic-only decrement.
-        unsafe { *depth = (*depth).saturating_sub(1) };
-    }
-}
-
-// -----------------------------------------------------------------------------
-// Scheduler tracepoint implementations
-// -----------------------------------------------------------------------------
-
-#[inline(always)]
-fn try_sched_wakeup(ctx: TracePointContext) -> u32 {
-    let mut pid: i32 = 0;
-    if !read_i32(&ctx, SCHED_WAKEUP_PID_OFFSET, &mut pid) {
-        return 1;
-    }
-    let mut target_cpu: u32 = 0;
-    if !read_u32(&ctx, SCHED_WAKEUP_TARGET_CPU_OFFSET, &mut target_cpu) {
-        return 1;
-    }
-
-    if pid <= 0 {
-        return 0;
-    }
-
-    let pid = pid as u32;
-
-    // Keep PID filtering here. current_cgroup is the waker, not the wakee.
-    // Runnable-depth accounting is intentionally target-local: only monitored
-    // target tasks are counted. Do not call mark_task_runnable() before this
-    // filter, or unrelated system wakeups can leak into CPU_RUNNABLE_DEPTH.
-    if !is_target_pid(pid) {
-        return 0;
-    }
-
-    // Count only monitored target tasks as runnable. This keeps the increment path
-    // aligned with sched_switch, which only decrements after consuming WAKEUP_DATA
-    // for a monitored target task.
-    let target_cpu_tracked = mark_task_runnable(pid, target_cpu);
-
-    let now = unsafe { bpf_ktime_get_ns() };
-    let waker_tid = (bpf_get_current_pid_tgid() & 0xffff_ffff) as u32;
-
-    let seq = wakeup_data::next_wakeup_seq(pid);
-    let data = WakeupData {
-        ts: now,
-        target_cpu,
-        waker_tid,
-        seq,
-    };
-    let mut old = WakeupData::default();
-
-    match wakeup_data::record_wakeup(pid, data, &mut old) {
-        WAKEUP_RECORD_NEW_PENDING => {
-            if target_cpu_tracked {
-                increment_target_pending(target_cpu);
-            }
-        }
-        WAKEUP_RECORD_REPLACED_PENDING_MOVED_CPU => {
-            increment_drop_counter(DROP_WAKEUP_DATA_REPLACED_ENTRY);
-            decrement_target_pending(old.target_cpu);
-            if target_cpu_tracked {
-                increment_target_pending(target_cpu);
-            }
-        }
-        WAKEUP_RECORD_REPLACED_PENDING_SAME_CPU => {
-            increment_drop_counter(DROP_WAKEUP_DATA_REPLACED_ENTRY);
-        }
-        WAKEUP_RECORD_INSERT_FAILED => increment_drop_counter(DROP_WAKEUP_DATA_INSERT_FAILED),
-        _ => {}
-    }
-
-    0
-}
-
-#[inline(always)]
-fn try_sched_switch(ctx: TracePointContext) -> u32 {
-    let mut next_pid: i32 = 0;
-    if !read_i32(&ctx, SCHED_SWITCH_NEXT_PID_OFFSET, &mut next_pid) {
-        return 1;
-    }
-
-    if next_pid <= 0 {
-        return 0;
-    }
-
-    let pid = next_pid as u32;
-
-    let mut wakeup_data = WakeupData::default();
-    match wakeup_data::consume_pending_wakeup(pid, &mut wakeup_data) {
-        WAKEUP_CONSUME_OK => {}
-        WAKEUP_CONSUME_CURSOR_INSERT_FAILED => {
-            increment_drop_counter(DROP_WAKEUP_DATA_INSERT_FAILED);
-            return 0;
-        }
-        WAKEUP_CONSUME_NONE => return 0,
-        _ => return 0,
-    }
-
-    if !is_target_pid(pid) {
-        increment_drop_counter(DROP_WAKEUP_DATA_STALE_ENTRY);
-        decrement_target_pending(wakeup_data.target_cpu);
-        remove_runnable_task_if_present(pid);
-        return 0;
-    }
-
-    // Wakeup data is marked consumed before slower tracepoint reads to avoid stale state.
-
-    // Read the previous task context only after the cheap relevance filters pass.
-    // Offsets are named above and validated in userspace preflight before load.
-    let mut prev_pid_raw: i32 = 0;
-    if !read_i32(&ctx, SCHED_SWITCH_PREV_PID_OFFSET, &mut prev_pid_raw) {
-        increment_drop_counter(DROP_WAKEUP_DATA_CONSUMED_READ_FAILED);
-        decrement_target_pending(wakeup_data.target_cpu);
-        remove_runnable_task_if_present(pid);
-        return 1;
-    }
-    let mut prev_state: i64 = 0;
-    if !read_i64(&ctx, SCHED_SWITCH_PREV_STATE_OFFSET, &mut prev_state) {
-        increment_drop_counter(DROP_WAKEUP_DATA_CONSUMED_READ_FAILED);
-        decrement_target_pending(wakeup_data.target_cpu);
-        remove_runnable_task_if_present(pid);
-        return 1;
-    }
-    let switch_prev_pid = if prev_pid_raw > 0 {
-        prev_pid_raw as u32
-    } else {
-        0
-    };
-
-    let wakeup_ns = wakeup_data.ts;
-    let waker_tid = wakeup_data.waker_tid;
-    let target_cpu = wakeup_data.target_cpu;
-
-    // We only arrived here because a wakeup record for this PID exists
-    // (inserted by sched_wakeup). Treat that as sufficient evidence this is
-    // a target-related event.
-
-    let cpu = unsafe { bpf_get_smp_processor_id() } as u32;
-
-    // Every sched_switch means next_pid is now running, so it is no longer
-    // counted as runnable in our approximation.
-    mark_task_running(pid, cpu);
-
-    // Read monitored runnable depth after removing next_pid. This represents
-    // remaining monitored target tasks that are still counted runnable on this CPU,
-    // not total kernel runqueue depth.
-    let observed_runnable_depth = read_cpu_runnable_depth(cpu);
-
-    // Decrement the target-pending counter for the CPU where the task was
-    // originally queued. This is not kernel runqueue depth.
-    decrement_target_pending(target_cpu);
-
-    let target_pending_wakeups = if valid_cpu(cpu) {
-        TARGET_PENDING_WAKEUPS.get(cpu).copied().unwrap_or(0)
-    } else {
-        0
-    };
-
-    let switch_ns = unsafe { bpf_ktime_get_ns() };
-    let latency_ns = switch_ns.saturating_sub(wakeup_ns);
-
-    let faults = unsafe {
-        PREV_FAULTS
-            .get(pid)
-            .copied()
-            .unwrap_or(FaultCounters { maj: 0, min: 0 })
-    };
-
-    let mut prio: i32 = 0;
-    if !read_i32(&ctx, SCHED_SWITCH_NEXT_PRIO_OFFSET, &mut prio) {
-        increment_drop_counter(DROP_WAKEUP_DATA_CONSUMED_READ_FAILED);
-        return 1;
-    }
-    let mut comm: [u8; 16] = [0; 16];
-    if !read_comm16(&ctx, SCHED_SWITCH_NEXT_COMM_OFFSET, &mut comm) {
-        increment_drop_counter(DROP_WAKEUP_DATA_CONSUMED_READ_FAILED);
-        return 1;
-    }
-
-    emit_ringbuf_event!(
-        SchedulerEvent,
-        return 0,
-        SchedulerEvent {
-            kind: EVENT_RUNNABLE_LATENCY,
-            tid: pid,
-            cpu,
-            wakeup_target_cpu: target_cpu,
-            prio,
-            waker_tid,
-            target_pending_wakeups,
-            observed_runnable_depth,
-            maj_flt: faults.maj,
-            min_flt: faults.min,
-            wakeup_ns,
-            switch_ns,
-            latency_ns,
-            comm,
-            switch_prev_pid,
-            _pad0: 0,
-            switch_prev_state: prev_state,
-        }
-    );
-
-    0
-}
-
-#[inline(always)]
-fn try_sched_migrate_task(ctx: TracePointContext) -> u32 {
-    let mut pid: i32 = 0;
-    if !read_i32(&ctx, SCHED_MIGRATE_TASK_PID_OFFSET, &mut pid) {
-        return 1;
-    }
-    if pid <= 0 {
-        return 0;
-    }
-
-    let pid = pid as u32;
-    if !is_target_pid(pid) {
-        return 0;
-    }
-
-    let mut orig_cpu: i32 = 0;
-    if !read_i32(&ctx, SCHED_MIGRATE_TASK_ORIG_CPU_OFFSET, &mut orig_cpu) {
-        return 1;
-    }
-    let mut dest_cpu: i32 = 0;
-    if !read_i32(&ctx, SCHED_MIGRATE_TASK_DEST_CPU_OFFSET, &mut dest_cpu) {
-        return 1;
-    }
-    let now = unsafe { bpf_ktime_get_ns() };
-
-    // Move monitored runnable count if this target task migrates while runnable.
-    match unsafe { RUNNABLE_TASK_CPU.get(pid).copied() } {
-        Some(old_cpu) if old_cpu != dest_cpu as u32 => {
-            let new_cpu = dest_cpu as u32;
-            decrement_cpu_runnable_depth(old_cpu);
-            increment_cpu_runnable_depth(new_cpu);
-            let _ = RUNNABLE_TASK_CPU.insert(pid, new_cpu, 0);
-        }
-        _ => {}
-    }
-
-    // If this task is currently a monitored target with a pending wakeup,
-    // update its target CPU and move its diagnostic-only pending counter.
-    let mut old_cpu = 0;
-    let new_cpu = dest_cpu as u32;
-    if wakeup_data::move_pending_cpu(pid, new_cpu, &mut old_cpu) {
-        decrement_target_pending(old_cpu);
-        increment_target_pending(new_cpu);
-    }
-
-    emit_ringbuf_event!(
-        MigrationEvent,
-        return 0,
-        MigrationEvent {
-            kind: EVENT_MIGRATION,
-            tid: pid,
-            from_cpu: orig_cpu as u32,
-            to_cpu: dest_cpu as u32,
-            timestamp_ns: now,
-        }
-    );
-
-    0
-}
-
-#[inline(always)]
-fn try_cpu_frequency(ctx: TracePointContext) -> u32 {
-    let mut state: u32 = 0;
-    if !read_u32(&ctx, CPU_FREQUENCY_STATE_OFFSET, &mut state) {
-        return 1;
-    }
-    let mut cpu_id: u32 = 0;
-    if !read_u32(&ctx, CPU_FREQUENCY_CPU_ID_OFFSET, &mut cpu_id) {
-        return 1;
-    }
-    let now = unsafe { bpf_ktime_get_ns() };
-
-    emit_ringbuf_event!(
-        CpuFreqEvent,
-        return 0,
-        CpuFreqEvent {
-            kind: EVENT_CPU_FREQ,
-            cpu: cpu_id,
-            state,
-            _pad: 0,
-            timestamp_ns: now,
-        }
-    );
-
-    0
-}
-
-#[inline(always)]
-fn try_sched_stat_wait(ctx: TracePointContext) -> u32 {
-    let mut pid: i32 = 0;
-    if !read_i32(&ctx, SCHED_STAT_WAIT_PID_OFFSET, &mut pid) {
-        return 1;
-    }
-    if pid <= 0 {
-        return 0;
-    }
-
-    let pid = pid as u32;
-    if !is_target_pid(pid) {
-        return 0;
-    }
-
-    let mut delay: u64 = 0;
-    if !read_u64(&ctx, SCHED_STAT_WAIT_DELAY_OFFSET, &mut delay) {
-        return 1;
-    }
-
-    emit_ringbuf_event!(
-        StatWaitEvent,
-        return 0,
-        StatWaitEvent {
-            kind: EVENT_STAT_WAIT,
-            tid: pid,
-            delay_ns: delay,
-        }
-    );
-
-    0
-}
-
-#[inline(always)]
-fn try_irq_handler_entry(ctx: TracePointContext) -> u32 {
-    let mut irq: i32 = 0;
-    if !read_i32(&ctx, IRQ_HANDLER_IRQ_OFFSET, &mut irq) {
-        return 1;
-    }
-    if irq < 0 {
-        return 0;
-    }
-
-    let irq = irq as u32;
-    if !is_target_irq(irq) {
-        return 0;
-    }
-
-    let cpu = unsafe { bpf_get_smp_processor_id() };
-    let key = irq_key(irq, cpu);
-    let now = unsafe { bpf_ktime_get_ns() };
-    if IRQ_START_TIMES.insert(key, now, 0).is_err() {
-        increment_drop_counter(DROP_IRQ_START_TIMES_INSERT_FAILED);
-    }
-    0
-}
-
-#[inline(always)]
-fn try_irq_handler_exit(ctx: TracePointContext) -> u32 {
-    let mut irq: i32 = 0;
-    if !read_i32(&ctx, IRQ_HANDLER_IRQ_OFFSET, &mut irq) {
-        return 1;
-    }
-    if irq < 0 {
-        return 0;
-    }
-
-    let irq = irq as u32;
-    if !is_target_irq(irq) {
-        return 0;
-    }
-
-    let cpu = unsafe { bpf_get_smp_processor_id() };
-    let key = irq_key(irq, cpu);
-    let enter_ns = match unsafe { IRQ_START_TIMES.get(key) } {
-        Some(ts) => *ts,
-        None => return 0,
-    };
-    let _ = IRQ_START_TIMES.remove(key);
-
-    let exit_ns = unsafe { bpf_ktime_get_ns() };
-    let duration_ns = exit_ns.saturating_sub(enter_ns);
-
-    emit_ringbuf_event!(
-        IrqEvent,
-        return 0,
-        IrqEvent {
-            kind: EVENT_IRQ_LATENCY,
-            irq,
-            cpu,
-            _pad0: 0,
-            enter_ns,
-            exit_ns,
-            duration_ns,
-        }
-    );
-    0
 }
 
 // -----------------------------------------------------------------------------

@@ -5,7 +5,7 @@ use super::{super::*, support::*};
 #[test]
 fn profile_apply_cache_invalidates_when_desired_nice_changes() {
     let task = test_task(42, TaskClass::Indexer, "indexer");
-    let tasks = BTreeMap::from([(42, task)]);
+    let tasks = BTreeMap::from([(42.into(), task)]);
     let mut cache = ProfileApplyCache::default();
     let mut nice_reads = 0;
 
@@ -79,7 +79,7 @@ fn profile_apply_cache_invalidates_when_desired_nice_changes() {
 #[test]
 fn profile_apply_cache_invalidates_when_desired_ionice_changes() {
     let task = test_task(42, TaskClass::PackageManager, "pacman");
-    let tasks = BTreeMap::from([(42, task)]);
+    let tasks = BTreeMap::from([(42.into(), task)]);
     let mut cache = ProfileApplyCache::default();
     let mut ionice_reads = 0;
     let idle = IoPrioValue::idle();
@@ -168,7 +168,7 @@ fn profile_apply_cache_skips_unchanged_known_correct_tasks() {
         sched_policy: None,
         from_cgroup: false,
     };
-    let tasks = BTreeMap::from([(7, task)]);
+    let tasks = BTreeMap::from([(7.into(), task)]);
     let profile = Profile {
         name: "test".to_owned(),
         rules: vec![ProfileRule {
@@ -188,7 +188,7 @@ fn profile_apply_cache_skips_unchanged_known_correct_tasks() {
         Some(&mut cache),
         |tid| {
             reads += 1;
-            assert_eq!(tid, 7);
+            assert_eq!(tid.as_u32(), 7);
             Ok(CpuMask::parse("0-1").unwrap())
         },
         |_| Ok(0),

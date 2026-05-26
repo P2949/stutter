@@ -555,7 +555,7 @@ struct FixtureMetadataInput<'a> {
 fn fixture_metadata(input: FixtureMetadataInput<'_>) -> FixtureMetadata {
     FixtureMetadata {
         name: input.name.to_owned(),
-        schema_version: SESSION_SCHEMA_VERSION,
+        schema_version: SESSION_SCHEMA_VERSION.get(),
         source: input.source.to_owned(),
         quality_expectation: input.quality_expectation.to_owned(),
         description: input.description.to_owned(),

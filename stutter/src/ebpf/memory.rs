@@ -20,22 +20,13 @@ pub(crate) fn parse_mem_available_bytes(meminfo: &str) -> Option<u64> {
 }
 
 fn available_memory_bytes_from_sysconf() -> Option<u64> {
-    let pages = unsafe { libc::sysconf(libc::_SC_AVPHYS_PAGES) };
-    let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
-    if pages <= 0 || page_size <= 0 {
-        return None;
-    }
-
-    (pages as u64).checked_mul(page_size as u64)
+    let pages = crate::syscall::get_avphys_pages()?;
+    let page_size = crate::syscall::get_pagesize();
+    pages.checked_mul(page_size)
 }
 
 pub(crate) fn system_page_size() -> u64 {
-    let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
-    if page_size > 0 {
-        page_size as u64
-    } else {
-        4096
-    }
+    crate::syscall::get_pagesize()
 }
 
 pub(crate) fn format_optional_bytes(value: Option<u64>) -> String {

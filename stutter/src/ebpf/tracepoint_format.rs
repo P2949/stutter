@@ -5,6 +5,7 @@ use std::{
 };
 
 use anyhow::Context;
+use stutter_common::tracepoint_offsets::{TracepointFieldSpec, TracepointName};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TracepointField {
@@ -145,15 +146,16 @@ fn parse_tracepoint_field_name(declaration: &str) -> Option<String> {
 
 pub(crate) fn validate_optional_tracepoint_format_at(
     path: &Path,
-    name: &str,
-    expected_offsets: &[(&str, usize)],
+    name: TracepointName<'_>,
+    expected_offsets: &[TracepointFieldSpec],
     warn_on_missing: bool,
 ) -> anyhow::Result<bool> {
     if !path.exists() {
         if warn_on_missing {
             log::warn!(
                 "optional tracepoint format missing: {}; continuing without {name}",
-                path.display()
+                path.display(),
+                name = name.as_str()
             );
         }
         return Ok(false);
@@ -165,7 +167,7 @@ pub(crate) fn validate_optional_tracepoint_format_at(
 
 pub(crate) fn validate_tracepoint_format_at(
     path: &Path,
-    expected_offsets: &[(&str, usize)],
+    expected_offsets: &[TracepointFieldSpec],
 ) -> anyhow::Result<()> {
     let tracepoint_name = path
         .parent()
@@ -173,13 +175,17 @@ pub(crate) fn validate_tracepoint_format_at(
         .and_then(|name| name.to_str())
         .unwrap_or("tracepoint");
 
-    validate_tracepoint_format_at_named(path, tracepoint_name, expected_offsets)
+    validate_tracepoint_format_at_named(
+        path,
+        TracepointName::new(tracepoint_name),
+        expected_offsets,
+    )
 }
 
 pub(crate) fn validate_tracepoint_format_at_named(
     path: &Path,
-    tracepoint_name: &str,
-    expected_offsets: &[(&str, usize)],
+    tracepoint_name: TracepointName<'_>,
+    expected_offsets: &[TracepointFieldSpec],
 ) -> anyhow::Result<()> {
     let format = fs::read_to_string(path)
         .with_context(|| format!("failed to read tracepoint format {}", path.display()))?;
@@ -189,6 +195,7 @@ pub(crate) fn validate_tracepoint_format_at_named(
             format!(
                 "{tracepoint_name} tracepoint format {} did not match the eBPF program assumptions",
                 path.display(),
+                tracepoint_name = tracepoint_name.as_str(),
             )
         },
     )
@@ -197,20 +204,23 @@ pub(crate) fn validate_tracepoint_format_at_named(
 #[cfg(test)]
 pub(crate) fn validate_tracepoint_format(
     format: &str,
-    expected_offsets: &[(&str, usize)],
+    expected_offsets: &[TracepointFieldSpec],
 ) -> anyhow::Result<()> {
-    validate_tracepoint_format_named("tracepoint", format, expected_offsets)
+    validate_tracepoint_format_named(TracepointName::new("tracepoint"), format, expected_offsets)
 }
 
 pub(crate) fn validate_tracepoint_format_named(
-    tracepoint_name: &str,
+    tracepoint_name: TracepointName<'_>,
     format_content: &str,
-    expected_offsets: &[(&str, usize)],
+    expected_offsets: &[TracepointFieldSpec],
 ) -> anyhow::Result<()> {
-    let format = parse_tracepoint_format(PathBuf::from(tracepoint_name), format_content);
+    let tracepoint_name_str = tracepoint_name.as_str();
+    let format = parse_tracepoint_format(PathBuf::from(tracepoint_name_str), format_content);
     let fields = &format.fields;
 
-    for &(field_name, expected_offset) in expected_offsets {
+    for field_spec in expected_offsets {
+        let field_name = field_spec.name.as_str();
+        let expected_offset = field_spec.offset;
         let Some(field) = fields.get(field_name) else {
             return Err(tracepoint_missing_field_error(
                 tracepoint_name,
@@ -233,11 +243,12 @@ pub(crate) fn validate_tracepoint_format_named(
 }
 
 fn tracepoint_offset_mismatch_error(
-    tracepoint_name: &str,
+    tracepoint_name: TracepointName<'_>,
     field_name: &str,
     expected: usize,
     field: &TracepointField,
 ) -> anyhow::Error {
+    let tracepoint_name = tracepoint_name.as_str();
     anyhow::anyhow!(
         "{} tracepoint layout mismatch for field `{}`: expected offset {}, got {}. Parsed declaration: `{}`{}",
         tracepoint_name,
@@ -250,10 +261,11 @@ fn tracepoint_offset_mismatch_error(
 }
 
 fn tracepoint_missing_field_error(
-    tracepoint_name: &str,
+    tracepoint_name: TracepointName<'_>,
     field_name: &str,
     fields: &BTreeMap<String, TracepointField>,
 ) -> anyhow::Error {
+    let tracepoint_name = tracepoint_name.as_str();
     let available = fields.keys().cloned().collect::<Vec<_>>().join(", ");
 
     anyhow::anyhow!(

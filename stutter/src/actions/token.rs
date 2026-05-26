@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -7,6 +7,38 @@ use crate::actions::model::{
     IoPrioRestoreRecord, IrqAffinityRestoreRecord, NiceRestoreRecord, UclampRestoreRecord,
     VmKnobRestoreRecord,
 };
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RollbackTokenKindError {
+    expected: &'static str,
+    actual: &'static str,
+}
+
+impl RollbackTokenKindError {
+    pub fn new(expected: &'static str, actual: &'static str) -> Self {
+        Self { expected, actual }
+    }
+
+    pub fn expected(self) -> &'static str {
+        self.expected
+    }
+
+    pub fn actual(self) -> &'static str {
+        self.actual
+    }
+}
+
+impl std::fmt::Display for RollbackTokenKindError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "invalid rollback token: expected {}, actual {}",
+            self.expected, self.actual
+        )
+    }
+}
+
+impl std::error::Error for RollbackTokenKindError {}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind")]
@@ -50,6 +82,190 @@ pub enum RollbackToken {
 }
 
 impl RollbackToken {
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::CpuAffinityRestoreFile { .. } => "cpu-affinity-restore-file",
+            Self::NiceRestore { .. } => "nice-restore",
+            Self::IrqAffinityRestore { .. } => "irq-affinity-restore",
+            Self::IoPrioRestore { .. } => "ioprio-restore",
+            Self::UclampRestore { .. } => "uclamp-restore",
+            Self::CgroupRestore { .. } => "cgroup-restore",
+            Self::CpuPowerRestore { .. } => "cpu-power-restore",
+            Self::VmKnobRestore { .. } => "vm-knob-restore",
+            Self::GpuPowerRestore { .. } => "gpu-power-restore",
+            Self::SysfsRestore { .. } => "sysfs-restore",
+        }
+    }
+
+    pub fn kind_error(&self, expected: &'static str) -> RollbackTokenKindError {
+        RollbackTokenKindError::new(expected, self.kind())
+    }
+
+    pub fn as_cpu_affinity_restore_file(&self) -> Option<(&Path, usize)> {
+        match self {
+            Self::CpuAffinityRestoreFile {
+                path,
+                affected_tasks,
+            } => Some((path.as_path(), *affected_tasks)),
+            _ => None,
+        }
+    }
+
+    pub fn into_cpu_affinity_restore_file(
+        self,
+    ) -> Result<(PathBuf, usize), RollbackTokenKindError> {
+        match self {
+            Self::CpuAffinityRestoreFile {
+                path,
+                affected_tasks,
+            } => Ok((path, affected_tasks)),
+            other => Err(other.kind_error("cpu-affinity-restore-file")),
+        }
+    }
+
+    pub fn as_nice_restore(&self) -> Option<&[NiceRestoreRecord]> {
+        match self {
+            Self::NiceRestore { records } => Some(records),
+            _ => None,
+        }
+    }
+
+    pub fn into_nice_restore(self) -> Result<Vec<NiceRestoreRecord>, RollbackTokenKindError> {
+        match self {
+            Self::NiceRestore { records } => Ok(records),
+            other => Err(other.kind_error("nice-restore")),
+        }
+    }
+
+    pub fn as_irq_affinity_restore(&self) -> Option<&[IrqAffinityRestoreRecord]> {
+        match self {
+            Self::IrqAffinityRestore { records } => Some(records),
+            _ => None,
+        }
+    }
+
+    pub fn into_irq_affinity_restore(
+        self,
+    ) -> Result<Vec<IrqAffinityRestoreRecord>, RollbackTokenKindError> {
+        match self {
+            Self::IrqAffinityRestore { records } => Ok(records),
+            other => Err(other.kind_error("irq-affinity-restore")),
+        }
+    }
+
+    pub fn as_ioprio_restore(&self) -> Option<&[IoPrioRestoreRecord]> {
+        match self {
+            Self::IoPrioRestore { records } => Some(records),
+            _ => None,
+        }
+    }
+
+    pub fn into_ioprio_restore(self) -> Result<Vec<IoPrioRestoreRecord>, RollbackTokenKindError> {
+        match self {
+            Self::IoPrioRestore { records } => Ok(records),
+            other => Err(other.kind_error("ioprio-restore")),
+        }
+    }
+
+    pub fn as_uclamp_restore(&self) -> Option<&[UclampRestoreRecord]> {
+        match self {
+            Self::UclampRestore { records } => Some(records),
+            _ => None,
+        }
+    }
+
+    pub fn into_uclamp_restore(self) -> Result<Vec<UclampRestoreRecord>, RollbackTokenKindError> {
+        match self {
+            Self::UclampRestore { records } => Ok(records),
+            other => Err(other.kind_error("uclamp-restore")),
+        }
+    }
+
+    pub fn as_cgroup_restore(
+        &self,
+    ) -> Option<(&[CgroupRestoreRecord], Option<&CgroupCpusetRestoreRecord>)> {
+        match self {
+            Self::CgroupRestore { records, cpuset } => Some((records, cpuset.as_ref())),
+            _ => None,
+        }
+    }
+
+    pub fn into_cgroup_restore(
+        self,
+    ) -> Result<(Vec<CgroupRestoreRecord>, Option<CgroupCpusetRestoreRecord>), RollbackTokenKindError>
+    {
+        match self {
+            Self::CgroupRestore { records, cpuset } => Ok((records, cpuset)),
+            other => Err(other.kind_error("cgroup-restore")),
+        }
+    }
+
+    pub fn as_cpu_power_restore(&self) -> Option<&[CpuPowerRestoreRecord]> {
+        match self {
+            Self::CpuPowerRestore { records } => Some(records),
+            _ => None,
+        }
+    }
+
+    pub fn into_cpu_power_restore(
+        self,
+    ) -> Result<Vec<CpuPowerRestoreRecord>, RollbackTokenKindError> {
+        match self {
+            Self::CpuPowerRestore { records } => Ok(records),
+            other => Err(other.kind_error("cpu-power-restore")),
+        }
+    }
+
+    pub fn as_vm_knob_restore(&self) -> Option<&[VmKnobRestoreRecord]> {
+        match self {
+            Self::VmKnobRestore { records } => Some(records),
+            _ => None,
+        }
+    }
+
+    pub fn into_vm_knob_restore(self) -> Result<Vec<VmKnobRestoreRecord>, RollbackTokenKindError> {
+        match self {
+            Self::VmKnobRestore { records } => Ok(records),
+            other => Err(other.kind_error("vm-knob-restore")),
+        }
+    }
+
+    pub fn as_gpu_power_restore(&self) -> Option<&[GpuPowerRestoreRecord]> {
+        match self {
+            Self::GpuPowerRestore { records } => Some(records),
+            _ => None,
+        }
+    }
+
+    pub fn into_gpu_power_restore(
+        self,
+    ) -> Result<Vec<GpuPowerRestoreRecord>, RollbackTokenKindError> {
+        match self {
+            Self::GpuPowerRestore { records } => Ok(records),
+            other => Err(other.kind_error("gpu-power-restore")),
+        }
+    }
+
+    pub fn as_sysfs_restore(&self) -> Option<(&Path, &str)> {
+        match self {
+            Self::SysfsRestore {
+                path,
+                original_value,
+            } => Some((path.as_path(), original_value)),
+            _ => None,
+        }
+    }
+
+    pub fn into_sysfs_restore(self) -> Result<(PathBuf, String), RollbackTokenKindError> {
+        match self {
+            Self::SysfsRestore {
+                path,
+                original_value,
+            } => Ok((path, original_value)),
+            other => Err(other.kind_error("sysfs-restore")),
+        }
+    }
+
     pub fn affected_tasks(&self) -> usize {
         match self {
             Self::CpuAffinityRestoreFile { affected_tasks, .. } => *affected_tasks,
@@ -207,5 +423,26 @@ mod tests {
         assert_eq!(value["records"][0]["identity"]["starttime_ticks"], 1234);
         assert_eq!(value["records"][0]["identity"]["comm"], "render");
         assert_eq!(value["records"][0]["identity"]["exe"], "/usr/bin/render");
+    }
+
+    #[test]
+    fn typed_restore_accessors_report_expected_and_actual_kind() {
+        let token = RollbackToken::IrqAffinityRestore {
+            records: vec![IrqAffinityRestoreRecord {
+                irq: 44,
+                device_hint: "amdgpu".to_owned(),
+                original_smp_affinity: "00000001".to_owned(),
+            }],
+        };
+
+        assert_eq!(token.as_irq_affinity_restore().unwrap()[0].irq, 44);
+        assert!(token.as_nice_restore().is_none());
+
+        let error = token.clone().into_nice_restore().unwrap_err();
+        assert_eq!(error.expected(), "nice-restore");
+        assert_eq!(error.actual(), "irq-affinity-restore");
+
+        let records = token.into_irq_affinity_restore().unwrap();
+        assert_eq!(records[0].device_hint, "amdgpu");
     }
 }

@@ -231,13 +231,9 @@ fn read_ioprio(proc_root: &Path, tid: u32) -> Option<String> {
 
 #[cfg(target_os = "linux")]
 fn read_live_ioprio(tid: u32) -> Option<String> {
-    const IOPRIO_WHO_PROCESS: libc::c_int = 1;
-    let raw = unsafe { libc::syscall(libc::SYS_ioprio_get, IOPRIO_WHO_PROCESS, tid) };
-    if raw < 0 {
-        return None;
-    }
+    let raw = crate::actions::syscalls::ioprio_get_process(tid).ok()?;
 
-    crate::actions::ioprio::IoPrioValue::decode(raw as i32)
+    crate::actions::ioprio::IoPrioValue::decode(raw)
         .ok()
         .map(|value| value.label())
 }

@@ -7,7 +7,7 @@ use std::{collections::BTreeMap, path::Path};
 
 use super::{
     classify::classify_task,
-    model::{ProcInfo, ProcessCache, ScanBudget, ScanBudgetReport, TaskClass},
+    model::{ProcessCache, ProcessMap, ScanBudget, ScanBudgetReport, TaskClass},
 };
 use crate::process_tree::{scan_processes_at, task_comm_at, thread_ids_of_at};
 
@@ -60,7 +60,7 @@ pub fn render_tree_at(proc_root: &Path, root_pid: u32) -> anyhow::Result<String>
 fn render_children(
     proc_root: &Path,
     pid: u32,
-    processes: &BTreeMap<u32, ProcInfo>,
+    processes: &ProcessMap,
     children_by_parent: &BTreeMap<u32, Vec<u32>>,
     prefix: &str,
     mark_unknown_as_helper: bool,

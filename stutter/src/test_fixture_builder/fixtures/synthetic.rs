@@ -292,7 +292,7 @@ pub(in crate::test_fixture_builder) fn old_schema_warning_fixture()
 -> (SessionFile, FixtureArtifacts) {
     let intervals = vec![interval_record(100, 100, "worker-a", 0.0)];
     let mut session = base_session("old_schema_warning");
-    session.core.schema_version = SESSION_SCHEMA_VERSION - 1;
+    session.core.schema_version = ArtifactSchemaVersion::new(SESSION_SCHEMA_VERSION - 1);
     apply_artifact_counts(
         &mut session,
         &FixtureArtifacts {
@@ -480,20 +480,23 @@ pub(in crate::test_fixture_builder) fn foreground_window_fixture() -> (SessionFi
         0.0,
         900_000,
     )];
-    let foreground_events = vec![ForegroundEvent {
-        elapsed_ms: 100,
-        source: crate::foreground::ForegroundSource::Sway,
-        status: crate::foreground::ForegroundProviderStatus::Available,
-        pid: Some(5701),
-        app_id: Some("steam_app_sanitized".to_owned()),
-        class: Some("steam_app_sanitized".to_owned()),
-        title: None,
-        window_id: Some("0xSANITIZED".to_owned()),
-        workspace: Some("gaming".to_owned()),
-        confidence: 0.95,
-        stale_ms: None,
-        reason: "focused Sway node from sanitized fixture".to_owned(),
-    }];
+    let foreground_events = vec![ForegroundEvent::new(
+        crate::foreground::ForegroundEventInput {
+            elapsed_ms: 100,
+            source: crate::foreground::ForegroundSource::Sway,
+            status: crate::foreground::ForegroundProviderStatus::Available,
+            pid: Some(5701),
+            app_id: Some("steam_app_sanitized".to_owned()),
+            class: Some("steam_app_sanitized".to_owned()),
+            title: None,
+            include_title: false,
+            window_id: Some("0xSANITIZED".to_owned()),
+            workspace: Some("gaming".to_owned()),
+            confidence: 0.95,
+            stale_ms: None,
+            reason: "focused Sway node from sanitized fixture".to_owned(),
+        },
+    )];
 
     let mut session = base_session("foreground_window");
     session.config.tree_roots = vec![5701];

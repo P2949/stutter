@@ -710,6 +710,7 @@ pub fn probe_spec(key: ProbeKey) -> &'static ProbeSpec {
     PROBE_REGISTRY
         .iter()
         .find(|spec| spec.key == key)
+        // invariant: ProbeKey enum elements are exhaustively mapped in PROBE_REGISTRY
         .expect("ProbeKey must have a ProbeSpec")
 }
 

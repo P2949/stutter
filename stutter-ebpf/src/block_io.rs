@@ -15,8 +15,9 @@ use stutter_common::{
 };
 
 use crate::{
-    increment_drop_counter, is_target_pid_or_current_cgroup,
+    drop_counters::increment_drop_counter,
     map_limits::BLOCK_START_MAP_MAX_ENTRIES,
+    target_filter::is_target_pid_or_current_cgroup,
     trace_offsets::{
         BLOCK_RQ_COMPLETE_NR_SECTOR_OFFSET, BLOCK_RQ_COMPLETE_RWBS_OFFSET,
         BLOCK_RQ_ISSUE_NR_SECTOR_OFFSET, BLOCK_RQ_ISSUE_RWBS_OFFSET, BLOCK_RQ_KEY_OFFSET,

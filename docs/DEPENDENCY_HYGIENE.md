@@ -33,6 +33,7 @@ The gate currently runs:
 ```sh
 cargo deny check
 cargo tree -d
+dependency feature audit
 ```
 
 `cargo deny check` enforces the repository advisory, license, source, and
@@ -43,6 +44,16 @@ the current baseline duplicate package names in `APPROVED_DUPLICATE_PACKAGES`
 inside `xtask/src/main.rs` and fails when a new unapproved duplicate package
 family appears. Prefer removing the duplicate by unifying dependency versions.
 Only update the allowlist when the duplicate is intentional.
+
+The dependency feature audit reports dependency shapes that need deliberate
+review when they change:
+
+* dependencies that still use default features
+* optional dependencies that are not wired to an explicit feature
+* resolved packages that expand the network/TLS surface
+
+These sections are informational today, while `cargo deny check` and the
+unapproved duplicate-version check remain the hard failures.
 
 ## Manual unused-dependency scan
 

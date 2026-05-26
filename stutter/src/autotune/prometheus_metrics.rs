@@ -254,7 +254,7 @@ fn is_applied_event(event: &AutotuneHistoryEvent) -> bool {
 
 fn is_blocked_event(event: &AutotuneHistoryEvent) -> bool {
     let decision = event.decision.decision.to_ascii_lowercase();
-    let reason = event.reason.to_ascii_lowercase();
+    let reason = event.reason.clone().to_ascii_lowercase();
 
     if decision.contains("entercooldown")
         || decision.contains("enter_cooldown")

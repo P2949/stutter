@@ -60,7 +60,7 @@ impl RollbackHandler for NiceRollbackHandler {
     }
 
     fn supports_token(&self, token: &RollbackToken) -> bool {
-        matches!(token, RollbackToken::NiceRestore { .. })
+        token.as_nice_restore().is_some()
     }
 
     fn dry_run_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackPreview> {
@@ -71,7 +71,7 @@ impl RollbackHandler for NiceRollbackHandler {
     }
 
     fn restore_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackResult> {
-        let RollbackToken::NiceRestore { records } = token else {
+        let Some(records) = token.as_nice_restore() else {
             anyhow::bail!("nice rollback handler does not support {token:?}");
         };
 
@@ -313,8 +313,11 @@ impl TuningAction for NiceAction {
     }
 
     fn rollback(&self, token: &RollbackToken) -> anyhow::Result<()> {
-        let RollbackToken::NiceRestore { records } = token else {
-            anyhow::bail!("rollback token is not a nice restore token");
+        let Some(records) = token.as_nice_restore() else {
+            return Err(crate::actions::ActionError::invalid_rollback_token_kind(
+                token.kind_error("nice-restore"),
+            )
+            .into());
         };
 
         let mut summary = RestoreSummary::default();
@@ -543,15 +546,8 @@ fn parse_stat_nice_and_starttime(stat: &str) -> anyhow::Result<(i32, u64)> {
 }
 
 pub(crate) fn set_task_nice(tid: u32, nice: i32) -> anyhow::Result<()> {
-    let rc =
-        unsafe { libc::setpriority(libc::PRIO_PROCESS, tid as libc::id_t, nice as libc::c_int) };
-
-    if rc != 0 {
-        return Err(std::io::Error::last_os_error())
-            .with_context(|| format!("setpriority(PRIO_PROCESS, {tid}, {nice}) failed"));
-    }
-
-    Ok(())
+    crate::actions::syscalls::setpriority_process(tid, nice)
+        .with_context(|| format!("setpriority(PRIO_PROCESS, {tid}, {nice}) failed"))
 }
 
 #[cfg(test)]
@@ -818,6 +814,8 @@ mod tests {
 
         let err = action.rollback(&token).unwrap_err().to_string();
 
-        assert!(err.contains("rollback token is not a nice restore token"));
+        assert!(err.contains("invalid rollback token"));
+        assert!(err.contains("expected nice-restore"));
+        assert!(err.contains("actual ioprio-restore"));
     }
 }

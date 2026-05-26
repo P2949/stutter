@@ -16,7 +16,7 @@ pub use model::{
     ForegroundWindowSnapshot,
 };
 #[cfg(test)]
-pub(crate) use model::{ForegroundAvailableInput, ForegroundEventInput};
+pub(crate) use model::{ForegroundAvailableInput, ForegroundEventInput, ForegroundReason};
 #[cfg(test)]
 pub(crate) use parse::x11::parse_x11_quoted_strings;
 #[cfg(test)]

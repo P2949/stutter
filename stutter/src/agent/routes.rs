@@ -67,7 +67,7 @@ pub(crate) fn version_response() -> VersionResponse {
     VersionResponse {
         name: "stutter".to_owned(),
         version: env!("CARGO_PKG_VERSION").to_owned(),
-        schema_version: crate::recorder::SESSION_SCHEMA_VERSION,
+        schema_version: crate::recorder::SESSION_SCHEMA_VERSION.get(),
     }
 }
 

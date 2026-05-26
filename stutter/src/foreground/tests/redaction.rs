@@ -14,10 +14,25 @@ mod tests {
         assert_eq!(snapshot.elapsed_ms, 0);
         assert_eq!(snapshot.source, None);
         assert_eq!(snapshot.status, ForegroundProviderStatus::Unsupported);
-        assert_eq!(snapshot.title, None);
-        assert_eq!(snapshot.confidence, 0.0);
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.title.clone()),
+            None
+        );
+        assert_eq!(snapshot.decision.confidence, 0.0);
         assert_eq!(snapshot.stale_ms, None);
-        assert_eq!(snapshot.reason, "");
+        assert_eq!(
+            snapshot
+                .decision
+                .reasons
+                .first()
+                .map(|r| r.reason.clone())
+                .unwrap_or_default(),
+            ""
+        );
     }
 
     #[test]
@@ -39,14 +54,64 @@ mod tests {
         assert_eq!(snapshot.elapsed_ms, 250);
         assert_eq!(snapshot.source, Some(ForegroundSource::Sway));
         assert_eq!(snapshot.status, ForegroundProviderStatus::Available);
-        assert_eq!(snapshot.pid, Some(1234));
-        assert_eq!(snapshot.app_id.as_deref(), Some("steam"));
-        assert_eq!(snapshot.class.as_deref(), Some("Steam"));
-        assert_eq!(snapshot.title, None);
-        assert_eq!(snapshot.window_id.as_deref(), Some("42"));
-        assert_eq!(snapshot.workspace.as_deref(), Some("games"));
-        assert_eq!(snapshot.confidence, 0.95);
-        assert_eq!(snapshot.reason, "active sway node");
+        assert_eq!(
+            snapshot.decision.target.as_ref().and_then(|t| t.pid),
+            Some(1234)
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.app_id.clone())
+                .as_deref(),
+            Some("steam")
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.class.clone())
+                .as_deref(),
+            Some("Steam")
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.title.clone()),
+            None
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.window_id.clone())
+                .as_deref(),
+            Some("42")
+        );
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.workspace.clone())
+                .as_deref(),
+            Some("games")
+        );
+        assert_eq!(snapshot.decision.confidence, 0.95);
+        assert_eq!(
+            snapshot
+                .decision
+                .reasons
+                .first()
+                .map(|r| r.reason.clone())
+                .unwrap_or_default(),
+            "active sway node"
+        );
     }
 
     #[test]
@@ -65,7 +130,15 @@ mod tests {
             reason: "active hyprland client".to_owned(),
         });
 
-        assert_eq!(snapshot.title.as_deref(), Some("Private browser tab"));
+        assert_eq!(
+            snapshot
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.title.clone())
+                .as_deref(),
+            Some("Private browser tab")
+        );
     }
 
     #[test]
@@ -86,33 +159,50 @@ mod tests {
             reason: "active x11 window".to_owned(),
         });
 
-        assert_eq!(event.title, None);
+        assert_eq!(
+            event.decision.target.as_ref().and_then(|t| t.title.clone()),
+            None
+        );
         assert_eq!(event.source, ForegroundSource::X11);
         assert_eq!(event.status, ForegroundProviderStatus::Available);
     }
 
     #[test]
     fn event_from_snapshot_applies_title_policy_again() {
-        let snapshot = ForegroundWindowSnapshot {
+        let snapshot = ForegroundWindowSnapshot::available(ForegroundAvailableInput {
             elapsed_ms: 1_000,
-            source: Some(ForegroundSource::Sway),
-            status: ForegroundProviderStatus::Available,
+            source: ForegroundSource::Sway,
             pid: Some(9000),
             app_id: Some("foot".to_owned()),
             class: None,
             title: Some("terminal: private path".to_owned()),
+            include_title: true,
             window_id: Some("17".to_owned()),
             workspace: Some("dev".to_owned()),
             confidence: 1.0,
-            stale_ms: None,
             reason: "test snapshot with title already present".to_owned(),
-        };
+        });
 
         let redacted = ForegroundEvent::from_snapshot(&snapshot, false).unwrap();
         let included = ForegroundEvent::from_snapshot(&snapshot, true).unwrap();
 
-        assert_eq!(redacted.title, None);
-        assert_eq!(included.title.as_deref(), Some("terminal: private path"));
+        assert_eq!(
+            redacted
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.title.clone()),
+            None
+        );
+        assert_eq!(
+            included
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.title.clone())
+                .as_deref(),
+            Some("terminal: private path")
+        );
     }
 
     #[test]
@@ -120,7 +210,11 @@ mod tests {
         let snapshot = ForegroundWindowSnapshot {
             source: None,
             status: ForegroundProviderStatus::Unavailable,
-            reason: "no provider selected".to_owned(),
+            decision: crate::foreground::model::ForegroundDecision::new(
+                None,
+                0.0,
+                "no provider selected",
+            ),
             ..ForegroundWindowSnapshot::default()
         };
 

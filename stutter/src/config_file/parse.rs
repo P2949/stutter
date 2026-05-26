@@ -49,7 +49,7 @@ pub fn parse_focus_source_value(value: &str) -> std::result::Result<FocusSource,
         "foreground" => Ok(FocusSource::Foreground),
         "hybrid" => Ok(FocusSource::Hybrid),
         other => Err(ConfigError::InvalidValue {
-            field: "focus_source",
+            field: "focus_source".to_owned(),
             message: format!("got {other:?}; valid values are heuristic, foreground, hybrid"),
         }),
     }
@@ -64,7 +64,7 @@ pub fn parse_foreground_source_value(
         "hyprland" => Ok(ForegroundSource::Hyprland),
         "x11" => Ok(ForegroundSource::X11),
         other => Err(ConfigError::InvalidValue {
-            field: "foreground_source",
+            field: "foreground_source".to_owned(),
             message: format!("got {other:?}; valid values are auto, sway, hyprland, x11"),
         }),
     }
@@ -88,10 +88,11 @@ pub fn parse_user_config_toml_versioned(
         });
     }
 
-    let mut file = toml::from_str::<UserConfigFile>(contents)
+    let file = toml::from_str::<UserConfigFile>(contents)
         .map_err(|err| ConfigError::InvalidUserConfigToml(anyhow::Error::new(err)))?;
 
     let mut diagnostics = schema_diagnostics(&raw);
+    let mut file = migrate_user_config_file(version, file, &mut diagnostics)?;
     diagnostics.extend(workload_policy_config_diagnostics(&file));
     file.config_version = Some(version);
     file.diagnostics = diagnostics.clone();
@@ -121,16 +122,50 @@ pub(super) fn config_version_from_raw_value(
         });
     };
 
-    match table.get("config_version") {
+    let config_version = optional_config_version_field(table, "config_version")?;
+    let schema_version = optional_config_version_field(table, "schema_version")?;
+
+    match (config_version, schema_version) {
+        (Some(config_version), Some(schema_version)) if config_version != schema_version => {
+            Err(ConfigError::InvalidConfigVersion {
+                message: format!(
+                    "config_version ({config_version}) and schema_version ({schema_version}) must match"
+                ),
+            })
+        }
+        (Some(version), _) | (_, Some(version)) => Ok(Some(version)),
+        (None, None) => Ok(None),
+    }
+}
+
+fn optional_config_version_field(
+    table: &toml::map::Map<String, toml::Value>,
+    field: &'static str,
+) -> std::result::Result<Option<u32>, ConfigError> {
+    match table.get(field) {
         None => Ok(None),
         Some(toml::Value::Integer(value)) if (1..=u32::MAX as i64).contains(value) => {
             Ok(Some(*value as u32))
         }
         Some(toml::Value::Integer(value)) => Err(ConfigError::InvalidConfigVersion {
-            message: format!("config_version must be a positive u32, got {value}"),
+            message: format!("{field} must be a positive u32, got {value}"),
         }),
         Some(value) => Err(ConfigError::InvalidConfigVersion {
-            message: format!("config_version must be an integer, got {value:?}"),
+            message: format!("{field} must be an integer, got {value:?}"),
+        }),
+    }
+}
+
+fn migrate_user_config_file(
+    version: u32,
+    file: UserConfigFile,
+    _diagnostics: &mut Vec<ConfigDiagnostic>,
+) -> std::result::Result<UserConfigFile, ConfigError> {
+    match version {
+        1 => Ok(file),
+        _ => Err(ConfigError::UnsupportedConfigVersion {
+            version,
+            current: CURRENT_CONFIG_VERSION,
         }),
     }
 }
@@ -175,6 +210,7 @@ pub(super) fn known_top_level_user_config_field(field: &str) -> bool {
     matches!(
         field,
         "config_version"
+            | "schema_version"
             | "experimental"
             | "summary_ms"
             | "summary_period_ms"

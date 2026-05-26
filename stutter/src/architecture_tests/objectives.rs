@@ -1,7 +1,7 @@
 //! Architecture checks for documented autotune objective semantics.
 
 fn objective_kind_variants() -> Vec<&'static str> {
-    let source = include_str!("../autotune/objective.rs");
+    let source = include_str!("../autotune/objective/mod.rs");
     let enum_body = source
         .split("pub enum ObjectiveKind")
         .nth(1)

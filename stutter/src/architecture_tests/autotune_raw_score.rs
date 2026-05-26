@@ -43,7 +43,8 @@ fn controller_does_not_compare_raw_score_totals() {
 fn diagnostic_raw_score_total_names_are_readable() {
     let sources = [
         include_str!("../autotune/controller.rs"),
-        include_str!("../autotune/candidate_memory.rs"),
+        include_str!("../autotune/candidate_memory/diagnostics.rs"),
+        include_str!("../autotune/candidate_memory/persistence.rs"),
         include_str!("../autotune/kept.rs"),
         include_str!("../autotune/runtime/daemon_state.rs"),
     ];
@@ -77,7 +78,11 @@ fn controller_does_not_directly_branch_on_raw_score_totals() {
 fn raw_score_total_usage_is_confined_to_known_diagnostic_or_test_paths() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/autotune");
 
-    let allowed = ["candidate_memory.rs", "runtime/daemon_state.rs"];
+    let allowed = [
+        "candidate_memory/diagnostics.rs",
+        "candidate_memory/persistence.rs",
+        "runtime/daemon_state.rs",
+    ];
 
     for path in collect_rs_files(&root) {
         let relative = path.strip_prefix(&root).unwrap().to_string_lossy();

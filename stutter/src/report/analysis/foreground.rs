@@ -22,23 +22,58 @@ pub(crate) fn foreground_report_summary(
         });
 
     let final_pid = final_event
-        .and_then(|event| event.pid)
+        .and_then(|event| event.decision.target.as_ref().and_then(|t| t.pid))
         .or(session.core.final_foreground_pid);
     let final_app_id = final_event
-        .and_then(|event| event.app_id.clone())
+        .and_then(|event| {
+            event
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.app_id.clone())
+                .clone()
+        })
         .or_else(|| session.core.final_foreground_app_id.clone());
     let final_class = final_event
-        .and_then(|event| event.class.clone())
+        .and_then(|event| {
+            event
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.class.clone())
+                .clone()
+        })
         .or_else(|| session.core.final_foreground_class.clone());
-    let final_title = final_event.and_then(|event| event.title.clone());
+    let final_title = final_event.and_then(|event| {
+        event
+            .decision
+            .target
+            .as_ref()
+            .and_then(|t| t.title.clone())
+            .clone()
+    });
     let final_window_id = final_event
-        .and_then(|event| event.window_id.clone())
+        .and_then(|event| {
+            event
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.window_id.clone())
+                .clone()
+        })
         .or_else(|| session.core.final_foreground_window_id.clone());
     let final_workspace = final_event
-        .and_then(|event| event.workspace.clone())
+        .and_then(|event| {
+            event
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.workspace.clone())
+                .clone()
+        })
         .or_else(|| session.core.final_foreground_workspace.clone());
     let confidence = final_event
-        .map(|event| event.confidence)
+        .map(|event| event.decision.confidence)
         .or(session.core.final_foreground_confidence);
     let provider_status = final_event
         .map(|event| format!("{:?}", event.status).to_ascii_lowercase())
@@ -47,7 +82,7 @@ pub(crate) fn foreground_report_summary(
         .and_then(|event| event.stale_ms)
         .or(session.core.final_foreground_stale_ms);
     let reasons = final_event
-        .map(|event| vec![event.reason.clone()])
+        .map(|event| event.decision.reason_strings())
         .or_else(|| {
             session
                 .core
@@ -134,10 +169,20 @@ pub(crate) fn annotate_clusters_with_foreground(
 ) {
     for cluster in clusters {
         if let Some(event) = foreground_for_cluster(cluster, foreground_events, max_stale_ms) {
-            cluster.foreground_pid = event.pid;
-            cluster.foreground_app_id = event.app_id.clone();
-            cluster.foreground_class = event.class.clone();
-            cluster.foreground_confidence = Some(event.confidence);
+            cluster.foreground_pid = event.decision.target.as_ref().and_then(|t| t.pid);
+            cluster.foreground_app_id = event
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.app_id.clone())
+                .clone();
+            cluster.foreground_class = event
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.class.clone())
+                .clone();
+            cluster.foreground_confidence = Some(event.decision.confidence);
         }
     }
 }
@@ -170,7 +215,7 @@ pub(crate) fn foreground_for_elapsed_ms(
 mod tests {
     use super::*;
     use crate::{
-        foreground::{ForegroundProviderStatus, ForegroundSource},
+        foreground::{ForegroundEventInput, ForegroundProviderStatus, ForegroundSource},
         recorder::{ForegroundEvent, SessionFile},
     };
 
@@ -208,7 +253,7 @@ mod tests {
         session.core.final_foreground_pid = Some(1111);
         session.core.final_foreground_window_id = Some("old".to_owned());
 
-        let events = vec![ForegroundEvent {
+        let events = vec![ForegroundEvent::new(ForegroundEventInput {
             elapsed_ms: 1_000,
             source: ForegroundSource::Sway,
             status: ForegroundProviderStatus::Available,
@@ -216,12 +261,13 @@ mod tests {
             app_id: Some("Alacritty".to_owned()),
             class: None,
             title: None,
+            include_title: false,
             window_id: Some("new".to_owned()),
             workspace: Some("4".to_owned()),
             confidence: 0.95,
             stale_ms: None,
             reason: "new foreground event".to_owned(),
-        }];
+        })];
 
         let summary = foreground_report_summary(&session, &events);
 

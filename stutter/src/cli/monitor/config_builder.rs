@@ -8,29 +8,25 @@ use super::{
     *,
 };
 
-impl FocusSource {
-    fn parse_config_value(value: &str) -> anyhow::Result<Self> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "heuristic" => Ok(Self::Heuristic),
-            "foreground" => Ok(Self::Foreground),
-            "hybrid" => Ok(Self::Hybrid),
-            other => anyhow::bail!(
-                "focus_source must be heuristic, foreground, or hybrid, got {other:?}"
-            ),
+fn parse_focus_source_config_value(value: &str) -> anyhow::Result<FocusSource> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "heuristic" => Ok(FocusSource::Heuristic),
+        "foreground" => Ok(FocusSource::Foreground),
+        "hybrid" => Ok(FocusSource::Hybrid),
+        other => {
+            anyhow::bail!("focus_source must be heuristic, foreground, or hybrid, got {other:?}")
         }
     }
 }
 
-impl ForegroundSource {
-    fn parse_config_value(value: &str) -> anyhow::Result<Self> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "auto" => Ok(Self::Auto),
-            "sway" => Ok(Self::Sway),
-            "hyprland" => Ok(Self::Hyprland),
-            "x11" => Ok(Self::X11),
-            other => anyhow::bail!(
-                "foreground_source must be auto, sway, hyprland, or x11, got {other:?}"
-            ),
+fn parse_foreground_source_config_value(value: &str) -> anyhow::Result<ForegroundSource> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "auto" => Ok(ForegroundSource::Auto),
+        "sway" => Ok(ForegroundSource::Sway),
+        "hyprland" => Ok(ForegroundSource::Hyprland),
+        "x11" => Ok(ForegroundSource::X11),
+        other => {
+            anyhow::bail!("foreground_source must be auto, sway, hyprland, or x11, got {other:?}")
         }
     }
 }
@@ -216,13 +212,13 @@ pub(crate) fn monitor_config_from_monitor_args_with_file_and_presence(
     if !cli_presence.focus_source
         && let Some(focus_source) = file_config.focus_source.as_deref()
     {
-        args.focus_source = FocusSource::parse_config_value(focus_source)?;
+        args.focus_source = parse_focus_source_config_value(focus_source)?;
     }
 
     if !cli_presence.foreground_source
         && let Some(foreground_source) = file_config.foreground_source.as_deref()
     {
-        args.foreground_source = ForegroundSource::parse_config_value(foreground_source)?;
+        args.foreground_source = parse_foreground_source_config_value(foreground_source)?;
     }
 
     if !cli_presence.foreground_poll_ms

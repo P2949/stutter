@@ -7,4 +7,5 @@ publish = false
 
 [dependencies]
 anyhow = { workspace = true, default-features = true }
+cargo_metadata = { workspace = true }
 clap = { workspace = true, features = ["help"] }

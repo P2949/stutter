@@ -1,4 +1,4 @@
-use std::{mem, path::Path};
+use std::path::Path;
 
 use anyhow::Context;
 
@@ -12,43 +12,6 @@ use crate::actions::{self, *};
 
 const CGROUP_ROOT: &str = "/sys/fs/cgroup";
 
-pub(super) const IOPRIO_WHO_PROCESS: libc::c_int = 1;
-pub(super) const SCHED_FLAG_KEEP_POLICY: u64 = 0x08;
-pub(super) const SCHED_FLAG_KEEP_PARAMS: u64 = 0x10;
-pub(super) const SCHED_FLAG_UTIL_CLAMP_MIN: u64 = 0x20;
-pub(super) const SCHED_FLAG_UTIL_CLAMP_MAX: u64 = 0x40;
-
-#[repr(C)]
-#[derive(Debug, Clone, Copy)]
-pub(super) struct SchedAttr {
-    size: u32,
-    sched_policy: u32,
-    sched_flags: u64,
-    sched_nice: i32,
-    sched_priority: u32,
-    sched_runtime: u64,
-    sched_deadline: u64,
-    sched_period: u64,
-    sched_util_min: u32,
-    sched_util_max: u32,
-}
-
-impl Default for SchedAttr {
-    fn default() -> Self {
-        Self {
-            size: mem::size_of::<SchedAttr>() as u32,
-            sched_policy: 0,
-            sched_flags: 0,
-            sched_nice: 0,
-            sched_priority: 0,
-            sched_runtime: 0,
-            sched_deadline: 0,
-            sched_period: 0,
-            sched_util_min: 0,
-            sched_util_max: 1024,
-        }
-    }
-}
 pub fn restore_rollback_token(token: &RollbackToken) -> anyhow::Result<RollbackRestoreSummary> {
     let result = default_autotune_rollback_registry().restore_token(token)?;
     Ok(rollback_restore_summary_from_registry_result(token, result))
@@ -178,22 +141,7 @@ pub(super) fn restore_nice_records(
     restore_task_records(
         "nice-restore",
         records,
-        |record| {
-            let tid = record.tid();
-            let rc = unsafe {
-                libc::setpriority(
-                    libc::PRIO_PROCESS,
-                    tid as libc::id_t,
-                    record.original_nice as libc::c_int,
-                )
-            };
-
-            if rc == 0 {
-                Ok(())
-            } else {
-                Err(std::io::Error::last_os_error())
-            }
-        },
+        |record| crate::actions::syscalls::setpriority_process(record.tid(), record.original_nice),
         |record| {
             format!(
                 "failed to restore nice={} for tid={}",
@@ -210,23 +158,7 @@ pub(super) fn restore_ioprio_records(
     restore_task_records(
         "ioprio-restore",
         records,
-        |record| {
-            let tid = record.tid();
-            let rc = unsafe {
-                libc::syscall(
-                    libc::SYS_ioprio_set,
-                    IOPRIO_WHO_PROCESS,
-                    tid as libc::c_int,
-                    record.original_ioprio as libc::c_int,
-                )
-            };
-
-            if rc == 0 {
-                Ok(())
-            } else {
-                Err(std::io::Error::last_os_error())
-            }
-        },
+        |record| crate::actions::syscalls::ioprio_set_process(record.tid(), record.original_ioprio),
         |record| {
             format!(
                 "failed to restore I/O priority={} for tid={}",
@@ -244,31 +176,13 @@ pub(super) fn restore_uclamp_records(
         "uclamp-restore",
         records,
         |record| {
-            let tid = record.tid();
-            let mut attr = SchedAttr {
-                sched_flags: SCHED_FLAG_KEEP_POLICY
-                    | SCHED_FLAG_KEEP_PARAMS
-                    | SCHED_FLAG_UTIL_CLAMP_MIN
-                    | SCHED_FLAG_UTIL_CLAMP_MAX,
-                sched_util_min: record.original_util_min,
-                sched_util_max: record.original_util_max,
-                ..SchedAttr::default()
-            };
-
-            let rc = unsafe {
-                libc::syscall(
-                    libc::SYS_sched_setattr,
-                    tid as libc::pid_t,
-                    &mut attr as *mut SchedAttr,
-                    0u32,
-                )
-            };
-
-            if rc == 0 {
-                Ok(())
-            } else {
-                Err(std::io::Error::last_os_error())
-            }
+            crate::actions::syscalls::sched_setattr(
+                record.tid(),
+                crate::actions::syscalls::SchedUclamp {
+                    util_min: record.original_util_min,
+                    util_max: record.original_util_max,
+                },
+            )
         },
         |record| {
             format!(

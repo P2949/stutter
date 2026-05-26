@@ -577,6 +577,15 @@ fn is_rust_keyword(ident: &str) -> bool {
 pub(in crate::architecture_tests) fn production_code_lines_outside_cfg_test_modules(
     source: &str,
 ) -> Vec<(usize, &str)> {
+    if source
+        .lines()
+        .map(str::trim)
+        .take_while(|line| line.is_empty() || line.starts_with("//") || line.starts_with("#!["))
+        .any(|line| line == "#![cfg(test)]")
+    {
+        return Vec::new();
+    }
+
     let mut lines = Vec::new();
     let mut cfg_test_pending = false;
     let mut skipped_test_module_brace_depth: Option<isize> = None;
@@ -606,7 +615,7 @@ pub(in crate::architecture_tests) fn production_code_lines_outside_cfg_test_modu
             continue;
         }
 
-        if cfg_test_pending && trimmed.starts_with("mod tests") && trimmed.contains('{') {
+        if cfg_test_pending && trimmed.contains('{') {
             cfg_test_pending = false;
             let depth = brace_delta(line);
             if depth > 0 {
@@ -621,6 +630,7 @@ pub(in crate::architecture_tests) fn production_code_lines_outside_cfg_test_modu
             && !trimmed.starts_with("//")
         {
             cfg_test_pending = false;
+            continue;
         }
 
         lines.push((line_number, line));

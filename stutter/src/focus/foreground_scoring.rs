@@ -114,11 +114,11 @@ pub(crate) fn foreground_focus_readiness(snapshot: &FocusSnapshot) -> Foreground
         return ForegroundFocusReadiness::StaleSnapshot;
     }
 
-    if foreground.confidence <= 0.0 {
+    if foreground.decision.confidence <= 0.0 {
         return ForegroundFocusReadiness::UnavailableStatus;
     }
 
-    let Some(pid) = foreground.pid else {
+    let Some(pid) = foreground.decision.target.as_ref().and_then(|t| t.pid) else {
         return ForegroundFocusReadiness::MissingPid;
     };
 
@@ -179,16 +179,16 @@ pub(crate) fn foreground_score_for_group(group: &FocusGroup, snapshot: &FocusSna
         return 0.0;
     };
 
-    let Some(pid) = fg.pid else {
+    let Some(pid) = fg.decision.target.as_ref().and_then(|t| t.pid) else {
         return 0.0;
     };
 
     if group.member_pids.contains(&pid) {
-        return 1.0 * fg.confidence;
+        return 1.0 * fg.decision.confidence;
     }
 
     if group.root_pids.contains(&pid) {
-        return 0.95 * fg.confidence;
+        return 0.95 * fg.decision.confidence;
     }
 
     if group
@@ -196,7 +196,7 @@ pub(crate) fn foreground_score_for_group(group: &FocusGroup, snapshot: &FocusSna
         .iter()
         .any(|member| same_process_family(snapshot, *member, pid))
     {
-        return 0.75 * fg.confidence;
+        return 0.75 * fg.decision.confidence;
     }
 
     0.0

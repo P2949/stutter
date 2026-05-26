@@ -45,6 +45,7 @@ pub(crate) mod model;
 pub(crate) mod restore_identity;
 pub(crate) mod restore_write;
 pub(crate) mod rollback;
+pub(crate) mod syscalls;
 pub(crate) mod token;
 pub(crate) mod traits;
 pub(crate) mod transaction;
@@ -60,10 +61,10 @@ pub use irq_affinity::{
     IrqAffinityAction, IrqAffinityEvidence, IrqAffinityPolicy, IrqAffinityRisk,
 };
 pub use model::{
-    ActionId, ActionOutcome, ActionPhase, ActionState, ActionWarning, CgroupCpusetRestoreRecord,
-    CgroupRestoreRecord, CpuPowerRestoreRecord, GpuPowerRestoreRecord, IoPrioRestoreRecord,
-    IrqAffinityRestoreRecord, NiceRestoreRecord, SafetyClass, TaskIdentity, TaskRestoreIdentity,
-    UclampRestoreRecord, VmKnobRestoreRecord,
+    ActionId, ActionOutcome, ActionPhase, ActionPreflightReport, ActionState, ActionWarning,
+    CgroupCpusetRestoreRecord, CgroupRestoreRecord, CpuPowerRestoreRecord, GpuPowerRestoreRecord,
+    IoPrioRestoreRecord, IrqAffinityRestoreRecord, NiceRestoreRecord, SafetyClass, TaskIdentity,
+    TaskRestoreIdentity, UclampRestoreRecord, VmKnobRestoreRecord,
 };
 pub use nice::{NiceAction, NicePolicy};
 pub use restore_identity::{RestoreIdentityStatus, verify_task_identity};
@@ -71,7 +72,7 @@ pub use rollback::{
     RestoreAllInput, RestoreAllSummary, RollbackCandidate, RollbackHandler, RollbackPreview,
     RollbackRegistry, RollbackResult, default_rollback_registry,
 };
-pub use token::RollbackToken;
+pub use token::{RollbackToken, RollbackTokenKindError};
 pub use traits::TuningAction;
 pub use vm_knobs::{VmKnobAction, VmKnobChange, VmKnobMode, VmKnobPolicy};
 

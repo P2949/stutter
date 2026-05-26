@@ -1,5 +1,5 @@
-use crate::model::DataQualitySummary;
 use super::pushln;
+use crate::model::DataQualitySummary;
 
 pub fn render_data_quality(data_quality: &DataQualitySummary) -> String {
     let mut output = String::new();

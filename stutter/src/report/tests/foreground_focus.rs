@@ -27,15 +27,47 @@ fn display_timing_summaries_handle_empty_optional_streams() {
     let direct_scanout = crate::report::analysis::build_direct_scanout_summary(&[], None);
 
     assert_eq!(kms.event_count, 0);
+    assert_eq!(
+        kms.evidence_quality,
+        EvidenceQuality::Missing {
+            reason: "no KMS timing events present".to_owned()
+        }
+    );
+    assert_eq!(
+        kms.scanout_window_estimate.evidence_quality,
+        EvidenceQuality::Missing {
+            reason:
+                "at least two KMS completion timestamps are required to estimate scanout window"
+                    .to_owned()
+        }
+    );
     assert_eq!(kms.notes, vec!["no KMS timing events present"]);
     assert_eq!(fence.event_count, 0);
+    assert_eq!(
+        fence.evidence_quality,
+        EvidenceQuality::Missing {
+            reason: "no DRM fence events present".to_owned()
+        }
+    );
     assert_eq!(fence.confidence, "missing");
     assert_eq!(wayland.event_count, 0);
+    assert_eq!(
+        wayland.evidence_quality,
+        EvidenceQuality::Missing {
+            reason: "no Wayland presentation events present".to_owned()
+        }
+    );
     assert_eq!(
         wayland.notes,
         vec!["no Wayland presentation events present"]
     );
     assert_eq!(direct_scanout.status, "unknown");
+    assert_eq!(
+        direct_scanout.evidence_quality,
+        EvidenceQuality::Missing {
+            reason: "direct scanout could not be determined from presentation evidence".to_owned()
+        }
+    );
     assert_eq!(direct_scanout.confidence, "missing");
 }
 
@@ -113,10 +145,15 @@ fn display_timing_summaries_compute_basic_percentiles() {
         crate::report::analysis::build_direct_scanout_summary(&wayland_events, None);
 
     assert_eq!(kms.duration_count, 2);
+    assert_eq!(kms.evidence_quality, EvidenceQuality::Direct);
     assert_eq!(kms.median_flip_ms, Some(3.0));
     assert_eq!(
         kms.scanout_window_estimate.refresh_period_ns,
         Some(16_666_667)
+    );
+    assert_eq!(
+        kms.scanout_window_estimate.evidence_quality,
+        EvidenceQuality::Derived
     );
     assert_eq!(
         kms.scanout_window_estimate
@@ -130,6 +167,7 @@ fn display_timing_summaries_compute_basic_percentiles() {
             .any(|note| note.contains("not photon latency"))
     );
     assert_eq!(fence.wait_interval_count, 1);
+    assert_eq!(fence.evidence_quality, EvidenceQuality::Direct);
     assert_eq!(fence.max_wait_ms, Some(3.0));
     assert_eq!(fence.display_gpu_wait_count, 1);
     assert_eq!(fence.cross_gpu_candidate_count, 1);
@@ -137,6 +175,7 @@ fn display_timing_summaries_compute_basic_percentiles() {
     assert_eq!(fence.waits_near_kms_delays, 1);
     assert_eq!(fence.top_waits.len(), 1);
     assert_eq!(cross_gpu_fence.candidate_count, 1);
+    assert_eq!(cross_gpu_fence.evidence_quality, EvidenceQuality::Derived);
     assert_eq!(cross_gpu_fence.high_confidence_count, 1);
     assert_eq!(cross_gpu_fence.confidence, "high");
     assert_eq!(cross_gpu_fence.display_side_wait_count, 1);
@@ -144,6 +183,7 @@ fn display_timing_summaries_compute_basic_percentiles() {
     assert_eq!(cross_gpu_fence.waits_near_kms_delays, 1);
     assert_eq!(cross_gpu_fence.top_candidates[0].signal_ns, Some(900_000));
     assert_eq!(wayland.presented_count, 1);
+    assert_eq!(wayland.evidence_quality, EvidenceQuality::Direct);
     assert_eq!(wayland.zero_copy_ratio, Some(1.0));
     assert_eq!(wayland.p99_commit_to_present_ms, Some(4.0));
     assert_eq!(wayland.outputs_seen, vec!["DP-1"]);
@@ -153,6 +193,7 @@ fn display_timing_summaries_compute_basic_percentiles() {
     assert_eq!(wayland.delays_near_kms_delays, 1);
     assert_eq!(wayland.compositor_queue_candidate_count, 1);
     assert_eq!(direct_scanout.status, "yes");
+    assert_eq!(direct_scanout.evidence_quality, EvidenceQuality::Derived);
     assert_eq!(direct_scanout.zero_copy_ratio, Some(1.0));
     assert_eq!(direct_scanout.direct_scanout_event_count, 1);
 }
@@ -177,6 +218,7 @@ fn dmabuf_path_summary_counts_modifier_and_cross_gpu_copy_candidates() {
     let summary = crate::report::analysis::build_dmabuf_path_summary(&events);
 
     assert_eq!(summary.event_count, 1);
+    assert_eq!(summary.evidence_quality, EvidenceQuality::Direct);
     assert_eq!(summary.linear_count, 1);
     assert_eq!(summary.modifier_mismatch_count, 1);
     assert_eq!(summary.cross_gpu_import_count, 1);
@@ -220,6 +262,7 @@ fn gpu_engine_activity_summary_counts_igpu_blitter_near_outlier() {
     let summary = crate::report::analysis::build_gpu_engine_activity_summary(&samples, &frames);
 
     assert_eq!(summary.sample_count, 2);
+    assert_eq!(summary.evidence_quality, EvidenceQuality::Direct);
     assert_eq!(summary.active_sample_count, 2);
     assert_eq!(summary.igpu_blitter_activity_near_outliers, 1);
     assert_eq!(summary.amdgpu_gfx_activity_near_outliers, 1);
@@ -342,6 +385,7 @@ fn direct_scanout_summary_reports_no_and_mixed_from_cooperative_flags() {
         None,
     );
     assert_eq!(no_summary.status, "no");
+    assert_eq!(no_summary.evidence_quality, EvidenceQuality::Derived);
     assert_eq!(no_summary.composited_event_count, 1);
     assert!(
         no_summary
@@ -353,6 +397,7 @@ fn direct_scanout_summary_reports_no_and_mixed_from_cooperative_flags() {
     let mixed_summary =
         crate::report::analysis::build_direct_scanout_summary(&[composited, direct], None);
     assert_eq!(mixed_summary.status, "mixed");
+    assert_eq!(mixed_summary.evidence_quality, EvidenceQuality::Direct);
     assert_eq!(mixed_summary.direct_scanout_event_count, 1);
     assert_eq!(mixed_summary.composited_event_count, 1);
 }
@@ -566,8 +611,22 @@ fn foreground_for_cluster_uses_nearest_event_at_or_before_cluster_time() {
 
     let selected = foreground_for_cluster(&cluster, &events, 1_000).unwrap();
 
-    assert_eq!(selected.pid, Some(2));
-    assert_eq!(selected.app_id.as_deref(), Some("game"));
+    assert_eq!(
+        selected
+            .decision
+            .target
+            .as_ref()
+            .and_then(|target| target.pid),
+        Some(2)
+    );
+    assert_eq!(
+        selected
+            .decision
+            .target
+            .as_ref()
+            .and_then(|target| target.app_id.as_deref()),
+        Some("game")
+    );
 }
 
 #[test]

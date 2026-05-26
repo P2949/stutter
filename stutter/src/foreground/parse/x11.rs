@@ -3,6 +3,10 @@
 //! Owns X11 active-window and window-property parsing plus parser confidence scoring. Does not own
 //! process execution or resolver stale-snapshot policy.
 
+use crate::foreground::model::{
+    CONFIDENCE_HIGH, CONFIDENCE_LOW, CONFIDENCE_MEDIUM, CONFIDENCE_ZERO, Confidence,
+};
+
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(crate) struct X11WindowProperties {
     pub(crate) pid: Option<u32>,
@@ -110,17 +114,17 @@ pub(crate) fn parse_x11_quoted_strings(line: &str) -> Vec<String> {
     values
 }
 
-pub(crate) fn x11_confidence(properties: &X11WindowProperties, window_id: &str) -> f32 {
+pub(crate) fn x11_confidence(properties: &X11WindowProperties, window_id: &str) -> Confidence {
     if properties.pid.is_some() {
-        0.90
+        CONFIDENCE_HIGH
     } else if properties.class.is_some() || properties.instance.is_some() {
-        0.55
+        CONFIDENCE_MEDIUM
     } else if properties.net_wm_name.is_some()
         || properties.wm_name.is_some()
         || !window_id.is_empty()
     {
-        0.35
+        CONFIDENCE_LOW
     } else {
-        0.0
+        CONFIDENCE_ZERO
     }
 }

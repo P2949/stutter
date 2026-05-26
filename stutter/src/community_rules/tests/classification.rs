@@ -210,6 +210,7 @@ fn rule(name: &str, stutter_class: &str) -> CommunityRule {
         source_url: None,
         comment: None,
         ambiguous: false,
+        specificity: Default::default(),
     }
 }
 
@@ -467,6 +468,7 @@ fn merge_file_forces_guarded_non_game_name_to_ambiguous() {
             source_url: None,
             comment: None,
             ambiguous: false,
+            specificity: Default::default(),
         }],
     })
     .unwrap();

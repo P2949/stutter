@@ -209,8 +209,7 @@ fn duration_millis_u64(duration: Duration) -> u64 {
 }
 
 fn ticks_per_second() -> u64 {
-    let value = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
-    if value <= 0 { 100 } else { value as u64 }
+    crate::syscall::clock_ticks_per_second()
 }
 
 fn read_cpu_jiffies(path: &Path) -> Option<u64> {

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::actions::model::ActionPhase;
+use crate::actions::{model::ActionPhase, token::RollbackTokenKindError};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActionError {
@@ -12,6 +12,7 @@ pub enum ActionFailure {
     Phase(PhaseFailure),
     Timeout(ActionTimeout),
     Rollback(RollbackOutcome),
+    InvalidRollbackToken { expected: String, actual: String },
     ScopeLimitExceeded(ScopeLimitExceeded),
     PolicyRejected { message: String },
 }
@@ -138,6 +139,10 @@ enum ActionErrorWire {
         timeout_ms: u128,
         rollback_error: String,
     },
+    InvalidRollbackToken {
+        expected: String,
+        actual: String,
+    },
     PolicyRejected {
         message: String,
     },
@@ -243,6 +248,27 @@ impl ActionError {
         }))
     }
 
+    pub fn invalid_rollback_token(expected: &'static str, actual: &'static str) -> Self {
+        Self::from_failure(ActionFailure::InvalidRollbackToken {
+            expected: expected.to_owned(),
+            actual: actual.to_owned(),
+        })
+    }
+
+    pub fn invalid_rollback_token_kind(error: RollbackTokenKindError) -> Self {
+        Self::invalid_rollback_token(error.expected(), error.actual())
+    }
+
+    pub fn from_rollback_error(error: anyhow::Error) -> Self {
+        if let Some(action_error) = error.downcast_ref::<ActionError>() {
+            return action_error.clone();
+        }
+        if let Some(kind_error) = error.downcast_ref::<RollbackTokenKindError>() {
+            return Self::invalid_rollback_token_kind(*kind_error);
+        }
+        Self::rollback(error)
+    }
+
     pub fn emergency_rollback(
         verify_error: impl std::fmt::Display,
         rollback_error: impl std::fmt::Display,
@@ -336,6 +362,7 @@ impl ActionFailure {
             Self::Phase(failure) => failure.phase(),
             Self::Timeout(timeout) => timeout.phase,
             Self::Rollback(outcome) => outcome.phase(),
+            Self::InvalidRollbackToken { .. } => ActionPhase::Rollback,
             Self::ScopeLimitExceeded(_) => ActionPhase::DryRun,
             Self::PolicyRejected { .. } => ActionPhase::Preflight,
         }
@@ -346,6 +373,7 @@ impl ActionFailure {
             Self::Phase(failure) => failure.category(),
             Self::Timeout { .. } => "timeout",
             Self::Rollback(outcome) => outcome.category(),
+            Self::InvalidRollbackToken { .. } => "invalid_rollback_token",
             Self::ScopeLimitExceeded(_) => "scope_limit_exceeded",
             Self::PolicyRejected { .. } => "policy_rejected",
         }
@@ -356,6 +384,9 @@ impl ActionFailure {
             Self::Phase(failure) => failure.human_message(),
             Self::Timeout(timeout) => timeout.human_message(),
             Self::Rollback(outcome) => outcome.human_message(),
+            Self::InvalidRollbackToken { expected, actual } => {
+                format!("invalid rollback token: expected {expected}, actual {actual}")
+            }
             Self::ScopeLimitExceeded(scope) => scope.human_message(),
             Self::PolicyRejected { message } => format!("policy rejected: {message}"),
         }
@@ -541,6 +572,9 @@ impl From<ActionErrorWire> for ActionFailure {
                 },
                 rollback_error,
             }),
+            ActionErrorWire::InvalidRollbackToken { expected, actual } => {
+                Self::InvalidRollbackToken { expected, actual }
+            }
             ActionErrorWire::PolicyRejected { message } => Self::PolicyRejected { message },
         }
     }
@@ -610,6 +644,9 @@ impl From<ActionFailure> for ActionErrorWire {
                 timeout_ms,
                 rollback_error,
             },
+            ActionFailure::InvalidRollbackToken { expected, actual } => {
+                Self::InvalidRollbackToken { expected, actual }
+            }
             ActionFailure::ScopeLimitExceeded(ScopeLimitExceeded {
                 affected_tasks,
                 max_affected_tasks,
@@ -785,6 +822,33 @@ mod tests {
             decoded.failure(),
             ActionFailure::Rollback(RollbackOutcome::TimeoutRollbackFailure { .. })
         ));
+    }
+
+    #[test]
+    fn action_error_serialization_preserves_invalid_rollback_token_shape() {
+        let err = ActionError::invalid_rollback_token("nice-restore", "ioprio-restore");
+
+        assert_eq!(err.phase(), ActionPhase::Rollback);
+        assert_eq!(err.category(), "invalid_rollback_token");
+        assert_eq!(
+            err.to_string(),
+            "invalid rollback token: expected nice-restore, actual ioprio-restore"
+        );
+
+        let json_str = serde_json::to_string(&err).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "kind": "invalid_rollback_token",
+                "expected": "nice-restore",
+                "actual": "ioprio-restore"
+            })
+        );
+
+        let decoded: ActionError = serde_json::from_str(&json_str).unwrap();
+        assert_eq!(decoded, err);
     }
 
     #[test]

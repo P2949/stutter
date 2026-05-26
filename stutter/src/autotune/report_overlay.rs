@@ -182,7 +182,7 @@ fn report_event_from_history_event(
         score_delta_percent,
         rollback_performed: event.rollback_performed,
         label,
-        reason: event.reason.clone(),
+        reason: event.reason.clone().clone(),
     }
 }
 
@@ -193,7 +193,7 @@ fn human_label_for_event(
 ) -> String {
     let decision = event.decision.decision.as_str();
     let decision_lc = decision.to_ascii_lowercase();
-    let reason_lc = event.reason.to_ascii_lowercase();
+    let reason_lc = event.reason.clone().to_ascii_lowercase();
     let candidate = candidate_name.unwrap_or("candidate");
 
     if reason_lc.contains("baseline") && reason_lc.contains("started") {
@@ -238,11 +238,11 @@ fn human_label_for_event(
     }
 
     if decision_lc.contains("fault") || matches!(event.phase, ControllerPhase::Faulted) {
-        return format!("controller fault: {}", event.reason);
+        return format!("controller fault: {}", event.reason.clone());
     }
 
-    if !event.reason.trim().is_empty() {
-        return event.reason.clone();
+    if !event.reason.clone().trim().is_empty() {
+        return event.reason.clone().clone();
     }
 
     decision.to_owned()

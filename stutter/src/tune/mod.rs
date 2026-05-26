@@ -610,6 +610,7 @@ pub async fn measure_tune_candidate(
         .recording
         .output_dir
         .as_ref()
+        // invariant: monitor_config.recording.output_dir is populated by collect_tune_results
         .unwrap()
         .clone();
 

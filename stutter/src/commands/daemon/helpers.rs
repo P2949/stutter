@@ -94,7 +94,7 @@ pub fn load_recent_daemon_decisions(limit: usize) -> Vec<super::status::DaemonRe
             candidate_name: event.decision.candidate_name,
             action_id: event.action_id,
             rollback_performed: event.rollback_performed,
-            reason: event.reason,
+            reason: event.reason.clone(),
         })
         .collect()
 }

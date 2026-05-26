@@ -48,10 +48,14 @@ impl ForegroundProvider for SequenceProvider {
     }
 }
 
+// SAFETY: callers hold TEST_MUTEX while changing process environment and this
+// helper only restores a captured value.
 pub(super) unsafe fn restore_env_var(name: &str, value: Option<std::ffi::OsString>) {
     if let Some(value) = value {
+        // SAFETY: guaranteed by the unsafe function contract above.
         unsafe { std::env::set_var(name, value) };
     } else {
+        // SAFETY: guaranteed by the unsafe function contract above.
         unsafe { std::env::remove_var(name) };
     }
 }

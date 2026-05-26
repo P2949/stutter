@@ -62,6 +62,7 @@ fn community_rules_db_for_exe(name: &str) -> CommunityRulesDb {
             source_url: None,
             comment: None,
             ambiguous: false,
+            specificity: Default::default(),
         }],
     })
     .unwrap()

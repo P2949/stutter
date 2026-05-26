@@ -126,7 +126,7 @@ Use the release gate command before tagging:
 ```bash
 stutter release check --channel experimental
 stutter release check --channel observe-stable --enforce
-stutter release check --channel low-risk-stable --soak-tests --enforce
+stutter release check --channel low-risk-stable --soak-tests --real-machine-validation --enforce
 ```
 
 `observe-stable` fails if apply actions are enabled. `low-risk-stable` requires

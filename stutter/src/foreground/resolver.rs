@@ -5,9 +5,9 @@
 
 use crate::foreground::{
     model::{
+        CONFIDENCE_HIGH, CONFIDENCE_LOW, CONFIDENCE_MEDIUM, CONFIDENCE_ZERO, Confidence,
         DEFAULT_FOREGROUND_INCLUDE_TITLE, DEFAULT_FOREGROUND_MAX_STALE_MS,
-        DEFAULT_FOREGROUND_MIN_CONFIDENCE, ForegroundProviderStatus, ForegroundSource,
-        ForegroundWindowSnapshot, redact_title_unless_allowed,
+        ForegroundProviderStatus, ForegroundReason, ForegroundSource, ForegroundWindowSnapshot,
     },
     provider::ForegroundProvider,
 };
@@ -58,7 +58,13 @@ impl ForegroundResolver {
     pub fn sample(&mut self, elapsed_ms: u64) -> ForegroundWindowSnapshot {
         let mut snapshot = self.provider.sample(elapsed_ms);
         snapshot.source = snapshot.source.or(Some(self.provider.source()));
-        snapshot.title = redact_title_unless_allowed(snapshot.title, self.include_title);
+
+        let title = snapshot
+            .decision
+            .target
+            .as_ref()
+            .and_then(|t| t.title.clone());
+        snapshot = snapshot.with_title_policy(title, self.include_title);
 
         if is_good_foreground_snapshot(&snapshot) {
             snapshot.stale_ms = None;
@@ -66,7 +72,13 @@ impl ForegroundResolver {
             return snapshot;
         }
 
-        if let Some(stale) = self.stale_snapshot(elapsed_ms, &snapshot.reason) {
+        let failed_reason = snapshot
+            .decision
+            .reasons
+            .first()
+            .map(|r| r.reason.clone())
+            .unwrap_or_default();
+        if let Some(stale) = self.stale_snapshot(elapsed_ms, &failed_reason) {
             return stale;
         }
 
@@ -87,11 +99,19 @@ impl ForegroundResolver {
 
         let mut snapshot = last.clone();
         snapshot.elapsed_ms = elapsed_ms;
-        snapshot.title = redact_title_unless_allowed(snapshot.title, self.include_title);
-        snapshot.confidence =
-            reduce_stale_confidence(snapshot.confidence, stale_ms, self.max_stale_ms);
+
+        let title = snapshot
+            .decision
+            .target
+            .as_ref()
+            .and_then(|t| t.title.clone());
+        snapshot = snapshot.with_title_policy(title, self.include_title);
+
+        snapshot.decision.confidence =
+            reduce_stale_confidence(snapshot.decision.confidence, stale_ms, self.max_stale_ms);
         snapshot.stale_ms = Some(stale_ms);
-        snapshot.reason = if failed_reason.trim().is_empty() {
+
+        let reason = if failed_reason.trim().is_empty() {
             format!("using stale foreground snapshot from {}ms ago", stale_ms)
         } else {
             format!(
@@ -99,6 +119,7 @@ impl ForegroundResolver {
                 stale_ms, failed_reason
             )
         };
+        snapshot.decision.reasons.push(ForegroundReason { reason });
 
         Some(snapshot)
     }
@@ -107,15 +128,33 @@ impl ForegroundResolver {
 fn is_good_foreground_snapshot(snapshot: &ForegroundWindowSnapshot) -> bool {
     snapshot.status == ForegroundProviderStatus::Available
         && snapshot.source.is_some()
-        && snapshot.confidence >= DEFAULT_FOREGROUND_MIN_CONFIDENCE
+        && snapshot.decision.confidence >= CONFIDENCE_MEDIUM
 }
 
-fn reduce_stale_confidence(confidence: f32, stale_ms: u64, max_stale_ms: u64) -> f32 {
+fn reduce_stale_confidence(confidence: Confidence, stale_ms: u64, max_stale_ms: u64) -> Confidence {
     if max_stale_ms == 0 {
-        return 0.0;
+        return CONFIDENCE_ZERO;
     }
 
     let stale_fraction = (stale_ms as f32 / max_stale_ms as f32).clamp(0.0, 1.0);
-    let multiplier = 0.75 - (0.50 * stale_fraction);
-    (confidence * multiplier).clamp(0.0, confidence)
+
+    if confidence >= CONFIDENCE_HIGH {
+        if stale_fraction < 0.25 {
+            CONFIDENCE_MEDIUM
+        } else if stale_fraction < 0.75 {
+            CONFIDENCE_LOW
+        } else {
+            CONFIDENCE_ZERO
+        }
+    } else if confidence >= CONFIDENCE_MEDIUM {
+        if stale_fraction < 0.5 {
+            CONFIDENCE_LOW
+        } else {
+            CONFIDENCE_ZERO
+        }
+    } else if confidence > CONFIDENCE_ZERO && stale_fraction < 0.25 {
+        confidence.min(CONFIDENCE_LOW)
+    } else {
+        CONFIDENCE_ZERO
+    }
 }

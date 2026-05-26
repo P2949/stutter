@@ -15,7 +15,7 @@ fn foreground_event(
     workspace: Option<&str>,
     confidence: f32,
 ) -> ForegroundEvent {
-    ForegroundEvent {
+    ForegroundEvent::new(crate::foreground::ForegroundEventInput {
         elapsed_ms,
         source: crate::foreground::ForegroundSource::Sway,
         status: crate::foreground::ForegroundProviderStatus::Available,
@@ -23,12 +23,13 @@ fn foreground_event(
         app_id: app_id.map(str::to_owned),
         class: class.map(str::to_owned),
         title: title.map(str::to_owned),
+        include_title: title.is_some(),
         window_id: Some("7".to_owned()),
         workspace: workspace.map(str::to_owned),
         confidence,
         stale_ms: None,
         reason: "test foreground event".to_owned(),
-    }
+    })
 }
 
 fn cluster_at(elapsed_ms: u64) -> SpikeCluster {

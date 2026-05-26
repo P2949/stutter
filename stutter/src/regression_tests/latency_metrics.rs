@@ -7,12 +7,12 @@ fn spike_events_capture_only_threshold_crossing_events() {
     let config = test_config(vec![7], vec![], None);
     let monitor_config = config;
     let active_targets = BTreeMap::from([(
-        7,
+        7.into(),
         task_info(7, 77, "KingdomCome.exe", "RenderThread", TaskClass::Game),
     )]);
     let spike_events = SpikeEventBuffer::default();
 
-    let stats_by_task = BTreeMap::<u32, crate::metrics::TaskStats>::new();
+    let stats_by_task = crate::metrics::TaskStatsMap::new();
     let below_threshold = scheduler_event_with_latency(7, "RenderThread", 999_999);
     let mut tasks = tasks::TaskTracker {
         active_targets,
@@ -79,7 +79,7 @@ fn spike_event_fault_deltas_are_captured_correctly() {
     let config = test_config(vec![7], vec![], None);
     let monitor_config = config;
     let active_targets = BTreeMap::from([(
-        7,
+        7.into(),
         task_info(7, 77, "KingdomCome.exe", "RenderThread", TaskClass::Game),
     )]);
     let spike_events = SpikeEventBuffer::default();
@@ -89,7 +89,7 @@ fn spike_event_fault_deltas_are_captured_correctly() {
     first_event.maj_flt = 10;
     first_event.min_flt = 20;
 
-    let stats_by_task = BTreeMap::<u32, crate::metrics::TaskStats>::new();
+    let stats_by_task = crate::metrics::TaskStatsMap::new();
     let mut tasks = tasks::TaskTracker {
         active_targets,
         stats_by_task,

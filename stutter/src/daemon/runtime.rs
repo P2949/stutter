@@ -16,6 +16,7 @@ use crate::{
         },
         state_builders::daemon_decision_state,
     },
+    process_tree::TaskMap,
     session_events::MonitorEvent,
 };
 
@@ -388,9 +389,7 @@ fn recovered_phase_for_mode(mode: crate::daemon::policy::DaemonMode) -> DaemonPh
     }
 }
 
-fn daemon_target_from_snapshot(
-    active_targets: &std::collections::BTreeMap<u32, crate::process_tree::TaskInfo>,
-) -> Option<DaemonTargetState> {
+fn daemon_target_from_snapshot(active_targets: &TaskMap) -> Option<DaemonTargetState> {
     let root_pid = active_targets
         .values()
         .map(|task| task.process_id().as_u32())
@@ -699,8 +698,8 @@ mod tests {
         let mut runtime = DaemonRuntime::new(runtime_config());
         runtime.handle_event(DaemonRuntimeEvent::RecoveryCompleted);
         let mut targets = BTreeMap::new();
-        targets.insert(11, task_info(11, 10, "game-main"));
-        targets.insert(12, task_info(12, 10, "game-render"));
+        targets.insert(11.into(), task_info(11, 10, "game-main"));
+        targets.insert(12.into(), task_info(12, 10, "game-render"));
 
         let transition = runtime.handle_event(DaemonRuntimeEvent::MonitorEvent(
             MonitorEvent::TargetSnapshot {

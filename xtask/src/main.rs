@@ -1,24 +1,30 @@
 use std::{env, path::PathBuf};
+
 use anyhow::{Context, bail};
 use clap::{Parser, Subcommand};
 
-pub mod process;
-pub mod workflow;
-pub mod no_allow_attrs;
 pub mod dependency_hygiene;
 pub mod ebpf_smoke;
 pub mod fixtures;
-pub mod preflight;
 pub mod maturity_report;
+pub mod no_allow_attrs;
+pub mod preflight;
+pub mod process;
+pub mod workflow;
 
-use crate::workflow::{CommandSpec, run_workflow, run_command_specs};
-use crate::process::run_cargo;
-use crate::no_allow_attrs::run_no_allow_attrs;
-use crate::dependency_hygiene::run_dependency_hygiene;
-use crate::ebpf_smoke::{run_privileged_ebpf_smoke, EBPF_BUILD_COMMAND};
-use crate::fixtures::{SCHEMA_CHECK_WORKFLOW, FIXTURE_CHECK_WORKFLOW, FIXTURE_UPDATE_WORKFLOW, REPORT_GOLDEN_UPDATE_WORKFLOW};
-use crate::preflight::run_preflight;
-use crate::maturity_report::run_maturity_report;
+use crate::{
+    dependency_hygiene::run_dependency_hygiene,
+    ebpf_smoke::{EBPF_BUILD_COMMAND, run_privileged_ebpf_smoke},
+    fixtures::{
+        FIXTURE_CHECK_WORKFLOW, FIXTURE_UPDATE_WORKFLOW, REPORT_GOLDEN_UPDATE_WORKFLOW,
+        SCHEMA_CHECK_WORKFLOW,
+    },
+    maturity_report::run_maturity_report,
+    no_allow_attrs::run_no_allow_attrs,
+    preflight::run_preflight,
+    process::run_cargo,
+    workflow::{CommandSpec, run_command_specs, run_workflow},
+};
 
 #[derive(Debug, Parser)]
 #[command(name = "xtask", about = "Stutter development workflow tasks")]
@@ -253,14 +259,20 @@ fn repo_root() -> anyhow::Result<PathBuf> {
 mod tests {
     use clap::CommandFactory;
 
-    use crate::dependency_hygiene::{APPROVED_DUPLICATE_PACKAGES, DEPENDENCY_HYGIENE_COMMANDS, DEPENDENCY_HYGIENE_WORKFLOW, DUPLICATE_DEPENDENCY_COMMAND, duplicate_package_names};
-    use crate::ebpf_smoke::PRIVILEGED_EBPF_SMOKE_COMMANDS;
-    use crate::fixtures::{SCHEMA_CHECK_COMMANDS, SCHEMA_CHECK_WORKFLOW, FIXTURE_CHECK_COMMANDS, FIXTURE_CHECK_WORKFLOW, FIXTURE_UPDATE_COMMANDS, FIXTURE_UPDATE_WORKFLOW, REPORT_GOLDEN_UPDATE_COMMANDS, REPORT_GOLDEN_UPDATE_WORKFLOW};
-    use crate::no_allow_attrs::scan_allow_attribute_file;
-    use crate::process::format_command;
-
-    use super::{
-        CI_COMMANDS, Cli, SMOKE_COMMANDS, VALIDATION_COMMANDS
+    use super::{CI_COMMANDS, Cli, SMOKE_COMMANDS, VALIDATION_COMMANDS};
+    use crate::{
+        dependency_hygiene::{
+            APPROVED_DUPLICATE_PACKAGES, DEPENDENCY_HYGIENE_COMMANDS, DEPENDENCY_HYGIENE_WORKFLOW,
+            DUPLICATE_DEPENDENCY_COMMAND, duplicate_package_names,
+        },
+        ebpf_smoke::PRIVILEGED_EBPF_SMOKE_COMMANDS,
+        fixtures::{
+            FIXTURE_CHECK_COMMANDS, FIXTURE_CHECK_WORKFLOW, FIXTURE_UPDATE_COMMANDS,
+            FIXTURE_UPDATE_WORKFLOW, REPORT_GOLDEN_UPDATE_COMMANDS, REPORT_GOLDEN_UPDATE_WORKFLOW,
+            SCHEMA_CHECK_COMMANDS, SCHEMA_CHECK_WORKFLOW,
+        },
+        no_allow_attrs::scan_allow_attribute_file,
+        process::format_command,
     };
 
     #[test]
@@ -374,7 +386,7 @@ mod tests {
                 "Cargo.lock",
                 "deny.toml",
                 "*/Cargo.toml",
-                "xtask/src/main.rs",
+                "xtask/src/dependency_hygiene.rs",
             ]
         );
     }

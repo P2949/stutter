@@ -290,9 +290,7 @@ impl MonitorSession {
     ) -> recorder::WaylandPresentationEventRecord {
         let timestamp_ns = event.presented_ns.or(event.commit_ns);
         if let (Some(start_ns), Some(timestamp_ns)) = (
-            self.runtime
-                .outputs
-                .recorder
+            crate::recorder_mut!(self.handles)
                 .run
                 .as_ref()
                 .and_then(|run| run.monotonic_start_ns),
@@ -353,7 +351,7 @@ impl MonitorSession {
                 raw_ms,
                 monotonic_ns,
             } => {
-                if let Some(run) = self.runtime.outputs.recorder.run.as_mut() {
+                if let Some(run) = crate::recorder_mut!(self.handles).run.as_mut() {
                     run.mangohud_first_frame_raw_elapsed_ms = Some(raw_ms);
                     run.mangohud_first_frame_monotonic_ns = Some(monotonic_ns);
                     info!(
@@ -403,26 +401,23 @@ impl MonitorSession {
                     }
                 }
             }
-
-            let drop_counters_snapshot = self.runtime.probes.loaded.snapshot_drop_counters();
+            let drop_counters_snapshot = self.handles.ebpf.loaded.snapshot_drop_counters();
             let psi_snapshot = self.runtime.probes.psi_reader.read_with_delta().ok();
             let records = collect_interval_summaries_labeled(
                 self.interval_label,
                 &mut self.runtime.targeting.tasks.stats_by_task,
                 elapsed_ms,
                 &drop_counters_snapshot,
-                self.runtime.probes.loaded.prev_faults_map.as_ref(),
+                self.handles.ebpf.loaded.prev_faults_map.as_ref(),
                 psi_snapshot.as_ref(),
                 &mut self.runtime.targeting.tasks.prev_faults_snapshot,
             );
-
             self.dispatch_monitor_event(MonitorEvent::Interval {
                 elapsed_ms,
                 records: records.clone(),
                 drop_counters: drop_counters_snapshot.clone(),
             })
             .await?;
-
             if let Some(sampler) = self.runtime.probes.runtime_slice_sampler.as_mut() {
                 let tasks = self
                     .runtime
@@ -438,39 +433,25 @@ impl MonitorSession {
                     self.config.timing.summary_period_ms,
                     self.config.runtime_slices.max_tasks,
                 );
-                self.runtime
-                    .outputs
-                    .recorder
+                crate::recorder_mut!(self.handles)
                     .counters
-                    .runtime_slice_read_errors = self
-                    .runtime
-                    .outputs
-                    .recorder
+                    .runtime_slice_read_errors = crate::recorder_mut!(self.handles)
                     .counters
                     .runtime_slice_read_errors
                     .saturating_add(batch.read_errors);
-                self.runtime
-                    .outputs
-                    .recorder
+                crate::recorder_mut!(self.handles)
                     .counters
-                    .runtime_slice_skipped_tasks = self
-                    .runtime
-                    .outputs
-                    .recorder
+                    .runtime_slice_skipped_tasks = crate::recorder_mut!(self.handles)
                     .counters
                     .runtime_slice_skipped_tasks
                     .saturating_add(batch.skipped_tasks as u64);
-
-                if self
-                    .runtime
-                    .outputs
-                    .recorder
+                if crate::recorder_mut!(self.handles)
                     .streams
                     .contains(ArtifactKind::RuntimeSlices)
                 {
                     for record in &batch.records {
                         crate::artifacts::push_artifact_event(
-                            &mut self.runtime.outputs.recorder,
+                            &mut crate::recorder_mut!(self.handles),
                             ArtifactKind::RuntimeSlices,
                             record,
                             "runtime_slices",
@@ -480,34 +461,27 @@ impl MonitorSession {
                         );
                     }
                 } else {
-                    self.runtime.outputs.recorder.counters.runtime_slice_count = self
-                        .runtime
-                        .outputs
-                        .recorder
+                    crate::recorder_mut!(self.handles).counters.runtime_slice_count = crate::recorder_mut!(self.handles)
                         .counters
                         .runtime_slice_count
                         .saturating_add(batch.records.len() as u64);
                 }
             }
-
-            if let Some(state) = self.runtime.outputs.prometheus_state.as_ref() {
+            if let Some(state) = self.handles.exporters.prometheus_state.as_ref() {
                 let max_p99 = records.iter().map(|r| r.p99_ns).max().unwrap_or(0);
                 state.set_latest_p99_ns(max_p99);
                 state.set_active_targets(self.runtime.targeting.tasks.active_targets.len() as u64);
                 state.set_event_stream_write_errors(
-                    self.runtime
-                        .outputs
-                        .recorder
+                    crate::recorder_mut!(self.handles)
                         .counters
                         .event_stream_write_errors,
                 );
                 state.set_ebpf_ringbuf_drops(drop_counters_snapshot.total());
             }
         }
-
         if let Some(term) = self.runtime.ui.terminal.as_mut() {
             let elapsed_ms = self.started.elapsed().as_millis() as u64;
-            let drop_counters_snapshot = self.runtime.probes.loaded.snapshot_drop_counters();
+            let drop_counters_snapshot = self.handles.ebpf.loaded.snapshot_drop_counters();
 
             let snapshot = TuiRenderSnapshot {
                 elapsed_ms,
@@ -515,10 +489,7 @@ impl MonitorSession {
                 tui_state: self.runtime.ui.tui_state.clone(),
                 active_targets: self.runtime.targeting.tasks.active_targets.clone(),
                 stats_by_task: self.runtime.targeting.tasks.stats_by_task.clone(),
-                interval_records: self
-                    .runtime
-                    .outputs
-                    .recorder
+                interval_records: crate::recorder_mut!(self.handles)
                     .buffers
                     .interval_records
                     .clone(),
@@ -770,10 +741,7 @@ impl MonitorSession {
             irq_events: self.runtime.telemetry.irq_events.iter().cloned().collect(),
             gpu_samples: self.runtime.telemetry.gpu_samples.iter().cloned().collect(),
             block_io_events: self.runtime.telemetry.io_events.iter().cloned().collect(),
-            intervals: self
-                .runtime
-                .outputs
-                .recorder
+            intervals: crate::recorder_mut!(self.handles)
                 .buffers
                 .interval_records
                 .clone(),
@@ -831,14 +799,11 @@ impl MonitorSession {
             .refresh(crate::tasks::RefreshInput {
                 target_snapshot_input,
                 max_tasks: policy.max_tasks,
-                tree_events: &mut self.runtime.outputs.recorder.buffers.tree_events,
-                target_pid_map: &mut self.runtime.probes.loaded.target_pid_map,
-                prev_faults_map: self.runtime.probes.loaded.prev_faults_map.as_mut(),
+                tree_events: &mut crate::recorder_mut!(self.handles).buffers.tree_events,
+                target_pid_map: &mut self.handles.ebpf.loaded.target_pid_map,
+                prev_faults_map: self.handles.ebpf.loaded.prev_faults_map.as_mut(),
                 elapsed_ms: self.started.elapsed().as_millis() as u64,
-                recording_started: self
-                    .runtime
-                    .outputs
-                    .recorder
+                recording_started: crate::recorder_mut!(self.handles)
                     .run
                     .as_ref()
                     .map(|run| run.started_instant),
@@ -846,16 +811,12 @@ impl MonitorSession {
             .await?;
 
         if budget_report.scan_timed_out {
-            self.runtime
-                .outputs
-                .recorder
+            crate::recorder_mut!(self.handles)
                 .counters
                 .process_scan_budget_exceeded_count += 1;
         }
 
-        self.runtime
-            .outputs
-            .recorder
+        crate::recorder_mut!(self.handles)
             .counters
             .thread_scan_limited_count += budget_report.processes_thread_limited as u64;
 
@@ -874,13 +835,10 @@ impl MonitorSession {
             let _ = crate::tui::restore_terminal(term);
         }
 
-        let drop_counters = self.runtime.probes.loaded.snapshot_drop_counters();
+        let drop_counters = self.handles.ebpf.loaded.snapshot_drop_counters();
         log_drop_counters(&drop_counters);
 
-        if let Some(dropped) = self
-            .runtime
-            .outputs
-            .recorder
+        if let Some(dropped) = crate::recorder_mut!(self.handles)
             .exporters
             .otel_spans_dropped
             .as_ref()
@@ -898,7 +856,7 @@ impl MonitorSession {
             print_session_summaries(&mut self.runtime.targeting.tasks.stats_by_task);
         }
 
-        if let Some(writer) = self.runtime.outputs.recorder.csv_writer.as_mut() {
+        if let Some(writer) = crate::recorder_mut!(self.handles).csv_writer.as_mut() {
             writer.finish()?;
             if let Some(CsvStreamTarget::File(path)) = &self.config.streams.csv
                 && !self.config.outputs.json_stream
@@ -907,16 +865,16 @@ impl MonitorSession {
             }
         }
 
-        if self.runtime.outputs.recorder.run.is_some() {
+        if crate::recorder_mut!(self.handles).run.is_some() {
             let frame_events = crate::session::mangohud_frames::read_and_stream_non_live_events(
                 self.config.as_ref(),
-                &mut self.runtime.outputs.recorder,
+                &mut crate::recorder_mut!(self.handles),
             );
 
-            self.runtime.outputs.recorder.streams.finish_all()?;
+            crate::recorder_mut!(self.handles).streams.finish_all()?;
 
             recorder::finalize_recording(FinalizeRecordingInput {
-                recorder: &self.runtime.outputs.recorder,
+                recorder: &crate::recorder_mut!(self.handles),
                 config: &self.config,
                 tree_pids: self.runtime.targeting.effective_tree_pids(),
                 stop_reason: &stop_reason,
@@ -945,7 +903,7 @@ impl MonitorSession {
                 current_focus: self.current_focus.clone(),
                 final_foreground_event: foreground_event_for_final_metadata(
                     self.current_foreground.as_ref(),
-                    self.runtime.outputs.recorder.last_foreground_event.as_ref(),
+                    crate::recorder_mut!(self.handles).last_foreground_event.as_ref(),
                     self.config.focus.foreground_include_title,
                 ),
                 drop_counters,
@@ -964,7 +922,7 @@ impl MonitorSession {
                     }),
             })?;
 
-            recorder::print_recording_warnings(&self.runtime.outputs.recorder);
+            recorder::print_recording_warnings(&crate::recorder_mut!(self.handles));
         }
 
         info!("exiting stop_reason={stop_reason}");

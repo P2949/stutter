@@ -12,15 +12,15 @@ pub(crate) fn pushln(output: &mut String, line: impl AsRef<str>) {
 
 pub fn render_report(model: &crate::model::ReportModel) -> String {
     let mut output = String::new();
-    
+
     if let Some(header) = &model.header {
         output.push_str(&header::render_header(header));
     }
-    
+
     if let Some(data_quality) = &model.data_quality {
         output.push_str(&quality::render_data_quality(data_quality));
     }
-    
+
     if !model.clusters.is_empty() {
         pushln(&mut output, "spike clusters");
         pushln(&mut output, "--------------");
@@ -29,7 +29,7 @@ pub fn render_report(model: &crate::model::ReportModel) -> String {
         }
         pushln(&mut output, "");
     }
-    
+
     if !model.frames.is_empty() {
         pushln(&mut output, "frame diagnosis");
         pushln(&mut output, "---------------");
@@ -38,13 +38,13 @@ pub fn render_report(model: &crate::model::ReportModel) -> String {
         }
         pushln(&mut output, "");
     }
-    
+
     if let Some(correlations) = &model.correlations {
         pushln(&mut output, "correlations");
         pushln(&mut output, "------------");
         correlation::render_correlation_sections(&mut output, correlations);
         pushln(&mut output, "");
     }
-    
+
     output.trim_end().to_string() + "\n"
 }

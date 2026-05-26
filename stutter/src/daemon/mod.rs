@@ -41,6 +41,8 @@ pub(crate) mod overhead;
 pub(crate) mod policy;
 pub(crate) mod privilege;
 pub(crate) mod runtime;
+#[cfg(test)]
+pub(crate) mod safety_acceptance;
 pub(crate) mod soak;
 pub(crate) mod state;
 pub(crate) mod state_builders;

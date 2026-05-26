@@ -112,9 +112,24 @@ pub(crate) fn build_frame_pacing_summary(
             nearest_cluster_anchor_comm: nearest_cluster
                 .as_ref()
                 .and_then(|(cluster, _)| cluster.anchor_comm.clone()),
-            foreground_pid: foreground.and_then(|event| event.pid),
-            foreground_app_id: foreground.and_then(|event| event.app_id.clone()),
-            foreground_class: foreground.and_then(|event| event.class.clone()),
+            foreground_pid: foreground
+                .and_then(|event| event.decision.target.as_ref().and_then(|t| t.pid)),
+            foreground_app_id: foreground.and_then(|event| {
+                event
+                    .decision
+                    .target
+                    .as_ref()
+                    .and_then(|t| t.app_id.clone())
+                    .clone()
+            }),
+            foreground_class: foreground.and_then(|event| {
+                event
+                    .decision
+                    .target
+                    .as_ref()
+                    .and_then(|t| t.class.clone())
+                    .clone()
+            }),
         });
     }
 

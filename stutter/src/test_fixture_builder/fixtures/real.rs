@@ -345,20 +345,23 @@ pub(in crate::test_fixture_builder) fn real_foreground_window_fixture()
             2_400_000,
         ),
     ];
-    let foreground_events = vec![ForegroundEvent {
-        elapsed_ms: 100,
-        source: crate::foreground::ForegroundSource::Sway,
-        status: crate::foreground::ForegroundProviderStatus::Available,
-        pid: Some(5701),
-        app_id: Some("steam_app_sanitized".to_owned()),
-        class: Some("steam_app_sanitized".to_owned()),
-        title: None,
-        window_id: Some("0xSANITIZED".to_owned()),
-        workspace: Some("gaming".to_owned()),
-        confidence: 0.96,
-        stale_ms: None,
-        reason: "focused Sway node from sanitized real foreground fixture".to_owned(),
-    }];
+    let foreground_events = vec![ForegroundEvent::new(
+        crate::foreground::ForegroundEventInput {
+            elapsed_ms: 100,
+            source: crate::foreground::ForegroundSource::Sway,
+            status: crate::foreground::ForegroundProviderStatus::Available,
+            pid: Some(5701),
+            app_id: Some("steam_app_sanitized".to_owned()),
+            class: Some("steam_app_sanitized".to_owned()),
+            title: None,
+            include_title: false,
+            window_id: Some("0xSANITIZED".to_owned()),
+            workspace: Some("gaming".to_owned()),
+            confidence: 0.96,
+            stale_ms: None,
+            reason: "focused Sway node from sanitized real foreground fixture".to_owned(),
+        },
+    )];
 
     let mut session = base_session("real_foreground_window");
     session.config.tree_roots = vec![5701];

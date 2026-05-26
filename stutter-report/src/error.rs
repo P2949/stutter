@@ -14,12 +14,6 @@ pub enum ReportError {
 
     #[error("invalid report model: {message}")]
     InvalidModel { message: String },
-
-    #[error("unsupported report operation '{operation}': {reason}")]
-    UnsupportedOperation {
-        operation: &'static str,
-        reason: String,
-    },
 }
 
 impl ReportError {
@@ -33,13 +27,6 @@ impl ReportError {
     pub fn invalid_model(message: impl Into<String>) -> Self {
         Self::InvalidModel {
             message: message.into(),
-        }
-    }
-
-    pub fn unsupported_operation(operation: &'static str, reason: impl Into<String>) -> Self {
-        Self::UnsupportedOperation {
-            operation,
-            reason: reason.into(),
         }
     }
 }
@@ -75,16 +62,5 @@ mod tests {
         let error = ReportError::invalid_model("missing run id");
 
         assert_eq!(error.to_string(), "invalid report model: missing run id");
-    }
-
-    #[test]
-    fn unsupported_operation_error_formats_operation_and_reason() {
-        let error =
-            ReportError::unsupported_operation("load_report_model", "migration is not complete");
-
-        assert_eq!(
-            error.to_string(),
-            "unsupported report operation 'load_report_model': migration is not complete"
-        );
     }
 }
