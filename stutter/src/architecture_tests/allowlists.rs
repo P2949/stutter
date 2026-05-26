@@ -122,11 +122,6 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
         max_lines: 701,
         reason: "pending ioprio split; baseline pinned for the 700-line production gate",
     },
-    OversizedRustFileAllowance {
-        path: "src/daemon/soak.rs",
-        max_lines: 801,
-        reason: "pending daemon soak-test split; baseline pinned for the 800-line production gate",
-    },
 ];
 
 pub(in crate::architecture_tests) fn allowlisted_file_size(
