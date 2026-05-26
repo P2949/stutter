@@ -43,11 +43,6 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
         reason: "pending Step 32.5 cleanup; baseline pinned for the 800-line production gate",
     },
     OversizedRustFileAllowance {
-        path: "src/autotune/controller_journal.rs",
-        max_lines: 854,
-        reason: "pending autotune controller journaling split; baseline pinned for the 800-line production gate",
-    },
-    OversizedRustFileAllowance {
         path: "src/service.rs",
         max_lines: 825,
         reason: "pending service command split; baseline pinned for the 800-line production gate",
