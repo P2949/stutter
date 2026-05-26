@@ -8,8 +8,9 @@
 //! Keeping the data map entry after consumption avoids the copy-then-delete race
 //! where sched_switch could delete a newer wakeup inserted between lookup and
 //! removal. Writers clear the consumed cursor when installing a new wakeup, task
-//! exit removes both maps, and CPU migration only mutates wakeups that are still
-//! pending under the cursor rule above.
+//! exit removes both maps. CPU migration deliberately does not mutate wakeup
+//! records after insertion; the target CPU remains the CPU recorded at wakeup
+//! time so pending records stay immutable after `record_wakeup`.
 //!
 //! To prevent ABA collisions where a new wakeup happens to have the same exact
 //! timestamp, CPU, and waker TID as a previously consumed wakeup, `WakeupData`
@@ -160,22 +161,6 @@ pub(crate) fn remove_for_exit(pid: u32, out: &mut WakeupData) -> bool {
     let _ = WAKEUP_CONSUMED.remove(pid);
     let _ = WAKEUP_SEQ.remove(pid);
     was_pending
-}
-
-#[inline(always)]
-pub(crate) fn move_pending_cpu(pid: u32, new_cpu: u32, old_cpu: &mut u32) -> bool {
-    let Some(data) = WAKEUP_DATA.get_ptr_mut(pid) else {
-        return false;
-    };
-
-    let current = unsafe { *data };
-    if same_wakeup_consumed(pid, &current) || current.target_cpu == new_cpu {
-        return false;
-    }
-
-    *old_cpu = current.target_cpu;
-    unsafe { (*data).target_cpu = new_cpu };
-    true
 }
 
 #[inline(always)]

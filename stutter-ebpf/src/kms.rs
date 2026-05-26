@@ -16,6 +16,8 @@ pub fn try_i915_flip_request(ctx: TracePointContext) -> u32 {
     try_kms_flip_request(
         ctx,
         KMS_FLIP_PROVIDER_I915,
+        unsafe { core::ptr::read_volatile(&raw const I915_FLIP_REQUEST_CARD_MINOR_OFFSET) },
+        unsafe { core::ptr::read_volatile(&raw const I915_FLIP_DONE_CARD_MINOR_OFFSET) },
         unsafe { core::ptr::read_volatile(&raw const I915_FLIP_REQUEST_CRTC_OFFSET) },
         unsafe { core::ptr::read_volatile(&raw const I915_FLIP_REQUEST_PIPE_OFFSET) },
     )
@@ -26,10 +28,9 @@ pub fn try_i915_flip_done(ctx: TracePointContext) -> u32 {
     try_kms_flip_done(
         ctx,
         (KMS_FLIP_PROVIDER_I915 << 16) | KMS_FLIP_EVENT_PAGEFLIP_DONE,
-        kms_offset_pair(
-            unsafe { core::ptr::read_volatile(&raw const I915_FLIP_DONE_CRTC_OFFSET) },
-            unsafe { core::ptr::read_volatile(&raw const I915_FLIP_DONE_PIPE_OFFSET) },
-        ),
+        unsafe { core::ptr::read_volatile(&raw const I915_FLIP_DONE_CARD_MINOR_OFFSET) },
+        unsafe { core::ptr::read_volatile(&raw const I915_FLIP_DONE_CRTC_OFFSET) },
+        unsafe { core::ptr::read_volatile(&raw const I915_FLIP_DONE_PIPE_OFFSET) },
     )
 }
 
@@ -38,6 +39,8 @@ pub fn try_drm_flip_request(ctx: TracePointContext) -> u32 {
     try_kms_flip_request(
         ctx,
         KMS_FLIP_PROVIDER_DRM,
+        unsafe { core::ptr::read_volatile(&raw const DRM_FLIP_REQUEST_CARD_MINOR_OFFSET) },
+        unsafe { core::ptr::read_volatile(&raw const DRM_FLIP_DONE_CARD_MINOR_OFFSET) },
         unsafe { core::ptr::read_volatile(&raw const DRM_FLIP_REQUEST_CRTC_OFFSET) },
         unsafe { core::ptr::read_volatile(&raw const DRM_FLIP_REQUEST_PIPE_OFFSET) },
     )
@@ -48,10 +51,9 @@ pub fn try_drm_flip_done(ctx: TracePointContext) -> u32 {
     try_kms_flip_done(
         ctx,
         (KMS_FLIP_PROVIDER_DRM << 16) | KMS_FLIP_EVENT_PAGEFLIP_DONE,
-        kms_offset_pair(
-            unsafe { core::ptr::read_volatile(&raw const DRM_FLIP_DONE_CRTC_OFFSET) },
-            unsafe { core::ptr::read_volatile(&raw const DRM_FLIP_DONE_PIPE_OFFSET) },
-        ),
+        unsafe { core::ptr::read_volatile(&raw const DRM_FLIP_DONE_CARD_MINOR_OFFSET) },
+        unsafe { core::ptr::read_volatile(&raw const DRM_FLIP_DONE_CRTC_OFFSET) },
+        unsafe { core::ptr::read_volatile(&raw const DRM_FLIP_DONE_PIPE_OFFSET) },
     )
 }
 
@@ -60,10 +62,9 @@ pub fn try_drm_vblank_event(ctx: TracePointContext) -> u32 {
     try_kms_flip_done(
         ctx,
         (KMS_FLIP_PROVIDER_DRM << 16) | KMS_FLIP_EVENT_VBLANK,
-        kms_offset_pair(
-            unsafe { core::ptr::read_volatile(&raw const DRM_VBLANK_CRTC_OFFSET) },
-            unsafe { core::ptr::read_volatile(&raw const DRM_VBLANK_PIPE_OFFSET) },
-        ),
+        unsafe { core::ptr::read_volatile(&raw const DRM_VBLANK_CARD_MINOR_OFFSET) },
+        unsafe { core::ptr::read_volatile(&raw const DRM_VBLANK_CRTC_OFFSET) },
+        unsafe { core::ptr::read_volatile(&raw const DRM_VBLANK_PIPE_OFFSET) },
     )
 }
 
@@ -72,6 +73,8 @@ pub fn try_amdgpu_flip_request(ctx: TracePointContext) -> u32 {
     try_kms_flip_request(
         ctx,
         KMS_FLIP_PROVIDER_AMDGPU,
+        unsafe { core::ptr::read_volatile(&raw const AMDGPU_FLIP_REQUEST_CARD_MINOR_OFFSET) },
+        unsafe { core::ptr::read_volatile(&raw const AMDGPU_FLIP_DONE_CARD_MINOR_OFFSET) },
         unsafe { core::ptr::read_volatile(&raw const AMDGPU_FLIP_REQUEST_CRTC_OFFSET) },
         unsafe { core::ptr::read_volatile(&raw const AMDGPU_FLIP_REQUEST_PIPE_OFFSET) },
     )
@@ -82,10 +85,9 @@ pub fn try_amdgpu_flip_done(ctx: TracePointContext) -> u32 {
     try_kms_flip_done(
         ctx,
         (KMS_FLIP_PROVIDER_AMDGPU << 16) | KMS_FLIP_EVENT_PAGEFLIP_DONE,
-        kms_offset_pair(
-            unsafe { core::ptr::read_volatile(&raw const AMDGPU_FLIP_DONE_CRTC_OFFSET) },
-            unsafe { core::ptr::read_volatile(&raw const AMDGPU_FLIP_DONE_PIPE_OFFSET) },
-        ),
+        unsafe { core::ptr::read_volatile(&raw const AMDGPU_FLIP_DONE_CARD_MINOR_OFFSET) },
+        unsafe { core::ptr::read_volatile(&raw const AMDGPU_FLIP_DONE_CRTC_OFFSET) },
+        unsafe { core::ptr::read_volatile(&raw const AMDGPU_FLIP_DONE_PIPE_OFFSET) },
     )
 }
 
@@ -94,10 +96,9 @@ pub fn try_amdgpu_vblank_event(ctx: TracePointContext) -> u32 {
     try_kms_flip_done(
         ctx,
         (KMS_FLIP_PROVIDER_AMDGPU << 16) | KMS_FLIP_EVENT_VBLANK,
-        kms_offset_pair(
-            unsafe { core::ptr::read_volatile(&raw const AMDGPU_VBLANK_CRTC_OFFSET) },
-            unsafe { core::ptr::read_volatile(&raw const AMDGPU_VBLANK_PIPE_OFFSET) },
-        ),
+        unsafe { core::ptr::read_volatile(&raw const AMDGPU_VBLANK_CARD_MINOR_OFFSET) },
+        unsafe { core::ptr::read_volatile(&raw const AMDGPU_VBLANK_CRTC_OFFSET) },
+        unsafe { core::ptr::read_volatile(&raw const AMDGPU_VBLANK_PIPE_OFFSET) },
     )
 }
 
@@ -105,16 +106,34 @@ pub fn try_amdgpu_vblank_event(ctx: TracePointContext) -> u32 {
 fn try_kms_flip_request(
     ctx: TracePointContext,
     provider: u32,
+    card_minor_offset: u32,
+    completion_card_minor_offset: u32,
     crtc_offset: u32,
     pipe_offset: u32,
 ) -> u32 {
     let mut key = KmsFlipKey {
         provider: 0,
+        card_minor_known: 0,
         card_minor: 0,
         crtc_id: 0,
         pipe: 0,
     };
-    if !fill_kms_flip_key(&mut key, provider, &ctx, crtc_offset, pipe_offset) {
+    if !fill_kms_flip_key(
+        &mut key,
+        provider,
+        card_minor_offset,
+        &ctx,
+        crtc_offset,
+        pipe_offset,
+    ) {
+        return 0;
+    }
+
+    // Request/done correlation must not use an ambiguous key. When the
+    // tracepoint format has no device identity field, emit completion-only KMS
+    // events instead of risking false duration matches between two devices from
+    // the same provider with identical CRTC/pipe ids.
+    if key.card_minor_known == 0 || completion_card_minor_offset == 0 {
         return 0;
     }
 
@@ -128,16 +147,17 @@ fn try_kms_flip_request(
 fn try_kms_flip_done(
     ctx: TracePointContext,
     provider_and_event_kind: u32,
-    offset_pair: u64,
+    card_minor_offset: u32,
+    crtc_offset: u32,
+    pipe_offset: u32,
 ) -> u32 {
     let provider = KmsProvider::from_raw(provider_and_event_kind >> 16);
     let completion_event_kind = provider_and_event_kind & 0xffff;
-    let crtc_offset = (offset_pair >> 32) as u32;
-    let pipe_offset = offset_pair as u32;
     let now = unsafe { bpf_ktime_get_ns() };
 
     let mut key = KmsFlipKey {
         provider: 0,
+        card_minor_known: 0,
         card_minor: 0,
         crtc_id: 0,
         pipe: 0,
@@ -145,6 +165,7 @@ fn try_kms_flip_done(
     if !fill_kms_flip_key(
         &mut key,
         provider_and_event_kind >> 16,
+        card_minor_offset,
         &ctx,
         crtc_offset,
         pipe_offset,
@@ -185,10 +206,6 @@ fn try_kms_flip_done(
     );
 
     0
-}
-
-fn kms_offset_pair(crtc_offset: u32, pipe_offset: u32) -> u64 {
-    ((crtc_offset as u64) << 32) | (pipe_offset as u64)
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -291,12 +308,15 @@ fn kms_sequence_offsets(
 fn fill_kms_flip_key(
     key: &mut KmsFlipKey,
     provider: u32,
+    card_minor_offset: u32,
     ctx: &TracePointContext,
     crtc_offset: u32,
     pipe_offset: u32,
 ) -> bool {
+    let mut card_minor = 0;
     let mut crtc_id = 0;
     let mut pipe = 0;
+    let has_card_minor = read_optional_u32(ctx, card_minor_offset, &mut card_minor);
     let _ = read_optional_u32(ctx, crtc_offset, &mut crtc_id);
     let _ = read_optional_u32(ctx, pipe_offset, &mut pipe);
 
@@ -304,12 +324,12 @@ fn fill_kms_flip_key(
         return false;
     }
 
-    // The tracepoint payloads used here do not expose a reliable DRM card
-    // minor. Keep the user-visible card_minor field unknown, but include the
-    // provider namespace in the internal correlation key so i915, amdgpu, and
-    // generic DRM events with matching CRTC/pipe ids do not collide.
+    // Provider separates i915/amdgpu/generic DRM namespaces. card_minor_known
+    // separates known card0 from unknown-card events; request correlation is
+    // skipped when the tracepoint format lacks a same-provider device identity.
     key.provider = provider;
-    key.card_minor = 0;
+    key.card_minor_known = has_card_minor as u32;
+    key.card_minor = card_minor;
     key.crtc_id = crtc_id;
     key.pipe = pipe;
     true

@@ -276,13 +276,9 @@ pub(crate) fn try_sched_migrate_task(ctx: TracePointContext) -> u32 {
         _ => {}
     }
 
-    // If this task is currently a monitored target with a pending wakeup,
-    // update its target CPU and move its diagnostic-only pending counter.
-    let mut old_cpu = 0;
-    if wakeup_data::move_pending_cpu(pid, new_cpu, &mut old_cpu) {
-        decrement_target_pending(old_cpu);
-        increment_target_pending(new_cpu);
-    }
+    // Pending wakeup records are immutable after sched_wakeup. If a runnable
+    // task migrates before switch-in, the final latency event still reports the
+    // original wakeup target CPU while this migration event reports the move.
 
     emit_ringbuf_event!(
         MigrationEvent,

@@ -20,12 +20,16 @@ pub(crate) static mut I915_FLIP_REQUEST_CRTC_OFFSET: u32 = 0;
 
 #[unsafe(no_mangle)]
 pub(crate) static mut I915_FLIP_REQUEST_PIPE_OFFSET: u32 = 0;
+#[unsafe(no_mangle)]
+pub(crate) static mut I915_FLIP_REQUEST_CARD_MINOR_OFFSET: u32 = 0;
 
 #[unsafe(no_mangle)]
 pub(crate) static mut I915_FLIP_DONE_CRTC_OFFSET: u32 = 0;
 
 #[unsafe(no_mangle)]
 pub(crate) static mut I915_FLIP_DONE_PIPE_OFFSET: u32 = 0;
+#[unsafe(no_mangle)]
+pub(crate) static mut I915_FLIP_DONE_CARD_MINOR_OFFSET: u32 = 0;
 
 #[unsafe(no_mangle)]
 pub(crate) static mut I915_FLIP_DONE_SEQUENCE_OFFSET: u32 = 0;
@@ -38,12 +42,16 @@ pub(crate) static mut DRM_FLIP_REQUEST_CRTC_OFFSET: u32 = 0;
 
 #[unsafe(no_mangle)]
 pub(crate) static mut DRM_FLIP_REQUEST_PIPE_OFFSET: u32 = 0;
+#[unsafe(no_mangle)]
+pub(crate) static mut DRM_FLIP_REQUEST_CARD_MINOR_OFFSET: u32 = 0;
 
 #[unsafe(no_mangle)]
 pub(crate) static mut DRM_FLIP_DONE_CRTC_OFFSET: u32 = 0;
 
 #[unsafe(no_mangle)]
 pub(crate) static mut DRM_FLIP_DONE_PIPE_OFFSET: u32 = 0;
+#[unsafe(no_mangle)]
+pub(crate) static mut DRM_FLIP_DONE_CARD_MINOR_OFFSET: u32 = 0;
 
 #[unsafe(no_mangle)]
 pub(crate) static mut DRM_FLIP_DONE_SEQUENCE_OFFSET: u32 = 0;
@@ -56,6 +64,8 @@ pub(crate) static mut DRM_VBLANK_CRTC_OFFSET: u32 = 0;
 
 #[unsafe(no_mangle)]
 pub(crate) static mut DRM_VBLANK_PIPE_OFFSET: u32 = 0;
+#[unsafe(no_mangle)]
+pub(crate) static mut DRM_VBLANK_CARD_MINOR_OFFSET: u32 = 0;
 
 #[unsafe(no_mangle)]
 pub(crate) static mut DRM_VBLANK_SEQUENCE_OFFSET: u32 = 0;
@@ -68,12 +78,16 @@ pub(crate) static mut AMDGPU_FLIP_REQUEST_CRTC_OFFSET: u32 = 0;
 
 #[unsafe(no_mangle)]
 pub(crate) static mut AMDGPU_FLIP_REQUEST_PIPE_OFFSET: u32 = 0;
+#[unsafe(no_mangle)]
+pub(crate) static mut AMDGPU_FLIP_REQUEST_CARD_MINOR_OFFSET: u32 = 0;
 
 #[unsafe(no_mangle)]
 pub(crate) static mut AMDGPU_FLIP_DONE_CRTC_OFFSET: u32 = 0;
 
 #[unsafe(no_mangle)]
 pub(crate) static mut AMDGPU_FLIP_DONE_PIPE_OFFSET: u32 = 0;
+#[unsafe(no_mangle)]
+pub(crate) static mut AMDGPU_FLIP_DONE_CARD_MINOR_OFFSET: u32 = 0;
 
 #[unsafe(no_mangle)]
 pub(crate) static mut AMDGPU_FLIP_DONE_SEQUENCE_OFFSET: u32 = 0;
@@ -86,6 +100,8 @@ pub(crate) static mut AMDGPU_VBLANK_CRTC_OFFSET: u32 = 0;
 
 #[unsafe(no_mangle)]
 pub(crate) static mut AMDGPU_VBLANK_PIPE_OFFSET: u32 = 0;
+#[unsafe(no_mangle)]
+pub(crate) static mut AMDGPU_VBLANK_CARD_MINOR_OFFSET: u32 = 0;
 
 #[unsafe(no_mangle)]
 pub(crate) static mut AMDGPU_VBLANK_SEQUENCE_OFFSET: u32 = 0;
