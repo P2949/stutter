@@ -1,15 +1,14 @@
 //! Main crate config model re-exports.
 //!
 //! The canonical `MonitorConfig` and all sub-structs now live in
-//! `stutter-config`. This module re-exports them to preserve the existing
-//! `crate::config::model::*` import paths throughout the main crate.
+//! `stutter-config`. This module re-exports the compatibility surface still used by
+//! the main crate. Wider public API re-exports should go through `crate::api`.
 
+#[cfg(test)]
+pub(crate) use stutter_config::DEFAULT_LIVE_DIAGNOSIS_CLUSTER_WINDOW_MS;
 pub use stutter_config::{
-    AlertConfig, CpuPerfConfig, DEFAULT_DESKTOP_ALERT_TIMEOUT_MS,
-    DEFAULT_LIVE_DIAGNOSIS_CLUSTER_WINDOW_MS, DEFAULT_MANGOHUD_ALIGNMENT_POLL_MS,
-    DEFAULT_MANGOHUD_TAIL_IDLE_SLEEP_MS, DiagnosisConfig, DisplayPathConfig, DmaBufConfig,
-    DrmFenceConfig, EbpfSizingConfig, FocusConfig, HwmonConfig, KmsTimingConfig, MangoHudConfig,
+    AlertConfig, CpuPerfConfig, EbpfSizingConfig, FocusConfig, HwmonConfig, MangoHudConfig,
     MonitorConfig, OutputConfig, ProbeConfig, RecordingConfig, RecordingRetentionConfig,
     RemoteConfig, RuntimeSlicesConfig, SafetyConfig, StreamConfig, TargetConfig, TimingConfig,
-    UiConfig, WatchConfig, WaylandPresentationConfig,
+    UiConfig, WatchConfig,
 };

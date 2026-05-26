@@ -12,7 +12,8 @@ mod ranking;
 pub mod recommendation;
 pub mod run;
 
-pub use comparability::TuneCoverageMetrics;
+#[cfg(test)]
+pub(crate) use comparability::TuneCoverageMetrics;
 use ranking::select_best_profile;
 pub(crate) use ranking::{assess_ranking_confidence, profile_stats_from_grouped};
 pub use run::*;

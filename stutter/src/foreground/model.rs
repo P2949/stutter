@@ -374,6 +374,5 @@ fn foreground_target_from_parts(
     })
 }
 
-pub const DEFAULT_FOREGROUND_POLL_MS: u64 = 1_000;
 pub const DEFAULT_FOREGROUND_MAX_STALE_MS: u64 = 2_500;
 pub const DEFAULT_FOREGROUND_INCLUDE_TITLE: bool = false;
