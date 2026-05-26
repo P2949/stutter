@@ -7,8 +7,7 @@ fn post_consumption_read_failures_use_correct_drop_counter() {
         .unwrap();
     let scheduler_rs = workspace_root.join("stutter-ebpf/src/scheduler.rs");
 
-    let content = fs::read_to_string(&scheduler_rs)
-        .expect("failed to read scheduler.rs");
+    let content = fs::read_to_string(&scheduler_rs).expect("failed to read scheduler.rs");
 
     let try_sched_switch_start = content
         .find("pub(crate) fn try_sched_switch")
