@@ -1,8 +1,8 @@
 #[cfg(test)]
 mod tests {
     use crate::daemon::soak::{
-        DaemonSoakBudget, DaemonSoakConfig, DaemonSoakProfile, SoakScenario,
-        run_fake_daemon_soak, run_scenario_daemon_soak,
+        DaemonSoakBudget, DaemonSoakConfig, DaemonSoakProfile, SoakScenario, run_fake_daemon_soak,
+        run_scenario_daemon_soak,
     };
 
     #[test]

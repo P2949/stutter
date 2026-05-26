@@ -26,6 +26,7 @@ pub use parse::command;
 pub(crate) use parse::parse_app_command;
 #[cfg(test)]
 pub(crate) use parse::parse_app_command_from;
+use stutter_config::monitor_layer::MonitorConfigLayer;
 use validate::{validate_comm_patterns, validate_pids};
 
 #[cfg(test)]
@@ -35,9 +36,10 @@ pub(crate) use crate::commands::input::RulesImportCommandInput;
 use crate::{
     config::{
         CsvStreamTarget, FocusSource, ForegroundSource, WaylandPresentationSource,
-        effective::resolve_monitor_config_sources,
-        layer::MonitorConfigLayer,
-        merge::{CliOverrides, ConfigSources, DefaultConfig, PresetConfig},
+        merge::{
+            CliOverrides, ConfigSources, DefaultConfig, PresetConfig,
+            resolve_monitor_config_sources,
+        },
         model::MonitorConfig,
     },
     process_tree::TaskClass,

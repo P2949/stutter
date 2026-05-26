@@ -2,11 +2,6 @@ use stutter_common::ebpf_capacity::{
     DEFAULT_PREV_FAULTS_PER_TARGET_MULTIPLIER, DEFAULT_RUNNABLE_TASK_CPU_PER_TARGET_MULTIPLIER,
     DEFAULT_TARGET_PIDS_MAP_MAX_ENTRIES,
 };
-use stutter_config::{
-    StaticAlertConfig, StaticDiagnosisConfig, StaticFocusConfig, StaticMangoHudConfig,
-    StaticMonitorConfig, StaticOutputConfig, StaticTargetConfig, StaticTimingConfig,
-    StaticWatchConfig,
-};
 
 use crate::config::{ConfigError, model::MonitorConfig};
 
@@ -22,37 +17,7 @@ pub(crate) fn validate_monitor_config(config: &MonitorConfig) -> Result<(), Conf
 }
 
 fn validate_static_config(config: &MonitorConfig) -> Result<(), ConfigError> {
-    stutter_config::validate_static_config(&StaticMonitorConfig {
-        timing: StaticTimingConfig {
-            summary_period_ms: config.timing.summary_period_ms,
-            epoch_period_ms: config.timing.epoch_period_ms,
-            spike_threshold_ns: config.timing.spike_threshold_ns,
-        },
-        diagnosis: StaticDiagnosisConfig {
-            live_cluster_window_ms: config.diagnosis.live_cluster_window_ms,
-        },
-        target: StaticTargetConfig::new(config.target.max_tasks),
-        focus: StaticFocusConfig {
-            foreground_poll_ms: config.focus.foreground_poll_ms,
-            auto_focus_poll_ms: config.focus.auto_focus_poll_ms,
-        },
-        watch: StaticWatchConfig {
-            poll_ms: config.watch.poll_ms,
-        },
-        alerts: StaticAlertConfig {
-            threshold_ns: config.alerts.threshold_ns,
-            desktop_timeout_ms: config.alerts.desktop_timeout_ms,
-        },
-        mangohud: StaticMangoHudConfig {
-            tail_idle_sleep_ms: config.mangohud.tail_idle_sleep_ms,
-            alignment_poll_ms: config.mangohud.alignment_poll_ms,
-        },
-        outputs: StaticOutputConfig {
-            otel_service_name: &config.outputs.otel_service_name,
-            otlp_endpoint: config.outputs.otlp_endpoint.as_deref(),
-        },
-    })
-    .map_err(ConfigError::from)
+    stutter_config::validate_static_config(config).map_err(ConfigError::from)
 }
 
 fn validate_runtime_config(config: &MonitorConfig) -> Result<(), ConfigError> {

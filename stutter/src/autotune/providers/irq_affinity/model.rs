@@ -470,4 +470,3 @@ fn irq_confidence(input: &CandidateProviderInput<'_>, evidence: &IrqCandidateEvi
 
     (input.observation.situation.confidence * completeness * signal_weight).clamp(0.0, 1.0)
 }
-

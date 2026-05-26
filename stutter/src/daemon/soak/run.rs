@@ -1,13 +1,12 @@
+use super::model::*;
 use crate::{
+    actions::SafetyClass,
     autotune::simulation::{
         FakeDaemonScenario, FakeDaemonSimulationReport, FakeDaemonStep,
         run_fake_daemon_scenario_with_safety,
     },
     daemon::DaemonPhase,
-    actions::SafetyClass,
 };
-
-use super::model::*;
 
 pub fn run_fake_daemon_soak(config: &DaemonSoakConfig) -> DaemonSoakReport {
     run_scenario_daemon_soak(config, &default_soak_scenarios(config.profile))

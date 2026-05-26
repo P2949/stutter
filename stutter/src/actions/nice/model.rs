@@ -175,7 +175,11 @@ impl NiceAction {
             })
     }
 
-    pub(super) fn dry_run_at(&self, proc_root: &Path, policy: &NicePolicy) -> anyhow::Result<ActionState> {
+    pub(super) fn dry_run_at(
+        &self,
+        proc_root: &Path,
+        policy: &NicePolicy,
+    ) -> anyhow::Result<ActionState> {
         let snapshots = self.collect_target_snapshots_at(proc_root, policy)?;
         let mut warnings = Vec::new();
         let mut pending_changes = 0usize;
@@ -196,7 +200,11 @@ impl NiceAction {
         })
     }
 
-    pub(super) fn verify_at(&self, proc_root: &Path, policy: &NicePolicy) -> anyhow::Result<ActionState> {
+    pub(super) fn verify_at(
+        &self,
+        proc_root: &Path,
+        policy: &NicePolicy,
+    ) -> anyhow::Result<ActionState> {
         let snapshots = self.collect_target_snapshots_at(proc_root, policy)?;
         let mut warnings = Vec::new();
         let mut pending_changes = 0usize;
@@ -549,4 +557,3 @@ pub(crate) fn set_task_nice(tid: u32, nice: i32) -> anyhow::Result<()> {
     crate::actions::syscalls::setpriority_process(tid, nice)
         .with_context(|| format!("setpriority(PRIO_PROCESS, {tid}, {nice}) failed"))
 }
-

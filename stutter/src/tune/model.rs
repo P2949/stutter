@@ -1,7 +1,15 @@
-use std::{path::PathBuf, sync::{Arc, atomic::{AtomicBool, AtomicUsize}}};
+use std::{
+    path::PathBuf,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicUsize},
+    },
+};
+
 use serde::{Deserialize, Serialize};
-use crate::{profiles, recorder::IntervalRecord};
+
 use super::comparability::{TuneComparabilityWarning, TuneCoverageMetrics};
+use crate::{profiles, recorder::IntervalRecord};
 #[derive(Serialize, Deserialize)]
 pub struct TuneSummary {
     pub schema_version: u32,

@@ -1,9 +1,10 @@
 #[cfg(test)]
 mod tests {
     use std::{fs, path::PathBuf};
+
     use crate::service::{
-        ServiceAction, ServiceManager, ServiceMode, ServiceCommandRequest,
-        build_service_plan, execute_service_plan,
+        ServiceAction, ServiceCommandRequest, ServiceManager, ServiceMode, build_service_plan,
+        execute_service_plan,
     };
 
     fn request(

@@ -578,4 +578,3 @@ fn sync_parent_directory(path: &Path) -> anyhow::Result<()> {
 
     Ok(())
 }
-

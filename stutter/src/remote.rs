@@ -1,13 +1,13 @@
 use std::time::Duration;
 
 use serde::{Deserialize, Deserializer, Serialize};
+use stutter_config::monitor_layer::MonitorConfigLayer;
 
 use crate::{
     actions::SafetyClass,
-    config::{FocusSource, ForegroundSource, layer::MonitorConfigLayer, model::MonitorConfig},
+    config::{FocusSource, ForegroundSource, model::MonitorConfig},
     daemon::{DaemonState, policy::DaemonMode},
 };
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RemoteMonitorRequest {
     pub target_pids: Vec<u32>,

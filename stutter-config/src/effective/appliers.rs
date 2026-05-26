@@ -3,15 +3,15 @@
 //! This module intentionally owns the repetitive `Option<T>` merge assignments so
 //! `effective.rs` can stay focused on source ordering, diagnostics, and provenance.
 
-use crate::config::{
-    layer::MonitorConfigLayer,
-    model::{
+use crate::{
+    config_model::{
         AlertConfig, CpuPerfConfig, DiagnosisConfig, DisplayPathConfig, DmaBufConfig,
         DrmFenceConfig, EbpfSizingConfig, FocusConfig, HwmonConfig, KmsTimingConfig,
         MangoHudConfig, MonitorConfig, OutputConfig, ProbeConfig, RecordingConfig, RemoteConfig,
         RuntimeSlicesConfig, SafetyConfig, StreamConfig, TargetConfig, TimingConfig, UiConfig,
         WatchConfig, WaylandPresentationConfig,
     },
+    monitor_layer::MonitorConfigLayer,
 };
 
 pub(super) fn apply_config_layer(config: &mut MonitorConfig, layer: &MonitorConfigLayer) {

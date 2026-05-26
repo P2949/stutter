@@ -21,9 +21,7 @@ fn run_golden_test(fixture_name: &str) {
     }
 
     let expected_text = fs::read_to_string(&expected_path).unwrap_or_else(|_| {
-        panic!(
-            "failed to read {fixture_name}/expected.txt (run with UPDATE_GOLDEN=1 to create)"
-        )
+        panic!("failed to read {fixture_name}/expected.txt (run with UPDATE_GOLDEN=1 to create)")
     });
 
     assert_eq!(

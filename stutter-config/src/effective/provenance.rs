@@ -1,7 +1,7 @@
 //! Field provenance recording for effective monitor config layers.
 
-use crate::config::{
-    layer::MonitorConfigLayer,
+use crate::{
+    monitor_layer::MonitorConfigLayer,
     source::{ConfigSource, FieldProvenance},
 };
 

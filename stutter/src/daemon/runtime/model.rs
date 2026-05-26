@@ -435,7 +435,9 @@ pub(super) fn daemon_phase_from_decision_label(value: &str) -> Option<DaemonPhas
     }
 }
 
-pub(super) fn daemon_mode_from_decision_label(value: &str) -> Option<crate::daemon::policy::DaemonMode> {
+pub(super) fn daemon_mode_from_decision_label(
+    value: &str,
+) -> Option<crate::daemon::policy::DaemonMode> {
     match value {
         "Observe" | "observe" => Some(crate::daemon::policy::DaemonMode::Observe),
         "Suggest" | "suggest" => Some(crate::daemon::policy::DaemonMode::Suggest),
@@ -479,8 +481,10 @@ pub(super) fn lifecycle_actions_label(actions: &[DaemonLifecycleAction]) -> Stri
         .join(",")
 }
 
-pub(super) fn replace_degraded_status(statuses: &mut Vec<DaemonDegradedStatus>, status: DaemonDegradedStatus) {
+pub(super) fn replace_degraded_status(
+    statuses: &mut Vec<DaemonDegradedStatus>,
+    status: DaemonDegradedStatus,
+) {
     statuses.retain(|existing| existing.category != status.category);
     statuses.push(status);
 }
-

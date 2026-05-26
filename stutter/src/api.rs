@@ -278,16 +278,17 @@ pub mod config {
     pub mod effective {
         //! Public resolved/effective monitor configuration contracts.
 
-        pub use crate::config::effective::{
+        pub use stutter_config::effective::{
             EffectiveMonitorConfig, ResolvedMonitorConfig, apply_layer,
-            resolve_monitor_config_sources,
         };
+
+        pub use crate::config::merge::resolve_monitor_config_sources;
     }
 
     pub mod layer {
         //! Public partial configuration layer contract.
 
-        pub use crate::config::layer::MonitorConfigLayer;
+        pub use stutter_config::monitor_layer::MonitorConfigLayer;
     }
 
     pub mod merge {
@@ -313,16 +314,19 @@ pub mod config {
     pub mod schema {
         //! Public user configuration schema contracts.
 
+        pub use stutter_config::schema::{ConfigDiagnostic, ConfigDiagnosticLevel};
+
         pub use crate::config::schema::{
-            CURRENT_CONFIG_VERSION, ConfigDiagnostic, ConfigDiagnosticLevel, ParsedUserConfigFile,
-            RawConfigFile,
+            CURRENT_CONFIG_VERSION, ParsedUserConfigFile, RawConfigFile,
         };
     }
 
     pub mod source {
         //! Public configuration provenance contracts.
 
-        pub use crate::config::source::{ConfigSource, FieldProvenance};
+        pub use stutter_config::source::{
+            ConfigMergeTrace, ConfigSource, FieldProvenance, MergeReason,
+        };
     }
 
     pub mod types {

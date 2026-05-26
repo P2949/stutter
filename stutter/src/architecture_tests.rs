@@ -14,6 +14,8 @@ mod dependencies;
 mod direct_prints;
 mod documentation;
 mod ebpf_layout;
+mod ebpf_switch_accounting;
+mod ebpf_wakeup_accounting;
 mod file_size;
 mod mutation_paths;
 mod objectives;
@@ -42,7 +44,10 @@ fn autotune_src_root() -> PathBuf {
 }
 
 fn relative_to_crate_root(path: &Path) -> String {
-    path.strip_prefix(env!("CARGO_MANIFEST_DIR"))
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_root = manifest_dir.parent().unwrap();
+    path.strip_prefix(manifest_dir)
+        .or_else(|_| path.strip_prefix(workspace_root))
         .unwrap_or(path)
         .to_string_lossy()
         .replace('\\', "/")

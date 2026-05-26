@@ -2,7 +2,7 @@ use super::*;
 use crate::config::{FocusSource, ForegroundSource, TARGET_PIDS_MAX};
 
 fn last_source_for_field(
-    provenance: &[crate::config::source::FieldProvenance],
+    provenance: &[stutter_config::source::FieldProvenance],
     field: &'static str,
 ) -> Option<ConfigSource> {
     provenance
@@ -13,9 +13,9 @@ fn last_source_for_field(
 }
 
 fn trace_for_field<'a>(
-    trace: &'a [crate::config::source::ConfigMergeTrace],
+    trace: &'a [stutter_config::source::ConfigMergeTrace],
     field: &'static str,
-) -> Option<&'a crate::config::source::ConfigMergeTrace> {
+) -> Option<&'a stutter_config::source::ConfigMergeTrace> {
     trace.iter().find(|entry| entry.field == field)
 }
 
@@ -60,21 +60,21 @@ fn merge_trace_reports_selected_layer_and_reason() {
     assert_eq!(summary.selected_layer, ConfigSource::Cli);
     assert_eq!(
         summary.reason,
-        crate::config::source::MergeReason::LaterLayerOverride
+        stutter_config::source::MergeReason::LaterLayerOverride
     );
 
     let hwmon = trace_for_field(&effective.merge_trace, "probes.hwmon").unwrap();
     assert_eq!(hwmon.selected_layer, ConfigSource::Cli);
     assert_eq!(
         hwmon.reason,
-        crate::config::source::MergeReason::LaterLayerOverride
+        stutter_config::source::MergeReason::LaterLayerOverride
     );
 
     let max_tasks = trace_for_field(&effective.merge_trace, "target.max_tasks").unwrap();
     assert_eq!(max_tasks.selected_layer, ConfigSource::Default);
     assert_eq!(
         max_tasks.reason,
-        crate::config::source::MergeReason::DefaultValue
+        stutter_config::source::MergeReason::DefaultValue
     );
 }
 

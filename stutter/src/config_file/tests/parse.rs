@@ -105,7 +105,7 @@ fn parse_user_config_toml_versioned_warns_for_deprecated_aliases() {
         diagnostic.level == crate::config::schema::ConfigDiagnosticLevel::Warning
     }));
 
-    let layer = crate::config::layer::MonitorConfigLayer::from_user_file(&parsed.file).unwrap();
+    let layer = crate::config::layer::layer_from_user_file(&parsed.file).unwrap();
     assert_eq!(layer.summary_period_ms, Some(500));
     assert_eq!(layer.spike_threshold_ns, Some(1_000_000));
 }
@@ -331,7 +331,7 @@ fn config_file_parses_extended_ebpf_sizing_fields() {
             .all(|diagnostic| { diagnostic.field.as_deref() != Some("ebpf_sizing") })
     );
 
-    let layer = crate::config::layer::MonitorConfigLayer::from_user_file(&parsed.file).unwrap();
+    let layer = crate::config::layer::layer_from_user_file(&parsed.file).unwrap();
     assert_eq!(layer.block_start_entries, Some(Some(32768)));
     assert_eq!(layer.drm_fence_signal_entries, Some(Some(8192)));
 }
@@ -350,7 +350,7 @@ fn config_file_parses_mangohud_timing_overrides() {
     assert_eq!(mangohud.tail_idle_sleep_ms, Some(25));
     assert_eq!(mangohud.alignment_poll_ms, Some(125));
 
-    let layer = crate::config::layer::MonitorConfigLayer::from_user_file(&parsed.file).unwrap();
+    let layer = crate::config::layer::layer_from_user_file(&parsed.file).unwrap();
     assert_eq!(layer.mangohud_tail_idle_sleep_ms, Some(25));
     assert_eq!(layer.mangohud_alignment_poll_ms, Some(125));
 }
@@ -367,7 +367,7 @@ fn config_file_parses_alert_desktop_timeout_override() {
 
     assert_eq!(alerts.desktop_timeout_ms, Some(2500));
 
-    let layer = crate::config::layer::MonitorConfigLayer::from_user_file(&parsed.file).unwrap();
+    let layer = crate::config::layer::layer_from_user_file(&parsed.file).unwrap();
     assert_eq!(layer.alert_desktop_timeout_ms, Some(2500));
 }
 

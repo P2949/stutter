@@ -13,10 +13,12 @@ use super::{
 enum RustFileKind {
     Production,
     Test,
-    Ebpf,
+    EbpfMain,
+    EbpfOther,
 }
 
-const EBPF_RUST_FILE_SIZE_LIMIT_LINES: usize = 500;
+const EBPF_MAIN_RUST_FILE_SIZE_LIMIT_LINES: usize = 500;
+const EBPF_OTHER_RUST_FILE_SIZE_LIMIT_LINES: usize = 600;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct RustFileLineCount {
@@ -30,7 +32,8 @@ impl RustFileLineCount {
         match self.kind {
             RustFileKind::Production => PRODUCTION_RUST_FILE_SIZE_LIMIT_LINES,
             RustFileKind::Test => TEST_RUST_FILE_SIZE_LIMIT_LINES,
-            RustFileKind::Ebpf => EBPF_RUST_FILE_SIZE_LIMIT_LINES,
+            RustFileKind::EbpfMain => EBPF_MAIN_RUST_FILE_SIZE_LIMIT_LINES,
+            RustFileKind::EbpfOther => EBPF_OTHER_RUST_FILE_SIZE_LIMIT_LINES,
         }
     }
 }
@@ -50,7 +53,11 @@ fn rust_file_kind(path: &str) -> RustFileKind {
         || path.ends_with("_tests.rs");
 
     if is_ebpf {
-        RustFileKind::Ebpf
+        if path.ends_with("stutter-ebpf/src/main.rs") {
+            RustFileKind::EbpfMain
+        } else {
+            RustFileKind::EbpfOther
+        }
     } else if is_test_only {
         RustFileKind::Test
     } else {

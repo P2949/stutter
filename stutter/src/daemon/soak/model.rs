@@ -2,10 +2,7 @@ use std::{fmt, str::FromStr};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    actions::SafetyClass,
-    daemon::policy::DaemonMode,
-};
+use crate::{actions::SafetyClass, daemon::policy::DaemonMode};
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]

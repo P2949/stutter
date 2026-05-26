@@ -27,7 +27,7 @@ struct ConfigCheckOutput {
 pub fn run_config_check_command(input: input::ConfigCheckCommandInput) -> anyhow::Result<()> {
     let user_config = config_file::load_user_config()?;
     if let Some(config) = user_config.as_ref() {
-        crate::config::layer::MonitorConfigLayer::from_user_file(config)?;
+        crate::config::layer::layer_from_user_file(config)?;
         let _ = config_file::agent_autotune_limits_from_user_config(Some(config))?;
     }
 

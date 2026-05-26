@@ -49,3 +49,38 @@ pub(super) fn cpu_tracking_limit_warning_from_possible_path(path: &Path) -> Opti
     let max_possible_cpu_id = parse_cpu_range_list_max_id(&possible)?;
     cpu_tracking_limit_warning(max_possible_cpu_id)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_cpu_range_list_max_id_handles_single_cpu() {
+        assert_eq!(parse_cpu_range_list_max_id("0"), Some(0));
+        assert_eq!(parse_cpu_range_list_max_id("  0  \n"), Some(0));
+    }
+
+    #[test]
+    fn parse_cpu_range_list_max_id_handles_contiguous_range() {
+        assert_eq!(parse_cpu_range_list_max_id("0-3"), Some(3));
+        assert_eq!(parse_cpu_range_list_max_id("0-15\n"), Some(15));
+    }
+
+    #[test]
+    fn parse_cpu_range_list_max_id_handles_sparse_lists() {
+        assert_eq!(parse_cpu_range_list_max_id("0,2"), Some(2));
+        assert_eq!(parse_cpu_range_list_max_id("0, 2, 4"), Some(4));
+        assert_eq!(parse_cpu_range_list_max_id("0-1,3-7"), Some(7));
+        assert_eq!(parse_cpu_range_list_max_id("0,2-4,6"), Some(6));
+        assert_eq!(parse_cpu_range_list_max_id("10-15,20,25-30"), Some(30));
+    }
+
+    #[test]
+    fn parse_cpu_range_list_max_id_handles_invalid_input() {
+        assert_eq!(parse_cpu_range_list_max_id(""), None);
+        assert_eq!(parse_cpu_range_list_max_id("a"), None);
+        assert_eq!(parse_cpu_range_list_max_id("0-a"), None);
+        assert_eq!(parse_cpu_range_list_max_id("3-0"), None);
+        assert_eq!(parse_cpu_range_list_max_id("0,,"), None);
+    }
+}

@@ -1,10 +1,9 @@
-use super::{
-    effective::{self, EffectiveMonitorConfig},
-    layer::MonitorConfigLayer,
-    model::MonitorConfig,
-    source::ConfigSource,
+use stutter_config::{
+    config_model::MonitorConfig, effective::EffectiveMonitorConfig,
+    monitor_layer::MonitorConfigLayer, source::ConfigSource,
 };
-use crate::config::ConfigError;
+
+use crate::config::{ConfigError, layer};
 
 #[derive(Debug, Clone, Default)]
 pub struct DefaultConfig {
@@ -79,14 +78,14 @@ pub fn merge_config_sources_effective_checked(
     let user_layer = sources
         .user_file
         .as_ref()
-        .map(MonitorConfigLayer::from_user_file)
+        .map(layer::layer_from_user_file)
         .transpose()
         .map_err(ConfigError::InvalidUserLayer)?;
 
     let preset_layer = sources.preset.map(|preset| preset.layer);
     let (override_layer, override_source) = sources.overrides.into_parts();
 
-    effective::EffectiveMonitorConfig::from_layers_with_sources(
+    let mut effective = EffectiveMonitorConfig::from_layers_with_sources(
         default_config,
         user_layer,
         preset_layer,
@@ -94,6 +93,23 @@ pub fn merge_config_sources_effective_checked(
         override_source,
         diagnostics,
     )
+    .map_err(ConfigError::from)?;
+
+    crate::config::validation::validate_monitor_config(&effective.config)?;
+    Ok(effective)
+}
+
+pub fn resolve_monitor_config_sources(
+    sources: ConfigSources,
+) -> Result<stutter_config::effective::ResolvedMonitorConfig, ConfigError> {
+    let effective = merge_config_sources_effective_checked(sources)?;
+
+    Ok(stutter_config::effective::ResolvedMonitorConfig {
+        config: effective.config,
+        provenance: effective.provenance,
+        merge_trace: effective.merge_trace,
+        diagnostics: effective.diagnostics,
+    })
 }
 
 pub fn merge_config_sources_checked(sources: ConfigSources) -> Result<MonitorConfig, ConfigError> {

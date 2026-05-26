@@ -1,11 +1,12 @@
 use anyhow::{Context, Result};
+use stutter_config::source::ConfigSource;
 
 use super::*;
 use crate::{
     autotune::workload_policy::{
         lint_workload_policy, parse_workload_policy_rule_configs, validate_workload_policy_lints,
     },
-    config::{schema::ConfigDiagnostic, source::ConfigSource},
+    config::schema::ConfigDiagnostic,
     daemon::{
         DaemonConfig,
         policy::{DaemonPolicyBuildInput, build_daemon_policy},

@@ -1,133 +1,134 @@
-    use super::*;
-    use crate::actions::ActionPhase;
 
-    #[test]
-    fn constructors_build_structured_failures() {
-        let err = ActionError::verify_rollback_completed("verify intentional failure");
-        assert!(matches!(
-            err.failure(),
-            ActionFailure::Rollback(RollbackOutcome::VerifyRollbackCompleted {
-                verify_error
-            }) if verify_error == "verify intentional failure"
-        ));
-        assert_eq!(err.phase(), ActionPhase::Verify);
-        assert_eq!(err.category(), "verify_failure_rollback_completed");
-        assert_eq!(
-            err.to_string(),
-            "verify failed; rollback completed: verify intentional failure"
-        );
+use super::*;
+use crate::actions::ActionPhase;
 
-        let err = ActionError::scope_limit_exceeded(8, 3);
-        assert!(matches!(
-            err.failure(),
-            ActionFailure::ScopeLimitExceeded(ScopeLimitExceeded {
-                affected_tasks: 8,
-                max_affected_tasks: 3,
-            })
-        ));
-        assert_eq!(err.phase(), ActionPhase::DryRun);
-        assert_eq!(err.category(), "scope_limit_exceeded");
-        assert_eq!(
-            err.to_string(),
-            "dry run affected 8 task(s), exceeding scope limit 3"
-        );
-    }
+#[test]
+fn constructors_build_structured_failures() {
+    let err = ActionError::verify_rollback_completed("verify intentional failure");
+    assert!(matches!(
+        err.failure(),
+        ActionFailure::Rollback(RollbackOutcome::VerifyRollbackCompleted {
+            verify_error
+        }) if verify_error == "verify intentional failure"
+    ));
+    assert_eq!(err.phase(), ActionPhase::Verify);
+    assert_eq!(err.category(), "verify_failure_rollback_completed");
+    assert_eq!(
+        err.to_string(),
+        "verify failed; rollback completed: verify intentional failure"
+    );
 
-    #[test]
-    fn action_error_serialization_preserves_legacy_scope_limit_shape() {
-        let err = ActionError::scope_limit_exceeded(8, 3);
+    let err = ActionError::scope_limit_exceeded(8, 3);
+    assert!(matches!(
+        err.failure(),
+        ActionFailure::ScopeLimitExceeded(ScopeLimitExceeded {
+            affected_tasks: 8,
+            max_affected_tasks: 3,
+        })
+    ));
+    assert_eq!(err.phase(), ActionPhase::DryRun);
+    assert_eq!(err.category(), "scope_limit_exceeded");
+    assert_eq!(
+        err.to_string(),
+        "dry run affected 8 task(s), exceeding scope limit 3"
+    );
+}
 
-        let json_str = serde_json::to_string(&err).unwrap();
-        let value: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+#[test]
+fn action_error_serialization_preserves_legacy_scope_limit_shape() {
+    let err = ActionError::scope_limit_exceeded(8, 3);
 
-        assert_eq!(
-            value,
-            serde_json::json!({
-                "kind": "scope_limit_exceeded",
-                "affected_tasks": 8,
-                "max_affected_tasks": 3
-            })
-        );
+    let json_str = serde_json::to_string(&err).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&json_str).unwrap();
 
-        let decoded: ActionError = serde_json::from_str(&json_str).unwrap();
-        assert_eq!(decoded, err);
-    }
+    assert_eq!(
+        value,
+        serde_json::json!({
+            "kind": "scope_limit_exceeded",
+            "affected_tasks": 8,
+            "max_affected_tasks": 3
+        })
+    );
 
-    #[test]
-    fn action_error_serialization_preserves_legacy_timeout_rollback_shape() {
-        let err = ActionError::timeout_rollback_failure(
-            ActionPhase::Apply,
-            20,
-            10,
-            "rollback intentional failure",
-        );
+    let decoded: ActionError = serde_json::from_str(&json_str).unwrap();
+    assert_eq!(decoded, err);
+}
 
-        let json_str = serde_json::to_string(&err).unwrap();
-        let value: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+#[test]
+fn action_error_serialization_preserves_legacy_timeout_rollback_shape() {
+    let err = ActionError::timeout_rollback_failure(
+        ActionPhase::Apply,
+        20,
+        10,
+        "rollback intentional failure",
+    );
 
-        assert_eq!(
-            value,
-            serde_json::json!({
-                "kind": "timeout_rollback_failure",
-                "phase": "apply",
-                "elapsed_ms": 20,
-                "timeout_ms": 10,
-                "rollback_error": "rollback intentional failure"
-            })
-        );
+    let json_str = serde_json::to_string(&err).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&json_str).unwrap();
 
-        let decoded: ActionError = serde_json::from_str(&json_str).unwrap();
-        assert_eq!(decoded, err);
-        assert!(matches!(
-            decoded.failure(),
-            ActionFailure::Rollback(RollbackOutcome::TimeoutRollbackFailure { .. })
-        ));
-    }
+    assert_eq!(
+        value,
+        serde_json::json!({
+            "kind": "timeout_rollback_failure",
+            "phase": "apply",
+            "elapsed_ms": 20,
+            "timeout_ms": 10,
+            "rollback_error": "rollback intentional failure"
+        })
+    );
 
-    #[test]
-    fn action_error_serialization_preserves_invalid_rollback_token_shape() {
-        let err = ActionError::invalid_rollback_token("nice-restore", "ioprio-restore");
+    let decoded: ActionError = serde_json::from_str(&json_str).unwrap();
+    assert_eq!(decoded, err);
+    assert!(matches!(
+        decoded.failure(),
+        ActionFailure::Rollback(RollbackOutcome::TimeoutRollbackFailure { .. })
+    ));
+}
 
-        assert_eq!(err.phase(), ActionPhase::Rollback);
-        assert_eq!(err.category(), "invalid_rollback_token");
-        assert_eq!(
-            err.to_string(),
-            "invalid rollback token: expected nice-restore, actual ioprio-restore"
-        );
+#[test]
+fn action_error_serialization_preserves_invalid_rollback_token_shape() {
+    let err = ActionError::invalid_rollback_token("nice-restore", "ioprio-restore");
 
-        let json_str = serde_json::to_string(&err).unwrap();
-        let value: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+    assert_eq!(err.phase(), ActionPhase::Rollback);
+    assert_eq!(err.category(), "invalid_rollback_token");
+    assert_eq!(
+        err.to_string(),
+        "invalid rollback token: expected nice-restore, actual ioprio-restore"
+    );
 
-        assert_eq!(
-            value,
-            serde_json::json!({
-                "kind": "invalid_rollback_token",
-                "expected": "nice-restore",
-                "actual": "ioprio-restore"
-            })
-        );
+    let json_str = serde_json::to_string(&err).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&json_str).unwrap();
 
-        let decoded: ActionError = serde_json::from_str(&json_str).unwrap();
-        assert_eq!(decoded, err);
-    }
+    assert_eq!(
+        value,
+        serde_json::json!({
+            "kind": "invalid_rollback_token",
+            "expected": "nice-restore",
+            "actual": "ioprio-restore"
+        })
+    );
 
-    #[test]
-    fn action_failure_serialization_preserves_legacy_policy_shape() {
-        let failure = ActionFailure::PolicyRejected {
-            message: "policy denied action".to_owned(),
-        };
+    let decoded: ActionError = serde_json::from_str(&json_str).unwrap();
+    assert_eq!(decoded, err);
+}
 
-        let json_str = serde_json::to_string(&failure).unwrap();
-        let value: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+#[test]
+fn action_failure_serialization_preserves_legacy_policy_shape() {
+    let failure = ActionFailure::PolicyRejected {
+        message: "policy denied action".to_owned(),
+    };
 
-        assert_eq!(
-            value,
-            serde_json::json!({
-                "kind": "policy_rejected",
-                "message": "policy denied action"
-            })
-        );
+    let json_str = serde_json::to_string(&failure).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&json_str).unwrap();
 
-        let decoded: ActionFailure = serde_json::from_str(&json_str).unwrap();
-        assert_eq!(decoded, failure);
-    }
+    assert_eq!(
+        value,
+        serde_json::json!({
+            "kind": "policy_rejected",
+            "message": "policy denied action"
+        })
+    );
+
+    let decoded: ActionFailure = serde_json::from_str(&json_str).unwrap();
+    assert_eq!(decoded, failure);
+}

@@ -641,8 +641,7 @@ pub(crate) fn monitor_config_from_remote_request(
 ) -> anyhow::Result<MonitorConfig> {
     use crate::config::{
         TARGET_PIDS_MAX,
-        effective::resolve_monitor_config_sources,
-        merge::{ApiOverrides, ConfigSources, DefaultConfig},
+        merge::{ApiOverrides, ConfigSources, DefaultConfig, resolve_monitor_config_sources},
     };
 
     let duration_seconds = request

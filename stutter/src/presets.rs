@@ -68,8 +68,8 @@ pub struct PresetDefaults {
 }
 
 impl PresetDefaults {
-    pub fn into_monitor_config_layer(self) -> crate::config::layer::MonitorConfigLayer {
-        crate::config::layer::MonitorConfigLayer::from_preset_defaults(self)
+    pub fn into_monitor_config_layer(self) -> stutter_config::monitor_layer::MonitorConfigLayer {
+        crate::config::layer::layer_from_preset_defaults(self)
     }
 }
 

@@ -1,7 +1,7 @@
-
-
 use std::{fs, path::PathBuf};
+
 use anyhow::Context;
+
 use super::model::*;
 
 pub fn default_service_binary_path() -> PathBuf {
@@ -227,4 +227,3 @@ fn enable_hint(manager: ServiceManager, unit_name: &str) -> String {
         ServiceManager::OpenRc => format!("rc-service {unit_name} start"),
     }
 }
-
