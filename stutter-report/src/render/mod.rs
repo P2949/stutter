@@ -18,7 +18,12 @@ impl ReportRenderFormat {
     }
 }
 
-/// Render the currently migrated report identity fields.
+/// Render a report model to the requested format.
+///
+/// For `Text`, outputs a "stutter report" header followed by the full text
+/// body produced by [`render::text::render_report`]. For `Html`, outputs a
+/// minimal HTML stub containing the run identity (the main crate owns the
+/// full HTML rendering pipeline).
 pub fn render_report_model(model: &ReportModel, format: ReportRenderFormat) -> String {
     let run_id = model
         .run_id()
@@ -26,7 +31,18 @@ pub fn render_report_model(model: &ReportModel, format: ReportRenderFormat) -> S
         .unwrap_or("unknown");
 
     match format {
-        ReportRenderFormat::Text => format!("stutter report\nrun_id: {run_id}\n"),
+        ReportRenderFormat::Text => {
+            let mut output = String::new();
+            output.push_str("stutter report\n");
+            output.push_str("==============\n");
+            output.push_str(&format!("run_id: {run_id}\n"));
+            let body = text::render_report(model);
+            if !body.trim().is_empty() {
+                output.push('\n');
+                output.push_str(&body);
+            }
+            output
+        }
         ReportRenderFormat::Html => {
             format!(
                 "<!doctype html>\n<title>stutter report</title>\n<h1>stutter report</h1>\n<p>run_id: {run_id}</p>\n"
