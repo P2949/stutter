@@ -59,7 +59,7 @@ mod tests {
     }
 
     #[test]
-    fn config_crate_exposes_minimal_model_layer_and_resolver() {
+    fn config_crate_exposes_model_layer_and_resolver() {
         let defaults = ConfigModel::with_paths(test_paths("/default"));
         let override_layer = ConfigLayer::with_paths(test_paths("/override"));
 

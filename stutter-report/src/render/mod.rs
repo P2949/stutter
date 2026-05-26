@@ -65,7 +65,7 @@ mod tests {
     }
 
     #[test]
-    fn renderer_outputs_minimal_report_identity() {
+    fn renderer_outputs_report_identity_and_delegates_text_body() {
         let model = ReportModel::new().with_run_id(RunId::new("run-001"));
 
         let text = render_report_model(&model, ReportRenderFormat::Text);

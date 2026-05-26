@@ -1,6 +1,7 @@
 use stutter_core::paths::StutterPaths;
 
-/// Minimal configuration model placeholder for future shared config migration.
+/// Lightweight path-only config model retained for generic resolver tests.
+/// The canonical monitor configuration lives in `config_model::MonitorConfig`.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ConfigModel {
     pub paths: Option<StutterPaths>,
