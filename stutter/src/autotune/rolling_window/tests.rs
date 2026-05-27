@@ -1,5 +1,9 @@
 use super::*;
 use crate::{
+    autotune::{
+        objective::{ObjectiveSignalQuality, ObjectiveSignals},
+        quality::{OnlineDataQuality, OnlineDataQualityPolicy},
+    },
     diagnosis::{Confidence, LiveDiagnosisEntry, StutterCause},
     process_tree::TaskClass,
 };

@@ -37,11 +37,6 @@ pub(in crate::architecture_tests) struct ExistingProductionPanicAllowance {
 
 pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
     &[OversizedRustFileAllowance] = &[
-    OversizedRustFileAllowance {
-        path: "src/autotune/rolling_window.rs",
-        max_lines: 718,
-        reason: "pending rolling window split; baseline pinned for the 700-line production gate",
-    },
 ];
 
 pub(in crate::architecture_tests) fn allowlisted_file_size(
