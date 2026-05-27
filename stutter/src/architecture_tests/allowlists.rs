@@ -78,11 +78,6 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
         reason: "pending observation builder split; baseline pinned for the 700-line production gate",
     },
     OversizedRustFileAllowance {
-        path: "src/actions/uclamp.rs",
-        max_lines: 741,
-        reason: "pending uclamp split; baseline pinned for the 700-line production gate",
-    },
-    OversizedRustFileAllowance {
         path: "src/daemon/config.rs",
         max_lines: 738,
         reason: "pending daemon config split; baseline pinned for the 700-line production gate",
