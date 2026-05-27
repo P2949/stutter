@@ -35,6 +35,12 @@ pub(in crate::architecture_tests) struct ExistingProductionPanicAllowance {
     pub(in crate::architecture_tests) reason: &'static str,
 }
 
+// Paths in this allowlist must be workspace-relative, for example:
+// - stutter/src/recommend/mod.rs
+// - stutter-report/src/model.rs
+// - xtask/src/maturity_report.rs
+// The list is intentionally empty after the oversized-file cleanup pass; keep it
+// empty unless a future split needs a reviewed, pinned, temporary exception.
 pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
     &[OversizedRustFileAllowance] = &[];
 
