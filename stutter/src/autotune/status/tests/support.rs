@@ -1,5 +1,4 @@
 use super::*;
-use crate::daemon::policy::DaemonMode;
 use crate::autotune::history::{AutotuneHistoryEvent, AutotuneMode, ControllerPhase, TargetIdentity};
 
 

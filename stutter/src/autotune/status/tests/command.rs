@@ -2,6 +2,7 @@ use super::{
     support::{kept_event, temp_dir},
     *,
 };
+use crate::daemon_policy::DaemonMode;
 
 #[test]
 fn load_autotune_status_prefers_daemon_state_snapshot_when_present() {

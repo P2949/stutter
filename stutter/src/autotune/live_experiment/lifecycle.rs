@@ -16,15 +16,10 @@ use crate::{
         decision::AutotuneDecision,
         experiment::ExperimentId,
         kept::{ActiveProfileState, KeptCandidateState},
-        objective::{ObjectiveComparisonInput, compare_for_objective, explain_for_objective},
+        objective::{ObjectiveComparisonInput, explain_for_objective},
         observation::AutotuneObservation,
         planning::candidate::CandidateAction,
         state::ControllerPhase,
-        washout::WashoutWindowConfig,
-    },
-    daemon::{
-        DaemonPolicy,
-        state::{DaemonExperimentState, DaemonRollbackState},
     },
     daemon_policy::DaemonMode,
 };

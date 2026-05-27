@@ -8,7 +8,7 @@ use crate::{
         decision::AutotuneDecision,
         experiment::{ExperimentId, WindowScore},
         kept::ActiveProfileState,
-        objective::{ObjectiveComparisonInput, compare_for_objective, explain_for_objective},
+        objective::{ObjectiveComparisonInput, compare_for_objective},
         observation::AutotuneObservation,
         planning::candidate::CandidateAction,
         washout::WashoutWindowConfig,
