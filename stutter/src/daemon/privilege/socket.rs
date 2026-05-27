@@ -2,6 +2,13 @@
 
 use super::*;
 
+fn unexpected_response_error(response: PrivilegedWorkerResponse) -> anyhow::Error {
+    PrivilegedWorkerError::UnexpectedResponse {
+        response: Box::new(response),
+    }
+    .into()
+}
+
 #[derive(Clone, Debug)]
 pub struct UnixSocketPrivilegedActionService {
     socket_path: PathBuf,
@@ -41,10 +48,10 @@ impl UnixSocketPrivilegedActionService {
             )
         })?;
         if line.trim().is_empty() {
-            anyhow::bail!(
-                "privileged_worker_empty_response: {} returned no response",
-                self.socket_path().display()
-            );
+            return Err(PrivilegedWorkerError::EmptyResponse {
+                socket_path: self.socket_path().to_path_buf(),
+            }
+            .into());
         }
 
         serde_json::from_str(&line).with_context(|| {
@@ -59,7 +66,7 @@ impl UnixSocketPrivilegedActionService {
         match self.call_worker(PrivilegedWorkerRequest::Shutdown)? {
             PrivilegedWorkerResponse::Shutdown { .. } => Ok(()),
             response @ PrivilegedWorkerResponse::Error { .. } => Err(response.into_error()),
-            other => anyhow::bail!("privileged_worker_unexpected_response: {other:?}"),
+            other => Err(unexpected_response_error(other)),
         }
     }
 
@@ -83,7 +90,7 @@ impl PrivilegedActionService for UnixSocketPrivilegedActionService {
         match response {
             PrivilegedWorkerResponse::DryRun { record } => Ok(record),
             response @ PrivilegedWorkerResponse::Error { .. } => Err(response.into_error()),
-            other => anyhow::bail!("privileged_worker_unexpected_response: {other:?}"),
+            other => Err(unexpected_response_error(other)),
         }
     }
 
@@ -97,7 +104,7 @@ impl PrivilegedActionService for UnixSocketPrivilegedActionService {
         match response {
             PrivilegedWorkerResponse::Apply { result } => Ok(result),
             response @ PrivilegedWorkerResponse::Error { .. } => Err(response.into_error()),
-            other => anyhow::bail!("privileged_worker_unexpected_response: {other:?}"),
+            other => Err(unexpected_response_error(other)),
         }
     }
 
@@ -116,7 +123,7 @@ impl PrivilegedActionService for UnixSocketPrivilegedActionService {
         match response {
             PrivilegedWorkerResponse::Rollback { result } => Ok(result),
             response @ PrivilegedWorkerResponse::Error { .. } => Err(response.into_error()),
-            other => anyhow::bail!("privileged_worker_unexpected_response: {other:?}"),
+            other => Err(unexpected_response_error(other)),
         }
     }
 }

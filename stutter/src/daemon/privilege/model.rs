@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{serde_u128_string, stable_error_reason_code};
+use super::{PrivilegedWorkerError, serde_u128_string, stable_error_reason_code};
 use crate::{
     actions::{ActionState, RollbackToken, SafetyClass},
     autotune::{
@@ -235,19 +235,19 @@ impl PrivilegedWorkerCandidatePlan {
 
     pub(crate) fn into_plan_request(self) -> anyhow::Result<CandidatePlanRequest> {
         if self.schema_version != PRIVILEGED_WORKER_IPC_SCHEMA_VERSION {
-            anyhow::bail!(
-                "privileged_worker_unsupported_schema: got {} expected {}",
-                self.schema_version,
-                PRIVILEGED_WORKER_IPC_SCHEMA_VERSION
-            );
+            return Err(PrivilegedWorkerError::UnsupportedSchema {
+                got: self.schema_version,
+                expected: PRIVILEGED_WORKER_IPC_SCHEMA_VERSION,
+            }
+            .into());
         }
 
         if self.plan_file.schema_version != CandidatePlanFile::SCHEMA_VERSION {
-            anyhow::bail!(
-                "privileged_worker_unsupported_candidate_plan_schema: got {} expected {}",
-                self.plan_file.schema_version,
-                CandidatePlanFile::SCHEMA_VERSION
-            );
+            return Err(PrivilegedWorkerError::UnsupportedCandidatePlanSchema {
+                got: self.plan_file.schema_version,
+                expected: CandidatePlanFile::SCHEMA_VERSION,
+            }
+            .into());
         }
 
         if self.plan_file.descriptor.action_id != self.descriptor.action_id
@@ -256,25 +256,24 @@ impl PrivilegedWorkerCandidatePlan {
             || self.plan_file.descriptor.effect_scope != self.descriptor.effect_scope
             || self.plan_file.objective != self.objective
         {
-            anyhow::bail!(
-                "privileged_worker_candidate_plan_metadata_mismatch: candidate plan metadata does not match worker request"
-            );
+            return Err(PrivilegedWorkerError::CandidatePlanMetadataMismatch.into());
         }
 
         let Some(executable) = self.plan_file.executable else {
-            if let Some(reason) = self.plan_file.manual_only_reason.as_deref() {
-                anyhow::bail!(
-                    "privileged_worker_candidate_plan_manual_only: candidate '{}' action_kind={} reason={}",
-                    self.plan_file.candidate.candidate_name,
-                    self.plan_file.candidate.action_kind,
-                    reason
-                );
+            if let Some(reason) = self.plan_file.manual_only_reason {
+                return Err(PrivilegedWorkerError::CandidatePlanManualOnly {
+                    candidate_name: self.plan_file.candidate.candidate_name,
+                    action_kind: self.plan_file.candidate.action_kind,
+                    reason,
+                }
+                .into());
             }
-            anyhow::bail!(
-                "privileged_worker_candidate_plan_not_executable: candidate '{}' action_kind={} has no executable payload",
-                self.plan_file.candidate.candidate_name,
-                self.plan_file.candidate.action_kind
-            );
+
+            return Err(PrivilegedWorkerError::CandidatePlanNotExecutable {
+                candidate_name: self.plan_file.candidate.candidate_name,
+                action_kind: self.plan_file.candidate.action_kind,
+            }
+            .into());
         };
 
         let candidate = executable.into_candidate();
@@ -374,8 +373,13 @@ pub enum PrivilegedWorkerResponse {
 
 impl PrivilegedWorkerResponse {
     pub(crate) fn from_error(error: anyhow::Error) -> Self {
+        let reason_code = error
+            .downcast_ref::<PrivilegedWorkerError>()
+            .map(|error| error.reason_code().to_owned());
+
         let message = format!("{error:#}");
-        let reason_code = stable_error_reason_code(&message);
+        let reason_code = reason_code.unwrap_or_else(|| stable_error_reason_code(&message));
+
         Self::Error {
             reason_code,
             message,

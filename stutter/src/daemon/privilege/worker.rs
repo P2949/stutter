@@ -199,15 +199,19 @@ pub(crate) fn wait_for_privileged_worker_socket_with_timing(
         }
     }
 
-    let suffix = last_error
+    let last_error = last_error.map(|err| err.to_string());
+    let last_error_suffix = last_error
+        .as_ref()
         .map(|err| format!("; last_error={err}"))
         .unwrap_or_default();
-    anyhow::bail!(
-        "privileged_worker_socket_not_ready: {} was not connectable within {}ms{}",
-        socket_path.display(),
-        timeout.as_millis(),
-        suffix
-    )
+
+    Err(PrivilegedWorkerError::SocketNotReady {
+        socket_path: socket_path.to_path_buf(),
+        timeout_ms: timeout.as_millis(),
+        last_error,
+        last_error_suffix,
+    }
+    .into())
 }
 
 pub fn default_privileged_worker_socket_path() -> anyhow::Result<PathBuf> {
@@ -216,9 +220,7 @@ pub fn default_privileged_worker_socket_path() -> anyhow::Result<PathBuf> {
     }
 
     let Some(home) = std::env::var_os("HOME") else {
-        anyhow::bail!(
-            "cannot choose default privileged worker socket path without XDG_RUNTIME_DIR or HOME"
-        );
+        return Err(PrivilegedWorkerError::MissingSocketRuntimeDirectory.into());
     };
 
     Ok(PathBuf::from(home)
@@ -302,10 +304,10 @@ fn prepare_privileged_worker_socket_path(path: &Path) -> anyhow::Result<()> {
         )
     })?;
     if !metadata.file_type().is_socket() {
-        anyhow::bail!(
-            "privileged_worker_socket_refusing_non_socket: refusing to replace {}",
-            path.display()
-        );
+        return Err(PrivilegedWorkerError::RefusingNonSocket {
+            path: path.to_path_buf(),
+        }
+        .into());
     }
 
     fs::remove_file(path).with_context(|| {
@@ -344,7 +346,7 @@ fn read_privileged_worker_request(stream: &UnixStream) -> anyhow::Result<Privile
     let mut line = String::new();
     reader.read_line(&mut line)?;
     if line.trim().is_empty() {
-        anyhow::bail!("privileged_worker_empty_request: request body was empty");
+        return Err(PrivilegedWorkerError::EmptyRequest.into());
     }
 
     serde_json::from_str(&line)
