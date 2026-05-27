@@ -8,9 +8,13 @@ mod score;
 mod tests;
 
 pub use input::OnlineDataQualityInput;
+pub use policy::OnlineDataQualityPolicy;
+pub use reason::OnlineDataQuality;
+
+#[cfg(test)]
 pub use policy::{
-    DEFAULT_FRAME_DATA_POLICY, DEFAULT_MAX_DROP_COUNTER_TOTAL, DEFAULT_MIN_SCORED_INTERVALS,
-    DEFAULT_MIN_SCORED_SAMPLES, FrameDataPolicy, OnlineDataQualityPolicy,
+    DEFAULT_FRAME_DATA_POLICY, DEFAULT_MIN_SCORED_INTERVALS,
+    DEFAULT_MIN_SCORED_SAMPLES, FrameDataPolicy,
 };
-pub use reason::{OnlineDataQuality, OnlineDataQualityReasonCode};
-pub use score::*;
+#[cfg(test)]
+pub use reason::OnlineDataQualityReasonCode;

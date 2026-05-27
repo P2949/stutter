@@ -10,11 +10,11 @@ mod stdout;
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
 pub(crate) use alert::AlertSink;
-pub use error::SinkError;
-pub use model::{MonitorEventSink, MonitorOutputConfig, MonitorSinkContext};
-pub(crate) use otel::OtelSink;
-pub(crate) use prometheus::PrometheusSink;
+pub use model::MonitorOutputConfig;
+#[cfg(test)]
+pub use model::{MonitorEventSink, MonitorSinkContext};
+#[cfg(test)]
 pub(crate) use recorder::RecorderSink;
 pub use registry::{MonitorOutputSinkRegistry, MonitorOutputSinks};
-pub(crate) use stdout::StdoutSink;
