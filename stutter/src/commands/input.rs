@@ -599,7 +599,10 @@ mod runtime_decoupling_tests {
                 "stutter/src/ebpf_loader.rs",
                 include_str!("../ebpf_loader.rs"),
             ),
-            ("stutter/src/remote.rs", include_str!("../remote.rs")),
+            (
+                "stutter/src/remote/mod.rs",
+                include_str!("../remote/mod.rs"),
+            ),
             ("stutter/src/agent/mod.rs", include_str!("../agent/mod.rs")),
             (
                 "stutter/src/config/layer.rs",
