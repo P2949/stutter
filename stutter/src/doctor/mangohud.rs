@@ -1,4 +1,5 @@
 use std::{collections::BTreeMap, fs, io::Read, path::Path};
+
 use super::model::{DoctorCheck, DoctorStatus};
 
 pub fn check_mangohud_log_path(path: &Path) -> DoctorCheck {

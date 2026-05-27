@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
-use crate::autotune::quality::{OnlineDataQualityInput, OnlineDataQualityPolicy};
 use super::{RollingWindow, RollingWindowScore};
+use crate::autotune::quality::{OnlineDataQualityInput, OnlineDataQualityPolicy};
 
 pub(crate) fn compute_rolling_window_score(
     window: &RollingWindow,

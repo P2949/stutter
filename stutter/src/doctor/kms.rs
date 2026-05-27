@@ -1,7 +1,10 @@
 use std::collections::BTreeMap;
+
+use super::{
+    model::{DoctorCheck, DoctorStatus},
+    utils::{available_unavailable, format_tracepoint_names, format_tracepoint_ref, yes_no},
+};
 use crate::drm_tracepoints;
-use super::model::{DoctorCheck, DoctorStatus};
-use super::utils::{available_unavailable, format_tracepoint_names, format_tracepoint_ref, yes_no};
 
 pub(crate) fn kms_timing_check() -> DoctorCheck {
     let availability = drm_tracepoints::discover_kms_tracepoints_default();

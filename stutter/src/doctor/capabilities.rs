@@ -1,14 +1,19 @@
 use std::collections::BTreeMap;
+
+use super::{
+    model::{DoctorCheck, DoctorStatus},
+    utils::yes_no,
+};
 use crate::daemon::capabilities::{CapabilityProbe, DaemonCapabilities};
-use super::model::{DoctorCheck, DoctorStatus};
-use super::utils::yes_no;
 
 pub(crate) fn daemon_capabilities_check() -> DoctorCheck {
     let capabilities = CapabilityProbe::default().probe();
     daemon_capabilities_check_from_snapshot(capabilities)
 }
 
-pub(crate) fn daemon_capabilities_check_from_snapshot(capabilities: DaemonCapabilities) -> DoctorCheck {
+pub(crate) fn daemon_capabilities_check_from_snapshot(
+    capabilities: DaemonCapabilities,
+) -> DoctorCheck {
     let unavailable = capabilities.unavailable_features();
     let mut details = BTreeMap::new();
 

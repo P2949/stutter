@@ -1,8 +1,6 @@
 use std::collections::{BTreeSet, VecDeque};
-use crate::{
-    recorder::IntervalRecord,
-    process_tree::TaskClass,
-};
+
+use crate::{process_tree::TaskClass, recorder::IntervalRecord};
 
 pub(crate) fn overlap_basis_label<'a>(bases: impl Iterator<Item = &'a str>) -> Option<String> {
     let unique = bases
@@ -17,8 +15,11 @@ pub(crate) fn overlap_basis_label<'a>(bases: impl Iterator<Item = &'a str>) -> O
     Some(unique.into_iter().collect::<Vec<_>>().join("+"))
 }
 
-pub(crate) fn drain_front_before_elapsed<T, F>(items: &mut VecDeque<T>, start_ms: u64, elapsed_ms: F)
-where
+pub(crate) fn drain_front_before_elapsed<T, F>(
+    items: &mut VecDeque<T>,
+    start_ms: u64,
+    elapsed_ms: F,
+) where
     F: Fn(&T) -> u64,
 {
     while items

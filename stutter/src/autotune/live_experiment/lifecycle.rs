@@ -1,5 +1,21 @@
 use std::path::PathBuf;
 
+use super::{
+    executor::{LiveExperimentActionExecutor, RuntimeLiveExperimentActionExecutor},
+    journal::{
+        controller_journal_metadata_for_candidate, controller_journal_path,
+        write_controller_journal_phase_for_live_experiment,
+    },
+    manager::{LiveExperimentManager, LiveExperimentRuntimeState},
+    model::{
+        LiveExperiment, LiveExperimentEvent, LiveExperimentHistoryContext,
+        LiveExperimentManagerInput, LiveExperimentOutcome,
+    },
+    rollback::{log_rollback_verification, rollback_verification_for_experiment},
+    scoring::{
+        experiment_data_quality, validate_window_score_for_apply, window_score_from_observation,
+    },
+};
 use crate::{
     actions::RollbackToken,
     autotune::{
@@ -20,23 +36,6 @@ use crate::{
         observation::AutotuneObservation,
         planning::candidate::CandidateAction,
         state::ControllerPhase,
-    },
-};
-
-use super::{
-    executor::{LiveExperimentActionExecutor, RuntimeLiveExperimentActionExecutor},
-    journal::{
-        controller_journal_metadata_for_candidate, controller_journal_path,
-        write_controller_journal_phase_for_live_experiment,
-    },
-    manager::{LiveExperimentManager, LiveExperimentRuntimeState},
-    model::{
-        LiveExperiment, LiveExperimentEvent, LiveExperimentHistoryContext, LiveExperimentManagerInput,
-        LiveExperimentOutcome,
-    },
-    rollback::{log_rollback_verification, rollback_verification_for_experiment},
-    scoring::{
-        experiment_data_quality, validate_window_score_for_apply, window_score_from_observation,
     },
 };
 impl LiveExperimentManager {
@@ -63,7 +62,9 @@ impl LiveExperimentManager {
         )
     }
 
-    pub(crate) fn apply_decision_side_effects_with_executor<E: LiveExperimentActionExecutor + ?Sized>(
+    pub(crate) fn apply_decision_side_effects_with_executor<
+        E: LiveExperimentActionExecutor + ?Sized,
+    >(
         &mut self,
         input: LiveExperimentManagerInput<'_>,
         runtime_state: LiveExperimentRuntimeState<'_>,
@@ -140,7 +141,9 @@ impl LiveExperimentManager {
         }
     }
 
-    pub(crate) fn start_candidate_experiment_with_executor<E: LiveExperimentActionExecutor + ?Sized>(
+    pub(crate) fn start_candidate_experiment_with_executor<
+        E: LiveExperimentActionExecutor + ?Sized,
+    >(
         &mut self,
         input: &LiveExperimentManagerInput<'_>,
         controller_state: &mut ControllerRuntimeState,
@@ -262,7 +265,9 @@ impl LiveExperimentManager {
         )
     }
 
-    pub(crate) fn apply_candidate_for_runtime_with_executor<E: LiveExperimentActionExecutor + ?Sized>(
+    pub(crate) fn apply_candidate_for_runtime_with_executor<
+        E: LiveExperimentActionExecutor + ?Sized,
+    >(
         &self,
         input: &LiveExperimentManagerInput<'_>,
         executor: &mut E,
@@ -332,7 +337,9 @@ impl LiveExperimentManager {
         Ok(applied_rollback)
     }
 
-    pub(crate) fn keep_current_experiment_with_executor<E: LiveExperimentActionExecutor + ?Sized>(
+    pub(crate) fn keep_current_experiment_with_executor<
+        E: LiveExperimentActionExecutor + ?Sized,
+    >(
         &mut self,
         input: &LiveExperimentManagerInput<'_>,
         controller_state: &mut ControllerRuntimeState,
@@ -451,7 +458,9 @@ impl LiveExperimentManager {
         }
     }
 
-    pub(crate) fn rollback_active_experiment_with_executor<E: LiveExperimentActionExecutor + ?Sized>(
+    pub(crate) fn rollback_active_experiment_with_executor<
+        E: LiveExperimentActionExecutor + ?Sized,
+    >(
         &mut self,
         input: &LiveExperimentManagerInput<'_>,
         controller_state: &mut ControllerRuntimeState,

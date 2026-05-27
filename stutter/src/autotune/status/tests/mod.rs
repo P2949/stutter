@@ -1,11 +1,11 @@
 use std::{fs, io::Write, path::PathBuf};
 
 use super::*;
-use crate::autotune::history::{ControllerPhase};
-
 use crate::{
     actions::{RollbackToken, SafetyClass},
-    autotune::history::{AutotuneDecisionSummary, ObservationSummary, SituationKind},
+    autotune::history::{
+        AutotuneDecisionSummary, ControllerPhase, ObservationSummary, SituationKind,
+    },
     daemon::state::{
         DaemonDecisionState, DaemonDegradedStatus, DaemonExperimentState, DaemonFaultState,
         DaemonPhase, DaemonRollbackState, DaemonState, DaemonStateSnapshotWriter,

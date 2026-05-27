@@ -1,28 +1,21 @@
 mod model;
-mod utils;
-mod signals;
 mod score;
+mod signals;
+mod utils;
+
+use std::{collections::VecDeque, time::Duration};
 
 pub use model::RollingWindowScore;
-
-use std::{
-    collections::VecDeque,
-    time::Duration,
-};
+use utils::*;
 
 use crate::{
-    autotune::{
-        objective::ObjectiveSignals,
-        quality::OnlineDataQualityPolicy,
-    },
+    autotune::{objective::ObjectiveSignals, quality::OnlineDataQualityPolicy},
     diagnosis::LiveDiagnosisEntry,
     recorder::{
         BlockIoRecord, CpuFreqRecord, ForegroundEvent, FrameEvent, GpuSample, IntervalRecord,
         IrqEventRecord,
     },
 };
-
-use utils::*;
 
 #[derive(Debug, Clone)]
 pub struct RollingWindow {

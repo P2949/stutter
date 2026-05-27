@@ -1,4 +1,5 @@
 use std::{collections::BTreeMap, fs, io, path::Path};
+
 use super::model::{DoctorCheck, DoctorStatus};
 
 pub(crate) fn fault_probe_preflight_check() -> DoctorCheck {

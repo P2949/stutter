@@ -1,7 +1,10 @@
 use std::collections::BTreeMap;
+
+use super::{
+    model::{DoctorCheck, DoctorInput, DoctorStatus},
+    utils::yes_no,
+};
 use crate::hwmon;
-use super::model::{DoctorCheck, DoctorInput, DoctorStatus};
-use super::utils::yes_no;
 
 pub(crate) fn hwmon_check(input: &DoctorInput) -> DoctorCheck {
     let report = hwmon::probe_hwmon_with_options(

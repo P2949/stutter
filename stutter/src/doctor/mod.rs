@@ -1,32 +1,29 @@
-pub mod ebpf_map_sizing;
-pub mod tracepoints;
-pub mod model;
-mod utils;
-mod ebpf;
 mod capabilities;
-mod registry;
-mod kms;
-mod perf;
+mod ebpf;
+pub mod ebpf_map_sizing;
 mod hwmon;
 mod irq;
+mod kms;
 mod mangohud;
+pub mod model;
+mod perf;
+mod registry;
+pub mod tracepoints;
+mod utils;
 
-pub use model::{DoctorInput, DoctorStatus, DoctorReport, DoctorCheck};
-pub use mangohud::check_mangohud_log_path;
-
-use ebpf_map_sizing::ebpf_map_sizing_check;
-use tracepoints::tracepoint_check;
-use ebpf::ebpf_build_check;
-use ebpf::ebpf_runtime_permission_check;
 use capabilities::daemon_capabilities_check;
-use registry::probe_registry_check;
-use perf::fault_probe_preflight_check;
-use perf::cpu_perf_preflight_check;
-use kms::kms_timing_check;
+use ebpf::{ebpf_build_check, ebpf_runtime_permission_check};
+use ebpf_map_sizing::ebpf_map_sizing_check;
 use hwmon::hwmon_check;
+use irq::irq_selection_check;
 #[cfg(test)]
 pub(crate) use irq::suggested_gpu_irq_lines_from_text;
-use irq::irq_selection_check;
+use kms::kms_timing_check;
+pub use mangohud::check_mangohud_log_path;
+pub use model::{DoctorCheck, DoctorInput, DoctorReport, DoctorStatus};
+use perf::{cpu_perf_preflight_check, fault_probe_preflight_check};
+use registry::probe_registry_check;
+use tracepoints::tracepoint_check;
 
 pub fn doctor_command(input: DoctorInput) -> anyhow::Result<()> {
     if input.tracepoint_dump {

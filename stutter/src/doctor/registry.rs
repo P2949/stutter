@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
-use crate::probe_catalog::ProbeStatus;
-use crate::probe_registry::PROBE_REGISTRY;
+
 use super::model::{DoctorCheck, DoctorInput, DoctorStatus};
+use crate::{probe_catalog::ProbeStatus, probe_registry::PROBE_REGISTRY};
 
 pub(crate) fn probe_registry_check(input: &DoctorInput) -> DoctorCheck {
     let mut details = BTreeMap::new();
