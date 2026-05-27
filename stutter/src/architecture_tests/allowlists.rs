@@ -42,16 +42,7 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
         max_lines: 792,
         reason: "pending recommend split; baseline pinned for the 700-line production gate",
     },
-    OversizedRustFileAllowance {
-        path: "src/autotune/live_experiment/mod.rs",
-        max_lines: 790,
-        reason: "pending live experiment split; baseline pinned for the 700-line production gate",
-    },
-    OversizedRustFileAllowance {
-        path: "src/doctor.rs",
-        max_lines: 763,
-        reason: "pending doctor split; baseline pinned for the 700-line production gate",
-    },
+
     OversizedRustFileAllowance {
         path: "src/autotune/rolling_window.rs",
         max_lines: 718,
