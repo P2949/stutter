@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
     autotune::{
-        objective::{ObjectiveSignalQuality, ObjectiveSignals},
+        objective::ObjectiveSignalQuality,
         quality::{OnlineDataQuality, OnlineDataQualityPolicy},
     },
     diagnosis::{Confidence, LiveDiagnosisEntry, StutterCause},
