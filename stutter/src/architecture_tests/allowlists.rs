@@ -63,11 +63,6 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
         reason: "pending summary split; baseline pinned for the 700-line production gate",
     },
     OversizedRustFileAllowance {
-        path: "src/remote.rs",
-        max_lines: 755,
-        reason: "pending remote split; baseline pinned for the 700-line production gate",
-    },
-    OversizedRustFileAllowance {
         path: "src/autotune/rolling_window.rs",
         max_lines: 718,
         reason: "pending rolling window split; baseline pinned for the 700-line production gate",
