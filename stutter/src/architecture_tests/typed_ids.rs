@@ -125,7 +125,7 @@ fn remaining_task_process_identity_models_use_typed_ids() {
     for relative_path in [
         "focus/classify.rs",
         "affinity/restore_record.rs",
-        "profile_restore.rs",
+        "profile_restore/mod.rs",
         "autotune/washout.rs",
         "profiles/plan.rs",
     ] {
