@@ -18,7 +18,7 @@ use crate::{
     },
 };
 
-pub(super) trait LiveExperimentActionExecutor {
+pub(crate) trait LiveExperimentActionExecutor {
     fn apply_candidate(
         &mut self,
         input: &LiveExperimentManagerInput<'_>,
@@ -34,7 +34,7 @@ pub(super) trait LiveExperimentActionExecutor {
         observation: &AutotuneObservation,
     ) -> anyhow::Result<Option<ActiveConfigSnapshot>>;
 }
-pub(super) struct RuntimeLiveExperimentActionExecutor;
+pub(crate) struct RuntimeLiveExperimentActionExecutor;
 
 impl LiveExperimentActionExecutor for RuntimeLiveExperimentActionExecutor {
     fn apply_candidate(
