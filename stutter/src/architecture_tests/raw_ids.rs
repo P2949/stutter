@@ -25,6 +25,14 @@ const RAW_ID_ALLOWED_PATHS: &[RawIdAllowedPath] = &[
         reason: "CPU sysfs provider boundary uses kernel CPU numbers",
     },
     RawIdAllowedPath {
+        path: "src/actions/ioprio/model.rs",
+        reason: "Ioprio action model preserves numeric task identity at the action boundary",
+    },
+    RawIdAllowedPath {
+        path: "src/actions/uclamp/models.rs",
+        reason: "Uclamp action model preserves numeric task identity at the action boundary",
+    },
+    RawIdAllowedPath {
         path: "src/actions/irq_affinity/model.rs",
         reason: "IRQ affinity action DTOs preserve kernel IRQ numbers",
     },
@@ -109,7 +117,7 @@ const RAW_ID_ALLOWED_PATHS: &[RawIdAllowedPath] = &[
         reason: "spike analysis DTOs preserve stable numeric JSON fields",
     },
     RawIdAllowedPath {
-        path: "src/summary.rs",
+        path: "src/summary/model.rs",
         reason: "summary DTOs preserve stable numeric JSON fields",
     },
     RawIdAllowedPath {
