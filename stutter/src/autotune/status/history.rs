@@ -1,12 +1,9 @@
-use std::{
-    collections::BTreeMap,
-    path::{Path, PathBuf},
-};
+use std::{collections::BTreeMap, path::PathBuf};
 
 use super::{
     model::{AutotuneStatus, StatusKeptAction, StatusTarget},
     render::{
-        default_restore_path_display, format_last_decision, humanize_decision, normalized_decision,
+        default_restore_path_display, format_last_decision, normalized_decision,
     },
 };
 use crate::autotune::history::{

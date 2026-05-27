@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use super::{
     history::cooldown_remaining_seconds_from_unix_nanos,

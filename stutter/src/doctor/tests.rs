@@ -6,7 +6,7 @@ use std::io;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use crate::daemon::capabilities::DaemonCapabilities;
-use crate::drm_tracepoints::{self, KmsTracepointProvider};
+use crate::drm_tracepoints::{self};
 use super::capabilities::daemon_capabilities_check_from_snapshot;
 use super::ebpf::ebpf_runtime_permission_check_from_parts;
 use super::kms::kms_timing_check_from_availability;
