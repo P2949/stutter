@@ -57,7 +57,7 @@ const RAW_ID_ALLOWED_PATHS: &[RawIdAllowedPath] = &[
         reason: "Nice action model preserves numeric task identity at the action boundary",
     },
     RawIdAllowedPath {
-        path: "src/autotune/status/mod.rs",
+        path: "src/autotune/status/model.rs",
         reason: "daemon status DTOs expose numeric process IDs",
     },
     RawIdAllowedPath {

@@ -1,4 +1,7 @@
 use super::*;
+use crate::daemon::policy::DaemonMode;
+use crate::autotune::history::{AutotuneHistoryEvent, AutotuneMode, ControllerPhase, TargetIdentity};
+
 
 #[test]
 fn status_from_daemon_state_reports_snapshot_fields() {
