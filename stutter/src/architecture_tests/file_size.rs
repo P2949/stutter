@@ -1,11 +1,13 @@
 //! Rust source file-size architecture tests.
 
-use std::{fs, path::Path};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use super::{
     PRODUCTION_RUST_FILE_SIZE_LIMIT_LINES, TEST_RUST_FILE_SIZE_LIMIT_LINES,
     allowlists::{OVERSIZED_RUST_FILE_ALLOWLIST, allowlisted_file_size},
-    crate_src_root, relative_to_crate_root,
     scanners::rust_files_under,
 };
 
@@ -19,6 +21,16 @@ enum RustFileKind {
 
 const EBPF_MAIN_RUST_FILE_SIZE_LIMIT_LINES: usize = 500;
 const EBPF_OTHER_RUST_FILE_SIZE_LIMIT_LINES: usize = 600;
+
+const WORKSPACE_SOURCE_ROOTS: &[&str] = &[
+    "stutter/src",
+    "stutter-ebpf/src",
+    "stutter-common/src",
+    "stutter-config/src",
+    "stutter-core/src",
+    "stutter-report/src",
+    "xtask/src",
+];
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct RustFileLineCount {
@@ -38,12 +50,35 @@ impl RustFileLineCount {
     }
 }
 
+fn workspace_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("stutter crate should live under workspace root")
+        .to_path_buf()
+}
+
+fn workspace_src_roots() -> Vec<PathBuf> {
+    let workspace_root = workspace_root();
+
+    WORKSPACE_SOURCE_ROOTS
+        .iter()
+        .map(|path| workspace_root.join(path))
+        .collect()
+}
+
+fn relative_to_workspace_root(path: &Path) -> String {
+    path.strip_prefix(workspace_root())
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
 fn rust_file_kind(path: &str) -> RustFileKind {
-    let is_ebpf = path.contains("stutter-ebpf/src/");
-    let is_test_only = path == "src/architecture_tests.rs"
-        || path == "src/artifact_contract_tests.rs"
-        || path == "src/recording_fixture_tests.rs"
-        || path == "src/test_fixture_builder.rs"
+    let is_ebpf = path.starts_with("stutter-ebpf/src/");
+    let is_test_only = path == "stutter/src/architecture_tests.rs"
+        || path == "stutter/src/artifact_contract_tests.rs"
+        || path == "stutter/src/recording_fixture_tests.rs"
+        || path == "stutter/src/test_fixture_builder.rs"
         || path.contains("/architecture_tests/")
         || path.contains("/planner_tests/")
         || path.contains("/regression_tests/")
@@ -53,7 +88,7 @@ fn rust_file_kind(path: &str) -> RustFileKind {
         || path.ends_with("_tests.rs");
 
     if is_ebpf {
-        if path.ends_with("stutter-ebpf/src/main.rs") {
+        if path == "stutter-ebpf/src/main.rs" {
             RustFileKind::EbpfMain
         } else {
             RustFileKind::EbpfOther
@@ -75,10 +110,14 @@ fn rust_source_line_count(path: &Path) -> usize {
 fn rust_file_line_counts_under(path: &Path) -> Vec<RustFileLineCount> {
     rust_files_under(path)
         .into_iter()
-        .map(|file| RustFileLineCount {
-            path: relative_to_crate_root(&file),
-            lines: rust_source_line_count(&file),
-            kind: rust_file_kind(&relative_to_crate_root(&file)),
+        .map(|file| {
+            let relative_path = relative_to_workspace_root(&file);
+
+            RustFileLineCount {
+                path: relative_path.clone(),
+                lines: rust_source_line_count(&file),
+                kind: rust_file_kind(&relative_path),
+            }
         })
         .collect()
 }
@@ -108,15 +147,14 @@ fn rust_source_file_sizes_do_not_grow_without_architecture_allowlist() {
         );
     }
 
-    let mut counts = rust_file_line_counts_under(&crate_src_root());
-    let ebpf_src = crate_src_root()
-        .parent()
-        .unwrap()
-        .join("stutter-ebpf")
-        .join("src");
-    counts.extend(rust_file_line_counts_under(&ebpf_src));
+    let mut counts = Vec::new();
+
+    for src_root in workspace_src_roots() {
+        counts.extend(rust_file_line_counts_under(&src_root));
+    }
 
     let largest_files = largest_rust_files(&counts, 20).join("\n");
+    let scanned_roots = WORKSPACE_SOURCE_ROOTS.join("\n");
     let mut violations = Vec::new();
 
     for allowance in OVERSIZED_RUST_FILE_ALLOWLIST {
@@ -155,8 +193,9 @@ fn rust_source_file_sizes_do_not_grow_without_architecture_allowlist() {
 
     assert!(
         violations.is_empty(),
-        "Rust source file size gate failed:\n{}\n\nlargest Rust files:\n{}",
+        "Rust source file size gate failed:\n{}\n\nscanned source roots:\n{}\n\nlargest Rust files:\n{}",
         violations.join("\n"),
+        scanned_roots,
         largest_files
     );
 }
@@ -171,24 +210,51 @@ fn no_oversized_production_files_are_currently_allowlisted() {
 
 #[cfg(test)]
 mod tests {
-    use super::{RustFileKind, rust_file_kind};
+    use super::{RustFileKind, WORKSPACE_SOURCE_ROOTS, rust_file_kind, workspace_src_roots};
+
+    #[test]
+    fn workspace_source_roots_cover_all_workspace_crate_src_dirs() {
+        assert_eq!(
+            WORKSPACE_SOURCE_ROOTS,
+            &[
+                "stutter/src",
+                "stutter-ebpf/src",
+                "stutter-common/src",
+                "stutter-config/src",
+                "stutter-core/src",
+                "stutter-report/src",
+                "xtask/src",
+            ]
+        );
+
+        let roots = workspace_src_roots();
+        assert_eq!(roots.len(), WORKSPACE_SOURCE_ROOTS.len());
+
+        for root in roots {
+            assert!(
+                root.is_dir(),
+                "workspace source root should exist: {}",
+                root.display()
+            );
+        }
+    }
 
     #[test]
     fn classifies_test_only_source_paths() {
         assert_eq!(
-            rust_file_kind("src/cli/report/tests.rs"),
+            rust_file_kind("stutter/src/cli/report/tests.rs"),
             RustFileKind::Test
         );
         assert_eq!(
-            rust_file_kind("src/autotune/planner_tests/workload_policy.rs"),
+            rust_file_kind("stutter/src/autotune/planner_tests/workload_policy.rs"),
             RustFileKind::Test
         );
         assert_eq!(
-            rust_file_kind("src/architecture_tests/file_size.rs"),
+            rust_file_kind("stutter/src/architecture_tests/file_size.rs"),
             RustFileKind::Test
         );
         assert_eq!(
-            rust_file_kind("src/recording_fixture_tests.rs"),
+            rust_file_kind("stutter/src/recording_fixture_tests.rs"),
             RustFileKind::Test
         );
     }
@@ -196,12 +262,36 @@ mod tests {
     #[test]
     fn classifies_regular_source_paths_as_production() {
         assert_eq!(
-            rust_file_kind("src/session_io.rs"),
+            rust_file_kind("stutter/src/session_io/mod.rs"),
             RustFileKind::Production
         );
         assert_eq!(
-            rust_file_kind("src/autotune/runtime/mod.rs"),
+            rust_file_kind("stutter/src/autotune/runtime/mod.rs"),
             RustFileKind::Production
+        );
+        assert_eq!(
+            rust_file_kind("stutter-report/src/model.rs"),
+            RustFileKind::Production
+        );
+        assert_eq!(
+            rust_file_kind("stutter-config/src/config_model.rs"),
+            RustFileKind::Production
+        );
+        assert_eq!(
+            rust_file_kind("xtask/src/maturity_report.rs"),
+            RustFileKind::Production
+        );
+    }
+
+    #[test]
+    fn classifies_ebpf_source_paths() {
+        assert_eq!(
+            rust_file_kind("stutter-ebpf/src/main.rs"),
+            RustFileKind::EbpfMain
+        );
+        assert_eq!(
+            rust_file_kind("stutter-ebpf/src/scheduler.rs"),
+            RustFileKind::EbpfOther
         );
     }
 }
