@@ -287,7 +287,7 @@ impl PrivilegedActionService for InProcessPrivilegedActionService {
                     detail,
                     affected_tasks: result.state.affected_tasks,
                 });
-                anyhow::bail!("{detail}");
+                return Err(PrivilegedWorkerError::MissingRollbackToken.into());
             }
         };
         self.audit_candidate_boundary(CandidateBoundaryAuditInput {

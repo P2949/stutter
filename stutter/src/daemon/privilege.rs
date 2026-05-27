@@ -32,6 +32,7 @@ use crate::{
 
 mod allowlist;
 mod audit;
+mod error;
 mod in_process;
 mod model;
 mod revalidate;
@@ -40,6 +41,7 @@ mod worker;
 pub use allowlist::PrivilegeCommandAllowlist;
 pub(crate) use audit::{CandidateBoundaryAuditInput, PrivilegeBoundaryAuditInput};
 pub use audit::{PrivilegeAuditSink, privileged_operation_audit_event};
+pub(crate) use error::PrivilegedWorkerError;
 pub use in_process::InProcessPrivilegedActionService;
 pub use model::*;
 pub(crate) use revalidate::revalidate_candidate_targets;
@@ -101,10 +103,14 @@ fn validate_candidate_plan_request(
     intent: PolicyIntent,
 ) -> anyhow::Result<()> {
     let now = crate::audit::unix_nanos_now();
-    if request.max_plan_age_nanos > 0
-        && now.saturating_sub(request.plan.created_unix_nanos) > request.max_plan_age_nanos
-    {
-        anyhow::bail!("stale_candidate_plan: candidate plan timestamp is too old");
+    let age_ns = now.saturating_sub(request.plan.created_unix_nanos);
+
+    if request.max_plan_age_nanos > 0 && age_ns > request.max_plan_age_nanos {
+        return Err(PrivilegedWorkerError::StaleCandidatePlan {
+            age_ns,
+            max_ns: request.max_plan_age_nanos,
+        }
+        .into());
     }
 
     let live_descriptor = request.plan.candidate.descriptor();
@@ -113,20 +119,18 @@ fn validate_candidate_plan_request(
         || live_descriptor.safety_class != request.plan.descriptor.safety_class
         || live_descriptor.effect_scope != request.plan.descriptor.effect_scope
     {
-        anyhow::bail!(
-            "candidate_plan_descriptor_mismatch: candidate plan descriptor does not match action payload"
-        );
+        return Err(PrivilegedWorkerError::CandidatePlanDescriptorMismatch.into());
     }
 
     if request.plan.objective != request.plan.candidate.objective() {
-        anyhow::bail!("candidate_plan_objective_mismatch: candidate objective changed");
+        return Err(PrivilegedWorkerError::CandidatePlanObjectiveMismatch.into());
     }
 
     if request.plan.evidence_count == 0
         && request.plan.candidate.evidence().is_empty()
         && request.plan.candidate.action_kind() != "cpu_affinity_profile"
     {
-        anyhow::bail!("candidate_plan_missing_evidence: candidate plan has no evidence");
+        return Err(PrivilegedWorkerError::CandidatePlanMissingEvidence.into());
     }
 
     request
