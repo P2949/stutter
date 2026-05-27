@@ -107,11 +107,6 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
         max_lines: 717,
         reason: "pending session sinks split; baseline pinned for the 700-line production gate",
     },
-    OversizedRustFileAllowance {
-        path: "src/autotune/quality.rs",
-        max_lines: 714,
-        reason: "pending autotune quality split; baseline pinned for the 700-line production gate",
-    },
 ];
 
 pub(in crate::architecture_tests) fn allowlisted_file_size(
