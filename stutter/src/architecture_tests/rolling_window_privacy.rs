@@ -4,7 +4,8 @@ fn rolling_window_does_not_expose_mutable_internal_state() {
     let source_path = manifest_dir
         .join("src")
         .join("autotune")
-        .join("rolling_window.rs");
+        .join("rolling_window")
+        .join("mod.rs");
 
     let source = std::fs::read_to_string(&source_path).unwrap();
 
