@@ -36,6 +36,39 @@ mod unwrap_expect;
 const PRODUCTION_RUST_FILE_SIZE_LIMIT_LINES: usize = 700;
 const TEST_RUST_FILE_SIZE_LIMIT_LINES: usize = 1_000;
 
+const WORKSPACE_SOURCE_ROOTS: &[&str] = &[
+    "stutter/src",
+    "stutter-ebpf/src",
+    "stutter-common/src",
+    "stutter-config/src",
+    "stutter-core/src",
+    "stutter-report/src",
+    "xtask/src",
+];
+
+fn workspace_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("stutter crate should live under workspace root")
+        .to_path_buf()
+}
+
+fn workspace_src_roots() -> Vec<PathBuf> {
+    let workspace_root = workspace_root();
+
+    WORKSPACE_SOURCE_ROOTS
+        .iter()
+        .map(|path| workspace_root.join(path))
+        .collect()
+}
+
+fn relative_to_workspace_root(path: &Path) -> String {
+    path.strip_prefix(workspace_root())
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
 fn crate_src_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src")
 }

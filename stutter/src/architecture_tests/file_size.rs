@@ -1,14 +1,13 @@
 //! Rust source file-size architecture tests.
 
-use std::{
-    fs,
-    path::{Path, PathBuf},
-};
+use std::{fs, path::Path};
 
 use super::{
-    PRODUCTION_RUST_FILE_SIZE_LIMIT_LINES, TEST_RUST_FILE_SIZE_LIMIT_LINES,
+    PRODUCTION_RUST_FILE_SIZE_LIMIT_LINES, TEST_RUST_FILE_SIZE_LIMIT_LINES, WORKSPACE_SOURCE_ROOTS,
     allowlists::{OVERSIZED_RUST_FILE_ALLOWLIST, allowlisted_file_size},
+    relative_to_workspace_root,
     scanners::rust_files_under,
+    workspace_src_roots,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -21,16 +20,6 @@ enum RustFileKind {
 
 const EBPF_MAIN_RUST_FILE_SIZE_LIMIT_LINES: usize = 500;
 const EBPF_OTHER_RUST_FILE_SIZE_LIMIT_LINES: usize = 600;
-
-const WORKSPACE_SOURCE_ROOTS: &[&str] = &[
-    "stutter/src",
-    "stutter-ebpf/src",
-    "stutter-common/src",
-    "stutter-config/src",
-    "stutter-core/src",
-    "stutter-report/src",
-    "xtask/src",
-];
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct RustFileLineCount {
@@ -48,29 +37,6 @@ impl RustFileLineCount {
             RustFileKind::EbpfOther => EBPF_OTHER_RUST_FILE_SIZE_LIMIT_LINES,
         }
     }
-}
-
-fn workspace_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("stutter crate should live under workspace root")
-        .to_path_buf()
-}
-
-fn workspace_src_roots() -> Vec<PathBuf> {
-    let workspace_root = workspace_root();
-
-    WORKSPACE_SOURCE_ROOTS
-        .iter()
-        .map(|path| workspace_root.join(path))
-        .collect()
-}
-
-fn relative_to_workspace_root(path: &Path) -> String {
-    path.strip_prefix(workspace_root())
-        .unwrap_or(path)
-        .to_string_lossy()
-        .replace('\\', "/")
 }
 
 fn rust_file_kind(path: &str) -> RustFileKind {
