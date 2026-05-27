@@ -161,6 +161,14 @@ fn rust_source_file_sizes_do_not_grow_without_architecture_allowlist() {
     );
 }
 
+#[test]
+fn no_oversized_production_files_are_currently_allowlisted() {
+    assert!(
+        OVERSIZED_RUST_FILE_ALLOWLIST.is_empty(),
+        "All oversized production files have been split. The allowlist should remain empty."
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::{RustFileKind, rust_file_kind};
