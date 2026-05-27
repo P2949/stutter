@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use super::{model::LiveExperiment, scoring::experiment_data_quality};
 use crate::{
     actions::SafetyClass,
     autotune::{
@@ -18,11 +19,6 @@ use crate::{
         policy::DaemonMode,
         state::{DaemonExperimentState, DaemonRollbackState},
     },
-};
-
-use super::{
-    model::LiveExperiment,
-    scoring::experiment_data_quality,
 };
 
 #[derive(Debug, Default)]

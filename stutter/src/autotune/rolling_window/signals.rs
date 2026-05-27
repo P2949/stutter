@@ -1,8 +1,12 @@
 use std::collections::BTreeSet;
 
-use crate::autotune::objective::{ObjectiveSignalQuality, ObjectiveSignalQualitySnapshot, ObjectiveSignals};
-use super::RollingWindow;
-use super::utils::{overlap_basis_label, is_compile_progress_record};
+use super::{
+    RollingWindow,
+    utils::{is_compile_progress_record, overlap_basis_label},
+};
+use crate::autotune::objective::{
+    ObjectiveSignalQuality, ObjectiveSignalQualitySnapshot, ObjectiveSignals,
+};
 
 const GPU_THERMAL_DEGRADED_MILLIDEGREES: u32 = 85_000;
 const GPU_POWER_LIMIT_BUSY_PERCENT: u32 = 95;
@@ -26,7 +30,8 @@ pub(crate) fn compute_objective_signals(window: &RollingWindow) -> ObjectiveSign
         .filter(|event| event.rwbs.contains('W') || event.rwbs.contains('F'))
         .count() as u64;
     let block_io_overlap_basis = overlap_basis_label(
-        window.block_io_events()
+        window
+            .block_io_events()
             .iter()
             .map(|event| event.correlation_basis.as_ref()),
     );
@@ -98,13 +103,15 @@ pub(crate) fn compute_objective_signals(window: &RollingWindow) -> ObjectiveSign
         (total / window.intervals().len() as f64) as f32
     });
     let swap_activity_events = (!window.intervals().is_empty()).then(|| {
-        window.intervals()
+        window
+            .intervals()
             .iter()
             .map(|record| record.major_faults)
             .fold(0_u64, u64::saturating_add)
     });
     let mem_stall_spike_count = (!window.intervals().is_empty()).then(|| {
-        window.intervals()
+        window
+            .intervals()
             .iter()
             .map(|record| u64::from(record.mem_psi_spike))
             .fold(0_u64, u64::saturating_add)
@@ -187,8 +194,7 @@ pub(crate) fn compute_objective_signals(window: &RollingWindow) -> ObjectiveSign
     } else {
         ObjectiveSignalQuality::Missing
     };
-    let block_io_overlap_trust =
-        has_block_io_events.then(|| block_io_quality.as_str().to_owned());
+    let block_io_overlap_trust = has_block_io_events.then(|| block_io_quality.as_str().to_owned());
     let irq_overlap_trust = has_irq_events.then(|| irq_quality.as_str().to_owned());
     let irq_overlap_basis = has_irq_events.then(|| "irq-duration".to_owned());
 
@@ -208,8 +214,7 @@ pub(crate) fn compute_objective_signals(window: &RollingWindow) -> ObjectiveSign
         cpu_power_limited,
         cpu_power_limited_cpu: cpu_power_limited_event.map(|event| event.cpu),
         cpu_power_limit_source: cpu_power_limited_event.map(|_| "cpu_freq_zero_khz".to_owned()),
-        cpu_power_limited_policy: cpu_power_limited_event
-            .map(|event| format!("cpu{}", event.cpu)),
+        cpu_power_limited_policy: cpu_power_limited_event.map(|event| format!("cpu{}", event.cpu)),
         gpu_power_limited,
         gpu_power_limit_reason,
         gpu_busy_percent: latest_gpu.and_then(|sample| sample.gpu_busy_percent),
@@ -229,7 +234,8 @@ pub(crate) fn compute_objective_signals(window: &RollingWindow) -> ObjectiveSign
         dirty_writeback_events: has_block_io_events.then_some(dirty_writeback_events),
         frame_p99_ms: Some(window.frame_p99_ms()),
         foreground_over_5ms: Some(
-            window.intervals()
+            window
+                .intervals()
                 .iter()
                 .map(|record| record.over_5ms)
                 .fold(0_u64, u64::saturating_add),

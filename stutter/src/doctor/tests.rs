@@ -1,17 +1,16 @@
 //! Tests extracted from the parent module to keep production files below the architecture size gate.
 
-use super::*;
-use std::fs;
-use std::io;
-use std::collections::BTreeMap;
-use std::path::PathBuf;
-use crate::daemon::capabilities::DaemonCapabilities;
-use crate::drm_tracepoints::{self};
-use super::capabilities::daemon_capabilities_check_from_snapshot;
-use super::ebpf::ebpf_runtime_permission_check_from_parts;
-use super::kms::kms_timing_check_from_availability;
-use super::perf::cpu_perf_preflight_check_at;
-use super::utils::format_rlimit_bytes;
+use std::{collections::BTreeMap, fs, io, path::PathBuf};
+
+use super::{
+    capabilities::daemon_capabilities_check_from_snapshot,
+    ebpf::ebpf_runtime_permission_check_from_parts, kms::kms_timing_check_from_availability,
+    perf::cpu_perf_preflight_check_at, utils::format_rlimit_bytes, *,
+};
+use crate::{
+    daemon::capabilities::DaemonCapabilities,
+    drm_tracepoints::{self},
+};
 
 fn check(status: DoctorStatus) -> DoctorCheck {
     DoctorCheck {

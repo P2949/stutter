@@ -1,13 +1,18 @@
-use std::time::{SystemTime, UNIX_EPOCH};
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use super::*;
 use crate::{
     metrics::IntervalRecord,
     process_tree::TaskClass,
     recorder::{RecordedConfig, RecordedTime, SessionFile},
-    tune::{RankingConfidence, TuneCandidateSummary, TuneCoverageMetrics, TuneIterationOrder, TuneProfileStats, TuneSummary, recommendation::TuneRecommendationVerdict},
+    tune::{
+        RankingConfidence, TuneCandidateSummary, TuneCoverageMetrics, TuneIterationOrder,
+        TuneProfileStats, TuneSummary, recommendation::TuneRecommendationVerdict,
+    },
 };
 
 fn temp_dir(name: &str) -> PathBuf {

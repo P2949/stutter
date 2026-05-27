@@ -1,6 +1,7 @@
 use super::*;
-use crate::autotune::history::{AutotuneHistoryEvent, AutotuneMode, ControllerPhase, TargetIdentity};
-
+use crate::autotune::history::{
+    AutotuneHistoryEvent, AutotuneMode, ControllerPhase, TargetIdentity,
+};
 
 pub(super) fn temp_dir(name: &str) -> PathBuf {
     let mut dir = std::env::temp_dir();

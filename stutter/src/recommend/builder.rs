@@ -1,13 +1,13 @@
 use std::{fs, path::Path};
+
 use anyhow::Context;
 
+use super::model::BaselineTuneRecommendation;
 use crate::{
     artifacts::ArtifactSelection,
     scorer, session_io,
     tune::{self, RankingConfidence, TuneSummary, recommendation::TuneRecommendationVerdict},
 };
-
-use super::model::BaselineTuneRecommendation;
 
 pub fn build_baseline_tune_recommendation(
     baseline_run: &Path,

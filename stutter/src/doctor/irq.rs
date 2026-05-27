@@ -1,4 +1,5 @@
 use std::{collections::BTreeMap, fs};
+
 use super::model::{DoctorCheck, DoctorStatus};
 
 pub(crate) fn irq_selection_check(irqs: &[u32]) -> DoctorCheck {

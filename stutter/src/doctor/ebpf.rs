@@ -1,7 +1,9 @@
-use std::collections::BTreeMap;
-use std::path::Path;
-use super::model::{DoctorCheck, DoctorStatus};
-use super::utils::{format_rlimit_bytes, read_trimmed, yes_no};
+use std::{collections::BTreeMap, path::Path};
+
+use super::{
+    model::{DoctorCheck, DoctorStatus},
+    utils::{format_rlimit_bytes, read_trimmed, yes_no},
+};
 
 pub(crate) fn ebpf_build_check() -> DoctorCheck {
     DoctorCheck {

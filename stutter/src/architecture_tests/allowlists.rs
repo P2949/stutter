@@ -36,8 +36,7 @@ pub(in crate::architecture_tests) struct ExistingProductionPanicAllowance {
 }
 
 pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
-    &[OversizedRustFileAllowance] = &[
-];
+    &[OversizedRustFileAllowance] = &[];
 
 pub(in crate::architecture_tests) fn allowlisted_file_size(
     path: &str,
