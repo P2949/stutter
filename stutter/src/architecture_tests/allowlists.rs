@@ -93,11 +93,6 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
         reason: "pending advisor split; baseline pinned for the 700-line production gate",
     },
     OversizedRustFileAllowance {
-        path: "src/probe_registry.rs",
-        max_lines: 721,
-        reason: "pending probe registry split; baseline pinned for the 700-line production gate",
-    },
-    OversizedRustFileAllowance {
         path: "src/autotune/rolling_window.rs",
         max_lines: 718,
         reason: "pending rolling window split; baseline pinned for the 700-line production gate",
