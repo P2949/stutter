@@ -21,7 +21,6 @@ use crate::{
         planning::candidate::CandidateAction,
         state::ControllerPhase,
     },
-    daemon_policy::DaemonMode,
 };
 
 use super::{
@@ -306,7 +305,7 @@ impl LiveExperimentManager {
             executor.apply_candidate(input, candidate, experiment_id, observation)?;
 
         #[cfg(test)]
-        if input.mode == DaemonMode::ApplyLowRisk
+        if input.mode == crate::daemon_policy::DaemonMode::ApplyLowRisk
             && let Some(registry) = input.exit_rollback_registry
         {
             crate::autotune::shutdown::register_cpu_affinity_rollback(
