@@ -4,9 +4,10 @@ use super::*;
 use crate::{
     autotune::{
         activity::ActivityLevel,
-        observation::AutotuneObservation, state::SituationKind,
+        observation::AutotuneObservation,
         quality::OnlineDataQualityPolicy,
         rolling_window::RollingWindow,
+        state::SituationKind,
         system_context::{SystemContextSnapshotInput, collect_system_context},
     },
     diagnosis::LiveDiagnosisEntry,
