@@ -105,7 +105,6 @@ pub(crate) mod runtime;
 pub(crate) mod runtime_handles;
 #[path = "session/sampler.rs"]
 pub(crate) mod sampler;
-#[path = "session/sinks.rs"]
 pub(crate) mod sinks;
 #[path = "session/targeting.rs"]
 pub(crate) mod targeting;
