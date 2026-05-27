@@ -3,8 +3,8 @@ use std::{collections::BTreeMap, fs, os::unix::fs::symlink, path::PathBuf, time:
 use super::*;
 use crate::{
     autotune::{
-        activity::ActivityLevel, state::SituationKind,
-        quality::OnlineDataQualityPolicy, rolling_window::RollingWindow,
+        activity::ActivityLevel, quality::OnlineDataQualityPolicy, rolling_window::RollingWindow,
+        state::SituationKind,
     },
     diagnosis::{Confidence, LiveDiagnosisEntry, StutterCause},
     ebpf_loader::DropCountersSnapshot,
