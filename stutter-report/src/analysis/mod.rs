@@ -64,7 +64,10 @@ pub fn analyze_report_model(model: &ReportModel) -> ReportAnalysis {
 
 #[cfg(test)]
 mod tests {
-    use stutter_core::{ids::RunId, paths::LogicalPath};
+    use stutter_core::{
+        ids::{CpuId, RunId, Tid},
+        paths::LogicalPath,
+    };
 
     use super::analyze_report_model;
     use crate::model::{
@@ -103,18 +106,18 @@ mod tests {
     fn minimal_cluster() -> SpikeCluster {
         SpikeCluster {
             points: vec![SpikePoint {
-                task: 1,
+                task: Tid::new(1),
                 class: "game".to_owned(),
                 process_pid: None,
                 comm: "render".to_owned(),
-                cpu: 0,
-                wakeup_target_cpu: 0,
+                cpu: CpuId::new(0),
+                wakeup_target_cpu: CpuId::new(0),
                 latency_ns: 1_000_000,
                 wakeup_ns: 1_000_000,
                 switch_ns: 2_000_000,
                 target_pending_wakeups: 0,
                 observed_runnable_depth: 0,
-                switch_prev_pid: 0,
+                switch_prev_pid: Tid::new(0),
                 switch_prev_state: 1,
                 switch_prev_state_label: "S".to_owned(),
                 scx_ops: None,

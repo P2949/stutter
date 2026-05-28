@@ -1,6 +1,16 @@
 use super::pushln;
 use crate::model::ReportHeaderSummary;
 
+fn format_display_list<T: std::fmt::Display>(values: &[T]) -> String {
+    let values = values
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    format!("[{values}]")
+}
+
 pub fn render_header(summary: &ReportHeaderSummary) -> String {
     let mut output = String::new();
 
@@ -15,9 +25,12 @@ pub fn render_header(summary: &ReportHeaderSummary) -> String {
     pushln(&mut output, format!("stop_reason: {}", summary.stop_reason));
     pushln(
         &mut output,
-        format!("manual_pids: {:?}", summary.manual_pids),
+        format!("manual_pids: {}", format_display_list(&summary.manual_pids)),
     );
-    pushln(&mut output, format!("tree_roots: {:?}", summary.tree_roots));
+    pushln(
+        &mut output,
+        format!("tree_roots: {}", format_display_list(&summary.tree_roots)),
+    );
     pushln(
         &mut output,
         format!("include_comm: {:?}", summary.include_comm),

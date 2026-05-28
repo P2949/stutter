@@ -37,7 +37,10 @@ fn validation_corpus_compositor_scheduler_delay() {
 fn validation_corpus_foreground_window() {
     let analysis = assert_fixture_from_metadata("foreground_window");
 
-    assert_eq!(analysis.foreground_summary.final_pid, Some(5701));
+    assert_eq!(
+        analysis.foreground_summary.final_pid,
+        Some(stutter_core::ids::Pid::new(5701))
+    );
     assert_eq!(
         analysis.foreground_summary.final_app_id.as_deref(),
         Some("steam_app_sanitized")

@@ -424,7 +424,7 @@ fn report_includes_foreground_summary_when_events_present() {
 
     assert!(summary.enabled);
     assert_eq!(summary.source.as_deref(), Some("sway"));
-    assert_eq!(summary.final_pid, Some(4242));
+    assert_eq!(summary.final_pid, Some(stutter_core::ids::Pid::new(4242)));
     assert_eq!(summary.final_app_id.as_deref(), Some("steam_app_379430"));
     assert_eq!(summary.final_class.as_deref(), Some("steam_app_379430"));
     assert_eq!(summary.final_window_id.as_deref(), Some("7"));
@@ -438,7 +438,7 @@ fn report_redacts_missing_title_cleanly() {
     let summary = ForegroundReportSummary {
         enabled: true,
         source: Some("sway".to_owned()),
-        final_pid: Some(4242),
+        final_pid: Some(stutter_core::ids::Pid::new(4242)),
         final_app_id: Some("steam_app_379430".to_owned()),
         final_class: Some("steam_app_379430".to_owned()),
         final_title: None,
@@ -541,7 +541,7 @@ fn foreground_report_summary_uses_final_event_and_redacted_title() {
 
     assert!(summary.enabled);
     assert_eq!(summary.source.as_deref(), Some("sway"));
-    assert_eq!(summary.final_pid, Some(12345));
+    assert_eq!(summary.final_pid, Some(stutter_core::ids::Pid::new(12345)));
     assert_eq!(summary.final_app_id.as_deref(), Some("steam_app_379430"));
     assert_eq!(summary.final_class.as_deref(), Some("steam_app_379430"));
     assert_eq!(summary.final_title, None);
@@ -557,7 +557,7 @@ fn render_foreground_summary_text_mentions_redacted_title() {
     let summary = ForegroundReportSummary {
         enabled: true,
         source: Some("sway".to_owned()),
-        final_pid: Some(12345),
+        final_pid: Some(stutter_core::ids::Pid::new(12345)),
         final_app_id: Some("steam_app_379430".to_owned()),
         final_class: Some("steam_app_379430".to_owned()),
         final_title: None,
@@ -769,8 +769,11 @@ fn render_focus_summary_text_includes_visible_reasons() {
         situation: Some("CompileLoad".to_owned()),
         confidence: Some(0.87),
         score: Some(0.91),
-        roots: vec![1234],
-        member_pids: vec![1234, 1235],
+        roots: vec![stutter_core::ids::Pid::new(1234)],
+        member_pids: vec![
+            stutter_core::ids::Pid::new(1234),
+            stutter_core::ids::Pid::new(1235),
+        ],
         focus_switches: 2,
         reasons: vec![
             "cargo root with 14 active compiler descendants".to_owned(),

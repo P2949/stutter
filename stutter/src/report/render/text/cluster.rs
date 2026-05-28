@@ -88,18 +88,18 @@ pub(super) fn render_spike_clusters(
 
 pub(crate) fn map_spike_point(p: &crate::spike::SpikePoint) -> stutter_report::model::SpikePoint {
     stutter_report::model::SpikePoint {
-        task: p.task,
+        task: stutter_core::ids::Tid::new(p.task),
         class: format!("{:?}", p.class),
-        process_pid: p.process_pid,
+        process_pid: p.process_pid.map(stutter_core::ids::Pid::new),
         comm: p.comm.clone(),
-        cpu: p.cpu,
-        wakeup_target_cpu: p.wakeup_target_cpu,
+        cpu: stutter_core::ids::CpuId::new(p.cpu),
+        wakeup_target_cpu: stutter_core::ids::CpuId::new(p.wakeup_target_cpu),
         latency_ns: p.latency_ns,
         wakeup_ns: p.wakeup_ns,
         switch_ns: p.switch_ns,
         target_pending_wakeups: p.target_pending_wakeups,
         observed_runnable_depth: p.observed_runnable_depth,
-        switch_prev_pid: p.switch_prev_pid,
+        switch_prev_pid: stutter_core::ids::Tid::new(p.switch_prev_pid),
         switch_prev_state: p.switch_prev_state,
         switch_prev_state_label: p.switch_prev_state_label.clone(),
         scx_ops: p.scx_ops.clone(),
@@ -120,9 +120,9 @@ pub(crate) fn map_cluster(c: &crate::spike::SpikeCluster) -> stutter_report::mod
             .wake_graph
             .iter()
             .map(|w| stutter_report::model::WakeGraphEdge {
-                waker_tid: w.waker_tid,
+                waker_tid: stutter_core::ids::Tid::new(w.waker_tid),
                 waker_comm: w.waker_comm.clone(),
-                wakee_tid: w.wakee_tid,
+                wakee_tid: stutter_core::ids::Tid::new(w.wakee_tid),
                 wakee_comm: w.wakee_comm.clone(),
                 count: w.count,
                 max_latency_ns: w.max_latency_ns,

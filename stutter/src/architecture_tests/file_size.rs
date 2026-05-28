@@ -236,7 +236,7 @@ mod tests {
             RustFileKind::Production
         );
         assert_eq!(
-            rust_file_kind("stutter-report/src/model.rs"),
+            rust_file_kind("stutter-report/src/model/mod.rs"),
             RustFileKind::Production
         );
         assert_eq!(

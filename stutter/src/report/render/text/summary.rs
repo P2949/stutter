@@ -22,7 +22,15 @@ pub(crate) fn render_focus_summary_text(focus: &FocusReportSummary) -> String {
         focus.situation.as_deref().unwrap_or("unknown")
     ));
     render_focus_confidence(&mut writer, focus);
-    writer.line(format!("  roots: {:?}", focus.roots));
+    writer.line(format!(
+        "  roots: [{}]",
+        focus
+            .roots
+            .iter()
+            .map(|p| p.to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    ));
     writer.line(format!("  focus switches: {}", focus.focus_switches));
     render_indented_reasons(&mut writer, &focus.reasons);
     writer.blank();

@@ -12,8 +12,20 @@ pub(super) fn render_header_section(path: &Path, session: &SessionFile) -> Strin
             .unwrap_or_else(|| "-".to_owned()),
         duration_ms: session.core.duration_ms,
         stop_reason: session.stop_reason.clone(),
-        manual_pids: session.config.manual_pids.clone(),
-        tree_roots: session.config.tree_roots.clone(),
+        manual_pids: session
+            .config
+            .manual_pids
+            .iter()
+            .copied()
+            .map(stutter_core::ids::Pid::new)
+            .collect(),
+        tree_roots: session
+            .config
+            .tree_roots
+            .iter()
+            .copied()
+            .map(stutter_core::ids::Pid::new)
+            .collect(),
         include_comm: session.config.include_comm.clone(),
         exclude_comm: session.config.exclude_comm.clone(),
         event_stream_warning: event_stream_warning(

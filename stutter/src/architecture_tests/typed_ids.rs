@@ -155,3 +155,23 @@ fn recorder_artifact_task_process_ids_use_typed_ids_but_common_abi_stays_raw() {
         "recorder artifact DTOs should keep Rust-side task/process IDs typed while serde preserves numeric JSON"
     );
 }
+
+#[test]
+fn report_model_uses_typed_ids() {
+    let spike_point = source("../../stutter-report/src/model/spike_point.rs");
+    assert!(
+        spike_point.contains("use stutter_core::ids::{CpuId, Pid, Tid};")
+            && spike_point.contains("pub task: Tid")
+            && spike_point.contains("pub process_pid: Option<Pid>")
+            && spike_point.contains("pub cpu: CpuId")
+            && spike_point.contains("pub wakeup_target_cpu: CpuId")
+            && spike_point.contains("pub switch_prev_pid: Tid"),
+        "stutter_report::model::SpikePoint must use typed IDs for JSON compatibility via #[serde(transparent)]"
+    );
+
+    let wake_graph = source("../../stutter-report/src/model/wake_graph.rs");
+    assert!(
+        wake_graph.contains("pub waker_tid: Tid") && wake_graph.contains("pub wakee_tid: Tid"),
+        "stutter_report::model::WakeGraphEdge must use typed IDs"
+    );
+}
