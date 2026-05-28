@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>stutter report</title>
+</head>
+<body>
+  <main>
+    <h1>stutter report</h1>
+    <section id="identity">
+      <h2>Identity</h2>
+      <dl>
+      </dl>
+    </section>
+    <section id="header">
+      <h2>Run header</h2>
+      <dl>
+        <dt>file_path</dt><dd>with_clusters.json</dd>
+        <dt>schema_version</dt><dd>22</dd>
+        <dt>expected_schema_version</dt><dd>22</dd>
+        <dt>run_name</dt><dd>game-session</dd>
+        <dt>duration_ms</dt><dd>5000</dd>
+        <dt>stop_reason</dt><dd>user</dd>
+        <dt>active_target_pids_count</dt><dd>2</dd>
+        <dt>watch_process</dt><dd>game</dd>
+        <dt>persistent</dt><dd>false</dd>
+        <dt>csv_stream</dt><dd>-</dd>
+        <dt>tree_roots</dt><dd>1234</dd>
+        <dt>include_comm</dt><dd>game</dd>
+      </dl>
+    </section>
+    <section id="data-quality">
+      <h2>Data quality</h2>
+      <dl>
+        <dt>level</dt><dd>Medium</dd>
+        <dt>schema_version</dt><dd>22</dd>
+        <dt>expected_schema_version</dt><dd>22</dd>
+        <dt>event_stream_write_errors</dt><dd>0</dd>
+        <dt>spike_events_truncated</dt><dd>false</dd>
+        <dt>drop_counters_nonzero</dt><dd>true</dd>
+        <dt>active_target_pids_count</dt><dd>2</dd>
+        <dt>block_io_correlation_confidence</dt><dd>high</dd>
+        <dt>frame_timestamp_alignment</dt><dd>none</dd>
+      </dl>
+      <h3>Reasons</h3>
+      <ul>
+        <li>spike_events_dropped</li>
+      </ul>
+    </section>
+    <section id="spike-clusters">
+      <h2>Spike clusters</h2>
+      <ol>
+        <li>
+          <dl>
+        <dt>distinct_tasks</dt><dd>3</dd>
+        <dt>point_count</dt><dd>3</dd>
+        <dt>min_switch_ns</dt><dd>1002600000</dd>
+        <dt>max_switch_ns</dt><dd>1003500000</dd>
+        <dt>max_latency_ns</dt><dd>3500000</dd>
+        <dt>diagnosis</dt><dd>cpu contention likely during frame render</dd>
+          </dl>
+          <table>
+            <thead><tr><th>task</th><th>comm</th><th>class</th><th>cpu</th><th>latency_ns</th></tr></thead>
+            <tbody>
+              <tr><td>1234</td><td>RenderThread</td><td>game</td><td>2</td><td>3500000</td></tr>
+              <tr><td>1235</td><td>Main</td><td>game</td><td>3</td><td>2100000</td></tr>
+              <tr><td>1236</td><td>AudioThread</td><td>game</td><td>0</td><td>1800000</td></tr>
+            </tbody>
+          </table>
+        </li>
+      </ol>
+    </section>
+  </main>
+</body>
+</html>

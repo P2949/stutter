@@ -1,5 +1,6 @@
 use crate::model::ReportModel;
 
+pub mod html;
 pub mod text;
 
 /// Supported report render targets for the migrated rendering boundary.
@@ -21,9 +22,12 @@ impl ReportRenderFormat {
 /// Render a report model to the requested format.
 ///
 /// For `Text`, outputs a "stutter report" header followed by the full text
-/// body produced by [`render::text::render_report`]. For `Html`, outputs a
-/// minimal HTML stub containing the run identity (the main crate owns the
-/// full HTML rendering pipeline).
+/// body produced by [`render::text::render_report`].
+///
+/// For `Html`, outputs a self-contained basic HTML report with the same core
+/// sections as the migrated text renderer: identity, summary, header, data
+/// quality, spike clusters, frame diagnosis, and correlations when those fields
+/// are present in the model.
 pub fn render_report_model(model: &ReportModel, format: ReportRenderFormat) -> String {
     let run_id = model
         .run_id()
@@ -43,11 +47,7 @@ pub fn render_report_model(model: &ReportModel, format: ReportRenderFormat) -> S
             }
             output
         }
-        ReportRenderFormat::Html => {
-            format!(
-                "<!doctype html>\n<title>stutter report</title>\n<h1>stutter report</h1>\n<p>run_id: {run_id}</p>\n"
-            )
-        }
+        ReportRenderFormat::Html => html::render_report(model),
     }
 }
 
@@ -65,15 +65,24 @@ mod tests {
     }
 
     #[test]
-    fn renderer_outputs_report_identity_and_delegates_text_body() {
+    fn text_renderer_outputs_report_identity_and_delegates_text_body() {
         let model = ReportModel::new().with_run_id(RunId::new("run-001"));
 
         let text = render_report_model(&model, ReportRenderFormat::Text);
+
         assert!(text.contains("stutter report"));
         assert!(text.contains("run-001"));
+    }
+
+    #[test]
+    fn html_renderer_delegates_to_real_html_report() {
+        let model = ReportModel::new().with_run_id(RunId::new("run-001"));
 
         let html = render_report_model(&model, ReportRenderFormat::Html);
-        assert!(html.contains("<h1>stutter report</h1>"));
+
+        assert!(html.contains("<!doctype html>"));
+        assert!(html.contains("<html lang=\"en\">"));
+        assert!(html.contains("<section id=\"identity\">"));
         assert!(html.contains("run-001"));
     }
 }

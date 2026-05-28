@@ -112,14 +112,16 @@ mod tests {
     }
 
     #[test]
-    fn render_report_model_html_stub_contains_run_id() {
+    fn render_report_model_html_contains_real_report_sections() {
         let model = ReportModel::new().with_run_id(RunId::new("run-003"));
 
         let html = render_report_model(&model, ReportRenderFormat::Html);
 
-        assert!(html.contains("<h1>stutter report</h1>"));
+        assert!(html.contains("<!doctype html>"));
+        assert!(html.contains("<html lang=\"en\">"));
+        assert!(html.contains("<main>"));
+        assert!(html.contains("<section id=\"identity\">"));
         assert!(html.contains("run-003"));
-        assert!(html.starts_with("<!doctype html>"));
     }
 
     #[test]
