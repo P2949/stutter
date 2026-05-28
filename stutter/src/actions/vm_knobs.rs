@@ -1,7 +1,5 @@
 use std::{
     collections::BTreeSet,
-    fs,
-    fs::OpenOptions,
     path::{Component, Path, PathBuf},
 };
 
@@ -16,6 +14,9 @@ use crate::actions::{
         token_restore_result,
     },
 };
+
+mod sysfs;
+use self::sysfs::{ensure_writable_file, read_trimmed, write_trimmed};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VmKnobMode {
@@ -464,21 +465,17 @@ fn validate_supported_reversible_knob(relative_path: &Path) -> anyhow::Result<()
         | "proc/sys/vm/dirty_background_ratio"
         | "proc/sys/vm/dirty_ratio"
         | "proc/sys/vm/zone_reclaim_mode" => Ok(()),
-        "proc/sys/vm/compact_memory" => {
-            return Err(ActionBoundaryError::InvalidRequest {
-                action_kind: "vm_knobs",
-                reason: "/proc/sys/vm/compact_memory is a write-only trigger and is not reversible; keep it suggest-only outside VmKnobAction".to_owned(),
-            }
-            .into());
+        "proc/sys/vm/compact_memory" => Err(ActionBoundaryError::InvalidRequest {
+            action_kind: "vm_knobs",
+            reason: "/proc/sys/vm/compact_memory is a write-only trigger and is not reversible; keep it suggest-only outside VmKnobAction".to_owned(),
         }
-        other => {
-            return Err(ActionBoundaryError::UnsupportedValue {
-                action_kind: "vm_knobs",
-                field: "path",
-                value: other.to_owned(),
-            }
-            .into());
+        .into()),
+        other => Err(ActionBoundaryError::UnsupportedValue {
+            action_kind: "vm_knobs",
+            field: "path",
+            value: other.to_owned(),
         }
+        .into()),
     }
 }
 
@@ -571,14 +568,12 @@ fn validate_numeric_vm_value(relative_path: &Path, value: &str) -> anyhow::Resul
         "proc/sys/vm/dirty_background_ratio" => validate_range(relative_path, parsed, 0, 100),
         "proc/sys/vm/dirty_ratio" => validate_range(relative_path, parsed, 1, 100),
         "proc/sys/vm/zone_reclaim_mode" => validate_range(relative_path, parsed, 0, 7),
-        _ => {
-            return Err(ActionBoundaryError::UnsupportedValue {
-                action_kind: "vm_knobs",
-                field: "numeric_vm_knob",
-                value: relative_path.display().to_string(),
-            }
-            .into());
+        _ => Err(ActionBoundaryError::UnsupportedValue {
+            action_kind: "vm_knobs",
+            field: "numeric_vm_knob",
+            value: relative_path.display().to_string(),
         }
+        .into()),
     }
 }
 
@@ -637,23 +632,6 @@ fn validate_plain_value(relative_path: &Path, value: &str) -> anyhow::Result<()>
     Ok(())
 }
 
-fn ensure_writable_file(path: &Path) -> anyhow::Result<()> {
-    if !path.is_file() {
-        return Err(ActionBoundaryError::MissingPath {
-            action_kind: "vm_knobs",
-            path: path.to_path_buf(),
-        }
-        .into());
-    }
-
-    OpenOptions::new()
-        .write(true)
-        .open(path)
-        .with_context(|| format!("required VM knob file is not writable: {}", path.display()))?;
-
-    Ok(())
-}
-
 fn rollback_vm_knob_records(records: &[VmKnobRestoreRecord]) -> anyhow::Result<()> {
     let mut failures = Vec::new();
 
@@ -692,16 +670,6 @@ fn rollback_vm_knob_records(records: &[VmKnobRestoreRecord]) -> anyhow::Result<(
     Ok(())
 }
 
-fn read_trimmed(path: &Path) -> anyhow::Result<String> {
-    fs::read_to_string(path)
-        .map(|value| value.trim().to_owned())
-        .with_context(|| format!("failed to read {}", path.display()))
-}
-
-fn write_trimmed(path: &Path, value: &str) -> anyhow::Result<()> {
-    fs::write(path, value.trim())
-        .with_context(|| format!("failed to write {:?} to {}", value.trim(), path.display()))
-}
 #[cfg(test)]
 #[path = "vm_knobs/tests.rs"]
 mod tests;
