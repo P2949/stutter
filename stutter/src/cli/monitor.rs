@@ -77,10 +77,17 @@ pub(super) struct MonitorArgs {
     )]
     pub(super) stream_csv: Option<String>,
 
-    #[arg(long = "irq-latency")]
+    #[arg(
+        long = "irq-latency",
+        help = "Enable IRQ latency tracing; requires at least one explicit --irq <IRQ>"
+    )]
     pub(super) irq_latency: bool,
 
-    #[arg(long = "irq", value_name = "IRQ")]
+    #[arg(
+        long = "irq",
+        value_name = "IRQ",
+        help = "IRQ number to trace when --irq-latency is enabled; repeat for multiple IRQs"
+    )]
     pub(super) irqs: Vec<u32>,
 
     #[arg(long = "hwmon", id = "hwmon", conflicts_with = "no_hwmon")]
@@ -516,6 +523,14 @@ pub(super) use monitor_test_support::parse_monitor_config_for_phase15;
 #[cfg(test)]
 #[path = "tests/monitor/target_filter.rs"]
 mod monitor_target_filter_cli_tests;
+
+#[cfg(test)]
+#[path = "tests/monitor/help.rs"]
+mod monitor_help_cli_tests;
+
+#[cfg(test)]
+#[path = "tests/monitor/irq.rs"]
+mod monitor_irq_cli_tests;
 
 #[cfg(test)]
 #[path = "tests/monitor/record_check_performance.rs"]
