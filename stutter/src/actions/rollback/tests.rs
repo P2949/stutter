@@ -383,7 +383,7 @@ fn rollback_handler_default_token_preview_error_is_typed() {
         typed.reason_code(),
         "rollback_handler_token_preview_unsupported"
     );
-    assert_eq!(typed.handler_id(), "default-handler");
+    assert_eq!(typed.handler_id(), Some("default-handler"));
     assert_eq!(typed.token_kind(), "sysfs-restore");
     assert!(format!("{typed}").contains("rollback_handler_token_preview_unsupported"));
 }
@@ -408,17 +408,67 @@ fn rollback_handler_default_token_restore_error_is_typed() {
         typed.reason_code(),
         "rollback_handler_token_restore_unsupported"
     );
-    assert_eq!(typed.handler_id(), "default-handler");
+    assert_eq!(typed.handler_id(), Some("default-handler"));
     assert_eq!(typed.token_kind(), "sysfs-restore");
     assert!(format!("{typed}").contains("rollback_handler_token_restore_unsupported"));
 }
 
 #[test]
-fn rollback_production_code_has_no_string_coded_anyhow_bail() {
+fn rollback_production_code_has_no_string_coded_anyhow_errors() {
     let source = include_str!("mod.rs");
+    let production_source = source
+        .split("#[cfg(test)]")
+        .next()
+        .expect("rollback module should have a production section");
 
-    assert!(
-        !source.contains("anyhow::bail!"),
-        "production rollback mod.rs should use typed errors instead of string-coded anyhow::bail!"
-    );
+    for forbidden in ["anyhow::bail!", "anyhow::anyhow!"] {
+        assert!(
+            !production_source.contains(forbidden),
+            "production rollback module should use typed errors instead of string-coded {forbidden}"
+        );
+    }
+}
+
+#[test]
+fn rollback_registry_missing_token_handler_error_is_typed() {
+    let registry = RollbackRegistry::new();
+    let token = RollbackToken::SysfsRestore {
+        path: PathBuf::from("/sys/devices/system/cpu/test-knob"),
+        original_value: "0".to_owned(),
+    };
+
+    let err = registry
+        .preview_token(&token)
+        .expect_err("empty registry should not support sysfs rollback token");
+
+    let typed = err
+        .downcast_ref::<RollbackRegistryError>()
+        .expect("missing token handler error should be typed");
+
+    assert_eq!(typed.reason_code(), "rollback_handler_for_token_missing");
+    assert_eq!(typed.handler_id(), None);
+    assert_eq!(typed.token_kind(), "sysfs-restore");
+    assert!(format!("{typed}").contains("rollback_handler_for_token_missing"));
+}
+
+#[test]
+fn rollback_registry_missing_token_restore_handler_error_is_typed() {
+    let registry = RollbackRegistry::new();
+    let token = RollbackToken::SysfsRestore {
+        path: PathBuf::from("/sys/devices/system/cpu/test-knob"),
+        original_value: "0".to_owned(),
+    };
+
+    let err = registry
+        .restore_token(&token)
+        .expect_err("empty registry should not support sysfs rollback token");
+
+    let typed = err
+        .downcast_ref::<RollbackRegistryError>()
+        .expect("missing token restore handler error should be typed");
+
+    assert_eq!(typed.reason_code(), "rollback_handler_for_token_missing");
+    assert_eq!(typed.handler_id(), None);
+    assert_eq!(typed.token_kind(), "sysfs-restore");
+    assert!(format!("{typed}").contains("rollback_handler_for_token_missing"));
 }
