@@ -84,3 +84,9 @@ fn api_public_modules_are_intentional() {
         "api public module exports changed; update EXPECTED_API_PUBLIC_MODULES with the intentional public facade module list and a reason for every exported section"
     );
 }
+
+#[test]
+fn actions_api_exports_rollback_registry_error() {
+    fn assert_exported<T>() {}
+    assert_exported::<crate::api::actions::RollbackRegistryError>();
+}

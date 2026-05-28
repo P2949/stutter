@@ -19,28 +19,33 @@ pub enum RollbackRegistryError {
         handler_id: &'static str,
         token_kind: &'static str,
     },
+
+    #[error("rollback_handler_for_token_missing: no rollback handler registered for {token_kind}")]
+    NoHandlerForToken { token_kind: &'static str },
 }
 
-#[cfg_attr(not(test), expect(dead_code))]
 impl RollbackRegistryError {
     pub const fn reason_code(&self) -> &'static str {
         match self {
             Self::TokenPreviewUnsupported { .. } => "rollback_handler_token_preview_unsupported",
             Self::TokenRestoreUnsupported { .. } => "rollback_handler_token_restore_unsupported",
+            Self::NoHandlerForToken { .. } => "rollback_handler_for_token_missing",
         }
     }
 
-    pub const fn handler_id(&self) -> &'static str {
+    pub const fn handler_id(&self) -> Option<&'static str> {
         match self {
             Self::TokenPreviewUnsupported { handler_id, .. }
-            | Self::TokenRestoreUnsupported { handler_id, .. } => handler_id,
+            | Self::TokenRestoreUnsupported { handler_id, .. } => Some(handler_id),
+            Self::NoHandlerForToken { .. } => None,
         }
     }
 
     pub const fn token_kind(&self) -> &'static str {
         match self {
             Self::TokenPreviewUnsupported { token_kind, .. }
-            | Self::TokenRestoreUnsupported { token_kind, .. } => token_kind,
+            | Self::TokenRestoreUnsupported { token_kind, .. }
+            | Self::NoHandlerForToken { token_kind } => token_kind,
         }
     }
 }
@@ -154,7 +159,12 @@ impl RollbackRegistry {
             .iter()
             .map(|handler| handler.as_ref())
             .find(|handler| handler.supports_token(token))
-            .ok_or_else(|| anyhow::anyhow!("no rollback handler registered for token {token:?}"))
+            .ok_or_else(|| {
+                RollbackRegistryError::NoHandlerForToken {
+                    token_kind: token.kind(),
+                }
+                .into()
+            })
     }
 }
 

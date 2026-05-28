@@ -68,11 +68,9 @@ pub use model::{
 };
 pub use nice::{NiceAction, NicePolicy};
 pub use restore_identity::{RestoreIdentityStatus, verify_task_identity};
-#[expect(unused_imports)]
-pub use rollback::RollbackRegistryError;
 pub use rollback::{
     RestoreAllInput, RestoreAllSummary, RollbackCandidate, RollbackHandler, RollbackPreview,
-    RollbackRegistry, RollbackResult, default_rollback_registry,
+    RollbackRegistry, RollbackRegistryError, RollbackResult, default_rollback_registry,
 };
 pub use token::{RollbackToken, RollbackTokenKindError};
 pub use traits::TuningAction;

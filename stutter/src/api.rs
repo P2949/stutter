@@ -26,9 +26,10 @@ pub mod actions {
         IrqAffinityEvidence, IrqAffinityPolicy, IrqAffinityRestoreRecord, IrqAffinityRisk,
         NiceAction, NicePolicy, NiceRestoreRecord, PhaseFailure, RestoreAllInput,
         RestoreAllSummary, RollbackCandidate, RollbackHandler, RollbackOutcome, RollbackPreview,
-        RollbackRegistry, RollbackResult, RollbackToken, RollbackTokenKindError, SafetyClass,
-        ScopeLimitExceeded, TaskIdentity, TuningAction, UclampRestoreRecord, VmKnobAction,
-        VmKnobChange, VmKnobMode, VmKnobPolicy, VmKnobRestoreRecord,
+        RollbackRegistry, RollbackRegistryError, RollbackResult, RollbackToken,
+        RollbackTokenKindError, SafetyClass, ScopeLimitExceeded, TaskIdentity, TuningAction,
+        UclampRestoreRecord, VmKnobAction, VmKnobChange, VmKnobMode, VmKnobPolicy,
+        VmKnobRestoreRecord,
     };
 }
 
