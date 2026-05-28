@@ -84,9 +84,9 @@ Options:
       --stream-csv <PATH_OR_->
           
       --irq-latency
-          
+          Enable IRQ latency tracing; requires at least one explicit --irq <IRQ>
       --irq <IRQ>
-          
+          IRQ number to trace when --irq-latency is enabled; repeat for multiple IRQs
       --hwmon
           
       --no-hwmon
