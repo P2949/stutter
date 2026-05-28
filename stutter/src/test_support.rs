@@ -513,7 +513,7 @@ mod tests {
         let err = action.preflight_with_policy(&policy).unwrap_err();
 
         assert!(
-            err.to_string().contains("while on battery"),
+            err.to_string().contains("action_policy_denied"),
             "unexpected CPU power preflight error: {err:#}"
         );
     }

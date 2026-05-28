@@ -2,6 +2,7 @@ use super::{
     model::{IoPrioClass, IoPrioValue},
     preflight::validate_ioprio_value,
 };
+use crate::actions::ActionBoundaryError;
 
 pub(crate) const IOPRIO_CLASS_SHIFT: i32 = 13;
 pub(crate) const IOPRIO_PRIO_MASK: i32 = (1 << IOPRIO_CLASS_SHIFT) - 1;
@@ -22,7 +23,12 @@ impl IoPrioClass {
             1 => Ok(Self::Realtime),
             2 => Ok(Self::BestEffort),
             3 => Ok(Self::Idle),
-            other => anyhow::bail!("unsupported Linux I/O priority class {other}"),
+            other => Err(ActionBoundaryError::UnsupportedValue {
+                action_kind: "ioprio",
+                field: "linux_class",
+                value: other.to_string(),
+            }
+            .into()),
         }
     }
 }
@@ -35,7 +41,12 @@ impl IoPrioValue {
 
     pub fn decode(encoded: i32) -> anyhow::Result<Self> {
         if encoded < 0 {
-            anyhow::bail!("negative encoded I/O priority {encoded}");
+            return Err(ActionBoundaryError::InvalidValue {
+                action_kind: "ioprio",
+                field: "encoded_ioprio".to_owned(),
+                reason: format!("negative encoded I/O priority {encoded}"),
+            }
+            .into());
         }
 
         let class = IoPrioClass::from_linux_class(encoded >> IOPRIO_CLASS_SHIFT)?;

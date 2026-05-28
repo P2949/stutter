@@ -151,7 +151,7 @@ where
                 PolicyIntent::DryRun,
                 &descriptor,
             )?;
-            let state = action.dry_run().map_err(ActionError::dry_run)?;
+            let state = action.dry_run().map_err(ActionError::dry_run_error)?;
             append_runner_audit_event(
                 audit_path,
                 &audit_event,
@@ -189,7 +189,7 @@ where
                 PolicyIntent::DryRun,
                 &descriptor,
             )?;
-            let dry_run_state = action.dry_run().map_err(ActionError::dry_run)?;
+            let dry_run_state = action.dry_run().map_err(ActionError::dry_run_error)?;
             append_runner_audit_event(
                 audit_path,
                 &audit_event,
@@ -272,7 +272,7 @@ where
                             }
                         }
                     } else {
-                        return Err(ActionError::apply(source));
+                        return Err(ActionError::apply_error(source));
                     }
                 }
             };

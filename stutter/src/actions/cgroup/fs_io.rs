@@ -6,6 +6,8 @@ use std::{
 
 use anyhow::Context;
 
+use crate::actions::ActionBoundaryError;
+
 pub(super) trait CgroupFileWriter {
     fn write_trimmed(&mut self, path: &Path, value: &str) -> anyhow::Result<()>;
 }
@@ -20,7 +22,11 @@ impl CgroupFileWriter for FsCgroupFileWriter {
 
 pub(super) fn ensure_writable_file(path: &Path) -> anyhow::Result<()> {
     if !path.is_file() {
-        anyhow::bail!("required cgroup file does not exist: {}", path.display());
+        return Err(ActionBoundaryError::MissingPath {
+            action_kind: "cgroup",
+            path: path.to_path_buf(),
+        }
+        .into());
     }
 
     OpenOptions::new()
@@ -33,11 +39,12 @@ pub(super) fn ensure_writable_file(path: &Path) -> anyhow::Result<()> {
 
 pub(super) fn ensure_path_under_root(root: &Path, path: &Path) -> anyhow::Result<()> {
     if !path.starts_with(root) {
-        anyhow::bail!(
-            "target cgroup {} is outside cgroup root {}",
-            path.display(),
-            root.display()
-        );
+        return Err(ActionBoundaryError::PathNotAllowed {
+            action_kind: "cgroup",
+            path: path.to_path_buf(),
+            reason: format!("target cgroup is outside cgroup root {}", root.display()),
+        }
+        .into());
     }
 
     Ok(())
@@ -52,16 +59,20 @@ pub(super) fn normalize_cgroup_path(path: &Path) -> anyhow::Result<PathBuf> {
             Component::Normal(part) => normalized.push(part),
             Component::CurDir => {}
             Component::ParentDir => {
-                anyhow::bail!(
-                    "cgroup path must not contain parent traversal: {}",
-                    path.display()
-                )
+                return Err(ActionBoundaryError::PathNotAllowed {
+                    action_kind: "cgroup",
+                    path: path.to_path_buf(),
+                    reason: "cgroup path must not contain parent traversal".to_owned(),
+                }
+                .into());
             }
             Component::Prefix(_) => {
-                anyhow::bail!(
-                    "cgroup path must not contain platform prefix: {}",
-                    path.display()
-                )
+                return Err(ActionBoundaryError::PathNotAllowed {
+                    action_kind: "cgroup",
+                    path: path.to_path_buf(),
+                    reason: "cgroup path must not contain platform prefix".to_owned(),
+                }
+                .into());
             }
         }
     }

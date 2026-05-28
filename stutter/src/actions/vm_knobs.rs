@@ -9,8 +9,8 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
 use crate::actions::{
-    ActionId, ActionState, ActionWarning, RollbackToken, SafetyClass, TuningAction,
-    VmKnobRestoreRecord,
+    ActionBoundaryError, ActionId, ActionState, ActionWarning, RollbackToken, SafetyClass,
+    TuningAction, VmKnobRestoreRecord,
     rollback::{
         RollbackCandidate, RollbackHandler, RollbackPreview, RollbackResult, token_dry_run_preview,
         token_restore_result,
@@ -68,11 +68,17 @@ impl RollbackHandler for VmKnobRollbackHandler {
     }
 
     fn dry_run(&self, _: &RollbackCandidate) -> anyhow::Result<RollbackPreview> {
-        anyhow::bail!("VM knob/sysfs rollback requires an explicit rollback token")
+        Err(
+            ActionBoundaryError::missing_explicit_rollback_token(self.id(), "vm-knob-restore")
+                .into(),
+        )
     }
 
     fn restore(&self, _: RollbackCandidate) -> anyhow::Result<RollbackResult> {
-        anyhow::bail!("VM knob/sysfs rollback requires an explicit rollback token")
+        Err(
+            ActionBoundaryError::missing_explicit_rollback_token(self.id(), "vm-knob-restore")
+                .into(),
+        )
     }
 
     fn supports_token(&self, token: &RollbackToken) -> bool {
@@ -85,7 +91,12 @@ impl RollbackHandler for VmKnobRollbackHandler {
         } else if token.as_sysfs_restore().is_some() {
             "sysfs-restore"
         } else {
-            anyhow::bail!("VM knob/sysfs rollback handler does not support {token:?}");
+            return Err(ActionBoundaryError::unsupported_rollback_token(
+                self.id(),
+                "vm-knob-restore",
+                token.kind(),
+            )
+            .into());
         };
         Ok(token_dry_run_preview(self.id(), token, rollback_kind))
     }
@@ -113,7 +124,12 @@ impl RollbackHandler for VmKnobRollbackHandler {
             ));
         }
 
-        anyhow::bail!("VM knob/sysfs rollback handler does not support {token:?}")
+        Err(ActionBoundaryError::unsupported_rollback_token(
+            self.id(),
+            "vm-knob-restore",
+            token.kind(),
+        )
+        .into())
     }
 }
 
@@ -163,12 +179,16 @@ impl VmKnobAction {
                 .with_context(|| format!("failed to verify write to {}", target.path.display()))?;
             if actual != target.requested_value {
                 rollback_vm_knob_records(&records)?;
-                anyhow::bail!(
-                    "VM knob write verification failed for {}: requested={:?} actual={:?}",
-                    target.path.display(),
-                    target.requested_value,
-                    actual
-                );
+                return Err(ActionBoundaryError::restore_failed(
+                    "vm_knobs",
+                    format!(
+                        "VM knob write verification failed for {}: requested={:?} actual={:?}",
+                        target.path.display(),
+                        target.requested_value,
+                        actual
+                    ),
+                )
+                .into());
             }
         }
 
@@ -249,10 +269,11 @@ impl VmKnobAction {
         for change in &self.changes {
             let relative_path = normalize_relative_knob_path(&change.path)?;
             if !policy.allowed_paths.contains(&relative_path) {
-                anyhow::bail!(
-                    "VM knob path {} is not in explicit allowlist",
-                    relative_path.display()
-                );
+                return Err(ActionBoundaryError::PolicyDenied {
+                    action_kind: "vm_knobs",
+                    requirement: "allowed_paths_contains_target",
+                }
+                .into());
             }
 
             validate_supported_reversible_knob(&relative_path)?;
@@ -342,19 +363,34 @@ impl TuningAction for VmKnobAction {
 
 fn validate_policy_and_request(action: &VmKnobAction, policy: &VmKnobPolicy) -> anyhow::Result<()> {
     if !policy.allow_vm_knob_changes {
-        anyhow::bail!("policy does not allow THP/compaction/VM knob changes");
+        return Err(ActionBoundaryError::PolicyDenied {
+            action_kind: "vm_knobs",
+            requirement: "allow_vm_knob_changes",
+        }
+        .into());
     }
 
     if policy.allowed_paths.is_empty() {
-        anyhow::bail!("VM knob action requires a non-empty explicit path allowlist");
+        return Err(ActionBoundaryError::PolicyDenied {
+            action_kind: "vm_knobs",
+            requirement: "allowed_paths_non_empty",
+        }
+        .into());
     }
 
     if action.changes.is_empty() {
-        anyhow::bail!("VM knob action requires at least one explicit knob change");
+        return Err(ActionBoundaryError::MissingExplicitTargets {
+            action_kind: "vm_knobs",
+        }
+        .into());
     }
 
     if policy.require_latency_cliff_evidence && !policy.latency_cliff_evidence {
-        anyhow::bail!("latency cliff evidence is required before changing THP/compaction/VM knobs");
+        return Err(ActionBoundaryError::PolicyDenied {
+            action_kind: "vm_knobs",
+            requirement: "latency_cliff_evidence",
+        }
+        .into());
     }
 
     Ok(())
@@ -362,9 +398,11 @@ fn validate_policy_and_request(action: &VmKnobAction, policy: &VmKnobPolicy) -> 
 
 fn validate_manual_apply_policy(policy: &VmKnobPolicy) -> anyhow::Result<()> {
     if !matches!(policy.mode, VmKnobMode::ManualApply) {
-        anyhow::bail!(
-            "VM knob action is suggest-only; set policy mode to ManualApply for explicit manual writes"
-        );
+        return Err(ActionBoundaryError::InvalidRequest {
+            action_kind: "vm_knobs",
+            reason: "VM knob action is suggest-only; set policy mode to ManualApply for explicit manual writes".to_owned(),
+        }
+        .into());
     }
 
     Ok(())
@@ -378,22 +416,37 @@ fn normalize_relative_knob_path(path: &Path) -> anyhow::Result<PathBuf> {
             Component::RootDir | Component::CurDir => {}
             Component::Normal(part) => normalized.push(part),
             Component::ParentDir => {
-                anyhow::bail!(
-                    "VM knob path must not contain parent traversal: {}",
-                    path.display()
-                )
+                return Err(ActionBoundaryError::InvalidValue {
+                    action_kind: "vm_knobs",
+                    field: "path".to_owned(),
+                    reason: format!(
+                        "VM knob path must not contain parent traversal: {}",
+                        path.display()
+                    ),
+                }
+                .into());
             }
             Component::Prefix(_) => {
-                anyhow::bail!(
-                    "VM knob path must not contain platform prefix: {}",
-                    path.display()
-                )
+                return Err(ActionBoundaryError::InvalidValue {
+                    action_kind: "vm_knobs",
+                    field: "path".to_owned(),
+                    reason: format!(
+                        "VM knob path must not contain platform prefix: {}",
+                        path.display()
+                    ),
+                }
+                .into());
             }
         }
     }
 
     if normalized.as_os_str().is_empty() {
-        anyhow::bail!("VM knob path must not be empty");
+        return Err(ActionBoundaryError::InvalidValue {
+            action_kind: "vm_knobs",
+            field: "path".to_owned(),
+            reason: "VM knob path must not be empty".to_owned(),
+        }
+        .into());
     }
 
     Ok(normalized)
@@ -412,14 +465,20 @@ fn validate_supported_reversible_knob(relative_path: &Path) -> anyhow::Result<()
         | "proc/sys/vm/dirty_ratio"
         | "proc/sys/vm/zone_reclaim_mode" => Ok(()),
         "proc/sys/vm/compact_memory" => {
-            anyhow::bail!(
-                "/proc/sys/vm/compact_memory is a write-only trigger and is not reversible; keep it suggest-only outside VmKnobAction"
-            )
+            return Err(ActionBoundaryError::InvalidRequest {
+                action_kind: "vm_knobs",
+                reason: "/proc/sys/vm/compact_memory is a write-only trigger and is not reversible; keep it suggest-only outside VmKnobAction".to_owned(),
+            }
+            .into());
         }
-        other => anyhow::bail!(
-            "unsupported VM knob {}; add explicit validation before allowing this system-wide knob",
-            other
-        ),
+        other => {
+            return Err(ActionBoundaryError::UnsupportedValue {
+                action_kind: "vm_knobs",
+                field: "path",
+                value: other.to_owned(),
+            }
+            .into());
+        }
     }
 }
 
@@ -444,11 +503,11 @@ fn validate_declared_safe_value(relative_path: &Path, value: &str) -> anyhow::Re
     if let Some(values) = declared_safe_values(relative_path)
         && !values.contains(&value)
     {
-        anyhow::bail!(
-            "vm knob write refused: {} not in safe_values for {}",
-            value,
-            relative_path.display()
-        );
+        return Err(ActionBoundaryError::PolicyDenied {
+            action_kind: "vm_knobs",
+            requirement: "declared_safe_values",
+        }
+        .into());
     }
 
     if relative_path == Path::new("proc/sys/vm/swappiness") {
@@ -486,12 +545,12 @@ fn validate_thp_value(relative_path: &Path, value: &str) -> anyhow::Result<()> {
     };
 
     if !allowed.contains(&value) {
-        anyhow::bail!(
-            "unsupported value {:?} for VM knob {}; allowed values are {:?}",
-            value,
-            relative_path.display(),
-            allowed
-        );
+        return Err(ActionBoundaryError::UnsupportedValue {
+            action_kind: "vm_knobs",
+            field: "value",
+            value: value.to_owned(),
+        }
+        .into());
     }
 
     Ok(())
@@ -512,22 +571,25 @@ fn validate_numeric_vm_value(relative_path: &Path, value: &str) -> anyhow::Resul
         "proc/sys/vm/dirty_background_ratio" => validate_range(relative_path, parsed, 0, 100),
         "proc/sys/vm/dirty_ratio" => validate_range(relative_path, parsed, 1, 100),
         "proc/sys/vm/zone_reclaim_mode" => validate_range(relative_path, parsed, 0, 7),
-        _ => anyhow::bail!(
-            "numeric validation missing for VM knob {}",
-            relative_path.display()
-        ),
+        _ => {
+            return Err(ActionBoundaryError::UnsupportedValue {
+                action_kind: "vm_knobs",
+                field: "numeric_vm_knob",
+                value: relative_path.display().to_string(),
+            }
+            .into());
+        }
     }
 }
 
 fn validate_range(relative_path: &Path, value: u32, min: u32, max: u32) -> anyhow::Result<()> {
     if !(min..=max).contains(&value) {
-        anyhow::bail!(
-            "VM knob {} value {} is outside allowed range {}..={}",
-            relative_path.display(),
-            value,
-            min,
-            max
-        );
+        return Err(ActionBoundaryError::InvalidValue {
+            action_kind: "vm_knobs",
+            field: relative_path.display().to_string(),
+            reason: format!("value {} is outside allowed range {}..={}", value, min, max),
+        }
+        .into());
     }
 
     Ok(())
@@ -535,30 +597,40 @@ fn validate_range(relative_path: &Path, value: u32, min: u32, max: u32) -> anyho
 
 fn validate_plain_value(relative_path: &Path, value: &str) -> anyhow::Result<()> {
     if value.trim().is_empty() {
-        anyhow::bail!(
-            "VM knob {} value must not be empty",
-            relative_path.display()
-        );
+        return Err(ActionBoundaryError::InvalidValue {
+            action_kind: "vm_knobs",
+            field: relative_path.display().to_string(),
+            reason: "value must not be empty".to_owned(),
+        }
+        .into());
     }
 
     if value.trim() != value {
-        anyhow::bail!(
-            "VM knob {} value must not contain leading or trailing whitespace",
-            relative_path.display()
-        );
+        return Err(ActionBoundaryError::InvalidValue {
+            action_kind: "vm_knobs",
+            field: relative_path.display().to_string(),
+            reason: "value must not contain leading or trailing whitespace".to_owned(),
+        }
+        .into());
     }
 
     if value.len() > 64 {
-        anyhow::bail!("VM knob {} value is too long", relative_path.display());
+        return Err(ActionBoundaryError::InvalidValue {
+            action_kind: "vm_knobs",
+            field: relative_path.display().to_string(),
+            reason: "value is too long".to_owned(),
+        }
+        .into());
     }
 
     for ch in value.chars() {
         if !(ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' || ch == '+') {
-            anyhow::bail!(
-                "VM knob {} value contains invalid character {:?}",
-                relative_path.display(),
-                ch
-            );
+            return Err(ActionBoundaryError::InvalidValue {
+                action_kind: "vm_knobs",
+                field: relative_path.display().to_string(),
+                reason: format!("value contains invalid character {:?}", ch),
+            }
+            .into());
         }
     }
 
@@ -567,7 +639,11 @@ fn validate_plain_value(relative_path: &Path, value: &str) -> anyhow::Result<()>
 
 fn ensure_writable_file(path: &Path) -> anyhow::Result<()> {
     if !path.is_file() {
-        anyhow::bail!("required VM knob file does not exist: {}", path.display());
+        return Err(ActionBoundaryError::MissingPath {
+            action_kind: "vm_knobs",
+            path: path.to_path_buf(),
+        }
+        .into());
     }
 
     OpenOptions::new()
@@ -606,7 +682,11 @@ fn rollback_vm_knob_records(records: &[VmKnobRestoreRecord]) -> anyhow::Result<(
     }
 
     if !failures.is_empty() {
-        anyhow::bail!("failed to rollback VM knob values: {}", failures.join("; "));
+        return Err(ActionBoundaryError::restore_failed(
+            "vm_knobs",
+            format!("failed to rollback VM knob values: {}", failures.join("; ")),
+        )
+        .into());
     }
 
     Ok(())

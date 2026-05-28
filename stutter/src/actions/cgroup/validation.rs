@@ -4,32 +4,47 @@ use super::{
     fs_io::{ensure_path_under_root, ensure_writable_file, normalize_cgroup_path},
     model::{CgroupPlacementAction, CgroupPlacementPolicy},
 };
-use crate::process_tree::TaskClass;
+use crate::{actions::ActionBoundaryError, process_tree::TaskClass};
 
 pub(super) fn validate_action_request(
     action: &CgroupPlacementAction,
     policy: &CgroupPlacementPolicy,
 ) -> anyhow::Result<()> {
     if !policy.allow_cgroup_moves {
-        anyhow::bail!("policy does not allow cgroup moves");
+        return Err(ActionBoundaryError::PolicyDenied {
+            action_kind: "cgroup",
+            requirement: "allow_cgroup_moves",
+        }
+        .into());
     }
 
     if action.targets.is_empty() {
-        anyhow::bail!("cgroup placement requires at least one explicit target task");
+        return Err(ActionBoundaryError::MissingExplicitTargets {
+            action_kind: "cgroup",
+        }
+        .into());
     }
 
     let target_rel = normalize_cgroup_path(&action.target_cgroup)?;
     if !policy.allow_nested_cgroups && target_rel.components().count() > 2 {
-        anyhow::bail!(
-            "policy does not allow nested cgroups: {}",
-            target_rel.display()
-        );
+        return Err(ActionBoundaryError::InvalidPolicy {
+            action_kind: "cgroup",
+            reason: format!(
+                "policy does not allow nested cgroups: {}",
+                target_rel.display()
+            ),
+        }
+        .into());
     }
 
     if (action.cpuset_cpus.is_some() || action.cpuset_mems.is_some())
         && !policy.allow_cpuset_changes
     {
-        anyhow::bail!("policy does not allow cpuset changes");
+        return Err(ActionBoundaryError::PolicyDenied {
+            action_kind: "cgroup",
+            requirement: "allow_cpuset_changes",
+        }
+        .into());
     }
 
     if let Some(cpuset_cpus) = &action.cpuset_cpus {
@@ -55,7 +70,11 @@ pub(super) fn validate_target_class(class: TaskClass) -> anyhow::Result<()> {
             | TaskClass::StorageDaemon
             | TaskClass::Unknown
     ) {
-        anyhow::bail!("refusing to move system/critical task class {class}");
+        return Err(ActionBoundaryError::InvalidRequest {
+            action_kind: "cgroup",
+            reason: format!("refusing to move system/critical task class {class}"),
+        }
+        .into());
     }
 
     Ok(())
@@ -68,7 +87,11 @@ pub(super) fn preflight_cgroup_files(
     let target_abs = action.target_cgroup_abs()?;
 
     if !target_abs.is_dir() {
-        anyhow::bail!("target cgroup does not exist: {}", target_abs.display());
+        return Err(ActionBoundaryError::MissingPath {
+            action_kind: "cgroup",
+            path: target_abs,
+        }
+        .into());
     }
 
     ensure_path_under_root(&action.cgroup_root, &target_abs)?;
@@ -91,7 +114,11 @@ pub(super) fn ensure_cpuset_available(
     policy: &CgroupPlacementPolicy,
 ) -> anyhow::Result<()> {
     if !policy.allow_cpuset_changes {
-        anyhow::bail!("policy does not allow cpuset changes");
+        return Err(ActionBoundaryError::PolicyDenied {
+            action_kind: "cgroup",
+            requirement: "allow_cpuset_changes",
+        }
+        .into());
     }
 
     ensure_writable_file(&target_abs.join(file_name))
@@ -99,16 +126,31 @@ pub(super) fn ensure_cpuset_available(
 
 pub(super) fn validate_cpuset_value(name: &str, value: &str) -> anyhow::Result<()> {
     if value.trim().is_empty() {
-        anyhow::bail!("{name} must not be empty");
+        return Err(ActionBoundaryError::InvalidValue {
+            action_kind: "cgroup",
+            field: name.to_owned(),
+            reason: format!("{name} must not be empty"),
+        }
+        .into());
     }
 
     if value.trim() != value {
-        anyhow::bail!("{name} must not contain leading or trailing whitespace");
+        return Err(ActionBoundaryError::InvalidValue {
+            action_kind: "cgroup",
+            field: name.to_owned(),
+            reason: format!("{name} must not contain leading or trailing whitespace"),
+        }
+        .into());
     }
 
     for ch in value.chars() {
         if !(ch.is_ascii_digit() || ch == ',' || ch == '-') {
-            anyhow::bail!("{name} contains invalid character {ch:?}");
+            return Err(ActionBoundaryError::InvalidValue {
+                action_kind: "cgroup",
+                field: name.to_owned(),
+                reason: format!("{name} contains invalid character {ch:?}"),
+            }
+            .into());
         }
     }
 

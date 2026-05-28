@@ -148,7 +148,7 @@ fn preflight_rejects_empty_targets() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("requires at least one explicit target task"));
+    assert!(err.contains("action_missing_explicit_targets"));
 }
 
 #[test]
@@ -160,7 +160,7 @@ fn preflight_rejects_empty_requested_values() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("requires sched_util_min, sched_util_max, or both"));
+    assert!(err.contains("action_invalid_request"));
 }
 
 #[test]
@@ -172,7 +172,7 @@ fn preflight_rejects_values_outside_uclamp_range() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("outside uclamp range"));
+    assert!(err.contains("action_invalid_value"));
 }
 
 #[test]
@@ -184,7 +184,7 @@ fn preflight_rejects_min_greater_than_max() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("greater than sched_util_max"));
+    assert!(err.contains("action_invalid_value"));
 }
 
 #[test]
@@ -202,7 +202,7 @@ fn preflight_rejects_when_policy_disallows_uclamp_changes() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("policy does not allow uclamp changes"));
+    assert!(err.contains("action_policy_denied"));
     fs::remove_dir_all(proc_root).ok();
 }
 
@@ -222,7 +222,7 @@ fn preflight_rejects_when_policy_disallows_per_task_control() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("policy does not allow per-task uclamp changes"));
+    assert!(err.contains("action_policy_denied"));
     fs::remove_dir_all(proc_root).ok();
 }
 
@@ -246,7 +246,7 @@ fn preflight_rejects_requested_values_outside_policy_range() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("requested sched_util_min 512 is outside policy range"));
+    assert!(err.contains("action_invalid_value"));
     fs::remove_dir_all(proc_root).ok();
 }
 
@@ -272,7 +272,7 @@ fn preflight_rejects_starttime_mismatch() {
         .preflight_at(&proc_root, &UclampPolicy::default())
         .unwrap_err();
 
-    assert!(format!("{:#}", err).contains("starttime mismatch"));
+    assert!(format!("{:#}", err).contains("action_target_identity_mismatch"));
     fs::remove_dir_all(proc_root).ok();
 }
 

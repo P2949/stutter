@@ -125,7 +125,7 @@ fn preflight_rejects_default_disabled_policy() {
 
     let err = action.preflight().unwrap_err().to_string();
 
-    assert!(err.contains("policy does not allow CPU governor/EPP changes"));
+    assert!(err.contains("action_policy_denied"));
     fs::remove_dir_all(root).ok();
 }
 
@@ -144,7 +144,7 @@ fn preflight_rejects_empty_cpu_list() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("requires at least one explicit CPU"));
+    assert!(err.contains("action_missing_explicit_targets"));
     fs::remove_dir_all(root).ok();
 }
 
@@ -163,7 +163,7 @@ fn preflight_rejects_missing_knobs() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("requires scaling_governor"));
+    assert!(err.contains("action_invalid_request"));
     fs::remove_dir_all(root).ok();
 }
 
@@ -181,7 +181,7 @@ fn preflight_rejects_empty_allowlist() {
 
     let err = action.preflight_at(&policy).unwrap_err().to_string();
 
-    assert!(err.contains("requires a non-empty explicit CPU allowlist"));
+    assert!(err.contains("action_policy_denied"));
     fs::remove_dir_all(root).ok();
 }
 
@@ -201,7 +201,7 @@ fn preflight_rejects_cpu_not_in_allowlist() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("CPU 0 is not in explicit CPU power allowlist"));
+    assert!(err.contains("action_policy_denied"));
     fs::remove_dir_all(root).ok();
 }
 
@@ -220,7 +220,7 @@ fn preflight_rejects_governor_when_not_allowed() {
 
     let err = action.preflight_at(&policy).unwrap_err().to_string();
 
-    assert!(err.contains("policy does not allow scaling_governor changes"));
+    assert!(err.contains("action_policy_denied"));
     fs::remove_dir_all(root).ok();
 }
 
@@ -239,7 +239,7 @@ fn preflight_rejects_epp_when_not_allowed() {
 
     let err = action.preflight_at(&policy).unwrap_err().to_string();
 
-    assert!(err.contains("policy does not allow energy_performance_preference changes"));
+    assert!(err.contains("action_policy_denied"));
     fs::remove_dir_all(root).ok();
 }
 
@@ -259,7 +259,7 @@ fn preflight_rejects_invalid_sysfs_value() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("scaling_governor value contains invalid character"));
+    assert!(err.contains("action_invalid_value"));
     fs::remove_dir_all(root).ok();
 }
 
@@ -279,7 +279,7 @@ fn preflight_rejects_missing_cpufreq_file() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("required CPU power sysfs file does not exist"));
+    assert!(err.contains("action_missing_path"));
     fs::remove_dir_all(root).ok();
 }
 
@@ -302,7 +302,7 @@ fn preflight_rejects_battery_without_override() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("refusing CPU governor/EPP changes while on battery"));
+    assert!(err.contains("action_policy_denied"));
     fs::remove_dir_all(root).ok();
 }
 

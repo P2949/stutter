@@ -52,8 +52,9 @@ pub(crate) mod transaction;
 
 pub use cpu_power::{CpuPowerAction, CpuPowerPolicy};
 pub use error::{
-    ActionError, ActionFailure, ActionResult, ActionTimeout, ApplyResult, PartialApplyError,
-    PhaseFailure, RollbackOutcome, ScopeLimitExceeded,
+    ActionBoundaryError, ActionBoundaryFailure, ActionError, ActionFailure, ActionResult,
+    ActionTimeout, ApplyResult, PartialApplyError, PhaseFailure, RollbackOutcome,
+    ScopeLimitExceeded,
 };
 pub use factory::default_action_factory_registry;
 pub use gpu_power::{GpuPowerAction, GpuPowerMode, GpuPowerPolicy};

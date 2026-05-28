@@ -1,7 +1,8 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::model::{
-    ActionFailure, ActionTimeout, PhaseFailure, RollbackOutcome, ScopeLimitExceeded,
+    ActionBoundaryFailure, ActionFailure, ActionTimeout, PhaseFailure, RollbackOutcome,
+    ScopeLimitExceeded,
 };
 use crate::actions::model::ActionPhase;
 
@@ -29,6 +30,12 @@ enum ActionErrorWire {
     EmergencyRollbackFailure {
         verify_error: String,
         rollback_error: String,
+    },
+    ActionBoundaryFailure {
+        phase: ActionPhase,
+        action_kind: String,
+        reason_code: String,
+        message: String,
     },
     ScopeLimitExceeded {
         affected_tasks: usize,
@@ -154,6 +161,17 @@ impl From<ActionErrorWire> for ActionFailure {
                 verify_error,
                 rollback_error,
             }),
+            ActionErrorWire::ActionBoundaryFailure {
+                phase,
+                action_kind,
+                reason_code,
+                message,
+            } => Self::Boundary(ActionBoundaryFailure {
+                phase,
+                action_kind,
+                reason_code,
+                message,
+            }),
             ActionErrorWire::ScopeLimitExceeded {
                 affected_tasks,
                 max_affected_tasks,
@@ -239,6 +257,17 @@ impl From<ActionFailure> for ActionErrorWire {
             }) => Self::EmergencyRollbackFailure {
                 verify_error,
                 rollback_error,
+            },
+            ActionFailure::Boundary(ActionBoundaryFailure {
+                phase,
+                action_kind,
+                reason_code,
+                message,
+            }) => Self::ActionBoundaryFailure {
+                phase,
+                action_kind,
+                reason_code,
+                message,
             },
             ActionFailure::Rollback(RollbackOutcome::TimeoutRollbackCompleted {
                 timeout:

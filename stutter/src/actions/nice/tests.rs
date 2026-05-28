@@ -108,7 +108,7 @@ fn preflight_rejects_empty_targets() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("requires at least one target task"));
+    assert!(err.contains("action_missing_explicit_targets"));
 }
 
 #[test]
@@ -120,7 +120,7 @@ fn preflight_rejects_nice_outside_linux_range() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("outside Linux nice range"));
+    assert!(err.contains("action_invalid_value"));
 }
 
 #[test]
@@ -138,7 +138,7 @@ fn preflight_rejects_when_policy_disallows_nice_changes() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("policy does not allow nice changes"));
+    assert!(err.contains("action_policy_denied"));
     fs::remove_dir_all(proc_root).ok();
 }
 
@@ -158,7 +158,7 @@ fn preflight_rejects_requested_nice_outside_policy_range() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("outside policy range"));
+    assert!(err.contains("action_invalid_value"));
     fs::remove_dir_all(proc_root).ok();
 }
 
@@ -184,7 +184,7 @@ fn preflight_rejects_starttime_mismatch() {
         .preflight_at(&proc_root, &NicePolicy::default())
         .unwrap_err();
 
-    assert!(format!("{:#}", err).contains("starttime mismatch"));
+    assert!(format!("{:#}", err).contains("action_target_identity_mismatch"));
     fs::remove_dir_all(proc_root).ok();
 }
 

@@ -126,7 +126,7 @@ fn preflight_rejects_default_disabled_policy() {
 
     let err = action_for(&root).preflight().unwrap_err().to_string();
 
-    assert!(err.contains("policy does not allow GPU power/performance profile changes"));
+    assert!(err.contains("action_policy_denied"));
     fs::remove_dir_all(root).ok();
 }
 
@@ -167,7 +167,7 @@ fn preflight_rejects_missing_knobs() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("requires power_dpm_force_performance_level"));
+    assert!(err.contains("action_invalid_request"));
     fs::remove_dir_all(root).ok();
 }
 
@@ -183,7 +183,7 @@ fn preflight_rejects_empty_allowlist() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("requires a non-empty explicit DRM card allowlist"));
+    assert!(err.contains("action_policy_denied"));
     fs::remove_dir_all(root).ok();
 }
 
@@ -197,7 +197,7 @@ fn preflight_rejects_card_not_in_allowlist() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("DRM card card0 is not in explicit GPU power allowlist"));
+    assert!(err.contains("action_policy_denied"));
     fs::remove_dir_all(root).ok();
 }
 
@@ -212,7 +212,7 @@ fn preflight_rejects_invalid_drm_card_name() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("DRM card name must start with card"));
+    assert!(err.contains("action_invalid_value"));
     fs::remove_dir_all(root).ok();
 }
 
@@ -228,7 +228,7 @@ fn preflight_rejects_dpm_when_not_allowed() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("policy does not allow power_dpm_force_performance_level changes"));
+    assert!(err.contains("action_policy_denied"));
     fs::remove_dir_all(root).ok();
 }
 
@@ -244,7 +244,7 @@ fn preflight_rejects_profile_when_not_allowed() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("policy does not allow pp_power_profile_mode changes"));
+    assert!(err.contains("action_policy_denied"));
     fs::remove_dir_all(root).ok();
 }
 
@@ -260,7 +260,7 @@ fn preflight_rejects_invalid_dpm_value() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("power_dpm_force_performance_level value contains invalid character"));
+    assert!(err.contains("action_invalid_value"));
     fs::remove_dir_all(root).ok();
 }
 
@@ -276,7 +276,7 @@ fn preflight_rejects_unsupported_dpm_value() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("unsupported power_dpm_force_performance_level value"));
+    assert!(err.contains("action_unsupported_value"));
     fs::remove_dir_all(root).ok();
 }
 
@@ -290,7 +290,7 @@ fn preflight_rejects_missing_gpu_sysfs_file() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("required GPU power sysfs file does not exist"));
+    assert!(err.contains("action_missing_path"));
     fs::remove_dir_all(root).ok();
 }
 
@@ -306,7 +306,7 @@ fn preflight_rejects_battery_without_override() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("refusing GPU power/performance profile changes while on battery"));
+    assert!(err.contains("action_policy_denied"));
     fs::remove_dir_all(root).ok();
 }
 
@@ -396,7 +396,7 @@ fn apply_rejects_suggest_only_policy() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("GPU power action is suggest-only"));
+    assert!(err.contains("action_invalid_request"));
     fs::remove_dir_all(root).ok();
 }
 

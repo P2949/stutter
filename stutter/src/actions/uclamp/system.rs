@@ -6,14 +6,18 @@ use super::{
     models::{UclampCurrentValues, UclampTargetSnapshot},
     validate::validate_uclamp_value,
 };
-use crate::actions::{ActionWarning, TaskIdentity, syscalls::SchedUclamp};
+use crate::actions::{ActionBoundaryError, ActionWarning, TaskIdentity, syscalls::SchedUclamp};
 
 pub(crate) fn read_target_snapshot_at(
     proc_root: &Path,
     target: &TaskIdentity,
 ) -> anyhow::Result<UclampTargetSnapshot> {
     if target.tid == 0 {
-        anyhow::bail!("target tid must be greater than zero");
+        return Err(ActionBoundaryError::InvalidTargetTid {
+            action_kind: "uclamp",
+            tid: target.tid.as_u32(),
+        }
+        .into());
     }
 
     let stat_path = proc_root.join(target.tid.to_string()).join("stat");
@@ -29,12 +33,13 @@ pub(crate) fn read_target_snapshot_at(
     if let Some(expected_starttime) = target.starttime_ticks
         && expected_starttime != starttime_ticks
     {
-        anyhow::bail!(
-            "target tid={} starttime mismatch: expected={} actual={}",
-            target.tid,
+        return Err(ActionBoundaryError::TargetIdentityMismatch {
+            action_kind: "uclamp",
+            tid: target.tid.as_u32(),
             expected_starttime,
-            starttime_ticks
-        );
+            actual_starttime: starttime_ticks,
+        }
+        .into());
     }
 
     let comm_path = proc_root.join(target.tid.to_string()).join("comm");
@@ -123,11 +128,15 @@ pub(crate) fn set_task_uclamp(tid: u32, values: UclampCurrentValues) -> anyhow::
     validate_uclamp_value("sched_util_max", values.sched_util_max)?;
 
     if values.sched_util_min > values.sched_util_max {
-        anyhow::bail!(
-            "sched_util_min {} is greater than sched_util_max {}",
-            values.sched_util_min,
-            values.sched_util_max
-        );
+        return Err(ActionBoundaryError::InvalidValue {
+            action_kind: "uclamp",
+            field: "sched_util_min".to_owned(),
+            reason: format!(
+                "sched_util_min {} is greater than sched_util_max {}",
+                values.sched_util_min, values.sched_util_max
+            ),
+        }
+        .into());
     }
 
     crate::actions::syscalls::sched_setattr(

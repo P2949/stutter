@@ -2,7 +2,7 @@ use std::path::Path;
 
 use super::{models::UclampCurrentValues, system::set_task_uclamp};
 use crate::actions::{
-    RestoreIdentityStatus, RollbackToken,
+    ActionBoundaryError, RestoreIdentityStatus, RollbackToken,
     restore_write::{RestoreWriteError, classify_restore_write_error},
     rollback::{
         RollbackCandidate, RollbackHandler, RollbackPreview, RollbackResult, token_dry_run_preview,
@@ -22,11 +22,17 @@ impl RollbackHandler for UclampRollbackHandler {
     }
 
     fn dry_run(&self, _: &RollbackCandidate) -> anyhow::Result<RollbackPreview> {
-        anyhow::bail!("uclamp rollback requires an explicit rollback token")
+        Err(
+            ActionBoundaryError::missing_explicit_rollback_token(self.id(), "uclamp-restore")
+                .into(),
+        )
     }
 
     fn restore(&self, _: RollbackCandidate) -> anyhow::Result<RollbackResult> {
-        anyhow::bail!("uclamp rollback requires an explicit rollback token")
+        Err(
+            ActionBoundaryError::missing_explicit_rollback_token(self.id(), "uclamp-restore")
+                .into(),
+        )
     }
 
     fn supports_token(&self, token: &RollbackToken) -> bool {
@@ -35,14 +41,24 @@ impl RollbackHandler for UclampRollbackHandler {
 
     fn dry_run_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackPreview> {
         if !self.supports_token(token) {
-            anyhow::bail!("uclamp rollback handler does not support {token:?}");
+            return Err(ActionBoundaryError::unsupported_rollback_token(
+                self.id(),
+                "uclamp-restore",
+                token.kind(),
+            )
+            .into());
         }
         Ok(token_dry_run_preview(self.id(), token, "uclamp-restore"))
     }
 
     fn restore_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackResult> {
         let Some(records) = token.as_uclamp_restore() else {
-            anyhow::bail!("uclamp rollback handler does not support {token:?}");
+            return Err(ActionBoundaryError::unsupported_rollback_token(
+                self.id(),
+                "uclamp-restore",
+                token.kind(),
+            )
+            .into());
         };
 
         let mut restored = 0;
