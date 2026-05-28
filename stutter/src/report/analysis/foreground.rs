@@ -4,6 +4,8 @@
 //! context. Does not own artifact loading, timing summaries, clustering, diagnosis, or report
 //! orchestration.
 
+use stutter_core::ids::Pid;
+
 use super::*;
 
 pub(crate) fn foreground_report_summary(
@@ -95,7 +97,7 @@ pub(crate) fn foreground_report_summary(
     ForegroundReportSummary {
         enabled,
         source,
-        final_pid,
+        final_pid: final_pid.map(Pid::new),
         final_app_id,
         final_class,
         final_title,
@@ -137,10 +139,10 @@ pub(crate) fn focus_report_summary(
     let confidence = final_event.map(|event| event.confidence);
     let score = final_event.map(|event| event.score);
     let roots = final_event
-        .map(|event| event.root_pids.iter().map(|pid| pid.as_u32()).collect())
+        .map(|event| event.root_pids.to_vec())
         .unwrap_or_default();
     let member_pids = final_event
-        .map(|event| event.member_pids.iter().map(|pid| pid.as_u32()).collect())
+        .map(|event| event.member_pids.to_vec())
         .unwrap_or_default();
     let reasons = final_event
         .map(|event| event.reasons.clone())
@@ -238,7 +240,7 @@ mod tests {
 
         assert!(summary.enabled);
         assert_eq!(summary.source.as_deref(), Some("sway"));
-        assert_eq!(summary.final_pid, Some(159447));
+        assert_eq!(summary.final_pid, Some(Pid::new(159447)));
         assert_eq!(summary.final_window_id.as_deref(), Some("163"));
         assert_eq!(summary.final_workspace.as_deref(), Some("5"));
         assert_eq!(summary.provider_status.as_deref(), Some("available"));
@@ -271,7 +273,7 @@ mod tests {
 
         let summary = foreground_report_summary(&session, &events);
 
-        assert_eq!(summary.final_pid, Some(2222));
+        assert_eq!(summary.final_pid, Some(Pid::new(2222)));
         assert_eq!(summary.final_window_id.as_deref(), Some("new"));
     }
 }

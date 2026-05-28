@@ -125,10 +125,10 @@ fn render_header(html: &mut String, header: &ReportHeaderSummary) {
     push_dt_dd(html, "csv_stream", &header.csv_stream);
 
     if !header.manual_pids.is_empty() {
-        push_dt_dd(html, "manual_pids", &join_u32(&header.manual_pids));
+        push_dt_dd(html, "manual_pids", &join_display(&header.manual_pids));
     }
     if !header.tree_roots.is_empty() {
-        push_dt_dd(html, "tree_roots", &join_u32(&header.tree_roots));
+        push_dt_dd(html, "tree_roots", &join_display(&header.tree_roots));
     }
     if !header.include_comm.is_empty() {
         push_dt_dd(html, "include_comm", &header.include_comm.join(", "));
@@ -348,10 +348,10 @@ fn push_string_list(html: &mut String, title: &str, values: &[String]) {
     html.push_str("      </ul>\n");
 }
 
-fn join_u32(values: &[u32]) -> String {
+fn join_display<T: std::fmt::Display>(values: &[T]) -> String {
     values
         .iter()
-        .map(u32::to_string)
+        .map(ToString::to_string)
         .collect::<Vec<_>>()
         .join(", ")
 }
@@ -375,7 +375,10 @@ fn escape_html(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use stutter_core::{ids::RunId, paths::LogicalPath};
+    use stutter_core::{
+        ids::{CpuId, Pid, RunId, Tid},
+        paths::LogicalPath,
+    };
 
     use super::{escape_html, render_report};
     use crate::model::{
@@ -415,18 +418,18 @@ mod tests {
     fn minimal_cluster() -> SpikeCluster {
         SpikeCluster {
             points: vec![SpikePoint {
-                task: 42,
+                task: Tid::new(42),
                 class: "game".to_owned(),
                 process_pid: None,
                 comm: "render<&>".to_owned(),
-                cpu: 3,
-                wakeup_target_cpu: 3,
+                cpu: CpuId::new(3),
+                wakeup_target_cpu: CpuId::new(3),
                 latency_ns: 1_000_000,
                 wakeup_ns: 1,
                 switch_ns: 1_000_001,
                 target_pending_wakeups: 0,
                 observed_runnable_depth: 0,
-                switch_prev_pid: 0,
+                switch_prev_pid: Tid::new(0),
                 switch_prev_state: 1,
                 switch_prev_state_label: "S".to_owned(),
                 scx_ops: None,
@@ -474,8 +477,8 @@ mod tests {
             run_name: "test run".to_owned(),
             duration_ms: 5000,
             stop_reason: "completed".to_owned(),
-            manual_pids: vec![100],
-            tree_roots: vec![200],
+            manual_pids: vec![Pid::new(100)],
+            tree_roots: vec![Pid::new(200)],
             include_comm: vec!["game".to_owned()],
             exclude_comm: vec!["browser".to_owned()],
             event_stream_warning: None,

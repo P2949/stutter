@@ -315,7 +315,10 @@ fn validation_corpus_real_foreground_window() {
         "real_foreground_window title must be null or redacted, got {:?}",
         analysis.foreground_summary.final_title
     );
-    assert_eq!(analysis.foreground_summary.final_pid, Some(5701));
+    assert_eq!(
+        analysis.foreground_summary.final_pid,
+        Some(stutter_core::ids::Pid::new(5701))
+    );
     assert_eq!(
         analysis.foreground_summary.final_app_id.as_deref(),
         Some("steam_app_sanitized")
