@@ -4,7 +4,8 @@ use anyhow::Context;
 
 use super::fs_io::{resolve_cgroup_fs_path, write_trimmed};
 use crate::actions::{
-    CgroupCpusetRestoreRecord, CgroupRestoreRecord, RestoreIdentityStatus, RollbackToken,
+    ActionBoundaryError, CgroupCpusetRestoreRecord, CgroupRestoreRecord, RestoreIdentityStatus,
+    RollbackToken,
     restore_write::{RestoreWriteError, classify_restore_write_error},
     rollback::{
         RollbackCandidate, RollbackHandler, RollbackPreview, RollbackResult, token_dry_run_preview,
@@ -24,11 +25,17 @@ impl RollbackHandler for CgroupRollbackHandler {
     }
 
     fn dry_run(&self, _: &RollbackCandidate) -> anyhow::Result<RollbackPreview> {
-        anyhow::bail!("cgroup rollback requires an explicit rollback token")
+        Err(
+            ActionBoundaryError::missing_explicit_rollback_token(self.id(), "cgroup-restore")
+                .into(),
+        )
     }
 
     fn restore(&self, _: RollbackCandidate) -> anyhow::Result<RollbackResult> {
-        anyhow::bail!("cgroup rollback requires an explicit rollback token")
+        Err(
+            ActionBoundaryError::missing_explicit_rollback_token(self.id(), "cgroup-restore")
+                .into(),
+        )
     }
 
     fn supports_token(&self, token: &RollbackToken) -> bool {
@@ -37,7 +44,12 @@ impl RollbackHandler for CgroupRollbackHandler {
 
     fn dry_run_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackPreview> {
         if !self.supports_token(token) {
-            anyhow::bail!("cgroup rollback handler does not support {token:?}");
+            return Err(ActionBoundaryError::unsupported_rollback_token(
+                self.id(),
+                "cgroup-restore",
+                token.kind(),
+            )
+            .into());
         }
         Ok(token_dry_run_preview(self.id(), token, "cgroup-restore"))
     }
@@ -55,7 +67,12 @@ impl CgroupRollbackHandler {
         token: &RollbackToken,
     ) -> anyhow::Result<RollbackResult> {
         let Some((records, cpuset)) = token.as_cgroup_restore() else {
-            anyhow::bail!("cgroup rollback handler does not support {token:?}");
+            return Err(ActionBoundaryError::unsupported_rollback_token(
+                self.id(),
+                "cgroup-restore",
+                token.kind(),
+            )
+            .into());
         };
 
         let mut restored = 0;
@@ -144,10 +161,14 @@ impl CgroupRollbackHandler {
         }
 
         if errors > 0 {
-            anyhow::bail!(
-                "failed to rollback cgroup placement: {}",
-                messages.join("; ")
-            );
+            return Err(ActionBoundaryError::restore_failed(
+                "cgroup",
+                format!(
+                    "failed to rollback cgroup placement: {}",
+                    messages.join("; ")
+                ),
+            )
+            .into());
         }
 
         Ok(RollbackResult {

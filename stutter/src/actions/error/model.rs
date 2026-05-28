@@ -1,4 +1,7 @@
+use std::path::PathBuf;
+
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use thiserror::Error;
 
 use crate::actions::{model::ActionPhase, token::RollbackTokenKindError};
 
@@ -10,6 +13,7 @@ pub struct ActionError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ActionFailure {
     Phase(PhaseFailure),
+    Boundary(ActionBoundaryFailure),
     Timeout(ActionTimeout),
     Rollback(RollbackOutcome),
     InvalidRollbackToken { expected: String, actual: String },
@@ -68,6 +72,185 @@ pub enum RollbackOutcome {
 pub struct ScopeLimitExceeded {
     pub affected_tasks: usize,
     pub max_affected_tasks: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ActionBoundaryFailure {
+    pub phase: ActionPhase,
+    pub action_kind: String,
+    pub reason_code: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Error, PartialEq, Eq)]
+pub enum ActionBoundaryError {
+    #[error(
+        "action_missing_explicit_rollback_token: {handler} requires explicit rollback token kind {expected_token_kind}"
+    )]
+    MissingExplicitRollbackToken {
+        handler: &'static str,
+        expected_token_kind: &'static str,
+    },
+
+    #[error(
+        "action_unsupported_rollback_token: {handler} expected rollback token kind {expected_token_kind}, got {actual_token_kind}"
+    )]
+    UnsupportedRollbackToken {
+        handler: &'static str,
+        expected_token_kind: &'static str,
+        actual_token_kind: &'static str,
+    },
+
+    #[error("action_missing_explicit_targets: {action_kind} requires at least one explicit target")]
+    MissingExplicitTargets { action_kind: &'static str },
+
+    #[error("action_policy_denied: {action_kind} denied by policy requirement {requirement}")]
+    PolicyDenied {
+        action_kind: &'static str,
+        requirement: &'static str,
+    },
+
+    #[error("action_evidence_required: {action_kind} requires evidence {evidence}")]
+    EvidenceRequired {
+        action_kind: &'static str,
+        evidence: &'static str,
+    },
+
+    #[error("action_invalid_target_tid: {action_kind} target tid {tid} must be greater than zero")]
+    InvalidTargetTid { action_kind: &'static str, tid: u32 },
+
+    #[error(
+        "action_target_identity_mismatch: {action_kind} tid={tid} starttime mismatch: expected={expected_starttime} actual={actual_starttime}"
+    )]
+    TargetIdentityMismatch {
+        action_kind: &'static str,
+        tid: u32,
+        expected_starttime: u64,
+        actual_starttime: u64,
+    },
+
+    #[error("action_invalid_request: {action_kind}: {reason}")]
+    InvalidRequest {
+        action_kind: &'static str,
+        reason: String,
+    },
+
+    #[error("action_invalid_policy: {action_kind}: {reason}")]
+    InvalidPolicy {
+        action_kind: &'static str,
+        reason: String,
+    },
+
+    #[error("action_invalid_value: {action_kind} field {field}: {reason}")]
+    InvalidValue {
+        action_kind: &'static str,
+        field: String,
+        reason: String,
+    },
+
+    #[error("action_unsupported_value: {action_kind} field {field}: {value}")]
+    UnsupportedValue {
+        action_kind: &'static str,
+        field: &'static str,
+        value: String,
+    },
+
+    #[error("action_path_not_allowed: {action_kind} path {path}: {reason}")]
+    PathNotAllowed {
+        action_kind: &'static str,
+        path: PathBuf,
+        reason: String,
+    },
+
+    #[error("action_missing_path: {action_kind} required path does not exist: {path}")]
+    MissingPath {
+        action_kind: &'static str,
+        path: PathBuf,
+    },
+
+    #[error("action_restore_failed: {action_kind}: {message}")]
+    RestoreFailed {
+        action_kind: &'static str,
+        message: String,
+    },
+}
+
+impl ActionBoundaryError {
+    pub const fn reason_code(&self) -> &'static str {
+        match self {
+            Self::MissingExplicitRollbackToken { .. } => "action_missing_explicit_rollback_token",
+            Self::UnsupportedRollbackToken { .. } => "action_unsupported_rollback_token",
+            Self::MissingExplicitTargets { .. } => "action_missing_explicit_targets",
+            Self::PolicyDenied { .. } => "action_policy_denied",
+            Self::EvidenceRequired { .. } => "action_evidence_required",
+            Self::InvalidTargetTid { .. } => "action_invalid_target_tid",
+            Self::TargetIdentityMismatch { .. } => "action_target_identity_mismatch",
+            Self::InvalidRequest { .. } => "action_invalid_request",
+            Self::InvalidPolicy { .. } => "action_invalid_policy",
+            Self::InvalidValue { .. } => "action_invalid_value",
+            Self::UnsupportedValue { .. } => "action_unsupported_value",
+            Self::PathNotAllowed { .. } => "action_path_not_allowed",
+            Self::MissingPath { .. } => "action_missing_path",
+            Self::RestoreFailed { .. } => "action_restore_failed",
+        }
+    }
+
+    pub const fn action_kind(&self) -> &'static str {
+        match self {
+            Self::MissingExplicitRollbackToken { handler, .. } => handler,
+            Self::UnsupportedRollbackToken { handler, .. } => handler,
+            Self::MissingExplicitTargets { action_kind }
+            | Self::PolicyDenied { action_kind, .. }
+            | Self::EvidenceRequired { action_kind, .. }
+            | Self::InvalidTargetTid { action_kind, .. }
+            | Self::TargetIdentityMismatch { action_kind, .. }
+            | Self::InvalidRequest { action_kind, .. }
+            | Self::InvalidPolicy { action_kind, .. }
+            | Self::InvalidValue { action_kind, .. }
+            | Self::UnsupportedValue { action_kind, .. }
+            | Self::PathNotAllowed { action_kind, .. }
+            | Self::MissingPath { action_kind, .. }
+            | Self::RestoreFailed { action_kind, .. } => action_kind,
+        }
+    }
+
+    pub fn to_failure(&self, phase: ActionPhase) -> ActionBoundaryFailure {
+        ActionBoundaryFailure {
+            phase,
+            action_kind: self.action_kind().to_owned(),
+            reason_code: self.reason_code().to_owned(),
+            message: self.to_string(),
+        }
+    }
+
+    pub fn unsupported_rollback_token(
+        handler: &'static str,
+        expected_token_kind: &'static str,
+        actual_token_kind: &'static str,
+    ) -> Self {
+        Self::UnsupportedRollbackToken {
+            handler,
+            expected_token_kind,
+            actual_token_kind,
+        }
+    }
+
+    pub fn missing_explicit_rollback_token(
+        handler: &'static str,
+        expected_token_kind: &'static str,
+    ) -> Self {
+        Self::MissingExplicitRollbackToken {
+            handler,
+            expected_token_kind,
+        }
+    }
+
+    pub fn restore_failed(action_kind: &'static str, message: impl Into<String>) -> Self {
+        Self::RestoreFailed {
+            action_kind,
+            message: message.into(),
+        }
+    }
 }
 
 impl ActionError {
@@ -136,10 +319,47 @@ impl ActionError {
         if let Some(action_error) = error.downcast_ref::<ActionError>() {
             return action_error.clone();
         }
-        if let Some(kind_error) = error.downcast_ref::<RollbackTokenKindError>() {
+        Self::rollback_error(error)
+    }
+
+    pub fn from_phase_error(phase: ActionPhase, error: anyhow::Error) -> Self {
+        if let Some(boundary_error) = error.downcast_ref::<ActionBoundaryError>() {
+            return Self::from_failure(ActionFailure::Boundary(boundary_error.to_failure(phase)));
+        }
+
+        if let Some(kind_error) = error.downcast_ref::<RollbackTokenKindError>()
+            && phase == ActionPhase::Rollback
+        {
             return Self::invalid_rollback_token_kind(*kind_error);
         }
-        Self::rollback(error)
+
+        match phase {
+            ActionPhase::Preflight => Self::preflight(error),
+            ActionPhase::DryRun => Self::dry_run(error),
+            ActionPhase::Apply => Self::apply(error),
+            ActionPhase::Verify => Self::verify(error),
+            ActionPhase::Rollback | ActionPhase::EmergencyRollback => Self::rollback(error),
+        }
+    }
+
+    pub fn preflight_error(error: anyhow::Error) -> Self {
+        Self::from_phase_error(ActionPhase::Preflight, error)
+    }
+
+    pub fn dry_run_error(error: anyhow::Error) -> Self {
+        Self::from_phase_error(ActionPhase::DryRun, error)
+    }
+
+    pub fn apply_error(error: anyhow::Error) -> Self {
+        Self::from_phase_error(ActionPhase::Apply, error)
+    }
+
+    pub fn verify_error(error: anyhow::Error) -> Self {
+        Self::from_phase_error(ActionPhase::Verify, error)
+    }
+
+    pub fn rollback_error(error: anyhow::Error) -> Self {
+        Self::from_phase_error(ActionPhase::Rollback, error)
     }
 
     pub fn emergency_rollback(
@@ -220,7 +440,7 @@ impl ActionError {
         self.failure.phase()
     }
 
-    pub fn category(&self) -> &'static str {
+    pub fn category(&self) -> &str {
         self.failure.category()
     }
 
@@ -233,6 +453,7 @@ impl ActionFailure {
     pub fn phase(&self) -> ActionPhase {
         match self {
             Self::Phase(failure) => failure.phase(),
+            Self::Boundary(failure) => failure.phase,
             Self::Timeout(timeout) => timeout.phase,
             Self::Rollback(outcome) => outcome.phase(),
             Self::InvalidRollbackToken { .. } => ActionPhase::Rollback,
@@ -241,9 +462,10 @@ impl ActionFailure {
         }
     }
 
-    pub fn category(&self) -> &'static str {
+    pub fn category(&self) -> &str {
         match self {
             Self::Phase(failure) => failure.category(),
+            Self::Boundary(failure) => failure.reason_code.as_str(),
             Self::Timeout { .. } => "timeout",
             Self::Rollback(outcome) => outcome.category(),
             Self::InvalidRollbackToken { .. } => "invalid_rollback_token",
@@ -255,6 +477,9 @@ impl ActionFailure {
     pub fn human_message(&self) -> String {
         match self {
             Self::Phase(failure) => failure.human_message(),
+            Self::Boundary(failure) => {
+                format!("{} failed: {}", failure.phase.as_str(), failure.message)
+            }
             Self::Timeout(timeout) => timeout.human_message(),
             Self::Rollback(outcome) => outcome.human_message(),
             Self::InvalidRollbackToken { expected, actual } => {

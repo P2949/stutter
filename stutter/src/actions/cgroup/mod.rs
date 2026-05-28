@@ -9,9 +9,9 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 
 use crate::actions::{
-    ActionId, ActionState, ActionWarning, ApplyResult, CgroupCpusetRestoreRecord,
-    CgroupRestoreRecord, PartialApplyError, RestoreIdentityStatus, RollbackToken, SafetyClass,
-    TaskRestoreIdentity, TuningAction,
+    ActionBoundaryError, ActionId, ActionState, ActionWarning, ApplyResult,
+    CgroupCpusetRestoreRecord, CgroupRestoreRecord, PartialApplyError, RestoreIdentityStatus,
+    RollbackToken, SafetyClass, TaskRestoreIdentity, TuningAction,
     restore_write::{RestoreSummary, RestoreWriteError, classify_restore_write_error},
     verify_task_identity,
 };
@@ -314,14 +314,18 @@ impl CgroupPlacementAction {
         }
 
         if summary.has_failures() {
-            anyhow::bail!(
-                "failed to rollback cgroup placement after attempting all records: restored={} skipped_missing={} skipped_identity_mismatch={} failed={} errors={}",
-                summary.restored,
-                summary.skipped_missing,
-                summary.skipped_identity_mismatch,
-                summary.failed,
-                failures.join("; ")
-            );
+            return Err(ActionBoundaryError::restore_failed(
+                "cgroup",
+                format!(
+                    "failed to rollback cgroup placement after attempting all records: restored={} skipped_missing={} skipped_identity_mismatch={} failed={} errors={}",
+                    summary.restored,
+                    summary.skipped_missing,
+                    summary.skipped_identity_mismatch,
+                    summary.failed,
+                    failures.join("; ")
+                ),
+            )
+            .into());
         }
 
         Ok(())

@@ -122,7 +122,7 @@ fn preflight_rejects_default_policy_because_advisor_is_investigate_first() {
 
     let err = action(&root).preflight().unwrap_err().to_string();
 
-    assert!(err.contains("advisor remains investigate-first"));
+    assert!(err.contains("action_policy_denied"));
     fs::remove_dir_all(root).ok();
 }
 
@@ -138,7 +138,7 @@ fn preflight_rejects_without_strong_irq_evidence() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("strong IRQ evidence is required"));
+    assert!(err.contains("action_policy_denied"));
     fs::remove_dir_all(root).ok();
 }
 
@@ -154,7 +154,7 @@ fn preflight_rejects_unstable_irq_identity() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("stable IRQ identity is required"));
+    assert!(err.contains("action_policy_denied"));
     fs::remove_dir_all(root).ok();
 }
 
@@ -170,7 +170,7 @@ fn preflight_rejects_unknown_device_mapping() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("known device mapping is required"));
+    assert!(err.contains("action_policy_denied"));
     fs::remove_dir_all(root).ok();
 }
 
@@ -186,7 +186,7 @@ fn preflight_rejects_evidence_irq_mismatch() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("IRQ evidence mismatch"));
+    assert!(err.contains("action_invalid_request"));
     fs::remove_dir_all(root).ok();
 }
 
@@ -200,7 +200,7 @@ fn preflight_rejects_device_mapping_mismatch() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("device mapping changed"));
+    assert!(err.contains("action_invalid_request"));
     fs::remove_dir_all(root).ok();
 }
 
@@ -216,7 +216,7 @@ fn preflight_rejects_high_risk_without_policy_allowance() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("does not allow high-risk IRQ affinity changes"));
+    assert!(err.contains("action_policy_denied"));
     fs::remove_dir_all(root).ok();
 }
 
@@ -233,7 +233,7 @@ fn preflight_rejects_system_critical_irq_identity() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("refusing to change system-critical IRQ"));
+    assert!(err.contains("action_invalid_request"));
     fs::remove_dir_all(root).ok();
 }
 
@@ -249,7 +249,7 @@ fn preflight_rejects_invalid_affinity_string() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("smp_affinity contains invalid character"));
+    assert!(err.contains("action_invalid_value"));
     fs::remove_dir_all(root).ok();
 }
 

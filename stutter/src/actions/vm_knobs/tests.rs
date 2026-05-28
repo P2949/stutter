@@ -120,7 +120,7 @@ fn preflight_rejects_default_disabled_policy() {
 
     let err = thp_action(&root).preflight().unwrap_err().to_string();
 
-    assert!(err.contains("policy does not allow THP/compaction/VM knob changes"));
+    assert!(err.contains("action_policy_denied"));
     fs::remove_dir_all(root).ok();
 }
 
@@ -162,7 +162,7 @@ fn preflight_rejects_empty_allowlist() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("requires a non-empty explicit path allowlist"));
+    assert!(err.contains("action_policy_denied"));
     fs::remove_dir_all(root).ok();
 }
 
@@ -179,7 +179,7 @@ fn preflight_rejects_empty_changes() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("requires at least one explicit knob change"));
+    assert!(err.contains("action_missing_explicit_targets"));
     fs::remove_dir_all(root).ok();
 }
 
@@ -199,7 +199,7 @@ fn preflight_rejects_without_latency_cliff_evidence() {
 
     let err = action.preflight_at(&policy).unwrap_err().to_string();
 
-    assert!(err.contains("latency cliff evidence is required"));
+    assert!(err.contains("action_policy_denied"));
     fs::remove_dir_all(root).ok();
 }
 
@@ -220,7 +220,7 @@ fn preflight_rejects_path_not_in_allowlist() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("is not in explicit allowlist"));
+    assert!(err.contains("action_policy_denied"));
     fs::remove_dir_all(root).ok();
 }
 
@@ -240,7 +240,7 @@ fn preflight_rejects_parent_traversal() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("must not contain parent traversal"));
+    assert!(err.contains("action_invalid_value"));
     fs::remove_dir_all(root).ok();
 }
 
@@ -261,7 +261,7 @@ fn preflight_rejects_unsupported_knob() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("unsupported VM knob"));
+    assert!(err.contains("action_unsupported_value"));
     fs::remove_dir_all(root).ok();
 }
 
@@ -282,7 +282,7 @@ fn preflight_rejects_compact_memory_as_not_reversible() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("write-only trigger and is not reversible"));
+    assert!(err.contains("action_invalid_request"));
     fs::remove_dir_all(root).ok();
 }
 
@@ -309,7 +309,7 @@ fn preflight_rejects_invalid_thp_value() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("unsupported value"));
+    assert!(err.contains("action_unsupported_value"));
     fs::remove_dir_all(root).ok();
 }
 
@@ -330,7 +330,7 @@ fn preflight_rejects_numeric_value_out_of_range() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("outside allowed range 1..=100"));
+    assert!(err.contains("action_invalid_value"));
     fs::remove_dir_all(root).ok();
 }
 
@@ -350,7 +350,7 @@ fn preflight_rejects_missing_knob_file() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("required VM knob file does not exist"));
+    assert!(err.contains("action_missing_path"));
     fs::remove_dir_all(root).ok();
 }
 
@@ -398,7 +398,7 @@ fn apply_rejects_suggest_only_policy() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("VM knob action is suggest-only"));
+    assert!(err.contains("action_invalid_request"));
     fs::remove_dir_all(root).ok();
 }
 

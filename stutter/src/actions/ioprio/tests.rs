@@ -137,7 +137,7 @@ fn rejects_invalid_level_for_idle_class() {
     .unwrap_err()
     .to_string();
 
-    assert!(err.contains("must not specify a level"));
+    assert!(err.contains("action_invalid_value"));
 }
 
 #[test]
@@ -150,7 +150,7 @@ fn rejects_missing_level_for_best_effort_class() {
     .unwrap_err()
     .to_string();
 
-    assert!(err.contains("requires level 0..=7"));
+    assert!(err.contains("action_invalid_value"));
 }
 
 #[test]
@@ -160,7 +160,7 @@ fn rejects_level_above_seven() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("outside range 0..=7"));
+    assert!(err.contains("action_invalid_value"));
 }
 
 #[test]
@@ -188,7 +188,7 @@ fn preflight_rejects_empty_targets() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("requires at least one explicit target task"));
+    assert!(err.contains("action_missing_explicit_targets"));
 }
 
 #[test]
@@ -207,7 +207,7 @@ fn preflight_rejects_when_policy_disallows_ioprio_changes() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("policy does not allow I/O priority changes"));
+    assert!(err.contains("action_policy_denied"));
     fs::remove_dir_all(proc_root).ok();
 }
 
@@ -228,8 +228,7 @@ fn preflight_rejects_without_strong_block_io_evidence() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("strong block I/O evidence is required"));
-    assert!(err.contains("investigate-first"));
+    assert!(err.contains("action_evidence_required"));
     fs::remove_dir_all(proc_root).ok();
 }
 
@@ -249,7 +248,7 @@ fn preflight_rejects_realtime_class_by_default_policy() {
     .unwrap_err()
     .to_string();
 
-    assert!(err.contains("does not allow realtime I/O priority class"));
+    assert!(err.contains("action_policy_denied"));
     fs::remove_dir_all(proc_root).ok();
 }
 
@@ -263,7 +262,7 @@ fn preflight_rejects_none_class_by_default_policy() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("does not allow resetting I/O priority to class none"));
+    assert!(err.contains("action_policy_denied"));
     fs::remove_dir_all(proc_root).ok();
 }
 
@@ -282,7 +281,7 @@ fn preflight_rejects_best_effort_level_above_policy_maximum() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("exceeds policy maximum"));
+    assert!(err.contains("action_invalid_value"));
     fs::remove_dir_all(proc_root).ok();
 }
 
@@ -308,7 +307,7 @@ fn preflight_rejects_starttime_mismatch_before_ioprio_read() {
         .preflight_at(&proc_root, &permissive_evidence_policy())
         .unwrap_err();
 
-    assert!(format!("{:#}", err).contains("starttime mismatch"));
+    assert!(format!("{:#}", err).contains("action_target_identity_mismatch"));
     fs::remove_dir_all(proc_root).ok();
 }
 

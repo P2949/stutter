@@ -6,14 +6,18 @@ use std::{
 use anyhow::Context;
 
 use super::{fs_io::normalize_cgroup_path, model::CgroupTargetSnapshot};
-use crate::actions::{ActionWarning, TaskIdentity};
+use crate::actions::{ActionBoundaryError, ActionWarning, TaskIdentity};
 
 pub(super) fn read_target_snapshot_at(
     proc_root: &Path,
     target: &TaskIdentity,
 ) -> anyhow::Result<CgroupTargetSnapshot> {
     if target.tid == 0 {
-        anyhow::bail!("target tid must be greater than zero");
+        return Err(ActionBoundaryError::InvalidTargetTid {
+            action_kind: "cgroup",
+            tid: target.tid.as_u32(),
+        }
+        .into());
     }
 
     let stat_path = proc_root.join(target.tid.to_string()).join("stat");
@@ -29,12 +33,13 @@ pub(super) fn read_target_snapshot_at(
     if let Some(expected_starttime) = target.starttime_ticks
         && expected_starttime != starttime_ticks
     {
-        anyhow::bail!(
-            "target tid={} starttime mismatch: expected={} actual={}",
-            target.tid,
+        return Err(ActionBoundaryError::TargetIdentityMismatch {
+            action_kind: "cgroup",
+            tid: target.tid.as_u32(),
             expected_starttime,
-            starttime_ticks
-        );
+            actual_starttime: starttime_ticks,
+        }
+        .into());
     }
 
     let comm_path = proc_root.join(target.tid.to_string()).join("comm");

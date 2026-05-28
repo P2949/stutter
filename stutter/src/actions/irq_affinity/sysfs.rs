@@ -2,12 +2,15 @@ use std::{fs, fs::OpenOptions, path::Path};
 
 use anyhow::Context;
 
+use crate::actions::ActionBoundaryError;
+
 pub(super) fn ensure_writable_file(path: &Path) -> anyhow::Result<()> {
     if !path.is_file() {
-        anyhow::bail!(
-            "required IRQ affinity file does not exist: {}",
-            path.display()
-        );
+        return Err(ActionBoundaryError::MissingPath {
+            action_kind: "irq_affinity",
+            path: path.to_path_buf(),
+        }
+        .into());
     }
 
     OpenOptions::new().write(true).open(path).with_context(|| {
@@ -35,11 +38,16 @@ pub(super) fn read_irq_device_hint(irq_dir: &Path) -> anyhow::Result<String> {
         return Ok(name);
     }
 
-    anyhow::bail!(
-        "neither {} nor {} contained a device hint",
-        actions_path.display(),
-        name_path.display()
-    )
+    return Err(ActionBoundaryError::InvalidValue {
+        action_kind: "irq_affinity",
+        field: "device_hint".to_owned(),
+        reason: format!(
+            "neither {} nor {} contained a device hint",
+            actions_path.display(),
+            name_path.display()
+        ),
+    }
+    .into());
 }
 
 pub(super) fn normalize_affinity(value: &str) -> String {

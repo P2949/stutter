@@ -9,8 +9,8 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
 use crate::actions::{
-    ActionId, ActionState, ActionWarning, CpuPowerRestoreRecord, RollbackToken, SafetyClass,
-    TuningAction,
+    ActionBoundaryError, ActionId, ActionState, ActionWarning, CpuPowerRestoreRecord,
+    RollbackToken, SafetyClass, TuningAction,
     rollback::{
         RollbackCandidate, RollbackHandler, RollbackPreview, RollbackResult, token_dry_run_preview,
         token_restore_result,
@@ -66,11 +66,17 @@ impl RollbackHandler for CpuPowerRollbackHandler {
     }
 
     fn dry_run(&self, _: &RollbackCandidate) -> anyhow::Result<RollbackPreview> {
-        anyhow::bail!("CPU power rollback requires an explicit rollback token")
+        Err(
+            ActionBoundaryError::missing_explicit_rollback_token(self.id(), "cpu-power-restore")
+                .into(),
+        )
     }
 
     fn restore(&self, _: RollbackCandidate) -> anyhow::Result<RollbackResult> {
-        anyhow::bail!("CPU power rollback requires an explicit rollback token")
+        Err(
+            ActionBoundaryError::missing_explicit_rollback_token(self.id(), "cpu-power-restore")
+                .into(),
+        )
     }
 
     fn supports_token(&self, token: &RollbackToken) -> bool {
@@ -79,14 +85,24 @@ impl RollbackHandler for CpuPowerRollbackHandler {
 
     fn dry_run_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackPreview> {
         if !self.supports_token(token) {
-            anyhow::bail!("CPU power rollback handler does not support {token:?}");
+            return Err(ActionBoundaryError::unsupported_rollback_token(
+                self.id(),
+                "cpu-power-restore",
+                token.kind(),
+            )
+            .into());
         }
         Ok(token_dry_run_preview(self.id(), token, "cpu-power-restore"))
     }
 
     fn restore_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackResult> {
         let Some(records) = token.as_cpu_power_restore() else {
-            anyhow::bail!("CPU power rollback handler does not support {token:?}");
+            return Err(ActionBoundaryError::unsupported_rollback_token(
+                self.id(),
+                "cpu-power-restore",
+                token.kind(),
+            )
+            .into());
         };
 
         rollback_cpu_power_records(records)?;
@@ -146,12 +162,16 @@ impl CpuPowerAction {
                 .with_context(|| format!("failed to verify write to {}", target.path.display()))?;
             if actual != target.requested_value {
                 rollback_cpu_power_records(&records)?;
-                anyhow::bail!(
-                    "CPU power write verification failed for {}: requested={:?} actual={:?}",
-                    target.path.display(),
-                    target.requested_value,
-                    actual
-                );
+                return Err(ActionBoundaryError::restore_failed(
+                    "cpu_power",
+                    format!(
+                        "CPU power write verification failed for {}: requested={:?} actual={:?}",
+                        target.path.display(),
+                        target.requested_value,
+                        actual
+                    ),
+                )
+                .into());
             }
         }
 
@@ -220,15 +240,20 @@ impl CpuPowerAction {
 
         for cpu in sorted_unique_cpus(&self.cpus) {
             if !policy.allowed_cpus.contains(&cpu) {
-                anyhow::bail!("CPU {cpu} is not in explicit CPU power allowlist");
+                return Err(ActionBoundaryError::PolicyDenied {
+                    action_kind: "cpu_power",
+                    requirement: "allowed_cpus_contains_target",
+                }
+                .into());
             }
 
             let cpufreq = self.cpu_cpufreq_dir(cpu);
             if !cpufreq.is_dir() {
-                anyhow::bail!(
-                    "cpufreq directory does not exist for CPU {cpu}: {}",
-                    cpufreq.display()
-                );
+                return Err(ActionBoundaryError::MissingPath {
+                    action_kind: "cpu_power",
+                    path: cpufreq,
+                }
+                .into());
             }
 
             if let Some(governor) = &self.scaling_governor {
@@ -318,29 +343,52 @@ fn validate_policy_and_request(
     policy: &CpuPowerPolicy,
 ) -> anyhow::Result<()> {
     if !policy.allow_cpu_power_changes {
-        anyhow::bail!("policy does not allow CPU governor/EPP changes");
+        return Err(ActionBoundaryError::PolicyDenied {
+            action_kind: "cpu_power",
+            requirement: "allow_cpu_power_changes",
+        }
+        .into());
     }
 
     if action.cpus.is_empty() {
-        anyhow::bail!("CPU power action requires at least one explicit CPU");
+        return Err(ActionBoundaryError::MissingExplicitTargets {
+            action_kind: "cpu_power",
+        }
+        .into());
     }
 
     if action.scaling_governor.is_none() && action.energy_performance_preference.is_none() {
-        anyhow::bail!(
-            "CPU power action requires scaling_governor, energy_performance_preference, or both"
-        );
+        return Err(ActionBoundaryError::InvalidRequest {
+            action_kind: "cpu_power",
+            reason:
+                "CPU power action requires scaling_governor, energy_performance_preference, or both"
+                    .to_owned(),
+        }
+        .into());
     }
 
     if policy.allowed_cpus.is_empty() {
-        anyhow::bail!("CPU power action requires a non-empty explicit CPU allowlist");
+        return Err(ActionBoundaryError::PolicyDenied {
+            action_kind: "cpu_power",
+            requirement: "allowed_cpus_non_empty",
+        }
+        .into());
     }
 
     if action.scaling_governor.is_some() && !policy.allow_governor_changes {
-        anyhow::bail!("policy does not allow scaling_governor changes");
+        return Err(ActionBoundaryError::PolicyDenied {
+            action_kind: "cpu_power",
+            requirement: "allow_governor_changes",
+        }
+        .into());
     }
 
     if action.energy_performance_preference.is_some() && !policy.allow_epp_changes {
-        anyhow::bail!("policy does not allow energy_performance_preference changes");
+        return Err(ActionBoundaryError::PolicyDenied {
+            action_kind: "cpu_power",
+            requirement: "allow_epp_changes",
+        }
+        .into());
     }
 
     if let Some(governor) = &action.scaling_governor {
@@ -354,12 +402,18 @@ fn validate_policy_and_request(
     if is_on_battery(&action.power_supply_root())? {
         match policy.battery_policy {
             BatteryPolicy::Never => {
-                anyhow::bail!("refusing CPU governor/EPP changes while on battery")
+                return Err(ActionBoundaryError::PolicyDenied {
+                    action_kind: "cpu_power",
+                    requirement: "battery_policy_allow",
+                }
+                .into());
             }
             BatteryPolicy::AllowWithExplicitConfig if !policy.explicit_battery_override => {
-                anyhow::bail!(
-                    "refusing CPU governor/EPP changes while on battery without explicit battery override"
-                )
+                return Err(ActionBoundaryError::PolicyDenied {
+                    action_kind: "cpu_power",
+                    requirement: "explicit_battery_override",
+                }
+                .into());
             }
             BatteryPolicy::AllowWithExplicitConfig => {}
         }
@@ -385,20 +439,40 @@ fn read_target_file(
 
 fn validate_sysfs_value(name: &str, value: &str) -> anyhow::Result<()> {
     if value.trim().is_empty() {
-        anyhow::bail!("{name} value must not be empty");
+        return Err(ActionBoundaryError::InvalidValue {
+            action_kind: "cpu_power",
+            field: name.to_owned(),
+            reason: format!("{name} value must not be empty"),
+        }
+        .into());
     }
 
     if value.trim() != value {
-        anyhow::bail!("{name} value must not contain leading or trailing whitespace");
+        return Err(ActionBoundaryError::InvalidValue {
+            action_kind: "cpu_power",
+            field: name.to_owned(),
+            reason: format!("{name} value must not contain leading or trailing whitespace"),
+        }
+        .into());
     }
 
     if value.len() > 64 {
-        anyhow::bail!("{name} value is too long");
+        return Err(ActionBoundaryError::InvalidValue {
+            action_kind: "cpu_power",
+            field: name.to_owned(),
+            reason: format!("{name} value is too long"),
+        }
+        .into());
     }
 
     for ch in value.chars() {
         if !(ch.is_ascii_alphanumeric() || ch == '_' || ch == '-') {
-            anyhow::bail!("{name} value contains invalid character {ch:?}");
+            return Err(ActionBoundaryError::InvalidValue {
+                action_kind: "cpu_power",
+                field: name.to_owned(),
+                reason: format!("{name} value contains invalid character {ch:?}"),
+            }
+            .into());
         }
     }
 
@@ -407,10 +481,11 @@ fn validate_sysfs_value(name: &str, value: &str) -> anyhow::Result<()> {
 
 fn ensure_writable_file(path: &Path) -> anyhow::Result<()> {
     if !path.is_file() {
-        anyhow::bail!(
-            "required CPU power sysfs file does not exist: {}",
-            path.display()
-        );
+        return Err(ActionBoundaryError::MissingPath {
+            action_kind: "cpu_power",
+            path: path.to_path_buf(),
+        }
+        .into());
     }
 
     OpenOptions::new().write(true).open(path).with_context(|| {
@@ -495,10 +570,14 @@ fn rollback_cpu_power_records(records: &[CpuPowerRestoreRecord]) -> anyhow::Resu
     }
 
     if !failures.is_empty() {
-        anyhow::bail!(
-            "failed to rollback CPU power values: {}",
-            failures.join("; ")
-        );
+        return Err(ActionBoundaryError::restore_failed(
+            "cpu_power",
+            format!(
+                "failed to rollback CPU power values: {}",
+                failures.join("; ")
+            ),
+        )
+        .into());
     }
 
     Ok(())

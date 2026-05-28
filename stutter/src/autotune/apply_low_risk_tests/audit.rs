@@ -68,7 +68,7 @@ mod tests {
         .unwrap_err();
         let err = format!("{err:#}");
 
-        assert!(err.contains("tree pid must be greater than zero"));
+        assert!(err.contains("action_invalid_target_tid"));
         fs::remove_dir_all(dir).ok();
     }
 

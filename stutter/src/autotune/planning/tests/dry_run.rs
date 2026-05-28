@@ -26,7 +26,7 @@ fn dry_run_candidate_records_failure_as_ineligible() {
             .reason
             .as_deref()
             .unwrap_or_default()
-            .contains("tree pid must be greater than zero")
+            .contains("action_invalid_target_tid")
     );
 }
 

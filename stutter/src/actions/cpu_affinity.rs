@@ -1,7 +1,8 @@
 use std::path::Path;
 
 use crate::actions::{
-    ActionId, ActionState, ActionWarning, RollbackToken, SafetyClass, TuningAction,
+    ActionBoundaryError, ActionId, ActionState, ActionWarning, RollbackToken, SafetyClass,
+    TuningAction,
     rollback::{
         RollbackCandidate, RollbackHandler, RollbackPreview, RollbackResult, token_dry_run_preview,
         token_restore_result,
@@ -20,11 +21,19 @@ impl RollbackHandler for CpuAffinityRollbackHandler {
     }
 
     fn dry_run(&self, _: &RollbackCandidate) -> anyhow::Result<RollbackPreview> {
-        anyhow::bail!("CPU affinity rollback requires an explicit rollback token")
+        Err(ActionBoundaryError::missing_explicit_rollback_token(
+            self.id(),
+            "cpu-affinity-restore-file",
+        )
+        .into())
     }
 
     fn restore(&self, _: RollbackCandidate) -> anyhow::Result<RollbackResult> {
-        anyhow::bail!("CPU affinity rollback requires an explicit rollback token")
+        Err(ActionBoundaryError::missing_explicit_rollback_token(
+            self.id(),
+            "cpu-affinity-restore-file",
+        )
+        .into())
     }
 
     fn supports_token(&self, token: &RollbackToken) -> bool {
@@ -33,7 +42,12 @@ impl RollbackHandler for CpuAffinityRollbackHandler {
 
     fn dry_run_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackPreview> {
         if !self.supports_token(token) {
-            anyhow::bail!("CPU affinity rollback handler does not support {token:?}");
+            return Err(ActionBoundaryError::unsupported_rollback_token(
+                self.id(),
+                "cpu-affinity-restore-file",
+                token.kind(),
+            )
+            .into());
         }
         Ok(token_dry_run_preview(
             self.id(),
@@ -44,7 +58,12 @@ impl RollbackHandler for CpuAffinityRollbackHandler {
 
     fn restore_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackResult> {
         let Some((path, _)) = token.as_cpu_affinity_restore_file() else {
-            anyhow::bail!("CPU affinity rollback handler does not support {token:?}");
+            return Err(ActionBoundaryError::unsupported_rollback_token(
+                self.id(),
+                "cpu-affinity-restore-file",
+                token.kind(),
+            )
+            .into());
         };
 
         if crate::profile_restore::load_restore_state(path).is_ok() {
@@ -146,10 +165,18 @@ impl CpuAffinityProfileAction {
     ) -> anyhow::Result<Vec<ActionWarning>> {
         let mut warnings = Vec::new();
         if self.tree_pid == 0 {
-            anyhow::bail!("tree pid must be greater than zero");
+            return Err(ActionBoundaryError::InvalidTargetTid {
+                action_kind: "cpu_affinity_profile",
+                tid: self.tree_pid,
+            }
+            .into());
         }
         if self.profile.rules.is_empty() {
-            anyhow::bail!("profile '{}' has no rules", self.profile.name);
+            return Err(ActionBoundaryError::InvalidRequest {
+                action_kind: "cpu_affinity_profile",
+                reason: format!("profile '{}' has no rules", self.profile.name),
+            }
+            .into());
         }
         if restore_path.exists() && !self.force_restore_overwrite {
             warnings.push(ActionWarning {

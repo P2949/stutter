@@ -10,8 +10,8 @@ use super::{
     validate::{validate_affinity_value, validate_irq_identity, validate_policy_and_request},
 };
 use crate::actions::{
-    ActionId, ActionState, ActionWarning, IrqAffinityRestoreRecord, RollbackToken, SafetyClass,
-    TuningAction,
+    ActionBoundaryError, ActionId, ActionState, ActionWarning, IrqAffinityRestoreRecord,
+    RollbackToken, SafetyClass, TuningAction,
     rollback::{
         RollbackCandidate, RollbackHandler, RollbackPreview, RollbackResult, token_dry_run_preview,
         token_restore_result,
@@ -30,11 +30,17 @@ impl RollbackHandler for IrqAffinityRollbackHandler {
     }
 
     fn dry_run(&self, _: &RollbackCandidate) -> anyhow::Result<RollbackPreview> {
-        anyhow::bail!("IRQ affinity rollback requires an explicit rollback token")
+        Err(
+            ActionBoundaryError::missing_explicit_rollback_token(self.id(), "irq-affinity-restore")
+                .into(),
+        )
     }
 
     fn restore(&self, _: RollbackCandidate) -> anyhow::Result<RollbackResult> {
-        anyhow::bail!("IRQ affinity rollback requires an explicit rollback token")
+        Err(
+            ActionBoundaryError::missing_explicit_rollback_token(self.id(), "irq-affinity-restore")
+                .into(),
+        )
     }
 
     fn supports_token(&self, token: &RollbackToken) -> bool {
@@ -43,7 +49,12 @@ impl RollbackHandler for IrqAffinityRollbackHandler {
 
     fn dry_run_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackPreview> {
         if !self.supports_token(token) {
-            anyhow::bail!("IRQ affinity rollback handler does not support {token:?}");
+            return Err(ActionBoundaryError::unsupported_rollback_token(
+                self.id(),
+                "irq-affinity-restore",
+                token.kind(),
+            )
+            .into());
         }
         Ok(token_dry_run_preview(
             self.id(),
@@ -54,7 +65,12 @@ impl RollbackHandler for IrqAffinityRollbackHandler {
 
     fn restore_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackResult> {
         let Some(records) = token.as_irq_affinity_restore() else {
-            anyhow::bail!("IRQ affinity rollback handler does not support {token:?}");
+            return Err(ActionBoundaryError::unsupported_rollback_token(
+                self.id(),
+                "irq-affinity-restore",
+                token.kind(),
+            )
+            .into());
         };
 
         let mut restored = 0usize;
@@ -138,12 +154,14 @@ impl IrqAffinityAction {
                 .with_context(|| format!("failed to verify IRQ {} smp_affinity write", self.irq))?;
 
             if normalize_affinity(&after) != normalize_affinity(&self.smp_affinity) {
-                anyhow::bail!(
-                    "IRQ {} smp_affinity verification failed: requested={} actual={}",
-                    self.irq,
-                    self.smp_affinity,
-                    after
-                );
+                return Err(ActionBoundaryError::restore_failed(
+                    "irq_affinity",
+                    format!(
+                        "IRQ {} smp_affinity verification failed: requested={} actual={}",
+                        self.irq, self.smp_affinity, after
+                    ),
+                )
+                .into());
             }
         }
 
@@ -211,7 +229,11 @@ impl IrqAffinityAction {
 
         let irq_dir = self.irq_dir();
         if !irq_dir.is_dir() {
-            anyhow::bail!("IRQ directory does not exist: {}", irq_dir.display());
+            return Err(ActionBoundaryError::MissingPath {
+                action_kind: "irq_affinity",
+                path: irq_dir,
+            }
+            .into());
         }
 
         let smp_affinity_path = irq_dir.join("smp_affinity");
@@ -222,12 +244,14 @@ impl IrqAffinityAction {
             .with_context(|| format!("failed to read stable device hint for IRQ {}", self.irq))?;
 
         if current_device_hint != self.device_hint {
-            anyhow::bail!(
-                "IRQ {} device mapping changed: expected {:?}, actual {:?}",
-                self.irq,
-                self.device_hint,
-                current_device_hint
-            );
+            return Err(ActionBoundaryError::InvalidRequest {
+                action_kind: "irq_affinity",
+                reason: format!(
+                    "IRQ {} device mapping changed: expected {:?}, actual {:?}",
+                    self.irq, self.device_hint, current_device_hint
+                ),
+            }
+            .into());
         }
 
         Ok(IrqAffinitySnapshot {
@@ -346,7 +370,11 @@ impl TuningAction for IrqAffinityAction {
         }
 
         if !failures.is_empty() {
-            anyhow::bail!("failed to rollback IRQ affinity: {}", failures.join("; "));
+            return Err(ActionBoundaryError::restore_failed(
+                "irq_affinity",
+                format!("failed to rollback IRQ affinity: {}", failures.join("; ")),
+            )
+            .into());
         }
 
         Ok(())

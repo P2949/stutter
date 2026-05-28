@@ -6,7 +6,7 @@ use super::{
     apply::read_task_ioprio,
     model::{IoPrioAction, IoPrioClass, IoPrioPolicy, IoPrioTargetSnapshot, IoPrioValue},
 };
-use crate::actions::{ActionState, ActionWarning, TaskIdentity};
+use crate::actions::{ActionBoundaryError, ActionState, ActionWarning, TaskIdentity};
 
 impl IoPrioAction {
     pub fn preflight_with_policy(
@@ -90,7 +90,10 @@ impl IoPrioAction {
         validate_policy_and_request(policy, self.ioprio)?;
 
         if self.targets.is_empty() {
-            anyhow::bail!("ioprio action requires at least one explicit target task");
+            return Err(ActionBoundaryError::MissingExplicitTargets {
+                action_kind: "ioprio",
+            }
+            .into());
         }
 
         let mut snapshots = Vec::with_capacity(self.targets.len());
@@ -111,32 +114,50 @@ pub(crate) fn validate_policy_and_request(
     requested: IoPrioValue,
 ) -> anyhow::Result<()> {
     if !policy.allow_ioprio_changes {
-        anyhow::bail!("policy does not allow I/O priority changes");
+        return Err(ActionBoundaryError::PolicyDenied {
+            action_kind: "ioprio",
+            requirement: "allow_ioprio_changes",
+        }
+        .into());
     }
 
     if policy.require_strong_block_io_evidence && !policy.strong_block_io_evidence {
-        anyhow::bail!(
-            "strong block I/O evidence is required before changing I/O priority; current advisor policy is investigate-first"
-        );
+        return Err(ActionBoundaryError::EvidenceRequired {
+            action_kind: "ioprio",
+            evidence: "strong_block_io_evidence",
+        }
+        .into());
     }
 
     validate_ioprio_value(requested)?;
 
     match requested.class {
         IoPrioClass::Realtime if !policy.allow_realtime_class => {
-            anyhow::bail!("policy does not allow realtime I/O priority class")
+            return Err(ActionBoundaryError::PolicyDenied {
+                action_kind: "ioprio",
+                requirement: "allow_realtime_class",
+            }
+            .into());
         }
         IoPrioClass::None if !policy.allow_none_class => {
-            anyhow::bail!("policy does not allow resetting I/O priority to class none")
+            return Err(ActionBoundaryError::PolicyDenied {
+                action_kind: "ioprio",
+                requirement: "allow_none_class",
+            }
+            .into());
         }
         IoPrioClass::BestEffort => {
             let level = requested.level.unwrap_or(4);
             if level > policy.max_best_effort_level {
-                anyhow::bail!(
-                    "requested best-effort I/O priority level {} exceeds policy maximum {}",
-                    level,
-                    policy.max_best_effort_level
-                );
+                return Err(ActionBoundaryError::InvalidValue {
+                    action_kind: "ioprio",
+                    field: "best_effort_level".to_owned(),
+                    reason: format!(
+                        "requested level {level} exceeds policy maximum {}",
+                        policy.max_best_effort_level
+                    ),
+                }
+                .into());
             }
         }
         IoPrioClass::Idle | IoPrioClass::Realtime | IoPrioClass::None => {}
@@ -149,26 +170,41 @@ pub(crate) fn validate_ioprio_value(value: IoPrioValue) -> anyhow::Result<()> {
     match value.class {
         IoPrioClass::None | IoPrioClass::Idle => {
             if value.level.is_some() {
-                anyhow::bail!(
-                    "I/O priority class {} must not specify a level",
-                    value.class.label()
-                );
+                return Err(ActionBoundaryError::InvalidValue {
+                    action_kind: "ioprio",
+                    field: "level".to_owned(),
+                    reason: format!(
+                        "I/O priority class {} must not specify a level",
+                        value.class.label()
+                    ),
+                }
+                .into());
             }
         }
         IoPrioClass::BestEffort | IoPrioClass::Realtime => {
             let Some(level) = value.level else {
-                anyhow::bail!(
-                    "I/O priority class {} requires level 0..=7",
-                    value.class.label()
-                );
+                return Err(ActionBoundaryError::InvalidValue {
+                    action_kind: "ioprio",
+                    field: "level".to_owned(),
+                    reason: format!(
+                        "I/O priority class {} requires level 0..=7",
+                        value.class.label()
+                    ),
+                }
+                .into());
             };
 
             if level > 7 {
-                anyhow::bail!(
-                    "I/O priority class {} level {} is outside range 0..=7",
-                    value.class.label(),
-                    level
-                );
+                return Err(ActionBoundaryError::InvalidValue {
+                    action_kind: "ioprio",
+                    field: "level".to_owned(),
+                    reason: format!(
+                        "I/O priority class {} level {} is outside range 0..=7",
+                        value.class.label(),
+                        level
+                    ),
+                }
+                .into());
             }
         }
     }
@@ -181,7 +217,11 @@ pub(crate) fn read_target_snapshot_at(
     target: &TaskIdentity,
 ) -> anyhow::Result<IoPrioTargetSnapshot> {
     if target.tid == 0 {
-        anyhow::bail!("target tid must be greater than zero");
+        return Err(ActionBoundaryError::InvalidTargetTid {
+            action_kind: "ioprio",
+            tid: target.tid.as_u32(),
+        }
+        .into());
     }
 
     let stat_path = proc_root.join(target.tid.to_string()).join("stat");
@@ -197,12 +237,13 @@ pub(crate) fn read_target_snapshot_at(
     if let Some(expected_starttime) = target.starttime_ticks
         && expected_starttime != starttime_ticks
     {
-        anyhow::bail!(
-            "target tid={} starttime mismatch: expected={} actual={}",
-            target.tid,
+        return Err(ActionBoundaryError::TargetIdentityMismatch {
+            action_kind: "ioprio",
+            tid: target.tid.as_u32(),
             expected_starttime,
-            starttime_ticks
-        );
+            actual_starttime: starttime_ticks,
+        }
+        .into());
     }
 
     let comm_path = proc_root.join(target.tid.to_string()).join("comm");

@@ -4,8 +4,9 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
 use crate::actions::{
-    ActionId, ActionState, ActionWarning, ApplyResult, NiceRestoreRecord, RestoreIdentityStatus,
-    RollbackToken, SafetyClass, TaskIdentity, TaskRestoreIdentity, TuningAction,
+    ActionBoundaryError, ActionId, ActionState, ActionWarning, ApplyResult, NiceRestoreRecord,
+    RestoreIdentityStatus, RollbackToken, SafetyClass, TaskIdentity, TaskRestoreIdentity,
+    TuningAction,
     restore_write::{RestoreSummary, RestoreWriteError, classify_restore_write_error},
     rollback::{
         RollbackCandidate, RollbackHandler, RollbackPreview, RollbackResult, token_dry_run_preview,
@@ -52,11 +53,11 @@ impl RollbackHandler for NiceRollbackHandler {
     }
 
     fn dry_run(&self, _: &RollbackCandidate) -> anyhow::Result<RollbackPreview> {
-        anyhow::bail!("nice rollback requires an explicit rollback token")
+        Err(ActionBoundaryError::missing_explicit_rollback_token(self.id(), "nice-restore").into())
     }
 
     fn restore(&self, _: RollbackCandidate) -> anyhow::Result<RollbackResult> {
-        anyhow::bail!("nice rollback requires an explicit rollback token")
+        Err(ActionBoundaryError::missing_explicit_rollback_token(self.id(), "nice-restore").into())
     }
 
     fn supports_token(&self, token: &RollbackToken) -> bool {
@@ -65,14 +66,24 @@ impl RollbackHandler for NiceRollbackHandler {
 
     fn dry_run_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackPreview> {
         if !self.supports_token(token) {
-            anyhow::bail!("nice rollback handler does not support {token:?}");
+            return Err(ActionBoundaryError::unsupported_rollback_token(
+                self.id(),
+                "nice-restore",
+                token.kind(),
+            )
+            .into());
         }
         Ok(token_dry_run_preview(self.id(), token, "nice-restore"))
     }
 
     fn restore_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackResult> {
         let Some(records) = token.as_nice_restore() else {
-            anyhow::bail!("nice rollback handler does not support {token:?}");
+            return Err(ActionBoundaryError::unsupported_rollback_token(
+                self.id(),
+                "nice-restore",
+                token.kind(),
+            )
+            .into());
         };
 
         let mut restored = 0;
@@ -233,7 +244,10 @@ impl NiceAction {
         validate_policy_and_request(policy, self.nice)?;
 
         if self.targets.is_empty() {
-            anyhow::bail!("nice action requires at least one target task");
+            return Err(ActionBoundaryError::MissingExplicitTargets {
+                action_kind: "nice",
+            }
+            .into());
         }
 
         let mut snapshots = Vec::with_capacity(self.targets.len());
@@ -379,14 +393,18 @@ impl TuningAction for NiceAction {
         }
 
         if summary.has_failures() {
-            anyhow::bail!(
-                "failed to rollback nice after attempting all records: restored={} skipped_missing={} skipped_identity_mismatch={} failed={} errors={}",
-                summary.restored,
-                summary.skipped_missing,
-                summary.skipped_identity_mismatch,
-                summary.failed,
-                failures.join("; ")
-            );
+            return Err(ActionBoundaryError::restore_failed(
+                "nice",
+                format!(
+                    "failed to rollback nice after attempting all records: restored={} skipped_missing={} skipped_identity_mismatch={} failed={} errors={}",
+                    summary.restored,
+                    summary.skipped_missing,
+                    summary.skipped_identity_mismatch,
+                    summary.failed,
+                    failures.join("; ")
+                ),
+            )
+            .into());
         }
 
         Ok(())
@@ -395,43 +413,57 @@ impl TuningAction for NiceAction {
 
 fn validate_policy_and_request(policy: &NicePolicy, requested_nice: i32) -> anyhow::Result<()> {
     if !policy.allow_nice_changes {
-        anyhow::bail!("policy does not allow nice changes");
+        return Err(ActionBoundaryError::PolicyDenied {
+            action_kind: "nice",
+            requirement: "allow_nice_changes",
+        }
+        .into());
     }
 
     if policy.min_nice < LINUX_MIN_NICE || policy.max_nice > LINUX_MAX_NICE {
-        anyhow::bail!(
-            "invalid nice policy range {}..={}; Linux nice range is {}..={}",
-            policy.min_nice,
-            policy.max_nice,
-            LINUX_MIN_NICE,
-            LINUX_MAX_NICE
-        );
+        return Err(ActionBoundaryError::InvalidPolicy {
+            action_kind: "nice",
+            reason: format!(
+                "invalid nice policy range {}..={}; Linux nice range is {}..={}",
+                policy.min_nice, policy.max_nice, LINUX_MIN_NICE, LINUX_MAX_NICE
+            ),
+        }
+        .into());
     }
 
     if policy.min_nice > policy.max_nice {
-        anyhow::bail!(
-            "invalid nice policy range {}..={}: min is greater than max",
-            policy.min_nice,
-            policy.max_nice
-        );
+        return Err(ActionBoundaryError::InvalidPolicy {
+            action_kind: "nice",
+            reason: format!(
+                "invalid nice policy range {}..={}: min is greater than max",
+                policy.min_nice, policy.max_nice
+            ),
+        }
+        .into());
     }
 
     if !(LINUX_MIN_NICE..=LINUX_MAX_NICE).contains(&requested_nice) {
-        anyhow::bail!(
-            "requested nice {} is outside Linux nice range {}..={}",
-            requested_nice,
-            LINUX_MIN_NICE,
-            LINUX_MAX_NICE
-        );
+        return Err(ActionBoundaryError::InvalidValue {
+            action_kind: "nice",
+            field: "nice".to_owned(),
+            reason: format!(
+                "requested nice {} is outside Linux nice range {}..={}",
+                requested_nice, LINUX_MIN_NICE, LINUX_MAX_NICE
+            ),
+        }
+        .into());
     }
 
     if !(policy.min_nice..=policy.max_nice).contains(&requested_nice) {
-        anyhow::bail!(
-            "requested nice {} is outside policy range {}..={}",
-            requested_nice,
-            policy.min_nice,
-            policy.max_nice
-        );
+        return Err(ActionBoundaryError::InvalidValue {
+            action_kind: "nice",
+            field: "nice".to_owned(),
+            reason: format!(
+                "requested nice {} is outside policy range {}..={}",
+                requested_nice, policy.min_nice, policy.max_nice
+            ),
+        }
+        .into());
     }
 
     Ok(())
@@ -442,7 +474,11 @@ pub(super) fn read_target_snapshot_at(
     target: &TaskIdentity,
 ) -> anyhow::Result<NiceTargetSnapshot> {
     if target.tid == 0 {
-        anyhow::bail!("target tid must be greater than zero");
+        return Err(ActionBoundaryError::InvalidTargetTid {
+            action_kind: "nice",
+            tid: target.tid.as_u32(),
+        }
+        .into());
     }
 
     let stat_path = proc_root.join(target.tid.to_string()).join("stat");
@@ -463,12 +499,13 @@ pub(super) fn read_target_snapshot_at(
     if let Some(expected_starttime) = target.starttime_ticks
         && expected_starttime != starttime_ticks
     {
-        anyhow::bail!(
-            "target tid={} starttime mismatch: expected={} actual={}",
-            target.tid,
+        return Err(ActionBoundaryError::TargetIdentityMismatch {
+            action_kind: "nice",
+            tid: target.tid.as_u32(),
             expected_starttime,
-            starttime_ticks
-        );
+            actual_starttime: starttime_ticks,
+        }
+        .into());
     }
 
     let comm_path = proc_root.join(target.tid.to_string()).join("comm");
@@ -490,7 +527,11 @@ pub(super) fn read_target_snapshot_at(
 
 pub(crate) fn read_task_nice(tid: u32) -> anyhow::Result<i32> {
     if tid == 0 {
-        anyhow::bail!("target tid must be greater than zero");
+        return Err(ActionBoundaryError::InvalidTargetTid {
+            action_kind: "nice",
+            tid,
+        }
+        .into());
     }
 
     let stat_path = Path::new("/proc").join(tid.to_string()).join("stat");

@@ -2,7 +2,7 @@ use std::path::Path;
 
 use super::apply::set_task_ioprio;
 use crate::actions::{
-    RestoreIdentityStatus, RollbackToken,
+    ActionBoundaryError, RestoreIdentityStatus, RollbackToken,
     restore_write::{RestoreWriteError, classify_restore_write_error},
     rollback::{
         RollbackCandidate, RollbackHandler, RollbackPreview, RollbackResult, token_dry_run_preview,
@@ -22,11 +22,17 @@ impl RollbackHandler for IoPrioRollbackHandler {
     }
 
     fn dry_run(&self, _: &RollbackCandidate) -> anyhow::Result<RollbackPreview> {
-        anyhow::bail!("I/O priority rollback requires an explicit rollback token")
+        Err(
+            ActionBoundaryError::missing_explicit_rollback_token(self.id(), "ioprio-restore")
+                .into(),
+        )
     }
 
     fn restore(&self, _: RollbackCandidate) -> anyhow::Result<RollbackResult> {
-        anyhow::bail!("I/O priority rollback requires an explicit rollback token")
+        Err(
+            ActionBoundaryError::missing_explicit_rollback_token(self.id(), "ioprio-restore")
+                .into(),
+        )
     }
 
     fn supports_token(&self, token: &RollbackToken) -> bool {
@@ -35,14 +41,24 @@ impl RollbackHandler for IoPrioRollbackHandler {
 
     fn dry_run_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackPreview> {
         if !self.supports_token(token) {
-            anyhow::bail!("I/O priority rollback handler does not support {token:?}");
+            return Err(ActionBoundaryError::unsupported_rollback_token(
+                self.id(),
+                "ioprio-restore",
+                token.kind(),
+            )
+            .into());
         }
         Ok(token_dry_run_preview(self.id(), token, "ioprio-restore"))
     }
 
     fn restore_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackResult> {
         let Some(records) = token.as_ioprio_restore() else {
-            anyhow::bail!("I/O priority rollback handler does not support {token:?}");
+            return Err(ActionBoundaryError::unsupported_rollback_token(
+                self.id(),
+                "ioprio-restore",
+                token.kind(),
+            )
+            .into());
         };
 
         let mut restored = 0;
@@ -104,6 +120,14 @@ impl RollbackHandler for IoPrioRollbackHandler {
                     }
                 },
             }
+        }
+
+        if errors > 0 {
+            return Err(ActionBoundaryError::restore_failed(
+                "ioprio",
+                format!("failed to restore I/O priority: {}", messages.join("; ")),
+            )
+            .into());
         }
 
         Ok(RollbackResult {

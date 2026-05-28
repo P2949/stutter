@@ -4,8 +4,8 @@ use anyhow::Context;
 
 use super::model::{IoPrioAction, IoPrioValue};
 use crate::actions::{
-    ActionId, ActionState, ActionWarning, ApplyResult, IoPrioRestoreRecord, RollbackToken,
-    SafetyClass, TaskRestoreIdentity, TuningAction,
+    ActionBoundaryError, ActionId, ActionState, ActionWarning, ApplyResult, IoPrioRestoreRecord,
+    RollbackToken, SafetyClass, TaskRestoreIdentity, TuningAction,
 };
 
 impl TuningAction for IoPrioAction {
@@ -150,14 +150,18 @@ impl TuningAction for IoPrioAction {
         }
 
         if summary.has_failures() {
-            anyhow::bail!(
-                "failed to rollback I/O priority after attempting all records: restored={} skipped_missing={} skipped_identity_mismatch={} failed={} errors={}",
-                summary.restored,
-                summary.skipped_missing,
-                summary.skipped_identity_mismatch,
-                summary.failed,
-                failures.join("; ")
-            );
+            return Err(ActionBoundaryError::restore_failed(
+                "ioprio",
+                format!(
+                    "failed to rollback I/O priority after attempting all records: restored={} skipped_missing={} skipped_identity_mismatch={} failed={} errors={}",
+                    summary.restored,
+                    summary.skipped_missing,
+                    summary.skipped_identity_mismatch,
+                    summary.failed,
+                    failures.join("; ")
+                ),
+            )
+            .into());
         }
 
         Ok(())

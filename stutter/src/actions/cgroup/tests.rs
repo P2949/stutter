@@ -294,7 +294,7 @@ fn preflight_rejects_missing_target_cgroup() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("target cgroup does not exist"));
+    assert!(err.contains("action_missing_path"));
     fs::remove_dir_all(proc_root).ok();
     fs::remove_dir_all(cgroup_root).ok();
 }
@@ -317,7 +317,7 @@ fn preflight_rejects_nested_cgroup_when_policy_disallows_it() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("policy does not allow nested cgroups"));
+    assert!(err.contains("action_invalid_policy"));
     fs::remove_dir_all(proc_root).ok();
     fs::remove_dir_all(cgroup_root).ok();
 }
@@ -340,7 +340,7 @@ fn preflight_rejects_cpuset_when_policy_disallows_it() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("policy does not allow cpuset changes"));
+    assert!(err.contains("action_policy_denied"));
     fs::remove_dir_all(proc_root).ok();
     fs::remove_dir_all(cgroup_root).ok();
 }
@@ -361,7 +361,7 @@ fn preflight_rejects_missing_cgroup_procs_permission_file() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("required cgroup file does not exist"));
+    assert!(err.contains("action_missing_path"));
     fs::remove_dir_all(proc_root).ok();
     fs::remove_dir_all(cgroup_root).ok();
 }
@@ -392,7 +392,7 @@ fn preflight_rejects_system_critical_task_classes() {
             .unwrap_err()
             .to_string();
 
-        assert!(err.contains("refusing to move system/critical task class"));
+        assert!(err.contains("action_invalid_request"));
         fs::remove_dir_all(proc_root).ok();
         fs::remove_dir_all(cgroup_root).ok();
     }
@@ -410,7 +410,7 @@ fn preflight_rejects_starttime_mismatch() {
         .preflight_at(&proc_root, &CgroupPlacementPolicy::default())
         .unwrap_err();
 
-    assert!(format!("{:#}", err).contains("starttime mismatch"));
+    assert!(format!("{:#}", err).contains("action_target_identity_mismatch"));
     fs::remove_dir_all(proc_root).ok();
     fs::remove_dir_all(cgroup_root).ok();
 }

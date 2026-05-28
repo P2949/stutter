@@ -8,8 +8,8 @@ use super::{
     validate::validate_policy_and_request,
 };
 use crate::actions::{
-    ActionId, ActionState, ActionWarning, ApplyResult, RestoreIdentityStatus, RollbackToken,
-    SafetyClass, TaskRestoreIdentity, TuningAction, UclampRestoreRecord,
+    ActionBoundaryError, ActionId, ActionState, ActionWarning, ApplyResult, RestoreIdentityStatus,
+    RollbackToken, SafetyClass, TaskRestoreIdentity, TuningAction, UclampRestoreRecord,
     restore_write::{RestoreSummary, RestoreWriteError, classify_restore_write_error},
     verify_task_identity,
 };
@@ -90,7 +90,10 @@ impl UclampAction {
         validate_policy_and_request(policy, self.values)?;
 
         if self.targets.is_empty() {
-            anyhow::bail!("uclamp action requires at least one explicit target task");
+            return Err(ActionBoundaryError::MissingExplicitTargets {
+                action_kind: "uclamp",
+            }
+            .into());
         }
 
         let mut snapshots = Vec::with_capacity(self.targets.len());
@@ -262,14 +265,18 @@ impl TuningAction for UclampAction {
         }
 
         if summary.has_failures() {
-            anyhow::bail!(
-                "failed to rollback uclamp after attempting all records: restored={} skipped_missing={} skipped_identity_mismatch={} failed={} errors={}",
-                summary.restored,
-                summary.skipped_missing,
-                summary.skipped_identity_mismatch,
-                summary.failed,
-                failures.join("; ")
-            );
+            return Err(ActionBoundaryError::restore_failed(
+                "uclamp",
+                format!(
+                    "failed to rollback uclamp after attempting all records: restored={} skipped_missing={} skipped_identity_mismatch={} failed={} errors={}",
+                    summary.restored,
+                    summary.skipped_missing,
+                    summary.skipped_identity_mismatch,
+                    summary.failed,
+                    failures.join("; ")
+                ),
+            )
+            .into());
         }
 
         Ok(())
