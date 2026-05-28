@@ -38,7 +38,7 @@ pub(super) fn read_irq_device_hint(irq_dir: &Path) -> anyhow::Result<String> {
         return Ok(name);
     }
 
-    return Err(ActionBoundaryError::InvalidValue {
+    Err(ActionBoundaryError::InvalidValue {
         action_kind: "irq_affinity",
         field: "device_hint".to_owned(),
         reason: format!(
@@ -47,7 +47,7 @@ pub(super) fn read_irq_device_hint(irq_dir: &Path) -> anyhow::Result<String> {
             name_path.display()
         ),
     }
-    .into());
+    .into())
 }
 
 pub(super) fn normalize_affinity(value: &str) -> String {
