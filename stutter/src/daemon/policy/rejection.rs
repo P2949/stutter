@@ -15,6 +15,9 @@ pub enum PolicyRejection {
     UnsupportedMode {
         mode: String,
     },
+    InvalidActionDescriptor {
+        reason: String,
+    },
     IntentNotAllowed {
         mode: DaemonMode,
         intent: PolicyIntent,
@@ -78,6 +81,9 @@ impl fmt::Display for PolicyRejection {
         match self {
             Self::UnsupportedMode { mode } => {
                 write!(f, "unsupported daemon mode: {mode}")
+            }
+            Self::InvalidActionDescriptor { reason } => {
+                write!(f, "invalid action descriptor: {reason}")
             }
             Self::IntentNotAllowed { mode, intent } => {
                 write!(f, "intent {intent:?} is not allowed in daemon mode {mode}")
@@ -207,6 +213,7 @@ impl PolicyRejection {
                 ..
             } => DaemonPolicyVerdict::RequireManualConfirmation,
             Self::UnsupportedMode { .. }
+            | Self::InvalidActionDescriptor { .. }
             | Self::IntentNotAllowed { .. }
             | Self::SafetyClassTooHigh { .. }
             | Self::EffectScopeNotAllowed { .. }
@@ -230,6 +237,7 @@ impl PolicyRejection {
     pub fn reason_code(&self) -> &'static str {
         match self {
             Self::UnsupportedMode { .. } => "unsupported_mode",
+            Self::InvalidActionDescriptor { .. } => "invalid_action_descriptor",
             Self::IntentNotAllowed { .. } => "intent_not_allowed",
             Self::SafetyClassTooHigh { .. } => "safety_class_too_high",
             Self::EffectScopeNotAllowed { .. } => "effect_scope_not_allowed",

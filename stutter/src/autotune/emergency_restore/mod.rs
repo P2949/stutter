@@ -155,16 +155,19 @@ pub fn restore_known_autotune_actions(
 
 fn journal_experiment_action(record: &ControllerJournalRecord) -> (String, String) {
     let state = record.state().as_str();
-    (
-        record
-            .experiment_id
-            .clone()
-            .unwrap_or_else(|| format!("{state}-unknown-experiment")),
-        record
-            .action_id
-            .clone()
-            .unwrap_or_else(|| format!("{state}-unknown-action")),
-    )
+    let experiment_id = record
+        .experiment_id
+        .as_ref()
+        .map(|id| id.as_str().to_owned())
+        .unwrap_or_else(|| format!("{state}-unknown-experiment"));
+
+    let action_id = record
+        .action_id
+        .as_ref()
+        .map(|id| id.as_str().to_owned())
+        .unwrap_or_else(|| format!("{state}-unknown-action"));
+
+    (experiment_id, action_id)
 }
 
 struct RestoreAppliedJournalInput<'a> {

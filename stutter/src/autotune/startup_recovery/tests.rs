@@ -91,8 +91,8 @@ fn pre_apply_transaction_phase_cleans_without_rollback() {
     let config = config_for_dir(&dir, true);
     let record = ControllerJournalRecord::for_phase(
         ControllerJournalState::Planned,
-        "experiment-1",
-        "cpu-affinity-profile:game-main",
+        crate::autotune::experiment::ExperimentId::try_new("experiment-1").unwrap(),
+        crate::actions::ActionId::try_new("cpu-affinity-profile:game-main").unwrap(),
         None,
     )
     .with_candidate("game-main");
@@ -117,8 +117,8 @@ fn post_apply_transaction_phase_rolls_back_on_startup() {
     let config = config_for_dir(&dir, true);
     let record = ControllerJournalRecord::for_phase(
         ControllerJournalState::Verifying,
-        "experiment-1",
-        "cpu-affinity-profile:game-main",
+        crate::autotune::experiment::ExperimentId::try_new("experiment-1").unwrap(),
+        crate::actions::ActionId::try_new("cpu-affinity-profile:game-main").unwrap(),
         Some(rollback_token()),
     )
     .with_verify_result("pending");
@@ -160,8 +160,8 @@ fn live_runtime_transaction_phases_roll_back_on_startup() {
         let config = config_for_dir(&dir, true);
         let record = ControllerJournalRecord::for_phase(
             phase,
-            "experiment-live",
-            "cpu-affinity-profile:game-main",
+            crate::autotune::experiment::ExperimentId::try_new("experiment-live").unwrap(),
+            crate::actions::ActionId::try_new("cpu-affinity-profile:game-main").unwrap(),
             Some(rollback_token()),
         )
         .with_candidate("game-main")
@@ -201,8 +201,8 @@ fn reverted_transaction_phase_cleans_without_rollback() {
     let config = config_for_dir(&dir, true);
     let record = ControllerJournalRecord::for_phase(
         ControllerJournalState::Reverted,
-        "experiment-live",
-        "cpu-affinity-profile:game-main",
+        crate::autotune::experiment::ExperimentId::try_new("experiment-live").unwrap(),
+        crate::actions::ActionId::try_new("cpu-affinity-profile:game-main").unwrap(),
         Some(rollback_token()),
     );
     write_controller_journal_record(&config.journal_path, &record).unwrap();
@@ -230,8 +230,8 @@ fn applying_journal_without_rollback_token_does_not_attempt_recovery() {
     let config = config_for_dir(&dir, true);
     write_controller_journal_applying(
         &config.journal_path,
-        "experiment-1",
-        "cpu-affinity-profile:game-main",
+        crate::autotune::experiment::ExperimentId::try_new("experiment-1").unwrap(),
+        crate::actions::ActionId::try_new("cpu-affinity-profile:game-main").unwrap(),
     )
     .unwrap();
     let mut executor = FakeRollbackExecutor::default();
@@ -280,8 +280,8 @@ fn applied_journal_rolls_back_audits_history_and_cleans_journal() {
     let config = config_for_dir(&dir, true);
     write_controller_journal_applied(
         &config.journal_path,
-        "experiment-1",
-        "cpu-affinity-profile:game-main",
+        crate::autotune::experiment::ExperimentId::try_new("experiment-1").unwrap(),
+        crate::actions::ActionId::try_new("cpu-affinity-profile:game-main").unwrap(),
         rollback_token(),
     )
     .unwrap();
@@ -348,8 +348,8 @@ fn applied_journal_with_recovery_disabled_leaves_journal_applied() {
     let config = config_for_dir(&dir, false);
     write_controller_journal_applied(
         &config.journal_path,
-        "experiment-1",
-        "cpu-affinity-profile:game-main",
+        crate::autotune::experiment::ExperimentId::try_new("experiment-1").unwrap(),
+        crate::actions::ActionId::try_new("cpu-affinity-profile:game-main").unwrap(),
         rollback_token(),
     )
     .unwrap();
@@ -405,8 +405,8 @@ fn rollback_failure_enters_faulted_and_keeps_applied_journal() {
     let config = config_for_dir(&dir, true);
     write_controller_journal_applied(
         &config.journal_path,
-        "experiment-1",
-        "cpu-affinity-profile:game-main",
+        crate::autotune::experiment::ExperimentId::try_new("experiment-1").unwrap(),
+        crate::actions::ActionId::try_new("cpu-affinity-profile:game-main").unwrap(),
         rollback_token(),
     )
     .unwrap();
@@ -492,8 +492,8 @@ fn journal_applied_state_rolls_back_on_start() {
 
     write_controller_journal_applied(
         &config.journal_path,
-        "experiment-1",
-        "cpu-affinity-profile:game-main",
+        crate::autotune::experiment::ExperimentId::try_new("experiment-1").unwrap(),
+        crate::actions::ActionId::try_new("cpu-affinity-profile:game-main").unwrap(),
         rollback_token(),
     )
     .unwrap();
@@ -595,8 +595,8 @@ fn rollback_failure_enters_faulted() {
 
     write_controller_journal_applied(
         &config.journal_path,
-        "experiment-1",
-        "cpu-affinity-profile:game-main",
+        crate::autotune::experiment::ExperimentId::try_new("experiment-1").unwrap(),
+        crate::actions::ActionId::try_new("cpu-affinity-profile:game-main").unwrap(),
         rollback_token(),
     )
     .unwrap();

@@ -64,3 +64,40 @@ fn all_capabilities_available() -> DaemonCapabilities {
         privileged_worker_socket_reachable: Some(true),
     }
 }
+
+#[test]
+fn policy_rejects_empty_action_id_descriptor() {
+    use crate::{
+        actions::SafetyClass,
+        daemon::policy::{
+            ActionDescriptor, ActionEffectScope, ActionSource, DaemonPolicy, PolicyIntent,
+            PolicyRejection, RollbackRequirement,
+        },
+    };
+
+    let policy = DaemonPolicy::observe(ActionSource::Test);
+    let descriptor = ActionDescriptor {
+        action_id: crate::actions::ActionId::new(""),
+        action_kind: "test-action".to_owned(),
+        safety_class: SafetyClass::ObserveOnly,
+        effect_scope: ActionEffectScope::LocalProcessTree,
+        rollback: RollbackRequirement::NotRequiredForDryRun,
+        persistent_effect: false,
+        touches_system_wide_state: false,
+        requires_explicit_target: false,
+        confidence: None,
+    };
+
+    let err = policy
+        .check_action(PolicyIntent::DryRun, &descriptor)
+        .expect_err("empty action_id should be rejected");
+
+    assert!(matches!(
+        err,
+        PolicyRejection::InvalidActionDescriptor { .. }
+    ));
+    assert!(
+        err.to_string().contains("ActionId cannot be empty"),
+        "unexpected error: {err}"
+    );
+}

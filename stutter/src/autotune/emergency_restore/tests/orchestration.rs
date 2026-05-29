@@ -27,8 +27,8 @@ fn reverted_journal_reports_clean_and_normalizes_journal() {
     let journal_path = input.journal_path.clone().unwrap();
     let record = ControllerJournalRecord::for_phase(
         ControllerJournalState::Reverted,
-        "experiment-live",
-        "cpu-affinity-profile:game-main",
+        crate::autotune::experiment::ExperimentId::try_new("experiment-live").unwrap(),
+        crate::actions::ActionId::try_new("cpu-affinity-profile:game-main").unwrap(),
         Some(RollbackToken::CpuAffinityRestoreFile {
             path: dir.join("restore.json"),
             affected_tasks: 1,
@@ -50,8 +50,8 @@ fn applying_journal_reports_no_rollback_token() {
     let input = command_input_for_dir(&dir, false);
     write_controller_journal_applying(
         input.journal_path.as_deref().unwrap(),
-        "experiment-1",
-        "cpu-affinity-profile:game-main",
+        crate::autotune::experiment::ExperimentId::try_new("experiment-1").unwrap(),
+        crate::actions::ActionId::try_new("cpu-affinity-profile:game-main").unwrap(),
     )
     .unwrap();
 
@@ -73,8 +73,8 @@ fn dry_run_for_applied_journal_does_not_clean_journal() {
     let journal_path = input.journal_path.clone().unwrap();
     write_controller_journal_applied(
         &journal_path,
-        "experiment-1",
-        "nice:set:5:targets:1",
+        crate::autotune::experiment::ExperimentId::try_new("experiment-1").unwrap(),
+        crate::actions::ActionId::try_new("nice:set:5:targets:1").unwrap(),
         RollbackToken::NiceRestore {
             records: vec![NiceRestoreRecord::new(
                 TaskRestoreIdentity::observed(123, None, Some("test".to_owned()), None, None),
@@ -110,8 +110,8 @@ fn dry_run_for_live_runtime_phases_does_not_clean_journal() {
         let journal_path = input.journal_path.clone().unwrap();
         let record = ControllerJournalRecord::for_phase(
             phase,
-            "experiment-live",
-            "nice:set:5:targets:1",
+            crate::autotune::experiment::ExperimentId::try_new("experiment-live").unwrap(),
+            crate::actions::ActionId::try_new("nice:set:5:targets:1").unwrap(),
             Some(RollbackToken::NiceRestore {
                 records: vec![NiceRestoreRecord::new(
                     TaskRestoreIdentity::observed(123, None, Some("test".to_owned()), None, None),
@@ -171,8 +171,8 @@ fn sysfs_restore_token_restores_file_and_cleans_journal_and_writes_logs() {
 
     write_controller_journal_applied(
         &journal_path,
-        "experiment-1",
-        "sysfs-restore:test",
+        crate::autotune::experiment::ExperimentId::try_new("experiment-1").unwrap(),
+        crate::actions::ActionId::try_new("sysfs-restore:test").unwrap(),
         RollbackToken::SysfsRestore {
             path: target.clone(),
             original_value: "original".to_owned(),
@@ -214,8 +214,8 @@ fn keeping_journal_restores_file_and_cleans_journal() {
     let journal_path = input.journal_path.clone().unwrap();
     let record = ControllerJournalRecord::for_phase(
         ControllerJournalState::Keeping,
-        "experiment-live",
-        "sysfs-restore:test",
+        crate::autotune::experiment::ExperimentId::try_new("experiment-live").unwrap(),
+        crate::actions::ActionId::try_new("sysfs-restore:test").unwrap(),
         Some(RollbackToken::SysfsRestore {
             path: target.clone(),
             original_value: "original".to_owned(),
@@ -246,8 +246,8 @@ fn sysfs_restore_failure_keeps_journal_and_writes_fault_logs() {
 
     write_controller_journal_applied(
         &journal_path,
-        "experiment-1",
-        "sysfs-restore:test",
+        crate::autotune::experiment::ExperimentId::try_new("experiment-1").unwrap(),
+        crate::actions::ActionId::try_new("sysfs-restore:test").unwrap(),
         RollbackToken::SysfsRestore {
             path: target.clone(),
             original_value: "original".to_owned(),

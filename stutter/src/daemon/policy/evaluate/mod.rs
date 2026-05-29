@@ -518,7 +518,12 @@ impl DaemonPolicy {
         intent: PolicyIntent,
         descriptor: &ActionDescriptor,
     ) -> Result<(), PolicyRejection> {
-        debug_assert!(validate_policy_descriptor_shape(descriptor).is_ok());
+        if let Err(err) = validate_policy_descriptor_shape(descriptor) {
+            return Err(PolicyRejection::InvalidActionDescriptor {
+                reason: err.to_string(),
+            });
+        }
+
         match self.explain_action(intent, descriptor).decision {
             PolicyDecisionKind::Allowed => Ok(()),
             PolicyDecisionKind::Rejected { rejection } => Err(rejection),
@@ -531,7 +536,12 @@ impl DaemonPolicy {
         descriptor: &ActionDescriptor,
         context: &DaemonPolicyContext,
     ) -> Result<(), PolicyRejection> {
-        debug_assert!(validate_policy_descriptor_shape(descriptor).is_ok());
+        if let Err(err) = validate_policy_descriptor_shape(descriptor) {
+            return Err(PolicyRejection::InvalidActionDescriptor {
+                reason: err.to_string(),
+            });
+        }
+
         match self
             .explain_action_with_context(intent, descriptor, context)
             .decision

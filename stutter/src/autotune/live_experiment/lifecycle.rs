@@ -295,8 +295,8 @@ impl LiveExperimentManager {
 
         write_controller_journal_applying_with_metadata(
             &journal_path,
-            experiment_id,
-            action_id,
+            ExperimentId::try_new(experiment_id)?,
+            crate::actions::ActionId::try_new(action_id)?,
             controller_journal_metadata_for_candidate(
                 input,
                 candidate,
@@ -322,8 +322,8 @@ impl LiveExperimentManager {
 
         write_controller_journal_applied_with_metadata(
             &journal_path,
-            experiment_id,
-            action_id,
+            ExperimentId::try_new(experiment_id)?,
+            crate::actions::ActionId::try_new(action_id)?,
             applied_rollback.clone(),
             controller_journal_metadata_for_candidate(
                 input,

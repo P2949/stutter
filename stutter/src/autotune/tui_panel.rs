@@ -227,7 +227,9 @@ fn current_profile_from_events(events: &[AutotuneHistoryEvent]) -> Option<String
 fn current_profile_from_journal(record: Option<&ControllerJournalRecord>) -> Option<String> {
     record
         .filter(|record| record.is_active_experiment_state())
-        .and_then(|record| candidate_name_from_action_id(record.action_id.as_deref()))
+        .and_then(|record| {
+            candidate_name_from_action_id(record.action_id.as_ref().map(|id| id.as_str()))
+        })
 }
 
 fn latest_baseline_score(events: &[AutotuneHistoryEvent]) -> Option<u64> {
@@ -470,8 +472,8 @@ mod tests {
 
         write_controller_journal_applied(
             &journal_path,
-            "experiment-1",
-            "cpu-affinity-profile:game-main-suggested",
+            crate::autotune::experiment::ExperimentId::try_new("experiment-1").unwrap(),
+            crate::actions::ActionId::try_new("cpu-affinity-profile:game-main-suggested").unwrap(),
             RollbackToken::CpuAffinityRestoreFile {
                 path: dir.join("restore.json"),
                 affected_tasks: 31,

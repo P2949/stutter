@@ -529,8 +529,8 @@ mod tests {
 
         write_controller_journal_applied(
             &journal_path,
-            "experiment-1",
-            "cpu-affinity-profile:game-main-suggested",
+            crate::autotune::experiment::ExperimentId::try_new("experiment-1").unwrap(),
+            crate::actions::ActionId::try_new("cpu-affinity-profile:game-main-suggested").unwrap(),
             RollbackToken::CpuAffinityRestoreFile {
                 path: dir.join("restore.json"),
                 affected_tasks: 31,

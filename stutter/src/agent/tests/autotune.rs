@@ -711,8 +711,8 @@ async fn autotune_restore_active_rollback_invokes_restore() {
 
     crate::autotune::controller_journal::write_controller_journal_applied(
         &journal_path,
-        "experiment-remote",
-        "sysfs-restore:remote",
+        crate::autotune::experiment::ExperimentId::try_new("experiment-remote").unwrap(),
+        crate::actions::ActionId::try_new("sysfs-restore:remote").unwrap(),
         crate::actions::RollbackToken::SysfsRestore {
             path: target.clone(),
             original_value: "original".to_owned(),
@@ -757,8 +757,8 @@ async fn autotune_restore_failure_returns_conflict_response() {
 
     crate::autotune::controller_journal::write_controller_journal_applied(
         &journal_path,
-        "experiment-remote",
-        "sysfs-restore:remote",
+        crate::autotune::experiment::ExperimentId::try_new("experiment-remote").unwrap(),
+        crate::actions::ActionId::try_new("sysfs-restore:remote").unwrap(),
         crate::actions::RollbackToken::SysfsRestore {
             path: target,
             original_value: "original".to_owned(),

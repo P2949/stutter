@@ -250,6 +250,19 @@ impl PrivilegedWorkerCandidatePlan {
             .into());
         }
 
+        self.descriptor.validate_identity_strings().map_err(|err| {
+            PrivilegedWorkerError::InvalidActionDescriptor {
+                reason: err.to_string(),
+            }
+        })?;
+
+        self.plan_file
+            .descriptor
+            .validate_identity_strings()
+            .map_err(|err| PrivilegedWorkerError::InvalidActionDescriptor {
+                reason: err.to_string(),
+            })?;
+
         if self.plan_file.descriptor.action_id != self.descriptor.action_id
             || self.plan_file.descriptor.action_kind != self.descriptor.action_kind
             || self.plan_file.descriptor.safety_class != self.descriptor.safety_class

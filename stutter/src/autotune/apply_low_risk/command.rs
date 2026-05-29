@@ -48,8 +48,8 @@ pub async fn apply_low_risk_command(
 
     write_controller_journal_applying_with_metadata(
         &journal_path,
-        &experiment_id,
-        &action_id,
+        crate::autotune::experiment::ExperimentId::try_new(&experiment_id)?,
+        crate::actions::ActionId::try_new(&action_id)?,
         controller_journal_metadata_for_cpu_affinity_action(
             &candidate_name,
             &action,

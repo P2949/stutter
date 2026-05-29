@@ -11,6 +11,9 @@ pub enum PrivilegedWorkerError {
     #[error("stale_candidate_plan: stale candidate plan: age {age_ns}ns exceeded max {max_ns}ns")]
     StaleCandidatePlan { age_ns: u128, max_ns: u128 },
 
+    #[error("privileged_worker_invalid_action_descriptor: {reason}")]
+    InvalidActionDescriptor { reason: String },
+
     #[error(
         "candidate_plan_descriptor_mismatch: candidate plan descriptor does not match action payload"
     )]
@@ -97,6 +100,7 @@ impl PrivilegedWorkerError {
     pub const fn reason_code(&self) -> &'static str {
         match self {
             Self::StaleCandidatePlan { .. } => "stale_candidate_plan",
+            Self::InvalidActionDescriptor { .. } => "privileged_worker_invalid_action_descriptor",
             Self::CandidatePlanDescriptorMismatch => "candidate_plan_descriptor_mismatch",
             Self::CandidatePlanObjectiveMismatch => "candidate_plan_objective_mismatch",
             Self::CandidatePlanMissingEvidence => "candidate_plan_missing_evidence",

@@ -1,4 +1,5 @@
 use serde::{Deserialize, Deserializer, Serialize};
+use stutter_core::ids::EmptyStringIdError;
 
 use super::key::{CandidateContextHashInput, CandidateIdentitySummary, CandidateMemoryKey};
 use crate::{
@@ -60,6 +61,10 @@ pub struct CandidateMemoryRecord {
 }
 
 impl CandidateMemoryRecord {
+    pub fn validate_identity_strings(&self) -> Result<(), EmptyStringIdError> {
+        self.action_id.validate_non_empty()
+    }
+
     pub fn is_degraded(&self) -> bool {
         self.degraded_reason.is_some()
     }
@@ -91,6 +96,10 @@ pub struct WorkloadActionMemory {
 }
 
 impl WorkloadActionMemory {
+    pub fn validate_identity_strings(&self) -> Result<(), EmptyStringIdError> {
+        self.action_id.validate_non_empty()
+    }
+
     pub fn is_degraded(&self) -> bool {
         self.degraded_reason.is_some()
     }
@@ -135,6 +144,18 @@ pub struct CandidateMemory {
     pub workload_actions: Vec<WorkloadActionMemory>,
 }
 
+impl CandidateMemory {
+    pub fn validate_identity_strings(&self) -> Result<(), EmptyStringIdError> {
+        for record in &self.records {
+            record.validate_identity_strings()?;
+        }
+        for workload_action in &self.workload_actions {
+            workload_action.validate_identity_strings()?;
+        }
+        Ok(())
+    }
+}
+
 impl<'de> Deserialize<'de> for CandidateMemory {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -153,6 +174,11 @@ impl<'de> Deserialize<'de> for CandidateMemory {
             records: wire.records,
             workload_actions: wire.workload_actions,
         };
+
+        memory
+            .validate_identity_strings()
+            .map_err(serde::de::Error::custom)?;
+
         super::collision::mark_loaded_identity_collisions(&mut memory);
         Ok(memory)
     }
