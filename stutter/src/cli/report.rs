@@ -384,15 +384,25 @@ pub(super) enum DoctorSubcommand {
 pub(super) struct DoctorTracepointsArgs {
     #[arg(long)]
     pub(super) dump: bool,
+
+    #[arg(
+        long = "events-root",
+        value_name = "PATH",
+        help = "Tracefs events root to dump; defaults to /sys/kernel/tracing/events"
+    )]
+    pub(super) events_root: Option<PathBuf>,
 }
 
 impl DoctorArgs {
     pub(super) fn into_input(self) -> anyhow::Result<crate::doctor::DoctorInput> {
+        let mut tracepoint_events_root = None;
+
         let tracepoint_dump = match self.command {
             Some(DoctorSubcommand::Tracepoints(tracepoints)) => {
                 if !tracepoints.dump {
                     anyhow::bail!("doctor tracepoints requires --dump");
                 }
+                tracepoint_events_root = tracepoints.events_root;
                 true
             }
             None => false,
@@ -401,6 +411,7 @@ impl DoctorArgs {
         Ok(crate::doctor::DoctorInput {
             json: self.json,
             tracepoint_dump,
+            tracepoint_events_root,
             hwmon: self.hwmon,
             hwmon_root: self.hwmon_root,
             hwmon_drm_card: self.hwmon_drm_card,

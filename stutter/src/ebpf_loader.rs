@@ -108,5 +108,9 @@ fn matching_request_key_offset(
 }
 
 #[cfg(test)]
+#[path = "ebpf/tests/tracepoint_format_fixtures.rs"]
+mod tracepoint_format_fixture_tests;
+
+#[cfg(test)]
 #[path = "ebpf/tests/loader.rs"]
 mod tests;

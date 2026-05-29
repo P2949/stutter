@@ -136,6 +136,7 @@ fn doctor_report_includes_runtime_permission_check() {
     let input = DoctorInput {
         json: false,
         tracepoint_dump: false,
+        tracepoint_events_root: None,
         hwmon: false,
         hwmon_root: None,
         hwmon_drm_card: None,
@@ -193,6 +194,7 @@ fn doctor_tracepoint_check_reports_sched_wakeup_new_coverage() {
     let input = DoctorInput {
         json: false,
         tracepoint_dump: false,
+        tracepoint_events_root: None,
         hwmon: false,
         hwmon_root: None,
         hwmon_drm_card: None,

@@ -6,6 +6,7 @@ use serde::Serialize;
 pub struct DoctorInput {
     pub json: bool,
     pub tracepoint_dump: bool,
+    pub tracepoint_events_root: Option<PathBuf>,
     pub hwmon: bool,
     pub hwmon_root: Option<PathBuf>,
     pub hwmon_drm_card: Option<String>,

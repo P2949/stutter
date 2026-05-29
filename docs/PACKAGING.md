@@ -69,6 +69,10 @@ offsets into BPF globals at load time, exactly as it does for locally-built
 objects. A prebuilt object that passes validation on one kernel may fail on
 another if the kernel's tracepoint layout differs.
 
+Packagers should not perform mandatory tracepoint-layout validation against the
+build host kernel. The target runtime kernel is validated by stutter preflight;
+see [KERNEL_COMPATIBILITY.md](KERNEL_COMPATIBILITY.md).
+
 > **This is an advanced packaging escape hatch.** For most users, the default
 > local build produces the correct object automatically.
 

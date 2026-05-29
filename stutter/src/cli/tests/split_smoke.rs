@@ -52,6 +52,29 @@ fn cli_parses_doctor_tracepoint_dump_command() {
 }
 
 #[test]
+fn cli_parses_doctor_tracepoint_dump_events_root() {
+    let command = parse_app_command_from([
+        "stutter",
+        "doctor",
+        "tracepoints",
+        "--dump",
+        "--events-root",
+        "/tmp/events",
+    ])
+    .unwrap();
+
+    let AppCommand::Doctor(input) = command else {
+        panic!("expected doctor command");
+    };
+
+    assert!(input.input.tracepoint_dump);
+    assert_eq!(
+        input.input.tracepoint_events_root.as_deref(),
+        Some(std::path::Path::new("/tmp/events"))
+    );
+}
+
+#[test]
 fn cli_split_review_guard_covers_all_split_cli_modules() {
     struct CliSplitCase {
         argv: &'static [&'static str],
