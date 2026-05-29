@@ -32,6 +32,7 @@ mod raw_ids;
 mod release_packaging;
 mod report_migration_docs;
 mod rolling_window_privacy;
+mod root_hygiene;
 mod scanners;
 mod scratch_dir;
 mod string_id_validation;
