@@ -321,6 +321,100 @@ fn rejects_bad_irq_tracepoint_offsets() {
 }
 
 #[test]
+fn tracepoint_preflight_required_mismatch_includes_diagnostic_dump_hint() {
+    let _lock = crate::test_support::TEST_MUTEX.lock().unwrap();
+    let dir = temp_dir("tracepoint-diagnostic-hint");
+
+    let sched_wakeup = dir.join("sched/sched_wakeup");
+    fs::create_dir_all(&sched_wakeup).unwrap();
+    fs::write(
+        sched_wakeup.join("format"),
+        "field:pid_t pid; offset:99; size:4; signed:1;\n\
+         field:int prio; offset:28; size:4; signed:1;\n\
+         field:int target_cpu; offset:32; size:4; signed:1;\n",
+    )
+    .unwrap();
+
+    let sched_switch = dir.join("sched/sched_switch");
+    fs::create_dir_all(&sched_switch).unwrap();
+    fs::write(
+        sched_switch.join("format"),
+        "field:pid_t prev_pid; offset:24; size:4; signed:1;\n\
+         field:long prev_state; offset:32; size:8; signed:1;\n\
+         field:char next_comm[16]; offset:40; size:16; signed:1;\n\
+         field:pid_t next_pid; offset:56; size:4; signed:1;\n\
+         field:int next_prio; offset:60; size:4; signed:1;\n",
+    )
+    .unwrap();
+
+    let report =
+        crate::ebpf::preflight::tracepoint_preflight(&dir, false, false, false, false, false);
+
+    assert_eq!(report.sched_wakeup, "mismatch");
+    assert!(
+        report
+            .errors
+            .iter()
+            .any(|error| error.contains("doctor tracepoints --dump --json")),
+        "preflight errors should tell users how to collect bug-report diagnostics: {report:#?}"
+    );
+
+    fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn tracepoint_preflight_optional_mismatch_includes_diagnostic_dump_hint() {
+    let _lock = crate::test_support::TEST_MUTEX.lock().unwrap();
+    let dir = temp_dir("tracepoint-optional-diagnostic-hint");
+
+    let sched_wakeup = dir.join("sched/sched_wakeup");
+    fs::create_dir_all(&sched_wakeup).unwrap();
+    fs::write(
+        sched_wakeup.join("format"),
+        "field:pid_t pid; offset:24; size:4; signed:1;\n\
+         field:int prio; offset:28; size:4; signed:1;\n\
+         field:int target_cpu; offset:32; size:4; signed:1;\n",
+    )
+    .unwrap();
+
+    let sched_switch = dir.join("sched/sched_switch");
+    fs::create_dir_all(&sched_switch).unwrap();
+    fs::write(
+        sched_switch.join("format"),
+        "field:pid_t prev_pid; offset:24; size:4; signed:1;\n\
+         field:long prev_state; offset:32; size:8; signed:1;\n\
+         field:char next_comm[16]; offset:40; size:16; signed:1;\n\
+         field:pid_t next_pid; offset:56; size:4; signed:1;\n\
+         field:int next_prio; offset:60; size:4; signed:1;\n",
+    )
+    .unwrap();
+
+    let sched_wakeup_new = dir.join("sched/sched_wakeup_new");
+    fs::create_dir_all(&sched_wakeup_new).unwrap();
+    fs::write(
+        sched_wakeup_new.join("format"),
+        "field:pid_t pid; offset:99; size:4; signed:1;\n\
+         field:int prio; offset:28; size:4; signed:1;\n\
+         field:int target_cpu; offset:32; size:4; signed:1;\n",
+    )
+    .unwrap();
+
+    let report =
+        crate::ebpf::preflight::tracepoint_preflight(&dir, false, false, false, false, false);
+
+    assert_eq!(report.sched_wakeup_new, "mismatch");
+    assert!(
+        report.warnings.iter().any(|warning| {
+            warning.contains("sched_wakeup_new")
+                && warning.contains("doctor tracepoints --dump --json")
+        }),
+        "preflight optional mismatch warnings should tell users how to collect bug-report diagnostics: {report:#?}"
+    );
+
+    fs::remove_dir_all(dir).ok();
+}
+
+#[test]
 fn validates_irq_tracepoint_without_ret() {
     let _lock = crate::test_support::TEST_MUTEX.lock().unwrap();
     let dir = temp_dir("irq-without-ret");

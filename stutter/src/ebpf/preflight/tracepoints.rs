@@ -26,6 +26,12 @@ use crate::{
     },
 };
 
+const TRACEPOINT_COMPATIBILITY_BUG_REPORT_HINT: &str = "Run `stutter doctor tracepoints --dump --json` and attach the output, kernel release, and distro/kernel flavor when reporting this compatibility issue.";
+
+fn tracepoint_compatibility_message(message: impl std::fmt::Display) -> String {
+    format!("{message}. {TRACEPOINT_COMPATIBILITY_BUG_REPORT_HINT}")
+}
+
 #[derive(Debug, Clone)]
 pub struct TracepointAvailability {
     pub sched_wakeup_new: bool,
@@ -139,7 +145,9 @@ pub fn tracepoint_preflight(
         if entry_ok && exit_ok {
             "ok".to_owned()
         } else {
-            warnings.push("IRQ tracepoint formats are present but layouts differ".to_owned());
+            warnings.push(tracepoint_compatibility_message(
+                "IRQ tracepoint formats are present but layouts differ",
+            ));
             "mismatch".to_owned()
         }
     } else {
@@ -189,9 +197,9 @@ fn required_tracepoint_status(
         Ok(()) => "ok".to_owned(),
         Err(err) => {
             let name = name.as_str();
-            errors.push(format!(
+            errors.push(tracepoint_compatibility_message(format!(
                 "{name} tracepoint unavailable or incompatible: {err:#}"
-            ));
+            )));
             if path.exists() {
                 "mismatch".to_owned()
             } else {
@@ -220,7 +228,9 @@ fn optional_tracepoint_status(
         Ok(()) => "ok".to_owned(),
         Err(err) => {
             if wanted {
-                warnings.push(format!("{name_label} tracepoint layout differs: {err:#}"));
+                warnings.push(tracepoint_compatibility_message(format!(
+                    "{name_label} tracepoint layout differs: {err:#}"
+                )));
             }
             "mismatch".to_owned()
         }

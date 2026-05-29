@@ -9,6 +9,9 @@
 - `bpf-linker`
 - privileges when loading eBPF programs for `monitor`, `record`, and live tracing paths
 
+For tracepoint-format compatibility details and bug-report diagnostics, see
+[KERNEL_COMPATIBILITY.md](KERNEL_COMPATIBILITY.md).
+
 ```bash
 rustup toolchain install nightly --component rust-src
 cargo install bpf-linker

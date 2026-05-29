@@ -27,7 +27,7 @@ use tracepoints::tracepoint_check;
 
 pub fn doctor_command(input: DoctorInput) -> anyhow::Result<()> {
     if input.tracepoint_dump {
-        return tracepoints::tracepoint_dump_command(input.json);
+        return tracepoints::tracepoint_dump_command(&input);
     }
 
     let report = build_doctor_report(&input);

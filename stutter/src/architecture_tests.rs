@@ -20,6 +20,7 @@ mod ebpf_wakeup_accounting;
 mod file_size;
 mod generated_templates;
 mod high_risk_apply_cli;
+mod kernel_compatibility;
 mod module_layout;
 mod mutation_paths;
 mod objectives;
