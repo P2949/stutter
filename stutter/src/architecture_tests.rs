@@ -18,6 +18,7 @@ mod ebpf_layout;
 mod ebpf_switch_accounting;
 mod ebpf_wakeup_accounting;
 mod file_size;
+mod high_risk_apply_cli;
 mod module_layout;
 mod mutation_paths;
 mod objectives;

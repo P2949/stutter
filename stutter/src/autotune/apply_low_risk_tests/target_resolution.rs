@@ -91,7 +91,7 @@ mod tests {
             watch_process: None,
             tree_pid: None,
             profiles: None,
-            mode: "apply-low-risk".to_owned(),
+            mode: crate::daemon::policy::DaemonMode::ApplyLowRisk,
             decision_log: None,
             duration_seconds: Some(0),
             washout_seconds: 0,

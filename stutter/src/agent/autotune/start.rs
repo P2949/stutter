@@ -112,7 +112,7 @@ pub(crate) async fn autotune_start_handler(
         watch_process: request.watch_process.clone(),
         tree_pid: request.tree_pid,
         profiles: request.profiles.as_deref().map(PathBuf::from),
-        mode: policy.mode.as_str().to_owned(),
+        mode: policy.mode,
         decision_log: request.decision_log.as_deref().map(PathBuf::from),
         duration_seconds: request.duration_seconds,
         summary_ms: request.summary_ms.unwrap_or(1_000),

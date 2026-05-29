@@ -14,7 +14,7 @@ pub struct AutotuneCommandInput {
     pub watch_process: Option<String>,
     pub tree_pid: Option<u32>,
     pub profiles: Option<PathBuf>,
-    pub mode: String,
+    pub mode: DaemonMode,
     pub decision_log: Option<PathBuf>,
     pub duration_seconds: Option<u64>,
     pub washout_seconds: u64,
@@ -36,13 +36,6 @@ pub struct AutotuneCommandInput {
     pub dry_run_all_safe: bool,
 }
 
-fn unsupported_live_autotune_mode_error(mode: impl std::fmt::Display) -> anyhow::Error {
-    anyhow::anyhow!(
-        "mode '{}' is not supported; use --mode observe, --mode suggest, --mode apply-low-risk, or --mode apply-medium-risk with --allow-medium-risk",
-        mode
-    )
-}
-
 fn ensure_supported_live_autotune_mode(
     mode: DaemonMode,
     allow_medium_risk: bool,
@@ -60,20 +53,10 @@ fn ensure_supported_live_autotune_mode(
                 "apply-medium-risk requires --allow-medium-risk and only applies reversible process-local candidates"
             )
         }
-        DaemonMode::ApplyHighRisk => anyhow::bail!("high-risk apply is not implemented"),
+        DaemonMode::ApplyHighRisk => anyhow::bail!(
+            "apply-high-risk is reserved internally and is not exposed by live autotune"
+        ),
     }
-}
-
-fn parse_supported_live_autotune_mode(
-    raw_mode: &str,
-    allow_medium_risk: bool,
-    dry_run_all_safe: bool,
-) -> anyhow::Result<DaemonMode> {
-    let mode = raw_mode
-        .parse::<DaemonMode>()
-        .map_err(|_| unsupported_live_autotune_mode_error(raw_mode))?;
-    ensure_supported_live_autotune_mode(mode, allow_medium_risk, dry_run_all_safe)?;
-    Ok(mode)
 }
 
 fn runtime_config_for_command(
@@ -111,11 +94,8 @@ fn runtime_config_for_command(
 }
 
 pub async fn autotune_command(input: AutotuneCommandInput) -> anyhow::Result<()> {
-    let mode = parse_supported_live_autotune_mode(
-        &input.mode,
-        input.allow_medium_risk,
-        input.dry_run_all_safe,
-    )?;
+    let mode = input.mode;
+    ensure_supported_live_autotune_mode(mode, input.allow_medium_risk, input.dry_run_all_safe)?;
 
     if matches!(mode, DaemonMode::ApplyLowRisk | DaemonMode::ApplyMediumRisk) {
         if input.auto_focus {
@@ -237,13 +217,13 @@ mod tests {
         );
     }
 
-    fn base_autotune_input(mode: &str) -> AutotuneCommandInput {
+    fn base_autotune_input(mode: DaemonMode) -> AutotuneCommandInput {
         AutotuneCommandInput {
             config: None,
             watch_process: None,
             tree_pid: Some(1234),
             profiles: None,
-            mode: mode.to_owned(),
+            mode,
             decision_log: None,
             duration_seconds: Some(1),
             washout_seconds: crate::autotune::washout::DEFAULT_WASHOUT_SECONDS,
@@ -269,10 +249,14 @@ mod tests {
 
     #[test]
     fn runtime_config_builder_accepts_all_controller_modes() {
-        for raw_mode in ["observe", "suggest", "apply-low-risk"] {
-            let input = base_autotune_input(raw_mode);
-            let mode = parse_supported_live_autotune_mode(
-                raw_mode,
+        for mode in [
+            DaemonMode::Observe,
+            DaemonMode::Suggest,
+            DaemonMode::ApplyLowRisk,
+        ] {
+            let input = base_autotune_input(mode);
+            ensure_supported_live_autotune_mode(
+                mode,
                 input.allow_medium_risk,
                 input.dry_run_all_safe,
             )
@@ -283,7 +267,7 @@ mod tests {
 
     #[test]
     fn verify_autotune_construction_applies_mode_and_target_to_daemon_config() {
-        let mut input = base_autotune_input("apply-low-risk");
+        let mut input = base_autotune_input(DaemonMode::ApplyLowRisk);
         input.tree_pid = Some(4444);
         input.watch_process = Some("Game.exe".to_owned());
         input.min_focus_confidence = 0.88;
@@ -303,24 +287,25 @@ mod tests {
     }
 
     #[test]
-    fn medium_live_mode_requires_unlock_and_high_live_mode_is_rejected() {
-        let err = parse_supported_live_autotune_mode("apply-medium-risk", false, false)
+    fn medium_live_mode_requires_unlock_and_high_live_mode_is_reserved() {
+        let err = ensure_supported_live_autotune_mode(DaemonMode::ApplyMediumRisk, false, false)
             .unwrap_err()
             .to_string();
         assert!(err.contains("requires --allow-medium-risk"));
 
-        let mode = parse_supported_live_autotune_mode("apply-medium-risk", true, false).unwrap();
-        assert_eq!(mode, DaemonMode::ApplyMediumRisk);
+        ensure_supported_live_autotune_mode(DaemonMode::ApplyMediumRisk, true, false)
+            .expect("medium-risk live mode should be allowed with explicit unlock");
 
-        let err = parse_supported_live_autotune_mode("apply-high-risk", true, false)
+        let err = ensure_supported_live_autotune_mode(DaemonMode::ApplyHighRisk, true, false)
             .unwrap_err()
             .to_string();
-        assert!(err.contains("high-risk apply is not implemented"));
+        assert!(err.contains("reserved internally"));
+        assert!(!err.contains("not implemented"));
     }
 
     #[test]
     fn dry_run_all_safe_requires_suggest_mode() {
-        let err = parse_supported_live_autotune_mode("apply-low-risk", false, true)
+        let err = ensure_supported_live_autotune_mode(DaemonMode::ApplyLowRisk, false, true)
             .unwrap_err()
             .to_string();
 
@@ -334,7 +319,7 @@ mod tests {
             watch_process: None,
             tree_pid: None,
             profiles: None,
-            mode: "apply-low-risk".to_owned(),
+            mode: DaemonMode::ApplyLowRisk,
             decision_log: None,
             duration_seconds: Some(1),
             washout_seconds: crate::autotune::washout::DEFAULT_WASHOUT_SECONDS,
@@ -368,7 +353,7 @@ mod tests {
             watch_process: None,
             tree_pid: None,
             profiles: None,
-            mode: "apply-low-risk".to_owned(),
+            mode: DaemonMode::ApplyLowRisk,
             decision_log: None,
             duration_seconds: Some(1),
             washout_seconds: crate::autotune::washout::DEFAULT_WASHOUT_SECONDS,
@@ -396,39 +381,5 @@ mod tests {
             err,
             "apply-low-risk does not support --auto-focus yet; pass --tree-pid or --watch-process"
         );
-    }
-
-    #[tokio::test]
-    async fn unknown_mode_is_rejected() {
-        let input = AutotuneCommandInput {
-            config: None,
-            watch_process: None,
-            tree_pid: None,
-            profiles: None,
-            mode: "unknown-mode".to_owned(),
-            decision_log: None,
-            duration_seconds: Some(1),
-            washout_seconds: crate::autotune::washout::DEFAULT_WASHOUT_SECONDS,
-            washout_verify_interval_ms:
-                crate::autotune::washout::DEFAULT_WASHOUT_VERIFY_INTERVAL_MS,
-            summary_ms: 1000,
-            preset: "diagnosis".to_owned(),
-            hwmon: false,
-            mangohud_log: None,
-            auto_focus: false,
-            min_focus_confidence: crate::autotune::DEFAULT_MIN_FOCUS_CONFIDENCE,
-            focus_source: crate::config::FocusSource::Hybrid,
-            foreground_window: false,
-            foreground_source: crate::config::ForegroundSource::Auto,
-            foreground_poll_ms: 1000,
-            foreground_max_stale_ms: 2500,
-            allow_system_wide_suggestions: false,
-            allow_medium_risk: false,
-            high_risk_dry_run: false,
-            dry_run_all_safe: false,
-        };
-
-        let err = autotune_command(input).await.unwrap_err().to_string();
-        assert!(err.contains("mode 'unknown-mode' is not supported"));
     }
 }

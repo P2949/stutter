@@ -49,14 +49,14 @@ pub(super) fn parse_autotune_command(args: AutotuneArgs) -> anyhow::Result<AppCo
             }
         }
     } else {
-        validate_autotune_mode(&args.mode, args.allow_medium_risk, args.dry_run_all_safe)?;
+        validate_autotune_mode(args.mode, args.allow_medium_risk, args.dry_run_all_safe)?;
         Ok(AppCommand::Autotune(AutotuneCommandDto {
             input: crate::autotune::commands::live::AutotuneCommandInput {
                 config: args.config,
                 watch_process: args.watch_process,
                 tree_pid: args.tree_pid,
                 profiles: args.profiles,
-                mode: args.mode,
+                mode: args.mode.as_daemon_mode(),
                 decision_log: args.decision_log,
                 duration_seconds: args.duration_seconds,
                 washout_seconds: args.washout_seconds,
