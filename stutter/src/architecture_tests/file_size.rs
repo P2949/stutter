@@ -176,7 +176,15 @@ fn no_oversized_production_files_are_currently_allowlisted() {
 
 #[cfg(test)]
 mod tests {
-    use super::{RustFileKind, WORKSPACE_SOURCE_ROOTS, rust_file_kind, workspace_src_roots};
+    use super::{
+        RustFileKind, TEST_RUST_FILE_SIZE_LIMIT_LINES, WORKSPACE_SOURCE_ROOTS, rust_file_kind,
+        workspace_src_roots,
+    };
+
+    const _: () = assert!(
+        TEST_RUST_FILE_SIZE_LIMIT_LINES < 1_000,
+        "test file-size gate should prevent near-1000-line test modules; split by behavior instead"
+    );
 
     #[test]
     fn workspace_source_roots_cover_all_workspace_crate_src_dirs() {

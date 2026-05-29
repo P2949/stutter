@@ -141,5 +141,5 @@ fn validate_candidate_plan_request(
 }
 
 #[cfg(test)]
-#[path = "privilege/tests.rs"]
+#[path = "privilege/tests/mod.rs"]
 mod tests;
