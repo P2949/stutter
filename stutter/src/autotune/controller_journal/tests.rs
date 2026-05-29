@@ -35,6 +35,10 @@ fn temporary_files_in(dir: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
+fn write_raw_controller_journal(path: &Path, json: &str) {
+    fs::write(path, json).unwrap();
+}
+
 #[test]
 fn process_identity_label_includes_starttime_and_active_tasks_when_known() {
     assert_eq!(
@@ -269,6 +273,88 @@ fn missing_journal_reads_as_clean() {
     let record = read_controller_journal(&path).unwrap();
 
     assert_eq!(record, ControllerJournalRecord::clean());
+    fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn controller_journal_read_rejects_empty_experiment_id() {
+    let dir = temp_dir("empty-experiment-id");
+    let path = dir.join("controller_journal.json");
+
+    write_raw_controller_journal(
+        &path,
+        r#"{
+            "schema_version": 1,
+            "state": "applied",
+            "experiment_id": "",
+            "action_id": "cpu-affinity-profile:game-main",
+            "candidate": null,
+            "workload_identity": null,
+            "target_identity": null,
+            "restore_command": null,
+            "verify_result": null,
+            "mode": null,
+            "safety_class": null,
+            "rollback_token": null,
+            "phase_started_unix_nanos": null,
+            "updated_unix_nanos": null,
+            "fault_reason": null
+        }"#,
+    );
+
+    let err = read_controller_journal(&path).expect_err("empty experiment_id should be rejected");
+
+    let message = format!("{err:#}");
+    assert!(
+        message.contains("ExperimentId cannot be empty"),
+        "unexpected error: {message}"
+    );
+    assert!(
+        message.contains("invalid autotune controller journal"),
+        "error should include journal validation context: {message}"
+    );
+
+    fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn controller_journal_read_rejects_empty_action_id() {
+    let dir = temp_dir("empty-action-id");
+    let path = dir.join("controller_journal.json");
+
+    write_raw_controller_journal(
+        &path,
+        r#"{
+            "schema_version": 1,
+            "state": "applied",
+            "experiment_id": "experiment-1",
+            "action_id": "",
+            "candidate": null,
+            "workload_identity": null,
+            "target_identity": null,
+            "restore_command": null,
+            "verify_result": null,
+            "mode": null,
+            "safety_class": null,
+            "rollback_token": null,
+            "phase_started_unix_nanos": null,
+            "updated_unix_nanos": null,
+            "fault_reason": null
+        }"#,
+    );
+
+    let err = read_controller_journal(&path).expect_err("empty action_id should be rejected");
+
+    let message = format!("{err:#}");
+    assert!(
+        message.contains("ActionId cannot be empty"),
+        "unexpected error: {message}"
+    );
+    assert!(
+        message.contains("invalid autotune controller journal"),
+        "error should include journal validation context: {message}"
+    );
+
     fs::remove_dir_all(dir).ok();
 }
 
