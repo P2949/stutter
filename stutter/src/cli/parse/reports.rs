@@ -151,6 +151,11 @@ pub(super) fn parse_release_command(args: ReleaseArgs) -> anyhow::Result<AppComm
                 soak_tests: args.soak_tests,
                 stronger_tests: args.stronger_tests,
                 real_machine_validation: args.real_machine_validation,
+                production_distro_packaging: args.production_distro_packaging,
+                reproducible_packaged_ebpf_object: args.reproducible_packaged_ebpf_object,
+                packaging_install_tests: args.packaging_install_tests,
+                packaging_service_smoke_tests: args.packaging_service_smoke_tests,
+                versioned_release_tarball: args.versioned_release_tarball,
                 ..ReleaseReadinessInputs::default()
             };
             Ok(AppCommand::ReleaseCheck(ReleaseCheckCommandInput {

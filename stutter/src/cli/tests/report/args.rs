@@ -210,6 +210,12 @@ fn parses_release_check_command() {
     assert!(input.inputs.soak_tests);
     assert!(input.json);
     assert!(!input.enforce);
+
+    assert!(!input.inputs.production_distro_packaging);
+    assert!(!input.inputs.reproducible_packaged_ebpf_object);
+    assert!(!input.inputs.packaging_install_tests);
+    assert!(!input.inputs.packaging_service_smoke_tests);
+    assert!(!input.inputs.versioned_release_tarball);
 }
 
 #[test]
@@ -223,6 +229,12 @@ fn parses_release_check_full_flags() {
         "--apply-actions-enabled",
         "--soak-tests",
         "--stronger-tests",
+        "--real-machine-validation",
+        "--production-distro-packaging",
+        "--reproducible-packaged-ebpf-object",
+        "--packaging-install-tests",
+        "--packaging-service-smoke-tests",
+        "--versioned-release-tarball",
         "--json",
         "--enforce",
     ])
@@ -236,6 +248,12 @@ fn parses_release_check_full_flags() {
     assert!(input.inputs.apply_actions_enabled);
     assert!(input.inputs.soak_tests);
     assert!(input.inputs.stronger_tests);
+    assert!(input.inputs.real_machine_validation);
+    assert!(input.inputs.production_distro_packaging);
+    assert!(input.inputs.reproducible_packaged_ebpf_object);
+    assert!(input.inputs.packaging_install_tests);
+    assert!(input.inputs.packaging_service_smoke_tests);
+    assert!(input.inputs.versioned_release_tarball);
     assert!(input.json);
     assert!(input.enforce);
 }

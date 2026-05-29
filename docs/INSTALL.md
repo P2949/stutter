@@ -301,3 +301,7 @@ scripts/install-local.sh
 
 A proper ebuild should be revisited once the runtime interface, eBPF object
 layout, release process, and service model are stable.
+
+See [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) for the distinction between
+source/runtime readiness, service-unit/local-install readiness, and production
+distro packaging readiness.
