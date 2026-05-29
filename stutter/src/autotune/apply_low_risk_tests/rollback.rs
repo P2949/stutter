@@ -90,8 +90,8 @@ mod tests {
 
         write_controller_journal_applied_with_metadata(
             &journal_path,
-            experiment_id,
-            action_id,
+            crate::autotune::experiment::ExperimentId::try_new(experiment_id).unwrap(),
+            crate::actions::ActionId::try_new(action_id).unwrap(),
             rollback,
             ControllerJournalActionMetadata::default()
                 .with_candidate("game-main")

@@ -127,6 +127,12 @@ pub struct ActionDescriptor {
     pub confidence: Option<f32>,
 }
 
+impl ActionDescriptor {
+    pub fn validate_identity_strings(&self) -> Result<(), stutter_core::ids::EmptyStringIdError> {
+        self.action_id.validate_non_empty()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PolicyIntent {

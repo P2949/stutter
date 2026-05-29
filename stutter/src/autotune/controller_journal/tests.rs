@@ -49,8 +49,10 @@ fn process_identity_label_includes_starttime_and_active_tasks_when_known() {
 
 #[test]
 fn applying_journal_serializes_without_rollback_token_until_applied() {
-    let record =
-        ControllerJournalRecord::applying("experiment-1", "cpu-affinity-profile:game-main");
+    let record = ControllerJournalRecord::applying(
+        crate::autotune::experiment::ExperimentId::try_new("experiment-1").unwrap(),
+        crate::actions::ActionId::try_new("cpu-affinity-profile:game-main").unwrap(),
+    );
 
     let value = serde_json::to_value(&record).unwrap();
 
@@ -70,8 +72,8 @@ fn applying_journal_serializes_without_rollback_token_until_applied() {
 #[test]
 fn applied_journal_serializes_with_rollback_token() {
     let record = ControllerJournalRecord::applied(
-        "experiment-1",
-        "cpu-affinity-profile:game-main",
+        crate::autotune::experiment::ExperimentId::try_new("experiment-1").unwrap(),
+        crate::actions::ActionId::try_new("cpu-affinity-profile:game-main").unwrap(),
         rollback_token(),
     );
 
@@ -122,8 +124,8 @@ fn transaction_journal_supports_expanded_phases_and_metadata() {
     for phase in phases {
         let record = ControllerJournalRecord::for_phase(
             phase,
-            "experiment-1",
-            "cpu-affinity-profile:game-main",
+            crate::autotune::experiment::ExperimentId::try_new("experiment-1").unwrap(),
+            crate::actions::ActionId::try_new("cpu-affinity-profile:game-main").unwrap(),
             matches!(
                 phase,
                 ControllerJournalState::Applied
@@ -165,15 +167,18 @@ fn journal_round_trips_and_atomic_write_removes_temp_file() {
     let dir = temp_dir("round-trip");
     let path = dir.join("controller_journal.json");
 
-    let applying =
-        write_controller_journal_applying(&path, "experiment-1", "cpu-affinity-profile:game-main")
-            .unwrap();
+    let applying = write_controller_journal_applying(
+        &path,
+        crate::autotune::experiment::ExperimentId::try_new("experiment-1").unwrap(),
+        crate::actions::ActionId::try_new("cpu-affinity-profile:game-main").unwrap(),
+    )
+    .unwrap();
     assert_eq!(read_controller_journal(&path).unwrap(), applying);
 
     let applied = write_controller_journal_applied(
         &path,
-        "experiment-1",
-        "cpu-affinity-profile:game-main",
+        crate::autotune::experiment::ExperimentId::try_new("experiment-1").unwrap(),
+        crate::actions::ActionId::try_new("cpu-affinity-profile:game-main").unwrap(),
         rollback_token(),
     )
     .unwrap();
@@ -195,8 +200,8 @@ fn journal_writer_does_not_use_fixed_temp_path() {
 
     write_controller_journal_applied(
         &path,
-        "experiment-1",
-        "cpu-affinity-profile:game-main",
+        crate::autotune::experiment::ExperimentId::try_new("experiment-1").unwrap(),
+        crate::actions::ActionId::try_new("cpu-affinity-profile:game-main").unwrap(),
         rollback_token(),
     )
     .unwrap();
@@ -225,8 +230,8 @@ fn metadata_aware_writer_persists_action_context() {
 
     let written = write_controller_journal_applied_with_metadata(
         &path,
-        "experiment-1",
-        "cpu-affinity-profile:game-main",
+        crate::autotune::experiment::ExperimentId::try_new("experiment-1").unwrap(),
+        crate::actions::ActionId::try_new("cpu-affinity-profile:game-main").unwrap(),
         rollback_token(),
         metadata,
     )

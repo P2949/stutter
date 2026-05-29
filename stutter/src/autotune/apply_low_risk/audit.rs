@@ -237,8 +237,8 @@ pub(crate) fn controller_journal_hooks_for_low_risk_action<'a>(
     ActionHooks::after_apply(move |rollback| {
         write_controller_journal_applied_with_metadata(
             journal_path,
-            experiment_id,
-            action_id,
+            crate::autotune::experiment::ExperimentId::try_new(experiment_id)?,
+            crate::actions::ActionId::try_new(action_id)?,
             rollback.clone(),
             controller_journal_metadata_for_cpu_affinity_action(
                 candidate_name,

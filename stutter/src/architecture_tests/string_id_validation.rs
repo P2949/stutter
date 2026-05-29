@@ -53,3 +53,44 @@ fn autotune_experiment_id_uses_shared_core_id_type() {
         "autotune must not reintroduce a duplicate local ExperimentId"
     );
 }
+
+#[test]
+fn daemon_policy_and_ipc_boundaries_validate_action_ids() {
+    let root = crate::architecture_tests::workspace_root();
+
+    // Policy Check
+    let evaluate_source =
+        std::fs::read_to_string(root.join("stutter/src/daemon/policy/evaluate/reason.rs"))
+            .expect("read evaluate reason.rs");
+    assert!(
+        evaluate_source.contains("validate_identity_strings()"),
+        "daemon policy evaluation must validate ActionDescriptor ActionId"
+    );
+
+    // Privileged Worker IPC Check
+    let priv_model_source =
+        std::fs::read_to_string(root.join("stutter/src/daemon/privilege/model.rs"))
+            .expect("read priv model.rs");
+    assert!(
+        priv_model_source.contains("validate_identity_strings()"),
+        "privileged worker candidate plan deserialization must validate ActionId"
+    );
+
+    // Candidate Memory Check
+    let candidate_memory_model =
+        std::fs::read_to_string(root.join("stutter/src/autotune/candidate_memory/model.rs"))
+            .expect("read candidate memory model.rs");
+    assert!(
+        candidate_memory_model.contains("validate_identity_strings()"),
+        "CandidateMemory must validate ActionId during deserialization"
+    );
+
+    // Controller Journal Check
+    let journal_model =
+        std::fs::read_to_string(root.join("stutter/src/autotune/controller_journal/model.rs"))
+            .expect("read journal model.rs");
+    assert!(
+        journal_model.contains("validate_identity_strings()"),
+        "read_controller_journal must validate ActionId and ExperimentId during deserialization"
+    );
+}

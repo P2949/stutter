@@ -858,3 +858,26 @@ fn privileged_worker_response_from_error_keeps_legacy_string_reason_code_fallbac
         other => panic!("expected error response, got {other:?}"),
     }
 }
+
+#[test]
+fn privileged_worker_plan_rejects_empty_action_id() {
+    let request = fake_apply_request();
+    let mut wire = PrivilegedWorkerCandidatePlan::from_plan_request(&request.plan);
+
+    wire.descriptor.action_id = crate::actions::ActionId::new("");
+    wire.plan_file.descriptor.action_id = crate::actions::ActionId::new("");
+
+    let err = wire
+        .into_plan_request()
+        .expect_err("empty action id should be rejected");
+
+    let typed = err
+        .downcast_ref::<crate::daemon::privilege::PrivilegedWorkerError>()
+        .expect("expected typed privileged worker error");
+
+    assert_eq!(
+        typed.reason_code(),
+        "privileged_worker_invalid_action_descriptor"
+    );
+    assert!(err.to_string().contains("ActionId cannot be empty"));
+}

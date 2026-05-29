@@ -441,3 +441,61 @@ fn observation_context_uses_workload_identity_and_inventory_signature() {
         ]
     );
 }
+
+#[test]
+fn candidate_memory_deserialize_rejects_empty_record_action_id() {
+    let json = r#"{
+        "records": [
+            {
+                "action_id": "",
+                "candidate_name": "bad",
+                "last_tried_unix_nanos": 1,
+                "result": "Tried",
+                "context_hash": "context",
+                "score_delta": 0,
+                "rollback_reason": null,
+                "cooldown_expires_unix_nanos": null
+            }
+        ],
+        "workload_actions": []
+    }"#;
+
+    let err = serde_json::from_str::<CandidateMemory>(json)
+        .expect_err("empty candidate memory action_id should be rejected");
+
+    assert!(
+        err.to_string().contains("ActionId cannot be empty"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn candidate_memory_deserialize_rejects_empty_workload_action_id() {
+    let json = r#"{
+        "records": [],
+        "workload_actions": [
+            {
+                "workload_hash": "workload",
+                "action_id": "",
+                "action_kind": "fake",
+                "objective": "desktop_interactivity",
+                "situation": "GameCpuSchedulerPressure",
+                "last_result": "Tried",
+                "score_delta": null,
+                "last_seen_unix_nanos": 1,
+                "cooldown_until_unix_nanos": null,
+                "exe_dev": null,
+                "exe_ino": null,
+                "cgroup_path": null
+            }
+        ]
+    }"#;
+
+    let err = serde_json::from_str::<CandidateMemory>(json)
+        .expect_err("empty workload action_id should be rejected");
+
+    assert!(
+        err.to_string().contains("ActionId cannot be empty"),
+        "unexpected error: {err}"
+    );
+}

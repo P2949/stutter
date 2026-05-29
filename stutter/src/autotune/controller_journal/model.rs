@@ -6,9 +6,11 @@ use std::{
 
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
+use stutter_core::ids::EmptyStringIdError;
 
 use crate::{
-    actions::{RollbackToken, SafetyClass},
+    actions::{ActionId, RollbackToken, SafetyClass},
+    autotune::experiment::ExperimentId,
     daemon::policy::DaemonMode,
 };
 
@@ -53,9 +55,9 @@ pub struct ControllerJournalRecord {
     pub schema_version: u32,
     pub state: ControllerJournalState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub experiment_id: Option<String>,
+    pub experiment_id: Option<ExperimentId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub action_id: Option<String>,
+    pub action_id: Option<ActionId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub candidate: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -136,7 +138,7 @@ impl ControllerJournalActionMetadata {
 }
 
 impl ControllerJournalRecord {
-    pub fn applying(experiment_id: impl Into<String>, action_id: impl Into<String>) -> Self {
+    pub fn applying(experiment_id: ExperimentId, action_id: ActionId) -> Self {
         Self::for_phase(
             ControllerJournalState::Applying,
             experiment_id,
@@ -146,8 +148,8 @@ impl ControllerJournalRecord {
     }
 
     pub fn applied(
-        experiment_id: impl Into<String>,
-        action_id: impl Into<String>,
+        experiment_id: ExperimentId,
+        action_id: ActionId,
         rollback_token: RollbackToken,
     ) -> Self {
         Self::for_phase(
@@ -180,15 +182,15 @@ impl ControllerJournalRecord {
 
     pub fn for_phase(
         state: ControllerJournalState,
-        experiment_id: impl Into<String>,
-        action_id: impl Into<String>,
+        experiment_id: ExperimentId,
+        action_id: ActionId,
         rollback_token: Option<RollbackToken>,
     ) -> Self {
         Self {
             schema_version: CONTROLLER_JOURNAL_SCHEMA_VERSION,
             state,
-            experiment_id: Some(experiment_id.into()),
-            action_id: Some(action_id.into()),
+            experiment_id: Some(experiment_id),
+            action_id: Some(action_id),
             candidate: None,
             workload_identity: None,
             target_identity: None,
@@ -281,7 +283,20 @@ impl ControllerJournalRecord {
     }
 
     pub fn experiment_action(&self) -> Option<(&str, &str)> {
-        Some((self.experiment_id.as_deref()?, self.action_id.as_deref()?))
+        Some((
+            self.experiment_id.as_ref()?.as_str(),
+            self.action_id.as_ref()?.as_str(),
+        ))
+    }
+
+    pub fn validate_identity_strings(&self) -> Result<(), EmptyStringIdError> {
+        if let Some(experiment_id) = &self.experiment_id {
+            experiment_id.validate_non_empty()?;
+        }
+        if let Some(action_id) = &self.action_id {
+            action_id.validate_non_empty()?;
+        }
+        Ok(())
     }
 
     pub fn rollback_token(&self) -> Option<&RollbackToken> {
@@ -408,6 +423,13 @@ pub fn read_controller_journal(path: &Path) -> anyhow::Result<ControllerJournalR
         )
     })?;
 
+    record.validate_identity_strings().with_context(|| {
+        format!(
+            "invalid autotune controller journal {} strings",
+            path.display()
+        )
+    })?;
+
     if record.schema_version() != CONTROLLER_JOURNAL_SCHEMA_VERSION {
         anyhow::bail!(
             "unsupported autotune controller journal schema_version={} in {}",
@@ -422,8 +444,8 @@ pub fn read_controller_journal(path: &Path) -> anyhow::Result<ControllerJournalR
 pub fn write_controller_journal_phase_with_metadata(
     path: &Path,
     state: ControllerJournalState,
-    experiment_id: &str,
-    action_id: &str,
+    experiment_id: ExperimentId,
+    action_id: ActionId,
     rollback_token: Option<RollbackToken>,
     metadata: ControllerJournalActionMetadata,
 ) -> anyhow::Result<ControllerJournalRecord> {
@@ -436,8 +458,8 @@ pub fn write_controller_journal_phase_with_metadata(
 
 pub fn write_controller_journal_applying(
     path: &Path,
-    experiment_id: &str,
-    action_id: &str,
+    experiment_id: ExperimentId,
+    action_id: ActionId,
 ) -> anyhow::Result<ControllerJournalRecord> {
     let record = ControllerJournalRecord::applying(experiment_id, action_id);
     write_controller_journal_record(path, &record)?;
@@ -446,8 +468,8 @@ pub fn write_controller_journal_applying(
 
 pub fn write_controller_journal_applying_with_metadata(
     path: &Path,
-    experiment_id: &str,
-    action_id: &str,
+    experiment_id: ExperimentId,
+    action_id: ActionId,
     metadata: ControllerJournalActionMetadata,
 ) -> anyhow::Result<ControllerJournalRecord> {
     write_controller_journal_phase_with_metadata(
@@ -462,8 +484,8 @@ pub fn write_controller_journal_applying_with_metadata(
 
 pub fn write_controller_journal_applied(
     path: &Path,
-    experiment_id: &str,
-    action_id: &str,
+    experiment_id: ExperimentId,
+    action_id: ActionId,
     rollback_token: RollbackToken,
 ) -> anyhow::Result<ControllerJournalRecord> {
     let record = ControllerJournalRecord::applied(experiment_id, action_id, rollback_token);
@@ -473,8 +495,8 @@ pub fn write_controller_journal_applied(
 
 pub fn write_controller_journal_applied_with_metadata(
     path: &Path,
-    experiment_id: &str,
-    action_id: &str,
+    experiment_id: ExperimentId,
+    action_id: ActionId,
     rollback_token: RollbackToken,
     metadata: ControllerJournalActionMetadata,
 ) -> anyhow::Result<ControllerJournalRecord> {
@@ -495,8 +517,8 @@ pub fn write_controller_journal_clean(path: &Path) -> anyhow::Result<ControllerJ
 }
 
 pub fn write_default_controller_journal_applying(
-    experiment_id: &str,
-    action_id: &str,
+    experiment_id: ExperimentId,
+    action_id: ActionId,
 ) -> anyhow::Result<PathBuf> {
     let path = default_controller_journal_path();
     write_controller_journal_applying(&path, experiment_id, action_id)?;
@@ -504,8 +526,8 @@ pub fn write_default_controller_journal_applying(
 }
 
 pub fn write_default_controller_journal_applied(
-    experiment_id: &str,
-    action_id: &str,
+    experiment_id: ExperimentId,
+    action_id: ActionId,
     rollback_token: RollbackToken,
 ) -> anyhow::Result<PathBuf> {
     let path = default_controller_journal_path();

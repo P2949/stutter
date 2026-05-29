@@ -65,6 +65,12 @@ pub(in crate::daemon::policy) fn record_policy_rule(
 pub(super) fn validate_policy_descriptor_shape(
     descriptor: &ActionDescriptor,
 ) -> Result<(), DaemonPolicyError> {
+    descriptor
+        .validate_identity_strings()
+        .map_err(|err| DaemonPolicyError::InvalidInput {
+            message: err.to_string(),
+        })?;
+
     if descriptor.action_kind.trim().is_empty() {
         return Err(DaemonPolicyError::InvalidInput {
             message: "action_kind must not be empty".to_owned(),
