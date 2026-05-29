@@ -28,6 +28,7 @@ mod privileged_errors;
 mod probe_planning;
 mod public_api;
 mod raw_ids;
+mod release_packaging;
 mod rolling_window_privacy;
 mod scanners;
 mod scratch_dir;

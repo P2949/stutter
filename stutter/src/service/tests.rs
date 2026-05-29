@@ -97,8 +97,13 @@ mod tests {
             .join("gentoo")
             .join("stutter-9999.ebuild");
         let install_doc_path = root.join("docs").join("INSTALL.md");
+        let packaging_doc_path = root.join("docs").join("PACKAGING.md");
+        let release_checklist_path = root.join("docs").join("RELEASE_CHECKLIST.md");
+
         let ebuild = std::fs::read_to_string(ebuild_path).unwrap();
         let install_doc = std::fs::read_to_string(install_doc_path).unwrap();
+        let packaging_doc = std::fs::read_to_string(packaging_doc_path).unwrap();
+        let release_checklist = std::fs::read_to_string(release_checklist_path).unwrap();
 
         assert!(
             ebuild.contains("# Packaging skeleton only."),
@@ -127,6 +132,36 @@ mod tests {
         assert!(
             install_doc.contains("skeleton only"),
             "install docs should describe Gentoo packaging as a skeleton"
+        );
+
+        assert!(
+            packaging_doc.contains("distro packaging is currently skeleton/experimental"),
+            "packaging docs should not present distro packaging as production-ready"
+        );
+        assert!(
+            packaging_doc
+                .replace('\n', " ")
+                .contains("**not** the same as production-ready distro packaging")
+                || packaging_doc
+                    .replace('\n', " ")
+                    .contains("not the same as production-ready distro packaging"),
+            "packaging docs should distinguish service-unit readiness from distro packaging readiness"
+        );
+        assert!(
+            release_checklist.replace('\n', " ").contains(
+                "separates source/runtime readiness from production distro packaging readiness"
+            ) || release_checklist.replace('\n', " ").contains(
+                "separate source/runtime readiness from production distro packaging readiness"
+            ),
+            "release checklist should explicitly separate source/runtime readiness from distro packaging"
+        );
+        assert!(
+            release_checklist.contains("Do not claim production-ready distro packaging"),
+            "release checklist should forbid production-ready packaging claims without evidence"
+        );
+        assert!(
+            release_checklist.contains("production_distro_packaging"),
+            "release checklist should name the distro packaging readiness gate"
         );
     }
 
