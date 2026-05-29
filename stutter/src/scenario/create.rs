@@ -4,6 +4,9 @@ use anyhow::{Context, Result};
 
 use super::{io::*, model::*};
 
+const DEFAULT_SCENARIO_NOTES: &str =
+    "Describe the route and edit watch_process/tree_pid/pid before running this scenario.";
+
 pub struct ScenarioCreateInput {
     pub name: String,
     pub force: bool,
@@ -40,12 +43,9 @@ pub fn create_scenario(input: ScenarioCreateInput) -> Result<PathBuf> {
             "GameScope".to_owned(),
             "Compositor".to_owned(),
         ],
-        notes: input.notes.or_else(|| {
-            Some(
-                "TODO: describe the route and edit watch_process/tree_pid/pid before running"
-                    .to_owned(),
-            )
-        }),
+        notes: input
+            .notes
+            .or_else(|| Some(DEFAULT_SCENARIO_NOTES.to_owned())),
         persistent: true,
         include_comm: Vec::new(),
         exclude_comm: Vec::new(),
