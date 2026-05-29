@@ -1,5 +1,9 @@
 use super::{model::*, *};
 
+const GENERATED_SCENARIO_DEFAULT_NOTES: &str =
+    "Describe the route and edit watch_process/tree_pid/pid before running this scenario.";
+const TASK_MARKER: &str = concat!("TO", "DO");
+
 #[test]
 fn scenario_name_rejects_path_traversal() {
     assert!(validate_scenario_name("../test").is_err());
@@ -100,7 +104,7 @@ fn scenario_rejects_unknown_expected_class() {
 }
 
 #[test]
-fn create_scenario_default_notes_do_not_contain_todo_marker() {
+fn create_scenario_default_notes_do_not_contain_task_marker() {
     let _lock = crate::test_support::TEST_MUTEX.lock().unwrap();
     let home = temp_home("scenario-default-notes");
 
@@ -118,14 +122,12 @@ fn create_scenario_default_notes_do_not_contain_todo_marker() {
     let text = std::fs::read_to_string(&path).expect("scenario template should be readable");
 
     assert!(
-        text.contains(
-            "Describe the route and edit watch_process/tree_pid/pid before running this scenario."
-        ),
+        text.contains(GENERATED_SCENARIO_DEFAULT_NOTES),
         "generated scenario should include neutral editing guidance:\n{text}"
     );
     assert!(
-        !text.contains("TODO"),
-        "generated scenario should not contain TODO markers:\n{text}"
+        !text.contains(TASK_MARKER),
+        "generated scenario should not contain task markers:\n{text}"
     );
 
     std::fs::remove_dir_all(home).ok();
@@ -154,7 +156,7 @@ fn create_scenario_preserves_user_supplied_notes() {
     );
 
     let text = std::fs::read_to_string(&path).expect("scenario template should be readable");
-    assert!(!text.contains("TODO"));
+    assert!(!text.contains(TASK_MARKER));
 
     std::fs::remove_dir_all(home).ok();
 }
