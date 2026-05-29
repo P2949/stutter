@@ -10,10 +10,13 @@ use super::{
     TextReportCorrelationSections,
 };
 
-/// Report-domain model migrated far enough to support crate-local load/render tests.
+/// Report-domain model used by the `stutter-report` crate for crate-local
+/// loading, analysis, diffing, text rendering, and basic HTML rendering.
 ///
-/// Remaining fields still derived by the main crate are tracked in
-/// `docs/REPORT_CRATE_MIGRATION.md`.
+/// The model intentionally contains the stable report fields that have been
+/// migrated out of the main runtime crate. Rich CLI HTML/report assembly still
+/// derives additional main-crate models until those ownership boundaries are
+/// migrated deliberately; see `docs/REPORT_CRATE_MIGRATION.md`.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ReportModel {
     pub run_id: Option<RunId>,

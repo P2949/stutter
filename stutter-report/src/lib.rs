@@ -1,10 +1,17 @@
 #![forbid(unsafe_code)]
 
-//! Report model, loading, analysis, diffing, and rendering migration boundary.
+//! Report model, loading, analysis, diffing, text rendering, and basic HTML
+//! rendering boundary.
 //!
 //! This crate is intentionally independent from the main `stutter` runtime crate.
-//! The remaining main-crate report logic is tracked in
-//! `docs/REPORT_CRATE_MIGRATION.md`.
+//! The initial report-crate migration is complete for crate-local loading,
+//! model analysis, diffing, text rendering, and basic self-contained HTML
+//! rendering.
+//!
+//! Rich CLI report assembly, artifact-to-report-input conversion, report JSON,
+//! compatibility re-exports, and the full interactive HTML report pipeline still
+//! live in the main `stutter` crate. Remaining ownership and follow-up work are
+//! tracked in `docs/REPORT_CRATE_MIGRATION.md`.
 
 pub mod analysis;
 pub mod diff;

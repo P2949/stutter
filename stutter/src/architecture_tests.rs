@@ -29,6 +29,7 @@ mod probe_planning;
 mod public_api;
 mod raw_ids;
 mod release_packaging;
+mod report_migration_docs;
 mod rolling_window_privacy;
 mod scanners;
 mod scratch_dir;
