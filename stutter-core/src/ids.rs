@@ -1,6 +1,23 @@
 use std::{borrow::Borrow, fmt};
 
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Error)]
+#[error("{type_name} cannot be empty")]
+pub struct EmptyStringIdError {
+    type_name: &'static str,
+}
+
+impl EmptyStringIdError {
+    pub const fn new(type_name: &'static str) -> Self {
+        Self { type_name }
+    }
+
+    pub const fn type_name(self) -> &'static str {
+        self.type_name
+    }
+}
 
 macro_rules! numeric_id {
     ($name:ident, $doc:literal) => {
@@ -105,8 +122,32 @@ macro_rules! string_id {
         pub struct $name(String);
 
         impl $name {
+            /// Construct a string identifier without validation.
+            ///
+            /// This constructor is retained for compatibility with existing internal
+            /// call sites. New user/input-facing code should prefer [`Self::try_new`].
             pub fn new(value: impl Into<String>) -> Self {
                 Self(value.into())
+            }
+
+            /// Construct a string identifier, rejecting empty or whitespace-only values.
+            pub fn try_new(value: impl Into<String>) -> Result<Self, EmptyStringIdError> {
+                let value = value.into();
+                if value.trim().is_empty() {
+                    return Err(EmptyStringIdError::new(stringify!($name)));
+                }
+                Ok(Self(value))
+            }
+
+            /// Validate an already-constructed or deserialized identifier.
+            ///
+            /// This is useful after serde deserialization, because these IDs use
+            /// `#[serde(transparent)]` to preserve the existing JSON string shape.
+            pub fn validate_non_empty(&self) -> Result<(), EmptyStringIdError> {
+                if self.0.trim().is_empty() {
+                    return Err(EmptyStringIdError::new(stringify!($name)));
+                }
+                Ok(())
             }
 
             pub fn as_str(&self) -> &str {
@@ -185,7 +226,62 @@ impl From<TaskId> for Tid {
 
 #[cfg(test)]
 mod tests {
-    use super::{ActionId, CpuId, ExperimentId, IrqId, Pid, ProcessId, RunId, TaskId, Tid};
+    use super::{
+        ActionId, CpuId, EmptyStringIdError, ExperimentId, IrqId, Pid, ProcessId, RunId, StableId,
+        TaskId, Tid,
+    };
+
+    #[test]
+    fn string_ids_try_new_rejects_empty_and_whitespace_values() {
+        for err in [
+            StableId::try_new("").expect_err("empty StableId should fail"),
+            RunId::try_new("").expect_err("empty RunId should fail"),
+            ActionId::try_new("   ").expect_err("whitespace ActionId should fail"),
+            ExperimentId::try_new("\t\n").expect_err("whitespace ExperimentId should fail"),
+        ] {
+            assert!(matches!(err, EmptyStringIdError { .. }));
+        }
+
+        assert_eq!(
+            RunId::try_new("")
+                .expect_err("empty RunId should fail")
+                .type_name(),
+            "RunId"
+        );
+        assert_eq!(
+            ActionId::try_new(" ")
+                .expect_err("empty ActionId should fail")
+                .type_name(),
+            "ActionId"
+        );
+        assert_eq!(
+            ExperimentId::try_new("\n")
+                .expect_err("empty ExperimentId should fail")
+                .type_name(),
+            "ExperimentId"
+        );
+    }
+
+    #[test]
+    fn string_ids_try_new_accepts_non_empty_values_without_trimming() {
+        let run = RunId::try_new(" run-001 ").expect("non-empty RunId should pass");
+        assert_eq!(run.as_str(), " run-001 ");
+
+        let action =
+            ActionId::try_new("action/cpu-affinity").expect("non-empty ActionId should pass");
+        assert_eq!(action.as_str(), "action/cpu-affinity");
+
+        let experiment = ExperimentId::try_new("experiment/live-001")
+            .expect("non-empty ExperimentId should pass");
+        assert_eq!(experiment.as_str(), "experiment/live-001");
+    }
+
+    #[test]
+    fn compatibility_string_id_new_still_accepts_empty_until_call_sites_migrate() {
+        let run = RunId::new("");
+        assert_eq!(run.as_str(), "");
+        assert!(run.validate_non_empty().is_err());
+    }
 
     #[test]
     fn numeric_ids_construct_and_convert_to_raw_values() {

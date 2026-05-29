@@ -2,22 +2,10 @@
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
+pub use stutter_core::ids::ExperimentId;
 
 use super::planning::candidate::CandidateAction;
 use crate::{actions::RollbackToken, scorer::StutterScore};
-
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ExperimentId(pub String);
-
-impl ExperimentId {
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct WindowScore {
@@ -371,5 +359,16 @@ mod tests {
 
         assert_eq!(score.duration_seconds(), None);
         assert_eq!(score.score_per_second(), None);
+    }
+
+    #[test]
+    fn autotune_experiment_id_uses_shared_non_empty_validation() {
+        assert!(ExperimentId::try_new("").is_err());
+        assert!(ExperimentId::try_new("   ").is_err());
+
+        let experiment_id =
+            ExperimentId::try_new("experiment-1").expect("non-empty experiment id should pass");
+
+        assert_eq!(experiment_id.as_str(), "experiment-1");
     }
 }
