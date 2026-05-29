@@ -643,3 +643,57 @@ pub fn implemented_probe_specs() -> impl Iterator<Item = &'static ProbeSpec> {
         .iter()
         .filter(|spec| spec.status == ProbeStatus::Implemented)
 }
+
+pub fn activation_probe_specs() -> impl Iterator<Item = &'static ProbeSpec> {
+    PROBE_REGISTRY
+        .iter()
+        .filter(|spec| spec.status != ProbeStatus::Planned)
+}
+
+pub fn visible_probe_specs(include_planned: bool) -> impl Iterator<Item = &'static ProbeSpec> {
+    PROBE_REGISTRY
+        .iter()
+        .filter(move |spec| include_planned || spec.status != ProbeStatus::Planned)
+}
+
+#[cfg(test)]
+pub fn planned_probe_specs() -> impl Iterator<Item = &'static ProbeSpec> {
+    PROBE_REGISTRY
+        .iter()
+        .filter(|spec| spec.status == ProbeStatus::Planned)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn activation_specs_exclude_planned_probes() {
+        let planned = planned_probe_specs()
+            .map(|spec| spec.key)
+            .collect::<std::collections::BTreeSet<_>>();
+
+        assert!(
+            !planned.is_empty(),
+            "registry should keep planned probes documented"
+        );
+
+        assert!(
+            activation_probe_specs().all(|spec| !planned.contains(&spec.key)),
+            "activation specs should exclude planned probes"
+        );
+    }
+
+    #[test]
+    fn visible_specs_hide_planned_by_default_and_include_them_when_requested() {
+        assert!(
+            visible_probe_specs(false).all(|spec| spec.status != ProbeStatus::Planned),
+            "default visible specs should hide planned probes"
+        );
+
+        assert!(
+            visible_probe_specs(true).any(|spec| spec.status == ProbeStatus::Planned),
+            "include-planned visible specs should expose planned probes"
+        );
+    }
+}

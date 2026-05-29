@@ -6,10 +6,9 @@ use crate::{
     artifacts::{ArtifactKind, artifact_is_ndjson_stream},
     config::{FocusSource, model::MonitorConfig},
     ebpf_loader::TracepointAvailability,
-    probe_catalog::ProbeStatus,
     probe_registry::{
-        DataQualityRule, EbpfProgramSpec, PROBE_REGISTRY, PerfEventSpec, ProbeKey, ProbeSpec,
-        TracepointSpec, probe_spec,
+        DataQualityRule, EbpfProgramSpec, PerfEventSpec, ProbeKey, ProbeSpec, TracepointSpec,
+        activation_probe_specs, probe_spec,
     },
 };
 
@@ -45,15 +44,7 @@ impl ProbeActivationPlan {
         let mut disabled = Vec::new();
         let mut warnings = Vec::new();
 
-        for spec in PROBE_REGISTRY {
-            if spec.status == ProbeStatus::Planned {
-                disabled.push(ProbeDisabledReason {
-                    key: spec.key,
-                    reason: "planned probe is not implemented".to_owned(),
-                });
-                continue;
-            }
-
+        for spec in activation_probe_specs() {
             if !probe_requested(spec.key, config) {
                 disabled.push(ProbeDisabledReason {
                     key: spec.key,
@@ -645,5 +636,34 @@ mod tests {
                 && warning.message.contains("drm_flip_request")
                 && warning.message.contains("permission denied")
         }));
+    }
+
+    #[test]
+    fn activation_plan_omits_planned_probes_entirely() {
+        let config = MonitorConfig::default();
+        let tracepoints = tracepoints();
+        let planned = crate::probe_registry::planned_probe_specs()
+            .map(|spec| spec.key)
+            .collect::<std::collections::BTreeSet<_>>();
+
+        let plan = ProbeActivationPlan::from_config(&config, &tracepoints)
+            .expect("default config should build activation plan");
+
+        assert!(
+            plan.enabled.iter().all(|spec| !planned.contains(&spec.key)),
+            "planned probes should never be enabled"
+        );
+        assert!(
+            plan.disabled
+                .iter()
+                .all(|disabled| !planned.contains(&disabled.key)),
+            "planned probes should be omitted from activation disabled list"
+        );
+        assert!(
+            plan.disabled.iter().all(|disabled| !disabled
+                .reason
+                .contains(concat!("planned probe is not", " implemented"))),
+            "activation disabled reasons should not expose planned probes as missing functionality"
+        );
     }
 }

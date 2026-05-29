@@ -2,7 +2,7 @@ use serde::Serialize;
 
 use crate::{
     artifacts::artifact_spec,
-    probe_registry::{PROBE_REGISTRY, ProbeCapability},
+    probe_registry::{ProbeCapability, visible_probe_specs},
 };
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -35,9 +35,18 @@ pub struct ProbeCatalogEntry {
     pub validation_contract: &'static str,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ProbeCatalogOptions {
+    pub include_planned: bool,
+}
+
+#[cfg(test)]
 pub fn probe_catalog_entries() -> Vec<ProbeCatalogEntry> {
-    PROBE_REGISTRY
-        .iter()
+    probe_catalog_entries_with_options(ProbeCatalogOptions::default())
+}
+
+pub fn probe_catalog_entries_with_options(options: ProbeCatalogOptions) -> Vec<ProbeCatalogEntry> {
+    visible_probe_specs(options.include_planned)
         .map(|spec| {
             let artifact_files = spec
                 .artifacts
@@ -75,8 +84,8 @@ pub fn probe_catalog_entries() -> Vec<ProbeCatalogEntry> {
         .collect()
 }
 
-pub fn probes_command(json: bool) -> anyhow::Result<()> {
-    let entries = probe_catalog_entries();
+pub fn probes_command(json: bool, include_planned: bool) -> anyhow::Result<()> {
+    let entries = probe_catalog_entries_with_options(ProbeCatalogOptions { include_planned });
     if json {
         println!("{}", serde_json::to_string_pretty(&entries)?);
     } else {
@@ -156,16 +165,45 @@ mod tests {
     }
 
     #[test]
-    fn planned_probes_are_default_off() {
+    fn default_probe_catalog_hides_planned_probes() {
         let entries = probe_catalog_entries();
-        for entry in entries
+
+        assert!(
+            entries
+                .iter()
+                .all(|entry| entry.status != ProbeStatus::Planned),
+            "default probe catalog should not include planned probes"
+        );
+        assert!(
+            entries.iter().all(|entry| {
+                entry.key != "perf_counter_presets" && entry.key != "compositor_frame_pacing_views"
+            }),
+            "default probe catalog should hide roadmap probes"
+        );
+    }
+
+    #[test]
+    fn planned_probes_are_available_only_when_requested() {
+        let entries = probe_catalog_entries_with_options(ProbeCatalogOptions {
+            include_planned: true,
+        });
+
+        let planned = entries
             .iter()
             .filter(|entry| entry.status == ProbeStatus::Planned)
-        {
+            .collect::<Vec<_>>();
+
+        assert!(
+            !planned.is_empty(),
+            "include_planned catalog should expose planned probes"
+        );
+
+        for entry in planned {
             assert!(!entry.default_enabled, "planned probe {} is on", entry.key);
             assert!(
                 entry.artifact_files.is_empty(),
-                "planned probe has artifacts"
+                "planned probe {} should not publish artifacts",
+                entry.key
             );
             assert!(
                 entry.validation_contract.contains("not implemented"),
@@ -191,20 +229,39 @@ mod tests {
     }
 
     #[test]
-    fn probe_catalog_json_serializes() {
+    fn default_probe_catalog_json_omits_planned_probes() {
         let entries = probe_catalog_entries();
         let json = serde_json::to_string_pretty(&entries).unwrap();
+
         assert!(json.contains("scheduler_runnable_latency"));
         assert!(json.contains("implemented"));
+        assert!(!json.contains("perf_counter_presets"));
+        assert!(!json.contains("compositor_frame_pacing_views"));
+        assert!(!json.contains("planned"));
     }
 
     #[test]
-    fn render_probe_catalog_mentions_core_probe() {
+    fn include_planned_probe_catalog_json_mentions_roadmap_probes() {
+        let entries = probe_catalog_entries_with_options(ProbeCatalogOptions {
+            include_planned: true,
+        });
+        let json = serde_json::to_string_pretty(&entries).unwrap();
+
+        assert!(json.contains("perf_counter_presets"));
+        assert!(json.contains("compositor_frame_pacing_views"));
+        assert!(json.contains("planned"));
+    }
+
+    #[test]
+    fn render_probe_catalog_mentions_core_probe_and_omits_planned_by_default() {
         let entries = probe_catalog_entries();
         let output = render_probe_catalog(&entries);
+
         assert!(output.contains("scheduler_runnable_latency"));
         assert!(output.contains("implemented"));
         assert!(output.contains("core"));
+        assert!(!output.contains("perf_counter_presets"));
+        assert!(!output.contains("compositor_frame_pacing_views"));
     }
 
     #[test]
@@ -272,7 +329,11 @@ mod tests {
 
     #[test]
     fn catalog_entries_are_direct_views_of_registry_specs() {
-        let entries = probe_catalog_entries();
+        use crate::probe_registry::PROBE_REGISTRY;
+
+        let entries = probe_catalog_entries_with_options(ProbeCatalogOptions {
+            include_planned: true,
+        });
         assert_eq!(entries.len(), PROBE_REGISTRY.len());
 
         for (entry, spec) in entries.iter().zip(PROBE_REGISTRY.iter()) {

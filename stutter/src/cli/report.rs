@@ -16,6 +16,12 @@ pub(super) struct CompletionsArgs {
 pub(super) struct ProbesArgs {
     #[arg(long)]
     pub(super) json: bool,
+
+    #[arg(
+        long = "include-planned",
+        help = "Include roadmap probes that are documented but not implemented"
+    )]
+    pub(super) include_planned: bool,
 }
 
 #[derive(Args, Debug, Clone)]

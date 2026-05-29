@@ -274,6 +274,7 @@ pub struct DoctorCommandInput {
 #[derive(Debug)]
 pub struct ProbesCommandInput {
     pub json: bool,
+    pub include_planned: bool,
 }
 
 #[derive(Debug)]

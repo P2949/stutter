@@ -311,5 +311,54 @@ pub(super) fn parse_man_command(args: ManArgs) -> anyhow::Result<AppCommand> {
 }
 
 pub(super) fn parse_probes_command(args: ProbesArgs) -> anyhow::Result<AppCommand> {
-    Ok(AppCommand::Probes(ProbesCommandInput { json: args.json }))
+    Ok(AppCommand::Probes(ProbesCommandInput {
+        json: args.json,
+        include_planned: args.include_planned,
+    }))
+}
+
+#[cfg(test)]
+mod probes_tests {
+    use crate::{cli::parse_app_command_from, commands::input::AppCommand};
+
+    #[test]
+    fn probes_include_planned_flag_is_parsed() {
+        let command = parse_app_command_from(["stutter", "probes", "--include-planned"])
+            .expect("probes --include-planned should parse");
+
+        match command {
+            AppCommand::Probes(input) => {
+                assert!(!input.json);
+                assert!(input.include_planned);
+            }
+            other => panic!("expected probes command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn probes_json_include_planned_flags_are_parsed_together() {
+        let command = parse_app_command_from(["stutter", "probes", "--json", "--include-planned"])
+            .expect("probes --json --include-planned should parse");
+
+        match command {
+            AppCommand::Probes(input) => {
+                assert!(input.json);
+                assert!(input.include_planned);
+            }
+            other => panic!("expected probes command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn probes_default_hides_planned_flag_is_false() {
+        let command = parse_app_command_from(["stutter", "probes"]).expect("probes should parse");
+
+        match command {
+            AppCommand::Probes(input) => {
+                assert!(!input.json);
+                assert!(!input.include_planned);
+            }
+            other => panic!("expected probes command, got {other:?}"),
+        }
+    }
 }
