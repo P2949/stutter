@@ -18,7 +18,7 @@ Options:
       --profiles <FILE>
           
       --mode <MODE>
-          Autotune mode: observe, suggest, apply-low-risk, apply-medium-risk, or apply-high-risk. Live autotune supports observe, suggest, apply-low-risk, and apply-medium-risk when --allow-medium-risk is set; apply-medium-risk is limited to reversible process-local/cgroup candidates, and apply-high-risk is not implemented. [default: observe]
+          Live autotune mode: observe, suggest, apply-low-risk, or apply-medium-risk. apply-medium-risk requires --allow-medium-risk and is limited to reversible process-local/cgroup candidates. High-risk apply is reserved internally and is not exposed by live autotune. [default: observe] [possible values: observe, suggest, apply-low-risk, apply-medium-risk]
       --decision-log <PATH>
           
       --duration-seconds <DURATION_SECONDS>

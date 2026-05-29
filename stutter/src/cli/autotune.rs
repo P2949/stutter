@@ -1,4 +1,43 @@
+use std::fmt;
+
+use clap::ValueEnum;
+
 use super::*;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+#[value(rename_all = "kebab-case")]
+pub(super) enum LiveAutotuneMode {
+    Observe,
+    Suggest,
+    ApplyLowRisk,
+    ApplyMediumRisk,
+}
+
+impl LiveAutotuneMode {
+    pub(super) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Observe => "observe",
+            Self::Suggest => "suggest",
+            Self::ApplyLowRisk => "apply-low-risk",
+            Self::ApplyMediumRisk => "apply-medium-risk",
+        }
+    }
+
+    pub(super) const fn as_daemon_mode(self) -> crate::daemon::policy::DaemonMode {
+        match self {
+            Self::Observe => crate::daemon::policy::DaemonMode::Observe,
+            Self::Suggest => crate::daemon::policy::DaemonMode::Suggest,
+            Self::ApplyLowRisk => crate::daemon::policy::DaemonMode::ApplyLowRisk,
+            Self::ApplyMediumRisk => crate::daemon::policy::DaemonMode::ApplyMediumRisk,
+        }
+    }
+}
+
+impl fmt::Display for LiveAutotuneMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
 
 #[derive(Args, Debug, Clone)]
 pub(super) struct AutotuneArgs {
@@ -19,10 +58,11 @@ pub(super) struct AutotuneArgs {
 
     #[arg(
         long = "mode",
-        default_value = "observe",
-        help = "Autotune mode: observe, suggest, apply-low-risk, apply-medium-risk, or apply-high-risk. Live autotune supports observe, suggest, apply-low-risk, and apply-medium-risk when --allow-medium-risk is set; apply-medium-risk is limited to reversible process-local/cgroup candidates, and apply-high-risk is not implemented."
+        value_enum,
+        default_value_t = LiveAutotuneMode::Observe,
+        help = "Live autotune mode: observe, suggest, apply-low-risk, or apply-medium-risk. apply-medium-risk requires --allow-medium-risk and is limited to reversible process-local/cgroup candidates. High-risk apply is reserved internally and is not exposed by live autotune."
     )]
-    pub(super) mode: String,
+    pub(super) mode: LiveAutotuneMode,
 
     #[arg(long = "decision-log", value_name = "PATH")]
     pub(super) decision_log: Option<PathBuf>,
@@ -218,23 +258,21 @@ pub(super) struct AutotuneStatusArgs {
 }
 
 pub(super) fn validate_autotune_mode(
-    mode: &str,
+    mode: LiveAutotuneMode,
     allow_medium_risk: bool,
     dry_run_all_safe: bool,
 ) -> anyhow::Result<()> {
-    if dry_run_all_safe && mode != "suggest" {
+    if dry_run_all_safe && mode != LiveAutotuneMode::Suggest {
         anyhow::bail!("--dry-run-all-safe requires --mode suggest");
     }
 
     match mode {
-        "observe" | "suggest" | "apply-low-risk" => Ok(()),
-        "apply-medium-risk" if allow_medium_risk => Ok(()),
-        "apply-medium-risk" => anyhow::bail!(
+        LiveAutotuneMode::Observe | LiveAutotuneMode::Suggest | LiveAutotuneMode::ApplyLowRisk => {
+            Ok(())
+        }
+        LiveAutotuneMode::ApplyMediumRisk if allow_medium_risk => Ok(()),
+        LiveAutotuneMode::ApplyMediumRisk => anyhow::bail!(
             "apply-medium-risk requires --allow-medium-risk and only applies reversible process-local candidates"
-        ),
-        "apply-high-risk" => anyhow::bail!("high-risk apply is not implemented"),
-        _ => anyhow::bail!(
-            "unsupported autotune mode; use observe, suggest, apply-low-risk, or apply-medium-risk with --allow-medium-risk"
         ),
     }
 }
