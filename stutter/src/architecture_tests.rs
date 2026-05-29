@@ -23,6 +23,7 @@ mod mutation_paths;
 mod objectives;
 mod panic_paths;
 mod privileged_errors;
+mod probe_planning;
 mod public_api;
 mod raw_ids;
 mod rolling_window_privacy;

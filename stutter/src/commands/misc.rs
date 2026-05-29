@@ -133,7 +133,7 @@ pub fn run_doctor_command(input: input::DoctorCommandInput) -> anyhow::Result<()
 }
 
 pub fn run_probes_command(input: input::ProbesCommandInput) -> anyhow::Result<()> {
-    probe_catalog::probes_command(input.json)
+    probe_catalog::probes_command(input.json, input.include_planned)
 }
 
 pub fn run_profile_template_command(
