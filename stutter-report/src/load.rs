@@ -33,7 +33,11 @@ pub(crate) fn load_json_file<T: DeserializeOwned>(path: &Path) -> Result<T, Repo
 
 /// Load a report model from the requested path.
 pub fn load_report_model(request: &ReportLoadRequest) -> Result<ReportModel, ReportError> {
-    load_json_file(request.path())
+    let model: ReportModel = load_json_file(request.path())?;
+    model
+        .validate_identity_strings()
+        .map_err(|err| ReportError::invalid_model(err.to_string()))?;
+    Ok(model)
 }
 
 #[cfg(test)]
@@ -62,5 +66,38 @@ mod tests {
         let request = ReportLoadRequest::from_path(&path);
         let loaded = load_report_model(&request).unwrap();
         assert_eq!(loaded.run_id, model.run_id);
+    }
+
+    #[test]
+    fn load_report_model_rejects_empty_run_id() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("report.json");
+
+        fs::write(
+            &path,
+            r#"{
+                "run_id": "",
+                "source_path": null,
+                "generated_at_unix_nanos": null,
+                "score": null,
+                "p95_latency_ns": null,
+                "p99_latency_ns": null,
+                "top_culprit": null,
+                "header": null,
+                "data_quality": null,
+                "clusters": [],
+                "frames": [],
+                "correlations": null
+            }"#,
+        )
+        .unwrap();
+
+        let request = ReportLoadRequest::from_path(&path);
+        let err = load_report_model(&request).expect_err("empty run_id should be rejected");
+
+        assert!(
+            err.to_string().contains("RunId cannot be empty"),
+            "unexpected error: {err}"
+        );
     }
 }

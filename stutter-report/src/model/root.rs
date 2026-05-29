@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
-use stutter_core::{ids::RunId, paths::LogicalPath, units::UnixNanoseconds};
+use stutter_core::{
+    ids::{EmptyStringIdError, RunId},
+    paths::LogicalPath,
+    units::UnixNanoseconds,
+};
 
 use super::{
     DataQualitySummary, FrameDiagnosis, ReportHeaderSummary, SpikeCluster,
@@ -75,6 +79,13 @@ impl ReportModel {
     pub fn generated_at_unix_nanos(&self) -> Option<UnixNanoseconds> {
         self.generated_at_unix_nanos
     }
+
+    pub fn validate_identity_strings(&self) -> Result<(), EmptyStringIdError> {
+        if let Some(run_id) = &self.run_id {
+            run_id.validate_non_empty()?;
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -104,5 +115,16 @@ mod tests {
                 .map(UnixNanoseconds::as_u128),
             Some(123)
         );
+    }
+
+    #[test]
+    fn report_model_rejects_empty_run_id_on_identity_validation() {
+        let model = ReportModel::new().with_run_id(RunId::new(""));
+
+        let err = model
+            .validate_identity_strings()
+            .expect_err("empty report run_id should be invalid");
+
+        assert_eq!(err.type_name(), "RunId");
     }
 }

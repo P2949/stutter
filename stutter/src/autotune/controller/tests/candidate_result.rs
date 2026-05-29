@@ -38,7 +38,7 @@ fn active_experiment_reverts_when_candidate_raw_score_is_lower_but_rate_is_worse
             experiment_id,
             reason,
         } => {
-            assert_eq!(experiment_id, ExperimentId("experiment-1".to_owned()));
+            assert_eq!(experiment_id, ExperimentId::new("experiment-1"));
             assert!(
                 reason.contains("regressed normalized score"),
                 "expected regression, got: {reason}"
@@ -63,7 +63,7 @@ fn active_experiment_keeps_when_candidate_raw_score_is_higher_but_rate_is_better
             experiment_id,
             reason,
         } => {
-            assert_eq!(experiment_id, ExperimentId("experiment-1".to_owned()));
+            assert_eq!(experiment_id, ExperimentId::new("experiment-1"));
             assert!(
                 reason.contains("improved normalized score"),
                 "expected improvement, got: {reason}"
@@ -89,7 +89,7 @@ fn active_experiment_reverts_when_score_comparison_is_invalid() {
             experiment_id,
             reason,
         } => {
-            assert_eq!(experiment_id, ExperimentId("experiment-1".to_owned()));
+            assert_eq!(experiment_id, ExperimentId::new("experiment-1"));
             assert!(
                 reason.contains("invalid active experiment score comparison"),
                 "expected invalid reason, got: {reason}"
@@ -116,7 +116,7 @@ fn target_disappeared_reverts_active_experiment() {
             experiment_id,
             reason,
         } => {
-            assert_eq!(experiment_id, ExperimentId("experiment-1".to_owned()));
+            assert_eq!(experiment_id, ExperimentId::new("experiment-1"));
             assert!(reason.contains("target disappeared"));
         }
         other => panic!("expected Revert, got {other:?}"),
@@ -136,7 +136,7 @@ fn regression_reverts_candidate() {
             experiment_id,
             reason,
         } => {
-            assert_eq!(experiment_id, ExperimentId("experiment-1".to_owned()));
+            assert_eq!(experiment_id, ExperimentId::new("experiment-1"));
             assert!(reason.contains("regressed normalized score"));
             assert!(reason.contains("exceeds max_regression_percent"));
         }
@@ -157,7 +157,7 @@ fn improvement_keeps_candidate() {
             experiment_id,
             reason,
         } => {
-            assert_eq!(experiment_id, ExperimentId("experiment-1".to_owned()));
+            assert_eq!(experiment_id, ExperimentId::new("experiment-1"));
             assert!(reason.contains("improved normalized score"));
             assert!(reason.contains("meets min_improvement_percent"));
         }

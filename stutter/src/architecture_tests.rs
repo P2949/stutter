@@ -28,6 +28,7 @@ mod raw_ids;
 mod rolling_window_privacy;
 mod scanners;
 mod scratch_dir;
+mod string_id_validation;
 mod test_layout;
 mod transitional;
 mod transitional_allowlist;

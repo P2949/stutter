@@ -148,7 +148,7 @@ fn policy_target_exit_reverts() {
             experiment_id,
             reason,
         } => {
-            assert_eq!(experiment_id, ExperimentId("experiment-1".to_owned()));
+            assert_eq!(experiment_id, ExperimentId::new("experiment-1"));
             assert!(
                 reason.contains("target disappeared during active experiment"),
                 "unexpected target-exit revert reason: {reason}"
@@ -171,7 +171,7 @@ fn policy_candidate_regression_reverts() {
             experiment_id,
             reason,
         } => {
-            assert_eq!(experiment_id, ExperimentId("experiment-1".to_owned()));
+            assert_eq!(experiment_id, ExperimentId::new("experiment-1"));
             assert!(
                 reason.contains("candidate regressed normalized score by 8.0%"),
                 "unexpected regression reason: {reason}"
@@ -198,7 +198,7 @@ fn policy_candidate_improvement_keeps() {
             experiment_id,
             reason,
         } => {
-            assert_eq!(experiment_id, ExperimentId("experiment-1".to_owned()));
+            assert_eq!(experiment_id, ExperimentId::new("experiment-1"));
             assert!(
                 reason.contains("candidate improved normalized score by 13.0%"),
                 "unexpected improvement reason: {reason}"
@@ -466,7 +466,7 @@ fn focus_policy_reverts_active_experiment_when_focus_becomes_idle() {
             experiment_id,
             reason,
         } => {
-            assert_eq!(experiment_id, ExperimentId("experiment-1".to_owned()));
+            assert_eq!(experiment_id, ExperimentId::new("experiment-1"));
             assert!(reason.contains("focus policy blocks active experiment"));
             assert!(reason.contains("idle or unknown"));
         }
