@@ -43,7 +43,10 @@ mod unsafe_safety;
 mod unwrap_expect;
 
 const PRODUCTION_RUST_FILE_SIZE_LIMIT_LINES: usize = 700;
-const TEST_RUST_FILE_SIZE_LIMIT_LINES: usize = 1_000;
+// Test files are allowed to be larger than production files, but should still
+// remain behavior-focused and navigable. Split large suites into child modules
+// rather than raising this gate.
+const TEST_RUST_FILE_SIZE_LIMIT_LINES: usize = 700;
 
 const WORKSPACE_SOURCE_ROOTS: &[&str] = &[
     "stutter/src",
