@@ -168,6 +168,7 @@ fn is_unsafe_wrapper_path(path: &str) -> bool {
 fn is_test_or_architecture_unsafe_path(path: &str) -> bool {
     path.contains("/tests/")
         || path.ends_with("_tests.rs")
+        || path.ends_with("/tests.rs")
         || path.contains("/architecture_tests/")
         || path == "stutter/src/architecture_tests.rs"
         || path == "stutter/src/community_rules/paths.rs"
