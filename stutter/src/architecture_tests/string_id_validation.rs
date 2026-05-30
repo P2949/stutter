@@ -303,9 +303,7 @@ fn raw_string_action_and_experiment_ids_are_tracked_until_migrated() {
             let key = (relative.clone(), needle.to_owned());
             *actual_counts.entry(key).or_insert(0) += 1;
 
-            let tracked = raw_string_id_allowance_for(&relative, needle).is_some();
-
-            if !tracked {
+            if raw_string_id_allowance_for(&relative, needle).is_none() {
                 untracked.push(format!(
                     "{}:{}: raw `{}` should use ActionId/ExperimentId or be added to RAW_STRING_ID_ALLOWLIST with reason and exit criteria",
                     relative,
@@ -335,11 +333,7 @@ fn raw_string_action_and_experiment_ids_are_tracked_until_migrated() {
 
     let mut stale_or_unexpected = Vec::new();
     for ((path, needle), actual) in &actual_counts {
-        let expected = expected_counts
-            .get(&(path.clone(), needle.clone()))
-            .copied();
-
-        if expected.is_none() {
+        if !expected_counts.contains_key(&(path.clone(), needle.clone())) {
             stale_or_unexpected.push(format!(
                 "{path}: found unallowlisted `{needle}` {actual} time(s)"
             ));
