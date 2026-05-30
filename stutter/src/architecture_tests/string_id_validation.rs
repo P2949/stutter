@@ -202,6 +202,12 @@ fn raw_string_id_needle(line: &str) -> Option<&str> {
     None
 }
 
+fn raw_string_id_allowance_for(path: &str, needle: &str) -> Option<&'static RawStringIdAllowance> {
+    RAW_STRING_ID_ALLOWLIST
+        .iter()
+        .find(|allowance| allowance.path == path && allowance.needle == needle)
+}
+
 fn raw_string_id_allowlist_map() -> BTreeMap<(String, String), usize> {
     RAW_STRING_ID_ALLOWLIST
         .iter()
@@ -212,6 +218,63 @@ fn raw_string_id_allowlist_map() -> BTreeMap<(String, String), usize> {
             )
         })
         .collect()
+}
+
+#[test]
+fn raw_string_id_scanner_preserves_exact_declaration_needles() {
+    assert_eq!(
+        raw_string_id_needle("    pub action_id: String,"),
+        Some("pub action_id: String,")
+    );
+    assert_eq!(
+        raw_string_id_needle("    pub(crate) experiment_id: String,"),
+        Some("pub(crate) experiment_id: String,")
+    );
+    assert_eq!(
+        raw_string_id_needle("        action_id: String,"),
+        Some("action_id: String,")
+    );
+}
+
+#[test]
+fn raw_string_id_scanner_ignores_non_identity_lines() {
+    assert_eq!(raw_string_id_needle("pub action: String,"), None);
+    assert_eq!(raw_string_id_needle("pub experiment: String,"), None);
+    assert_eq!(raw_string_id_needle("pub action_id: ActionId,"), None);
+    assert_eq!(
+        raw_string_id_needle("pub experiment_id: ExperimentId,"),
+        None
+    );
+}
+
+#[test]
+fn raw_string_id_path_filter_excludes_tests_fixtures_and_architecture_tests() {
+    for path in [
+        "stutter/src/foo/tests.rs",
+        "stutter/src/foo/tests/bar.rs",
+        "stutter/src/foo/foo_tests.rs",
+        "stutter/src/tests/fixtures/example.rs",
+        "stutter/src/test_fixture_builder/model.rs",
+        "stutter/src/architecture_tests/string_id_validation.rs",
+    ] {
+        assert!(
+            is_raw_string_id_scan_excluded_path(path),
+            "{path} should be excluded from raw string ID scanning"
+        );
+    }
+}
+
+#[test]
+fn raw_string_id_allowance_lookup_matches_exact_path_and_needle() {
+    assert!(
+        raw_string_id_allowance_for("stutter/src/daemon/state.rs", "pub action_id: String,")
+            .is_some()
+    );
+
+    assert!(
+        raw_string_id_allowance_for("stutter/src/daemon/state.rs", "action_id: String,").is_none(),
+        "allowance lookup should not ignore visibility differences"
+    );
 }
 
 #[test]
@@ -240,9 +303,7 @@ fn raw_string_action_and_experiment_ids_are_tracked_until_migrated() {
             let key = (relative.clone(), needle.to_owned());
             *actual_counts.entry(key).or_insert(0) += 1;
 
-            let tracked = RAW_STRING_ID_ALLOWLIST
-                .iter()
-                .any(|allowance| allowance.path == relative && allowance.needle == needle);
+            let tracked = raw_string_id_allowance_for(&relative, needle).is_some();
 
             if !tracked {
                 untracked.push(format!(
