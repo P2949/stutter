@@ -152,6 +152,8 @@ mod emission;
 
 mod lifecycle;
 
+mod mode_matrix;
+
 mod planning;
 
 mod restore;
