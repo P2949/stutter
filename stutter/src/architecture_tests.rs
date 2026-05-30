@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+mod action_errors;
 mod action_rollback_errors;
 mod allow_attributes;
 mod allowlists;

@@ -10,6 +10,32 @@ fn is_test_action_path(path: &str) -> bool {
         || path.ends_with("/fake_action.rs")
 }
 
+fn is_action_framework_path(relative: &str) -> bool {
+    const EXACT_PATHS: &[&str] = &[
+        "stutter/src/actions/transaction.rs",
+        "stutter/src/actions/traits.rs",
+        "stutter/src/actions/rollback.rs",
+        "stutter/src/actions/token.rs",
+        "stutter/src/actions/factory.rs",
+        "stutter/src/actions/syscalls.rs",
+        "stutter/src/actions/restore_write.rs",
+        "stutter/src/actions/restore_identity.rs",
+        "stutter/src/actions/model.rs",
+        "stutter/src/actions/mod.rs",
+    ];
+
+    const DIRECTORY_PREFIXES: &[&str] = &[
+        "stutter/src/actions/runner/",
+        "stutter/src/actions/rollback/",
+        "stutter/src/actions/error/",
+    ];
+
+    EXACT_PATHS.contains(&relative)
+        || DIRECTORY_PREFIXES
+            .iter()
+            .any(|prefix| relative.starts_with(prefix))
+}
+
 #[test]
 fn production_actions_use_typed_boundary_errors_instead_of_string_coded_bail() {
     let actions_root = crate::architecture_tests::workspace_root()
@@ -22,20 +48,8 @@ fn production_actions_use_typed_boundary_errors_instead_of_string_coded_bail() {
     for file in rust_files_under(&actions_root) {
         let relative = relative_to_workspace_root(&file);
 
-        // Core framework files are not boundary layers
-        if relative.starts_with("stutter/src/actions/runner") ||
-           relative.starts_with("stutter/src/actions/transaction.rs") ||
-           relative.starts_with("stutter/src/actions/traits.rs") ||
-           relative.starts_with("stutter/src/actions/rollback.rs") ||
-           relative.starts_with("stutter/src/actions/token.rs") ||
-           relative.starts_with("stutter/src/actions/factory.rs") ||
-           relative.starts_with("stutter/src/actions/syscalls.rs") ||
-           relative.starts_with("stutter/src/actions/restore_write.rs") ||
-           relative.starts_with("stutter/src/actions/restore_identity.rs") ||
-           relative.starts_with("stutter/src/actions/model.rs") ||
-           relative.starts_with("stutter/src/actions/mod.rs") ||
-           relative.starts_with("stutter/src/actions/error")
-        {
+        // Core framework files are not action boundary modules.
+        if is_action_framework_path(&relative) {
             continue;
         }
 
@@ -62,4 +76,44 @@ fn production_actions_use_typed_boundary_errors_instead_of_string_coded_bail() {
         "production action modules still have string-coded bail paths:\n{}",
         violations.join("\n")
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_action_framework_path;
+
+    #[test]
+    fn action_error_framework_path_excludes_old_flat_rollback_file() {
+        assert!(is_action_framework_path("stutter/src/actions/rollback.rs"));
+    }
+
+    #[test]
+    fn action_error_framework_path_excludes_rollback_directory() {
+        assert!(is_action_framework_path(
+            "stutter/src/actions/rollback/mod.rs"
+        ));
+        assert!(is_action_framework_path(
+            "stutter/src/actions/rollback/tests.rs"
+        ));
+    }
+
+    #[test]
+    fn action_error_framework_path_does_not_overmatch_rollback_prefix() {
+        assert!(!is_action_framework_path(
+            "stutter/src/actions/rollback_extra.rs"
+        ));
+    }
+
+    #[test]
+    fn action_error_framework_path_does_not_overmatch_flat_framework_prefixes() {
+        assert!(!is_action_framework_path(
+            "stutter/src/actions/model_extra.rs"
+        ));
+        assert!(!is_action_framework_path(
+            "stutter/src/actions/transaction_extra.rs"
+        ));
+        assert!(!is_action_framework_path(
+            "stutter/src/actions/token_extra.rs"
+        ));
+    }
 }
