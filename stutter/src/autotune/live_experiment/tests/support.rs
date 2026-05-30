@@ -351,6 +351,77 @@ pub(super) fn decision_reason(decision: &AutotuneDecision) -> String {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum DecisionFingerprint {
+    Noop {
+        reason: String,
+    },
+    Suggest {
+        action_id: String,
+        reason: String,
+    },
+    StartExperiment {
+        action_id: String,
+        reason: String,
+    },
+    KeepCurrent {
+        experiment_id: String,
+        reason: String,
+    },
+    Revert {
+        experiment_id: String,
+        reason: String,
+    },
+    EnterCooldown {
+        duration_nanos: u128,
+        reason: String,
+    },
+    Fault {
+        reason: String,
+    },
+}
+
+pub(super) fn decision_fingerprint(decision: &AutotuneDecision) -> DecisionFingerprint {
+    match decision {
+        AutotuneDecision::Noop { reason } => DecisionFingerprint::Noop {
+            reason: reason.clone(),
+        },
+        AutotuneDecision::Suggest { candidate, reason } => DecisionFingerprint::Suggest {
+            action_id: candidate.action_id().into_string(),
+            reason: reason.clone(),
+        },
+        AutotuneDecision::StartExperiment { candidate, reason } => {
+            DecisionFingerprint::StartExperiment {
+                action_id: candidate.action_id().into_string(),
+                reason: reason.clone(),
+            }
+        }
+        AutotuneDecision::KeepCurrent {
+            experiment_id,
+            reason,
+        } => DecisionFingerprint::KeepCurrent {
+            experiment_id: experiment_id.as_str().to_owned(),
+            reason: reason.clone(),
+        },
+        AutotuneDecision::Revert {
+            experiment_id,
+            reason,
+        } => DecisionFingerprint::Revert {
+            experiment_id: experiment_id.as_str().to_owned(),
+            reason: reason.clone(),
+        },
+        AutotuneDecision::EnterCooldown { duration, reason } => {
+            DecisionFingerprint::EnterCooldown {
+                duration_nanos: duration.as_nanos(),
+                reason: reason.clone(),
+            }
+        }
+        AutotuneDecision::Fault { reason } => DecisionFingerprint::Fault {
+            reason: reason.clone(),
+        },
+    }
+}
+
 pub(super) fn temp_journal_path(name: &str) -> PathBuf {
     let mut dir = std::env::temp_dir();
     dir.push(format!(

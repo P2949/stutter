@@ -6,6 +6,7 @@ mod allowlists;
 mod artifact_paths;
 mod autotune_facades;
 mod autotune_focus_policy;
+mod autotune_invariant_coverage;
 mod autotune_raw_score;
 mod cgroup_imports;
 mod concurrency;
