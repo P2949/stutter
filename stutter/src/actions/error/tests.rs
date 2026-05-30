@@ -112,6 +112,67 @@ fn action_error_serialization_preserves_invalid_rollback_token_shape() {
 }
 
 #[test]
+fn action_boundary_error_round_trips_through_action_error_serde() {
+    const EXPECTED_REASON: &str = "action_missing_explicit_targets";
+    const EXPECTED_MESSAGE: &str =
+        "action_missing_explicit_targets: uclamp requires at least one explicit target";
+
+    let source = anyhow::Error::new(ActionBoundaryError::MissingExplicitTargets {
+        action_kind: "uclamp",
+    });
+
+    let err = ActionError::from_phase_error(ActionPhase::DryRun, source);
+
+    assert!(matches!(
+        err.failure(),
+        ActionFailure::Boundary(ActionBoundaryFailure {
+            phase: ActionPhase::DryRun,
+            action_kind,
+            reason_code,
+            message,
+        }) if action_kind == "uclamp"
+            && reason_code == EXPECTED_REASON
+            && message == EXPECTED_MESSAGE
+    ));
+
+    assert_eq!(err.phase(), ActionPhase::DryRun);
+    assert_eq!(err.category(), EXPECTED_REASON);
+    assert_eq!(
+        err.to_string(),
+        format!("dry_run failed: {EXPECTED_MESSAGE}")
+    );
+
+    let json_str = serde_json::to_string(&err).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+    assert_eq!(
+        value,
+        serde_json::json!({
+            "kind": "action_boundary_failure",
+            "phase": "dry_run",
+            "action_kind": "uclamp",
+            "reason_code": EXPECTED_REASON,
+            "message": EXPECTED_MESSAGE
+        })
+    );
+
+    let decoded: ActionError = serde_json::from_str(&json_str).unwrap();
+    assert_eq!(decoded, err);
+
+    assert!(matches!(
+        decoded.failure(),
+        ActionFailure::Boundary(ActionBoundaryFailure {
+            phase: ActionPhase::DryRun,
+            action_kind,
+            reason_code,
+            message,
+        }) if action_kind == "uclamp"
+            && reason_code == EXPECTED_REASON
+            && message == EXPECTED_MESSAGE
+    ));
+}
+
+#[test]
 fn action_failure_serialization_preserves_legacy_policy_shape() {
     let failure = ActionFailure::PolicyRejected {
         message: "policy denied action".to_owned(),
