@@ -75,8 +75,12 @@ pub(super) fn kept_event() -> AutotuneHistoryEvent {
             eligible: true,
             rollback_policy: "rollback-on-exit".to_owned(),
         },
-        experiment_id: Some("experiment-1".to_owned()),
-        action_id: Some("cpu-affinity-profile:game-main-suggested".to_owned()),
+        experiment_id: Some(crate::autotune::experiment::ExperimentId::new(
+            "experiment-1",
+        )),
+        action_id: Some(crate::actions::ActionId::new(
+            "cpu-affinity-profile:game-main-suggested",
+        )),
         score_before: Some(score(1_000)),
         score_after: Some(score(818)),
         planner: None,

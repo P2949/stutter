@@ -3,13 +3,14 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 
 use crate::{
-    actions::RollbackToken,
+    actions::{ActionId, RollbackToken},
     audit::{AuditEvent, append_audit_event_to_path},
     autotune::{
         controller_journal::{
             ControllerJournalRecord, ControllerJournalState, default_controller_journal_path,
             read_controller_journal, write_controller_journal_clean,
         },
+        experiment::ExperimentId,
         history::{
             AutotuneDecisionSummary, AutotuneHistoryEvent, AutotuneHistoryEventInput, AutotuneMode,
             ControllerPhase, ObservationSummary, SituationKind, append_autotune_history_event,
@@ -52,23 +53,23 @@ impl Default for StartupRecoveryConfig {
 pub enum StartupRecoveryOutcome {
     Clean,
     ApplyingWithoutRollback {
-        experiment_id: String,
-        action_id: String,
+        experiment_id: ExperimentId,
+        action_id: ActionId,
     },
     RollbackDisabled {
-        experiment_id: String,
-        action_id: String,
+        experiment_id: ExperimentId,
+        action_id: ActionId,
         manual_restore_command: String,
     },
     Recovered {
-        experiment_id: String,
-        action_id: String,
+        experiment_id: ExperimentId,
+        action_id: ActionId,
         affected_tasks: usize,
         manual_restore_command: String,
     },
     Faulted {
-        experiment_id: String,
-        action_id: String,
+        experiment_id: ExperimentId,
+        action_id: ActionId,
         manual_restore_command: String,
         reason: String,
     },
@@ -239,19 +240,17 @@ pub fn recover_controller_journal_with_executor<E: StartupRecoveryRollbackExecut
     }
 }
 
-fn journal_experiment_action(record: &ControllerJournalRecord) -> (String, String) {
+fn journal_experiment_action(record: &ControllerJournalRecord) -> (ExperimentId, ActionId) {
     let state = record.state().as_str();
     let experiment_id = record
         .experiment_id
-        .as_ref()
-        .map(|id| id.as_str().to_owned())
-        .unwrap_or_else(|| format!("{state}-unknown-experiment"));
+        .clone()
+        .unwrap_or_else(|| ExperimentId::new(format!("{state}-unknown-experiment")));
 
     let action_id = record
         .action_id
-        .as_ref()
-        .map(|id| id.as_str().to_owned())
-        .unwrap_or_else(|| format!("{state}-unknown-action"));
+        .clone()
+        .unwrap_or_else(|| ActionId::new(format!("{state}-unknown-action")));
 
     (experiment_id, action_id)
 }
@@ -259,8 +258,8 @@ fn journal_experiment_action(record: &ControllerJournalRecord) -> (String, Strin
 fn recover_applied_journal_record<E: StartupRecoveryRollbackExecutor + ?Sized>(
     config: StartupRecoveryConfig,
     executor: &mut E,
-    experiment_id: String,
-    action_id: String,
+    experiment_id: ExperimentId,
+    action_id: ActionId,
     rollback_token: RollbackToken,
 ) -> anyhow::Result<StartupRecoveryOutcome> {
     let manual_restore_command = manual_restore_command_for_token(&rollback_token);
@@ -411,7 +410,7 @@ fn recover_applied_journal_record<E: StartupRecoveryRollbackExecutor + ?Sized>(
 
 fn write_startup_recovery_audit_event(
     audit_path: &Path,
-    action_id: &str,
+    action_id: &ActionId,
     rollback_token: &RollbackToken,
     success: bool,
     affected_tasks: usize,
@@ -421,7 +420,7 @@ fn write_startup_recovery_audit_event(
         schema_version: 1,
         unix_nanos: crate::audit::unix_nanos_now(),
         command: "autotune-startup-recovery".to_owned(),
-        action_id: Some(action_id.to_owned()),
+        action_id: Some(action_id.as_str().to_owned()),
         safety_class: Some(safety_class_for_rollback_token(rollback_token)),
         dry_run: false,
         success,
@@ -444,8 +443,8 @@ struct StartupRecoveryHistoryEventInput<'a> {
     history_path: &'a Path,
     phase: ControllerPhase,
     decision: &'a str,
-    experiment_id: &'a str,
-    action_id: &'a str,
+    experiment_id: &'a ExperimentId,
+    action_id: &'a ActionId,
     rollback_token: &'a RollbackToken,
     rollback_performed: bool,
     reason: String,
@@ -463,16 +462,16 @@ fn write_startup_recovery_history_event(
         observation_summary: empty_observation_summary(),
         decision: AutotuneDecisionSummary {
             decision: input.decision.to_owned(),
-            candidate_name: candidate_name_from_action_id(input.action_id),
-            action_kind: Some(action_kind_from_action_id(input.action_id)),
+            candidate_name: candidate_name_from_action_id(input.action_id.as_str()),
+            action_kind: Some(action_kind_from_action_id(input.action_id.as_str())),
             safety_class: Some(safety_class_for_rollback_token(input.rollback_token)),
             eligible: input.rollback_performed,
             rollback_policy: "rollback-on-crash-recovery".to_owned(),
         },
         reason: input.reason,
     })
-    .with_experiment_id(input.experiment_id.to_owned())
-    .with_action_id(input.action_id.to_owned())
+    .with_experiment_id(input.experiment_id.clone())
+    .with_action_id(input.action_id.clone())
     .with_rollback_performed(input.rollback_performed);
 
     append_autotune_history_event(input.history_path, &event).with_context(|| {

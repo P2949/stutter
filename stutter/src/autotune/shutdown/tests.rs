@@ -48,7 +48,7 @@ fn rollback_token() -> RollbackToken {
 }
 
 fn action(name: &str) -> ActiveAutotuneAction {
-    ActiveAutotuneAction::cpu_affinity_profile(name, rollback_token())
+    ActiveAutotuneAction::try_cpu_affinity_profile(name, rollback_token()).unwrap()
 }
 
 fn profile(name: &str) -> Profile {
@@ -379,7 +379,10 @@ fn register_cpu_affinity_rollback_adds_active_action() {
 
     let actions = registry.snapshot();
     assert_eq!(actions.len(), 1);
-    assert_eq!(actions[0].action_id, "cpu-affinity-profile:game-main");
+    assert_eq!(
+        actions[0].action_id.as_str(),
+        "cpu-affinity-profile:game-main"
+    );
     assert_eq!(actions[0].action_kind, "cpu_affinity_profile");
     assert_eq!(actions[0].safety_class, SafetyClass::ReversibleLowRisk);
 }

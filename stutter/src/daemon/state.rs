@@ -9,8 +9,8 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    actions::{RollbackToken, SafetyClass},
-    autotune::planner::PlannerSummary,
+    actions::{ActionId, RollbackToken, SafetyClass},
+    autotune::{experiment::ExperimentId, planner::PlannerSummary},
     daemon::{health::SystemHealthSnapshot, policy::DaemonMode},
     metadata::SystemMetadata,
 };
@@ -43,6 +43,13 @@ pub fn load_daemon_state(path: &Path) -> anyhow::Result<DaemonState> {
             path.display()
         );
     }
+
+    state.validate_identity_strings().with_context(|| {
+        format!(
+            "invalid daemon state snapshot identity strings in {}",
+            path.display()
+        )
+    })?;
 
     Ok(state)
 }
@@ -140,6 +147,19 @@ impl Default for DaemonState {
     }
 }
 
+impl DaemonState {
+    pub fn validate_identity_strings(&self) -> Result<(), stutter_core::ids::EmptyStringIdError> {
+        if let Some(active_experiment) = &self.active_experiment {
+            active_experiment.validate_identity_strings()?;
+        }
+        if let Some(active_rollback) = &self.active_rollback {
+            active_rollback.validate_identity_strings()?;
+        }
+        self.profile_memory.validate_identity_strings()?;
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DaemonTargetState {
     pub root_pid: Option<u32>,
@@ -149,8 +169,8 @@ pub struct DaemonTargetState {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DaemonExperimentState {
-    pub experiment_id: String,
-    pub action_id: String,
+    pub experiment_id: ExperimentId,
+    pub action_id: ActionId,
     pub candidate_name: Option<String>,
     #[serde(default = "default_active_autotune_mode")]
     pub mode: DaemonMode,
@@ -160,7 +180,7 @@ pub struct DaemonExperimentState {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DaemonRollbackState {
-    pub action_id: String,
+    pub action_id: ActionId,
     #[serde(default = "default_active_autotune_mode")]
     pub mode: DaemonMode,
     #[serde(default = "default_active_autotune_safety_class")]
@@ -176,6 +196,19 @@ fn default_active_autotune_mode() -> DaemonMode {
 
 fn default_active_autotune_safety_class() -> SafetyClass {
     SafetyClass::ReversibleLowRisk
+}
+
+impl DaemonExperimentState {
+    pub fn validate_identity_strings(&self) -> Result<(), stutter_core::ids::EmptyStringIdError> {
+        self.experiment_id.validate_non_empty()?;
+        self.action_id.validate_non_empty()
+    }
+}
+
+impl DaemonRollbackState {
+    pub fn validate_identity_strings(&self) -> Result<(), stutter_core::ids::EmptyStringIdError> {
+        self.action_id.validate_non_empty()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -229,7 +262,7 @@ impl DaemonProfileMemory {
                 || workload_identity_hash
                     .is_some_and(|hash| profile.workload_identity_hash == hash);
             let candidate_matches = candidate_name
-                .map(|name| profile.candidate_name == name || profile.action_id == name)
+                .map(|name| profile.candidate_name == name || profile.action_id.as_str() == name)
                 .unwrap_or(true);
 
             if matches && candidate_matches {
@@ -253,6 +286,13 @@ impl DaemonProfileMemory {
         });
         profiles
     }
+
+    pub fn validate_identity_strings(&self) -> Result<(), stutter_core::ids::EmptyStringIdError> {
+        for profile in &self.profiles {
+            profile.validate_identity_strings()?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -260,7 +300,7 @@ pub struct DaemonWorkloadProfile {
     pub workload_identity_hash: String,
     pub workload_label: Option<String>,
     pub candidate_name: String,
-    pub action_id: String,
+    pub action_id: ActionId,
     pub action_kind: String,
     pub safety_class: SafetyClass,
     pub kept_unix_nanos: u128,
@@ -276,6 +316,10 @@ pub struct DaemonWorkloadProfile {
 }
 
 impl DaemonWorkloadProfile {
+    pub fn validate_identity_strings(&self) -> Result<(), stutter_core::ids::EmptyStringIdError> {
+        self.action_id.validate_non_empty()
+    }
+
     pub fn validation(
         &self,
         current_environment: &DaemonProfileEnvironment,

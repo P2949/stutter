@@ -424,7 +424,7 @@ mod tests {
             mode: DaemonMode::ApplyLowRisk,
             cooldown_until_unix_nanos: Some(crate::audit::unix_nanos_now() + 3_600_000_000_000),
             active_rollback: Some(crate::daemon::state::DaemonRollbackState {
-                action_id: "action-1".to_owned(),
+                action_id: crate::actions::ActionId::new("action-1"),
                 mode: DaemonMode::ApplyLowRisk,
                 safety_class: crate::actions::SafetyClass::ReversibleLowRisk,
                 rollback_available: true,

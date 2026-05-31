@@ -6,8 +6,9 @@ use std::{
 use serde::Serialize;
 
 use crate::{
+    actions::ActionId,
     autotune::{
-        experiment::WindowScore,
+        experiment::{ExperimentId, WindowScore},
         history::{
             AutotuneHistoryEvent, ControllerPhase, default_autotune_history_path,
             read_autotune_history_events,
@@ -40,8 +41,8 @@ pub struct AutotuneReportEvent {
     pub phase: String,
     pub decision: String,
     pub candidate_name: Option<String>,
-    pub action_id: Option<String>,
-    pub experiment_id: Option<String>,
+    pub action_id: Option<ActionId>,
+    pub experiment_id: Option<ExperimentId>,
     pub score_delta_percent: Option<f64>,
     pub rollback_performed: bool,
     pub label: String,
@@ -163,11 +164,10 @@ fn report_event_from_history_event(
         .min(u128::from(u64::MAX)) as u64;
     let score_delta_percent =
         score_delta_percent(event.score_before.as_ref(), event.score_after.as_ref());
-    let candidate_name = event
-        .decision
-        .candidate_name
-        .clone()
-        .or_else(|| candidate_name_from_action_id(event.action_id.as_deref()));
+    let candidate_name =
+        event.decision.candidate_name.clone().or_else(|| {
+            candidate_name_from_action_id(event.action_id.as_ref().map(|id| id.as_str()))
+        });
     let label = human_label_for_event(event, candidate_name.as_deref(), score_delta_percent);
 
     AutotuneReportEvent {
@@ -427,8 +427,10 @@ mod tests {
             },
             reason: reason.to_owned(),
         })
-        .with_experiment_id("experiment-1")
-        .with_action_id("cpu-affinity-profile:game-main-suggested");
+        .try_with_experiment_id("experiment-1")
+        .unwrap()
+        .try_with_action_id("cpu-affinity-profile:game-main-suggested")
+        .unwrap();
 
         event.unix_nanos = unix_nanos;
         event
@@ -520,8 +522,8 @@ mod tests {
                 phase: "Applying".to_owned(),
                 decision: "StartExperiment".to_owned(),
                 candidate_name: Some("game-main-suggested".to_owned()),
-                action_id: Some("cpu-affinity-profile:game-main-suggested".to_owned()),
-                experiment_id: Some("experiment-1".to_owned()),
+                action_id: Some("cpu-affinity-profile:game-main-suggested".into()),
+                experiment_id: Some("experiment-1".into()),
                 score_delta_percent: None,
                 rollback_performed: false,
                 label: "applied profile game-main-suggested".to_owned(),

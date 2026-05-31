@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use crate::{
-    actions::{RollbackToken, SafetyClass},
+    actions::{ActionId, RollbackToken, SafetyClass},
     autotune::{
         controller::ControllerPolicy,
         experiment::{ExperimentId, WindowScore},
@@ -32,8 +32,8 @@ impl LiveExperiment {
         self.candidate.profile_name()
     }
 
-    pub fn action_id(&self) -> String {
-        self.candidate.action_id().into_string()
+    pub fn action_id(&self) -> ActionId {
+        self.candidate.action_id()
     }
 }
 #[derive(Clone, Debug)]
@@ -61,8 +61,8 @@ pub enum LiveExperimentEvent {
 }
 #[derive(Clone, Debug)]
 pub struct LiveExperimentHistoryContext {
-    pub experiment_id: String,
-    pub action_id: String,
+    pub experiment_id: ExperimentId,
+    pub action_id: ActionId,
     pub candidate_name: String,
     pub action_kind: String,
     pub mode: DaemonMode,

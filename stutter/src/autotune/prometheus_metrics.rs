@@ -233,7 +233,8 @@ fn count_unique_applied_actions(events: &[AutotuneHistoryEvent]) -> u64 {
             unique.insert(
                 event
                     .action_id
-                    .clone()
+                    .as_ref()
+                    .map(|action_id| action_id.as_str().to_owned())
                     .unwrap_or_else(|| format!("event:{}", event.unix_nanos)),
             );
         }
@@ -411,8 +412,8 @@ mod tests {
                 eligible: true,
                 rollback_policy: "rollback-on-exit".to_owned(),
             },
-            experiment_id: Some("experiment-1".to_owned()),
-            action_id: Some("cpu-affinity-profile:game-main-suggested".to_owned()),
+            experiment_id: Some("experiment-1".into()),
+            action_id: Some("cpu-affinity-profile:game-main-suggested".into()),
             score_before: Some(score(412)),
             score_after: Some(score(330)),
             planner: None,

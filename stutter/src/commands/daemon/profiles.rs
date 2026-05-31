@@ -305,7 +305,7 @@ mod tests {
             workload_identity_hash: workload.to_owned(),
             workload_label: Some("game".to_owned()),
             candidate_name: candidate.to_owned(),
-            action_id: format!("cpu-affinity-profile:{candidate}"),
+            action_id: crate::actions::ActionId::new(format!("cpu-affinity-profile:{candidate}")),
             action_kind: "cpu_affinity_profile".to_owned(),
             safety_class: SafetyClass::ReversibleLowRisk,
             kept_unix_nanos: 1_000,

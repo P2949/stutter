@@ -7,8 +7,8 @@ use super::{
     },
 };
 use crate::{
-    actions::{RollbackToken, SafetyClass},
-    autotune::startup_recovery::StartupRecoveryOutcome,
+    actions::{ActionId, RollbackToken, SafetyClass},
+    autotune::{experiment::ExperimentId, startup_recovery::StartupRecoveryOutcome},
     remote::RemoteMonitorRequest,
 };
 
@@ -18,8 +18,8 @@ pub struct StartupRecoveryDaemonStateInput<'a> {
     pub phase: DaemonPhase,
     pub decision: &'a str,
     pub reason: String,
-    pub experiment_id: &'a str,
-    pub action_id: &'a str,
+    pub experiment_id: &'a ExperimentId,
+    pub action_id: &'a ActionId,
     pub rollback_token: Option<&'a RollbackToken>,
     pub rollback_available: bool,
     pub include_active_experiment: bool,
@@ -215,9 +215,9 @@ pub fn daemon_state_for_startup_recovery_snapshot(
         .unwrap_or(SafetyClass::ReversibleLowRisk);
     let active_experiment = if input.include_active_experiment {
         Some(DaemonExperimentState {
-            experiment_id: input.experiment_id.to_owned(),
-            action_id: input.action_id.to_owned(),
-            candidate_name: candidate_name_from_action_id(input.action_id),
+            experiment_id: input.experiment_id.clone(),
+            action_id: input.action_id.clone(),
+            candidate_name: candidate_name_from_action_id(input.action_id.as_str()),
             mode: DaemonMode::ApplyLowRisk,
             safety_class: safety_class.clone(),
             started_unix_nanos: None,
@@ -226,7 +226,7 @@ pub fn daemon_state_for_startup_recovery_snapshot(
         None
     };
     let active_rollback = input.rollback_token.map(|token| DaemonRollbackState {
-        action_id: input.action_id.to_owned(),
+        action_id: input.action_id.clone(),
         mode: DaemonMode::ApplyLowRisk,
         safety_class: safety_class.clone(),
         rollback_available: input.rollback_available,
@@ -384,8 +384,8 @@ mod tests {
     #[test]
     fn startup_recovery_outcome_builder_preserves_rollback_disabled_shape() {
         let state = daemon_state_from_startup_recovery(&StartupRecoveryOutcome::RollbackDisabled {
-            experiment_id: "experiment-1".to_owned(),
-            action_id: "cpu-affinity-profile:game-main".to_owned(),
+            experiment_id: ExperimentId::new("experiment-1"),
+            action_id: ActionId::new("cpu-affinity-profile:game-main"),
             manual_restore_command: "stutter restore".to_owned(),
         });
 
@@ -447,8 +447,8 @@ mod tests {
             phase: DaemonPhase::Faulted,
             decision: "faulted",
             reason: "startup crash recovery rollback failed".to_owned(),
-            experiment_id: "experiment-1",
-            action_id: "cpu-affinity-profile:game-main",
+            experiment_id: &ExperimentId::new("experiment-1"),
+            action_id: &ActionId::new("cpu-affinity-profile:game-main"),
             rollback_token: Some(&rollback_token),
             rollback_available: true,
             include_active_experiment: true,
@@ -510,8 +510,8 @@ mod tests {
             phase: DaemonPhase::Faulted,
             decision: "faulted",
             reason: "startup crash recovery rollback failed".to_owned(),
-            experiment_id: "experiment-1",
-            action_id: "cpu-affinity-profile:game-main",
+            experiment_id: &ExperimentId::new("experiment-1"),
+            action_id: &ActionId::new("cpu-affinity-profile:game-main"),
             rollback_token: Some(&rollback_token),
             rollback_available: true,
             include_active_experiment: true,

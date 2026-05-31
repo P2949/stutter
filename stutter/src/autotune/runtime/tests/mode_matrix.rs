@@ -95,7 +95,7 @@ fn apply_low_risk_mode_matrix_starts_experiment_and_exposes_rollback_state() {
         .active_rollback
         .expect("active low-risk experiment should expose rollback state");
 
-    assert_eq!(rollback.action_id, "mode-apply-low-candidate");
+    assert_eq!(rollback.action_id.as_str(), "mode-apply-low-candidate");
     assert_eq!(rollback.mode, DaemonMode::ApplyLowRisk);
     assert_eq!(rollback.safety_class, SafetyClass::ReversibleLowRisk);
     assert!(rollback.rollback_available);

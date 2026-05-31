@@ -1,5 +1,5 @@
 use super::*;
-use crate::daemon::policy::DaemonMode;
+use crate::{actions::ActionId, autotune::experiment::ExperimentId, daemon::policy::DaemonMode};
 
 #[test]
 fn status_from_daemon_state_reports_snapshot_fields() {
@@ -15,15 +15,15 @@ fn status_from_daemon_state_reports_snapshot_fields() {
             comm: Some("KingdomCome.exe".to_owned()),
         }),
         active_experiment: Some(DaemonExperimentState {
-            experiment_id: "experiment-1".to_owned(),
-            action_id: "cpu-affinity-profile:game-main".to_owned(),
+            experiment_id: ExperimentId::new("experiment-1"),
+            action_id: ActionId::new("cpu-affinity-profile:game-main"),
             candidate_name: Some("game-main".to_owned()),
             mode: DaemonMode::ApplyLowRisk,
             safety_class: SafetyClass::ReversibleLowRisk,
             started_unix_nanos: Some(100),
         }),
         active_rollback: Some(DaemonRollbackState {
-            action_id: "cpu-affinity-profile:game-main".to_owned(),
+            action_id: ActionId::new("cpu-affinity-profile:game-main"),
             mode: DaemonMode::ApplyLowRisk,
             safety_class: SafetyClass::ReversibleLowRisk,
             rollback_available: true,
@@ -90,7 +90,7 @@ fn status_from_daemon_state_lists_all_profile_memory_kept_actions() {
             workload_identity_hash: "workload-a".to_owned(),
             workload_label: Some("KingdomCome.exe".to_owned()),
             candidate_name: candidate_name.to_owned(),
-            action_id: action_id.to_owned(),
+            action_id: ActionId::new(action_id),
             action_kind: action_id
                 .split_once(':')
                 .map(|(kind, _)| kind.replace('-', "_"))
@@ -122,13 +122,13 @@ fn status_from_daemon_state_lists_all_profile_memory_kept_actions() {
         status
             .kept_actions
             .iter()
-            .any(|action| action.action_id == "cpu-affinity-profile:game-main")
+            .any(|action| action.action_id.as_str() == "cpu-affinity-profile:game-main")
     );
     assert!(
         status
             .kept_actions
             .iter()
-            .any(|action| action.action_id == "ionice:io-priority")
+            .any(|action| action.action_id.as_str() == "ionice:io-priority")
     );
 }
 
@@ -137,8 +137,8 @@ fn status_from_daemon_state_renders_daemon_lifecycle_labels_and_candidates() {
     let base_state = DaemonState {
         mode: DaemonMode::ApplyLowRisk,
         active_experiment: Some(DaemonExperimentState {
-            experiment_id: "experiment-1".to_owned(),
-            action_id: "cpu-affinity-profile:game-main".to_owned(),
+            experiment_id: ExperimentId::new("experiment-1"),
+            action_id: ActionId::new("cpu-affinity-profile:game-main"),
             candidate_name: Some("game-main".to_owned()),
             mode: DaemonMode::ApplyLowRisk,
             safety_class: SafetyClass::ReversibleLowRisk,

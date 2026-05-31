@@ -176,6 +176,12 @@ macro_rules! string_id {
                 value.into_string()
             }
         }
+
+        impl fmt::Display for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                self.0.fmt(f)
+            }
+        }
     };
 }
 
@@ -347,5 +353,14 @@ mod tests {
 
         let experiment = ExperimentId::new("experiment/live-001");
         assert_eq!(experiment.as_str(), "experiment/live-001");
+    }
+
+    #[test]
+    fn string_ids_display_as_inner_strings() {
+        let action = ActionId::try_new("cpu-affinity-profile:game").unwrap();
+        let experiment = ExperimentId::try_new("experiment-1").unwrap();
+
+        assert_eq!(action.to_string(), "cpu-affinity-profile:game");
+        assert_eq!(experiment.to_string(), "experiment-1");
     }
 }

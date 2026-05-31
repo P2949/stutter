@@ -139,8 +139,8 @@ mod tests {
                 affected_tasks,
                 manual_restore_command,
             } => {
-                assert_eq!(experiment_id, "apply-low-risk:game-main");
-                assert_eq!(action_id, "cpu-affinity-profile:game-main");
+                assert_eq!(experiment_id.as_str(), "apply-low-risk:game-main");
+                assert_eq!(action_id.as_str(), "cpu-affinity-profile:game-main");
                 assert_eq!(affected_tasks, 31);
                 assert!(manual_restore_command.ends_with("stutter restore"));
             }

@@ -13,15 +13,15 @@ async fn autotune_status_includes_serializable_daemon_state_without_task_handles
             comm: Some("Game.exe".to_owned()),
         }),
         active_experiment: Some(DaemonExperimentState {
-            experiment_id: "experiment-1".to_owned(),
-            action_id: "remote-autotune-start:apply-low-risk".to_owned(),
+            experiment_id: crate::autotune::experiment::ExperimentId::new("experiment-1"),
+            action_id: crate::actions::ActionId::new("remote-autotune-start:apply-low-risk"),
             candidate_name: Some("Game.exe".to_owned()),
             mode: DaemonMode::ApplyLowRisk,
             safety_class: SafetyClass::ReversibleLowRisk,
             started_unix_nanos: Some(100),
         }),
         active_rollback: Some(DaemonRollbackState {
-            action_id: "remote-autotune-start:apply-low-risk".to_owned(),
+            action_id: crate::actions::ActionId::new("remote-autotune-start:apply-low-risk"),
             mode: DaemonMode::ApplyLowRisk,
             safety_class: SafetyClass::ReversibleLowRisk,
             rollback_available: false,

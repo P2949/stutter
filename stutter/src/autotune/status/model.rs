@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::autotune::planner::PlannerSummary;
+use crate::{actions::ActionId, autotune::planner::PlannerSummary};
 
 #[derive(Clone, Debug)]
 pub struct AutotuneStatusCommandInput {
@@ -40,7 +40,7 @@ pub struct StatusTarget {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StatusKeptAction {
     pub candidate_name: String,
-    pub action_id: String,
+    pub action_id: ActionId,
     pub action_kind: String,
     pub safety_class: String,
     pub kept_unix_nanos: u128,

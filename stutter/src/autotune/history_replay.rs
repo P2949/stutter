@@ -141,7 +141,7 @@ fn candidate_name(event: &AutotuneHistoryEvent) -> String {
         .decision
         .candidate_name
         .clone()
-        .or_else(|| event.action_id.clone())
+        .or_else(|| event.action_id.as_ref().map(|id| id.as_str().to_owned()))
         .unwrap_or_else(|| "unknown".to_owned())
 }
 
@@ -284,8 +284,8 @@ mod tests {
                 eligible: true,
                 rollback_policy: "rollback-on-exit".to_owned(),
             },
-            experiment_id: Some("experiment-1".to_owned()),
-            action_id: candidate.map(|name| format!("cpu-affinity-profile:{name}")),
+            experiment_id: Some("experiment-1".into()),
+            action_id: candidate.map(|name| format!("cpu-affinity-profile:{name}").into()),
             score_before: None,
             score_after: None,
             planner: None,

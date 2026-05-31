@@ -216,7 +216,9 @@ fn current_profile_from_events(events: &[AutotuneHistoryEvent]) -> Option<String
             return Some(candidate.clone());
         }
 
-        if let Some(candidate) = candidate_name_from_action_id(event.action_id.as_deref()) {
+        if let Some(candidate) =
+            candidate_name_from_action_id(event.action_id.as_ref().map(|id| id.as_str()))
+        {
             return Some(candidate);
         }
     }
@@ -427,8 +429,8 @@ mod tests {
                 eligible: true,
                 rollback_policy: "rollback-on-exit".to_owned(),
             },
-            experiment_id: Some("experiment-1".to_owned()),
-            action_id: Some("cpu-affinity-profile:game-main-suggested".to_owned()),
+            experiment_id: Some("experiment-1".into()),
+            action_id: Some("cpu-affinity-profile:game-main-suggested".into()),
             score_before: Some(score(412)),
             score_after: None,
             planner: None,

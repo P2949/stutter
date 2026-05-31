@@ -267,15 +267,15 @@ mod tests {
                     comm: Some("game".to_owned()),
                 }),
                 active_experiment: Some(crate::daemon::state::DaemonExperimentState {
-                    experiment_id: "experiment-1".to_owned(),
-                    action_id: "cpu-affinity-profile:game-main".to_owned(),
+                    experiment_id: crate::autotune::experiment::ExperimentId::new("experiment-1"),
+                    action_id: crate::actions::ActionId::new("cpu-affinity-profile:game-main"),
                     candidate_name: Some("game-main".to_owned()),
                     mode: DaemonMode::ApplyLowRisk,
                     safety_class: crate::actions::SafetyClass::ReversibleLowRisk,
                     started_unix_nanos: Some(100),
                 }),
                 active_rollback: Some(crate::daemon::state::DaemonRollbackState {
-                    action_id: "cpu-affinity-profile:game-main".to_owned(),
+                    action_id: crate::actions::ActionId::new("cpu-affinity-profile:game-main"),
                     mode: DaemonMode::ApplyLowRisk,
                     safety_class: crate::actions::SafetyClass::ReversibleLowRisk,
                     rollback_available: true,
@@ -287,7 +287,7 @@ mod tests {
                         workload_identity_hash: "workload-abc".to_owned(),
                         workload_label: Some("game".to_owned()),
                         candidate_name: "game-main".to_owned(),
-                        action_id: "cpu-affinity-profile:game-main".to_owned(),
+                        action_id: crate::actions::ActionId::new("cpu-affinity-profile:game-main"),
                         action_kind: "cpu_affinity_profile".to_owned(),
                         safety_class: crate::actions::SafetyClass::ReversibleLowRisk,
                         kept_unix_nanos: 200,
@@ -448,7 +448,7 @@ mod tests {
             DaemonState {
                 phase: DaemonPhase::Faulted,
                 active_rollback: Some(crate::daemon::state::DaemonRollbackState {
-                    action_id: "action-1".to_owned(),
+                    action_id: crate::actions::ActionId::new("action-1"),
                     mode: DaemonMode::ApplyLowRisk,
                     safety_class: crate::actions::SafetyClass::ReversibleLowRisk,
                     rollback_available: true,

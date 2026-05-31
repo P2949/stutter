@@ -71,8 +71,8 @@ pub(super) fn write_emergency_restore_history_event(
         },
         reason: input.reason,
     })
-    .with_experiment_id(input.experiment_id.to_owned())
-    .with_action_id(input.action_id.to_owned())
+    .try_with_experiment_id(input.experiment_id.to_owned())?
+    .try_with_action_id(input.action_id.to_owned())?
     .with_rollback_performed(input.rollback_performed);
 
     append_autotune_history_event(input.history_path, &event).with_context(|| {

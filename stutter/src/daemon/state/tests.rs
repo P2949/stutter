@@ -118,15 +118,15 @@ fn daemon_state_can_store_live_runtime_fields() {
             comm: Some("game".to_owned()),
         }),
         active_experiment: Some(DaemonExperimentState {
-            experiment_id: "experiment-1".to_owned(),
-            action_id: "cpu-affinity-profile:game".to_owned(),
+            experiment_id: ExperimentId::new("experiment-1"),
+            action_id: ActionId::new("cpu-affinity-profile:game"),
             candidate_name: Some("game".to_owned()),
             mode: DaemonMode::ApplyLowRisk,
             safety_class: SafetyClass::ReversibleLowRisk,
             started_unix_nanos: Some(100),
         }),
         active_rollback: Some(DaemonRollbackState {
-            action_id: "cpu-affinity-profile:game".to_owned(),
+            action_id: ActionId::new("cpu-affinity-profile:game"),
             mode: DaemonMode::ApplyLowRisk,
             safety_class: SafetyClass::ReversibleLowRisk,
             rollback_available: true,
@@ -154,7 +154,7 @@ fn daemon_state_can_store_live_runtime_fields() {
                 workload_identity_hash: "workload-abc".to_owned(),
                 workload_label: Some("game".to_owned()),
                 candidate_name: "game-main".to_owned(),
-                action_id: "cpu-affinity-profile:game-main".to_owned(),
+                action_id: ActionId::new("cpu-affinity-profile:game-main"),
                 action_kind: "cpu_affinity_profile".to_owned(),
                 safety_class: SafetyClass::ReversibleLowRisk,
                 kept_unix_nanos: 300,
@@ -193,6 +193,69 @@ fn daemon_state_can_store_live_runtime_fields() {
         decoded.profile_memory.profiles[0].workload_identity_hash,
         "workload-abc"
     );
+}
+
+#[test]
+fn daemon_state_typed_ids_keep_json_shape() {
+    let state = DaemonState {
+        active_experiment: Some(DaemonExperimentState {
+            experiment_id: ExperimentId::try_new("experiment-1").unwrap(),
+            action_id: ActionId::try_new("cpu-affinity-profile:game").unwrap(),
+            candidate_name: Some("game".to_owned()),
+            mode: DaemonMode::ApplyLowRisk,
+            safety_class: SafetyClass::ReversibleLowRisk,
+            started_unix_nanos: Some(1),
+        }),
+        active_rollback: Some(DaemonRollbackState {
+            action_id: ActionId::try_new("cpu-affinity-profile:game").unwrap(),
+            mode: DaemonMode::ApplyLowRisk,
+            safety_class: SafetyClass::ReversibleLowRisk,
+            rollback_available: true,
+            token: None,
+            manual_restore_command: Some("stutter daemon emergency-restore".to_owned()),
+        }),
+        ..DaemonState::default()
+    };
+
+    let value = serde_json::to_value(&state).unwrap();
+
+    assert_eq!(value["active_experiment"]["experiment_id"], "experiment-1");
+    assert_eq!(
+        value["active_experiment"]["action_id"],
+        "cpu-affinity-profile:game"
+    );
+    assert_eq!(
+        value["active_rollback"]["action_id"],
+        "cpu-affinity-profile:game"
+    );
+}
+
+#[test]
+fn daemon_state_load_rejects_empty_typed_ids() {
+    let dir = temp_dir("empty-typed-id");
+    let path = dir.join("daemon_state.json");
+    let state = DaemonState {
+        active_experiment: Some(DaemonExperimentState {
+            experiment_id: ExperimentId::new(""),
+            action_id: ActionId::new("cpu-affinity-profile:game"),
+            candidate_name: Some("game".to_owned()),
+            mode: DaemonMode::ApplyLowRisk,
+            safety_class: SafetyClass::ReversibleLowRisk,
+            started_unix_nanos: Some(1),
+        }),
+        ..DaemonState::default()
+    };
+
+    serde_json::to_writer_pretty(fs::File::create(&path).unwrap(), &state).unwrap();
+
+    let err = load_daemon_state(&path).expect_err("empty experiment_id should be rejected");
+
+    assert!(
+        format!("{err:#}").contains("ExperimentId cannot be empty"),
+        "unexpected error: {err:#}"
+    );
+
+    fs::remove_dir_all(dir).ok();
 }
 
 #[test]
@@ -269,7 +332,7 @@ fn workload_profile_validation_detects_environment_change_and_age() {
         workload_identity_hash: "workload-abc".to_owned(),
         workload_label: Some("game".to_owned()),
         candidate_name: "game-main".to_owned(),
-        action_id: "cpu-affinity-profile:game-main".to_owned(),
+        action_id: ActionId::new("cpu-affinity-profile:game-main"),
         action_kind: "cpu_affinity_profile".to_owned(),
         safety_class: SafetyClass::ReversibleLowRisk,
         kept_unix_nanos: 100,
@@ -317,7 +380,7 @@ fn profile_memory_forget_filters_by_workload_and_candidate() {
         workload_identity_hash: workload.to_owned(),
         workload_label: Some(workload.to_owned()),
         candidate_name: candidate.to_owned(),
-        action_id: format!("cpu-affinity-profile:{candidate}"),
+        action_id: ActionId::new(format!("cpu-affinity-profile:{candidate}")),
         action_kind: "cpu_affinity_profile".to_owned(),
         safety_class: SafetyClass::ReversibleLowRisk,
         kept_unix_nanos: 1,
@@ -505,7 +568,7 @@ fn workload_profile_serializes_candidate_raw_score_total_name() {
         workload_identity_hash: "workload-abc".to_owned(),
         workload_label: Some("game".to_owned()),
         candidate_name: "game-main".to_owned(),
-        action_id: "cpu-affinity-profile:game-main".to_owned(),
+        action_id: ActionId::new("cpu-affinity-profile:game-main"),
         action_kind: "cpu_affinity_profile".to_owned(),
         safety_class: SafetyClass::ReversibleLowRisk,
         kept_unix_nanos: 300,
