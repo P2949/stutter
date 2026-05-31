@@ -28,7 +28,7 @@ pub(crate) fn audit_agent_event_with_safety(
         schema_version: 1,
         unix_nanos: crate::audit::unix_nanos_now(),
         command: "agent".to_owned(),
-        action_id: Some(action_id.to_owned()),
+        action_id: Some(crate::actions::ActionId::new(action_id)),
         safety_class: Some(safety_class),
         dry_run: false,
         success,

@@ -252,7 +252,13 @@ mod tests {
         assert_eq!(events.len(), 5);
         let terminal = events.last().expect("expected terminal audit event");
         assert_eq!(terminal.command, "autotune candidate");
-        assert_eq!(terminal.action_id.as_deref(), Some("test-candidate"));
+        assert_eq!(
+            terminal
+                .action_id
+                .as_ref()
+                .map(crate::actions::ActionId::as_str),
+            Some("test-candidate")
+        );
         assert_eq!(terminal.safety_class, Some(SafetyClass::ReversibleLowRisk));
         assert!(!terminal.dry_run);
         assert!(terminal.success);

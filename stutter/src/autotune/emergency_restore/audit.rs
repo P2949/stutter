@@ -21,7 +21,7 @@ pub(super) fn write_emergency_restore_audit_event(
         schema_version: 1,
         unix_nanos: crate::audit::unix_nanos_now(),
         command: "autotune emergency restore".to_owned(),
-        action_id: Some(action_id.to_owned()),
+        action_id: Some(crate::actions::ActionId::new(action_id)),
         safety_class: Some(safety_class_for_rollback_token(rollback_token)),
         dry_run: false,
         success,

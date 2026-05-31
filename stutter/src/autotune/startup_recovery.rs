@@ -420,7 +420,7 @@ fn write_startup_recovery_audit_event(
         schema_version: 1,
         unix_nanos: crate::audit::unix_nanos_now(),
         command: "autotune-startup-recovery".to_owned(),
-        action_id: Some(action_id.as_str().to_owned()),
+        action_id: Some(action_id.clone()),
         safety_class: Some(safety_class_for_rollback_token(rollback_token)),
         dry_run: false,
         success,

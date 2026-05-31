@@ -269,7 +269,10 @@ pub(super) async fn write_tune_summary(
                         schema_version: 1,
                         unix_nanos: crate::audit::unix_nanos_now(),
                         command: "tune --keep-best".to_owned(),
-                        action_id: Some(format!("cpu-affinity-profile:{}", profile.name)),
+                        action_id: Some(crate::actions::ActionId::new(format!(
+                            "cpu-affinity-profile:{}",
+                            profile.name
+                        ))),
                         safety_class: Some(if profiles::profile_uses_priority_actions(profile) {
                             crate::actions::SafetyClass::ReversibleMediumRisk
                         } else {
@@ -293,7 +296,10 @@ pub(super) async fn write_tune_summary(
                 schema_version: 1,
                 unix_nanos: crate::audit::unix_nanos_now(),
                 command: "tune --keep-best".to_owned(),
-                action_id: Some(format!("cpu-affinity-profile:{}", profile.name)),
+                action_id: Some(crate::actions::ActionId::new(format!(
+                    "cpu-affinity-profile:{}",
+                    profile.name
+                ))),
                 safety_class: Some(if profiles::profile_uses_priority_actions(profile) {
                     crate::actions::SafetyClass::ReversibleMediumRisk
                 } else {
@@ -390,7 +396,10 @@ pub async fn measure_tune_candidate(
                 schema_version: 1,
                 unix_nanos: crate::audit::unix_nanos_now(),
                 command: "tune candidate".to_owned(),
-                action_id: Some(format!("cpu-affinity-profile:{}", profile.name)),
+                action_id: Some(crate::actions::ActionId::new(format!(
+                    "cpu-affinity-profile:{}",
+                    profile.name
+                ))),
                 safety_class: Some(crate::actions::SafetyClass::ReversibleLowRisk),
                 dry_run: false,
                 success: false,
@@ -411,7 +420,10 @@ pub async fn measure_tune_candidate(
         schema_version: 1,
         unix_nanos: crate::audit::unix_nanos_now(),
         command: "tune candidate".to_owned(),
-        action_id: Some(format!("cpu-affinity-profile:{}", profile.name)),
+        action_id: Some(crate::actions::ActionId::new(format!(
+            "cpu-affinity-profile:{}",
+            profile.name
+        ))),
         safety_class: Some(if profiles::profile_uses_priority_actions(&profile) {
             crate::actions::SafetyClass::ReversibleMediumRisk
         } else {

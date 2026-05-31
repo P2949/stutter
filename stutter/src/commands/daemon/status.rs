@@ -2,6 +2,7 @@ use serde::Serialize;
 
 use super::helpers::load_recent_daemon_decisions;
 use crate::{
+    actions::ActionId,
     config_file,
     daemon::{
         capabilities::{CapabilityProbe, DaemonCapabilities},
@@ -33,7 +34,7 @@ pub struct DaemonRecentDecision {
     pub mode: String,
     pub decision: String,
     pub candidate_name: Option<String>,
-    pub action_id: Option<String>,
+    pub action_id: Option<ActionId>,
     pub rollback_performed: bool,
     pub reason: String,
 }
@@ -276,7 +277,7 @@ pub fn render_status_text(output: &DaemonStatusOutput) -> String {
                 decision.mode,
                 decision.phase,
                 decision.decision,
-                decision.action_id.as_deref().unwrap_or("none"),
+                decision.action_id.as_ref().map(ActionId::as_str).unwrap_or("none"),
                 decision.candidate_name.as_deref().unwrap_or("none"),
                 decision.rollback_performed,
                 decision.reason
@@ -394,7 +395,7 @@ mod tests {
             mode: "ApplyLowRisk".to_owned(),
             decision: "optimize".to_owned(),
             candidate_name: Some("game-main".to_owned()),
-            action_id: Some("cpu-affinity:game".to_owned()),
+            action_id: Some(ActionId::new("cpu-affinity:game")),
             rollback_performed: false,
             reason: "found better affinity".to_owned(),
         }];

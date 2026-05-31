@@ -3,13 +3,13 @@ use std::{thread, time::Duration};
 use super::status::{
     DaemonStatusOutput, build_status_output_with_recent_decisions, render_status_text,
 };
-use crate::daemon::state::DaemonPhase;
+use crate::{actions::ActionId, daemon::state::DaemonPhase};
 
 #[derive(Clone, Debug)]
 pub struct DaemonWatchSignature {
     pub phase: DaemonPhase,
-    pub active_action_id: Option<String>,
-    pub rollback_action_id: Option<String>,
+    pub active_action_id: Option<ActionId>,
+    pub rollback_action_id: Option<ActionId>,
     pub rollback_available: bool,
     pub fault_reason: Option<String>,
 }
@@ -54,12 +54,12 @@ impl DaemonWatchSignature {
                 .state
                 .active_experiment
                 .as_ref()
-                .map(|experiment| experiment.action_id.as_str().to_owned()),
+                .map(|experiment| experiment.action_id.clone()),
             rollback_action_id: output
                 .state
                 .active_rollback
                 .as_ref()
-                .map(|rollback| rollback.action_id.as_str().to_owned()),
+                .map(|rollback| rollback.action_id.clone()),
             rollback_available: output
                 .state
                 .active_rollback
@@ -208,14 +208,14 @@ mod tests {
         );
 
         next.phase = DaemonPhase::Apply;
-        next.active_action_id = Some("action-a".to_owned());
+        next.active_action_id = Some(ActionId::new("action-a"));
         assert_eq!(
             render_watch_notification(&signature, &next),
             Some("action applied action_id=action-a".to_owned())
         );
 
         next.active_action_id = None;
-        next.rollback_action_id = Some("action-a".to_owned());
+        next.rollback_action_id = Some(ActionId::new("action-a"));
         next.rollback_available = true;
         assert_eq!(
             render_watch_notification(&signature, &next),

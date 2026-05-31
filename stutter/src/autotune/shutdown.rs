@@ -507,7 +507,7 @@ fn build_exit_audit_event(
         schema_version: 1,
         unix_nanos: crate::audit::unix_nanos_now(),
         command: "autotune rollback-on-exit".to_owned(),
-        action_id: Some(action.action_id.as_str().to_owned()),
+        action_id: Some(action.action_id.clone()),
         safety_class: Some(action.safety_class.clone()),
         dry_run: false,
         success,

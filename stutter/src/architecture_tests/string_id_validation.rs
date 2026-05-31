@@ -106,36 +106,7 @@ struct RawStringIdAllowance {
     exit_criteria: &'static str,
 }
 
-const RAW_STRING_ID_ALLOWLIST: &[RawStringIdAllowance] = &[
-    RawStringIdAllowance {
-        path: "stutter/src/audit.rs",
-        needle: "pub action_id: Option<String>,",
-        expected_count: 1,
-        reason: "audit JSON compatibility remains string-shaped while audit records migrate separately from autotune/daemon state IDs",
-        exit_criteria: "replace AuditEvent.action_id with ActionId or validate_non_empty() when reading audit events",
-    },
-    RawStringIdAllowance {
-        path: "stutter/src/commands/daemon/status.rs",
-        needle: "pub action_id: Option<String>,",
-        expected_count: 1,
-        reason: "daemon status recent-decision JSON is a display DTO while persisted history and daemon state IDs migrate to typed IDs",
-        exit_criteria: "replace DaemonRecentDecision.action_id with ActionId or validate_non_empty() when building status output",
-    },
-    RawStringIdAllowance {
-        path: "stutter/src/commands/daemon/watch.rs",
-        needle: "pub active_action_id: Option<String>,",
-        expected_count: 1,
-        reason: "daemon watch signatures are display/cache DTOs while active daemon state IDs are typed",
-        exit_criteria: "replace DaemonWatchSignature.active_action_id with ActionId or validate_non_empty() when building watch signatures",
-    },
-    RawStringIdAllowance {
-        path: "stutter/src/commands/daemon/watch.rs",
-        needle: "pub rollback_action_id: Option<String>,",
-        expected_count: 1,
-        reason: "daemon watch signatures are display/cache DTOs while rollback daemon state IDs are typed",
-        exit_criteria: "replace DaemonWatchSignature.rollback_action_id with ActionId or validate_non_empty() when building watch signatures",
-    },
-];
+const RAW_STRING_ID_ALLOWLIST: &[RawStringIdAllowance] = &[];
 
 fn is_raw_string_id_scan_excluded_path(path: &str) -> bool {
     path.contains("/tests/")

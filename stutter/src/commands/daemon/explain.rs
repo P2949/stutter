@@ -215,7 +215,11 @@ pub fn render_explain_text(output: &DaemonExplainOutput) -> String {
                 "- {} candidate={} action={} rollback={} reason={}\n",
                 decision.decision,
                 decision.candidate_name.as_deref().unwrap_or("none"),
-                decision.action_id.as_deref().unwrap_or("none"),
+                decision
+                    .action_id
+                    .as_ref()
+                    .map(crate::actions::ActionId::as_str)
+                    .unwrap_or("none"),
                 decision.rollback_performed,
                 decision.reason
             ));

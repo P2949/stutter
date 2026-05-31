@@ -91,7 +91,7 @@ where
         schema_version: 1,
         unix_nanos: started_unix_nanos,
         command: command.to_owned(),
-        action_id: Some(action_id.as_str().to_owned()),
+        action_id: Some(action_id.clone()),
         safety_class: Some(safety_class.clone()),
         dry_run,
         success: false,

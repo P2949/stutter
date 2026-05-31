@@ -92,7 +92,7 @@ pub fn load_recent_daemon_decisions(limit: usize) -> Vec<super::status::DaemonRe
             mode: format!("{:?}", event.mode),
             decision: event.decision.decision,
             candidate_name: event.decision.candidate_name,
-            action_id: event.action_id.map(|id| id.into_string()),
+            action_id: event.action_id,
             rollback_performed: event.rollback_performed,
             reason: event.reason.clone(),
         })
