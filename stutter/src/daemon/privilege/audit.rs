@@ -17,7 +17,7 @@ pub fn privileged_operation_audit_event(
         schema_version: 1,
         unix_nanos: crate::audit::unix_nanos_now(),
         command: "daemon_privilege".to_owned(),
-        action_id: Some(operation.audit_action_id().to_owned()),
+        action_id: Some(crate::actions::ActionId::new(operation.audit_action_id())),
         safety_class: Some(operation.minimum_safety_class()),
         dry_run: false,
         success,
@@ -89,8 +89,12 @@ impl PrivilegeAuditSink {
                 command: "daemon_privilege".to_owned(),
                 action_id: input
                     .descriptor
-                    .map(|descriptor| descriptor.action_id.as_str().to_owned())
-                    .or_else(|| Some(input.operation.audit_action_id().to_owned())),
+                    .map(|descriptor| descriptor.action_id.clone())
+                    .or_else(|| {
+                        Some(crate::actions::ActionId::new(
+                            input.operation.audit_action_id(),
+                        ))
+                    }),
                 safety_class: input
                     .descriptor
                     .map(|descriptor| descriptor.safety_class.clone())

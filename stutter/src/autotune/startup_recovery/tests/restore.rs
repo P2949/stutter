@@ -174,7 +174,10 @@ fn applied_journal_rolls_back_audits_history_and_cleans_journal() {
     assert!(audit[0].success);
     assert_eq!(audit[0].command, "autotune-startup-recovery");
     assert_eq!(
-        audit[0].action_id.as_deref(),
+        audit[0]
+            .action_id
+            .as_ref()
+            .map(crate::actions::ActionId::as_str),
         Some("cpu-affinity-profile:game-main")
     );
     assert_eq!(audit[0].affected_tasks, 31);
@@ -388,7 +391,10 @@ fn journal_applied_state_rolls_back_on_start() {
     assert!(audit[0].success);
     assert_eq!(audit[0].command, "autotune-startup-recovery");
     assert_eq!(
-        audit[0].action_id.as_deref(),
+        audit[0]
+            .action_id
+            .as_ref()
+            .map(crate::actions::ActionId::as_str),
         Some("cpu-affinity-profile:game-main")
     );
     assert_eq!(audit[0].affected_tasks, 31);
@@ -467,7 +473,10 @@ fn rollback_failure_enters_faulted() {
     assert!(!audit[0].success);
     assert_eq!(audit[0].command, "autotune-startup-recovery");
     assert_eq!(
-        audit[0].action_id.as_deref(),
+        audit[0]
+            .action_id
+            .as_ref()
+            .map(crate::actions::ActionId::as_str),
         Some("cpu-affinity-profile:game-main")
     );
     assert_eq!(audit[0].affected_tasks, 0);

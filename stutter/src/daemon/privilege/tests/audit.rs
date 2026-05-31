@@ -10,7 +10,10 @@ fn privileged_operation_audit_event_uses_stable_action_id() {
 
     assert_eq!(event.command, "daemon_privilege");
     assert_eq!(
-        event.action_id.as_deref(),
+        event
+            .action_id
+            .as_ref()
+            .map(crate::actions::ActionId::as_str),
         Some("privilege-rollback-action")
     );
     assert_eq!(event.safety_class, Some(SafetyClass::ReversibleLowRisk));

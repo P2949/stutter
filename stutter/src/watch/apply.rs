@@ -126,7 +126,10 @@ pub async fn apply_profile_command(input: ApplyProfileCommandInput) -> anyhow::R
         schema_version: 1,
         unix_nanos: crate::audit::unix_nanos_now(),
         command: "apply-profile --watch".to_owned(),
-        action_id: Some(format!("cpu-affinity-profile:{}", profile.name)),
+        action_id: Some(crate::actions::ActionId::new(format!(
+            "cpu-affinity-profile:{}",
+            profile.name
+        ))),
         safety_class: Some(
             if crate::profiles::profile_uses_priority_actions(&profile) {
                 crate::actions::SafetyClass::ReversibleMediumRisk
