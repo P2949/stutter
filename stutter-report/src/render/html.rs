@@ -500,6 +500,15 @@ mod tests {
     }
 
     #[test]
+    fn html_table_cells_render_value_once_and_escape_content() {
+        let mut html = String::new();
+
+        super::push_td(&mut html, "render<&>");
+
+        assert_eq!(html, "<td>render&lt;&amp;&gt;</td>");
+    }
+
+    #[test]
     fn html_report_renders_core_sections_and_escapes_content() {
         let mut model = ReportModel::new()
             .with_run_id(RunId::new("run-<001>"))
