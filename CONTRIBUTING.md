@@ -28,6 +28,21 @@ This repository uses `xtask` commands as the local development gate. Run them wi
    RUSTUP_TOOLCHAIN=nightly cargo run -p xtask -- preflight
    ```
 
+## Action boundary and string ID migration validation
+
+When touching action boundary errors or raw `action_id` / `experiment_id`
+fields, run the focused migration guard before the broader validation gates:
+
+```sh
+scripts/validate-action-boundary-string-id-migration.sh
+```
+
+This verifies that action boundary modules use typed errors instead of
+string-coded `anyhow::bail!`, rollback framework paths are excluded
+precisely, `ActionBoundaryError` round-trips through `ActionError` serde,
+and remaining raw string ID migration debt is tracked with reasons, exit
+criteria, and counts.
+
 ## Privileged eBPF smoke
 
 The normal `ci` and `validate` gates are non-root. For changes that affect eBPF loading, eBPF map names or types, tracepoint attach logic, or BPF object build/load behavior, also run the ignored privileged loader smoke test on a Linux machine with tracefs mounted and eBPF privileges:
