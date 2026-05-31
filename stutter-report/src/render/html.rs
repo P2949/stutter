@@ -1,6 +1,6 @@
 use crate::model::{
     DataQualitySummary, FrameDiagnosis, ReportHeaderSummary, ReportModel, SpikeCluster,
-    TextReportCorrelationSections,
+    TextReportCorrelationSections, WakeGraphEdge,
 };
 
 pub fn render_report(model: &ReportModel) -> String {
@@ -255,11 +255,42 @@ fn render_clusters(html: &mut String, clusters: &[SpikeCluster]) {
             html.push_str("          </table>\n");
         }
 
+        render_wake_graph(html, &cluster.wake_graph);
+
         html.push_str("        </li>\n");
     }
 
     html.push_str("      </ol>\n");
     html.push_str("    </section>\n");
+}
+
+fn render_wake_graph(html: &mut String, wake_graph: &[WakeGraphEdge]) {
+    if wake_graph.is_empty() {
+        return;
+    }
+
+    html.push_str("          <details>\n");
+    html.push_str("            <summary>Wake relationships</summary>\n");
+    html.push_str("            <table>\n");
+    html.push_str(
+        "              <thead><tr><th>waker_tid</th><th>waker_comm</th><th>wakee_tid</th><th>wakee_comm</th><th>count</th><th>max_latency_ns</th></tr></thead>\n",
+    );
+    html.push_str("              <tbody>\n");
+
+    for edge in wake_graph {
+        html.push_str("                <tr>");
+        push_td(html, &edge.waker_tid.to_string());
+        push_td(html, &edge.waker_comm);
+        push_td(html, &edge.wakee_tid.to_string());
+        push_td(html, &edge.wakee_comm);
+        push_td(html, &edge.count.to_string());
+        push_td(html, &edge.max_latency_ns.to_string());
+        html.push_str("</tr>\n");
+    }
+
+    html.push_str("              </tbody>\n");
+    html.push_str("            </table>\n");
+    html.push_str("          </details>\n");
 }
 
 fn render_frames(html: &mut String, frames: &[FrameDiagnosis]) {
@@ -384,6 +415,7 @@ mod tests {
     use crate::model::{
         DataQualityLevel, DataQualitySummary, Diagnosis, ReportHeaderSummary, ReportModel,
         SpikeCluster, SpikePoint, TextReportCorrelationSection, TextReportCorrelationSections,
+        WakeGraphEdge,
     };
 
     fn minimal_data_quality(level: DataQualityLevel) -> DataQualitySummary {
@@ -448,7 +480,14 @@ mod tests {
                 secondary_causes: Vec::new(),
                 report_summary: "scheduler delay <high>".to_owned(),
             }),
-            wake_graph: Vec::new(),
+            wake_graph: vec![WakeGraphEdge {
+                waker_tid: Tid::new(10),
+                waker_comm: "launcher<&>".to_owned(),
+                wakee_tid: Tid::new(42),
+                wakee_comm: "render<&>".to_owned(),
+                count: 3,
+                max_latency_ns: 900_000,
+            }],
         }
     }
 
@@ -511,6 +550,12 @@ mod tests {
         assert!(html.contains("render&lt;&amp;&gt;"));
         assert!(html.contains("low sample count &lt;unsafe&gt;"));
         assert!(html.contains("IRQ &amp; GPU"));
+        assert!(html.contains("Wake relationships"));
+        assert!(html.contains("waker_tid"));
+        assert!(html.contains("wakee_tid"));
+        assert!(html.contains("launcher&lt;&amp;&gt;"));
+        assert!(html.contains("900000"));
+        assert!(!html.contains("launcher<&>"));
         assert!(!html.contains("render<&>"));
         assert!(!html.contains("low sample count <unsafe>"));
     }
