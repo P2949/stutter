@@ -90,7 +90,7 @@ impl AutotuneRuntime {
                     workload_identity_hash: workload_identity_hash.clone(),
                     workload_label: workload_label.clone(),
                     candidate_name: record.candidate_name.clone(),
-                    action_id: record.action_id.as_str().to_owned(),
+                    action_id: record.action_id.clone(),
                     action_kind,
                     safety_class,
                     kept_unix_nanos: record.last_tried_unix_nanos,

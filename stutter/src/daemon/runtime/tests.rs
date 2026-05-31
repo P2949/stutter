@@ -2,8 +2,8 @@ use std::{collections::BTreeMap, path::PathBuf};
 
 use super::*;
 use crate::{
-    actions::SafetyClass,
-    autotune::runtime::AutotuneDecisionStreamEntry,
+    actions::{ActionId, SafetyClass},
+    autotune::{experiment::ExperimentId, runtime::AutotuneDecisionStreamEntry},
     config::model::MonitorConfig,
     daemon::{
         DaemonConfig,
@@ -308,8 +308,8 @@ fn daemon_runtime_decision_event_updates_phase_target_and_last_decision() {
 
 fn active_experiment() -> DaemonExperimentState {
     DaemonExperimentState {
-        experiment_id: "experiment-1".to_owned(),
-        action_id: "action-1".to_owned(),
+        experiment_id: ExperimentId::new("experiment-1"),
+        action_id: ActionId::new("action-1"),
         candidate_name: Some("game-candidate".to_owned()),
         mode: DaemonMode::ApplyLowRisk,
         safety_class: SafetyClass::ReversibleLowRisk,
@@ -319,7 +319,7 @@ fn active_experiment() -> DaemonExperimentState {
 
 fn active_rollback(rollback_available: bool) -> DaemonRollbackState {
     DaemonRollbackState {
-        action_id: "action-1".to_owned(),
+        action_id: ActionId::new("action-1"),
         mode: DaemonMode::ApplyLowRisk,
         safety_class: SafetyClass::ReversibleLowRisk,
         rollback_available,

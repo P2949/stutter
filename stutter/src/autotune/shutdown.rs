@@ -12,7 +12,7 @@ use super::decision_log::{
     DecisionJsonlEntryInput, OnlineDataQualityLabel, SituationKindLabel, append_decision_jsonl,
 };
 use crate::{
-    actions::{RollbackToken, SafetyClass},
+    actions::{ActionId, RollbackToken, SafetyClass},
     audit::{AuditEvent, append_audit_event_to_path, audit_or_warn},
     autotune::{kept::ActiveProfileState, planning::candidate::CandidateAction},
 };
@@ -43,7 +43,7 @@ pub struct RollbackOnExitConfig {
 
 #[derive(Clone, Debug)]
 pub struct ActiveAutotuneAction {
-    pub action_id: String,
+    pub action_id: ActionId,
     pub action_kind: String,
     pub safety_class: SafetyClass,
     pub rollback: RollbackToken,
@@ -51,14 +51,24 @@ pub struct ActiveAutotuneAction {
 }
 
 impl ActiveAutotuneAction {
-    pub fn cpu_affinity_profile(action_id: impl Into<String>, rollback: RollbackToken) -> Self {
+    pub fn cpu_affinity_profile(action_id: ActionId, rollback: RollbackToken) -> Self {
         Self {
-            action_id: action_id.into(),
+            action_id,
             action_kind: "cpu_affinity_profile".to_owned(),
             safety_class: SafetyClass::ReversibleLowRisk,
             rollback,
             candidate: None,
         }
+    }
+
+    pub fn try_cpu_affinity_profile(
+        action_id: impl Into<String>,
+        rollback: RollbackToken,
+    ) -> Result<Self, stutter_core::ids::EmptyStringIdError> {
+        Ok(Self::cpu_affinity_profile(
+            ActionId::try_new(action_id)?,
+            rollback,
+        ))
     }
 
     pub fn from_kept_candidate(kept: &crate::autotune::kept::KeptCandidateState) -> Option<Self> {
@@ -68,7 +78,7 @@ impl ActiveAutotuneAction {
         }
 
         Some(Self {
-            action_id: descriptor.action_id.into_string(),
+            action_id: descriptor.action_id,
             action_kind: descriptor.action_kind,
             safety_class: descriptor.safety_class,
             rollback: kept.rollback.clone(),
@@ -497,7 +507,7 @@ fn build_exit_audit_event(
         schema_version: 1,
         unix_nanos: crate::audit::unix_nanos_now(),
         command: "autotune rollback-on-exit".to_owned(),
-        action_id: Some(action.action_id.clone()),
+        action_id: Some(action.action_id.as_str().to_owned()),
         safety_class: Some(action.safety_class.clone()),
         dry_run: false,
         success,
@@ -585,7 +595,8 @@ pub fn register_cpu_affinity_rollback(
     rollback: RollbackToken,
 ) {
     registry.register(ActiveAutotuneAction::cpu_affinity_profile(
-        action_id, rollback,
+        ActionId::new(action_id),
+        rollback,
     ));
 }
 

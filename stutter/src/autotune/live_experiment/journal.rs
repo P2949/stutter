@@ -22,8 +22,7 @@ pub(super) fn controller_journal_record_for_live_experiment(
     ControllerJournalRecord::for_phase(
         state,
         experiment.experiment_id.clone(),
-        // invariant: live experiment action IDs are constructed internally and are always non-empty
-        crate::actions::ActionId::try_new(action_id).unwrap(),
+        action_id,
         Some(experiment.rollback.clone()),
     )
     .with_metadata(controller_journal_metadata_for_candidate(

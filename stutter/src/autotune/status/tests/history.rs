@@ -6,7 +6,7 @@ fn status_from_history_lists_multiple_kept_actions() {
     second.unix_nanos = 2;
     second.decision.candidate_name = Some("io-priority".to_owned());
     second.decision.action_kind = Some("ionice".to_owned());
-    second.action_id = Some("ionice:io-priority".to_owned());
+    second.action_id = Some(crate::actions::ActionId::new("ionice:io-priority"));
 
     let status =
         status_from_history_events(PathBuf::from("/tmp/history.jsonl"), &[kept_event(), second]);
@@ -16,13 +16,13 @@ fn status_from_history_lists_multiple_kept_actions() {
         status
             .kept_actions
             .iter()
-            .any(|action| action.action_id == "cpu-affinity-profile:game-main-suggested")
+            .any(|action| action.action_id.as_str() == "cpu-affinity-profile:game-main-suggested")
     );
     assert!(
         status
             .kept_actions
             .iter()
-            .any(|action| action.action_id == "ionice:io-priority")
+            .any(|action| action.action_id.as_str() == "ionice:io-priority")
     );
 }
 

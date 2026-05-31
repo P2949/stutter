@@ -50,6 +50,14 @@ fn temp_dir(name: &str) -> PathBuf {
     dir
 }
 
+fn experiment_id(value: &str) -> crate::autotune::experiment::ExperimentId {
+    crate::autotune::experiment::ExperimentId::try_new(value).unwrap()
+}
+
+fn action_id(value: &str) -> crate::actions::ActionId {
+    crate::actions::ActionId::try_new(value).unwrap()
+}
+
 fn rollback_token() -> RollbackToken {
     RollbackToken::CpuAffinityRestoreFile {
         path: crate::affinity::default_restore_path(),

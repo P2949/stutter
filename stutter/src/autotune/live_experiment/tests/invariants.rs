@@ -9,7 +9,7 @@ fn low_risk_active_apply_experiment_exposes_daemon_rollback_state_after_start() 
     let mut executor = FakeLiveExecutor::default();
     let observation = observation(1_000, 1_000_000_000);
     let candidate = low_risk_candidate();
-    let expected_action_id = candidate.action_id().into_string();
+    let expected_action_id = candidate.action_id();
 
     let outcome = manager
         .apply_decision_side_effects_with_executor(
@@ -55,7 +55,7 @@ fn medium_risk_active_apply_experiment_exposes_daemon_rollback_state_after_start
     let mut executor = FakeLiveExecutor::default();
     let observation = observation(1_000, 1_000_000_000);
     let candidate = medium_risk_candidate();
-    let expected_action_id = candidate.action_id().into_string();
+    let expected_action_id = candidate.action_id();
 
     let outcome = manager
         .apply_decision_side_effects_with_executor(

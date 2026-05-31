@@ -23,8 +23,8 @@ fn post_apply_transaction_phase_rolls_back_on_startup() {
     assert_eq!(
         outcome,
         StartupRecoveryOutcome::Recovered {
-            experiment_id: "experiment-1".to_owned(),
-            action_id: "cpu-affinity-profile:game-main".to_owned(),
+            experiment_id: experiment_id("experiment-1"),
+            action_id: action_id("cpu-affinity-profile:game-main"),
             affected_tasks: 31,
             manual_restore_command: "stutter restore".to_owned(),
         }
@@ -68,8 +68,8 @@ fn live_runtime_transaction_phases_roll_back_on_startup() {
         assert_eq!(
             outcome,
             StartupRecoveryOutcome::Recovered {
-                experiment_id: "experiment-live".to_owned(),
-                action_id: "cpu-affinity-profile:game-main".to_owned(),
+                experiment_id: experiment_id("experiment-live"),
+                action_id: action_id("cpu-affinity-profile:game-main"),
                 affected_tasks: 31,
                 manual_restore_command: "stutter restore".to_owned(),
             }
@@ -100,8 +100,8 @@ fn applying_journal_without_rollback_token_does_not_attempt_recovery() {
     assert_eq!(
         outcome,
         StartupRecoveryOutcome::ApplyingWithoutRollback {
-            experiment_id: "experiment-1".to_owned(),
-            action_id: "cpu-affinity-profile:game-main".to_owned(),
+            experiment_id: experiment_id("experiment-1"),
+            action_id: action_id("cpu-affinity-profile:game-main"),
         }
     );
     assert_eq!(executor.calls, 0);
@@ -156,8 +156,8 @@ fn applied_journal_rolls_back_audits_history_and_cleans_journal() {
     assert_eq!(
         outcome,
         StartupRecoveryOutcome::Recovered {
-            experiment_id: "experiment-1".to_owned(),
-            action_id: "cpu-affinity-profile:game-main".to_owned(),
+            experiment_id: experiment_id("experiment-1"),
+            action_id: action_id("cpu-affinity-profile:game-main"),
             affected_tasks: 31,
             manual_restore_command: "stutter restore".to_owned(),
         }
@@ -220,8 +220,8 @@ fn applied_journal_with_recovery_disabled_leaves_journal_applied() {
     assert_eq!(
         outcome,
         StartupRecoveryOutcome::RollbackDisabled {
-            experiment_id: "experiment-1".to_owned(),
-            action_id: "cpu-affinity-profile:game-main".to_owned(),
+            experiment_id: experiment_id("experiment-1"),
+            action_id: action_id("cpu-affinity-profile:game-main"),
             manual_restore_command: "stutter restore".to_owned(),
         }
     );
@@ -285,8 +285,8 @@ fn rollback_failure_enters_faulted_and_keeps_applied_journal() {
             manual_restore_command,
             reason,
         } => {
-            assert_eq!(experiment_id, "experiment-1");
-            assert_eq!(action_id, "cpu-affinity-profile:game-main");
+            assert_eq!(experiment_id.as_str(), "experiment-1");
+            assert_eq!(action_id.as_str(), "cpu-affinity-profile:game-main");
             assert_eq!(manual_restore_command, "stutter restore");
             assert!(reason.contains("intentional recovery rollback failure"));
         }
@@ -369,8 +369,8 @@ fn journal_applied_state_rolls_back_on_start() {
     assert_eq!(
         outcome,
         StartupRecoveryOutcome::Recovered {
-            experiment_id: "experiment-1".to_owned(),
-            action_id: "cpu-affinity-profile:game-main".to_owned(),
+            experiment_id: experiment_id("experiment-1"),
+            action_id: action_id("cpu-affinity-profile:game-main"),
             affected_tasks: 31,
             manual_restore_command: "stutter restore".to_owned(),
         }
@@ -404,10 +404,13 @@ fn journal_applied_state_rolls_back_on_start() {
     assert_eq!(history[0].phase, ControllerPhase::Cooldown);
     assert_eq!(history[0].decision.decision, "restored");
     assert_eq!(
-        history[0].action_id.as_deref(),
+        history[0].action_id.as_ref().map(|id| id.as_str()),
         Some("cpu-affinity-profile:game-main")
     );
-    assert_eq!(history[0].experiment_id.as_deref(), Some("experiment-1"));
+    assert_eq!(
+        history[0].experiment_id.as_ref().map(|id| id.as_str()),
+        Some("experiment-1")
+    );
     assert!(history[0].rollback_performed);
 
     fs::remove_dir_all(dir).ok();
@@ -441,8 +444,8 @@ fn rollback_failure_enters_faulted() {
             manual_restore_command,
             reason,
         } => {
-            assert_eq!(experiment_id, "experiment-1");
-            assert_eq!(action_id, "cpu-affinity-profile:game-main");
+            assert_eq!(experiment_id.as_str(), "experiment-1");
+            assert_eq!(action_id.as_str(), "cpu-affinity-profile:game-main");
             assert_eq!(manual_restore_command, "stutter restore");
             assert!(reason.contains("startup crash recovery rollback failed"));
             assert!(reason.contains("intentional recovery rollback failure"));
@@ -480,10 +483,13 @@ fn rollback_failure_enters_faulted() {
     assert_eq!(history[0].phase, ControllerPhase::Faulted);
     assert_eq!(history[0].decision.decision, "CrashRecoveryFault");
     assert_eq!(
-        history[0].action_id.as_deref(),
+        history[0].action_id.as_ref().map(|id| id.as_str()),
         Some("cpu-affinity-profile:game-main")
     );
-    assert_eq!(history[0].experiment_id.as_deref(), Some("experiment-1"));
+    assert_eq!(
+        history[0].experiment_id.as_ref().map(|id| id.as_str()),
+        Some("experiment-1")
+    );
     assert!(!history[0].rollback_performed);
     assert!(
         history[0]

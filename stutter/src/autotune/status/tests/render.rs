@@ -19,7 +19,7 @@ fn status_from_history_matches_text_example() {
     );
     assert_eq!(status.kept_actions.len(), 1);
     assert_eq!(
-        status.kept_actions[0].action_id,
+        status.kept_actions[0].action_id.as_str(),
         "cpu-affinity-profile:game-main-suggested"
     );
     assert_eq!(status.last_decision, "candidate_kept, improvement=18.2%");

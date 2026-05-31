@@ -1,18 +1,20 @@
 //! Runtime history context models and history-log facade exports.
 
 use crate::{
-    actions::SafetyClass,
+    actions::{ActionId, SafetyClass},
     autotune::{
-        experiment::WindowScore, live_experiment::LiveExperimentHistoryContext,
-        observation::AutotuneObservation, state::ControllerPhase,
+        experiment::{ExperimentId, WindowScore},
+        live_experiment::LiveExperimentHistoryContext,
+        observation::AutotuneObservation,
+        state::ControllerPhase,
     },
     daemon::policy::DaemonMode,
 };
 
 #[derive(Clone, Debug)]
 pub(crate) struct RuntimeHistoryContext {
-    pub(crate) experiment_id: String,
-    pub(crate) action_id: String,
+    pub(crate) experiment_id: ExperimentId,
+    pub(crate) action_id: ActionId,
     pub(crate) candidate_name: String,
     pub(crate) action_kind: String,
     pub(crate) mode: DaemonMode,

@@ -165,7 +165,7 @@ impl LiveExperimentManager {
             candidate.profile_name(),
             observation.now_unix_nanos
         ));
-        let action_id = candidate.action_id().into_string();
+        let action_id = candidate.action_id();
         let action_kind = candidate.action_kind().to_owned();
         let safety_class = candidate.safety_class();
 
@@ -174,7 +174,7 @@ impl LiveExperimentManager {
             executor,
             &candidate,
             experiment_id.as_str(),
-            &action_id,
+            action_id.as_str(),
             observation,
         )?;
 
@@ -234,8 +234,8 @@ impl LiveExperimentManager {
             experiment_id: self
                 .current
                 .as_ref()
-                .map(|experiment| experiment.experiment_id.as_str().to_owned())
-                .unwrap_or_else(|| "unknown-experiment".to_owned()),
+                .map(|experiment| experiment.experiment_id.clone())
+                .unwrap_or_else(|| ExperimentId::new("unknown-experiment")),
             action_id,
             candidate_name: self
                 .current
@@ -416,7 +416,7 @@ impl LiveExperimentManager {
                     .saturating_add(input.controller_policy.cooldown_after_keep.as_nanos());
 
                 let history_context = LiveExperimentHistoryContext {
-                    experiment_id: experiment.experiment_id.as_str().to_owned(),
+                    experiment_id: experiment.experiment_id.clone(),
                     action_id: experiment.action_id(),
                     candidate_name: experiment.candidate.profile_name().to_owned(),
                     action_kind: experiment.candidate.action_kind().to_owned(),
@@ -540,7 +540,7 @@ impl LiveExperimentManager {
                 let cooldown_until_unix_nanos = now_unix_nanos
                     .saturating_add(input.controller_policy.cooldown_after_fault.as_nanos());
                 let history_context = LiveExperimentHistoryContext {
-                    experiment_id: experiment.experiment_id.as_str().to_owned(),
+                    experiment_id: experiment.experiment_id.clone(),
                     action_id: experiment.action_id(),
                     candidate_name: experiment.candidate.profile_name().to_owned(),
                     action_kind: experiment.candidate.action_kind().to_owned(),
@@ -598,7 +598,7 @@ impl LiveExperimentManager {
             now_unix_nanos.saturating_add(input.controller_policy.cooldown_after_revert.as_nanos());
 
         let history_context = LiveExperimentHistoryContext {
-            experiment_id: experiment.experiment_id.as_str().to_owned(),
+            experiment_id: experiment.experiment_id.clone(),
             action_id: experiment.action_id(),
             candidate_name: experiment.candidate.profile_name().to_owned(),
             action_kind: experiment.candidate.action_kind().to_owned(),

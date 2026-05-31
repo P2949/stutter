@@ -64,7 +64,7 @@ impl LiveExperimentManager {
         self.current
             .as_ref()
             .map(|experiment| DaemonExperimentState {
-                experiment_id: experiment.experiment_id.as_str().to_owned(),
+                experiment_id: experiment.experiment_id.clone(),
                 action_id: experiment.action_id(),
                 candidate_name: Some(experiment.candidate_name().to_owned()),
                 mode: experiment.mode,

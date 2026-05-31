@@ -54,12 +54,12 @@ impl DaemonWatchSignature {
                 .state
                 .active_experiment
                 .as_ref()
-                .map(|experiment| experiment.action_id.clone()),
+                .map(|experiment| experiment.action_id.as_str().to_owned()),
             rollback_action_id: output
                 .state
                 .active_rollback
                 .as_ref()
-                .map(|rollback| rollback.action_id.clone()),
+                .map(|rollback| rollback.action_id.as_str().to_owned()),
             rollback_available: output
                 .state
                 .active_rollback

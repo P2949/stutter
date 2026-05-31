@@ -359,8 +359,8 @@ mod tests {
             active_targets: 1,
         });
         output.state.active_experiment = Some(crate::daemon::state::DaemonExperimentState {
-            experiment_id: "test-experiment".to_owned(),
-            action_id: "cpu-affinity:game".to_owned(),
+            experiment_id: crate::autotune::experiment::ExperimentId::new("test-experiment"),
+            action_id: crate::actions::ActionId::new("cpu-affinity:game"),
             candidate_name: Some("game-main".to_owned()),
             mode: crate::daemon::policy::DaemonMode::ApplyLowRisk,
             safety_class: crate::actions::SafetyClass::ReversibleLowRisk,

@@ -4,8 +4,9 @@ use super::{
     model::{AutotuneStatus, StatusKeptAction, StatusTarget},
     render::{default_restore_path_display, format_last_decision, normalized_decision},
 };
-use crate::autotune::history::{
-    AutotuneHistoryEvent, AutotuneMode, ControllerPhase, TargetIdentity,
+use crate::{
+    actions::ActionId,
+    autotune::history::{AutotuneHistoryEvent, AutotuneMode, ControllerPhase, TargetIdentity},
 };
 
 pub fn status_from_history_events(
@@ -145,7 +146,7 @@ fn active_candidate_from_events(events: &[AutotuneHistoryEvent]) -> Option<Strin
 }
 
 fn kept_actions_from_events(events: &[AutotuneHistoryEvent]) -> Vec<StatusKeptAction> {
-    let mut kept = BTreeMap::<String, StatusKeptAction>::new();
+    let mut kept = BTreeMap::<ActionId, StatusKeptAction>::new();
 
     for event in events {
         let decision = normalized_decision(&event.decision.decision);
@@ -166,11 +167,13 @@ fn kept_actions_from_events(events: &[AutotuneHistoryEvent]) -> Vec<StatusKeptAc
 
         if decision == "candidate_kept" {
             let action_id = event.action_id.clone().unwrap_or_else(|| {
-                event
-                    .decision
-                    .candidate_name
-                    .clone()
-                    .unwrap_or_else(|| "unknown".to_owned())
+                ActionId::new(
+                    event
+                        .decision
+                        .candidate_name
+                        .clone()
+                        .unwrap_or_else(|| "unknown".to_owned()),
+                )
             });
             kept.insert(
                 action_id.clone(),

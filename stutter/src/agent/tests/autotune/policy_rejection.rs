@@ -57,7 +57,7 @@ async fn autotune_policy_rejection_preserves_active_rollback_state() {
         daemon_state.mode = DaemonMode::ApplyLowRisk;
         daemon_state.phase = DaemonPhase::Rollback;
         daemon_state.active_rollback = Some(DaemonRollbackState {
-            action_id: "cpu-affinity:game".to_owned(),
+            action_id: crate::actions::ActionId::new("cpu-affinity:game"),
             mode: DaemonMode::ApplyLowRisk,
             safety_class: SafetyClass::ReversibleLowRisk,
             rollback_available: true,

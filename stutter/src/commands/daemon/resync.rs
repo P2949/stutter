@@ -144,8 +144,8 @@ mod tests {
             mode: DaemonMode::ApplyLowRisk,
             phase: DaemonPhase::Faulted,
             active_experiment: Some(DaemonExperimentState {
-                experiment_id: "exp".to_owned(),
-                action_id: "action".to_owned(),
+                experiment_id: crate::autotune::experiment::ExperimentId::new("exp"),
+                action_id: crate::actions::ActionId::new("action"),
                 candidate_name: Some("candidate".to_owned()),
                 mode: DaemonMode::ApplyLowRisk,
                 safety_class: SafetyClass::ReversibleLowRisk,
@@ -156,7 +156,7 @@ mod tests {
                     workload_identity_hash: "hash".to_owned(),
                     workload_label: None,
                     candidate_name: "candidate".to_owned(),
-                    action_id: "action".to_owned(),
+                    action_id: crate::actions::ActionId::new("action"),
                     action_kind: "fake".to_owned(),
                     safety_class: SafetyClass::ReversibleLowRisk,
                     kept_unix_nanos: 1,
@@ -172,7 +172,7 @@ mod tests {
             ..DaemonState::default()
         };
         state.active_rollback = Some(crate::daemon::state::DaemonRollbackState {
-            action_id: "action".to_owned(),
+            action_id: crate::actions::ActionId::new("action"),
             mode: DaemonMode::ApplyLowRisk,
             safety_class: SafetyClass::ReversibleLowRisk,
             rollback_available: true,

@@ -60,14 +60,17 @@ pub(crate) fn daemon_state_for_autotune_start(
     request: &AutotuneStartRequest,
     started_unix_nanos: u128,
 ) -> DaemonState {
-    let action_id = format!("remote-autotune-start:{}", policy.mode.as_str());
+    let action_id =
+        crate::actions::ActionId::new(format!("remote-autotune-start:{}", policy.mode.as_str()));
 
     DaemonState {
         mode: policy.mode,
         phase: daemon_phase_for_started_mode(policy.mode),
         active_target: daemon_target_from_autotune_request(request),
         active_experiment: Some(DaemonExperimentState {
-            experiment_id: format!("remote-autotune-{started_unix_nanos}"),
+            experiment_id: crate::autotune::experiment::ExperimentId::new(format!(
+                "remote-autotune-{started_unix_nanos}"
+            )),
             action_id: action_id.clone(),
             candidate_name: request
                 .watch_process

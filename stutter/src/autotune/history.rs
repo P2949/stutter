@@ -6,10 +6,14 @@ use std::{
 
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
+use stutter_core::ids::EmptyStringIdError;
 
 pub use super::situation::SituationKind;
-use super::{experiment::WindowScore, planner::PlannerSummary};
-use crate::actions::SafetyClass;
+use super::{
+    experiment::{ExperimentId, WindowScore},
+    planner::PlannerSummary,
+};
+use crate::actions::{ActionId, SafetyClass};
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ControllerPhase {
@@ -85,8 +89,8 @@ pub struct AutotuneHistoryEvent {
     pub situation: SituationKind,
     pub observation_summary: ObservationSummary,
     pub decision: AutotuneDecisionSummary,
-    pub experiment_id: Option<String>,
-    pub action_id: Option<String>,
+    pub experiment_id: Option<ExperimentId>,
+    pub action_id: Option<ActionId>,
     pub score_before: Option<WindowScore>,
     pub score_after: Option<WindowScore>,
     pub rollback_performed: bool,
@@ -128,14 +132,28 @@ impl AutotuneHistoryEvent {
         }
     }
 
-    pub fn with_experiment_id(mut self, experiment_id: impl Into<String>) -> Self {
-        self.experiment_id = Some(experiment_id.into());
+    pub fn with_experiment_id(mut self, experiment_id: ExperimentId) -> Self {
+        self.experiment_id = Some(experiment_id);
         self
     }
 
-    pub fn with_action_id(mut self, action_id: impl Into<String>) -> Self {
-        self.action_id = Some(action_id.into());
+    pub fn with_action_id(mut self, action_id: ActionId) -> Self {
+        self.action_id = Some(action_id);
         self
+    }
+
+    pub fn try_with_experiment_id(
+        self,
+        experiment_id: impl Into<String>,
+    ) -> Result<Self, EmptyStringIdError> {
+        Ok(self.with_experiment_id(ExperimentId::try_new(experiment_id)?))
+    }
+
+    pub fn try_with_action_id(
+        self,
+        action_id: impl Into<String>,
+    ) -> Result<Self, EmptyStringIdError> {
+        Ok(self.with_action_id(ActionId::try_new(action_id)?))
     }
 
     pub fn with_scores(
@@ -156,6 +174,16 @@ impl AutotuneHistoryEvent {
     pub fn with_planner(mut self, planner: Option<PlannerSummary>) -> Self {
         self.planner = planner;
         self
+    }
+
+    pub fn validate_identity_strings(&self) -> Result<(), EmptyStringIdError> {
+        if let Some(experiment_id) = &self.experiment_id {
+            experiment_id.validate_non_empty()?;
+        }
+        if let Some(action_id) = &self.action_id {
+            action_id.validate_non_empty()?;
+        }
+        Ok(())
     }
 }
 
@@ -229,6 +257,12 @@ pub fn read_autotune_history_events(path: &Path) -> anyhow::Result<Vec<AutotuneH
 
         let event = serde_json::from_str::<AutotuneHistoryEvent>(&line).with_context(|| {
             format!("failed to parse autotune history event {}", path.display())
+        })?;
+        event.validate_identity_strings().with_context(|| {
+            format!(
+                "invalid autotune history identity strings in {}",
+                path.display()
+            )
         })?;
         events.push(event);
     }
@@ -389,8 +423,10 @@ mod tests {
             decision: decision(),
             reason: "candidate improved by 15.00%; kept as current active profile".to_owned(),
         })
-        .with_experiment_id("experiment-1")
-        .with_action_id("cpu-affinity-profile:game-main")
+        .try_with_experiment_id("experiment-1")
+        .unwrap()
+        .try_with_action_id("cpu-affinity-profile:game-main")
+        .unwrap()
         .with_scores(Some(before), Some(after))
         .with_rollback_performed(false);
 
@@ -407,9 +443,12 @@ mod tests {
             events[0].target.as_ref().map(|target| target.root_pid),
             Some(1234)
         );
-        assert_eq!(events[0].experiment_id.as_deref(), Some("experiment-1"));
         assert_eq!(
-            events[0].action_id.as_deref(),
+            events[0].experiment_id.as_ref().map(|id| id.as_str()),
+            Some("experiment-1")
+        );
+        assert_eq!(
+            events[0].action_id.as_ref().map(|id| id.as_str()),
             Some("cpu-affinity-profile:game-main")
         );
         assert_eq!(
