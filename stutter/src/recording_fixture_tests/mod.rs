@@ -83,6 +83,7 @@ pub fn write_minimal_recording_fixture(dir: &Path) {
         exe_dev: None,
         exe_ino: None,
         comm: "game".to_owned(),
+        allowed_cpus: None,
         latency: RecordedLatency {
             samples: 100,
             stored_samples: 100,
@@ -272,6 +273,7 @@ fn task_for_fixture(task: u32, class: TaskClass, comm: &str) -> SessionTask {
         exe_dev: None,
         exe_ino: None,
         comm: comm.to_owned(),
+        allowed_cpus: None,
         latency: RecordedLatency {
             samples: 10,
             stored_samples: 10,

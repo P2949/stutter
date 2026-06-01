@@ -2,8 +2,10 @@ use std::path::Path;
 
 use super::models::*;
 use crate::{
+    affinity::CpuMask,
     diagnosis::{Confidence, StutterCause},
     irq_inspect::{IrqLine, classify_irq_device},
+    process_tree::TaskClass,
     report::{self, DataQualityLevel, ReportAnalysisJson},
 };
 
@@ -20,6 +22,7 @@ pub fn build_advisor_report_from_analysis(
     let causes = causes_from_analysis(analysis);
     let cause_evidence = cause_evidence_from_analysis(analysis);
     let irq_inventory = analysis.session.core.metadata.irq_lines.as_slice();
+    let irq_affinity_overlaps = irq_affinity_overlaps_from_analysis(analysis, irq_inventory);
     build_advisor_report_from_evidence(AdvisorEvidenceInput {
         run,
         data_quality: analysis.data_quality.level,
@@ -36,6 +39,7 @@ pub fn build_advisor_report_from_analysis(
         },
         tree_pid: analysis.session.config.tree_roots.first().copied(),
         irq_inventory,
+        irq_affinity_overlaps: &irq_affinity_overlaps,
     })
 }
 pub(crate) fn build_advisor_report_from_evidence(input: AdvisorEvidenceInput<'_>) -> AdvisorReport {
@@ -49,6 +53,7 @@ pub(crate) fn build_advisor_report_from_evidence(input: AdvisorEvidenceInput<'_>
     let has_block_io = input.signal_availability.has_block_io;
     let tree_pid = input.tree_pid;
     let irq_inventory = input.irq_inventory;
+    let irq_affinity_overlaps = input.irq_affinity_overlaps;
     let mut warnings = Vec::new();
     let mut recommendations = Vec::new();
 
@@ -114,7 +119,8 @@ pub(crate) fn build_advisor_report_from_evidence(input: AdvisorEvidenceInput<'_>
     }
 
     if has_irq_candidate {
-        let irq_specific = irq_specific_rationale(cause_evidence, irq_inventory);
+        let irq_specific =
+            irq_specific_rationale(cause_evidence, irq_inventory, irq_affinity_overlaps);
         recommendations.push(AdvisorRecommendation {
             title: irq_specific
                 .as_ref()
@@ -235,12 +241,59 @@ fn scheduler_evidence_note(cause_evidence: &[AdvisorCauseEvidence]) -> Option<St
         .or_else(|| evidence_note_for(cause_evidence, StutterCause::CompositorSchedulerDelay))
 }
 
+fn first_irq_cpu_from_evidence(cause_evidence: &[AdvisorCauseEvidence]) -> Option<u32> {
+    let evidence = evidence_note_for(cause_evidence, StutterCause::IrqDelayCandidate)?;
+
+    parse_irq_cpu_from_message(&evidence)
+}
+
+fn parse_irq_cpu_from_message(message: &str) -> Option<u32> {
+    for marker in ["cpu=", "CPU "] {
+        let Some(start) = message.find(marker).map(|index| index + marker.len()) else {
+            continue;
+        };
+        let tail = &message[start..];
+        let digits = tail
+            .chars()
+            .take_while(|ch| ch.is_ascii_digit())
+            .collect::<String>();
+
+        if let Ok(cpu) = digits.parse() {
+            return Some(cpu);
+        }
+    }
+
+    None
+}
+
+fn is_target_latency_class(class: TaskClass) -> bool {
+    matches!(
+        class,
+        TaskClass::Game
+            | TaskClass::GameRenderThread
+            | TaskClass::GameWorkerThread
+            | TaskClass::GameHelper
+            | TaskClass::GameScope
+            | TaskClass::Compositor
+    )
+}
+
+fn session_task_affinity_contains_cpu(allowed_cpus: &str, cpu: u32) -> bool {
+    CpuMask::parse(allowed_cpus)
+        .map(|mask| mask.contains_cpu(cpu))
+        .unwrap_or(false)
+}
+
 fn first_irq_number_from_evidence(cause_evidence: &[AdvisorCauseEvidence]) -> Option<u32> {
     let evidence = evidence_note_for(cause_evidence, StutterCause::IrqDelayCandidate)?;
 
+    parse_irq_number_from_message(&evidence)
+}
+
+fn parse_irq_number_from_message(message: &str) -> Option<u32> {
     let marker = "IRQ ";
-    let start = evidence.find(marker)? + marker.len();
-    let tail = &evidence[start..];
+    let start = message.find(marker)? + marker.len();
+    let tail = &message[start..];
     let digits = tail
         .chars()
         .take_while(|ch| ch.is_ascii_digit())
@@ -254,16 +307,131 @@ fn irq_line_for_number(irq_inventory: &[IrqLine], irq: u32) -> Option<&IrqLine> 
     irq_inventory.iter().find(|line| line.irq == irq)
 }
 
+fn irq_affinity_overlaps_from_analysis(
+    analysis: &ReportAnalysisJson,
+    irq_inventory: &[IrqLine],
+) -> Vec<AdvisorIrqAffinityOverlap> {
+    let mut overlaps = Vec::new();
+
+    for cluster in analysis.cluster_analysis.clusters.iter().take(10) {
+        let Some(diagnosis) = &cluster.diagnosis else {
+            continue;
+        };
+
+        let irq_candidates = diagnosis
+            .primary
+            .iter()
+            .chain(diagnosis.candidates.iter())
+            .filter(|candidate| candidate.cause == StutterCause::IrqDelayCandidate)
+            .collect::<Vec<_>>();
+
+        if irq_candidates.is_empty() {
+            continue;
+        }
+
+        let Some(irq) = irq_candidates
+            .iter()
+            .flat_map(|candidate| candidate.evidence.iter())
+            .find_map(|evidence| parse_irq_number_from_message(&evidence.message))
+        else {
+            continue;
+        };
+
+        let Some(irq_cpu) = irq_candidates
+            .iter()
+            .flat_map(|candidate| candidate.evidence.iter())
+            .find_map(|evidence| parse_irq_cpu_from_message(&evidence.message))
+        else {
+            continue;
+        };
+
+        let Some(line) = irq_line_for_number(irq_inventory, irq) else {
+            continue;
+        };
+
+        let overlapping_tasks = cluster
+            .points
+            .iter()
+            .filter(|point| is_target_latency_class(point.class))
+            .filter_map(|point| {
+                let task = analysis
+                    .session
+                    .tasks
+                    .iter()
+                    .find(|task| task.task == point.task)?;
+                let allowed_cpus = task.allowed_cpus.as_deref()?;
+
+                if !session_task_affinity_contains_cpu(allowed_cpus, irq_cpu) {
+                    return None;
+                }
+
+                Some(AdvisorTargetAffinityOverlap {
+                    task: task.task,
+                    comm: task.comm.clone(),
+                    class: task.class,
+                    allowed_cpus: allowed_cpus.to_owned(),
+                })
+            })
+            .collect::<Vec<_>>();
+
+        if overlapping_tasks.is_empty() {
+            continue;
+        }
+
+        overlaps.push(AdvisorIrqAffinityOverlap {
+            irq,
+            irq_cpu,
+            irq_name: line.name.clone(),
+            irq_class: classify_irq_device(line),
+            overlapping_tasks,
+        });
+    }
+
+    overlaps
+}
+
+#[cfg(test)]
+pub(crate) fn irq_affinity_overlaps_from_analysis_for_tests(
+    analysis: &ReportAnalysisJson,
+    irq_inventory: &[IrqLine],
+) -> Vec<AdvisorIrqAffinityOverlap> {
+    irq_affinity_overlaps_from_analysis(analysis, irq_inventory)
+}
+
 fn irq_specific_rationale(
     cause_evidence: &[AdvisorCauseEvidence],
     irq_inventory: &[IrqLine],
+    irq_affinity_overlaps: &[AdvisorIrqAffinityOverlap],
 ) -> Option<String> {
     let irq = first_irq_number_from_evidence(cause_evidence)?;
     let line = irq_line_for_number(irq_inventory, irq)?;
     let class = classify_irq_device(line);
 
+    if let Some(overlap) = irq_affinity_overlaps
+        .iter()
+        .find(|overlap| overlap.irq == irq)
+        && let Some(task) = overlap.overlapping_tasks.first()
+    {
+        return Some(format!(
+            "IRQ {irq} ({}, class={:?}) fired on CPU {}, which is inside recorded target affinity {} for {} (TID {}, class={:?}). Consider moving IRQ {irq} away from CPU {} or moving that target thread off CPU {} in a controlled experiment.",
+            overlap.irq_name,
+            overlap.irq_class,
+            overlap.irq_cpu,
+            task.allowed_cpus,
+            task.comm,
+            task.task,
+            task.class,
+            overlap.irq_cpu,
+            overlap.irq_cpu
+        ));
+    }
+
+    let cpu_note = first_irq_cpu_from_evidence(cause_evidence)
+        .map(|cpu| format!(" on CPU {cpu}"))
+        .unwrap_or_default();
+
     Some(format!(
-        "IRQ {irq} ({}, class={class:?}) overlapped with the spike. Inspect IRQ affinity for this specific interrupt before changing CPU tuning.",
+        "IRQ {irq} ({}, class={class:?}) overlapped with the spike{cpu_note}. Recorded target affinity overlap was unavailable or did not include that CPU; inspect IRQ affinity for this specific interrupt before changing CPU tuning.",
         line.name
     ))
 }

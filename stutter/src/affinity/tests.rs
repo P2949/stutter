@@ -16,6 +16,16 @@ fn parses_cpu_mask_ranges_and_lists() {
 }
 
 #[test]
+fn cpu_mask_reports_cpu_membership() {
+    let mask = CpuMask::parse("0-3,7").unwrap();
+
+    assert!(mask.contains_cpu(0));
+    assert!(mask.contains_cpu(2));
+    assert!(mask.contains_cpu(7));
+    assert!(!mask.contains_cpu(4));
+}
+
+#[test]
 fn rejects_empty_cpu_mask() {
     assert!(CpuMask::parse("").is_err());
 }

@@ -146,6 +146,7 @@ pub(super) fn session_task(
         exe_dev: Some(1),
         exe_ino: Some(2),
         comm: comm.to_owned(),
+        allowed_cpus: None,
         latency: RecordedLatency {
             samples: 1,
             stored_samples: 1,

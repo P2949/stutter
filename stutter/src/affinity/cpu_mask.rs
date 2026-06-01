@@ -113,6 +113,10 @@ impl CpuMask {
             .is_some_and(|word| *word & (1u64 << (cpu % 64)) != 0)
     }
 
+    pub fn contains_cpu(&self, cpu: u32) -> bool {
+        self.contains(cpu)
+    }
+
     pub(super) fn cpus(&self) -> Vec<u32> {
         let mut cpus = Vec::new();
         for cpu in 0..cpu_set_size() {

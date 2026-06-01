@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 mod action_errors;
 mod action_rollback_errors;
+mod advisor_irq_affinity_overlap;
 mod allow_attributes;
 mod allowlists;
 mod artifact_paths;
