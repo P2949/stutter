@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     diagnosis::{Confidence, StutterCause},
+    irq_inspect::IrqLine,
     report::DataQualityLevel,
 };
 
@@ -64,4 +65,5 @@ pub(crate) struct AdvisorEvidenceInput<'a> {
     pub profiles: Option<&'a Path>,
     pub signal_availability: AdvisorSignalAvailability,
     pub tree_pid: Option<u32>,
+    pub irq_inventory: &'a [IrqLine],
 }

@@ -121,6 +121,24 @@ mod ranking_tests {
     }
 
     #[test]
+    fn profile_stats_include_stddev_for_effect_size_metrics() {
+        let grouped = grouped_candidates(vec![
+            tune_candidate("a", 1, 90, true),
+            tune_candidate("a", 2, 100, true),
+            tune_candidate("a", 3, 110, true),
+            tune_candidate("b", 1, 150, true),
+            tune_candidate("b", 2, 160, true),
+            tune_candidate("b", 3, 170, true),
+        ]);
+
+        let stats = profile_stats_from_grouped(&grouped);
+        let a = stats.iter().find(|stat| stat.profile == "a").unwrap();
+
+        assert!(a.stddev_diagnostic_raw_score_total > 0.0);
+        assert!(a.mean_diagnostic_raw_score_total > 0.0);
+    }
+
+    #[test]
     fn ranking_confidence_is_unstable_for_close_results() {
         let grouped = grouped_candidates(vec![
             tune_candidate("a", 1, 100, true),

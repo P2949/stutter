@@ -24,6 +24,8 @@ fn diagnosis_threshold_table_covers_all_config_fields() {
         "cpu_freq_drop_percent",
         "migration_window_ms",
         "page_fault_delta_threshold",
+        "frame_coincidence_window_ms",
+        "frame_spike_frametime_ms",
         "low_ipc_threshold",
         "high_cache_mpki_threshold",
         "min_primary_score",

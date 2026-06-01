@@ -2,6 +2,8 @@ use std::fs;
 
 use serde::{Deserialize, Serialize};
 
+use crate::irq_inspect::{IrqLine, parse_proc_interrupts};
+
 #[derive(Clone, Serialize, Deserialize, Default, Debug)]
 pub struct SystemMetadata {
     pub kernel_osrelease: Option<String>,
@@ -9,6 +11,8 @@ pub struct SystemMetadata {
     pub cpu_online: Option<String>,
     pub cpu_possible: Option<String>,
     pub cpu_topology: Vec<CpuTopology>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub irq_lines: Vec<IrqLine>,
     pub scx_state: Option<String>,
     pub scx_ops: Option<String>,
     pub scx_enable_seq: Option<String>,
@@ -53,10 +57,19 @@ pub fn collect_system_metadata() -> SystemMetadata {
         cpu_online: read_trimmed("/sys/devices/system/cpu/online"),
         cpu_possible: read_trimmed("/sys/devices/system/cpu/possible"),
         cpu_topology: collect_cpu_topology(),
+        irq_lines: collect_irq_lines(),
         scx_state: read_trimmed("/sys/kernel/sched_ext/state"),
         scx_ops: read_trimmed("/sys/kernel/sched_ext/root/ops"),
         scx_enable_seq: read_trimmed("/sys/kernel/sched_ext/enable_seq"),
     }
+}
+
+fn collect_irq_lines() -> Vec<IrqLine> {
+    let Some(contents) = fs::read_to_string("/proc/interrupts").ok() else {
+        return Vec::new();
+    };
+
+    parse_proc_interrupts(&contents).unwrap_or_default()
 }
 
 fn collect_cpu_topology() -> Vec<CpuTopology> {

@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-use super::{RankingConfidence, TuneProfileStats, TuneSummary};
+use super::{
+    RankingConfidence, TuneProfileStats, TuneSummary,
+    ranking::{noise_ratio, normalized_effect_size},
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum TuneRecommendationVerdict {
@@ -42,10 +45,19 @@ pub struct TuneRecommendationMetrics {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TuneRecommendationComparison {
     pub other_profile: String,
+
     pub score_delta_abs: i64,
     pub score_delta_percent: Option<f64>,
+    pub score_effect_size: Option<f64>,
+    pub score_noise_ratio: Option<f64>,
+
     pub over_5ms_delta_abs: i64,
+    pub over_5ms_effect_size: Option<f64>,
+    pub over_5ms_noise_ratio: Option<f64>,
+
     pub frame_p99_delta_us: i64,
+    pub frame_p99_effect_size: Option<f64>,
+    pub frame_p99_noise_ratio: Option<f64>,
 }
 
 pub fn build_tune_recommendation(
@@ -151,20 +163,28 @@ pub fn build_tune_recommendation(
     let comparison_metrics = comparison_stat.map(|other| {
         let metrics = comparison_between(best_stat, other);
         why.push(format!(
-            "Median score delta versus {} '{}' is {} ({})",
+            "Median score delta versus {} '{}' is {} ({}, effect_size={}, noise_ratio={})",
             comparison_kind.as_deref().unwrap_or("comparison"),
             other.profile,
             metrics.score_delta_abs,
-            format_percent(metrics.score_delta_percent)
+            format_percent(metrics.score_delta_percent),
+            format_optional_float(metrics.score_effect_size, 2),
+            format_optional_float(metrics.score_noise_ratio, 2),
         ));
         why.push(format!(
-            "over_5ms delta versus '{}' is {}",
-            other.profile, metrics.over_5ms_delta_abs
+            "over_5ms delta versus '{}' is {} (effect_size={}, noise_ratio={})",
+            other.profile,
+            metrics.over_5ms_delta_abs,
+            format_optional_float(metrics.over_5ms_effect_size, 2),
+            format_optional_float(metrics.over_5ms_noise_ratio, 2),
         ));
         if best_stat.median_frame_p99_us > 0 || other.median_frame_p99_us > 0 {
             why.push(format!(
-                "frame p99 delta versus '{}' is {}us",
-                other.profile, metrics.frame_p99_delta_us
+                "frame p99 delta versus '{}' is {}us (effect_size={}, noise_ratio={})",
+                other.profile,
+                metrics.frame_p99_delta_us,
+                format_optional_float(metrics.frame_p99_effect_size, 2),
+                format_optional_float(metrics.frame_p99_noise_ratio, 2),
             ));
         } else {
             warnings.push("missing frame data for best or comparison profile".to_owned());
@@ -342,16 +362,72 @@ fn comparison_between(
 ) -> TuneRecommendationComparison {
     let score_delta_abs = best.median_diagnostic_raw_score_total as i64
         - other.median_diagnostic_raw_score_total as i64;
+    let score_pooled_stddev = pooled_comparison_stddev(
+        best.stddev_diagnostic_raw_score_total,
+        best.valid_runs,
+        other.stddev_diagnostic_raw_score_total,
+        other.valid_runs,
+    );
+
+    let over_5ms_delta_abs = best.median_over_5ms as i64 - other.median_over_5ms as i64;
+    let over_5ms_pooled_stddev = pooled_comparison_stddev(
+        best.stddev_over_5ms,
+        best.valid_runs,
+        other.stddev_over_5ms,
+        other.valid_runs,
+    );
+
+    let frame_p99_delta_us = best.median_frame_p99_us as i64 - other.median_frame_p99_us as i64;
+    let frame_p99_pooled_stddev = pooled_comparison_stddev(
+        best.stddev_frame_p99_us,
+        best.valid_runs,
+        other.stddev_frame_p99_us,
+        other.valid_runs,
+    );
+
     TuneRecommendationComparison {
         other_profile: other.profile.clone(),
+
         score_delta_abs,
         score_delta_percent: if other.median_diagnostic_raw_score_total > 0 {
             Some(score_delta_abs as f64 / other.median_diagnostic_raw_score_total as f64 * 100.0)
         } else {
             None
         },
-        over_5ms_delta_abs: best.median_over_5ms as i64 - other.median_over_5ms as i64,
-        frame_p99_delta_us: best.median_frame_p99_us as i64 - other.median_frame_p99_us as i64,
+        score_effect_size: normalized_effect_size(score_delta_abs, score_pooled_stddev),
+        score_noise_ratio: noise_ratio(
+            best.iqr_diagnostic_raw_score_total,
+            best.median_diagnostic_raw_score_total,
+        ),
+
+        over_5ms_delta_abs,
+        over_5ms_effect_size: normalized_effect_size(over_5ms_delta_abs, over_5ms_pooled_stddev),
+        over_5ms_noise_ratio: noise_ratio(best.iqr_over_5ms, best.median_over_5ms),
+
+        frame_p99_delta_us,
+        frame_p99_effect_size: normalized_effect_size(frame_p99_delta_us, frame_p99_pooled_stddev),
+        frame_p99_noise_ratio: noise_ratio(best.iqr_frame_p99_us, best.median_frame_p99_us),
+    }
+}
+
+fn pooled_comparison_stddev(
+    best_stddev: f64,
+    best_n: usize,
+    other_stddev: f64,
+    other_n: usize,
+) -> f64 {
+    if best_n < 2 || other_n < 2 {
+        return 0.0;
+    }
+
+    let numerator = ((best_n - 1) as f64 * best_stddev * best_stddev)
+        + ((other_n - 1) as f64 * other_stddev * other_stddev);
+    let denominator = (best_n + other_n - 2) as f64;
+
+    if denominator <= 0.0 {
+        0.0
+    } else {
+        (numerator / denominator).sqrt()
     }
 }
 
@@ -359,6 +435,13 @@ fn format_percent(value: Option<f64>) -> String {
     value
         .map(|value| format!("{value:.1}%"))
         .unwrap_or_else(|| "n/a".to_owned())
+}
+
+fn format_optional_float(value: Option<f64>, precision: usize) -> String {
+    match value {
+        Some(value) => format!("{value:.precision$}"),
+        None => "n/a".to_owned(),
+    }
 }
 
 fn push_markdown_list(out: &mut String, items: &[String]) {
@@ -391,10 +474,16 @@ mod tests {
             median_diagnostic_raw_score_total: median,
             iqr_diagnostic_raw_score_total: 0,
             worst_diagnostic_raw_score_total: median,
+            mean_diagnostic_raw_score_total: median as f64,
+            stddev_diagnostic_raw_score_total: 0.0,
             median_over_5ms: median / 100,
             iqr_over_5ms: 0,
+            mean_over_5ms: (median / 100) as f64,
+            stddev_over_5ms: 0.0,
             median_frame_p99_us: 16_000,
             iqr_frame_p99_us: 0,
+            mean_frame_p99_us: 16_000.0,
+            stddev_frame_p99_us: 0.0,
         }
     }
 
@@ -523,5 +612,39 @@ mod tests {
         assert!(markdown.contains("## Warnings"));
         assert!(markdown.contains("- note"));
         assert!(markdown.contains("sample mismatch"));
+    }
+
+    #[test]
+    fn recommendation_comparison_includes_effect_size_and_noise_ratio() {
+        let best = TuneProfileStats {
+            profile: "best".to_owned(),
+            valid_runs: 3,
+            invalid_runs: 0,
+            median_diagnostic_raw_score_total: 100,
+            iqr_diagnostic_raw_score_total: 10,
+            worst_diagnostic_raw_score_total: 110,
+            mean_diagnostic_raw_score_total: 100.0,
+            stddev_diagnostic_raw_score_total: 10.0,
+            median_over_5ms: 2,
+            iqr_over_5ms: 1,
+            mean_over_5ms: 2.0,
+            stddev_over_5ms: 1.0,
+            median_frame_p99_us: 8000,
+            iqr_frame_p99_us: 500,
+            mean_frame_p99_us: 8000.0,
+            stddev_frame_p99_us: 500.0,
+        };
+
+        let other = TuneProfileStats {
+            profile: "other".to_owned(),
+            median_diagnostic_raw_score_total: 130,
+            mean_diagnostic_raw_score_total: 130.0,
+            ..best.clone()
+        };
+
+        let comparison = comparison_between(&best, &other);
+
+        assert!(comparison.score_effect_size.is_some());
+        assert_eq!(comparison.score_noise_ratio, Some(0.10));
     }
 }

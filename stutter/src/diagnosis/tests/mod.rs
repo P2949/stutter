@@ -7,8 +7,13 @@ use std::collections::BTreeSet;
 
 use super::*;
 use crate::{
+    irq_inspect::IrqLine,
+    metadata::SystemMetadata,
     process_tree::TaskClass,
-    recorder::{BlockIoRecord, GpuSample, IntervalRecord, IrqEventRecord},
+    recorder::{
+        BlockIoRecord, DrmFenceEventRecord, FrameEvent, GpuSample, IntervalRecord, IrqEventRecord,
+        MetadataFile, SessionMetadataCore,
+    },
     session_io::RunArtifacts,
     spike::{SpikeCluster, SpikePoint},
 };
@@ -56,6 +61,25 @@ fn irq_event(duration_ns: u64) -> IrqEventRecord {
         enter_ns: 100_000_000,
         exit_ns: 100_000_000 + duration_ns,
         duration_ns,
+    }
+}
+
+fn metadata_with_irq_line(irq: u32, name: &str) -> MetadataFile {
+    MetadataFile {
+        core: SessionMetadataCore {
+            metadata: SystemMetadata {
+                irq_lines: vec![IrqLine {
+                    irq: irq.to_string(),
+                    counts_by_cpu: vec![0, 10],
+                    total: 10,
+                    kind: "PCI-MSI".to_owned(),
+                    name: name.to_owned(),
+                    raw: format!("{irq}: 0 10 PCI-MSI {name}"),
+                }],
+                ..Default::default()
+            },
+            ..Default::default()
+        },
     }
 }
 

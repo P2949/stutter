@@ -75,6 +75,59 @@ pub fn iqr_u64(values: Vec<u64>) -> u64 {
     q75.saturating_sub(q25)
 }
 
+pub fn mean_u64(values: &[u64]) -> f64 {
+    if values.is_empty() {
+        return 0.0;
+    }
+
+    values.iter().map(|value| *value as f64).sum::<f64>() / values.len() as f64
+}
+
+pub fn sample_stddev_u64(values: &[u64]) -> f64 {
+    if values.len() < 2 {
+        return 0.0;
+    }
+
+    let mean = mean_u64(values);
+    let variance = values
+        .iter()
+        .map(|value| {
+            let diff = *value as f64 - mean;
+            diff * diff
+        })
+        .sum::<f64>()
+        / (values.len() as f64 - 1.0);
+
+    variance.sqrt()
+}
+
+fn pooled_stddev(left: f64, left_n: usize, right: f64, right_n: usize) -> f64 {
+    if left_n < 2 || right_n < 2 {
+        return 0.0;
+    }
+
+    let numerator = ((left_n - 1) as f64 * left * left) + ((right_n - 1) as f64 * right * right);
+    let denominator = (left_n + right_n - 2) as f64;
+
+    if denominator <= 0.0 {
+        0.0
+    } else {
+        (numerator / denominator).sqrt()
+    }
+}
+
+pub(super) fn normalized_effect_size(delta_abs: i64, pooled_stddev: f64) -> Option<f64> {
+    if pooled_stddev <= f64::EPSILON {
+        return None;
+    }
+
+    Some(delta_abs.unsigned_abs() as f64 / pooled_stddev)
+}
+
+pub(super) fn noise_ratio(iqr: u64, median: u64) -> Option<f64> {
+    (median > 0).then_some(iqr as f64 / median as f64)
+}
+
 pub fn profile_stats_from_grouped(
     grouped: &BTreeMap<String, Vec<TuneCandidateSummary>>,
 ) -> Vec<TuneProfileStats> {
@@ -95,17 +148,30 @@ pub fn profile_stats_from_grouped(
                 .map(|run| (run.frame_p99_ms * 1000.0) as u64)
                 .collect::<Vec<_>>();
 
+            let score_median = median_u64(score_totals.clone());
+            let score_iqr = iqr_u64(score_totals.clone());
+            let over_5ms_median = median_u64(over_5ms.clone());
+            let over_5ms_iqr = iqr_u64(over_5ms.clone());
+            let frame_p99_median = median_u64(frame_p99_us.clone());
+            let frame_p99_iqr = iqr_u64(frame_p99_us.clone());
+
             TuneProfileStats {
                 profile: profile.clone(),
                 valid_runs: valid_runs.len(),
                 invalid_runs: runs.len().saturating_sub(valid_runs.len()),
-                median_diagnostic_raw_score_total: median_u64(score_totals.clone()),
-                iqr_diagnostic_raw_score_total: iqr_u64(score_totals.clone()),
-                worst_diagnostic_raw_score_total: worst_u64(score_totals),
-                median_over_5ms: median_u64(over_5ms.clone()),
-                iqr_over_5ms: iqr_u64(over_5ms),
-                median_frame_p99_us: median_u64(frame_p99_us.clone()),
-                iqr_frame_p99_us: iqr_u64(frame_p99_us),
+                median_diagnostic_raw_score_total: score_median,
+                iqr_diagnostic_raw_score_total: score_iqr,
+                worst_diagnostic_raw_score_total: worst_u64(score_totals.clone()),
+                mean_diagnostic_raw_score_total: mean_u64(&score_totals),
+                stddev_diagnostic_raw_score_total: sample_stddev_u64(&score_totals),
+                median_over_5ms: over_5ms_median,
+                iqr_over_5ms: over_5ms_iqr,
+                mean_over_5ms: mean_u64(&over_5ms),
+                stddev_over_5ms: sample_stddev_u64(&over_5ms),
+                median_frame_p99_us: frame_p99_median,
+                iqr_frame_p99_us: frame_p99_iqr,
+                mean_frame_p99_us: mean_u64(&frame_p99_us),
+                stddev_frame_p99_us: sample_stddev_u64(&frame_p99_us),
             }
         })
         .collect()
@@ -155,6 +221,24 @@ pub fn assess_ranking_confidence(
     let diff = second
         .median_diagnostic_raw_score_total
         .abs_diff(best.median_diagnostic_raw_score_total);
+    let score_stddev = pooled_stddev(
+        best.stddev_diagnostic_raw_score_total,
+        best.valid_runs,
+        second.stddev_diagnostic_raw_score_total,
+        second.valid_runs,
+    );
+    let score_effect_size =
+        normalized_effect_size(i64::try_from(diff).unwrap_or(i64::MAX), score_stddev);
+    if let Some(effect) = score_effect_size
+        && effect < 0.50
+    {
+        notes.push(format!(
+            "best and second-best median scores have small normalized effect size ({:.2}σ)",
+            effect
+        ));
+        return (RankingConfidence::Unstable, notes);
+    }
+
     let max_iqr = best
         .iqr_diagnostic_raw_score_total
         .max(second.iqr_diagnostic_raw_score_total);
