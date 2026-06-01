@@ -146,3 +146,62 @@ fn large_irq_can_be_primary_when_no_scheduler_anchor_exists() {
         StutterCause::IrqDelayCandidate
     );
 }
+
+#[test]
+fn frame_spike_near_scheduler_cluster_adds_scheduler_evidence() {
+    let cluster = spike_cluster(vec![spike_point(
+        456,
+        TaskClass::Game,
+        "RenderThread",
+        8_000_000,
+    )]);
+
+    let artifacts = RunArtifacts {
+        frame_events: vec![FrameEvent {
+            elapsed_ms: 105,
+            frametime_ms: 55.0,
+        }],
+        ..Default::default()
+    };
+
+    let diagnosis = diagnose_cluster(&cluster, &artifacts, 0);
+    let scheduler = candidate(&diagnosis, StutterCause::GameThreadSchedulerDelay);
+
+    assert!(
+        scheduler.evidence.iter().any(|evidence| {
+            evidence
+                .message
+                .contains("frame spike (55.0ms) coincides with scheduling cluster")
+        }),
+        "scheduler diagnosis should include frame coincidence evidence: {scheduler:#?}"
+    );
+}
+
+#[test]
+fn frame_spike_far_from_cluster_does_not_add_scheduler_evidence() {
+    let cluster = spike_cluster(vec![spike_point(
+        456,
+        TaskClass::Game,
+        "RenderThread",
+        8_000_000,
+    )]);
+
+    let artifacts = RunArtifacts {
+        frame_events: vec![FrameEvent {
+            elapsed_ms: 500,
+            frametime_ms: 55.0,
+        }],
+        ..Default::default()
+    };
+
+    let diagnosis = diagnose_cluster(&cluster, &artifacts, 0);
+    let scheduler = candidate(&diagnosis, StutterCause::GameThreadSchedulerDelay);
+
+    assert!(
+        !scheduler
+            .evidence
+            .iter()
+            .any(|evidence| evidence.message.contains("frame spike")),
+        "far-away frame spike should not be attached: {scheduler:#?}"
+    );
+}

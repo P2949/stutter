@@ -49,10 +49,22 @@ pub struct TuneProfileStats {
     pub iqr_diagnostic_raw_score_total: u64,
     #[serde(alias = "worst_diagnostic_score_total")]
     pub worst_diagnostic_raw_score_total: u64,
+    #[serde(default)]
+    pub mean_diagnostic_raw_score_total: f64,
+    #[serde(default)]
+    pub stddev_diagnostic_raw_score_total: f64,
     pub median_over_5ms: u64,
     pub iqr_over_5ms: u64,
+    #[serde(default)]
+    pub mean_over_5ms: f64,
+    #[serde(default)]
+    pub stddev_over_5ms: f64,
     pub median_frame_p99_us: u64,
     pub iqr_frame_p99_us: u64,
+    #[serde(default)]
+    pub mean_frame_p99_us: f64,
+    #[serde(default)]
+    pub stddev_frame_p99_us: f64,
 }
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum RankingConfidence {

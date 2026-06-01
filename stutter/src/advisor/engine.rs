@@ -3,6 +3,7 @@ use std::path::Path;
 use super::models::*;
 use crate::{
     diagnosis::{Confidence, StutterCause},
+    irq_inspect::{IrqLine, classify_irq_device},
     report::{self, DataQualityLevel, ReportAnalysisJson},
 };
 
@@ -18,6 +19,7 @@ pub fn build_advisor_report_from_analysis(
 ) -> AdvisorReport {
     let causes = causes_from_analysis(analysis);
     let cause_evidence = cause_evidence_from_analysis(analysis);
+    let irq_inventory = analysis.session.core.metadata.irq_lines.as_slice();
     build_advisor_report_from_evidence(AdvisorEvidenceInput {
         run,
         data_quality: analysis.data_quality.level,
@@ -33,6 +35,7 @@ pub fn build_advisor_report_from_analysis(
                 || analysis.artifacts_summary.block_io_event_count > 0,
         },
         tree_pid: analysis.session.config.tree_roots.first().copied(),
+        irq_inventory,
     })
 }
 pub(crate) fn build_advisor_report_from_evidence(input: AdvisorEvidenceInput<'_>) -> AdvisorReport {
@@ -45,6 +48,7 @@ pub(crate) fn build_advisor_report_from_evidence(input: AdvisorEvidenceInput<'_>
     let has_irq = input.signal_availability.has_irq;
     let has_block_io = input.signal_availability.has_block_io;
     let tree_pid = input.tree_pid;
+    let irq_inventory = input.irq_inventory;
     let mut warnings = Vec::new();
     let mut recommendations = Vec::new();
 
@@ -81,17 +85,27 @@ pub(crate) fn build_advisor_report_from_evidence(input: AdvisorEvidenceInput<'_>
     let has_block_io_candidate = causes.contains(&StutterCause::BlockIoCandidate);
 
     if has_gpu {
+        let gpu_note = gpu_specific_note(cause_evidence);
         recommendations.push(AdvisorRecommendation {
             title: "Investigate non-CPU bottleneck candidate".to_owned(),
             rationale: rationale_with_evidence(
-                "GPU-bound evidence is a candidate, not proof; CPU affinity may not fix this.",
+                gpu_note.as_deref().unwrap_or(
+                    "GPU-bound evidence is a candidate, not proof; CPU affinity may not fix this.",
+                ),
                 evidence_note_for(cause_evidence, StutterCause::GpuBoundCandidate),
             ),
             confidence: Confidence::Medium,
             suggested_commands: if has_hwmon {
-                vec!["stutter report --analysis-json <run-dir>".to_owned()]
+                vec![
+                    "stutter report --analysis-json <run-dir>".to_owned(),
+                    "stutter display-path compare --baseline <baseline-run> --test <test-run>"
+                        .to_owned(),
+                ]
             } else {
-                vec!["stutter record --hwmon --duration 180 --run-name gpu-check".to_owned()]
+                vec![
+                    "stutter record --hwmon --drm-fence-latency --duration 180 --run-name gpu-check"
+                        .to_owned(),
+                ]
             },
             safety_note: "Observe only; do not auto-apply CPU affinity for a GPU-bound candidate."
                 .to_owned(),
@@ -100,21 +114,38 @@ pub(crate) fn build_advisor_report_from_evidence(input: AdvisorEvidenceInput<'_>
     }
 
     if has_irq_candidate {
+        let irq_specific = irq_specific_rationale(cause_evidence, irq_inventory);
         recommendations.push(AdvisorRecommendation {
-            title: "Confirm IRQ latency candidate".to_owned(),
+            title: irq_specific
+                .as_ref()
+                .map(|_| "Inspect specific IRQ affinity candidate")
+                .unwrap_or("Confirm IRQ latency candidate")
+                .to_owned(),
             rationale: rationale_with_evidence(
-                "IRQ overlap is a candidate signal, not proof; collect explicit IRQ data before changing anything.",
+                irq_specific.as_deref().unwrap_or(
+                    "IRQ overlap is a candidate signal, not proof; collect explicit IRQ data before changing anything.",
+                ),
                 evidence_note_for(cause_evidence, StutterCause::IrqDelayCandidate),
             ),
             confidence: Confidence::Medium,
             suggested_commands: if has_irq {
-                vec!["stutter report --analysis-json <run-dir>".to_owned()]
+                if let Some(irq) = first_irq_number_from_evidence(cause_evidence) {
+                    vec![
+                        "stutter report --analysis-json <run-dir>".to_owned(),
+                        format!("stutter irq inspect --top 20 | grep '^{irq}:'"),
+                    ]
+                } else {
+                    vec!["stutter report --analysis-json <run-dir>".to_owned()]
+                }
             } else {
                 vec!["stutter record --irq-latency --irq <IRQ> --duration 180 --run-name irq-check".to_owned()]
             },
-            safety_note: "Observe only; do not change IRQ affinity yet.".to_owned(),
+            safety_note: "Observe only; inspect IRQ affinity before changing it.".to_owned(),
         });
-        warnings.push("Advisor does not suggest changing IRQ affinity yet.".to_owned());
+        warnings.push(
+            "Advisor does not auto-suggest changing IRQ affinity; inspect the specific IRQ first."
+                .to_owned(),
+        );
     }
 
     if has_block_io_candidate {
@@ -202,6 +233,57 @@ fn rationale_with_evidence(base: &str, evidence_note: Option<String>) -> String 
 fn scheduler_evidence_note(cause_evidence: &[AdvisorCauseEvidence]) -> Option<String> {
     evidence_note_for(cause_evidence, StutterCause::GameThreadSchedulerDelay)
         .or_else(|| evidence_note_for(cause_evidence, StutterCause::CompositorSchedulerDelay))
+}
+
+fn first_irq_number_from_evidence(cause_evidence: &[AdvisorCauseEvidence]) -> Option<u32> {
+    let evidence = evidence_note_for(cause_evidence, StutterCause::IrqDelayCandidate)?;
+
+    let marker = "IRQ ";
+    let start = evidence.find(marker)? + marker.len();
+    let tail = &evidence[start..];
+    let digits = tail
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit())
+        .collect::<String>();
+
+    digits.parse().ok()
+}
+
+fn irq_line_for_number(irq_inventory: &[IrqLine], irq: u32) -> Option<&IrqLine> {
+    let irq = irq.to_string();
+    irq_inventory.iter().find(|line| line.irq == irq)
+}
+
+fn irq_specific_rationale(
+    cause_evidence: &[AdvisorCauseEvidence],
+    irq_inventory: &[IrqLine],
+) -> Option<String> {
+    let irq = first_irq_number_from_evidence(cause_evidence)?;
+    let line = irq_line_for_number(irq_inventory, irq)?;
+    let class = classify_irq_device(line);
+
+    Some(format!(
+        "IRQ {irq} ({}, class={class:?}) overlapped with the spike. Inspect IRQ affinity for this specific interrupt before changing CPU tuning.",
+        line.name
+    ))
+}
+
+fn gpu_specific_note(cause_evidence: &[AdvisorCauseEvidence]) -> Option<String> {
+    let messages = cause_evidence
+        .iter()
+        .find(|entry| entry.cause == StutterCause::GpuBoundCandidate)?
+        .messages
+        .iter()
+        .filter(|message| {
+            message.contains("power limit")
+                || message.contains("DRM fence wait")
+                || message.contains("GPU busy")
+        })
+        .take(3)
+        .cloned()
+        .collect::<Vec<_>>();
+
+    (!messages.is_empty()).then(|| messages.join("; "))
 }
 
 fn evidence_note_for(

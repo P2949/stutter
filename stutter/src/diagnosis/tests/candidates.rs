@@ -194,3 +194,121 @@ fn gpu_bound_beats_below_threshold_scheduler_delay() {
     assert_eq!(d.cause, StutterCause::GpuBoundCandidate);
     assert_no_candidate(&d, StutterCause::GameThreadSchedulerDelay);
 }
+
+#[test]
+fn irq_candidate_message_includes_device_identity_when_metadata_has_irq_line() {
+    let cluster = spike_cluster(vec![spike_point(
+        100,
+        TaskClass::Unknown,
+        "worker",
+        3_000_000,
+    )]);
+
+    let artifacts = RunArtifacts {
+        metadata: Some(metadata_with_irq_line(137, "524288-edge amdgpu")),
+        irq_events: vec![IrqEventRecord {
+            elapsed_ms: Some(100),
+            irq: 137,
+            cpu: 1,
+            enter_ns: 100_000_000,
+            exit_ns: 104_000_000,
+            duration_ns: 4_000_000,
+        }],
+        ..Default::default()
+    };
+
+    let diagnosis = diagnose_cluster(&cluster, &artifacts, 0);
+    let irq = candidate(&diagnosis, StutterCause::IrqDelayCandidate);
+
+    assert!(
+        irq.evidence.iter().any(|evidence| {
+            evidence.message.contains("IRQ 137")
+                && evidence.message.contains("amdgpu")
+                && evidence.message.contains("class=Gpu")
+                && evidence.message.contains("cpu=1")
+        }),
+        "IRQ evidence should include device identity: {irq:#?}"
+    );
+    assert!(
+        irq.evidence
+            .iter()
+            .any(|evidence| evidence.message.contains("classified as a GPU interrupt")),
+        "GPU IRQ should get class-specific supporting evidence: {irq:#?}"
+    );
+}
+
+#[test]
+fn gpu_candidate_includes_power_limit_reason_when_available() {
+    let config = DiagnosisConfig::default();
+    let cluster = spike_cluster(vec![spike_point(
+        456,
+        TaskClass::Game,
+        "RenderThread",
+        config.sched_delay_significant_ns - 1,
+    )]);
+
+    let artifacts = RunArtifacts {
+        gpu_samples: vec![GpuSample {
+            elapsed_ms: 100,
+            gpu_busy_percent: Some(99),
+            power_limit_reason: Some("power_cap".to_owned()),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+
+    let diagnosis = diagnose_cluster_with_config(&cluster, &artifacts, 0, config);
+    let gpu = candidate(&diagnosis, StutterCause::GpuBoundCandidate);
+
+    assert!(
+        gpu.evidence.iter().any(|evidence| {
+            evidence.message.contains("power limit active")
+                && evidence.message.contains("power_cap")
+        }),
+        "GPU candidate should mention power limit reason: {gpu:#?}"
+    );
+}
+
+#[test]
+fn gpu_candidate_includes_drm_fence_wait_when_available() {
+    let config = DiagnosisConfig::default();
+    let cluster = spike_cluster(vec![spike_point(
+        456,
+        TaskClass::Game,
+        "RenderThread",
+        config.sched_delay_significant_ns - 1,
+    )]);
+
+    let artifacts = RunArtifacts {
+        gpu_samples: vec![GpuSample {
+            elapsed_ms: 100,
+            gpu_busy_percent: Some(99),
+            ..Default::default()
+        }],
+        drm_fence_events: vec![DrmFenceEventRecord {
+            elapsed_ms: 100,
+            timestamp_ns: 100_500_000,
+            driver: Some("amdgpu".to_owned()),
+            gpu_role: Some("render".to_owned()),
+            comm: Some("Game.exe".to_owned()),
+            wait_start_ns: Some(100_000_000),
+            wait_done_ns: Some(103_000_000),
+            duration_ns: Some(3_000_000),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+
+    let diagnosis = diagnose_cluster_with_config(&cluster, &artifacts, 5_000_000, config);
+    let gpu = candidate(&diagnosis, StutterCause::GpuBoundCandidate);
+
+    assert!(
+        gpu.evidence.iter().any(|evidence| {
+            evidence.kind == EvidenceKind::DrmFenceWait
+                && evidence.message.contains("DRM fence wait")
+                && evidence.message.contains("render")
+                && evidence.message.contains("3.000ms")
+        }),
+        "GPU candidate should include DRM fence wait evidence: {gpu:#?}"
+    );
+}

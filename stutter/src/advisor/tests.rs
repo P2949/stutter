@@ -35,6 +35,7 @@ fn report_for(causes: &[StutterCause], quality: DataQualityLevel) -> AdvisorRepo
             has_block_io: false,
         },
         tree_pid: Some(42),
+        irq_inventory: &[],
     })
 }
 
@@ -93,7 +94,7 @@ fn irq_candidate_does_not_suggest_changing_irq_affinity_yet() {
     assert!(
         report.recommendations[0]
             .safety_note
-            .contains("do not change IRQ affinity yet")
+            .contains("inspect IRQ affinity")
     );
 }
 
@@ -115,6 +116,7 @@ fn recommendation_rationale_includes_structured_evidence() {
             has_block_io: false,
         },
         tree_pid: Some(42),
+        irq_inventory: &[],
     });
 
     assert!(
@@ -206,4 +208,82 @@ fn gpu_and_scheduler_both_produce_recommendations() {
             .iter()
             .any(|r| r.title.contains("profile tuning"))
     );
+}
+
+#[test]
+fn irq_candidate_uses_irq_inventory_for_specific_recommendation() {
+    let irq_lines = vec![crate::irq_inspect::IrqLine {
+        irq: "146".to_owned(),
+        counts_by_cpu: vec![0, 10],
+        total: 10,
+        kind: "PCI-MSI".to_owned(),
+        name: "524288-edge amdgpu".to_owned(),
+        raw: "146: 0 10 PCI-MSI 524288-edge amdgpu".to_owned(),
+    }];
+
+    let cause_evidence = vec![AdvisorCauseEvidence {
+        cause: StutterCause::IrqDelayCandidate,
+        messages: vec![
+            "IRQ 146 (524288-edge amdgpu, class=Gpu, cpu=1) active during spike".to_owned(),
+        ],
+    }];
+
+    let report = build_advisor_report_from_evidence(AdvisorEvidenceInput {
+        run: Path::new("/tmp/run"),
+        data_quality: DataQualityLevel::High,
+        causes: &[StutterCause::IrqDelayCandidate],
+        cause_evidence: &cause_evidence,
+        profiles: Some(Path::new("profiles.toml")),
+        signal_availability: AdvisorSignalAvailability {
+            has_hwmon: false,
+            has_irq: true,
+            has_block_io: false,
+        },
+        tree_pid: Some(42),
+        irq_inventory: &irq_lines,
+    });
+
+    let recommendation = &report.recommendations[0];
+
+    assert!(recommendation.title.contains("specific IRQ"));
+    assert!(recommendation.rationale.contains("IRQ 146"));
+    assert!(recommendation.rationale.contains("amdgpu"));
+    assert!(
+        recommendation
+            .suggested_commands
+            .iter()
+            .any(|command| command.contains("146"))
+    );
+}
+
+#[test]
+fn gpu_candidate_uses_power_limit_and_fence_evidence_in_recommendation() {
+    let cause_evidence = vec![AdvisorCauseEvidence {
+        cause: StutterCause::GpuBoundCandidate,
+        messages: vec![
+            "GPU power limit active near spike (reason: power_cap)".to_owned(),
+            "DRM fence wait near spike: role=render driver=amdgpu comm=Game.exe duration=3ms"
+                .to_owned(),
+        ],
+    }];
+
+    let report = build_advisor_report_from_evidence(AdvisorEvidenceInput {
+        run: Path::new("/tmp/run"),
+        data_quality: DataQualityLevel::High,
+        causes: &[StutterCause::GpuBoundCandidate],
+        cause_evidence: &cause_evidence,
+        profiles: Some(Path::new("profiles.toml")),
+        signal_availability: AdvisorSignalAvailability {
+            has_hwmon: true,
+            has_irq: false,
+            has_block_io: false,
+        },
+        tree_pid: Some(42),
+        irq_inventory: &[],
+    });
+
+    let recommendation = &report.recommendations[0];
+
+    assert!(recommendation.rationale.contains("power limit"));
+    assert!(recommendation.rationale.contains("DRM fence wait"));
 }

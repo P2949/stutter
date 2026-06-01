@@ -6,8 +6,8 @@ use super::{
     Diagnosis, DiagnosisConfig, EvidenceItem, EvidenceKind, StutterCause,
     anchor::{is_compositor_point, is_game_point},
     candidate::{
-        DiagnosisContextSummary, finalize_diagnosis, push_candidate, scheduler_candidate_cause,
-        scheduler_delay_score,
+        DiagnosisContextSummary, finalize_diagnosis, push_candidate, push_supporting_evidence,
+        scheduler_candidate_cause, scheduler_delay_score,
     },
     evidence::{
         push_cpu_frequency_evidence, push_cpu_perf_evidence, push_migration_evidence,
@@ -17,14 +17,101 @@ use super::{
     },
 };
 use crate::{
+    irq_inspect::{IrqDeviceClass, IrqLine, classify_irq_device},
     metrics::format_latency,
     recorder::{
-        BlockIoRecord, CpuFreqRecord, GpuSample, IntervalRecord, IrqEventRecord,
-        MigrationEventRecord,
+        BlockIoRecord, CpuFreqRecord, DrmFenceEventRecord, FrameEvent, GpuSample, IntervalRecord,
+        IrqEventRecord, MigrationEventRecord,
     },
     session_io::RunArtifacts,
     spike::SpikeCluster,
 };
+
+fn irq_inventory_from_artifacts(artifacts: &RunArtifacts) -> &[IrqLine] {
+    artifacts
+        .metadata
+        .as_ref()
+        .map(|metadata| metadata.core.metadata.irq_lines.as_slice())
+        .unwrap_or(&[])
+}
+
+fn irq_line_for_event(irq_lines: &[IrqLine], irq: u32) -> Option<&IrqLine> {
+    let irq = irq.to_string();
+    irq_lines.iter().find(|line| line.irq == irq)
+}
+
+fn irq_device_label(line: Option<&IrqLine>) -> String {
+    let Some(line) = line else {
+        return "unknown device".to_owned();
+    };
+
+    let class = classify_irq_device(line);
+    let name = if line.name.trim().is_empty() {
+        "unnamed IRQ device"
+    } else {
+        line.name.trim()
+    };
+
+    format!("{name}, class={class:?}")
+}
+
+fn irq_class(line: Option<&IrqLine>) -> IrqDeviceClass {
+    line.map(classify_irq_device)
+        .unwrap_or(IrqDeviceClass::Unknown)
+}
+
+fn cluster_elapsed_midpoint(cluster: &SpikeCluster) -> Option<u64> {
+    let mut values = cluster.points.iter().filter_map(|point| point.elapsed_ms);
+    let first = values.next()?;
+    let mut min = first;
+    let mut max = first;
+
+    for value in values {
+        min = min.min(value);
+        max = max.max(value);
+    }
+
+    Some(min + (max.saturating_sub(min) / 2))
+}
+
+fn coincident_frame_spike<'a>(
+    cluster: &SpikeCluster,
+    frames: &'a [FrameEvent],
+    config: DiagnosisConfig,
+) -> Option<&'a FrameEvent> {
+    let elapsed = cluster_elapsed_midpoint(cluster)?;
+
+    frames
+        .iter()
+        .filter(|frame| frame.frametime_ms.is_finite())
+        .filter(|frame| frame.frametime_ms >= config.frame_spike_frametime_ms)
+        .filter(|frame| frame.elapsed_ms.abs_diff(elapsed) <= config.frame_coincidence_window_ms)
+        .max_by(|a, b| a.frametime_ms.total_cmp(&b.frametime_ms))
+}
+
+fn frame_spike_strength(frame: &FrameEvent, config: DiagnosisConfig) -> f32 {
+    let excess_ms = (frame.frametime_ms - config.frame_spike_frametime_ms).max(0.0);
+    (0.20 + (excess_ms / 50.0) as f32).clamp(0.20, 0.60)
+}
+
+fn max_drm_fence_wait(events: &[DrmFenceEventRecord]) -> Option<&DrmFenceEventRecord> {
+    events
+        .iter()
+        .filter(|event| event.duration_ns.unwrap_or(0) >= 1_000_000)
+        .max_by_key(|event| event.duration_ns.unwrap_or(0))
+}
+
+fn drm_fence_message(event: &DrmFenceEventRecord) -> String {
+    let duration = event.duration_ns.unwrap_or_default();
+    let role = event.gpu_role.as_deref().unwrap_or("unknown");
+    let driver = event.driver.as_deref().unwrap_or("-");
+    let comm = event.comm.as_deref().unwrap_or("-");
+
+    format!(
+        "DRM fence wait near spike: role={role} driver={driver} comm={comm} duration={}",
+        format_latency(duration)
+    )
+}
 
 pub(crate) fn diagnose_cluster(
     cluster: &SpikeCluster,
@@ -43,6 +130,7 @@ pub(crate) fn diagnose_cluster_with_config(
     // Compute cluster time window
     let start_ns = cluster.min_switch_ns.saturating_sub(window_ns);
     let end_ns = cluster.max_switch_ns.saturating_add(window_ns);
+    let irq_inventory = irq_inventory_from_artifacts(artifacts);
 
     // Helper: cluster elapsed and range based on spike point elapsed_ms
     let cluster_elapsed_opt = cluster.points.iter().filter_map(|p| p.elapsed_ms).min();
@@ -80,8 +168,36 @@ pub(crate) fn diagnose_cluster_with_config(
         Vec::new()
     };
 
-    // frame events are not currently used in diagnosis, but could be considered
-    // for future enhancements.
+    let frame_events: Vec<FrameEvent> = if let Some((min, max)) = cluster_elapsed_range {
+        artifacts
+            .frame_events
+            .iter()
+            .filter(|frame| {
+                frame.elapsed_ms >= min.saturating_sub(config.frame_coincidence_window_ms)
+                    && frame.elapsed_ms <= max.saturating_add(config.frame_coincidence_window_ms)
+            })
+            .cloned()
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    let drm_fence_events: Vec<DrmFenceEventRecord> = artifacts
+        .drm_fence_events
+        .iter()
+        .filter(|event| {
+            if event.timestamp_ns >= start_ns && event.timestamp_ns <= end_ns {
+                return true;
+            }
+
+            if let (Some(wait_start), Some(wait_done)) = (event.wait_start_ns, event.wait_done_ns) {
+                return wait_done >= start_ns && wait_start <= end_ns;
+            }
+
+            false
+        })
+        .cloned()
+        .collect();
 
     let io_events: Vec<BlockIoRecord> = artifacts
         .block_io_events
@@ -203,6 +319,27 @@ pub(crate) fn diagnose_cluster_with_config(
         push_runnable_depth_evidence(&mut candidates, StutterCause::GameThreadSchedulerDelay, p);
     }
 
+    if let Some(frame) = coincident_frame_spike(cluster, &frame_events, config)
+        && let Some(cause) = scheduler_candidate_cause(&candidates)
+    {
+        let strength = frame_spike_strength(frame, config);
+        push_supporting_evidence(
+            &mut candidates,
+            cause,
+            EvidenceItem {
+                kind: EvidenceKind::SchedulerDelay,
+                strength,
+                message: format!(
+                    "frame spike ({:.1}ms) coincides with scheduling cluster",
+                    frame.frametime_ms
+                ),
+                timestamp_ms: Some(frame.elapsed_ms),
+                start_ns: None,
+                end_ns: None,
+            },
+        );
+    }
+
     // 3. IRQ overlap
     let max_irq = irq_events
         .iter()
@@ -217,9 +354,13 @@ pub(crate) fn diagnose_cluster_with_config(
         {
             score = score.min(0.35);
         }
+        let irq_line = irq_line_for_event(irq_inventory, irq.irq);
+        let irq_label = irq_device_label(irq_line);
+        let irq_class = irq_class(irq_line);
         let message = format!(
-            "IRQ {} active during spike (max duration {})",
+            "IRQ {} ({irq_label}, cpu={}) active during spike (max duration {})",
             irq.irq,
+            irq.cpu,
             format_latency(irq.duration_ns)
         );
         push_candidate(
@@ -235,6 +376,24 @@ pub(crate) fn diagnose_cluster_with_config(
                 end_ns: Some(irq.exit_ns),
             },
         );
+
+        if irq_class == IrqDeviceClass::Gpu {
+            push_supporting_evidence(
+                &mut candidates,
+                StutterCause::IrqDelayCandidate,
+                EvidenceItem {
+                    kind: EvidenceKind::IrqOverlap,
+                    strength: 0.30,
+                    message: format!(
+                        "IRQ {} is classified as a GPU interrupt; inspect IRQ affinity before changing CPU tuning",
+                        irq.irq
+                    ),
+                    timestamp_ms: irq.elapsed_ms,
+                    start_ns: Some(irq.enter_ns),
+                    end_ns: Some(irq.exit_ns),
+                },
+            );
+        }
     }
 
     // 4. GPU bound
@@ -248,8 +407,27 @@ pub(crate) fn diagnose_cluster_with_config(
         .max_by_key(|(_, busy)| *busy);
     if let Some((sample, busy_percent)) = high_gpu {
         context.saw_high_gpu = true;
-        let score = (busy_percent.saturating_sub(90)) as f32 / 10.0;
-        let message = format!("GPU busy at {}%", busy_percent);
+
+        let power_limited = sample
+            .power_limit_reason
+            .as_deref()
+            .filter(|reason| !reason.trim().is_empty());
+        let max_fence_wait = max_drm_fence_wait(&drm_fence_events);
+
+        let mut score = (busy_percent.saturating_sub(90)) as f32 / 10.0;
+        if power_limited.is_some() {
+            score = (score + 0.15).min(1.0);
+        }
+        if max_fence_wait.is_some() {
+            score = (score + 0.10).min(1.0);
+        }
+
+        let message = match power_limited {
+            Some(reason) => {
+                format!("GPU busy at {busy_percent}% with power limit active ({reason})")
+            }
+            None => format!("GPU busy at {busy_percent}%"),
+        };
         push_candidate(
             &mut candidates,
             StutterCause::GpuBoundCandidate,
@@ -263,6 +441,36 @@ pub(crate) fn diagnose_cluster_with_config(
                 end_ns: None,
             },
         );
+
+        if let Some(reason) = power_limited {
+            push_supporting_evidence(
+                &mut candidates,
+                StutterCause::GpuBoundCandidate,
+                EvidenceItem {
+                    kind: EvidenceKind::GpuBusy,
+                    strength: 0.35,
+                    message: format!("GPU power limit active near spike (reason: {reason})"),
+                    timestamp_ms: Some(sample.elapsed_ms),
+                    start_ns: None,
+                    end_ns: None,
+                },
+            );
+        }
+
+        if let Some(fence) = max_fence_wait {
+            push_supporting_evidence(
+                &mut candidates,
+                StutterCause::GpuBoundCandidate,
+                EvidenceItem {
+                    kind: EvidenceKind::DrmFenceWait,
+                    strength: 0.30,
+                    message: drm_fence_message(fence),
+                    timestamp_ms: Some(fence.elapsed_ms),
+                    start_ns: fence.wait_start_ns,
+                    end_ns: fence.wait_done_ns.or(Some(fence.timestamp_ns)),
+                },
+            );
+        }
     }
 
     // 5. Block I/O
