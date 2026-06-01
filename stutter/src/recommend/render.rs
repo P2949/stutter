@@ -14,6 +14,13 @@ pub fn render_baseline_tune_recommendation_markdown(rec: &BaselineTuneRecommenda
         ),
     );
     pushln(&mut out, format!("Confidence: {:?}", rec.confidence));
+    pushln(
+        &mut out,
+        format!(
+            "Baseline runs: {} valid, {} invalid",
+            rec.baseline_valid_runs, rec.baseline_invalid_runs
+        ),
+    );
     pushln(&mut out, "");
     pushln(&mut out, "## Summary");
     pushln(&mut out, "");
@@ -101,6 +108,45 @@ pub fn render_baseline_tune_recommendation_markdown(rec: &BaselineTuneRecommenda
                 .unwrap_or_else(|| "n/a".to_owned())
         ),
     );
+
+    pushln(&mut out, "");
+    pushln(&mut out, "## Formal A/B statistics");
+    pushln(&mut out, "");
+    if rec.formal_metrics.is_empty() {
+        pushln(&mut out, "- none");
+    } else {
+        for metric in &rec.formal_metrics {
+            let ci = metric
+                .bootstrap_ci95
+                .as_ref()
+                .map(|ci| format!("95% CI [{:.3}, {:.3}]", ci.lower, ci.upper))
+                .unwrap_or_else(|| "95% CI n/a".to_owned());
+            let effect = metric
+                .effect_size
+                .map(|value| format!("{value:.2}σ"))
+                .unwrap_or_else(|| "n/a".to_owned());
+            pushln(
+                &mut out,
+                format!(
+                    "- {}: baseline_median={:.3}{} tuned_median={:.3}{} improvement={:.3}{} effect_size={} {} enough_samples={} significant={}",
+                    metric.metric,
+                    metric.baseline_median,
+                    metric.unit,
+                    metric.tuned_median,
+                    metric.unit,
+                    metric.improvement_delta,
+                    metric.unit,
+                    effect,
+                    ci,
+                    metric.enough_samples,
+                    metric.statistically_significant
+                ),
+            );
+            if let Some(reason) = &metric.not_enough_samples_reason {
+                pushln(&mut out, format!("  - {reason}"));
+            }
+        }
+    }
     pushln(&mut out, "");
     pushln(&mut out, "## Warnings");
     pushln(&mut out, "");

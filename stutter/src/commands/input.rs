@@ -166,7 +166,7 @@ pub struct TuneCommandInput {
 
 #[derive(Debug)]
 pub struct RecommendCommandInput {
-    pub baseline: PathBuf,
+    pub baseline: Vec<PathBuf>,
     pub tune: PathBuf,
     pub json: bool,
     pub markdown: Option<PathBuf>,

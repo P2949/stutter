@@ -1,18 +1,48 @@
-use std::{fs, path::Path};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use anyhow::Context;
 
 use super::model::BaselineTuneRecommendation;
 use crate::{
     artifacts::ArtifactSelection,
-    scorer, session_io,
-    tune::{self, RankingConfidence, TuneSummary, recommendation::TuneRecommendationVerdict},
+    scorer::{self, StutterScore},
+    session_io,
+    tune::{
+        self, RankingConfidence, TuneCandidateSummary, TuneSummary,
+        recommendation::TuneRecommendationVerdict,
+        statistics::{self, FormalMetricComparison, MIN_FORMAL_SAMPLES_PER_SIDE},
+    },
 };
+
+const BASELINE_MIN_SCORED_SAMPLES: u64 = 50;
+const LOW_BASELINE_SCORE_TOTAL: u64 = 100;
+
+struct BaselineSample {
+    run_dir: PathBuf,
+    score: StutterScore,
+    scored_samples: u64,
+    intervals_empty: bool,
+    valid: bool,
+}
 
 pub fn build_baseline_tune_recommendation(
     baseline_run: &Path,
     tune_dir: &Path,
 ) -> anyhow::Result<BaselineTuneRecommendation> {
+    build_baseline_tune_recommendation_for_baselines(&[baseline_run.to_path_buf()], tune_dir)
+}
+
+pub fn build_baseline_tune_recommendation_for_baselines(
+    baseline_runs: &[PathBuf],
+    tune_dir: &Path,
+) -> anyhow::Result<BaselineTuneRecommendation> {
+    if baseline_runs.is_empty() {
+        anyhow::bail!("at least one --baseline run is required");
+    }
+
     let summary_path = tune_dir.join("tuning_summary.json");
     if !summary_path.exists() {
         anyhow::bail!(
@@ -26,23 +56,39 @@ pub fn build_baseline_tune_recommendation(
     )
     .with_context(|| format!("failed to parse {}", summary_path.display()))?;
 
-    let baseline = session_io::load_run_artifacts(baseline_run, ArtifactSelection::tune())
-        .with_context(|| format!("failed to load baseline run {}", baseline_run.display()))?;
-    let baseline_score =
-        scorer::score_from_interval_records_and_frames(&baseline.intervals, &baseline.frame_events);
-    let (_, baseline_scored_samples) = tune::tune_scored_record_counts(&baseline.intervals);
-
     let mut warnings = Vec::new();
-    warnings.extend(baseline.validation.errors.iter().cloned());
-    warnings.extend(baseline.validation.warnings.iter().cloned());
-    warnings.extend(
-        baseline
-            .validation
-            .missing_optional_files
-            .iter()
-            .map(|file| format!("baseline missing optional artifact: {file}")),
-    );
     warnings.extend(summary.ranking_notes.iter().cloned());
+
+    let baseline_samples = load_baseline_samples(baseline_runs, &mut warnings)?;
+    let valid_baselines = baseline_samples
+        .iter()
+        .filter(|sample| sample.valid)
+        .collect::<Vec<_>>();
+    let baseline_valid_runs = valid_baselines.len();
+    let baseline_invalid_runs = baseline_samples.len().saturating_sub(baseline_valid_runs);
+
+    if baseline_valid_runs == 0 {
+        warnings.push("no valid baseline run was available for comparison".to_owned());
+    }
+    if baseline_invalid_runs > 0 {
+        warnings.push(format!(
+            "{} baseline run(s) were invalid and excluded from formal statistics",
+            baseline_invalid_runs
+        ));
+    }
+
+    let baseline_score_total =
+        median_u64_from_f64(&baseline_metric_values(&valid_baselines, |sample| {
+            sample.score.total as f64
+        }));
+    let baseline_over_5ms =
+        median_u64_from_f64(&baseline_metric_values(&valid_baselines, |sample| {
+            sample.score.over_5ms as f64
+        }));
+    let baseline_frame_p99_ms =
+        optional_median_f64(&baseline_metric_values(&valid_baselines, |sample| {
+            sample.score.frame_p99_ms
+        }));
 
     let best_profile = if summary.best_profile.is_empty() {
         None
@@ -58,18 +104,14 @@ pub fn build_baseline_tune_recommendation(
     let best_median_diagnostic_raw_score_total =
         best_stat.map(|stat| stat.median_diagnostic_raw_score_total);
     let score_delta_abs = best_median_diagnostic_raw_score_total
-        .map(|best| baseline_score.total as i64 - best as i64);
+        .map(|best| baseline_score_total as i64 - best as i64);
     let score_delta_percent = score_delta_abs.and_then(|delta| {
-        (baseline_score.total > 0).then_some(delta as f64 / baseline_score.total as f64 * 100.0)
+        (baseline_score_total > 0).then_some(delta as f64 / baseline_score_total as f64 * 100.0)
     });
 
-    let baseline_over_5ms = baseline_score.over_5ms;
     let best_median_over_5ms = best_stat.map(|stat| stat.median_over_5ms);
     let over_5ms_delta_abs =
         best_median_over_5ms.map(|best| baseline_over_5ms as i64 - best as i64);
-
-    let baseline_frame_p99_ms =
-        (baseline_score.frame_p99_ms > 0.0).then_some(baseline_score.frame_p99_ms);
 
     let best_median_frame_p99_ms = best_stat.and_then(|stat| {
         (stat.median_frame_p99_us > 0).then_some(stat.median_frame_p99_us as f64 / 1000.0)
@@ -80,43 +122,53 @@ pub fn build_baseline_tune_recommendation(
         _ => None,
     };
 
-    if baseline.intervals.is_empty() {
-        warnings.push("baseline intervals are missing".to_owned());
-    }
-    if baseline_scored_samples < 50 {
-        warnings.push(format!(
-            "baseline scored sample count is low ({baseline_scored_samples})"
-        ));
-    }
+    let best_candidates = best_profile
+        .as_deref()
+        .map(|profile| valid_candidates_for_profile(&summary, profile))
+        .unwrap_or_default();
+
     if let Some(best_profile) = &best_profile {
-        let best_candidates = summary
+        let all_best_candidates = summary
             .candidates
             .iter()
             .filter(|candidate| candidate.profile == *best_profile)
             .collect::<Vec<_>>();
-        if best_candidates.is_empty() {
+        if all_best_candidates.is_empty() {
             warnings.push(format!(
                 "best profile '{best_profile}' has no candidate runs"
             ));
-        } else if best_candidates.iter().any(|candidate| !candidate.valid) {
+        } else if all_best_candidates.iter().any(|candidate| !candidate.valid) {
             warnings.push(format!(
                 "best profile '{best_profile}' has invalid candidate runs"
             ));
         }
     }
 
+    let formal_metrics = formal_metric_comparisons(&valid_baselines, &best_candidates);
+    extend_formal_metric_warnings(&mut warnings, &formal_metrics);
+    let formal_score_metric = formal_metrics
+        .iter()
+        .find(|metric| metric.metric == "diagnostic_raw_score_total");
+    let formal_score_blocks_recommendation = formal_score_metric.is_none_or(|metric| {
+        !metric.enough_samples
+            || !metric.statistically_significant
+            || metric.improvement_delta <= 0.0
+    });
+
     let baseline_quality_blocks_recommendation =
-        baseline.intervals.is_empty() || baseline_scored_samples < 50;
+        valid_baselines.iter().any(|sample| sample.intervals_empty)
+            || valid_baselines
+                .iter()
+                .any(|sample| sample.scored_samples < BASELINE_MIN_SCORED_SAMPLES)
+            || baseline_valid_runs == 0;
 
-    const LOW_BASELINE_SCORE_TOTAL: u64 = 100;
-
-    let baseline_score_blocks_recommendation = if baseline_score.total == 0 {
+    let baseline_score_blocks_recommendation = if baseline_score_total == 0 {
         warnings.push("baseline score is zero; score improvement cannot be measured".to_owned());
         true
-    } else if baseline_score.total < LOW_BASELINE_SCORE_TOTAL {
+    } else if baseline_score_total < LOW_BASELINE_SCORE_TOTAL {
         warnings.push(format!(
             "baseline score is very low ({}); recommendation requires retest",
-            baseline_score.total
+            baseline_score_total
         ));
         true
     } else {
@@ -126,15 +178,14 @@ pub fn build_baseline_tune_recommendation(
     let verdict = if summary.ranking_confidence == RankingConfidence::Unstable {
         TuneRecommendationVerdict::NoRecommendation
     } else if let Some(best) = best_median_diagnostic_raw_score_total {
-        let worse_threshold = baseline_score
-            .total
-            .saturating_add(baseline_score.total / 20);
-        let improvement_threshold = baseline_score.total / 20;
-        let improvement = baseline_score.total.saturating_sub(best);
+        let worse_threshold = baseline_score_total.saturating_add(baseline_score_total / 20);
+        let improvement_threshold = baseline_score_total / 20;
+        let improvement = baseline_score_total.saturating_sub(best);
         if best > worse_threshold {
             TuneRecommendationVerdict::NoRecommendation
         } else if baseline_quality_blocks_recommendation
             || baseline_score_blocks_recommendation
+            || formal_score_blocks_recommendation
             || improvement < improvement_threshold
         {
             TuneRecommendationVerdict::NeedsRetest
@@ -152,19 +203,19 @@ pub fn build_baseline_tune_recommendation(
 
     let summary_text = match verdict {
         TuneRecommendationVerdict::Recommended => format!(
-            "Best tuned profile '{}' improved the baseline by {} score point(s).",
+            "Best tuned profile '{}' improved the repeated baseline by {} score point(s) with a bootstrap CI that excludes zero.",
             best_profile.as_deref().unwrap_or("unknown"),
             score_delta_abs.unwrap_or(0)
         ),
         TuneRecommendationVerdict::NeedsRetest => format!(
-            "Best tuned profile '{}' needs another comparable run before it is trusted.",
+            "Best tuned profile '{}' needs more comparable baseline/tune samples before it is trusted.",
             best_profile.as_deref().unwrap_or("unknown")
         ),
         TuneRecommendationVerdict::NoRecommendation => {
             if summary.ranking_confidence == RankingConfidence::Unstable {
                 "No recommendation: tune ranking was unstable.".to_owned()
             } else if let Some(best) = best_median_diagnostic_raw_score_total {
-                if best > baseline_score.total {
+                if best > baseline_score_total {
                     "No recommendation: the best tuned candidate failed to beat baseline."
                         .to_owned()
                 } else {
@@ -184,9 +235,13 @@ pub fn build_baseline_tune_recommendation(
             next_steps.push("Apply manually and keep stutter restore available.".to_owned());
         }
         TuneRecommendationVerdict::NeedsRetest => {
-            next_steps
-                .push("Rerun baseline and tune with the same route, scene, and load.".to_owned());
-            next_steps.push("Use at least 5 tune runs for a stronger comparison.".to_owned());
+            next_steps.push(format!(
+                "Collect at least {MIN_FORMAL_SAMPLES_PER_SIDE} baseline runs and {MIN_FORMAL_SAMPLES_PER_SIDE} tune runs on the same route, scene, and load."
+            ));
+            next_steps.push(
+                "Treat the current result as directional only if any formal A/B metric says enough_samples=false or its CI crosses zero."
+                    .to_owned(),
+            );
         }
         TuneRecommendationVerdict::NoRecommendation => {
             next_steps.push("Do not apply a tuned profile from this result.".to_owned());
@@ -198,14 +253,20 @@ pub fn build_baseline_tune_recommendation(
     }
 
     Ok(BaselineTuneRecommendation {
-        schema_version: 2,
-        baseline_run: baseline.run_dir,
+        schema_version: 3,
+        baseline_run: baseline_samples[0].run_dir.clone(),
+        baseline_runs: baseline_samples
+            .iter()
+            .map(|sample| sample.run_dir.clone())
+            .collect(),
         tune_dir: tune_dir.to_path_buf(),
         best_profile,
         confidence: summary.ranking_confidence,
         verdict,
         summary: summary_text,
-        diagnostic_baseline_raw_score_total: baseline_score.total,
+        baseline_valid_runs,
+        baseline_invalid_runs,
+        diagnostic_baseline_raw_score_total: baseline_score_total,
         best_median_diagnostic_raw_score_total,
         score_delta_abs,
         score_delta_percent,
@@ -215,7 +276,192 @@ pub fn build_baseline_tune_recommendation(
         baseline_frame_p99_ms,
         best_median_frame_p99_ms,
         frame_p99_delta_ms,
+        formal_metrics,
         warnings,
         next_steps,
     })
+}
+
+fn load_baseline_samples(
+    baseline_runs: &[PathBuf],
+    warnings: &mut Vec<String>,
+) -> anyhow::Result<Vec<BaselineSample>> {
+    let mut samples = Vec::with_capacity(baseline_runs.len());
+    for run_dir in baseline_runs {
+        let baseline = session_io::load_run_artifacts(run_dir, ArtifactSelection::tune())
+            .with_context(|| format!("failed to load baseline run {}", run_dir.display()))?;
+        warnings.extend(
+            baseline
+                .validation
+                .errors
+                .iter()
+                .map(|warning| format!("baseline {}: {warning}", run_dir.display())),
+        );
+        warnings.extend(
+            baseline
+                .validation
+                .warnings
+                .iter()
+                .map(|warning| format!("baseline {}: {warning}", run_dir.display())),
+        );
+        warnings.extend(
+            baseline
+                .validation
+                .missing_optional_files
+                .iter()
+                .map(|file| {
+                    format!(
+                        "baseline {} missing optional artifact: {file}",
+                        run_dir.display()
+                    )
+                }),
+        );
+
+        let score = scorer::score_from_interval_records_and_frames(
+            &baseline.intervals,
+            &baseline.frame_events,
+        );
+        let (_, scored_samples) = tune::tune_scored_record_counts(&baseline.intervals);
+        let intervals_empty = baseline.intervals.is_empty();
+        let valid = !intervals_empty && scored_samples >= BASELINE_MIN_SCORED_SAMPLES;
+        if intervals_empty {
+            warnings.push(format!(
+                "baseline {} intervals are missing",
+                run_dir.display()
+            ));
+        }
+        if scored_samples < BASELINE_MIN_SCORED_SAMPLES {
+            warnings.push(format!(
+                "baseline {} scored sample count is low ({scored_samples})",
+                run_dir.display()
+            ));
+        }
+
+        samples.push(BaselineSample {
+            run_dir: baseline.run_dir,
+            score,
+            scored_samples,
+            intervals_empty,
+            valid,
+        });
+    }
+    Ok(samples)
+}
+
+fn valid_candidates_for_profile<'a>(
+    summary: &'a TuneSummary,
+    profile: &str,
+) -> Vec<&'a TuneCandidateSummary> {
+    summary
+        .candidates
+        .iter()
+        .filter(|candidate| candidate.profile == profile && candidate.valid)
+        .collect()
+}
+
+fn formal_metric_comparisons(
+    baselines: &[&BaselineSample],
+    tuned: &[&TuneCandidateSummary],
+) -> Vec<FormalMetricComparison> {
+    vec![
+        statistics::compare_lower_is_better_metric(
+            "diagnostic_raw_score_total",
+            "score_points",
+            &baseline_metric_values(baselines, |sample| sample.score.total as f64),
+            &tuned_metric_values(tuned, |candidate| {
+                candidate.diagnostic_raw_score_total as f64
+            }),
+        ),
+        statistics::compare_lower_is_better_metric(
+            "over_5ms",
+            "samples",
+            &baseline_metric_values(baselines, |sample| sample.score.over_5ms as f64),
+            &tuned_metric_values(tuned, |candidate| candidate.over_5ms as f64),
+        ),
+        statistics::compare_lower_is_better_metric(
+            "frame_p99_ms",
+            "ms",
+            &baseline_metric_values(baselines, |sample| sample.score.frame_p99_ms)
+                .into_iter()
+                .filter(|value| *value > 0.0)
+                .collect::<Vec<_>>(),
+            &tuned_metric_values(tuned, |candidate| candidate.frame_p99_ms)
+                .into_iter()
+                .filter(|value| *value > 0.0)
+                .collect::<Vec<_>>(),
+        ),
+        statistics::compare_lower_is_better_metric(
+            "frame_over_16ms",
+            "frames",
+            &baseline_metric_values(baselines, |sample| sample.score.frame_over_16ms as f64),
+            &tuned_metric_values(tuned, |candidate| candidate.frame_over_16ms as f64),
+        ),
+        statistics::compare_lower_is_better_metric(
+            "frame_over_33ms",
+            "frames",
+            &baseline_metric_values(baselines, |sample| sample.score.frame_over_33ms as f64),
+            &tuned_metric_values(tuned, |candidate| candidate.frame_over_33ms as f64),
+        ),
+        statistics::compare_lower_is_better_metric(
+            "frame_over_50ms",
+            "frames",
+            &baseline_metric_values(baselines, |sample| sample.score.frame_over_50ms as f64),
+            &tuned_metric_values(tuned, |candidate| candidate.frame_over_50ms as f64),
+        ),
+        statistics::compare_lower_is_better_metric(
+            "max_latency_ns",
+            "ns",
+            &baseline_metric_values(baselines, |sample| sample.score.max_latency_ns as f64),
+            &tuned_metric_values(tuned, |candidate| candidate.max_latency_ns as f64),
+        ),
+    ]
+}
+
+fn extend_formal_metric_warnings(warnings: &mut Vec<String>, metrics: &[FormalMetricComparison]) {
+    for metric in metrics {
+        if let Some(reason) = &metric.not_enough_samples_reason {
+            warnings.push(format!("{}: {reason}", metric.metric));
+        } else if metric.metric == "diagnostic_raw_score_total" && !metric.statistically_significant
+        {
+            warnings.push(format!(
+                "{} bootstrap 95% CI crosses zero; A/B improvement is not statistically significant",
+                metric.metric
+            ));
+        }
+    }
+}
+
+fn baseline_metric_values(
+    samples: &[&BaselineSample],
+    value: impl Fn(&BaselineSample) -> f64,
+) -> Vec<f64> {
+    samples
+        .iter()
+        .map(|sample| value(sample))
+        .filter(|value| value.is_finite())
+        .collect()
+}
+
+fn tuned_metric_values(
+    samples: &[&TuneCandidateSummary],
+    value: impl Fn(&TuneCandidateSummary) -> f64,
+) -> Vec<f64> {
+    samples
+        .iter()
+        .map(|sample| value(sample))
+        .filter(|value| value.is_finite())
+        .collect()
+}
+
+fn median_u64_from_f64(values: &[f64]) -> u64 {
+    statistics::median_f64(values).round().max(0.0) as u64
+}
+
+fn optional_median_f64(values: &[f64]) -> Option<f64> {
+    let values = values
+        .iter()
+        .copied()
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .collect::<Vec<_>>();
+    (!values.is_empty()).then(|| statistics::median_f64(&values))
 }
