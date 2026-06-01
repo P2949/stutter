@@ -2,11 +2,14 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::tune::{RankingConfidence, recommendation::TuneRecommendationVerdict};
+use crate::tune::{
+    RankingConfidence, recommendation::TuneRecommendationVerdict,
+    statistics::FormalMetricComparison,
+};
 
 #[derive(Debug, Clone)]
 pub struct RecommendCommandInput {
-    pub baseline: PathBuf,
+    pub baseline: Vec<PathBuf>,
     pub tune: PathBuf,
     pub json: bool,
     pub markdown: Option<PathBuf>,
@@ -16,11 +19,20 @@ pub struct RecommendCommandInput {
 pub struct BaselineTuneRecommendation {
     pub schema_version: u32,
     pub baseline_run: PathBuf,
+    #[serde(default)]
+    pub baseline_runs: Vec<PathBuf>,
     pub tune_dir: PathBuf,
     pub best_profile: Option<String>,
     pub confidence: RankingConfidence,
     pub verdict: TuneRecommendationVerdict,
     pub summary: String,
+    #[serde(default)]
+    pub baseline_valid_runs: usize,
+    #[serde(default)]
+    pub baseline_invalid_runs: usize,
+    /// Median diagnostic score across valid baseline runs. For schema v2 files
+    /// this was the single baseline run score; schema v3 generalizes it to
+    /// repeated baselines while preserving the field name for compatibility.
     pub diagnostic_baseline_raw_score_total: u64,
     #[serde(alias = "best_median_diagnostic_score_total")]
     pub best_median_diagnostic_raw_score_total: Option<u64>,
@@ -34,6 +46,9 @@ pub struct BaselineTuneRecommendation {
     pub baseline_frame_p99_ms: Option<f64>,
     pub best_median_frame_p99_ms: Option<f64>,
     pub frame_p99_delta_ms: Option<f64>,
+
+    #[serde(default)]
+    pub formal_metrics: Vec<FormalMetricComparison>,
 
     pub warnings: Vec<String>,
     pub next_steps: Vec<String>,

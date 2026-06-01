@@ -10,7 +10,9 @@ use crate::profiles;
 pub mod comparability;
 mod ranking;
 pub mod recommendation;
+mod recommendation_formal;
 pub mod run;
+pub mod statistics;
 
 #[cfg(test)]
 pub(crate) use comparability::TuneCoverageMetrics;

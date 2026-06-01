@@ -106,9 +106,13 @@ fn stat(profile: &str, score: u64, confidence_runs: usize) -> TuneProfileStats {
 }
 
 fn candidate(profile: &str, score: u64) -> TuneCandidateSummary {
+    candidate_with_iteration(profile, 1, score)
+}
+
+fn candidate_with_iteration(profile: &str, iteration: u32, score: u64) -> TuneCandidateSummary {
     TuneCandidateSummary {
         profile: profile.to_owned(),
-        iteration: 1,
+        iteration,
         run_dir: PathBuf::from(format!("/tmp/{profile}")),
         applied_tasks: 1,
         warmup_seconds: 0,
@@ -130,6 +134,18 @@ fn candidate(profile: &str, score: u64) -> TuneCandidateSummary {
         coverage: TuneCoverageMetrics::default(),
         valid: true,
     }
+}
+
+fn write_repeated_baselines(name: &str, scores_over_5ms: &[u64]) -> Vec<PathBuf> {
+    scores_over_5ms
+        .iter()
+        .enumerate()
+        .map(|(idx, score)| {
+            let dir = temp_dir(&format!("{name}-{idx}"));
+            write_baseline(&dir, *score, 100);
+            dir
+        })
+        .collect()
 }
 
 fn write_tune(dir: &Path, confidence: RankingConfidence, best_score: u64) {
@@ -158,7 +174,11 @@ fn write_tune(dir: &Path, confidence: RankingConfidence, best_score: u64) {
         ranking_confidence: confidence,
         ranking_notes: Vec::new(),
         comparability_warnings: Vec::new(),
-        candidates: vec![candidate("best", best_score)],
+        candidates: vec![
+            candidate_with_iteration("best", 1, best_score),
+            candidate_with_iteration("best", 2, best_score),
+            candidate_with_iteration("best", 3, best_score),
+        ],
     };
     fs::write(
         dir.join("tuning_summary.json"),
@@ -209,16 +229,48 @@ fn best_worse_than_baseline_gives_no_recommendation() {
 }
 
 #[test]
-fn best_more_than_five_percent_better_gives_recommended() {
-    let baseline = temp_dir("better-baseline");
-    write_baseline(&baseline, 2, 100);
+fn best_more_than_five_percent_better_gives_recommended_with_repeated_baselines() {
+    let baselines = write_repeated_baselines("better-baseline", &[2, 2, 2]);
     let tune = temp_dir("better-tune");
+    write_tune(&tune, RankingConfidence::High, 100);
+
+    let rec = build_baseline_tune_recommendation_for_baselines(&baselines, &tune).unwrap();
+
+    assert_eq!(rec.verdict, TuneRecommendationVerdict::Recommended);
+    assert_eq!(rec.score_delta_abs, Some(100));
+    assert_eq!(rec.baseline_valid_runs, 3);
+    assert!(
+        rec.formal_metrics
+            .iter()
+            .any(|metric| metric.metric == "diagnostic_raw_score_total"
+                && metric.statistically_significant)
+    );
+    for baseline in baselines {
+        fs::remove_dir_all(baseline).ok();
+    }
+    fs::remove_dir_all(tune).ok();
+}
+
+#[test]
+fn single_baseline_run_needs_retest_with_explicit_sample_warning() {
+    let baseline = temp_dir("single-baseline");
+    write_baseline(&baseline, 2, 100);
+    let tune = temp_dir("single-baseline-tune");
     write_tune(&tune, RankingConfidence::High, 100);
 
     let rec = build_baseline_tune_recommendation(&baseline, &tune).unwrap();
 
-    assert_eq!(rec.verdict, TuneRecommendationVerdict::Recommended);
-    assert_eq!(rec.score_delta_abs, Some(100));
+    assert_eq!(rec.verdict, TuneRecommendationVerdict::NeedsRetest);
+    assert!(
+        rec.formal_metrics
+            .iter()
+            .any(|metric| !metric.enough_samples)
+    );
+    assert!(
+        rec.warnings
+            .iter()
+            .any(|warning| warning.contains("not enough samples for formal A/B comparison"))
+    );
     fs::remove_dir_all(baseline).ok();
     fs::remove_dir_all(tune).ok();
 }
@@ -247,12 +299,13 @@ fn json_output_serializes_expected_fields() {
     let rec = build_baseline_tune_recommendation(&baseline, &tune).unwrap();
     let json = serde_json::to_value(&rec).unwrap();
 
-    assert_eq!(json["schema_version"], 2);
+    assert_eq!(json["schema_version"], 3);
     assert_eq!(json["best_profile"], "best");
     assert_eq!(json["diagnostic_baseline_raw_score_total"], 200);
     assert_eq!(json["baseline_over_5ms"], 2);
     assert!(json["best_median_over_5ms"].is_number());
     assert!(json["over_5ms_delta_abs"].is_number());
+    assert!(json["formal_metrics"].is_array());
     fs::remove_dir_all(baseline).ok();
     fs::remove_dir_all(tune).ok();
 }
@@ -319,11 +372,7 @@ fn very_low_baseline_score_needs_retest() {
 #[test]
 fn frame_p99_metrics_are_captured_structured() {
     let baseline = temp_dir("frame-baseline");
-    fs::write(
-        baseline.join("session.json"),
-        serde_json::to_vec_pretty(&minimal_session(1)).unwrap(),
-    )
-    .unwrap();
+    write_baseline(&baseline, 2, 100);
     fs::write(
         baseline.join("frame_correlation.json"),
         r#"{"elapsed_ms":100,"frametime_ms":16.0}

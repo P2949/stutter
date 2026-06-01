@@ -3,6 +3,10 @@ use serde::{Deserialize, Serialize};
 use super::{
     RankingConfidence, TuneProfileStats, TuneSummary,
     ranking::{noise_ratio, normalized_effect_size},
+    recommendation_formal::{
+        extend_formal_metric_warnings, extend_formal_metric_why, formal_metrics_between_profiles,
+    },
+    statistics::FormalMetricComparison,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -58,6 +62,9 @@ pub struct TuneRecommendationComparison {
     pub frame_p99_delta_us: i64,
     pub frame_p99_effect_size: Option<f64>,
     pub frame_p99_noise_ratio: Option<f64>,
+
+    #[serde(default)]
+    pub formal_metrics: Vec<FormalMetricComparison>,
 }
 
 pub fn build_tune_recommendation(
@@ -161,7 +168,11 @@ pub fn build_tune_recommendation(
         &mut warnings,
     );
     let comparison_metrics = comparison_stat.map(|other| {
-        let metrics = comparison_between(best_stat, other);
+        let mut metrics = comparison_between(best_stat, other);
+        metrics.formal_metrics =
+            formal_metrics_between_profiles(summary, &summary.best_profile, &other.profile);
+        extend_formal_metric_warnings(&mut warnings, &metrics.formal_metrics);
+        extend_formal_metric_why(&mut why, &metrics.formal_metrics);
         why.push(format!(
             "Median score delta versus {} '{}' is {} ({}, effect_size={}, noise_ratio={})",
             comparison_kind.as_deref().unwrap_or("comparison"),
@@ -407,6 +418,7 @@ fn comparison_between(
         frame_p99_delta_us,
         frame_p99_effect_size: normalized_effect_size(frame_p99_delta_us, frame_p99_pooled_stddev),
         frame_p99_noise_ratio: noise_ratio(best.iqr_frame_p99_us, best.median_frame_p99_us),
+        formal_metrics: Vec::new(),
     }
 }
 

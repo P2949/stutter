@@ -219,8 +219,8 @@ pub(super) struct CheckArgs {
 
 #[derive(Args, Debug, Clone)]
 pub(super) struct RecommendArgs {
-    #[arg(long = "baseline", value_name = "PATH")]
-    pub(super) baseline: PathBuf,
+    #[arg(long = "baseline", value_name = "PATH", required = true, num_args = 1..)]
+    pub(super) baseline: Vec<PathBuf>,
 
     #[arg(long = "tune", value_name = "PATH")]
     pub(super) tune: PathBuf,
