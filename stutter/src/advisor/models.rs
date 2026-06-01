@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     diagnosis::{Confidence, StutterCause},
-    irq_inspect::IrqLine,
+    irq_inspect::{IrqDeviceClass, IrqLine},
+    process_tree::TaskClass,
     report::DataQualityLevel,
 };
 
@@ -51,6 +52,23 @@ pub(crate) struct AdvisorCauseEvidence {
     pub messages: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AdvisorTargetAffinityOverlap {
+    pub task: u32,
+    pub comm: String,
+    pub class: TaskClass,
+    pub allowed_cpus: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AdvisorIrqAffinityOverlap {
+    pub irq: u32,
+    pub irq_cpu: u32,
+    pub irq_name: String,
+    pub irq_class: IrqDeviceClass,
+    pub overlapping_tasks: Vec<AdvisorTargetAffinityOverlap>,
+}
+
 pub(crate) struct AdvisorSignalAvailability {
     pub has_hwmon: bool,
     pub has_irq: bool,
@@ -66,4 +84,5 @@ pub(crate) struct AdvisorEvidenceInput<'a> {
     pub signal_availability: AdvisorSignalAvailability,
     pub tree_pid: Option<u32>,
     pub irq_inventory: &'a [IrqLine],
+    pub irq_affinity_overlaps: &'a [AdvisorIrqAffinityOverlap],
 }

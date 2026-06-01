@@ -473,6 +473,8 @@ pub struct SessionTask {
     #[serde(default)]
     pub exe_ino: Option<u64>,
     pub comm: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allowed_cpus: Option<String>,
     pub latency: RecordedLatency,
     pub cpu: RecordedCpuSnapshot,
     pub top_spikes: Vec<RecordedSpike>,

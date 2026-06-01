@@ -41,6 +41,10 @@ const RAW_ID_ALLOWED_PATHS: &[RawIdAllowedPath] = &[
         reason: "serialized action compatibility constructors still accept legacy numeric IDs",
     },
     RawIdAllowedPath {
+        path: "src/advisor/models.rs",
+        reason: "advisor evidence DTOs preserve kernel IRQ numbers for observe-only diagnostics",
+    },
+    RawIdAllowedPath {
         path: "src/alert.rs",
         reason: "alert payloads are external DTOs with stable numeric JSON fields",
     },

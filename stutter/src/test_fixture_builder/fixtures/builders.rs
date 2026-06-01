@@ -227,6 +227,7 @@ pub(in crate::test_fixture_builder) fn task_for_fixture(
         exe_dev: Some(10),
         exe_ino: Some(10_000 + u64::from(task)),
         comm: comm.to_owned(),
+        allowed_cpus: None,
         latency: RecordedLatency {
             samples,
             stored_samples: samples,

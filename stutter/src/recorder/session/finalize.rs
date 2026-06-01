@@ -96,6 +96,10 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
             None
         };
 
+        let allowed_cpus = crate::affinity::read_allowed_mask(stats.task_id())
+            .ok()
+            .map(|mask| mask.to_range_string());
+
         tasks.push(SessionTask {
             task: stats.task_id().as_u32(),
             active: stats.active,
@@ -110,6 +114,7 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
             exe_dev: stats.exe_dev,
             exe_ino: stats.exe_ino,
             comm: stats.comm.clone(),
+            allowed_cpus,
             latency: recorded_latency(latency),
             cpu: recorded_cpu(cpu),
             top_spikes: stats

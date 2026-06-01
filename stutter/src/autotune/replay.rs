@@ -479,6 +479,7 @@ mod tests {
             exe_dev: Some(1),
             exe_ino: Some(2),
             comm: format!("task-{task}"),
+            allowed_cpus: None,
             latency: RecordedLatency::default(),
             cpu: RecordedCpuSnapshot::default(),
             top_spikes: Vec::new(),
