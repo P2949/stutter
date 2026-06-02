@@ -115,6 +115,8 @@ fn foreground_source_label(source: ForegroundSource) -> String {
         ForegroundSource::Auto => "auto",
         ForegroundSource::Sway => "sway",
         ForegroundSource::Hyprland => "hyprland",
+        ForegroundSource::Gnome => "gnome",
+        ForegroundSource::Kde => "kde",
         ForegroundSource::X11 => "x11",
     }
     .to_owned()

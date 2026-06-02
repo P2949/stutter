@@ -273,13 +273,17 @@ JSON
     }
 
     #[test]
-    fn generic_wayland_without_sway_or_hyprland_is_unsupported() {
+    fn gnome_wayland_without_helper_uses_gnome_provider_with_safe_unavailable_reason() {
         let _lock = crate::test_support::TEST_MUTEX.lock().unwrap();
         let previous_wayland_display = std::env::var_os("WAYLAND_DISPLAY");
         let previous_swaysock = std::env::var_os("SWAYSOCK");
         let previous_hyprland = std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE");
         let previous_display = std::env::var_os("DISPLAY");
         let previous_desktop = std::env::var_os("XDG_CURRENT_DESKTOP");
+        let previous_session_desktop = std::env::var_os("XDG_SESSION_DESKTOP");
+        let previous_desktop_session = std::env::var_os("DESKTOP_SESSION");
+        let previous_gdm_session = std::env::var_os("GDMSESSION");
+        let previous_kde_session = std::env::var_os("KDE_FULL_SESSION");
 
         // SAFETY: TEST_MUTEX serializes process environment mutation in this test.
         unsafe {
@@ -288,6 +292,10 @@ JSON
             std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
             std::env::set_var("DISPLAY", ":0");
             std::env::set_var("XDG_CURRENT_DESKTOP", "GNOME");
+            std::env::remove_var("XDG_SESSION_DESKTOP");
+            std::env::remove_var("DESKTOP_SESSION");
+            std::env::remove_var("GDMSESSION");
+            std::env::remove_var("KDE_FULL_SESSION");
         }
 
         assert!(is_generic_wayland_without_supported_foreground_api());
@@ -296,17 +304,17 @@ JSON
         let mut provider = auto_foreground_provider();
         let snapshot = provider.sample(2_000);
 
-        assert_eq!(provider.source(), ForegroundSource::Unsupported);
-        assert_eq!(snapshot.source, Some(ForegroundSource::Unsupported));
-        assert_eq!(snapshot.status, ForegroundProviderStatus::Unsupported);
-        assert_eq!(
+        assert_eq!(provider.source(), ForegroundSource::Gnome);
+        assert_eq!(snapshot.source, Some(ForegroundSource::Gnome));
+        assert_eq!(snapshot.status, ForegroundProviderStatus::Unavailable);
+        assert!(
             snapshot
                 .decision
                 .reasons
                 .first()
                 .map(|r| r.reason.clone())
-                .unwrap_or_default(),
-            "GNOME/KDE Wayland session detected, but no safe generic Wayland foreground-window API is available"
+                .unwrap_or_default()
+                .contains("unsafe org.gnome.Shell Eval is intentionally not used")
         );
         assert_eq!(
             snapshot
@@ -324,17 +332,25 @@ JSON
             restore_env_var("HYPRLAND_INSTANCE_SIGNATURE", previous_hyprland);
             restore_env_var("DISPLAY", previous_display);
             restore_env_var("XDG_CURRENT_DESKTOP", previous_desktop);
+            restore_env_var("XDG_SESSION_DESKTOP", previous_session_desktop);
+            restore_env_var("DESKTOP_SESSION", previous_desktop_session);
+            restore_env_var("GDMSESSION", previous_gdm_session);
+            restore_env_var("KDE_FULL_SESSION", previous_kde_session);
         }
     }
 
     #[test]
-    fn kde_wayland_without_compositor_specific_provider_is_unsupported() {
+    fn kde_wayland_without_helper_uses_kde_provider_with_safe_unavailable_reason() {
         let _lock = crate::test_support::TEST_MUTEX.lock().unwrap();
         let previous_wayland_display = std::env::var_os("WAYLAND_DISPLAY");
         let previous_swaysock = std::env::var_os("SWAYSOCK");
         let previous_hyprland = std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE");
         let previous_display = std::env::var_os("DISPLAY");
         let previous_desktop = std::env::var_os("XDG_CURRENT_DESKTOP");
+        let previous_session_desktop = std::env::var_os("XDG_SESSION_DESKTOP");
+        let previous_desktop_session = std::env::var_os("DESKTOP_SESSION");
+        let previous_gdm_session = std::env::var_os("GDMSESSION");
+        let previous_kde_session = std::env::var_os("KDE_FULL_SESSION");
 
         // SAFETY: TEST_MUTEX serializes process environment mutation in this test.
         unsafe {
@@ -343,6 +359,10 @@ JSON
             std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
             std::env::set_var("DISPLAY", ":0");
             std::env::set_var("XDG_CURRENT_DESKTOP", "KDE");
+            std::env::remove_var("XDG_SESSION_DESKTOP");
+            std::env::remove_var("DESKTOP_SESSION");
+            std::env::remove_var("GDMSESSION");
+            std::env::set_var("KDE_FULL_SESSION", "true");
         }
 
         assert!(is_generic_wayland_without_supported_foreground_api());
@@ -351,16 +371,17 @@ JSON
         let mut provider = auto_foreground_provider();
         let snapshot = provider.sample(3_000);
 
-        assert_eq!(provider.source(), ForegroundSource::Unsupported);
-        assert_eq!(snapshot.status, ForegroundProviderStatus::Unsupported);
-        assert_eq!(
+        assert_eq!(provider.source(), ForegroundSource::Kde);
+        assert_eq!(snapshot.source, Some(ForegroundSource::Kde));
+        assert_eq!(snapshot.status, ForegroundProviderStatus::Unavailable);
+        assert!(
             snapshot
                 .decision
                 .reasons
                 .first()
                 .map(|r| r.reason.clone())
-                .unwrap_or_default(),
-            "GNOME/KDE Wayland session detected, but no safe generic Wayland foreground-window API is available"
+                .unwrap_or_default()
+                .contains("KWin script injection is intentionally not used")
         );
 
         // SAFETY: TEST_MUTEX is still held and previous values were captured before mutation.
@@ -370,6 +391,10 @@ JSON
             restore_env_var("HYPRLAND_INSTANCE_SIGNATURE", previous_hyprland);
             restore_env_var("DISPLAY", previous_display);
             restore_env_var("XDG_CURRENT_DESKTOP", previous_desktop);
+            restore_env_var("XDG_SESSION_DESKTOP", previous_session_desktop);
+            restore_env_var("DESKTOP_SESSION", previous_desktop_session);
+            restore_env_var("GDMSESSION", previous_gdm_session);
+            restore_env_var("KDE_FULL_SESSION", previous_kde_session);
         }
     }
 

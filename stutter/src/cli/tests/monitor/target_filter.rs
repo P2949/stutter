@@ -524,3 +524,28 @@ fn cli_focus_source_overrides_config_file_focus_source() {
     assert_eq!(config.focus.foreground_source, ForegroundSource::Hyprland);
     assert!(config.focus.foreground_window);
 }
+
+#[test]
+fn cli_accepts_gnome_and_kde_foreground_sources() {
+    let gnome = parse_monitor_config_for_phase15([
+        "stutter",
+        "monitor",
+        "--focus-source",
+        "foreground",
+        "--foreground-source",
+        "gnome",
+    ])
+    .unwrap();
+    assert_eq!(gnome.focus.foreground_source, ForegroundSource::Gnome);
+
+    let kde = parse_monitor_config_for_phase15([
+        "stutter",
+        "monitor",
+        "--focus-source",
+        "foreground",
+        "--foreground-source",
+        "kde",
+    ])
+    .unwrap();
+    assert_eq!(kde.focus.foreground_source, ForegroundSource::Kde);
+}

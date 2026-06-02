@@ -4,6 +4,7 @@
 //! Does not own production foreground behavior.
 
 mod command;
+mod gnome_kde;
 mod hyprland;
 mod redaction;
 mod resolver;

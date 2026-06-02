@@ -5,6 +5,36 @@ use crate::{
     daemon::policy::DaemonMode,
 };
 
+fn minimal_remote_monitor_request() -> RemoteMonitorRequest {
+    RemoteMonitorRequest {
+        target_pids: Vec::new(),
+        tree_pids: Vec::new(),
+        exclude_tree_pids: Vec::new(),
+        duration_seconds: None,
+        spike_us: None,
+        summary_ms: None,
+        include_comm: Vec::new(),
+        exclude_comm: Vec::new(),
+        hwmon: false,
+        cpu_freq: false,
+        faults: false,
+        stat_wait: false,
+        block_io: false,
+        runtime_slices: false,
+        runtime_slices_max_tasks: None,
+        irq_latency: false,
+        irqs: Vec::new(),
+        foreground_window: false,
+        focus_source: None,
+        foreground_source: None,
+        foreground_poll_ms: None,
+        foreground_max_stale_ms: None,
+        foreground_include_title: false,
+        record: false,
+        run_name: None,
+    }
+}
+
 #[test]
 fn remote_monitor_request_round_trips_json() {
     let request = RemoteMonitorRequest {
@@ -236,4 +266,22 @@ fn remote_monitor_request_preserves_explicit_default_valued_layer_fields() {
     assert_eq!(layer.foreground_poll_ms, Some(1_000));
     assert_eq!(layer.foreground_max_stale_ms, Some(2_500));
     assert_eq!(layer.foreground_window, None);
+}
+
+#[test]
+fn remote_monitor_request_accepts_gnome_kde_and_plasma_foreground_sources() {
+    for (value, expected) in [
+        ("gnome", ForegroundSource::Gnome),
+        ("kde", ForegroundSource::Kde),
+        ("plasma", ForegroundSource::Kde),
+    ] {
+        let request = RemoteMonitorRequest {
+            foreground_source: Some(value.to_owned()),
+            ..minimal_remote_monitor_request()
+        };
+
+        let layer = request.into_monitor_config_layer().unwrap();
+
+        assert_eq!(layer.foreground_source, Some(expected));
+    }
 }

@@ -104,6 +104,8 @@ pub(crate) fn parse_foreground_source_or_auto(value: Option<&str>) -> Foreground
     match value {
         Some("sway") => ForegroundSource::Sway,
         Some("hyprland") => ForegroundSource::Hyprland,
+        Some("gnome") => ForegroundSource::Gnome,
+        Some("kde") | Some("plasma") => ForegroundSource::Kde,
         Some("x11") => ForegroundSource::X11,
         Some("auto") | None => ForegroundSource::Auto,
         Some(_) => ForegroundSource::Auto,

@@ -31,8 +31,9 @@ pub(crate) use providers::{
     auto::auto_foreground_provider, hyprland::hyprland_snapshot_from_activewindow_json,
 };
 pub(crate) use providers::{
-    auto::auto_foreground_resolver, hyprland::HyprlandForegroundProvider,
-    sway::SwayForegroundProvider, x11::X11ForegroundProvider,
+    auto::auto_foreground_resolver, gnome::GnomeForegroundProvider,
+    hyprland::HyprlandForegroundProvider, kde::KdeForegroundProvider, sway::SwayForegroundProvider,
+    x11::X11ForegroundProvider,
 };
 pub(crate) use resolver::ForegroundResolver;
 
