@@ -131,21 +131,22 @@ pub fn compare_lower_is_better_metric(
     }
 
     if enough_samples && !statistically_significant {
-        uncertainty_warnings.push(format!(
-            "{metric} bootstrap 95% CI crosses zero; A/B improvement is not statistically significant"
-        ));
+        uncertainty_warnings.push(
+            "bootstrap 95% CI crosses zero; A/B improvement is not statistically significant"
+                .to_owned(),
+        );
     }
 
     if baseline_noise_ratio.is_some_and(|ratio| ratio >= HIGH_NOISE_RATIO) {
         uncertainty_warnings.push(format!(
-            "{metric} baseline distribution is noisy: noise_ratio={:.2}",
+            "baseline distribution is noisy: noise_ratio={:.2}",
             baseline_noise_ratio.unwrap_or_default()
         ));
     }
 
     if tuned_noise_ratio.is_some_and(|ratio| ratio >= HIGH_NOISE_RATIO) {
         uncertainty_warnings.push(format!(
-            "{metric} tuned distribution is noisy: noise_ratio={:.2}",
+            "tuned distribution is noisy: noise_ratio={:.2}",
             tuned_noise_ratio.unwrap_or_default()
         ));
     }
