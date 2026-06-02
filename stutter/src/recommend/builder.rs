@@ -284,7 +284,7 @@ pub fn build_baseline_tune_recommendation_for_baselines(
     }
 
     Ok(BaselineTuneRecommendation {
-        schema_version: 4,
+        schema_version: 5,
         baseline_run: baseline_samples[0].run_dir.clone(),
         baseline_runs: baseline_samples
             .iter()
@@ -457,15 +457,15 @@ fn formal_metric_comparisons(
 
 fn extend_formal_metric_warnings(warnings: &mut Vec<String>, metrics: &[FormalMetricComparison]) {
     for metric in metrics {
-        if let Some(reason) = &metric.not_enough_samples_reason {
-            warnings.push(format!("{}: {reason}", metric.metric));
-        } else if metric.metric == "diagnostic_raw_score_total" && !metric.statistically_significant
-        {
-            warnings.push(format!(
-                "{} bootstrap 95% CI crosses zero; A/B improvement is not statistically significant",
-                metric.metric
-            ));
+        for warning in &metric.uncertainty_warnings {
+            push_unique(warnings, format!("{}: {}", metric.metric, warning));
         }
+    }
+}
+
+fn push_unique(values: &mut Vec<String>, value: String) {
+    if !values.iter().any(|existing| existing == &value) {
+        values.push(value);
     }
 }
 

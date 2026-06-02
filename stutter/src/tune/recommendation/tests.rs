@@ -341,3 +341,99 @@ fn recommendation_comparison_includes_effect_size_and_noise_ratio() {
     assert!(comparison.score_effect_size.is_some());
     assert_eq!(comparison.score_noise_ratio, Some(0.10));
 }
+
+#[test]
+fn tune_recommendation_html_exposes_ab_uncertainty_charts_and_metrics() {
+    let mut summary = summary(RankingConfidence::High);
+    summary.candidates = vec![
+        candidate_with_metrics(
+            "best",
+            CandidateMetricFixture {
+                iteration: 1,
+                diagnostic_raw_score_total: 180,
+                over_5ms: 3,
+                frame_p99_ms: 17.0,
+                frame_over_16ms: 2,
+                frame_over_33ms: 1,
+                frame_over_50ms: 0,
+                max_latency_ns: 2_000_000,
+            },
+        ),
+        candidate_with_metrics(
+            "best",
+            CandidateMetricFixture {
+                iteration: 2,
+                diagnostic_raw_score_total: 190,
+                over_5ms: 4,
+                frame_p99_ms: 18.0,
+                frame_over_16ms: 3,
+                frame_over_33ms: 2,
+                frame_over_50ms: 1,
+                max_latency_ns: 3_000_000,
+            },
+        ),
+        candidate_with_metrics(
+            "best",
+            CandidateMetricFixture {
+                iteration: 3,
+                diagnostic_raw_score_total: 200,
+                over_5ms: 5,
+                frame_p99_ms: 19.0,
+                frame_over_16ms: 4,
+                frame_over_33ms: 3,
+                frame_over_50ms: 2,
+                max_latency_ns: 4_000_000,
+            },
+        ),
+        candidate_with_metrics(
+            "baseline",
+            CandidateMetricFixture {
+                iteration: 1,
+                diagnostic_raw_score_total: 280,
+                over_5ms: 8,
+                frame_p99_ms: 25.0,
+                frame_over_16ms: 7,
+                frame_over_33ms: 4,
+                frame_over_50ms: 3,
+                max_latency_ns: 8_000_000,
+            },
+        ),
+        candidate_with_metrics(
+            "baseline",
+            CandidateMetricFixture {
+                iteration: 2,
+                diagnostic_raw_score_total: 300,
+                over_5ms: 9,
+                frame_p99_ms: 26.0,
+                frame_over_16ms: 8,
+                frame_over_33ms: 5,
+                frame_over_50ms: 4,
+                max_latency_ns: 9_000_000,
+            },
+        ),
+        candidate_with_metrics(
+            "baseline",
+            CandidateMetricFixture {
+                iteration: 3,
+                diagnostic_raw_score_total: 320,
+                over_5ms: 10,
+                frame_p99_ms: 27.0,
+                frame_over_16ms: 9,
+                frame_over_33ms: 6,
+                frame_over_50ms: 5,
+                max_latency_ns: 10_000_000,
+            },
+        ),
+    ];
+
+    let rec = build_tune_recommendation(&summary, Some("baseline"));
+    let html = crate::tune::recommendation_html::render_tune_recommendation_html(&rec);
+
+    assert!(html.contains("A/B uncertainty"));
+    assert!(html.contains("Sample distribution"));
+    assert!(html.contains("Bootstrap median-improvement CI"));
+    assert!(html.contains("Effect size"));
+    assert!(html.contains("Noise ratio"));
+    assert!(html.contains("Samples"));
+    assert!(html.contains("diagnostic_raw_score_total"));
+}

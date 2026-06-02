@@ -1035,3 +1035,9 @@ docs/examples/artifacts/v22/
 The version number matches `recorder::SESSION_SCHEMA_VERSION`. These examples
 are sanitized, minimal, and covered by tests so they remain executable artifact
 contracts.
+
+
+## Tune recommendation HTML
+
+`tuning_recommendation.html` is a self-contained HTML view of
+`tuning_recommendation.json`, including formal A/B uncertainty charts.

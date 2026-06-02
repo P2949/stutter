@@ -145,3 +145,11 @@ stutter recommend --baseline <baseline-run-dir> --tune <tune-dir>
 ```
 
 Apply only when the workload was comparable and the recommendation is stable enough to justify a manual experiment. Keep `stutter restore` available while testing.
+
+
+### A/B tuning uncertainty
+
+The HTML recommendation report exposes A/B uncertainty: distribution charts,
+bootstrap CI bands, effect size, sample counts, noise ratios, and warnings when
+the comparison is underpowered. Treat recommendations as directional when CI
+bands cross zero, sample counts are low, or noise ratios are high.
