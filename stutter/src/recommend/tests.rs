@@ -52,6 +52,10 @@ fn minimal_session(interval_count: u64) -> SessionFile {
 }
 
 fn interval(over_5ms: u64, samples: u64) -> IntervalRecord {
+    interval_with_max_latency(over_5ms, samples, over_5ms.saturating_mul(1_000_000))
+}
+
+fn interval_with_max_latency(over_5ms: u64, samples: u64, max_ns: u64) -> IntervalRecord {
     IntervalRecord {
         elapsed_ms: 1000,
         task: 1,
@@ -63,6 +67,7 @@ fn interval(over_5ms: u64, samples: u64) -> IntervalRecord {
         samples,
         stored_samples: samples,
         over_5ms,
+        max_ns,
         percentile_scope: "all".to_owned(),
         ..Default::default()
     }
@@ -82,6 +87,42 @@ fn write_baseline(dir: &Path, score_over_5ms: u64, samples: u64) {
         ),
     )
     .unwrap();
+}
+
+fn write_baseline_with_frames(
+    dir: &Path,
+    score_over_5ms: u64,
+    samples: u64,
+    max_ns: u64,
+    frametimes_ms: &[f64],
+) {
+    fs::write(
+        dir.join("session.json"),
+        serde_json::to_vec_pretty(&minimal_session(1)).unwrap(),
+    )
+    .unwrap();
+    fs::write(
+        dir.join("interval.json"),
+        format!(
+            "{}\n",
+            serde_json::to_string(&interval_with_max_latency(score_over_5ms, samples, max_ns))
+                .unwrap()
+        ),
+    )
+    .unwrap();
+    let frames = frametimes_ms
+        .iter()
+        .enumerate()
+        .map(|(idx, frametime_ms)| {
+            format!(
+                r#"{{"elapsed_ms":{},"frametime_ms":{}}}"#,
+                (idx + 1) * 100,
+                frametime_ms
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(dir.join("frame_correlation.json"), format!("{frames}\n")).unwrap();
 }
 
 fn stat(profile: &str, score: u64, confidence_runs: usize) -> TuneProfileStats {
@@ -105,36 +146,81 @@ fn stat(profile: &str, score: u64, confidence_runs: usize) -> TuneProfileStats {
     }
 }
 
+#[derive(Clone, Copy)]
+struct CandidateMetricFixture {
+    iteration: u32,
+    diagnostic_raw_score_total: u64,
+    over_5ms: u64,
+    max_latency_ns: u64,
+    frame_p99_ms: f64,
+    frame_over_16ms: u64,
+    frame_over_33ms: u64,
+    frame_over_50ms: u64,
+}
+
 fn candidate(profile: &str, score: u64) -> TuneCandidateSummary {
     candidate_with_iteration(profile, 1, score)
 }
 
 fn candidate_with_iteration(profile: &str, iteration: u32, score: u64) -> TuneCandidateSummary {
+    candidate_with_metrics(
+        profile,
+        CandidateMetricFixture {
+            iteration,
+            diagnostic_raw_score_total: score,
+            over_5ms: score / 100,
+            max_latency_ns: 0,
+            frame_p99_ms: 0.0,
+            frame_over_16ms: 0,
+            frame_over_33ms: 0,
+            frame_over_50ms: 0,
+        },
+    )
+}
+
+fn candidate_with_metrics(profile: &str, metrics: CandidateMetricFixture) -> TuneCandidateSummary {
     TuneCandidateSummary {
         profile: profile.to_owned(),
-        iteration,
-        run_dir: PathBuf::from(format!("/tmp/{profile}")),
+        iteration: metrics.iteration,
+        run_dir: PathBuf::from(format!("/tmp/{profile}-{}", metrics.iteration)),
         applied_tasks: 1,
         warmup_seconds: 0,
         measure_seconds: 1,
         interval_count: 1,
         samples: 100,
         scored_samples: 100,
-        diagnostic_raw_score_total: score,
+        diagnostic_raw_score_total: metrics.diagnostic_raw_score_total,
         over_1ms: 0,
         over_2ms: 0,
-        over_5ms: score / 100,
-        max_latency_ns: 0,
-        frame_count: 0,
-        frame_max_ms: 0.0,
-        frame_p99_ms: 0.0,
-        frame_over_16ms: 0,
-        frame_over_33ms: 0,
-        frame_over_50ms: 0,
+        over_5ms: metrics.over_5ms,
+        max_latency_ns: metrics.max_latency_ns,
+        frame_count: 120,
+        frame_max_ms: metrics.frame_p99_ms + 3.0,
+        frame_p99_ms: metrics.frame_p99_ms,
+        frame_over_16ms: metrics.frame_over_16ms,
+        frame_over_33ms: metrics.frame_over_33ms,
+        frame_over_50ms: metrics.frame_over_50ms,
         coverage: TuneCoverageMetrics::default(),
         valid: true,
     }
 }
+
+fn formal_metric_names(metrics: &[crate::tune::statistics::FormalMetricComparison]) -> Vec<&str> {
+    metrics
+        .iter()
+        .map(|metric| metric.metric.as_str())
+        .collect()
+}
+
+const EXPECTED_FORMAL_METRICS: &[&str] = &[
+    "diagnostic_raw_score_total",
+    "over_5ms",
+    "frame_p99_ms",
+    "frame_over_16ms",
+    "frame_over_33ms",
+    "frame_over_50ms",
+    "max_latency_ns",
+];
 
 fn write_repeated_baselines(name: &str, scores_over_5ms: &[u64]) -> Vec<PathBuf> {
     scores_over_5ms
@@ -149,6 +235,24 @@ fn write_repeated_baselines(name: &str, scores_over_5ms: &[u64]) -> Vec<PathBuf>
 }
 
 fn write_tune(dir: &Path, confidence: RankingConfidence, best_score: u64) {
+    write_tune_with_candidates(
+        dir,
+        confidence,
+        best_score,
+        vec![
+            candidate_with_iteration("best", 1, best_score),
+            candidate_with_iteration("best", 2, best_score),
+            candidate_with_iteration("best", 3, best_score),
+        ],
+    );
+}
+
+fn write_tune_with_candidates(
+    dir: &Path,
+    confidence: RankingConfidence,
+    best_score: u64,
+    candidates: Vec<TuneCandidateSummary>,
+) {
     fs::create_dir_all(dir).unwrap();
     let summary = TuneSummary {
         schema_version: 1,
@@ -174,11 +278,7 @@ fn write_tune(dir: &Path, confidence: RankingConfidence, best_score: u64) {
         ranking_confidence: confidence,
         ranking_notes: Vec::new(),
         comparability_warnings: Vec::new(),
-        candidates: vec![
-            candidate_with_iteration("best", 1, best_score),
-            candidate_with_iteration("best", 2, best_score),
-            candidate_with_iteration("best", 3, best_score),
-        ],
+        candidates,
     };
     fs::write(
         dir.join("tuning_summary.json"),
@@ -245,6 +345,99 @@ fn best_more_than_five_percent_better_gives_recommended_with_repeated_baselines(
             .any(|metric| metric.metric == "diagnostic_raw_score_total"
                 && metric.statistically_significant)
     );
+    for baseline in baselines {
+        fs::remove_dir_all(baseline).ok();
+    }
+    fs::remove_dir_all(tune).ok();
+}
+
+#[test]
+fn baseline_recommendation_formal_metrics_cover_all_key_metrics() {
+    let baseline_inputs = [
+        (4, 8_000_000, vec![17.0, 34.0, 51.0]),
+        (5, 9_000_000, vec![18.0, 52.0, 53.0]),
+        (6, 10_000_000, vec![55.0, 56.0, 57.0]),
+    ];
+    let baselines = baseline_inputs
+        .iter()
+        .enumerate()
+        .map(|(idx, (score_over_5ms, max_ns, frames))| {
+            let dir = temp_dir(&format!("formal-baseline-{idx}"));
+            write_baseline_with_frames(&dir, *score_over_5ms, 100, *max_ns, frames);
+            dir
+        })
+        .collect::<Vec<_>>();
+    let tune = temp_dir("formal-tune");
+    write_tune_with_candidates(
+        &tune,
+        RankingConfidence::High,
+        100,
+        vec![
+            candidate_with_metrics(
+                "best",
+                CandidateMetricFixture {
+                    iteration: 1,
+                    diagnostic_raw_score_total: 100,
+                    over_5ms: 1,
+                    max_latency_ns: 1_000_000,
+                    frame_p99_ms: 12.0,
+                    frame_over_16ms: 0,
+                    frame_over_33ms: 0,
+                    frame_over_50ms: 0,
+                },
+            ),
+            candidate_with_metrics(
+                "best",
+                CandidateMetricFixture {
+                    iteration: 2,
+                    diagnostic_raw_score_total: 110,
+                    over_5ms: 2,
+                    max_latency_ns: 2_000_000,
+                    frame_p99_ms: 13.0,
+                    frame_over_16ms: 1,
+                    frame_over_33ms: 0,
+                    frame_over_50ms: 0,
+                },
+            ),
+            candidate_with_metrics(
+                "best",
+                CandidateMetricFixture {
+                    iteration: 3,
+                    diagnostic_raw_score_total: 120,
+                    over_5ms: 3,
+                    max_latency_ns: 3_000_000,
+                    frame_p99_ms: 14.0,
+                    frame_over_16ms: 2,
+                    frame_over_33ms: 1,
+                    frame_over_50ms: 0,
+                },
+            ),
+        ],
+    );
+
+    let rec = build_baseline_tune_recommendation_for_baselines(&baselines, &tune).unwrap();
+
+    assert_eq!(
+        formal_metric_names(&rec.formal_metrics),
+        EXPECTED_FORMAL_METRICS
+    );
+    for metric in &rec.formal_metrics {
+        assert!(
+            metric.enough_samples,
+            "{} should have enough samples",
+            metric.metric
+        );
+        assert!(
+            metric.bootstrap_ci95.is_some(),
+            "{} should report a bootstrap CI",
+            metric.metric
+        );
+        assert!(
+            metric.effect_size.is_some(),
+            "{} should report an effect size when both sides vary",
+            metric.metric
+        );
+    }
     for baseline in baselines {
         fs::remove_dir_all(baseline).ok();
     }

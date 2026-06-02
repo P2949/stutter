@@ -82,6 +82,30 @@ pub(super) fn formal_metrics_between_profiles(
                 .map(|run| run.frame_over_33ms as f64)
                 .collect::<Vec<_>>(),
         ),
+        statistics::compare_lower_is_better_metric(
+            "frame_over_50ms",
+            "frames",
+            &other_runs
+                .iter()
+                .map(|run| run.frame_over_50ms as f64)
+                .collect::<Vec<_>>(),
+            &best_runs
+                .iter()
+                .map(|run| run.frame_over_50ms as f64)
+                .collect::<Vec<_>>(),
+        ),
+        statistics::compare_lower_is_better_metric(
+            "max_latency_ns",
+            "ns",
+            &other_runs
+                .iter()
+                .map(|run| run.max_latency_ns as f64)
+                .collect::<Vec<_>>(),
+            &best_runs
+                .iter()
+                .map(|run| run.max_latency_ns as f64)
+                .collect::<Vec<_>>(),
+        ),
     ]
 }
 
