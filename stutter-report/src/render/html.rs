@@ -236,6 +236,10 @@ fn render_clusters(html: &mut String, clusters: &[SpikeCluster]) {
         );
         html.push_str("          </dl>\n");
 
+        if let Some(diagnosis) = &cluster.diagnosis {
+            render_diagnosis_chains(html, diagnosis);
+        }
+
         if !cluster.points.is_empty() {
             html.push_str("          <table>\n");
             html.push_str(
@@ -262,6 +266,59 @@ fn render_clusters(html: &mut String, clusters: &[SpikeCluster]) {
 
     html.push_str("      </ol>\n");
     html.push_str("    </section>\n");
+}
+
+fn render_diagnosis_chains(html: &mut String, diagnosis: &crate::model::Diagnosis) {
+    if diagnosis.evidence_chains.is_empty() {
+        return;
+    }
+
+    html.push_str("          <details>\n");
+    html.push_str("            <summary>Explicit evidence chains</summary>\n");
+    for chain in &diagnosis.evidence_chains {
+        html.push_str("            <p>");
+        html.push_str(&escape_html(&format!(
+            "{} explicit={} - {}",
+            chain.kind, chain.explicit, chain.summary
+        )));
+        html.push_str("</p>\n");
+        html.push_str("            <ol>\n");
+        for node in &chain.nodes {
+            html.push_str("              <li>");
+            html.push_str(&escape_html(&format!(
+                "{} {} timestamp_ms={} start_ns={} end_ns={} delta_from_previous_ms={}",
+                node.kind,
+                node.label,
+                node.timestamp_ms
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "-".to_owned()),
+                node.start_ns
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "-".to_owned()),
+                node.end_ns
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "-".to_owned()),
+                node.delta_from_previous_ms
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "-".to_owned())
+            )));
+            if !node.details.is_empty() {
+                html.push_str(" <span class=\"muted\">");
+                html.push_str(&escape_html(
+                    &node
+                        .details
+                        .iter()
+                        .map(|(key, value)| format!("{key}={value}"))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                ));
+                html.push_str("</span>");
+            }
+            html.push_str("</li>\n");
+        }
+        html.push_str("            </ol>\n");
+    }
+    html.push_str("          </details>\n");
 }
 
 fn render_wake_graph(html: &mut String, wake_graph: &[WakeGraphEdge]) {
@@ -309,6 +366,7 @@ fn render_frames(html: &mut String, frames: &[FrameDiagnosis]) {
         push_dt_dd(html, "frametime_ms", &frame.frametime_ms.to_string());
         push_dt_dd(html, "diagnosis", frame.diagnosis.report_summary());
         html.push_str("          </dl>\n");
+        render_diagnosis_chains(html, &frame.diagnosis);
         html.push_str("        </li>\n");
     }
 
@@ -478,6 +536,7 @@ mod tests {
                 missing_evidence: Vec::new(),
                 candidate_rejections: Vec::new(),
                 secondary_causes: Vec::new(),
+                evidence_chains: Vec::new(),
                 report_summary: "scheduler delay <high>".to_owned(),
             }),
             wake_graph: vec![WakeGraphEdge {
