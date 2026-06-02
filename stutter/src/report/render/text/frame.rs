@@ -46,6 +46,7 @@ pub(super) fn map_diagnosis(d: &crate::diagnosis::Diagnosis) -> stutter_report::
             })
             .collect(),
         missing_evidence: d.missing_evidence.clone(),
+        evidence_chains: d.evidence_chains.iter().map(map_evidence_chain).collect(),
         candidate_rejections: d
             .candidate_rejections
             .iter()
@@ -72,5 +73,28 @@ fn map_diagnosis_evidence(
         kind: format!("{:?}", evidence.kind),
         strength: evidence.strength,
         message: evidence.message.clone(),
+    }
+}
+
+fn map_evidence_chain(
+    chain: &crate::diagnosis::EvidenceChain,
+) -> stutter_report::model::DiagnosisEvidenceChain {
+    stutter_report::model::DiagnosisEvidenceChain {
+        kind: format!("{:?}", chain.kind),
+        explicit: chain.explicit,
+        summary: chain.summary.clone(),
+        nodes: chain
+            .nodes
+            .iter()
+            .map(|node| stutter_report::model::DiagnosisEvidenceChainNode {
+                kind: format!("{:?}", node.kind),
+                label: node.label.clone(),
+                timestamp_ms: node.timestamp_ms,
+                start_ns: node.start_ns,
+                end_ns: node.end_ns,
+                delta_from_previous_ms: node.delta_from_previous_ms,
+                details: node.details.clone(),
+            })
+            .collect(),
     }
 }

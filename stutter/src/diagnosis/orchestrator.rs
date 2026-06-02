@@ -15,6 +15,7 @@ use super::{
         push_runtime_slice_context_candidates, push_runtime_slice_supporting_evidence,
         push_scx_evidence,
     },
+    evidence_chain::{EvidenceChainInputs, attach_evidence_chains},
 };
 use crate::{
     irq_inspect::{IrqDeviceClass, IrqLine, classify_irq_device},
@@ -319,7 +320,9 @@ pub(crate) fn diagnose_cluster_with_config(
         push_runnable_depth_evidence(&mut candidates, StutterCause::GameThreadSchedulerDelay, p);
     }
 
-    if let Some(frame) = coincident_frame_spike(cluster, &frame_events, config)
+    let coincident_frame = coincident_frame_spike(cluster, &frame_events, config);
+
+    if let Some(frame) = coincident_frame
         && let Some(cause) = scheduler_candidate_cause(&candidates)
     {
         let strength = frame_spike_strength(frame, config);
@@ -397,6 +400,7 @@ pub(crate) fn diagnose_cluster_with_config(
     }
 
     // 4. GPU bound
+    let max_fence_wait = max_drm_fence_wait(&drm_fence_events);
     let high_gpu = gpu_samples
         .iter()
         .filter_map(|s| {
@@ -412,7 +416,6 @@ pub(crate) fn diagnose_cluster_with_config(
             .power_limit_reason
             .as_deref()
             .filter(|reason| !reason.trim().is_empty());
-        let max_fence_wait = max_drm_fence_wait(&drm_fence_events);
 
         let mut score = (busy_percent.saturating_sub(90)) as f32 / 10.0;
         if power_limited.is_some() {
@@ -551,5 +554,18 @@ pub(crate) fn diagnose_cluster_with_config(
 
     push_runtime_slice_context_candidates(&mut candidates, &runtime_slices, cluster, config);
 
-    finalize_diagnosis(candidates, config, context)
+    let mut diagnosis = finalize_diagnosis(candidates, config, context);
+    attach_evidence_chains(
+        &mut diagnosis,
+        cluster,
+        EvidenceChainInputs {
+            frame: coincident_frame,
+            irq_event: max_irq,
+            irq_line: max_irq.and_then(|irq| irq_line_for_event(irq_inventory, irq.irq)),
+            gpu_sample: high_gpu,
+            drm_fence_event: max_fence_wait,
+            block_io_event: max_io,
+        },
+    );
+    diagnosis
 }

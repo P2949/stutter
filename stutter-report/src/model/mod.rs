@@ -17,7 +17,8 @@ pub use artifacts::{ArtifactsSummary, SpikeClusterSource, SpikeDensityBucket};
 pub use cluster::{MIN_CLUSTER_TASKS, SpikeCluster, SpikeClusterAnalysis};
 pub use correlation::{TextReportCorrelationSection, TextReportCorrelationSections};
 pub use diagnosis::{
-    Diagnosis, DiagnosisCandidate, DiagnosisEvidence, DiagnosisPrimary, DiagnosisRejection,
+    Diagnosis, DiagnosisCandidate, DiagnosisEvidence, DiagnosisEvidenceChain,
+    DiagnosisEvidenceChainNode, DiagnosisPrimary, DiagnosisRejection,
 };
 pub use display::{
     CrossGpuFenceCandidate, CrossGpuFenceSummary, DirectScanoutSummary, DisplayPathComponent,

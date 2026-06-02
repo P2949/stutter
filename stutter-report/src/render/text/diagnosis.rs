@@ -63,6 +63,56 @@ pub fn render_diagnosis_detail_lines(diagnosis: &Diagnosis, indent: &str) -> Str
         }
     }
 
+    if !diagnosis.evidence_chains.is_empty() {
+        pushln(&mut output, format!("{indent}explicit evidence chains:"));
+        for chain in diagnosis.evidence_chains.iter().take(4) {
+            pushln(
+                &mut output,
+                format!(
+                    "{indent}  - kind={} explicit={} summary={}",
+                    chain.kind, chain.explicit, chain.summary
+                ),
+            );
+            for node in chain.nodes.iter().take(6) {
+                let detail_text = if node.details.is_empty() {
+                    String::new()
+                } else {
+                    format!(
+                        " details={}",
+                        node.details
+                            .iter()
+                            .map(|(key, value)| format!("{key}={value}"))
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    )
+                };
+                let delta = node
+                    .delta_from_previous_ms
+                    .map(|delta| format!(" delta_from_previous_ms={delta}"))
+                    .unwrap_or_default();
+                pushln(
+                    &mut output,
+                    format!(
+                        "{indent}    -> {} label={} timestamp_ms={} start_ns={} end_ns={}{}{}",
+                        node.kind,
+                        node.label,
+                        node.timestamp_ms
+                            .map(|value| value.to_string())
+                            .unwrap_or_else(|| "-".to_owned()),
+                        node.start_ns
+                            .map(|value| value.to_string())
+                            .unwrap_or_else(|| "-".to_owned()),
+                        node.end_ns
+                            .map(|value| value.to_string())
+                            .unwrap_or_else(|| "-".to_owned()),
+                        delta,
+                        detail_text
+                    ),
+                );
+            }
+        }
+    }
+
     if !diagnosis.candidate_rejections.is_empty() {
         pushln(&mut output, format!("{indent}why not primary:"));
         for rejection in diagnosis.candidate_rejections.iter().take(3) {

@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::process_tree::TaskClass;
@@ -280,6 +282,43 @@ pub enum EvidenceKind {
     Unknown,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum EvidenceChainKind {
+    Irq,
+    Gpu,
+    DrmFence,
+    BlockIo,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum EvidenceChainNodeKind {
+    Frame,
+    Cluster,
+    Event,
+    Device,
+    Recommendation,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EvidenceChainNode {
+    pub kind: EvidenceChainNodeKind,
+    pub label: String,
+    pub timestamp_ms: Option<u64>,
+    pub start_ns: Option<u64>,
+    pub end_ns: Option<u64>,
+    pub delta_from_previous_ms: Option<i64>,
+    #[serde(default)]
+    pub details: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EvidenceChain {
+    pub kind: EvidenceChainKind,
+    pub explicit: bool,
+    pub summary: String,
+    pub nodes: Vec<EvidenceChainNode>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct EvidenceItem {
     pub kind: EvidenceKind,
@@ -330,6 +369,8 @@ pub struct Diagnosis {
     pub evidence: Vec<String>,
     #[serde(default)]
     pub missing_evidence: Vec<String>,
+    #[serde(default)]
+    pub evidence_chains: Vec<EvidenceChain>,
     pub primary: Option<DiagnosisCandidate>,
     pub candidates: Vec<DiagnosisCandidate>,
     #[serde(default)]

@@ -312,3 +312,111 @@ fn gpu_candidate_includes_drm_fence_wait_when_available() {
         "GPU candidate should include DRM fence wait evidence: {gpu:#?}"
     );
 }
+
+#[test]
+fn irq_candidate_records_explicit_evidence_chain() {
+    let cluster = spike_cluster(vec![spike_point(
+        100,
+        TaskClass::Unknown,
+        "worker",
+        3_000_000,
+    )]);
+
+    let artifacts = RunArtifacts {
+        metadata: Some(metadata_with_irq_line(137, "524288-edge amdgpu")),
+        frame_events: vec![FrameEvent {
+            elapsed_ms: 100,
+            frametime_ms: 40.0,
+        }],
+        irq_events: vec![IrqEventRecord {
+            elapsed_ms: Some(100),
+            irq: 137,
+            cpu: 1,
+            enter_ns: 100_000_000,
+            exit_ns: 104_000_000,
+            duration_ns: 4_000_000,
+        }],
+        ..Default::default()
+    };
+
+    let diagnosis = diagnose_cluster(&cluster, &artifacts, 0);
+
+    let chain = diagnosis
+        .evidence_chains
+        .iter()
+        .find(|chain| chain.kind == EvidenceChainKind::Irq)
+        .expect("IRQ candidate should include an explicit evidence chain");
+    assert!(chain.explicit);
+    assert!(chain.summary.contains("explicit IRQ chain"));
+    assert_eq!(chain.nodes[0].kind, EvidenceChainNodeKind::Frame);
+    assert_eq!(chain.nodes[1].kind, EvidenceChainNodeKind::Cluster);
+    assert_eq!(chain.nodes[2].kind, EvidenceChainNodeKind::Event);
+    assert_eq!(chain.nodes[3].kind, EvidenceChainNodeKind::Device);
+    assert_eq!(chain.nodes[4].kind, EvidenceChainNodeKind::Recommendation);
+    assert_eq!(chain.nodes[2].delta_from_previous_ms, Some(0));
+    assert!(chain.nodes[3].label.contains("amdgpu"));
+}
+
+#[test]
+fn gpu_fence_candidate_records_explicit_evidence_chains() {
+    let config = DiagnosisConfig::default();
+    let cluster = spike_cluster(vec![spike_point(
+        456,
+        TaskClass::Game,
+        "RenderThread",
+        config.sched_delay_significant_ns - 1,
+    )]);
+
+    let artifacts = RunArtifacts {
+        frame_events: vec![FrameEvent {
+            elapsed_ms: 100,
+            frametime_ms: 42.0,
+        }],
+        gpu_samples: vec![GpuSample {
+            elapsed_ms: 100,
+            gpu_busy_percent: Some(99),
+            drm_card: Some("card0".to_owned()),
+            render_node: Some("renderD128".to_owned()),
+            ..Default::default()
+        }],
+        drm_fence_events: vec![DrmFenceEventRecord {
+            elapsed_ms: 100,
+            timestamp_ns: 100_500_000,
+            driver: Some("amdgpu".to_owned()),
+            card: Some("card0".to_owned()),
+            gpu_role: Some("render".to_owned()),
+            comm: Some("Game.exe".to_owned()),
+            wait_start_ns: Some(100_000_000),
+            wait_done_ns: Some(103_000_000),
+            duration_ns: Some(3_000_000),
+            confidence: "high".to_owned(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+
+    let diagnosis = diagnose_cluster_with_config(&cluster, &artifacts, 5_000_000, config);
+
+    assert!(
+        diagnosis
+            .evidence_chains
+            .iter()
+            .any(|chain| chain.kind == EvidenceChainKind::Gpu
+                && chain
+                    .nodes
+                    .iter()
+                    .any(|node| node.kind == EvidenceChainNodeKind::Recommendation)),
+        "GPU candidate should include a GPU evidence chain: {diagnosis:#?}"
+    );
+    assert!(
+        diagnosis
+            .evidence_chains
+            .iter()
+            .any(|chain| chain.kind == EvidenceChainKind::DrmFence
+                && chain
+                    .nodes
+                    .iter()
+                    .any(|node| node.label == "DRM fence wait")),
+        "GPU candidate should include a DRM fence evidence chain: {diagnosis:#?}"
+    );
+}

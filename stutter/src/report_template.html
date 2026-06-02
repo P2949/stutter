@@ -589,6 +589,35 @@ document.addEventListener('DOMContentLoaded', () => {
             : `<p class="muted">No frame outliers above the display threshold.</p>`;
     }
 
+    function renderEvidenceChains(chains) {
+        const rows = Array.isArray(chains) ? chains : [];
+        if (rows.length === 0) {
+            return '<p class="muted">No explicit chain recorded for this candidate.</p>';
+        }
+
+        return rows.map(chain => `
+            <div style="margin-bottom: 10px;">
+              <p class="muted">${escapeHtml(chain.kind || 'chain')} explicit=${escapeHtml(chain.explicit)} — ${escapeHtml(chain.summary || '')}</p>
+              <ol>
+                ${(Array.isArray(chain.nodes) ? chain.nodes : []).map(node => {
+                    const details = node.details && typeof node.details === 'object'
+                        ? Object.entries(node.details).map(([k, v]) => `${k}=${v}`).join(', ')
+                        : '';
+                    const delta = node.delta_from_previous_ms === null || node.delta_from_previous_ms === undefined
+                        ? '—'
+                        : `${node.delta_from_previous_ms}ms`;
+                    return `
+                      <li>
+                        <strong>${escapeHtml(node.kind || 'node')}</strong> ${escapeHtml(node.label || '—')}
+                        <span class="muted">timestamp_ms=${escapeHtml(node.timestamp_ms ?? '—')} start_ns=${escapeHtml(node.start_ns ?? '—')} end_ns=${escapeHtml(node.end_ns ?? '—')} delta=${escapeHtml(delta)} ${escapeHtml(details)}</span>
+                      </li>
+                    `;
+                }).join('')}
+              </ol>
+            </div>
+        `).join('');
+    }
+
     function renderDiagnosisDetails(explanation, diagnosis) {
         const primary = diagnosis.primary || {};
         const evidenceItems = Array.isArray(explanation && explanation.evidence_items)
@@ -597,6 +626,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const missing = Array.isArray(explanation && explanation.missing_evidence)
             ? explanation.missing_evidence
             : (Array.isArray(diagnosis.missing_evidence) ? diagnosis.missing_evidence : []);
+        const chains = Array.isArray(diagnosis.evidence_chains) ? diagnosis.evidence_chains : [];
         const competing = Array.isArray(explanation && explanation.competing_candidates)
             ? explanation.competing_candidates
             : (Array.isArray(diagnosis.candidates) ? diagnosis.candidates.slice(primary.cause ? 1 : 0) : []);
@@ -622,6 +652,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     `).join('')}
                   </ul>
                 ` : '<p class="muted">No primary evidence items recorded.</p>'}
+              </details>
+
+              <details>
+                <summary>Explicit evidence chains</summary>
+                ${renderEvidenceChains(chains)}
               </details>
 
               <details>

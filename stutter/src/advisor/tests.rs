@@ -423,6 +423,7 @@ fn analysis_builder_derives_irq_affinity_overlap_from_recorded_task_mask() {
         secondary_causes: Vec::new(),
         evidence: Vec::new(),
         missing_evidence: Vec::new(),
+        evidence_chains: Vec::new(),
         primary: None,
         candidates: vec![DiagnosisCandidate {
             cause: StutterCause::IrqDelayCandidate,
