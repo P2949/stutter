@@ -16,6 +16,7 @@ use super::{
         push_scx_evidence,
     },
     evidence_chain::{EvidenceChainInputs, attach_evidence_chains},
+    wording::apply_causal_wording_policy,
 };
 use crate::{
     irq_inspect::{IrqDeviceClass, IrqLine, classify_irq_device},
@@ -567,5 +568,6 @@ pub(crate) fn diagnose_cluster_with_config(
             block_io_event: max_io,
         },
     );
+    apply_causal_wording_policy(&mut diagnosis);
     diagnosis
 }

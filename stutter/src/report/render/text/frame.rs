@@ -98,3 +98,56 @@ fn map_evidence_chain(
             .collect(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::diagnosis::{
+        Confidence, Diagnosis, DiagnosisCandidate, EvidenceItem, EvidenceKind, StutterCause,
+    };
+
+    fn device_candidate_without_chain(cause: StutterCause) -> Diagnosis {
+        let primary = DiagnosisCandidate {
+            cause,
+            score: 0.90,
+            confidence: Confidence::High,
+            evidence: vec![EvidenceItem {
+                kind: EvidenceKind::Unknown,
+                strength: 0.90,
+                message: "synthetic evidence".to_owned(),
+                timestamp_ms: Some(100),
+                start_ns: Some(100_000_000),
+                end_ns: Some(103_000_000),
+            }],
+        };
+
+        Diagnosis {
+            cause,
+            confidence: Confidence::High,
+            secondary_causes: Vec::new(),
+            evidence: vec!["synthetic evidence".to_owned()],
+            missing_evidence: Vec::new(),
+            evidence_chains: Vec::new(),
+            primary: Some(primary.clone()),
+            candidates: vec![primary],
+            candidate_rejections: Vec::new(),
+            summary: format!("primary={cause:?} confidence=High score=0.90"),
+        }
+    }
+
+    #[test]
+    fn mapped_report_summary_uses_candidate_wording_without_explicit_chain() {
+        let diagnosis = device_candidate_without_chain(StutterCause::IrqDelayCandidate);
+
+        let mapped = map_diagnosis(&diagnosis);
+
+        assert!(
+            mapped
+                .report_summary
+                .contains("explicit IRQ evidence chain missing")
+        );
+        assert!(mapped.report_summary.contains("candidate"));
+        assert!(!mapped.report_summary.contains("attributed to"));
+        assert!(!mapped.report_summary.contains("caused by"));
+    }
+}
