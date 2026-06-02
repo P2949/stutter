@@ -461,6 +461,11 @@ fn baseline_recommendation_formal_metrics_cover_all_key_metrics() {
     assert!(html.contains("diagnostic_raw_score_total"));
     assert!(html.contains("Noise ratio"));
     assert!(html.contains("Tune runs"));
+    assert!(html.contains("A/B uncertainty"));
+    assert!(html.contains("Sample distribution"));
+    assert!(html.contains("Bootstrap median-improvement CI"));
+    assert!(html.contains("Effect size"));
+    assert!(html.contains("Samples"));
     for baseline in baselines {
         fs::remove_dir_all(baseline).ok();
     }
@@ -492,6 +497,38 @@ fn single_baseline_run_needs_retest_with_explicit_sample_warning() {
 }
 
 #[test]
+fn baseline_tune_html_exposes_distribution_charts_ci_bands_and_underpowered_warnings() {
+    let tune = temp_dir("html-ab-uncertainty-tune");
+    write_tune_with_candidates(
+        &tune,
+        RankingConfidence::Low,
+        100,
+        vec![
+            candidate_with_iteration("best", 1, 100),
+            candidate_with_iteration("best", 2, 98),
+        ],
+    );
+
+    let baselines = write_repeated_baselines("html-ab-uncertainty-baseline", &[120, 118]);
+
+    let rec = build_baseline_tune_recommendation_for_baselines(&baselines, &tune).unwrap();
+    let html = super::render::render_baseline_tune_recommendation_html(&rec);
+
+    assert!(html.contains("A/B uncertainty"));
+    assert!(html.contains("Sample distribution"));
+    assert!(html.contains("Bootstrap median-improvement CI") || html.contains("No CI band"));
+    assert!(html.contains("Effect size"));
+    assert!(html.contains("Noise ratio"));
+    assert!(html.contains("underpowered"));
+    assert!(html.contains("not enough samples"));
+
+    for baseline in baselines {
+        fs::remove_dir_all(baseline).ok();
+    }
+    fs::remove_dir_all(tune).ok();
+}
+
+#[test]
 fn low_confidence_gives_needs_retest() {
     let baseline = temp_dir("low-baseline");
     write_baseline(&baseline, 2, 100);
@@ -515,7 +552,7 @@ fn json_output_serializes_expected_fields() {
     let rec = build_baseline_tune_recommendation(&baseline, &tune).unwrap();
     let json = serde_json::to_value(&rec).unwrap();
 
-    assert_eq!(json["schema_version"], 4);
+    assert_eq!(json["schema_version"], 5);
     assert_eq!(json["best_profile"], "best");
     assert_eq!(json["diagnostic_baseline_raw_score_total"], 200);
     assert_eq!(json["baseline_over_5ms"], 2);

@@ -114,15 +114,15 @@ pub(super) fn extend_formal_metric_warnings(
     metrics: &[FormalMetricComparison],
 ) {
     for metric in metrics {
-        if let Some(reason) = &metric.not_enough_samples_reason {
-            warnings.push(format!("{}: {reason}", metric.metric));
-        } else if !metric.statistically_significant && metric.metric == "diagnostic_raw_score_total"
-        {
-            warnings.push(format!(
-                "{} bootstrap 95% CI crosses zero; A/B improvement is not statistically significant",
-                metric.metric
-            ));
+        for warning in &metric.uncertainty_warnings {
+            push_unique(warnings, format!("{}: {}", metric.metric, warning));
         }
+    }
+}
+
+fn push_unique(values: &mut Vec<String>, value: String) {
+    if !values.iter().any(|existing| existing == &value) {
+        values.push(value);
     }
 }
 

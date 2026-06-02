@@ -18,7 +18,7 @@ use super::{
         TuneCandidateSummary, TuneControl, TuneIterationOrder, TuneMeasureResult,
         TuneProfileRefreshInput, TuneSummary,
     },
-    recommendation, retain_after_warmup, unix_nanos_now,
+    recommendation, recommendation_html, retain_after_warmup, unix_nanos_now,
 };
 use crate::{
     artifacts::ArtifactSelection, config::model::MonitorConfig, hwmon, profiles,
@@ -333,6 +333,11 @@ pub(super) async fn write_tune_summary(
         &recommendation_markdown_path,
         recommendation::render_tune_recommendation_markdown(&recommendation),
     )?;
+    let recommendation_html_path = tune_output_dir.join("tuning_recommendation.html");
+    fs::write(
+        &recommendation_html_path,
+        recommendation_html::render_tune_recommendation_html(&recommendation),
+    )?;
 
     println!(
         "tune complete best_profile={} restore_policy={} summary={}{}",
@@ -346,6 +351,7 @@ pub(super) async fn write_tune_summary(
         }
     );
     println!("recommendation={}", recommendation_markdown_path.display());
+    println!("recommendation_html={}", recommendation_html_path.display());
 
     warn!(
         "tune_ranking_is_workload_sensitive: decisions are not final truth and depend on comparable workload; repeated runs showing low variance are recommended."

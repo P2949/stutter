@@ -1,4 +1,5 @@
 use super::model::BaselineTuneRecommendation;
+use crate::tune::uncertainty_html::render_ab_uncertainty_section;
 #[cfg(test)]
 use crate::tune::{self, TuneSummary};
 
@@ -313,51 +314,10 @@ pub fn render_baseline_tune_recommendation_html(rec: &BaselineTuneRecommendation
         pushln(&mut out, "</ul>");
     }
 
-    pushln(&mut out, "<h2>Formal A/B statistics</h2>");
-    if rec.formal_metrics.is_empty() {
-        pushln(&mut out, "<p>none</p>");
-    } else {
-        pushln(&mut out, "<table>");
-        pushln(
-            &mut out,
-            "<thead><tr><th>Metric</th><th>Baseline median</th><th>Tuned median</th><th>Improvement</th><th>Effect size</th><th>CI</th><th>Enough samples</th><th>Significant</th></tr></thead>",
-        );
-        pushln(&mut out, "<tbody>");
-        for metric in &rec.formal_metrics {
-            let ci = metric
-                .bootstrap_ci95
-                .as_ref()
-                .map(|ci| format!("95% CI [{:.3}, {:.3}]", ci.lower, ci.upper))
-                .unwrap_or_else(|| "95% CI n/a".to_owned());
-            pushln(
-                &mut out,
-                format!(
-                    "<tr><td>{}</td><td>{:.3}{}</td><td>{:.3}{}</td><td>{:.3}{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
-                    escape_html(&metric.metric),
-                    metric.baseline_median,
-                    escape_html(&metric.unit),
-                    metric.tuned_median,
-                    escape_html(&metric.unit),
-                    metric.improvement_delta,
-                    escape_html(&metric.unit),
-                    escape_html(&format_optional_sigma(metric.effect_size)),
-                    escape_html(&ci),
-                    metric.enough_samples,
-                    metric.statistically_significant
-                ),
-            );
-            if let Some(reason) = &metric.not_enough_samples_reason {
-                pushln(
-                    &mut out,
-                    format!(
-                        "<tr><td colspan=\"8\"><em>{}</em></td></tr>",
-                        escape_html(reason)
-                    ),
-                );
-            }
-        }
-        pushln(&mut out, "</tbody></table>");
-    }
+    out.push_str(&render_ab_uncertainty_section(
+        &rec.formal_metrics,
+        &rec.warnings,
+    ));
 
     html_list(&mut out, "Warnings", &rec.warnings, "none");
     html_list(&mut out, "Next steps", &rec.next_steps, "none");

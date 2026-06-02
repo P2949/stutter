@@ -97,7 +97,7 @@ pub fn build_tune_recommendation(
 
     if summary.ranking_confidence == RankingConfidence::Unstable {
         return TuneRecommendation {
-            schema_version: 1,
+            schema_version: 2,
             verdict: TuneRecommendationVerdict::NoRecommendation,
             best_profile: None,
             baseline_profile: baseline_profile.map(ToOwned::to_owned),
@@ -125,7 +125,7 @@ pub fn build_tune_recommendation(
             ));
         }
         return TuneRecommendation {
-            schema_version: 1,
+            schema_version: 2,
             verdict: TuneRecommendationVerdict::NoRecommendation,
             best_profile: None,
             baseline_profile: baseline_profile.map(ToOwned::to_owned),
@@ -268,7 +268,7 @@ pub fn build_tune_recommendation(
     }
 
     TuneRecommendation {
-        schema_version: 1,
+        schema_version: 2,
         verdict,
         best_profile: Some(summary.best_profile.clone()),
         baseline_profile: baseline_profile.map(ToOwned::to_owned),

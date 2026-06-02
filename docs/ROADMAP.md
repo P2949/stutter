@@ -9,7 +9,7 @@
 | Profiler | Completed | Records runnable latency, frame correlation, optional IRQ/GPU/block-I/O/fault context, and data-quality notes. |
 | Manual diagnosis | Completed | Reports cautious diagnosis candidates and supporting evidence. |
 | Profile benchmarker | Current | `tune` benchmarks explicit CPU-affinity profile sets and records per-candidate artifacts. |
-| Profile recommender | Current | `tune` writes recommendation artifacts, and `recommend` compares baseline runs with tune output. |
+| Profile recommender | Current | `tune` writes JSON, Markdown, and HTML recommendation artifacts. `recommend --html` shows A/B distributions, bootstrap CI bands, effect size, sample counts, noise ratios, and underpowered warnings. |
 | Advisor daemon | Current | `advisor --watch-runs` watches completed runs and emits conservative offline recommendations. |
 | Limited auto-tuner | In development / gated | Runtime, planning, live experiment, rollback, audit, and emergency-restore infrastructure exist. User-facing enablement remains gated on safety validation, policy coverage, and end-to-end recovery confidence. |
 | Broader optimizer | Experimental / internal | Providers and candidate paths exist for CPU affinity, nice, ioprio, uclamp, cgroup placement, IRQ affinity, CPU power, VM knobs, and GPU power. Broader user-facing enablement remains future work pending stronger evidence, policy hardening, and clearer operator controls. |

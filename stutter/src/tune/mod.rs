@@ -11,8 +11,10 @@ pub mod comparability;
 mod ranking;
 pub mod recommendation;
 mod recommendation_formal;
+pub(crate) mod recommendation_html;
 pub mod run;
 pub mod statistics;
+pub(crate) mod uncertainty_html;
 
 #[cfg(test)]
 pub(crate) use comparability::TuneCoverageMetrics;
