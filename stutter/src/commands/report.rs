@@ -61,6 +61,7 @@ pub fn run_recommend_command(input: RecommendCommandInput) -> anyhow::Result<()>
         tune: input.tune,
         json: input.json,
         markdown: input.markdown,
+        html: input.html,
     })
 }
 

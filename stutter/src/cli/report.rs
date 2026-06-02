@@ -230,6 +230,9 @@ pub(super) struct RecommendArgs {
 
     #[arg(long, value_name = "PATH")]
     pub(super) markdown: Option<PathBuf>,
+
+    #[arg(long, value_name = "PATH")]
+    pub(super) html: Option<PathBuf>,
 }
 
 #[derive(Args, Debug, Clone)]

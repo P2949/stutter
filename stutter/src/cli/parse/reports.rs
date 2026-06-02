@@ -140,6 +140,7 @@ pub(super) fn parse_recommend_command(args: RecommendArgs) -> anyhow::Result<App
         tune: args.tune,
         json: args.json,
         markdown: args.markdown,
+        html: args.html,
     }))
 }
 

@@ -5,7 +5,7 @@ use std::{
 
 use anyhow::Context;
 
-use super::model::BaselineTuneRecommendation;
+use super::model::{BaselineTuneConfidenceMetadata, BaselineTuneRecommendation};
 use crate::{
     artifacts::ArtifactSelection,
     scorer::{self, StutterScore},
@@ -155,6 +155,37 @@ pub fn build_baseline_tune_recommendation_for_baselines(
             || metric.improvement_delta <= 0.0
     });
 
+    let score_effect_size =
+        formal_metric_effect_size(&formal_metrics, "diagnostic_raw_score_total");
+    let score_noise_ratio =
+        metric_noise_ratio(&tuned_metric_values(&best_candidates, |candidate| {
+            candidate.diagnostic_raw_score_total as f64
+        }));
+    let over_5ms_effect_size = formal_metric_effect_size(&formal_metrics, "over_5ms");
+    let over_5ms_noise_ratio =
+        metric_noise_ratio(&tuned_metric_values(&best_candidates, |candidate| {
+            candidate.over_5ms as f64
+        }));
+    let frame_p99_effect_size = formal_metric_effect_size(&formal_metrics, "frame_p99_ms");
+    let frame_p99_noise_ratio = metric_noise_ratio(
+        &tuned_metric_values(&best_candidates, |candidate| candidate.frame_p99_ms)
+            .into_iter()
+            .filter(|value| *value > 0.0)
+            .collect::<Vec<_>>(),
+    );
+
+    let confidence_metadata = BaselineTuneConfidenceMetadata {
+        ranking_confidence: summary.ranking_confidence,
+        ranking_notes: summary.ranking_notes.clone(),
+        tune_runs: summary.runs,
+        tune_epoch_seconds: summary.epoch_seconds,
+        tune_warmup_seconds: summary.warmup_seconds,
+        best_profile_valid_runs: best_stat.map(|stat| stat.valid_runs),
+        best_profile_invalid_runs: best_stat.map(|stat| stat.invalid_runs),
+        baseline_valid_runs,
+        baseline_invalid_runs,
+    };
+
     let baseline_quality_blocks_recommendation =
         valid_baselines.iter().any(|sample| sample.intervals_empty)
             || valid_baselines
@@ -253,7 +284,7 @@ pub fn build_baseline_tune_recommendation_for_baselines(
     }
 
     Ok(BaselineTuneRecommendation {
-        schema_version: 3,
+        schema_version: 4,
         baseline_run: baseline_samples[0].run_dir.clone(),
         baseline_runs: baseline_samples
             .iter()
@@ -262,6 +293,7 @@ pub fn build_baseline_tune_recommendation_for_baselines(
         tune_dir: tune_dir.to_path_buf(),
         best_profile,
         confidence: summary.ranking_confidence,
+        confidence_metadata: Some(confidence_metadata),
         verdict,
         summary: summary_text,
         baseline_valid_runs,
@@ -270,12 +302,18 @@ pub fn build_baseline_tune_recommendation_for_baselines(
         best_median_diagnostic_raw_score_total,
         score_delta_abs,
         score_delta_percent,
+        score_effect_size,
+        score_noise_ratio,
         baseline_over_5ms,
         best_median_over_5ms,
         over_5ms_delta_abs,
+        over_5ms_effect_size,
+        over_5ms_noise_ratio,
         baseline_frame_p99_ms,
         best_median_frame_p99_ms,
         frame_p99_delta_ms,
+        frame_p99_effect_size,
+        frame_p99_noise_ratio,
         formal_metrics,
         warnings,
         next_steps,
@@ -429,6 +467,58 @@ fn extend_formal_metric_warnings(warnings: &mut Vec<String>, metrics: &[FormalMe
             ));
         }
     }
+}
+
+fn formal_metric_effect_size(metrics: &[FormalMetricComparison], metric_name: &str) -> Option<f64> {
+    metrics
+        .iter()
+        .find(|metric| metric.metric == metric_name)
+        .and_then(|metric| metric.effect_size)
+        .map(|value| value.abs())
+}
+
+fn metric_noise_ratio(values: &[f64]) -> Option<f64> {
+    let values = values
+        .iter()
+        .copied()
+        .filter(|value| value.is_finite())
+        .collect::<Vec<_>>();
+    let median = statistics::median_f64(&values);
+    if median <= f64::EPSILON {
+        return None;
+    }
+
+    Some(iqr_f64(&values) / median.abs())
+}
+
+fn iqr_f64(values: &[f64]) -> f64 {
+    if values.is_empty() {
+        return 0.0;
+    }
+    let mut values = values
+        .iter()
+        .copied()
+        .filter(|value| value.is_finite())
+        .collect::<Vec<_>>();
+    if values.is_empty() {
+        return 0.0;
+    }
+    let mut q25_values = values.clone();
+    let q25 = percentile_nearest_rank_f64(&mut q25_values, 25.0);
+    let q75 = percentile_nearest_rank_f64(&mut values, 75.0);
+    (q75 - q25).max(0.0)
+}
+
+fn percentile_nearest_rank_f64(values: &mut [f64], percentile: f64) -> f64 {
+    if values.is_empty() {
+        return 0.0;
+    }
+
+    values.sort_by(f64::total_cmp);
+    let percentile = percentile.clamp(0.0, 100.0);
+    let rank = ((percentile / 100.0) * values.len() as f64).ceil() as usize;
+    let idx = rank.saturating_sub(1).min(values.len() - 1);
+    values[idx]
 }
 
 fn baseline_metric_values(
