@@ -6,6 +6,7 @@ mod evidence;
 mod evidence_chain;
 mod model;
 mod orchestrator;
+mod wording;
 
 pub(crate) use anchor::{select_anchor, select_anchor_for_diagnosis};
 pub use model::{

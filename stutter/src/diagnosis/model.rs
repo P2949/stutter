@@ -222,6 +222,24 @@ impl StutterCause {
             StutterCause::Unknown => 9,
         }
     }
+
+    pub fn explicit_attribution_chain_label(self) -> Option<&'static str> {
+        match self {
+            StutterCause::IrqDelayCandidate => Some("IRQ"),
+            StutterCause::GpuBoundCandidate => Some("GPU or DRM fence"),
+            StutterCause::BlockIoCandidate => Some("block I/O"),
+            StutterCause::CompositorSchedulerDelay
+            | StutterCause::GameThreadSchedulerDelay
+            | StutterCause::CpuPressureCandidate
+            | StutterCause::CpuMonopolizationCandidate
+            | StutterCause::RuntimeWaitCandidate
+            | StutterCause::Unknown => None,
+        }
+    }
+
+    pub fn requires_explicit_attribution_chain(self) -> bool {
+        self.explicit_attribution_chain_label().is_some()
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -379,8 +397,51 @@ pub struct Diagnosis {
 }
 
 impl Diagnosis {
+    pub fn has_explicit_evidence_chain(&self, kind: EvidenceChainKind) -> bool {
+        self.evidence_chains
+            .iter()
+            .any(|chain| chain.kind == kind && chain.explicit)
+    }
+
+    pub fn has_explicit_evidence_chain_for_cause(&self, cause: StutterCause) -> bool {
+        match cause {
+            StutterCause::IrqDelayCandidate => {
+                self.has_explicit_evidence_chain(EvidenceChainKind::Irq)
+            }
+            StutterCause::GpuBoundCandidate => {
+                self.has_explicit_evidence_chain(EvidenceChainKind::Gpu)
+                    || self.has_explicit_evidence_chain(EvidenceChainKind::DrmFence)
+            }
+            StutterCause::BlockIoCandidate => {
+                self.has_explicit_evidence_chain(EvidenceChainKind::BlockIo)
+            }
+            StutterCause::CompositorSchedulerDelay
+            | StutterCause::GameThreadSchedulerDelay
+            | StutterCause::CpuPressureCandidate
+            | StutterCause::CpuMonopolizationCandidate
+            | StutterCause::RuntimeWaitCandidate
+            | StutterCause::Unknown => false,
+        }
+    }
+
     pub fn report_summary(&self) -> String {
         match &self.primary {
+            Some(primary)
+                if primary.cause.requires_explicit_attribution_chain()
+                    && !self.has_explicit_evidence_chain_for_cause(primary.cause) =>
+            {
+                format!(
+                    "{:?}: {} only (confidence={:?}, score={:.2}) - explicit {} evidence chain missing; do not treat this as causal attribution",
+                    primary.cause,
+                    primary.confidence.as_report_word(),
+                    primary.confidence,
+                    primary.score,
+                    primary
+                        .cause
+                        .explicit_attribution_chain_label()
+                        .unwrap_or("device")
+                )
+            }
             Some(primary) => format!(
                 "{:?}: {} (confidence={:?}, score={:.2}) - {}",
                 primary.cause,
