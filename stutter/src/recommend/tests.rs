@@ -438,6 +438,29 @@ fn baseline_recommendation_formal_metrics_cover_all_key_metrics() {
             metric.metric
         );
     }
+    assert!(rec.score_effect_size.is_some());
+    assert!(rec.score_noise_ratio.is_some());
+    assert!(rec.over_5ms_effect_size.is_some());
+    assert!(rec.over_5ms_noise_ratio.is_some());
+    assert!(rec.frame_p99_effect_size.is_some());
+    assert!(rec.frame_p99_noise_ratio.is_some());
+    let metadata = rec.confidence_metadata.as_ref().unwrap();
+    assert_eq!(metadata.ranking_confidence, RankingConfidence::High);
+    assert_eq!(metadata.tune_runs, 3);
+    assert_eq!(metadata.baseline_valid_runs, 3);
+
+    let markdown = super::render::render_baseline_tune_recommendation_markdown(&rec);
+    assert!(markdown.contains("Score effect size:"));
+    assert!(markdown.contains("Score noise ratio:"));
+    assert!(markdown.contains("Over 5ms effect size:"));
+    assert!(markdown.contains("Frame p99 effect size:"));
+    assert!(markdown.contains("Tune runs: 3 configured"));
+
+    let html = super::render::render_baseline_tune_recommendation_html(&rec);
+    assert!(html.contains("Unified comparison metrics"));
+    assert!(html.contains("diagnostic_raw_score_total"));
+    assert!(html.contains("Noise ratio"));
+    assert!(html.contains("Tune runs"));
     for baseline in baselines {
         fs::remove_dir_all(baseline).ok();
     }
@@ -492,13 +515,18 @@ fn json_output_serializes_expected_fields() {
     let rec = build_baseline_tune_recommendation(&baseline, &tune).unwrap();
     let json = serde_json::to_value(&rec).unwrap();
 
-    assert_eq!(json["schema_version"], 3);
+    assert_eq!(json["schema_version"], 4);
     assert_eq!(json["best_profile"], "best");
     assert_eq!(json["diagnostic_baseline_raw_score_total"], 200);
     assert_eq!(json["baseline_over_5ms"], 2);
     assert!(json["best_median_over_5ms"].is_number());
     assert!(json["over_5ms_delta_abs"].is_number());
     assert!(json["formal_metrics"].is_array());
+    assert!(json["confidence_metadata"].is_object());
+    assert!(json["score_effect_size"].is_null() || json["score_effect_size"].is_number());
+    assert!(json["score_noise_ratio"].is_null() || json["score_noise_ratio"].is_number());
+    assert!(json["over_5ms_effect_size"].is_null() || json["over_5ms_effect_size"].is_number());
+    assert!(json["frame_p99_effect_size"].is_null() || json["frame_p99_effect_size"].is_number());
     fs::remove_dir_all(baseline).ok();
     fs::remove_dir_all(tune).ok();
 }

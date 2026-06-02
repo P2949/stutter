@@ -6,3 +6,4 @@ mod diff;
 mod errors;
 #[path = "report/helpers.rs"]
 mod helpers;
+mod recommend;

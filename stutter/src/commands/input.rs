@@ -170,6 +170,7 @@ pub struct RecommendCommandInput {
     pub tune: PathBuf,
     pub json: bool,
     pub markdown: Option<PathBuf>,
+    pub html: Option<PathBuf>,
 }
 
 #[derive(Debug)]
