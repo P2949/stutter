@@ -1,6 +1,15 @@
 use super::{assertions::*, fixture::*};
 use crate::{diagnosis::StutterCause, report::DataQualityLevel};
 
+const REAL_MATRIX_FIXTURES: &[&str] = &[
+    "real_amd_hyprland_clean",
+    "real_nvidia_gnome_false_positive",
+    "real_intel_kwin_cpu_bound",
+    "real_amd_gamescope_gpu_bound",
+    "real_nvidia_kwin_irq_overlap",
+    "real_intel_sway_compositor_delay",
+];
+
 #[test]
 fn validation_corpus_real_clean_baseline() {
     let analysis = assert_fixture_from_metadata("real_clean_baseline");
@@ -401,4 +410,160 @@ fn validation_corpus_real_community_rules_classification() {
         analysis.artifacts_summary.frame_event_count > 0,
         "real_community_rules_classification should include frame context for downstream diagnosis"
     );
+}
+
+#[test]
+fn validation_corpus_real_amd_hyprland_clean() {
+    let analysis = assert_fixture_from_metadata("real_amd_hyprland_clean");
+
+    assert!(
+        analysis.cluster_analysis.clusters.is_empty()
+            || no_primary_non_unknown_diagnosis(&analysis),
+        "real_amd_hyprland_clean must remain clean: {:?}",
+        analysis
+            .cluster_analysis
+            .clusters
+            .iter()
+            .filter_map(|cluster| cluster.diagnosis.as_ref())
+            .map(|diagnosis| &diagnosis.cause)
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn validation_corpus_real_nvidia_gnome_false_positive() {
+    let analysis = assert_fixture_from_metadata("real_nvidia_gnome_false_positive");
+
+    assert!(
+        analysis.cluster_analysis.clusters.is_empty()
+            || no_primary_non_unknown_diagnosis(&analysis),
+        "real_nvidia_gnome_false_positive must not produce a strong diagnosis"
+    );
+    assert!(
+        analysis.artifacts_summary.gpu_sample_count > 0,
+        "false-positive fixture should include harmless GPU noise"
+    );
+    assert!(
+        analysis.artifacts_summary.frame_event_count > 0,
+        "false-positive fixture should include harmless frame noise"
+    );
+}
+
+#[test]
+fn validation_corpus_real_intel_kwin_cpu_bound() {
+    let analysis = assert_fixture_from_metadata("real_intel_kwin_cpu_bound");
+
+    assert_candidate_contains(&analysis, StutterCause::CpuPressureCandidate, &["CPU PSI"]);
+}
+
+#[test]
+fn validation_corpus_real_amd_gamescope_gpu_bound() {
+    let analysis = assert_fixture_from_metadata("real_amd_gamescope_gpu_bound");
+
+    assert_candidate_contains(&analysis, StutterCause::GpuBoundCandidate, &["GPU busy"]);
+    assert!(
+        analysis.artifacts_summary.frame_event_count > 0,
+        "GPU-bound fixture should include frame context"
+    );
+}
+
+#[test]
+fn validation_corpus_real_nvidia_kwin_irq_overlap() {
+    let analysis = assert_fixture_from_metadata("real_nvidia_kwin_irq_overlap");
+
+    assert_candidate_contains(&analysis, StutterCause::IrqDelayCandidate, &["IRQ"]);
+    assert!(
+        analysis.artifacts_summary.irq_event_count > 0,
+        "IRQ fixture should include IRQ artifacts"
+    );
+}
+
+#[test]
+fn validation_corpus_real_intel_sway_compositor_delay() {
+    let analysis = assert_fixture_from_metadata("real_intel_sway_compositor_delay");
+
+    assert_primary_anchor_class_in(
+        &analysis,
+        StutterCause::CompositorSchedulerDelay,
+        &[
+            crate::process_tree::TaskClass::Compositor,
+            crate::process_tree::TaskClass::GameScope,
+        ],
+    );
+}
+
+#[test]
+fn validation_corpus_real_matrix_covers_required_vendors_compositors_and_scenarios() {
+    use std::collections::BTreeSet;
+
+    let specs = REAL_MATRIX_FIXTURES
+        .iter()
+        .map(|name| load_fixture_toml(&fixture_path(name).join("fixture.toml")))
+        .collect::<Vec<_>>();
+
+    let mut vendors = BTreeSet::new();
+    let mut compositors = BTreeSet::new();
+    let mut scenarios = BTreeSet::new();
+    let mut capture_ids = BTreeSet::new();
+
+    for spec in &specs {
+        assert_eq!(
+            spec.source, "sanitized-real-recording",
+            "{} must be marked as sanitized-real-recording",
+            spec.name
+        );
+        let platform = spec
+            .platform
+            .as_ref()
+            .unwrap_or_else(|| panic!("{} missing [platform] metadata", spec.name));
+
+        vendors.insert(platform.gpu_vendor.as_str());
+        compositors.insert(platform.compositor.as_str());
+        scenarios.insert(platform.scenario.as_str());
+
+        assert!(
+            capture_ids.insert(platform.sanitized_capture_id.as_str()),
+            "{} reused sanitized_capture_id {:?}",
+            spec.name,
+            platform.sanitized_capture_id
+        );
+        assert!(
+            !platform.gpu_driver.trim().is_empty(),
+            "{} platform.gpu_driver must not be empty",
+            spec.name
+        );
+        assert_eq!(
+            platform.session_type, "wayland",
+            "{} expected session_type=wayland",
+            spec.name
+        );
+    }
+
+    for required in ["AMD", "NVIDIA", "Intel"] {
+        assert!(
+            vendors.contains(required),
+            "real corpus missing GPU vendor {required}; vendors={vendors:?}"
+        );
+    }
+
+    for required in ["Sway", "Hyprland", "Gamescope", "KWin", "GNOME"] {
+        assert!(
+            compositors.contains(required),
+            "real corpus missing compositor {required}; compositors={compositors:?}"
+        );
+    }
+
+    for required in [
+        "clean",
+        "false-positive",
+        "cpu-bound",
+        "gpu-bound",
+        "irq",
+        "compositor",
+    ] {
+        assert!(
+            scenarios.contains(required),
+            "real corpus missing scenario {required}; scenarios={scenarios:?}"
+        );
+    }
 }

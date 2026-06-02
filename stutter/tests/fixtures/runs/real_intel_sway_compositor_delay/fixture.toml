@@ -1,0 +1,44 @@
+name = "real_intel_sway_compositor_delay"
+schema_version = 22
+source = "sanitized-real-recording"
+quality_expectation = "High"
+description = "Sanitized Intel/Sway recording with compositor scheduler delay during a visible frame spike."
+
+[platform]
+gpu_vendor = "Intel"
+gpu_driver = "i915"
+compositor = "Sway"
+session_type = "wayland"
+scenario = "compositor"
+sanitized_capture_id = "sanitized-intel-sway-compositor-delay-v1"
+
+[expected]
+primary_cause = "CompositorSchedulerDelay"
+accepted_confidence = [
+    "Medium",
+    "High",
+]
+data_quality = "High"
+
+[expected.artifacts]
+spikes = 3
+intervals = 3
+irq_events = 0
+gpu_samples = 0
+frames = 3
+block_io_events = 0
+foreground_events = 0
+kms_flip_events = 0
+drm_fence_events = 0
+wayland_presentation_events = 0
+dmabuf_events = 0
+gpu_engine_samples = 0
+
+[expected.evidence]
+contains = ["compositor thread"]
+
+[privacy]
+titles_redacted = true
+paths_redacted = true
+hostnames_redacted = true
+usernames_redacted = true
