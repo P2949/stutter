@@ -426,6 +426,8 @@ pub(crate) fn foreground_source_arg_label(source: ForegroundSource) -> String {
         ForegroundSource::Auto => "auto",
         ForegroundSource::Sway => "sway",
         ForegroundSource::Hyprland => "hyprland",
+        ForegroundSource::Gnome => "gnome",
+        ForegroundSource::Kde => "kde",
         ForegroundSource::X11 => "x11",
     }
     .to_owned()
@@ -436,6 +438,8 @@ pub(crate) fn foreground_source_label(source: crate::foreground::ForegroundSourc
         crate::foreground::ForegroundSource::Auto => "auto",
         crate::foreground::ForegroundSource::Sway => "sway",
         crate::foreground::ForegroundSource::Hyprland => "hyprland",
+        crate::foreground::ForegroundSource::Gnome => "gnome",
+        crate::foreground::ForegroundSource::Kde => "kde",
         crate::foreground::ForegroundSource::X11 => "x11",
         crate::foreground::ForegroundSource::Unsupported => "unsupported",
     }

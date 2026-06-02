@@ -4,7 +4,12 @@
 //! not own compositor-specific provider sampling or parser details.
 
 use super::{
-    hyprland::HyprlandForegroundProvider, sway::SwayForegroundProvider, x11::X11ForegroundProvider,
+    desktop::{desktop_looks_like_gnome, desktop_looks_like_kde},
+    gnome::GnomeForegroundProvider,
+    hyprland::HyprlandForegroundProvider,
+    kde::KdeForegroundProvider,
+    sway::SwayForegroundProvider,
+    x11::X11ForegroundProvider,
 };
 use crate::foreground::{
     provider::{ForegroundProvider, UnsupportedForegroundProvider},
@@ -20,12 +25,27 @@ pub fn auto_foreground_provider() -> Box<dyn ForegroundProvider + Send> {
         return Box::new(HyprlandForegroundProvider::new());
     }
 
+    if GnomeForegroundProvider::is_detected() {
+        return Box::new(GnomeForegroundProvider::new());
+    }
+
+    if KdeForegroundProvider::is_detected() {
+        return Box::new(KdeForegroundProvider::new());
+    }
+
     if is_generic_wayland_without_supported_foreground_api() {
-        if current_desktop_looks_like_gnome_or_kde() {
+        if desktop_looks_like_gnome() {
             return Box::new(UnsupportedForegroundProvider::new(
-                "GNOME/KDE Wayland session detected, but no safe generic Wayland foreground-window API is available",
+                "GNOME Wayland session detected, but stutter-gnome-foreground is required; unsafe org.gnome.Shell Eval is intentionally not used",
             ));
         }
+
+        if desktop_looks_like_kde() {
+            return Box::new(UnsupportedForegroundProvider::new(
+                "KDE Wayland session detected, but stutter-kde-foreground is required; KWin script injection is intentionally not used",
+            ));
+        }
+
         return Box::new(UnsupportedForegroundProvider::generic_wayland());
     }
 
@@ -58,11 +78,7 @@ pub(crate) fn is_generic_wayland_without_supported_foreground_api() -> bool {
     true
 }
 
+#[cfg(test)]
 pub(crate) fn current_desktop_looks_like_gnome_or_kde() -> bool {
-    let desktop = std::env::var("XDG_CURRENT_DESKTOP")
-        .or_else(|_| std::env::var("DESKTOP_SESSION"))
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-
-    desktop.contains("gnome") || desktop.contains("kde") || desktop.contains("plasma")
+    desktop_looks_like_gnome() || desktop_looks_like_kde()
 }

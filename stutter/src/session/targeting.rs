@@ -220,6 +220,12 @@ fn foreground_resolver_from_config(
         ForegroundSource::Hyprland => crate::foreground::ForegroundResolver::new(Box::new(
             crate::foreground::HyprlandForegroundProvider::new(),
         )),
+        ForegroundSource::Gnome => crate::foreground::ForegroundResolver::new(Box::new(
+            crate::foreground::GnomeForegroundProvider::new(),
+        )),
+        ForegroundSource::Kde => crate::foreground::ForegroundResolver::new(Box::new(
+            crate::foreground::KdeForegroundProvider::new(),
+        )),
         ForegroundSource::X11 => crate::foreground::ForegroundResolver::new(Box::new(
             crate::foreground::X11ForegroundProvider::new(),
         )),

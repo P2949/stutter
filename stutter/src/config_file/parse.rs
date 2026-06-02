@@ -62,10 +62,14 @@ pub fn parse_foreground_source_value(
         "auto" => Ok(ForegroundSource::Auto),
         "sway" => Ok(ForegroundSource::Sway),
         "hyprland" => Ok(ForegroundSource::Hyprland),
+        "gnome" => Ok(ForegroundSource::Gnome),
+        "kde" | "plasma" => Ok(ForegroundSource::Kde),
         "x11" => Ok(ForegroundSource::X11),
         other => Err(ConfigError::InvalidValue {
             field: "foreground_source".to_owned(),
-            message: format!("got {other:?}; valid values are auto, sway, hyprland, x11"),
+            message: format!(
+                "got {other:?}; valid values are auto, sway, hyprland, gnome, kde, x11"
+            ),
         }),
     }
 }

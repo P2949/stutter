@@ -24,9 +24,13 @@ fn parse_foreground_source_config_value(value: &str) -> anyhow::Result<Foregroun
         "auto" => Ok(ForegroundSource::Auto),
         "sway" => Ok(ForegroundSource::Sway),
         "hyprland" => Ok(ForegroundSource::Hyprland),
+        "gnome" => Ok(ForegroundSource::Gnome),
+        "kde" | "plasma" => Ok(ForegroundSource::Kde),
         "x11" => Ok(ForegroundSource::X11),
         other => {
-            anyhow::bail!("foreground_source must be auto, sway, hyprland, or x11, got {other:?}")
+            anyhow::bail!(
+                "foreground_source must be auto, sway, hyprland, gnome, kde, or x11, got {other:?}"
+            )
         }
     }
 }

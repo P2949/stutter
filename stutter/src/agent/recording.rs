@@ -511,9 +511,13 @@ pub(crate) fn parse_remote_foreground_source(
         "auto" => Ok(ForegroundSource::Auto),
         "sway" => Ok(ForegroundSource::Sway),
         "hyprland" => Ok(ForegroundSource::Hyprland),
+        "gnome" => Ok(ForegroundSource::Gnome),
+        "kde" | "plasma" => Ok(ForegroundSource::Kde),
         "x11" => Ok(ForegroundSource::X11),
         other => {
-            anyhow::bail!("foreground_source must be auto, sway, hyprland, or x11, got {other:?}")
+            anyhow::bail!(
+                "foreground_source must be auto, sway, hyprland, gnome, kde, or x11, got {other:?}"
+            )
         }
     }
 }

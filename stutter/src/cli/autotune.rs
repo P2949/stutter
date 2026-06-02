@@ -125,7 +125,7 @@ pub(super) struct AutotuneArgs {
         long = "foreground-source",
         value_enum,
         default_value_t = ForegroundSource::Auto,
-        help = "Foreground-window provider for autotune focus: auto, sway, hyprland, x11"
+        help = "Foreground-window provider for autotune focus: auto, sway, hyprland, gnome, kde, x11"
     )]
     pub(super) foreground_source: ForegroundSource,
 

@@ -448,6 +448,8 @@ fn foreground_source_label(source: ForegroundSource) -> &'static str {
         ForegroundSource::Auto => "auto",
         ForegroundSource::Sway => "sway",
         ForegroundSource::Hyprland => "hyprland",
+        ForegroundSource::Gnome => "gnome",
+        ForegroundSource::Kde => "kde",
         ForegroundSource::X11 => "x11",
         ForegroundSource::Unsupported => "unsupported",
     }

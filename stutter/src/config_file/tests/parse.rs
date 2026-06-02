@@ -244,6 +244,18 @@ fn test_parse_foreground_source_value() {
         ForegroundSource::Hyprland
     );
     assert_eq!(
+        parse_foreground_source_value("gnome").unwrap(),
+        ForegroundSource::Gnome
+    );
+    assert_eq!(
+        parse_foreground_source_value("kde").unwrap(),
+        ForegroundSource::Kde
+    );
+    assert_eq!(
+        parse_foreground_source_value("plasma").unwrap(),
+        ForegroundSource::Kde
+    );
+    assert_eq!(
         parse_foreground_source_value("x11").unwrap(),
         ForegroundSource::X11
     );

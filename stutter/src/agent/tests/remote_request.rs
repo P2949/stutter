@@ -114,7 +114,7 @@ fn validate_remote_request_rejects_invalid_focus_source() {
 #[test]
 fn validate_remote_request_rejects_invalid_foreground_source() {
     let mut request = minimal_remote_request();
-    request.foreground_source = Some("gnome".to_owned());
+    request.foreground_source = Some("river".to_owned());
     let limits = AgentLimits {
         max_duration_seconds: 60,
         max_targets: 4,
@@ -125,7 +125,7 @@ fn validate_remote_request_rejects_invalid_foreground_source() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("foreground_source must be auto, sway, hyprland, or x11"));
+    assert!(err.contains("foreground_source must be auto, sway, hyprland, gnome, kde, or x11"));
 }
 
 #[test]

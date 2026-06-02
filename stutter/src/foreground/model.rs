@@ -12,6 +12,8 @@ pub enum ForegroundSource {
     Auto,
     Sway,
     Hyprland,
+    Gnome,
+    Kde,
     X11,
     Unsupported,
 }

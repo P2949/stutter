@@ -44,7 +44,7 @@ Options:
       --foreground-window
           Collect foreground-window context for autotune focus classification
       --foreground-source <FOREGROUND_SOURCE>
-          Foreground-window provider for autotune focus: auto, sway, hyprland, x11 [default: auto] [possible values: auto, sway, hyprland, x11]
+          Foreground-window provider for autotune focus: auto, sway, hyprland, gnome, kde, x11 [default: auto] [possible values: auto, sway, hyprland, gnome, kde, x11]
       --foreground-poll-ms <FOREGROUND_POLL_MS>
           [default: 1000]
       --foreground-max-stale-ms <FOREGROUND_MAX_STALE_MS>
