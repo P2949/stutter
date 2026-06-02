@@ -1,0 +1,41 @@
+name = "real_amd_hyprland_clean"
+schema_version = 22
+source = "sanitized-real-recording"
+quality_expectation = "High"
+description = "Sanitized AMD/Hyprland clean recording with normal frames and no scheduler spike diagnosis."
+
+[platform]
+gpu_vendor = "AMD"
+gpu_driver = "amdgpu"
+compositor = "Hyprland"
+session_type = "wayland"
+scenario = "clean"
+sanitized_capture_id = "sanitized-amd-hyprland-clean-v1"
+
+[expected]
+primary_cause = "Unknown"
+accepted_confidence = []
+data_quality = "High"
+
+[expected.artifacts]
+spikes = 0
+intervals = 2
+irq_events = 0
+gpu_samples = 2
+frames = 3
+block_io_events = 0
+foreground_events = 0
+kms_flip_events = 0
+drm_fence_events = 0
+wayland_presentation_events = 0
+dmabuf_events = 0
+gpu_engine_samples = 0
+
+[expected.evidence]
+contains = []
+
+[privacy]
+titles_redacted = true
+paths_redacted = true
+hostnames_redacted = true
+usernames_redacted = true

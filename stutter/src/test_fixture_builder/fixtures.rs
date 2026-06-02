@@ -5,6 +5,7 @@ use super::*;
 mod builders;
 mod display_path;
 mod real;
+mod real_matrix;
 mod synthetic;
 
 pub(super) use builders::renamed_fixture;
@@ -18,6 +19,11 @@ pub(super) use real::{
     real_community_rules_classification_fixture, real_compositor_scheduler_delay_fixture,
     real_foreground_window_fixture, real_game_thread_scheduler_delay_fixture,
     real_gpu_bound_looking_fixture, real_irq_overlap_fixture, real_truncated_low_quality_fixture,
+};
+pub(super) use real_matrix::{
+    real_amd_gamescope_gpu_bound_fixture, real_amd_hyprland_clean_fixture,
+    real_intel_kwin_cpu_bound_fixture, real_intel_sway_compositor_delay_fixture,
+    real_nvidia_gnome_false_positive_fixture, real_nvidia_kwin_irq_overlap_fixture,
 };
 pub(super) use synthetic::{
     block_io_stall_fixture, clean_run_fixture, community_rules_classification_fixture,

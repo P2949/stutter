@@ -2,6 +2,8 @@
 
 use super::*;
 
+mod real_matrix;
+
 #[derive(serde::Serialize)]
 pub(super) struct FixtureMetadata {
     name: String,
@@ -9,8 +11,20 @@ pub(super) struct FixtureMetadata {
     source: String,
     quality_expectation: String,
     description: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    platform: Option<FixturePlatform>,
     expected: FixtureExpected,
     privacy: FixturePrivacy,
+}
+
+#[derive(Clone, serde::Serialize)]
+pub(super) struct FixturePlatform {
+    gpu_vendor: String,
+    gpu_driver: String,
+    compositor: String,
+    session_type: String,
+    scenario: String,
+    sanitized_capture_id: String,
 }
 
 #[derive(serde::Serialize)]
@@ -120,6 +134,10 @@ macro_rules! fixture_metadata {
 }
 
 pub(super) fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> FixtureMetadata {
+    if let Some(metadata) = real_matrix::fixture_metadata_for_real_matrix(name, artifacts) {
+        return metadata;
+    }
+
     match name {
         "clean_run" => fixture_metadata!(
             name,
@@ -540,6 +558,29 @@ fn with_quality_reasons(
     metadata
 }
 
+fn with_platform(mut metadata: FixtureMetadata, platform: FixturePlatform) -> FixtureMetadata {
+    metadata.platform = Some(platform);
+    metadata
+}
+
+fn real_platform(
+    gpu_vendor: &str,
+    gpu_driver: &str,
+    compositor: &str,
+    session_type: &str,
+    scenario: &str,
+    sanitized_capture_id: &str,
+) -> FixturePlatform {
+    FixturePlatform {
+        gpu_vendor: gpu_vendor.to_owned(),
+        gpu_driver: gpu_driver.to_owned(),
+        compositor: compositor.to_owned(),
+        session_type: session_type.to_owned(),
+        scenario: scenario.to_owned(),
+        sanitized_capture_id: sanitized_capture_id.to_owned(),
+    }
+}
+
 struct FixtureMetadataInput<'a> {
     name: &'a str,
     source: &'a str,
@@ -559,6 +600,7 @@ fn fixture_metadata(input: FixtureMetadataInput<'_>) -> FixtureMetadata {
         source: input.source.to_owned(),
         quality_expectation: input.quality_expectation.to_owned(),
         description: input.description.to_owned(),
+        platform: None,
         expected: FixtureExpected {
             primary_cause: input.primary_cause.to_owned(),
             required_candidate: None,

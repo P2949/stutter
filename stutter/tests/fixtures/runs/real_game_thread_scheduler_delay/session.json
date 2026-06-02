@@ -80,10 +80,15 @@
   "drop_counters": {
     "lost_wakeup_timestamp_inserts": 0,
     "wakeup_data_stale_entries": 0,
+    "wakeup_data_replaced_entries": 0,
+    "wakeup_data_consumed_read_failed": 0,
     "ringbuf_reserve_failed": 0,
     "irq_start_times_insert_failed": 0,
     "block_start_insert_failed": 0,
-    "block_fallback_key_collisions": 0
+    "block_fallback_key_collisions": 0,
+    "cpu_accounting_untracked": 0,
+    "block_zero_keys": 0,
+    "drm_fence_missing_start": 0
   },
   "cpu_perf_sample_count": 0,
   "cpu_perf_open_errors": 0,
@@ -120,6 +125,7 @@
     "retain_intervals": null,
     "max_tasks": 1024,
     "spike_threshold_ns": 1000000,
+    "live_diagnosis_cluster_window_ms": 5,
     "alert_threshold_ns": null,
     "alert_webhook_url": null,
     "follow_exec": true,

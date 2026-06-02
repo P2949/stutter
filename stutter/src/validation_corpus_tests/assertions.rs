@@ -437,6 +437,20 @@ pub(super) fn assert_privacy(analysis: &ReportAnalysisJson, spec: &FixtureExpect
             analysis.foreground_summary.final_title
         );
     }
+
+    if spec.source == "sanitized-real-recording" {
+        let serialized = serde_json::to_string(analysis)
+            .expect("analysis should serialize for privacy scan")
+            .to_ascii_lowercase();
+
+        for forbidden in ["/home/", "users/", "hostname", "steamapps/common"] {
+            assert!(
+                !serialized.contains(forbidden),
+                "{} sanitized-real fixture leaked forbidden token {forbidden:?}",
+                spec.name
+            );
+        }
+    }
 }
 
 pub(super) fn assert_fixture_from_metadata(name: &str) -> ReportAnalysisJson {

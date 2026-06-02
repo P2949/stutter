@@ -135,6 +135,36 @@ pub(crate) fn write_validation_corpus(root: &Path) -> anyhow::Result<()> {
         "real_community_rules_classification",
         real_community_rules_classification_fixture(),
     )?;
+    write_fixture(
+        root,
+        "real_amd_hyprland_clean",
+        real_amd_hyprland_clean_fixture(),
+    )?;
+    write_fixture(
+        root,
+        "real_nvidia_gnome_false_positive",
+        real_nvidia_gnome_false_positive_fixture(),
+    )?;
+    write_fixture(
+        root,
+        "real_intel_kwin_cpu_bound",
+        real_intel_kwin_cpu_bound_fixture(),
+    )?;
+    write_fixture(
+        root,
+        "real_amd_gamescope_gpu_bound",
+        real_amd_gamescope_gpu_bound_fixture(),
+    )?;
+    write_fixture(
+        root,
+        "real_nvidia_kwin_irq_overlap",
+        real_nvidia_kwin_irq_overlap_fixture(),
+    )?;
+    write_fixture(
+        root,
+        "real_intel_sway_compositor_delay",
+        real_intel_sway_compositor_delay_fixture(),
+    )?;
 
     Ok(())
 }

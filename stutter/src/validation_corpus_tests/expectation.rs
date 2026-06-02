@@ -42,9 +42,27 @@ pub(super) struct FixtureExpectationFile {
     pub(super) quality_expectation: String,
     #[serde(default)]
     pub(super) description: String,
+    #[serde(default)]
+    pub(super) platform: Option<PlatformExpectations>,
     pub(super) expected: ExpectedFromToml,
     #[serde(default)]
     pub(super) privacy: Option<PrivacyExpectations>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub(super) struct PlatformExpectations {
+    #[serde(default)]
+    pub(super) gpu_vendor: String,
+    #[serde(default)]
+    pub(super) gpu_driver: String,
+    #[serde(default)]
+    pub(super) compositor: String,
+    #[serde(default)]
+    pub(super) session_type: String,
+    #[serde(default)]
+    pub(super) scenario: String,
+    #[serde(default)]
+    pub(super) sanitized_capture_id: String,
 }
 
 #[derive(Debug, Deserialize)]
