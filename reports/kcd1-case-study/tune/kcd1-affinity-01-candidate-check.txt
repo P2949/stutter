@@ -1,0 +1,60 @@
+{
+  "profile": "kcd1-game-on-1-5-7-11-gamescope-on-0-6",
+  "iteration": 1,
+  "valid": true,
+  "applied_tasks": 122,
+  "measure_seconds": 180,
+  "frame_count": 13934,
+  "diagnostic_raw_score_total": 10850,
+  "over_5ms": 0,
+  "frame_p99_ms": 32.555,
+  "frame_over_33ms": 115
+}
+{
+  "profile": "kcd1-game-on-1-5-7-11-gamescope-on-0-6",
+  "iteration": 2,
+  "valid": true,
+  "applied_tasks": 117,
+  "measure_seconds": 180,
+  "frame_count": 7420,
+  "diagnostic_raw_score_total": 62132,
+  "over_5ms": 0,
+  "frame_p99_ms": 49.2389,
+  "frame_over_33ms": 1389
+}
+{
+  "profile": "kcd1-game-on-1-5-7-11-gamescope-on-0-6",
+  "iteration": 3,
+  "valid": true,
+  "applied_tasks": 117,
+  "measure_seconds": 180,
+  "frame_count": 7456,
+  "diagnostic_raw_score_total": 61422,
+  "over_5ms": 0,
+  "frame_p99_ms": 45.4257,
+  "frame_over_33ms": 2252
+}
+{
+  "profile": "kcd1-game-on-1-5-7-11-gamescope-on-0-6",
+  "iteration": 4,
+  "valid": true,
+  "applied_tasks": 117,
+  "measure_seconds": 180,
+  "frame_count": 8070,
+  "diagnostic_raw_score_total": 35552,
+  "over_5ms": 0,
+  "frame_p99_ms": 40.2796,
+  "frame_over_33ms": 977
+}
+{
+  "profile": "kcd1-game-on-1-5-7-11-gamescope-on-0-6",
+  "iteration": 5,
+  "valid": true,
+  "applied_tasks": 117,
+  "measure_seconds": 180,
+  "frame_count": 8722,
+  "diagnostic_raw_score_total": 23426,
+  "over_5ms": 0,
+  "frame_p99_ms": 37.9077,
+  "frame_over_33ms": 515
+}

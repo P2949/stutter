@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>stutter fix validation</title>
+<style>body{font-family:system-ui,sans-serif;line-height:1.45;max-width:1100px;margin:2rem auto;padding:0 1rem}table{border-collapse:collapse;width:100%;margin:1rem 0}th,td{border:1px solid #ccc;padding:.4rem;text-align:left}code{white-space:pre-wrap}.pass{color:#126b39}.fail{color:#a32929}</style>
+</head>
+<body>
+<h1>stutter fix validation</h1>
+<section id="fix-validation">
+<h2>Fix validation</h2>
+<dl>
+<dt>Status</dt><dd>InvalidExperiment</dd>
+<dt>Hypothesis</dt><dd>game thread &#39;wineserver&#39; delayed by 2.995ms; SCX state near spike: ops=- state=disabled</dd>
+<dt>Fix kind</dt><dd>cpu_affinity_profile</dd>
+<dt>Cause</dt><dd>GameThreadSchedulerDelay</dd>
+<dt>Best profile</dt><dd>none</dd>
+</dl>
+<table>
+<thead><tr><th>Metric</th><th>Expected</th><th>Actual</th><th>Result</th></tr></thead>
+<tbody>
+<tr><td>diagnostic_raw_score_total</td><td>&gt;= 5% lower, CI excludes zero</td><td>actual improvement 100.0% (delta 45295.000score_points)</td><td class="fail">failed</td></tr>
+<tr><td>over_5ms</td><td>&gt;= 10% lower, CI excludes zero</td><td>actual improvement 0.0% (delta 0.000samples)</td><td class="fail">failed</td></tr>
+<tr><td>frame_p99_ms</td><td>no &gt;5% regression</td><td>actual improvement 100.0% (delta 49.252ms)</td><td class="fail">failed</td></tr>
+</tbody></table>
+<h2>Passed criteria</h2>
+<p>none</p>
+<h2>Failed criteria</h2>
+<ul>
+<li>diagnostic_raw_score_total: not enough samples for fix validation</li>
+<li>diagnostic_raw_score_total: required CI is missing</li>
+<li>over_5ms: not enough samples for fix validation</li>
+<li>over_5ms: required CI is missing</li>
+<li>over_5ms: metric regressed</li>
+<li>frame_p99_ms: not enough samples for fix validation</li>
+</ul>
+<h2>Warnings</h2>
+<ul>
+<li>formal A/B evidence is underpowered; do not count this as proof</li>
+<li>comparability Warning profile=kcd1-game-on-1-5-7-11-gamescope-on-0-6 kind=drop-counters-nonzero: candidate had non-zero drop counters (max=472447)</li>
+</ul>
+<h2>Next steps</h2>
+<ul>
+<li>Repeat the experiment with comparable workload, frame coverage, and drop counters.</li>
+</ul>
+</section>
+</body></html>

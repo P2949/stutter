@@ -1,0 +1,120 @@
+profile dry-run:
+  checked_tasks=109
+  pending_affinity=109
+  pending_nice=0
+  pending_ionice=0
+  total_pending_tasks=109
+  affinity_changes:
+    tid=519075 process_pid=Some(Pid(519072)) original_mask=0-11 proposed_mask=0,6
+    tid=519078 process_pid=Some(Pid(519072)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519111 process_pid=Some(Pid(519111)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519205 process_pid=Some(Pid(519205)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519252 process_pid=Some(Pid(519252)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519254 process_pid=Some(Pid(519254)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519267 process_pid=Some(Pid(519267)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519270 process_pid=Some(Pid(519267)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519271 process_pid=Some(Pid(519267)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519272 process_pid=Some(Pid(519267)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519273 process_pid=Some(Pid(519267)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519274 process_pid=Some(Pid(519267)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519311 process_pid=Some(Pid(519267)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519313 process_pid=Some(Pid(519313)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519315 process_pid=Some(Pid(519313)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519316 process_pid=Some(Pid(519313)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519325 process_pid=Some(Pid(519313)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519326 process_pid=Some(Pid(519313)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519327 process_pid=Some(Pid(519313)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519340 process_pid=Some(Pid(519313)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519341 process_pid=Some(Pid(519313)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519342 process_pid=Some(Pid(519313)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519343 process_pid=Some(Pid(519313)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519364 process_pid=Some(Pid(519313)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519365 process_pid=Some(Pid(519313)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519408 process_pid=Some(Pid(519252)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519418 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519419 process_pid=Some(Pid(519252)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519477 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519478 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519479 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519480 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519481 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519482 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519483 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519484 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519486 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519487 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519488 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519489 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519490 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519493 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519494 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519505 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519506 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519523 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519528 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519529 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519530 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519531 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519542 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519543 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519544 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519545 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519591 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519598 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519599 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519601 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519602 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519603 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519604 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519605 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519639 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519640 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519641 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519642 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519644 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519645 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519646 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519647 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519754 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519755 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519756 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519757 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519758 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519759 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519760 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519761 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519762 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519763 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519764 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519765 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519772 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519773 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519774 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519782 process_pid=Some(Pid(519418)) original_mask=3 proposed_mask=1-5,7-11
+    tid=519783 process_pid=Some(Pid(519418)) original_mask=3 proposed_mask=1-5,7-11
+    tid=519784 process_pid=Some(Pid(519418)) original_mask=2 proposed_mask=1-5,7-11
+    tid=519785 process_pid=Some(Pid(519418)) original_mask=2 proposed_mask=1-5,7-11
+    tid=519786 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519787 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519788 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519797 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519798 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519799 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519825 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=519826 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=520094 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=520101 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=520102 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=520109 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=520110 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=520111 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=520118 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=520119 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=520120 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=520121 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=520271 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+    tid=520808 process_pid=Some(Pid(519418)) original_mask=0-11 proposed_mask=1-5,7-11
+  nice_changes=[]
+  ionice_changes=[]
+apply-profile dry-run did not change live affinity, nice, ionice, audit state, or restore state
+apply-profile is one-shot; use --watch to keep applying to new threads

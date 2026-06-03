@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "id": "advisor-fix:game-thread-scheduler-delay:cpu-affinity-profile",
+  "kind": "cpu_affinity_profile",
+  "cause": "GameThreadSchedulerDelay",
+  "confidence": "Medium",
+  "rationale": "game thread 'wineserver' delayed by 2.995ms; SCX state near spike: ops=- state=disabled",
+  "safety_class": "ReversibleLowRisk",
+  "effect_scope": "local_process_tree",
+  "rollback": "required_before_apply",
+  "safety_risk": {
+    "safety_class": "ReversibleLowRisk",
+    "effect_scope": "local_process_tree",
+    "rollback_requirement": "required_before_apply",
+    "requires_privilege": true,
+    "system_wide": false,
+    "persistent": false,
+    "allowed_by_default_policy": true,
+    "required_policy_mode": "apply-low-risk"
+  },
+  "expected_metric_movement": [
+    {
+      "metric": "diagnostic_raw_score_total",
+      "lower_is_better": true,
+      "minimum_relative_improvement_percent": 5.0,
+      "maximum_allowed_regression_percent": null,
+      "required_ci_excludes_zero": true
+    },
+    {
+      "metric": "over_5ms",
+      "lower_is_better": true,
+      "minimum_relative_improvement_percent": 10.0,
+      "maximum_allowed_regression_percent": null,
+      "required_ci_excludes_zero": true
+    },
+    {
+      "metric": "frame_p99_ms",
+      "lower_is_better": true,
+      "minimum_relative_improvement_percent": null,
+      "maximum_allowed_regression_percent": 5.0,
+      "required_ci_excludes_zero": false
+    }
+  ],
+  "validation": {
+    "baseline_runs_required": 5,
+    "test_runs_required": 5,
+    "scenario_name": null,
+    "baseline_command": "stutter record --tree-pid 106001 --duration 180 --run-name baseline-a",
+    "experiment_command": "stutter tune --tree-pid 106001 --profiles <profiles.toml> --runs 5 --baseline-profile baseline-online",
+    "compare_command": "stutter recommend --fix-plan reports/kcd1-case-study/runs/baseline-01/advisor_fix_plan_cpu_affinity_profile.json --baseline <baseline-run> --tune <tune-dir> --html fix-validation.html",
+    "stop_conditions": [
+      "Stop if the target process tree changes substantially between baseline and test runs.",
+      "Stop if frame data, scheduler data, or diagnostic scores are missing from either side.",
+      "Stop if any safety metric regresses beyond the acceptance guardrail."
+    ],
+    "acceptance_criteria": [
+      {
+        "metric": "diagnostic_raw_score_total",
+        "lower_is_better": true,
+        "minimum_relative_improvement_percent": 5.0,
+        "maximum_allowed_regression_percent": null,
+        "required_ci_excludes_zero": true
+      },
+      {
+        "metric": "over_5ms",
+        "lower_is_better": true,
+        "minimum_relative_improvement_percent": 10.0,
+        "maximum_allowed_regression_percent": null,
+        "required_ci_excludes_zero": true
+      },
+      {
+        "metric": "frame_p99_ms",
+        "lower_is_better": true,
+        "minimum_relative_improvement_percent": null,
+        "maximum_allowed_regression_percent": 5.0,
+        "required_ci_excludes_zero": false
+      }
+    ]
+  },
+  "suggested_commands": [
+    "stutter tune --tree-pid 106001 --profiles <profiles.toml> --runs 5 --baseline-profile baseline-online"
+  ],
+  "candidate_plan_path": "reports/kcd1-case-study/runs/baseline-01/advisor_fix_plan_cpu_affinity_profile.json",
+  "safety_notes": [
+    "Applyable experiment only after repeated baseline/test evidence; do not treat one run as proof.",
+    "Rollback must be available before applying any profile result."
+  ]
+}

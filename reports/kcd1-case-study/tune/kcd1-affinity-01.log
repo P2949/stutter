@@ -1,0 +1,24 @@
+tune iteration=1 status=Starting
+tune iteration=1 candidate=kcd1-game-on-1-5-7-11-gamescope-on-0-6 state=CandidateWarmup warmup_seconds=90
+tune iteration=1 candidate=kcd1-game-on-1-5-7-11-gamescope-on-0-6 state=CandidateMeasure measure_seconds=180
+recording written to reports/kcd1-case-study/tune/kcd1-affinity-01/iter-001-kcd1-game-on-1-5-7-11-gamescope-on-0-6
+tune iteration=2 status=Starting
+tune iteration=2 candidate=kcd1-game-on-1-5-7-11-gamescope-on-0-6 state=CandidateWarmup warmup_seconds=90
+tune iteration=2 candidate=kcd1-game-on-1-5-7-11-gamescope-on-0-6 state=CandidateMeasure measure_seconds=180
+recording written to reports/kcd1-case-study/tune/kcd1-affinity-01/iter-002-kcd1-game-on-1-5-7-11-gamescope-on-0-6
+tune iteration=3 status=Starting
+tune iteration=3 candidate=kcd1-game-on-1-5-7-11-gamescope-on-0-6 state=CandidateWarmup warmup_seconds=90
+tune iteration=3 candidate=kcd1-game-on-1-5-7-11-gamescope-on-0-6 state=CandidateMeasure measure_seconds=180
+recording written to reports/kcd1-case-study/tune/kcd1-affinity-01/iter-003-kcd1-game-on-1-5-7-11-gamescope-on-0-6
+tune iteration=4 status=Starting
+tune iteration=4 candidate=kcd1-game-on-1-5-7-11-gamescope-on-0-6 state=CandidateWarmup warmup_seconds=90
+tune iteration=4 candidate=kcd1-game-on-1-5-7-11-gamescope-on-0-6 state=CandidateMeasure measure_seconds=180
+recording written to reports/kcd1-case-study/tune/kcd1-affinity-01/iter-004-kcd1-game-on-1-5-7-11-gamescope-on-0-6
+tune iteration=5 status=Starting
+tune iteration=5 candidate=kcd1-game-on-1-5-7-11-gamescope-on-0-6 state=CandidateWarmup warmup_seconds=90
+tune iteration=5 candidate=kcd1-game-on-1-5-7-11-gamescope-on-0-6 state=CandidateMeasure measure_seconds=180
+recording written to reports/kcd1-case-study/tune/kcd1-affinity-01/iter-005-kcd1-game-on-1-5-7-11-gamescope-on-0-6
+tune complete best_profile= restore_policy=restore-after-each summary=reports/kcd1-case-study/tune/kcd1-affinity-01/tuning_summary.json
+recommendation=reports/kcd1-case-study/tune/kcd1-affinity-01/tuning_recommendation.md
+recommendation_html=reports/kcd1-case-study/tune/kcd1-affinity-01/tuning_recommendation.html
+Error: Command(tune ranking unstable; no best profile selected; inspect tuning_summary.json)
