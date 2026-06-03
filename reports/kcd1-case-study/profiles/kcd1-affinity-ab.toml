@@ -1,0 +1,21 @@
+[[profile]]
+name = "baseline-online"
+
+[[profile.rules]]
+affinity = "online"
+match_class = ["Game", "GameHelper", "WineServer", "GameScope", "Compositor", "Launcher", "SteamRuntime", "Helper", "Unknown"]
+
+[[profile]]
+name = "kcd1-game-on-1-5-7-11-gamescope-on-0-6"
+
+[[profile.rules]]
+affinity = "1-5,7-11"
+match_comm = ["Main"]
+
+[[profile.rules]]
+affinity = "1-5,7-11"
+match_class = ["Game", "GameHelper", "WineServer"]
+
+[[profile.rules]]
+affinity = "0,6"
+match_class = ["GameScope", "Compositor", "Launcher", "SteamRuntime"]

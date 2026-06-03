@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>stutter tuning recommendation</title>
+<style>body{font-family:system-ui,sans-serif;line-height:1.45;max-width:1200px;margin:2rem auto;padding:0 1rem}table{border-collapse:collapse;width:100%;margin:1rem 0}th,td{border:1px solid #ccc;padding:.4rem;text-align:left}.muted{color:#666}</style>
+</head>
+<body>
+<h1>stutter tuning recommendation</h1>
+<dl>
+<dt>Verdict</dt><dd>NeedsRetest</dd>
+<dt>Best profile</dt><dd>baseline-online</dd>
+<dt>Compared against</dt><dd>baseline</dd>
+<dt>Confidence</dt><dd>Medium</dd>
+</dl>
+<h2>Summary</h2>
+<p>Profile &#39;baseline-online&#39; is currently best, but the result is not strong enough to trust without another run.</p>
+<h2>Best profile metrics</h2>
+<dl>
+<dt>Valid runs</dt><dd>5</dd>
+<dt>Invalid runs</dt><dd>0</dd>
+<dt>Median diagnostic raw score</dt><dd>21533</dd>
+<dt>IQR diagnostic raw score</dt><dd>6829</dd>
+<dt>Median over 5ms</dt><dd>0</dd>
+<dt>Median frame p99 us</dt><dd>38337</dd>
+</dl>
+<h2>Comparison summary</h2>
+<dl>
+<dt>Other profile</dt><dd>baseline-online</dd>
+<dt>Score delta</dt><dd>0</dd>
+<dt>Score effect size</dt><dd>0.00σ</dd>
+<dt>Score noise ratio</dt><dd>0.32</dd>
+<dt>Over 5ms effect size</dt><dd>0.00σ</dd>
+<dt>Frame p99 effect size</dt><dd>0.00σ</dd>
+</dl>
+<section id="ab-uncertainty-section">
+<h2>A/B uncertainty</h2>
+<p class="muted">Each chart shows baseline/tuned sample distributions and a separate bootstrap confidence interval band for median improvement. Positive improvement means the tuned side was better for lower-is-better metrics.</p>
+
+<style>
+#ab-uncertainty-section .ab-warning {
+  margin: 1rem 0;
+  padding: .75rem 1rem;
+  border-left: 4px solid #b45309;
+  background: #fffbeb;
+}
+#ab-uncertainty-section .ab-card {
+  margin: 1.25rem 0;
+  padding: 1rem;
+  border: 1px solid #ddd;
+  border-radius: .5rem;
+}
+#ab-uncertainty-section .ab-chart-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 1rem;
+}
+#ab-uncertainty-section .ab-svg {
+  width: 100%;
+  max-width: 760px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: .5rem;
+}
+#ab-uncertainty-section .axis { stroke: #6b7280; stroke-width: 1; }
+#ab-uncertainty-section .zero-line { stroke: #111827; stroke-width: 1; stroke-dasharray: 4 3; }
+#ab-uncertainty-section .baseline-point { fill: #2563eb; opacity: .75; }
+#ab-uncertainty-section .tuned-point { fill: #16a34a; opacity: .75; }
+#ab-uncertainty-section .median-line { stroke: #111827; stroke-width: 2; }
+#ab-uncertainty-section .ci-band { fill: #fbbf24; opacity: .45; }
+#ab-uncertainty-section .improvement-line { stroke: #dc2626; stroke-width: 2; }
+#ab-uncertainty-section .ab-warning-list { color: #92400e; }
+</style>
+
+<div class="ab-warning"><strong>Warning:</strong> this comparison is underpowered or noisy. Treat the result as directional until repeated runs produce stable distributions and CIs that exclude zero.</div>
+<h3>Metric summary</h3>
+<table class="ab-table">
+<thead><tr><th>Metric</th><th>Samples</th><th>Baseline median</th><th>Tuned median</th><th>Improvement</th><th>Effect size</th><th>Noise ratio</th><th>95% CI</th><th>Significant</th><th>Power</th></tr></thead>
+<tbody>
+<tr><td>diagnostic_raw_score_total</td><td>5 / 5</td><td>21533.000score_points</td><td>21533.000score_points</td><td>+0.000score_points</td><td>0.00σ</td><td>baseline=0.32 tuned=0.32</td><td>[-11461.000, 11461.000]</td><td>false</td><td>30 runs/side</td></tr>
+<tr><td>over_5ms</td><td>5 / 5</td><td>0.000samples</td><td>0.000samples</td><td>+0.000samples</td><td>0.00σ</td><td>baseline=n/a tuned=n/a</td><td>[-1.000, 1.000]</td><td>false</td><td>unavailable</td></tr>
+<tr><td>frame_p99_ms</td><td>5 / 5</td><td>38.338ms</td><td>38.338ms</td><td>+0.000ms</td><td>0.00σ</td><td>baseline=0.04 tuned=0.04</td><td>[-6.350, 6.350]</td><td>false</td><td>18 runs/side</td></tr>
+<tr><td>frame_over_16ms</td><td>5 / 5</td><td>6796.000frames</td><td>6796.000frames</td><td>+0.000frames</td><td>0.00σ</td><td>baseline=0.22 tuned=0.22</td><td>[-1593.000, 1593.000]</td><td>false</td><td>24 runs/side</td></tr>
+<tr><td>frame_over_33ms</td><td>5 / 5</td><td>433.000frames</td><td>433.000frames</td><td>+0.000frames</td><td>0.00σ</td><td>baseline=0.27 tuned=0.27</td><td>[-367.000, 367.000]</td><td>false</td><td>30 runs/side</td></tr>
+<tr><td>frame_over_50ms</td><td>5 / 5</td><td>8.000frames</td><td>8.000frames</td><td>+0.000frames</td><td>0.00σ</td><td>baseline=0.38 tuned=0.38</td><td>[-16.000, 16.000]</td><td>false</td><td>30 runs/side</td></tr>
+<tr><td>max_latency_ns</td><td>5 / 5</td><td>4152319.000ns</td><td>4152319.000ns</td><td>+0.000ns</td><td>0.00σ</td><td>baseline=0.18 tuned=0.18</td><td>[-1089458.000, 1089458.000]</td><td>false</td><td>26 runs/side</td></tr>
+</tbody></table>
+<article class="ab-card">
+<h3>diagnostic_raw_score_total</h3>
+<ul class="ab-warning-list">
+<li>estimated 30 runs per side needed to detect 10% improvement at current noise</li>
+<li>bootstrap 95% CI crosses zero; A/B improvement is not statistically significant</li>
+<li>baseline distribution is noisy: noise_ratio=0.32</li>
+<li>tuned distribution is noisy: noise_ratio=0.32</li>
+</ul>
+<p class="muted">Sample-size guidance for 10% target: 30 runs per side. normal approximation using pooled_stddev=6419.321, baseline_median=21533.000, target_delta=2153.300</p>
+<div class="ab-chart-grid">
+<svg class="ab-svg" viewBox="0 0 760 220" role="img">
+<title>diagnostic_raw_score_total sample distribution</title>
+<text x="20" y="24">Sample distribution</text>
+<line x1="80" y1="170" x2="720" y2="170" class="axis"/>
+<text x="20" y="84">baseline</text>
+<text x="20" y="134">tuned</text>
+<text x="80" y="195">15007.900score_points</text>
+<text x="660" y="195">34629.100score_points</text>
+<circle cx="229.1" cy="76.0" r="4" class="baseline-point"/>
+<circle cx="292.8" cy="80.0" r="4" class="baseline-point"/>
+<circle cx="133.3" cy="84.0" r="4" class="baseline-point"/>
+<circle cx="451.8" cy="88.0" r="4" class="baseline-point"/>
+<circle cx="666.7" cy="92.0" r="4" class="baseline-point"/>
+<circle cx="229.1" cy="126.0" r="4" class="tuned-point"/>
+<circle cx="292.8" cy="130.0" r="4" class="tuned-point"/>
+<circle cx="133.3" cy="134.0" r="4" class="tuned-point"/>
+<circle cx="451.8" cy="138.0" r="4" class="tuned-point"/>
+<circle cx="666.7" cy="142.0" r="4" class="tuned-point"/>
+<line x1="292.8" y1="58" x2="292.8" y2="106" class="median-line"/>
+<line x1="292.8" y1="112" x2="292.8" y2="160" class="median-line"/>
+</svg>
+
+<svg class="ab-svg" viewBox="0 0 760 180" role="img">
+<title>diagnostic_raw_score_total bootstrap confidence interval</title>
+<text x="20" y="24">Bootstrap median-improvement CI</text>
+<line x1="80" y1="90" x2="720" y2="90" class="axis"/>
+<line x1="400.0" y1="50" x2="400.0" y2="130" class="zero-line"/>
+<rect x="133.3" y="70" width="533.3" height="40" class="ci-band"/>
+<line x1="400.0" y1="60" x2="400.0" y2="120" class="improvement-line"/>
+<text x="80" y="150">CI [-11461.000, 11461.000] score_points; improvement +0.000score_points</text>
+</svg>
+
+</div>
+</article>
+<article class="ab-card">
+<h3>over_5ms</h3>
+<ul class="ab-warning-list">
+<li>bootstrap 95% CI crosses zero; A/B improvement is not statistically significant</li>
+</ul>
+<p class="muted">Sample-size guidance for 10% target: unavailable. sample-size estimate unavailable: baseline median is zero or too close to zero</p>
+<div class="ab-chart-grid">
+<svg class="ab-svg" viewBox="0 0 760 220" role="img">
+<title>over_5ms sample distribution</title>
+<text x="20" y="24">Sample distribution</text>
+<line x1="80" y1="170" x2="720" y2="170" class="axis"/>
+<text x="20" y="84">baseline</text>
+<text x="20" y="134">tuned</text>
+<text x="80" y="195">-0.100samples</text>
+<text x="660" y="195">1.100samples</text>
+<circle cx="133.3" cy="76.0" r="4" class="baseline-point"/>
+<circle cx="133.3" cy="80.0" r="4" class="baseline-point"/>
+<circle cx="133.3" cy="84.0" r="4" class="baseline-point"/>
+<circle cx="133.3" cy="88.0" r="4" class="baseline-point"/>
+<circle cx="666.7" cy="92.0" r="4" class="baseline-point"/>
+<circle cx="133.3" cy="126.0" r="4" class="tuned-point"/>
+<circle cx="133.3" cy="130.0" r="4" class="tuned-point"/>
+<circle cx="133.3" cy="134.0" r="4" class="tuned-point"/>
+<circle cx="133.3" cy="138.0" r="4" class="tuned-point"/>
+<circle cx="666.7" cy="142.0" r="4" class="tuned-point"/>
+<line x1="133.3" y1="58" x2="133.3" y2="106" class="median-line"/>
+<line x1="133.3" y1="112" x2="133.3" y2="160" class="median-line"/>
+</svg>
+
+<svg class="ab-svg" viewBox="0 0 760 180" role="img">
+<title>over_5ms bootstrap confidence interval</title>
+<text x="20" y="24">Bootstrap median-improvement CI</text>
+<line x1="80" y1="90" x2="720" y2="90" class="axis"/>
+<line x1="400.0" y1="50" x2="400.0" y2="130" class="zero-line"/>
+<rect x="133.3" y="70" width="533.3" height="40" class="ci-band"/>
+<line x1="400.0" y1="60" x2="400.0" y2="120" class="improvement-line"/>
+<text x="80" y="150">CI [-1.000, 1.000] samples; improvement +0.000samples</text>
+</svg>
+
+</div>
+</article>
+<article class="ab-card">
+<h3>frame_p99_ms</h3>
+<ul class="ab-warning-list">
+<li>estimated 18 runs per side needed to detect 10% improvement at current noise</li>
+<li>bootstrap 95% CI crosses zero; A/B improvement is not statistically significant</li>
+</ul>
+<p class="muted">Sample-size guidance for 10% target: 18 runs per side. normal approximation using pooled_stddev=4.060, baseline_median=38.338, target_delta=3.834</p>
+<div class="ab-chart-grid">
+<svg class="ab-svg" viewBox="0 0 760 220" role="img">
+<title>frame_p99_ms sample distribution</title>
+<text x="20" y="24">Sample distribution</text>
+<line x1="80" y1="170" x2="720" y2="170" class="axis"/>
+<text x="20" y="84">baseline</text>
+<text x="20" y="134">tuned</text>
+<text x="80" y="195">31.740ms</text>
+<text x="660" y="195">45.390ms</text>
+<circle cx="368.9" cy="76.0" r="4" class="baseline-point"/>
+<circle cx="389.4" cy="80.0" r="4" class="baseline-point"/>
+<circle cx="133.3" cy="84.0" r="4" class="baseline-point"/>
+<circle cx="440.5" cy="88.0" r="4" class="baseline-point"/>
+<circle cx="666.7" cy="92.0" r="4" class="baseline-point"/>
+<circle cx="368.9" cy="126.0" r="4" class="tuned-point"/>
+<circle cx="389.4" cy="130.0" r="4" class="tuned-point"/>
+<circle cx="133.3" cy="134.0" r="4" class="tuned-point"/>
+<circle cx="440.5" cy="138.0" r="4" class="tuned-point"/>
+<circle cx="666.7" cy="142.0" r="4" class="tuned-point"/>
+<line x1="389.4" y1="58" x2="389.4" y2="106" class="median-line"/>
+<line x1="389.4" y1="112" x2="389.4" y2="160" class="median-line"/>
+</svg>
+
+<svg class="ab-svg" viewBox="0 0 760 180" role="img">
+<title>frame_p99_ms bootstrap confidence interval</title>
+<text x="20" y="24">Bootstrap median-improvement CI</text>
+<line x1="80" y1="90" x2="720" y2="90" class="axis"/>
+<line x1="400.0" y1="50" x2="400.0" y2="130" class="zero-line"/>
+<rect x="133.3" y="70" width="533.3" height="40" class="ci-band"/>
+<line x1="400.0" y1="60" x2="400.0" y2="120" class="improvement-line"/>
+<text x="80" y="150">CI [-6.350, 6.350] ms; improvement +0.000ms</text>
+</svg>
+
+</div>
+</article>
+<article class="ab-card">
+<h3>frame_over_16ms</h3>
+<ul class="ab-warning-list">
+<li>estimated 24 runs per side needed to detect 10% improvement at current noise</li>
+<li>bootstrap 95% CI crosses zero; A/B improvement is not statistically significant</li>
+</ul>
+<p class="muted">Sample-size guidance for 10% target: 24 runs per side. normal approximation using pooled_stddev=823.877, baseline_median=6796.000, target_delta=679.600</p>
+<div class="ab-chart-grid">
+<svg class="ab-svg" viewBox="0 0 760 220" role="img">
+<title>frame_over_16ms sample distribution</title>
+<text x="20" y="24">Sample distribution</text>
+<line x1="80" y1="170" x2="720" y2="170" class="axis"/>
+<text x="20" y="84">baseline</text>
+<text x="20" y="134">tuned</text>
+<text x="80" y="195">5382.400frames</text>
+<text x="660" y="195">7405.600frames</text>
+<circle cx="666.7" cy="76.0" r="4" class="baseline-point"/>
+<circle cx="527.2" cy="80.0" r="4" class="baseline-point"/>
+<circle cx="162.8" cy="84.0" r="4" class="baseline-point"/>
+<circle cx="646.4" cy="88.0" r="4" class="baseline-point"/>
+<circle cx="133.3" cy="92.0" r="4" class="baseline-point"/>
+<circle cx="666.7" cy="126.0" r="4" class="tuned-point"/>
+<circle cx="527.2" cy="130.0" r="4" class="tuned-point"/>
+<circle cx="162.8" cy="134.0" r="4" class="tuned-point"/>
+<circle cx="646.4" cy="138.0" r="4" class="tuned-point"/>
+<circle cx="133.3" cy="142.0" r="4" class="tuned-point"/>
+<line x1="527.2" y1="58" x2="527.2" y2="106" class="median-line"/>
+<line x1="527.2" y1="112" x2="527.2" y2="160" class="median-line"/>
+</svg>
+
+<svg class="ab-svg" viewBox="0 0 760 180" role="img">
+<title>frame_over_16ms bootstrap confidence interval</title>
+<text x="20" y="24">Bootstrap median-improvement CI</text>
+<line x1="80" y1="90" x2="720" y2="90" class="axis"/>
+<line x1="400.0" y1="50" x2="400.0" y2="130" class="zero-line"/>
+<rect x="133.3" y="70" width="533.3" height="40" class="ci-band"/>
+<line x1="400.0" y1="60" x2="400.0" y2="120" class="improvement-line"/>
+<text x="80" y="150">CI [-1593.000, 1593.000] frames; improvement +0.000frames</text>
+</svg>
+
+</div>
+</article>
+<article class="ab-card">
+<h3>frame_over_33ms</h3>
+<ul class="ab-warning-list">
+<li>estimated 30 runs per side needed to detect 10% improvement at current noise</li>
+<li>bootstrap 95% CI crosses zero; A/B improvement is not statistically significant</li>
+<li>baseline distribution is noisy: noise_ratio=0.27</li>
+<li>tuned distribution is noisy: noise_ratio=0.27</li>
+</ul>
+<p class="muted">Sample-size guidance for 10% target: 30 runs per side. normal approximation using pooled_stddev=238.016, baseline_median=433.000, target_delta=43.300</p>
+<div class="ab-chart-grid">
+<svg class="ab-svg" viewBox="0 0 760 220" role="img">
+<title>frame_over_33ms sample distribution</title>
+<text x="20" y="24">Sample distribution</text>
+<line x1="80" y1="170" x2="720" y2="170" class="axis"/>
+<text x="20" y="84">baseline</text>
+<text x="20" y="134">tuned</text>
+<text x="80" y="195">0.500frames</text>
+<text x="660" y="195">786.500frames</text>
+<circle cx="432.2" cy="76.0" r="4" class="baseline-point"/>
+<circle cx="507.1" cy="80.0" r="4" class="baseline-point"/>
+<circle cx="133.3" cy="84.0" r="4" class="baseline-point"/>
+<circle cx="413.4" cy="88.0" r="4" class="baseline-point"/>
+<circle cx="666.7" cy="92.0" r="4" class="baseline-point"/>
+<circle cx="432.2" cy="126.0" r="4" class="tuned-point"/>
+<circle cx="507.1" cy="130.0" r="4" class="tuned-point"/>
+<circle cx="133.3" cy="134.0" r="4" class="tuned-point"/>
+<circle cx="413.4" cy="138.0" r="4" class="tuned-point"/>
+<circle cx="666.7" cy="142.0" r="4" class="tuned-point"/>
+<line x1="432.2" y1="58" x2="432.2" y2="106" class="median-line"/>
+<line x1="432.2" y1="112" x2="432.2" y2="160" class="median-line"/>
+</svg>
+
+<svg class="ab-svg" viewBox="0 0 760 180" role="img">
+<title>frame_over_33ms bootstrap confidence interval</title>
+<text x="20" y="24">Bootstrap median-improvement CI</text>
+<line x1="80" y1="90" x2="720" y2="90" class="axis"/>
+<line x1="400.0" y1="50" x2="400.0" y2="130" class="zero-line"/>
+<rect x="133.3" y="70" width="533.3" height="40" class="ci-band"/>
+<line x1="400.0" y1="60" x2="400.0" y2="120" class="improvement-line"/>
+<text x="80" y="150">CI [-367.000, 367.000] frames; improvement +0.000frames</text>
+</svg>
+
+</div>
+</article>
+<article class="ab-card">
+<h3>frame_over_50ms</h3>
+<ul class="ab-warning-list">
+<li>estimated 30 runs per side needed to detect 10% improvement at current noise</li>
+<li>bootstrap 95% CI crosses zero; A/B improvement is not statistically significant</li>
+<li>baseline distribution is noisy: noise_ratio=0.38</li>
+<li>tuned distribution is noisy: noise_ratio=0.38</li>
+</ul>
+<p class="muted">Sample-size guidance for 10% target: 30 runs per side. normal approximation using pooled_stddev=8.019, baseline_median=8.000, target_delta=0.800</p>
+<div class="ab-chart-grid">
+<svg class="ab-svg" viewBox="0 0 760 220" role="img">
+<title>frame_over_50ms sample distribution</title>
+<text x="20" y="24">Sample distribution</text>
+<line x1="80" y1="170" x2="720" y2="170" class="axis"/>
+<text x="20" y="84">baseline</text>
+<text x="20" y="134">tuned</text>
+<text x="80" y="195">0.900frames</text>
+<text x="660" y="195">26.100frames</text>
+<circle cx="260.3" cy="76.0" r="4" class="baseline-point"/>
+<circle cx="311.1" cy="80.0" r="4" class="baseline-point"/>
+<circle cx="133.3" cy="84.0" r="4" class="baseline-point"/>
+<circle cx="234.9" cy="88.0" r="4" class="baseline-point"/>
+<circle cx="666.7" cy="92.0" r="4" class="baseline-point"/>
+<circle cx="260.3" cy="126.0" r="4" class="tuned-point"/>
+<circle cx="311.1" cy="130.0" r="4" class="tuned-point"/>
+<circle cx="133.3" cy="134.0" r="4" class="tuned-point"/>
+<circle cx="234.9" cy="138.0" r="4" class="tuned-point"/>
+<circle cx="666.7" cy="142.0" r="4" class="tuned-point"/>
+<line x1="260.3" y1="58" x2="260.3" y2="106" class="median-line"/>
+<line x1="260.3" y1="112" x2="260.3" y2="160" class="median-line"/>
+</svg>
+
+<svg class="ab-svg" viewBox="0 0 760 180" role="img">
+<title>frame_over_50ms bootstrap confidence interval</title>
+<text x="20" y="24">Bootstrap median-improvement CI</text>
+<line x1="80" y1="90" x2="720" y2="90" class="axis"/>
+<line x1="400.0" y1="50" x2="400.0" y2="130" class="zero-line"/>
+<rect x="133.3" y="70" width="533.3" height="40" class="ci-band"/>
+<line x1="400.0" y1="60" x2="400.0" y2="120" class="improvement-line"/>
+<text x="80" y="150">CI [-16.000, 16.000] frames; improvement +0.000frames</text>
+</svg>
+
+</div>
+</article>
+<article class="ab-card">
+<h3>max_latency_ns</h3>
+<ul class="ab-warning-list">
+<li>estimated 26 runs per side needed to detect 10% improvement at current noise</li>
+<li>bootstrap 95% CI crosses zero; A/B improvement is not statistically significant</li>
+</ul>
+<p class="muted">Sample-size guidance for 10% target: 26 runs per side. normal approximation using pooled_stddev=531462.749, baseline_median=4152319.000, target_delta=415231.900</p>
+<div class="ab-chart-grid">
+<svg class="ab-svg" viewBox="0 0 760 220" role="img">
+<title>max_latency_ns sample distribution</title>
+<text x="20" y="24">Sample distribution</text>
+<line x1="80" y1="170" x2="720" y2="170" class="axis"/>
+<text x="20" y="84">baseline</text>
+<text x="20" y="134">tuned</text>
+<text x="80" y="195">3947354.200ns</text>
+<text x="660" y="195">5359451.800ns</text>
+<circle cx="172.8" cy="76.0" r="4" class="baseline-point"/>
+<circle cx="133.3" cy="80.0" r="4" class="baseline-point"/>
+<circle cx="505.1" cy="84.0" r="4" class="baseline-point"/>
+<circle cx="172.9" cy="88.0" r="4" class="baseline-point"/>
+<circle cx="666.7" cy="92.0" r="4" class="baseline-point"/>
+<circle cx="172.8" cy="126.0" r="4" class="tuned-point"/>
+<circle cx="133.3" cy="130.0" r="4" class="tuned-point"/>
+<circle cx="505.1" cy="134.0" r="4" class="tuned-point"/>
+<circle cx="172.9" cy="138.0" r="4" class="tuned-point"/>
+<circle cx="666.7" cy="142.0" r="4" class="tuned-point"/>
+<line x1="172.9" y1="58" x2="172.9" y2="106" class="median-line"/>
+<line x1="172.9" y1="112" x2="172.9" y2="160" class="median-line"/>
+</svg>
+
+<svg class="ab-svg" viewBox="0 0 760 180" role="img">
+<title>max_latency_ns bootstrap confidence interval</title>
+<text x="20" y="24">Bootstrap median-improvement CI</text>
+<line x1="80" y1="90" x2="720" y2="90" class="axis"/>
+<line x1="400.0" y1="50" x2="400.0" y2="130" class="zero-line"/>
+<rect x="133.3" y="70" width="533.3" height="40" class="ci-band"/>
+<line x1="400.0" y1="60" x2="400.0" y2="120" class="improvement-line"/>
+<text x="80" y="150">CI [-1089458.000, 1089458.000] ns; improvement +0.000ns</text>
+</svg>
+
+</div>
+</article>
+</section>
+<h2>Why</h2>
+<ul>
+<li>formal A/B diagnostic_raw_score_total: baseline_median=21533.000 tuned_median=21533.000 improvement=0.000 effect_size=0.00 95% CI [-11461.000, 11461.000] enough_samples=true significant=false power=30 runs/side</li>
+<li>formal A/B over_5ms: baseline_median=0.000 tuned_median=0.000 improvement=0.000 effect_size=0.00 95% CI [-1.000, 1.000] enough_samples=true significant=false power=n/a</li>
+<li>formal A/B frame_p99_ms: baseline_median=38.338 tuned_median=38.338 improvement=0.000 effect_size=0.00 95% CI [-6.350, 6.350] enough_samples=true significant=false power=18 runs/side</li>
+<li>formal A/B frame_over_16ms: baseline_median=6796.000 tuned_median=6796.000 improvement=0.000 effect_size=0.00 95% CI [-1593.000, 1593.000] enough_samples=true significant=false power=24 runs/side</li>
+<li>formal A/B frame_over_33ms: baseline_median=433.000 tuned_median=433.000 improvement=0.000 effect_size=0.00 95% CI [-367.000, 367.000] enough_samples=true significant=false power=30 runs/side</li>
+<li>formal A/B frame_over_50ms: baseline_median=8.000 tuned_median=8.000 improvement=0.000 effect_size=0.00 95% CI [-16.000, 16.000] enough_samples=true significant=false power=30 runs/side</li>
+<li>formal A/B max_latency_ns: baseline_median=4152319.000 tuned_median=4152319.000 improvement=0.000 effect_size=0.00 95% CI [-1089458.000, 1089458.000] enough_samples=true significant=false power=26 runs/side</li>
+<li>Median score delta versus baseline &#39;baseline-online&#39; is 0 (0.0%, effect_size=0.00, noise_ratio=0.32)</li>
+<li>over_5ms delta versus &#39;baseline-online&#39; is 0 (effect_size=0.00, noise_ratio=n/a)</li>
+<li>frame p99 delta versus &#39;baseline-online&#39; is 0us (effect_size=0.00, noise_ratio=0.04)</li>
+<li>best profile &#39;baseline-online&#39; had 5 valid run(s) and 0 invalid run(s)</li>
+<li>best median score=21533 IQR=6829 worst=32994</li>
+</ul>
+<h2>Warnings</h2>
+<ul>
+<li>best profile score IQR is non-zero</li>
+<li>comparability Warning profile=baseline-online kind=drop-counters-nonzero: candidate had non-zero drop counters (max=403467)</li>
+<li>comparability Warning profile=kcd1-game-on-1-5-7-11-gamescope-on-0-6 kind=drop-counters-nonzero: candidate had non-zero drop counters (max=428919)</li>
+<li>best profile score IQR is non-zero (6829)</li>
+<li>diagnostic_raw_score_total: estimated 30 runs per side needed to detect 10% improvement at current noise</li>
+<li>diagnostic_raw_score_total: bootstrap 95% CI crosses zero; A/B improvement is not statistically significant</li>
+<li>diagnostic_raw_score_total: baseline distribution is noisy: noise_ratio=0.32</li>
+<li>diagnostic_raw_score_total: tuned distribution is noisy: noise_ratio=0.32</li>
+<li>over_5ms: bootstrap 95% CI crosses zero; A/B improvement is not statistically significant</li>
+<li>frame_p99_ms: estimated 18 runs per side needed to detect 10% improvement at current noise</li>
+<li>frame_p99_ms: bootstrap 95% CI crosses zero; A/B improvement is not statistically significant</li>
+<li>frame_over_16ms: estimated 24 runs per side needed to detect 10% improvement at current noise</li>
+<li>frame_over_16ms: bootstrap 95% CI crosses zero; A/B improvement is not statistically significant</li>
+<li>frame_over_33ms: estimated 30 runs per side needed to detect 10% improvement at current noise</li>
+<li>frame_over_33ms: bootstrap 95% CI crosses zero; A/B improvement is not statistically significant</li>
+<li>frame_over_33ms: baseline distribution is noisy: noise_ratio=0.27</li>
+<li>frame_over_33ms: tuned distribution is noisy: noise_ratio=0.27</li>
+<li>frame_over_50ms: estimated 30 runs per side needed to detect 10% improvement at current noise</li>
+<li>frame_over_50ms: bootstrap 95% CI crosses zero; A/B improvement is not statistically significant</li>
+<li>frame_over_50ms: baseline distribution is noisy: noise_ratio=0.38</li>
+<li>frame_over_50ms: tuned distribution is noisy: noise_ratio=0.38</li>
+<li>max_latency_ns: estimated 26 runs per side needed to detect 10% improvement at current noise</li>
+<li>max_latency_ns: bootstrap 95% CI crosses zero; A/B improvement is not statistically significant</li>
+<li>close score margin versus &#39;baseline-online&#39;: delta_abs=0 threshold=1076</li>
+<li>formal diagnostic score comparison is underpowered, insignificant, or not positive; recommendation requires retest</li>
+</ul>
+<h2>Next steps</h2>
+<ul>
+<li>Rerun tune with the same workload and at least 5 runs.</li>
+</ul>
+</body></html>
