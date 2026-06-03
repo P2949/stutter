@@ -23,6 +23,12 @@ Options:
           
       --run-name <NAME>
           
+      --scenario <NAME>
+          
+      --workload-label <LABEL>
+          
+      --route-label <LABEL>
+          
       --out-dir <PATH>
           
       --include-comm <PATTERN>

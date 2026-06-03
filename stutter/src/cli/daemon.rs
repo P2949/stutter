@@ -34,6 +34,8 @@ pub(super) enum DaemonCommand {
     Restore(DaemonRestoreArgs),
     #[command(name = "emergency-restore")]
     EmergencyRestore(DaemonRestoreArgs),
+    #[command(name = "rollback-drill")]
+    RollbackDrill(DaemonRollbackDrillArgs),
 }
 
 #[derive(Args, Debug, Clone)]
@@ -247,6 +249,15 @@ pub(super) struct DaemonResumeArgs {}
 pub(super) struct DaemonRestoreArgs {
     #[arg(long = "dry-run")]
     pub(super) dry_run: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub(super) struct DaemonRollbackDrillArgs {
+    #[arg(long = "dry-run")]
+    pub(super) dry_run: bool,
+
+    #[arg(long = "json")]
+    pub(super) json: bool,
 }
 
 #[cfg(test)]

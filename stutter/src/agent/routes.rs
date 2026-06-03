@@ -75,6 +75,7 @@ pub(crate) fn capabilities_response(state: &AgentState) -> CapabilitiesResponse 
     CapabilitiesResponse {
         version: env!("CARGO_PKG_VERSION").to_owned(),
         auth_required: state.auth.any_token_configured(),
+        remote_access: remote_access_status(state),
         max_duration_seconds: state.limits.max_duration_seconds,
         max_targets: state.limits.max_targets,
         max_concurrent_recordings: state.limits.max_concurrent_recordings,

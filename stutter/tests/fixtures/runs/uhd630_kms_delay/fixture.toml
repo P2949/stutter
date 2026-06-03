@@ -1,11 +1,12 @@
 name = "uhd630_kms_delay"
-schema_version = 22
+schema_version = 23
 source = "synthetic-display-path"
 quality_expectation = "High"
 description = "Synthetic display-path fixture with UHD630/i915 scanout and KMS/pageflip delay near a frame outlier."
 
 [expected]
 primary_cause = "Unknown"
+expected_behavior = "must_diagnose"
 accepted_confidence = []
 data_quality = "High"
 

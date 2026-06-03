@@ -70,6 +70,28 @@ fn merge_bool(
     }
 }
 
+fn normalize_recording_identity(
+    recording: &mut crate::config::model::RecordingConfig,
+) -> anyhow::Result<()> {
+    recording.scenario_name =
+        crate::scenario::normalize_identity_label(recording.scenario_name.as_deref());
+    recording.workload_label =
+        crate::scenario::normalize_identity_label(recording.workload_label.as_deref());
+    recording.route_label =
+        crate::scenario::normalize_identity_label(recording.route_label.as_deref());
+
+    if let Some(scenario_name) = recording.scenario_name.as_deref() {
+        crate::scenario::validate_scenario_name(scenario_name)?;
+    }
+
+    recording.scenario_hash = crate::scenario::scenario_identity_hash(
+        recording.scenario_name.as_deref(),
+        recording.workload_label.as_deref(),
+        recording.route_label.as_deref(),
+    );
+    Ok(())
+}
+
 pub(crate) fn monitor_config_from_monitor_args(
     args: MonitorArgs,
     recording_mode: RecordingMode,
@@ -496,6 +518,7 @@ pub(crate) fn monitor_config_from_monitor_args_with_file_and_presence(
     config.timing.summary_period_ms = summary_period_ms;
     config.timing.spike_threshold_ns = spike_threshold_ns;
     config.alerts.threshold_ns = alert_threshold_ns;
+    normalize_recording_identity(&mut config.recording)?;
 
     config.probes.faults = faults;
     config.probes.stat_wait = stat_wait;

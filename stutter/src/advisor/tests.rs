@@ -5,8 +5,12 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use super::{engine::*, models::*, scanner::*};
+use super::{
+    engine::*, fix_plan::AdvisorFixKind, models::*, render::render_advisor_report, scanner::*,
+};
 use crate::{
+    actions::SafetyClass,
+    daemon_policy::ActionEffectScope,
     diagnosis::{
         Confidence, Diagnosis, DiagnosisCandidate, EvidenceItem, EvidenceKind, StutterCause,
     },
@@ -521,4 +525,102 @@ fn gpu_candidate_uses_power_limit_and_fence_evidence_in_recommendation() {
 
     assert!(recommendation.rationale.contains("power limit"));
     assert!(recommendation.rationale.contains("DRM fence wait"));
+}
+
+#[test]
+fn scheduler_delay_advisor_includes_cpu_affinity_fix_plan() {
+    let report = report_for(
+        &[StutterCause::GameThreadSchedulerDelay],
+        DataQualityLevel::High,
+    );
+
+    let fix_plan = report.recommendations[0]
+        .fix_plan
+        .as_ref()
+        .expect("scheduler advisor should include a fix plan");
+
+    assert_eq!(report.schema_version, 2);
+    assert_eq!(report.fix_plans.len(), 1);
+    assert_eq!(fix_plan.kind, AdvisorFixKind::CpuAffinityProfile);
+    assert_eq!(fix_plan.cause, StutterCause::GameThreadSchedulerDelay);
+    assert_eq!(fix_plan.safety_class, SafetyClass::ReversibleLowRisk);
+    assert_eq!(fix_plan.effect_scope, ActionEffectScope::LocalProcessTree);
+    assert!(
+        fix_plan
+            .expected_metric_movement
+            .iter()
+            .any(|movement| movement.metric == "diagnostic_raw_score_total"
+                && movement.required_ci_excludes_zero)
+    );
+    assert!(
+        fix_plan
+            .validation
+            .acceptance_criteria
+            .iter()
+            .any(|criterion| criterion.metric == "over_5ms"
+                && criterion.minimum_relative_improvement_percent == Some(10.0))
+    );
+    assert!(
+        fix_plan
+            .suggested_commands
+            .iter()
+            .any(|command| command.contains("stutter tune --tree-pid 42"))
+    );
+}
+
+#[test]
+fn gpu_candidate_advisor_includes_investigation_plan_not_cpu_fix() {
+    let report = report_for(&[StutterCause::GpuBoundCandidate], DataQualityLevel::High);
+    let fix_plan = report.recommendations[0]
+        .fix_plan
+        .as_ref()
+        .expect("GPU candidate should include an investigation plan");
+
+    assert_ne!(fix_plan.kind, AdvisorFixKind::CpuAffinityProfile);
+    assert!(matches!(
+        fix_plan.kind,
+        AdvisorFixKind::GpuPowerInvestigation | AdvisorFixKind::DisplayPathInvestigation
+    ));
+    assert_eq!(fix_plan.safety_class, SafetyClass::ObserveOnly);
+    assert!(
+        report
+            .recommendations
+            .iter()
+            .flat_map(|rec| rec.suggested_commands.iter())
+            .all(|command| !command.contains("stutter tune --tree-pid"))
+    );
+}
+
+#[test]
+fn irq_candidate_advisor_includes_investigation_plan_with_validation_recipe() {
+    let report = report_for(&[StutterCause::IrqDelayCandidate], DataQualityLevel::High);
+    let fix_plan = report.recommendations[0]
+        .fix_plan
+        .as_ref()
+        .expect("IRQ candidate should include an investigation plan");
+
+    assert_eq!(fix_plan.kind, AdvisorFixKind::IrqAffinityInvestigation);
+    assert_eq!(fix_plan.safety_class, SafetyClass::ObserveOnly);
+    assert_eq!(fix_plan.effect_scope, ActionEffectScope::Irq);
+    assert!(
+        fix_plan
+            .validation
+            .stop_conditions
+            .iter()
+            .any(|condition| condition.contains("Do not apply"))
+    );
+}
+
+#[test]
+fn advisor_render_includes_structured_fix_plan_sections() {
+    let report = report_for(
+        &[StutterCause::GameThreadSchedulerDelay],
+        DataQualityLevel::High,
+    );
+    let rendered = render_advisor_report(&report);
+
+    assert!(rendered.contains("Expected metric movement"));
+    assert!(rendered.contains("Validation"));
+    assert!(rendered.contains("diagnostic_raw_score_total"));
+    assert!(rendered.contains("CI excludes zero"));
 }

@@ -39,6 +39,17 @@ pub(crate) fn read_prebuilt_bpf_object(path: &Path) -> Result<Vec<u8>, EbpfLoadE
 /// function returns an error - it does not silently fall back to the embedded
 /// object.
 pub(crate) fn ebpf_object_bytes() -> anyhow::Result<Cow<'static, [u8]>> {
+    let manifest_metadata = crate::ebpf::artifact_manifest::ebpf_artifact_manifest(
+        env!("CARGO_PKG_VERSION"),
+        "runtime_hash_unavailable",
+    );
+    log::debug!(
+        "ebpf_object_metadata event_abi_version={} map_count={} program_count={}",
+        manifest_metadata.event_abi_version,
+        manifest_metadata.map_names.len(),
+        manifest_metadata.program_names.len()
+    );
+
     if let Ok(path_str) = std::env::var("STUTTER_BPF_OBJECT") {
         let path = PathBuf::from(path_str);
         log::info!("using_prebuilt_bpf_object path={}", path.display());

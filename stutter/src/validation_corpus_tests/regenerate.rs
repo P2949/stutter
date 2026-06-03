@@ -4,7 +4,7 @@ use crate::test_fixture_builder;
 
 #[test]
 #[ignore]
-fn regenerate_public_examples_v22() {
+fn regenerate_public_examples_v23() {
     let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let workspace_root = manifest_dir
         .parent()
@@ -13,10 +13,10 @@ fn regenerate_public_examples_v22() {
         .join("docs")
         .join("examples")
         .join("artifacts")
-        .join("v22");
+        .join("v23");
 
-    test_fixture_builder::write_public_examples_v22(&root)
-        .unwrap_or_else(|err| panic!("failed to regenerate public v22 examples: {err:#}"));
+    test_fixture_builder::write_public_examples_v23(&root)
+        .unwrap_or_else(|err| panic!("failed to regenerate public v23 examples: {err:#}"));
 }
 
 #[test]

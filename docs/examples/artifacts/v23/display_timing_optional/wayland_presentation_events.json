@@ -1,0 +1,1 @@
+{"elapsed_ms":1220,"source":"gamescope","app_id":"game.example","surface_role":"game","commit_ns":1001210000000,"presented_ns":1001220000000,"commit_to_present_ns":10000000,"output_name":"DP-1","refresh_ns":6944444,"sequence":99182,"zero_copy":true,"discarded":false,"flags":["zero_copy"],"confidence":"medium"}

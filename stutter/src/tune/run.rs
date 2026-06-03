@@ -66,6 +66,10 @@ pub(super) struct TuneCollectionInput<'a> {
     pub(super) mangohud_log: Option<PathBuf>,
     pub(super) enforce: bool,
     pub(super) hwmon: bool,
+    pub(super) scenario_name: Option<String>,
+    pub(super) scenario_hash: Option<String>,
+    pub(super) workload_label: Option<String>,
+    pub(super) route_label: Option<String>,
     pub(super) tune_output_dir: &'a Path,
 }
 
@@ -80,6 +84,10 @@ pub(super) async fn collect_tune_results(
     let mangohud_log = input.mangohud_log;
     let enforce = input.enforce;
     let tune_output_dir = input.tune_output_dir;
+    let scenario_name = input.scenario_name;
+    let scenario_hash = input.scenario_hash;
+    let workload_label = input.workload_label;
+    let route_label = input.route_label;
     let measure_seconds = epoch_seconds.saturating_sub(warmup_seconds);
     let mut results = Vec::new();
     let shared_hwmon = if input.hwmon {
@@ -132,6 +140,10 @@ pub(super) async fn collect_tune_results(
                     },
                     recording: crate::config::model::RecordingConfig {
                         run_name: Some(format!("tune-{}", profile.name)),
+                        scenario_name: scenario_name.clone(),
+                        scenario_hash: scenario_hash.clone(),
+                        workload_label: workload_label.clone(),
+                        route_label: route_label.clone(),
                         output_dir: Some(tune_run_dir(tune_output_dir, &profile.name, iteration)),
                         ..Default::default()
                     },
@@ -664,9 +676,7 @@ pub fn default_tune_output_dir() -> anyhow::Result<PathBuf> {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
 
-    path.push(".local");
-    path.push("state");
-    path.push("stutter");
+    path.extend([".local", "state", "stutter"]);
     cleanup_stale_tune_run_dirs(&path)?;
     path.push(format!("tune-{}", unix_nanos_now()));
     Ok(path)

@@ -18,6 +18,7 @@ use super::{
 use crate::{
     actions::SafetyClass,
     autotune::objective::ObjectiveKind,
+    daemon::explain::{PolicyDecisionKind, PolicyExplanation},
     daemon_policy::{ActionDescriptor, ActionSource, DaemonPolicy, PolicyIntent},
 };
 
@@ -26,8 +27,15 @@ pub struct CandidatePlanFile {
     pub schema_version: u32,
     pub candidate: CandidatePlanSummary,
     pub descriptor: ActionDescriptor,
+    pub policy_intent: PolicyIntent,
+    #[serde(skip_deserializing, default = "default_policy_explanation")]
+    pub policy_explanation: PolicyExplanation,
     pub objective: ObjectiveKind,
     pub evidence: Vec<CandidateEvidence>,
+    pub dry_run_command: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub apply_command: Option<String>,
+    pub rollback_command: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub manual_apply_command: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -44,9 +52,19 @@ pub struct CandidatePlanSummary {
 }
 
 impl CandidatePlanFile {
-    pub const SCHEMA_VERSION: u32 = 1;
+    pub const SCHEMA_VERSION: u32 = 2;
 
     pub fn from_suggestion(suggestion: &CandidateSuggestion) -> Self {
+        let policy = policy_for_candidate_plan_descriptor(&suggestion.descriptor);
+        let policy_intent = PolicyIntent::Apply;
+        let policy_explanation =
+            policy.explain_action(policy_intent.clone(), &suggestion.descriptor);
+        let apply_command = apply_command_if_policy_allows(
+            &suggestion.descriptor,
+            &policy_intent,
+            &policy_explanation,
+            suggestion.manual_apply_command.clone(),
+        );
         Self {
             schema_version: Self::SCHEMA_VERSION,
             candidate: CandidatePlanSummary {
@@ -56,8 +74,16 @@ impl CandidatePlanFile {
                 reason: Some(suggestion.reason.clone()),
             },
             descriptor: suggestion.descriptor.clone(),
+            policy_intent,
+            policy_explanation,
             objective: suggestion.objective,
             evidence: suggestion.evidence.clone(),
+            dry_run_command: suggestion
+                .dry_run_command
+                .clone()
+                .unwrap_or_else(|| "stutter autotune apply-candidate --candidate-json <candidate-plan.json> --dry-run".to_owned()),
+            apply_command,
+            rollback_command: "stutter daemon emergency-restore --dry-run".to_owned(),
             manual_apply_command: suggestion.manual_apply_command.clone(),
             manual_only_reason: suggestion.manual_only_reason.clone(),
             executable: None,
@@ -65,7 +91,37 @@ impl CandidatePlanFile {
     }
 
     pub fn from_candidate(candidate: &CandidateAction, affected_tasks: Option<usize>) -> Self {
+        Self::from_candidate_with_policy(
+            candidate,
+            affected_tasks,
+            &policy_for_candidate_plan_descriptor(&candidate.descriptor()),
+            PolicyIntent::Apply,
+            None,
+        )
+    }
+
+    pub fn from_candidate_with_policy(
+        candidate: &CandidateAction,
+        affected_tasks: Option<usize>,
+        policy: &DaemonPolicy,
+        policy_intent: PolicyIntent,
+        plan_path: Option<&Path>,
+    ) -> Self {
         let (manual_apply_command, manual_only_reason) = candidate_plan_manual_metadata(candidate);
+        let descriptor = candidate.descriptor();
+        let policy_explanation = policy.explain_action(policy_intent.clone(), &descriptor);
+        let candidate_json = plan_path
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "<candidate-plan.json>".to_owned());
+        let candidate_plan_apply_command = CandidateExecutablePlan::from_candidate(candidate)
+            .is_some()
+            .then(|| format!("stutter autotune apply-candidate --candidate-json {candidate_json}"));
+        let apply_command = apply_command_if_policy_allows(
+            &descriptor,
+            &policy_intent,
+            &policy_explanation,
+            candidate_plan_apply_command,
+        );
         Self {
             schema_version: Self::SCHEMA_VERSION,
             candidate: CandidatePlanSummary {
@@ -74,9 +130,16 @@ impl CandidatePlanFile {
                 affected_tasks,
                 reason: Some(candidate.describe()),
             },
-            descriptor: candidate.descriptor(),
+            descriptor,
+            policy_intent,
+            policy_explanation,
             objective: candidate.objective(),
             evidence: candidate.evidence().to_vec(),
+            dry_run_command: format!(
+                "stutter autotune apply-candidate --candidate-json {candidate_json} --dry-run"
+            ),
+            apply_command,
+            rollback_command: "stutter daemon emergency-restore --dry-run".to_owned(),
             manual_apply_command,
             manual_only_reason,
             executable: CandidateExecutablePlan::from_candidate(candidate),
@@ -117,7 +180,30 @@ pub fn write_candidate_plan_file(
     candidate: &CandidateAction,
     affected_tasks: Option<usize>,
 ) -> anyhow::Result<CandidatePlanFile> {
-    let plan = CandidatePlanFile::from_candidate(candidate, affected_tasks);
+    let policy = policy_for_candidate_plan_descriptor(&candidate.descriptor());
+    write_candidate_plan_file_with_policy(
+        path,
+        candidate,
+        affected_tasks,
+        &policy,
+        PolicyIntent::Apply,
+    )
+}
+
+pub fn write_candidate_plan_file_with_policy(
+    path: &Path,
+    candidate: &CandidateAction,
+    affected_tasks: Option<usize>,
+    policy: &DaemonPolicy,
+    policy_intent: PolicyIntent,
+) -> anyhow::Result<CandidatePlanFile> {
+    let plan = CandidatePlanFile::from_candidate_with_policy(
+        candidate,
+        affected_tasks,
+        policy,
+        policy_intent,
+        Some(path),
+    );
 
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -127,6 +213,49 @@ pub fn write_candidate_plan_file(
     fs::write(path, bytes)?;
 
     Ok(plan)
+}
+
+fn policy_for_candidate_plan_descriptor(descriptor: &ActionDescriptor) -> DaemonPolicy {
+    match descriptor.safety_class {
+        SafetyClass::ObserveOnly | SafetyClass::ReversibleLowRisk => {
+            DaemonPolicy::apply_low_risk(ActionSource::Cli)
+        }
+        SafetyClass::ReversibleMediumRisk => DaemonPolicy::apply_medium_risk(ActionSource::Cli),
+        SafetyClass::HighRisk => DaemonPolicy::apply_high_risk_explicit(ActionSource::Cli),
+    }
+}
+
+fn default_policy_explanation() -> PolicyExplanation {
+    let descriptor = ActionDescriptor {
+        action_id: crate::actions::ActionId::new("candidate-plan:deserialized"),
+        action_kind: "candidate_plan".to_owned(),
+        safety_class: SafetyClass::ObserveOnly,
+        effect_scope: crate::daemon_policy::ActionEffectScope::ObserveOnly,
+        rollback: crate::daemon_policy::RollbackRequirement::NotRequiredForDryRun,
+        persistent_effect: false,
+        touches_system_wide_state: false,
+        requires_explicit_target: false,
+        confidence: None,
+    };
+    DaemonPolicy::observe(ActionSource::Cli).explain_action(PolicyIntent::Observe, &descriptor)
+}
+
+fn apply_command_if_policy_allows(
+    descriptor: &ActionDescriptor,
+    policy_intent: &PolicyIntent,
+    policy_explanation: &PolicyExplanation,
+    candidate_command: Option<String>,
+) -> Option<String> {
+    if descriptor.safety_class == SafetyClass::HighRisk || descriptor.touches_system_wide_state {
+        return None;
+    }
+    if !matches!(policy_intent, PolicyIntent::Apply) {
+        return None;
+    }
+    if !matches!(policy_explanation.decision, PolicyDecisionKind::Allowed) {
+        return None;
+    }
+    candidate_command
 }
 
 fn sanitize_candidate_plan_component(value: &str) -> String {

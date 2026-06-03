@@ -4,23 +4,29 @@ use anyhow::{Context, bail};
 use clap::{Parser, Subcommand};
 
 pub mod dependency_hygiene;
+pub mod ebpf_manifest;
 pub mod ebpf_smoke;
+pub mod fixture_coverage;
 pub mod fixtures;
 pub mod maturity_report;
 pub mod no_allow_attrs;
+pub mod ops_checks;
 pub mod preflight;
 pub mod process;
 pub mod workflow;
 
 use crate::{
     dependency_hygiene::run_dependency_hygiene,
+    ebpf_manifest::run_ebpf_manifest,
     ebpf_smoke::{EBPF_BUILD_COMMAND, run_privileged_ebpf_smoke, run_unprivileged_ebpf_smoke},
+    fixture_coverage::run_fixture_coverage,
     fixtures::{
         FIXTURE_CHECK_WORKFLOW, FIXTURE_UPDATE_WORKFLOW, REPORT_GOLDEN_UPDATE_WORKFLOW,
         SCHEMA_CHECK_WORKFLOW,
     },
     maturity_report::run_maturity_report,
     no_allow_attrs::run_no_allow_attrs,
+    ops_checks::{run_local_install_smoke, run_package_layout_check, run_service_smoke},
     preflight::run_preflight,
     process::run_cargo,
     workflow::{CommandSpec, run_command_specs, run_workflow},
@@ -33,7 +39,7 @@ pub struct Cli {
     pub command: XtaskCommand,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Subcommand)]
+#[derive(Clone, Debug, Eq, PartialEq, Subcommand)]
 pub enum XtaskCommand {
     #[command(about = "Run the non-root CI workflow used by local development")]
     Ci,
@@ -53,6 +59,16 @@ pub enum XtaskCommand {
         about = "Build eBPF object and check toolchain without requiring root."
     )]
     EbpfSmoke,
+    #[command(
+        name = "ebpf-manifest",
+        about = "Write a reproducible eBPF artifact manifest for a prebuilt object"
+    )]
+    EbpfManifest {
+        #[arg(long = "object", value_name = "PATH")]
+        object: PathBuf,
+        #[arg(long = "out", value_name = "PATH")]
+        out: PathBuf,
+    },
     #[command(
         name = "privileged-ebpf-smoke",
         about = "Build and run privileged eBPF loader tests."
@@ -83,6 +99,29 @@ pub enum XtaskCommand {
         about = "Validate committed validation corpus fixtures"
     )]
     FixtureCheck,
+    #[command(
+        name = "fixture-coverage",
+        about = "Print validation corpus coverage matrix and fail if required cells disappear"
+    )]
+    FixtureCoverage {
+        #[arg(long = "html", value_name = "PATH")]
+        html: Option<PathBuf>,
+    },
+    #[command(
+        name = "service-smoke",
+        about = "Validate packaged service unit command shapes without enabling services"
+    )]
+    ServiceSmoke,
+    #[command(
+        name = "package-layout-check",
+        about = "Validate tarball/distro packaging layout references"
+    )]
+    PackageLayoutCheck,
+    #[command(
+        name = "local-install-smoke",
+        about = "Install stutter into a temporary prefix and run dry-run checks"
+    )]
+    LocalInstallSmoke,
     #[command(
         name = "fixture-update",
         about = "Regenerate committed validation corpus and public example fixtures"
@@ -208,6 +247,7 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
         XtaskCommand::Smoke => run_command_specs(&root, SMOKE_COMMANDS),
         XtaskCommand::Preflight => run_preflight(),
         XtaskCommand::EbpfSmoke => run_unprivileged_ebpf_smoke(&root),
+        XtaskCommand::EbpfManifest { object, out } => run_ebpf_manifest(&root, &object, &out),
         XtaskCommand::PrivilegedEbpfSmoke => run_privileged_ebpf_smoke(&root),
         XtaskCommand::Validate => {
             run_preflight()?;
@@ -216,7 +256,14 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
         XtaskCommand::DependencyHygiene => run_dependency_hygiene(&root),
         XtaskCommand::SchemaCheck => run_workflow(&root, SCHEMA_CHECK_WORKFLOW),
         XtaskCommand::NoAllowAttrs => run_no_allow_attrs(&root),
-        XtaskCommand::FixtureCheck => run_workflow(&root, FIXTURE_CHECK_WORKFLOW),
+        XtaskCommand::FixtureCheck => {
+            run_fixture_coverage(&root, None)?;
+            run_workflow(&root, FIXTURE_CHECK_WORKFLOW)
+        }
+        XtaskCommand::FixtureCoverage { html } => run_fixture_coverage(&root, html.as_deref()),
+        XtaskCommand::ServiceSmoke => run_service_smoke(&root),
+        XtaskCommand::PackageLayoutCheck => run_package_layout_check(&root),
+        XtaskCommand::LocalInstallSmoke => run_local_install_smoke(&root),
         XtaskCommand::FixtureUpdate => run_workflow(&root, FIXTURE_UPDATE_WORKFLOW),
         XtaskCommand::ReportGoldenUpdate => run_workflow(&root, REPORT_GOLDEN_UPDATE_WORKFLOW),
         XtaskCommand::GenerateMan => {
@@ -289,19 +336,24 @@ mod tests {
                 "ci",
                 "clippy",
                 "dependency-hygiene",
+                "ebpf-manifest",
                 "ebpf-smoke",
                 "fixture-check",
+                "fixture-coverage",
                 "fixture-update",
                 "fmt",
                 "generate-completions",
                 "generate-man",
+                "local-install-smoke",
                 "maturity-report",
                 "no-allow-attrs",
                 "package",
+                "package-layout-check",
                 "preflight",
                 "privileged-ebpf-smoke",
                 "report-golden-update",
                 "schema-check",
+                "service-smoke",
                 "smoke",
                 "validate",
             ]
@@ -473,7 +525,7 @@ syn v2.0.117
             SCHEMA_CHECK_WORKFLOW.affected_paths,
             &[
                 "stutter/src/artifact_contract_tests.rs",
-                "docs/examples/artifacts/v22/**",
+                "docs/examples/artifacts/v23/**",
             ]
         );
     }
@@ -498,15 +550,15 @@ syn v2.0.117
         assert_eq!(
             command_texts(FIXTURE_UPDATE_COMMANDS),
             vec![
-                "cargo test -p stutter validation_corpus_tests::regenerate_validation_corpus -- --ignored --exact",
-                "cargo test -p stutter validation_corpus_tests::regenerate_public_examples_v22 -- --ignored --exact",
+                "cargo test -p stutter validation_corpus_tests::regenerate::regenerate_validation_corpus -- --ignored --exact",
+                "cargo test -p stutter validation_corpus_tests::regenerate::regenerate_public_examples_v23 -- --ignored --exact",
             ]
         );
         assert_eq!(
             FIXTURE_UPDATE_WORKFLOW.affected_paths,
             &[
                 "stutter/tests/fixtures/runs/**",
-                "docs/examples/artifacts/v22/**",
+                "docs/examples/artifacts/v23/**",
             ]
         );
     }

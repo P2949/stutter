@@ -1,11 +1,29 @@
 name = "real_block_io_overlap"
-schema_version = 22
+schema_version = 23
 source = "sanitized-real-recording"
 quality_expectation = "High"
 description = "Block I/O request overlapped the scheduler-latency cluster while unrelated block I/O occurred outside the correlation window."
 
+[platform]
+gpu_vendor = "NVIDIA"
+gpu_driver = "nvidia"
+compositor = "KWin"
+session_type = "wayland"
+scenario = "block-io"
+sanitized_capture_id = "sanitized-nvidia-kwin-block-io-overlap-v1"
+kernel_family = "linux"
+kernel_version_bucket = "6.8-6.12"
+cpu_vendor = "AMD"
+cpu_topology_bucket = "8c16t"
+display_refresh_bucket = "90-165hz"
+capture_features = [
+    "frames",
+    "block-io",
+]
+
 [expected]
 primary_cause = "BlockIoCandidate"
+expected_behavior = "must_diagnose"
 accepted_confidence = [
     "Medium",
     "High",

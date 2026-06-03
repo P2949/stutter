@@ -6,7 +6,7 @@ use crate::{
     autotune::{
         observation::AutotuneObservation,
         planner::{CandidatePlanner, PlanResult, PlannerInput},
-        planning::{candidate::CandidateAction, plan_io},
+        planning::{candidate::CandidateAction, plan_io, policy::policy_intent_for_mode},
     },
     daemon::policy::DaemonMode,
 };
@@ -118,10 +118,12 @@ impl AutotuneRuntime {
                 continue;
             };
             let path = plan_io::candidate_plan_path(&evaluation.candidate, &plan_dir);
-            plan_io::write_candidate_plan_file(
+            plan_io::write_candidate_plan_file_with_policy(
                 &path,
                 &evaluation.candidate,
                 Some(dry_run.affected_tasks),
+                &self.config.daemon_policy,
+                policy_intent_for_mode(self.config.daemon_policy.mode),
             )?;
             written.push(AutotuneDryRunPlanFileSummary {
                 candidate_name: evaluation.candidate_name.clone(),

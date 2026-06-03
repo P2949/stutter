@@ -1,7 +1,7 @@
 use super::{assertions::*, fixture::*};
 use crate::{diagnosis::StutterCause, report::DataQualityLevel};
 
-const REAL_MATRIX_FIXTURES: &[&str] = &[
+pub(super) const REAL_MATRIX_FIXTURES: &[&str] = &[
     "real_amd_hyprland_clean",
     "real_nvidia_gnome_false_positive",
     "real_intel_kwin_cpu_bound",
@@ -535,6 +535,49 @@ fn validation_corpus_real_matrix_covers_required_vendors_compositors_and_scenari
         assert_eq!(
             platform.session_type, "wayland",
             "{} expected session_type=wayland",
+            spec.name
+        );
+        assert_eq!(
+            platform.kernel_family.as_deref(),
+            Some("linux"),
+            "{} expected kernel_family=linux",
+            spec.name
+        );
+        assert!(
+            platform
+                .kernel_version_bucket
+                .as_deref()
+                .is_some_and(|bucket| !bucket.trim().is_empty() && bucket.contains('.')),
+            "{} platform.kernel_version_bucket must be a non-empty bucket",
+            spec.name
+        );
+        assert!(
+            platform
+                .cpu_vendor
+                .as_deref()
+                .is_some_and(|vendor| !vendor.trim().is_empty()),
+            "{} platform.cpu_vendor must not be empty",
+            spec.name
+        );
+        assert!(
+            platform
+                .cpu_topology_bucket
+                .as_deref()
+                .is_some_and(|bucket| bucket.ends_with('t') && bucket.contains('c')),
+            "{} platform.cpu_topology_bucket must be a bucket like 6c12t",
+            spec.name
+        );
+        assert!(
+            platform
+                .display_refresh_bucket
+                .as_deref()
+                .is_some_and(|bucket| bucket.ends_with("hz")),
+            "{} platform.display_refresh_bucket must be a refresh bucket",
+            spec.name
+        );
+        assert!(
+            !platform.capture_features.is_empty(),
+            "{} platform.capture_features must list coarse evidence streams",
             spec.name
         );
     }

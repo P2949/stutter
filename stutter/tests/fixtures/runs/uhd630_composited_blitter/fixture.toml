@@ -1,11 +1,12 @@
 name = "uhd630_composited_blitter"
-schema_version = 22
+schema_version = 23
 source = "synthetic-display-path"
 quality_expectation = "High"
 description = "Synthetic display-path fixture with composited presentation and iGPU blitter activity near a frame outlier."
 
 [expected]
 primary_cause = "Unknown"
+expected_behavior = "must_diagnose"
 accepted_confidence = []
 data_quality = "High"
 

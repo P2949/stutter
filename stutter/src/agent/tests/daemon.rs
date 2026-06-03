@@ -30,6 +30,11 @@ fn daemon_status_response_exposes_state_capabilities_and_restore_command() {
     let response = daemon_status_response(
         false,
         true,
+        RemoteAccessStatus {
+            remote_transport: "loopback_tcp".to_owned(),
+            remote_auth_configured: true,
+            remote_apply_enabled: true,
+        },
         state,
         test_capabilities(),
         SystemHealthSnapshot::default(),
@@ -37,6 +42,9 @@ fn daemon_status_response_exposes_state_capabilities_and_restore_command() {
 
     assert!(!response.active_recording);
     assert!(response.active_autotune);
+    assert_eq!(response.remote_access.remote_transport, "loopback_tcp");
+    assert!(response.remote_access.remote_auth_configured);
+    assert!(response.remote_access.remote_apply_enabled);
     assert_eq!(response.daemon_state.mode, DaemonMode::ApplyLowRisk);
     assert!(response.health.ok_for_apply);
     assert!(response.watchdog.ok);

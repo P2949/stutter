@@ -146,6 +146,15 @@ fn apply_recording_layer(config: &mut RecordingConfig, layer: &MonitorConfigLaye
     if let Some(value) = &layer.run_name {
         config.run_name = value.clone();
     }
+    if let Some(value) = &layer.scenario_name {
+        config.scenario_name = value.clone();
+    }
+    if let Some(value) = &layer.workload_label {
+        config.workload_label = value.clone();
+    }
+    if let Some(value) = &layer.route_label {
+        config.route_label = value.clone();
+    }
     if let Some(value) = &layer.output_dir {
         config.output_dir = value.clone();
     }

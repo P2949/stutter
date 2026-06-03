@@ -1,11 +1,12 @@
 name = "foreground_window"
-schema_version = 22
+schema_version = 23
 source = "synthetic-edge-case"
 quality_expectation = "High"
 description = "Synthetic edge-case fixture that verifies foreground PID/app/class are preserved while title is redacted."
 
 [expected]
 primary_cause = "Unknown"
+expected_behavior = "must_diagnose"
 accepted_confidence = []
 data_quality = "High"
 

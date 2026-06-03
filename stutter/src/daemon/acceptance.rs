@@ -168,6 +168,12 @@ pub fn run_fake_daemon_acceptance_suite() -> DaemonAcceptanceReport {
             soak_tests: true,
             stronger_tests: true,
             real_machine_validation: true,
+            real_validation_matrix: true,
+            false_negative_catalogue: true,
+            local_install_smoke_tests: true,
+            emergency_restore_smoke_tests: true,
+            service_start_stop_smoke_tests: true,
+            rollback_drill: true,
             ..ReleaseReadinessInputs::default()
         },
     );

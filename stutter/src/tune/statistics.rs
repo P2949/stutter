@@ -15,6 +15,13 @@ pub struct BootstrapConfidenceInterval {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PowerEstimate {
+    pub target_relative_improvement_percent: f64,
+    pub estimated_runs_per_side: Option<usize>,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FormalMetricComparison {
     pub metric: String,
     pub unit: String,
@@ -53,6 +60,8 @@ pub struct FormalMetricComparison {
 
     #[serde(default)]
     pub underpowered: bool,
+    #[serde(default)]
+    pub power_estimate: Option<PowerEstimate>,
     #[serde(default)]
     pub uncertainty_warnings: Vec<String>,
 }
@@ -112,6 +121,11 @@ pub fn compare_lower_is_better_metric(
     let statistically_significant = bootstrap_ci95
         .as_ref()
         .is_some_and(|ci| ci.lower > 0.0 || ci.upper < 0.0);
+    let power_estimate = Some(estimate_runs_per_side_for_effect(
+        &baseline_values,
+        &tuned_values,
+        10.0,
+    ));
 
     let mut uncertainty_warnings = Vec::new();
 
@@ -127,6 +141,18 @@ pub fn compare_lower_is_better_metric(
             baseline_values.len(),
             tuned_values.len(),
             RECOMMENDED_FORMAL_SAMPLES_PER_SIDE
+        ));
+    }
+
+    if let Some(power_estimate) = &power_estimate
+        && (baseline_values.len() < RECOMMENDED_FORMAL_SAMPLES_PER_SIDE
+            || tuned_values.len() < RECOMMENDED_FORMAL_SAMPLES_PER_SIDE
+            || enough_samples && !statistically_significant)
+        && let Some(estimated) = power_estimate.estimated_runs_per_side
+    {
+        uncertainty_warnings.push(format!(
+            "estimated {estimated} runs per side needed to detect {:.0}% improvement at current noise",
+            power_estimate.target_relative_improvement_percent
         ));
     }
 
@@ -174,7 +200,70 @@ pub fn compare_lower_is_better_metric(
         not_enough_samples_reason,
         statistically_significant,
         underpowered,
+        power_estimate,
         uncertainty_warnings,
+    }
+}
+
+pub fn estimate_runs_per_side_for_effect(
+    baseline_values: &[f64],
+    tuned_values: &[f64],
+    target_relative_improvement_percent: f64,
+) -> PowerEstimate {
+    let baseline_values = finite_values(baseline_values);
+    let tuned_values = finite_values(tuned_values);
+    if baseline_values.len() < 2 || tuned_values.len() < 2 {
+        return PowerEstimate {
+            target_relative_improvement_percent,
+            estimated_runs_per_side: None,
+            reason: "sample-size estimate unavailable: at least two finite samples per side are required".to_owned(),
+        };
+    }
+
+    let baseline_median = median_f64(&baseline_values);
+    if baseline_median.abs() <= f64::EPSILON {
+        return PowerEstimate {
+            target_relative_improvement_percent,
+            estimated_runs_per_side: None,
+            reason:
+                "sample-size estimate unavailable: baseline median is zero or too close to zero"
+                    .to_owned(),
+        };
+    }
+
+    let pooled_stddev = pooled_sample_stddev(&baseline_values, &tuned_values);
+    if pooled_stddev <= f64::EPSILON {
+        return PowerEstimate {
+            target_relative_improvement_percent,
+            estimated_runs_per_side: None,
+            reason: "sample-size estimate unavailable: current sample variance is zero or too low"
+                .to_owned(),
+        };
+    }
+
+    let target_absolute_delta =
+        baseline_median.abs() * target_relative_improvement_percent.abs() / 100.0;
+    let standardized_effect = target_absolute_delta / pooled_stddev;
+    if standardized_effect <= f64::EPSILON {
+        return PowerEstimate {
+            target_relative_improvement_percent,
+            estimated_runs_per_side: None,
+            reason:
+                "sample-size estimate unavailable: target effect is too small for current noise"
+                    .to_owned(),
+        };
+    }
+
+    let estimated = (2.0 * ((1.96 + 0.84) / standardized_effect).powi(2))
+        .ceil()
+        .clamp(3.0, 30.0) as usize;
+
+    PowerEstimate {
+        target_relative_improvement_percent,
+        estimated_runs_per_side: Some(estimated),
+        reason: format!(
+            "normal approximation using pooled_stddev={pooled_stddev:.3}, baseline_median={baseline_median:.3}, target_delta={target_absolute_delta:.3}"
+        ),
     }
 }
 
@@ -421,5 +510,27 @@ mod tests {
         assert!(comparison.enough_samples);
         assert!(comparison.bootstrap_ci95.is_some());
         assert!(comparison.underpowered || !comparison.statistically_significant);
+    }
+
+    #[test]
+    fn power_estimate_recommends_more_runs_for_noisy_small_effect() {
+        let estimate = estimate_runs_per_side_for_effect(
+            &[70.0, 90.0, 100.0, 120.0, 130.0],
+            &[72.0, 92.0, 99.0, 118.0, 128.0],
+            10.0,
+        );
+
+        assert!(estimate.estimated_runs_per_side.is_some());
+        assert!(estimate.estimated_runs_per_side.unwrap() > 5);
+        assert!(estimate.reason.contains("pooled_stddev"));
+    }
+
+    #[test]
+    fn power_estimate_is_unavailable_for_zero_variance_or_missing_samples() {
+        let zero_variance = estimate_runs_per_side_for_effect(&[100.0, 100.0], &[90.0, 90.0], 10.0);
+        let missing_samples = estimate_runs_per_side_for_effect(&[100.0], &[90.0], 10.0);
+
+        assert!(zero_variance.estimated_runs_per_side.is_none());
+        assert!(missing_samples.estimated_runs_per_side.is_none());
     }
 }

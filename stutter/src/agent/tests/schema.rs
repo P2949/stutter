@@ -32,6 +32,9 @@ fn capabilities_response_schema_snapshot() {
             "max_concurrent_recordings": "number",
             "max_duration_seconds": "number",
             "max_targets": "number",
+            "remote_apply_enabled": "boolean",
+            "remote_auth_configured": "boolean",
+            "remote_transport": "string",
             "supported_artifacts": ["string"],
             "supported_routes": ["string"],
             "version": "string"
@@ -44,6 +47,11 @@ fn daemon_status_response_schema_snapshot() {
     let response = daemon_status_response(
         false,
         true,
+        RemoteAccessStatus {
+            remote_transport: "loopback_tcp".to_owned(),
+            remote_auth_configured: true,
+            remote_apply_enabled: true,
+        },
         DaemonState::default(),
         test_capabilities(),
         SystemHealthSnapshot::default(),
@@ -60,6 +68,9 @@ fn daemon_status_response_schema_snapshot() {
             "health": system_health_schema(),
             "manual_restore_command": "string",
             "message": "string",
+            "remote_apply_enabled": "boolean",
+            "remote_auth_configured": "boolean",
+            "remote_transport": "string",
             "watchdog": daemon_watchdog_schema()
         }),
     );

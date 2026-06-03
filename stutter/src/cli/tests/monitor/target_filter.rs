@@ -62,6 +62,38 @@ fn parses_include_and_exclude_comm_filters() {
 }
 
 #[test]
+fn record_accepts_scenario_identity_flags() {
+    let config = parse_monitor_config_for_phase15([
+        "stutter",
+        "record",
+        "--tree-pid",
+        "42",
+        "--scenario",
+        "city-route",
+        "--workload-label",
+        "Game.exe",
+        "--route-label",
+        "city-loop",
+    ])
+    .unwrap();
+
+    assert_eq!(
+        config.recording.scenario_name.as_deref(),
+        Some("city-route")
+    );
+    assert_eq!(config.recording.workload_label.as_deref(), Some("Game.exe"));
+    assert_eq!(config.recording.route_label.as_deref(), Some("city-loop"));
+    assert_eq!(
+        config.recording.scenario_hash,
+        crate::scenario::scenario_identity_hash(
+            Some("city-route"),
+            Some("Game.exe"),
+            Some("city-loop")
+        )
+    );
+}
+
+#[test]
 fn include_and_exclude_comm_filters_are_sorted_and_deduplicated() {
     let config = parse_monitor_config_for_phase15([
         "stutter",

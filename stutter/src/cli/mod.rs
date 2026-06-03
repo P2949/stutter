@@ -11,6 +11,8 @@ mod daemon;
 mod help;
 mod monitor;
 mod parse;
+mod prove_fix;
+mod release;
 mod report;
 mod service;
 mod validate;

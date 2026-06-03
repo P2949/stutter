@@ -41,6 +41,9 @@ pub struct MonitorConfigLayer {
     pub display_topology: Option<bool>,
 
     pub run_name: Option<Option<String>>,
+    pub scenario_name: Option<Option<String>>,
+    pub workload_label: Option<Option<String>>,
+    pub route_label: Option<Option<String>>,
     pub output_dir: Option<Option<PathBuf>>,
     pub retain_intervals: Option<Option<usize>>,
     pub retention_max_run_count: Option<Option<usize>>,
@@ -163,6 +166,9 @@ impl MonitorConfigLayer {
             display_topology: Some(config.probes.display_topology),
 
             run_name: Some(config.recording.run_name),
+            scenario_name: Some(config.recording.scenario_name),
+            workload_label: Some(config.recording.workload_label),
+            route_label: Some(config.recording.route_label),
             output_dir: Some(config.recording.output_dir),
             retain_intervals: Some(config.recording.retain_intervals),
             retention_max_run_count: Some(config.recording.retention.max_run_count),

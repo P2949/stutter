@@ -31,12 +31,13 @@ pub(crate) async fn start_record_handler(
             "remote-record-start",
             false,
             0,
-            "rejected foreground_include_title request: title capture requires loopback bind or valid bearer token".to_owned(),
+            "rejected foreground_include_title request: title capture requires loopback tcp or unix socket transport".to_owned(),
         );
         return (
             status,
             Json(ErrorResponse {
-                error: "foreground_include_title requires a loopback-bound agent or a valid bearer token".to_owned(),
+                error: "foreground_include_title requires loopback tcp or unix socket transport"
+                    .to_owned(),
             }),
         )
             .into_response();
@@ -564,11 +565,8 @@ pub(crate) fn validate_foreground_title_capture_security(
         return Ok(());
     }
 
-    if !state.auth.apply_token_configured() {
-        return Err(StatusCode::FORBIDDEN);
-    }
-
-    authorize_apply(headers, &state.auth)
+    let _ = headers;
+    Err(StatusCode::FORBIDDEN)
 }
 
 pub(crate) fn validate_remote_request_limits(

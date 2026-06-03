@@ -25,11 +25,24 @@ pub(super) struct FixturePlatform {
     session_type: String,
     scenario: String,
     sanitized_capture_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    kernel_family: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    kernel_version_bucket: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    cpu_vendor: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    cpu_topology_bucket: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    display_refresh_bucket: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    capture_features: Vec<String>,
 }
 
 #[derive(serde::Serialize)]
 struct FixtureExpected {
     primary_cause: String,
+    expected_behavior: FixtureExpectedBehavior,
     #[serde(skip_serializing_if = "Option::is_none")]
     required_candidate: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -40,6 +53,14 @@ struct FixtureExpected {
     data_quality: String,
     artifacts: FixtureExpectedArtifacts,
     evidence: FixtureExpectedEvidence,
+}
+
+#[derive(Clone, Copy, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+enum FixtureExpectedBehavior {
+    MustDiagnose,
+    MustNotDiagnose,
+    KnownMiss,
 }
 
 #[derive(Default, serde::Serialize)]
@@ -255,69 +276,6 @@ pub(super) fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> 
             &["compositor thread", "delayed"],
             exact_artifacts(artifacts),
         ),
-        "real_gpu_bound_looking" => {
-            let mut metadata = fixture_metadata!(
-                name,
-                "sanitized-real-recording",
-                "High",
-                "GPU busy was high during a visible frame spike; scheduler evidence may also exist, so GPU-bound is required as a candidate rather than always primary.",
-                "Any",
-                &[],
-                "High",
-                &[],
-                exact_artifacts(artifacts),
-            );
-            metadata.expected.required_candidate = Some("GpuBoundCandidate".to_owned());
-            metadata.expected.required_candidate_evidence = vec!["GPU busy".to_owned()];
-            metadata
-        }
-        "real_block_io_overlap" => fixture_metadata!(
-            name,
-            "sanitized-real-recording",
-            "High",
-            "Block I/O request overlapped the scheduler-latency cluster while unrelated block I/O occurred outside the correlation window.",
-            "BlockIoCandidate",
-            &["Medium", "High"],
-            "High",
-            &["block I/O"],
-            exact_artifacts(artifacts),
-        ),
-        "real_truncated_low_quality" => with_quality_reasons(
-            fixture_metadata!(
-                name,
-                "sanitized-real-recording",
-                "Medium",
-                "Sanitized low-quality recording with truncated spike events and nonzero drop counters; quality handling is the regression target, not diagnosis cause detection.",
-                "Unknown",
-                &[],
-                "Medium",
-                &[],
-                exact_artifacts(artifacts),
-            ),
-            &["truncated", "drop"],
-        ),
-        "real_foreground_window" => fixture_metadata!(
-            name,
-            "sanitized-real-recording",
-            "High",
-            "Sanitized foreground-window recording with a scheduler cluster near a foreground event; title is redacted while PID/app/class remain available.",
-            "Any",
-            &[],
-            "High",
-            &[],
-            exact_artifacts(artifacts),
-        ),
-        "real_community_rules_classification" => fixture_metadata!(
-            name,
-            "sanitized-real-recording",
-            "High",
-            "Sanitized community-rules classification fixture where an originally unknown game process is represented in the final artifact stream as TaskClass::Game.",
-            "GameThreadSchedulerDelay",
-            &["Medium", "High"],
-            "High",
-            &["game thread", "delayed"],
-            exact_artifacts(artifacts),
-        ),
         "foreground_window" => fixture_metadata!(
             name,
             "synthetic-edge-case",
@@ -489,50 +447,6 @@ pub(super) fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> 
             ),
             &["truncated", "drop"],
         ),
-        "real_clean_baseline" => fixture_metadata!(
-            name,
-            "validation-corpus",
-            "High",
-            "Real clean baseline example.",
-            "Unknown",
-            &[],
-            "High",
-            &[],
-            exact_artifacts(artifacts),
-        ),
-        "real_compositor_scheduler_delay" => fixture_metadata!(
-            name,
-            "sanitized-real-recording",
-            "High",
-            "Compositor or gamescope thread had scheduler delay during a visible frame spike.",
-            "CompositorSchedulerDelay",
-            &["Medium", "High"],
-            "High",
-            &["compositor thread"],
-            exact_artifacts(artifacts),
-        ),
-        "real_game_thread_scheduler_delay" => fixture_metadata!(
-            name,
-            "validation-corpus",
-            "High",
-            "Real game-thread scheduler delay example.",
-            "GameThreadSchedulerDelay",
-            &["Medium", "High"],
-            "High",
-            &["game thread", "delayed"],
-            exact_artifacts(artifacts),
-        ),
-        "real_irq_overlap" => fixture_metadata!(
-            name,
-            "sanitized-real-recording",
-            "High",
-            "IRQ handler activity overlapped the scheduler-latency cluster while unrelated IRQ noise occurred outside the correlation window.",
-            "IrqDelayCandidate",
-            &["Medium", "High"],
-            "High",
-            &["IRQ"],
-            exact_artifacts(artifacts),
-        ),
         other => fixture_metadata!(
             other,
             "synthetic-contract",
@@ -558,6 +472,14 @@ fn with_quality_reasons(
     metadata
 }
 
+fn with_expected_behavior(
+    mut metadata: FixtureMetadata,
+    behavior: FixtureExpectedBehavior,
+) -> FixtureMetadata {
+    metadata.expected.expected_behavior = behavior;
+    metadata
+}
+
 fn with_platform(mut metadata: FixtureMetadata, platform: FixturePlatform) -> FixtureMetadata {
     metadata.platform = Some(platform);
     metadata
@@ -571,6 +493,22 @@ fn real_platform(
     scenario: &str,
     sanitized_capture_id: &str,
 ) -> FixturePlatform {
+    let capture_features = match scenario {
+        "clean" => vec!["frames", "scheduler"],
+        "false-positive" => vec!["frames", "gpu-noise"],
+        "cpu-bound" => vec!["frames", "cpu-pressure"],
+        "gpu-bound" => vec!["frames", "gpu-samples", "gpu-engine"],
+        "irq" => vec!["frames", "irq"],
+        "compositor" => vec!["frames", "compositor"],
+        "block-io" => vec!["frames", "block-io"],
+        "foreground" => vec!["frames", "foreground"],
+        "game" => vec!["frames", "scheduler"],
+        "community" => vec!["frames", "scheduler", "community-rules"],
+        "low-quality" => vec!["frames", "drop-counters"],
+        "known-miss" => vec!["frames", "sparse-evidence"],
+        _ => vec!["frames"],
+    };
+
     FixturePlatform {
         gpu_vendor: gpu_vendor.to_owned(),
         gpu_driver: gpu_driver.to_owned(),
@@ -578,6 +516,32 @@ fn real_platform(
         session_type: session_type.to_owned(),
         scenario: scenario.to_owned(),
         sanitized_capture_id: sanitized_capture_id.to_owned(),
+        kernel_family: Some("linux".to_owned()),
+        kernel_version_bucket: Some("6.8-6.12".to_owned()),
+        cpu_vendor: Some(
+            match gpu_vendor {
+                "Intel" => "Intel",
+                _ => "AMD",
+            }
+            .to_owned(),
+        ),
+        cpu_topology_bucket: Some(
+            match gpu_vendor {
+                "Intel" => "6c12t",
+                "NVIDIA" => "8c16t",
+                _ => "8c16t",
+            }
+            .to_owned(),
+        ),
+        display_refresh_bucket: Some(
+            match compositor {
+                "GNOME" => "60-90hz",
+                "Gamescope" => "120-165hz",
+                _ => "90-165hz",
+            }
+            .to_owned(),
+        ),
+        capture_features: capture_features.into_iter().map(str::to_owned).collect(),
     }
 }
 
@@ -603,6 +567,7 @@ fn fixture_metadata(input: FixtureMetadataInput<'_>) -> FixtureMetadata {
         platform: None,
         expected: FixtureExpected {
             primary_cause: input.primary_cause.to_owned(),
+            expected_behavior: FixtureExpectedBehavior::MustDiagnose,
             required_candidate: None,
             required_candidate_evidence: Vec::new(),
             quality_reasons_contain: Vec::new(),
@@ -633,28 +598,17 @@ fn fixture_metadata(input: FixtureMetadataInput<'_>) -> FixtureMetadata {
 fn exact_artifacts(artifacts: &FixtureArtifacts) -> FixtureExpectedArtifacts {
     FixtureExpectedArtifacts {
         spikes: Some(artifacts.spikes.len() as u64),
-        spikes_min: None,
         intervals: Some(artifacts.intervals.len() as u64),
-        intervals_min: None,
         irq_events: Some(artifacts.irq_events.len() as u64),
-        irq_events_min: None,
         gpu_samples: Some(artifacts.gpu_samples.len() as u64),
-        gpu_samples_min: None,
         frames: Some(artifacts.frame_events.len() as u64),
-        frames_min: None,
         block_io_events: Some(artifacts.block_io_events.len() as u64),
-        block_io_events_min: None,
         foreground_events: Some(artifacts.foreground_events.len() as u64),
-        foreground_events_min: None,
         kms_flip_events: Some(artifacts.kms_flip_events.len() as u64),
-        kms_flip_events_min: None,
         drm_fence_events: Some(artifacts.drm_fence_events.len() as u64),
-        drm_fence_events_min: None,
         wayland_presentation_events: Some(artifacts.wayland_presentation_events.len() as u64),
-        wayland_presentation_events_min: None,
         dmabuf_events: Some(artifacts.dmabuf_events.len() as u64),
-        dmabuf_events_min: None,
         gpu_engine_samples: Some(artifacts.gpu_engine_samples.len() as u64),
-        gpu_engine_samples_min: None,
+        ..FixtureExpectedArtifacts::default()
     }
 }

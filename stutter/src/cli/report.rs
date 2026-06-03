@@ -177,6 +177,15 @@ pub(super) struct TuneArgs {
     #[arg(long = "baseline-profile", value_name = "NAME")]
     pub(super) baseline_profile: Option<String>,
 
+    #[arg(long = "scenario", value_name = "NAME")]
+    pub(super) scenario_name: Option<String>,
+
+    #[arg(long = "workload-label", value_name = "LABEL")]
+    pub(super) workload_label: Option<String>,
+
+    #[arg(long = "route-label", value_name = "LABEL")]
+    pub(super) route_label: Option<String>,
+
     #[arg(long = "out-dir", value_name = "PATH")]
     pub(super) out_dir: Option<PathBuf>,
 
@@ -225,6 +234,12 @@ pub(super) struct RecommendArgs {
     #[arg(long = "tune", value_name = "PATH")]
     pub(super) tune: PathBuf,
 
+    #[arg(long = "fix-plan", value_name = "PATH")]
+    pub(super) fix_plan: Option<PathBuf>,
+
+    #[arg(long = "allow-scenario-mismatch")]
+    pub(super) allow_scenario_mismatch: bool,
+
     #[arg(long)]
     pub(super) json: bool,
 
@@ -233,71 +248,6 @@ pub(super) struct RecommendArgs {
 
     #[arg(long, value_name = "PATH")]
     pub(super) html: Option<PathBuf>,
-}
-
-#[derive(Args, Debug, Clone)]
-pub(super) struct ReleaseArgs {
-    #[command(subcommand)]
-    pub(super) command: ReleaseCommand,
-}
-
-#[derive(Subcommand, Debug, Clone)]
-pub(super) enum ReleaseCommand {
-    Check(ReleaseCheckArgs),
-}
-
-#[derive(Args, Debug, Clone)]
-pub(super) struct ReleaseCheckArgs {
-    #[arg(long = "channel", default_value = "experimental")]
-    pub(super) channel: String,
-
-    #[arg(long = "apply-actions-enabled")]
-    pub(super) apply_actions_enabled: bool,
-
-    #[arg(long = "soak-tests")]
-    pub(super) soak_tests: bool,
-
-    #[arg(long = "stronger-tests")]
-    pub(super) stronger_tests: bool,
-
-    #[arg(long = "real-machine-validation")]
-    pub(super) real_machine_validation: bool,
-
-    #[arg(
-        long = "production-distro-packaging",
-        help = "Mark production distro packaging as ready; defaults false because current ebuild/overlay packaging is skeleton-only"
-    )]
-    pub(super) production_distro_packaging: bool,
-
-    #[arg(
-        long = "reproducible-packaged-ebpf-object",
-        help = "Mark packaged eBPF object build/artifact flow as reproducible"
-    )]
-    pub(super) reproducible_packaged_ebpf_object: bool,
-
-    #[arg(
-        long = "packaging-install-tests",
-        help = "Mark distro packaging install/layout tests as passing"
-    )]
-    pub(super) packaging_install_tests: bool,
-
-    #[arg(
-        long = "packaging-service-smoke-tests",
-        help = "Mark packaged service start/stop smoke tests as passing"
-    )]
-    pub(super) packaging_service_smoke_tests: bool,
-
-    #[arg(
-        long = "versioned-release-tarball",
-        help = "Mark versioned release tarballs/artifacts as available for packagers"
-    )]
-    pub(super) versioned_release_tarball: bool,
-
-    #[arg(long)]
-    pub(super) json: bool,
-
-    #[arg(long)]
-    pub(super) enforce: bool,
 }
 
 #[derive(Args, Debug, Clone)]

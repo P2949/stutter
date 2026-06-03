@@ -32,7 +32,7 @@ mod spike_buffer;
 mod sync_tracker;
 mod writers;
 
-pub const SESSION_SCHEMA_VERSION: ArtifactSchemaVersion = ArtifactSchemaVersion::new(22);
+pub const SESSION_SCHEMA_VERSION: ArtifactSchemaVersion = ArtifactSchemaVersion::new(23);
 
 // Re-export types from metrics
 pub type IntervalRecord = crate::metrics::IntervalRecord;

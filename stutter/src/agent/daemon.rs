@@ -20,6 +20,7 @@ pub(crate) async fn daemon_status_handler(
     Json(daemon_status_response(
         active_recording,
         active_autotune,
+        remote_access_status(&state),
         daemon_state,
         CapabilityProbe::default().probe(),
         system_health_monitor_for_agent_state(&state).probe(),
@@ -350,6 +351,7 @@ pub(crate) fn daemon_explain_response(
 pub(crate) fn daemon_status_response(
     active_recording: bool,
     active_autotune: bool,
+    remote_access: RemoteAccessStatus,
     daemon_state: DaemonState,
     capabilities: DaemonCapabilities,
     health: SystemHealthSnapshot,
@@ -371,6 +373,7 @@ pub(crate) fn daemon_status_response(
     DaemonStatusResponse {
         active_recording,
         active_autotune,
+        remote_access,
         daemon_state,
         capabilities,
         health,

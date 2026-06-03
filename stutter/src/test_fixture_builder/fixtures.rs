@@ -15,10 +15,13 @@ pub(super) use display_path::{
     uhd630_kms_delay_fixture, wayland_zero_copy_good_fixture,
 };
 pub(super) use real::{
-    real_block_io_overlap_fixture, real_clean_baseline_fixture,
-    real_community_rules_classification_fixture, real_compositor_scheduler_delay_fixture,
-    real_foreground_window_fixture, real_game_thread_scheduler_delay_fixture,
-    real_gpu_bound_looking_fixture, real_irq_overlap_fixture, real_truncated_low_quality_fixture,
+    real_amd_kwin_overlay_false_positive_fixture, real_block_io_overlap_fixture,
+    real_clean_baseline_fixture, real_community_rules_classification_fixture,
+    real_compositor_scheduler_delay_fixture, real_foreground_window_fixture,
+    real_game_thread_scheduler_delay_fixture, real_gpu_bound_looking_fixture,
+    real_intel_gnome_frame_jitter_false_positive_fixture, real_irq_overlap_fixture,
+    real_known_miss_block_io_tail_fixture, real_known_miss_short_irq_overlap_fixture,
+    real_known_miss_sparse_gpu_bound_fixture, real_truncated_low_quality_fixture,
 };
 pub(super) use real_matrix::{
     real_amd_gamescope_gpu_bound_fixture, real_amd_hyprland_clean_fixture,

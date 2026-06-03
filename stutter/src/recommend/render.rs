@@ -1,4 +1,4 @@
-use super::model::BaselineTuneRecommendation;
+use super::model::{BaselineTuneRecommendation, FixValidationReport};
 use crate::tune::uncertainty_html::render_ab_uncertainty_section;
 #[cfg(test)]
 use crate::tune::{self, TuneSummary};
@@ -187,6 +187,50 @@ pub fn render_baseline_tune_recommendation_markdown(rec: &BaselineTuneRecommenda
     out
 }
 
+pub fn render_fix_validation_report_markdown(report: &FixValidationReport) -> String {
+    let mut out = String::new();
+    pushln(&mut out, "# stutter fix validation");
+    pushln(&mut out, "");
+    pushln(&mut out, format!("Status: {:?}", report.status));
+    pushln(
+        &mut out,
+        format!("Fix kind: {}", report.fix_plan.kind.as_str()),
+    );
+    pushln(&mut out, format!("Cause: {:?}", report.fix_plan.cause));
+    pushln(
+        &mut out,
+        format!(
+            "Best profile: {}",
+            report
+                .baseline_tune_recommendation
+                .best_profile
+                .as_deref()
+                .unwrap_or("none")
+        ),
+    );
+    pushln(&mut out, "");
+    pushln(&mut out, "## Metric criteria");
+    pushln(&mut out, "");
+    if report.metric_results.is_empty() {
+        pushln(&mut out, "- none");
+    } else {
+        for result in &report.metric_results {
+            pushln(
+                &mut out,
+                format!(
+                    "- {}: expected {}; actual {}; passed={}",
+                    result.metric, result.expected, result.actual, result.passed
+                ),
+            );
+        }
+    }
+    render_string_list(&mut out, "Passed criteria", &report.passed_criteria, "none");
+    render_string_list(&mut out, "Failed criteria", &report.failed_criteria, "none");
+    render_string_list(&mut out, "Warnings", &report.warnings, "none");
+    render_string_list(&mut out, "Next steps", &report.next_steps, "none");
+    out
+}
+
 pub fn render_baseline_tune_recommendation_html(rec: &BaselineTuneRecommendation) -> String {
     let mut out = String::new();
     pushln(&mut out, "<!doctype html>");
@@ -325,6 +369,72 @@ pub fn render_baseline_tune_recommendation_html(rec: &BaselineTuneRecommendation
     out
 }
 
+pub fn render_fix_validation_report_html(report: &FixValidationReport) -> String {
+    let mut out = String::new();
+    pushln(&mut out, "<!doctype html>");
+    pushln(&mut out, "<html lang=\"en\">");
+    pushln(&mut out, "<head>");
+    pushln(&mut out, "<meta charset=\"utf-8\">");
+    pushln(
+        &mut out,
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">",
+    );
+    pushln(&mut out, "<title>stutter fix validation</title>");
+    pushln(
+        &mut out,
+        "<style>body{font-family:system-ui,sans-serif;line-height:1.45;max-width:1100px;margin:2rem auto;padding:0 1rem}table{border-collapse:collapse;width:100%;margin:1rem 0}th,td{border:1px solid #ccc;padding:.4rem;text-align:left}code{white-space:pre-wrap}.pass{color:#126b39}.fail{color:#a32929}</style>",
+    );
+    pushln(&mut out, "</head>");
+    pushln(&mut out, "<body>");
+    pushln(&mut out, "<h1>stutter fix validation</h1>");
+    pushln(&mut out, "<section id=\"fix-validation\">");
+    pushln(&mut out, "<h2>Fix validation</h2>");
+    pushln(&mut out, "<dl>");
+    html_dl_row(&mut out, "Status", &format!("{:?}", report.status));
+    html_dl_row(&mut out, "Hypothesis", &report.fix_plan.rationale);
+    html_dl_row(&mut out, "Fix kind", report.fix_plan.kind.as_str());
+    html_dl_row(&mut out, "Cause", &format!("{:?}", report.fix_plan.cause));
+    html_dl_row(
+        &mut out,
+        "Best profile",
+        report
+            .baseline_tune_recommendation
+            .best_profile
+            .as_deref()
+            .unwrap_or("none"),
+    );
+    pushln(&mut out, "</dl>");
+    pushln(&mut out, "<table>");
+    pushln(
+        &mut out,
+        "<thead><tr><th>Metric</th><th>Expected</th><th>Actual</th><th>Result</th></tr></thead>",
+    );
+    pushln(&mut out, "<tbody>");
+    for result in &report.metric_results {
+        let class = if result.passed { "pass" } else { "fail" };
+        let label = if result.passed { "passed" } else { "failed" };
+        pushln(
+            &mut out,
+            format!(
+                "<tr><td>{}</td><td>{}</td><td>{}</td><td class=\"{}\">{}</td></tr>",
+                escape_html(&result.metric),
+                escape_html(&result.expected),
+                escape_html(&result.actual),
+                class,
+                label
+            ),
+        );
+    }
+    pushln(&mut out, "</tbody></table>");
+    html_list(&mut out, "Passed criteria", &report.passed_criteria, "none");
+    html_list(&mut out, "Failed criteria", &report.failed_criteria, "none");
+    html_list(&mut out, "Warnings", &report.warnings, "none");
+    html_list(&mut out, "Next steps", &report.next_steps, "none");
+    pushln(&mut out, "</section>");
+    pushln(&mut out, "</body></html>");
+    out
+}
+
 fn push_formal_metrics_markdown(out: &mut String, rec: &BaselineTuneRecommendation) {
     pushln(out, "");
     pushln(out, "## Formal A/B statistics");
@@ -362,6 +472,19 @@ fn push_formal_metrics_markdown(out: &mut String, rec: &BaselineTuneRecommendati
             if let Some(reason) = &metric.not_enough_samples_reason {
                 pushln(out, format!("  - {reason}"));
             }
+            if let Some(power) = &metric.power_estimate {
+                let estimate = power
+                    .estimated_runs_per_side
+                    .map(|runs| format!("{runs} runs per side"))
+                    .unwrap_or_else(|| "unavailable".to_owned());
+                pushln(
+                    out,
+                    format!(
+                        "  - power estimate for {:.0}% target: {estimate} ({})",
+                        power.target_relative_improvement_percent, power.reason
+                    ),
+                );
+            }
         }
     }
 }
@@ -382,6 +505,19 @@ fn push_warnings_and_next_steps(out: &mut String, rec: &BaselineTuneRecommendati
     pushln(out, "");
     for step in &rec.next_steps {
         pushln(out, format!("- {step}"));
+    }
+}
+
+fn render_string_list(out: &mut String, title: &str, items: &[String], empty: &str) {
+    pushln(out, "");
+    pushln(out, format!("## {title}"));
+    pushln(out, "");
+    if items.is_empty() {
+        pushln(out, format!("- {empty}"));
+    } else {
+        for item in items {
+            pushln(out, format!("- {item}"));
+        }
     }
 }
 

@@ -37,6 +37,13 @@ pub fn layer_from_user_file(user_file: &UserConfigFile) -> anyhow::Result<Monito
         retention_max_total_bytes: user_file.retention_max_total_bytes.map(Some),
         retention_max_age_seconds: user_file.retention_max_age_seconds.map(Some),
         retention_min_free_bytes: user_file.retention_min_free_bytes.map(Some),
+        scenario_name: user_file
+            .scenario_name
+            .clone()
+            .or_else(|| user_file.scenario.clone())
+            .map(Some),
+        workload_label: user_file.workload_label.clone().map(Some),
+        route_label: user_file.route_label.clone().map(Some),
         foreground_window: user_file.foreground_window,
         focus_source,
         foreground_source,

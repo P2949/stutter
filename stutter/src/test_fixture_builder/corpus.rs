@@ -101,6 +101,31 @@ pub(crate) fn write_validation_corpus(root: &Path) -> anyhow::Result<()> {
     write_fixture(root, "real_clean_baseline", real_clean_baseline_fixture())?;
     write_fixture(
         root,
+        "real_intel_gnome_frame_jitter_false_positive",
+        real_intel_gnome_frame_jitter_false_positive_fixture(),
+    )?;
+    write_fixture(
+        root,
+        "real_amd_kwin_overlay_false_positive",
+        real_amd_kwin_overlay_false_positive_fixture(),
+    )?;
+    write_fixture(
+        root,
+        "real_known_miss_sparse_gpu_bound",
+        real_known_miss_sparse_gpu_bound_fixture(),
+    )?;
+    write_fixture(
+        root,
+        "real_known_miss_short_irq_overlap",
+        real_known_miss_short_irq_overlap_fixture(),
+    )?;
+    write_fixture(
+        root,
+        "real_known_miss_block_io_tail",
+        real_known_miss_block_io_tail_fixture(),
+    )?;
+    write_fixture(
+        root,
         "real_game_thread_scheduler_delay",
         real_game_thread_scheduler_delay_fixture(),
     )?;
@@ -169,7 +194,7 @@ pub(crate) fn write_validation_corpus(root: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub(crate) fn write_public_examples_v22(root: &Path) -> anyhow::Result<()> {
+pub(crate) fn write_public_examples_v23(root: &Path) -> anyhow::Result<()> {
     fs::create_dir_all(root)
         .with_context(|| format!("failed to create public example root {}", root.display()))?;
 
@@ -195,7 +220,7 @@ pub(crate) fn write_public_examples_v22(root: &Path) -> anyhow::Result<()> {
         "low_quality_truncated",
         public_low_quality_truncated_fixture(),
     )?;
-    write_public_examples_readme_v22(root)?;
+    write_public_examples_readme_v23(root)?;
 
     Ok(())
 }
@@ -320,8 +345,8 @@ fn write_fixture(
     Ok(())
 }
 
-fn write_public_examples_readme_v22(root: &Path) -> anyhow::Result<()> {
-    let readme = r#"# stutter v22 public artifact examples
+fn write_public_examples_readme_v23(root: &Path) -> anyhow::Result<()> {
+    let readme = r#"# stutter v23 public artifact examples
 
 This directory intentionally contains only small, representative sanitized examples.
 
@@ -332,6 +357,7 @@ This directory intentionally contains only small, representative sanitized examp
 | `clean_baseline/`              | Quiet baseline run with no strong diagnosis.   |
 | `game_thread_scheduler_delay/` | Game-thread scheduler-delay diagnosis example. |
 | `low_quality_truncated/`       | Low-quality/truncated data-quality example.    |
+| `display_timing_optional/`     | Minimal optional KMS/fence/Wayland stream examples. |
 
 The larger regression corpus lives under:
 

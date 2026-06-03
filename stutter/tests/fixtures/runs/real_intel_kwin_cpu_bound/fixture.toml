@@ -1,5 +1,5 @@
 name = "real_intel_kwin_cpu_bound"
-schema_version = 22
+schema_version = 23
 source = "sanitized-real-recording"
 quality_expectation = "High"
 description = "Sanitized Intel/KWin CPU-pressure recording with CPU PSI near scheduler-latency spikes."
@@ -11,9 +11,19 @@ compositor = "KWin"
 session_type = "wayland"
 scenario = "cpu-bound"
 sanitized_capture_id = "sanitized-intel-kwin-cpu-bound-v1"
+kernel_family = "linux"
+kernel_version_bucket = "6.8-6.12"
+cpu_vendor = "Intel"
+cpu_topology_bucket = "6c12t"
+display_refresh_bucket = "90-165hz"
+capture_features = [
+    "frames",
+    "cpu-pressure",
+]
 
 [expected]
 primary_cause = "CpuPressureCandidate"
+expected_behavior = "must_diagnose"
 accepted_confidence = [
     "Medium",
     "High",

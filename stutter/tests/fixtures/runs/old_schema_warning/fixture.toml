@@ -1,11 +1,12 @@
 name = "old_schema_warning"
-schema_version = 22
+schema_version = 23
 source = "synthetic-contract"
 quality_expectation = "Medium"
 description = "Synthetic old-schema fixture that should warn without being rejected."
 
 [expected]
 primary_cause = "Unknown"
+expected_behavior = "must_diagnose"
 quality_reasons_contain = ["older than current"]
 accepted_confidence = []
 data_quality = "Medium"

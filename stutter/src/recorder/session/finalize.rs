@@ -179,6 +179,10 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
     let core = SessionMetadataCore {
         schema_version: SESSION_SCHEMA_VERSION,
         run_name: recording.run_name.clone(),
+        scenario_name: config.recording.scenario_name.clone(),
+        scenario_hash: config.recording.scenario_hash.clone(),
+        workload_label: config.recording.workload_label.clone(),
+        route_label: config.recording.route_label.clone(),
         started_at: recorded_time(recording.started_at),
         ended_at: recorded_time(ended_at),
         monotonic_start_ns: recording.monotonic_start_ns,

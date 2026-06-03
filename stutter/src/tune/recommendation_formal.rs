@@ -134,7 +134,7 @@ pub(super) fn extend_formal_metric_why(why: &mut Vec<String>, metrics: &[FormalM
             .map(|ci| format!("95% CI [{:.3}, {:.3}]", ci.lower, ci.upper))
             .unwrap_or_else(|| "95% CI n/a".to_owned());
         why.push(format!(
-            "formal A/B {}: baseline_median={:.3} tuned_median={:.3} improvement={:.3} effect_size={} {} enough_samples={} significant={}",
+            "formal A/B {}: baseline_median={:.3} tuned_median={:.3} improvement={:.3} effect_size={} {} enough_samples={} significant={} power={}",
             metric.metric,
             metric.baseline_median,
             metric.tuned_median,
@@ -142,7 +142,13 @@ pub(super) fn extend_formal_metric_why(why: &mut Vec<String>, metrics: &[FormalM
             format_optional_float(metric.effect_size, 2),
             ci,
             metric.enough_samples,
-            metric.statistically_significant
+            metric.statistically_significant,
+            metric
+                .power_estimate
+                .as_ref()
+                .and_then(|estimate| estimate.estimated_runs_per_side)
+                .map(|runs| format!("{runs} runs/side"))
+                .unwrap_or_else(|| "n/a".to_owned())
         ));
     }
 }

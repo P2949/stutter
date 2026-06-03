@@ -40,12 +40,21 @@ pub struct VersionResponse {
 pub struct CapabilitiesResponse {
     pub version: String,
     pub auth_required: bool,
+    #[serde(flatten)]
+    pub remote_access: RemoteAccessStatus,
     pub max_duration_seconds: u64,
     pub max_targets: usize,
     pub max_concurrent_recordings: usize,
     pub supported_routes: Vec<String>,
     pub supported_artifacts: Vec<String>,
     pub features: AgentFeatureFlags,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RemoteAccessStatus {
+    pub remote_transport: String,
+    pub remote_auth_configured: bool,
+    pub remote_apply_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

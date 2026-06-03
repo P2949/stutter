@@ -14,6 +14,7 @@ Commands:
   apply-profile            
   tune                     Benchmark multiple profiles and select the best one
   recommend                
+  prove-fix                Print a guided workflow for proving an advisor fix plan
   release                  
   check                    
   compare                  
@@ -60,6 +61,12 @@ Options:
   -v, --verbose
           
       --run-name <NAME>
+          
+      --scenario <NAME>
+          
+      --workload-label <LABEL>
+          
+      --route-label <LABEL>
           
       --out-dir <PATH>
           

@@ -2,15 +2,20 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::tune::{
-    RankingConfidence, recommendation::TuneRecommendationVerdict,
-    statistics::FormalMetricComparison,
+use crate::{
+    advisor::{AdvisorFixPlan, AdvisorFixValidationStatus},
+    tune::{
+        RankingConfidence, recommendation::TuneRecommendationVerdict,
+        statistics::FormalMetricComparison,
+    },
 };
 
 #[derive(Debug, Clone)]
 pub struct RecommendCommandInput {
     pub baseline: Vec<PathBuf>,
     pub tune: PathBuf,
+    pub fix_plan: Option<PathBuf>,
+    pub allow_scenario_mismatch: bool,
     pub json: bool,
     pub markdown: Option<PathBuf>,
     pub html: Option<PathBuf>,
@@ -23,6 +28,14 @@ pub struct BaselineTuneRecommendation {
     #[serde(default)]
     pub baseline_runs: Vec<PathBuf>,
     pub tune_dir: PathBuf,
+    #[serde(default)]
+    pub scenario_name: Option<String>,
+    #[serde(default)]
+    pub scenario_hash: Option<String>,
+    #[serde(default)]
+    pub workload_label: Option<String>,
+    #[serde(default)]
+    pub route_label: Option<String>,
     pub best_profile: Option<String>,
     pub confidence: RankingConfidence,
     #[serde(default)]
@@ -69,6 +82,11 @@ pub struct BaselineTuneRecommendation {
     pub next_steps: Vec<String>,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct BaselineTuneRecommendationOptions {
+    pub allow_scenario_mismatch: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BaselineTuneConfidenceMetadata {
     pub ranking_confidence: RankingConfidence,
@@ -80,4 +98,37 @@ pub struct BaselineTuneConfidenceMetadata {
     pub best_profile_invalid_runs: Option<usize>,
     pub baseline_valid_runs: usize,
     pub baseline_invalid_runs: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FixValidationReport {
+    pub schema_version: u32,
+    pub fix_plan: AdvisorFixPlan,
+    pub baseline_tune_recommendation: BaselineTuneRecommendation,
+    pub status: AdvisorFixValidationStatus,
+    pub passed_criteria: Vec<String>,
+    pub failed_criteria: Vec<String>,
+    pub warnings: Vec<String>,
+    pub blockers: Vec<FixValidationBlocker>,
+    pub next_steps: Vec<String>,
+    #[serde(default)]
+    pub metric_results: Vec<FixValidationMetricResult>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FixValidationMetricResult {
+    pub metric: String,
+    pub expected: String,
+    pub actual: String,
+    pub passed: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum FixValidationBlocker {
+    ScenarioMismatch,
+    MajorThreadTopologyShift,
+    FrameCountMismatch,
+    CoverageTooLow,
+    DropCountersNonzero,
 }

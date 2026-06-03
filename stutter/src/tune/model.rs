@@ -14,6 +14,14 @@ use crate::{profiles, recorder::IntervalRecord};
 pub struct TuneSummary {
     pub schema_version: u32,
     pub tree_pid: u32,
+    #[serde(default)]
+    pub scenario_name: Option<String>,
+    #[serde(default)]
+    pub scenario_hash: Option<String>,
+    #[serde(default)]
+    pub workload_label: Option<String>,
+    #[serde(default)]
+    pub route_label: Option<String>,
     pub profiles_path: PathBuf,
     pub runs: u32,
     pub epoch_seconds: u64,
@@ -109,6 +117,9 @@ pub struct TuneCommandInput {
     pub runs: u32,
     pub keep_best: bool,
     pub baseline_profile: Option<String>,
+    pub scenario_name: Option<String>,
+    pub workload_label: Option<String>,
+    pub route_label: Option<String>,
     pub out_dir: Option<PathBuf>,
     pub mangohud_log: Option<PathBuf>,
     pub enforce: bool,

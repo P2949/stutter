@@ -369,9 +369,9 @@ pub enum PolicyDecisionKind {
     Rejected { rejection: PolicyRejection },
 }
 
-#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PolicyRuleEvaluation {
-    pub rule: &'static str,
+    pub rule: String,
     pub passed: bool,
     pub reason: String,
 }
@@ -642,7 +642,7 @@ mod tests {
             mode: DaemonMode::ApplyLowRisk,
             source: ActionSource::Test,
             evaluated_rules: vec![PolicyRuleEvaluation {
-                rule: "intent_allowed",
+                rule: "intent_allowed".to_owned(),
                 passed: true,
                 reason: "apply intent is allowed in daemon mode apply-low-risk".to_owned(),
             }],

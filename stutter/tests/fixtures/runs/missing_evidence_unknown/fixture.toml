@@ -1,11 +1,12 @@
 name = "missing_evidence_unknown"
-schema_version = 22
+schema_version = 23
 source = "synthetic-display-path"
 quality_expectation = "High"
 description = "Synthetic display-path fixture with no optional display-path evidence, which should keep suspicion low-confidence."
 
 [expected]
 primary_cause = "Unknown"
+expected_behavior = "must_diagnose"
 accepted_confidence = []
 data_quality = "High"
 

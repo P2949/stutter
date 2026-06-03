@@ -192,6 +192,10 @@ pub struct DisplayPathConfig {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct RecordingConfig {
     pub run_name: Option<String>,
+    pub scenario_name: Option<String>,
+    pub scenario_hash: Option<String>,
+    pub workload_label: Option<String>,
+    pub route_label: Option<String>,
     pub output_dir: Option<PathBuf>,
     pub retain_intervals: Option<usize>,
     pub retention: RecordingRetentionConfig,

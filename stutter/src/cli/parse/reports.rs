@@ -2,11 +2,13 @@ use std::time::Duration;
 
 use super::super::{
     config::{ConfigArgs, ConfigCommand},
+    prove_fix::ProveFixArgs,
+    release::{ReleaseArgs, ReleaseCommand},
     report::{
         AdvisorArgs, ApplyProfileArgs, AuditArgs, CheckArgs, CompareArgs, CompareCommand,
         CompletionsArgs, DoctorArgs, InspectDrmTracepointsArgs, InspectIrqsArgs, InspectTreeArgs,
-        ManArgs, ProbesArgs, ProfileTemplateArgs, RecommendArgs, ReleaseArgs, ReleaseCommand,
-        ReportArgs, RestoreArgs, SummaryArgs, TuneArgs, WaylandProbeArgs,
+        ManArgs, ProbesArgs, ProfileTemplateArgs, RecommendArgs, ReportArgs, RestoreArgs,
+        SummaryArgs, TuneArgs, WaylandProbeArgs,
     },
     validate::{ValidateArgs, parse_optional_task_class},
 };
@@ -16,9 +18,9 @@ use crate::{
         CheckCommandInput, CompletionsCommandInput, ConfigCheckCommandInput,
         DaemonConfigExplainCommandInput, DisplayPathCompareCommandInput, DoctorCommandInput,
         InspectIrqsCommandInput, InspectTreeCommandInput, ManCommandInput, ProbesCommandInput,
-        ProfileTemplateCommandInput, RecommendCommandInput, ReleaseCheckCommandInput,
-        ReportCommandInput, RestoreCommandInput, SummaryCommandInput, TuneCommandInput,
-        ValidateCommandInput, WaylandProbeCommandInput,
+        ProfileTemplateCommandInput, ProveFixCommandInput, RecommendCommandInput,
+        ReleaseCheckCommandInput, ReportCommandInput, RestoreCommandInput, SummaryCommandInput,
+        TuneCommandInput, ValidateCommandInput, WaylandProbeCommandInput,
     },
     release::{ReleaseChannel, ReleaseReadinessInputs},
 };
@@ -119,6 +121,12 @@ pub(super) fn parse_tune_command(args: TuneArgs) -> anyhow::Result<AppCommand> {
     if args.runs == 0 {
         anyhow::bail!("--runs must be greater than zero");
     }
+    let scenario_name = crate::scenario::normalize_identity_label(args.scenario_name.as_deref());
+    if let Some(scenario_name) = scenario_name.as_deref() {
+        crate::scenario::validate_scenario_name(scenario_name)?;
+    }
+    let workload_label = crate::scenario::normalize_identity_label(args.workload_label.as_deref());
+    let route_label = crate::scenario::normalize_identity_label(args.route_label.as_deref());
     Ok(AppCommand::Tune(TuneCommandInput {
         tree_pid: args.tree_pid,
         profiles: args.profiles,
@@ -127,6 +135,9 @@ pub(super) fn parse_tune_command(args: TuneArgs) -> anyhow::Result<AppCommand> {
         runs: args.runs,
         keep_best: args.keep_best,
         baseline_profile: args.baseline_profile,
+        scenario_name,
+        workload_label,
+        route_label,
         out_dir: args.out_dir,
         mangohud_log: args.mangohud_log,
         enforce: args.enforce,
@@ -138,8 +149,49 @@ pub(super) fn parse_recommend_command(args: RecommendArgs) -> anyhow::Result<App
     Ok(AppCommand::Recommend(RecommendCommandInput {
         baseline: args.baseline,
         tune: args.tune,
+        fix_plan: args.fix_plan,
+        allow_scenario_mismatch: args.allow_scenario_mismatch,
         json: args.json,
         markdown: args.markdown,
+        html: args.html,
+    }))
+}
+
+pub(super) fn parse_prove_fix_command(args: ProveFixArgs) -> anyhow::Result<AppCommand> {
+    if args.tree_pid == 0 {
+        anyhow::bail!("--tree-pid must be greater than zero");
+    }
+    if args.duration_seconds == 0 {
+        anyhow::bail!("--duration must be greater than zero");
+    }
+    if matches!(args.baseline_runs, Some(0)) {
+        anyhow::bail!("--baseline-runs must be greater than zero");
+    }
+    if matches!(args.test_runs, Some(0)) {
+        anyhow::bail!("--test-runs must be greater than zero");
+    }
+    if args.baseline_profile.trim().is_empty() {
+        anyhow::bail!("--baseline-profile must not be empty");
+    }
+
+    let scenario_name = crate::scenario::normalize_identity_label(args.scenario_name.as_deref());
+    if let Some(scenario_name) = scenario_name.as_deref() {
+        crate::scenario::validate_scenario_name(scenario_name)?;
+    }
+    let workload_label = crate::scenario::normalize_identity_label(args.workload_label.as_deref());
+    let route_label = crate::scenario::normalize_identity_label(args.route_label.as_deref());
+
+    Ok(AppCommand::ProveFix(ProveFixCommandInput {
+        plan: args.plan,
+        profiles: args.profiles,
+        tree_pid: args.tree_pid,
+        scenario_name,
+        workload_label,
+        route_label,
+        duration_seconds: args.duration_seconds,
+        baseline_runs: args.baseline_runs,
+        test_runs: args.test_runs,
+        baseline_profile: args.baseline_profile.trim().to_owned(),
         html: args.html,
     }))
 }
@@ -152,6 +204,16 @@ pub(super) fn parse_release_command(args: ReleaseArgs) -> anyhow::Result<AppComm
                 soak_tests: args.soak_tests,
                 stronger_tests: args.stronger_tests,
                 real_machine_validation: args.real_machine_validation,
+                real_validation_matrix: args.real_validation_matrix,
+                false_negative_catalogue: args.false_negative_catalogue,
+                multi_machine_validation: args.multi_machine_validation,
+                local_install_smoke_tests: args.local_install_smoke_tests,
+                service_doctor_smoke_tests: args.service_doctor_smoke_tests,
+                emergency_restore_smoke_tests: args.emergency_restore_smoke_tests,
+                unprivileged_report_smoke_tests: args.unprivileged_report_smoke_tests,
+                packaged_artifact_layout_tests: args.packaged_artifact_layout_tests,
+                service_start_stop_smoke_tests: args.service_start_stop_smoke_tests,
+                rollback_drill: args.rollback_drill,
                 production_distro_packaging: args.production_distro_packaging,
                 reproducible_packaged_ebpf_object: args.reproducible_packaged_ebpf_object,
                 packaging_install_tests: args.packaging_install_tests,

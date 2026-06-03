@@ -60,6 +60,16 @@ pub struct ReleaseReadinessInputs {
     pub stronger_tests: bool,
     pub manual_confirmation_or_explicit_config: bool,
     pub real_machine_validation: bool,
+    pub real_validation_matrix: bool,
+    pub false_negative_catalogue: bool,
+    pub multi_machine_validation: bool,
+    pub local_install_smoke_tests: bool,
+    pub service_doctor_smoke_tests: bool,
+    pub emergency_restore_smoke_tests: bool,
+    pub unprivileged_report_smoke_tests: bool,
+    pub packaged_artifact_layout_tests: bool,
+    pub service_start_stop_smoke_tests: bool,
+    pub rollback_drill: bool,
 
     /// Whether distro packages may be described as production-ready.
     ///
@@ -100,6 +110,16 @@ impl Default for ReleaseReadinessInputs {
             stronger_tests: false,
             manual_confirmation_or_explicit_config: true,
             real_machine_validation: false,
+            real_validation_matrix: false,
+            false_negative_catalogue: false,
+            multi_machine_validation: false,
+            local_install_smoke_tests: false,
+            service_doctor_smoke_tests: false,
+            emergency_restore_smoke_tests: false,
+            unprivileged_report_smoke_tests: false,
+            packaged_artifact_layout_tests: false,
+            service_start_stop_smoke_tests: false,
+            rollback_drill: false,
 
             production_distro_packaging: false,
             reproducible_packaged_ebpf_object: false,
@@ -162,6 +182,24 @@ pub fn evaluate_release_readiness(
                 inputs.health_and_status,
                 "observe-stable requires health and status surfaces",
             ),
+            gate(
+                "local_install_smoke_tests",
+                true,
+                inputs.local_install_smoke_tests,
+                "observe-stable requires local install smoke evidence",
+            ),
+            gate(
+                "service_doctor_smoke_tests",
+                true,
+                inputs.service_doctor_smoke_tests,
+                "observe-stable requires service doctor dry-run smoke evidence",
+            ),
+            gate(
+                "unprivileged_report_smoke_tests",
+                true,
+                inputs.unprivileged_report_smoke_tests,
+                "observe-stable requires unprivileged report/recommend smoke evidence",
+            ),
         ],
         ReleaseChannel::LowRiskStable => vec![
             gate(
@@ -195,10 +233,46 @@ pub fn evaluate_release_readiness(
                 "low-risk-stable requires real-machine validation",
             ),
             gate(
+                "real_validation_matrix",
+                true,
+                inputs.real_validation_matrix,
+                "low-risk-stable requires the real validation matrix gate",
+            ),
+            gate(
+                "false_negative_catalogue",
+                true,
+                inputs.false_negative_catalogue,
+                "low-risk-stable requires tracked false-negative catalogue support",
+            ),
+            gate(
                 "service_packaging",
                 true,
                 inputs.service_packaging,
                 "low-risk-stable requires service unit templates and local install support, not production distro packaging",
+            ),
+            gate(
+                "local_install_smoke_tests",
+                true,
+                inputs.local_install_smoke_tests,
+                "low-risk-stable requires local install smoke evidence",
+            ),
+            gate(
+                "emergency_restore_smoke_tests",
+                true,
+                inputs.emergency_restore_smoke_tests,
+                "low-risk-stable requires emergency restore smoke evidence",
+            ),
+            gate(
+                "service_start_stop_smoke_tests",
+                true,
+                inputs.service_start_stop_smoke_tests,
+                "low-risk-stable requires service start/stop smoke evidence",
+            ),
+            gate(
+                "rollback_drill",
+                true,
+                inputs.rollback_drill,
+                "low-risk-stable requires rollback drill evidence",
             ),
             gate("docs", true, inputs.docs, "low-risk-stable requires docs"),
         ],
@@ -220,6 +294,12 @@ pub fn evaluate_release_readiness(
                 true,
                 inputs.manual_confirmation_or_explicit_config,
                 "medium-risk requires manual confirmation or explicit config",
+            ),
+            gate(
+                "multi_machine_validation",
+                true,
+                inputs.multi_machine_validation,
+                "medium-risk requires multi-machine validation evidence",
             ),
         ],
     };
@@ -268,7 +348,7 @@ fn packaging_roadmap_gates(inputs: &ReleaseReadinessInputs) -> Vec<ReleaseGate> 
         gate(
             "packaging_install_tests",
             false,
-            inputs.packaging_install_tests,
+            inputs.packaging_install_tests || inputs.packaged_artifact_layout_tests,
             "production distro packaging requires install tests for ebuild/PKGBUILD/tarball layout",
         ),
         gate(
@@ -294,6 +374,9 @@ mod tests {
     fn observe_stable_passes_only_without_apply_actions() {
         let mut inputs = ReleaseReadinessInputs {
             apply_actions_enabled: false,
+            local_install_smoke_tests: true,
+            service_doctor_smoke_tests: true,
+            unprivileged_report_smoke_tests: true,
             ..ReleaseReadinessInputs::default()
         };
         let report = evaluate_release_readiness(ReleaseChannel::ObserveStable, &inputs);
@@ -317,6 +400,35 @@ mod tests {
                 .gates
                 .iter()
                 .any(|gate| gate.code == "soak_tests" && !gate.passed)
+        );
+    }
+
+    #[test]
+    fn low_risk_stable_requires_real_validation_matrix_and_false_negative_catalogue() {
+        let inputs = ReleaseReadinessInputs {
+            soak_tests: true,
+            real_machine_validation: true,
+            local_install_smoke_tests: true,
+            emergency_restore_smoke_tests: true,
+            service_start_stop_smoke_tests: true,
+            rollback_drill: true,
+            ..ReleaseReadinessInputs::default()
+        };
+
+        let report = evaluate_release_readiness(ReleaseChannel::LowRiskStable, &inputs);
+
+        assert!(!report.passed);
+        assert!(
+            report
+                .gates
+                .iter()
+                .any(|gate| gate.code == "real_validation_matrix" && !gate.passed)
+        );
+        assert!(
+            report
+                .gates
+                .iter()
+                .any(|gate| gate.code == "false_negative_catalogue" && !gate.passed)
         );
     }
 

@@ -2,7 +2,7 @@ use std::{path::PathBuf, time::Duration};
 
 use anyhow::Result;
 
-use super::{io::*, model::*};
+use super::{identity::*, io::*, model::*};
 use crate::config::model::MonitorConfig;
 
 pub struct ScenarioRunInput {
@@ -64,6 +64,19 @@ pub fn prepare_scenario_run(input: ScenarioRunInput) -> Result<PreparedScenarioR
         .unwrap_or(false);
     let cpu_freq = (cpu_freq_config || true) && scenario.cpu_freq.unwrap_or(true);
 
+    let workload_label = scenario
+        .watch_process
+        .clone()
+        .or_else(|| scenario.tree_pid.map(|pid| format!("tree-pid-{pid}")))
+        .or_else(|| {
+            (!scenario.pid.is_empty()).then(|| format!("pid-count-{}", scenario.pid.len()))
+        });
+    let scenario_hash = scenario_identity_hash(
+        Some(&scenario.name),
+        workload_label.as_deref(),
+        Some(&scenario.name),
+    );
+
     let config = MonitorConfig {
         target: crate::config::model::TargetConfig {
             target_pids: scenario.pid.clone(),
@@ -103,6 +116,10 @@ pub fn prepare_scenario_run(input: ScenarioRunInput) -> Result<PreparedScenarioR
         },
         recording: crate::config::model::RecordingConfig {
             run_name: Some(run_name.clone()),
+            scenario_name: Some(scenario.name.clone()),
+            scenario_hash,
+            workload_label,
+            route_label: Some(scenario.name.clone()),
             output_dir: Some(out_dir.clone()),
             ..Default::default()
         },

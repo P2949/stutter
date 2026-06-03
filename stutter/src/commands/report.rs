@@ -1,9 +1,9 @@
 use crate::{
     commands::input::{
-        CheckCommandInput, RecommendCommandInput, ReportCommandInput, SummaryCommandInput,
-        ValidateCommandInput,
+        CheckCommandInput, ProveFixCommandInput, RecommendCommandInput, ReportCommandInput,
+        SummaryCommandInput, ValidateCommandInput,
     },
-    recommend, report, summary, validate,
+    prove_fix, recommend, report, summary, validate,
 };
 
 pub fn run_summary_command(input: SummaryCommandInput) -> anyhow::Result<()> {
@@ -59,8 +59,26 @@ pub fn run_recommend_command(input: RecommendCommandInput) -> anyhow::Result<()>
     recommend::recommend_command(recommend::RecommendCommandInput {
         baseline: input.baseline,
         tune: input.tune,
+        fix_plan: input.fix_plan,
+        allow_scenario_mismatch: input.allow_scenario_mismatch,
         json: input.json,
         markdown: input.markdown,
+        html: input.html,
+    })
+}
+
+pub fn run_prove_fix_command(input: ProveFixCommandInput) -> anyhow::Result<()> {
+    prove_fix::prove_fix_command(prove_fix::ProveFixCommandInput {
+        plan: input.plan,
+        profiles: input.profiles,
+        tree_pid: input.tree_pid,
+        scenario_name: input.scenario_name,
+        workload_label: input.workload_label,
+        route_label: input.route_label,
+        duration_seconds: input.duration_seconds,
+        baseline_runs: input.baseline_runs,
+        test_runs: input.test_runs,
+        baseline_profile: input.baseline_profile,
         html: input.html,
     })
 }
