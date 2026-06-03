@@ -1,0 +1,16 @@
+=== baseline drop counter rates ===
+baseline-01 duration_s=180.761 replaced=275663 ringbuf=0 replaced_per_s=1525
+baseline-02 duration_s=180.809 replaced=259722 ringbuf=0 replaced_per_s=1436
+baseline-03 duration_s=180.666 replaced=266677 ringbuf=0 replaced_per_s=1476
+baseline-04 duration_s=180.835 replaced=281600 ringbuf=0 replaced_per_s=1557
+baseline-05 duration_s=180.746 replaced=267023 ringbuf=0 replaced_per_s=1477
+
+=== mapfactor-4 pilot ===
+mapfactor-4 duration_s=180.665 replaced=283358 ringbuf=0 replaced_per_s=1568
+
+=== frame ingestion check ===
+21:    "duration_ms": 180665,
+1286:    "frame_event_count": 7072,
+1316:    "stop_reason": "max_duration_reached",
+250798:    "frame_event_count": 7072,
+250849:    "frame_timestamp_alignment": "monotonic_observed",
