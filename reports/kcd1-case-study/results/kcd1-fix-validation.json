@@ -100,53 +100,53 @@ recommendation_html=reports/kcd1-case-study/results/kcd1-fix-validation.html
       "reports/kcd1-case-study/runs/baseline-04",
       "reports/kcd1-case-study/runs/baseline-05"
     ],
-    "tune_dir": "reports/kcd1-case-study/tune/kcd1-affinity-01",
+    "tune_dir": "reports/kcd1-case-study/tune/kcd1-affinity-02",
     "scenario_name": "kcd1-rattay-route-1",
     "scenario_hash": "2c484985116c8ff0",
     "workload_label": "kcd1-proton-ge-10-34",
     "route_label": "rattay-fixed-route-1",
-    "best_profile": null,
-    "confidence": "Unstable",
+    "best_profile": "baseline-online",
+    "confidence": "Medium",
     "confidence_metadata": {
-      "ranking_confidence": "Unstable",
+      "ranking_confidence": "Medium",
       "ranking_notes": [
-        "fewer than two profiles produced valid runs"
+        "best profile score IQR is non-zero"
       ],
       "tune_runs": 5,
       "tune_epoch_seconds": 270,
       "tune_warmup_seconds": 90,
-      "best_profile_valid_runs": null,
-      "best_profile_invalid_runs": null,
+      "best_profile_valid_runs": 5,
+      "best_profile_invalid_runs": 0,
       "baseline_valid_runs": 5,
       "baseline_invalid_runs": 0
     },
-    "verdict": "NoRecommendation",
-    "summary": "No recommendation: tune ranking was unstable.",
+    "verdict": "Recommended",
+    "summary": "Best tuned profile 'baseline-online' improved the repeated baseline by 23762 score point(s) with a bootstrap CI that excludes zero.",
     "baseline_valid_runs": 5,
     "baseline_invalid_runs": 0,
     "diagnostic_baseline_raw_score_total": 45295,
-    "best_median_diagnostic_raw_score_total": null,
-    "score_delta_abs": null,
-    "score_delta_percent": null,
-    "score_effect_size": null,
-    "score_noise_ratio": null,
+    "best_median_diagnostic_raw_score_total": 21533,
+    "score_delta_abs": 23762,
+    "score_delta_percent": 52.46053648305552,
+    "score_effect_size": 4.305447013324916,
+    "score_noise_ratio": 0.317141132215669,
     "baseline_over_5ms": 0,
-    "best_median_over_5ms": null,
-    "over_5ms_delta_abs": null,
-    "over_5ms_effect_size": null,
+    "best_median_over_5ms": 0,
+    "over_5ms_delta_abs": 0,
+    "over_5ms_effect_size": 0.0,
     "over_5ms_noise_ratio": null,
     "baseline_frame_p99_ms": 49.2522,
-    "best_median_frame_p99_ms": null,
-    "frame_p99_delta_ms": null,
-    "frame_p99_effect_size": null,
-    "frame_p99_noise_ratio": null,
+    "best_median_frame_p99_ms": 38.337,
+    "frame_p99_delta_ms": -10.915199999999999,
+    "frame_p99_effect_size": 3.23938379811843,
+    "frame_p99_noise_ratio": 0.039811986634565956,
     "formal_metrics": [
       {
         "metric": "diagnostic_raw_score_total",
         "unit": "score_points",
         "lower_is_better": true,
         "baseline_samples": 5,
-        "tuned_samples": 0,
+        "tuned_samples": 5,
         "baseline_values": [
           45295.0,
           51519.0,
@@ -154,28 +154,38 @@ recommendation_html=reports/kcd1-case-study/results/kcd1-fix-validation.html
           46699.0,
           41390.0
         ],
-        "tuned_values": [],
+        "tuned_values": [
+          19579.0,
+          21533.0,
+          16643.0,
+          26408.0,
+          32994.0
+        ],
         "baseline_median": 45295.0,
-        "tuned_median": 0.0,
+        "tuned_median": 21533.0,
         "baseline_iqr": 5309.0,
-        "tuned_iqr": 0.0,
+        "tuned_iqr": 6829.0,
         "baseline_noise_ratio": 0.11720940501159069,
-        "tuned_noise_ratio": null,
-        "improvement_delta": 45295.0,
-        "effect_size": null,
-        "bootstrap_ci95": null,
-        "enough_samples": false,
-        "not_enough_samples_reason": "not enough samples for formal A/B comparison: baseline_runs=5 tuned_runs=0 required_each=3",
-        "statistically_significant": false,
+        "tuned_noise_ratio": 0.317141132215669,
+        "improvement_delta": 23762.0,
+        "effect_size": 4.305447013324916,
+        "bootstrap_ci95": {
+          "confidence_level": 0.95,
+          "lower": 12301.0,
+          "upper": 30056.0,
+          "iterations": 2000
+        },
+        "enough_samples": true,
+        "not_enough_samples_reason": null,
+        "statistically_significant": true,
         "underpowered": true,
         "power_estimate": {
           "target_relative_improvement_percent": 10.0,
-          "estimated_runs_per_side": null,
-          "reason": "sample-size estimate unavailable: at least two finite samples per side are required"
+          "estimated_runs_per_side": 24,
+          "reason": "normal approximation using pooled_stddev=5519.055, baseline_median=45295.000, target_delta=4529.500"
         },
         "uncertainty_warnings": [
-          "not enough samples for formal A/B comparison: baseline_runs=5 tuned_runs=0 required_each=3",
-          "low sample count: baseline_runs=5 tuned_runs=0 recommended_each=5"
+          "tuned distribution is noisy: noise_ratio=0.32"
         ]
       },
       {
@@ -183,7 +193,7 @@ recommendation_html=reports/kcd1-case-study/results/kcd1-fix-validation.html
         "unit": "samples",
         "lower_is_better": true,
         "baseline_samples": 5,
-        "tuned_samples": 0,
+        "tuned_samples": 5,
         "baseline_values": [
           0.0,
           0.0,
@@ -191,7 +201,13 @@ recommendation_html=reports/kcd1-case-study/results/kcd1-fix-validation.html
           1.0,
           2.0
         ],
-        "tuned_values": [],
+        "tuned_values": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
         "baseline_median": 0.0,
         "tuned_median": 0.0,
         "baseline_iqr": 1.0,
@@ -199,20 +215,24 @@ recommendation_html=reports/kcd1-case-study/results/kcd1-fix-validation.html
         "baseline_noise_ratio": null,
         "tuned_noise_ratio": null,
         "improvement_delta": 0.0,
-        "effect_size": null,
-        "bootstrap_ci95": null,
-        "enough_samples": false,
-        "not_enough_samples_reason": "not enough samples for formal A/B comparison: baseline_runs=5 tuned_runs=0 required_each=3",
+        "effect_size": 0.0,
+        "bootstrap_ci95": {
+          "confidence_level": 0.95,
+          "lower": -1.0,
+          "upper": 2.0,
+          "iterations": 2000
+        },
+        "enough_samples": true,
+        "not_enough_samples_reason": null,
         "statistically_significant": false,
         "underpowered": true,
         "power_estimate": {
           "target_relative_improvement_percent": 10.0,
           "estimated_runs_per_side": null,
-          "reason": "sample-size estimate unavailable: at least two finite samples per side are required"
+          "reason": "sample-size estimate unavailable: baseline median is zero or too close to zero"
         },
         "uncertainty_warnings": [
-          "not enough samples for formal A/B comparison: baseline_runs=5 tuned_runs=0 required_each=3",
-          "low sample count: baseline_runs=5 tuned_runs=0 recommended_each=5"
+          "bootstrap 95% CI crosses zero; A/B improvement is not statistically significant"
         ]
       },
       {
@@ -220,7 +240,7 @@ recommendation_html=reports/kcd1-case-study/results/kcd1-fix-validation.html
         "unit": "ms",
         "lower_is_better": true,
         "baseline_samples": 5,
-        "tuned_samples": 0,
+        "tuned_samples": 5,
         "baseline_values": [
           51.0079,
           49.7124,
@@ -228,36 +248,44 @@ recommendation_html=reports/kcd1-case-study/results/kcd1-fix-validation.html
           46.7779,
           44.7876
         ],
-        "tuned_values": [],
+        "tuned_values": [
+          37.9018,
+          38.3377,
+          32.8773,
+          39.4281,
+          44.2522
+        ],
         "baseline_median": 49.2522,
-        "tuned_median": 0.0,
+        "tuned_median": 38.3377,
         "baseline_iqr": 2.9345,
-        "tuned_iqr": 0.0,
+        "tuned_iqr": 1.526299999999999,
         "baseline_noise_ratio": 0.059581094854646084,
-        "tuned_noise_ratio": null,
-        "improvement_delta": 49.2522,
-        "effect_size": null,
-        "bootstrap_ci95": null,
-        "enough_samples": false,
-        "not_enough_samples_reason": "not enough samples for formal A/B comparison: baseline_runs=5 tuned_runs=0 required_each=3",
-        "statistically_significant": false,
-        "underpowered": true,
+        "tuned_noise_ratio": 0.039811986634565956,
+        "improvement_delta": 10.914500000000004,
+        "effect_size": 3.23938379811843,
+        "bootstrap_ci95": {
+          "confidence_level": 0.95,
+          "lower": 5.0,
+          "upper": 16.374900000000004,
+          "iterations": 2000
+        },
+        "enough_samples": true,
+        "not_enough_samples_reason": null,
+        "statistically_significant": true,
+        "underpowered": false,
         "power_estimate": {
           "target_relative_improvement_percent": 10.0,
-          "estimated_runs_per_side": null,
-          "reason": "sample-size estimate unavailable: at least two finite samples per side are required"
+          "estimated_runs_per_side": 8,
+          "reason": "normal approximation using pooled_stddev=3.369, baseline_median=49.252, target_delta=4.925"
         },
-        "uncertainty_warnings": [
-          "not enough samples for formal A/B comparison: baseline_runs=5 tuned_runs=0 required_each=3",
-          "low sample count: baseline_runs=5 tuned_runs=0 recommended_each=5"
-        ]
+        "uncertainty_warnings": []
       },
       {
         "metric": "frame_over_16ms",
         "unit": "frames",
         "lower_is_better": true,
         "baseline_samples": 5,
-        "tuned_samples": 0,
+        "tuned_samples": 5,
         "baseline_values": [
           4720.0,
           5388.0,
@@ -265,28 +293,39 @@ recommendation_html=reports/kcd1-case-study/results/kcd1-fix-validation.html
           5887.0,
           5597.0
         ],
-        "tuned_values": [],
+        "tuned_values": [
+          7237.0,
+          6796.0,
+          5644.0,
+          7173.0,
+          5551.0
+        ],
         "baseline_median": 5388.0,
-        "tuned_median": 0.0,
+        "tuned_median": 6796.0,
         "baseline_iqr": 877.0,
-        "tuned_iqr": 0.0,
+        "tuned_iqr": 1529.0,
         "baseline_noise_ratio": 0.1627691165553081,
-        "tuned_noise_ratio": null,
-        "improvement_delta": 5388.0,
-        "effect_size": null,
-        "bootstrap_ci95": null,
-        "enough_samples": false,
-        "not_enough_samples_reason": "not enough samples for formal A/B comparison: baseline_runs=5 tuned_runs=0 required_each=3",
+        "tuned_noise_ratio": 0.2249852854620365,
+        "improvement_delta": -1408.0,
+        "effect_size": -1.981383261976293,
+        "bootstrap_ci95": {
+          "confidence_level": 0.95,
+          "lower": -2517.0,
+          "upper": 46.0,
+          "iterations": 2000
+        },
+        "enough_samples": true,
+        "not_enough_samples_reason": null,
         "statistically_significant": false,
         "underpowered": true,
         "power_estimate": {
           "target_relative_improvement_percent": 10.0,
-          "estimated_runs_per_side": null,
-          "reason": "sample-size estimate unavailable: at least two finite samples per side are required"
+          "estimated_runs_per_side": 28,
+          "reason": "normal approximation using pooled_stddev=710.615, baseline_median=5388.000, target_delta=538.800"
         },
         "uncertainty_warnings": [
-          "not enough samples for formal A/B comparison: baseline_runs=5 tuned_runs=0 required_each=3",
-          "low sample count: baseline_runs=5 tuned_runs=0 recommended_each=5"
+          "estimated 28 runs per side needed to detect 10% improvement at current noise",
+          "bootstrap 95% CI crosses zero; A/B improvement is not statistically significant"
         ]
       },
       {
@@ -294,7 +333,7 @@ recommendation_html=reports/kcd1-case-study/results/kcd1-fix-validation.html
         "unit": "frames",
         "lower_is_better": true,
         "baseline_samples": 5,
-        "tuned_samples": 0,
+        "tuned_samples": 5,
         "baseline_values": [
           1347.0,
           1354.0,
@@ -302,28 +341,38 @@ recommendation_html=reports/kcd1-case-study/results/kcd1-fix-validation.html
           1229.0,
           1098.0
         ],
-        "tuned_values": [],
+        "tuned_values": [
+          433.0,
+          525.0,
+          66.0,
+          410.0,
+          721.0
+        ],
         "baseline_median": 1240.0,
-        "tuned_median": 0.0,
+        "tuned_median": 433.0,
         "baseline_iqr": 118.0,
-        "tuned_iqr": 0.0,
+        "tuned_iqr": 115.0,
         "baseline_noise_ratio": 0.09516129032258064,
-        "tuned_noise_ratio": null,
-        "improvement_delta": 1240.0,
-        "effect_size": null,
-        "bootstrap_ci95": null,
-        "enough_samples": false,
-        "not_enough_samples_reason": "not enough samples for formal A/B comparison: baseline_runs=5 tuned_runs=0 required_each=3",
-        "statistically_significant": false,
+        "tuned_noise_ratio": 0.26558891454965355,
+        "improvement_delta": 807.0,
+        "effect_size": 4.389410422280529,
+        "bootstrap_ci95": {
+          "confidence_level": 0.95,
+          "lower": 519.0,
+          "upper": 1174.0,
+          "iterations": 2000
+        },
+        "enough_samples": true,
+        "not_enough_samples_reason": null,
+        "statistically_significant": true,
         "underpowered": true,
         "power_estimate": {
           "target_relative_improvement_percent": 10.0,
-          "estimated_runs_per_side": null,
-          "reason": "sample-size estimate unavailable: at least two finite samples per side are required"
+          "estimated_runs_per_side": 30,
+          "reason": "normal approximation using pooled_stddev=183.852, baseline_median=1240.000, target_delta=124.000"
         },
         "uncertainty_warnings": [
-          "not enough samples for formal A/B comparison: baseline_runs=5 tuned_runs=0 required_each=3",
-          "low sample count: baseline_runs=5 tuned_runs=0 recommended_each=5"
+          "tuned distribution is noisy: noise_ratio=0.27"
         ]
       },
       {
@@ -331,7 +380,7 @@ recommendation_html=reports/kcd1-case-study/results/kcd1-fix-validation.html
         "unit": "frames",
         "lower_is_better": true,
         "baseline_samples": 5,
-        "tuned_samples": 0,
+        "tuned_samples": 5,
         "baseline_values": [
           105.0,
           75.0,
@@ -339,29 +388,39 @@ recommendation_html=reports/kcd1-case-study/results/kcd1-fix-validation.html
           29.0,
           24.0
         ],
-        "tuned_values": [],
+        "tuned_values": [
+          8.0,
+          10.0,
+          3.0,
+          7.0,
+          24.0
+        ],
         "baseline_median": 75.0,
-        "tuned_median": 0.0,
+        "tuned_median": 8.0,
         "baseline_iqr": 49.0,
-        "tuned_iqr": 0.0,
+        "tuned_iqr": 3.0,
         "baseline_noise_ratio": 0.6533333333333333,
-        "tuned_noise_ratio": null,
-        "improvement_delta": 75.0,
-        "effect_size": null,
-        "bootstrap_ci95": null,
-        "enough_samples": false,
-        "not_enough_samples_reason": "not enough samples for formal A/B comparison: baseline_runs=5 tuned_runs=0 required_each=3",
-        "statistically_significant": false,
+        "tuned_noise_ratio": 0.375,
+        "improvement_delta": 67.0,
+        "effect_size": 2.6630109222825,
+        "bootstrap_ci95": {
+          "confidence_level": 0.95,
+          "lower": 14.0,
+          "upper": 97.0,
+          "iterations": 2000
+        },
+        "enough_samples": true,
+        "not_enough_samples_reason": null,
+        "statistically_significant": true,
         "underpowered": true,
         "power_estimate": {
           "target_relative_improvement_percent": 10.0,
-          "estimated_runs_per_side": null,
-          "reason": "sample-size estimate unavailable: at least two finite samples per side are required"
+          "estimated_runs_per_side": 30,
+          "reason": "normal approximation using pooled_stddev=25.159, baseline_median=75.000, target_delta=7.500"
         },
         "uncertainty_warnings": [
-          "not enough samples for formal A/B comparison: baseline_runs=5 tuned_runs=0 required_each=3",
-          "low sample count: baseline_runs=5 tuned_runs=0 recommended_each=5",
-          "baseline distribution is noisy: noise_ratio=0.65"
+          "baseline distribution is noisy: noise_ratio=0.65",
+          "tuned distribution is noisy: noise_ratio=0.38"
         ]
       },
       {
@@ -369,7 +428,7 @@ recommendation_html=reports/kcd1-case-study/results/kcd1-fix-validation.html
         "unit": "ns",
         "lower_is_better": true,
         "baseline_samples": 5,
-        "tuned_samples": 0,
+        "tuned_samples": 5,
         "baseline_values": [
           3824131.0,
           4466598.0,
@@ -377,70 +436,75 @@ recommendation_html=reports/kcd1-case-study/results/kcd1-fix-validation.html
           5348049.0,
           5151538.0
         ],
-        "tuned_values": [],
+        "tuned_values": [
+          4152098.0,
+          4065029.0,
+          4885308.0,
+          4152319.0,
+          5241777.0
+        ],
         "baseline_median": 4466598.0,
-        "tuned_median": 0.0,
+        "tuned_median": 4152319.0,
         "baseline_iqr": 1327407.0,
-        "tuned_iqr": 0.0,
+        "tuned_iqr": 733210.0,
         "baseline_noise_ratio": 0.29718524031041077,
-        "tuned_noise_ratio": null,
-        "improvement_delta": 4466598.0,
-        "effect_size": null,
-        "bootstrap_ci95": null,
-        "enough_samples": false,
-        "not_enough_samples_reason": "not enough samples for formal A/B comparison: baseline_runs=5 tuned_runs=0 required_each=3",
+        "tuned_noise_ratio": 0.17657843725397784,
+        "improvement_delta": 314279.0,
+        "effect_size": 0.48516594195597007,
+        "bootstrap_ci95": {
+          "confidence_level": 0.95,
+          "lower": -1176193.0,
+          "upper": 1195730.0,
+          "iterations": 2000
+        },
+        "enough_samples": true,
+        "not_enough_samples_reason": null,
         "statistically_significant": false,
         "underpowered": true,
         "power_estimate": {
           "target_relative_improvement_percent": 10.0,
-          "estimated_runs_per_side": null,
-          "reason": "sample-size estimate unavailable: at least two finite samples per side are required"
+          "estimated_runs_per_side": 30,
+          "reason": "normal approximation using pooled_stddev=647776.303, baseline_median=4466598.000, target_delta=446659.800"
         },
         "uncertainty_warnings": [
-          "not enough samples for formal A/B comparison: baseline_runs=5 tuned_runs=0 required_each=3",
-          "low sample count: baseline_runs=5 tuned_runs=0 recommended_each=5",
+          "estimated 30 runs per side needed to detect 10% improvement at current noise",
+          "bootstrap 95% CI crosses zero; A/B improvement is not statistically significant",
           "baseline distribution is noisy: noise_ratio=0.30"
         ]
       }
     ],
     "warnings": [
-      "fewer than two profiles produced valid runs",
-      "comparability Warning profile=kcd1-game-on-1-5-7-11-gamescope-on-0-6 kind=drop-counters-nonzero: candidate had non-zero drop counters (max=472447)",
-      "diagnostic_raw_score_total: not enough samples for formal A/B comparison: baseline_runs=5 tuned_runs=0 required_each=3",
-      "diagnostic_raw_score_total: low sample count: baseline_runs=5 tuned_runs=0 recommended_each=5",
-      "over_5ms: not enough samples for formal A/B comparison: baseline_runs=5 tuned_runs=0 required_each=3",
-      "over_5ms: low sample count: baseline_runs=5 tuned_runs=0 recommended_each=5",
-      "frame_p99_ms: not enough samples for formal A/B comparison: baseline_runs=5 tuned_runs=0 required_each=3",
-      "frame_p99_ms: low sample count: baseline_runs=5 tuned_runs=0 recommended_each=5",
-      "frame_over_16ms: not enough samples for formal A/B comparison: baseline_runs=5 tuned_runs=0 required_each=3",
-      "frame_over_16ms: low sample count: baseline_runs=5 tuned_runs=0 recommended_each=5",
-      "frame_over_33ms: not enough samples for formal A/B comparison: baseline_runs=5 tuned_runs=0 required_each=3",
-      "frame_over_33ms: low sample count: baseline_runs=5 tuned_runs=0 recommended_each=5",
-      "frame_over_50ms: not enough samples for formal A/B comparison: baseline_runs=5 tuned_runs=0 required_each=3",
-      "frame_over_50ms: low sample count: baseline_runs=5 tuned_runs=0 recommended_each=5",
+      "best profile score IQR is non-zero",
+      "comparability Warning profile=baseline-online kind=drop-counters-nonzero: candidate had non-zero drop counters (max=403467)",
+      "comparability Warning profile=kcd1-game-on-1-5-7-11-gamescope-on-0-6 kind=drop-counters-nonzero: candidate had non-zero drop counters (max=428919)",
+      "diagnostic_raw_score_total: tuned distribution is noisy: noise_ratio=0.32",
+      "over_5ms: bootstrap 95% CI crosses zero; A/B improvement is not statistically significant",
+      "frame_over_16ms: estimated 28 runs per side needed to detect 10% improvement at current noise",
+      "frame_over_16ms: bootstrap 95% CI crosses zero; A/B improvement is not statistically significant",
+      "frame_over_33ms: tuned distribution is noisy: noise_ratio=0.27",
       "frame_over_50ms: baseline distribution is noisy: noise_ratio=0.65",
-      "max_latency_ns: not enough samples for formal A/B comparison: baseline_runs=5 tuned_runs=0 required_each=3",
-      "max_latency_ns: low sample count: baseline_runs=5 tuned_runs=0 recommended_each=5",
+      "frame_over_50ms: tuned distribution is noisy: noise_ratio=0.38",
+      "max_latency_ns: estimated 30 runs per side needed to detect 10% improvement at current noise",
+      "max_latency_ns: bootstrap 95% CI crosses zero; A/B improvement is not statistically significant",
       "max_latency_ns: baseline distribution is noisy: noise_ratio=0.30"
     ],
     "next_steps": [
-      "Do not apply a tuned profile from this result.",
-      "Collect another baseline and tuning run if the workload was not stable."
+      "Review tuning_recommendation.md before applying the profile.",
+      "Apply manually and keep stutter restore available."
     ]
   },
   "status": "invalid_experiment",
-  "passed_criteria": [],
+  "passed_criteria": [
+    "diagnostic_raw_score_total: >= 5% lower, CI excludes zero",
+    "frame_p99_ms: no >5% regression"
+  ],
   "failed_criteria": [
-    "diagnostic_raw_score_total: not enough samples for fix validation",
-    "diagnostic_raw_score_total: required CI is missing",
-    "over_5ms: not enough samples for fix validation",
-    "over_5ms: required CI is missing",
-    "over_5ms: metric regressed",
-    "frame_p99_ms: not enough samples for fix validation"
+    "over_5ms: CI crosses zero [-1.000, 2.000]",
+    "over_5ms: metric regressed"
   ],
   "warnings": [
-    "formal A/B evidence is underpowered; do not count this as proof",
-    "comparability Warning profile=kcd1-game-on-1-5-7-11-gamescope-on-0-6 kind=drop-counters-nonzero: candidate had non-zero drop counters (max=472447)"
+    "comparability Warning profile=baseline-online kind=drop-counters-nonzero: candidate had non-zero drop counters (max=403467)",
+    "comparability Warning profile=kcd1-game-on-1-5-7-11-gamescope-on-0-6 kind=drop-counters-nonzero: candidate had non-zero drop counters (max=428919)"
   ],
   "blockers": [
     "drop_counters_nonzero"
@@ -452,8 +516,8 @@ recommendation_html=reports/kcd1-case-study/results/kcd1-fix-validation.html
     {
       "metric": "diagnostic_raw_score_total",
       "expected": ">= 5% lower, CI excludes zero",
-      "actual": "actual improvement 100.0% (delta 45295.000score_points)",
-      "passed": false
+      "actual": "actual improvement 52.5% (delta 23762.000score_points)",
+      "passed": true
     },
     {
       "metric": "over_5ms",
@@ -464,8 +528,8 @@ recommendation_html=reports/kcd1-case-study/results/kcd1-fix-validation.html
     {
       "metric": "frame_p99_ms",
       "expected": "no >5% regression",
-      "actual": "actual improvement 100.0% (delta 49.252ms)",
-      "passed": false
+      "actual": "actual improvement 22.2% (delta 10.915ms)",
+      "passed": true
     }
   ]
 }

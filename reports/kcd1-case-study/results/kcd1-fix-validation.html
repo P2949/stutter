@@ -15,30 +15,29 @@
 <dt>Hypothesis</dt><dd>game thread &#39;wineserver&#39; delayed by 2.995ms; SCX state near spike: ops=- state=disabled</dd>
 <dt>Fix kind</dt><dd>cpu_affinity_profile</dd>
 <dt>Cause</dt><dd>GameThreadSchedulerDelay</dd>
-<dt>Best profile</dt><dd>none</dd>
+<dt>Best profile</dt><dd>baseline-online</dd>
 </dl>
 <table>
 <thead><tr><th>Metric</th><th>Expected</th><th>Actual</th><th>Result</th></tr></thead>
 <tbody>
-<tr><td>diagnostic_raw_score_total</td><td>&gt;= 5% lower, CI excludes zero</td><td>actual improvement 100.0% (delta 45295.000score_points)</td><td class="fail">failed</td></tr>
+<tr><td>diagnostic_raw_score_total</td><td>&gt;= 5% lower, CI excludes zero</td><td>actual improvement 52.5% (delta 23762.000score_points)</td><td class="pass">passed</td></tr>
 <tr><td>over_5ms</td><td>&gt;= 10% lower, CI excludes zero</td><td>actual improvement 0.0% (delta 0.000samples)</td><td class="fail">failed</td></tr>
-<tr><td>frame_p99_ms</td><td>no &gt;5% regression</td><td>actual improvement 100.0% (delta 49.252ms)</td><td class="fail">failed</td></tr>
+<tr><td>frame_p99_ms</td><td>no &gt;5% regression</td><td>actual improvement 22.2% (delta 10.915ms)</td><td class="pass">passed</td></tr>
 </tbody></table>
 <h2>Passed criteria</h2>
-<p>none</p>
+<ul>
+<li>diagnostic_raw_score_total: &gt;= 5% lower, CI excludes zero</li>
+<li>frame_p99_ms: no &gt;5% regression</li>
+</ul>
 <h2>Failed criteria</h2>
 <ul>
-<li>diagnostic_raw_score_total: not enough samples for fix validation</li>
-<li>diagnostic_raw_score_total: required CI is missing</li>
-<li>over_5ms: not enough samples for fix validation</li>
-<li>over_5ms: required CI is missing</li>
+<li>over_5ms: CI crosses zero [-1.000, 2.000]</li>
 <li>over_5ms: metric regressed</li>
-<li>frame_p99_ms: not enough samples for fix validation</li>
 </ul>
 <h2>Warnings</h2>
 <ul>
-<li>formal A/B evidence is underpowered; do not count this as proof</li>
-<li>comparability Warning profile=kcd1-game-on-1-5-7-11-gamescope-on-0-6 kind=drop-counters-nonzero: candidate had non-zero drop counters (max=472447)</li>
+<li>comparability Warning profile=baseline-online kind=drop-counters-nonzero: candidate had non-zero drop counters (max=403467)</li>
+<li>comparability Warning profile=kcd1-game-on-1-5-7-11-gamescope-on-0-6 kind=drop-counters-nonzero: candidate had non-zero drop counters (max=428919)</li>
 </ul>
 <h2>Next steps</h2>
 <ul>
