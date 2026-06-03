@@ -1,0 +1,333 @@
+{
+  "schema_version": 2,
+  "run": "reports/kcd1-case-study/runs/baseline-02",
+  "data_quality": "Medium",
+  "verdict": "InvestigateNonCpuBottleneck",
+  "recommendations": [
+    {
+      "title": "Investigate non-CPU bottleneck candidate",
+      "rationale": "GPU busy at 97% Evidence: GPU busy at 97%",
+      "confidence": "Medium",
+      "suggested_commands": [
+        "stutter report --analysis-json <run-dir>",
+        "stutter display-path compare --baseline <baseline-run> --test <test-run>"
+      ],
+      "safety_note": "Observe only; do not auto-apply CPU affinity for a GPU-bound candidate.",
+      "safety_risk": {
+        "safety_class": "ObserveOnly",
+        "effect_scope": "observe_only",
+        "rollback_requirement": "not_required_for_dry_run",
+        "requires_privilege": false,
+        "system_wide": false,
+        "persistent": false,
+        "allowed_by_default_policy": true,
+        "required_policy_mode": "observe"
+      },
+      "fix_plan": {
+        "schema_version": 1,
+        "id": "advisor-fix:gpu-bound:investigation",
+        "kind": "display_path_investigation",
+        "cause": "GpuBoundCandidate",
+        "confidence": "Medium",
+        "rationale": "GPU busy at 97%",
+        "safety_class": "ObserveOnly",
+        "effect_scope": "observe_only",
+        "rollback": "not_required_for_dry_run",
+        "safety_risk": {
+          "safety_class": "ObserveOnly",
+          "effect_scope": "observe_only",
+          "rollback_requirement": "not_required_for_dry_run",
+          "requires_privilege": false,
+          "system_wide": false,
+          "persistent": false,
+          "allowed_by_default_policy": true,
+          "required_policy_mode": "observe"
+        },
+        "expected_metric_movement": [],
+        "validation": {
+          "baseline_runs_required": 1,
+          "test_runs_required": 1,
+          "scenario_name": null,
+          "baseline_command": "stutter record --duration 180 --run-name investigation-baseline",
+          "experiment_command": "stutter report --analysis-json <run-dir>",
+          "compare_command": "stutter report --analysis-json <run-dir>",
+          "stop_conditions": [
+            "Stop if required evidence streams are unavailable.",
+            "Do not apply system-wide or IRQ/GPU/block-I/O changes from this plan."
+          ],
+          "acceptance_criteria": [
+            {
+              "metric": "diagnostic_raw_score_total",
+              "lower_is_better": true,
+              "minimum_relative_improvement_percent": null,
+              "maximum_allowed_regression_percent": null,
+              "required_ci_excludes_zero": false
+            }
+          ]
+        },
+        "suggested_commands": [
+          "stutter report --analysis-json <run-dir>",
+          "stutter display-path compare --baseline <baseline-run> --test <test-run>"
+        ],
+        "candidate_plan_path": null,
+        "safety_notes": [
+          "Collect hwmon GPU power/clock evidence when available.",
+          "Compare DRM fence and display-path timing before applying CPU tuning."
+        ]
+      }
+    },
+    {
+      "title": "Try profile tuning experiment",
+      "rationale": "Scheduler-delay candidates suggest a profile tuning experiment may be useful, but this is not proof of root cause. Evidence: game thread 'Main' delayed by 2.164ms; SCX state near spike: ops=- state=disabled",
+      "confidence": "Medium",
+      "suggested_commands": [
+        "stutter tune --tree-pid <PID> --profiles <profiles.toml> --runs 5 --baseline-profile baseline-online"
+      ],
+      "safety_note": "Suggested experiment only; do not auto-apply the result.",
+      "safety_risk": {
+        "safety_class": "ReversibleLowRisk",
+        "effect_scope": "local_process_tree",
+        "rollback_requirement": "required_before_apply",
+        "requires_privilege": true,
+        "system_wide": false,
+        "persistent": false,
+        "allowed_by_default_policy": true,
+        "required_policy_mode": "apply-low-risk"
+      },
+      "fix_plan": {
+        "schema_version": 1,
+        "id": "advisor-fix:game-thread-scheduler-delay:cpu-affinity-profile",
+        "kind": "cpu_affinity_profile",
+        "cause": "GameThreadSchedulerDelay",
+        "confidence": "Medium",
+        "rationale": "game thread 'Main' delayed by 2.164ms; SCX state near spike: ops=- state=disabled",
+        "safety_class": "ReversibleLowRisk",
+        "effect_scope": "local_process_tree",
+        "rollback": "required_before_apply",
+        "safety_risk": {
+          "safety_class": "ReversibleLowRisk",
+          "effect_scope": "local_process_tree",
+          "rollback_requirement": "required_before_apply",
+          "requires_privilege": true,
+          "system_wide": false,
+          "persistent": false,
+          "allowed_by_default_policy": true,
+          "required_policy_mode": "apply-low-risk"
+        },
+        "expected_metric_movement": [
+          {
+            "metric": "diagnostic_raw_score_total",
+            "lower_is_better": true,
+            "minimum_relative_improvement_percent": 5.0,
+            "maximum_allowed_regression_percent": null,
+            "required_ci_excludes_zero": true
+          },
+          {
+            "metric": "over_5ms",
+            "lower_is_better": true,
+            "minimum_relative_improvement_percent": 10.0,
+            "maximum_allowed_regression_percent": null,
+            "required_ci_excludes_zero": true
+          },
+          {
+            "metric": "frame_p99_ms",
+            "lower_is_better": true,
+            "minimum_relative_improvement_percent": null,
+            "maximum_allowed_regression_percent": 5.0,
+            "required_ci_excludes_zero": false
+          }
+        ],
+        "validation": {
+          "baseline_runs_required": 5,
+          "test_runs_required": 5,
+          "scenario_name": null,
+          "baseline_command": "stutter record --tree-pid <PID> --duration 180 --run-name baseline-a",
+          "experiment_command": "stutter tune --tree-pid <PID> --profiles <profiles.toml> --runs 5 --baseline-profile baseline-online",
+          "compare_command": "stutter recommend --fix-plan reports/kcd1-case-study/runs/baseline-02/advisor_fix_plan_cpu_affinity_profile.json --baseline <baseline-run> --tune <tune-dir> --html fix-validation.html",
+          "stop_conditions": [
+            "Stop if the target process tree changes substantially between baseline and test runs.",
+            "Stop if frame data, scheduler data, or diagnostic scores are missing from either side.",
+            "Stop if any safety metric regresses beyond the acceptance guardrail."
+          ],
+          "acceptance_criteria": [
+            {
+              "metric": "diagnostic_raw_score_total",
+              "lower_is_better": true,
+              "minimum_relative_improvement_percent": 5.0,
+              "maximum_allowed_regression_percent": null,
+              "required_ci_excludes_zero": true
+            },
+            {
+              "metric": "over_5ms",
+              "lower_is_better": true,
+              "minimum_relative_improvement_percent": 10.0,
+              "maximum_allowed_regression_percent": null,
+              "required_ci_excludes_zero": true
+            },
+            {
+              "metric": "frame_p99_ms",
+              "lower_is_better": true,
+              "minimum_relative_improvement_percent": null,
+              "maximum_allowed_regression_percent": 5.0,
+              "required_ci_excludes_zero": false
+            }
+          ]
+        },
+        "suggested_commands": [
+          "stutter tune --tree-pid <PID> --profiles <profiles.toml> --runs 5 --baseline-profile baseline-online"
+        ],
+        "candidate_plan_path": "reports/kcd1-case-study/runs/baseline-02/advisor_fix_plan_cpu_affinity_profile.json",
+        "safety_notes": [
+          "Applyable experiment only after repeated baseline/test evidence; do not treat one run as proof.",
+          "Rollback must be available before applying any profile result."
+        ]
+      }
+    }
+  ],
+  "fix_plans": [
+    {
+      "schema_version": 1,
+      "id": "advisor-fix:gpu-bound:investigation",
+      "kind": "display_path_investigation",
+      "cause": "GpuBoundCandidate",
+      "confidence": "Medium",
+      "rationale": "GPU busy at 97%",
+      "safety_class": "ObserveOnly",
+      "effect_scope": "observe_only",
+      "rollback": "not_required_for_dry_run",
+      "safety_risk": {
+        "safety_class": "ObserveOnly",
+        "effect_scope": "observe_only",
+        "rollback_requirement": "not_required_for_dry_run",
+        "requires_privilege": false,
+        "system_wide": false,
+        "persistent": false,
+        "allowed_by_default_policy": true,
+        "required_policy_mode": "observe"
+      },
+      "expected_metric_movement": [],
+      "validation": {
+        "baseline_runs_required": 1,
+        "test_runs_required": 1,
+        "scenario_name": null,
+        "baseline_command": "stutter record --duration 180 --run-name investigation-baseline",
+        "experiment_command": "stutter report --analysis-json <run-dir>",
+        "compare_command": "stutter report --analysis-json <run-dir>",
+        "stop_conditions": [
+          "Stop if required evidence streams are unavailable.",
+          "Do not apply system-wide or IRQ/GPU/block-I/O changes from this plan."
+        ],
+        "acceptance_criteria": [
+          {
+            "metric": "diagnostic_raw_score_total",
+            "lower_is_better": true,
+            "minimum_relative_improvement_percent": null,
+            "maximum_allowed_regression_percent": null,
+            "required_ci_excludes_zero": false
+          }
+        ]
+      },
+      "suggested_commands": [
+        "stutter report --analysis-json <run-dir>",
+        "stutter display-path compare --baseline <baseline-run> --test <test-run>"
+      ],
+      "candidate_plan_path": null,
+      "safety_notes": [
+        "Collect hwmon GPU power/clock evidence when available.",
+        "Compare DRM fence and display-path timing before applying CPU tuning."
+      ]
+    },
+    {
+      "schema_version": 1,
+      "id": "advisor-fix:game-thread-scheduler-delay:cpu-affinity-profile",
+      "kind": "cpu_affinity_profile",
+      "cause": "GameThreadSchedulerDelay",
+      "confidence": "Medium",
+      "rationale": "game thread 'Main' delayed by 2.164ms; SCX state near spike: ops=- state=disabled",
+      "safety_class": "ReversibleLowRisk",
+      "effect_scope": "local_process_tree",
+      "rollback": "required_before_apply",
+      "safety_risk": {
+        "safety_class": "ReversibleLowRisk",
+        "effect_scope": "local_process_tree",
+        "rollback_requirement": "required_before_apply",
+        "requires_privilege": true,
+        "system_wide": false,
+        "persistent": false,
+        "allowed_by_default_policy": true,
+        "required_policy_mode": "apply-low-risk"
+      },
+      "expected_metric_movement": [
+        {
+          "metric": "diagnostic_raw_score_total",
+          "lower_is_better": true,
+          "minimum_relative_improvement_percent": 5.0,
+          "maximum_allowed_regression_percent": null,
+          "required_ci_excludes_zero": true
+        },
+        {
+          "metric": "over_5ms",
+          "lower_is_better": true,
+          "minimum_relative_improvement_percent": 10.0,
+          "maximum_allowed_regression_percent": null,
+          "required_ci_excludes_zero": true
+        },
+        {
+          "metric": "frame_p99_ms",
+          "lower_is_better": true,
+          "minimum_relative_improvement_percent": null,
+          "maximum_allowed_regression_percent": 5.0,
+          "required_ci_excludes_zero": false
+        }
+      ],
+      "validation": {
+        "baseline_runs_required": 5,
+        "test_runs_required": 5,
+        "scenario_name": null,
+        "baseline_command": "stutter record --tree-pid <PID> --duration 180 --run-name baseline-a",
+        "experiment_command": "stutter tune --tree-pid <PID> --profiles <profiles.toml> --runs 5 --baseline-profile baseline-online",
+        "compare_command": "stutter recommend --fix-plan reports/kcd1-case-study/runs/baseline-02/advisor_fix_plan_cpu_affinity_profile.json --baseline <baseline-run> --tune <tune-dir> --html fix-validation.html",
+        "stop_conditions": [
+          "Stop if the target process tree changes substantially between baseline and test runs.",
+          "Stop if frame data, scheduler data, or diagnostic scores are missing from either side.",
+          "Stop if any safety metric regresses beyond the acceptance guardrail."
+        ],
+        "acceptance_criteria": [
+          {
+            "metric": "diagnostic_raw_score_total",
+            "lower_is_better": true,
+            "minimum_relative_improvement_percent": 5.0,
+            "maximum_allowed_regression_percent": null,
+            "required_ci_excludes_zero": true
+          },
+          {
+            "metric": "over_5ms",
+            "lower_is_better": true,
+            "minimum_relative_improvement_percent": 10.0,
+            "maximum_allowed_regression_percent": null,
+            "required_ci_excludes_zero": true
+          },
+          {
+            "metric": "frame_p99_ms",
+            "lower_is_better": true,
+            "minimum_relative_improvement_percent": null,
+            "maximum_allowed_regression_percent": 5.0,
+            "required_ci_excludes_zero": false
+          }
+        ]
+      },
+      "suggested_commands": [
+        "stutter tune --tree-pid <PID> --profiles <profiles.toml> --runs 5 --baseline-profile baseline-online"
+      ],
+      "candidate_plan_path": "reports/kcd1-case-study/runs/baseline-02/advisor_fix_plan_cpu_affinity_profile.json",
+      "safety_notes": [
+        "Applyable experiment only after repeated baseline/test evidence; do not treat one run as proof.",
+        "Rollback must be available before applying any profile result."
+      ]
+    }
+  ],
+  "warnings": [
+    "CPU affinity may not help a GPU-bound candidate.",
+    "No profiles file was provided; create one from examples/profiles before tuning."
+  ]
+}

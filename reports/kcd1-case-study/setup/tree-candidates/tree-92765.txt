@@ -1,0 +1,2 @@
+=== inspect-tree 92765 ===
+root 92765 wineserver [WineServer]

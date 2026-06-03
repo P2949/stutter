@@ -1,0 +1,5 @@
+=== inspect-tree 92759 ===
+root 92759 python3
+└─ 92763 steam.exe [Game]
+   ├─ 92833 steam.exe [Game]
+   └─ 92838 steam.exe [Game]

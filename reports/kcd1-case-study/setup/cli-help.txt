@@ -1,0 +1,561 @@
+=== stutter help ===
+Profile scheduler runnable latency for selected tasks
+
+Usage: stutter [OPTIONS] [COMMAND]
+
+Commands:
+  monitor                  
+  record                   
+  bench                    
+  inspect-tree             
+  report                   
+  summary                  
+  validate                 
+  restore                  
+  apply-profile            
+  tune                     Benchmark multiple profiles and select the best one
+  recommend                
+  prove-fix                Print a guided workflow for proving an advisor fix plan
+  release                  
+  check                    
+  compare                  
+  config                   
+  audit                    
+  advisor                  
+  doctor                   
+  profile-template         
+  inspect-irqs             
+  inspect-drm-tracepoints  
+  wayland-probe            
+  autotune                 
+  autotune-status          
+  agent                    
+  privileged-worker        
+  daemon                   
+  service                  
+  completions              
+  man                      
+  probes                   
+  rules                    
+  scenario                 
+  help                     Print this message or the help of the given subcommand(s)
+
+Options:
+  -p, --pid <PID>
+          
+      --tree-pid <PID>
+          
+      --exclude-tree-pid <PID>
+          
+      --summary-ms <MS>
+          
+      --epoch <MS>
+          
+      --spike-us <US>
+          
+      --live-diagnosis-cluster-window-ms <MS>
+          
+      --alert-threshold-ms <MS>
+          
+      --alert-webhook-url <URL>
+          
+  -v, --verbose
+          
+      --run-name <NAME>
+          
+      --scenario <NAME>
+          
+      --workload-label <LABEL>
+          
+      --route-label <LABEL>
+          
+      --out-dir <PATH>
+          
+      --include-comm <PATTERN>
+          
+      --exclude-comm <PATTERN>
+          
+      --keep-missing-pid
+          
+      --watch-process <COMM>
+          
+      --persistent
+          
+      --watch-poll-ms <WATCH_POLL_MS>
+          [default: 2000]
+      --watch-timeout-seconds <SECONDS>
+          
+      --max-tasks <N>
+          
+      --csv <PATH>
+          
+      --stream-csv <PATH_OR_->
+          
+      --irq-latency
+          Enable IRQ latency tracing; requires at least one explicit --irq <IRQ>
+      --irq <IRQ>
+          IRQ number to trace when --irq-latency is enabled; repeat for multiple IRQs
+      --hwmon
+          
+      --no-hwmon
+          Disable GPU hwmon telemetry
+      --hwmon-root <PATH>
+          
+      --hwmon-drm-card <CARD>
+          
+      --hwmon-render-node <NODE>
+          
+      --mangohud-log <PATH>
+          
+      --mangohud-log-live
+          
+      --tui
+          
+      --retain-intervals <N>
+          
+      --retention-max-runs <N>
+          
+      --retention-max-bytes <BYTES>
+          
+      --retention-max-age-seconds <SECONDS>
+          
+      --retention-min-free-bytes <BYTES>
+          
+      --no-record
+          
+      --cpu-freq
+          Collect CPU frequency information (enabled by default for recording runs)
+      --no-cpu-freq
+          Disable CPU frequency collection
+      --cgroupv2 <PATH>
+          
+      --native-cgroup-filter
+          
+      --follow-exec
+          
+      --no-follow-exec
+          
+      --faults
+          
+      --no-faults
+          Disable page fault collection
+      --cpu-perf
+          Collect per-task CPU hardware counters for IPC/cache-miss diagnostics
+      --cpu-perf-kernel
+          Include kernel/hypervisor time in CPU perf counters; default is user-space only
+      --cpu-perf-max-tasks <N>
+          Maximum active target tasks to attach CPU perf counters to [default: 128]
+      --cpu-perf-cache-refs
+          Also collect cache references so cache miss rate can be computed; otherwise only cache MPKI is computed
+      --block-io
+          
+      --no-block-io
+          Disable block I/O collection
+      --stat-wait
+          
+      --no-stat-wait
+          Disable stat-wait collection
+      --runtime-slices
+          Collect per-thread CPU runtime/wait slices from procfs schedstat
+      --no-runtime-slices
+          Disable per-thread runtime-slice collection
+      --runtime-slices-max-tasks <N>
+          [default: 256]
+      --kms-timing
+          
+      --kms-card <cardN>
+          
+      --kms-connector <NAME>
+          
+      --kms-crtc <ID>
+          
+      --drm-fence-latency
+          
+      --drm-fence-render-card <cardN>
+          
+      --drm-fence-display-card <cardN>
+          
+      --drm-fence-driver <amdgpu|i915|auto>
+          
+      --wayland-presentation
+          
+      --wayland-presentation-log <PATH>
+          
+      --wayland-presentation-source <WAYLAND_PRESENTATION_SOURCE>
+          [default: external-log] [possible values: external-log, gamescope, self-test]
+      --dmabuf-tracking
+          Ingest cooperative DMABUF format/modifier path events
+      --dmabuf-log <PATH>
+          
+      --gpu-engine-sampling
+          Collect per-GPU engine activity samples for display-path diagnosis
+      --display-path-label <LABEL>
+          
+      --display-render-gpu <DRIVER>
+          
+      --display-scanout-gpu <DRIVER>
+          
+      --display-connector <NAME>
+          
+      --json-stream
+          Emit scheduler spike events to stdout as newline-delimited JSON
+      --metrics-port <PORT>
+          
+      --preset <NAME>
+          Apply named monitor defaults: gaming, recording, diagnosis, lightweight
+      --ebpf-ringbuf-size-kb <KB>
+          
+      --ebpf-wakeup-map-factor <N>
+          
+      --ebpf-block-start-entries <N>
+          
+      --ebpf-drm-fence-wait-start-entries <N>
+          
+      --ebpf-drm-fence-signal-entries <N>
+          
+      --otlp-endpoint <URL>
+          
+      --otel-service-name <OTEL_SERVICE_NAME>
+          [default: stutter]
+      --auto-focus
+          
+      --focus-source <FOCUS_SOURCE>
+          Auto-focus source: heuristic, foreground, or hybrid [default: heuristic] [possible values: heuristic, foreground, hybrid]
+      --foreground-window
+          Record foreground-window events even when explicit targets are used
+      --foreground-source <FOREGROUND_SOURCE>
+          Foreground-window provider: auto, sway, hyprland, gnome, kde, x11 [default: auto] [possible values: auto, sway, hyprland, gnome, kde, x11]
+      --foreground-poll-ms <FOREGROUND_POLL_MS>
+          [default: 1000]
+      --foreground-max-stale-ms <FOREGROUND_MAX_STALE_MS>
+          [default: 2500]
+      --foreground-include-title
+          
+      --auto-focus-poll-ms <AUTO_FOCUS_POLL_MS>
+          [default: 1000]
+      --auto-focus-min-confidence <AUTO_FOCUS_MIN_CONFIDENCE>
+          [default: 0.6]
+      --auto-focus-switch-cooldown-ms <AUTO_FOCUS_SWITCH_COOLDOWN_MS>
+          [default: 5000]
+      --auto-focus-switch-margin <AUTO_FOCUS_SWITCH_MARGIN>
+          [default: 0.2]
+      --auto-focus-required-polls <AUTO_FOCUS_REQUIRED_POLLS>
+          [default: 2]
+      --auto-focus-max-roots <AUTO_FOCUS_MAX_ROOTS>
+          [default: 4]
+      --remote <URL>
+          
+  -h, --help
+          Print help
+  -V, --version
+          Print version
+
+=== record help ===
+Usage: stutter record [OPTIONS]
+
+Options:
+  -p, --pid <PID>
+          
+      --tree-pid <PID>
+          
+      --exclude-tree-pid <PID>
+          
+      --summary-ms <MS>
+          
+      --epoch <MS>
+          
+      --spike-us <US>
+          
+      --live-diagnosis-cluster-window-ms <MS>
+          
+      --alert-threshold-ms <MS>
+          
+      --alert-webhook-url <URL>
+          
+  -v, --verbose
+          
+      --run-name <NAME>
+          
+      --scenario <NAME>
+          
+      --workload-label <LABEL>
+          
+      --route-label <LABEL>
+          
+      --out-dir <PATH>
+          
+      --include-comm <PATTERN>
+          
+      --exclude-comm <PATTERN>
+          
+      --keep-missing-pid
+          
+      --watch-process <COMM>
+          
+      --persistent
+          
+      --watch-poll-ms <WATCH_POLL_MS>
+          [default: 2000]
+      --watch-timeout-seconds <SECONDS>
+          
+      --max-tasks <N>
+          
+      --csv <PATH>
+          
+      --stream-csv <PATH_OR_->
+          
+      --irq-latency
+          Enable IRQ latency tracing; requires at least one explicit --irq <IRQ>
+      --irq <IRQ>
+          IRQ number to trace when --irq-latency is enabled; repeat for multiple IRQs
+      --hwmon
+          
+      --no-hwmon
+          Disable GPU hwmon telemetry
+      --hwmon-root <PATH>
+          
+      --hwmon-drm-card <CARD>
+          
+      --hwmon-render-node <NODE>
+          
+      --mangohud-log <PATH>
+          
+      --mangohud-log-live
+          
+      --tui
+          
+      --retain-intervals <N>
+          
+      --retention-max-runs <N>
+          
+      --retention-max-bytes <BYTES>
+          
+      --retention-max-age-seconds <SECONDS>
+          
+      --retention-min-free-bytes <BYTES>
+          
+      --no-record
+          
+      --cpu-freq
+          Collect CPU frequency information (enabled by default for recording runs)
+      --no-cpu-freq
+          Disable CPU frequency collection
+      --cgroupv2 <PATH>
+          
+      --native-cgroup-filter
+          
+      --follow-exec
+          
+      --no-follow-exec
+          
+      --faults
+          
+      --no-faults
+          Disable page fault collection
+      --cpu-perf
+          Collect per-task CPU hardware counters for IPC/cache-miss diagnostics
+      --cpu-perf-kernel
+          Include kernel/hypervisor time in CPU perf counters; default is user-space only
+      --cpu-perf-max-tasks <N>
+          Maximum active target tasks to attach CPU perf counters to [default: 128]
+      --cpu-perf-cache-refs
+          Also collect cache references so cache miss rate can be computed; otherwise only cache MPKI is computed
+      --block-io
+          
+      --no-block-io
+          Disable block I/O collection
+      --stat-wait
+          
+      --no-stat-wait
+          Disable stat-wait collection
+      --runtime-slices
+          Collect per-thread CPU runtime/wait slices from procfs schedstat
+      --no-runtime-slices
+          Disable per-thread runtime-slice collection
+      --runtime-slices-max-tasks <N>
+          [default: 256]
+      --kms-timing
+          
+      --kms-card <cardN>
+          
+      --kms-connector <NAME>
+          
+      --kms-crtc <ID>
+          
+      --drm-fence-latency
+          
+      --drm-fence-render-card <cardN>
+          
+      --drm-fence-display-card <cardN>
+          
+      --drm-fence-driver <amdgpu|i915|auto>
+          
+      --wayland-presentation
+          
+      --wayland-presentation-log <PATH>
+          
+      --wayland-presentation-source <WAYLAND_PRESENTATION_SOURCE>
+          [default: external-log] [possible values: external-log, gamescope, self-test]
+      --dmabuf-tracking
+          Ingest cooperative DMABUF format/modifier path events
+      --dmabuf-log <PATH>
+          
+      --gpu-engine-sampling
+          Collect per-GPU engine activity samples for display-path diagnosis
+      --display-path-label <LABEL>
+          
+      --display-render-gpu <DRIVER>
+          
+      --display-scanout-gpu <DRIVER>
+          
+      --display-connector <NAME>
+          
+      --json-stream
+          Emit scheduler spike events to stdout as newline-delimited JSON
+      --metrics-port <PORT>
+          
+      --preset <NAME>
+          Apply named monitor defaults: gaming, recording, diagnosis, lightweight
+      --ebpf-ringbuf-size-kb <KB>
+          
+      --ebpf-wakeup-map-factor <N>
+          
+      --ebpf-block-start-entries <N>
+          
+      --ebpf-drm-fence-wait-start-entries <N>
+          
+      --ebpf-drm-fence-signal-entries <N>
+          
+      --otlp-endpoint <URL>
+          
+      --otel-service-name <OTEL_SERVICE_NAME>
+          [default: stutter]
+      --auto-focus
+          
+      --focus-source <FOCUS_SOURCE>
+          Auto-focus source: heuristic, foreground, or hybrid [default: heuristic] [possible values: heuristic, foreground, hybrid]
+      --foreground-window
+          Record foreground-window events even when explicit targets are used
+      --foreground-source <FOREGROUND_SOURCE>
+          Foreground-window provider: auto, sway, hyprland, gnome, kde, x11 [default: auto] [possible values: auto, sway, hyprland, gnome, kde, x11]
+      --foreground-poll-ms <FOREGROUND_POLL_MS>
+          [default: 1000]
+      --foreground-max-stale-ms <FOREGROUND_MAX_STALE_MS>
+          [default: 2500]
+      --foreground-include-title
+          
+      --auto-focus-poll-ms <AUTO_FOCUS_POLL_MS>
+          [default: 1000]
+      --auto-focus-min-confidence <AUTO_FOCUS_MIN_CONFIDENCE>
+          [default: 0.6]
+      --auto-focus-switch-cooldown-ms <AUTO_FOCUS_SWITCH_COOLDOWN_MS>
+          [default: 5000]
+      --auto-focus-switch-margin <AUTO_FOCUS_SWITCH_MARGIN>
+          [default: 0.2]
+      --auto-focus-required-polls <AUTO_FOCUS_REQUIRED_POLLS>
+          [default: 2]
+      --auto-focus-max-roots <AUTO_FOCUS_MAX_ROOTS>
+          [default: 4]
+      --remote <URL>
+          
+      --duration <SECONDS>
+          
+  -h, --help
+          Print help
+
+=== advisor help ===
+Usage: stutter advisor [OPTIONS]
+
+Options:
+      --run <PATH>                   
+      --profiles <PATH>              
+      --json                         
+      --watch-runs                   
+      --runs-dir <PATH>              
+      --poll-seconds <POLL_SECONDS>  [default: 10]
+      --once                         
+  -h, --help                         Print help
+
+=== prove-fix help ===
+Print a guided workflow for proving an advisor fix plan
+
+Usage: stutter prove-fix [OPTIONS] --plan <PATH> --profiles <FILE> --tree-pid <PID>
+
+Options:
+      --plan <PATH>              
+      --profiles <FILE>          
+      --tree-pid <PID>           
+      --scenario <NAME>          
+      --workload-label <LABEL>   
+      --route-label <LABEL>      
+      --duration <SECONDS>       [default: 180]
+      --baseline-runs <N>        
+      --test-runs <N>            
+      --baseline-profile <NAME>  [default: baseline-online]
+      --html <PATH>              [default: fix-validation.html]
+  -h, --help                     Print help
+
+=== tune help ===
+Benchmark multiple profiles and select the best one. Warning: ranking is count-based and workload-sensitive. It assumes comparable route/scene/load across epochs and will reject profiles with major scored-sample or frame-count mismatches. Use --runs 3 or higher for reliable results.
+
+Usage: stutter tune [OPTIONS] --tree-pid <PID> --profiles <FILE>
+
+Options:
+      --tree-pid <PID>
+          
+
+      --profiles <FILE>
+          
+
+      --epoch-seconds <EPOCH_SECONDS>
+          [default: 120]
+
+      --warmup-seconds <WARMUP_SECONDS>
+          [default: 30]
+
+      --keep-best
+          
+
+      --baseline-profile <NAME>
+          
+
+      --scenario <NAME>
+          
+
+      --workload-label <LABEL>
+          
+
+      --route-label <LABEL>
+          
+
+      --out-dir <PATH>
+          
+
+      --mangohud-log <PATH>
+          
+
+  -n, --runs <N>
+          [default: 3]
+
+      --enforce
+          
+
+      --hwmon
+          
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+=== recommend help ===
+Usage: stutter recommend [OPTIONS] --baseline <PATH>... --tune <PATH>
+
+Options:
+      --baseline <PATH>...       
+      --tune <PATH>              
+      --fix-plan <PATH>          
+      --allow-scenario-mismatch  
+      --json                     
+      --markdown <PATH>          
+      --html <PATH>              
+  -h, --help                     Print help
+

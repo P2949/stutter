@@ -1,0 +1,15 @@
+=== inspect-tree 92831 ===
+root 92831 xalia.exe
+├─ 92842 SGen worker
+├─ 92843 Finalizer
+├─ 92844 xalia.e:disk$0
+├─ 92845 xalia.e:disk$0
+├─ 92846 mangohud-amdgpu
+├─ 92847 mangohud-gpufd
+├─ 92858 xalia.e:disk$0
+├─ 92859 xalia.e:disk$0
+├─ 92870 wine_sechost_de
+├─ 92874 SDL_joystick
+├─ 92875 wine_xinput_hid [Input]
+├─ 92877 xalia.exe
+└─ 92878 Thread Pool Wor

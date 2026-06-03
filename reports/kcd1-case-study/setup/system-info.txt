@@ -1,0 +1,125 @@
+=== git status ===
+?? reports/
+
+=== git commit ===
+4fca2c9 removing stale plan.md
+
+=== rust toolchain ===
+rustc 1.97.0-nightly (ca9a134e0 2026-04-26)
+binary: rustc
+commit-hash: ca9a134e0985765ded9cfdde4030a5df4db7e2bd
+commit-date: 2026-04-26
+host: x86_64-unknown-linux-gnu
+release: 1.97.0-nightly
+LLVM version: 22.1.2
+cargo 1.97.0-nightly (eb9b60f1f 2026-04-24)
+nightly-x86_64-unknown-linux-gnu (overridden by '/home/p2949/Desktop/stutter/rust-toolchain.toml')
+
+=== kernel/os ===
+Linux localhost 7.0.1-cachyos #4 SMP PREEMPT_DYNAMIC Fri Apr 24 23:49:02 IST 2026 x86_64 Intel(R) Core(TM) i5-10600K CPU @ 4.10GHz GenuineIntel GNU/Linux
+NAME='Gentoo'
+ID='gentoo'
+PRETTY_NAME='Gentoo Linux'
+VERSION='2.18'
+VERSION_ID='2.18'
+HOME_URL='https://www.gentoo.org/'
+SUPPORT_URL='https://www.gentoo.org/support/'
+BUG_REPORT_URL='https://bugs.gentoo.org/'
+ANSI_COLOR='1;32'
+
+=== cpu topology ===
+Architecture:                            x86_64
+CPU op-mode(s):                          32-bit, 64-bit
+Address sizes:                           39 bits physical, 48 bits virtual
+Byte Order:                              Little Endian
+CPU(s):                                  12
+On-line CPU(s) list:                     0-11
+Vendor ID:                               GenuineIntel
+Model name:                              Intel(R) Core(TM) i5-10600K CPU @ 4.10GHz
+CPU family:                              6
+Model:                                   165
+Thread(s) per core:                      2
+Core(s) per socket:                      6
+Socket(s):                               1
+Stepping:                                5
+Microcode version:                       0x100
+CPU(s) scaling MHz:                      22%
+CPU max MHz:                             5000.0000
+CPU min MHz:                             800.0001
+BogoMIPS:                                8199.79
+Flags:                                   fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush dts acpi mmx fxsr sse sse2 ss ht tm pbe syscall nx pdpe1gb rdtscp lm constant_tsc art arch_perfmon pebs bts rep_good nopl xtopology nonstop_tsc cpuid aperfmperf pni pclmulqdq dtes64 monitor ds_cpl vmx smx est tm2 ssse3 sdbg fma cx16 xtpr pdcm pcid sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand lahf_lm abm 3dnowprefetch cpuid_fault epb ssbd ibrs ibpb stibp ibrs_enhanced tpr_shadow flexpriority ept vpid ept_ad fsgsbase tsc_adjust bmi1 avx2 smep bmi2 erms invpcid mpx rdseed adx smap clflushopt intel_pt xsaveopt xsavec xgetbv1 xsaves dtherm ida arat pln pts hwp hwp_notify hwp_act_window hwp_epp vnmi pku ospke md_clear flush_l1d arch_capabilities
+Virtualization:                          VT-x
+L1d cache:                               192 KiB (6 instances)
+L1i cache:                               192 KiB (6 instances)
+L2 cache:                                1.5 MiB (6 instances)
+L3 cache:                                12 MiB (1 instance)
+Vulnerability Gather data sampling:      Vulnerable
+Vulnerability Ghostwrite:                Not affected
+Vulnerability Indirect target selection: Vulnerable
+Vulnerability Itlb multihit:             Processor vulnerable
+Vulnerability L1tf:                      Not affected
+Vulnerability Mds:                       Not affected
+Vulnerability Meltdown:                  Not affected
+Vulnerability Mmio stale data:           Vulnerable
+Vulnerability Old microcode:             Not affected
+Vulnerability Reg file data sampling:    Not affected
+Vulnerability Retbleed:                  Vulnerable
+Vulnerability Spec rstack overflow:      Not affected
+Vulnerability Spec store bypass:         Vulnerable
+Vulnerability Spectre v1:                Vulnerable: __user pointer sanitization and usercopy barriers only; no swapgs barriers
+Vulnerability Spectre v2:                Vulnerable; IBPB: disabled; STIBP: disabled; PBRSB-eIBRS: Vulnerable; BHI: Vulnerable
+Vulnerability Srbds:                     Vulnerable
+Vulnerability Tsa:                       Not affected
+Vulnerability Tsx async abort:           Not affected
+Vulnerability Vmscape:                   Vulnerable
+
+CPU SOCKET CORE L1d:L1i:L2:L3 ONLINE    MAXMHZ   MINMHZ       MHZ
+  0      0    0 0:0:0:0          yes 5000.0000 800.0001 4499.9473
+  1      0    1 1:1:1:0          yes 5000.0000 800.0001  800.0001
+  2      0    2 2:2:2:0          yes 5000.0000 800.0001  800.0001
+  3      0    3 3:3:3:0          yes 5000.0000 800.0001  800.0001
+  4      0    4 4:4:4:0          yes 5000.0000 800.0001  800.0001
+  5      0    5 5:5:5:0          yes 5000.0000 800.0001  800.0001
+  6      0    0 0:0:0:0          yes 5000.0000 800.0001  800.0001
+  7      0    1 1:1:1:0          yes 5000.0000 800.0001  800.0001
+  8      0    2 2:2:2:0          yes 5000.0000 800.0001  800.0001
+  9      0    3 3:3:3:0          yes 5000.0000 800.0001  800.0001
+ 10      0    4 4:4:4:0          yes 5000.0000 800.0001  800.0001
+ 11      0    5 5:5:5:0          yes 5000.0000 800.0001  800.0001
+
+=== online CPUs ===
+0-11
+
+=== SMT sibling layout ===
+/sys/devices/system/cpu/cpu0/topology/thread_siblings_list: 0,6
+/sys/devices/system/cpu/cpu10/topology/thread_siblings_list: 4,10
+/sys/devices/system/cpu/cpu11/topology/thread_siblings_list: 5,11
+/sys/devices/system/cpu/cpu1/topology/thread_siblings_list: 1,7
+/sys/devices/system/cpu/cpu2/topology/thread_siblings_list: 2,8
+/sys/devices/system/cpu/cpu3/topology/thread_siblings_list: 3,9
+/sys/devices/system/cpu/cpu4/topology/thread_siblings_list: 4,10
+/sys/devices/system/cpu/cpu5/topology/thread_siblings_list: 5,11
+/sys/devices/system/cpu/cpu6/topology/thread_siblings_list: 0,6
+/sys/devices/system/cpu/cpu7/topology/thread_siblings_list: 1,7
+/sys/devices/system/cpu/cpu8/topology/thread_siblings_list: 2,8
+/sys/devices/system/cpu/cpu9/topology/thread_siblings_list: 3,9
+
+=== GPU summary ===
+00:02.0 VGA compatible controller [0300]: Intel Corporation CometLake-S GT2 [UHD Graphics 630] [8086:9bc5] (rev 05)
+	DeviceName: Onboard - Video
+	Subsystem: ASUSTeK Computer Inc. Device [1043:8694]
+	Kernel driver in use: i915
+	Kernel modules: i915
+--
+03:00.0 VGA compatible controller [0300]: Advanced Micro Devices, Inc. [AMD/ATI] Navi 48 [Radeon RX 9070/9070 XT/9070 GRE] [1002:7550] (rev c0)
+	Subsystem: Acer Incorporated [ALI] Device [1025:187a]
+	Kernel driver in use: amdgpu
+	Kernel modules: amdgpu
+03:00.1 Audio device [0403]: Advanced Micro Devices, Inc. [AMD/ATI] Navi 48 HDMI/DP Audio Controller [1002:ab40]
+
+=== display/session ===
+XDG_SESSION_TYPE=wayland
+XDG_CURRENT_DESKTOP=sway
+DESKTOP_SESSION=sway
+WAYLAND_DISPLAY=wayland-1
+

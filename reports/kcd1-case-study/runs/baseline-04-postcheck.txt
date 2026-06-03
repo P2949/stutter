@@ -1,0 +1,8 @@
+=== key analysis fields for baseline-04 ===
+21:    "duration_ms": 174509,
+1103:    "frame_event_count": 8187,
+1133:    "stop_reason": "tree_root_exit",
+157205:    "frame_count": 8187,
+259731:    "frame_count": 8187,
+259734:    "frame_event_count": 8187,
+259786:    "frame_timestamp_alignment": "monotonic_observed",

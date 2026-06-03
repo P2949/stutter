@@ -1,0 +1,8 @@
+=== key analysis fields for baseline-03 ===
+21:    "duration_ms": 180666,
+1288:    "frame_event_count": 9261,
+1318:    "stop_reason": "max_duration_reached",
+148914:    "frame_count": 9261,
+254687:    "frame_count": 9261,
+254690:    "frame_event_count": 9261,
+254741:    "frame_timestamp_alignment": "monotonic_observed",

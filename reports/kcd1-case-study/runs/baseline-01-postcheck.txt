@@ -1,0 +1,49 @@
+=== run dir ===
+reports/kcd1-case-study/runs/baseline-01/cpu_freq_samples.json
+reports/kcd1-case-study/runs/baseline-01/display_topology.json
+reports/kcd1-case-study/runs/baseline-01/focus_events.json
+reports/kcd1-case-study/runs/baseline-01/foreground_events.json
+reports/kcd1-case-study/runs/baseline-01/frame_correlation.json
+reports/kcd1-case-study/runs/baseline-01/gpu_samples.json
+reports/kcd1-case-study/runs/baseline-01/interval.json
+reports/kcd1-case-study/runs/baseline-01/metadata.json
+reports/kcd1-case-study/runs/baseline-01/migration_events.json
+reports/kcd1-case-study/runs/baseline-01/runtime_slices.json
+reports/kcd1-case-study/runs/baseline-01/session.json
+reports/kcd1-case-study/runs/baseline-01/spike_events.json
+reports/kcd1-case-study/runs/baseline-01/tree_events.json
+
+=== MangoHud CSV used ===
+/home/p2949/.local/state/stutter/mangohud-kcd/KingdomCome_2026-06-03_18-46-57.csv
+-rw-r--r-- 1 p2949 p2949 1.1M Jun  3 18:50 /home/p2949/.local/state/stutter/mangohud-kcd/KingdomCome_2026-06-03_18-46-57.csv
+v1
+v0.8.2
+---------------------SYSTEM INFO---------------------
+os,cpu,gpu,ram,kernel,driver,cpuscheduler
+Steam Runtime 3 (sniper),Intel Core i5-10600K CPU @ 4.10GHz,AMD Radeon RX 9070 XT (RADV GFX1201),32148228,7.0.1-cachyos,,performance
+--------------------FRAME METRICS--------------------
+fps,frametime,cpu_load,cpu_power,gpu_load,cpu_temp,gpu_temp,gpu_core_clock,gpu_mem_clock,gpu_vram_used,gpu_power,ram_used,swap_used,process_rss,cpu_mhz,elapsed
+2300.02,0.434778,36.8846,0,0,67,0,1200,0,0,0,12.5302,0.000278473,0,4499,147855925
+99.629,10.0372,36.8846,0,0,67,0,1200,0,0,0,12.5302,0.000278473,0,4499,157894598
+99.9039,10.0096,36.8846,0,0,67,0,1200,0,0,0,12.5302,0.000278473,0,4499,167905930
+99.8925,10.0108,36.8846,0,0,67,0,1200,0,0,0,12.5302,0.000278473,0,4499,177917266
+100.422,9.95796,36.8846,0,0,67,0,1200,0,0,0,12.5302,0.000278473,0,4499,187875822
+99.7363,10.0264,36.8846,0,0,67,0,1200,0,0,0,12.5302,0.000278473,0,4499,197903507
+99.9628,10.0037,36.8846,0,0,67,0,1200,0,0,0,12.5302,0.000278473,0,4499,207908626
+100.036,9.99642,36.8846,0,0,67,0,1200,0,0,0,12.5302,0.000278473,0,4499,217905435
+100.142,9.98581,36.8846,0,0,67,0,1200,0,0,0,12.5302,0.000278473,0,4499,227891712
+99.8378,10.0162,36.8846,0,0,67,0,1200,0,0,0,12.5302,0.000278473,0,4499,237908705
+99.846,10.0154,36.8846,0,0,67,0,1200,0,0,0,12.5302,0.000278473,0,4499,247926202
+99.7208,10.028,36.8846,0,0,67,0,1200,0,0,0,12.5302,0.000278473,0,4499,257954863
+100.053,9.99467,36.8846,0,0,67,0,1200,0,0,0,12.5302,0.000278473,0,4499,267951863
+
+=== key analysis fields ===
+21:    "duration_ms": 180761,
+1288:    "frame_event_count": 8833,
+1318:    "stop_reason": "max_duration_reached",
+165054:    "frame_count": 8833,
+266719:    "frame_count": 8833,
+266722:    "frame_event_count": 8833,
+266737:  "data_quality": {
+266773:    "frame_timestamp_alignment": "monotonic_observed",
+266967:    "verdict": "low",

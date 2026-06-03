@@ -1,0 +1,257 @@
+=== MangoHud logs ===
+total 1372
+-rw-r--r-- 1 p2949 p2949 1404060 Jun  3 18:03 KingdomCome_2026-06-03_17-58-31.csv
+
+=== Sway outputs ===
+[
+  {
+    "id": 3,
+    "type": "output",
+    "orientation": "none",
+    "percent": 1.0,
+    "urgent": false,
+    "marks": [],
+    "layout": "output",
+    "border": "none",
+    "current_border_width": 0,
+    "rect": {
+      "x": 0,
+      "y": 0,
+      "width": 1920,
+      "height": 1080
+    },
+    "deco_rect": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+    },
+    "window_rect": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+    },
+    "geometry": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+    },
+    "name": "DP-4",
+    "window": null,
+    "nodes": [],
+    "floating_nodes": [],
+    "focus": [
+      13,
+      6,
+      4
+    ],
+    "fullscreen_mode": 0,
+    "sticky": false,
+    "floating": null,
+    "scratchpad_state": null,
+    "primary": false,
+    "make": "Xiaomi Corporation",
+    "model": "P24FBA-RAGL",
+    "serial": "5438520002722",
+    "modes": [
+      {
+        "width": 1920,
+        "height": 1080,
+        "refresh": 60000,
+        "picture_aspect_ratio": "none"
+      },
+      {
+        "width": 1920,
+        "height": 1080,
+        "refresh": 100000,
+        "picture_aspect_ratio": "none"
+      },
+      {
+        "width": 1920,
+        "height": 1080,
+        "refresh": 75000,
+        "picture_aspect_ratio": "none"
+      },
+      {
+        "width": 1920,
+        "height": 1080,
+        "refresh": 59940,
+        "picture_aspect_ratio": "none"
+      },
+      {
+        "width": 1920,
+        "height": 1080,
+        "refresh": 50000,
+        "picture_aspect_ratio": "none"
+      },
+      {
+        "width": 1680,
+        "height": 1050,
+        "refresh": 59954,
+        "picture_aspect_ratio": "none"
+      },
+      {
+        "width": 1600,
+        "height": 900,
+        "refresh": 60000,
+        "picture_aspect_ratio": "none"
+      },
+      {
+        "width": 1280,
+        "height": 1024,
+        "refresh": 75025,
+        "picture_aspect_ratio": "none"
+      },
+      {
+        "width": 1280,
+        "height": 1024,
+        "refresh": 60020,
+        "picture_aspect_ratio": "none"
+      },
+      {
+        "width": 1440,
+        "height": 900,
+        "refresh": 59887,
+        "picture_aspect_ratio": "none"
+      },
+      {
+        "width": 1280,
+        "height": 720,
+        "refresh": 60000,
+        "picture_aspect_ratio": "none"
+      },
+      {
+        "width": 1280,
+        "height": 720,
+        "refresh": 59940,
+        "picture_aspect_ratio": "none"
+      },
+      {
+        "width": 1280,
+        "height": 720,
+        "refresh": 50000,
+        "picture_aspect_ratio": "none"
+      },
+      {
+        "width": 1024,
+        "height": 768,
+        "refresh": 75029,
+        "picture_aspect_ratio": "none"
+      },
+      {
+        "width": 1024,
+        "height": 768,
+        "refresh": 60004,
+        "picture_aspect_ratio": "none"
+      },
+      {
+        "width": 800,
+        "height": 600,
+        "refresh": 75000,
+        "picture_aspect_ratio": "none"
+      },
+      {
+        "width": 800,
+        "height": 600,
+        "refresh": 72188,
+        "picture_aspect_ratio": "none"
+      },
+      {
+        "width": 800,
+        "height": 600,
+        "refresh": 60317,
+        "picture_aspect_ratio": "none"
+      },
+      {
+        "width": 720,
+        "height": 576,
+        "refresh": 50000,
+        "picture_aspect_ratio": "none"
+      },
+      {
+        "width": 720,
+        "height": 480,
+        "refresh": 60000,
+        "picture_aspect_ratio": "none"
+      },
+      {
+        "width": 720,
+        "height": 480,
+        "refresh": 59940,
+        "picture_aspect_ratio": "none"
+      },
+      {
+        "width": 640,
+        "height": 480,
+        "refresh": 75000,
+        "picture_aspect_ratio": "none"
+      },
+      {
+        "width": 640,
+        "height": 480,
+        "refresh": 60000,
+        "picture_aspect_ratio": "none"
+      },
+      {
+        "width": 640,
+        "height": 480,
+        "refresh": 59940,
+        "picture_aspect_ratio": "none"
+      },
+      {
+        "width": 720,
+        "height": 400,
+        "refresh": 70082,
+        "picture_aspect_ratio": "none"
+      }
+    ],
+    "features": {
+      "adaptive_sync": false,
+      "hdr": false
+    },
+    "non_desktop": false,
+    "active": true,
+    "dpms": true,
+    "power": true,
+    "scale": 1.0,
+    "scale_filter": "nearest",
+    "transform": "normal",
+    "adaptive_sync_status": "disabled",
+    "current_workspace": "3",
+    "current_mode": {
+      "width": 1920,
+      "height": 1080,
+      "refresh": 100000,
+      "picture_aspect_ratio": "none"
+    },
+    "max_render_time": 1,
+    "allow_tearing": true,
+    "hdr": false,
+    "focused": true,
+    "subpixel_hinting": "unknown"
+  }
+]
+
+=== KCD/Proton process search after close ===
+82834 /bin/bash /usr/bin/steam
+82848 /home/p2949/.local/share/Steam/ubuntu12_32/steam-runtime/usr/libexec/steam-runtime-tools-0/srt-logger --sh-syntax --rotate=8388608 --log-directory /home/p2949/.local/share/Steam/logs --filename console-linux.txt --log-fd=6 --terminal-fd=2 --parse-level-prefix
+82854 /home/p2949/.local/share/Steam/steam.sh -s -- -srt-logger-opened
+82858 /home/p2949/.local/share/Steam/steamrt64/steam -srt-logger-opened
+82859 /home/p2949/.local/share/Steam/steamrt64/pv-runtime/steam-runtime-steamrt/pressure-vessel/bin/steam-runtime-launcher-service --alongside-steam --verbose
+82865 [steam] <defunct>
+82872 /bin/bash /home/p2949/.local/share/Steam/steamrt64/pv-run.sh -- /home/p2949/.local/share/Steam/steamrt64/steam -srt-logger-opened
+82875 /home/p2949/.local/share/Steam/steamrt64/pv-runtime/steam-runtime-steamrt/pressure-vessel/libexec/steam-runtime-tools-0/srt-bwrap --args 26 /usr/lib/pressure-vessel/from-host/libexec/steam-runtime-tools-0/pv-adverb --prefix=/usr/lib/pressure-vessel/from-host --generate-locales --fd 10 --regenerate-ld.so-cache /var/pressure-vessel/ldso --add-ld.so-path /usr/lib/pressure-vessel/overrides/lib/x86_64-linux-gnu --add-ld.so-path /usr/lib/pressure-vessel/overrides/lib/i386-linux-gnu --set-ld-library-path /usr/lib/pressure-vessel/overrides/lib/x86_64-linux-gnu/aliases:/usr/lib/pressure-vessel/overrides/lib/i386-linux-gnu/aliases --overrides-path /usr/lib/pressure-vessel/overrides --exit-with-parent --subreaper --assign-fd=1=3 --assign-fd=2=4 -- /home/p2949/.local/share/Steam/steamrt64/steam -srt-logger-opened
+82947 /usr/lib/pressure-vessel/from-host/libexec/steam-runtime-tools-0/pv-adverb --prefix=/usr/lib/pressure-vessel/from-host --generate-locales --fd 10 --regenerate-ld.so-cache /var/pressure-vessel/ldso --add-ld.so-path /usr/lib/pressure-vessel/overrides/lib/x86_64-linux-gnu --add-ld.so-path /usr/lib/pressure-vessel/overrides/lib/i386-linux-gnu --set-ld-library-path /usr/lib/pressure-vessel/overrides/lib/x86_64-linux-gnu/aliases:/usr/lib/pressure-vessel/overrides/lib/i386-linux-gnu/aliases --overrides-path /usr/lib/pressure-vessel/overrides --exit-with-parent --subreaper --assign-fd=1=3 --assign-fd=2=4 -- /home/p2949/.local/share/Steam/steamrt64/steam -srt-logger-opened
+82971 /home/p2949/.local/share/Steam/steamrt64/steam -srt-logger-opened
+82999 ./steamwebhelper -nocrashdialog -lang=en_US -cachedir=/home/p2949/.local/share/Steam/config/htmlcache -steampid=82971 -buildid=1780352834 -steamid=0 -logdir=/home/p2949/.local/share/Steam/logs -uimode=7 -startcount=0 -steamuniverse=Public -realm=Global -clientui=/home/p2949/.local/share/Steam/clientui -steampath=/home/p2949/.local/share/Steam/steamrt64/steam -launcher=0 --valve-enable-site-isolation --disable-smooth-scrolling --disable-gpu-compositing --disable-gpu --password-store=basic --log-file=/home/p2949/.local/share/Steam/logs/cef_log.txt --disable-quick-menu --disable-component-update --gaia-url=http://disabled.invalid --disable-features=WinRetrieveSuggestionsOnlyOnDemand,SpareRendererForSitePerProcess,DcheckIsFatal,BlockPromptsIfIgnoredOften,ValveFFmpegAllowLowDelayHEVC
+83004 /home/p2949/.local/share/Steam/steamrt64/steamwebhelper --monitor-self-annotation=ptype=crashpad-handler --type=crashpad-handler --max-uploads=5 --max-db-size=20 --max-db-age=5 --database=/tmp/dumps --url=https://crash.steampowered.com/submit --annotation=lsb-release=Steam Runtime 3c (steamrt3c) --annotation=platform=linux64 --annotation=product=cefwebhelper --annotation=version=1780352834 --initial-client-fd=8 --shared-client-connection
+83007 /home/p2949/.local/share/Steam/steamrt64/steamwebhelper --type=zygote --no-zygote-sandbox --crashpad-handler-pid=0 --enable-crash-reporter=, --change-stack-guard-on-fork=enable --enable-chrome-runtime --user-data-dir=/home/p2949/.local/share/Steam/config/htmlcache --user-agent-product=Valve Steam Client --buildid=1780352834 --steamid=0
+83008 /home/p2949/.local/share/Steam/steamrt64/steamwebhelper --type=zygote --crashpad-handler-pid=0 --enable-crash-reporter=, --change-stack-guard-on-fork=enable --enable-chrome-runtime --user-data-dir=/home/p2949/.local/share/Steam/config/htmlcache --user-agent-product=Valve Steam Client --buildid=1780352834 --steamid=0
+83012 /home/p2949/.local/share/Steam/steamrt64/steamwebhelper --type=zygote --crashpad-handler-pid=0 --enable-crash-reporter=, --change-stack-guard-on-fork=enable --enable-chrome-runtime --user-data-dir=/home/p2949/.local/share/Steam/config/htmlcache --user-agent-product=Valve Steam Client --buildid=1780352834 --steamid=0
+83032 /home/p2949/.local/share/Steam/steamrt64/steamwebhelper --type=zygote --no-zygote-sandbox --crashpad-handler-pid=0 --enable-crash-reporter=, --change-stack-guard-on-fork=enable --enable-chrome-runtime --user-data-dir=/home/p2949/.local/share/Steam/config/htmlcache --user-agent-product=Valve Steam Client --buildid=1780352834 --steamid=0
+83051 /proc/self/exe --type=utility --utility-sub-type=network.mojom.NetworkService --lang=en-GB --service-sandbox-type=none --crashpad-handler-pid=0 --enable-crash-reporter=, --change-stack-guard-on-fork=enable --enable-chrome-runtime --user-data-dir=/home/p2949/.local/share/Steam/config/htmlcache --user-agent-product=Valve Steam Client --buildid=1780352834 --steamid=0 --shared-files --field-trial-handle=3,i,9233007089437149409,12573955849758278788,262144 --disable-features=BlockPromptsIfIgnoredOften,DcheckIsFatal,SpareRendererForSitePerProcess,ValveFFmpegAllowLowDelayHEVC,WinRetrieveSuggestionsOnlyOnDemand --variations-seed-version --log-file=/home/p2949/.local/share/Steam/logs/cef_log.txt
+83052 /home/p2949/.local/share/Steam/steamrt64/steamwebhelper --type=zygote --crashpad-handler-pid=0 --enable-crash-reporter=, --change-stack-guard-on-fork=enable --enable-chrome-runtime --user-data-dir=/home/p2949/.local/share/Steam/config/htmlcache --user-agent-product=Valve Steam Client --buildid=1780352834 --steamid=0
+83116 /home/p2949/.local/share/Steam/steamrt64/steamwebhelper --type=zygote --crashpad-handler-pid=0 --enable-crash-reporter=, --change-stack-guard-on-fork=enable --enable-chrome-runtime --user-data-dir=/home/p2949/.local/share/Steam/config/htmlcache --user-agent-product=Valve Steam Client --buildid=1780352834 --steamid=0
+84862 /home/p2949/.local/share/Steam/steamrt64/steamwebhelper --type=zygote --crashpad-handler-pid=0 --enable-crash-reporter=, --change-stack-guard-on-fork=enable --enable-chrome-runtime --user-data-dir=/home/p2949/.local/share/Steam/config/htmlcache --user-agent-product=Valve Steam Client --buildid=1780352834 --steamid=0

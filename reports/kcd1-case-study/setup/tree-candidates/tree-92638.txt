@@ -1,0 +1,4 @@
+=== inspect-tree 92638 ===
+root 92638 steam-runtime-l [Game]
+├─ 92639 gmain [Game]
+└─ 92640 gdbus [Game]
