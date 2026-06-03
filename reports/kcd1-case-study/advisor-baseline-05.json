@@ -6,10 +6,10 @@
   "recommendations": [
     {
       "title": "Try profile tuning experiment",
-      "rationale": "Scheduler-delay candidates suggest a profile tuning experiment may be useful, but this is not proof of root cause. Evidence: game thread 'Main' delayed by 3.870ms; SCX state near spike: ops=- state=disabled",
+      "rationale": "Scheduler-delay candidates suggest a profile tuning experiment may be useful, but this is not proof of root cause. Evidence: game thread 'Main' delayed by 3.280ms; SCX state near spike: ops=- state=disabled",
       "confidence": "Medium",
       "suggested_commands": [
-        "stutter tune --tree-pid <PID> --profiles <profiles.toml> --runs 5 --baseline-profile baseline-online"
+        "stutter tune --tree-pid 421947 --profiles <profiles.toml> --runs 5 --baseline-profile baseline-online"
       ],
       "safety_note": "Suggested experiment only; do not auto-apply the result.",
       "safety_risk": {
@@ -28,7 +28,7 @@
         "kind": "cpu_affinity_profile",
         "cause": "GameThreadSchedulerDelay",
         "confidence": "Medium",
-        "rationale": "game thread 'Main' delayed by 3.870ms; SCX state near spike: ops=- state=disabled",
+        "rationale": "game thread 'Main' delayed by 3.280ms; SCX state near spike: ops=- state=disabled",
         "safety_class": "ReversibleLowRisk",
         "effect_scope": "local_process_tree",
         "rollback": "required_before_apply",
@@ -69,8 +69,8 @@
           "baseline_runs_required": 5,
           "test_runs_required": 5,
           "scenario_name": null,
-          "baseline_command": "stutter record --tree-pid <PID> --duration 180 --run-name baseline-a",
-          "experiment_command": "stutter tune --tree-pid <PID> --profiles <profiles.toml> --runs 5 --baseline-profile baseline-online",
+          "baseline_command": "stutter record --tree-pid 421947 --duration 180 --run-name baseline-a",
+          "experiment_command": "stutter tune --tree-pid 421947 --profiles <profiles.toml> --runs 5 --baseline-profile baseline-online",
           "compare_command": "stutter recommend --fix-plan reports/kcd1-case-study/runs/baseline-05/advisor_fix_plan_cpu_affinity_profile.json --baseline <baseline-run> --tune <tune-dir> --html fix-validation.html",
           "stop_conditions": [
             "Stop if the target process tree changes substantially between baseline and test runs.",
@@ -102,7 +102,7 @@
           ]
         },
         "suggested_commands": [
-          "stutter tune --tree-pid <PID> --profiles <profiles.toml> --runs 5 --baseline-profile baseline-online"
+          "stutter tune --tree-pid 421947 --profiles <profiles.toml> --runs 5 --baseline-profile baseline-online"
         ],
         "candidate_plan_path": "reports/kcd1-case-study/runs/baseline-05/advisor_fix_plan_cpu_affinity_profile.json",
         "safety_notes": [
@@ -119,7 +119,7 @@
       "kind": "cpu_affinity_profile",
       "cause": "GameThreadSchedulerDelay",
       "confidence": "Medium",
-      "rationale": "game thread 'Main' delayed by 3.870ms; SCX state near spike: ops=- state=disabled",
+      "rationale": "game thread 'Main' delayed by 3.280ms; SCX state near spike: ops=- state=disabled",
       "safety_class": "ReversibleLowRisk",
       "effect_scope": "local_process_tree",
       "rollback": "required_before_apply",
@@ -160,8 +160,8 @@
         "baseline_runs_required": 5,
         "test_runs_required": 5,
         "scenario_name": null,
-        "baseline_command": "stutter record --tree-pid <PID> --duration 180 --run-name baseline-a",
-        "experiment_command": "stutter tune --tree-pid <PID> --profiles <profiles.toml> --runs 5 --baseline-profile baseline-online",
+        "baseline_command": "stutter record --tree-pid 421947 --duration 180 --run-name baseline-a",
+        "experiment_command": "stutter tune --tree-pid 421947 --profiles <profiles.toml> --runs 5 --baseline-profile baseline-online",
         "compare_command": "stutter recommend --fix-plan reports/kcd1-case-study/runs/baseline-05/advisor_fix_plan_cpu_affinity_profile.json --baseline <baseline-run> --tune <tune-dir> --html fix-validation.html",
         "stop_conditions": [
           "Stop if the target process tree changes substantially between baseline and test runs.",
@@ -193,7 +193,7 @@
         ]
       },
       "suggested_commands": [
-        "stutter tune --tree-pid <PID> --profiles <profiles.toml> --runs 5 --baseline-profile baseline-online"
+        "stutter tune --tree-pid 421947 --profiles <profiles.toml> --runs 5 --baseline-profile baseline-online"
       ],
       "candidate_plan_path": "reports/kcd1-case-study/runs/baseline-05/advisor_fix_plan_cpu_affinity_profile.json",
       "safety_notes": [
