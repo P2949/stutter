@@ -1,6 +1,10 @@
 {
-  "schema_version": 22,
+  "schema_version": 23,
   "run_name": "real_amd_hyprland_clean",
+  "scenario_name": null,
+  "scenario_hash": null,
+  "workload_label": null,
+  "route_label": null,
   "started_at": {
     "unix_seconds": 1625097600,
     "unix_nanos": 0,
@@ -114,6 +118,10 @@
     "tree_roots": [
       6100
     ],
+    "scenario_name": null,
+    "scenario_hash": null,
+    "workload_label": null,
+    "route_label": null,
     "cgroupv2": null,
     "exclude_tree_pids": [],
     "include_comm": [],

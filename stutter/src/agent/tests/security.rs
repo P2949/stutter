@@ -622,7 +622,7 @@ fn foreground_title_capture_rejected_on_non_loopback_without_token() {
 }
 
 #[test]
-fn foreground_title_capture_allowed_on_non_loopback_with_valid_bearer_token() {
+fn foreground_title_capture_rejected_on_non_loopback_with_valid_bearer_token() {
     let mut request = minimal_remote_request();
     request.foreground_include_title = true;
     let state = test_agent_state_custom("0.0.0.0:0".parse().unwrap(), Some("secret".to_owned()));
@@ -632,7 +632,10 @@ fn foreground_title_capture_allowed_on_non_loopback_with_valid_bearer_token() {
         "Bearer secret".parse().unwrap(),
     );
 
-    assert!(validate_foreground_title_capture_security(&request, &state, &headers).is_ok());
+    assert_eq!(
+        validate_foreground_title_capture_security(&request, &state, &headers),
+        Err(StatusCode::FORBIDDEN)
+    );
 }
 
 #[test]

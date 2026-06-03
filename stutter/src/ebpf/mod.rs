@@ -2,6 +2,7 @@
 //!
 //! The current loader façade remains `crate::ebpf_loader` while internals migrate here.
 
+pub(crate) mod artifact_manifest;
 pub(crate) mod attach;
 pub(crate) mod errors;
 pub(crate) mod load;

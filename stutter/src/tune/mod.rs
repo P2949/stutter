@@ -36,11 +36,25 @@ pub async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
         runs,
         keep_best,
         baseline_profile,
+        scenario_name,
+        workload_label,
+        route_label,
         out_dir,
         mangohud_log,
         enforce,
         hwmon,
     } = input;
+    let scenario_name = crate::scenario::normalize_identity_label(scenario_name.as_deref());
+    if let Some(scenario_name) = scenario_name.as_deref() {
+        crate::scenario::validate_scenario_name(scenario_name)?;
+    }
+    let workload_label = crate::scenario::normalize_identity_label(workload_label.as_deref());
+    let route_label = crate::scenario::normalize_identity_label(route_label.as_deref());
+    let scenario_hash = crate::scenario::scenario_identity_hash(
+        scenario_name.as_deref(),
+        workload_label.as_deref(),
+        route_label.as_deref(),
+    );
 
     let profiles = profiles::load_profiles(&profiles_path)?;
     if profiles.is_empty() {
@@ -85,6 +99,10 @@ pub async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
         mangohud_log,
         enforce,
         hwmon,
+        scenario_name: scenario_name.clone(),
+        scenario_hash: scenario_hash.clone(),
+        workload_label: workload_label.clone(),
+        route_label: route_label.clone(),
         tune_output_dir: &tune_output_dir,
     })
     .await?;
@@ -123,6 +141,10 @@ pub async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
     let summary = TuneSummary {
         schema_version: 1,
         tree_pid,
+        scenario_name,
+        scenario_hash,
+        workload_label,
+        route_label,
         profiles_path,
         runs,
         epoch_seconds,

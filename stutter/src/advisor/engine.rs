@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use super::models::*;
+use super::{fix_plan::*, models::*};
 use crate::{
     affinity::CpuMask,
     diagnosis::{Confidence, StutterCause},
@@ -58,6 +58,11 @@ pub(crate) fn build_advisor_report_from_evidence(input: AdvisorEvidenceInput<'_>
     let mut recommendations = Vec::new();
 
     if data_quality == DataQualityLevel::Low {
+        let fix_plan = collect_more_data_fix_plan(
+            "Data quality is low, so advisor output is only a candidate signal and not proof."
+                .to_owned(),
+            "stutter bench --duration 180 --scenario <name> --role baseline".to_owned(),
+        );
         recommendations.push(AdvisorRecommendation {
             title: "Collect more data".to_owned(),
             rationale:
@@ -68,12 +73,15 @@ pub(crate) fn build_advisor_report_from_evidence(input: AdvisorEvidenceInput<'_>
                 "stutter bench --duration 180 --scenario <name> --role baseline".to_owned(),
             ],
             safety_note: "Observe only; do not auto-apply tuning from this run.".to_owned(),
+            safety_risk: fix_plan.safety_risk.clone(),
+            fix_plan: Some(fix_plan),
         });
         return AdvisorReport {
-            schema_version: 1,
+            schema_version: 2,
             run: run.to_path_buf(),
             data_quality,
             verdict: AdvisorVerdict::CollectMoreData,
+            fix_plans: fix_plans_from_recommendations(&recommendations),
             recommendations,
             warnings,
         };
@@ -91,6 +99,25 @@ pub(crate) fn build_advisor_report_from_evidence(input: AdvisorEvidenceInput<'_>
 
     if has_gpu {
         let gpu_note = gpu_specific_note(cause_evidence);
+        let suggested_commands = if has_hwmon {
+            vec![
+                "stutter report --analysis-json <run-dir>".to_owned(),
+                "stutter display-path compare --baseline <baseline-run> --test <test-run>"
+                    .to_owned(),
+            ]
+        } else {
+            vec![
+                "stutter record --hwmon --drm-fence-latency --duration 180 --run-name gpu-check"
+                    .to_owned(),
+            ]
+        };
+        let mut fix_plan = gpu_investigation_fix_plan(
+            gpu_note
+                .clone()
+                .or_else(|| evidence_note_for(cause_evidence, StutterCause::GpuBoundCandidate)),
+            has_hwmon,
+        );
+        fix_plan.suggested_commands = suggested_commands.clone();
         recommendations.push(AdvisorRecommendation {
             title: "Investigate non-CPU bottleneck candidate".to_owned(),
             rationale: rationale_with_evidence(
@@ -100,20 +127,11 @@ pub(crate) fn build_advisor_report_from_evidence(input: AdvisorEvidenceInput<'_>
                 evidence_note_for(cause_evidence, StutterCause::GpuBoundCandidate),
             ),
             confidence: Confidence::Medium,
-            suggested_commands: if has_hwmon {
-                vec![
-                    "stutter report --analysis-json <run-dir>".to_owned(),
-                    "stutter display-path compare --baseline <baseline-run> --test <test-run>"
-                        .to_owned(),
-                ]
-            } else {
-                vec![
-                    "stutter record --hwmon --drm-fence-latency --duration 180 --run-name gpu-check"
-                        .to_owned(),
-                ]
-            },
+            suggested_commands,
             safety_note: "Observe only; do not auto-apply CPU affinity for a GPU-bound candidate."
                 .to_owned(),
+            safety_risk: fix_plan.safety_risk.clone(),
+            fix_plan: Some(fix_plan),
         });
         warnings.push("CPU affinity may not help a GPU-bound candidate.".to_owned());
     }
@@ -121,6 +139,28 @@ pub(crate) fn build_advisor_report_from_evidence(input: AdvisorEvidenceInput<'_>
     if has_irq_candidate {
         let irq_specific =
             irq_specific_rationale(cause_evidence, irq_inventory, irq_affinity_overlaps);
+        let suggested_commands = if has_irq {
+            if let Some(irq) = first_irq_number_from_evidence(cause_evidence) {
+                vec![
+                    "stutter report --analysis-json <run-dir>".to_owned(),
+                    format!("stutter irq inspect --top 20 | grep '^{irq}:'"),
+                ]
+            } else {
+                vec!["stutter report --analysis-json <run-dir>".to_owned()]
+            }
+        } else {
+            vec![
+                "stutter record --irq-latency --irq <IRQ> --duration 180 --run-name irq-check"
+                    .to_owned(),
+            ]
+        };
+        let mut fix_plan = irq_investigation_fix_plan(
+            irq_specific
+                .clone()
+                .or_else(|| evidence_note_for(cause_evidence, StutterCause::IrqDelayCandidate)),
+            has_irq,
+        );
+        fix_plan.suggested_commands = suggested_commands.clone();
         recommendations.push(AdvisorRecommendation {
             title: irq_specific
                 .as_ref()
@@ -134,19 +174,10 @@ pub(crate) fn build_advisor_report_from_evidence(input: AdvisorEvidenceInput<'_>
                 evidence_note_for(cause_evidence, StutterCause::IrqDelayCandidate),
             ),
             confidence: Confidence::Medium,
-            suggested_commands: if has_irq {
-                if let Some(irq) = first_irq_number_from_evidence(cause_evidence) {
-                    vec![
-                        "stutter report --analysis-json <run-dir>".to_owned(),
-                        format!("stutter irq inspect --top 20 | grep '^{irq}:'"),
-                    ]
-                } else {
-                    vec!["stutter report --analysis-json <run-dir>".to_owned()]
-                }
-            } else {
-                vec!["stutter record --irq-latency --irq <IRQ> --duration 180 --run-name irq-check".to_owned()]
-            },
+            suggested_commands,
             safety_note: "Observe only; inspect IRQ affinity before changing it.".to_owned(),
+            safety_risk: fix_plan.safety_risk.clone(),
+            fix_plan: Some(fix_plan),
         });
         warnings.push(
             "Advisor does not auto-suggest changing IRQ affinity; inspect the specific IRQ first."
@@ -155,6 +186,16 @@ pub(crate) fn build_advisor_report_from_evidence(input: AdvisorEvidenceInput<'_>
     }
 
     if has_block_io_candidate {
+        let suggested_commands = if has_block_io {
+            vec!["stutter report --analysis-json <run-dir>".to_owned()]
+        } else {
+            vec!["stutter record --block-io --duration 180 --run-name io-check".to_owned()]
+        };
+        let mut fix_plan = block_io_investigation_fix_plan(
+            evidence_note_for(cause_evidence, StutterCause::BlockIoCandidate),
+            has_block_io,
+        );
+        fix_plan.suggested_commands = suggested_commands.clone();
         recommendations.push(AdvisorRecommendation {
             title: "Check storage activity candidate".to_owned(),
             rationale: rationale_with_evidence(
@@ -162,22 +203,31 @@ pub(crate) fn build_advisor_report_from_evidence(input: AdvisorEvidenceInput<'_>
                 evidence_note_for(cause_evidence, StutterCause::BlockIoCandidate),
             ),
             confidence: Confidence::Medium,
-            suggested_commands: if has_block_io {
-                vec!["stutter report --analysis-json <run-dir>".to_owned()]
-            } else {
-                vec!["stutter record --block-io --duration 180 --run-name io-check".to_owned()]
-            },
+            suggested_commands,
             safety_note: "Observe only; do not tune CPU affinity first for a block I/O candidate.".to_owned(),
+            safety_risk: fix_plan.safety_risk.clone(),
+            fix_plan: Some(fix_plan),
         });
     }
 
     if has_scheduler {
-        let profiles_arg = profiles
-            .map(|path| path.display().to_string())
-            .unwrap_or_else(|| "<profiles.toml>".to_owned());
-        let pid_arg = tree_pid
-            .map(|pid| pid.to_string())
-            .unwrap_or_else(|| "<PID>".to_owned());
+        let scheduler_cause = causes
+            .iter()
+            .copied()
+            .find(|cause| {
+                matches!(
+                    cause,
+                    StutterCause::CompositorSchedulerDelay | StutterCause::GameThreadSchedulerDelay
+                )
+            })
+            .unwrap_or(StutterCause::GameThreadSchedulerDelay);
+        let fix_plan = scheduler_profile_fix_plan(
+            run,
+            scheduler_cause,
+            tree_pid,
+            profiles,
+            scheduler_evidence_note(cause_evidence),
+        );
         recommendations.push(AdvisorRecommendation {
             title: "Try profile tuning experiment".to_owned(),
             rationale: rationale_with_evidence(
@@ -185,10 +235,10 @@ pub(crate) fn build_advisor_report_from_evidence(input: AdvisorEvidenceInput<'_>
                 scheduler_evidence_note(cause_evidence),
             ),
             confidence: Confidence::Medium,
-            suggested_commands: vec![format!(
-                "stutter tune --tree-pid {pid_arg} --profiles {profiles_arg} --runs 5 --baseline-profile baseline-online"
-            )],
+            suggested_commands: fix_plan.suggested_commands.clone(),
             safety_note: "Suggested experiment only; do not auto-apply the result.".to_owned(),
+            safety_risk: fix_plan.safety_risk.clone(),
+            fix_plan: Some(fix_plan),
         });
         if profiles.is_none() {
             warnings.push(
@@ -204,6 +254,11 @@ pub(crate) fn build_advisor_report_from_evidence(input: AdvisorEvidenceInput<'_>
         AdvisorVerdict::TryProfileTuning
     } else {
         if recommendations.is_empty() {
+            let fix_plan = collect_more_data_fix_plan(
+                "No strong candidate stood out; this is not proof that no bottleneck exists."
+                    .to_owned(),
+                "stutter bench --duration 180 --scenario <name> --role baseline".to_owned(),
+            );
             recommendations.push(AdvisorRecommendation {
                 title: "Collect more comparable data".to_owned(),
                 rationale:
@@ -214,19 +269,31 @@ pub(crate) fn build_advisor_report_from_evidence(input: AdvisorEvidenceInput<'_>
                     "stutter bench --duration 180 --scenario <name> --role baseline".to_owned(),
                 ],
                 safety_note: "Observe only; do not auto-apply tuning from this run.".to_owned(),
+                safety_risk: fix_plan.safety_risk.clone(),
+                fix_plan: Some(fix_plan),
             });
         }
         AdvisorVerdict::CollectMoreData
     };
 
     AdvisorReport {
-        schema_version: 1,
+        schema_version: 2,
         run: run.to_path_buf(),
         data_quality,
         verdict,
+        fix_plans: fix_plans_from_recommendations(&recommendations),
         recommendations,
         warnings,
     }
+}
+
+fn fix_plans_from_recommendations(
+    recommendations: &[AdvisorRecommendation],
+) -> Vec<AdvisorFixPlan> {
+    recommendations
+        .iter()
+        .filter_map(|recommendation| recommendation.fix_plan.clone())
+        .collect()
 }
 
 fn rationale_with_evidence(base: &str, evidence_note: Option<String>) -> String {

@@ -1,5 +1,5 @@
 name = "real_intel_sway_compositor_delay"
-schema_version = 22
+schema_version = 23
 source = "sanitized-real-recording"
 quality_expectation = "High"
 description = "Sanitized Intel/Sway recording with compositor scheduler delay during a visible frame spike."
@@ -11,9 +11,19 @@ compositor = "Sway"
 session_type = "wayland"
 scenario = "compositor"
 sanitized_capture_id = "sanitized-intel-sway-compositor-delay-v1"
+kernel_family = "linux"
+kernel_version_bucket = "6.8-6.12"
+cpu_vendor = "Intel"
+cpu_topology_bucket = "6c12t"
+display_refresh_bucket = "90-165hz"
+capture_features = [
+    "frames",
+    "compositor",
+]
 
 [expected]
 primary_cause = "CompositorSchedulerDelay"
+expected_behavior = "must_diagnose"
 accepted_confidence = [
     "Medium",
     "High",

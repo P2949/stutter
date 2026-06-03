@@ -45,6 +45,15 @@ fn parses_bench_baseline() {
         Some("bench-baseline-route-a")
     );
     assert_eq!(
+        input.config.recording.scenario_name.as_deref(),
+        Some("route-a")
+    );
+    assert_eq!(
+        input.config.recording.route_label.as_deref(),
+        Some("route-a")
+    );
+    assert!(input.config.recording.scenario_hash.is_some());
+    assert_eq!(
         input.config.target.watch_process.as_deref(),
         Some("Game.exe")
     );
@@ -262,5 +271,9 @@ fn bench_preserves_monitor_flags() {
     assert_eq!(
         input.config.mangohud.log,
         Some(PathBuf::from("/tmp/mango.csv"))
+    );
+    assert_eq!(
+        input.config.recording.scenario_name.as_deref(),
+        Some("route-a")
     );
 }

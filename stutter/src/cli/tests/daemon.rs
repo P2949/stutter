@@ -269,6 +269,20 @@ fn parses_daemon_status_json_command() {
 }
 
 #[test]
+fn parses_daemon_rollback_drill_dry_run_json_command() {
+    let command =
+        parse_daemon_command(["stutter", "daemon", "rollback-drill", "--dry-run", "--json"])
+            .unwrap();
+
+    let AppCommand::DaemonRollbackDrill(input) = command else {
+        panic!("expected daemon rollback-drill command");
+    };
+
+    assert!(input.dry_run);
+    assert!(input.json);
+}
+
+#[test]
 fn parses_daemon_status_explain_last_command() {
     let command = parse_daemon_command([
         "stutter",

@@ -1,5 +1,5 @@
 name = "real_nvidia_kwin_irq_overlap"
-schema_version = 22
+schema_version = 23
 source = "sanitized-real-recording"
 quality_expectation = "High"
 description = "Sanitized NVIDIA/KWin recording with a GPU IRQ handler overlapping a scheduler-latency cluster."
@@ -11,9 +11,19 @@ compositor = "KWin"
 session_type = "wayland"
 scenario = "irq"
 sanitized_capture_id = "sanitized-nvidia-kwin-irq-overlap-v1"
+kernel_family = "linux"
+kernel_version_bucket = "6.8-6.12"
+cpu_vendor = "AMD"
+cpu_topology_bucket = "8c16t"
+display_refresh_bucket = "90-165hz"
+capture_features = [
+    "frames",
+    "irq",
+]
 
 [expected]
 primary_cause = "IrqDelayCandidate"
+expected_behavior = "must_diagnose"
 accepted_confidence = [
     "Medium",
     "High",

@@ -1,6 +1,7 @@
 #![cfg(test)]
 
 mod assertions;
+mod coverage;
 mod display_path;
 mod expectation;
 mod fixture;

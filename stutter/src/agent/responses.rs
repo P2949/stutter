@@ -11,6 +11,8 @@ pub(crate) struct ErrorResponse {
 pub(crate) struct DaemonStatusResponse {
     pub(crate) active_recording: bool,
     pub(crate) active_autotune: bool,
+    #[serde(flatten)]
+    pub(crate) remote_access: RemoteAccessStatus,
     pub(crate) daemon_state: DaemonState,
     pub(crate) capabilities: DaemonCapabilities,
     pub(crate) health: SystemHealthSnapshot,

@@ -1,11 +1,12 @@
 name = "community_rules_classification"
-schema_version = 22
+schema_version = 23
 source = "synthetic-edge-case"
 quality_expectation = "High"
 description = "Synthetic edge-case fixture that verifies a community-classified game task remains classified as Game."
 
 [expected]
 primary_cause = "Unknown"
+expected_behavior = "must_diagnose"
 accepted_confidence = []
 data_quality = "High"
 

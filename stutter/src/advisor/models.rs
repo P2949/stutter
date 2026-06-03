@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    advisor::fix_plan::{AdvisorFixPlan, AdvisorSafetyRisk},
     diagnosis::{Confidence, StutterCause},
     irq_inspect::{IrqDeviceClass, IrqLine},
     process_tree::TaskClass,
@@ -27,6 +28,8 @@ pub struct AdvisorReport {
     pub data_quality: DataQualityLevel,
     pub verdict: AdvisorVerdict,
     pub recommendations: Vec<AdvisorRecommendation>,
+    #[serde(default)]
+    pub fix_plans: Vec<AdvisorFixPlan>,
     pub warnings: Vec<String>,
 }
 
@@ -45,6 +48,9 @@ pub struct AdvisorRecommendation {
     pub confidence: Confidence,
     pub suggested_commands: Vec<String>,
     pub safety_note: String,
+    pub safety_risk: AdvisorSafetyRisk,
+    #[serde(default)]
+    pub fix_plan: Option<AdvisorFixPlan>,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AdvisorCauseEvidence {

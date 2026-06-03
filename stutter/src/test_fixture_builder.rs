@@ -28,6 +28,6 @@ mod metadata;
 mod model;
 
 pub(crate) use corpus::{
-    fixture_path, write_autotune_replay_corpus, write_public_examples_v22, write_validation_corpus,
+    fixture_path, write_autotune_replay_corpus, write_public_examples_v23, write_validation_corpus,
 };
 pub(crate) use model::FixtureArtifacts;

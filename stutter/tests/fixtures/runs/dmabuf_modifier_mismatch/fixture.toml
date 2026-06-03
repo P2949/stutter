@@ -1,11 +1,12 @@
 name = "dmabuf_modifier_mismatch"
-schema_version = 22
+schema_version = 23
 source = "synthetic-display-path"
 quality_expectation = "High"
 description = "Synthetic display-path fixture where cooperative DMABUF evidence reports a modifier mismatch and copy-required candidate."
 
 [expected]
 primary_cause = "Unknown"
+expected_behavior = "must_diagnose"
 accepted_confidence = []
 data_quality = "High"
 

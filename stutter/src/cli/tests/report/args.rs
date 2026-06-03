@@ -9,7 +9,6 @@ use crate::{
         AppCommand, RulesCommand as RulesCommandDto, ScenarioCommand as ScenarioCommandDto,
     },
     process_tree::TaskClass,
-    release::ReleaseChannel,
 };
 
 #[test]
@@ -190,75 +189,6 @@ fn parses_summary_command() {
 }
 
 #[test]
-fn parses_release_check_command() {
-    let command = parse_report_command([
-        "stutter",
-        "release",
-        "check",
-        "--channel",
-        "low-risk-stable",
-        "--soak-tests",
-        "--json",
-    ])
-    .unwrap();
-
-    let AppCommand::ReleaseCheck(input) = command else {
-        panic!("expected release check command");
-    };
-
-    assert_eq!(input.channel, ReleaseChannel::LowRiskStable);
-    assert!(input.inputs.soak_tests);
-    assert!(input.json);
-    assert!(!input.enforce);
-
-    assert!(!input.inputs.production_distro_packaging);
-    assert!(!input.inputs.reproducible_packaged_ebpf_object);
-    assert!(!input.inputs.packaging_install_tests);
-    assert!(!input.inputs.packaging_service_smoke_tests);
-    assert!(!input.inputs.versioned_release_tarball);
-}
-
-#[test]
-fn parses_release_check_full_flags() {
-    let command = parse_report_command([
-        "stutter",
-        "release",
-        "check",
-        "--channel",
-        "experimental",
-        "--apply-actions-enabled",
-        "--soak-tests",
-        "--stronger-tests",
-        "--real-machine-validation",
-        "--production-distro-packaging",
-        "--reproducible-packaged-ebpf-object",
-        "--packaging-install-tests",
-        "--packaging-service-smoke-tests",
-        "--versioned-release-tarball",
-        "--json",
-        "--enforce",
-    ])
-    .unwrap();
-
-    let AppCommand::ReleaseCheck(input) = command else {
-        panic!("expected release check command");
-    };
-
-    assert_eq!(input.channel, ReleaseChannel::Experimental);
-    assert!(input.inputs.apply_actions_enabled);
-    assert!(input.inputs.soak_tests);
-    assert!(input.inputs.stronger_tests);
-    assert!(input.inputs.real_machine_validation);
-    assert!(input.inputs.production_distro_packaging);
-    assert!(input.inputs.reproducible_packaged_ebpf_object);
-    assert!(input.inputs.packaging_install_tests);
-    assert!(input.inputs.packaging_service_smoke_tests);
-    assert!(input.inputs.versioned_release_tarball);
-    assert!(input.json);
-    assert!(input.enforce);
-}
-
-#[test]
 fn parses_restore_and_apply_profile_commands() {
     let restore = parse_report_command(["stutter", "restore"]).unwrap();
     assert!(matches!(restore, AppCommand::Restore(input) if !input.dry_run));
@@ -386,6 +316,12 @@ fn parses_tune_optional_flags() {
         "5",
         "--baseline-profile",
         "stock",
+        "--scenario",
+        "city-route",
+        "--workload-label",
+        "Game.exe",
+        "--route-label",
+        "city-loop",
         "--out-dir",
         "/tmp/tune-out",
         "--enforce",
@@ -401,6 +337,9 @@ fn parses_tune_optional_flags() {
     assert_eq!(input.warmup_seconds, 15);
     assert_eq!(input.runs, 5);
     assert_eq!(input.baseline_profile.as_deref(), Some("stock"));
+    assert_eq!(input.scenario_name.as_deref(), Some("city-route"));
+    assert_eq!(input.workload_label.as_deref(), Some("Game.exe"));
+    assert_eq!(input.route_label.as_deref(), Some("city-loop"));
     assert_eq!(input.out_dir, Some(PathBuf::from("/tmp/tune-out")));
     assert!(input.enforce);
     assert!(input.hwmon);

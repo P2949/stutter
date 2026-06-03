@@ -5,7 +5,9 @@ use std::{
 
 use anyhow::Context;
 
-use super::model::{BaselineTuneConfidenceMetadata, BaselineTuneRecommendation};
+use super::model::{
+    BaselineTuneConfidenceMetadata, BaselineTuneRecommendation, BaselineTuneRecommendationOptions,
+};
 use crate::{
     artifacts::ArtifactSelection,
     scorer::{self, StutterScore},
@@ -22,12 +24,17 @@ const LOW_BASELINE_SCORE_TOTAL: u64 = 100;
 
 struct BaselineSample {
     run_dir: PathBuf,
+    scenario_name: Option<String>,
+    scenario_hash: Option<String>,
+    workload_label: Option<String>,
+    route_label: Option<String>,
     score: StutterScore,
     scored_samples: u64,
     intervals_empty: bool,
     valid: bool,
 }
 
+#[cfg(test)]
 pub fn build_baseline_tune_recommendation(
     baseline_run: &Path,
     tune_dir: &Path,
@@ -35,9 +42,22 @@ pub fn build_baseline_tune_recommendation(
     build_baseline_tune_recommendation_for_baselines(&[baseline_run.to_path_buf()], tune_dir)
 }
 
+#[cfg(test)]
 pub fn build_baseline_tune_recommendation_for_baselines(
     baseline_runs: &[PathBuf],
     tune_dir: &Path,
+) -> anyhow::Result<BaselineTuneRecommendation> {
+    build_baseline_tune_recommendation_for_baselines_with_options(
+        baseline_runs,
+        tune_dir,
+        BaselineTuneRecommendationOptions::default(),
+    )
+}
+
+pub fn build_baseline_tune_recommendation_for_baselines_with_options(
+    baseline_runs: &[PathBuf],
+    tune_dir: &Path,
+    options: BaselineTuneRecommendationOptions,
 ) -> anyhow::Result<BaselineTuneRecommendation> {
     if baseline_runs.is_empty() {
         anyhow::bail!("at least one --baseline run is required");
@@ -58,8 +78,24 @@ pub fn build_baseline_tune_recommendation_for_baselines(
 
     let mut warnings = Vec::new();
     warnings.extend(summary.ranking_notes.iter().cloned());
+    warnings.extend(
+        summary
+            .comparability_warnings
+            .iter()
+            .map(|warning| match &warning.profile {
+                Some(profile) => format!(
+                    "comparability {:?} profile={} kind={}: {}",
+                    warning.severity, profile, warning.kind, warning.message
+                ),
+                None => format!(
+                    "comparability {:?} kind={}: {}",
+                    warning.severity, warning.kind, warning.message
+                ),
+            }),
+    );
 
     let baseline_samples = load_baseline_samples(baseline_runs, &mut warnings)?;
+    push_scenario_identity_warnings(&baseline_samples, &summary, &mut warnings, &options);
     let valid_baselines = baseline_samples
         .iter()
         .filter(|sample| sample.valid)
@@ -291,6 +327,10 @@ pub fn build_baseline_tune_recommendation_for_baselines(
             .map(|sample| sample.run_dir.clone())
             .collect(),
         tune_dir: tune_dir.to_path_buf(),
+        scenario_name: summary.scenario_name.clone(),
+        scenario_hash: summary.scenario_hash.clone(),
+        workload_label: summary.workload_label.clone(),
+        route_label: summary.route_label.clone(),
         best_profile,
         confidence: summary.ranking_confidence,
         confidence_metadata: Some(confidence_metadata),
@@ -377,6 +417,10 @@ fn load_baseline_samples(
 
         samples.push(BaselineSample {
             run_dir: baseline.run_dir,
+            scenario_name: baseline.session.core.scenario_name.clone(),
+            scenario_hash: baseline.session.core.scenario_hash.clone(),
+            workload_label: baseline.session.core.workload_label.clone(),
+            route_label: baseline.session.core.route_label.clone(),
             score,
             scored_samples,
             intervals_empty,
@@ -384,6 +428,68 @@ fn load_baseline_samples(
         });
     }
     Ok(samples)
+}
+
+fn push_scenario_identity_warnings(
+    baselines: &[BaselineSample],
+    summary: &TuneSummary,
+    warnings: &mut Vec<String>,
+    options: &BaselineTuneRecommendationOptions,
+) {
+    if options.allow_scenario_mismatch {
+        return;
+    }
+
+    for baseline in baselines {
+        push_optional_identity_warning(
+            warnings,
+            &baseline.run_dir,
+            "scenario_name",
+            baseline.scenario_name.as_deref(),
+            summary.scenario_name.as_deref(),
+        );
+        push_optional_identity_warning(
+            warnings,
+            &baseline.run_dir,
+            "scenario_hash",
+            baseline.scenario_hash.as_deref(),
+            summary.scenario_hash.as_deref(),
+        );
+        push_optional_identity_warning(
+            warnings,
+            &baseline.run_dir,
+            "workload_label",
+            baseline.workload_label.as_deref(),
+            summary.workload_label.as_deref(),
+        );
+        push_optional_identity_warning(
+            warnings,
+            &baseline.run_dir,
+            "route_label",
+            baseline.route_label.as_deref(),
+            summary.route_label.as_deref(),
+        );
+    }
+}
+
+fn push_optional_identity_warning(
+    warnings: &mut Vec<String>,
+    run_dir: &Path,
+    field: &str,
+    baseline: Option<&str>,
+    tune: Option<&str>,
+) {
+    if baseline == tune {
+        return;
+    }
+
+    warnings.push(format!(
+        "scenario-mismatch baseline={} field={} baseline={} tune={}",
+        run_dir.display(),
+        field,
+        baseline.unwrap_or("<missing>"),
+        tune.unwrap_or("<missing>")
+    ));
 }
 
 fn valid_candidates_for_profile<'a>(

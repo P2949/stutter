@@ -1,0 +1,20 @@
+sanitized_capture_id = "external-amd-hyprland-scheduler-v1"
+operator_id = "external-001"
+hardware_bucket = "amd-gpu-8c16t"
+kernel_version_bucket = "6.10-6.12"
+game_workload_bucket = "dxvk-ue4-open-world"
+display_refresh_bucket = "120-165hz"
+privacy_reviewed = true
+
+[platform]
+gpu_vendor = "AMD"
+gpu_driver = "amdgpu"
+compositor = "Hyprland"
+session_type = "wayland"
+cpu_vendor = "AMD"
+cpu_topology_bucket = "8c16t"
+capture_features = ["frames", "scheduler", "foreground"]
+
+[expected.diagnosis]
+expected_behavior = "must_diagnose"
+primary_cause = "GameThreadSchedulerDelay"

@@ -11,6 +11,11 @@ Raw artifact files are documented for debugging, testing, benchmarking, and
 offline automation, but consumers should prefer `report --analysis-json` unless
 they specifically need raw event streams.
 
+Advisor JSON is a separate recommendation artifact. `stutter advisor --json`
+emits schema-versioned reports with inline `fix_plans`; each fix plan has
+`schema_version = 1`, expected metric movement, validation recipe, safety risk,
+and stop conditions. See [docs/TUNING_WORKFLOW.md](TUNING_WORKFLOW.md).
+
 ## Canonical Artifact Registry
 
 The canonical artifact list is `stutter/src/artifacts.rs`.
@@ -1029,7 +1034,7 @@ Strict exit policy:
 Versioned examples live under:
 
 ```text
-docs/examples/artifacts/v22/
+docs/examples/artifacts/v23/
 ```
 
 The version number matches `recorder::SESSION_SCHEMA_VERSION`. These examples

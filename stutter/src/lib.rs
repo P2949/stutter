@@ -53,6 +53,7 @@ pub(crate) mod probe_catalog;
 pub(crate) mod profile_restore;
 pub(crate) mod profiles;
 pub(crate) mod prometheus;
+pub(crate) mod prove_fix;
 pub(crate) mod psi;
 pub(crate) mod recommend;
 pub(crate) mod recorder;

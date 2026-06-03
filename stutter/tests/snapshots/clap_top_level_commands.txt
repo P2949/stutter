@@ -10,6 +10,7 @@ stutter
   apply-profile
   tune
   recommend
+  prove-fix
   release
   check
   compare

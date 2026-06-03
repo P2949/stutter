@@ -17,7 +17,7 @@ pub const FIXTURE_UPDATE_COMMANDS: &[CommandSpec] = &[
             "test",
             "-p",
             "stutter",
-            "validation_corpus_tests::regenerate_validation_corpus",
+            "validation_corpus_tests::regenerate::regenerate_validation_corpus",
             "--",
             "--ignored",
             "--exact",
@@ -29,7 +29,7 @@ pub const FIXTURE_UPDATE_COMMANDS: &[CommandSpec] = &[
             "test",
             "-p",
             "stutter",
-            "validation_corpus_tests::regenerate_public_examples_v22",
+            "validation_corpus_tests::regenerate::regenerate_public_examples_v23",
             "--",
             "--ignored",
             "--exact",
@@ -54,7 +54,7 @@ pub const SCHEMA_CHECK_WORKFLOW: WorkflowSpec = WorkflowSpec {
     description: "validates artifact contract tests and public example artifact schema expectations",
     affected_paths: &[
         "stutter/src/artifact_contract_tests.rs",
-        "docs/examples/artifacts/v22/**",
+        "docs/examples/artifacts/v23/**",
     ],
     commands: SCHEMA_CHECK_COMMANDS,
 };
@@ -71,10 +71,10 @@ pub const FIXTURE_CHECK_WORKFLOW: WorkflowSpec = WorkflowSpec {
 
 pub const FIXTURE_UPDATE_WORKFLOW: WorkflowSpec = WorkflowSpec {
     name: "fixture-update",
-    description: "updates validation corpus fixtures and public v22 example artifact fixtures",
+    description: "updates validation corpus fixtures and public v23 example artifact fixtures",
     affected_paths: &[
         "stutter/tests/fixtures/runs/**",
-        "docs/examples/artifacts/v22/**",
+        "docs/examples/artifacts/v23/**",
     ],
     commands: FIXTURE_UPDATE_COMMANDS,
 };

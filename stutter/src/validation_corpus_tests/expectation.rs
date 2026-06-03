@@ -63,11 +63,25 @@ pub(super) struct PlatformExpectations {
     pub(super) scenario: String,
     #[serde(default)]
     pub(super) sanitized_capture_id: String,
+    #[serde(default)]
+    pub(super) kernel_family: Option<String>,
+    #[serde(default)]
+    pub(super) kernel_version_bucket: Option<String>,
+    #[serde(default)]
+    pub(super) cpu_vendor: Option<String>,
+    #[serde(default)]
+    pub(super) cpu_topology_bucket: Option<String>,
+    #[serde(default)]
+    pub(super) display_refresh_bucket: Option<String>,
+    #[serde(default)]
+    pub(super) capture_features: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
 pub(super) struct ExpectedFromToml {
     pub(super) primary_cause: String,
+    #[serde(default)]
+    pub(super) expected_behavior: ExpectedDiagnosisBehavior,
     #[serde(default)]
     pub(super) required_candidate: Option<String>,
     #[serde(default)]
@@ -81,6 +95,16 @@ pub(super) struct ExpectedFromToml {
     pub(super) artifacts: ExpectedArtifactsFromToml,
     #[serde(default)]
     pub(super) evidence: ExpectedEvidenceFromToml,
+}
+
+#[derive(Debug, Default, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum ExpectedDiagnosisBehavior {
+    #[default]
+    MustDiagnose,
+    MustNotDiagnose,
+    KnownMiss,
+    Informational,
 }
 
 #[derive(Debug, Default, Deserialize)]

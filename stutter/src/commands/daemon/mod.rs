@@ -128,3 +128,9 @@ pub fn run_resync_state_command(
 ) -> anyhow::Result<()> {
     resync::run_resync_state_command(input)
 }
+
+pub fn run_rollback_drill_command(
+    input: crate::commands::input::DaemonRollbackDrillCommandInput,
+) -> anyhow::Result<()> {
+    doctor::run_rollback_drill_command(input)
+}

@@ -162,3 +162,25 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 pub(crate) fn agent_state_is_local(state: &AgentState) -> bool {
     state.unix_socket.is_some() || is_local_bind(&state.bind)
 }
+
+pub(crate) fn remote_access_status(state: &AgentState) -> RemoteAccessStatus {
+    RemoteAccessStatus {
+        remote_transport: remote_transport_label(state).to_owned(),
+        remote_auth_configured: state.auth.any_token_configured(),
+        remote_apply_enabled: remote_apply_enabled(state),
+    }
+}
+
+fn remote_transport_label(state: &AgentState) -> &'static str {
+    match agent_privilege_transport(state) {
+        PrivilegeTransport::UnixSocket => "unix_socket",
+        PrivilegeTransport::LoopbackTcp | PrivilegeTransport::LocalCli => "loopback_tcp",
+        PrivilegeTransport::RemoteTcp => "unsafe_tcp",
+    }
+}
+
+fn remote_apply_enabled(state: &AgentState) -> bool {
+    agent_state_is_local(state)
+        && state.auth.apply_token_configured()
+        && autotune::remote_mode_supported(&state.autotune_limits, DaemonMode::ApplyLowRisk)
+}

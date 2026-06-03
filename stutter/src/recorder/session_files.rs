@@ -90,6 +90,14 @@ impl From<&crate::probe_activation::ProbeActivationWarning> for RecordedProbeAct
 pub struct SessionMetadataCore {
     pub schema_version: ArtifactSchemaVersion,
     pub run_name: Option<String>,
+    #[serde(default)]
+    pub scenario_name: Option<String>,
+    #[serde(default)]
+    pub scenario_hash: Option<String>,
+    #[serde(default)]
+    pub workload_label: Option<String>,
+    #[serde(default)]
+    pub route_label: Option<String>,
     pub started_at: RecordedTime,
     pub ended_at: RecordedTime,
     pub monotonic_start_ns: Option<u64>,
@@ -261,6 +269,14 @@ pub struct MetadataFile {
 pub struct RecordedConfig {
     pub manual_pids: Vec<u32>,
     pub tree_roots: Vec<u32>,
+    #[serde(default)]
+    pub scenario_name: Option<String>,
+    #[serde(default)]
+    pub scenario_hash: Option<String>,
+    #[serde(default)]
+    pub workload_label: Option<String>,
+    #[serde(default)]
+    pub route_label: Option<String>,
     #[serde(default)]
     pub cgroupv2: Option<PathBuf>,
     #[serde(default)]

@@ -100,6 +100,10 @@ fn summary(confidence: RankingConfidence) -> TuneSummary {
     TuneSummary {
         schema_version: 1,
         tree_pid: 42,
+        scenario_name: None,
+        scenario_hash: None,
+        workload_label: None,
+        route_label: None,
         profiles_path: PathBuf::from("profiles.toml"),
         runs: 3,
         epoch_seconds: 120,
@@ -118,7 +122,125 @@ fn summary(confidence: RankingConfidence) -> TuneSummary {
         ranking_confidence: confidence,
         ranking_notes: Vec::new(),
         comparability_warnings: Vec::new(),
-        candidates: vec![candidate("best", 80), candidate("baseline", 120)],
+        candidates: vec![
+            candidate_with_metrics(
+                "best",
+                CandidateMetricFixture {
+                    iteration: 1,
+                    diagnostic_raw_score_total: 80,
+                    over_5ms: 1,
+                    frame_p99_ms: 16.0,
+                    frame_over_16ms: 0,
+                    frame_over_33ms: 0,
+                    frame_over_50ms: 0,
+                    max_latency_ns: 1_000_000,
+                },
+            ),
+            candidate_with_metrics(
+                "best",
+                CandidateMetricFixture {
+                    iteration: 2,
+                    diagnostic_raw_score_total: 80,
+                    over_5ms: 1,
+                    frame_p99_ms: 16.0,
+                    frame_over_16ms: 0,
+                    frame_over_33ms: 0,
+                    frame_over_50ms: 0,
+                    max_latency_ns: 1_000_000,
+                },
+            ),
+            candidate_with_metrics(
+                "best",
+                CandidateMetricFixture {
+                    iteration: 3,
+                    diagnostic_raw_score_total: 80,
+                    over_5ms: 1,
+                    frame_p99_ms: 16.0,
+                    frame_over_16ms: 0,
+                    frame_over_33ms: 0,
+                    frame_over_50ms: 0,
+                    max_latency_ns: 1_000_000,
+                },
+            ),
+            candidate_with_metrics(
+                "baseline",
+                CandidateMetricFixture {
+                    iteration: 1,
+                    diagnostic_raw_score_total: 120,
+                    over_5ms: 2,
+                    frame_p99_ms: 17.0,
+                    frame_over_16ms: 1,
+                    frame_over_33ms: 0,
+                    frame_over_50ms: 0,
+                    max_latency_ns: 2_000_000,
+                },
+            ),
+            candidate_with_metrics(
+                "baseline",
+                CandidateMetricFixture {
+                    iteration: 2,
+                    diagnostic_raw_score_total: 120,
+                    over_5ms: 2,
+                    frame_p99_ms: 17.0,
+                    frame_over_16ms: 1,
+                    frame_over_33ms: 0,
+                    frame_over_50ms: 0,
+                    max_latency_ns: 2_000_000,
+                },
+            ),
+            candidate_with_metrics(
+                "baseline",
+                CandidateMetricFixture {
+                    iteration: 3,
+                    diagnostic_raw_score_total: 120,
+                    over_5ms: 2,
+                    frame_p99_ms: 17.0,
+                    frame_over_16ms: 1,
+                    frame_over_33ms: 0,
+                    frame_over_50ms: 0,
+                    max_latency_ns: 2_000_000,
+                },
+            ),
+            candidate_with_metrics(
+                "second",
+                CandidateMetricFixture {
+                    iteration: 1,
+                    diagnostic_raw_score_total: 100,
+                    over_5ms: 2,
+                    frame_p99_ms: 16.5,
+                    frame_over_16ms: 1,
+                    frame_over_33ms: 0,
+                    frame_over_50ms: 0,
+                    max_latency_ns: 1_500_000,
+                },
+            ),
+            candidate_with_metrics(
+                "second",
+                CandidateMetricFixture {
+                    iteration: 2,
+                    diagnostic_raw_score_total: 100,
+                    over_5ms: 2,
+                    frame_p99_ms: 16.5,
+                    frame_over_16ms: 1,
+                    frame_over_33ms: 0,
+                    frame_over_50ms: 0,
+                    max_latency_ns: 1_500_000,
+                },
+            ),
+            candidate_with_metrics(
+                "second",
+                CandidateMetricFixture {
+                    iteration: 3,
+                    diagnostic_raw_score_total: 100,
+                    over_5ms: 2,
+                    frame_p99_ms: 16.5,
+                    frame_over_16ms: 1,
+                    frame_over_33ms: 0,
+                    frame_over_50ms: 0,
+                    max_latency_ns: 1_500_000,
+                },
+            ),
+        ],
     }
 }
 
@@ -140,6 +262,21 @@ fn medium_confidence_produces_recommended_verdict() {
 
     assert_eq!(rec.verdict, TuneRecommendationVerdict::Recommended);
     assert_eq!(rec.best_profile.as_deref(), Some("best"));
+}
+
+#[test]
+fn formal_diagnostic_score_blocks_recommended_verdict_when_underpowered() {
+    let mut summary = summary(RankingConfidence::High);
+    summary.candidates = vec![candidate("best", 80), candidate("baseline", 120)];
+
+    let rec = build_tune_recommendation(&summary, None);
+
+    assert_eq!(rec.verdict, TuneRecommendationVerdict::NeedsRetest);
+    assert!(
+        rec.warnings
+            .iter()
+            .any(|warning| warning.contains("formal diagnostic score comparison"))
+    );
 }
 
 #[test]

@@ -52,7 +52,7 @@ pub(in crate::daemon::policy) fn record_policy_rule(
     rejection: Option<PolicyRejection>,
 ) {
     evaluated_rules.push(PolicyRuleEvaluation {
-        rule,
+        rule: rule.to_owned(),
         passed,
         reason,
     });

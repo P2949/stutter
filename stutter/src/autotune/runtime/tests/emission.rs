@@ -49,6 +49,17 @@ fn dry_run_all_safe_writes_plan_files_without_starting_experiment() {
             plan.path.display()
         );
         assert_eq!(plan.safety_class, SafetyClass::ReversibleLowRisk);
+        let decoded: crate::autotune::planning::plan_io::CandidatePlanFile =
+            serde_json::from_slice(&std::fs::read(&plan.path).unwrap()).unwrap();
+        assert_eq!(
+            decoded.policy_intent,
+            crate::daemon_policy::PolicyIntent::Suggest
+        );
+        assert!(
+            decoded.apply_command.is_none(),
+            "suggest-mode plan files must not advertise direct apply"
+        );
+        assert!(decoded.policy_explanation.final_reason.contains("allowed"));
     }
 }
 

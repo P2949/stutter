@@ -1,11 +1,30 @@
 name = "real_community_rules_classification"
-schema_version = 22
+schema_version = 23
 source = "sanitized-real-recording"
 quality_expectation = "High"
 description = "Sanitized community-rules classification fixture where an originally unknown game process is represented in the final artifact stream as TaskClass::Game."
 
+[platform]
+gpu_vendor = "NVIDIA"
+gpu_driver = "nvidia"
+compositor = "GNOME"
+session_type = "wayland"
+scenario = "community"
+sanitized_capture_id = "sanitized-nvidia-gnome-community-rules-v1"
+kernel_family = "linux"
+kernel_version_bucket = "6.8-6.12"
+cpu_vendor = "AMD"
+cpu_topology_bucket = "8c16t"
+display_refresh_bucket = "60-90hz"
+capture_features = [
+    "frames",
+    "scheduler",
+    "community-rules",
+]
+
 [expected]
 primary_cause = "GameThreadSchedulerDelay"
+expected_behavior = "must_diagnose"
 accepted_confidence = [
     "Medium",
     "High",

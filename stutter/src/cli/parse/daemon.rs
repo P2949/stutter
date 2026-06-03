@@ -7,8 +7,9 @@ use crate::{
         DaemonProfilesCommandInput, DaemonProfilesExplainCommandInput,
         DaemonProfilesForgetCommandInput, DaemonProfilesListCommandInput,
         DaemonResetStateCommandInput, DaemonRestoreCommandInput, DaemonResumeCommandInput,
-        DaemonResyncStateCommandInput, DaemonSoakCommandInput, DaemonStatusCommandInput,
-        DaemonWatchCommandInput, DaemonWhatChangedCommandInput, DaemonWhyNotOptimizeCommandInput,
+        DaemonResyncStateCommandInput, DaemonRollbackDrillCommandInput, DaemonSoakCommandInput,
+        DaemonStatusCommandInput, DaemonWatchCommandInput, DaemonWhatChangedCommandInput,
+        DaemonWhyNotOptimizeCommandInput,
     },
     daemon::testing::{DaemonSoakBudget, DaemonSoakConfig, DaemonSoakProfile},
 };
@@ -171,5 +172,11 @@ pub(super) fn parse_daemon_command(args: DaemonArgs) -> anyhow::Result<AppComman
                 emergency: true,
             }))
         }
+        DaemonCommand::RollbackDrill(args) => Ok(AppCommand::DaemonRollbackDrill(
+            DaemonRollbackDrillCommandInput {
+                dry_run: args.dry_run,
+                json: args.json,
+            },
+        )),
     }
 }

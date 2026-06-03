@@ -48,7 +48,10 @@ pub(super) fn parse_bench_command(
     if args.duration == 0 {
         anyhow::bail!("--duration must be greater than zero");
     }
-    if args.scenario.trim().is_empty() {
+    let Some(scenario_name) = args.monitor.scenario_name.clone() else {
+        anyhow::bail!("--scenario is required for bench");
+    };
+    if scenario_name.trim().is_empty() {
         anyhow::bail!("--scenario must not be empty");
     }
     if !matches!(args.role.as_str(), "baseline" | "current") {
@@ -57,8 +60,9 @@ pub(super) fn parse_bench_command(
     if args.monitor.no_record {
         anyhow::bail!("bench --no-record is contradictory");
     }
-    let run_name = format!("bench-{}-{}", args.role, args.scenario);
+    let run_name = format!("bench-{}-{}", args.role, scenario_name);
     args.monitor.run_name = Some(run_name.clone());
+    args.monitor.route_label = args.monitor.route_label.or(Some(scenario_name.clone()));
     let config = Arc::new(monitor_config_from_monitor_args_with_presence(
         args.monitor,
         RecordingMode::ForceRecording {

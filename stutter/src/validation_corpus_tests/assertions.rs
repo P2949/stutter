@@ -96,6 +96,31 @@ pub(super) fn assert_data_quality(analysis: &ReportAnalysisJson, spec: &FixtureE
 pub(super) fn assert_diagnosis(analysis: &ReportAnalysisJson, spec: &FixtureExpectationFile) {
     let name = spec.name.as_str();
 
+    if spec.expected.expected_behavior == ExpectedDiagnosisBehavior::KnownMiss {
+        let expected_cause = parse_stutter_cause(&spec.expected.primary_cause);
+        if primary_diagnosis(analysis).is_some_and(|diagnosis| diagnosis.cause == expected_cause)
+            || find_candidate(analysis, expected_cause).is_some()
+        {
+            panic!(
+                "{name} known miss is now diagnosed; update metadata from known_miss to must_diagnose"
+            );
+        }
+        return;
+    }
+
+    if spec.expected.expected_behavior == ExpectedDiagnosisBehavior::MustNotDiagnose {
+        assert!(
+            primary_diagnosis(analysis).is_none() || no_primary_non_unknown_diagnosis(analysis),
+            "{name} expected no diagnosis, got {:?}",
+            primary_diagnosis(analysis).map(|diagnosis| &diagnosis.cause)
+        );
+        return;
+    }
+
+    if spec.expected.expected_behavior == ExpectedDiagnosisBehavior::Informational {
+        return;
+    }
+
     match parse_primary_cause(&spec.expected.primary_cause) {
         ExpectedPrimaryCause::Any => {}
         ExpectedPrimaryCause::Cause(expected_cause) => {
@@ -439,18 +464,57 @@ pub(super) fn assert_privacy(analysis: &ReportAnalysisJson, spec: &FixtureExpect
     }
 
     if spec.source == "sanitized-real-recording" {
-        let serialized = serde_json::to_string(analysis)
+        let serialized_raw = serde_json::to_string(analysis)
             .expect("analysis should serialize for privacy scan")
             .to_ascii_lowercase();
 
-        for forbidden in ["/home/", "users/", "hostname", "steamapps/common"] {
+        for forbidden in [
+            "/home/",
+            "/users/",
+            "c:\\\\users\\\\",
+            "hostname",
+            "steamapps/common",
+            ".local/share/steam/steamapps",
+        ] {
             assert!(
-                !serialized.contains(forbidden),
+                !serialized_raw.contains(forbidden),
                 "{} sanitized-real fixture leaked forbidden token {forbidden:?}",
                 spec.name
             );
         }
+
+        let email_like = regex::Regex::new(r#"[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}"#)
+            .expect("email regex should compile");
+        assert!(
+            !email_like.is_match(&serialized_raw),
+            "{} sanitized-real fixture leaked an email-like token",
+            spec.name
+        );
+
+        let ipv4_like =
+            regex::Regex::new(r#"\b(?:\d{1,3}\.){3}\d{1,3}\b"#).expect("IPv4 regex should compile");
+        for ip in ipv4_like.find_iter(&serialized_raw).map(|mat| mat.as_str()) {
+            assert!(
+                is_private_or_loopback_ipv4(ip),
+                "{} sanitized-real fixture leaked public-looking IPv4 address {ip}",
+                spec.name
+            );
+        }
     }
+}
+
+fn is_private_or_loopback_ipv4(ip: &str) -> bool {
+    let octets = ip
+        .split('.')
+        .filter_map(|part| part.parse::<u8>().ok())
+        .collect::<Vec<_>>();
+    if octets.len() != 4 {
+        return false;
+    }
+    matches!(
+        octets.as_slice(),
+        [10, ..] | [127, ..] | [192, 168, ..] | [172, 16..=31, ..]
+    )
 }
 
 pub(super) fn assert_fixture_from_metadata(name: &str) -> ReportAnalysisJson {

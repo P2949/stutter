@@ -212,6 +212,24 @@ pub(super) fn record_layer_provenance(
 
     record_if_present(&layer.run_name, provenance, "recording.run_name", source);
     record_if_present(
+        &layer.scenario_name,
+        provenance,
+        "recording.scenario_name",
+        source,
+    );
+    record_if_present(
+        &layer.workload_label,
+        provenance,
+        "recording.workload_label",
+        source,
+    );
+    record_if_present(
+        &layer.route_label,
+        provenance,
+        "recording.route_label",
+        source,
+    );
+    record_if_present(
         &layer.output_dir,
         provenance,
         "recording.output_dir",

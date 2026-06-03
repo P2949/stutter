@@ -4,6 +4,11 @@
 
 System-changing daemon actions are enforced through `DaemonPolicy::check_action` and `ActionDescriptor`; they are not controlled only by comments, help text, or convention.
 
+Advisor fix plans carry explicit safety risk fields: safety class, effect scope,
+rollback requirement, privilege/system-wide/persistence flags, required policy
+mode, and whether the default policy allows the proposed experiment. A fix plan
+is not permission to apply a change; validation and policy still gate action.
+
 ## eBPF Privilege Boundary
 
 Recording and live tracing require privileges on most systems because `stutter` loads eBPF programs. Offline commands such as `report`, `recommend`, `advisor`, and `audit` read files and do not need root.

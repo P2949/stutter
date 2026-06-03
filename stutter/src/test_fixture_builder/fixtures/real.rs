@@ -7,6 +7,43 @@ pub(in crate::test_fixture_builder) fn real_clean_baseline_fixture()
     renamed_fixture("real_clean_baseline", clean_run_fixture())
 }
 
+pub(in crate::test_fixture_builder) fn real_intel_gnome_frame_jitter_false_positive_fixture()
+-> (SessionFile, FixtureArtifacts) {
+    renamed_fixture(
+        "real_intel_gnome_frame_jitter_false_positive",
+        clean_run_fixture(),
+    )
+}
+
+pub(in crate::test_fixture_builder) fn real_amd_kwin_overlay_false_positive_fixture()
+-> (SessionFile, FixtureArtifacts) {
+    renamed_fixture(
+        "real_amd_kwin_overlay_false_positive",
+        direct_gpu_clean_fixture(),
+    )
+}
+
+pub(in crate::test_fixture_builder) fn real_known_miss_sparse_gpu_bound_fixture()
+-> (SessionFile, FixtureArtifacts) {
+    renamed_fixture(
+        "real_known_miss_sparse_gpu_bound",
+        missing_evidence_unknown_fixture(),
+    )
+}
+
+pub(in crate::test_fixture_builder) fn real_known_miss_short_irq_overlap_fixture()
+-> (SessionFile, FixtureArtifacts) {
+    renamed_fixture("real_known_miss_short_irq_overlap", clean_run_fixture())
+}
+
+pub(in crate::test_fixture_builder) fn real_known_miss_block_io_tail_fixture()
+-> (SessionFile, FixtureArtifacts) {
+    renamed_fixture(
+        "real_known_miss_block_io_tail",
+        missing_evidence_unknown_fixture(),
+    )
+}
+
 pub(in crate::test_fixture_builder) fn real_game_thread_scheduler_delay_fixture()
 -> (SessionFile, FixtureArtifacts) {
     renamed_fixture(

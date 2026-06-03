@@ -1,11 +1,12 @@
 name = "wayland_zero_copy_good"
-schema_version = 22
+schema_version = 23
 source = "synthetic-display-path"
 quality_expectation = "High"
 description = "Synthetic display-path fixture where cooperative Wayland evidence reports zero-copy/direct scanout."
 
 [expected]
 primary_cause = "Unknown"
+expected_behavior = "must_diagnose"
 accepted_confidence = []
 data_quality = "High"
 

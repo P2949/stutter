@@ -103,8 +103,8 @@ pub(crate) use crate::{
         AgentAutotuneLimits, AgentFeatureFlags, AutotuneConfigResponse, AutotuneHistoryResponse,
         AutotuneRestoreResponse, AutotuneStartRequest, AutotuneStartResponse,
         AutotuneStatusResponse, AutotuneStopResponse, CapabilitiesResponse, HealthResponse,
-        RecordStatusResponse, RemoteMonitorRequest, RunsResponse, StartRecordResponse,
-        StopRecordResponse, VersionResponse,
+        RecordStatusResponse, RemoteAccessStatus, RemoteMonitorRequest, RunsResponse,
+        StartRecordResponse, StopRecordResponse, VersionResponse,
     },
 };
 
@@ -129,10 +129,12 @@ pub use auth::AgentAuth;
 #[cfg(test)]
 pub(crate) use auth::agent_privilege_transport;
 #[cfg(test)]
+pub(crate) use auth::authorize_apply;
+#[cfg(test)]
 pub(crate) use auth::authorize_state_change;
 pub(crate) use auth::{
-    agent_state_is_local, authorize, authorize_agent_privileged_operation, authorize_apply,
-    authorize_remote_autotune_start,
+    agent_state_is_local, authorize, authorize_agent_privileged_operation,
+    authorize_remote_autotune_start, remote_access_status,
 };
 #[cfg(test)]
 pub(crate) use bind::agent_listen_audit_message;

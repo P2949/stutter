@@ -1,0 +1,10 @@
+name = "scheduler_affinity_underpowered"
+scenario_name = "city-run-scheduler"
+expected_status = "underpowered"
+baseline_over_5ms = [3, 3]
+tuned_scores = [100, 100]
+tuned_over_5ms = 1
+tuned_frame_p99_ms = 18.0
+
+[notes]
+summary = "Same scheduler route, but with too few baseline and tuned samples to count as proof."

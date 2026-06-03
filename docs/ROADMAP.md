@@ -10,7 +10,8 @@
 | Manual diagnosis | Completed | Reports cautious diagnosis candidates and supporting evidence. |
 | Profile benchmarker | Current | `tune` benchmarks explicit CPU-affinity profile sets and records per-candidate artifacts. |
 | Profile recommender | Current | `tune` writes JSON, Markdown, and HTML recommendation artifacts. `recommend --html` shows A/B distributions, bootstrap CI bands, effect size, sample counts, noise ratios, and underpowered warnings. |
-| Advisor daemon | Current | `advisor --watch-runs` watches completed runs and emits conservative offline recommendations. |
+| Advisor daemon | Current | `advisor --watch-runs` watches completed runs and emits conservative offline recommendations with structured fix plans. |
+| Fix validation | Current | `recommend --fix-plan` validates advisor hypotheses against repeated baseline/tune A/B evidence and reports validated/rejected/underpowered/inconclusive/invalid-experiment status. |
 | Limited auto-tuner | In development / gated | Runtime, planning, live experiment, rollback, audit, and emergency-restore infrastructure exist. User-facing enablement remains gated on safety validation, policy coverage, and end-to-end recovery confidence. |
 | Broader optimizer | Experimental / internal | Providers and candidate paths exist for CPU affinity, nice, ioprio, uclamp, cgroup placement, IRQ affinity, CPU power, VM knobs, and GPU power. Broader user-facing enablement remains future work pending stronger evidence, policy hardening, and clearer operator controls. |
 
@@ -45,6 +46,7 @@ Guardrail-only or missing direct signal objectives:
 Near-term work should improve trust, repeatability, and rollback before adding broader system changes:
 
 - Better comparability checks for tune runs.
+- More guided proof workflows around `advisor --json`, `tune`, and `recommend --fix-plan`.
 - More example profile sets and benchmark guidance.
 - More offline smoke fixtures for recommendation/advisor behavior.
 - Stronger audit views for actions that change system state.

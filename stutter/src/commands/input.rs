@@ -24,6 +24,7 @@ pub enum AppCommand {
     ReleaseCheck(ReleaseCheckCommandInput),
     Tune(TuneCommandInput),
     Recommend(RecommendCommandInput),
+    ProveFix(ProveFixCommandInput),
     Check(CheckCommandInput),
     DisplayPathCompare(DisplayPathCompareCommandInput),
     ConfigCheck(ConfigCheckCommandInput),
@@ -63,6 +64,7 @@ pub enum AppCommand {
     DaemonResume(DaemonResumeCommandInput),
     DaemonResyncState(DaemonResyncStateCommandInput),
     DaemonRestore(DaemonRestoreCommandInput),
+    DaemonRollbackDrill(DaemonRollbackDrillCommandInput),
     Completions(CompletionsCommandInput),
     Man(ManCommandInput),
     Rules(RulesCommandInput),
@@ -158,6 +160,9 @@ pub struct TuneCommandInput {
     pub runs: u32,
     pub keep_best: bool,
     pub baseline_profile: Option<String>,
+    pub scenario_name: Option<String>,
+    pub workload_label: Option<String>,
+    pub route_label: Option<String>,
     pub out_dir: Option<PathBuf>,
     pub mangohud_log: Option<PathBuf>,
     pub enforce: bool,
@@ -168,9 +173,26 @@ pub struct TuneCommandInput {
 pub struct RecommendCommandInput {
     pub baseline: Vec<PathBuf>,
     pub tune: PathBuf,
+    pub fix_plan: Option<PathBuf>,
+    pub allow_scenario_mismatch: bool,
     pub json: bool,
     pub markdown: Option<PathBuf>,
     pub html: Option<PathBuf>,
+}
+
+#[derive(Debug)]
+pub struct ProveFixCommandInput {
+    pub plan: PathBuf,
+    pub profiles: PathBuf,
+    pub tree_pid: u32,
+    pub scenario_name: Option<String>,
+    pub workload_label: Option<String>,
+    pub route_label: Option<String>,
+    pub duration_seconds: u64,
+    pub baseline_runs: Option<usize>,
+    pub test_runs: Option<usize>,
+    pub baseline_profile: String,
+    pub html: PathBuf,
 }
 
 #[derive(Debug)]
@@ -425,6 +447,12 @@ pub struct DaemonResyncStateCommandInput {
 pub struct DaemonRestoreCommandInput {
     pub dry_run: bool,
     pub emergency: bool,
+}
+
+#[derive(Debug)]
+pub struct DaemonRollbackDrillCommandInput {
+    pub dry_run: bool,
+    pub json: bool,
 }
 
 #[derive(Debug)]

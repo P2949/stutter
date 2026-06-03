@@ -126,6 +126,21 @@ fn generic_candidate_suggestion_writes_plan_file_and_uses_apply_candidate_comman
     assert_eq!(decoded.candidate.candidate_name, "nice-browser-helper");
     assert_eq!(decoded.candidate.action_kind, "nice");
     assert!(decoded.executable.is_some());
+    assert_eq!(
+        decoded.policy_intent,
+        crate::daemon_policy::PolicyIntent::Apply
+    );
+    assert!(decoded.policy_explanation.verdict.is_allowed());
+    assert_eq!(
+        decoded.apply_command.as_deref(),
+        Some(format!(
+            "stutter autotune apply-candidate --candidate-json {}",
+            plan_path.display()
+        ))
+        .as_deref()
+    );
+    assert!(decoded.dry_run_command.ends_with("--dry-run"));
+    assert!(decoded.rollback_command.contains("emergency-restore"));
 
     let rendered = render_candidate_suggestion(suggestion);
     assert!(rendered.contains("action=nice"));
@@ -195,12 +210,27 @@ fn high_risk_system_candidate_suggestion_is_dry_run_only() {
             .contains("manual-only high-risk/system-adjacent")
     );
 
+    let raw_plan: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&plan_path).unwrap()).unwrap();
+    assert!(raw_plan.get("apply_command").is_none());
+    assert!(
+        raw_plan["policy_explanation"]["final_reason"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("high-risk apply")
+            || raw_plan["policy_explanation"]["final_reason"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("system-wide action")
+    );
+
     let dry_run_plan = apply_candidate_plan_file(&plan_path, true).unwrap();
     assert_eq!(
         dry_run_plan.candidate.candidate_name,
         "irq-affinity-44-high-risk"
     );
     assert!(dry_run_plan.executable.is_none());
+    assert_eq!(dry_run_plan.apply_command, None);
 
     let err = apply_candidate_plan_file(&plan_path, false)
         .unwrap_err()
@@ -282,6 +312,8 @@ fn candidate_plan_file_can_embed_executable_process_local_payload() {
     let decoded: CandidatePlanFile = serde_json::from_str(&json).unwrap();
 
     assert!(decoded.executable.is_some());
+    assert!(decoded.policy_explanation.verdict.is_allowed());
+    assert!(decoded.apply_command.is_some());
     let decoded_candidate = decoded.executable.unwrap().into_candidate();
     assert_eq!(decoded_candidate.action_kind(), "nice");
     assert_eq!(decoded_candidate.candidate_name(), "nice-browser-helper");
@@ -310,6 +342,7 @@ fn cpu_affinity_candidate_plan_file_is_manual_only_with_stable_rejection() {
 
     let plan = write_candidate_plan_file(&plan_path, &candidate, Some(1)).unwrap();
     assert!(plan.executable.is_none());
+    assert_eq!(plan.apply_command, None);
     assert_eq!(
         plan.manual_apply_command.as_deref(),
         Some("stutter apply-profile --tree-pid 1234 --profile <generated-or-existing-profile>")

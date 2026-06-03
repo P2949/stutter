@@ -1,6 +1,10 @@
 {
-  "schema_version": 22,
+  "schema_version": 23,
   "run_name": "wayland_zero_copy_good",
+  "scenario_name": null,
+  "scenario_hash": null,
+  "workload_label": null,
+  "route_label": null,
   "started_at": {
     "unix_seconds": 1625097600,
     "unix_nanos": 0,
@@ -112,6 +116,10 @@
   "config": {
     "manual_pids": [],
     "tree_roots": [],
+    "scenario_name": null,
+    "scenario_hash": null,
+    "workload_label": null,
+    "route_label": null,
     "cgroupv2": null,
     "exclude_tree_pids": [],
     "include_comm": [],

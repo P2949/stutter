@@ -113,3 +113,23 @@ fn remote_policy_response_uses_policy_explanation_text() {
     assert!(err.response_message.contains("loopback"));
     assert!(err.audit_message.contains("loopback"));
 }
+
+#[test]
+fn default_remote_limits_reject_medium_and_high_risk_apply_modes() {
+    let state = test_agent_state(Some("secret"), true);
+    let mut headers = HeaderMap::new();
+    headers.insert("Authorization", "Bearer secret".parse().unwrap());
+
+    for mode in ["apply-medium-risk", "apply-high-risk"] {
+        let request = autotune_start_request(mode);
+        let err = policy_for_remote_autotune_start(&headers, &state, &request).unwrap_err();
+
+        assert_eq!(err.status, StatusCode::BAD_REQUEST, "mode={mode}");
+        assert!(
+            err.response_message.contains("not allowed")
+                || err.response_message.contains("not permitted"),
+            "unexpected response for mode={mode}: {}",
+            err.response_message
+        );
+    }
+}

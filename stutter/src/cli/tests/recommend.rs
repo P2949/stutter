@@ -13,10 +13,13 @@ fn parses_recommend_command_with_repeated_baselines_and_outputs() {
         "/tmp/base-2",
         "--tune",
         "/tmp/tune",
+        "--fix-plan",
+        "/tmp/fix-plan.json",
         "--markdown",
         "/tmp/recommendation.md",
         "--html",
         "/tmp/recommendation.html",
+        "--allow-scenario-mismatch",
     ])
     .unwrap();
 
@@ -29,6 +32,8 @@ fn parses_recommend_command_with_repeated_baselines_and_outputs() {
         vec![PathBuf::from("/tmp/base-1"), PathBuf::from("/tmp/base-2")]
     );
     assert_eq!(input.tune, PathBuf::from("/tmp/tune"));
+    assert_eq!(input.fix_plan, Some(PathBuf::from("/tmp/fix-plan.json")));
+    assert!(input.allow_scenario_mismatch);
     assert_eq!(
         input.markdown,
         Some(PathBuf::from("/tmp/recommendation.md"))

@@ -19,6 +19,10 @@ pub fn recorded_config(config: &MonitorConfig, tree_pids: &[u32]) -> RecordedCon
     RecordedConfig {
         manual_pids: config.target.target_pids.clone(),
         tree_roots: tree_pids.to_vec(),
+        scenario_name: config.recording.scenario_name.clone(),
+        scenario_hash: config.recording.scenario_hash.clone(),
+        workload_label: config.recording.workload_label.clone(),
+        route_label: config.recording.route_label.clone(),
         cgroupv2: config.target.cgroupv2.clone(),
         exclude_tree_pids: config.target.exclude_tree_pids.clone(),
         include_comm: config.target.include_comm.clone(),

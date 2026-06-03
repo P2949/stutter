@@ -40,6 +40,15 @@ pub(super) struct MonitorArgs {
     #[arg(long = "run-name", value_name = "NAME")]
     pub(super) run_name: Option<String>,
 
+    #[arg(long = "scenario", value_name = "NAME")]
+    pub(super) scenario_name: Option<String>,
+
+    #[arg(long = "workload-label", value_name = "LABEL")]
+    pub(super) workload_label: Option<String>,
+
+    #[arg(long = "route-label", value_name = "LABEL")]
+    pub(super) route_label: Option<String>,
+
     #[arg(long = "out-dir", alias = "out", value_name = "PATH")]
     pub(super) out_dir: Option<PathBuf>,
 
@@ -404,9 +413,6 @@ pub(super) struct BenchArgs {
 
     #[arg(long, value_name = "SECONDS")]
     pub(super) duration: u64,
-
-    #[arg(long = "scenario", value_name = "NAME")]
-    pub(super) scenario: String,
 
     #[arg(
         long = "role",

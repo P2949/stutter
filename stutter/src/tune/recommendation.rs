@@ -230,9 +230,35 @@ pub fn build_tune_recommendation(
         warnings.push("missing frame data for best profile".to_owned());
     }
 
+    let formal_score_blocks_recommendation = comparison_metrics
+        .as_ref()
+        .and_then(|metrics| {
+            metrics
+                .formal_metrics
+                .iter()
+                .find(|metric| metric.metric == "diagnostic_raw_score_total")
+        })
+        .is_none_or(|metric| {
+            !metric.enough_samples
+                || !metric.statistically_significant
+                || metric.improvement_delta <= 0.0
+        });
+
+    if formal_score_blocks_recommendation {
+        warnings.push(
+            "formal diagnostic score comparison is underpowered, insignificant, or not positive; recommendation requires retest"
+                .to_owned(),
+        );
+    }
+
     let verdict = match summary.ranking_confidence {
-        RankingConfidence::High | RankingConfidence::Medium => {
+        RankingConfidence::High | RankingConfidence::Medium
+            if !formal_score_blocks_recommendation =>
+        {
             TuneRecommendationVerdict::Recommended
+        }
+        RankingConfidence::High | RankingConfidence::Medium => {
+            TuneRecommendationVerdict::NeedsRetest
         }
         RankingConfidence::Low => TuneRecommendationVerdict::NeedsRetest,
         RankingConfidence::Unstable => TuneRecommendationVerdict::NoRecommendation,

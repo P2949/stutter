@@ -1,0 +1,10 @@
+name = "scheduler_affinity_validated"
+scenario_name = "city-run-scheduler"
+expected_status = "validated"
+baseline_over_5ms = [3, 3, 3, 3, 3]
+tuned_scores = [100, 100, 100, 100, 100]
+tuned_over_5ms = 1
+tuned_frame_p99_ms = 18.0
+
+[notes]
+summary = "Repeated scheduler-delay baseline where the tuned CPU-affinity profile clears the required bootstrap CI."

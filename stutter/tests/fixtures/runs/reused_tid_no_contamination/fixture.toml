@@ -1,11 +1,12 @@
 name = "reused_tid_no_contamination"
-schema_version = 22
+schema_version = 23
 source = "synthetic-contract"
 quality_expectation = "High"
 description = "Synthetic reused-TID fixture that verifies separate logical tasks are not merged."
 
 [expected]
 primary_cause = "Unknown"
+expected_behavior = "must_diagnose"
 accepted_confidence = []
 data_quality = "High"
 

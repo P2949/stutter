@@ -1,11 +1,12 @@
 name = "irq_heavy"
-schema_version = 22
+schema_version = 23
 source = "synthetic-contract"
 quality_expectation = "High"
 description = "Synthetic IRQ fixture with a long IRQ handler overlapping scheduler-latency spikes."
 
 [expected]
 primary_cause = "IrqDelayCandidate"
+expected_behavior = "must_diagnose"
 accepted_confidence = [
     "Medium",
     "High",

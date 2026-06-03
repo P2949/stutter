@@ -79,10 +79,15 @@ fn render_metric_table(out: &mut String, metrics: &[FormalMetricComparison]) {
             format_optional_ratio(metric.tuned_noise_ratio)
         );
 
-        let power = if metric.underpowered {
-            "underpowered"
+        let power = if let Some(power) = &metric.power_estimate {
+            power
+                .estimated_runs_per_side
+                .map(|runs| format!("{runs} runs/side"))
+                .unwrap_or_else(|| "unavailable".to_owned())
+        } else if metric.underpowered {
+            "underpowered".to_owned()
         } else {
-            "ok"
+            "ok".to_owned()
         };
 
         pushln(
@@ -113,7 +118,7 @@ fn render_metric_table(out: &mut String, metrics: &[FormalMetricComparison]) {
                 escape_html(&noise),
                 escape_html(&ci),
                 metric.statistically_significant,
-                escape_html(power),
+                escape_html(&power),
             ),
         );
     }
@@ -131,6 +136,21 @@ fn render_metric_card(out: &mut String, metric: &FormalMetricComparison) {
             pushln(out, format!("<li>{}</li>", escape_html(warning)));
         }
         pushln(out, "</ul>");
+    }
+    if let Some(power) = &metric.power_estimate {
+        let estimate = power
+            .estimated_runs_per_side
+            .map(|runs| format!("{runs} runs per side"))
+            .unwrap_or_else(|| "unavailable".to_owned());
+        pushln(
+            out,
+            format!(
+                "<p class=\"muted\">Sample-size guidance for {:.0}% target: {}. {}</p>",
+                power.target_relative_improvement_percent,
+                escape_html(&estimate),
+                escape_html(&power.reason)
+            ),
+        );
     }
 
     pushln(out, "<div class=\"ab-chart-grid\">");

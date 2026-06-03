@@ -52,6 +52,7 @@ where
         Some(Command::ApplyProfile(args)) => reports::parse_apply_profile_command(args),
         Some(Command::Tune(args)) => reports::parse_tune_command(args),
         Some(Command::Recommend(args)) => reports::parse_recommend_command(args),
+        Some(Command::ProveFix(args)) => reports::parse_prove_fix_command(args),
         Some(Command::Release(args)) => reports::parse_release_command(args),
         Some(Command::Check(args)) => reports::parse_check_command(args),
         Some(Command::Compare(args)) => reports::parse_compare_command(args),

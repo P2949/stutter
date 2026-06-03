@@ -22,6 +22,11 @@ This repository uses `xtask` commands as the local development gate. Run them wi
    RUSTUP_TOOLCHAIN=nightly cargo run -p xtask -- validate
    ```
 
+   For real validation-corpus fixtures, also follow `docs/VALIDATION_CORPUS.md`:
+   complete `fixture.toml`, preserve only bucketed platform details, set
+   expected behavior, use a unique `sanitized_capture_id`, and run
+   `RUSTUP_TOOLCHAIN=nightly cargo run -p xtask -- fixture-check`.
+
 4. Use the preflight check when setting up a new machine or when a validation command fails before the Rust build starts:
 
    ```sh
