@@ -12,6 +12,7 @@ Commands:
   validate                 
   restore                  
   apply-profile            
+  profile-plan             Explain profile targets for a process tree
   tune                     Benchmark multiple profiles and select the best one
   recommend                
   prove-fix                Print a guided workflow for proving an advisor fix plan

@@ -3,10 +3,14 @@ use std::{
     io,
 };
 
-use anyhow::Context;
 use stutter_core::ids::Tid;
 
-use super::{Profile, ProfileRule, matching::matching_profile_rule, summary::ProfileApplySummary};
+use super::{
+    Profile, ProfileRule,
+    action_decision::{ActionStatus, decide_profile_task_actions},
+    matching::matching_profile_rule,
+    summary::ProfileApplySummary,
+};
 use crate::{
     actions::TaskIdentity,
     affinity::{self, AffinityRecord, CpuMask},
@@ -115,34 +119,34 @@ where
             continue;
         }
 
-        let mut task_pending = false;
+        let action_decision = decide_profile_task_actions(
+            task,
+            rule,
+            &mut read_allowed_mask,
+            &mut read_nice,
+            &mut read_ioprio,
+        )?;
+        if action_decision.task_disappeared() {
+            continue;
+        }
 
-        if let Some(desired_mask) = &rule.affinity {
-            let original_mask = match read_allowed_mask(task.task_id()) {
-                Ok(mask) => mask,
-                Err(err) if err.raw_os_error() == Some(libc::ESRCH) => {
-                    continue;
-                }
-                Err(err) => {
-                    return Err(anyhow::anyhow!(
-                        "failed to read CPU affinity for TID {}: {err}",
-                        task.tid
-                    ));
-                }
-            };
-
-            if original_mask != *desired_mask {
-                if !task_has_complete_identity(task) {
-                    log::warn!(
-                        "profile_skip_incomplete_identity tid={} comm={} process_pid={}",
-                        task.tid,
-                        task.comm,
-                        task.process_pid
-                    );
-                } else {
+        if let Some(decision) = &action_decision.affinity {
+            match decision.status {
+                ActionStatus::Pending => {
+                    let Some(original_mask) = decision.current.clone() else {
+                        anyhow::bail!(
+                            "internal error: pending affinity decision for TID {} is missing current mask",
+                            task.tid
+                        );
+                    };
+                    let Some(applied_mask) = decision.desired.clone() else {
+                        anyhow::bail!(
+                            "internal error: pending affinity decision for TID {} is missing desired mask",
+                            task.tid
+                        );
+                    };
                     plan.summary.pending_affinity += 1;
                     pending_tids.insert(task.task_id());
-                    task_pending = true;
                     plan.affinity_changes.push(PlannedAffinityChange {
                         record: AffinityRecord {
                             tid: task.task_id(),
@@ -150,36 +154,39 @@ where
                             process_starttime_ticks: task.process_starttime_ticks,
                             task_starttime_ticks: task.task_starttime_ticks,
                             original_mask,
-                            applied_mask: desired_mask.clone(),
+                            applied_mask,
                         },
                     });
                 }
-            }
-        }
-
-        if let Some(desired_nice) = rule.nice {
-            let original_nice = match read_nice(task.task_id()) {
-                Ok(nice) => nice,
-                Err(err) if anyhow_raw_os_error(&err) == Some(libc::ESRCH) => continue,
-                Err(err) => {
-                    return Err(err).with_context(|| {
-                        format!("failed to read nice for profile target TID {}", task.tid)
-                    });
-                }
-            };
-
-            if original_nice != desired_nice {
-                if !task_has_complete_identity(task) {
+                ActionStatus::SkippedIncompleteIdentity => {
                     log::warn!(
-                        "profile_skip_priority_incomplete_identity tid={} comm={} process_pid={}",
+                        "profile_skip_incomplete_identity tid={} comm={} process_pid={}",
                         task.tid,
                         task.comm,
                         task.process_pid
                     );
-                } else {
+                }
+                _ => {}
+            }
+        }
+
+        if let Some(decision) = &action_decision.nice {
+            match decision.status {
+                ActionStatus::Pending => {
+                    let Some(desired_nice) = decision.desired else {
+                        anyhow::bail!(
+                            "internal error: pending nice decision for TID {} is missing desired nice",
+                            task.tid
+                        );
+                    };
+                    let Some(original_nice) = decision.current else {
+                        anyhow::bail!(
+                            "internal error: pending nice decision for TID {} is missing current nice",
+                            task.tid
+                        );
+                    };
                     plan.summary.pending_nice += 1;
                     pending_tids.insert(task.task_id());
-                    task_pending = true;
                     plan.nice_groups
                         .entry(desired_nice)
                         .or_default()
@@ -194,36 +201,41 @@ where
                         applied_nice: desired_nice,
                     });
                 }
-            }
-        }
-
-        if let Some(desired_ioprio) = rule.ionice {
-            let original_ioprio = match read_ioprio(task.task_id()) {
-                Ok(ioprio) => ioprio,
-                Err(err) if anyhow_raw_os_error(&err) == Some(libc::ESRCH) => continue,
-                Err(err) => {
-                    return Err(err).with_context(|| {
-                        format!(
-                            "failed to read I/O priority for profile target TID {}",
-                            task.tid
-                        )
-                    });
-                }
-            };
-            let desired_encoded = desired_ioprio.encode()?;
-
-            if original_ioprio != desired_encoded {
-                if !task_has_complete_identity(task) {
+                ActionStatus::SkippedIncompleteIdentity => {
                     log::warn!(
                         "profile_skip_priority_incomplete_identity tid={} comm={} process_pid={}",
                         task.tid,
                         task.comm,
                         task.process_pid
                     );
-                } else {
+                }
+                _ => {}
+            }
+        }
+
+        if let Some(decision) = &action_decision.ionice {
+            match decision.status {
+                ActionStatus::Pending => {
+                    let Some(desired_ioprio) = decision.desired else {
+                        anyhow::bail!(
+                            "internal error: pending ionice decision for TID {} is missing desired I/O priority",
+                            task.tid
+                        );
+                    };
+                    let Some(desired_encoded) = decision.desired_encoded else {
+                        anyhow::bail!(
+                            "internal error: pending ionice decision for TID {} is missing encoded desired I/O priority",
+                            task.tid
+                        );
+                    };
+                    let Some(original_ioprio) = decision.current_encoded else {
+                        anyhow::bail!(
+                            "internal error: pending ionice decision for TID {} is missing current I/O priority",
+                            task.tid
+                        );
+                    };
                     plan.summary.pending_ionice += 1;
                     pending_tids.insert(task.task_id());
-                    task_pending = true;
                     plan.ionice_groups
                         .entry(desired_ioprio)
                         .or_default()
@@ -238,10 +250,19 @@ where
                         applied_ioprio: desired_encoded,
                     });
                 }
+                ActionStatus::SkippedIncompleteIdentity => {
+                    log::warn!(
+                        "profile_skip_priority_incomplete_identity tid={} comm={} process_pid={}",
+                        task.tid,
+                        task.comm,
+                        task.process_pid
+                    );
+                }
+                _ => {}
             }
         }
 
-        if task_pending {
+        if action_decision.pending() {
             plan.cache_keys.push(cache_key);
         } else if let Some(cache) = cache.as_mut() {
             cache.known_correct.insert(cache_key);
@@ -257,16 +278,6 @@ where
     }
 
     Ok(plan)
-}
-
-fn task_has_complete_identity(task: &TaskInfo) -> bool {
-    task.process_starttime_ticks.is_some() && task.task_starttime_ticks.is_some()
-}
-
-pub(super) fn anyhow_raw_os_error(err: &anyhow::Error) -> Option<i32> {
-    err.chain()
-        .find_map(|cause| cause.downcast_ref::<io::Error>())
-        .and_then(io::Error::raw_os_error)
 }
 
 impl ProfileApplyCacheKey {

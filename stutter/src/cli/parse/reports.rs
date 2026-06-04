@@ -7,8 +7,8 @@ use super::super::{
     report::{
         AdvisorArgs, ApplyProfileArgs, AuditArgs, CheckArgs, CompareArgs, CompareCommand,
         CompletionsArgs, DoctorArgs, InspectDrmTracepointsArgs, InspectIrqsArgs, InspectTreeArgs,
-        ManArgs, ProbesArgs, ProfileTemplateArgs, RecommendArgs, ReportArgs, RestoreArgs,
-        SummaryArgs, TuneArgs, WaylandProbeArgs,
+        ManArgs, ProbesArgs, ProfilePlanArgs, ProfileTemplateArgs, RecommendArgs, ReportArgs,
+        RestoreArgs, SummaryArgs, TuneArgs, WaylandProbeArgs,
     },
     validate::{ValidateArgs, parse_optional_task_class},
 };
@@ -18,9 +18,9 @@ use crate::{
         CheckCommandInput, CompletionsCommandInput, ConfigCheckCommandInput,
         DaemonConfigExplainCommandInput, DisplayPathCompareCommandInput, DoctorCommandInput,
         InspectIrqsCommandInput, InspectTreeCommandInput, ManCommandInput, ProbesCommandInput,
-        ProfileTemplateCommandInput, ProveFixCommandInput, RecommendCommandInput,
-        ReleaseCheckCommandInput, ReportCommandInput, RestoreCommandInput, SummaryCommandInput,
-        TuneCommandInput, ValidateCommandInput, WaylandProbeCommandInput,
+        ProfilePlanCommandInput, ProfileTemplateCommandInput, ProveFixCommandInput,
+        RecommendCommandInput, ReleaseCheckCommandInput, ReportCommandInput, RestoreCommandInput,
+        SummaryCommandInput, TuneCommandInput, ValidateCommandInput, WaylandProbeCommandInput,
     },
     release::{ReleaseChannel, ReleaseReadinessInputs},
 };
@@ -95,6 +95,21 @@ pub(super) fn parse_apply_profile_command(args: ApplyProfileArgs) -> anyhow::Res
     if args.keep_applied && !args.watch {
         anyhow::bail!("--keep-applied requires --watch");
     }
+    if args.explain && !args.dry_run {
+        anyhow::bail!("--explain is only supported with --dry-run");
+    }
+    if args.explain && args.watch {
+        anyhow::bail!("--explain cannot be combined with --watch");
+    }
+    if args.json && !args.explain {
+        anyhow::bail!("--json requires --explain");
+    }
+    if args.output.is_some() && !args.explain {
+        anyhow::bail!("--output requires --explain");
+    }
+    if args.top == 0 {
+        anyhow::bail!("--top must be greater than zero");
+    }
     Ok(AppCommand::ApplyProfile(ApplyProfileCommandInput {
         tree_pid: args.tree_pid,
         profile: args.profile,
@@ -105,6 +120,28 @@ pub(super) fn parse_apply_profile_command(args: ApplyProfileArgs) -> anyhow::Res
         keep_applied: args.keep_applied,
         refresh_ms: args.refresh_ms,
         enforce: args.enforce,
+        explain: args.explain,
+        json: args.json,
+        output: args.output,
+        top: args.top,
+        highlight_comm: args.highlight_comm,
+    }))
+}
+
+pub(super) fn parse_profile_plan_command(args: ProfilePlanArgs) -> anyhow::Result<AppCommand> {
+    if args.tree_pid == 0 {
+        anyhow::bail!("--tree-pid must be greater than zero");
+    }
+    if args.top == 0 {
+        anyhow::bail!("--top must be greater than zero");
+    }
+    Ok(AppCommand::ProfilePlan(ProfilePlanCommandInput {
+        tree_pid: args.tree_pid,
+        profile: args.profile,
+        json: args.json,
+        output: args.output,
+        top: args.top,
+        highlight_comm: args.highlight_comm,
     }))
 }
 

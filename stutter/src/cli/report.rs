@@ -148,6 +148,67 @@ pub(super) struct ApplyProfileArgs {
 
     #[arg(long)]
     pub(super) enforce: bool,
+
+    #[arg(
+        long,
+        help = "Explain which profile rules match which tasks during dry-run"
+    )]
+    pub(super) explain: bool,
+
+    #[arg(long, help = "Emit dry-run explanation as JSON")]
+    pub(super) json: bool,
+
+    #[arg(long, value_name = "PATH", help = "Write explanation output to a file")]
+    pub(super) output: Option<PathBuf>,
+
+    #[arg(
+        long,
+        default_value_t = 10,
+        value_name = "N",
+        help = "Number of top comm/class entries to show in explain text output"
+    )]
+    pub(super) top: usize,
+
+    #[arg(
+        long = "highlight-comm",
+        value_name = "PATTERN",
+        help = "Highlight tasks whose thread comm or process comm matches this pattern"
+    )]
+    pub(super) highlight_comm: Vec<String>,
+}
+
+#[derive(Args, Debug, Clone)]
+pub(super) struct ProfilePlanArgs {
+    #[arg(long = "tree-pid", value_name = "PID")]
+    pub(super) tree_pid: u32,
+
+    #[arg(long = "profile", value_name = "FILE")]
+    pub(super) profile: PathBuf,
+
+    #[arg(long, help = "Emit profile plan as JSON")]
+    pub(super) json: bool,
+
+    #[arg(
+        long,
+        value_name = "PATH",
+        help = "Write profile plan output to a file"
+    )]
+    pub(super) output: Option<PathBuf>,
+
+    #[arg(
+        long,
+        default_value_t = 10,
+        value_name = "N",
+        help = "Number of top comm/class entries to show in text output"
+    )]
+    pub(super) top: usize,
+
+    #[arg(
+        long = "highlight-comm",
+        value_name = "PATTERN",
+        help = "Highlight tasks whose thread comm or process comm matches this pattern"
+    )]
+    pub(super) highlight_comm: Vec<String>,
 }
 
 #[derive(Args, Debug, Clone)]

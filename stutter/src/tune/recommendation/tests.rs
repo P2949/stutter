@@ -1,7 +1,10 @@
-use std::path::PathBuf;
+use std::{collections::BTreeMap, path::PathBuf};
 
 use super::*;
-use crate::tune::{TuneCandidateSummary, TuneCoverageMetrics, TuneIterationOrder};
+use crate::tune::{
+    TuneCandidateSummary, TuneCoverageMetrics, TuneIterationOrder, TuneProfilePlanSummary,
+    TuneProfileRulePlanSummary,
+};
 
 fn stat(profile: &str, median: u64) -> TuneProfileStats {
     TuneProfileStats {
@@ -58,6 +61,7 @@ fn candidate_with_metrics(profile: &str, metrics: CandidateMetricFixture) -> Tun
         iteration: metrics.iteration,
         run_dir: PathBuf::from(format!("/tmp/{profile}-{}", metrics.iteration)),
         applied_tasks: 1,
+        profile_plan: None,
         warmup_seconds: 1,
         measure_seconds: 1,
         interval_count: 2,
@@ -331,6 +335,40 @@ fn markdown_contains_verdict_best_profile_confidence_and_warnings() {
     assert!(markdown.contains("## Warnings"));
     assert!(markdown.contains("- note"));
     assert!(markdown.contains("sample mismatch"));
+}
+
+#[test]
+fn recommendation_includes_profile_plan_coverage_section() {
+    let mut summary = summary(RankingConfidence::Medium);
+    summary.candidates[0].profile_plan = Some(TuneProfilePlanSummary {
+        snapshot_tasks: 184,
+        matched_tasks: 117,
+        pending_unique_tasks: 117,
+        pending_affinity: 117,
+        rules: vec![TuneProfileRulePlanSummary {
+            rule_index: 0,
+            matched_tasks: 104,
+            pending_affinity: 104,
+            top_classes: BTreeMap::from([("Helper".to_owned(), 92)]),
+            top_thread_comms: BTreeMap::from([("RenderThread".to_owned(), 1)]),
+            process_comm_captures: 103,
+        }],
+    });
+
+    let rec = build_tune_recommendation(&summary, None);
+    let markdown = render_tune_recommendation_markdown(&rec);
+    let html = crate::tune::recommendation_html::render_tune_recommendation_html(&rec);
+
+    assert_eq!(rec.profile_plan.as_ref().unwrap().matched_tasks, 117);
+    assert!(
+        rec.why
+            .iter()
+            .any(|why| why.contains("Profile coverage matched 117 of 184"))
+    );
+    assert!(markdown.contains("## Profile coverage"));
+    assert!(markdown.contains("Top rule 0 matched 104 task(s)"));
+    assert!(html.contains("<h2>Profile coverage</h2>"));
+    assert!(html.contains("RenderThread"));
 }
 
 #[test]

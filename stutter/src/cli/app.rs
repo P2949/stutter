@@ -11,8 +11,8 @@ use super::{
     report::{
         AdvisorArgs, ApplyProfileArgs, AuditArgs, CheckArgs, CompareArgs, CompletionsArgs,
         DoctorArgs, InspectDrmTracepointsArgs, InspectIrqsArgs, InspectTreeArgs, ManArgs,
-        ProbesArgs, ProfileTemplateArgs, RecommendArgs, ReportArgs, RestoreArgs, RulesArgs,
-        ScenarioArgs, SummaryArgs, TuneArgs, WaylandProbeArgs,
+        ProbesArgs, ProfilePlanArgs, ProfileTemplateArgs, RecommendArgs, ReportArgs, RestoreArgs,
+        RulesArgs, ScenarioArgs, SummaryArgs, TuneArgs, WaylandProbeArgs,
     },
     service::ServiceArgs,
     validate::ValidateArgs,
@@ -42,6 +42,11 @@ pub(super) enum Command {
     Validate(ValidateArgs),
     Restore(RestoreArgs),
     ApplyProfile(ApplyProfileArgs),
+    #[command(
+        name = "profile-plan",
+        about = "Explain profile targets for a process tree"
+    )]
+    ProfilePlan(ProfilePlanArgs),
     Tune(TuneArgs),
     Recommend(RecommendArgs),
     #[command(name = "prove-fix")]

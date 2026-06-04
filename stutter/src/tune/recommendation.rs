@@ -1,7 +1,9 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use super::{
-    RankingConfidence, TuneProfileStats, TuneSummary,
+    RankingConfidence, TuneProfilePlanSummary, TuneProfileStats, TuneSummary,
     ranking::{noise_ratio, normalized_effect_size},
     recommendation_formal::{
         extend_formal_metric_warnings, extend_formal_metric_why, formal_metrics_between_profiles,
@@ -30,6 +32,8 @@ pub struct TuneRecommendation {
     pub next_steps: Vec<String>,
     pub best_metrics: Option<TuneRecommendationMetrics>,
     pub comparison_metrics: Option<TuneRecommendationComparison>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_plan: Option<TuneRecommendationProfilePlanSummary>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,6 +69,20 @@ pub struct TuneRecommendationComparison {
 
     #[serde(default)]
     pub formal_metrics: Vec<FormalMetricComparison>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TuneRecommendationProfilePlanSummary {
+    pub profile: String,
+    pub snapshot_tasks: usize,
+    pub matched_tasks: usize,
+    pub pending_unique_tasks: usize,
+    pub pending_affinity: usize,
+    pub top_rule_index: Option<usize>,
+    pub top_rule_matched_tasks: Option<usize>,
+    pub top_rule_process_comm_captures: Option<usize>,
+    pub top_classes: BTreeMap<String, usize>,
+    pub top_thread_comms: BTreeMap<String, usize>,
 }
 
 pub fn build_tune_recommendation(
@@ -112,6 +130,7 @@ pub fn build_tune_recommendation(
             ],
             best_metrics: None,
             comparison_metrics: None,
+            profile_plan: None,
         };
     }
 
@@ -139,6 +158,7 @@ pub fn build_tune_recommendation(
             ],
             best_metrics: None,
             comparison_metrics: None,
+            profile_plan: None,
         };
     };
 
@@ -229,6 +249,21 @@ pub fn build_tune_recommendation(
     if best_stat.median_frame_p99_us == 0 {
         warnings.push("missing frame data for best profile".to_owned());
     }
+    let profile_plan = recommendation_profile_plan(summary, &summary.best_profile);
+    if let Some(plan) = &profile_plan {
+        why.push(format!(
+            "Profile coverage matched {} of {} snapshot task(s), with {} pending unique task(s) and {} pending affinity change(s)",
+            plan.matched_tasks, plan.snapshot_tasks, plan.pending_unique_tasks, plan.pending_affinity
+        ));
+        if let Some(captures) = plan.top_rule_process_comm_captures
+            && captures > 0
+        {
+            why.push(format!(
+                "Top matching rule captured {} helper/thread comm value(s) through process_comm",
+                captures
+            ));
+        }
+    }
 
     let formal_score_blocks_recommendation = comparison_metrics
         .as_ref()
@@ -306,6 +341,7 @@ pub fn build_tune_recommendation(
         next_steps,
         best_metrics: Some(metrics_from_stat(best_stat)),
         comparison_metrics,
+        profile_plan,
     }
 }
 
@@ -327,6 +363,42 @@ pub fn render_tune_recommendation_markdown(rec: &TuneRecommendation) -> String {
     pushln(&mut out, "");
     pushln(&mut out, &rec.summary);
     pushln(&mut out, "");
+    if let Some(plan) = &rec.profile_plan {
+        pushln(&mut out, "## Profile coverage");
+        pushln(&mut out, "");
+        pushln(
+            &mut out,
+            format!(
+                "Matched {} of {} snapshot task(s); pending unique tasks {}; pending affinity {}.",
+                plan.matched_tasks,
+                plan.snapshot_tasks,
+                plan.pending_unique_tasks,
+                plan.pending_affinity
+            ),
+        );
+        if let Some(rule_index) = plan.top_rule_index {
+            pushln(
+                &mut out,
+                format!(
+                    "Top rule {} matched {} task(s) and captured {} process_comm helper/thread comm value(s).",
+                    rule_index,
+                    plan.top_rule_matched_tasks.unwrap_or_default(),
+                    plan.top_rule_process_comm_captures.unwrap_or_default()
+                ),
+            );
+        }
+        if !plan.top_classes.is_empty() {
+            pushln(&mut out, "");
+            pushln(&mut out, "Top classes:");
+            push_markdown_map(&mut out, &plan.top_classes);
+        }
+        if !plan.top_thread_comms.is_empty() {
+            pushln(&mut out, "");
+            pushln(&mut out, "Top thread comms:");
+            push_markdown_map(&mut out, &plan.top_thread_comms);
+        }
+        pushln(&mut out, "");
+    }
     pushln(&mut out, "## Why");
     pushln(&mut out, "");
     push_markdown_list(&mut out, &rec.why);
@@ -391,6 +463,67 @@ fn metrics_from_stat(stat: &TuneProfileStats) -> TuneRecommendationMetrics {
         valid_runs: stat.valid_runs,
         invalid_runs: stat.invalid_runs,
     }
+}
+
+fn recommendation_profile_plan(
+    summary: &TuneSummary,
+    profile: &str,
+) -> Option<TuneRecommendationProfilePlanSummary> {
+    let plan = summary
+        .candidates
+        .iter()
+        .find(|candidate| candidate.profile == profile)
+        .and_then(|candidate| candidate.profile_plan.as_ref())?;
+    let top_rule = plan.rules.iter().max_by_key(|rule| rule.matched_tasks);
+
+    Some(TuneRecommendationProfilePlanSummary {
+        profile: profile.to_owned(),
+        snapshot_tasks: plan.snapshot_tasks,
+        matched_tasks: plan.matched_tasks,
+        pending_unique_tasks: plan.pending_unique_tasks,
+        pending_affinity: plan.pending_affinity,
+        top_rule_index: top_rule.map(|rule| rule.rule_index),
+        top_rule_matched_tasks: top_rule.map(|rule| rule.matched_tasks),
+        top_rule_process_comm_captures: top_rule.map(|rule| rule.process_comm_captures),
+        top_classes: aggregate_profile_plan_classes(plan),
+        top_thread_comms: aggregate_profile_plan_thread_comms(plan),
+    })
+}
+
+fn aggregate_profile_plan_classes(plan: &TuneProfilePlanSummary) -> BTreeMap<String, usize> {
+    let mut counts = BTreeMap::new();
+    for rule in &plan.rules {
+        merge_counts(&mut counts, &rule.top_classes);
+    }
+    top_map(&counts, 10)
+}
+
+fn aggregate_profile_plan_thread_comms(plan: &TuneProfilePlanSummary) -> BTreeMap<String, usize> {
+    let mut counts = BTreeMap::new();
+    for rule in &plan.rules {
+        merge_counts(&mut counts, &rule.top_thread_comms);
+    }
+    top_map(&counts, 10)
+}
+
+fn merge_counts(target: &mut BTreeMap<String, usize>, source: &BTreeMap<String, usize>) {
+    for (key, value) in source {
+        *target.entry(key.clone()).or_default() += value;
+    }
+}
+
+fn top_map(map: &BTreeMap<String, usize>, top: usize) -> BTreeMap<String, usize> {
+    let mut entries = map.iter().collect::<Vec<_>>();
+    entries.sort_by(|(left_key, left_count), (right_key, right_count)| {
+        right_count
+            .cmp(left_count)
+            .then_with(|| left_key.cmp(right_key))
+    });
+    entries
+        .into_iter()
+        .take(top)
+        .map(|(key, value)| (key.clone(), *value))
+        .collect()
 }
 
 fn comparison_between(
@@ -489,6 +622,12 @@ fn push_markdown_list(out: &mut String, items: &[String]) {
     }
     for item in items {
         pushln(out, format!("- {item}"));
+    }
+}
+
+fn push_markdown_map(out: &mut String, items: &BTreeMap<String, usize>) {
+    for (key, value) in items {
+        pushln(out, format!("- {key}: {value}"));
     }
 }
 

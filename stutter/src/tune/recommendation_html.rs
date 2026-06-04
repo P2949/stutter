@@ -38,6 +38,42 @@ pub fn render_tune_recommendation_html(rec: &TuneRecommendation) -> String {
     pushln(&mut out, "<h2>Summary</h2>");
     pushln(&mut out, format!("<p>{}</p>", escape_html(&rec.summary)));
 
+    if let Some(plan) = &rec.profile_plan {
+        pushln(&mut out, "<h2>Profile coverage</h2>");
+        pushln(&mut out, "<dl>");
+        html_dl_row(&mut out, "Snapshot tasks", &plan.snapshot_tasks.to_string());
+        html_dl_row(&mut out, "Matched tasks", &plan.matched_tasks.to_string());
+        html_dl_row(
+            &mut out,
+            "Pending unique tasks",
+            &plan.pending_unique_tasks.to_string(),
+        );
+        html_dl_row(
+            &mut out,
+            "Pending affinity",
+            &plan.pending_affinity.to_string(),
+        );
+        if let Some(rule_index) = plan.top_rule_index {
+            html_dl_row(&mut out, "Top rule", &rule_index.to_string());
+            html_dl_row(
+                &mut out,
+                "Top rule matched tasks",
+                &plan.top_rule_matched_tasks.unwrap_or_default().to_string(),
+            );
+            html_dl_row(
+                &mut out,
+                "Top rule process_comm captures",
+                &plan
+                    .top_rule_process_comm_captures
+                    .unwrap_or_default()
+                    .to_string(),
+            );
+        }
+        pushln(&mut out, "</dl>");
+        html_map(&mut out, "Top classes", &plan.top_classes);
+        html_map(&mut out, "Top thread comms", &plan.top_thread_comms);
+    }
+
     if let Some(metrics) = &rec.best_metrics {
         pushln(&mut out, "<h2>Best profile metrics</h2>");
         pushln(&mut out, "<dl>");
@@ -136,6 +172,18 @@ fn html_list(out: &mut String, title: &str, items: &[String], empty: &str) {
     pushln(out, "<ul>");
     for item in items {
         pushln(out, format!("<li>{}</li>", escape_html(item)));
+    }
+    pushln(out, "</ul>");
+}
+
+fn html_map(out: &mut String, title: &str, items: &std::collections::BTreeMap<String, usize>) {
+    if items.is_empty() {
+        return;
+    }
+    pushln(out, format!("<h3>{}</h3>", escape_html(title)));
+    pushln(out, "<ul>");
+    for (key, value) in items {
+        pushln(out, format!("<li>{}: {}</li>", escape_html(key), value));
     }
     pushln(out, "</ul>");
 }

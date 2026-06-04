@@ -8,6 +8,8 @@ use log::{info, warn};
 use crate::profiles;
 
 pub mod comparability;
+mod order;
+mod profile_plan;
 mod ranking;
 pub mod recommendation;
 mod recommendation_formal;
@@ -18,6 +20,9 @@ pub(crate) mod uncertainty_html;
 
 #[cfg(test)]
 pub(crate) use comparability::TuneCoverageMetrics;
+#[cfg(test)]
+pub(crate) use order::candidate_order_for_iteration;
+use order::tune_candidate_order;
 use ranking::select_best_profile;
 pub(crate) use ranking::{assess_ranking_confidence, profile_stats_from_grouped};
 pub use run::*;

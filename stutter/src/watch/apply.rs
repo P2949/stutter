@@ -1,5 +1,6 @@
-use std::{path::PathBuf, time::Duration};
+use std::{fs, path::PathBuf, time::Duration};
 
+use anyhow::Context;
 use log::{debug, info, warn};
 use tokio::{
     signal,
@@ -9,6 +10,7 @@ use tokio::{
 use super::{
     PROFILE_WATCH_VERIFY_MS,
     policy::{force_for_watch_apply, validate_apply_profile_mode, validate_apply_profile_policy},
+    profile_explain_render::{ProfileExplainRenderOptions, render_profile_explain_text},
     restore::restore_profile_watch_on_exit,
 };
 
@@ -22,6 +24,20 @@ pub struct ApplyProfileCommandInput {
     pub keep_applied: bool,
     pub refresh_ms: u64,
     pub enforce: bool,
+    pub explain: bool,
+    pub json: bool,
+    pub output: Option<PathBuf>,
+    pub top: usize,
+    pub highlight_comm: Vec<String>,
+}
+
+pub struct ProfilePlanCommandInput {
+    pub tree_pid: u32,
+    pub profile_path: PathBuf,
+    pub json: bool,
+    pub output: Option<PathBuf>,
+    pub top: usize,
+    pub highlight_comm: Vec<String>,
 }
 
 pub async fn apply_profile_command(input: ApplyProfileCommandInput) -> anyhow::Result<()> {
@@ -35,6 +51,11 @@ pub async fn apply_profile_command(input: ApplyProfileCommandInput) -> anyhow::R
         keep_applied,
         refresh_ms,
         enforce,
+        explain,
+        json,
+        output,
+        top,
+        highlight_comm,
     } = input;
     let profile = crate::profiles::load_first_profile(&profile_path)?;
     validate_apply_profile_mode(dry_run, watch)?;
@@ -52,6 +73,32 @@ pub async fn apply_profile_command(input: ApplyProfileCommandInput) -> anyhow::R
 
     if !watch {
         if dry_run {
+            if explain {
+                let wrote_to_file = output.is_some();
+                let report = explain_profile_to_tree_blocking(tree_pid, profile).await?;
+                write_profile_explain_report(
+                    &report,
+                    ProfileExplainOutput {
+                        json,
+                        output,
+                        render_options: ProfileExplainRenderOptions {
+                            top,
+                            highlight_comm,
+                            include_tasks: true,
+                        },
+                    },
+                )?;
+                if !json && !wrote_to_file {
+                    println!(
+                        "apply-profile dry-run did not change live affinity, nice, ionice, audit state, or restore state"
+                    );
+                    println!(
+                        "apply-profile is one-shot; use --watch to keep applying to new threads"
+                    );
+                }
+                return Ok(());
+            }
+
             let (apply_result, _) = apply_profile_to_tree_cached_blocking(
                 tree_pid,
                 profile,
@@ -214,6 +261,23 @@ pub async fn apply_profile_command(input: ApplyProfileCommandInput) -> anyhow::R
     }
 }
 
+pub async fn profile_plan_command(input: ProfilePlanCommandInput) -> anyhow::Result<()> {
+    let profile = crate::profiles::load_first_profile(&input.profile_path)?;
+    let report = explain_profile_to_tree_blocking(input.tree_pid, profile).await?;
+    write_profile_explain_report(
+        &report,
+        ProfileExplainOutput {
+            json: input.json,
+            output: input.output,
+            render_options: ProfileExplainRenderOptions {
+                top: input.top,
+                highlight_comm: input.highlight_comm,
+                include_tasks: true,
+            },
+        },
+    )
+}
+
 pub async fn apply_profile_to_tree_blocking(
     tree_pid: u32,
     profile: crate::profiles::Profile,
@@ -260,6 +324,48 @@ pub async fn apply_profile_to_tree_cached_blocking(
     })
     .await
     .map_err(|err| anyhow::anyhow!("profile apply worker failed: {err}"))?
+}
+
+pub async fn explain_profile_to_tree_blocking(
+    tree_pid: u32,
+    profile: crate::profiles::Profile,
+) -> anyhow::Result<crate::profiles::explain::ProfileExplainReport> {
+    tokio::task::spawn_blocking(move || {
+        crate::profiles::explain::explain_profile_for_tree(tree_pid, &profile)
+    })
+    .await
+    .map_err(|err| anyhow::anyhow!("profile explain worker failed: {err}"))?
+}
+
+struct ProfileExplainOutput {
+    json: bool,
+    output: Option<PathBuf>,
+    render_options: ProfileExplainRenderOptions,
+}
+
+fn write_profile_explain_report(
+    report: &crate::profiles::explain::ProfileExplainReport,
+    output: ProfileExplainOutput,
+) -> anyhow::Result<()> {
+    let content = if output.json {
+        serde_json::to_string_pretty(report)?
+    } else {
+        render_profile_explain_text(report, &output.render_options)
+    };
+
+    if let Some(path) = output.output {
+        if let Some(parent) = path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create {}", parent.display()))?;
+        }
+        fs::write(&path, content).with_context(|| format!("failed to write {}", path.display()))?;
+    } else {
+        println!("{content}");
+    }
+
+    Ok(())
 }
 
 fn print_profile_dry_run_result(result: &crate::profiles::ProfileApplyResult) {

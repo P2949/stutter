@@ -226,6 +226,7 @@ fn candidate_with_metrics(profile: &str, metrics: CandidateMetricFixture) -> Tun
         iteration: metrics.iteration,
         run_dir: PathBuf::from(format!("/tmp/{profile}-{}", metrics.iteration)),
         applied_tasks: 1,
+        profile_plan: None,
         warmup_seconds: 0,
         measure_seconds: 1,
         interval_count: 1,

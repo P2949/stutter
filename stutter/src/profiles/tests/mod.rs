@@ -5,6 +5,7 @@
 
 mod cache;
 mod evaluation;
+mod explain;
 mod parsing;
 mod support;
 mod warnings;
