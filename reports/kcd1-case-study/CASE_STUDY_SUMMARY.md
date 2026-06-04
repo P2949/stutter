@@ -18,7 +18,7 @@ The purpose of this case study is not to prove that `stutter` automatically fixe
 - In the proper A/B tune run, `baseline-online` had a lower primary diagnostic score than the tuned affinity profile in all five paired iterations.
 - The non-validation result is valuable: it shows that `stutter` can prevent a plausible Linux tuning tweak from being mistaken for a proven improvement.
 - A measurement-quality pilot found that wakeup replacement counters were not ring-buffer reserve failures and were not reduced by `--ebpf-wakeup-map-factor 4`.
-- The next engineering priority is profile explainability: report which rule matched which tasks, classes, `comm`, `process_comm`, and CPU masks.
+- A follow-up profile-explainability implementation now allows `stutter` to report which profile rules match which tasks, classes, `comm`, `process_comm`, match source, and proposed CPU masks before a profile is applied.
 
 ## Experiment scope
 
@@ -143,7 +143,20 @@ Two profile-matching details are important for reproducing and interpreting this
 
 This matters because KCD's process appears as `process_comm = "Main"`, while important worker threads appear with task names such as `RenderThread`, `ClothingRaycast`, `Streaming Async`, `AudioThread`, and `dxvk-submit`. A broad rule such as `match_comm = ["Main"]` can therefore match those worker threads through their process comm, even when their own task comm is different.
 
-The current dry-run output showed that tasks would move, but it did not explain which rule matched which semantic thread. A useful code/reporting improvement is to add rule-level summaries showing matched `comm`, `process_comm`, class, original mask, proposed mask, and per-rule counts.
+The original dry-run output showed that tasks would move, but it did not explain which rule matched which semantic thread. The follow-up profile-plan output fills that gap with rule-level summaries showing matched `comm`, `process_comm`, class, match source, original mask, proposed mask, and per-rule counts.
+
+## Profile explainability follow-up
+
+After the initial KCD1 A/B experiment, `stutter` gained profile explainability output through:
+
+```bash
+stutter profile-plan --tree-pid <PID> --profile <profiles.toml>
+stutter apply-profile --tree-pid <PID> --profile <profiles.toml> --dry-run --explain
+```
+
+This reports rule-level matched task counts, pending affinity changes, top task `comm`, top `process_comm`, matched classes, match source (`task.comm`, `process_comm`, class, or catch-all), and broad `process_comm` captures.
+
+For this case study, that matters because the KCD process appears as `process_comm = "Main"`, while important worker threads use task names such as `RenderThread`, `ClothingRaycast`, `Streaming Async`, `AudioThread`, and `dxvk-submit`. The explainability output can now show whether those worker threads were matched by the broad `match_comm = ["Main"]` rule, rather than leaving that interpretation implicit.
 
 ## A/B tuning result
 
@@ -226,10 +239,10 @@ This case study is already useful for the report:
 5. A controlled A/B tuning run tested the hypothesis.
 6. The tested profile was not validated and should not be recommended on the current evidence; `baseline-online` remained best.
 7. A drop-counter pilot clarified that wakeup replacements were not ring-buffer drops and were not fixed by increasing wakeup-map capacity.
-8. The next tool-improvement priority is profile explainability: rule-level reporting of which tasks were matched and moved.
+8. A follow-up profile-explainability feature now reports rule-level task matches, classes, `comm`, `process_comm`, and proposed masks so future tuning hypotheses are easier to audit before collecting A/B data.
 
 The report should frame this as an evidence-based validation case study, not as a successful performance tweak. The most defensible conclusion is:
 
 > For this machine, route, Proton version, and configuration, the tested CPU-affinity profile was not validated and should not be recommended on the current evidence. The value of `stutter` is that it made this conclusion visible through repeated measurements, rather than relying on anecdotal impressions.
 
-In short, this case study validates the workflow rather than the tuning tweak. `stutter` collected evidence from a complex KCD1/Proton process tree, generated a scoped CPU-affinity hypothesis, tested it with repeated A/B measurements, and declined to recommend the hypothesis when the data did not support it. That ability to avoid false-positive tuning recommendations is a critical step toward reliable tuning advice. The next priority, profile explainability, will make the tool's decisions easier to audit and reproduce.
+In short, this case study validates the workflow rather than the tuning tweak. `stutter` collected evidence from a complex KCD1/Proton process tree, generated a scoped CPU-affinity hypothesis, tested it with repeated A/B measurements, and declined to recommend the hypothesis when the data did not support it. That ability to avoid false-positive tuning recommendations is a critical step toward reliable tuning advice. The profile explainability follow-up makes this kind of tuning result easier to audit and reproduce by showing which rules matched which tasks before any profile is applied.

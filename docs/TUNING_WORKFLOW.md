@@ -15,6 +15,7 @@ tune runs.
 ```bash
 stutter record --tree-pid <PID> --duration 180 --run-name baseline-a
 stutter advisor --run baseline-a --json > advisor.json
+stutter profile-plan --tree-pid <PID> --profile profiles.toml
 stutter tune --tree-pid <PID> --profiles profiles.toml --runs 5 --baseline-profile baseline-online
 stutter recommend --fix-plan advisor.json \
   --baseline baseline-a \
@@ -28,6 +29,44 @@ stutter recommend --fix-plan advisor.json \
 
 `advisor --json` includes fix plans inline. `recommend --fix-plan` accepts either
 that advisor JSON or a standalone advisor fix-plan JSON.
+
+## Preview Profile Matching Before Tuning
+
+Before running a tuning experiment, inspect how each profile rule would match the
+live process tree:
+
+```bash
+stutter profile-plan \
+  --tree-pid <PID> \
+  --profile profiles.toml \
+  --top 20 \
+  --highlight-comm RenderThread \
+  --highlight-comm dxvk-submit
+```
+
+For apply-profile dry runs, the same explanation can be emitted with:
+
+```bash
+stutter apply-profile \
+  --tree-pid <PID> \
+  --profile profiles.toml \
+  --dry-run \
+  --explain
+```
+
+Use JSON output for artifacts:
+
+```bash
+stutter profile-plan \
+  --tree-pid <PID> \
+  --profile profiles.toml \
+  --json \
+  --output profile-plan.json
+```
+
+Profile rules are first-match-wins. `match_comm` checks both a thread's `comm`
+and its process `process_comm`, so a broad rule such as `match_comm = ["Main"]`
+may match worker threads whose own thread names are different.
 
 ## Verdicts
 

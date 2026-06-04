@@ -16,6 +16,14 @@ emits schema-versioned reports with inline `fix_plans`; each fix plan has
 `schema_version = 1`, expected metric movement, validation recipe, safety risk,
 and stop conditions. See [docs/TUNING_WORKFLOW.md](TUNING_WORKFLOW.md).
 
+Profile plan explanation artifacts are separate audit artifacts. `stutter
+profile-plan --json` emits a profile explanation report containing the selected
+profile name, tree PID, snapshot task count, matched and unmatched task counts,
+per-rule actions and match criteria, match basis, class counts, top thread
+`comm`, top process `process_comm`, broad process-comm captures, highlighted
+task entries, warnings, and pending action counts. These artifacts explain what
+a profile would do before applying or benchmarking it.
+
 ## Canonical Artifact Registry
 
 The canonical artifact list is `stutter/src/artifacts.rs`.
