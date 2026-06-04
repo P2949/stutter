@@ -73,6 +73,7 @@ pub async fn run_apply_profile_command(
     watch::apply_profile_command(watch::ApplyProfileCommandInput {
         tree_pid: input.tree_pid,
         profile_path: input.profile,
+        profile_name: input.profile_name,
         force: input.force,
         dry_run: input.dry_run,
         allow_medium_risk: input.allow_medium_risk,
@@ -93,6 +94,7 @@ pub async fn run_profile_plan_command(input: input::ProfilePlanCommandInput) -> 
     watch::profile_plan_command(watch::ProfilePlanCommandInput {
         tree_pid: input.tree_pid,
         profile_path: input.profile,
+        profile_name: input.profile_name,
         json: input.json,
         output: input.output,
         top: input.top,

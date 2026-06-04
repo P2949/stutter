@@ -8,6 +8,7 @@ mod autotune;
 mod config;
 mod config_bridge;
 mod daemon;
+mod doctor;
 mod help;
 mod monitor;
 mod parse;

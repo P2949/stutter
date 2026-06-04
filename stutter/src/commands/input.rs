@@ -99,6 +99,7 @@ pub struct VersionCommandInput {
 pub struct ApplyProfileCommandInput {
     pub tree_pid: u32,
     pub profile: PathBuf,
+    pub profile_name: Option<String>,
     pub force: bool,
     pub dry_run: bool,
     pub allow_medium_risk: bool,
@@ -117,6 +118,7 @@ pub struct ApplyProfileCommandInput {
 pub struct ProfilePlanCommandInput {
     pub tree_pid: u32,
     pub profile: PathBuf,
+    pub profile_name: Option<String>,
     pub json: bool,
     pub output: Option<PathBuf>,
     pub top: usize,
