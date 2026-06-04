@@ -1,0 +1,7 @@
+condition,run,duration_ms,frames,median_ms,p95_ms,p99_ms,max_ms,diagnostic_score,data_quality,stop_reason
+"clean","01",180801,10011,18.3887,25.2043,28.6453,65.7529,,"Medium","max_duration_reached"
+"clean","02",180752,9576,19.34185,26.9876,31.5203,67.4367,,"Medium","max_duration_reached"
+"clean","03",185922,8665,21.0124,29.9163,34.6607,70.8899,,"Medium","max_duration_reached"
+"personal-stack","01",181084,9084,20.1032,28.3838,32.4916,71.902,,"Medium","max_duration_reached"
+"personal-stack","02",181127,7749,22.8599,33.2041,37.8372,181.596,,"Medium","max_duration_reached"
+"personal-stack","03",180870,9051,19.1118,26.3812,30.1557,91.134,,"Medium","max_duration_reached"

@@ -1,0 +1,143 @@
+{
+  "collected_at_elapsed_ms": 0,
+  "session_type": "wayland",
+  "compositor": {
+    "name": "sway",
+    "pid": 2867
+  },
+  "drm_devices": [
+    {
+      "card": "card0",
+      "render_node": "renderD128",
+      "driver": "amdgpu",
+      "vendor_id": "0x1002",
+      "device_id": "0x7550",
+      "pci_slot": "0000:03:00.0",
+      "boot_vga": false,
+      "hwmon_paths": [
+        "/sys/class/drm/card0/device/hwmon/hwmon2"
+      ]
+    },
+    {
+      "card": "card1",
+      "render_node": "renderD129",
+      "driver": "i915",
+      "vendor_id": "0x8086",
+      "device_id": "0x9bc5",
+      "pci_slot": "0000:00:02.0",
+      "boot_vga": true,
+      "hwmon_paths": []
+    }
+  ],
+  "connectors": [
+    {
+      "card": "card0",
+      "name": "DP-1",
+      "status": "disconnected",
+      "enabled": "disabled",
+      "modes": [],
+      "edid_hash": null
+    },
+    {
+      "card": "card0",
+      "name": "DP-2",
+      "status": "disconnected",
+      "enabled": "disabled",
+      "modes": [],
+      "edid_hash": null
+    },
+    {
+      "card": "card0",
+      "name": "DP-3",
+      "status": "disconnected",
+      "enabled": "disabled",
+      "modes": [],
+      "edid_hash": null
+    },
+    {
+      "card": "card0",
+      "name": "HDMI-A-1",
+      "status": "disconnected",
+      "enabled": "disabled",
+      "modes": [],
+      "edid_hash": null
+    },
+    {
+      "card": "card0",
+      "name": "Writeback-1",
+      "status": "unknown",
+      "enabled": "disabled",
+      "modes": [],
+      "edid_hash": null
+    },
+    {
+      "card": "card1",
+      "name": "DP-4",
+      "status": "connected",
+      "enabled": "enabled",
+      "modes": [
+        "1920x1080",
+        "1920x1080",
+        "1920x1080",
+        "1920x1080",
+        "1920x1080",
+        "1920x1080i",
+        "1920x1080i",
+        "1920x1080",
+        "1920x1080i",
+        "1680x1050",
+        "1600x900",
+        "1280x1024",
+        "1280x1024",
+        "1440x900",
+        "1280x720",
+        "1280x720",
+        "1280x720",
+        "1024x768",
+        "1024x768",
+        "800x600",
+        "800x600",
+        "800x600",
+        "720x576",
+        "720x480",
+        "720x480",
+        "640x480",
+        "640x480",
+        "640x480",
+        "640x480",
+        "720x400"
+      ],
+      "edid_hash": "f2b2d2139e50b4b5"
+    },
+    {
+      "card": "card1",
+      "name": "HDMI-A-2",
+      "status": "disconnected",
+      "enabled": "disabled",
+      "modes": [],
+      "edid_hash": null
+    },
+    {
+      "card": "card1",
+      "name": "HDMI-A-3",
+      "status": "disconnected",
+      "enabled": "disabled",
+      "modes": [],
+      "edid_hash": null
+    }
+  ],
+  "guessed_path": {
+    "render_card": "card0",
+    "render_driver": "amdgpu",
+    "scanout_card": "card1",
+    "scanout_driver": "i915",
+    "connector": "DP-4",
+    "is_cross_gpu": true,
+    "confidence": "high",
+    "reasons": [
+      "Detected connected connector DP-4 on card1",
+      "Detected discrete GPU card0 with driver Some(\"amdgpu\")"
+    ]
+  },
+  "warnings": []
+}

@@ -1,0 +1,12 @@
+=== clean-03 key fields ===
+21:    "duration_ms": 185922,
+1285:    "frame_event_count": 8665,
+1315:    "stop_reason": "max_duration_reached",
+82261:    "frame_count": 8665,
+140743:    "frame_count": 8665,
+140746:    "frame_event_count": 8665,
+140761:  "data_quality": {
+140798:    "frame_timestamp_alignment": "monotonic_observed",
+
+=== scheduler status ===
+disabled

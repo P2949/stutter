@@ -1,0 +1,15 @@
+=== personal-stack-03 key fields ===
+21:    "duration_ms": 180870,
+1290:    "frame_event_count": 9051,
+1320:    "stop_reason": "max_duration_reached",
+84315:    "frame_count": 9051,
+147627:    "frame_count": 9051,
+147630:    "frame_event_count": 9051,
+147645:  "data_quality": {
+147681:    "frame_timestamp_alignment": "monotonic_observed",
+
+=== scheduler status ===
+81266 doas scx_lavd --cpu-pref-order 1,2,3,4,5,0,7,8,9,10,11,6 --performance --preempt-shift 0 --slice-min-us 100 --slice-max-us 1000 --pinned-slice-us 250 --lb-low-util-pct 0 --lb-local-dsq-util-pct 0 --per-cpu-dsq
+81268 scx_lavd --cpu-pref-order 1,2,3,4,5,0,7,8,9,10,11,6 --performance --preempt-shift 0 --slice-min-us 100 --slice-max-us 1000 --pinned-slice-us 250 --lb-low-util-pct 0 --lb-local-dsq-util-pct 0 --per-cpu-dsq
+enabled
+lavd_1.1.0_x86_64_unknown_linux_gnu
