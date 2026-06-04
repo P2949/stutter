@@ -150,11 +150,21 @@ The original dry-run output showed that tasks would move, but it did not explain
 After the initial KCD1 A/B experiment, `stutter` gained profile explainability output through:
 
 ```bash
-stutter profile-plan --tree-pid <PID> --profile <profiles.toml>
-stutter apply-profile --tree-pid <PID> --profile <profiles.toml> --dry-run --explain
+stutter profile-plan \
+  --tree-pid <PID> \
+  --profile reports/kcd1-case-study/profiles/kcd1-affinity-ab.toml \
+  --profile-name kcd1-game-on-1-5-7-11-gamescope-on-0-6
+stutter apply-profile \
+  --tree-pid <PID> \
+  --profile reports/kcd1-case-study/profiles/kcd1-affinity-ab.toml \
+  --profile-name kcd1-game-on-1-5-7-11-gamescope-on-0-6 \
+  --dry-run \
+  --explain
 ```
 
 This reports rule-level matched task counts, pending affinity changes, top task `comm`, top `process_comm`, matched classes, match source (`task.comm`, `process_comm`, class, or catch-all), and broad `process_comm` captures.
+
+Because the case-study TOML contains both `baseline-online` and the tuned affinity profile, the profile-plan artifact is generated with `--profile-name` so the audited profile is the tuned profile rather than the first profile in the file.
 
 For this case study, that matters because the KCD process appears as `process_comm = "Main"`, while important worker threads use task names such as `RenderThread`, `ClothingRaycast`, `Streaming Async`, `AudioThread`, and `dxvk-submit`. The explainability output can now show whether those worker threads were matched by the broad `match_comm = ["Main"]` rule, rather than leaving that interpretation implicit.
 
