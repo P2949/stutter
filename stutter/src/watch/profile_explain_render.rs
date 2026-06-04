@@ -56,6 +56,9 @@ pub(crate) fn render_profile_explain_text(
         "  pending ionice:        {}\n",
         report.pending_ionice
     ));
+    out.push_str(
+        "\nRule matching is first-match-wins: each task is assigned to the first matching rule.\n",
+    );
 
     for rule in &report.rules {
         out.push('\n');
@@ -157,8 +160,10 @@ pub(crate) fn render_profile_explain_text(
             out.push('\n');
             out.push_str("  Note:\n");
             out.push_str(&format!(
-                "    Rule {} captured {} task(s) through process_comm while their own thread comm differed.\n",
-                rule.rule_index, captures
+                "    Rule {} captured {} task(s) through process_comm match_comm = [{}] while their own thread comm differed.\n",
+                rule.rule_index,
+                captures,
+                rule.match_comm.join(", ")
             ));
         }
     }
@@ -373,13 +378,14 @@ mod tests {
                 ]),
                 top_thread_comms: BTreeMap::from([
                     ("RenderThread".to_owned(), 1),
+                    ("ClothingRaycast".to_owned(), 1),
                     ("AudioThread".to_owned(), 2),
                 ]),
                 top_process_comms: BTreeMap::from([("Main".to_owned(), 2)]),
-                broad_process_comm_captured_thread_comms: BTreeMap::from([(
-                    "RenderThread".to_owned(),
-                    1,
-                )]),
+                broad_process_comm_captured_thread_comms: BTreeMap::from([
+                    ("RenderThread".to_owned(), 1),
+                    ("ClothingRaycast".to_owned(), 1),
+                ]),
                 tasks: vec![ProfileTaskExplain {
                     tid: Tid::new(100),
                     process_pid: Pid::new(42),
@@ -429,6 +435,20 @@ mod tests {
     }
 
     #[test]
+    fn render_explain_includes_profile_audit_clues() {
+        let text = render_profile_explain_text(
+            &report_for_render(),
+            &ProfileExplainRenderOptions::default(),
+        );
+
+        assert!(text.contains("first-match-wins"));
+        assert!(text.contains("process_comm"));
+        assert!(text.contains("RenderThread"));
+        assert!(text.contains("ClothingRaycast"));
+        assert!(text.contains("pending affinity"));
+    }
+
+    #[test]
     fn render_explain_includes_broad_process_comm_note() {
         let text = render_profile_explain_text(
             &report_for_render(),
@@ -436,7 +456,7 @@ mod tests {
         );
 
         assert!(text.contains("broad process_comm captures"));
-        assert!(text.contains("captured 1 task(s) through process_comm"));
+        assert!(text.contains("captured 2 task(s) through process_comm match_comm = [Main]"));
     }
 
     #[test]
