@@ -1,6 +1,8 @@
 {
   "profile": "kcd1-game-on-1-5-7-11-gamescope-on-0-6",
-  "tree_pid": 26689,
+  "profile_path": "reports/kcd1-case-study/profiles/kcd1-affinity-ab.toml",
+  "profile_name_requested": "kcd1-game-on-1-5-7-11-gamescope-on-0-6",
+  "tree_pid": 45598,
   "snapshot_tasks": 181,
   "matched_tasks": 114,
   "pending_affinity": 114,

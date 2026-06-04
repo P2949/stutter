@@ -1,7 +1,10 @@
 Profile plan: kcd1-game-on-1-5-7-11-gamescope-on-0-6
 
+Profile file: reports/kcd1-case-study/profiles/kcd1-affinity-ab.toml
+Selected with: --profile-name kcd1-game-on-1-5-7-11-gamescope-on-0-6
+
 Snapshot:
-  tree pid:              26689
+  tree pid:              45598
   snapshot tasks:        181
   matched tasks:         114
   unmatched tasks:       67
@@ -155,15 +158,15 @@ Rule 2
 
 Highlighted tasks:
   tid     comm              process_comm       class              rule  match source   affinity
-  26946   Streaming Async   Main               Helper             0     process_comm   0-11 -> 1-5,7-11 Pending
-  26978   RenderThread      Main               Helper             0     process_comm   0-11 -> 1-5,7-11 Pending
-  26992   dxvk-submit       Main               Helper             0     process_comm   0-11 -> 1-5,7-11 Pending
-  26995   dxvk-cs           Main               Helper             0     process_comm   0-11 -> 1-5,7-11 Pending
-  27070   ClothingRaycast   Main               Helper             0     process_comm   0-11 -> 1-5,7-11 Pending
-  27071   ClothingRaycast   Main               Helper             0     process_comm   0-11 -> 1-5,7-11 Pending
-  27092   ClothingRaycast   Main               Helper             0     process_comm   0-11 -> 1-5,7-11 Pending
-  27093   ClothingRaycast   Main               Helper             0     process_comm   0-11 -> 1-5,7-11 Pending
-  26816   wineserver        wineserver         WineServer         1     class          0-11 -> 1-5,7-11 Pending
+  45850   Streaming Async   Main               Helper             0     process_comm   0-11 -> 1-5,7-11 Pending
+  45883   RenderThread      Main               Helper             0     process_comm   0-11 -> 1-5,7-11 Pending
+  45898   dxvk-submit       Main               Helper             0     process_comm   0-11 -> 1-5,7-11 Pending
+  45901   dxvk-cs           Main               Helper             0     process_comm   0-11 -> 1-5,7-11 Pending
+  45963   ClothingRaycast   Main               Helper             0     process_comm   0-11 -> 1-5,7-11 Pending
+  45964   ClothingRaycast   Main               Helper             0     process_comm   0-11 -> 1-5,7-11 Pending
+  45982   ClothingRaycast   Main               Helper             0     process_comm   0-11 -> 1-5,7-11 Pending
+  45983   ClothingRaycast   Main               Helper             0     process_comm   0-11 -> 1-5,7-11 Pending
+  45722   wineserver        wineserver         WineServer         1     class          0-11 -> 1-5,7-11 Pending
 
 Unmatched:
   tasks: 67

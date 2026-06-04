@@ -1,7 +1,9 @@
 {
   "schema_version": 1,
   "profile": "kcd1-game-on-1-5-7-11-gamescope-on-0-6",
-  "tree_pid": 26689,
+  "profile_path": "reports/kcd1-case-study/profiles/kcd1-affinity-ab.toml",
+  "profile_name_requested": "kcd1-game-on-1-5-7-11-gamescope-on-0-6",
+  "tree_pid": 45598,
   "snapshot_tasks": 181,
   "matched_tasks": 114,
   "unmatched_tasks": 67,
@@ -137,8 +139,8 @@
       },
       "tasks": [
         {
-          "tid": 26695,
-          "process_pid": 26689,
+          "tid": 45604,
+          "process_pid": 45598,
           "comm": "gmain",
           "process_comm": "gamescope-wl",
           "class": "Unknown",
@@ -164,8 +166,8 @@
           "pending": true
         },
         {
-          "tid": 26892,
-          "process_pid": 26892,
+          "tid": 45793,
+          "process_pid": 45793,
           "comm": "Main",
           "process_comm": "Main",
           "class": "Helper",
@@ -196,8 +198,8 @@
           "pending": true
         },
         {
-          "tid": 26933,
-          "process_pid": 26892,
+          "tid": 45837,
+          "process_pid": 45793,
           "comm": "JobSystem_Worke",
           "process_comm": "Main",
           "class": "Recorder",
@@ -223,8 +225,8 @@
           "pending": true
         },
         {
-          "tid": 26934,
-          "process_pid": 26892,
+          "tid": 45838,
+          "process_pid": 45793,
           "comm": "JobSystem_Worke",
           "process_comm": "Main",
           "class": "Recorder",
@@ -250,8 +252,8 @@
           "pending": true
         },
         {
-          "tid": 26935,
-          "process_pid": 26892,
+          "tid": 45839,
+          "process_pid": 45793,
           "comm": "JobSystem_Worke",
           "process_comm": "Main",
           "class": "Recorder",
@@ -277,8 +279,8 @@
           "pending": true
         },
         {
-          "tid": 26936,
-          "process_pid": 26892,
+          "tid": 45840,
+          "process_pid": 45793,
           "comm": "JobSystem_Worke",
           "process_comm": "Main",
           "class": "Recorder",
@@ -304,8 +306,8 @@
           "pending": true
         },
         {
-          "tid": 26937,
-          "process_pid": 26892,
+          "tid": 45841,
+          "process_pid": 45793,
           "comm": "JobSystem_Worke",
           "process_comm": "Main",
           "class": "Recorder",
@@ -331,8 +333,8 @@
           "pending": true
         },
         {
-          "tid": 26938,
-          "process_pid": 26892,
+          "tid": 45842,
+          "process_pid": 45793,
           "comm": "JobSystem_Worke",
           "process_comm": "Main",
           "class": "Recorder",
@@ -358,8 +360,8 @@
           "pending": true
         },
         {
-          "tid": 26940,
-          "process_pid": 26892,
+          "tid": 45843,
+          "process_pid": 45793,
           "comm": "JobSystem_Worke",
           "process_comm": "Main",
           "class": "Recorder",
@@ -385,8 +387,8 @@
           "pending": true
         },
         {
-          "tid": 26941,
-          "process_pid": 26892,
+          "tid": 45844,
+          "process_pid": 45793,
           "comm": "JobSystem_Worke",
           "process_comm": "Main",
           "class": "Recorder",
@@ -412,8 +414,8 @@
           "pending": true
         },
         {
-          "tid": 26942,
-          "process_pid": 26892,
+          "tid": 45846,
+          "process_pid": 45793,
           "comm": "JobSystem_Worke",
           "process_comm": "Main",
           "class": "Recorder",
@@ -439,8 +441,8 @@
           "pending": true
         },
         {
-          "tid": 26943,
-          "process_pid": 26892,
+          "tid": 45847,
+          "process_pid": 45793,
           "comm": "Streaming File",
           "process_comm": "Main",
           "class": "Helper",
@@ -466,8 +468,8 @@
           "pending": true
         },
         {
-          "tid": 26944,
-          "process_pid": 26892,
+          "tid": 45848,
+          "process_pid": 45793,
           "comm": "Streaming File",
           "process_comm": "Main",
           "class": "Helper",
@@ -493,8 +495,8 @@
           "pending": true
         },
         {
-          "tid": 26945,
-          "process_pid": 26892,
+          "tid": 45849,
+          "process_pid": 45793,
           "comm": "Streaming File",
           "process_comm": "Main",
           "class": "Helper",
@@ -520,8 +522,8 @@
           "pending": true
         },
         {
-          "tid": 26946,
-          "process_pid": 26892,
+          "tid": 45850,
+          "process_pid": 45793,
           "comm": "Streaming Async",
           "process_comm": "Main",
           "class": "Helper",
@@ -547,8 +549,8 @@
           "pending": true
         },
         {
-          "tid": 26949,
-          "process_pid": 26892,
+          "tid": 45854,
+          "process_pid": 45793,
           "comm": "mangohud-amdgpu",
           "process_comm": "Main",
           "class": "Helper",
@@ -574,8 +576,8 @@
           "pending": true
         },
         {
-          "tid": 26950,
-          "process_pid": 26892,
+          "tid": 45855,
+          "process_pid": 45793,
           "comm": "mangohud-gpufd",
           "process_comm": "Main",
           "class": "Helper",
@@ -601,8 +603,8 @@
           "pending": true
         },
         {
-          "tid": 26961,
-          "process_pid": 26892,
+          "tid": 45866,
+          "process_pid": 45793,
           "comm": "Kingdom:disk$0",
           "process_comm": "Main",
           "class": "Helper",
@@ -628,8 +630,8 @@
           "pending": true
         },
         {
-          "tid": 26962,
-          "process_pid": 26892,
+          "tid": 45867,
+          "process_pid": 45793,
           "comm": "Kingdom:disk$0",
           "process_comm": "Main",
           "class": "Helper",
@@ -655,8 +657,8 @@
           "pending": true
         },
         {
-          "tid": 26973,
-          "process_pid": 26892,
+          "tid": 45878,
+          "process_pid": 45793,
           "comm": "Main",
           "process_comm": "Main",
           "class": "Helper",
@@ -687,8 +689,8 @@
           "pending": true
         },
         {
-          "tid": 26978,
-          "process_pid": 26892,
+          "tid": 45883,
+          "process_pid": 45793,
           "comm": "RenderThread",
           "process_comm": "Main",
           "class": "Helper",
@@ -714,8 +716,8 @@
           "pending": true
         },
         {
-          "tid": 26979,
-          "process_pid": 26892,
+          "tid": 45884,
+          "process_pid": 45793,
           "comm": "ShaderCompile",
           "process_comm": "Main",
           "class": "Helper",
@@ -741,8 +743,8 @@
           "pending": true
         },
         {
-          "tid": 26980,
-          "process_pid": 26892,
+          "tid": 45886,
+          "process_pid": 45793,
           "comm": "Kingdom:disk$0",
           "process_comm": "Main",
           "class": "Helper",
@@ -768,8 +770,8 @@
           "pending": true
         },
         {
-          "tid": 26981,
-          "process_pid": 26892,
+          "tid": 45887,
+          "process_pid": 45793,
           "comm": "Kingdom:disk$0",
           "process_comm": "Main",
           "class": "Helper",
@@ -795,8 +797,8 @@
           "pending": true
         },
         {
-          "tid": 26992,
-          "process_pid": 26892,
+          "tid": 45898,
+          "process_pid": 45793,
           "comm": "dxvk-submit",
           "process_comm": "Main",
           "class": "Helper",
@@ -822,8 +824,8 @@
           "pending": true
         },
         {
-          "tid": 26993,
-          "process_pid": 26892,
+          "tid": 45899,
+          "process_pid": 45793,
           "comm": "dxvk-queue",
           "process_comm": "Main",
           "class": "Helper",
@@ -849,8 +851,8 @@
           "pending": true
         },
         {
-          "tid": 26994,
-          "process_pid": 26892,
+          "tid": 45900,
+          "process_pid": 45793,
           "comm": "dxvk-descriptor",
           "process_comm": "Main",
           "class": "Helper",
@@ -876,8 +878,8 @@
           "pending": true
         },
         {
-          "tid": 26995,
-          "process_pid": 26892,
+          "tid": 45901,
+          "process_pid": 45793,
           "comm": "dxvk-cs",
           "process_comm": "Main",
           "class": "Helper",
@@ -903,8 +905,8 @@
           "pending": true
         },
         {
-          "tid": 27012,
-          "process_pid": 26892,
+          "tid": 45916,
+          "process_pid": 45793,
           "comm": "AudioThread",
           "process_comm": "Main",
           "class": "Helper",
@@ -930,8 +932,8 @@
           "pending": true
         },
         {
-          "tid": 27013,
-          "process_pid": 26892,
+          "tid": 45917,
+          "process_pid": 45793,
           "comm": "wine_mmdevapi_n",
           "process_comm": "Main",
           "class": "Helper",
@@ -957,8 +959,8 @@
           "pending": true
         },
         {
-          "tid": 27014,
-          "process_pid": 26892,
+          "tid": 45918,
+          "process_pid": 45793,
           "comm": "audio_client_ma",
           "process_comm": "Main",
           "class": "Helper",
@@ -984,8 +986,8 @@
           "pending": true
         },
         {
-          "tid": 27016,
-          "process_pid": 26892,
+          "tid": 45920,
+          "process_pid": 45793,
           "comm": "AudioThread",
           "process_comm": "Main",
           "class": "Helper",
@@ -1011,8 +1013,8 @@
           "pending": true
         },
         {
-          "tid": 27017,
-          "process_pid": 26892,
+          "tid": 45921,
+          "process_pid": 45793,
           "comm": "AudioThread",
           "process_comm": "Main",
           "class": "Helper",
@@ -1038,8 +1040,8 @@
           "pending": true
         },
         {
-          "tid": 27018,
-          "process_pid": 26892,
+          "tid": 45922,
+          "process_pid": 45793,
           "comm": "AudioThread",
           "process_comm": "Main",
           "class": "Helper",
@@ -1065,8 +1067,8 @@
           "pending": true
         },
         {
-          "tid": 27019,
-          "process_pid": 26892,
+          "tid": 45923,
+          "process_pid": 45793,
           "comm": "AudioThread",
           "process_comm": "Main",
           "class": "Helper",
@@ -1092,8 +1094,8 @@
           "pending": true
         },
         {
-          "tid": 27020,
-          "process_pid": 26892,
+          "tid": 45924,
+          "process_pid": 45793,
           "comm": "AudioThread",
           "process_comm": "Main",
           "class": "Helper",
@@ -1119,8 +1121,8 @@
           "pending": true
         },
         {
-          "tid": 27023,
-          "process_pid": 26892,
+          "tid": 45925,
+          "process_pid": 45793,
           "comm": "Main",
           "process_comm": "Main",
           "class": "Helper",
@@ -1151,8 +1153,8 @@
           "pending": true
         },
         {
-          "tid": 27024,
-          "process_pid": 26892,
+          "tid": 45926,
+          "process_pid": 45793,
           "comm": "Main",
           "process_comm": "Main",
           "class": "Helper",
@@ -1183,8 +1185,8 @@
           "pending": true
         },
         {
-          "tid": 27025,
-          "process_pid": 26892,
+          "tid": 45927,
+          "process_pid": 45793,
           "comm": "Main",
           "process_comm": "Main",
           "class": "Helper",
@@ -1215,8 +1217,8 @@
           "pending": true
         },
         {
-          "tid": 27026,
-          "process_pid": 26892,
+          "tid": 45928,
+          "process_pid": 45793,
           "comm": "Main",
           "process_comm": "Main",
           "class": "Helper",
@@ -1247,8 +1249,8 @@
           "pending": true
         },
         {
-          "tid": 27027,
-          "process_pid": 26892,
+          "tid": 45929,
+          "process_pid": 45793,
           "comm": "Main",
           "process_comm": "Main",
           "class": "Helper",
@@ -1279,8 +1281,8 @@
           "pending": true
         },
         {
-          "tid": 27028,
-          "process_pid": 26892,
+          "tid": 45930,
+          "process_pid": 45793,
           "comm": "Main",
           "process_comm": "Main",
           "class": "Helper",
@@ -1311,8 +1313,8 @@
           "pending": true
         },
         {
-          "tid": 27029,
-          "process_pid": 26892,
+          "tid": 45931,
+          "process_pid": 45793,
           "comm": "Main",
           "process_comm": "Main",
           "class": "Helper",
@@ -1343,8 +1345,8 @@
           "pending": true
         },
         {
-          "tid": 27030,
-          "process_pid": 26892,
+          "tid": 45932,
+          "process_pid": 45793,
           "comm": "GFxMeshCacheRes",
           "process_comm": "Main",
           "class": "Helper",
@@ -1370,8 +1372,8 @@
           "pending": true
         },
         {
-          "tid": 27038,
-          "process_pid": 26892,
+          "tid": 45935,
+          "process_pid": 45793,
           "comm": "dxvk-shader-l",
           "process_comm": "Main",
           "class": "Helper",
@@ -1397,8 +1399,8 @@
           "pending": true
         },
         {
-          "tid": 27039,
-          "process_pid": 26892,
+          "tid": 45936,
+          "process_pid": 45793,
           "comm": "dxvk-shader-l",
           "process_comm": "Main",
           "class": "Helper",
@@ -1424,8 +1426,8 @@
           "pending": true
         },
         {
-          "tid": 27040,
-          "process_pid": 26892,
+          "tid": 45937,
+          "process_pid": 45793,
           "comm": "dxvk-shader-l",
           "process_comm": "Main",
           "class": "Helper",
@@ -1451,8 +1453,8 @@
           "pending": true
         },
         {
-          "tid": 27041,
-          "process_pid": 26892,
+          "tid": 45938,
+          "process_pid": 45793,
           "comm": "dxvk-shader-n",
           "process_comm": "Main",
           "class": "Helper",
@@ -1478,8 +1480,8 @@
           "pending": true
         },
         {
-          "tid": 27042,
-          "process_pid": 26892,
+          "tid": 45939,
+          "process_pid": 45793,
           "comm": "dxvk-shader-n",
           "process_comm": "Main",
           "class": "Helper",
@@ -1505,8 +1507,8 @@
           "pending": true
         },
         {
-          "tid": 27043,
-          "process_pid": 26892,
+          "tid": 45940,
+          "process_pid": 45793,
           "comm": "dxvk-shader-n",
           "process_comm": "Main",
           "class": "Helper",
@@ -1532,8 +1534,8 @@
           "pending": true
         },
         {
-          "tid": 27044,
-          "process_pid": 26892,
+          "tid": 45941,
+          "process_pid": 45793,
           "comm": "dxvk-shader-n",
           "process_comm": "Main",
           "class": "Helper",
@@ -1559,8 +1561,8 @@
           "pending": true
         },
         {
-          "tid": 27045,
-          "process_pid": 26892,
+          "tid": 45942,
+          "process_pid": 45793,
           "comm": "dxvk-shader-h",
           "process_comm": "Main",
           "class": "Helper",
@@ -1586,8 +1588,8 @@
           "pending": true
         },
         {
-          "tid": 27046,
-          "process_pid": 26892,
+          "tid": 45943,
+          "process_pid": 45793,
           "comm": "dxvk-shader-h",
           "process_comm": "Main",
           "class": "Helper",
@@ -1613,8 +1615,8 @@
           "pending": true
         },
         {
-          "tid": 27047,
-          "process_pid": 26892,
+          "tid": 45944,
+          "process_pid": 45793,
           "comm": "dxvk-shader-h",
           "process_comm": "Main",
           "class": "Helper",
@@ -1640,8 +1642,8 @@
           "pending": true
         },
         {
-          "tid": 27048,
-          "process_pid": 26892,
+          "tid": 45945,
+          "process_pid": 45793,
           "comm": "dxvk-shader-h",
           "process_comm": "Main",
           "class": "Helper",
@@ -1667,8 +1669,8 @@
           "pending": true
         },
         {
-          "tid": 27049,
-          "process_pid": 26892,
+          "tid": 45946,
+          "process_pid": 45793,
           "comm": "dxvk-shader-h",
           "process_comm": "Main",
           "class": "Helper",
@@ -1694,8 +1696,8 @@
           "pending": true
         },
         {
-          "tid": 27050,
-          "process_pid": 26892,
+          "tid": 45947,
+          "process_pid": 45793,
           "comm": "NetAddressResol",
           "process_comm": "Main",
           "class": "Helper",
@@ -1721,8 +1723,8 @@
           "pending": true
         },
         {
-          "tid": 27051,
-          "process_pid": 26892,
+          "tid": 45948,
+          "process_pid": 45793,
           "comm": "ServiceNetworkT",
           "process_comm": "Main",
           "class": "Helper",
@@ -1748,8 +1750,8 @@
           "pending": true
         },
         {
-          "tid": 27052,
-          "process_pid": 26892,
+          "tid": 45949,
+          "process_pid": 45793,
           "comm": "Main",
           "process_comm": "Main",
           "class": "Helper",
@@ -1780,8 +1782,8 @@
           "pending": true
         },
         {
-          "tid": 27056,
-          "process_pid": 26892,
+          "tid": 45951,
+          "process_pid": 45793,
           "comm": "DeferredPhysics",
           "process_comm": "Main",
           "class": "Helper",
@@ -1807,8 +1809,8 @@
           "pending": true
         },
         {
-          "tid": 27057,
-          "process_pid": 26892,
+          "tid": 45952,
+          "process_pid": 45793,
           "comm": "TaskThread0",
           "process_comm": "Main",
           "class": "Helper",
@@ -1834,9 +1836,36 @@
           "pending": true
         },
         {
-          "tid": 27058,
-          "process_pid": 26892,
+          "tid": 45953,
+          "process_pid": 45793,
           "comm": "TaskThread1",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "2",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 45954,
+          "process_pid": 45793,
+          "comm": "TaskThread2",
           "process_comm": "Main",
           "class": "Helper",
           "matched_rule_index": 0,
@@ -1861,35 +1890,8 @@
           "pending": true
         },
         {
-          "tid": 27059,
-          "process_pid": 26892,
-          "comm": "TaskThread2",
-          "process_comm": "Main",
-          "class": "Helper",
-          "matched_rule_index": 0,
-          "match_evidence": {
-            "matched_class": false,
-            "comm_hits": [
-              {
-                "field": "process_comm",
-                "pattern": "Main",
-                "value": "Main"
-              }
-            ]
-          },
-          "affinity": {
-            "status": "pending",
-            "current": "3",
-            "desired": "1-5,7-11",
-            "reason": null
-          },
-          "nice": null,
-          "ionice": null,
-          "pending": true
-        },
-        {
-          "tid": 27060,
-          "process_pid": 26892,
+          "tid": 45955,
+          "process_pid": 45793,
           "comm": "InputWorker",
           "process_comm": "Main",
           "class": "Input",
@@ -1915,8 +1917,8 @@
           "pending": true
         },
         {
-          "tid": 27061,
-          "process_pid": 26892,
+          "tid": 45956,
+          "process_pid": 45793,
           "comm": "wine_xinput_hid",
           "process_comm": "Main",
           "class": "Input",
@@ -1942,8 +1944,8 @@
           "pending": true
         },
         {
-          "tid": 27062,
-          "process_pid": 26892,
+          "tid": 45957,
+          "process_pid": 45793,
           "comm": "wine_sechost_de",
           "process_comm": "Main",
           "class": "Helper",
@@ -1969,8 +1971,8 @@
           "pending": true
         },
         {
-          "tid": 27065,
-          "process_pid": 26892,
+          "tid": 45960,
+          "process_pid": 45793,
           "comm": "Main",
           "process_comm": "Main",
           "class": "Helper",
@@ -2001,8 +2003,8 @@
           "pending": true
         },
         {
-          "tid": 27066,
-          "process_pid": 26892,
+          "tid": 45961,
+          "process_pid": 45793,
           "comm": "PROS thread",
           "process_comm": "Main",
           "class": "Helper",
@@ -2028,8 +2030,8 @@
           "pending": true
         },
         {
-          "tid": 27067,
-          "process_pid": 26892,
+          "tid": 45962,
+          "process_pid": 45793,
           "comm": "ZLibCompressor",
           "process_comm": "Main",
           "class": "Helper",
@@ -2055,8 +2057,8 @@
           "pending": true
         },
         {
-          "tid": 27070,
-          "process_pid": 26892,
+          "tid": 45963,
+          "process_pid": 45793,
           "comm": "ClothingRaycast",
           "process_comm": "Main",
           "class": "Helper",
@@ -2082,8 +2084,8 @@
           "pending": true
         },
         {
-          "tid": 27071,
-          "process_pid": 26892,
+          "tid": 45964,
+          "process_pid": 45793,
           "comm": "ClothingRaycast",
           "process_comm": "Main",
           "class": "Helper",
@@ -2109,8 +2111,8 @@
           "pending": true
         },
         {
-          "tid": 27089,
-          "process_pid": 26892,
+          "tid": 45979,
+          "process_pid": 45793,
           "comm": "wine_dinput_wor",
           "process_comm": "Main",
           "class": "Input",
@@ -2136,8 +2138,8 @@
           "pending": true
         },
         {
-          "tid": 27090,
-          "process_pid": 26892,
+          "tid": 45980,
+          "process_pid": 45793,
           "comm": "dxvk-frame",
           "process_comm": "Main",
           "class": "Helper",
@@ -2163,8 +2165,8 @@
           "pending": true
         },
         {
-          "tid": 27091,
-          "process_pid": 26892,
+          "tid": 45981,
+          "process_pid": 45793,
           "comm": "mangohud-hwinfo",
           "process_comm": "Main",
           "class": "Helper",
@@ -2190,8 +2192,8 @@
           "pending": true
         },
         {
-          "tid": 27092,
-          "process_pid": 26892,
+          "tid": 45982,
+          "process_pid": 45793,
           "comm": "ClothingRaycast",
           "process_comm": "Main",
           "class": "Helper",
@@ -2217,8 +2219,8 @@
           "pending": true
         },
         {
-          "tid": 27093,
-          "process_pid": 26892,
+          "tid": 45983,
+          "process_pid": 45793,
           "comm": "ClothingRaycast",
           "process_comm": "Main",
           "class": "Helper",
@@ -2244,8 +2246,8 @@
           "pending": true
         },
         {
-          "tid": 27097,
-          "process_pid": 26892,
+          "tid": 45987,
+          "process_pid": 45793,
           "comm": "Network",
           "process_comm": "Main",
           "class": "Helper",
@@ -2271,8 +2273,8 @@
           "pending": true
         },
         {
-          "tid": 27116,
-          "process_pid": 26892,
+          "tid": 45998,
+          "process_pid": 45793,
           "comm": "TileCacheUpdate",
           "process_comm": "Main",
           "class": "Helper",
@@ -2298,8 +2300,8 @@
           "pending": true
         },
         {
-          "tid": 27151,
-          "process_pid": 26892,
+          "tid": 46060,
+          "process_pid": 45793,
           "comm": "PROS banners th",
           "process_comm": "Main",
           "class": "Helper",
@@ -2325,8 +2327,8 @@
           "pending": true
         },
         {
-          "tid": 27222,
-          "process_pid": 26892,
+          "tid": 46098,
+          "process_pid": 45793,
           "comm": "RemoteConsoleSe",
           "process_comm": "Main",
           "class": "Helper",
@@ -2352,8 +2354,8 @@
           "pending": true
         },
         {
-          "tid": 27223,
-          "process_pid": 26892,
+          "tid": 46099,
+          "process_pid": 45793,
           "comm": "Physics",
           "process_comm": "Main",
           "class": "Helper",
@@ -2379,8 +2381,8 @@
           "pending": true
         },
         {
-          "tid": 27224,
-          "process_pid": 26892,
+          "tid": 46100,
+          "process_pid": 45793,
           "comm": "PhysicsWorkerTh",
           "process_comm": "Main",
           "class": "Helper",
@@ -2406,8 +2408,8 @@
           "pending": true
         },
         {
-          "tid": 27225,
-          "process_pid": 26892,
+          "tid": 46101,
+          "process_pid": 45793,
           "comm": "SkinLoader",
           "process_comm": "Main",
           "class": "Helper",
@@ -2433,8 +2435,8 @@
           "pending": true
         },
         {
-          "tid": 27226,
-          "process_pid": 26892,
+          "tid": 46102,
+          "process_pid": 45793,
           "comm": "Main",
           "process_comm": "Main",
           "class": "Helper",
@@ -2465,8 +2467,8 @@
           "pending": true
         },
         {
-          "tid": 27227,
-          "process_pid": 26892,
+          "tid": 46103,
+          "process_pid": 45793,
           "comm": "Main",
           "process_comm": "Main",
           "class": "Helper",
@@ -2497,8 +2499,8 @@
           "pending": true
         },
         {
-          "tid": 27230,
-          "process_pid": 26892,
+          "tid": 46104,
+          "process_pid": 45793,
           "comm": "AudioThread",
           "process_comm": "Main",
           "class": "Helper",
@@ -2524,8 +2526,8 @@
           "pending": true
         },
         {
-          "tid": 27231,
-          "process_pid": 26892,
+          "tid": 46105,
+          "process_pid": 45793,
           "comm": "AudioThread",
           "process_comm": "Main",
           "class": "Helper",
@@ -2551,8 +2553,8 @@
           "pending": true
         },
         {
-          "tid": 27334,
-          "process_pid": 26892,
+          "tid": 46519,
+          "process_pid": 45793,
           "comm": "dxvk-cache",
           "process_comm": "Main",
           "class": "Helper",
@@ -2630,8 +2632,8 @@
       "broad_process_comm_captured_thread_comms": {},
       "tasks": [
         {
-          "tid": 26717,
-          "process_pid": 26717,
+          "tid": 45625,
+          "process_pid": 45625,
           "comm": "srt-bwrap",
           "process_comm": "srt-bwrap",
           "class": "Game",
@@ -2651,8 +2653,8 @@
           "pending": true
         },
         {
-          "tid": 26783,
-          "process_pid": 26783,
+          "tid": 45689,
+          "process_pid": 45689,
           "comm": "pv-adverb",
           "process_comm": "pv-adverb",
           "class": "Game",
@@ -2672,8 +2674,8 @@
           "pending": true
         },
         {
-          "tid": 26814,
-          "process_pid": 26814,
+          "tid": 45720,
+          "process_pid": 45720,
           "comm": "steam.exe",
           "process_comm": "steam.exe",
           "class": "Game",
@@ -2693,8 +2695,8 @@
           "pending": true
         },
         {
-          "tid": 26816,
-          "process_pid": 26816,
+          "tid": 45722,
+          "process_pid": 45722,
           "comm": "wineserver",
           "process_comm": "wineserver",
           "class": "WineServer",
@@ -2714,8 +2716,8 @@
           "pending": true
         },
         {
-          "tid": 26824,
-          "process_pid": 26824,
+          "tid": 45729,
+          "process_pid": 45729,
           "comm": "winedevice.exe",
           "process_comm": "winedevice.exe",
           "class": "Game",
@@ -2735,8 +2737,8 @@
           "pending": true
         },
         {
-          "tid": 26827,
-          "process_pid": 26824,
+          "tid": 45732,
+          "process_pid": 45729,
           "comm": "winedevice.exe",
           "process_comm": "winedevice.exe",
           "class": "Game",
@@ -2756,8 +2758,8 @@
           "pending": true
         },
         {
-          "tid": 26828,
-          "process_pid": 26824,
+          "tid": 45733,
+          "process_pid": 45729,
           "comm": "wine_sechost_se",
           "process_comm": "winedevice.exe",
           "class": "Game",
@@ -2777,8 +2779,8 @@
           "pending": true
         },
         {
-          "tid": 26829,
-          "process_pid": 26824,
+          "tid": 45734,
+          "process_pid": 45729,
           "comm": "winedevice.exe",
           "process_comm": "winedevice.exe",
           "class": "Game",
@@ -2798,8 +2800,8 @@
           "pending": true
         },
         {
-          "tid": 26830,
-          "process_pid": 26824,
+          "tid": 45735,
+          "process_pid": 45729,
           "comm": "winedevice.exe",
           "process_comm": "winedevice.exe",
           "class": "Game",
@@ -2819,8 +2821,8 @@
           "pending": true
         },
         {
-          "tid": 26831,
-          "process_pid": 26824,
+          "tid": 45736,
+          "process_pid": 45729,
           "comm": "winedevice.exe",
           "process_comm": "winedevice.exe",
           "class": "Game",
@@ -2840,8 +2842,8 @@
           "pending": true
         },
         {
-          "tid": 26843,
-          "process_pid": 26824,
+          "tid": 45748,
+          "process_pid": 45729,
           "comm": "wine_nsi_notifi",
           "process_comm": "winedevice.exe",
           "class": "Game",
@@ -2861,8 +2863,8 @@
           "pending": true
         },
         {
-          "tid": 26845,
-          "process_pid": 26845,
+          "tid": 45750,
+          "process_pid": 45750,
           "comm": "winedevice.exe",
           "process_comm": "winedevice.exe",
           "class": "Game",
@@ -2882,8 +2884,8 @@
           "pending": true
         },
         {
-          "tid": 26847,
-          "process_pid": 26845,
+          "tid": 45752,
+          "process_pid": 45750,
           "comm": "winedevice.exe",
           "process_comm": "winedevice.exe",
           "class": "Game",
@@ -2903,8 +2905,8 @@
           "pending": true
         },
         {
-          "tid": 26848,
-          "process_pid": 26845,
+          "tid": 45753,
+          "process_pid": 45750,
           "comm": "wine_sechost_se",
           "process_comm": "winedevice.exe",
           "class": "Game",
@@ -2924,8 +2926,8 @@
           "pending": true
         },
         {
-          "tid": 26852,
-          "process_pid": 26845,
+          "tid": 45756,
+          "process_pid": 45750,
           "comm": "winedevice.exe",
           "process_comm": "winedevice.exe",
           "class": "Game",
@@ -2945,8 +2947,8 @@
           "pending": true
         },
         {
-          "tid": 26853,
-          "process_pid": 26845,
+          "tid": 45757,
+          "process_pid": 45750,
           "comm": "winedevice.exe",
           "process_comm": "winedevice.exe",
           "class": "Game",
@@ -2966,8 +2968,8 @@
           "pending": true
         },
         {
-          "tid": 26854,
-          "process_pid": 26845,
+          "tid": 45758,
+          "process_pid": 45750,
           "comm": "winedevice.exe",
           "process_comm": "winedevice.exe",
           "class": "Game",
@@ -2987,8 +2989,8 @@
           "pending": true
         },
         {
-          "tid": 26855,
-          "process_pid": 26845,
+          "tid": 45759,
+          "process_pid": 45750,
           "comm": "winedevice.exe",
           "process_comm": "winedevice.exe",
           "class": "Game",
@@ -3008,8 +3010,8 @@
           "pending": true
         },
         {
-          "tid": 26856,
-          "process_pid": 26845,
+          "tid": 45760,
+          "process_pid": 45750,
           "comm": "winedevice.exe",
           "process_comm": "winedevice.exe",
           "class": "Game",
@@ -3029,8 +3031,8 @@
           "pending": true
         },
         {
-          "tid": 26857,
-          "process_pid": 26845,
+          "tid": 45761,
+          "process_pid": 45750,
           "comm": "winedevice.exe",
           "process_comm": "winedevice.exe",
           "class": "Game",
@@ -3050,8 +3052,8 @@
           "pending": true
         },
         {
-          "tid": 26858,
-          "process_pid": 26845,
+          "tid": 45762,
+          "process_pid": 45750,
           "comm": "winedevice.exe",
           "process_comm": "winedevice.exe",
           "class": "Game",
@@ -3071,8 +3073,8 @@
           "pending": true
         },
         {
-          "tid": 26860,
-          "process_pid": 26845,
+          "tid": 45764,
+          "process_pid": 45750,
           "comm": "winedevice.exe",
           "process_comm": "winedevice.exe",
           "class": "Game",
@@ -3092,8 +3094,8 @@
           "pending": true
         },
         {
-          "tid": 26861,
-          "process_pid": 26845,
+          "tid": 45765,
+          "process_pid": 45750,
           "comm": "libusb_event",
           "process_comm": "winedevice.exe",
           "class": "Game",
@@ -3113,8 +3115,8 @@
           "pending": true
         },
         {
-          "tid": 26888,
-          "process_pid": 26814,
+          "tid": 45790,
+          "process_pid": 45720,
           "comm": "steam.exe",
           "process_comm": "steam.exe",
           "class": "Game",
@@ -3134,8 +3136,8 @@
           "pending": true
         },
         {
-          "tid": 26893,
-          "process_pid": 26814,
+          "tid": 45795,
+          "process_pid": 45720,
           "comm": "steam.exe",
           "process_comm": "steam.exe",
           "class": "Game",
@@ -3196,8 +3198,8 @@
       "broad_process_comm_captured_thread_comms": {},
       "tasks": [
         {
-          "tid": 26692,
-          "process_pid": 26689,
+          "tid": 45601,
+          "process_pid": 45598,
           "comm": "gamescope",
           "process_comm": "gamescope-wl",
           "class": "GameScope",
