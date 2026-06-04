@@ -1,7 +1,7 @@
-condition,run,duration_ms,frames,median_ms,p95_ms,p99_ms,max_ms,diagnostic_score,data_quality,stop_reason
-"clean","01",180801,10011,18.3887,25.2043,28.6453,65.7529,,"Medium","max_duration_reached"
-"clean","02",180752,9576,19.34185,26.9876,31.5203,67.4367,,"Medium","max_duration_reached"
-"clean","03",185922,8665,21.0124,29.9163,34.6607,70.8899,,"Medium","max_duration_reached"
-"personal-stack","01",181084,9084,20.1032,28.3838,32.4916,71.902,,"Medium","max_duration_reached"
-"personal-stack","02",181127,7749,22.8599,33.2041,37.8372,181.596,,"Medium","max_duration_reached"
-"personal-stack","03",180870,9051,19.1118,26.3812,30.1557,91.134,,"Medium","max_duration_reached"
+condition,run,duration_ms,frames,median_ms,p95_ms,p99_ms,max_ms,outliers,outlier_pct,data_quality,ringbuf_reserve_failed,wakeup_replacements,stop_reason,scheduler
+"clean","01",180801,10011,18.3887,25.2043,28.6453,65.7529,26,0.25971431425432023,"Medium",0,304164,"max_duration_reached","default"
+"clean","02",180752,9576,19.34185,26.9876,31.5203,67.4367,50,0.5221386800334169,"Medium",0,321928,"max_duration_reached","default"
+"clean","03",180729,10046,19.48935,26.2893,29.8236,63.0714,43,0.42803105713716905,"Medium",0,314766,"max_duration_reached","default"
+"personal-stack","01",181084,9084,20.1032,28.3838,32.4916,71.902,75,0.8256274768824308,"Medium",0,334882,"max_duration_reached","scx_lavd"
+"personal-stack","02",181127,7749,22.8599,33.2041,37.8372,181.596,373,4.813524325719447,"Medium",0,362481,"max_duration_reached","scx_lavd"
+"personal-stack","03",180870,9051,19.1118,26.3812,30.1557,91.134,35,0.3866976024748647,"Medium",0,248832,"max_duration_reached","scx_lavd"
