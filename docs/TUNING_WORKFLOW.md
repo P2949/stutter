@@ -15,7 +15,7 @@ tune runs.
 ```bash
 stutter record --tree-pid <PID> --duration 180 --run-name baseline-a
 stutter advisor --run baseline-a --json > advisor.json
-stutter profile-plan --tree-pid <PID> --profile profiles.toml
+stutter profile-plan --tree-pid <PID> --profile profiles.toml --profile-name tuned-profile-name
 stutter tune --tree-pid <PID> --profiles profiles.toml --runs 5 --baseline-profile baseline-online
 stutter recommend --fix-plan advisor.json \
   --baseline baseline-a \
@@ -39,6 +39,7 @@ live process tree:
 stutter profile-plan \
   --tree-pid <PID> \
   --profile profiles.toml \
+  --profile-name tuned-profile-name \
   --top 20 \
   --highlight-comm RenderThread \
   --highlight-comm dxvk-submit
@@ -50,6 +51,7 @@ For apply-profile dry runs, the same explanation can be emitted with:
 stutter apply-profile \
   --tree-pid <PID> \
   --profile profiles.toml \
+  --profile-name tuned-profile-name \
   --dry-run \
   --explain
 ```
@@ -60,6 +62,7 @@ Use JSON output for artifacts:
 stutter profile-plan \
   --tree-pid <PID> \
   --profile profiles.toml \
+  --profile-name tuned-profile-name \
   --json \
   --output profile-plan.json
 ```
@@ -67,6 +70,11 @@ stutter profile-plan \
 Profile rules are first-match-wins. `match_comm` checks both a thread's `comm`
 and its process `process_comm`, so a broad rule such as `match_comm = ["Main"]`
 may match worker threads whose own thread names are different.
+
+When a TOML file contains multiple `[[profile]]` entries, commands that inspect
+or apply a single profile default to the first profile unless `--profile-name`
+is provided. For A/B files, always pass `--profile-name` when inspecting the
+tuned profile.
 
 ## Verdicts
 

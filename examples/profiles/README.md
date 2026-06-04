@@ -19,8 +19,21 @@ each rule would match:
 stutter profile-plan \
   --tree-pid <PID> \
   --profile examples/profiles/common-game-layouts.toml \
+  --profile-name game-on-middle-compositor-low \
   --top 20
 ```
+
+For multi-profile files, select the profile explicitly:
+
+```bash
+stutter profile-plan \
+  --tree-pid <PID> \
+  --profile profiles.toml \
+  --profile-name tuned-profile-name
+```
+
+Without `--profile-name`, single-profile commands use the first profile in the
+file for backwards compatibility.
 
 For complex Proton/Wine games, use `--highlight-comm` for important threads:
 
@@ -28,6 +41,7 @@ For complex Proton/Wine games, use `--highlight-comm` for important threads:
 stutter profile-plan \
   --tree-pid <PID> \
   --profile profiles.toml \
+  --profile-name tuned-profile-name \
   --highlight-comm RenderThread \
   --highlight-comm dxvk-submit \
   --highlight-comm wineserver
