@@ -16,7 +16,37 @@ use crate::{
     process_tree::{CompiledPattern, TaskClass},
 };
 
-pub fn load_first_profile(path: &Path) -> anyhow::Result<Profile> {
+pub fn load_selected_profile(path: &Path, profile_name: Option<&str>) -> anyhow::Result<Profile> {
+    let Some(name) = profile_name else {
+        return load_first_profile(path);
+    };
+
+    let profiles = load_profiles(path)?;
+
+    let available = profiles
+        .iter()
+        .map(|profile| profile.name.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    profiles
+        .into_iter()
+        .find(|profile| profile.name == name)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "profile '{}' not found in {}; available profiles: {}",
+                name,
+                path.display(),
+                if available.is_empty() {
+                    "<none>"
+                } else {
+                    available.as_str()
+                }
+            )
+        })
+}
+
+fn load_first_profile(path: &Path) -> anyhow::Result<Profile> {
     load_profiles(path)?.into_iter().next().ok_or_else(|| {
         anyhow::anyhow!(
             "profile file {} did not contain [[profile]]",

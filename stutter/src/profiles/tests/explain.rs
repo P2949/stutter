@@ -1,4 +1,7 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+};
 
 use serde_json::Value;
 use stutter_core::ids::Tid;
@@ -433,4 +436,57 @@ fn explain_pending_counts_match_apply_planner() {
     assert_eq!(plan.summary.pending_affinity, report.pending_affinity);
     assert_eq!(plan.summary.pending_nice, report.pending_nice);
     assert_eq!(plan.summary.pending_ionice, report.pending_ionice);
+}
+
+#[test]
+fn explain_uses_selected_profile_from_multi_profile_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("profiles.toml");
+    fs::write(
+        &path,
+        r#"
+        [[profile]]
+        name = "baseline-online"
+
+        [[profile.rules]]
+        affinity = "online"
+        match_class = ["Game", "Helper"]
+
+        [[profile]]
+        name = "tuned"
+
+        [[profile.rules]]
+        affinity = "0"
+        match_comm = ["Main"]
+        "#,
+    )
+    .unwrap();
+
+    let mut render = test_task(90, TaskClass::Helper, "RenderThread");
+    render.process_comm = "Main".to_owned();
+    let snapshot = snapshot_from_tasks(vec![render]);
+
+    let default_profile = load_selected_profile(&path, None).unwrap();
+    assert_eq!(default_profile.name, "baseline-online");
+
+    let tuned_profile = load_selected_profile(&path, Some("tuned")).unwrap();
+    let report = explain_profile_for_snapshot(
+        &tuned_profile,
+        &snapshot,
+        ProfileExplainOptions::default(),
+        |_| Ok(CpuMask::parse("1").unwrap()),
+        |_| Ok(0),
+        |_| Ok(0),
+    )
+    .unwrap();
+
+    assert_eq!(report.profile, "tuned");
+    assert!(report.pending_affinity > 0);
+    assert_eq!(report.rules[0].match_basis.process_comm, 1);
+    assert_eq!(
+        report.rules[0]
+            .broad_process_comm_captured_thread_comms
+            .get("RenderThread"),
+        Some(&1)
+    );
 }

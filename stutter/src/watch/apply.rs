@@ -17,6 +17,7 @@ use super::{
 pub struct ApplyProfileCommandInput {
     pub tree_pid: u32,
     pub profile_path: PathBuf,
+    pub profile_name: Option<String>,
     pub force: bool,
     pub dry_run: bool,
     pub allow_medium_risk: bool,
@@ -34,6 +35,7 @@ pub struct ApplyProfileCommandInput {
 pub struct ProfilePlanCommandInput {
     pub tree_pid: u32,
     pub profile_path: PathBuf,
+    pub profile_name: Option<String>,
     pub json: bool,
     pub output: Option<PathBuf>,
     pub top: usize,
@@ -44,6 +46,7 @@ pub async fn apply_profile_command(input: ApplyProfileCommandInput) -> anyhow::R
     let ApplyProfileCommandInput {
         tree_pid,
         profile_path,
+        profile_name,
         force,
         dry_run,
         allow_medium_risk,
@@ -57,7 +60,7 @@ pub async fn apply_profile_command(input: ApplyProfileCommandInput) -> anyhow::R
         top,
         highlight_comm,
     } = input;
-    let profile = crate::profiles::load_first_profile(&profile_path)?;
+    let profile = crate::profiles::load_selected_profile(&profile_path, profile_name.as_deref())?;
     validate_apply_profile_mode(dry_run, watch)?;
     let persistent_effect = watch && keep_applied;
     let policy = validate_apply_profile_policy(
@@ -75,7 +78,9 @@ pub async fn apply_profile_command(input: ApplyProfileCommandInput) -> anyhow::R
         if dry_run {
             if explain {
                 let wrote_to_file = output.is_some();
-                let report = explain_profile_to_tree_blocking(tree_pid, profile).await?;
+                let mut report = explain_profile_to_tree_blocking(tree_pid, profile).await?;
+                report.profile_path = Some(profile_path.display().to_string());
+                report.profile_name_requested = profile_name.clone();
                 write_profile_explain_report(
                     &report,
                     ProfileExplainOutput {
@@ -262,8 +267,11 @@ pub async fn apply_profile_command(input: ApplyProfileCommandInput) -> anyhow::R
 }
 
 pub async fn profile_plan_command(input: ProfilePlanCommandInput) -> anyhow::Result<()> {
-    let profile = crate::profiles::load_first_profile(&input.profile_path)?;
-    let report = explain_profile_to_tree_blocking(input.tree_pid, profile).await?;
+    let profile =
+        crate::profiles::load_selected_profile(&input.profile_path, input.profile_name.as_deref())?;
+    let mut report = explain_profile_to_tree_blocking(input.tree_pid, profile).await?;
+    report.profile_path = Some(input.profile_path.display().to_string());
+    report.profile_name_requested = input.profile_name.clone();
     write_profile_explain_report(
         &report,
         ProfileExplainOutput {

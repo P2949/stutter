@@ -24,6 +24,8 @@ use crate::{
 pub(crate) struct ProfileExplainReport {
     pub schema_version: u32,
     pub profile: String,
+    pub profile_path: Option<String>,
+    pub profile_name_requested: Option<String>,
     pub tree_pid: Option<Pid>,
 
     pub snapshot_tasks: usize,
@@ -191,6 +193,8 @@ where
     let mut report = ProfileExplainReport {
         schema_version: 1,
         profile: profile.name.clone(),
+        profile_path: None,
+        profile_name_requested: None,
         tree_pid: options.tree_pid,
         snapshot_tasks: snapshot.tasks.len(),
         matched_tasks: 0,

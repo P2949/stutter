@@ -2,13 +2,14 @@ use std::time::Duration;
 
 use super::super::{
     config::{ConfigArgs, ConfigCommand},
+    doctor::DoctorArgs,
     prove_fix::ProveFixArgs,
     release::{ReleaseArgs, ReleaseCommand},
     report::{
         AdvisorArgs, ApplyProfileArgs, AuditArgs, CheckArgs, CompareArgs, CompareCommand,
-        CompletionsArgs, DoctorArgs, InspectDrmTracepointsArgs, InspectIrqsArgs, InspectTreeArgs,
-        ManArgs, ProbesArgs, ProfilePlanArgs, ProfileTemplateArgs, RecommendArgs, ReportArgs,
-        RestoreArgs, SummaryArgs, TuneArgs, WaylandProbeArgs,
+        CompletionsArgs, InspectDrmTracepointsArgs, InspectIrqsArgs, InspectTreeArgs, ManArgs,
+        ProbesArgs, ProfilePlanArgs, ProfileTemplateArgs, RecommendArgs, ReportArgs, RestoreArgs,
+        SummaryArgs, TuneArgs, WaylandProbeArgs,
     },
     validate::{ValidateArgs, parse_optional_task_class},
 };
@@ -113,6 +114,7 @@ pub(super) fn parse_apply_profile_command(args: ApplyProfileArgs) -> anyhow::Res
     Ok(AppCommand::ApplyProfile(ApplyProfileCommandInput {
         tree_pid: args.tree_pid,
         profile: args.profile,
+        profile_name: args.profile_name,
         force: args.force,
         dry_run: args.dry_run,
         allow_medium_risk: args.allow_medium_risk,
@@ -138,6 +140,7 @@ pub(super) fn parse_profile_plan_command(args: ProfilePlanArgs) -> anyhow::Resul
     Ok(AppCommand::ProfilePlan(ProfilePlanCommandInput {
         tree_pid: args.tree_pid,
         profile: args.profile,
+        profile_name: args.profile_name,
         json: args.json,
         output: args.output,
         top: args.top,

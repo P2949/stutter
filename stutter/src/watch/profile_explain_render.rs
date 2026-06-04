@@ -24,6 +24,15 @@ pub(crate) fn render_profile_explain_text(
     let mut out = String::new();
 
     out.push_str(&format!("Profile plan: {}\n\n", report.profile));
+    if let Some(profile_path) = &report.profile_path {
+        out.push_str(&format!("Profile file: {profile_path}\n"));
+    }
+    if let Some(profile_name) = &report.profile_name_requested {
+        out.push_str(&format!("Selected with: --profile-name {profile_name}\n"));
+    }
+    if report.profile_path.is_some() || report.profile_name_requested.is_some() {
+        out.push('\n');
+    }
     out.push_str("Snapshot:\n");
     if let Some(tree_pid) = report.tree_pid {
         out.push_str(&format!("  tree pid:              {tree_pid}\n"));
@@ -344,6 +353,8 @@ mod tests {
         ProfileExplainReport {
             schema_version: 1,
             profile: "game".to_owned(),
+            profile_path: Some("profiles.toml".to_owned()),
+            profile_name_requested: Some("game".to_owned()),
             tree_pid: Some(Pid::new(42)),
             snapshot_tasks: 3,
             matched_tasks: 2,
@@ -430,6 +441,8 @@ mod tests {
         );
 
         assert!(text.contains("Profile plan: game"));
+        assert!(text.contains("Profile file: profiles.toml"));
+        assert!(text.contains("Selected with: --profile-name game"));
         assert!(text.contains("Rule 0"));
         assert!(text.contains("pending affinity:      1"));
     }

@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{fs, path::Path};
 
 use super::super::*;
 
@@ -222,4 +222,66 @@ fn examples_profile_file_parses() {
             .iter()
             .any(|profile| profile.name == "baseline-online")
     );
+}
+
+fn write_two_profile_file() -> (tempfile::TempDir, std::path::PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("profiles.toml");
+    fs::write(
+        &path,
+        r#"
+        [[profile]]
+        name = "baseline-online"
+
+        [[profile.rules]]
+        affinity = "online"
+
+        [[profile]]
+        name = "tuned"
+
+        [[profile.rules]]
+        affinity = "1-5"
+        match_comm = ["Main"]
+        "#,
+    )
+    .unwrap();
+    (dir, path)
+}
+
+#[test]
+fn load_selected_profile_defaults_to_first_profile() {
+    let (_dir, path) = write_two_profile_file();
+
+    let profile = load_selected_profile(&path, None).unwrap();
+
+    assert_eq!(profile.name, "baseline-online");
+}
+
+#[test]
+fn load_selected_profile_selects_named_profile() {
+    let (_dir, path) = write_two_profile_file();
+
+    let profile = load_selected_profile(&path, Some("tuned")).unwrap();
+
+    assert_eq!(profile.name, "tuned");
+    assert_eq!(
+        profile.rules[0]
+            .affinity
+            .as_ref()
+            .unwrap()
+            .to_range_string(),
+        "1-5"
+    );
+}
+
+#[test]
+fn load_selected_profile_rejects_missing_name_and_lists_available_profiles() {
+    let (_dir, path) = write_two_profile_file();
+
+    let err = load_selected_profile(&path, Some("missing")).unwrap_err();
+    let message = err.to_string();
+
+    assert!(message.contains("profile 'missing' not found"));
+    assert!(message.contains("baseline-online"));
+    assert!(message.contains("tuned"));
 }

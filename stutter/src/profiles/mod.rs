@@ -32,7 +32,7 @@ pub use matching::{
 };
 #[cfg(test)]
 pub(crate) use parse::parse_profiles;
-pub use parse::{load_first_profile, load_profiles};
+pub use parse::{load_profiles, load_selected_profile};
 pub use plan::ProfileApplyCache;
 #[cfg(test)]
 pub(crate) use plan::planned_profile_apply_with_readers;
