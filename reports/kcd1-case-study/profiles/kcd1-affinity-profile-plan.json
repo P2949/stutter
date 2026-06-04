@@ -1,0 +1,3283 @@
+{
+  "schema_version": 1,
+  "profile": "kcd1-game-on-1-5-7-11-gamescope-on-0-6",
+  "tree_pid": 26689,
+  "snapshot_tasks": 181,
+  "matched_tasks": 114,
+  "unmatched_tasks": 67,
+  "pending_unique_tasks": 114,
+  "pending_affinity": 114,
+  "pending_nice": 0,
+  "pending_ionice": 0,
+  "rules": [
+    {
+      "rule_index": 0,
+      "actions": {
+        "affinity": "1-5,7-11",
+        "nice": null,
+        "ionice": null
+      },
+      "match_class": [],
+      "match_comm": [
+        "Main"
+      ],
+      "matched_tasks": 88,
+      "pending_unique_tasks": 88,
+      "pending_affinity": 88,
+      "pending_nice": 0,
+      "pending_ionice": 0,
+      "already_satisfied_tasks": 0,
+      "skipped_tasks": 0,
+      "match_basis": {
+        "class_only": 0,
+        "task_comm": 1,
+        "process_comm": 74,
+        "both_comm_fields": 13,
+        "catch_all": 0
+      },
+      "classes": {
+        "Helper": 75,
+        "Input": 3,
+        "Recorder": 9,
+        "Unknown": 1
+      },
+      "top_thread_comms": {
+        "AudioThread": 8,
+        "ClothingRaycast": 4,
+        "DeferredPhysics": 1,
+        "GFxMeshCacheRes": 1,
+        "InputWorker": 1,
+        "JobSystem_Worke": 9,
+        "Kingdom:disk$0": 4,
+        "Main": 13,
+        "NetAddressResol": 1,
+        "Network": 1,
+        "PROS banners th": 1,
+        "PROS thread": 1,
+        "Physics": 1,
+        "PhysicsWorkerTh": 1,
+        "RemoteConsoleSe": 1,
+        "RenderThread": 1,
+        "ServiceNetworkT": 1,
+        "ShaderCompile": 1,
+        "SkinLoader": 1,
+        "Streaming Async": 1,
+        "Streaming File": 3,
+        "TaskThread0": 1,
+        "TaskThread1": 1,
+        "TaskThread2": 1,
+        "TileCacheUpdate": 1,
+        "ZLibCompressor": 1,
+        "audio_client_ma": 1,
+        "dxvk-cache": 1,
+        "dxvk-cs": 1,
+        "dxvk-descriptor": 1,
+        "dxvk-frame": 1,
+        "dxvk-queue": 1,
+        "dxvk-shader-h": 5,
+        "dxvk-shader-l": 3,
+        "dxvk-shader-n": 4,
+        "dxvk-submit": 1,
+        "gmain": 1,
+        "mangohud-amdgpu": 1,
+        "mangohud-gpufd": 1,
+        "mangohud-hwinfo": 1,
+        "wine_dinput_wor": 1,
+        "wine_mmdevapi_n": 1,
+        "wine_sechost_de": 1,
+        "wine_xinput_hid": 1
+      },
+      "top_process_comms": {
+        "Main": 87,
+        "gamescope-wl": 1
+      },
+      "broad_process_comm_captured_thread_comms": {
+        "AudioThread": 8,
+        "ClothingRaycast": 4,
+        "DeferredPhysics": 1,
+        "GFxMeshCacheRes": 1,
+        "InputWorker": 1,
+        "JobSystem_Worke": 9,
+        "Kingdom:disk$0": 4,
+        "NetAddressResol": 1,
+        "Network": 1,
+        "PROS banners th": 1,
+        "PROS thread": 1,
+        "Physics": 1,
+        "PhysicsWorkerTh": 1,
+        "RemoteConsoleSe": 1,
+        "RenderThread": 1,
+        "ServiceNetworkT": 1,
+        "ShaderCompile": 1,
+        "SkinLoader": 1,
+        "Streaming Async": 1,
+        "Streaming File": 3,
+        "TaskThread0": 1,
+        "TaskThread1": 1,
+        "TaskThread2": 1,
+        "TileCacheUpdate": 1,
+        "ZLibCompressor": 1,
+        "audio_client_ma": 1,
+        "dxvk-cache": 1,
+        "dxvk-cs": 1,
+        "dxvk-descriptor": 1,
+        "dxvk-frame": 1,
+        "dxvk-queue": 1,
+        "dxvk-shader-h": 5,
+        "dxvk-shader-l": 3,
+        "dxvk-shader-n": 4,
+        "dxvk-submit": 1,
+        "mangohud-amdgpu": 1,
+        "mangohud-gpufd": 1,
+        "mangohud-hwinfo": 1,
+        "wine_dinput_wor": 1,
+        "wine_mmdevapi_n": 1,
+        "wine_sechost_de": 1,
+        "wine_xinput_hid": 1
+      },
+      "tasks": [
+        {
+          "tid": 26695,
+          "process_pid": 26689,
+          "comm": "gmain",
+          "process_comm": "gamescope-wl",
+          "class": "Unknown",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "task_comm",
+                "pattern": "Main",
+                "value": "gmain"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26892,
+          "process_pid": 26892,
+          "comm": "Main",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "task_comm",
+                "pattern": "Main",
+                "value": "Main"
+              },
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26933,
+          "process_pid": 26892,
+          "comm": "JobSystem_Worke",
+          "process_comm": "Main",
+          "class": "Recorder",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26934,
+          "process_pid": 26892,
+          "comm": "JobSystem_Worke",
+          "process_comm": "Main",
+          "class": "Recorder",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26935,
+          "process_pid": 26892,
+          "comm": "JobSystem_Worke",
+          "process_comm": "Main",
+          "class": "Recorder",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26936,
+          "process_pid": 26892,
+          "comm": "JobSystem_Worke",
+          "process_comm": "Main",
+          "class": "Recorder",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26937,
+          "process_pid": 26892,
+          "comm": "JobSystem_Worke",
+          "process_comm": "Main",
+          "class": "Recorder",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26938,
+          "process_pid": 26892,
+          "comm": "JobSystem_Worke",
+          "process_comm": "Main",
+          "class": "Recorder",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26940,
+          "process_pid": 26892,
+          "comm": "JobSystem_Worke",
+          "process_comm": "Main",
+          "class": "Recorder",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26941,
+          "process_pid": 26892,
+          "comm": "JobSystem_Worke",
+          "process_comm": "Main",
+          "class": "Recorder",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26942,
+          "process_pid": 26892,
+          "comm": "JobSystem_Worke",
+          "process_comm": "Main",
+          "class": "Recorder",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26943,
+          "process_pid": 26892,
+          "comm": "Streaming File",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26944,
+          "process_pid": 26892,
+          "comm": "Streaming File",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26945,
+          "process_pid": 26892,
+          "comm": "Streaming File",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26946,
+          "process_pid": 26892,
+          "comm": "Streaming Async",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26949,
+          "process_pid": 26892,
+          "comm": "mangohud-amdgpu",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26950,
+          "process_pid": 26892,
+          "comm": "mangohud-gpufd",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26961,
+          "process_pid": 26892,
+          "comm": "Kingdom:disk$0",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26962,
+          "process_pid": 26892,
+          "comm": "Kingdom:disk$0",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26973,
+          "process_pid": 26892,
+          "comm": "Main",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "task_comm",
+                "pattern": "Main",
+                "value": "Main"
+              },
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26978,
+          "process_pid": 26892,
+          "comm": "RenderThread",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26979,
+          "process_pid": 26892,
+          "comm": "ShaderCompile",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26980,
+          "process_pid": 26892,
+          "comm": "Kingdom:disk$0",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26981,
+          "process_pid": 26892,
+          "comm": "Kingdom:disk$0",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26992,
+          "process_pid": 26892,
+          "comm": "dxvk-submit",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26993,
+          "process_pid": 26892,
+          "comm": "dxvk-queue",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26994,
+          "process_pid": 26892,
+          "comm": "dxvk-descriptor",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26995,
+          "process_pid": 26892,
+          "comm": "dxvk-cs",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27012,
+          "process_pid": 26892,
+          "comm": "AudioThread",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27013,
+          "process_pid": 26892,
+          "comm": "wine_mmdevapi_n",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27014,
+          "process_pid": 26892,
+          "comm": "audio_client_ma",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27016,
+          "process_pid": 26892,
+          "comm": "AudioThread",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27017,
+          "process_pid": 26892,
+          "comm": "AudioThread",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27018,
+          "process_pid": 26892,
+          "comm": "AudioThread",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27019,
+          "process_pid": 26892,
+          "comm": "AudioThread",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27020,
+          "process_pid": 26892,
+          "comm": "AudioThread",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27023,
+          "process_pid": 26892,
+          "comm": "Main",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "task_comm",
+                "pattern": "Main",
+                "value": "Main"
+              },
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27024,
+          "process_pid": 26892,
+          "comm": "Main",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "task_comm",
+                "pattern": "Main",
+                "value": "Main"
+              },
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27025,
+          "process_pid": 26892,
+          "comm": "Main",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "task_comm",
+                "pattern": "Main",
+                "value": "Main"
+              },
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27026,
+          "process_pid": 26892,
+          "comm": "Main",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "task_comm",
+                "pattern": "Main",
+                "value": "Main"
+              },
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27027,
+          "process_pid": 26892,
+          "comm": "Main",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "task_comm",
+                "pattern": "Main",
+                "value": "Main"
+              },
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27028,
+          "process_pid": 26892,
+          "comm": "Main",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "task_comm",
+                "pattern": "Main",
+                "value": "Main"
+              },
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27029,
+          "process_pid": 26892,
+          "comm": "Main",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "task_comm",
+                "pattern": "Main",
+                "value": "Main"
+              },
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27030,
+          "process_pid": 26892,
+          "comm": "GFxMeshCacheRes",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27038,
+          "process_pid": 26892,
+          "comm": "dxvk-shader-l",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27039,
+          "process_pid": 26892,
+          "comm": "dxvk-shader-l",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27040,
+          "process_pid": 26892,
+          "comm": "dxvk-shader-l",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27041,
+          "process_pid": 26892,
+          "comm": "dxvk-shader-n",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27042,
+          "process_pid": 26892,
+          "comm": "dxvk-shader-n",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27043,
+          "process_pid": 26892,
+          "comm": "dxvk-shader-n",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27044,
+          "process_pid": 26892,
+          "comm": "dxvk-shader-n",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27045,
+          "process_pid": 26892,
+          "comm": "dxvk-shader-h",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27046,
+          "process_pid": 26892,
+          "comm": "dxvk-shader-h",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27047,
+          "process_pid": 26892,
+          "comm": "dxvk-shader-h",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27048,
+          "process_pid": 26892,
+          "comm": "dxvk-shader-h",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27049,
+          "process_pid": 26892,
+          "comm": "dxvk-shader-h",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27050,
+          "process_pid": 26892,
+          "comm": "NetAddressResol",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27051,
+          "process_pid": 26892,
+          "comm": "ServiceNetworkT",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27052,
+          "process_pid": 26892,
+          "comm": "Main",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "task_comm",
+                "pattern": "Main",
+                "value": "Main"
+              },
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27056,
+          "process_pid": 26892,
+          "comm": "DeferredPhysics",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "3",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27057,
+          "process_pid": 26892,
+          "comm": "TaskThread0",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "3",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27058,
+          "process_pid": 26892,
+          "comm": "TaskThread1",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "1",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27059,
+          "process_pid": 26892,
+          "comm": "TaskThread2",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "3",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27060,
+          "process_pid": 26892,
+          "comm": "InputWorker",
+          "process_comm": "Main",
+          "class": "Input",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27061,
+          "process_pid": 26892,
+          "comm": "wine_xinput_hid",
+          "process_comm": "Main",
+          "class": "Input",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27062,
+          "process_pid": 26892,
+          "comm": "wine_sechost_de",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27065,
+          "process_pid": 26892,
+          "comm": "Main",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "task_comm",
+                "pattern": "Main",
+                "value": "Main"
+              },
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27066,
+          "process_pid": 26892,
+          "comm": "PROS thread",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27067,
+          "process_pid": 26892,
+          "comm": "ZLibCompressor",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27070,
+          "process_pid": 26892,
+          "comm": "ClothingRaycast",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27071,
+          "process_pid": 26892,
+          "comm": "ClothingRaycast",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27089,
+          "process_pid": 26892,
+          "comm": "wine_dinput_wor",
+          "process_comm": "Main",
+          "class": "Input",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27090,
+          "process_pid": 26892,
+          "comm": "dxvk-frame",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27091,
+          "process_pid": 26892,
+          "comm": "mangohud-hwinfo",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27092,
+          "process_pid": 26892,
+          "comm": "ClothingRaycast",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27093,
+          "process_pid": 26892,
+          "comm": "ClothingRaycast",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27097,
+          "process_pid": 26892,
+          "comm": "Network",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27116,
+          "process_pid": 26892,
+          "comm": "TileCacheUpdate",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27151,
+          "process_pid": 26892,
+          "comm": "PROS banners th",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27222,
+          "process_pid": 26892,
+          "comm": "RemoteConsoleSe",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27223,
+          "process_pid": 26892,
+          "comm": "Physics",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27224,
+          "process_pid": 26892,
+          "comm": "PhysicsWorkerTh",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27225,
+          "process_pid": 26892,
+          "comm": "SkinLoader",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27226,
+          "process_pid": 26892,
+          "comm": "Main",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "task_comm",
+                "pattern": "Main",
+                "value": "Main"
+              },
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27227,
+          "process_pid": 26892,
+          "comm": "Main",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "task_comm",
+                "pattern": "Main",
+                "value": "Main"
+              },
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27230,
+          "process_pid": 26892,
+          "comm": "AudioThread",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27231,
+          "process_pid": 26892,
+          "comm": "AudioThread",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 27334,
+          "process_pid": 26892,
+          "comm": "dxvk-cache",
+          "process_comm": "Main",
+          "class": "Helper",
+          "matched_rule_index": 0,
+          "match_evidence": {
+            "matched_class": false,
+            "comm_hits": [
+              {
+                "field": "process_comm",
+                "pattern": "Main",
+                "value": "Main"
+              }
+            ]
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        }
+      ]
+    },
+    {
+      "rule_index": 1,
+      "actions": {
+        "affinity": "1-5,7-11",
+        "nice": null,
+        "ionice": null
+      },
+      "match_class": [
+        "Game",
+        "GameHelper",
+        "WineServer"
+      ],
+      "match_comm": [],
+      "matched_tasks": 25,
+      "pending_unique_tasks": 25,
+      "pending_affinity": 25,
+      "pending_nice": 0,
+      "pending_ionice": 0,
+      "already_satisfied_tasks": 0,
+      "skipped_tasks": 0,
+      "match_basis": {
+        "class_only": 25,
+        "task_comm": 0,
+        "process_comm": 0,
+        "both_comm_fields": 0,
+        "catch_all": 0
+      },
+      "classes": {
+        "Game": 24,
+        "WineServer": 1
+      },
+      "top_thread_comms": {
+        "libusb_event": 1,
+        "pv-adverb": 1,
+        "srt-bwrap": 1,
+        "steam.exe": 3,
+        "wine_nsi_notifi": 1,
+        "wine_sechost_se": 2,
+        "winedevice.exe": 15,
+        "wineserver": 1
+      },
+      "top_process_comms": {
+        "pv-adverb": 1,
+        "srt-bwrap": 1,
+        "steam.exe": 3,
+        "winedevice.exe": 19,
+        "wineserver": 1
+      },
+      "broad_process_comm_captured_thread_comms": {},
+      "tasks": [
+        {
+          "tid": 26717,
+          "process_pid": 26717,
+          "comm": "srt-bwrap",
+          "process_comm": "srt-bwrap",
+          "class": "Game",
+          "matched_rule_index": 1,
+          "match_evidence": {
+            "matched_class": true,
+            "comm_hits": []
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26783,
+          "process_pid": 26783,
+          "comm": "pv-adverb",
+          "process_comm": "pv-adverb",
+          "class": "Game",
+          "matched_rule_index": 1,
+          "match_evidence": {
+            "matched_class": true,
+            "comm_hits": []
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26814,
+          "process_pid": 26814,
+          "comm": "steam.exe",
+          "process_comm": "steam.exe",
+          "class": "Game",
+          "matched_rule_index": 1,
+          "match_evidence": {
+            "matched_class": true,
+            "comm_hits": []
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26816,
+          "process_pid": 26816,
+          "comm": "wineserver",
+          "process_comm": "wineserver",
+          "class": "WineServer",
+          "matched_rule_index": 1,
+          "match_evidence": {
+            "matched_class": true,
+            "comm_hits": []
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26824,
+          "process_pid": 26824,
+          "comm": "winedevice.exe",
+          "process_comm": "winedevice.exe",
+          "class": "Game",
+          "matched_rule_index": 1,
+          "match_evidence": {
+            "matched_class": true,
+            "comm_hits": []
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26827,
+          "process_pid": 26824,
+          "comm": "winedevice.exe",
+          "process_comm": "winedevice.exe",
+          "class": "Game",
+          "matched_rule_index": 1,
+          "match_evidence": {
+            "matched_class": true,
+            "comm_hits": []
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26828,
+          "process_pid": 26824,
+          "comm": "wine_sechost_se",
+          "process_comm": "winedevice.exe",
+          "class": "Game",
+          "matched_rule_index": 1,
+          "match_evidence": {
+            "matched_class": true,
+            "comm_hits": []
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26829,
+          "process_pid": 26824,
+          "comm": "winedevice.exe",
+          "process_comm": "winedevice.exe",
+          "class": "Game",
+          "matched_rule_index": 1,
+          "match_evidence": {
+            "matched_class": true,
+            "comm_hits": []
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26830,
+          "process_pid": 26824,
+          "comm": "winedevice.exe",
+          "process_comm": "winedevice.exe",
+          "class": "Game",
+          "matched_rule_index": 1,
+          "match_evidence": {
+            "matched_class": true,
+            "comm_hits": []
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26831,
+          "process_pid": 26824,
+          "comm": "winedevice.exe",
+          "process_comm": "winedevice.exe",
+          "class": "Game",
+          "matched_rule_index": 1,
+          "match_evidence": {
+            "matched_class": true,
+            "comm_hits": []
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26843,
+          "process_pid": 26824,
+          "comm": "wine_nsi_notifi",
+          "process_comm": "winedevice.exe",
+          "class": "Game",
+          "matched_rule_index": 1,
+          "match_evidence": {
+            "matched_class": true,
+            "comm_hits": []
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26845,
+          "process_pid": 26845,
+          "comm": "winedevice.exe",
+          "process_comm": "winedevice.exe",
+          "class": "Game",
+          "matched_rule_index": 1,
+          "match_evidence": {
+            "matched_class": true,
+            "comm_hits": []
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26847,
+          "process_pid": 26845,
+          "comm": "winedevice.exe",
+          "process_comm": "winedevice.exe",
+          "class": "Game",
+          "matched_rule_index": 1,
+          "match_evidence": {
+            "matched_class": true,
+            "comm_hits": []
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26848,
+          "process_pid": 26845,
+          "comm": "wine_sechost_se",
+          "process_comm": "winedevice.exe",
+          "class": "Game",
+          "matched_rule_index": 1,
+          "match_evidence": {
+            "matched_class": true,
+            "comm_hits": []
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26852,
+          "process_pid": 26845,
+          "comm": "winedevice.exe",
+          "process_comm": "winedevice.exe",
+          "class": "Game",
+          "matched_rule_index": 1,
+          "match_evidence": {
+            "matched_class": true,
+            "comm_hits": []
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26853,
+          "process_pid": 26845,
+          "comm": "winedevice.exe",
+          "process_comm": "winedevice.exe",
+          "class": "Game",
+          "matched_rule_index": 1,
+          "match_evidence": {
+            "matched_class": true,
+            "comm_hits": []
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26854,
+          "process_pid": 26845,
+          "comm": "winedevice.exe",
+          "process_comm": "winedevice.exe",
+          "class": "Game",
+          "matched_rule_index": 1,
+          "match_evidence": {
+            "matched_class": true,
+            "comm_hits": []
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26855,
+          "process_pid": 26845,
+          "comm": "winedevice.exe",
+          "process_comm": "winedevice.exe",
+          "class": "Game",
+          "matched_rule_index": 1,
+          "match_evidence": {
+            "matched_class": true,
+            "comm_hits": []
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26856,
+          "process_pid": 26845,
+          "comm": "winedevice.exe",
+          "process_comm": "winedevice.exe",
+          "class": "Game",
+          "matched_rule_index": 1,
+          "match_evidence": {
+            "matched_class": true,
+            "comm_hits": []
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26857,
+          "process_pid": 26845,
+          "comm": "winedevice.exe",
+          "process_comm": "winedevice.exe",
+          "class": "Game",
+          "matched_rule_index": 1,
+          "match_evidence": {
+            "matched_class": true,
+            "comm_hits": []
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26858,
+          "process_pid": 26845,
+          "comm": "winedevice.exe",
+          "process_comm": "winedevice.exe",
+          "class": "Game",
+          "matched_rule_index": 1,
+          "match_evidence": {
+            "matched_class": true,
+            "comm_hits": []
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26860,
+          "process_pid": 26845,
+          "comm": "winedevice.exe",
+          "process_comm": "winedevice.exe",
+          "class": "Game",
+          "matched_rule_index": 1,
+          "match_evidence": {
+            "matched_class": true,
+            "comm_hits": []
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26861,
+          "process_pid": 26845,
+          "comm": "libusb_event",
+          "process_comm": "winedevice.exe",
+          "class": "Game",
+          "matched_rule_index": 1,
+          "match_evidence": {
+            "matched_class": true,
+            "comm_hits": []
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26888,
+          "process_pid": 26814,
+          "comm": "steam.exe",
+          "process_comm": "steam.exe",
+          "class": "Game",
+          "matched_rule_index": 1,
+          "match_evidence": {
+            "matched_class": true,
+            "comm_hits": []
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        },
+        {
+          "tid": 26893,
+          "process_pid": 26814,
+          "comm": "steam.exe",
+          "process_comm": "steam.exe",
+          "class": "Game",
+          "matched_rule_index": 1,
+          "match_evidence": {
+            "matched_class": true,
+            "comm_hits": []
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "1-5,7-11",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        }
+      ]
+    },
+    {
+      "rule_index": 2,
+      "actions": {
+        "affinity": "0,6",
+        "nice": null,
+        "ionice": null
+      },
+      "match_class": [
+        "GameScope",
+        "Compositor",
+        "Launcher",
+        "SteamRuntime"
+      ],
+      "match_comm": [],
+      "matched_tasks": 1,
+      "pending_unique_tasks": 1,
+      "pending_affinity": 1,
+      "pending_nice": 0,
+      "pending_ionice": 0,
+      "already_satisfied_tasks": 0,
+      "skipped_tasks": 0,
+      "match_basis": {
+        "class_only": 1,
+        "task_comm": 0,
+        "process_comm": 0,
+        "both_comm_fields": 0,
+        "catch_all": 0
+      },
+      "classes": {
+        "GameScope": 1
+      },
+      "top_thread_comms": {
+        "gamescope": 1
+      },
+      "top_process_comms": {
+        "gamescope-wl": 1
+      },
+      "broad_process_comm_captured_thread_comms": {},
+      "tasks": [
+        {
+          "tid": 26692,
+          "process_pid": 26689,
+          "comm": "gamescope",
+          "process_comm": "gamescope-wl",
+          "class": "GameScope",
+          "matched_rule_index": 2,
+          "match_evidence": {
+            "matched_class": true,
+            "comm_hits": []
+          },
+          "affinity": {
+            "status": "pending",
+            "current": "0-11",
+            "desired": "0,6",
+            "reason": null
+          },
+          "nice": null,
+          "ionice": null,
+          "pending": true
+        }
+      ]
+    }
+  ],
+  "unmatched": {
+    "tasks": 67,
+    "classes": {
+      "Helper": 52,
+      "Input": 1,
+      "Unknown": 14
+    },
+    "top_thread_comms": {
+      "Finalizer": 1,
+      "SDL_joystick": 1,
+      "SGen worker": 1,
+      "Thread Pool Wor": 1,
+      "[pango] fontcon": 1,
+      "dconf worker": 1,
+      "explore:disk$0": 2,
+      "explorer.exe": 2,
+      "gamesc:traceq0": 1,
+      "gamesco:disk$0": 3,
+      "gamescope-eis": 1,
+      "gamescope-pw": 1,
+      "gamescope-wait": 1,
+      "gamescope-wl": 1,
+      "gamescope-xwm": 1,
+      "gamescope_img": 1,
+      "gamescopereaper": 1,
+      "gdbus": 1,
+      "mangohud-amdgpu": 1,
+      "mangohud-gpufd": 1,
+      "plugplay.exe": 2,
+      "pool-spawner": 1,
+      "python3": 1,
+      "reaper": 1,
+      "rpcss.exe": 2,
+      "services.exe": 2,
+      "svchost.exe": 2,
+      "tabtip.exe": 2,
+      "wine_explorer_d": 1,
+      "wine_rpcrt4_io": 11,
+      "wine_rpcrt4_ser": 6,
+      "wine_sechost_de": 1,
+      "wine_sechost_se": 3,
+      "wine_threadpool": 2,
+      "wine_xinput_hid": 1,
+      "xalia.e:disk$0": 4,
+      "xalia.exe": 1
+    },
+    "top_process_comms": {
+      "explorer.exe": 6,
+      "gamescope-wl": 14,
+      "gamescopereaper": 1,
+      "plugplay.exe": 9,
+      "python3": 1,
+      "reaper": 1,
+      "rpcss.exe": 7,
+      "services.exe": 9,
+      "svchost.exe": 3,
+      "tabtip.exe": 3,
+      "xalia.exe": 13
+    }
+  },
+  "warnings": []
+}

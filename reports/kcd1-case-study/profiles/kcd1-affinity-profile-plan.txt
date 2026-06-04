@@ -1,0 +1,196 @@
+Profile plan: kcd1-game-on-1-5-7-11-gamescope-on-0-6
+
+Snapshot:
+  tree pid:              26689
+  snapshot tasks:        181
+  matched tasks:         114
+  unmatched tasks:       67
+  pending unique tasks:  114
+  pending affinity:      114
+  pending nice:          0
+  pending ionice:        0
+
+Rule matching is first-match-wins: each task is assigned to the first matching rule.
+
+Rule 0
+  action:
+    affinity: 1-5,7-11
+  match:
+    comm patterns: Main
+
+  matched tasks:         88
+  pending unique tasks:  88
+  pending affinity:      88
+  already satisfied:     0
+
+  match source:
+    task.comm:           1
+    process_comm:        74
+    both comm fields:    13
+    class only:          0
+    catch-all:           0
+
+  classes:
+    Helper: 75
+    Recorder: 9
+    Input: 3
+    Unknown: 1
+
+  top thread comms:
+    Main: 13
+    JobSystem_Worke: 9
+    AudioThread: 8
+    dxvk-shader-h: 5
+    ClothingRaycast: 4
+    Kingdom:disk$0: 4
+    dxvk-shader-n: 4
+    Streaming File: 3
+    dxvk-shader-l: 3
+    DeferredPhysics: 1
+    GFxMeshCacheRes: 1
+    InputWorker: 1
+    NetAddressResol: 1
+    Network: 1
+    PROS banners th: 1
+    PROS thread: 1
+    Physics: 1
+    PhysicsWorkerTh: 1
+    RemoteConsoleSe: 1
+    RenderThread: 1
+
+  top process comms:
+    Main: 87
+    gamescope-wl: 1
+
+  broad process_comm captures:
+    JobSystem_Worke: 9
+    AudioThread: 8
+    dxvk-shader-h: 5
+    ClothingRaycast: 4
+    Kingdom:disk$0: 4
+    dxvk-shader-n: 4
+    Streaming File: 3
+    dxvk-shader-l: 3
+    DeferredPhysics: 1
+    GFxMeshCacheRes: 1
+    InputWorker: 1
+    NetAddressResol: 1
+    Network: 1
+    PROS banners th: 1
+    PROS thread: 1
+    Physics: 1
+    PhysicsWorkerTh: 1
+    RemoteConsoleSe: 1
+    RenderThread: 1
+    ServiceNetworkT: 1
+
+  Note:
+    Rule 0 captured 74 task(s) through process_comm match_comm = [Main] while their own thread comm differed.
+
+Rule 1
+  action:
+    affinity: 1-5,7-11
+  match:
+    classes: Game, GameHelper, WineServer
+
+  matched tasks:         25
+  pending unique tasks:  25
+  pending affinity:      25
+  already satisfied:     0
+
+  match source:
+    task.comm:           0
+    process_comm:        0
+    both comm fields:    0
+    class only:          25
+    catch-all:           0
+
+  classes:
+    Game: 24
+    WineServer: 1
+
+  top thread comms:
+    winedevice.exe: 15
+    steam.exe: 3
+    wine_sechost_se: 2
+    libusb_event: 1
+    pv-adverb: 1
+    srt-bwrap: 1
+    wine_nsi_notifi: 1
+    wineserver: 1
+
+  top process comms:
+    winedevice.exe: 19
+    steam.exe: 3
+    pv-adverb: 1
+    srt-bwrap: 1
+    wineserver: 1
+
+Rule 2
+  action:
+    affinity: 0,6
+  match:
+    classes: GameScope, Compositor, Launcher, SteamRuntime
+
+  matched tasks:         1
+  pending unique tasks:  1
+  pending affinity:      1
+  already satisfied:     0
+
+  match source:
+    task.comm:           0
+    process_comm:        0
+    both comm fields:    0
+    class only:          1
+    catch-all:           0
+
+  classes:
+    GameScope: 1
+
+  top thread comms:
+    gamescope: 1
+
+  top process comms:
+    gamescope-wl: 1
+
+Highlighted tasks:
+  tid     comm              process_comm       class              rule  match source   affinity
+  26946   Streaming Async   Main               Helper             0     process_comm   0-11 -> 1-5,7-11 Pending
+  26978   RenderThread      Main               Helper             0     process_comm   0-11 -> 1-5,7-11 Pending
+  26992   dxvk-submit       Main               Helper             0     process_comm   0-11 -> 1-5,7-11 Pending
+  26995   dxvk-cs           Main               Helper             0     process_comm   0-11 -> 1-5,7-11 Pending
+  27070   ClothingRaycast   Main               Helper             0     process_comm   0-11 -> 1-5,7-11 Pending
+  27071   ClothingRaycast   Main               Helper             0     process_comm   0-11 -> 1-5,7-11 Pending
+  27092   ClothingRaycast   Main               Helper             0     process_comm   0-11 -> 1-5,7-11 Pending
+  27093   ClothingRaycast   Main               Helper             0     process_comm   0-11 -> 1-5,7-11 Pending
+  26816   wineserver        wineserver         WineServer         1     class          0-11 -> 1-5,7-11 Pending
+
+Unmatched:
+  tasks: 67
+
+  classes:
+    Helper: 52
+    Unknown: 14
+    Input: 1
+
+  top thread comms:
+    wine_rpcrt4_io: 11
+    wine_rpcrt4_ser: 6
+    xalia.e:disk$0: 4
+    gamesco:disk$0: 3
+    wine_sechost_se: 3
+    explore:disk$0: 2
+    explorer.exe: 2
+    plugplay.exe: 2
+    rpcss.exe: 2
+    services.exe: 2
+    svchost.exe: 2
+    tabtip.exe: 2
+    wine_threadpool: 2
+    Finalizer: 1
+    SDL_joystick: 1
+    SGen worker: 1
+    Thread Pool Wor: 1
+    [pango] fontcon: 1
+    dconf worker: 1
+    gamesc:traceq0: 1
