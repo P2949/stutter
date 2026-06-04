@@ -145,6 +145,135 @@ fn apply_profile_rejects_zero_refresh_ms() {
 }
 
 #[test]
+fn apply_profile_rejects_explain_without_dry_run() {
+    let err = parse_report_command([
+        "stutter",
+        "apply-profile",
+        "--tree-pid",
+        "42",
+        "--profile",
+        "/tmp/profile.toml",
+        "--explain",
+    ])
+    .unwrap_err();
+
+    assert!(
+        err.to_string()
+            .contains("--explain is only supported with --dry-run")
+    );
+}
+
+#[test]
+fn apply_profile_rejects_json_without_explain() {
+    let err = parse_report_command([
+        "stutter",
+        "apply-profile",
+        "--tree-pid",
+        "42",
+        "--profile",
+        "/tmp/profile.toml",
+        "--dry-run",
+        "--json",
+    ])
+    .unwrap_err();
+
+    assert!(err.to_string().contains("--json requires --explain"));
+}
+
+#[test]
+fn apply_profile_rejects_output_without_explain() {
+    let err = parse_report_command([
+        "stutter",
+        "apply-profile",
+        "--tree-pid",
+        "42",
+        "--profile",
+        "/tmp/profile.toml",
+        "--dry-run",
+        "--output",
+        "/tmp/profile-plan.txt",
+    ])
+    .unwrap_err();
+
+    assert!(err.to_string().contains("--output requires --explain"));
+}
+
+#[test]
+fn apply_profile_rejects_explain_with_watch() {
+    let err = parse_report_command([
+        "stutter",
+        "apply-profile",
+        "--tree-pid",
+        "42",
+        "--profile",
+        "/tmp/profile.toml",
+        "--dry-run",
+        "--explain",
+        "--watch",
+    ])
+    .unwrap_err();
+
+    assert!(
+        err.to_string()
+            .contains("--explain cannot be combined with --watch")
+    );
+}
+
+#[test]
+fn apply_profile_rejects_zero_top() {
+    let err = parse_report_command([
+        "stutter",
+        "apply-profile",
+        "--tree-pid",
+        "42",
+        "--profile",
+        "/tmp/profile.toml",
+        "--dry-run",
+        "--explain",
+        "--top",
+        "0",
+    ])
+    .unwrap_err();
+
+    assert!(err.to_string().contains("--top must be greater than zero"));
+}
+
+#[test]
+fn profile_plan_rejects_zero_tree_pid() {
+    let err = parse_report_command([
+        "stutter",
+        "profile-plan",
+        "--tree-pid",
+        "0",
+        "--profile",
+        "/tmp/profile.toml",
+    ])
+    .unwrap_err();
+
+    assert!(
+        err.to_string()
+            .contains("--tree-pid must be greater than zero")
+    );
+}
+
+#[test]
+fn profile_plan_rejects_zero_top() {
+    let err = parse_report_command([
+        "stutter",
+        "profile-plan",
+        "--tree-pid",
+        "42",
+        "--profile",
+        "/tmp/profile.toml",
+        "--top",
+        "0",
+    ])
+    .unwrap_err();
+
+    assert!(err.to_string().contains("--top must be greater than zero"));
+}
+
+#[test]
 fn tune_rejects_invalid_values() {
     for (args, expected) in [
         (

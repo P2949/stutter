@@ -8,6 +8,7 @@ stutter
   validate
   restore
   apply-profile
+  profile-plan
   tune
   recommend
   prove-fix

@@ -1,6 +1,12 @@
 use std::collections::BTreeMap;
 
-use super::{super::*, support::*};
+use super::{
+    super::{
+        matching::{CommField, matching_profile_rule_with_evidence, profile_rule_match_evidence},
+        *,
+    },
+    support::*,
+};
 
 #[test]
 fn match_comm_treats_metacharacters_as_literals_unless_slash_delimited() {
@@ -17,6 +23,102 @@ fn match_comm_treats_metacharacters_as_literals_unless_slash_delimited() {
     let literal_bracket = CompiledPattern::new("[".to_owned()).unwrap();
     assert!(literal_bracket.matches("renderer[0]"));
     assert!(CompiledPattern::new("/[/".to_owned()).is_err());
+}
+
+#[test]
+fn profile_rule_match_evidence_reports_task_comm_hit() {
+    let task = test_task(42, TaskClass::GameHelper, "dxvk-submit");
+    let rule = ProfileRule {
+        affinity: Some(CpuMask::parse("0").unwrap()),
+        nice: None,
+        ionice: None,
+        match_class: Vec::new(),
+        match_comm: vec![CompiledPattern::new("dxvk-submit".to_owned()).unwrap()],
+    };
+
+    let evidence = profile_rule_match_evidence(&task, &rule).unwrap();
+
+    assert!(!evidence.matched_class);
+    assert_eq!(evidence.comm_hits.len(), 1);
+    assert_eq!(evidence.comm_hits[0].field, CommField::TaskComm);
+    assert_eq!(evidence.comm_hits[0].pattern, "dxvk-submit");
+    assert_eq!(evidence.comm_hits[0].value, "dxvk-submit");
+}
+
+#[test]
+fn profile_rule_match_evidence_reports_process_comm_hit() {
+    let mut task = test_task(43, TaskClass::GameRenderThread, "RenderThread");
+    task.process_comm = "Main".to_owned();
+    let rule = ProfileRule {
+        affinity: Some(CpuMask::parse("0").unwrap()),
+        nice: None,
+        ionice: None,
+        match_class: Vec::new(),
+        match_comm: vec![CompiledPattern::new("Main".to_owned()).unwrap()],
+    };
+
+    let evidence = profile_rule_match_evidence(&task, &rule).unwrap();
+
+    assert_eq!(evidence.comm_hits.len(), 1);
+    assert_eq!(evidence.comm_hits[0].field, CommField::ProcessComm);
+    assert_eq!(evidence.comm_hits[0].pattern, "Main");
+    assert_eq!(evidence.comm_hits[0].value, "Main");
+}
+
+#[test]
+fn profile_rule_match_evidence_reports_both_comm_fields() {
+    let mut task = test_task(44, TaskClass::Game, "Main");
+    task.process_comm = "Main".to_owned();
+    let rule = ProfileRule {
+        affinity: Some(CpuMask::parse("0").unwrap()),
+        nice: None,
+        ionice: None,
+        match_class: Vec::new(),
+        match_comm: vec![CompiledPattern::new("Main".to_owned()).unwrap()],
+    };
+
+    let evidence = profile_rule_match_evidence(&task, &rule).unwrap();
+    let fields = evidence
+        .comm_hits
+        .iter()
+        .map(|hit| hit.field)
+        .collect::<Vec<_>>();
+
+    assert_eq!(fields, vec![CommField::TaskComm, CommField::ProcessComm]);
+}
+
+#[test]
+fn matching_profile_rule_with_evidence_preserves_first_match_wins() {
+    let mut task = test_task(45, TaskClass::GameRenderThread, "RenderThread");
+    task.process_comm = "Main".to_owned();
+    let profile = Profile {
+        name: "shadowing".to_owned(),
+        rules: vec![
+            ProfileRule {
+                affinity: Some(CpuMask::parse("1-5,7-11").unwrap()),
+                nice: None,
+                ionice: None,
+                match_class: Vec::new(),
+                match_comm: vec![CompiledPattern::new("Main".to_owned()).unwrap()],
+            },
+            ProfileRule {
+                affinity: Some(CpuMask::parse("0,6").unwrap()),
+                nice: None,
+                ionice: None,
+                match_class: Vec::new(),
+                match_comm: vec![CompiledPattern::new("RenderThread".to_owned()).unwrap()],
+            },
+        ],
+    };
+
+    let (index, rule, evidence) = matching_profile_rule_with_evidence(&task, &profile).unwrap();
+
+    assert_eq!(index, 0);
+    assert_eq!(
+        rule.affinity.as_ref().unwrap().to_range_string(),
+        "1-5,7-11"
+    );
+    assert_eq!(evidence.comm_hits[0].field, CommField::ProcessComm);
 }
 
 #[test]

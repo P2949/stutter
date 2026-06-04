@@ -17,6 +17,7 @@ pub enum AppCommand {
     Version(VersionCommandInput),
     Restore(RestoreCommandInput),
     ApplyProfile(ApplyProfileCommandInput),
+    ProfilePlan(ProfilePlanCommandInput),
     InspectTree(InspectTreeCommandInput),
     Summary(SummaryCommandInput),
     Validate(ValidateCommandInput),
@@ -105,6 +106,21 @@ pub struct ApplyProfileCommandInput {
     pub keep_applied: bool,
     pub refresh_ms: u64,
     pub enforce: bool,
+    pub explain: bool,
+    pub json: bool,
+    pub output: Option<PathBuf>,
+    pub top: usize,
+    pub highlight_comm: Vec<String>,
+}
+
+#[derive(Debug)]
+pub struct ProfilePlanCommandInput {
+    pub tree_pid: u32,
+    pub profile: PathBuf,
+    pub json: bool,
+    pub output: Option<PathBuf>,
+    pub top: usize,
+    pub highlight_comm: Vec<String>,
 }
 
 #[derive(Debug)]

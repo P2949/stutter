@@ -216,6 +216,11 @@ fn parses_restore_and_apply_profile_commands() {
     assert!(!input.keep_applied);
     assert_eq!(input.refresh_ms, 1_000);
     assert!(!input.enforce);
+    assert!(!input.explain);
+    assert!(!input.json);
+    assert_eq!(input.output, None);
+    assert_eq!(input.top, 10);
+    assert!(input.highlight_comm.is_empty());
 }
 
 #[test]

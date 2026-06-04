@@ -15,47 +15,16 @@ use tokio::time::sleep;
 use super::{
     TUNE_PROFILE_REFRESH_MS, TUNE_RUN_STALE_AFTER, comparability,
     model::{
-        TuneCandidateSummary, TuneControl, TuneIterationOrder, TuneMeasureResult,
-        TuneProfileRefreshInput, TuneSummary,
+        TuneCandidateSummary, TuneControl, TuneMeasureResult, TuneProfileRefreshInput, TuneSummary,
     },
+    order::candidate_order_for_iteration,
+    profile_plan::{tune_profile_plan_summary, write_profile_plan_artifacts},
     recommendation, recommendation_html, retain_after_warmup, unix_nanos_now,
 };
 use crate::{
     artifacts::ArtifactSelection, config::model::MonitorConfig, hwmon, profiles,
     recorder::IntervalRecord, scorer, session::run_monitor, session_io,
 };
-
-pub fn candidate_order_for_iteration(profile_count: usize, iteration: u32) -> Vec<usize> {
-    let mut order: Vec<usize> = (0..profile_count).collect();
-
-    if profile_count <= 1 {
-        return order;
-    }
-
-    let rotation = ((iteration - 1) as usize) % profile_count;
-    order.rotate_left(rotation);
-
-    if iteration.is_multiple_of(2) {
-        order.reverse();
-    }
-
-    order
-}
-
-pub(super) fn tune_candidate_order(
-    profiles: &[profiles::Profile],
-    runs: u32,
-) -> Vec<TuneIterationOrder> {
-    (1..=runs)
-        .map(|iteration| TuneIterationOrder {
-            iteration,
-            profiles: candidate_order_for_iteration(profiles.len(), iteration)
-                .into_iter()
-                .map(|profile_idx| profiles[profile_idx].name.clone())
-                .collect(),
-        })
-        .collect()
-}
 
 pub(super) struct TuneCollectionInput<'a> {
     pub(super) profiles: &'a [profiles::Profile],
@@ -117,6 +86,7 @@ pub(super) async fn collect_tune_results(
 
             let TuneMeasureResult {
                 applied_tasks,
+                profile_plan,
                 run_dir,
                 interval_records,
                 frame_events,
@@ -216,6 +186,7 @@ pub(super) async fn collect_tune_results(
                 iteration,
                 run_dir,
                 applied_tasks,
+                profile_plan,
                 warmup_seconds,
                 measure_seconds,
                 interval_count: interval_records.len(),
@@ -391,6 +362,11 @@ pub async fn measure_tune_candidate(
         .clone();
 
     let cache = profiles::ProfileApplyCache::default();
+    let profile_plan_report =
+        crate::profiles::explain::explain_profile_for_tree(tree_pid, &profile)?;
+    write_profile_plan_artifacts(&run_dir, &profile_plan_report)?;
+    let profile_plan = Some(tune_profile_plan_summary(&profile_plan_report));
+
     let tune_candidate_policy = crate::watch::profile_apply_policy(
         false,
         profiles::profile_uses_priority_actions(&profile),
@@ -517,6 +493,7 @@ pub async fn measure_tune_candidate(
 
     Ok(TuneMeasureResult {
         applied_tasks,
+        profile_plan,
         run_dir,
         interval_records,
         frame_events,

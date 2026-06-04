@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     path::PathBuf,
     sync::{
         Arc,
@@ -88,6 +89,8 @@ pub struct TuneCandidateSummary {
     pub iteration: u32,
     pub run_dir: PathBuf,
     pub applied_tasks: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_plan: Option<TuneProfilePlanSummary>,
     pub warmup_seconds: u64,
     pub measure_seconds: u64,
     pub interval_count: usize,
@@ -107,6 +110,25 @@ pub struct TuneCandidateSummary {
     pub frame_over_50ms: u64,
     pub coverage: TuneCoverageMetrics,
     pub valid: bool,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct TuneProfilePlanSummary {
+    pub snapshot_tasks: usize,
+    pub matched_tasks: usize,
+    pub pending_unique_tasks: usize,
+    pub pending_affinity: usize,
+    pub rules: Vec<TuneProfileRulePlanSummary>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct TuneProfileRulePlanSummary {
+    pub rule_index: usize,
+    pub matched_tasks: usize,
+    pub pending_affinity: usize,
+    pub top_classes: BTreeMap<String, usize>,
+    pub top_thread_comms: BTreeMap<String, usize>,
+    pub process_comm_captures: usize,
 }
 
 pub struct TuneCommandInput {
@@ -145,6 +167,7 @@ pub struct TuneProfileRefreshInput {
 
 pub struct TuneMeasureResult {
     pub applied_tasks: usize,
+    pub profile_plan: Option<TuneProfilePlanSummary>,
     pub run_dir: PathBuf,
     pub interval_records: Vec<IntervalRecord>,
     pub frame_events: Vec<crate::recorder::FrameEvent>,

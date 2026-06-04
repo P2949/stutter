@@ -50,6 +50,7 @@ where
         Some(Command::Validate(args)) => reports::parse_validate_command(args),
         Some(Command::Restore(args)) => reports::parse_restore_command(args),
         Some(Command::ApplyProfile(args)) => reports::parse_apply_profile_command(args),
+        Some(Command::ProfilePlan(args)) => reports::parse_profile_plan_command(args),
         Some(Command::Tune(args)) => reports::parse_tune_command(args),
         Some(Command::Recommend(args)) => reports::parse_recommend_command(args),
         Some(Command::ProveFix(args)) => reports::parse_prove_fix_command(args),

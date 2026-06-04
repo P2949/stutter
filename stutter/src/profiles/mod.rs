@@ -4,8 +4,10 @@ use crate::{
     process_tree::{CompiledPattern, TaskClass},
 };
 
+mod action_decision;
 mod apply;
 mod evaluate;
+pub(crate) mod explain;
 mod ioprio;
 mod matching;
 pub(crate) mod parse;

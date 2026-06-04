@@ -3,6 +3,7 @@ use std::time::Duration;
 mod apply;
 mod policy;
 mod process_match;
+pub(crate) mod profile_explain_render;
 mod resolve;
 mod restore;
 mod tree_roots;
@@ -56,8 +57,8 @@ impl WatchProcessConfig {
 }
 
 pub use apply::{
-    ApplyProfileCommandInput, apply_profile_command, apply_profile_to_tree_blocking,
-    apply_profile_to_tree_cached_blocking,
+    ApplyProfileCommandInput, ProfilePlanCommandInput, apply_profile_command,
+    apply_profile_to_tree_blocking, apply_profile_to_tree_cached_blocking, profile_plan_command,
 };
 pub use policy::profile_apply_policy;
 #[cfg(test)]

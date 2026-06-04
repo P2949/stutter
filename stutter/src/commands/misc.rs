@@ -80,6 +80,23 @@ pub async fn run_apply_profile_command(
         keep_applied: input.keep_applied,
         refresh_ms: input.refresh_ms,
         enforce: input.enforce,
+        explain: input.explain,
+        json: input.json,
+        output: input.output,
+        top: input.top,
+        highlight_comm: input.highlight_comm,
+    })
+    .await
+}
+
+pub async fn run_profile_plan_command(input: input::ProfilePlanCommandInput) -> anyhow::Result<()> {
+    watch::profile_plan_command(watch::ProfilePlanCommandInput {
+        tree_pid: input.tree_pid,
+        profile_path: input.profile,
+        json: input.json,
+        output: input.output,
+        top: input.top,
+        highlight_comm: input.highlight_comm,
     })
     .await
 }

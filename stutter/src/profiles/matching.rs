@@ -1,6 +1,28 @@
 use super::{Profile, ProfileRule, evaluate::task_info_from_active_snapshot};
 use crate::process_tree::{self, TaskInfo, TaskMap};
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RuleMatchEvidence {
+    pub matched_class: bool,
+    pub rule_had_match_class: bool,
+    pub rule_had_match_comm: bool,
+    pub comm_hits: Vec<CommPatternHit>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct CommPatternHit {
+    pub field: CommField,
+    pub pattern_index: usize,
+    pub pattern: String,
+    pub value: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CommField {
+    TaskComm,
+    ProcessComm,
+}
+
 pub fn profile_matched_task_count_from_snapshots(
     tasks: &[crate::autotune::observation::ActiveTaskSnapshot],
     profile: &Profile,
@@ -36,19 +58,53 @@ pub fn profile_matches_task(task: &TaskInfo, profile: &Profile) -> bool {
 }
 
 pub fn profile_rule_matches_task(task: &TaskInfo, rule: &ProfileRule) -> bool {
-    if !rule.match_class.is_empty() && !rule.match_class.contains(&task.class) {
-        return false;
+    profile_rule_match_evidence(task, rule).is_some()
+}
+
+pub(crate) fn profile_rule_match_evidence(
+    task: &TaskInfo,
+    rule: &ProfileRule,
+) -> Option<RuleMatchEvidence> {
+    let rule_had_match_class = !rule.match_class.is_empty();
+    let rule_had_match_comm = !rule.match_comm.is_empty();
+    let matched_class = rule_had_match_class && rule.match_class.contains(&task.class);
+
+    if rule_had_match_class && !matched_class {
+        return None;
     }
 
-    if !rule.match_comm.is_empty() {
-        let comms = [&task.comm, task.process_comm.as_str()];
-        return rule
-            .match_comm
-            .iter()
-            .any(|pattern| comms.iter().any(|comm| pattern.matches(comm)));
+    let mut comm_hits = Vec::new();
+    if rule_had_match_comm {
+        for (pattern_index, pattern) in rule.match_comm.iter().enumerate() {
+            if pattern.matches(&task.comm) {
+                comm_hits.push(CommPatternHit {
+                    field: CommField::TaskComm,
+                    pattern_index,
+                    pattern: pattern.raw().to_owned(),
+                    value: task.comm.clone(),
+                });
+            }
+            if pattern.matches(&task.process_comm) {
+                comm_hits.push(CommPatternHit {
+                    field: CommField::ProcessComm,
+                    pattern_index,
+                    pattern: pattern.raw().to_owned(),
+                    value: task.process_comm.clone(),
+                });
+            }
+        }
+
+        if comm_hits.is_empty() {
+            return None;
+        }
     }
 
-    true
+    Some(RuleMatchEvidence {
+        matched_class,
+        rule_had_match_class,
+        rule_had_match_comm,
+        comm_hits,
+    })
 }
 
 pub(super) fn matching_profile_rule<'a>(
@@ -62,29 +118,14 @@ pub(super) fn matching_profile_rule_with_index<'a>(
     task: &TaskInfo,
     profile: &'a Profile,
 ) -> Option<(usize, &'a ProfileRule)> {
-    for (index, rule) in profile.rules.iter().enumerate() {
-        if !rule.match_class.is_empty() && !rule.match_class.contains(&task.class) {
-            continue;
-        }
+    matching_profile_rule_with_evidence(task, profile).map(|(index, rule, _)| (index, rule))
+}
 
-        if !rule.match_comm.is_empty() {
-            let comms = [&task.comm, task.process_comm.as_str()];
-            let mut comm_match = false;
-
-            for pattern in &rule.match_comm {
-                if comms.iter().any(|comm| pattern.matches(comm)) {
-                    comm_match = true;
-                    break;
-                }
-            }
-
-            if !comm_match {
-                continue;
-            }
-        }
-
-        return Some((index, rule));
-    }
-
-    None
+pub(crate) fn matching_profile_rule_with_evidence<'a>(
+    task: &TaskInfo,
+    profile: &'a Profile,
+) -> Option<(usize, &'a ProfileRule, RuleMatchEvidence)> {
+    profile.rules.iter().enumerate().find_map(|(index, rule)| {
+        profile_rule_match_evidence(task, rule).map(|evidence| (index, rule, evidence))
+    })
 }

@@ -21,6 +21,7 @@ pub async fn dispatch(command: AppCommand) -> Result<(), StutterError> {
         AppCommand::Version(input) => misc::run_version_command(input),
         AppCommand::Restore(input) => restore::run_restore_command(input.dry_run),
         AppCommand::ApplyProfile(input) => misc::run_apply_profile_command(input).await,
+        AppCommand::ProfilePlan(input) => misc::run_profile_plan_command(input).await,
         AppCommand::InspectTree(input) => misc::run_inspect_tree_command(input),
         AppCommand::Summary(input) => report::run_summary_command(input),
         AppCommand::Validate(input) => report::run_validate_command(input),
