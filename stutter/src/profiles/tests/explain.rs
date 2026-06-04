@@ -11,7 +11,10 @@ use super::{
     },
     support::*,
 };
-use crate::process_tree::{ScanBudgetReport, TargetSnapshot};
+use crate::{
+    process_tree::{ScanBudgetReport, TargetSnapshot},
+    profiles::explain::CommFieldDto,
+};
 
 fn snapshot_from_tasks(tasks: Vec<TaskInfo>) -> TargetSnapshot {
     TargetSnapshot {
@@ -99,6 +102,84 @@ fn explain_distinguishes_task_comm_and_process_comm_matches() {
         Some(&1)
     );
     assert_eq!(rule.tasks[1].match_evidence.comm_hits[0].value, "Main");
+}
+
+#[test]
+fn explain_reports_process_comm_capture_with_different_thread_comm() {
+    let mut render = test_task(22, TaskClass::Helper, "RenderThread");
+    render.process_comm = "Main".to_owned();
+    let snapshot = snapshot_from_tasks(vec![render]);
+    let profile = Profile {
+        name: "process-comm-capture".to_owned(),
+        rules: vec![ProfileRule {
+            affinity: Some(CpuMask::parse("1-5").unwrap()),
+            nice: None,
+            ionice: None,
+            match_class: Vec::new(),
+            match_comm: vec![CompiledPattern::new("Main".to_owned()).unwrap()],
+        }],
+    };
+
+    let report = explain_profile_for_snapshot(
+        &profile,
+        &snapshot,
+        ProfileExplainOptions::default(),
+        |_| Ok(CpuMask::parse("0").unwrap()),
+        |_| Ok(0),
+        |_| Ok(0),
+    )
+    .unwrap();
+    let rule = &report.rules[0];
+
+    assert_eq!(rule.matched_tasks, 1);
+    assert_eq!(rule.match_basis.process_comm, 1);
+    assert_eq!(rule.match_basis.task_comm, 0);
+    assert_eq!(
+        rule.broad_process_comm_captured_thread_comms
+            .get("RenderThread"),
+        Some(&1)
+    );
+    assert_eq!(
+        rule.tasks[0].match_evidence.comm_hits[0].field,
+        CommFieldDto::ProcessComm
+    );
+}
+
+#[test]
+fn explain_reports_task_comm_match_without_broad_process_capture() {
+    let mut render = test_task(23, TaskClass::Helper, "RenderThread");
+    render.process_comm = "Main".to_owned();
+    let snapshot = snapshot_from_tasks(vec![render]);
+    let profile = Profile {
+        name: "task-comm-capture".to_owned(),
+        rules: vec![ProfileRule {
+            affinity: Some(CpuMask::parse("1-5").unwrap()),
+            nice: None,
+            ionice: None,
+            match_class: Vec::new(),
+            match_comm: vec![CompiledPattern::new("RenderThread".to_owned()).unwrap()],
+        }],
+    };
+
+    let report = explain_profile_for_snapshot(
+        &profile,
+        &snapshot,
+        ProfileExplainOptions::default(),
+        |_| Ok(CpuMask::parse("0").unwrap()),
+        |_| Ok(0),
+        |_| Ok(0),
+    )
+    .unwrap();
+    let rule = &report.rules[0];
+
+    assert_eq!(rule.matched_tasks, 1);
+    assert_eq!(rule.match_basis.task_comm, 1);
+    assert_eq!(rule.match_basis.process_comm, 0);
+    assert!(rule.broad_process_comm_captured_thread_comms.is_empty());
+    assert_eq!(
+        rule.tasks[0].match_evidence.comm_hits[0].field,
+        CommFieldDto::TaskComm
+    );
 }
 
 #[test]

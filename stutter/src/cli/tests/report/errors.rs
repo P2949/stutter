@@ -157,10 +157,7 @@ fn apply_profile_rejects_explain_without_dry_run() {
     ])
     .unwrap_err();
 
-    assert!(
-        err.to_string()
-            .contains("--explain is only supported with --dry-run")
-    );
+    assert!(err.to_string().contains("--explain requires --dry-run"));
 }
 
 #[test]

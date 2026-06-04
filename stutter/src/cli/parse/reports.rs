@@ -96,7 +96,7 @@ pub(super) fn parse_apply_profile_command(args: ApplyProfileArgs) -> anyhow::Res
         anyhow::bail!("--keep-applied requires --watch");
     }
     if args.explain && !args.dry_run {
-        anyhow::bail!("--explain is only supported with --dry-run");
+        anyhow::bail!("--explain requires --dry-run");
     }
     if args.explain && args.watch {
         anyhow::bail!("--explain cannot be combined with --watch");

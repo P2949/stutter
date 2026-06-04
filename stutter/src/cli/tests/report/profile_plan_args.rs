@@ -59,21 +59,30 @@ fn apply_profile_accepts_dry_run_explain_json() {
 }
 
 #[test]
-fn parses_profile_plan_command() {
-    let command = parse_report_command([
+fn apply_profile_rejects_explain_without_dry_run() {
+    let err = parse_report_command([
         "stutter",
-        "profile-plan",
+        "apply-profile",
         "--tree-pid",
         "42",
         "--profile",
         "/tmp/profile.toml",
-        "--json",
-        "--output",
-        "/tmp/profile-plan.json",
-        "--top",
-        "4",
-        "--highlight-comm",
-        "dxvk",
+        "--explain",
+    ])
+    .unwrap_err();
+
+    assert!(err.to_string().contains("--explain requires --dry-run"));
+}
+
+#[test]
+fn parses_profile_plan_command_with_defaults() {
+    let command = parse_report_command([
+        "stutter",
+        "profile-plan",
+        "--tree-pid",
+        "123",
+        "--profile",
+        "profiles.toml",
     ])
     .unwrap();
 
@@ -81,10 +90,41 @@ fn parses_profile_plan_command() {
         panic!("expected profile-plan command");
     };
 
-    assert_eq!(input.tree_pid, 42);
-    assert_eq!(input.profile, PathBuf::from("/tmp/profile.toml"));
+    assert_eq!(input.tree_pid, 123);
+    assert_eq!(input.profile, PathBuf::from("profiles.toml"));
+    assert!(!input.json);
+    assert_eq!(input.output, None);
+    assert_eq!(input.top, 10);
+    assert!(input.highlight_comm.is_empty());
+}
+
+#[test]
+fn parses_profile_plan_command_with_json_output_and_highlight() {
+    let command = parse_report_command([
+        "stutter",
+        "profile-plan",
+        "--tree-pid",
+        "123",
+        "--profile",
+        "profiles.toml",
+        "--json",
+        "--output",
+        "/tmp/profile-plan.json",
+        "--top",
+        "20",
+        "--highlight-comm",
+        "RenderThread",
+    ])
+    .unwrap();
+
+    let AppCommand::ProfilePlan(input) = command else {
+        panic!("expected profile-plan command");
+    };
+
+    assert_eq!(input.tree_pid, 123);
+    assert_eq!(input.profile, PathBuf::from("profiles.toml"));
     assert!(input.json);
     assert_eq!(input.output, Some(PathBuf::from("/tmp/profile-plan.json")));
-    assert_eq!(input.top, 4);
-    assert_eq!(input.highlight_comm, vec!["dxvk"]);
+    assert_eq!(input.top, 20);
+    assert_eq!(input.highlight_comm, vec!["RenderThread"]);
 }
