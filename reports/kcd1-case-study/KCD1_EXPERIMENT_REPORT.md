@@ -1,5 +1,4 @@
-# Evidence-Based Linux Game Tuning Case Study:
-# Kingdom Come: Deliverance 1 under Proton
+# Evidence-Based Linux Game Tuning Case Study: Kingdom Come: Deliverance 1 under Proton
 
 Using scheduler-aware eBPF profiling to evaluate a CPU-affinity tuning hypothesis
 
