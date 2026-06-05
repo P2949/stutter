@@ -161,6 +161,8 @@ The proper A/B tuning run, `kcd1-affinity-02`, tested both profiles with five va
 | 4 | 26,408 | 38,806 | +46.9% | baseline |
 | 5 | 32,994 | 98,461 | +198.4% | baseline |
 
+Iteration 5 was the most extreme tuned-profile outlier. It raised the tuned profile's mean diagnostic score substantially, so the median score is the more stable condition-level summary. The conclusion does not depend only on this outlier: `baseline-online` still had a lower diagnostic score in all five paired iterations.
+
 Profile-level summary:
 
 | Profile | Valid runs | Median diagnostic score | Mean diagnostic score | Median frame P99 | Mean scheduler >5ms |
@@ -182,7 +184,7 @@ A/B evidence: `reports/kcd1-case-study/tune/kcd1-affinity-02/tuning_summary.json
 
 The profile likely reduced useful CPU capacity. KCD1/DXVK/Wine had many active worker, render, streaming, physics, audio, and helper threads. Moving the game workload from all 12 logical CPUs to `1-5,7-11` gave it only 10 logical CPUs, while reserving `0,6` for Gamescope. On this 6-core/12-thread CPU, that trade-off appears to have increased scheduling pressure more than it helped presentation isolation.
 
-This is an interpretation, not a proven causal mechanism. The evidence supporting the interpretation is:
+This is an interpretation, not a demonstrated causal mechanism. The evidence supporting the interpretation is:
 
 - `profile-plan` shows important KCD worker/render/DXVK threads were moved.
 - The same categories of threads appear in spike evidence.
@@ -232,7 +234,11 @@ A small exploratory comparison tested the stripped-down clean stack against the 
 | clean | 3 | 19.3419ms | 26.2893ms | 29.8236ms | 65.7529ms | 0.428% | default |
 | personal-stack | 3 | 20.1032ms | 28.3838ms | 32.4916ms | 91.134ms | 0.826% | `scx_lavd` |
 
+The `Max` column is the median of each condition's per-run maximum frametime, not the single worst frame observed across the condition. The worst individual personal-stack run was `personal-stack-02`, with a 181.596ms maximum frametime and a 4.814% outlier rate.
+
 The personal stack did not show a clear advantage in this small sample. The value of this add-on is realism: `stutter` can capture and compare a complex player-used configuration bundle without overclaiming causality.
+
+As documented in `reports/kcd1-case-study/realworld-stack/ARTIFACT_NOTES.md`, the raw MangoHud CSV sources for `clean-01` and `clean-02` were not preserved when the archive was finalized. Their frame timing had already been ingested into the committed analysis JSON files, so the runs remain usable for this exploratory comparison, but the missing raw CSVs are a transparency limitation.
 
 Exploratory evidence: `reports/kcd1-case-study/realworld-stack/realworld-stack-summary.csv`, `reports/kcd1-case-study/realworld-stack/README.md`, and `reports/kcd1-case-study/realworld-stack/setup/launch-options.md`.
 

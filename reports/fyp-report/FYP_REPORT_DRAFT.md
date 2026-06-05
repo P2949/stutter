@@ -513,6 +513,12 @@ The first-match-wins rule is important because a broad early match can prevent
 later, more specific rules from applying. That is why the report treats profile
 explainability as necessary rather than optional.
 
+> **Profile matching caveat:** Profile rules are first-match-wins. A broad rule
+> such as `match_comm = ["Main"]` can match many worker threads through
+> `process_comm = "Main"` before later, more specific rules are considered.
+> This is why `profile-plan` or `apply-profile --dry-run --explain` should be
+> run before applying or tuning a profile.
+
 ### 6.6 Explainability Model
 
 The explainability model reports what a profile would do before it is applied.
@@ -756,6 +762,12 @@ Table 6. A/B per-iteration diagnostic score:
 | 4 | 26,408 | 38,806 | +46.9% |
 | 5 | 32,994 | 98,461 | +198.4% |
 
+Iteration 5 was the most extreme tuned-profile outlier. It raised the tuned
+profile's mean diagnostic score substantially, so the median score is the more
+stable condition-level summary. The conclusion does not depend only on this
+outlier: `baseline-online` still had a lower diagnostic score in all five
+paired iterations.
+
 Table 7. Profile-level summary:
 
 This table summarizes the same `tuning_summary.json` artifact at profile level.
@@ -789,6 +801,12 @@ statistics in `tuning_summary.json`.
 
 The generated recommendation also estimated that some metrics may require more
 runs per side to detect a 10% movement at the observed noise level:
+
+Because the generated recommendation selected `baseline-online` as the
+lower-scoring profile, these run-count estimates should be read as
+noise/sensitivity estimates from the recommendation artifact rather than as a
+claim that the tuned profile would validate with that exact number of additional
+runs.
 
 Table 8. Sample-size estimates:
 
@@ -842,6 +860,11 @@ bundle comparison and not a single-variable causal test.
 | clean | 3 | 19.3419ms | 26.2893ms | 29.8236ms | 65.7529ms | 0.428% | default |
 | personal-stack | 3 | 20.1032ms | 28.3838ms | 32.4916ms | 91.134ms | 0.826% | `scx_lavd` |
 
+The `Max` column is the median of each condition's per-run maximum frametime,
+not the single worst frame observed across the condition. The worst individual
+personal-stack run was `personal-stack-02`, with a 181.596ms maximum frametime
+and a 4.814% outlier rate.
+
 The personal stack did not show a clear advantage in this small sample. The
 value of the add-on is realism: `stutter` can capture and compare a complex
 player-used configuration bundle without overclaiming causality.
@@ -875,7 +898,7 @@ The tuned profile was not recommended because:
 
 The most plausible explanation is that reserving `0,6` for Gamescope removed
 too much useful scheduling capacity from KCD1/DXVK/Wine. That remains an
-interpretation, not a proven causal mechanism.
+interpretation, not a demonstrated causal mechanism.
 
 ### 9.3 What the Negative Result Demonstrates
 
@@ -1042,6 +1065,11 @@ Proton/Wine/Gamescope workload, produced a plausible CPU-affinity profile,
 tested it against `baseline-online`, and did not recommend it when the A/B data
 failed to support it. The experiment validates the workflow rather than the
 specific CPU-affinity tweak.
+
+The five-run A/B test was sufficient to avoid recommending this unsupported
+profile, but the generated sample-size estimates show that much larger run
+counts may be needed to estimate small tuning effects precisely in noisy
+open-world workloads.
 
 The project therefore succeeds not by finding a magic KCD1 tweak, but by
 showing that a Linux game-tuning tool can behave conservatively: collect
@@ -1251,7 +1279,7 @@ Table A1. Artifact map:
 | `reports/kcd1-case-study/CASE_STUDY_SUMMARY.md` | KCD1 archive summary |
 | `reports/kcd1-case-study/ARTIFACT_INDEX.md` | Archive map |
 | `reports/kcd1-case-study/setup/system-info.txt` | Machine and session context |
-| `reports/kcd1-case-study/runs/baseline-01` | Baseline run directory example |
+| `reports/kcd1-case-study/runs/baseline-*` | Formal baseline run directories |
 | `reports/kcd1-case-study/tune/kcd1-affinity-02/tuning_summary.json` | Primary A/B profile comparison |
 | `reports/kcd1-case-study/tune/kcd1-affinity-02/tuning_recommendation.json` | Recommendation and uncertainty data |
 | `reports/kcd1-case-study/results/kcd1-fix-validation.json` | Secondary fix-validation artifact; status is `InvalidExperiment`, not the primary tuned-profile conclusion |

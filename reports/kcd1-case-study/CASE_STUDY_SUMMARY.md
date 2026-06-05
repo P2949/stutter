@@ -17,7 +17,7 @@ The purpose of this case study is not to show that `stutter` automatically repai
 - The workload is noisy enough that small tuning effects may require roughly 18-30+ runs per condition, depending on the metric; the five-run A/B test is enough to show the workflow and avoid a false positive, but not enough to claim precise small-effect estimates.
 - The advisor generated a plausible, reversible CPU-affinity hypothesis, but A/B tuning did not validate the tested profile.
 - In the proper A/B tune run, `baseline-online` had a lower primary diagnostic score than the tuned affinity profile in all five paired iterations.
-- The non-validation result is valuable: it shows that `stutter` can prevent a plausible Linux tuning tweak from being mistaken for a proven improvement.
+- The non-validation result is valuable: it shows that `stutter` can prevent a plausible Linux tuning tweak from being mistaken for a validated improvement.
 - A measurement-quality pilot found that wakeup replacement counters were not ring-buffer reserve failures and were not reduced by `--ebpf-wakeup-map-factor 4`.
 - A follow-up profile-explainability implementation now allows `stutter` to report which profile rules match which tasks, classes, `comm`, `process_comm`, match source, and proposed CPU masks before a profile is applied.
 - An exploratory real-world stack add-on compared the stripped-down measurement setup against the author's normal gaming configuration bundle with `scx_lavd`; in this small sample, the personal stack did not show a clear frame-pacing advantage.
@@ -96,7 +96,7 @@ The baseline set is valid but noisy. Median frametime varied from about 16.3ms t
 
 The advisor consistently produced a scoped tuning hypothesis from the baseline runs. All five baseline advisor outputs returned `TryProfileTuning` with `Medium` confidence and suggested a reversible local CPU-affinity profile experiment.
 
-The evidence varied by run, but the recurring explanation was scheduler delay affecting game/proton threads such as `wineserver` or `Main`, with SCX disabled. This is a useful case-study result: the tool produced a concrete hypothesis, but did not claim the hypothesis was already proven.
+The evidence varied by run, but the recurring explanation was scheduler delay affecting game/proton threads such as `wineserver` or `Main`, with SCX disabled. This is a useful case-study result: the tool produced a concrete hypothesis, but did not treat the hypothesis as already validated.
 
 ## Tested CPU-affinity hypothesis
 
@@ -197,6 +197,12 @@ Lower diagnostic score is better. The tuned profile was worse on the primary dia
 | 4 | 26,408 | 38,806 | +46.9% | baseline-online |
 | 5 | 32,994 | 98,461 | +198.4% | baseline-online |
 
+Iteration 5 was the most extreme tuned-profile outlier. It raised the tuned
+profile's mean diagnostic score substantially, so the median score is the more
+stable condition-level summary. The conclusion does not depend only on this
+outlier: `baseline-online` still had a lower diagnostic score in all five paired
+iterations.
+
 A compact visual summary of the median diagnostic scores makes the profile non-validation visible at a glance:
 
 ```text
@@ -206,7 +212,7 @@ tuned-profile median:   38,806  [================    ]  +80.2% worse
 
 Frame P99 was mixed, but the primary scheduler-aware diagnostic score did not support the tuned profile. The correct conclusion is:
 
-> The tested CPU-affinity profile was not validated and should not be recommended on the current evidence for this route and system. The tool prevented a plausible tuning hypothesis from being mistaken for a proven improvement.
+> The tested CPU-affinity profile was not validated and should not be recommended on the current evidence for this route and system. The tool prevented a plausible tuning hypothesis from being mistaken for a validated improvement.
 
 This is a good result for the FYP narrative. The project is about evidence-based validation, not forcing a positive tuning result.
 
@@ -218,7 +224,7 @@ The profile-plan artifact shows that the tuned profile did not simply miss the i
 
 The more likely explanation is that the profile reduced the game's available CPU set from all 12 logical CPUs to 10 logical CPUs while KCD1/DXVK/Wine had many active worker, render, streaming, physics, and audio threads. Reserving CPU pair `0,6` for Gamescope was plausible, but on this 6-core/12-thread machine the reduced scheduling capacity appears to have outweighed any presentation-thread isolation benefit.
 
-This is an interpretation, not a proven causal mechanism. It is still useful because it is grounded in the profile-plan and A/B evidence: the same worker/render threads appeared in the spike evidence, but the tuned profile produced worse diagnostic scores under the tested route and configuration.
+This is an interpretation, not a demonstrated causal mechanism. It is still useful because it is grounded in the profile-plan and A/B evidence: the same worker/render threads appeared in the spike evidence, but the tuned profile produced worse diagnostic scores under the tested route and configuration.
 
 ## Statistical interpretation
 
@@ -269,6 +275,11 @@ All six exploratory runs passed the basic validity gates: full-duration recordin
 |---|---:|---:|---:|---:|---:|---:|---|
 | `clean` | 3 | 19.3419ms | 26.2893ms | 29.8236ms | 65.7529ms | 0.428% | default |
 | `personal-stack` | 3 | 20.1032ms | 28.3838ms | 32.4916ms | 91.134ms | 0.826% | `scx_lavd` |
+
+The `Max` column is the median of each condition's per-run maximum frametime,
+not the single worst frame observed across the condition. The worst individual
+personal-stack run was `personal-stack-02`, with a 181.596ms maximum frametime
+and a 4.814% outlier rate.
 
 In this small sample, the personal stack did not show a clear frame-pacing advantage over the clean stack. Its condition-level median was worse on median frametime, P95, P99, max frametime, and outlier percentage. The strongest personal-stack outlier was `personal-stack-02`, with P99 `37.8372ms`, max frametime `181.596ms`, and outlier rate `4.814%`.
 

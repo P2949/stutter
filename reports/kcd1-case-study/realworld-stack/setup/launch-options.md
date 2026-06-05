@@ -16,7 +16,7 @@ Properties:
 - 100 Hz output
 - 100 FPS MangoHud cap
 - MangoHud logging enabled
-- fixed `+exec user.cfg`
+- kept `+exec user.cfg`
 - no RADV experimental flags
 - no FSR/FSR4
 - no gamemode
@@ -46,7 +46,7 @@ Properties:
 - Wine/Proton flags enabled
 - mimalloc and gamemode enabled
 - MangoHud logging enabled
-- fixed `+exec user.cfg`
+- kept `+exec user.cfg`
 
 Steam launch options:
 
@@ -80,4 +80,4 @@ with `sched_ext` disabled.
 This add-on intentionally represents a realistic player-used configuration
 bundle. It should be used to show that `stutter` can capture and compare a
 real-world setup, not to claim that any single scheduler, driver flag, Wine flag,
-allocator, or Gamescope option caused the observed result.
+allocator, or Gamescope option explains the observed result by itself.
