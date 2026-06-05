@@ -1286,6 +1286,7 @@ Table A1. Artifact map:
 | `reports/kcd1-case-study/profiles/kcd1-affinity-profile-plan-summary.json` | Profile explainability summary |
 | `reports/kcd1-case-study/drop-counter-pilot/mapfactor-4-comparison.txt` | Measurement-quality investigation |
 | `reports/kcd1-case-study/realworld-stack/realworld-stack-summary.csv` | Exploratory clean vs personal-stack comparison |
+| `reports/kcd1-case-study/realworld-stack/ARTIFACT_NOTES.md` | Notes on missing raw MangoHud CSVs for two clean exploratory runs |
 | `docs/TUNING_WORKFLOW.md` | Trusted diagnosis-to-validation loop |
 | `docs/SAFETY.md` | Safety, rollback, and privilege model |
 | `docs/FULL_SYSTEM_WATCHER_ARCHITECTURE.md` | Observer/planner/action-runner architecture |
