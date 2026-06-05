@@ -19,6 +19,7 @@ The purpose of this case study is not to prove that `stutter` automatically fixe
 - The non-validation result is valuable: it shows that `stutter` can prevent a plausible Linux tuning tweak from being mistaken for a proven improvement.
 - A measurement-quality pilot found that wakeup replacement counters were not ring-buffer reserve failures and were not reduced by `--ebpf-wakeup-map-factor 4`.
 - A follow-up profile-explainability implementation now allows `stutter` to report which profile rules match which tasks, classes, `comm`, `process_comm`, match source, and proposed CPU masks before a profile is applied.
+- An exploratory real-world stack add-on compared the stripped-down measurement setup against the author's normal gaming configuration bundle with `scx_lavd`; in this small sample, the personal stack did not show a clear frame-pacing advantage.
 
 ## Experiment scope
 
@@ -238,6 +239,33 @@ Report wording:
 
 > The case study exposed a measurement-quality nuance in the profiler. KCD1/Proton produced high wakeup replacement pressure, but ring-buffer reserve failures remained zero. Increasing wakeup-map capacity did not reduce the replacement rate, suggesting the counter may represent repeated wakeup churn rather than ordinary event loss. Future work should distinguish harmful measurement loss from benign replacement of superseded wakeup timestamps.
 
+## Exploratory add-on: personal gaming stack
+
+As a realism check, the case study also recorded a small exploratory comparison between the stripped-down clean measurement setup and the author's normal gaming configuration bundle.
+
+This add-on compared:
+
+- `clean`: stripped-down measurement launch configuration, default scheduler, 1920x1080 through Gamescope, 100 Hz output, and 100 FPS MangoHud cap.
+- `personal-stack`: the author's usual launch-option bundle plus `scx_lavd` using the recorded aggressive gaming flags.
+
+This is not a causal test of `scx_lavd`, Gamescope FSR, RADV/Mesa options, Wine/Proton options, allocator choice, gamemode, or any individual launch flag. The personal stack changes many variables at once, so the result is best treated as a realistic configuration-bundle comparison.
+
+All six exploratory runs passed the basic validity gates: full-duration recording, `max_duration_reached`, non-zero frame count, `monotonic_observed` frame timestamp alignment, `Medium` data quality, and zero ring-buffer reserve failures.
+
+| Condition | Runs | Median frametime | P95 | P99 | Max | Median outlier % | Scheduler |
+|---|---:|---:|---:|---:|---:|---:|---|
+| `clean` | 3 | 19.3419ms | 26.2893ms | 29.8236ms | 65.7529ms | 0.428% | default |
+| `personal-stack` | 3 | 20.1032ms | 28.3838ms | 32.4916ms | 91.134ms | 0.826% | `scx_lavd` |
+
+In this small sample, the personal stack did not show a clear frame-pacing advantage over the clean stack. Its condition-level median was worse on median frametime, P95, P99, max frametime, and outlier percentage. The strongest personal-stack outlier was `personal-stack-02`, with P99 `37.8372ms`, max frametime `181.596ms`, and outlier rate `4.814%`.
+
+The correct interpretation is restrained:
+
+> The personal gaming stack was captured successfully, but this exploratory sample did not show a clear frame-pacing improvement over the stripped-down measurement setup. Because the personal stack changes many variables at once, this result should not be used to attribute causality to `scx_lavd` or any individual launch flag. It is useful as evidence that `stutter` can capture and compare realistic player-used configuration bundles without turning the result into an unsupported tuning claim.
+
+Artifact note: the raw MangoHud CSV used by `clean-01` and `clean-02` was no longer available when the archive was finalized. Their frame timing data had already been ingested into the committed `stutter` analysis JSON files, so the runs remain usable for this exploratory comparison. This limitation is documented in `reports/kcd1-case-study/realworld-stack/ARTIFACT_NOTES.md`.
+
+
 ## Current conclusion
 
 This case study is already useful for the report:
@@ -250,6 +278,7 @@ This case study is already useful for the report:
 6. The tested profile was not validated and should not be recommended on the current evidence; `baseline-online` remained best.
 7. A drop-counter pilot clarified that wakeup replacements were not ring-buffer drops and were not fixed by increasing wakeup-map capacity.
 8. A follow-up profile-explainability feature now reports rule-level task matches, classes, `comm`, `process_comm`, and proposed masks so future tuning hypotheses are easier to audit before collecting A/B data.
+9. An exploratory real-world stack add-on shows that `stutter` can capture and compare a realistic player-used configuration bundle, while still avoiding causal claims when many variables change at once.
 
 The report should frame this as an evidence-based validation case study, not as a successful performance tweak. The most defensible conclusion is:
 
