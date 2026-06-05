@@ -1,7 +1,7 @@
 # FYP Report Planning Notes
 
 These notes keep the FYP report grounded in evidence before prose polish. The
-main report draft is `FYP_REPORT_DRAFT.md`.
+main report is `FYP_REPORT.md`.
 
 ## Core Framing
 
@@ -202,16 +202,14 @@ Include:
 
 ## References Status
 
-External references have been added to `FYP_REPORT_DRAFT.md` for eBPF, Linux
+External references have been added to `FYP_REPORT.md` for eBPF, Linux
 scheduling, Proton/Wine/DXVK/Gamescope, MangoHud, Mesa/Vulkan, and measurement
 methodology.
 
-Before final submission, verify that:
-- the citation style matches the course requirement;
-- all background claims that need citations have inline references;
-- access dates and URLs are formatted consistently;
-- any added discussion of bootstrap, sample-size estimation, or statistical
-  power has an appropriate methodology reference.
+The final report uses a consistent IEEE-style numeric web-reference format with
+uniform `Jun. 5, 2026` access dates. For future edits, preserve inline
+references on background claims and add methodology references for any new
+discussion of bootstrap, sample-size estimation, or statistical power.
 
 ## Evidence Matrix
 
@@ -225,4 +223,4 @@ Before final submission, verify that:
 | Recommendation was `NeedsRetest` | `reports/kcd1-case-study/tune/kcd1-affinity-02/tuning_recommendation.json` |
 | Drop counter was not ringbuf failure | `reports/kcd1-case-study/drop-counter-pilot/mapfactor-4-comparison.txt` |
 | Personal stack is exploratory | `reports/kcd1-case-study/realworld-stack/README.md`, `reports/kcd1-case-study/realworld-stack/setup/launch-options.md` |
-| Build/test flow exists | `reports/kcd1-case-study/setup/build-check.txt`, validation commands in `FYP_REPORT_DRAFT.md` |
+| Build/test flow exists | `reports/kcd1-case-study/setup/build-check.txt`, validation commands in `FYP_REPORT.md` |
