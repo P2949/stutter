@@ -41,8 +41,13 @@ Only the parts of `stutter` that matter for this experiment are summarised here:
 Experiment pipeline:
 
 ```text
-Record baseline -> Diagnose -> Generate hypothesis -> Explain profile -> A/B tune -> Recommend / needs retest / decline -> Interpret
+Record baseline -> Diagnose -> Generate hypothesis -> A/B tune -> Recommend / needs retest / decline -> Interpret
+                                      |
+                                      v
+                         Profile explainability follow-up
 ```
+
+In this case study, the profile-plan explainability pass was added as a follow-up after the A/B run exposed the need to audit which rules matched which KCD1 threads. Future studies should run it before tuning.
 
 The important property is that the tool does not stop at producing a plausible profile. It measures the profile against an online-baseline profile and can decline to recommend the tuning change.
 
@@ -260,7 +265,7 @@ The most useful academic angle is that the result is negative for the tuning twe
 
 This case study validates the workflow rather than the tuning tweak. `stutter` successfully captured a complex KCD1/Proton workload, generated a plausible CPU-affinity hypothesis, tested it with repeated A/B measurements, and declined to recommend the hypothesis when the evidence did not support it. That ability to avoid false-positive tuning recommendations is central to reliable Linux game-performance tuning.
 
-## Appendix A: Exact Commands
+## Appendix A: Command Shapes and Validation Commands
 
 The case-study archive records command shapes rather than every exact shell invocation. PIDs were live process-tree roots and were re-detected before recording.
 
