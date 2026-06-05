@@ -207,3 +207,17 @@ The final submitted report should add external references for:
 - Proton and Wine.
 - Frame pacing and frametime analysis.
 - Experimental benchmarking or A/B methodology.
+
+## Evidence Matrix
+
+| Claim | Evidence |
+| --- | --- |
+| Five formal baselines were valid | `reports/kcd1-case-study/runs/baseline-*-analysis.json`, postcheck files |
+| Frames were ingested | `reports/kcd1-case-study/mangohud/baseline-*.csv`, `frame_correlation.json` artifacts |
+| Timestamp alignment was monotonic | `reports/kcd1-case-study/CASE_STUDY_SUMMARY.md`, baseline analysis artifacts |
+| Profile matched key KCD threads | `reports/kcd1-case-study/profiles/kcd1-affinity-profile-plan-summary.json`, full profile-plan JSON |
+| `baseline-online` had lower score in all A/B iterations | `reports/kcd1-case-study/tune/kcd1-affinity-02/tuning_summary.json` |
+| Recommendation was `NeedsRetest` | `reports/kcd1-case-study/tune/kcd1-affinity-02/tuning_recommendation.json` |
+| Drop counter was not ringbuf failure | `reports/kcd1-case-study/drop-counter-pilot/mapfactor-4-comparison.txt` |
+| Personal stack is exploratory | `reports/kcd1-case-study/realworld-stack/README.md`, `reports/kcd1-case-study/realworld-stack/setup/launch-options.md` |
+| Build/test flow exists | `reports/kcd1-case-study/setup/build-check.txt`, validation commands in `FYP_REPORT_DRAFT.md` |

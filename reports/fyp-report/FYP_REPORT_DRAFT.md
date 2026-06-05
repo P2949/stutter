@@ -1,432 +1,633 @@
 # Evidence-Based Linux Game-Performance Tuning with `stutter`
 
-## Abstract
+## 1. Abstract
 
-Linux game performance tuning is often driven by anecdote: players change CPU
-affinity, scheduler settings, compositor options, Wine/Proton flags, or driver
-settings and judge the result from short play sessions or average FPS. This
-project explores a different approach: an evidence-based Linux game-performance
-tuning tool that collects scheduler, frame-timing, process-tree, GPU, and data
-quality evidence before making tuning recommendations. The prototype, `stutter`,
-uses scheduler-aware eBPF profiling, structured artifacts, advisor-generated
-hypotheses, reversible tuning profiles, and repeated A/B validation to decide
-whether a proposed change is supported.
+Linux game-performance tuning is often based on anecdotal tweaks and short play
+sessions. This project presents `stutter`, a prototype Linux profiling and
+tuning tool that combines eBPF scheduler evidence, process-tree tracking,
+MangoHud frame timing, structured artifacts, guarded tuning hypotheses, and
+repeated A/B validation. The tool records a workload, analyses scheduler and
+frame-pacing evidence, proposes scoped tuning experiments, explains which tasks
+a profile would affect, and declines to recommend changes that are not
+supported by repeated measurement.
 
-The main evaluation is a real Kingdom Come: Deliverance 1 workload under
-GE-Proton10-34, Gamescope, and Sway/Wayland. `stutter` captured valid baseline
-runs, generated a plausible CPU-affinity hypothesis, tested it against an
-online-baseline profile, and declined to recommend the tuned profile when the
-A/B evidence did not support it. The tuned profile was not validated:
-`baseline-online` had a lower primary diagnostic score in all five paired
-iterations. This negative tuning result is the central positive result of the
-project: the tool completed the evidence loop and avoided a false-positive
-tuning recommendation.
+The prototype is evaluated through a case study on Kingdom Come: Deliverance 1
+under GE-Proton10-34 on Wayland/Gamescope. The case study tested a CPU-affinity
+hypothesis that moved game/Wine tasks to CPUs `1-5,7-11` and Gamescope/runtime
+tasks to CPUs `0,6`. Across five paired A/B iterations, the online baseline had
+a lower primary diagnostic score than the tuned profile in every iteration. The
+profile was therefore not validated and should not be recommended on the
+current evidence.
 
-## 1. Introduction
+The result demonstrates the value of evidence-based tuning: the tool did not
+produce a general Linux performance tweak, but it successfully prevented a
+plausible false-positive recommendation in a noisy real-world workload.
 
-Linux game performance problems are not only average-FPS problems. A game can
-report a reasonable mean frame rate while still feeling uneven because of frame
-pacing spikes, p99 frametime regressions, scheduler delay, presentation stalls,
-or noisy background work. These effects are especially visible in complex
-Proton/Wine workloads, where a single game session may involve the game process,
-Wine helper processes, Gamescope, Steam runtime tasks, driver work, and display
-presentation paths.
+## 2. Introduction
 
-Manual tuning is common in this environment. Players try CPU-affinity masks,
-custom schedulers, launch options, compositor changes, memory allocators, and GPU
-driver flags. Some changes may help under some workloads, but short subjective
-tests are weak evidence. A tuning workflow that accepts every plausible story is
-dangerous because noisy workloads can make unsupported changes look convincing.
+### 2.1 Problem Statement
 
-The goal of this project is to build and evaluate `stutter`, a Linux
-game-performance profiling and tuning prototype that supports evidence-based
-tuning rather than magic tweaks. The tool collects runtime evidence, produces
-scoped hypotheses, guards system-changing experiments behind policy, preflight
-checks, rollback support where available, and explicit validation, and reports
-when evidence is not strong enough to recommend a change.
+Linux game performance is shaped by many interacting layers: the kernel
+scheduler, CPU topology, compositor, GPU driver, Wine/Proton runtime, Gamescope,
+MangoHud, Steam runtime processes, and the game engine itself. A user may see
+acceptable average FPS while still experiencing uneven frame pacing, p99
+frametime spikes, audio or input disruption, or presentation stalls. Average
+FPS is therefore an incomplete measure of smoothness.
+
+Linux gaming communities often respond to these issues with tuning advice:
+change CPU affinity, change scheduler settings, add launch flags, change
+compositor behavior, alter memory allocator choices, or use driver-specific
+options. Some of this advice may be useful in a particular setup. The problem
+is that it is rarely validated under controlled conditions, and noisy
+open-world games can make a weak change appear helpful after only one run.
+
+This project addresses that gap by treating tuning advice as a testable
+hypothesis. A tool should collect evidence, make a scoped proposal, explain
+what the proposal would change, test it repeatedly, and refuse to recommend it
+when the evidence does not support the change.
+
+### 2.2 Project Aim
+
+The aim is to build and evaluate a prototype that turns Linux game-tuning
+advice into a measurable workflow. The prototype, `stutter`, is not intended to
+be a general Linux gaming tweak. It is an evidence tool: record, diagnose,
+propose, explain, test, and decline unsupported recommendations.
+
+### 2.3 Research Question
 
 The research question is:
 
-> Can a Linux game-performance tool collect enough evidence from a real Proton
-> workload to generate, test, and validate or decline to recommend a tuning
-> hypothesis?
+> Can a Linux profiling prototype collect enough evidence from a real Proton
+> game workload to generate, explain, and validate or decline to recommend a
+> scoped tuning hypothesis?
 
-The main answer from the evaluation is yes, with an important qualification. In
-the KCD1 case study, the specific CPU-affinity hypothesis was not validated and
-should not be recommended on current evidence. That is still a successful
-workflow result because the project is designed to avoid unsupported
-recommendations.
+This wording matters. The goal is not only to find improvements. A responsible
+tool must also avoid recommending a plausible tweak when repeated measurements
+do not support it.
 
-## 2. Background
+### 2.4 Contributions
 
-### 2.1 Runnable Latency
+The project makes the following contributions:
 
-`stutter` measures scheduler runnable latency:
+- A scheduler-aware recording pipeline using Rust and Aya eBPF.
+- Frame-timing correlation using MangoHud CSV data.
+- Process-tree and task classification for Proton/Wine/Gamescope workloads.
+- An advisor and tuning workflow for guarded profile experiments.
+- A profile explainability path for rule-level task matching.
+- A real KCD1 case study showing evidence-based non-validation of a plausible
+  CPU-affinity tweak.
+- A validation corpus and repository check flow that support regression testing
+  beyond the single case study.
+
+### 2.5 Report Structure
+
+The report first introduces the background concepts needed to understand game
+stutter, runnable latency, eBPF tracing, Proton process trees, CPU affinity, and
+A/B testing. It then describes the requirements, architecture, implementation,
+and experimental methodology of `stutter`. The central evaluation chapter
+presents the KCD1 case study. The final chapters separate results, discussion,
+limitations, future work, references, and reproducibility appendices.
+
+## 3. Background and Related Concepts
+
+### 3.1 Frame Pacing and Stutter
+
+Frames are perceived over time, so smoothness depends on consistency as well as
+average rate. Average FPS compresses a whole run into one number. Frametime
+instead measures how long each frame takes. Stutter often appears in p95, p99,
+maximum frametime, or outlier counts rather than in the mean.
+
+For example:
+
+```text
+At 100 FPS, the expected frame interval is about 10ms.
+A 50ms frame is a multi-frame stall even if the average FPS remains high.
+```
+
+This is why the project focuses on frame-pacing tails and outliers. A tuning
+change that leaves mean FPS similar but reduces p99 frametime could be useful.
+Conversely, a change that moves one frame metric in a favorable direction while
+increasing scheduler tail latency may not be safe to recommend.
+
+### 3.2 Linux Scheduling and Runnable Latency
+
+Linux tasks become runnable when they have work to do and are eligible to run
+on a CPU. Runnable latency is the delay between a task becoming runnable and
+actually receiving CPU time:
 
 ```text
 sched_wakeup timestamp -> sched_switch timestamp = runnable latency
 ```
 
-This asks whether a task was ready to run but waited before receiving CPU time.
-For games, this is useful because frame pacing can be affected by short periods
-where important game, render, audio, compositor, or runtime tasks are runnable
-but delayed.
+High runnable latency can matter for game threads, render threads, DXVK submit
+threads, streaming workers, audio threads, Wine helper processes, or compositor
+tasks. It should not be read as a claim that every visible stutter is
+scheduler-related. It does provide scheduler-visible evidence that can be
+combined with frame timing and process identity.
 
-Runnable latency is not the only possible source of stutter. GPU saturation,
-shader compilation, display presentation, I/O, compositor behavior, and game
-engine work can all matter. The point of measuring runnable latency is not to
-claim every frame issue is a scheduler issue. It is to add scheduler-visible
-evidence to a broader frame and process analysis.
+Games under Proton produce many Linux-visible tasks: the game process, Wine
+services, DXVK-related threads, Gamescope, Steam runtime processes, and helper
+tasks. That makes process-tree tracking and classification necessary. A single
+PID is usually not enough context for a useful tuning decision.
 
-### 2.2 Proton, Wine, and Process Trees
+### 3.3 eBPF as a Measurement Tool
 
-Windows games running through Proton are not simple single-process Linux
-applications. Wine, Proton, Steam runtime components, helper processes, DXVK
-threads, audio threads, streaming threads, and compositor processes can all be
-part of the active workload. A tuning tool therefore needs process-tree and task
-classification rather than only one PID.
+eBPF allows a user-space program to attach safe, verified programs to selected
+kernel events. For `stutter`, this makes scheduler-visible timing practical:
+events can be observed near the source rather than inferred through coarse
+user-space polling. The result is lower-latency evidence about wakeups, context
+switches, and related runtime behavior.
 
-This complexity is a motivation for `stutter`'s explicit targeting model.
-Commands can target a live process tree, record per-task evidence, and classify
-tasks by role. For the KCD1 case study, explicit `--tree-pid` targeting was used
-for the KCD1/Gamescope process tree.
+The same mechanism has limitations. eBPF programs use maps and buffers with
+finite capacity. Optional probes may not be available on every kernel or setup.
+Counters such as replacement counts or ring-buffer reserve failures need careful
+interpretation. The KCD1 drop-counter pilot later shows why this matters:
+non-zero wakeup replacement counters were not the same as ring-buffer event
+loss.
 
-### 2.3 Gamescope, MangoHud, and Frame Timing
+### 3.4 Proton, Wine, DXVK, and Gamescope
 
-Gamescope and MangoHud are common parts of technical Linux gaming setups.
-MangoHud can provide frame-timing logs, while Gamescope creates a more explicit
-presentation/runtime environment. `stutter` ingests MangoHud frame data so that
-scheduler evidence can be interpreted alongside frame pacing rather than in
-isolation.
+The KCD1 workload runs through a layered Linux gaming stack:
 
-Average FPS is insufficient for this project because the relevant problem is
-often tail behavior: p95 or p99 frametime, long frame outliers, and repeated
-small stalls that affect perceived smoothness. The KCD1 baseline measurements
-show this clearly: the route produced usable but noisy runs, with median
-frametime varying meaningfully between repeated measurements of the same route.
+```text
+Windows game -> Proton/Wine -> DXVK/Vulkan -> Mesa/RADV -> Wayland/Gamescope -> GPU/display
+```
 
-### 2.4 Why A/B Testing Matters
+Each layer can create tasks that appear in Linux scheduler evidence. Wine may
+spawn helper processes and `wineserver`. DXVK may create submit, queue, or
+shader-related threads. Gamescope contributes compositor/runtime work. Steam
+runtime tasks and launchers can also appear around the game.
 
-Real games are noisy workloads. Open-world traversal, asset streaming,
-background runtime behavior, shader state, and OS scheduling can vary between
-runs. A single tuned run cannot prove a tuning change helped. `stutter` treats
-recommendations as experiments: a diagnosis produces a structured hypothesis,
-and repeated comparable baseline/tuned measurements decide whether that
-hypothesis is supported.
+Thread naming is also complicated. A thread's `task.comm` can differ from its
+parent process `process_comm`. In the KCD1 profile, a broad
+`match_comm = ["Main"]` rule could match worker threads whose own names were
+`RenderThread`, `ClothingRaycast`, `Streaming Async`, or `dxvk-submit`, because
+those threads belonged to a process whose `process_comm` was `Main`. This is
+why profile explainability became important.
 
-The trusted loop is:
+### 3.5 CPU Affinity and Tuning Risks
+
+CPU affinity restricts where tasks are allowed to run. It can be useful when a
+workload benefits from separating classes of work, reducing interference, or
+keeping runtime tasks away from game threads. It can also reduce scheduler
+flexibility and effective CPU capacity.
+
+That trade-off is central to the KCD1 case study. On a 6-core/12-thread CPU,
+reserving one SMT pair (`0,6`) for Gamescope/runtime work removes a meaningful
+portion of the logical CPU set from the game side. A plausible profile can
+therefore become a harmful or unsupported change if it compresses a busy game
+process onto too few CPUs. This is exactly why the profile needed repeated
+validation instead of being recommended from diagnosis alone.
+
+### 3.6 Why Repeated A/B Testing Matters
+
+A/B testing compares a baseline and a candidate under similar conditions.
+Interleaving baseline and tuned runs helps reduce time drift, and repeated
+measurements help account for workload variance. This is especially important
+for open-world games where traversal, asset streaming, shader state, and
+background runtime work can vary.
+
+The trusted tuning loop in `stutter` is:
 
 ```text
 diagnosis candidate -> structured fix hypothesis -> validation experiment -> A/B evidence -> fix verdict
 ```
 
-This is the academic center of the project. The tool is valuable not because it
-always finds a positive tweak, but because it can refuse weak tuning stories.
+Confidence intervals, sample-size estimates, data-quality checks, and verdicts
+such as `NeedsRetest` prevent overclaiming. The correct result is not
+necessarily "validated". Sometimes the correct result is "not enough evidence"
+or "do not recommend this profile".
 
-## 3. Requirements and Design Goals
+## 4. Requirements and Design Goals
 
-### 3.1 Functional Requirements
+### 4.1 Functional Requirements
 
-The project needs to support the following functional behavior:
+The prototype is expected to:
 
-- Record scheduler, frame, process-tree, GPU, and quality evidence from a target
-  game or process tree.
-- Correlate scheduler-visible delay with frame timing and workload identity.
-- Classify relevant tasks and processes, including game, Wine, runtime,
-  compositor, and helper roles.
-- Generate scoped tuning hypotheses from recorded evidence.
-- Represent tuning changes as explicit profiles or fix plans.
-- Apply reversible low/medium-risk actions only through policy-controlled paths.
-- Compare baseline and tuned runs using repeated A/B measurements.
-- Report uncertainty, data quality, verdicts, and reasons instead of only a
-  single performance number.
-- Explain profile matching before or after an experiment so a user can audit
-  which rules matched which tasks.
+- Record scheduler, frame, process-tree, GPU, and data-quality evidence.
+- Associate evidence with a selected workload or process tree.
+- Ingest MangoHud frame logs.
+- Summarise performance and stutter evidence.
+- Classify relevant game, Wine, runtime, compositor, and helper tasks.
+- Generate tuning hypotheses from recorded evidence.
+- Represent candidate changes as profile or fix-plan artifacts.
+- Run profile-based A/B tuning experiments.
+- Produce reports and machine-readable artifacts.
+- Explain profile matching before or after application.
 
-### 3.2 Non-Functional Requirements
+### 4.2 Non-Functional Requirements
 
-The non-functional requirements are equally important:
+The prototype should also satisfy non-functional goals:
 
-- Safety first: observation and planning must not mutate the machine.
-- Explicit targeting: the user should know which process tree or workload is
-  being measured.
-- Reversibility: system-changing actions should have rollback state before
-  they are applied.
-- No false confidence: underpowered or noisy evidence must not be presented as
-  a validated fix.
-- Reproducible artifacts: runs, profiles, summaries, and recommendations should
-  be inspectable after the experiment.
-- Human auditability: recommendations should expose the evidence, the profile,
-  the verdict, and the uncertainty.
+- Low enough overhead for real game workloads.
+- Reproducible artifacts that can be inspected after the run.
+- Stable JSON, NDJSON, Markdown, and HTML outputs where applicable.
+- Clear diagnostics and cautious language.
+- A CLI usable by technical Linux users.
+- Robustness in noisy workloads.
+- Separation between observation, suggestion, and mutation.
 
-These requirements make a negative KCD1 tuning result look like success rather
-than failure. A tool designed to avoid unsupported recommendations should be
-judged partly by whether it can say "not validated" when a plausible tuning
-idea does not survive measurement.
+### 4.3 Safety Requirements
 
-## 4. System Architecture
+The safety model is a core design requirement, not an afterthought:
 
-`stutter` can be described as an evidence pipeline:
+- Apply supported low/medium-risk actions only through policy-controlled paths,
+  with preflight checks and rollback requirements where applicable.
+- Provide dry-run modes for profile inspection.
+- Gate medium-risk actions through explicit policy.
+- Require user intent or force flags where persistent effects are possible.
+- Avoid hidden persistent changes.
+- Preserve rollback state when a supported action is applied.
+- Avoid recommending unsupported tweaks as validated fixes.
+- Treat data-quality failure as a reason to block or revert an experiment.
+
+This language is deliberately cautious. Some actions are reversible, some are
+suggest-only, and some are blocked by policy. The report should not imply that
+every possible tuning action is safe to apply.
+
+### 4.4 Evaluation Requirements
+
+The project must be evaluated as both software and methodology:
+
+- Validate code with formatting, tests, linting, and fixture checks.
+- Validate artifacts with structured parsing and review.
+- Check that large or ignored generated files are not accidentally staged.
+- Use a real workload case study rather than only synthetic fixtures.
+- Preserve raw and derived evidence.
+- Show that a plausible recommendation can be declined when data does not
+  support it.
+
+## 5. System Architecture
+
+### 5.1 Architecture Overview
+
+`stutter` is organized as a pipeline from evidence collection to cautious
+recommendation:
 
 ```text
-record -> analyze/report -> advisor -> profile/fix plan -> tune/recommend -> explain
+Game / Proton / Gamescope
+        |
+        v
+stutter record
+  - eBPF scheduler events
+  - process tree snapshots
+  - MangoHud frames
+  - GPU samples
+        |
+        v
+analysis JSON / run directory
+        |
+        v
+advisor / fix-plan
+        |
+        v
+profile-plan / dry-run explain
+        |
+        v
+tune A/B runs
+        |
+        v
+recommendation + report artifacts
 ```
 
-The pipeline separates observation, diagnosis, planning, action execution, and
-validation.
+The important architectural boundary is that recording and analysis do not
+mutate the machine. Planning produces candidates. Action execution is guarded
+by policy, preflight checks, and rollback requirements.
 
-### 4.1 Observation and Recording
+### 5.2 Recorder Pipeline
 
-The recording path collects live evidence from a target workload. Scheduler
-events provide runnable-latency samples. Process-tree snapshots identify which
-tasks belong to the game and related runtime. Optional collectors provide frame
-timing, GPU samples, CPU frequency, foreground-window context, and runtime
-slice information.
+`stutter record` is the evidence collector. In the KCD1 case study it targets a
+live process tree with `--tree-pid`, records for a configured duration, and writes a
+run directory rather than one monolithic file.
 
-Observation is deliberately non-mutating. It reads live state and emits
-artifacts, but it does not decide that a tuning action is safe.
+Typical run artifacts include:
 
-### 4.2 Analysis and Reporting
+- `metadata.json`
+- `session.json`
+- `tree_events.json`
+- `spike_events.json`
+- `frame_correlation.json`
+- `gpu_samples.json`
+- `cpu_freq_samples.json`
+- `runtime_slices.json`
+- `foreground_events.json`
+- `focus_events.json`
+- `interval.json`
 
-Analysis turns raw artifacts into summaries: latency thresholds, frame-pacing
-tails, task attribution, quality warnings, and diagnostic scores. The report
-path produces human-readable and machine-readable output so that later
-recommendation steps can be audited.
+For example, KCD1 baseline runs such as
+`reports/kcd1-case-study/runs/baseline-01` preserve both raw and derived
+evidence. This makes later claims auditable.
 
-The diagnostic score used in the KCD1 evaluation is an internal comparison
-score, not FPS. Lower is better. It combines scheduler-latency threshold counts
-for relevant task classes with frame-time tail counts. Its purpose is to compare
-candidate profiles under the same workload, route, and measurement settings.
+### 5.3 Analysis and Scoring Pipeline
 
-### 4.3 Advisor and Fix Plans
+The analysis pipeline converts event streams into summaries. It identifies
+scheduler spikes, frame-pacing outliers, task attribution, data-quality warnings,
+and comparison metrics. For the KCD1 case study, the key comparison metric is
+`diagnostic_raw_score_total`.
 
-The advisor turns evidence into a scoped tuning hypothesis. A hypothesis is not
-proof and is not permission to change the system. It records a candidate action,
-why the action might help, what evidence motivated it, and what validation must
-show before the action can be considered supported.
+The simplified frame-aware score shape is:
 
-This design keeps the project from becoming an automatic tweak generator. The
-advisor can propose an experiment, but the validation pipeline must still
-decide whether the proposal is recommended.
+```text
+scheduler component:
+  over_5ms * 100
++ over_2ms * 20
++ over_1ms
 
-### 4.4 Tuning and Recommendation
+frame component:
+  frame_over_50ms * 100
++ frame_over_33ms * 20
++ frame_over_16ms
+```
 
-The tuning flow compares profiles across repeated runs. A typical A/B profile
-set includes a `baseline-online` profile that leaves relevant tasks on the
-online CPU mask and one or more tuned profiles. Repeated measurements are then
-ranked by diagnostic and workload-specific metrics.
+This score is useful only for comparable runs under the same workload, route,
+measurement settings, and analysis path. It is not FPS and not a
+general-purpose performance score.
 
-The recommendation step can return outcomes such as validated, underpowered,
-inconclusive, invalid experiment, or needs retest. These outcomes matter because
-they prevent the report from turning weak evidence into advice.
+### 5.4 Advisor and Fix-Plan Pipeline
 
-### 4.5 Safety and Rollback
+The advisor turns diagnosis into candidate actions. In the KCD1 case study, the
+advisor produced a CPU-affinity hypothesis: move game/Wine work away from the
+Gamescope/runtime CPU pair. The output is a scoped experiment proposal, not a
+truth claim.
 
-The safety model separates observation, recommendation, and system change.
-State-changing actions are represented as `TuningAction` values and checked
-through action descriptors, policy, preflight checks, and rollback behavior.
-The daemon architecture describes an always-on observer, planner, and guarded
-action runner. Providers suggest candidates; they do not mutate the system
-directly.
+Fix plans are structured hypothesis artifacts. They can include evidence,
+expected effect, safety class, rollback expectations, affected scope, and
+validation requirements. A fix plan must still be tested through repeated
+comparison before becoming advice.
 
-Important safety rules include:
+### 5.5 Tune/Recommend Pipeline
 
-- Observe-only behavior is the default.
-- Apply mode must be explicitly enabled.
-- Unsupported action families are denied by policy.
-- Autonomous apply requires rollback.
-- Data-quality failure blocks action.
-- Failed verification or worse/inconclusive evidence triggers rollback unless a
-  policy explicitly says otherwise.
+`stutter tune` runs repeated profile comparisons. A tune profile set includes
+`baseline-online` so the tuned profile can be compared against an explicit
+online-mask control. Warmup and measurement periods are separated so startup
+or route stabilization does not contaminate the measured window.
 
-This safety model is part of the FYP contribution because it treats tuning as a
-controlled experiment rather than as a permanent machine policy.
+`stutter recommend` interprets the result. A useful recommendation pipeline can
+return `NeedsRetest`, underpowered, inconclusive, or invalid-experiment results.
+That is not a failure of the tool. It is how the tool prevents weak evidence
+from becoming advice.
 
-### 4.6 Profile Explainability
+### 5.6 Profile Explainability Pipeline
 
-Profile explainability makes a tuning hypothesis auditable. `profile-plan` and
-`apply-profile --dry-run --explain` show which rules match which tasks, what
-classes and `comm` values are involved, what CPU masks would be applied, and how
-many pending changes would occur.
+Profile explainability was added because the KCD1 case study exposed a
+reporting gap. The original dry-run could show that tasks would move, but not
+enough about why each task matched. `profile-plan` and
+`apply-profile --dry-run --explain` fill that gap.
 
-This feature matters in the KCD1 case study because the profile used a broad
-`match_comm = ["Main"]` rule. The explainability artifact showed that important
-KCD1 worker threads were matched through `process_comm = "Main"`, which made
-the negative A/B result more meaningful: the profile did not merely fail because
-it missed the relevant game threads.
+The explainability path reports:
 
-## 5. Implementation
+- rule-level matched task counts;
+- proposed affinity masks;
+- `task.comm` and `process_comm`;
+- task class;
+- match source or basis;
+- first-match-wins behavior;
+- broad `process_comm` captures;
+- highlighted comms for important threads.
 
-### 5.1 Rust Workspace Layout
+This is an FYP contribution because explainability is also a safety feature.
+Users need to know what a profile will move before trusting a tuning experiment.
 
-The project is implemented as a Rust workspace. The workspace members are:
+### 5.7 Artifact Model
 
-- `stutter`: the main CLI and application logic.
-- `stutter-common`: shared common structures.
-- `stutter-config`: configuration model and resolution logic.
-- `stutter-core`: core typed primitives.
-- `stutter-ebpf`: eBPF-side code and build integration.
-- `stutter-report`: report model, loading, analysis, and rendering.
-- `xtask`: repository maintenance and validation commands.
+The project keeps raw and derived artifacts. JSON files represent structured
+state and summaries. NDJSON-style streams represent event sequences where
+appropriate. Optional streams may be absent or empty depending on flags,
+kernel support, and workload conditions.
 
-This split lets the project keep artifact models, configuration, eBPF code,
-report rendering, and validation tooling in separate ownership areas.
+The artifact model makes the case study reproducible. Instead of relying on a
+memory of a live run, the report can point to baseline directories, tune
+summaries, recommendation JSON, profile-plan output, setup notes, and artifact
+indexes.
 
-### 5.2 eBPF Probe Handling
+## 6. Implementation
 
-The scheduler profiler is built around eBPF tracepoints for wakeup and context
-switch timing. The measured quantity is runnable latency: the time between a
-task becoming runnable and the task actually being switched onto a CPU.
+### 6.1 Rust Workspace Structure
 
-Because eBPF tracing usually requires privileges, live recording is separated
-from offline commands. Reporting, recommendation, advisor, and audit commands
-can operate on files without loading probes.
+The repository is a Rust workspace with these members:
 
-### 5.3 Artifact Format
+| Crate | Role |
+| --- | --- |
+| `stutter` | Main CLI, recording, analysis orchestration, commands |
+| `stutter-common` | Shared common structures |
+| `stutter-core` | Core typed primitives |
+| `stutter-config` | Configuration model and effective config resolution |
+| `stutter-ebpf` | eBPF-side code and build integration |
+| `stutter-report` | Report model, loading, analysis, diffing, rendering |
+| `xtask` | Repository validation and maintenance commands |
 
-`stutter` records structured artifacts such as JSON and NDJSON files for session
-metadata, tree events, frame correlation, GPU samples, CPU frequency samples,
-runtime slices, foreground/focus events, spike events, and interval summaries.
-This is essential for the FYP because the evaluation can be inspected after the
-live game has stopped.
+This layout keeps the tracing, artifact model, report rendering, configuration,
+and repository checks from collapsing into one unstructured binary.
 
-The case study keeps these artifacts under `reports/kcd1-case-study/`, with
-separate areas for setup notes, baseline runs, advisor output, profile plans,
-tune output, result reports, drop-counter investigation, and exploratory
-personal-stack measurements.
+### 6.2 Process-Tree Classification
 
-### 5.4 Scoring and Comparison
+The process-tree model is needed because Proton games create multiple relevant
+Linux tasks. The tool needs to distinguish game threads, helpers, WineServer,
+Gamescope, Steam runtime tasks, compositor work, and unknown tasks.
 
-The diagnostic score used in the KCD1 case study combines scheduler and frame
-signals. In the frame-aware path, scheduler thresholds are weighted by counts
-over 1ms, 2ms, and 5ms, while frame thresholds are weighted by counts over
-roughly 16ms, 33ms, and 50ms. The score is useful only when comparing runs
-under the same workload and measurement settings.
+KCD1 shows why process names alone are not enough. A process can be named
+`Main`, while important worker threads have separate `task.comm` values such as
+`RenderThread`, `ClothingRaycast`, `Streaming Async`, or `dxvk-submit`.
+Classification and profile matching therefore need both thread-level and
+process-level context.
 
-For auto-tune controller decisions, the architecture also records normalized
-score rates and objective-specific signals so that unequal windows and workload
-objectives can be handled more carefully. The important design principle is
-that no single global score should be treated as a universal performance unit.
+### 6.3 eBPF Event Capture
 
-### 5.5 CPU-Affinity Profile Model
+The eBPF path captures scheduler-visible timing and emits event streams for the
+recorder. Conceptually, it observes wakeup and switch timing so `stutter` can
+measure runnable latency. It also tracks drop and replacement counters so that
+measurement quality can be interpreted.
 
-The KCD1 evaluation used a TOML profile model. Profiles contain ordered rules,
-and rules are first-match-wins. A rule can match by class or by `comm`. In the
-current behavior, `match_comm` checks both a task's own `comm` and its process
-`process_comm`. This can be powerful but also needs auditability because a broad
-process-level match can capture many worker threads.
+This comes with practical constraints. The process needs privileges to load
+eBPF programs on most systems. Kernel support can vary. Map capacity and
+ring-buffer capacity must be sized carefully. The KCD1 drop-counter pilot is
+included because it distinguishes replacement churn from ring-buffer reserve
+failure.
 
-### 5.6 Safety and Rollback Implementation
+### 6.4 Frame Correlation
 
-System-changing actions are guarded by policy and action descriptors. A fix
-plan records risk, rollback requirements, effect scope, privilege needs,
-persistence flags, and whether the default policy allows the proposed
-experiment. Apply paths are expected to support preflight, dry-run, apply,
-verify, rollback, and audit.
+Frame correlation uses MangoHud CSV data. The recorder ingests frame timing and
+aligns it with the run timeline. In the formal KCD1 baseline set, the frame
+timestamp alignment was `monotonic_observed`, which made the frame data usable
+for repeated comparison.
 
-The key implementation choice is that recommendations do not automatically
-become permanent changes. The tool can suggest experiments, apply guarded
-actions where policy allows, and restore saved state.
+Frame metrics include frame counts, median frametime, p95, p99, maximum
+frametime, and outlier counts. These metrics are interpreted alongside
+scheduler evidence rather than replacing it.
 
-### 5.7 Testing Strategy
+### 6.5 Profile Matching
 
-Testing is part of the project evidence. The repository includes unit tests,
-integration tests, architecture tests, report golden tests, validation-corpus
-fixtures, and `xtask` checks. The validation corpus includes real and synthetic
-fixtures covering vendors, compositors, scenarios, known false positives, known
-false negatives, quality levels, and display-path cases.
+Profiles are TOML-defined collections of ordered rules. First matching rule
+wins. Rules can match task classes, task `comm`, or process `process_comm`,
+depending on the match type. The KCD1 profile used:
 
-This test strategy supports the FYP argument that the project is more than a
-single case study. KCD1 is the main real evaluation, but the repository also
-contains broader regression and fixture coverage for the tool's artifact and
-analysis behavior.
+- a baseline profile that kept tasks on the online CPU set;
+- a tuned profile that placed `Main` and game/Wine classes on `1-5,7-11`;
+- a Gamescope/runtime rule that placed those classes on `0,6`.
 
-## 6. Validation Methodology
+The first-match-wins rule is important because a broad early match can prevent
+later, more specific rules from applying. That is why the report treats profile
+explainability as necessary rather than optional.
 
-### 6.1 Repeated Measurement
+### 6.6 Explainability Model
 
-The validation methodology treats tuning as an experiment. A candidate profile
-must be tested against comparable baseline behavior under the same route,
-duration, and workload labels. Repeated runs are needed because game workloads
-vary.
+The explainability model reports what a profile would do before it is applied.
+Conceptually it contains:
 
-In the KCD1 case study, the formal baseline set used five 180-second route
-runs, and the A/B tune used five measured iterations for `baseline-online` and
-five for the tuned CPU-affinity profile. The tool also reported that some
-metrics may need roughly 18-30+ runs per condition to estimate smaller effects
-precisely.
+- report-level summary counts;
+- rule summaries;
+- per-task matches;
+- original and proposed masks;
+- matched task classes;
+- match source or basis;
+- broad `process_comm` capture detection;
+- highlighted comms for important threads.
 
-### 6.2 Baseline-Online
+For KCD1, this showed that key game/DXVK/Wine worker threads were matched by
+the broad `process_comm = "Main"` behavior. That made the A/B result easier to
+interpret because the tuned profile did not fail merely by missing the target
+threads.
 
-`baseline-online` is the within-tune control profile. It keeps relevant tasks
-on the online CPU mask rather than applying the tuned affinity split. Comparing
-the tuned profile against `baseline-online` inside the same tune run helps
-separate the tuning hypothesis from unrelated changes in the earlier baseline
-archive.
+### 6.7 Safety and Policy Checks
 
-### 6.3 Warmup and Measurement Windows
+The implementation separates dry-run explanation, one-shot apply, watch mode,
+and persistent effects. For example, `apply-profile --explain` requires
+`--dry-run`, dry-run is not combined with watch mode, medium-risk policies are
+gated, and persistent effects require explicit user intent.
 
-Game runs often need stabilization time. Warmup windows let the workload settle
-before scoring. Measurement windows then provide the evidence used for profile
-comparison. In the KCD1 tune run, each epoch used warmup plus measurement; the
-case-study report records that each epoch used 90 seconds of warmup followed by
-180 seconds of measurement.
+The wider safety model requires action descriptors, preflight checks, rollback
+requirements where applicable, policy checks, audit events, and verification
+before an applied experiment is kept. This is why the report describes `stutter`
+as a guarded experiment tool rather than an auto-tweaker.
 
-### 6.4 Diagnostic Score
+### 6.8 Testing and Validation
 
-`diagnostic_raw_score_total` is not FPS and not a general benchmark score. It is
-an internal weighted penalty score for comparable runs under the same settings.
-Lower is better. Larger values mean more or worse scheduler/frame-pacing
-outliers during the measured window.
+Testing covers both code behavior and artifact behavior. The repository uses:
 
-This distinction is important for academic reporting. The score supports an
-within-experiment comparison, not broad claims across games or machines.
+- formatting checks with `cargo fmt`;
+- unit and integration tests with `cargo test`;
+- linting with `cargo clippy`;
+- report golden tests;
+- architecture tests;
+- validation-corpus fixtures;
+- `xtask fixture-check`.
 
-### 6.5 Uncertainty and Verdicts
+The validation corpus is especially relevant to the FYP because it covers more
+than the KCD1 case study: real and synthetic runs, multiple vendors, multiple
+compositors, known false positives, known false negatives, and data-quality
+cases.
 
-The recommendation model prevents false confidence. A result can be
-underpowered, inconclusive, invalid, or marked as needing retest even when one
-profile ranks better in a small sample. This is not hedging; it is the mechanism
-that makes the tool evidence-based.
+## 7. Experimental Methodology
 
-For KCD1, the generated recommendation selected `baseline-online` as the current
-best profile and reported `NeedsRetest`. The tuned-profile conclusion in this
-report is therefore based on the profile candidate statistics in
-`tuning_summary.json`, while the recommendation artifact is interpreted
-carefully because some formal comparison fields compare the selected best
-profile against itself.
+### 7.1 Measurement Principles
 
-### 6.6 Non-Validation Is Not Proof of Harm
+The experimental method follows these rules:
 
-"Not validated" means the evidence did not support recommending the tuned
-profile. It is not the same as proving the profile is harmful in every
-condition. The KCD1 result says that under the tested route, hardware, Proton
-version, and profile, the tuned profile did not earn a recommendation.
+- Keep the workload stable.
+- Change one main variable at a time.
+- Use repeated runs.
+- Preserve raw and derived evidence.
+- Separate warmup and measurement windows.
+- Avoid causal claims when many variables changed.
+- Treat uncertainty as a result, not as an inconvenience.
 
-This distinction is crucial to the FYP. The point is to demonstrate evidence
-discipline, not to force a strong claim from a small experiment.
+### 7.2 Workload Selection
 
-## 7. Main Evaluation: KCD1 Case Study
+KCD1 is a useful workload because it is a real open-world game running through
+Proton/Wine. It has a complex process tree, frame-pacing variation, and enough
+runtime complexity to expose scheduler and profile-matching issues. It is also
+noisy, which makes it a good test of whether the tool avoids overclaiming.
 
-### 7.1 Setup
+### 7.3 Baseline Collection
+
+The formal baseline set used five runs of a repeatable Rattay route from the same
+save. Each run lasted about 180 seconds. The setup used Gamescope and MangoHud
+frame logging, explicit process-tree targeting, and a stripped-down launch
+configuration so the CPU-affinity profile would be the main variable later.
+
+Baseline validity checks included stop reason, duration, frame count, timestamp
+alignment, data quality, and artifact completeness.
+
+### 7.4 Hypothesis Formation
+
+The advisor suggested a CPU-affinity profile because the baseline showed
+scheduler-visible latency and frame-pacing outliers. The hypothesis was that
+placing Gamescope/runtime work on CPU pair `0,6` and game/Wine work on
+`1-5,7-11` might reduce interference.
+
+This was a plausible hypothesis, not a conclusion. It was reversible and
+therefore suitable for a controlled profile experiment.
+
+### 7.5 A/B Tuning Design
+
+The tune run compared `baseline-online` against the tuned profile. Each profile
+had five measured iterations. The tune command used a 90-second warmup and a
+270-second epoch so that each epoch provided 180 seconds of measurement after
+warmup. The generated summary recorded restore behavior after each profile.
+
+This design prevents a profile from being recommended solely because it was a
+good story. It must perform better under repeated measurement.
+
+### 7.6 Data-Quality Checks
+
+The quality checks include:
+
+- stop reason;
+- duration;
+- frame count;
+- timestamp alignment;
+- data-quality level;
+- drop and replacement counters;
+- missing optional correlations;
+- run comparability.
+
+The formal KCD1 runs were usable, but not lab-perfect. They were treated as
+valid with limitations rather than as clean synthetic benchmarks.
+
+### 7.7 Interpretation Rules
+
+The interpretation rule is:
+
+```text
+A profile is not recommended unless evidence supports it across repeated
+comparisons. NeedsRetest is not failure; it is a correct uncertainty result.
+```
+
+The report therefore uses careful wording: not validated, not recommended on
+current evidence, plausible hypothesis, likely explanation, and observed in this
+workload. It avoids claiming general behavior beyond the measured setup.
+
+## 8. KCD1 Case Study
+
+### 8.1 Setup
 
 The main evaluation used Kingdom Come: Deliverance 1 under Steam with
-GE-Proton10-34, Sway/Wayland, Gamescope, and MangoHud frame logging. The route
-was a repeatable 180-second Rattay route from the same save. The system used an
-Intel i5-10600K with 6 cores and 12 threads and an AMD Radeon RX 9070 XT.
+GE-Proton10-34, Sway/Wayland, Gamescope, and MangoHud frame logging.
 
-The experiment intentionally excluded the author's larger personal optimized
-launch configuration. The measurement setup retained Gamescope, MangoHud, and
-the archived KCD1 config, but did not include RADV experimental flags, FSR/FSR4,
-gamemode, mimalloc, or forced Wine CPU topology. This kept the main variable to
-the CPU-affinity profile.
+| Item | Value |
+| --- | --- |
+| Game | Kingdom Come: Deliverance 1 |
+| Platform | Steam + GE-Proton10-34 |
+| Session | Gentoo Linux, Sway/Wayland, Gamescope |
+| CPU | Intel i5-10600K, 6 cores / 12 threads |
+| GPU | AMD Radeon RX 9070 XT |
+| Route | Repeatable Rattay route from the same save |
+| Duration | 180 seconds per measured run |
+| Baselines | 5 formal baseline runs |
+| A/B test | 5 `baseline-online` + 5 tuned profile runs |
+| Main variable | CPU-affinity profile |
 
-### 7.2 Baseline Findings
+The measurement launch kept Gamescope, MangoHud logging, and the archived KCD1
+config. It excluded the author's larger personal optimized configuration: no
+RADV experimental flags, no FSR/FSR4, no gamemode, no mimalloc, and no forced
+Wine CPU topology.
 
-Five formal baseline runs passed the basic validity checks. Each ran for about
-180 seconds, stopped because the maximum duration was reached, ingested MangoHud
-frame data, used monotonic frame timestamp alignment, and reported `Medium`
-data quality.
+### 8.2 Baseline Results
+
+Five formal baselines passed the basic validity checks: each ran for about 180
+seconds, stopped because the maximum duration was reached, ingested MangoHud
+frame data, used monotonic timestamp alignment, and reported `Medium` data
+quality.
 
 | Run | Frames | Median frametime | P99 | Max | Frame-pacing outliers |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -436,54 +637,48 @@ data quality.
 | baseline-04 | 7,421 | 22.811ms | 46.778ms | 84.384ms | 1,229 |
 | baseline-05 | 7,607 | 22.884ms | 44.788ms | 87.387ms | 1,098 |
 
-The baseline route was valid but noisy. Median frametime ranged from about
-16.3ms to 22.9ms, while p99 frametime remained around the mid-40s to low-50s
-milliseconds. This justified repeated A/B measurement rather than a one-run
-tuning claim.
+The baseline set was valid but noisy. Median frametime varied from about
+16.3ms to 22.9ms, while p99 remained in the mid-40s to low-50s milliseconds.
+That supported repeated A/B measurement rather than a one-run tuning claim.
 
-### 7.3 Advisor Hypothesis
+### 8.3 Advisor Hypothesis
 
 The advisor generated a plausible CPU-placement hypothesis: reserve the core-0
 SMT pair for Gamescope/runtime work and place KCD1/Wine/game threads on the
-remaining CPUs. This hypothesis was plausible because the baseline evidence
-showed scheduler-visible tail latency and frame-pacing outliers, but it was not
-treated as validated by diagnosis alone.
+remaining CPUs. The hypothesis was motivated by scheduler-visible tail latency
+and frame-pacing outliers, but diagnosis alone did not validate it.
 
-### 7.4 CPU-Affinity Profile
+The profile rules were:
 
-The tested profile used two conditions:
+| Rule | Match | Affinity | Intended effect |
+| --- | --- | --- | --- |
+| 0 | `match_comm = ["Main"]` | `1-5,7-11` | Move KCD process threads |
+| 1 | `Game`, `GameHelper`, `WineServer` | `1-5,7-11` | Move Wine/game helpers |
+| 2 | `GameScope`, `Compositor`, `Launcher`, `SteamRuntime` | `0,6` | Reserve core-0 SMT pair for presentation/runtime |
 
-- `baseline-online`: leave relevant classes on the online CPU set.
-- `kcd1-game-on-1-5-7-11-gamescope-on-0-6`: place game/Wine classes on
-  `1-5,7-11` and Gamescope/runtime classes on `0,6`.
+### 8.4 Profile Explainability
 
-The intended effect was to isolate presentation/runtime work from the main game
-work. On this CPU, that also reduced the game side from 12 logical CPUs to 10
-logical CPUs, which later became important for interpretation.
+The profile-plan follow-up showed what the tuned profile would do before
+application:
 
-### 7.5 Profile Explainability
+| Item | Count |
+| --- | ---: |
+| Snapshot tasks | 181 |
+| Matched tasks | 114 |
+| Pending affinity changes | 114 |
+| Rule 0 matched tasks | 88 |
+| Rule 1 matched tasks | 25 |
+| Rule 2 matched tasks | 1 |
 
-The profile-plan follow-up showed that the tuned profile would match 114 of 181
-snapshot tasks and had 114 pending affinity changes. Rule counts were 88, 25,
-and 1 for the three profile rules.
+The explainability artifact showed that important KCD/DXVK/Wine-side worker
+threads were matched through `process_comm = "Main"`, including render,
+streaming, DXVK, audio, shader, physics, and job-system threads. This means the
+tuned profile did not fail simply because it missed the relevant tasks.
 
-The key interpretive result is that important KCD/DXVK/Wine worker threads were
-matched through the broad `process_comm = "Main"` behavior, including render,
-streaming, DXVK, audio, shader, physics, and job-system threads. The tuned
-profile did not fail simply because it missed the relevant tasks.
-
-### 7.6 A/B Result
+### 8.5 A/B Results
 
 The proper A/B tune run, `kcd1-affinity-02`, tested both profiles with five
 valid measured iterations each. Lower diagnostic score is better.
-
-| Profile | Valid runs | Median diagnostic score | Mean diagnostic score | Median frame P99 | Mean over-5ms |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| `baseline-online` | 5 | 21,533 | 23,431.4 | 38.337ms | 0.2 |
-| `kcd1-game-on-1-5-7-11-gamescope-on-0-6` | 5 | 38,806 | 49,746.0 | 37.798ms | 0.6 |
-
-The tuned profile had a worse primary diagnostic score in every paired
-iteration:
 
 | Iteration | Baseline-online score | Tuned profile score | Delta |
 | ---: | ---: | ---: | ---: |
@@ -493,153 +688,268 @@ iteration:
 | 4 | 26,408 | 38,806 | +46.9% |
 | 5 | 32,994 | 98,461 | +198.4% |
 
-The correct conclusion is that the tuned profile was not validated and should
-not be recommended on current evidence. This does not claim the profile is
-harmful in all conditions. It says that the tested route and system did not
-support recommending this CPU-affinity split.
+Profile-level summary:
 
-### 7.7 Why the Profile Likely Failed
+| Profile | Valid runs | Median diagnostic score | Mean diagnostic score | Median frame P99 | Mean over-5ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `baseline-online` | 5 | 21,533 | 23,431.4 | 38.337ms | 0.2 |
+| `kcd1-game-on-1-5-7-11-gamescope-on-0-6` | 5 | 38,806 | 49,746.0 | 37.798ms | 0.6 |
 
-The most plausible interpretation is that the profile reduced useful CPU
-capacity. KCD1/DXVK/Wine had many active worker, render, streaming, physics,
-audio, and helper threads. Moving the game workload from all 12 logical CPUs to
-`1-5,7-11` gave it only 10 logical CPUs, while reserving `0,6` for Gamescope.
-On this 6-core/12-thread CPU, that trade-off appears to have increased
-scheduling pressure more than it helped presentation isolation.
+The median comparison is visible in a compact bar:
 
-This is an interpretation, not a proven causal mechanism. The evidence supports
-a careful claim: the profile caught relevant tasks, but repeated A/B measurement
-did not support recommending it.
+```text
+baseline-online median: 21,533  [=========           ]
+tuned-profile median:   38,806  [================    ]  +80.2% worse
+```
 
-### 7.8 Drop-Counter Investigation
+The tuned profile was not validated and should not be recommended on the
+current evidence.
 
-A separate measurement-quality pilot investigated recurring non-zero wakeup
-replacement counters. The important finding was that the issue was not
-ring-buffer reserve failure. Baselines showed about 1436-1557 wakeup
-replacements per second with zero ring-buffer reserve failures, and the
-mapfactor-4 pilot still showed about 1568 wakeup replacements per second with
-zero reserve failures.
+The generated recommendation also estimated that some metrics may require more
+runs per side to detect a 10% movement at the observed noise level:
 
-The likely interpretation is wakeup timestamp churn from rapid repeated wakeups
-for the same target tasks. This is a measurement-quality nuance, not evidence
-that frame data was dropped.
+| Metric | Estimated runs per side |
+| --- | ---: |
+| `diagnostic_raw_score_total` | 30 |
+| `frame_p99_ms` | 18 |
+| `frame_over_16ms` | 24 |
+| `frame_over_33ms` | 30 |
+| `frame_over_50ms` | 30 |
+| `max_latency_ns` | 26 |
 
-### 7.9 Personal-Stack Add-On
+### 8.6 Measurement-Quality Pilot
+
+A separate drop-counter pilot investigated the recurring wakeup replacement
+counter.
+
+| Condition | Wakeup replacements/s | Ringbuf reserve failures |
+| --- | ---: | ---: |
+| baselines | about 1436-1557/s | 0 |
+| mapfactor-4 pilot | about 1568/s | 0 |
+
+The pilot showed that wakeup replacement counters were not ring-buffer reserve
+failures and were not reduced by `--ebpf-wakeup-map-factor 4`. The likely
+interpretation is wakeup timestamp churn from rapid repeated wakeups for the
+same target tasks.
+
+### 8.7 Exploratory Personal-Stack Comparison
 
 An exploratory add-on compared the stripped-down measurement stack against the
 author's normal gaming configuration bundle, including `scx_lavd` and many
 launch flags. This changed many variables at once, so it is not a causal test of
 one flag or scheduler.
 
-In three runs per condition, the personal stack did not show a clear
-frame-pacing advantage. The value of the add-on is realism: `stutter` can
-capture and compare a complex player-used configuration bundle without
-overclaiming causality.
+| Condition | Runs | Median frametime | P95 | P99 | Max | Median outlier % | Scheduler |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| clean | 3 | 19.3419ms | 26.2893ms | 29.8236ms | 65.7529ms | 0.428% | default |
+| personal-stack | 3 | 20.1032ms | 28.3838ms | 32.4916ms | 91.134ms | 0.826% | `scx_lavd` |
 
-### 7.10 Evaluation Summary
+The personal stack did not show a clear advantage in this small sample. The
+value of the add-on is realism: `stutter` can capture and compare a complex
+player-used configuration bundle without overclaiming causality.
 
-The KCD1 case study validates the workflow rather than the tuning tweak.
-`stutter` captured a complex Proton workload, generated a plausible hypothesis,
-tested it, explained why the result mattered, and declined to recommend the
-hypothesis when the evidence did not support it.
+## 9. Results and Analysis
 
-## 8. Results and Discussion
+### 9.1 Main Result
 
-The main result is methodological. `stutter` successfully completed the
-evidence loop on a real Proton/Wine/Gamescope workload:
+The primary diagnostic score was lower for `baseline-online` in all five paired
+A/B iterations. This is the main evaluation result.
 
-- It recorded scheduler and frame evidence from a live game route.
-- It produced a scoped CPU-affinity hypothesis.
-- It represented that hypothesis as a reversible profile.
-- It tested the profile through repeated A/B measurement.
-- It selected `baseline-online` as the current best profile.
-- It did not recommend the tuned profile when the evidence was weak or negative.
-- It later made the profile behavior auditable through rule-level
-  explainability.
+The result does not say that CPU affinity is inherently bad, or that the exact
+profile is harmful in every setup. It says that this profile did not earn a
+recommendation under this route, machine, Proton version, and measurement
+method.
 
-This is a useful result precisely because it is not a positive tuning story. An
-evidence-based advisor should not be rewarded only when it finds improvements.
-It should also be rewarded when it refuses unsupported advice.
+### 9.2 Why the Tuned Profile Was Not Recommended
 
-The project therefore demonstrates a methodology:
+The tuned profile was not recommended because:
 
-```text
-observe -> hypothesize -> validate -> recommend only if supported
-```
+- it matched relevant KCD1 worker threads;
+- it still had worse primary diagnostic scores;
+- it likely reduced useful CPU capacity from 12 logical CPUs to 10 for the game
+  side;
+- the workload was noisy;
+- the recommendation output correctly reported uncertainty through
+  `NeedsRetest`.
 
-The case study also shows why explainability matters. Before the profile-plan
-artifact, a reader might suspect that the CPU-affinity profile failed because it
-did not match important KCD1 worker threads. The follow-up artifact showed that
-the profile did match those threads. That shifts the interpretation from "bad
-matching" to a more interesting tuning result: a plausible and relevant profile
-still did not perform better under measurement.
+The most plausible explanation is that reserving `0,6` for Gamescope removed
+too much useful scheduling capacity from KCD1/DXVK/Wine. That remains an
+interpretation, not a proven causal mechanism.
 
-The expected result at the start of a tuning experiment is often "maybe this
-will help." The actual result was "this should not be recommended on current
-evidence." That is a stronger academic contribution because it shows restraint.
+### 9.3 What the Negative Result Demonstrates
 
-## 9. Limitations
+The negative tuning result is not a failed project result. It validates the
+purpose of an evidence-based advisor: avoiding unsupported tuning advice. A
+tool that promotes every plausible hypothesis is not safe or useful in noisy
+game workloads.
 
-The project has several important limitations:
+### 9.4 What the Tool Learned
 
-- The main case study used one machine.
-- It used one game, one route, and one Proton version.
-- The formal KCD1 artifacts did not include IRQ/KMS/DRM correlation.
-- The workload variance was high.
-- Five runs per profile were enough for a case-study demonstration, but not
-  enough for precise small-effect estimates.
-- The tool estimated that some metrics may need roughly 18-30+ runs per
-  condition for a 10% effect at the observed noise level.
-- The personal-stack comparison changed many variables at once and is therefore
-  exploratory and non-causal.
-- The current tool still expects technical users who can identify process trees,
-  interpret artifacts, and manage privileged tracing.
+The case study revealed several engineering lessons:
 
-These limitations do not undermine the result. They define its scope. The
-project does not claim a general KCD1 optimization. It claims that the tool can
-collect evidence, form a tuning hypothesis, test it, and avoid a false-positive
-recommendation under a real workload.
+- Profile explainability was needed to audit broad `process_comm` matches.
+- Wakeup replacement counters needed careful interpretation and were not simply
+  ring-buffer reserve failures.
+- Recommendation output needed to distinguish candidate statistics from formal
+  comparison fields when `baseline-online` was selected as best.
+- Artifact context matters: setup notes, route labels, tune summaries, and
+  profile plans are part of the evidence.
 
-## 10. Future Work
+### 9.5 Threats to Validity
 
-Future work should extend both the tool and the evaluation:
+The main threats to validity are:
 
-- Add IRQ/KMS/DRM capture to future case studies so scheduler, interrupt, and
-  display presentation evidence can be interpreted together.
-- Evaluate more games, engines, hardware, GPUs, compositors, and Proton
-  versions.
-- Improve automated sample-size guidance so users know when a comparison is
-  likely underpowered before spending time on more runs.
-- Improve report generation so the FYP-style narrative can be produced more
-  directly from artifacts.
-- Expand profile explainability so every tuning hypothesis is auditable before
-  A/B data collection.
-- Explore more granular profile hypotheses that do not compress broad game
-  worker sets onto fewer CPUs without stronger evidence.
-- Improve foreground and target selection for Gamescope and nested runtime
-  process trees.
-- Consider a UI or dashboard after the evidence, safety, and validation model
-  is stable.
+- one machine;
+- one game;
+- one route;
+- one Proton version;
+- missing IRQ/KMS/DRM optional correlations in the formal artifacts;
+- explicit tree targeting rather than foreground auto-targeting;
+- sample size too small for precise small-effect estimates;
+- personal-stack comparison changing many variables at once.
 
-## 11. Conclusion
+These threats limit generalisation. They do not remove the central workflow
+result.
 
-This project demonstrates that Linux game tuning can be made more
-evidence-based by collecting scheduler and frame evidence, generating scoped
-hypotheses, validating them with repeated measurement, and refusing unsupported
-recommendations.
+## 10. Discussion
+
+### 10.1 Evidence-Based Tuning vs Tweak Guides
+
+Online tweak advice is often anecdotal. It can be useful as a source of
+hypotheses, but it is not enough for a recommendation. `stutter` turns a tweak
+story into a measurement loop: record evidence, propose a scoped experiment,
+compare repeated runs, and report uncertainty.
+
+### 10.2 Explainability as a Safety Feature
+
+Explainability is a safety feature because a user needs to know what a profile
+will move. Broad process matches can capture more tasks than expected.
+First-match-wins rule order can make later rules irrelevant. Without
+explainability, a profile may appear simple while moving a large set of worker
+threads.
+
+The KCD1 profile-plan artifact made the result more auditable. It showed that
+important worker threads were matched, which prevented a misleading explanation
+that the profile failed only because it missed the right tasks.
+
+### 10.3 Why `NeedsRetest` Matters
+
+A responsible tuning tool must be able to say "not enough evidence." `NeedsRetest`
+is useful because it prevents a ranking from becoming an overconfident
+recommendation when sample counts are low, noise is high, or confidence
+intervals cross zero.
+
+### 10.4 Practical Value for Linux Gamers
+
+The practical value of `stutter` is not that it gives every user a magic
+profile. It helps technical users:
+
+- diagnose frame and scheduler evidence;
+- avoid wasting time on unsupported tweaks;
+- archive reproducible artifacts;
+- compare configurations more honestly;
+- understand which tasks a profile would affect.
+
+### 10.5 Engineering Lessons
+
+Real workloads expose gaps that synthetic tests can miss. KCD1 exposed the need
+for profile explainability and careful measurement-quality language. The
+project also shows that artifact hygiene, CLI safety, test coverage, and
+documentation are part of the tool, not afterthoughts.
+
+## 11. Limitations and Future Work
+
+### 11.1 Limitations
+
+| Limitation | Impact |
+| --- | --- |
+| Prototype status | The tool still expects technical users and careful setup |
+| One primary case study | Results should not be generalized to all games |
+| One machine and route | Hardware and workload differences may change outcomes |
+| One Proton version | Runtime updates could change process behavior |
+| Missing IRQ/KMS/DRM correlation | Some display or interrupt causes may be invisible in formal KCD1 artifacts |
+| High workload variance | More runs are needed for precise small-effect estimates |
+| eBPF permissions | Live tracing usually requires privileges |
+| Policy-gated actions | Some tuning families are suggest-only or blocked by default |
+
+### 11.2 Future Work
+
+Future work can be grouped into four areas.
+
+| Area | Examples |
+| --- | --- |
+| Measurement improvements | IRQ attribution, KMS/DRM fence correlation, wakeup replacement interpretation |
+| Tuning improvements | More granular profiles, safer templates, profile-plan before tune by default |
+| Reporting improvements | Visual reports, confidence summaries, easier artifact navigation |
+| Evaluation improvements | More games, more hardware, more schedulers, controlled variable isolation |
+
+Measurement improvements:
+
+- IRQ attribution.
+- KMS/DRM fence correlation.
+- Better wakeup replacement interpretation.
+- More robust foreground detection in Gamescope/Wayland setups.
+
+Tuning improvements:
+
+- More granular profile hypotheses.
+- Safer suggested profile templates.
+- `profile-plan` before tune by default.
+- More adaptive sample-size planning.
+
+Reporting improvements:
+
+- Better visual reports.
+- More explicit confidence summaries.
+- Easier artifact navigation.
+- More direct FYP-style narrative generation from artifacts.
+
+Evaluation improvements:
+
+- More games.
+- More hardware.
+- More schedulers.
+- More controlled variable-isolation experiments.
+
+## 12. Conclusion
+
+Linux game tuning is noisy, multi-layered, and often anecdotal. This project
+shows a more conservative approach. `stutter` collects scheduler and frame
+evidence, generates scoped tuning hypotheses, validates them with repeated
+measurement, and declines unsupported recommendations.
 
 The KCD1 case study is the central evidence. `stutter` captured a real
 Proton/Wine/Gamescope workload, produced a plausible CPU-affinity profile,
-tested it against an online baseline, and did not recommend it when the A/B data
+tested it against `baseline-online`, and did not recommend it when the A/B data
 failed to support it. The experiment validates the workflow rather than the
 specific CPU-affinity tweak.
 
-That result is valuable because reliable tuning tools must be able to say no. A
-tool that turns every plausible hypothesis into advice is not evidence-based.
-`stutter` shows the more useful behavior: collect evidence, test the claim, show
-uncertainty, and decline unsupported tuning advice.
+The project therefore succeeds not by finding a magic KCD1 tweak, but by
+showing that a Linux game-tuning tool can behave conservatively: collect
+evidence, test a plausible hypothesis, and decline to recommend it when
+repeated measurements do not support it. That conservative evidence-based
+behavior is the central contribution of `stutter`.
 
-## Appendix A: Command Shapes
+## 13. References
+
+References still to be finalized before submission:
+
+- Linux kernel eBPF documentation for tracing and BPF maps.
+- Linux kernel scheduler documentation for runnable tasks and scheduling
+  concepts.
+- Wine documentation for Windows compatibility on Unix-like systems.
+- Valve Proton project documentation for the Proton runtime stack.
+- DXVK project documentation for Direct3D-to-Vulkan translation.
+- Gamescope project documentation for the gaming compositor layer.
+- MangoHud documentation for frame timing capture.
+- Benchmarking methodology references for repeated runs, confidence intervals,
+  bootstrap intervals, and A/B comparison.
+
+Internal project evidence used by this draft is listed in Appendix C.
+
+## 14. Appendices
+
+### Appendix A: Commands and Validation Checks
 
 The KCD1 archive records command shapes rather than every exact shell
 invocation. Live PIDs were re-detected before recording.
@@ -653,8 +963,8 @@ stutter record \
   --run-name kcd1-rattay-baseline-XX \
   --scenario kcd1-rattay-route-1 \
   --workload-label kcd1-proton-ge-10-34 \
-  --route-label rattay-fixed-route-1 \
-  --out-dir reports/kcd1-case-study/runs/baseline-XX \
+  --route-label rattay-route-1 \
+  --out-dir reports/kcd1-case-study/runs/baseline-01 \
   --mangohud-log <KingdomCome_MANGOHUD_CSV> \
   --hwmon \
   --cpu-freq \
@@ -675,7 +985,7 @@ stutter tune \
   --epoch-seconds 270 \
   --scenario kcd1-rattay-route-1 \
   --workload-label kcd1-proton-ge-10-34 \
-  --route-label rattay-fixed-route-1 \
+  --route-label rattay-route-1 \
   --out-dir reports/kcd1-case-study/tune/kcd1-affinity-02
 ```
 
@@ -703,7 +1013,7 @@ stutter recommend \
   --html reports/kcd1-case-study/results/kcd1-fix-validation.html
 ```
 
-Validation flow:
+Validation flow before final submission:
 
 ```bash
 RUSTUP_TOOLCHAIN=nightly cargo fmt --all -- --check
@@ -712,7 +1022,7 @@ RUSTUP_TOOLCHAIN=nightly cargo clippy --all-targets -- -D warnings
 RUSTUP_TOOLCHAIN=nightly cargo run -p xtask -- fixture-check
 ```
 
-## Appendix B: KCD1 Profile TOML
+### Appendix B: CPU-Affinity Profile TOML
 
 ```toml
 [[profile]]
@@ -738,7 +1048,7 @@ affinity = "0,6"
 match_class = ["GameScope", "Compositor", "Launcher", "SteamRuntime"]
 ```
 
-## Appendix C: Artifact Map
+### Appendix C: Artifact Map and Evidence Matrix
 
 | Artifact | Role |
 | --- | --- |
@@ -746,7 +1056,7 @@ match_class = ["GameScope", "Compositor", "Launcher", "SteamRuntime"]
 | `reports/kcd1-case-study/CASE_STUDY_SUMMARY.md` | KCD1 archive summary |
 | `reports/kcd1-case-study/ARTIFACT_INDEX.md` | Archive map |
 | `reports/kcd1-case-study/setup/system-info.txt` | Machine and session context |
-| `reports/kcd1-case-study/runs/baseline-*` | Formal baseline run artifacts |
+| `reports/kcd1-case-study/runs/baseline-01` | Baseline run directory example |
 | `reports/kcd1-case-study/tune/kcd1-affinity-02/tuning_summary.json` | Primary A/B profile comparison |
 | `reports/kcd1-case-study/tune/kcd1-affinity-02/tuning_recommendation.json` | Recommendation and uncertainty data |
 | `reports/kcd1-case-study/profiles/kcd1-affinity-profile-plan-summary.json` | Profile explainability summary |
@@ -757,7 +1067,19 @@ match_class = ["GameScope", "Compositor", "Launcher", "SteamRuntime"]
 | `docs/FULL_SYSTEM_WATCHER_ARCHITECTURE.md` | Observer/planner/action-runner architecture |
 | `docs/AUTOTUNE_ARCHITECTURE.md` | Controller contract and keep/revert model |
 
-## Appendix D: Reproducibility Checklist
+| Claim | Evidence |
+| --- | --- |
+| Five formal baselines were valid | `baseline-*-analysis.json`, postcheck files |
+| Frames were ingested | MangoHud CSVs and frame correlation artifacts |
+| Timestamp alignment was monotonic | `CASE_STUDY_SUMMARY.md` and baseline analysis artifacts |
+| Profile matched key KCD threads | `kcd1-affinity-profile-plan-summary.json` |
+| `baseline-online` had lower score in all A/B iterations | `tuning_summary.json` |
+| Recommendation was `NeedsRetest` | `tuning_recommendation.json` |
+| Drop counter was not ringbuf failure | `mapfactor-4-comparison.txt` |
+| Personal stack is exploratory | `realworld-stack/README.md`, `launch-options.md` |
+| Build/test flow exists | `setup/build-check.txt`, validation commands in Appendix A |
+
+### Appendix D: Reproducibility Checklist
 
 - Use the same Rattay route and save described in the KCD1 method notes.
 - Use Steam with GE-Proton10-34.
@@ -768,11 +1090,48 @@ match_class = ["GameScope", "Compositor", "Launcher", "SteamRuntime"]
   workload.
 - Use 1920x1080 through Gamescope, 100 Hz output, and a 100 FPS MangoHud cap.
 - Use 180 seconds per measured run.
+- Use 90 seconds of warmup and 270 seconds per tune epoch for the A/B tune shape.
 - Re-detect the live Gamescope/KCD process-tree root before each recording.
 - Keep background load stable.
 - Treat hardware differences as a limitation.
 
-## Appendix E: Glossary
+### Appendix E: Selected Build/Test Output
+
+The latest validation flow for this draft was run on 2026-06-05:
+
+| Command | Result |
+| --- | --- |
+| `RUSTUP_TOOLCHAIN=nightly cargo fmt --all -- --check` | passed |
+| `RUSTUP_TOOLCHAIN=nightly cargo test --all` | passed |
+| `RUSTUP_TOOLCHAIN=nightly cargo clippy --all-targets -- -D warnings` | passed |
+| `RUSTUP_TOOLCHAIN=nightly cargo run -p xtask -- fixture-check` | passed |
+
+Selected output:
+
+- `cargo test --all`: the main `stutter` library test target reported 2643
+  passed, 0 failed, and 5 ignored; the remaining workspace unit,
+  integration, golden, and doc-test targets also passed.
+- `xtask fixture-check`: 20 real fixtures, 19 synthetic fixtures, 20 distinct
+  sanitized capture ids, no missing fixtures, no maturity warnings, and no
+  privacy warnings.
+- validation-corpus stage inside `fixture-check`: 44 passed, 0 failed, and 2
+  ignored.
+
+Full command logs should stay in repository artifacts or build logs rather than
+being pasted into the main report.
+
+### Appendix F: Additional KCD1 Tables
+
+Additional tables that can be included in a final formatted submission:
+
+- full baseline frame table with P95 and data-quality columns;
+- full tune candidate statistics;
+- profile-plan per-rule top comms;
+- drop-counter pilot command output;
+- real-world stack per-run details;
+- build/check command output.
+
+### Appendix G: Glossary
 
 | Term | Meaning |
 | --- | --- |
