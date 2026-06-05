@@ -19,7 +19,7 @@ when the artifact archive was finalized:
 
 ```text
 /home/p2949/.local/state/stutter/mangohud-kcd-clean/KingdomCome_2026-06-04_13-41-07.csv
-````
+```
 
 This does not invalidate the analysis results, because the frame timing data was
 already ingested into the committed `stutter` analysis JSON files. However, it
