@@ -1079,60 +1079,65 @@ behavior is the central contribution of `stutter`.
 
 ## 13. References
 
-External technical references are listed in numeric style below. Experiment
-artifacts are kept separate in Appendix C so that background references and
-project evidence remain distinct.
+External technical references are listed in an IEEE-style numeric format below.
+Project artifacts are kept separate in Appendix C so that background references
+and experiment evidence remain distinct.
 
-[1] Linux kernel documentation, "BPF Documentation." Accessed: 2026-06-05.
-Available: <https://docs.kernel.org/bpf/>
+[1] Linux kernel documentation, "BPF Documentation," Linux Kernel Documentation.
+Accessed: Jun. 5, 2026. [Online]. Available: <https://docs.kernel.org/bpf/>
 
-[2] Linux kernel documentation, "BPF maps." Accessed: 2026-06-05. Available:
+[2] Linux kernel documentation, "BPF maps," Linux Kernel Documentation.
+Accessed: Jun. 5, 2026. [Online]. Available:
 <https://docs.kernel.org/bpf/maps.html>
 
-[3] Linux kernel documentation, "BPF ring buffer." Accessed: 2026-06-05.
-Available: <https://docs.kernel.org/bpf/ringbuf.html>
+[3] Linux kernel documentation, "BPF ring buffer," Linux Kernel Documentation.
+Accessed: Jun. 5, 2026. [Online]. Available:
+<https://docs.kernel.org/bpf/ringbuf.html>
 
-[4] Linux kernel documentation, "Scheduler." Accessed: 2026-06-05. Available:
+[4] Linux kernel documentation, "Scheduler," Linux Kernel Documentation.
+Accessed: Jun. 5, 2026. [Online]. Available:
 <https://docs.kernel.org/scheduler/index.html>
 
-[5] Linux kernel documentation, "CFS Scheduler." Accessed: 2026-06-05.
-Available: <https://docs.kernel.org/scheduler/sched-design-CFS.html>
+[5] Linux kernel documentation, "CFS Scheduler," Linux Kernel Documentation.
+Accessed: Jun. 5, 2026. [Online]. Available:
+<https://docs.kernel.org/scheduler/sched-design-CFS.html>
 
-[6] Linux kernel documentation, "EEVDF Scheduler." Accessed: 2026-06-05.
-Available: <https://docs.kernel.org/scheduler/sched-eevdf.html>
+[6] Linux kernel documentation, "EEVDF Scheduler," Linux Kernel Documentation.
+Accessed: Jun. 5, 2026. [Online]. Available:
+<https://docs.kernel.org/scheduler/sched-eevdf.html>
 
-[7] WineHQ, "What is Wine?" Accessed: 2026-06-05. Available:
+[7] WineHQ, "What is Wine?" Accessed: Jun. 5, 2026. [Online]. Available:
 <https://www.winehq.org/>
 
-[8] ValveSoftware, "Proton." Accessed: 2026-06-05. Available:
-<https://github.com/ValveSoftware/Proton>
+[8] ValveSoftware, "Proton," GitHub repository. Accessed: Jun. 5, 2026.
+[Online]. Available: <https://github.com/ValveSoftware/Proton>
 
-[9] doitsujin, "DXVK." Accessed: 2026-06-05. Available:
-<https://github.com/doitsujin/dxvk>
+[9] doitsujin, "DXVK," GitHub repository. Accessed: Jun. 5, 2026. [Online].
+Available: <https://github.com/doitsujin/dxvk>
 
-[10] ValveSoftware, "gamescope." Accessed: 2026-06-05. Available:
-<https://github.com/ValveSoftware/gamescope>
+[10] ValveSoftware, "gamescope," GitHub repository. Accessed: Jun. 5, 2026.
+[Online]. Available: <https://github.com/ValveSoftware/gamescope>
 
-[11] flightlessmango, "MangoHud." Accessed: 2026-06-05. Available:
-<https://github.com/flightlessmango/MangoHud>
+[11] flightlessmango, "MangoHud," GitHub repository. Accessed: Jun. 5, 2026.
+[Online]. Available: <https://github.com/flightlessmango/MangoHud>
 
 [12] Mesa project, "Mesa 3D Graphics Library documentation." Accessed:
-2026-06-05. Available: <https://docs.mesa3d.org/>
+Jun. 5, 2026. [Online]. Available: <https://docs.mesa3d.org/>
 
-[13] Khronos Group, "Vulkan." Accessed: 2026-06-05. Available:
+[13] Khronos Group, "Vulkan." Accessed: Jun. 5, 2026. [Online]. Available:
 <https://www.khronos.org/vulkan/>
 
 [14] NIST/SEMATECH, "Engineering Statistics Handbook: Confidence intervals."
-Accessed: 2026-06-05. Available:
+Accessed: Jun. 5, 2026. [Online]. Available:
 <https://www.itl.nist.gov/div898/handbook/prc/section1/prc14.htm>
 
 [15] NIST/SEMATECH, "Engineering Statistics Handbook: Measurement process
-characterization." Accessed: 2026-06-05. Available:
+characterization." Accessed: Jun. 5, 2026. [Online]. Available:
 <https://www.itl.nist.gov/div898/handbook/mpc/mpc.htm>
 
 [16] A. Georges, D. Buytaert, and L. Eeckhout, "Statistically rigorous Java
-performance evaluation," OOPSLA 2007. Accessed: 2026-06-05. Available:
-<https://doi.org/10.1145/1297027.1297033>
+performance evaluation," OOPSLA 2007. Accessed: Jun. 5, 2026. [Online].
+Available: <https://doi.org/10.1145/1297027.1297033>
 
 ## 14. Appendices
 
@@ -1234,7 +1239,7 @@ stutter recommend \
   > reports/kcd1-case-study/results/kcd1-fix-validation.json
 ```
 
-Validation flow before final submission:
+Validation flow for submission/export:
 
 ```bash
 RUSTUP_TOOLCHAIN=nightly cargo fmt --all -- --check
@@ -1317,14 +1322,15 @@ Table A2. Evidence matrix:
   workload.
 - Use 1920x1080 through Gamescope, 100 Hz output, and a 100 FPS MangoHud cap.
 - Use 180 seconds per measured run.
-- Use 90 seconds of warmup and 270 seconds per tune epoch for the A/B tune shape.
+- Use 270 seconds per tune epoch: 90 seconds of warmup followed by 180 seconds
+  of measurement.
 - Re-detect the live Gamescope/KCD process-tree root before each recording.
 - Keep background load stable.
 - Treat hardware differences as a limitation.
 
 ### Appendix E: Selected Build/Test Output
 
-The latest validation flow for this draft was run on 2026-06-05:
+The latest validation flow for this report was run on 2026-06-05:
 
 | Command | Result |
 | --- | --- |
