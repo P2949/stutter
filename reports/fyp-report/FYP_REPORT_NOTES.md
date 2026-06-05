@@ -200,14 +200,18 @@ Include:
 - Reproducibility checklist.
 - Glossary.
 
-## References Still Needed
+## References Status
 
-The final submitted report should add external references for:
-- eBPF and Linux tracing.
-- Linux scheduler concepts.
-- Proton and Wine.
-- Frame pacing and frametime analysis.
-- Experimental benchmarking or A/B methodology.
+External references have been added to `FYP_REPORT_DRAFT.md` for eBPF, Linux
+scheduling, Proton/Wine/DXVK/Gamescope, MangoHud, Mesa/Vulkan, and measurement
+methodology.
+
+Before final submission, verify that:
+- the citation style matches the course requirement;
+- all background claims that need citations have inline references;
+- access dates and URLs are formatted consistently;
+- any added discussion of bootstrap, sample-size estimation, or statistical
+  power has an appropriate methodology reference.
 
 ## Evidence Matrix
 

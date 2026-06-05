@@ -69,7 +69,7 @@ do not support it.
 
 The project makes the following contributions:
 
-- A scheduler-aware recording pipeline using Rust and Aya eBPF.
+- A scheduler-aware recording pipeline using Rust-based eBPF instrumentation.
 - Frame-timing correlation using MangoHud CSV data.
 - Process-tree and task classification for Proton/Wine/Gamescope workloads.
 - An advisor and tuning workflow for guarded profile experiments.
@@ -196,7 +196,7 @@ measurements help account for workload variance. This is especially important
 for open-world games where traversal, asset streaming, shader state, and
 background runtime work can vary.
 The report uses confidence intervals and sample-size estimates as conservative
-measurement tools rather than as proof of causality [14], [15].
+measurement tools rather than as proof of causality [14]-[16].
 
 The trusted tuning loop in `stutter` is:
 
@@ -687,7 +687,7 @@ This table is derived from the formal baseline analysis artifacts in
 outlier count is `frame_pacing.outlier_count`: frames at or above 33.3ms, or
 at least 2x the run median frametime.
 
-| Run | Frames | Median frametime | P99 | Max | Frame-pacing outliers |
+| Run | Frames | Median frametime | P99 | Max | Outliers |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | baseline-01 | 8,833 | 17.725ms | 51.008ms | 562.266ms | 1,347 |
 | baseline-02 | 7,744 | 21.276ms | 49.712ms | 272.166ms | 1,354 |
@@ -760,10 +760,13 @@ Table 7. Profile-level summary:
 
 This table summarizes the same `tuning_summary.json` artifact at profile level.
 
-| Profile | Valid runs | Median diagnostic score | Mean diagnostic score | Median frame P99 | Mean over-5ms |
+| Profile | Valid runs | Median diagnostic score | Mean diagnostic score | Median frame P99 | Mean scheduler >5ms |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | `baseline-online` | 5 | 21,533 | 23,431.4 | 38.337ms | 0.2 |
 | `kcd1-game-on-1-5-7-11-gamescope-on-0-6` | 5 | 38,806 | 49,746.0 | 37.798ms | 0.6 |
+
+The `over-5ms` value is a scheduler-latency threshold count from the diagnostic
+score, not a frame-time threshold.
 
 The median comparison is visible in a compact bar:
 
@@ -776,6 +779,13 @@ tuned-profile median:   38,806  [================    ]  +80.2% worse
 
 The tuned profile was not validated and should not be recommended on the
 current evidence.
+
+The profile-vs-profile tables above are derived from `tuning_summary.json`
+candidate statistics. The generated `tuning_recommendation.json` selected
+`baseline-online` as the lower-scoring profile, so some formal comparison
+fields in that artifact compare `baseline-online` against itself and show zero
+deltas. The tuned-profile conclusion here is therefore based on the candidate
+statistics in `tuning_summary.json`.
 
 The generated recommendation also estimated that some metrics may require more
 runs per side to detect a 10% movement at the observed noise level:
@@ -835,6 +845,9 @@ bundle comparison and not a single-variable causal test.
 The personal stack did not show a clear advantage in this small sample. The
 value of the add-on is realism: `stutter` can capture and compare a complex
 player-used configuration bundle without overclaiming causality.
+As documented in the real-world stack artifact notes, two raw MangoHud CSV
+sources were not preserved, but their ingested frame data remains available in
+the committed analysis artifacts.
 
 ## 9. Results and Analysis
 
@@ -1089,6 +1102,10 @@ Accessed: 2026-06-05. Available:
 characterization." Accessed: 2026-06-05. Available:
 <https://www.itl.nist.gov/div898/handbook/mpc/mpc.htm>
 
+[16] A. Georges, D. Buytaert, and L. Eeckhout, "Statistically rigorous Java
+performance evaluation," OOPSLA 2007. Accessed: 2026-06-05. Available:
+<https://doi.org/10.1145/1297027.1297033>
+
 ## 14. Appendices
 
 ### Appendix A: Commands and Validation Checks
@@ -1128,6 +1145,7 @@ stutter tune \
   --scenario kcd1-rattay-route-1 \
   --workload-label kcd1-proton-ge-10-34 \
   --route-label rattay-fixed-route-1 \
+  --mangohud-log <KingdomCome_MANGOHUD_CSV> \
   --out-dir reports/kcd1-case-study/tune/kcd1-affinity-02
 ```
 
@@ -1169,6 +1187,22 @@ stutter recommend \
   --tune reports/kcd1-case-study/tune/kcd1-affinity-02 \
   --markdown reports/kcd1-case-study/results/kcd1-fix-validation.md \
   --html reports/kcd1-case-study/results/kcd1-fix-validation.html
+```
+
+The JSON version was produced by the same secondary fix-validation command with
+`--json` redirected to `reports/kcd1-case-study/results/kcd1-fix-validation.json`:
+
+```bash
+stutter recommend \
+  --fix-plan reports/kcd1-case-study/fix-plan-cpu-affinity-profile.json \
+  --baseline reports/kcd1-case-study/runs/baseline-01 \
+  --baseline reports/kcd1-case-study/runs/baseline-02 \
+  --baseline reports/kcd1-case-study/runs/baseline-03 \
+  --baseline reports/kcd1-case-study/runs/baseline-04 \
+  --baseline reports/kcd1-case-study/runs/baseline-05 \
+  --tune reports/kcd1-case-study/tune/kcd1-affinity-02 \
+  --json \
+  > reports/kcd1-case-study/results/kcd1-fix-validation.json
 ```
 
 Validation flow before final submission:
