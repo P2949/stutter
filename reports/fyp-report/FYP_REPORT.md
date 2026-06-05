@@ -1353,9 +1353,10 @@ Selected output:
 Full command logs should stay in repository artifacts or build logs rather than
 being pasted into the main report.
 
-### Appendix F: Additional KCD1 Tables
+Appendix F: Additional KCD1 Tables Available in the Artifact Archive
 
-Additional tables that can be included in a final formatted submission:
+The following supporting tables are available in the repository artifacts and
+can be used for further inspection or presentation:
 
 - full baseline frame table with P95 and data-quality columns;
 - full tune candidate statistics;
