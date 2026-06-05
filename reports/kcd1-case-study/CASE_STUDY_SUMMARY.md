@@ -254,7 +254,7 @@ A separate measurement-quality check investigated the recurring non-zero drop-co
 
 The `--ebpf-wakeup-map-factor 4` pilot did not reduce `wakeup_data_replaced_entries`; it produced a similar replacement rate to the baselines. Therefore, the counter is probably not simple map-capacity exhaustion. It is more consistent with repeated wakeups for the same target task before `sched_switch` consumes the previous wakeup timestamp.
 
-Report wording:
+Suggested interpretation for the report:
 
 > The case study exposed a measurement-quality nuance in the profiler. KCD1/Proton produced high wakeup replacement pressure, but ring-buffer reserve failures remained zero. Increasing wakeup-map capacity did not reduce the replacement rate, suggesting the counter may represent repeated wakeup churn rather than ordinary event loss. Future work should distinguish problematic measurement loss from benign replacement of superseded wakeup timestamps.
 
