@@ -2,4 +2,3 @@
 # Too large for normal Git/GitHub; publish as release assets instead.
 runs/*/migration_events.json
 **/migration_events.json
-reports/kcd1-case-study/tune/kcd1-affinity-01/iter-003-kcd1-game-on-1-5-7-11-gamescope-on-0-6/migration_events.json
