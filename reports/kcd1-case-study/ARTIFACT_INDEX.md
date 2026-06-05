@@ -1,10 +1,12 @@
 # KCD1 case-study artifact index
 
 This directory contains the technical archive for the Kingdom Come: Deliverance 1
-case study. The primary human-readable summary is `CASE_STUDY_SUMMARY.md`.
+case study. The polished lecturer-facing report is `KCD1_EXPERIMENT_REPORT.md`;
+the primary technical archive summary is `CASE_STUDY_SUMMARY.md`.
 
 ## Primary narrative
 
+- `KCD1_EXPERIMENT_REPORT.md` — polished lecturer-facing case-study report.
 - `CASE_STUDY_SUMMARY.md` — summary of the method, results, limitations, and conclusions.
 - `setup/kcd1-method-notes.md` — controlled route and setup notes.
 - `setup/system-info.txt` — captured machine/software context.
