@@ -104,16 +104,18 @@ At 100 FPS, the expected frame interval is about 10ms.
 A 50ms frame is a multi-frame stall even if the average FPS remains high.
 ```
 
-This is why the project focuses on frame-pacing tails and outliers. A tuning
-change that leaves mean FPS similar but reduces p99 frametime could be useful.
-Conversely, a change that moves one frame metric in a favorable direction while
-increasing scheduler tail latency may not be safe to recommend.
+This is why the project focuses on frame-pacing tails, MangoHud frame logs, and
+outliers [11]. A tuning change that leaves mean FPS similar but reduces p99
+frametime could be useful. Conversely, a change that moves one frame metric in
+a favorable direction while increasing scheduler tail latency may not be safe to
+recommend.
 
 ### 3.2 Linux Scheduling and Runnable Latency
 
 Linux tasks become runnable when they have work to do and are eligible to run
 on a CPU. Runnable latency is the delay between a task becoming runnable and
-actually receiving CPU time:
+actually receiving CPU time. Linux scheduler documentation provides the
+background for this model [4]-[6]:
 
 ```text
 sched_wakeup timestamp -> sched_switch timestamp = runnable latency
@@ -136,7 +138,8 @@ eBPF allows a user-space program to attach safe, verified programs to selected
 kernel events. For `stutter`, this makes scheduler-visible timing practical:
 events can be observed near the source rather than inferred through coarse
 user-space polling. The result is lower-latency evidence about wakeups, context
-switches, and related runtime behavior.
+switches, and related runtime behavior. The implementation model follows the
+Linux BPF, map, and ring-buffer documentation [1]-[3].
 
 The same mechanism has limitations. eBPF programs use maps and buffers with
 finite capacity. Optional probes may not be available on every kernel or setup.
@@ -147,10 +150,15 @@ loss.
 
 ### 3.4 Proton, Wine, DXVK, and Gamescope
 
-The KCD1 workload runs through a layered Linux gaming stack:
+The KCD1 workload is mediated by a layered Linux gaming stack [7]-[13]:
 
 ```text
-Windows game -> Proton/Wine -> DXVK/Vulkan -> Mesa/RADV -> Wayland/Gamescope -> GPU/display
+Windows game
+  -> Proton/Wine
+  -> DXVK/Vulkan/RADV render path
+  -> Gamescope presentation/compositor layer
+  -> Wayland/Sway session
+  -> GPU/display
 ```
 
 Each layer can create tasks that appear in Linux scheduler evidence. Wine may
@@ -175,9 +183,10 @@ flexibility and effective CPU capacity.
 That trade-off is central to the KCD1 case study. On a 6-core/12-thread CPU,
 reserving one SMT pair (`0,6`) for Gamescope/runtime work removes a meaningful
 portion of the logical CPU set from the game side. A plausible profile can
-therefore become a harmful or unsupported change if it compresses a busy game
-process onto too few CPUs. This is exactly why the profile needed repeated
-validation instead of being recommended from diagnosis alone.
+therefore become unsupported, or unsuitable in a specific setup, if it
+compresses a busy game process onto too few CPUs. This is exactly why the
+profile needed repeated validation instead of being recommended from diagnosis
+alone.
 
 ### 3.6 Why Repeated A/B Testing Matters
 
@@ -186,6 +195,8 @@ Interleaving baseline and tuned runs helps reduce time drift, and repeated
 measurements help account for workload variance. This is especially important
 for open-world games where traversal, asset streaming, shader state, and
 background runtime work can vary.
+The report uses confidence intervals and sample-size estimates as conservative
+measurement tools rather than as proof of causality [14], [15].
 
 The trusted tuning loop in `stutter` is:
 
@@ -577,6 +588,8 @@ The formal baseline set used five runs of a repeatable Rattay route from the sam
 save. Each run lasted about 180 seconds. The setup used Gamescope and MangoHud
 frame logging, explicit process-tree targeting, and a stripped-down launch
 configuration so the CPU-affinity profile would be the main variable later.
+The exact command shapes are listed in Appendix A; live process IDs were
+re-detected before each run.
 
 Baseline validity checks included stop reason, duration, frame count, timestamp
 alignment, data quality, and artifact completeness.
@@ -656,6 +669,9 @@ The measurement launch kept Gamescope, MangoHud logging, and the archived KCD1
 config. It excluded the author's larger personal optimized configuration: no
 RADV experimental flags, no FSR/FSR4, no gamemode, no mimalloc, and no forced
 Wine CPU topology.
+Appendix A lists command shapes, Appendix B gives the tested profile TOML,
+Appendix C maps the artifacts used as evidence, and Appendix D records the
+reproducibility checklist.
 
 ### 8.2 Baseline Results
 
@@ -665,6 +681,11 @@ frame data, used monotonic timestamp alignment, and reported `Medium` data
 quality.
 
 Table 3. Baseline frame timing:
+
+This table is derived from the formal baseline analysis artifacts in
+`reports/kcd1-case-study/runs/`. Frametime units are milliseconds, and the
+outlier count is `frame_pacing.outlier_count`: frames at or above 33.3ms, or
+at least 2x the run median frametime.
 
 | Run | Frames | Median frametime | P99 | Max | Frame-pacing outliers |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -698,7 +719,9 @@ Table 4. CPU-affinity profile rules:
 ### 8.4 Profile Explainability
 
 The profile-plan follow-up showed what the tuned profile would do before
-application:
+application. In this case study, the profile-plan explainability pass was added
+as a follow-up after the A/B run exposed the need to audit which rules matched
+which KCD1 threads. Future studies should run it before tuning:
 
 Table 5. Profile-plan task-count summary:
 
@@ -719,7 +742,9 @@ tuned profile did not fail simply because it missed the relevant tasks.
 ### 8.5 A/B Results
 
 The proper A/B tune run, `kcd1-affinity-02`, tested both profiles with five
-valid measured iterations each. Lower diagnostic score is better.
+valid measured iterations each. Scores are derived from
+`reports/kcd1-case-study/tune/kcd1-affinity-02/tuning_summary.json`; lower
+diagnostic score is better.
 
 Table 6. A/B per-iteration diagnostic score:
 
@@ -732,6 +757,8 @@ Table 6. A/B per-iteration diagnostic score:
 | 5 | 32,994 | 98,461 | +198.4% |
 
 Table 7. Profile-level summary:
+
+This table summarizes the same `tuning_summary.json` artifact at profile level.
 
 | Profile | Valid runs | Median diagnostic score | Mean diagnostic score | Median frame P99 | Mean over-5ms |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -755,6 +782,9 @@ runs per side to detect a 10% movement at the observed noise level:
 
 Table 8. Sample-size estimates:
 
+The values are estimated run counts per profile side from the tuning
+recommendation artifact.
+
 | Metric | Estimated runs per side |
 | --- | ---: |
 | `diagnostic_raw_score_total` | 30 |
@@ -770,6 +800,9 @@ A separate drop-counter pilot investigated the recurring wakeup replacement
 counter.
 
 Table 9. Drop-counter pilot summary:
+
+The rates are summarized from
+`reports/kcd1-case-study/drop-counter-pilot/mapfactor-4-comparison.txt`.
 
 | Condition | Wakeup replacements/s | Ringbuf reserve failures |
 | --- | ---: | ---: |
@@ -790,6 +823,10 @@ one flag or scheduler.
 
 Table 10. Exploratory personal-stack comparison:
 
+This table is derived from
+`reports/kcd1-case-study/realworld-stack/realworld-stack-summary.csv`; it is a
+bundle comparison and not a single-variable causal test.
+
 | Condition | Runs | Median frametime | P95 | P99 | Max | Median outlier % | Scheduler |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
 | clean | 3 | 19.3419ms | 26.2893ms | 29.8236ms | 65.7529ms | 0.428% | default |
@@ -807,7 +844,7 @@ The primary diagnostic score was lower for `baseline-online` in all five paired
 A/B iterations. This is the main evaluation result.
 
 The result does not say that CPU affinity is inherently bad, or that the exact
-profile is harmful in every setup. It says that this profile did not earn a
+profile is unsuitable in every setup. It says that this profile did not earn a
 recommendation under this route, machine, Proton version, and measurement
 method.
 
@@ -842,7 +879,8 @@ The case study revealed several engineering lessons:
 - Wakeup replacement counters needed careful interpretation and were not simply
   ring-buffer reserve failures.
 - Recommendation output needed to distinguish candidate statistics from formal
-  comparison fields when `baseline-online` was selected as best.
+  comparison fields when `baseline-online` was selected as the lower-scoring
+  profile.
 - Artifact context matters: setup notes, route labels, tune summaries, and
   profile plans are part of the evidence.
 
@@ -1000,38 +1038,56 @@ behavior is the central contribution of `stutter`.
 
 ## 13. References
 
-External references to finalize into the required submission style:
+External technical references are listed in numeric style below. Experiment
+artifacts are kept separate in Appendix C so that background references and
+project evidence remain distinct.
 
-- Linux kernel documentation. "BPF Documentation." Accessed 2026-06-05.
-  <https://docs.kernel.org/bpf/>
-- Linux kernel documentation. "BPF maps." Accessed 2026-06-05.
-  <https://docs.kernel.org/bpf/maps.html>
-- Linux kernel documentation. "BPF ring buffer." Accessed 2026-06-05.
-  <https://docs.kernel.org/bpf/ringbuf.html>
-- Linux kernel documentation. "Scheduler." Accessed 2026-06-05.
-  <https://docs.kernel.org/scheduler/index.html>
-- Linux kernel documentation. "CFS Scheduler." Accessed 2026-06-05.
-  <https://docs.kernel.org/scheduler/sched-design-CFS.html>
-- Linux kernel documentation. "EEVDF Scheduler." Accessed 2026-06-05.
-  <https://docs.kernel.org/scheduler/sched-eevdf.html>
-- WineHQ. "What is Wine?" Accessed 2026-06-05.
-  <https://www.winehq.org/>
-- ValveSoftware. "Proton." Accessed 2026-06-05.
-  <https://github.com/ValveSoftware/Proton>
-- doitsujin. "DXVK." Accessed 2026-06-05.
-  <https://github.com/doitsujin/dxvk>
-- ValveSoftware. "gamescope." Accessed 2026-06-05.
-  <https://github.com/ValveSoftware/gamescope>
-- flightlessmango. "MangoHud." Accessed 2026-06-05.
-  <https://github.com/flightlessmango/MangoHud>
-- NIST/SEMATECH. "Engineering Statistics Handbook: Confidence intervals."
-  Accessed 2026-06-05.
-  <https://www.itl.nist.gov/div898/handbook/prc/section1/prc14.htm>
-- NIST/SEMATECH. "Engineering Statistics Handbook: Measurement process
-  characterization." Accessed 2026-06-05.
-  <https://www.itl.nist.gov/div898/handbook/mpc/mpc.htm>
+[1] Linux kernel documentation, "BPF Documentation." Accessed: 2026-06-05.
+Available: <https://docs.kernel.org/bpf/>
 
-Internal project evidence used by this draft is listed in Appendix C.
+[2] Linux kernel documentation, "BPF maps." Accessed: 2026-06-05. Available:
+<https://docs.kernel.org/bpf/maps.html>
+
+[3] Linux kernel documentation, "BPF ring buffer." Accessed: 2026-06-05.
+Available: <https://docs.kernel.org/bpf/ringbuf.html>
+
+[4] Linux kernel documentation, "Scheduler." Accessed: 2026-06-05. Available:
+<https://docs.kernel.org/scheduler/index.html>
+
+[5] Linux kernel documentation, "CFS Scheduler." Accessed: 2026-06-05.
+Available: <https://docs.kernel.org/scheduler/sched-design-CFS.html>
+
+[6] Linux kernel documentation, "EEVDF Scheduler." Accessed: 2026-06-05.
+Available: <https://docs.kernel.org/scheduler/sched-eevdf.html>
+
+[7] WineHQ, "What is Wine?" Accessed: 2026-06-05. Available:
+<https://www.winehq.org/>
+
+[8] ValveSoftware, "Proton." Accessed: 2026-06-05. Available:
+<https://github.com/ValveSoftware/Proton>
+
+[9] doitsujin, "DXVK." Accessed: 2026-06-05. Available:
+<https://github.com/doitsujin/dxvk>
+
+[10] ValveSoftware, "gamescope." Accessed: 2026-06-05. Available:
+<https://github.com/ValveSoftware/gamescope>
+
+[11] flightlessmango, "MangoHud." Accessed: 2026-06-05. Available:
+<https://github.com/flightlessmango/MangoHud>
+
+[12] Mesa project, "Mesa 3D Graphics Library documentation." Accessed:
+2026-06-05. Available: <https://docs.mesa3d.org/>
+
+[13] Khronos Group, "Vulkan." Accessed: 2026-06-05. Available:
+<https://www.khronos.org/vulkan/>
+
+[14] NIST/SEMATECH, "Engineering Statistics Handbook: Confidence intervals."
+Accessed: 2026-06-05. Available:
+<https://www.itl.nist.gov/div898/handbook/prc/section1/prc14.htm>
+
+[15] NIST/SEMATECH, "Engineering Statistics Handbook: Measurement process
+characterization." Accessed: 2026-06-05. Available:
+<https://www.itl.nist.gov/div898/handbook/mpc/mpc.htm>
 
 ## 14. Appendices
 
@@ -1084,7 +1140,23 @@ stutter profile-plan \
   --profile-name kcd1-game-on-1-5-7-11-gamescope-on-0-6
 ```
 
-Recommend shape:
+Explainable dry-run shape:
+
+```bash
+stutter apply-profile \
+  --tree-pid <KCD1_OR_GAMESCOPE_TREE_PID> \
+  --profile reports/kcd1-case-study/profiles/kcd1-affinity-ab.toml \
+  --profile-name kcd1-game-on-1-5-7-11-gamescope-on-0-6 \
+  --dry-run \
+  --explain
+```
+
+Secondary fix-validation recommend shape:
+
+The primary profile-vs-profile conclusion is based on
+`reports/kcd1-case-study/tune/kcd1-affinity-02/tuning_summary.json`; the
+fix-validation artifacts under `reports/kcd1-case-study/results/` are secondary
+and are marked `InvalidExperiment`.
 
 ```bash
 stutter recommend \
@@ -1147,6 +1219,7 @@ Table A1. Artifact map:
 | `reports/kcd1-case-study/runs/baseline-01` | Baseline run directory example |
 | `reports/kcd1-case-study/tune/kcd1-affinity-02/tuning_summary.json` | Primary A/B profile comparison |
 | `reports/kcd1-case-study/tune/kcd1-affinity-02/tuning_recommendation.json` | Recommendation and uncertainty data |
+| `reports/kcd1-case-study/results/kcd1-fix-validation.json` | Secondary fix-validation artifact; status is `InvalidExperiment`, not the primary tuned-profile conclusion |
 | `reports/kcd1-case-study/profiles/kcd1-affinity-profile-plan-summary.json` | Profile explainability summary |
 | `reports/kcd1-case-study/drop-counter-pilot/mapfactor-4-comparison.txt` | Measurement-quality investigation |
 | `reports/kcd1-case-study/realworld-stack/realworld-stack-summary.csv` | Exploratory clean vs personal-stack comparison |
