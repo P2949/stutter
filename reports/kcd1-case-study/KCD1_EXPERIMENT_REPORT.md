@@ -163,16 +163,18 @@ The proper A/B tuning run, `kcd1-affinity-02`, tested both profiles with five va
 
 Profile-level summary:
 
-| Profile | Valid runs | Median diagnostic score | Mean diagnostic score | Median frame P99 | Mean over-5ms |
+| Profile | Valid runs | Median diagnostic score | Mean diagnostic score | Median frame P99 | Mean scheduler >5ms |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | `baseline-online` | 5 | 21,533 | 23,431.4 | 38.337ms | 0.2 |
 | `kcd1-game-on-1-5-7-11-gamescope-on-0-6` | 5 | 38,806 | 49,746.0 | 37.798ms | 0.6 |
 
-The profile-vs-profile tables above are derived from `tuning_summary.json` candidate statistics. The generated `tuning_recommendation.json` selected `baseline-online` as the best profile, so some of its formal comparison fields compare `baseline-online` against itself and show zero deltas. The tuned-profile conclusion here is therefore based on the candidate statistics in `tuning_summary.json`.
+The `over-5ms` value is a scheduler-latency threshold count from the diagnostic score, not a frame-time threshold.
 
-The tuned profile was **not validated and should not be recommended on the current evidence**. The primary diagnostic score was worse in every paired iteration. The generated recommendation selected `baseline-online` as the current best profile with `NeedsRetest`, reflecting that the workload is noisy and confidence intervals still cross zero for several metrics.
+The profile-vs-profile tables above are derived from `tuning_summary.json` candidate statistics. The generated `tuning_recommendation.json` selected `baseline-online` as the lower-scoring profile, so some of its formal comparison fields compare `baseline-online` against itself and show zero deltas. The tuned-profile conclusion here is therefore based on the candidate statistics in `tuning_summary.json`.
 
-The careful interpretation is that the evidence did not support recommending the tuned profile, and the observed paired scores were consistently worse. This is not a claim that the profile is statistically proven harmful across all conditions.
+The tuned profile was **not validated and should not be recommended on the current evidence**. The primary diagnostic score was worse in every paired iteration. The generated recommendation selected `baseline-online` as the lower-scoring profile with `NeedsRetest`, reflecting that the workload is noisy and confidence intervals still cross zero for several metrics.
+
+The careful interpretation is that the evidence did not support recommending the tuned profile, and the observed paired scores were consistently worse. This is not a claim that the profile is unsuitable across all conditions.
 
 A/B evidence: `reports/kcd1-case-study/tune/kcd1-affinity-02/tuning_summary.json`, `reports/kcd1-case-study/tune/kcd1-affinity-02/tuning_recommendation.json`, and `reports/kcd1-case-study/tune/kcd1-affinity-02/tuning_recommendation.md`.
 
@@ -187,7 +189,7 @@ This is an interpretation, not a proven causal mechanism. The evidence supportin
 - The tuned profile had worse diagnostic scores in every paired iteration.
 - No clear GPU-utilisation explanation was needed for the profile-vs-profile result.
 
-The lesson is not that CPU affinity is always a bad idea for Proton games. The lesson is that a plausible CPU-placement story still needs repeated validation, especially on a CPU where reserving one SMT pair removes a meaningful part of the available logical CPU set.
+The lesson is not that CPU affinity is inherently a bad idea for Proton games. The lesson is that a plausible CPU-placement story still needs repeated validation, especially on a CPU where reserving one SMT pair removes a meaningful part of the available logical CPU set.
 
 ## 11. Statistical Interpretation
 
@@ -204,7 +206,7 @@ Estimated runs per side for detecting a 10% movement at the observed noise level
 | `frame_over_50ms` | 30 |
 | `max_latency_ns` | 26 |
 
-Five runs per side is enough for a case-study demonstration and enough to avoid recommending this particular false positive. It is not enough for broad tuning claims or precise small-effect estimates. This is why the generated recommendation says `NeedsRetest` even though `baseline-online` is the current best profile.
+Five runs per side is enough for a case-study demonstration and enough to avoid recommending this particular false positive. It is not enough for broad tuning claims or precise small-effect estimates. This is why the generated recommendation says `NeedsRetest` even though `baseline-online` is the lower-scoring profile in this tuning run.
 
 Uncertainty evidence: `reports/kcd1-case-study/tune/kcd1-affinity-02/tuning_recommendation.json`.
 
@@ -320,12 +322,16 @@ stutter tune \
   --scenario kcd1-rattay-route-1 \
   --workload-label kcd1-proton-ge-10-34 \
   --route-label rattay-fixed-route-1 \
+  --mangohud-log <KingdomCome_MANGOHUD_CSV> \
+  --hwmon \
   --out-dir reports/kcd1-case-study/tune/kcd1-affinity-02
 ```
 
 In this tune run, each epoch used 90 seconds of warm-up followed by 180 seconds of measurement; the generated summary recorded `restore_policy = "restore-after-each"`.
 
-Recommend command shape:
+Secondary fix-validation recommend command shape:
+
+The primary profile-vs-profile conclusion is based on `reports/kcd1-case-study/tune/kcd1-affinity-02/tuning_summary.json`; the fix-validation artifacts under `reports/kcd1-case-study/results/` are secondary and are marked `InvalidExperiment`.
 
 ```bash
 stutter recommend \
@@ -412,7 +418,7 @@ Profile file: `reports/kcd1-case-study/profiles/kcd1-affinity-ab.toml`.
 | `reports/kcd1-case-study/realworld-stack/realworld-stack-summary.csv` | Exploratory clean vs personal-stack comparison |
 | `reports/kcd1-case-study/results/kcd1-fix-validation.json` | Secondary validation artifact; status is `InvalidExperiment` |
 
-The primary source for the tuned-profile conclusion is `tuning_summary.json`. The fix-validation artifact is secondary because it compares the selected best tune candidate, `baseline-online`, against the earlier formal baseline set and is marked `InvalidExperiment`.
+The primary source for the tuned-profile conclusion is `tuning_summary.json`. The fix-validation artifact is secondary because it compares the selected lower-scoring tune candidate, `baseline-online`, against the earlier formal baseline set and is marked `InvalidExperiment`.
 
 ## Appendix D: Reproducibility Checklist
 

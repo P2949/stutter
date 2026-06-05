@@ -6,7 +6,7 @@ This document summarizes the current Kingdom Come: Deliverance 1 case-study evid
 reports/kcd1-case-study/CASE_STUDY_SUMMARY.md
 ```
 
-The purpose of this case study is not to prove that `stutter` automatically fixes KCD1, or that a specific Linux tuning tweak universally improves the game. The purpose is narrower and more useful: show that the prototype can collect evidence from a real Proton/Wine game workload, generate a scoped tuning hypothesis, and determine whether that hypothesis is validated, unsupported, or requires more evidence through repeated A/B measurements.
+The purpose of this case study is not to show that `stutter` automatically repairs KCD1, or that a specific Linux tuning tweak generalizes to the game. The purpose is narrower and more useful: show that the prototype can collect evidence from a real Proton/Wine game workload, generate a scoped tuning hypothesis, and determine whether that hypothesis is validated, unsupported, or requires more evidence through repeated A/B measurements.
 
 ## Key takeaways
 
@@ -24,14 +24,14 @@ The purpose of this case study is not to prove that `stutter` automatically fixe
 
 ## Experiment scope
 
-The experiment used a fixed Kingdom Come: Deliverance 1 route under Linux/Proton:
+The experiment used a repeatable Kingdom Come: Deliverance 1 route under Linux/Proton:
 
 - Game: Kingdom Come: Deliverance 1
 - Platform: Steam with GE-Proton10-34
 - Session: Wayland/Sway with Gamescope
 - Resolution: 1920x1080 through Gamescope
 - Refresh / cap: 100 Hz output with 100 FPS MangoHud cap
-- Route: fixed Rattay route from a fixed save
+- Route: repeatable Rattay route from the same save
 - Run length: 180 seconds per measured run
 - Hardware: Intel Core i5-10600K, 6 cores / 12 threads; AMD Radeon RX 9070 XT
 - CPU topology used by the profile design:
@@ -42,19 +42,19 @@ The experiment used a fixed Kingdom Come: Deliverance 1 route under Linux/Proton
   - core 4: CPUs 4,10
   - core 5: CPUs 5,11
 
-The large personal optimized launch configuration was intentionally not used. The measurement launch was kept stripped down: Gamescope, MangoHud logging, the fixed KCD1 config, and no RADV experimental flags, no FSR/FSR4, no gamemode, no mimalloc, and no forced Wine CPU topology.
+The large personal launch configuration was intentionally not used. The measurement launch was kept stripped down: Gamescope, MangoHud logging, the archived KCD1 config, and no RADV experimental flags, no FSR/FSR4, no gamemode, no mimalloc, and no forced Wine CPU topology.
 
-The Steam launch still used `+exec user.cfg`. The archived `user.cfg` mainly sets memory, texture streaming, material preload, and pak stream-cache options. These settings are treated as part of the fixed workload configuration, not as the tuning variable.
+The Steam launch still used `+exec user.cfg`. The archived `user.cfg` mainly sets memory, texture streaming, material preload, and pak stream-cache options. These settings are treated as part of the repeatable workload configuration, not as the tuning variable.
 
 
 ## Reproducibility checklist
 
-To reproduce this case study as closely as possible, keep the workload and measurement environment fixed:
+To reproduce this case study as closely as possible, keep the workload and measurement environment consistent:
 
-- Use the same fixed Rattay route and save file described in the method notes.
+- Use the same repeatable Rattay route and save file described in the method notes.
 - Use Steam with GE-Proton10-34.
 - Launch KCD1 with the stripped-down measurement configuration: Gamescope and MangoHud logging, no RADV experimental flags, no FSR/FSR4, no gamemode, no mimalloc, and no forced Wine CPU topology.
-- Keep `+exec user.cfg` enabled, because the archived `user.cfg` settings are part of the fixed workload configuration.
+- Keep `+exec user.cfg` enabled, because the archived `user.cfg` settings are part of the workload configuration.
 - Use 1920x1080 through Gamescope, 100 Hz output, and a 100 FPS MangoHud cap.
 - Use the same route duration: 180 seconds per measured run.
 - Re-detect the live Gamescope/KCD process-tree root before each recording; do not reuse a PID from a previous launch.
@@ -68,7 +68,7 @@ The primary comparison metric in the tune output is `diagnostic_raw_score_total`
 
 In the frame-aware comparison path used for this case study, the score combines scheduler-latency threshold counts for relevant game/runtime classes with frame-time tail counts. The scheduler component is weighted as `over_5ms * 100 + over_2ms * 20 + over_1ms`; the frame component adds `frame_over_50ms * 100 + frame_over_33ms * 20 + frame_over_16ms`. Larger values therefore mean more or worse scheduler/frame-pacing outliers during the measured window.
 
-Because it is an internal raw score, it should not be presented as a universal performance unit. It is useful inside one controlled experiment for comparing baseline and tuned candidates under the same scenario, route label, and measurement settings.
+Because it is an internal raw score, it should not be presented as a general-purpose performance unit. It is useful inside one controlled experiment for comparing baseline and tuned candidates under the same scenario, route label, and measurement settings.
 
 ## Baseline data quality
 
@@ -176,14 +176,16 @@ For this case study, that matters because the KCD process appears as `process_co
 
 The second tuning experiment, `kcd1-affinity-02`, used a proper A/B profile set with both `baseline-online` and the tuned CPU-affinity profile. Each profile had five valid measured iterations.
 
-The tuning summary selected `baseline-online` as the best profile with `Medium` ranking confidence. The tested tuned profile was not validated and should not be recommended on the current evidence.
+The tuning summary selected `baseline-online` as the lower-scoring profile with `Medium` ranking confidence. The tested tuned profile was not validated and should not be recommended on the current evidence.
 
-| Profile | Valid runs | Median diagnostic score | Mean diagnostic score | Median frame P99 | Mean over_5ms |
+| Profile | Valid runs | Median diagnostic score | Mean diagnostic score | Median frame P99 | Mean scheduler >5ms |
 |---|---:|---:|---:|---:|---:|
 | `baseline-online` | 5 | 21,533 | 23,431.4 | 38.337ms | 0.2 |
 | `kcd1-game-on-1-5-7-11-gamescope-on-0-6` | 5 | 38,806 | 49,746.0 | 37.798ms | 0.6 |
 
-This table is derived from `reports/kcd1-case-study/tune/kcd1-affinity-02/tuning_summary.json` candidate statistics. The generated `tuning_recommendation.json` selected `baseline-online` as the best profile; therefore some formal comparison fields in that artifact compare the selected best profile against itself and report zero deltas. The profile-vs-profile conclusion here is based on the candidate scores in the tuning summary.
+The `over_5ms` value is a scheduler-latency threshold count from the diagnostic score, not a frame-time threshold.
+
+This table is derived from `reports/kcd1-case-study/tune/kcd1-affinity-02/tuning_summary.json` candidate statistics. The generated `tuning_recommendation.json` selected `baseline-online` as the lower-scoring profile; therefore some formal comparison fields in that artifact compare `baseline-online` against itself and report zero deltas. The profile-vs-profile conclusion here is based on the candidate scores in the tuning summary.
 
 Lower diagnostic score is better. The tuned profile was worse on the primary diagnostic metric in every paired iteration:
 
@@ -208,7 +210,7 @@ Frame P99 was mixed, but the primary scheduler-aware diagnostic score did not su
 
 This is a good result for the FYP narrative. The project is about evidence-based validation, not forcing a positive tuning result.
 
-`reports/kcd1-case-study/results/kcd1-fix-validation.md` should be treated as a secondary validation artifact rather than the primary source for the tuned-profile conclusion. Its status is `InvalidExperiment`, and it compares the selected best tune candidate, `baseline-online`, against the earlier formal baseline set. The tuned-profile conclusion in this summary comes from the profile candidate statistics in `tuning_summary.json`.
+`reports/kcd1-case-study/results/kcd1-fix-validation.md` should be treated as a secondary validation artifact rather than the primary source for the tuned-profile conclusion. Its status is `InvalidExperiment`, and it compares the selected lower-scoring tune candidate, `baseline-online`, against the earlier formal baseline set. The tuned-profile conclusion in this summary comes from the profile candidate statistics in `tuning_summary.json`.
 
 ## Why the affinity profile likely failed
 
@@ -220,7 +222,7 @@ This is an interpretation, not a proven causal mechanism. It is still useful bec
 
 ## Statistical interpretation
 
-`tuning_recommendation.json` returned `NeedsRetest`, with `baseline-online` as the current best profile. The A/B uncertainty output warned that several metrics were noisy and that bootstrap confidence intervals crossed zero.
+`tuning_recommendation.json` returned `NeedsRetest`, with `baseline-online` as the lower-scoring profile in this tuning run. The A/B uncertainty output warned that several metrics were noisy and that bootstrap confidence intervals crossed zero.
 
 Estimated sample requirements included approximately:
 
@@ -244,11 +246,11 @@ A separate measurement-quality check investigated the recurring non-zero drop-co
 | baseline-05 | 1477/s | 0 |
 | mapfactor-4 pilot | 1568/s | 0 |
 
-The `--ebpf-wakeup-map-factor 4` pilot did not reduce `wakeup_data_replaced_entries`; it produced a similar replacement rate to the baselines. Therefore, the counter is probably not simple map-capacity exhaustion. It is more likely caused by repeated wakeups for the same target task before `sched_switch` consumes the previous wakeup timestamp.
+The `--ebpf-wakeup-map-factor 4` pilot did not reduce `wakeup_data_replaced_entries`; it produced a similar replacement rate to the baselines. Therefore, the counter is probably not simple map-capacity exhaustion. It is more consistent with repeated wakeups for the same target task before `sched_switch` consumes the previous wakeup timestamp.
 
 Report wording:
 
-> The case study exposed a measurement-quality nuance in the profiler. KCD1/Proton produced high wakeup replacement pressure, but ring-buffer reserve failures remained zero. Increasing wakeup-map capacity did not reduce the replacement rate, suggesting the counter may represent repeated wakeup churn rather than ordinary event loss. Future work should distinguish harmful measurement loss from benign replacement of superseded wakeup timestamps.
+> The case study exposed a measurement-quality nuance in the profiler. KCD1/Proton produced high wakeup replacement pressure, but ring-buffer reserve failures remained zero. Increasing wakeup-map capacity did not reduce the replacement rate, suggesting the counter may represent repeated wakeup churn rather than ordinary event loss. Future work should distinguish problematic measurement loss from benign replacement of superseded wakeup timestamps.
 
 ## Exploratory add-on: personal gaming stack
 
@@ -259,7 +261,7 @@ This add-on compared:
 - `clean`: stripped-down measurement launch configuration, default scheduler, 1920x1080 through Gamescope, 100 Hz output, and 100 FPS MangoHud cap.
 - `personal-stack`: the author's usual launch-option bundle plus `scx_lavd` using the recorded aggressive gaming flags.
 
-This is not a causal test of `scx_lavd`, Gamescope FSR, RADV/Mesa options, Wine/Proton options, allocator choice, gamemode, or any individual launch flag. The personal stack changes many variables at once, so the result is best treated as a realistic configuration-bundle comparison.
+This is not a causal test of `scx_lavd`, Gamescope FSR, RADV/Mesa options, Wine/Proton options, allocator choice, gamemode, or any individual launch flag. The personal stack changes many variables at once, so the result should be treated as a realistic configuration-bundle comparison.
 
 All six exploratory runs passed the basic validity gates: full-duration recording, `max_duration_reached`, non-zero frame count, `monotonic_observed` frame timestamp alignment, `Medium` data quality, and zero ring-buffer reserve failures.
 
@@ -291,8 +293,8 @@ This case study is already useful for the report:
 3. The route showed real frame-pacing problems and meaningful run-to-run variance.
 4. The advisor produced a reversible CPU-affinity tuning hypothesis.
 5. A controlled A/B tuning run tested the hypothesis.
-6. The tested profile was not validated and should not be recommended on the current evidence; `baseline-online` remained best.
-7. A drop-counter pilot clarified that wakeup replacements were not ring-buffer drops and were not fixed by increasing wakeup-map capacity.
+6. The tested profile was not validated and should not be recommended on the current evidence; `baseline-online` remained lower-scoring in the measured comparison.
+7. A drop-counter pilot clarified that wakeup replacements were not ring-buffer drops and were not reduced by increasing wakeup-map capacity.
 8. A follow-up profile-explainability feature now reports rule-level task matches, classes, `comm`, `process_comm`, and proposed masks so future tuning hypotheses are easier to audit before collecting A/B data.
 9. An exploratory real-world stack add-on shows that `stutter` can capture and compare a realistic player-used configuration bundle, while still avoiding causal claims when many variables change at once.
 

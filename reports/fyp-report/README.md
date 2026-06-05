@@ -8,3 +8,5 @@ The KCD1 case-study source material lives in `reports/kcd1-case-study/`.
 
 Keep the notes file in the repository as internal planning material. The final
 submitted report should be based on `FYP_REPORT_DRAFT.md`, not the notes file.
+The report is intentionally left as `FYP_REPORT_DRAFT.md` until the final
+submission/export step is explicitly chosen.

@@ -331,7 +331,7 @@ For example, KCD1 baseline runs such as
 `reports/kcd1-case-study/runs/baseline-01` preserve both raw and derived
 evidence. This makes later claims auditable.
 
-### 5.3 Analysis and Scoring Pipeline
+### 5.3 Analysis and Diagnostic Score Pipeline
 
 The analysis pipeline converts event streams into summaries. It identifies
 scheduler spikes, frame-pacing outliers, task attribution, data-quality warnings,
@@ -340,7 +340,7 @@ and comparison metrics. For the KCD1 case study, the key comparison metric is
 
 The simplified frame-aware score shape is:
 
-Figure 2. Simplified diagnostic score shape:
+Figure 2. Simplified Diagnostic Score shape:
 
 ```text
 scheduler component:
@@ -1146,6 +1146,7 @@ stutter tune \
   --workload-label kcd1-proton-ge-10-34 \
   --route-label rattay-fixed-route-1 \
   --mangohud-log <KingdomCome_MANGOHUD_CSV> \
+  --hwmon \
   --out-dir reports/kcd1-case-study/tune/kcd1-affinity-02
 ```
 
