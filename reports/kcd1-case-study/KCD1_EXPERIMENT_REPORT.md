@@ -1,7 +1,7 @@
 # Evidence-Based Linux Game Tuning Case Study:
 # Kingdom Come: Deliverance 1 under Proton
 
-Using scheduler-aware eBPF profiling to validate or reject a CPU-affinity tuning hypothesis
+Using scheduler-aware eBPF profiling to evaluate a CPU-affinity tuning hypothesis
 
 ## 1. Executive Summary
 
@@ -72,7 +72,7 @@ Setup evidence: `reports/kcd1-case-study/setup/kcd1-method-notes.md`, `reports/k
 
 The five formal baseline runs passed the basic validity checks: each ran for about 180 seconds, stopped because `max_duration_reached`, ingested MangoHud frame data, used `monotonic_observed` frame timestamp alignment, and reported `Medium` data quality.
 
-| Run | Frames | Median frametime | P99 | Max | Over-33ms/outlier count | Data quality |
+| Run | Frames | Median frametime | P99 | Max | Frame-pacing outliers (~33ms / 2x median) | Data quality |
 | --- | ---: | ---: | ---: | ---: | ---: | --- |
 | baseline-01 | 8,833 | 17.725ms | 51.008ms | 562.266ms | 1,347 | Medium |
 | baseline-02 | 7,744 | 21.276ms | 49.712ms | 272.166ms | 1,354 | Medium |
@@ -163,6 +163,8 @@ Profile-level summary:
 | --- | ---: | ---: | ---: | ---: | ---: |
 | `baseline-online` | 5 | 21,533 | 23,431.4 | 38.337ms | 0.2 |
 | `kcd1-game-on-1-5-7-11-gamescope-on-0-6` | 5 | 38,806 | 49,746.0 | 37.798ms | 0.6 |
+
+The profile-vs-profile tables above are derived from `tuning_summary.json` candidate statistics. The generated `tuning_recommendation.json` selected `baseline-online` as the best profile, so some of its formal comparison fields compare `baseline-online` against itself and show zero deltas. The tuned-profile conclusion here is therefore based on the candidate statistics in `tuning_summary.json`.
 
 The tuned profile was **not validated and should not be recommended on the current evidence**. The primary diagnostic score was worse in every paired iteration. The generated recommendation selected `baseline-online` as the current best profile with `NeedsRetest`, reflecting that the workload is noisy and confidence intervals still cross zero for several metrics.
 
@@ -269,10 +271,16 @@ stutter record \
   --tree-pid <KCD1_OR_GAMESCOPE_TREE_PID> \
   --duration 180 \
   --run-name kcd1-rattay-baseline-XX \
-  --scenario-name kcd1-rattay-route-1 \
+  --scenario kcd1-rattay-route-1 \
   --workload-label kcd1-proton-ge-10-34 \
   --route-label rattay-fixed-route-1 \
-  --mangohud-csv <KingdomCome_MANGOHUD_CSV>
+  --out-dir reports/kcd1-case-study/runs/baseline-XX \
+  --mangohud-log <KingdomCome_MANGOHUD_CSV> \
+  --hwmon \
+  --cpu-freq \
+  --runtime-slices \
+  --foreground-window \
+  --foreground-source sway
 ```
 
 Profile-plan command:
@@ -304,10 +312,14 @@ stutter tune \
   --runs 5 \
   --baseline-profile baseline-online \
   --warmup-seconds 90 \
-  --measure-seconds 180 \
-  --restore-policy restore-after-each \
+  --epoch-seconds 270 \
+  --scenario kcd1-rattay-route-1 \
+  --workload-label kcd1-proton-ge-10-34 \
+  --route-label rattay-fixed-route-1 \
   --out-dir reports/kcd1-case-study/tune/kcd1-affinity-02
 ```
+
+In this tune run, each epoch used 90 seconds of warm-up followed by 180 seconds of measurement; the generated summary recorded `restore_policy = "restore-after-each"`.
 
 Recommend command shape:
 
@@ -320,16 +332,32 @@ stutter recommend \
   --baseline reports/kcd1-case-study/runs/baseline-04 \
   --baseline reports/kcd1-case-study/runs/baseline-05 \
   --tune reports/kcd1-case-study/tune/kcd1-affinity-02 \
-  --html reports/kcd1-case-study/tune/kcd1-affinity-02/tuning_recommendation.html
+  --markdown reports/kcd1-case-study/results/kcd1-fix-validation.md \
+  --html reports/kcd1-case-study/results/kcd1-fix-validation.html
+```
+
+JSON recommendation artifact:
+
+```bash
+stutter recommend \
+  --fix-plan reports/kcd1-case-study/fix-plan-cpu-affinity-profile.json \
+  --baseline reports/kcd1-case-study/runs/baseline-01 \
+  --baseline reports/kcd1-case-study/runs/baseline-02 \
+  --baseline reports/kcd1-case-study/runs/baseline-03 \
+  --baseline reports/kcd1-case-study/runs/baseline-04 \
+  --baseline reports/kcd1-case-study/runs/baseline-05 \
+  --tune reports/kcd1-case-study/tune/kcd1-affinity-02 \
+  --json \
+  > reports/kcd1-case-study/results/kcd1-fix-validation.json
 ```
 
 Validation checks:
 
 ```bash
-cargo fmt --all -- --check
-cargo test
-grep -nEi 'proves|fixed|caused|rejected|guarantee|universal|scx.*caused|improves' \
-  reports/kcd1-case-study/KCD1_EXPERIMENT_REPORT.md
+RUSTUP_TOOLCHAIN=nightly cargo fmt --all -- --check
+RUSTUP_TOOLCHAIN=nightly cargo test --all
+RUSTUP_TOOLCHAIN=nightly cargo clippy --all-targets -- -D warnings
+RUSTUP_TOOLCHAIN=nightly cargo run -p xtask -- fixture-check
 ```
 
 Build/check evidence: `reports/kcd1-case-study/setup/build-check.txt`, `reports/kcd1-case-study/tune/kcd1-affinity-02.log`, and `reports/kcd1-case-study/results/kcd1-fix-validation-command-output.txt`.
