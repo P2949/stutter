@@ -14,6 +14,7 @@ The purpose of this case study is not to prove that `stutter` automatically fixe
 - `stutter` successfully captured and analyzed a real KCD1/Proton workload with scheduler data, process-tree data, GPU samples, and MangoHud frame timing.
 - Five formal baseline runs were valid: each ran for about 180 seconds, stopped because the maximum duration was reached, ingested frame data, and used monotonic frame timestamp alignment.
 - The baseline route was noisy but useful: median frametime ranged from about 16.3ms to 22.9ms, while p99 frametime stayed in the mid-40s to low-50s milliseconds.
+- The workload is noisy enough that small tuning effects may require roughly 18-30+ runs per condition, depending on the metric; the five-run A/B test is enough to show the workflow and avoid a false positive, but not enough to claim precise small-effect estimates.
 - The advisor generated a plausible, reversible CPU-affinity hypothesis, but A/B tuning did not validate the tested profile.
 - In the proper A/B tune run, `baseline-online` had a lower primary diagnostic score than the tuned affinity profile in all five paired iterations.
 - The non-validation result is valuable: it shows that `stutter` can prevent a plausible Linux tuning tweak from being mistaken for a proven improvement.
@@ -63,7 +64,9 @@ To reproduce this case study as closely as possible, keep the workload and measu
 
 ## How to read the diagnostic score
 
-The primary comparison metric in the tune output is `diagnostic_raw_score_total`. This is an internal `stutter` ranking/diagnostic score, not an FPS metric. Lower is better. It is used by the tune/recommend pipeline to compare profiles based on the scheduler-aware diagnostic evidence collected during each measured window.
+The primary comparison metric in the tune output is `diagnostic_raw_score_total`. This is an internal `stutter` weighted penalty score, not an FPS metric. Lower is better. It is used by the tune/recommend pipeline to compare profiles based on the scheduler-aware diagnostic evidence collected during each measured window.
+
+In the frame-aware comparison path used for this case study, the score combines scheduler-latency threshold counts for relevant game/runtime classes with frame-time tail counts. The scheduler component is weighted as `over_5ms * 100 + over_2ms * 20 + over_1ms`; the frame component adds `frame_over_50ms * 100 + frame_over_33ms * 20 + frame_over_16ms`. Larger values therefore mean more or worse scheduler/frame-pacing outliers during the measured window.
 
 Because it is an internal raw score, it should not be presented as a universal performance unit. It is useful inside one controlled experiment for comparing baseline and tuned candidates under the same scenario, route label, and measurement settings.
 
@@ -207,6 +210,14 @@ This is a good result for the FYP narrative. The project is about evidence-based
 
 `reports/kcd1-case-study/results/kcd1-fix-validation.md` should be treated as a secondary validation artifact rather than the primary source for the tuned-profile conclusion. Its status is `InvalidExperiment`, and it compares the selected best tune candidate, `baseline-online`, against the earlier formal baseline set. The tuned-profile conclusion in this summary comes from the profile candidate statistics in `tuning_summary.json`.
 
+## Why the affinity profile likely failed
+
+The profile-plan artifact shows that the tuned profile did not simply miss the important KCD1 worker threads. `RenderThread`, `ClothingRaycast`, `Streaming Async`, `dxvk-submit`, and `dxvk-cs` were matched through `process_comm = "Main"` and would have been moved by rule 0.
+
+The more likely explanation is that the profile reduced the game's available CPU set from all 12 logical CPUs to 10 logical CPUs while KCD1/DXVK/Wine had many active worker, render, streaming, physics, and audio threads. Reserving CPU pair `0,6` for Gamescope was plausible, but on this 6-core/12-thread machine the reduced scheduling capacity appears to have outweighed any presentation-thread isolation benefit.
+
+This is an interpretation, not a proven causal mechanism. It is still useful because it is grounded in the profile-plan and A/B evidence: the same worker/render threads appeared in the spike evidence, but the tuned profile produced worse diagnostic scores under the tested route and configuration.
+
 ## Statistical interpretation
 
 `tuning_recommendation.json` returned `NeedsRetest`, with `baseline-online` as the current best profile. The A/B uncertainty output warned that several metrics were noisy and that bootstrap confidence intervals crossed zero.
@@ -265,6 +276,11 @@ The correct interpretation is restrained:
 
 Artifact note: the raw MangoHud CSV used by `clean-01` and `clean-02` was no longer available when the archive was finalized. Their frame timing data had already been ingested into the committed `stutter` analysis JSON files, so the runs remain usable for this exploratory comparison. This limitation is documented in `reports/kcd1-case-study/realworld-stack/ARTIFACT_NOTES.md`.
 
+## Additional limitations and future work
+
+- The formal KCD1 runs used explicit `--tree-pid` targeting rather than foreground-window auto-selection. This was appropriate for the Gamescope/Proton process tree, but it means the case study should not be presented as a demonstration of foreground focus attribution. Foreground-window evidence was secondary; the validity of the recording comes from explicit KCD/Gamescope tree targeting.
+- IRQ, KMS flip, and DRM fence correlation were not available in the formal baseline artifacts. Future KCD1 runs could use `stutter inspect-irqs` to identify relevant GPU/device IRQs, then record with `--irq-latency --irq <IRQ>` to test whether device interrupt overlap contributes to the observed tail latency.
+- The profile-plan artifact was added after the first A/B experiment exposed the need for better explainability. Future case studies should run `profile-plan` before A/B data collection and include it as part of hypothesis formation.
 
 ## Current conclusion
 
