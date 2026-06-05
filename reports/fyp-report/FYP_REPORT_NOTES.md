@@ -68,14 +68,15 @@ Functional:
 - Correlate scheduler and frame timing evidence.
 - Classify relevant tasks and processes.
 - Generate explicit tuning hypotheses.
-- Apply reversible low/medium-risk actions under policy.
+- Apply supported low/medium-risk actions only through policy-controlled paths,
+  with preflight checks and rollback requirements where applicable.
 - Compare baseline and tuned runs.
 - Report uncertainty, quality, and verdicts.
 
 Non-functional:
 - Safety first.
 - Explicit targeting.
-- Reversible actions.
+- Reversibility where applicable.
 - No false confidence.
 - Reproducible artifacts.
 - Human-auditable recommendations.

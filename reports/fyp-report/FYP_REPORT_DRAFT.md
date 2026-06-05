@@ -264,6 +264,8 @@ The project must be evaluated as both software and methodology:
 `stutter` is organized as a pipeline from evidence collection to cautious
 recommendation:
 
+Figure 1. Evidence-to-recommendation pipeline:
+
 ```text
 Game / Proton / Gamescope
         |
@@ -326,6 +328,8 @@ and comparison metrics. For the KCD1 case study, the key comparison metric is
 `diagnostic_raw_score_total`.
 
 The simplified frame-aware score shape is:
+
+Figure 2. Simplified diagnostic score shape:
 
 ```text
 scheduler component:
@@ -406,6 +410,8 @@ indexes.
 
 The repository is a Rust workspace with these members:
 
+Table 1. Rust workspace crates:
+
 | Crate | Role |
 | --- | --- |
 | `stutter` | Main CLI, recording, analysis orchestration, commands |
@@ -418,6 +424,33 @@ The repository is a Rust workspace with these members:
 
 This layout keeps the tracing, artifact model, report rendering, configuration,
 and repository checks from collapsing into one unstructured binary.
+
+Relevant implementation anchors include:
+
+- recording session setup, writers, and finalization in
+  `stutter/src/recorder/session/prepare.rs`,
+  `stutter/src/recorder/session/writers.rs`, and
+  `stutter/src/recorder/session/finalize.rs`;
+- runnable-latency capture and wakeup replacement accounting in
+  `stutter-ebpf/src/scheduler.rs`, `stutter-ebpf/src/wakeup_data.rs`,
+  `stutter-ebpf/src/maps.rs`, and `stutter-ebpf/src/drop_counters.rs`;
+- MangoHud parsing and timestamp alignment in `stutter/src/mangohud/parser.rs`
+  and `stutter/src/mangohud/alignment.rs`;
+- report frame analysis in `stutter/src/report/analysis/frame.rs`;
+- profile matching and explainability in `stutter/src/profiles/matching.rs`,
+  `stutter/src/profiles/explain.rs`, `stutter/src/tune/profile_plan.rs`, and
+  `stutter/src/watch/profile_explain_render.rs`;
+- tune execution, ranking, statistics, and recommendations in
+  `stutter/src/tune/run.rs`, `stutter/src/tune/ranking.rs`,
+  `stutter/src/tune/statistics.rs`, and
+  `stutter/src/tune/recommendation.rs`;
+- fix-validation rendering in `stutter/src/recommend/fix_validation.rs` and
+  `stutter/src/recommend/render.rs`;
+- policy and rollback paths in `stutter/src/actions/runner/policy.rs`,
+  `stutter/src/actions/runner/rollback.rs`, `stutter/src/watch/policy.rs`, and
+  `stutter/src/profile_restore/`;
+- validation fixtures and golden reports in `xtask/src/fixtures.rs`,
+  `xtask/src/fixture_coverage.rs`, and `stutter-report/tests/golden.rs`.
 
 ### 6.2 Process-Tree Classification
 
@@ -604,6 +637,8 @@ workload. It avoids claiming general behavior beyond the measured setup.
 The main evaluation used Kingdom Come: Deliverance 1 under Steam with
 GE-Proton10-34, Sway/Wayland, Gamescope, and MangoHud frame logging.
 
+Table 2. Experimental setup:
+
 | Item | Value |
 | --- | --- |
 | Game | Kingdom Come: Deliverance 1 |
@@ -629,6 +664,8 @@ seconds, stopped because the maximum duration was reached, ingested MangoHud
 frame data, used monotonic timestamp alignment, and reported `Medium` data
 quality.
 
+Table 3. Baseline frame timing:
+
 | Run | Frames | Median frametime | P99 | Max | Frame-pacing outliers |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | baseline-01 | 8,833 | 17.725ms | 51.008ms | 562.266ms | 1,347 |
@@ -650,6 +687,8 @@ and frame-pacing outliers, but diagnosis alone did not validate it.
 
 The profile rules were:
 
+Table 4. CPU-affinity profile rules:
+
 | Rule | Match | Affinity | Intended effect |
 | --- | --- | --- | --- |
 | 0 | `match_comm = ["Main"]` | `1-5,7-11` | Move KCD process threads |
@@ -660,6 +699,8 @@ The profile rules were:
 
 The profile-plan follow-up showed what the tuned profile would do before
 application:
+
+Table 5. Profile-plan task-count summary:
 
 | Item | Count |
 | --- | ---: |
@@ -680,6 +721,8 @@ tuned profile did not fail simply because it missed the relevant tasks.
 The proper A/B tune run, `kcd1-affinity-02`, tested both profiles with five
 valid measured iterations each. Lower diagnostic score is better.
 
+Table 6. A/B per-iteration diagnostic score:
+
 | Iteration | Baseline-online score | Tuned profile score | Delta |
 | ---: | ---: | ---: | ---: |
 | 1 | 19,579 | 32,052 | +63.7% |
@@ -688,7 +731,7 @@ valid measured iterations each. Lower diagnostic score is better.
 | 4 | 26,408 | 38,806 | +46.9% |
 | 5 | 32,994 | 98,461 | +198.4% |
 
-Profile-level summary:
+Table 7. Profile-level summary:
 
 | Profile | Valid runs | Median diagnostic score | Mean diagnostic score | Median frame P99 | Mean over-5ms |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -696,6 +739,8 @@ Profile-level summary:
 | `kcd1-game-on-1-5-7-11-gamescope-on-0-6` | 5 | 38,806 | 49,746.0 | 37.798ms | 0.6 |
 
 The median comparison is visible in a compact bar:
+
+Figure 3. Median diagnostic-score comparison:
 
 ```text
 baseline-online median: 21,533  [=========           ]
@@ -707,6 +752,8 @@ current evidence.
 
 The generated recommendation also estimated that some metrics may require more
 runs per side to detect a 10% movement at the observed noise level:
+
+Table 8. Sample-size estimates:
 
 | Metric | Estimated runs per side |
 | --- | ---: |
@@ -721,6 +768,8 @@ runs per side to detect a 10% movement at the observed noise level:
 
 A separate drop-counter pilot investigated the recurring wakeup replacement
 counter.
+
+Table 9. Drop-counter pilot summary:
 
 | Condition | Wakeup replacements/s | Ringbuf reserve failures |
 | --- | ---: | ---: |
@@ -738,6 +787,8 @@ An exploratory add-on compared the stripped-down measurement stack against the
 author's normal gaming configuration bundle, including `scx_lavd` and many
 launch flags. This changed many variables at once, so it is not a causal test of
 one flag or scheduler.
+
+Table 10. Exploratory personal-stack comparison:
 
 | Condition | Runs | Median frametime | P95 | P99 | Max | Median outlier % | Scheduler |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
@@ -811,6 +862,19 @@ The main threats to validity are:
 These threats limit generalisation. They do not remove the central workflow
 result.
 
+### 9.6 Evaluation Summary
+
+The evaluation combines software validation and workload evidence. The codebase
+passed formatting, tests, linting, and fixture checks. The formal KCD1 baseline
+set produced valid run artifacts with MangoHud frame ingestion and monotonic
+timestamp alignment. The advisor produced a plausible CPU-affinity profile, and
+profile-plan output confirmed that the profile matched relevant game, Wine, and
+DXVK-side tasks. The repeated A/B tune then showed `baseline-online` with a
+lower primary diagnostic score in every paired iteration, so the recommendation
+remained `NeedsRetest` rather than promoting the tuned profile. Together, these
+results support the report's central claim: `stutter` can collect evidence,
+form a guarded hypothesis, test it, and decline unsupported tuning advice.
+
 ## 10. Discussion
 
 ### 10.1 Evidence-Based Tuning vs Tweak Guides
@@ -861,6 +925,8 @@ documentation are part of the tool, not afterthoughts.
 
 ### 11.1 Limitations
 
+Table 11. Limitations:
+
 | Limitation | Impact |
 | --- | --- |
 | Prototype status | The tool still expects technical users and careful setup |
@@ -875,6 +941,8 @@ documentation are part of the tool, not afterthoughts.
 ### 11.2 Future Work
 
 Future work can be grouped into four areas.
+
+Table 12. Future-work areas:
 
 | Area | Examples |
 | --- | --- |
@@ -932,18 +1000,36 @@ behavior is the central contribution of `stutter`.
 
 ## 13. References
 
-References still to be finalized before submission:
+External references to finalize into the required submission style:
 
-- Linux kernel eBPF documentation for tracing and BPF maps.
-- Linux kernel scheduler documentation for runnable tasks and scheduling
-  concepts.
-- Wine documentation for Windows compatibility on Unix-like systems.
-- Valve Proton project documentation for the Proton runtime stack.
-- DXVK project documentation for Direct3D-to-Vulkan translation.
-- Gamescope project documentation for the gaming compositor layer.
-- MangoHud documentation for frame timing capture.
-- Benchmarking methodology references for repeated runs, confidence intervals,
-  bootstrap intervals, and A/B comparison.
+- Linux kernel documentation. "BPF Documentation." Accessed 2026-06-05.
+  <https://docs.kernel.org/bpf/>
+- Linux kernel documentation. "BPF maps." Accessed 2026-06-05.
+  <https://docs.kernel.org/bpf/maps.html>
+- Linux kernel documentation. "BPF ring buffer." Accessed 2026-06-05.
+  <https://docs.kernel.org/bpf/ringbuf.html>
+- Linux kernel documentation. "Scheduler." Accessed 2026-06-05.
+  <https://docs.kernel.org/scheduler/index.html>
+- Linux kernel documentation. "CFS Scheduler." Accessed 2026-06-05.
+  <https://docs.kernel.org/scheduler/sched-design-CFS.html>
+- Linux kernel documentation. "EEVDF Scheduler." Accessed 2026-06-05.
+  <https://docs.kernel.org/scheduler/sched-eevdf.html>
+- WineHQ. "What is Wine?" Accessed 2026-06-05.
+  <https://www.winehq.org/>
+- ValveSoftware. "Proton." Accessed 2026-06-05.
+  <https://github.com/ValveSoftware/Proton>
+- doitsujin. "DXVK." Accessed 2026-06-05.
+  <https://github.com/doitsujin/dxvk>
+- ValveSoftware. "gamescope." Accessed 2026-06-05.
+  <https://github.com/ValveSoftware/gamescope>
+- flightlessmango. "MangoHud." Accessed 2026-06-05.
+  <https://github.com/flightlessmango/MangoHud>
+- NIST/SEMATECH. "Engineering Statistics Handbook: Confidence intervals."
+  Accessed 2026-06-05.
+  <https://www.itl.nist.gov/div898/handbook/prc/section1/prc14.htm>
+- NIST/SEMATECH. "Engineering Statistics Handbook: Measurement process
+  characterization." Accessed 2026-06-05.
+  <https://www.itl.nist.gov/div898/handbook/mpc/mpc.htm>
 
 Internal project evidence used by this draft is listed in Appendix C.
 
@@ -963,8 +1049,8 @@ stutter record \
   --run-name kcd1-rattay-baseline-XX \
   --scenario kcd1-rattay-route-1 \
   --workload-label kcd1-proton-ge-10-34 \
-  --route-label rattay-route-1 \
-  --out-dir reports/kcd1-case-study/runs/baseline-01 \
+  --route-label rattay-fixed-route-1 \
+  --out-dir reports/kcd1-case-study/runs/baseline-XX \
   --mangohud-log <KingdomCome_MANGOHUD_CSV> \
   --hwmon \
   --cpu-freq \
@@ -985,7 +1071,7 @@ stutter tune \
   --epoch-seconds 270 \
   --scenario kcd1-rattay-route-1 \
   --workload-label kcd1-proton-ge-10-34 \
-  --route-label rattay-route-1 \
+  --route-label rattay-fixed-route-1 \
   --out-dir reports/kcd1-case-study/tune/kcd1-affinity-02
 ```
 
@@ -1050,6 +1136,8 @@ match_class = ["GameScope", "Compositor", "Launcher", "SteamRuntime"]
 
 ### Appendix C: Artifact Map and Evidence Matrix
 
+Table A1. Artifact map:
+
 | Artifact | Role |
 | --- | --- |
 | `reports/kcd1-case-study/KCD1_EXPERIMENT_REPORT.md` | Detailed KCD1 case-study report |
@@ -1067,17 +1155,19 @@ match_class = ["GameScope", "Compositor", "Launcher", "SteamRuntime"]
 | `docs/FULL_SYSTEM_WATCHER_ARCHITECTURE.md` | Observer/planner/action-runner architecture |
 | `docs/AUTOTUNE_ARCHITECTURE.md` | Controller contract and keep/revert model |
 
+Table A2. Evidence matrix:
+
 | Claim | Evidence |
 | --- | --- |
-| Five formal baselines were valid | `baseline-*-analysis.json`, postcheck files |
-| Frames were ingested | MangoHud CSVs and frame correlation artifacts |
-| Timestamp alignment was monotonic | `CASE_STUDY_SUMMARY.md` and baseline analysis artifacts |
-| Profile matched key KCD threads | `kcd1-affinity-profile-plan-summary.json` |
-| `baseline-online` had lower score in all A/B iterations | `tuning_summary.json` |
-| Recommendation was `NeedsRetest` | `tuning_recommendation.json` |
-| Drop counter was not ringbuf failure | `mapfactor-4-comparison.txt` |
-| Personal stack is exploratory | `realworld-stack/README.md`, `launch-options.md` |
-| Build/test flow exists | `setup/build-check.txt`, validation commands in Appendix A |
+| Five formal baselines were valid | Baseline analysis and postcheck files in `reports/kcd1-case-study/runs/` |
+| Frames were ingested | MangoHud CSVs in `reports/kcd1-case-study/mangohud/` and baseline frame-correlation artifacts |
+| Timestamp alignment was monotonic | `reports/kcd1-case-study/CASE_STUDY_SUMMARY.md` and baseline analysis artifacts |
+| Profile matched key KCD threads | `reports/kcd1-case-study/profiles/kcd1-affinity-profile-plan-summary.json` |
+| `baseline-online` had lower score in all A/B iterations | `reports/kcd1-case-study/tune/kcd1-affinity-02/tuning_summary.json` |
+| Recommendation was `NeedsRetest` | `reports/kcd1-case-study/tune/kcd1-affinity-02/tuning_recommendation.json` |
+| Drop counter was not ringbuf failure | `reports/kcd1-case-study/drop-counter-pilot/mapfactor-4-comparison.txt` |
+| Personal stack is exploratory | `reports/kcd1-case-study/realworld-stack/README.md`, `reports/kcd1-case-study/realworld-stack/setup/launch-options.md` |
+| Build/test flow exists | `reports/kcd1-case-study/setup/build-check.txt`, validation commands in Appendix A |
 
 ### Appendix D: Reproducibility Checklist
 
