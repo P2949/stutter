@@ -155,7 +155,7 @@ Claims:
 - A negative tuning result can be a positive validation result.
 - The tool handled a complex real workload and avoided a false-positive
   recommendation.
-- Explainability improved auditability after the A/B result.
+- Explainability made the A/B result easier to audit.
 - The evaluation demonstrates method, not a general KCD1 optimization.
 
 Evidence:
