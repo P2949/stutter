@@ -61,7 +61,7 @@ pub async fn apply_profile_command(input: ApplyProfileCommandInput) -> anyhow::R
         highlight_comm,
     } = input;
     let profile = crate::profiles::load_selected_profile(&profile_path, profile_name.as_deref())?;
-    validate_apply_profile_mode(dry_run, watch)?;
+    validate_apply_profile_mode(dry_run, watch, explain)?;
     let persistent_effect = watch && keep_applied;
     let policy = validate_apply_profile_policy(
         &profile,
