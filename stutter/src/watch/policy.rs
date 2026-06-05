@@ -51,10 +51,20 @@ pub(crate) fn validate_apply_profile_policy(
     Ok(policy)
 }
 
-pub(crate) fn validate_apply_profile_mode(dry_run: bool, watch: bool) -> anyhow::Result<()> {
+pub(crate) fn validate_apply_profile_mode(
+    dry_run: bool,
+    watch: bool,
+    explain: bool,
+) -> anyhow::Result<()> {
     if dry_run && watch {
         anyhow::bail!(
             "apply-profile --dry-run cannot be combined with --watch; run a one-shot dry-run without --watch"
+        );
+    }
+
+    if explain && !dry_run {
+        anyhow::bail!(
+            "apply-profile --explain requires --dry-run; use --dry-run --explain to preview profile matches before applying"
         );
     }
 

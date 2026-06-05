@@ -34,6 +34,15 @@ fn apply_profile_policy_allows_dry_run_without_medium_flag() {
 }
 
 #[test]
+fn apply_profile_mode_rejects_explain_without_dry_run() {
+    let err = validate_apply_profile_mode(false, false, true).unwrap_err();
+    assert!(
+        err.to_string().contains("--explain requires --dry-run"),
+        "{err}"
+    );
+}
+
+#[test]
 fn watch_apply_profile_uses_policy_for_medium_risk_profiles() {
     let profile = priority_profile();
 
@@ -130,12 +139,12 @@ fn apply_profile_policy_allows_persistent_effect_only_when_requested() {
 
 #[test]
 fn apply_profile_mode_allows_one_shot_dry_run() {
-    validate_apply_profile_mode(true, false).unwrap();
+    validate_apply_profile_mode(true, false, false).unwrap();
 }
 
 #[test]
 fn apply_profile_mode_rejects_dry_run_watch() {
-    let err = validate_apply_profile_mode(true, true).unwrap_err();
+    let err = validate_apply_profile_mode(true, true, false).unwrap_err();
 
     assert!(
         err.to_string()
@@ -145,7 +154,7 @@ fn apply_profile_mode_rejects_dry_run_watch() {
 
 #[test]
 fn apply_profile_mode_allows_real_watch() {
-    validate_apply_profile_mode(false, true).unwrap();
+    validate_apply_profile_mode(false, true, false).unwrap();
 }
 
 #[test]
