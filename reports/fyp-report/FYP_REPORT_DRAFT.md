@@ -41,13 +41,15 @@ dangerous because noisy workloads can make unsupported changes look convincing.
 The goal of this project is to build and evaluate `stutter`, a Linux
 game-performance profiling and tuning prototype that supports evidence-based
 tuning rather than magic tweaks. The tool collects runtime evidence, produces
-scoped hypotheses, applies only guarded and reversible experiments, and reports
+scoped hypotheses, guards system-changing experiments behind policy, preflight
+checks, rollback support where available, and explicit validation, and reports
 when evidence is not strong enough to recommend a change.
 
 The research question is:
 
 > Can a Linux game-performance tool collect enough evidence from a real Proton
-> workload to generate, test, and validate or reject a tuning hypothesis?
+> workload to generate, test, and validate or decline to recommend a tuning
+> hypothesis?
 
 The main answer from the evaluation is yes, with an important qualification. In
 the KCD1 case study, the specific CPU-affinity hypothesis was not validated and

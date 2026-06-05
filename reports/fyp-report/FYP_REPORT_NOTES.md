@@ -40,8 +40,8 @@ Claims:
 - Proton/Wine/Gamescope workloads are multi-process and noisy.
 - Manual tuning needs evidence, comparison, and restraint.
 - Research question: Can a Linux game-performance tool collect enough evidence
-  from a real Proton workload to generate, test, and validate or reject a tuning
-  hypothesis?
+  from a real Proton workload to generate, test, and validate or decline to
+  recommend a tuning hypothesis?
 
 Evidence:
 - README runnable-latency definition.
@@ -198,3 +198,12 @@ Include:
 - Artifact map.
 - Reproducibility checklist.
 - Glossary.
+
+## References Still Needed
+
+The final submitted report should add external references for:
+- eBPF and Linux tracing.
+- Linux scheduler concepts.
+- Proton and Wine.
+- Frame pacing and frametime analysis.
+- Experimental benchmarking or A/B methodology.
