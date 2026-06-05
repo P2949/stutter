@@ -13,6 +13,7 @@ Commands:
   validate                 
   restore                  
   apply-profile            
+  profile-plan             Explain profile targets for a process tree
   tune                     Benchmark multiple profiles and select the best one
   recommend                
   prove-fix                Print a guided workflow for proving an advisor fix plan
@@ -463,18 +464,41 @@ Options:
   -h, --help
           Print help
 
-=== advisor help ===
-Usage: stutter advisor [OPTIONS]
+=== apply-profile help ===
+Usage: stutter apply-profile [OPTIONS] --tree-pid <PID> --profile <FILE>
 
 Options:
-      --run <PATH>                   
-      --profiles <PATH>              
-      --json                         
-      --watch-runs                   
-      --runs-dir <PATH>              
-      --poll-seconds <POLL_SECONDS>  [default: 10]
-      --once                         
-  -h, --help                         Print help
+      --tree-pid <PID>            
+      --profile <FILE>            
+      --profile-name <NAME>       Select a named profile from a multi-profile TOML file
+      --force                     
+      --dry-run                   
+      --allow-medium-risk         
+      --watch                     
+      --keep-applied              
+      --refresh-ms <REFRESH_MS>   [default: 1000]
+      --enforce                   
+      --explain                   Explain which profile rules match which tasks during dry-run
+      --json                      Emit dry-run explanation as JSON
+      --output <PATH>             Write explanation output to a file
+      --top <N>                   Number of top comm/class entries to show in explain text output [default: 10]
+      --highlight-comm <PATTERN>  Highlight tasks whose thread comm or process comm matches this pattern
+  -h, --help                      Print help
+
+=== profile-plan help ===
+Explain profile targets for a process tree
+
+Usage: stutter profile-plan [OPTIONS] --tree-pid <PID> --profile <FILE>
+
+Options:
+      --tree-pid <PID>            
+      --profile <FILE>            
+      --profile-name <NAME>       Select a named profile from a multi-profile TOML file
+      --json                      Emit profile plan as JSON
+      --output <PATH>             Write profile plan output to a file
+      --top <N>                   Number of top comm/class entries to show in text output [default: 10]
+      --highlight-comm <PATTERN>  Highlight tasks whose thread comm or process comm matches this pattern
+  -h, --help                      Print help
 
 === prove-fix help ===
 Print a guided workflow for proving an advisor fix plan
@@ -558,4 +582,3 @@ Options:
       --markdown <PATH>          
       --html <PATH>              
   -h, --help                     Print help
-
