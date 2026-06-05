@@ -12,6 +12,14 @@ case study. The primary human-readable summary is `CASE_STUDY_SUMMARY.md`.
 - `setup/build-check.txt` — validation command output for the repo state used by the case study.
 - `setup/cli-help.txt` — relevant CLI help output.
 
+## Setup and process selection
+
+- `setup/live-process-candidates.txt` — live process search output used while selecting the KCD1 process tree.
+- `setup/tree-candidates/` — candidate `inspect-tree` outputs from early process-tree selection.
+- `setup/baseline-*-tree-check.txt` — final tree checks for the formal baseline runs.
+- `setup/launch-smoke-test.txt` — launch/capture smoke-test notes.
+- `setup/kcd1-config-summary.txt` — summary of archived KCD1 config files.
+
 ## Formal baseline evidence
 
 - `runs/baseline-01` through `runs/baseline-05` — five formal baseline run directories.
@@ -56,5 +64,8 @@ case study. The primary human-readable summary is `CASE_STUDY_SUMMARY.md`.
 ## Notes
 
 Some files with `.json` extension are newline-delimited event streams rather than
-single JSON documents. They are preserved as produced by `stutter record`.
+single JSON documents. Some optional stream files may also be empty when that
+signal was enabled but no samples were recorded. They are preserved as produced
+by `stutter record`.
+
 Large `migration_events.json` files are intentionally excluded from Git.
