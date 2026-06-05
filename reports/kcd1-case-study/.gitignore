@@ -1,4 +1,2 @@
-
 # Too large for normal Git/GitHub; publish as release assets instead.
-runs/*/migration_events.json
 **/migration_events.json
