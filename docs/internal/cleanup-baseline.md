@@ -1,5 +1,9 @@
 # Cleanup Baseline
 
+> Internal maintenance note. This document records historical refactor planning
+> and maturity-report baselines. It is not part of the proposed FYP assessment
+> scope.
+
 This document captures the baseline of the top 50 largest files before the massive refactoring phases begin.
 Each subsequent phase should split these files and document the before/after LOC sizes.
 

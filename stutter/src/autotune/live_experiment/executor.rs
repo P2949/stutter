@@ -71,11 +71,11 @@ impl LiveExperimentActionExecutor for RuntimeLiveExperimentActionExecutor {
             let outcome = apply_candidate_with_audit(candidate.clone())?;
             log::info!(
                 "autotune_candidate_applied candidate={} action_kind={} affected_tasks={} safety_class={:?} state={:?}",
-                &outcome.candidate_name,
-                &outcome.action_kind,
+                outcome.candidate_name,
+                outcome.action_kind,
                 outcome.affected_tasks,
-                &outcome.safety_class,
-                &outcome.state
+                outcome.safety_class,
+                outcome.state
             );
             Ok(outcome.rollback)
         }

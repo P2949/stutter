@@ -5,6 +5,14 @@ row covers the unsafe blocks/functions currently in that file and names the
 owner plus the migration target needed before the unsafe documentation gate can
 become a hard architecture test.
 
+## Status
+
+This inventory is a safety/audit document for the current prototype. The listed
+migration targets are hardening tasks and future refactor directions, not
+required preconditions for the supervisor-review snapshot. The current gate
+requires unsafe usage to be documented with `// SAFETY:` comments and tracked
+here before new unsafe usage is accepted.
+
 Generated baseline command:
 
 ```bash

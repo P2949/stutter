@@ -17,7 +17,7 @@ mod timing;
 pub(crate) use clusters::*;
 pub(crate) use correlation::text_report_correlation_sections;
 pub use density::build_spike_density;
-pub(crate) use density::*;
+pub(crate) use density::{median_f64, ms_to_ns_i64, ns_to_ms, percentile_f64};
 pub(crate) use diagnosis::*;
 pub(crate) use display_path::*;
 #[cfg(test)]
