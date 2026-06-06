@@ -178,10 +178,14 @@ fn process_cache_invalidates_when_pid_starttime_changes() {
     // Manually overwrite stat to match the test's expected starttime.
     fs::write(dir.join("10/stat"), fake_stat("new-name", 999)).unwrap();
 
+    let budget = process_tree::ScanBudget::default_proc_scan();
     let mut budget_report = process_tree::ScanBudgetReport::default();
     let second = process_tree::scan_processes_at(&dir, &mut cache, &budget, &mut budget_report);
-    assert_eq!(second.get(&10).unwrap().comm, "new-name");
-    assert_eq!(second.get(&10).unwrap().starttime_ticks, Some(999));
+    let reused_process = second
+        .get(&10)
+        .expect("recreated fake process should be present in second scan");
+    assert_eq!(reused_process.comm, "new-name");
+    assert_eq!(reused_process.starttime_ticks, Some(999));
 
     fs::remove_dir_all(dir).ok();
 }
