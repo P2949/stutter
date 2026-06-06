@@ -33,7 +33,7 @@ the primary technical archive summary is `CASE_STUDY_SUMMARY.md`.
 ## Affinity A/B evidence
 
 - `profiles/kcd1-affinity-ab.toml` — final A/B profile file.
-- `tune/kcd1-affinity-02/` — proper A/B tune run.
+- `tune/kcd1-affinity-02/` — paired A/B tune run; not counterbalanced because baseline ran before tuned in every iteration.
 - `tune/kcd1-affinity-02/tuning_summary.json` — primary source for profile-vs-profile candidate statistics.
 - `tune/kcd1-affinity-02/tuning_recommendation.md` and `.html` — generated recommendation outputs.
 - `results/kcd1-fix-validation.md` and `.html` — secondary fix-validation output; status is `InvalidExperiment`, so it is not the primary source for the tuned-profile conclusion.

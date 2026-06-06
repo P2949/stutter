@@ -1,7 +1,10 @@
 use std::{collections::BTreeMap, path::PathBuf};
 
 use super::model::*;
-use crate::{process_tree::TaskClass, tune::model::TuneCandidateSummary};
+use crate::{
+    process_tree::TaskClass,
+    tune::model::{RankingConfidence, TuneCandidateSummary, TuneIterationOrder},
+};
 
 fn mock_candidate(name: &str, coverage: TuneCoverageMetrics) -> TuneCandidateSummary {
     TuneCandidateSummary {
@@ -262,6 +265,61 @@ fn reject_level_existing_behavior_is_preserved() {
             .any(|warning| warning.kind == "scored-sample-count-mismatch"
                 && warning.severity == TuneComparabilitySeverity::Reject)
     );
+}
+
+#[test]
+fn fixed_two_profile_candidate_order_produces_counterbalance_warning() {
+    let candidate_order = vec![
+        TuneIterationOrder {
+            iteration: 1,
+            profiles: vec!["baseline".to_owned(), "tuned".to_owned()],
+        },
+        TuneIterationOrder {
+            iteration: 2,
+            profiles: vec!["baseline".to_owned(), "tuned".to_owned()],
+        },
+        TuneIterationOrder {
+            iteration: 3,
+            profiles: vec!["baseline".to_owned(), "tuned".to_owned()],
+        },
+    ];
+
+    let warnings = tune_candidate_order_warnings(&candidate_order);
+
+    assert!(warnings.iter().any(|warning| {
+        warning.kind == CANDIDATE_ORDER_NOT_COUNTERBALANCED_KIND
+            && warning.profile.is_none()
+            && warning.severity == TuneComparabilitySeverity::Warning
+            && warning.message.contains("confounded with order effect")
+    }));
+    assert_eq!(
+        ranking_confidence_after_comparability_warnings(RankingConfidence::High, &warnings),
+        RankingConfidence::Low
+    );
+    assert_eq!(
+        ranking_confidence_after_comparability_warnings(RankingConfidence::Medium, &warnings),
+        RankingConfidence::Low
+    );
+}
+
+#[test]
+fn alternating_two_profile_candidate_order_has_no_counterbalance_warning() {
+    let candidate_order = vec![
+        TuneIterationOrder {
+            iteration: 1,
+            profiles: vec!["baseline".to_owned(), "tuned".to_owned()],
+        },
+        TuneIterationOrder {
+            iteration: 2,
+            profiles: vec!["tuned".to_owned(), "baseline".to_owned()],
+        },
+        TuneIterationOrder {
+            iteration: 3,
+            profiles: vec!["baseline".to_owned(), "tuned".to_owned()],
+        },
+    ];
+
+    assert!(tune_candidate_order_warnings(&candidate_order).is_empty());
 }
 
 #[test]

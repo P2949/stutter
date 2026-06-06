@@ -6,8 +6,13 @@ use serde::{Deserialize, Serialize};
 use crate::{
     process_tree::TaskClass,
     recorder, scorer,
-    tune::{model::TuneCandidateSummary, ranking::median_u64},
+    tune::{
+        model::{RankingConfidence, TuneCandidateSummary, TuneIterationOrder},
+        ranking::median_u64,
+    },
 };
+
+pub const CANDIDATE_ORDER_NOT_COUNTERBALANCED_KIND: &str = "candidate-order-not-counterbalanced";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TuneComparabilityWarning {
@@ -288,6 +293,56 @@ pub fn tune_comparability_warnings(
     }
 
     warnings
+}
+
+pub fn tune_candidate_order_warnings(
+    candidate_order: &[TuneIterationOrder],
+) -> Vec<TuneComparabilityWarning> {
+    if !two_profile_candidate_order_is_fixed(candidate_order) {
+        return Vec::new();
+    }
+
+    vec![TuneComparabilityWarning {
+        profile: None,
+        kind: CANDIDATE_ORDER_NOT_COUNTERBALANCED_KIND.to_owned(),
+        message: "two-profile tuning run used the same candidate order for every iteration; profile effect may be confounded with order effect"
+            .to_owned(),
+        severity: TuneComparabilitySeverity::Warning,
+    }]
+}
+
+pub fn has_candidate_order_counterbalance_warning(warnings: &[TuneComparabilityWarning]) -> bool {
+    warnings
+        .iter()
+        .any(|warning| warning.kind == CANDIDATE_ORDER_NOT_COUNTERBALANCED_KIND)
+}
+
+pub fn ranking_confidence_after_comparability_warnings(
+    confidence: RankingConfidence,
+    warnings: &[TuneComparabilityWarning],
+) -> RankingConfidence {
+    if !has_candidate_order_counterbalance_warning(warnings) {
+        return confidence;
+    }
+
+    match confidence {
+        RankingConfidence::High | RankingConfidence::Medium => RankingConfidence::Low,
+        RankingConfidence::Low | RankingConfidence::Unstable => confidence,
+    }
+}
+
+fn two_profile_candidate_order_is_fixed(candidate_order: &[TuneIterationOrder]) -> bool {
+    let Some(first) = candidate_order.first() else {
+        return false;
+    };
+    if candidate_order.len() < 2 || first.profiles.len() != 2 {
+        return false;
+    }
+
+    let first_profiles = first.profiles.as_slice();
+    candidate_order
+        .iter()
+        .all(|order| order.profiles.len() == 2 && order.profiles.as_slice() == first_profiles)
 }
 
 fn push_median_ratio_warning<'a>(

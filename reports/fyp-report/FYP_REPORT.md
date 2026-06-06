@@ -16,8 +16,11 @@ under GE-Proton10-34 on Wayland/Gamescope. The case study tested a CPU-affinity
 hypothesis that moved game/Wine tasks to CPUs `1-5,7-11` and Gamescope/runtime
 tasks to CPUs `0,6`. Across five paired A/B iterations, the online baseline had
 a lower primary diagnostic score than the tuned profile in every iteration. The
-profile was therefore not validated and should not be recommended on the
-current evidence.
+archived run was paired but not counterbalanced: the online baseline was
+measured before the tuned profile in every iteration. The profile was therefore
+not validated on the current evidence, but the result should be treated as
+caveated low-confidence evidence rather than a fully counterbalanced effect
+estimate.
 
 The result demonstrates the value of evidence-based tuning: the tool did not
 produce a general Linux performance tweak, but it successfully prevented a
@@ -608,7 +611,7 @@ placing Gamescope/runtime work on CPU pair `0,6` and game/Wine work on
 `1-5,7-11` might reduce interference.
 
 This was a plausible hypothesis, not a conclusion. It was reversible and
-therefore suitable for a controlled profile experiment.
+therefore suitable for a profile experiment.
 
 ### 7.5 A/B Tuning Design
 
@@ -616,6 +619,10 @@ The tune run compared `baseline-online` against the tuned profile. Each profile
 had five measured iterations. The tune command used a 90-second warmup and a
 270-second epoch so that each epoch provided 180 seconds of measurement after
 warmup. The generated summary recorded restore behavior after each profile.
+Review of the archived `candidate_order` showed that `baseline-online` was
+measured before the tuned profile in every iteration. The KCD1 run was therefore
+paired but not counterbalanced, and future methodology must enforce alternating
+AB/BA order for two-profile comparisons.
 
 This design prevents a profile from being recommended solely because it was a
 good story. It must perform better under repeated measurement.
@@ -747,8 +754,10 @@ tuned profile did not fail simply because it missed the relevant tasks.
 
 ### 8.5 A/B Results
 
-The proper A/B tune run, `kcd1-affinity-02`, tested both profiles with five
-valid measured iterations each. Scores are derived from
+The paired A/B tune run, `kcd1-affinity-02`, tested both profiles with five
+valid measured iterations each. The archived candidate order was fixed with
+`baseline-online` before the tuned profile in every iteration, so the run was
+not counterbalanced and may include an order effect. Scores are derived from
 `reports/kcd1-case-study/tune/kcd1-affinity-02/tuning_summary.json`; lower
 diagnostic score is better.
 
@@ -790,7 +799,9 @@ tuned-profile median:   38,806  [================    ]  +80.2% worse
 ```
 
 The tuned profile was not validated and should not be recommended on the
-current evidence.
+current evidence. Because the pair order was fixed, this is a caveated
+low-confidence non-validation result rather than a fully counterbalanced A/B
+estimate.
 
 The profile-vs-profile tables above are derived from `tuning_summary.json`
 candidate statistics. The generated `tuning_recommendation.json` selected
@@ -944,10 +955,12 @@ set produced valid run artifacts with MangoHud frame ingestion and monotonic
 timestamp alignment. The advisor produced a plausible CPU-affinity profile, and
 profile-plan output confirmed that the profile matched relevant game, Wine, and
 DXVK-side tasks. The repeated A/B tune then showed `baseline-online` with a
-lower primary diagnostic score in every paired iteration, so the recommendation
-remained `NeedsRetest` rather than promoting the tuned profile. Together, these
-results support the report's central claim: `stutter` can collect evidence,
-form a guarded hypothesis, test it, and decline unsupported tuning advice.
+lower primary diagnostic score in every paired iteration. However, the candidate
+order was fixed, so the result is treated as low-confidence non-validation
+evidence and the recommendation remains `NeedsRetest` rather than promoting the
+tuned profile. Together, these results support the report's central claim:
+`stutter` can collect evidence, form a guarded hypothesis, test it, and decline
+unsupported tuning advice while surfacing methodological limitations.
 
 ## 10. Discussion
 

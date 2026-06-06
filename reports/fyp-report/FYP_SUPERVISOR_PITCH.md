@@ -28,16 +28,16 @@ In the final methodology, profile explanation would be run before A/B tuning so 
 
 ## Preliminary case study
 
-A preliminary real-world case study has already been completed using *Kingdom Come: Deliverance 1* under GE-Proton on Linux/Wayland/Gamescope. The prototype collected five formal baseline runs and a five-iteration paired A/B comparison of a CPU-affinity tuning hypothesis.
+A preliminary real-world case study has already been completed using *Kingdom Come: Deliverance 1* under GE-Proton on Linux/Wayland/Gamescope. The prototype collected five formal baseline runs and a five-iteration paired A/B comparison of a CPU-affinity tuning hypothesis. The archived A/B run was paired but not counterbalanced: the online baseline was measured before the tuned profile in every iteration, so the case study is treated as preliminary low-confidence evidence and as motivation for enforcing alternating order in the FYP methodology.
 
-The tested profile was plausible: it placed game/Wine tasks on CPUs `1-5,7-11` and Gamescope/runtime tasks on CPUs `0,6`. However, the profile was not validated. The online baseline had a lower primary diagnostic score in all five paired A/B iterations. This is a useful result because it demonstrates that the workflow can decline an unsupported recommendation rather than turning a plausible tweak into advice.
+The tested profile was plausible: it placed game/Wine tasks on CPUs `1-5,7-11` and Gamescope/runtime tasks on CPUs `0,6`. However, the profile was not validated. The online baseline had a lower primary diagnostic score in all five paired A/B iterations, with the order caveat above. This is a useful result because it demonstrates that the workflow can decline an unsupported recommendation rather than turning a plausible tweak into advice.
 
 The case study also exposed the need for better profile auditability. In response, a profile-explainability feature was added so that the tool can show which profile rules matched important threads such as `RenderThread`, `ClothingRaycast`, `dxvk-submit`, and `wineserver` before a profile is applied.
 
 This case study is not presented as a universal claim about KCD1 performance or CPU affinity. Its value is methodological: it shows that the prototype can:
 
 - collect real workload evidence from a complex Proton/Wine workload;
-- test a scoped tuning hypothesis with controlled A/B comparison;
+- test a scoped tuning hypothesis with repeated A/B comparison and explicit order/counterbalancing checks;
 - quantify uncertainty in a noisy game workload;
 - decline an unsupported tuning recommendation instead of producing a false-positive tuning claim.
 
