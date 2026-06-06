@@ -9,3 +9,5 @@ publish = false
 anyhow = { workspace = true, default-features = true }
 cargo_metadata = { workspace = true }
 clap = { workspace = true, features = ["help"] }
+serde_json = { workspace = true }
+stutter = { path = "../stutter" }

@@ -804,11 +804,11 @@ low-confidence non-validation result rather than a fully counterbalanced A/B
 estimate.
 
 The profile-vs-profile tables above are derived from `tuning_summary.json`
-candidate statistics. The generated `tuning_recommendation.json` selected
-`baseline-online` as the lower-scoring profile, so some formal comparison
-fields in that artifact compare `baseline-online` against itself and show zero
-deltas. The tuned-profile conclusion here is therefore based on the candidate
-statistics in `tuning_summary.json`.
+candidate statistics. The regenerated `tuning_recommendation.json` selects
+`baseline-online` as best and compares it against the best valid non-baseline
+candidate, `kcd1-game-on-1-5-7-11-gamescope-on-0-6`. The tuned-profile
+conclusion is unchanged: the tuned profile still does not validate on the
+current evidence.
 
 The generated recommendation also estimated that some metrics may require more
 runs per side to detect a 10% movement at the observed noise level:
@@ -827,11 +827,11 @@ recommendation artifact.
 | Metric | Estimated runs per side |
 | --- | ---: |
 | `diagnostic_raw_score_total` | 30 |
-| `frame_p99_ms` | 18 |
-| `frame_over_16ms` | 24 |
+| `frame_p99_ms` | 30 |
+| `frame_over_16ms` | 30 |
 | `frame_over_33ms` | 30 |
 | `frame_over_50ms` | 30 |
-| `max_latency_ns` | 26 |
+| `max_latency_ns` | 19 |
 
 ### 8.6 Measurement-Quality Pilot
 

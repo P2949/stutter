@@ -1,0 +1,191 @@
+{
+  "profile": "kcd1-game-on-1-5-7-11-gamescope-on-0-6",
+  "profile_path": "reports/kcd1-case-study/profiles/kcd1-affinity-ab.toml",
+  "profile_name_requested": "kcd1-game-on-1-5-7-11-gamescope-on-0-6",
+  "tree_pid": 45598,
+  "snapshot_tasks": 181,
+  "matched_tasks": 114,
+  "pending_affinity": 114,
+  "rules": [
+    {
+      "rule_index": 0,
+      "actions": {
+        "affinity": "1-5,7-11",
+        "nice": null,
+        "ionice": null
+      },
+      "match_comm": [
+        "Main"
+      ],
+      "match_class": [],
+      "matched_tasks": 88,
+      "pending_affinity": 88,
+      "classes": {
+        "Helper": 75,
+        "Input": 3,
+        "Recorder": 9,
+        "Unknown": 1
+      },
+      "top_thread_comms": {
+        "AudioThread": 8,
+        "ClothingRaycast": 4,
+        "DeferredPhysics": 1,
+        "GFxMeshCacheRes": 1,
+        "InputWorker": 1,
+        "JobSystem_Worke": 9,
+        "Kingdom:disk$0": 4,
+        "Main": 13,
+        "NetAddressResol": 1,
+        "Network": 1,
+        "PROS banners th": 1,
+        "PROS thread": 1,
+        "Physics": 1,
+        "PhysicsWorkerTh": 1,
+        "RemoteConsoleSe": 1,
+        "RenderThread": 1,
+        "ServiceNetworkT": 1,
+        "ShaderCompile": 1,
+        "SkinLoader": 1,
+        "Streaming Async": 1,
+        "Streaming File": 3,
+        "TaskThread0": 1,
+        "TaskThread1": 1,
+        "TaskThread2": 1,
+        "TileCacheUpdate": 1,
+        "ZLibCompressor": 1,
+        "audio_client_ma": 1,
+        "dxvk-cache": 1,
+        "dxvk-cs": 1,
+        "dxvk-descriptor": 1,
+        "dxvk-frame": 1,
+        "dxvk-queue": 1,
+        "dxvk-shader-h": 5,
+        "dxvk-shader-l": 3,
+        "dxvk-shader-n": 4,
+        "dxvk-submit": 1,
+        "gmain": 1,
+        "mangohud-amdgpu": 1,
+        "mangohud-gpufd": 1,
+        "mangohud-hwinfo": 1,
+        "wine_dinput_wor": 1,
+        "wine_mmdevapi_n": 1,
+        "wine_sechost_de": 1,
+        "wine_xinput_hid": 1
+      },
+      "top_process_comms": {
+        "Main": 87,
+        "gamescope-wl": 1
+      },
+      "broad_process_comm_captured_thread_comms": {
+        "AudioThread": 8,
+        "ClothingRaycast": 4,
+        "DeferredPhysics": 1,
+        "GFxMeshCacheRes": 1,
+        "InputWorker": 1,
+        "JobSystem_Worke": 9,
+        "Kingdom:disk$0": 4,
+        "NetAddressResol": 1,
+        "Network": 1,
+        "PROS banners th": 1,
+        "PROS thread": 1,
+        "Physics": 1,
+        "PhysicsWorkerTh": 1,
+        "RemoteConsoleSe": 1,
+        "RenderThread": 1,
+        "ServiceNetworkT": 1,
+        "ShaderCompile": 1,
+        "SkinLoader": 1,
+        "Streaming Async": 1,
+        "Streaming File": 3,
+        "TaskThread0": 1,
+        "TaskThread1": 1,
+        "TaskThread2": 1,
+        "TileCacheUpdate": 1,
+        "ZLibCompressor": 1,
+        "audio_client_ma": 1,
+        "dxvk-cache": 1,
+        "dxvk-cs": 1,
+        "dxvk-descriptor": 1,
+        "dxvk-frame": 1,
+        "dxvk-queue": 1,
+        "dxvk-shader-h": 5,
+        "dxvk-shader-l": 3,
+        "dxvk-shader-n": 4,
+        "dxvk-submit": 1,
+        "mangohud-amdgpu": 1,
+        "mangohud-gpufd": 1,
+        "mangohud-hwinfo": 1,
+        "wine_dinput_wor": 1,
+        "wine_mmdevapi_n": 1,
+        "wine_sechost_de": 1,
+        "wine_xinput_hid": 1
+      }
+    },
+    {
+      "rule_index": 1,
+      "actions": {
+        "affinity": "1-5,7-11",
+        "nice": null,
+        "ionice": null
+      },
+      "match_comm": [],
+      "match_class": [
+        "Game",
+        "GameHelper",
+        "WineServer"
+      ],
+      "matched_tasks": 25,
+      "pending_affinity": 25,
+      "classes": {
+        "Game": 24,
+        "WineServer": 1
+      },
+      "top_thread_comms": {
+        "libusb_event": 1,
+        "pv-adverb": 1,
+        "srt-bwrap": 1,
+        "steam.exe": 3,
+        "wine_nsi_notifi": 1,
+        "wine_sechost_se": 2,
+        "winedevice.exe": 15,
+        "wineserver": 1
+      },
+      "top_process_comms": {
+        "pv-adverb": 1,
+        "srt-bwrap": 1,
+        "steam.exe": 3,
+        "winedevice.exe": 19,
+        "wineserver": 1
+      },
+      "broad_process_comm_captured_thread_comms": {}
+    },
+    {
+      "rule_index": 2,
+      "actions": {
+        "affinity": "0,6",
+        "nice": null,
+        "ionice": null
+      },
+      "match_comm": [],
+      "match_class": [
+        "GameScope",
+        "Compositor",
+        "Launcher",
+        "SteamRuntime"
+      ],
+      "matched_tasks": 1,
+      "pending_affinity": 1,
+      "classes": {
+        "GameScope": 1
+      },
+      "top_thread_comms": {
+        "gamescope": 1
+      },
+      "top_process_comms": {
+        "gamescope-wl": 1
+      },
+      "broad_process_comm_captured_thread_comms": {}
+    }
+  ],
+  "warnings": []
+}

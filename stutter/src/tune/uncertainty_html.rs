@@ -15,7 +15,7 @@ pub(crate) fn render_ab_uncertainty_section(
     pushln(&mut out, "<h2>A/B uncertainty</h2>");
     pushln(
         &mut out,
-        "<p class=\"muted\">Each chart shows baseline/tuned sample distributions and a separate bootstrap confidence interval band for median improvement. Positive improvement means the tuned side was better for lower-is-better metrics.</p>",
+        "<p class=\"muted\">Each chart shows comparison/selected sample distributions and a separate bootstrap confidence interval band for median improvement. Positive improvement means the selected profile was better for lower-is-better metrics.</p>",
     );
 
     pushln(&mut out, uncertainty_style());
@@ -54,8 +54,8 @@ fn render_metric_table(out: &mut String, metrics: &[FormalMetricComparison]) {
         "<thead><tr>\
          <th>Metric</th>\
          <th>Samples</th>\
-         <th>Baseline median</th>\
-         <th>Tuned median</th>\
+         <th>Comparison median</th>\
+         <th>Selected median</th>\
          <th>Improvement</th>\
          <th>Effect size</th>\
          <th>Noise ratio</th>\
@@ -74,7 +74,7 @@ fn render_metric_table(out: &mut String, metrics: &[FormalMetricComparison]) {
             .unwrap_or_else(|| "n/a".to_owned());
 
         let noise = format!(
-            "baseline={} tuned={}",
+            "comparison={} selected={}",
             format_optional_ratio(metric.baseline_noise_ratio),
             format_optional_ratio(metric.tuned_noise_ratio)
         );
@@ -133,7 +133,10 @@ fn render_metric_card(out: &mut String, metric: &FormalMetricComparison) {
     if !metric.uncertainty_warnings.is_empty() {
         pushln(out, "<ul class=\"ab-warning-list\">");
         for warning in &metric.uncertainty_warnings {
-            pushln(out, format!("<li>{}</li>", escape_html(warning)));
+            pushln(
+                out,
+                format!("<li>{}</li>", escape_html(&neutral_side_labels(warning))),
+            );
         }
         pushln(out, "</ul>");
     }
@@ -148,7 +151,7 @@ fn render_metric_card(out: &mut String, metric: &FormalMetricComparison) {
                 "<p class=\"muted\">Sample-size guidance for {:.0}% target: {}. {}</p>",
                 power.target_relative_improvement_percent,
                 escape_html(&estimate),
-                escape_html(&power.reason)
+                escape_html(&neutral_side_labels(&power.reason))
             ),
         );
     }
@@ -195,8 +198,8 @@ fn render_distribution_svg(metric: &FormalMetricComparison) -> String {
         &mut svg,
         "<line x1=\"80\" y1=\"170\" x2=\"720\" y2=\"170\" class=\"axis\"/>",
     );
-    pushln(&mut svg, "<text x=\"20\" y=\"84\">baseline</text>");
-    pushln(&mut svg, "<text x=\"20\" y=\"134\">tuned</text>");
+    pushln(&mut svg, "<text x=\"20\" y=\"84\">comparison</text>");
+    pushln(&mut svg, "<text x=\"20\" y=\"134\">selected</text>");
 
     pushln(
         &mut svg,
@@ -396,6 +399,20 @@ fn format_optional_ratio(value: Option<f64>) -> String {
     value
         .map(|value| format!("{value:.2}"))
         .unwrap_or_else(|| "n/a".to_owned())
+}
+
+fn neutral_side_labels(value: &str) -> String {
+    value
+        .replace("baseline_runs", "comparison_runs")
+        .replace("tuned_runs", "selected_runs")
+        .replace("baseline distribution", "comparison distribution")
+        .replace("tuned distribution", "selected distribution")
+        .replace("baseline median", "comparison median")
+        .replace("tuned median", "selected median")
+        .replace("baseline_median", "comparison_median")
+        .replace("tuned_median", "selected_median")
+        .replace("baseline=", "comparison=")
+        .replace("tuned=", "selected=")
 }
 
 fn escape_html(value: &str) -> String {

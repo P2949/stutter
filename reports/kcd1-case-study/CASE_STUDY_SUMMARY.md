@@ -14,7 +14,7 @@ The purpose of this case study is not to show that `stutter` automatically repai
 - `stutter` successfully captured and analyzed a real KCD1/Proton workload with scheduler data, process-tree data, GPU samples, and MangoHud frame timing.
 - Five formal baseline runs were valid: each ran for about 180 seconds, stopped because the maximum duration was reached, ingested frame data, and used monotonic frame timestamp alignment.
 - The baseline route was noisy but useful: median frametime ranged from about 16.3ms to 22.9ms, while p99 frametime stayed in the mid-40s to low-50s milliseconds.
-- The workload is noisy enough that small tuning effects may require roughly 18-30+ runs per condition, depending on the metric; the five-run A/B test is useful as conservative non-validation evidence, but not enough to claim precise small-effect estimates.
+- The workload is noisy enough that small tuning effects may require roughly 19-30 runs per condition, depending on the metric; the five-run A/B test is useful as conservative non-validation evidence, but not enough to claim precise small-effect estimates.
 - The advisor generated a plausible, reversible CPU-affinity hypothesis, but A/B tuning did not validate the tested profile.
 - In the paired A/B tune run, `baseline-online` had a lower primary diagnostic score than the tuned affinity profile in all five paired iterations.
 - The archived candidate order was fixed: `baseline-online` was measured before the tuned profile in every iteration. The run was paired but not counterbalanced, so the result may include an order effect and should be treated as low-confidence until rerun with alternating order.
@@ -186,7 +186,7 @@ The corrected tuning summary selects `baseline-online` as the lower-scoring prof
 
 The `over_5ms` value is a scheduler-latency threshold count from the diagnostic score, not a frame-time threshold.
 
-This table is derived from `reports/kcd1-case-study/tune/kcd1-affinity-02/tuning_summary.json` candidate statistics. The generated `tuning_recommendation.json` selected `baseline-online` as the lower-scoring profile; therefore some formal comparison fields in that artifact compare `baseline-online` against itself and report zero deltas. The profile-vs-profile conclusion here is based on the candidate scores in the tuning summary.
+This table is derived from `reports/kcd1-case-study/tune/kcd1-affinity-02/tuning_summary.json` candidate statistics. The regenerated `tuning_recommendation.json` selects `baseline-online` as best and compares it against the best valid non-baseline candidate, `kcd1-game-on-1-5-7-11-gamescope-on-0-6`. The tuned profile still does not validate on the current evidence.
 
 Lower diagnostic score is better. The tuned profile was worse on the primary diagnostic metric in every paired iteration:
 
@@ -234,9 +234,9 @@ This is an interpretation, not a demonstrated causal mechanism. It is still usef
 Estimated sample requirements included approximately:
 
 - 30 runs per side for `diagnostic_raw_score_total`
-- 18 runs per side for `frame_p99_ms`
-- 24 runs per side for `frame_over_16ms`
-- 30 runs per side for several tail/outlier metrics
+- 30 runs per side for `frame_p99_ms`
+- 30 runs per side for frame tail/outlier metrics
+- 19 runs per side for `max_latency_ns`
 
 This supports a key report point: KCD1 is a noisy real-world workload, and small tuning effects require many repeated runs to validate.
 

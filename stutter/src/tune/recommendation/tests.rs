@@ -100,6 +100,8 @@ const EXPECTED_FORMAL_METRICS: &[&str] = &[
     "max_latency_ns",
 ];
 
+mod self_comparison;
+
 fn summary(confidence: RankingConfidence) -> TuneSummary {
     TuneSummary {
         schema_version: 1,
@@ -292,7 +294,7 @@ fn low_confidence_produces_needs_retest() {
 }
 
 #[test]
-fn baseline_profile_is_preferred_for_comparison() {
+fn baseline_profile_is_preferred_for_comparison_when_best_is_tuned() {
     let rec = build_tune_recommendation(&summary(RankingConfidence::High), Some("baseline"));
 
     assert_eq!(rec.compared_against.as_deref(), Some("baseline"));
