@@ -6,6 +6,7 @@ use aya_build::Toolchain;
 fn main() -> anyhow::Result<()> {
     println!("cargo:rerun-if-env-changed=STUTTER_USE_PREBUILT_BPF");
     println!("cargo:rerun-if-env-changed=STUTTER_BPF_OBJECT");
+    println!("cargo:rerun-if-env-changed=RUSTUP_TOOLCHAIN");
     emit_build_metadata();
 
     let out_dir = PathBuf::from(env::var_os("OUT_DIR").unwrap());
@@ -60,7 +61,16 @@ fn main() -> anyhow::Result<()> {
             .as_str(),
         ..Default::default()
     };
-    aya_build::build_ebpf([ebpf_package], Toolchain::default())
+    let rustup_toolchain = env::var("RUSTUP_TOOLCHAIN")
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty());
+    let toolchain = rustup_toolchain
+        .as_deref()
+        .map(Toolchain::Custom)
+        .unwrap_or_default();
+
+    aya_build::build_ebpf([ebpf_package], toolchain)
 }
 
 fn emit_build_metadata() {

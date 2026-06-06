@@ -44,8 +44,6 @@ pub(super) fn count_ndjson_file<T: DeserializeOwned>(path: &Path) -> Result<usiz
 
 #[cfg(test)]
 mod tests {
-    use std::time::Instant;
-
     use super::*;
     use crate::recorder::FrameEvent;
 
@@ -64,12 +62,9 @@ mod tests {
         }
         std::fs::write(&path, data).unwrap();
 
-        let start = Instant::now();
         let events = load_ndjson_file_filtered::<FrameEvent, _>(&path, |_| true).unwrap();
-        let duration = start.elapsed();
 
         assert_eq!(events.len(), 100_000);
-        println!("Parsed 100k NDJSON rows in {:?}", duration);
         std::fs::remove_file(path).ok();
     }
 }
