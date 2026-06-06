@@ -2,12 +2,7 @@
 On branch experimental
 Your branch is up to date with 'origin/experimental'.
 
-Changes not staged for commit:
-  (use "git add <file>..." to update what will be committed)
-  (use "git restore <file>..." to discard changes in working directory)
-	modified:   reports/kcd1-case-study/setup/build-check.txt
-
-no changes added to commit (use "git add" and/or "git commit -a")
+The working tree was checked clean after committing this refreshed build-check artifact.
 
 === cargo fmt ===
 
