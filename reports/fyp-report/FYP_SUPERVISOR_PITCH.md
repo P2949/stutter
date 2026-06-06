@@ -43,11 +43,11 @@ This case study is not presented as a universal claim about KCD1 performance or 
 
 The case study also showed that small effects in this type of workload may require substantially more data to measure precisely: depending on the metric, the tool estimated roughly 18–30+ runs per condition for small-effect detection.
 
-## Existing work and proposed FYP contribution
+## Existing work and assessment boundary
 
-The current `stutter` prototype and KCD1 case study are preliminary work used to demonstrate feasibility before supervision. The proposed FYP would not be assessed as simply “the existing tool”. The assessed contribution would be the formalization and evaluation of a bounded methodology: a reproducible benchmark protocol, profile explainability as a required pre-tuning step, repeated A/B comparison, uncertainty-aware reporting, and conservative recommendation verdicts.
+The current `stutter` prototype and KCD1 case study are preliminary work used to demonstrate feasibility before supervision. The proposed FYP would not be assessed as simply “the existing tool” or as a general-purpose Linux optimizer. The assessed contribution would be the formalization and evaluation of a bounded methodology: a reproducible benchmark protocol, profile explainability as a required pre-tuning step, repeated A/B comparison, uncertainty-aware reporting, and conservative recommendation verdicts.
 
-The core evaluated tuning area would be CPU affinity and process/thread placement. Existing support for broader areas such as daemon control, GPU power, IRQ affinity, VM knobs, remote/agent paths, or system-wide autotuning would be treated as background implementation, optional extension, or future work unless explicitly agreed with the supervisor.
+The core evaluated tuning area would be CPU affinity and process/thread placement. Existing support for broader areas such as daemon control, GPU power, IRQ affinity, VM knobs, remote/agent paths, system-wide autotuning, scheduler replacement, and wide hardware/game coverage would be treated as background implementation, optional extension, or future work unless explicitly agreed with the supervisor.
 
 ## Proposed FYP scope
 
@@ -62,12 +62,6 @@ The proposed Final Year Project would build on this prototype and focus on turni
 To keep the project achievable, the evaluation would focus on a limited set of reversible tuning areas. CPU affinity and process/thread placement would be the primary tuning area, with selected process-local scheduler controls such as `uclamp` considered only if appropriate. Broader or higher-risk system changes, such as persistent IRQ affinity changes or replacing the system scheduler, would be treated as optional extensions or future work.
 
 The current prototype and KCD1 case study show that the idea is viable. The FYP would formalize, narrow, evaluate, and present the methodology as a complete project rather than trying to become a universal Linux game optimizer.
-
-## Assessment boundary
-
-The current prototype and KCD1 case study are preliminary work used to demonstrate feasibility. The proposed FYP would not be assessed as a general-purpose Linux optimizer. The assessed project would be bounded around a reproducible validation methodology: benchmark protocol, profile explainability, A/B comparison, uncertainty-aware reporting, and conservative recommendation verdicts.
-
-The primary evaluated tuning area would be CPU affinity and process/thread placement. Broader system-wide tuning features, daemon control, persistent IRQ affinity, scheduler replacement, and wide hardware/game coverage would remain outside the core scope unless explicitly agreed as optional extensions.
 
 ## Success criteria
 
