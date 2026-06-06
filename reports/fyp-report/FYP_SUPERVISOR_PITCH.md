@@ -55,6 +55,12 @@ To keep the project achievable, the evaluation would focus on a limited set of r
 
 The current prototype and KCD1 case study show that the idea is viable. The FYP would formalize, narrow, evaluate, and present the methodology as a complete project rather than trying to become a universal Linux game optimizer.
 
+## Assessment boundary
+
+The current prototype and KCD1 case study are preliminary work used to demonstrate feasibility. The proposed FYP would not be assessed as a general-purpose Linux optimizer. The assessed project would be bounded around a reproducible validation methodology: benchmark protocol, profile explainability, A/B comparison, uncertainty-aware reporting, and conservative recommendation verdicts.
+
+The primary evaluated tuning area would be CPU affinity and process/thread placement. Broader system-wide tuning features, daemon control, persistent IRQ affinity, scheduler replacement, and wide hardware/game coverage would remain outside the core scope unless explicitly agreed as optional extensions.
+
 ## Success criteria
 
 The project would be considered successful if:
