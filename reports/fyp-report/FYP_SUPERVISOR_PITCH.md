@@ -24,6 +24,8 @@ A working prototype, `stutter`, has already been developed in Rust using Aya/eBP
 
 The main difference from using tools such as MangoHud or `perf` individually is that `stutter` attempts to connect measurement, hypothesis generation, profile auditing, repeated comparison, and recommendation handling into one auditable workflow.
 
+In the final methodology, profile explanation would be run before A/B tuning so that the affected threads, matching rules, and proposed CPU masks are auditable before any measurement comparison is made.
+
 ## Preliminary case study
 
 A preliminary real-world case study has already been completed using *Kingdom Come: Deliverance 1* under GE-Proton on Linux/Wayland/Gamescope. The prototype collected five formal baseline runs and a five-iteration paired A/B comparison of a CPU-affinity tuning hypothesis.
@@ -40,6 +42,12 @@ This case study is not presented as a universal claim about KCD1 performance or 
 - decline an unsupported tuning recommendation instead of producing a false-positive tuning claim.
 
 The case study also showed that small effects in this type of workload may require substantially more data to measure precisely: depending on the metric, the tool estimated roughly 18–30+ runs per condition for small-effect detection.
+
+## Existing work and proposed FYP contribution
+
+The current `stutter` prototype and KCD1 case study are preliminary work used to demonstrate feasibility before supervision. The proposed FYP would not be assessed as simply “the existing tool”. The assessed contribution would be the formalization and evaluation of a bounded methodology: a reproducible benchmark protocol, profile explainability as a required pre-tuning step, repeated A/B comparison, uncertainty-aware reporting, and conservative recommendation verdicts.
+
+The core evaluated tuning area would be CPU affinity and process/thread placement. Existing support for broader areas such as daemon control, GPU power, IRQ affinity, VM knobs, remote/agent paths, or system-wide autotuning would be treated as background implementation, optional extension, or future work unless explicitly agreed with the supervisor.
 
 ## Proposed FYP scope
 
@@ -69,6 +77,7 @@ The project would be considered successful if:
 - the workflow can compare baseline and tuned configurations using repeated runs and uncertainty-aware statistics;
 - the report can distinguish validated improvements, regressions, and inconclusive or unsupported results;
 - the methodology is documented clearly enough for another technical user to reproduce the experiment;
+- the evaluation reports internal diagnostic scores alongside raw frame-time and scheduler metrics, such as p95/p99/max frametime, outlier counts, scheduler threshold counts, effect sizes, and confidence intervals;
 - the system avoids recommending a tuning change when the collected evidence does not support it.
 
 ## Expected deliverables
