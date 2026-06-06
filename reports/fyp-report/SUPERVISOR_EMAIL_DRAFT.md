@@ -2,20 +2,24 @@
 
 Subject: FYP supervision request - evidence-based Linux game-performance tuning
 
-Dear <Supervisor Name>,
+Dear Dr [Surname],
 
-I hope you are well. I am looking for a supervisor for my Final Year Project and wanted to ask whether this topic might be a good fit for your interests.
+I hope you are well. I am currently preparing my Final Year Project idea for Computer Games Development, and I wanted to ask whether the topic might fit your supervision interests.
 
-The proposed project is **Stutter: Evidence-Based Validation of Linux Game-Performance Tuning**. It focuses on whether scheduler-aware profiling, frame-time evidence, profile explainability, and repeated A/B comparison can validate, reject, or mark as inconclusive Linux game-performance tuning hypotheses in noisy real-world workloads.
+The project is called “Stutter: Evidence-Based Validation of Linux Game-Performance Tuning”. It focuses on using scheduler-aware eBPF profiling, frame-time data, process-tree tracking, and repeated A/B measurements to evaluate Linux gaming performance tweaks. The aim is not to build a “magic optimizer”, but to create a reproducible workflow that can validate, reject, or mark tuning hypotheses as inconclusive based on evidence.
+
+I already have a working Rust/eBPF prototype and a completed real-world case study using Kingdom Come: Deliverance 1 under Proton/Gamescope. In that case study, a plausible CPU-affinity tuning profile was not validated: the online baseline had a lower primary diagnostic score in all five paired A/B iterations. I think this is a useful result because it shows the tool can avoid turning plausible but unsupported tuning advice into a recommendation.
 
 I have frozen the current prototype and preliminary KCD1 case-study state as a supervisor-review release. I am aware that the project could become too broad, so I would like to scope the FYP around CPU-affinity/process-placement validation, profile explainability, counterbalanced A/B testing, and uncertainty-aware reporting, rather than a general Linux game optimizer or broad autotuning platform.
 
-The supervisor pitch is attached as `FYP_SUPERVISOR_PITCH.pdf`. The current repository snapshot is available at:
+I have attached a short supervisor pitch. I also made a GitHub release snapshot with the longer report and case-study material here:
 
-https://github.com/P2949/stutter/tree/fyp-report-final
+https://github.com/P2949/stutter/releases/tag/fyp-report-final
 
-Would you be open to discussing whether this could work as a scoped FYP?
+Repository:
+https://github.com/P2949/stutter/tree/experimental
 
-Best regards,
+I would really appreciate your feedback on whether this is appropriately scoped for an FYP, and whether you might be interested in supervising it.
 
-<Your Name>
+Kind regards,
+[Student's name]
