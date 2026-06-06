@@ -539,6 +539,22 @@ pub mod report {
     };
 }
 
+pub mod tune_recommendation {
+    //! Public tune recommendation artifact refresh contracts.
+
+    pub use crate::tune::{
+        RankingConfidence, TuneCandidateSummary, TuneIterationOrder, TuneProfilePlanSummary,
+        TuneProfileRulePlanSummary, TuneProfileStats, TuneSummary,
+        comparability::TuneCoverageMetrics,
+        recommendation::{
+            TuneRecommendation, TuneRecommendationComparison, TuneRecommendationMetrics,
+            TuneRecommendationProfilePlanSummary, TuneRecommendationVerdict,
+            build_tune_recommendation, render_tune_recommendation_markdown,
+        },
+        recommendation_html::render_tune_recommendation_html,
+    };
+}
+
 pub mod session {
     //! Public monitor session runtime entry points.
 

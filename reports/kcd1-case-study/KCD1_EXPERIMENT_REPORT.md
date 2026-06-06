@@ -172,7 +172,7 @@ Profile-level summary:
 
 The `over-5ms` value is a scheduler-latency threshold count from the diagnostic score, not a frame-time threshold.
 
-The profile-vs-profile tables above are derived from `tuning_summary.json` candidate statistics. The generated `tuning_recommendation.json` selected `baseline-online` as the lower-scoring profile, so some of its formal comparison fields compare `baseline-online` against itself and show zero deltas. The tuned-profile conclusion here is therefore based on the candidate statistics in `tuning_summary.json`.
+The profile-vs-profile tables above are derived from `tuning_summary.json` candidate statistics. The regenerated `tuning_recommendation.json` selects `baseline-online` as best and compares it against the best valid non-baseline candidate, `kcd1-game-on-1-5-7-11-gamescope-on-0-6`. The tuned-profile conclusion is unchanged: the tuned profile still does not validate on the current evidence.
 
 The tuned profile was **not validated and should not be recommended on the current evidence**. The primary diagnostic score was worse in every paired iteration. Because the pair order was fixed, this should be read as a caveated non-validation result rather than a fully counterbalanced A/B estimate. The generated recommendation selected `baseline-online` as the lower-scoring profile with `NeedsRetest`, and the corrected interpretation treats ranking confidence as low once the order caveat is considered.
 
@@ -195,18 +195,18 @@ The lesson is not that CPU affinity is inherently a bad idea for Proton games. T
 
 ## 11. Statistical Interpretation
 
-The A/B run is useful for avoiding a false positive, but it is not enough to estimate small effects precisely, and the fixed pair order further limits causal interpretation. The tool estimated that some metrics may require roughly 18-30+ runs per condition because KCD1 is noisy.
+The A/B run is useful for avoiding a false positive, but it is not enough to estimate small effects precisely, and the fixed pair order further limits causal interpretation. The tool estimated that some metrics may require roughly 19-30 runs per condition because KCD1 is noisy.
 
 Estimated runs per side for detecting a 10% movement at the observed noise level:
 
 | Metric | Estimated runs per side |
 | --- | ---: |
 | `diagnostic_raw_score_total` | 30 |
-| `frame_p99_ms` | 18 |
-| `frame_over_16ms` | 24 |
+| `frame_p99_ms` | 30 |
+| `frame_over_16ms` | 30 |
 | `frame_over_33ms` | 30 |
 | `frame_over_50ms` | 30 |
-| `max_latency_ns` | 26 |
+| `max_latency_ns` | 19 |
 
 Five runs per side is enough for a case-study demonstration and enough to avoid recommending this particular false positive. It is not enough for broad tuning claims or precise small-effect estimates. This is why the generated recommendation says `NeedsRetest` even though `baseline-online` is the lower-scoring profile in this tuning run.
 

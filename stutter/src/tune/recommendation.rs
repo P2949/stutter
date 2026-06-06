@@ -315,9 +315,18 @@ pub fn build_tune_recommendation(
         RankingConfidence::Unstable => TuneRecommendationVerdict::NoRecommendation,
     };
 
+    let best_is_baseline = baseline_profile == Some(summary.best_profile.as_str());
     let summary_text = match verdict {
+        TuneRecommendationVerdict::Recommended if best_is_baseline => format!(
+            "Baseline profile '{}' remained best for this workload sample; no tuned profile beat the baseline.",
+            summary.best_profile
+        ),
         TuneRecommendationVerdict::Recommended => format!(
             "Profile '{}' is recommended for this workload sample.",
+            summary.best_profile
+        ),
+        TuneRecommendationVerdict::NeedsRetest if best_is_baseline => format!(
+            "Baseline profile '{}' remained best, but the result is not strong enough to trust without another run.",
             summary.best_profile
         ),
         TuneRecommendationVerdict::NeedsRetest => format!(
@@ -447,26 +456,45 @@ fn choose_comparison_stat<'a>(
     warnings: &mut Vec<String>,
 ) -> (Option<String>, Option<&'a TuneProfileStats>) {
     if let Some(baseline) = baseline_profile {
-        if let Some(stat) = valid_stat(summary, baseline) {
-            return (Some("baseline".to_owned()), Some(stat));
+        if baseline != best_profile {
+            if let Some(stat) = valid_stat(summary, baseline) {
+                return (Some("baseline".to_owned()), Some(stat));
+            }
+            warnings.push(format!(
+                "baseline profile '{baseline}' was not present with valid stats"
+            ));
+        } else {
+            warnings.push(format!(
+                "best profile is the baseline profile '{baseline}'; comparing against the best valid non-baseline candidate"
+            ));
+            let other = best_valid_non_best_stat(summary, best_profile);
+            return if other.is_some() {
+                (Some("best-non-baseline".to_owned()), other)
+            } else {
+                (None, None)
+            };
         }
-        warnings.push(format!(
-            "baseline profile '{baseline}' was not present with valid stats"
-        ));
     } else {
         warnings.push("no baseline profile specified".to_owned());
     }
 
-    let second = summary
-        .profile_stats
-        .iter()
-        .filter(|stat| stat.profile != best_profile && stat.valid_runs > 0)
-        .min_by_key(|stat| stat.median_diagnostic_raw_score_total);
+    let second = best_valid_non_best_stat(summary, best_profile);
     if second.is_some() {
         (Some("second-best".to_owned()), second)
     } else {
         (None, None)
     }
+}
+
+fn best_valid_non_best_stat<'a>(
+    summary: &'a TuneSummary,
+    best_profile: &str,
+) -> Option<&'a TuneProfileStats> {
+    summary
+        .profile_stats
+        .iter()
+        .filter(|stat| stat.profile != best_profile && stat.valid_runs > 0)
+        .min_by_key(|stat| stat.median_diagnostic_raw_score_total)
 }
 
 fn metrics_from_stat(stat: &TuneProfileStats) -> TuneRecommendationMetrics {

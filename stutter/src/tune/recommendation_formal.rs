@@ -115,7 +115,10 @@ pub(super) fn extend_formal_metric_warnings(
 ) {
     for metric in metrics {
         for warning in &metric.uncertainty_warnings {
-            push_unique(warnings, format!("{}: {}", metric.metric, warning));
+            push_unique(
+                warnings,
+                format!("{}: {}", metric.metric, neutral_side_labels(warning)),
+            );
         }
     }
 }
@@ -134,7 +137,7 @@ pub(super) fn extend_formal_metric_why(why: &mut Vec<String>, metrics: &[FormalM
             .map(|ci| format!("95% CI [{:.3}, {:.3}]", ci.lower, ci.upper))
             .unwrap_or_else(|| "95% CI n/a".to_owned());
         why.push(format!(
-            "formal A/B {}: baseline_median={:.3} tuned_median={:.3} improvement={:.3} effect_size={} {} enough_samples={} significant={} power={}",
+            "formal A/B {}: comparison_median={:.3} selected_median={:.3} selected_improvement={:.3} effect_size={} {} enough_samples={} significant={} power={}",
             metric.metric,
             metric.baseline_median,
             metric.tuned_median,
@@ -157,4 +160,18 @@ fn format_optional_float(value: Option<f64>, digits: usize) -> String {
     value
         .map(|value| format!("{value:.digits$}"))
         .unwrap_or_else(|| "n/a".to_owned())
+}
+
+fn neutral_side_labels(value: &str) -> String {
+    value
+        .replace("baseline_runs", "comparison_runs")
+        .replace("tuned_runs", "selected_runs")
+        .replace("baseline distribution", "comparison distribution")
+        .replace("tuned distribution", "selected distribution")
+        .replace("baseline median", "comparison median")
+        .replace("tuned median", "selected median")
+        .replace("baseline_median", "comparison_median")
+        .replace("tuned_median", "selected_median")
+        .replace("baseline=", "comparison=")
+        .replace("tuned=", "selected=")
 }

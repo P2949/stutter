@@ -13,6 +13,7 @@ pub mod no_allow_attrs;
 pub mod ops_checks;
 pub mod preflight;
 pub mod process;
+pub mod refresh_tune_recommendation;
 pub mod workflow;
 
 use crate::{
@@ -29,6 +30,7 @@ use crate::{
     ops_checks::{run_local_install_smoke, run_package_layout_check, run_service_smoke},
     preflight::run_preflight,
     process::run_cargo,
+    refresh_tune_recommendation::refresh_tune_recommendation,
     workflow::{CommandSpec, run_command_specs, run_workflow},
 };
 
@@ -132,6 +134,18 @@ pub enum XtaskCommand {
         about = "Validate committed report text golden output fixture"
     )]
     ReportGoldenUpdate,
+    #[command(
+        name = "refresh-tune-recommendation",
+        about = "Regenerate tune recommendation JSON, Markdown, and HTML from a tuning summary"
+    )]
+    RefreshTuneRecommendation {
+        #[arg(long = "summary", value_name = "PATH")]
+        summary: PathBuf,
+        #[arg(long = "baseline-profile", value_name = "NAME")]
+        baseline_profile: Option<String>,
+        #[arg(long = "out-dir", value_name = "DIR")]
+        out_dir: PathBuf,
+    },
     #[command(name = "generate-man", about = "Scaffold for man page generation")]
     GenerateMan,
     #[command(
@@ -266,6 +280,11 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
         XtaskCommand::LocalInstallSmoke => run_local_install_smoke(&root),
         XtaskCommand::FixtureUpdate => run_workflow(&root, FIXTURE_UPDATE_WORKFLOW),
         XtaskCommand::ReportGoldenUpdate => run_workflow(&root, REPORT_GOLDEN_UPDATE_WORKFLOW),
+        XtaskCommand::RefreshTuneRecommendation {
+            summary,
+            baseline_profile,
+            out_dir,
+        } => refresh_tune_recommendation(&summary, baseline_profile.as_deref(), &out_dir),
         XtaskCommand::GenerateMan => {
             scaffold_only("generate-man");
             Ok(())
@@ -351,6 +370,7 @@ mod tests {
                 "package-layout-check",
                 "preflight",
                 "privileged-ebpf-smoke",
+                "refresh-tune-recommendation",
                 "report-golden-update",
                 "schema-check",
                 "service-smoke",
