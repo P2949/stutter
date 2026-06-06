@@ -4,7 +4,7 @@
   "best_profile": "baseline-online",
   "baseline_profile": "baseline-online",
   "compared_against": "baseline",
-  "confidence": "Medium",
+  "confidence": "Low",
   "summary": "Profile 'baseline-online' is currently best, but the result is not strong enough to trust without another run.",
   "why": [
     "formal A/B diagnostic_raw_score_total: baseline_median=21533.000 tuned_median=21533.000 improvement=0.000 effect_size=0.00 95% CI [-11461.000, 11461.000] enough_samples=true significant=false power=30 runs/side",
@@ -22,6 +22,8 @@
   ],
   "warnings": [
     "best profile score IQR is non-zero",
+    "candidate order was not counterbalanced; ranking confidence lowered",
+    "comparability Warning kind=candidate-order-not-counterbalanced: two-profile tuning run used the same candidate order for every iteration; profile effect may be confounded with order effect",
     "comparability Warning profile=baseline-online kind=drop-counters-nonzero: candidate had non-zero drop counters (max=403467)",
     "comparability Warning profile=kcd1-game-on-1-5-7-11-gamescope-on-0-6 kind=drop-counters-nonzero: candidate had non-zero drop counters (max=428919)",
     "best profile score IQR is non-zero (6829)",

@@ -104,11 +104,12 @@
     "workload_label": "kcd1-proton-ge-10-34",
     "route_label": "rattay-fixed-route-1",
     "best_profile": "baseline-online",
-    "confidence": "Medium",
+    "confidence": "Low",
     "confidence_metadata": {
-      "ranking_confidence": "Medium",
+      "ranking_confidence": "Low",
       "ranking_notes": [
-        "best profile score IQR is non-zero"
+        "best profile score IQR is non-zero",
+        "candidate order was not counterbalanced; ranking confidence lowered"
       ],
       "tune_runs": 5,
       "tune_epoch_seconds": 270,
@@ -473,6 +474,8 @@
     ],
     "warnings": [
       "best profile score IQR is non-zero",
+      "candidate order was not counterbalanced; ranking confidence lowered",
+      "comparability Warning kind=candidate-order-not-counterbalanced: two-profile tuning run used the same candidate order for every iteration; profile effect may be confounded with order effect",
       "comparability Warning profile=baseline-online kind=drop-counters-nonzero: candidate had non-zero drop counters (max=403467)",
       "comparability Warning profile=kcd1-game-on-1-5-7-11-gamescope-on-0-6 kind=drop-counters-nonzero: candidate had non-zero drop counters (max=428919)",
       "diagnostic_raw_score_total: tuned distribution is noisy: noise_ratio=0.32",
@@ -501,6 +504,7 @@
     "over_5ms: metric regressed"
   ],
   "warnings": [
+    "comparability Warning kind=candidate-order-not-counterbalanced: two-profile tuning run used the same candidate order for every iteration; profile effect may be confounded with order effect",
     "comparability Warning profile=baseline-online kind=drop-counters-nonzero: candidate had non-zero drop counters (max=403467)",
     "comparability Warning profile=kcd1-game-on-1-5-7-11-gamescope-on-0-6 kind=drop-counters-nonzero: candidate had non-zero drop counters (max=428919)"
   ],

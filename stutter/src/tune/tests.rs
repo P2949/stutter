@@ -49,12 +49,16 @@ mod keep_best_policy_tests {
 
 #[cfg(test)]
 mod ranking_tests {
-    use std::path::{Path, PathBuf};
+    use std::{
+        collections::BTreeSet,
+        path::{Path, PathBuf},
+    };
 
     use super::{
         ranking::{iqr_u64, percentile_nearest_rank_u64},
         *,
     };
+    use crate::profiles::Profile;
 
     fn tune_candidate(
         profile: &str,
@@ -103,11 +107,84 @@ mod ranking_tests {
     }
 
     #[test]
-    fn candidate_order_counterbalances_iterations() {
-        assert_eq!(candidate_order_for_iteration(3, 1), vec![0, 1, 2]);
-        assert_eq!(candidate_order_for_iteration(3, 2), vec![0, 2, 1]);
-        assert_eq!(candidate_order_for_iteration(3, 3), vec![2, 0, 1]);
+    fn single_profile_order_is_stable() {
         assert_eq!(candidate_order_for_iteration(1, 4), vec![0]);
+    }
+
+    #[test]
+    fn two_profile_order_counterbalances_ab_ba() {
+        assert_eq!(candidate_order_for_iteration(2, 1), vec![0, 1]);
+        assert_eq!(candidate_order_for_iteration(2, 2), vec![1, 0]);
+        assert_eq!(candidate_order_for_iteration(2, 3), vec![0, 1]);
+        assert_eq!(candidate_order_for_iteration(2, 4), vec![1, 0]);
+        assert_eq!(candidate_order_for_iteration(2, 5), vec![0, 1]);
+    }
+
+    #[test]
+    fn two_profile_tune_candidate_order_summary_alternates_names() {
+        let profiles = vec![
+            Profile {
+                name: "baseline".to_owned(),
+                rules: Vec::new(),
+            },
+            Profile {
+                name: "tuned".to_owned(),
+                rules: Vec::new(),
+            },
+        ];
+        let orders = tune_candidate_order(&profiles, 5);
+        let summary_order = orders
+            .iter()
+            .map(|order| (order.iteration, order.profiles.clone()))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            summary_order,
+            vec![
+                (1, vec!["baseline".to_owned(), "tuned".to_owned()]),
+                (2, vec!["tuned".to_owned(), "baseline".to_owned()]),
+                (3, vec!["baseline".to_owned(), "tuned".to_owned()]),
+                (4, vec!["tuned".to_owned(), "baseline".to_owned()]),
+                (5, vec!["baseline".to_owned(), "tuned".to_owned()]),
+            ]
+        );
+    }
+
+    #[test]
+    fn four_profile_order_positions_are_balanced_over_one_block() {
+        let orders: Vec<Vec<usize>> = (1..=4)
+            .map(|iteration| candidate_order_for_iteration(4, iteration))
+            .collect();
+
+        assert_eq!(
+            orders,
+            vec![
+                vec![0, 1, 2, 3],
+                vec![1, 2, 3, 0],
+                vec![2, 3, 0, 1],
+                vec![3, 0, 1, 2],
+            ]
+        );
+    }
+
+    #[test]
+    fn candidate_order_balances_each_profile_position_over_one_block() {
+        for profile_count in 3..=6 {
+            let orders: Vec<Vec<usize>> = (1..=profile_count as u32)
+                .map(|iteration| candidate_order_for_iteration(profile_count, iteration))
+                .collect();
+            let expected: BTreeSet<usize> = (0..profile_count).collect();
+
+            for order in &orders {
+                let actual: BTreeSet<usize> = order.iter().copied().collect();
+                assert_eq!(actual, expected);
+            }
+
+            for position in 0..profile_count {
+                let actual: BTreeSet<usize> = orders.iter().map(|order| order[position]).collect();
+                assert_eq!(actual, expected);
+            }
+        }
     }
 
     #[test]

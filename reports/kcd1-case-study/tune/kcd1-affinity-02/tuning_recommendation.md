@@ -2,7 +2,7 @@
 
 Verdict: NeedsRetest
 Best profile: baseline-online
-Confidence: Medium
+Confidence: Low
 
 ## Summary
 
@@ -26,6 +26,8 @@ Profile 'baseline-online' is currently best, but the result is not strong enough
 ## Warnings
 
 - best profile score IQR is non-zero
+- candidate order was not counterbalanced; ranking confidence lowered
+- comparability Warning kind=candidate-order-not-counterbalanced: two-profile tuning run used the same candidate order for every iteration; profile effect may be confounded with order effect
 - comparability Warning profile=baseline-online kind=drop-counters-nonzero: candidate had non-zero drop counters (max=403467)
 - comparability Warning profile=kcd1-game-on-1-5-7-11-gamescope-on-0-6 kind=drop-counters-nonzero: candidate had non-zero drop counters (max=428919)
 - best profile score IQR is non-zero (6829)

@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    RankingConfidence, TuneProfilePlanSummary, TuneProfileStats, TuneSummary,
+    RankingConfidence, TuneProfilePlanSummary, TuneProfileStats, TuneSummary, comparability,
     ranking::{noise_ratio, normalized_effect_size},
     recommendation_formal::{
         extend_formal_metric_warnings, extend_formal_metric_why, formal_metrics_between_profiles,
@@ -89,10 +89,26 @@ pub fn build_tune_recommendation(
     summary: &TuneSummary,
     baseline_profile: Option<&str>,
 ) -> TuneRecommendation {
+    let mut comparability_warnings = summary.comparability_warnings.clone();
+    for warning in comparability::tune_candidate_order_warnings(&summary.candidate_order) {
+        if !comparability_warnings
+            .iter()
+            .any(|existing| existing.kind == warning.kind && existing.profile == warning.profile)
+        {
+            comparability_warnings.push(warning);
+        }
+    }
+    let confidence = comparability::ranking_confidence_after_comparability_warnings(
+        summary.ranking_confidence,
+        &comparability_warnings,
+    );
     let mut warnings = summary.ranking_notes.clone();
+    if confidence != summary.ranking_confidence {
+        warnings
+            .push("candidate order was not counterbalanced; ranking confidence lowered".to_owned());
+    }
     warnings.extend(
-        summary
-            .comparability_warnings
+        comparability_warnings
             .iter()
             .map(|warning| match &warning.profile {
                 Some(profile) => format!(
@@ -113,14 +129,14 @@ pub fn build_tune_recommendation(
         valid_stat(summary, &summary.best_profile)
     };
 
-    if summary.ranking_confidence == RankingConfidence::Unstable {
+    if confidence == RankingConfidence::Unstable {
         return TuneRecommendation {
             schema_version: 2,
             verdict: TuneRecommendationVerdict::NoRecommendation,
             best_profile: None,
             baseline_profile: baseline_profile.map(ToOwned::to_owned),
             compared_against: None,
-            confidence: summary.ranking_confidence,
+            confidence,
             summary: "No profile recommendation: ranking was unstable.".to_owned(),
             why,
             warnings,
@@ -149,7 +165,7 @@ pub fn build_tune_recommendation(
             best_profile: None,
             baseline_profile: baseline_profile.map(ToOwned::to_owned),
             compared_against: None,
-            confidence: summary.ranking_confidence,
+            confidence,
             summary: "No profile recommendation: no valid best profile was available.".to_owned(),
             why,
             warnings,
@@ -286,7 +302,7 @@ pub fn build_tune_recommendation(
         );
     }
 
-    let verdict = match summary.ranking_confidence {
+    let verdict = match confidence {
         RankingConfidence::High | RankingConfidence::Medium
             if !formal_score_blocks_recommendation =>
         {
@@ -334,7 +350,7 @@ pub fn build_tune_recommendation(
         best_profile: Some(summary.best_profile.clone()),
         baseline_profile: baseline_profile.map(ToOwned::to_owned),
         compared_against: comparison_kind,
-        confidence: summary.ranking_confidence,
+        confidence,
         summary: summary_text,
         why,
         warnings,

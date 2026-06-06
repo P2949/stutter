@@ -86,11 +86,18 @@
       "stddev_frame_p99_us": 6080.9097345709715
     }
   ],
-  "ranking_confidence": "Medium",
+  "ranking_confidence": "Low",
   "ranking_notes": [
-    "best profile score IQR is non-zero"
+    "best profile score IQR is non-zero",
+    "candidate order was not counterbalanced; ranking confidence lowered"
   ],
   "comparability_warnings": [
+    {
+      "profile": null,
+      "kind": "candidate-order-not-counterbalanced",
+      "message": "two-profile tuning run used the same candidate order for every iteration; profile effect may be confounded with order effect",
+      "severity": "Warning"
+    },
     {
       "profile": "baseline-online",
       "kind": "drop-counters-nonzero",

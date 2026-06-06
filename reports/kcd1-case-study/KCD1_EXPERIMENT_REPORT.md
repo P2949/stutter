@@ -4,7 +4,7 @@ Using scheduler-aware eBPF profiling to evaluate a CPU-affinity tuning hypothesi
 
 ## 1. Executive Summary
 
-This case study evaluates whether `stutter`, a Linux game-performance profiling prototype, can collect evidence from a real Proton/Wine game workload, generate a scoped tuning hypothesis, and validate whether the change supports better frame pacing. The tested CPU-affinity profile was plausible but was **not validated**: `baseline-online` had a lower primary diagnostic score than the tuned profile in all five paired A/B iterations. The result is useful because it shows the tool can avoid false-positive tuning recommendations in a noisy real-world workload.
+This case study evaluates whether `stutter`, a Linux game-performance profiling prototype, can collect evidence from a real Proton/Wine game workload, generate a scoped tuning hypothesis, and validate whether the change supports better frame pacing. The tested CPU-affinity profile was plausible but was **not validated**: `baseline-online` had a lower primary diagnostic score than the tuned profile in all five paired A/B iterations. The archived run was paired but not counterbalanced: `baseline-online` was measured before the tuned profile in every iteration, so the result may include an order effect. The result is still useful as conservative non-validation evidence because it shows the tool can avoid false-positive tuning recommendations in a noisy real-world workload.
 
 - Real game workload: Kingdom Come: Deliverance 1 under GE-Proton10-34.
 - Repeatable 180-second Rattay route from the same save.
@@ -62,7 +62,7 @@ The important property is that the tool does not stop at producing a plausible p
 | Route | Repeatable Rattay route from the same save |
 | Duration | 180 seconds per recorded run |
 | Baselines | 5 formal baseline runs |
-| A/B test | 5 `baseline-online` + 5 tuned profile runs |
+| A/B test | 5 `baseline-online` + 5 tuned profile runs; paired but not counterbalanced |
 | Frame capture | MangoHud CSV ingested by `stutter` |
 | Main variable | CPU-affinity profile only |
 
@@ -151,7 +151,7 @@ Explainability evidence: `reports/kcd1-case-study/profiles/kcd1-affinity-profile
 
 ## 9. A/B Tuning Result
 
-The proper A/B tuning run, `kcd1-affinity-02`, tested both profiles with five valid measured iterations each. Lower diagnostic score is better.
+The paired A/B tuning run, `kcd1-affinity-02`, tested both profiles with five valid measured iterations each. Lower diagnostic score is better. This run was paired but not counterbalanced: `baseline-online` was measured before the tuned profile in every iteration, so profile effects may be confounded with measurement order.
 
 | Iteration | Baseline-online score | Tuned profile score | Delta | Lower score |
 | --- | ---: | ---: | ---: | --- |
@@ -174,7 +174,7 @@ The `over-5ms` value is a scheduler-latency threshold count from the diagnostic 
 
 The profile-vs-profile tables above are derived from `tuning_summary.json` candidate statistics. The generated `tuning_recommendation.json` selected `baseline-online` as the lower-scoring profile, so some of its formal comparison fields compare `baseline-online` against itself and show zero deltas. The tuned-profile conclusion here is therefore based on the candidate statistics in `tuning_summary.json`.
 
-The tuned profile was **not validated and should not be recommended on the current evidence**. The primary diagnostic score was worse in every paired iteration. The generated recommendation selected `baseline-online` as the lower-scoring profile with `NeedsRetest`, reflecting that the workload is noisy and confidence intervals still cross zero for several metrics.
+The tuned profile was **not validated and should not be recommended on the current evidence**. The primary diagnostic score was worse in every paired iteration. Because the pair order was fixed, this should be read as a caveated non-validation result rather than a fully counterbalanced A/B estimate. The generated recommendation selected `baseline-online` as the lower-scoring profile with `NeedsRetest`, and the corrected interpretation treats ranking confidence as low once the order caveat is considered.
 
 The careful interpretation is that the evidence did not support recommending the tuned profile, and the observed paired scores were consistently worse. This is not a claim that the profile is unsuitable across all conditions.
 
@@ -195,7 +195,7 @@ The lesson is not that CPU affinity is inherently a bad idea for Proton games. T
 
 ## 11. Statistical Interpretation
 
-The A/B run is useful for avoiding a false positive, but it is not enough to estimate small effects precisely. The tool estimated that some metrics may require roughly 18-30+ runs per condition because KCD1 is noisy.
+The A/B run is useful for avoiding a false positive, but it is not enough to estimate small effects precisely, and the fixed pair order further limits causal interpretation. The tool estimated that some metrics may require roughly 18-30+ runs per condition because KCD1 is noisy.
 
 Estimated runs per side for detecting a 10% movement at the observed noise level:
 

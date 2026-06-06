@@ -14,9 +14,10 @@ The purpose of this case study is not to show that `stutter` automatically repai
 - `stutter` successfully captured and analyzed a real KCD1/Proton workload with scheduler data, process-tree data, GPU samples, and MangoHud frame timing.
 - Five formal baseline runs were valid: each ran for about 180 seconds, stopped because the maximum duration was reached, ingested frame data, and used monotonic frame timestamp alignment.
 - The baseline route was noisy but useful: median frametime ranged from about 16.3ms to 22.9ms, while p99 frametime stayed in the mid-40s to low-50s milliseconds.
-- The workload is noisy enough that small tuning effects may require roughly 18-30+ runs per condition, depending on the metric; the five-run A/B test is enough to show the workflow and avoid a false positive, but not enough to claim precise small-effect estimates.
+- The workload is noisy enough that small tuning effects may require roughly 18-30+ runs per condition, depending on the metric; the five-run A/B test is useful as conservative non-validation evidence, but not enough to claim precise small-effect estimates.
 - The advisor generated a plausible, reversible CPU-affinity hypothesis, but A/B tuning did not validate the tested profile.
-- In the proper A/B tune run, `baseline-online` had a lower primary diagnostic score than the tuned affinity profile in all five paired iterations.
+- In the paired A/B tune run, `baseline-online` had a lower primary diagnostic score than the tuned affinity profile in all five paired iterations.
+- The archived candidate order was fixed: `baseline-online` was measured before the tuned profile in every iteration. The run was paired but not counterbalanced, so the result may include an order effect and should be treated as low-confidence until rerun with alternating order.
 - The non-validation result is valuable: it shows that `stutter` can prevent a plausible Linux tuning tweak from being mistaken for a validated improvement.
 - A measurement-quality pilot found that wakeup replacement counters were not ring-buffer reserve failures and were not reduced by `--ebpf-wakeup-map-factor 4`.
 - A follow-up profile-explainability implementation now allows `stutter` to report which profile rules match which tasks, classes, `comm`, `process_comm`, match source, and proposed CPU masks before a profile is applied.
@@ -174,9 +175,9 @@ For this case study, that matters because the KCD process appears as `process_co
 
 ## A/B tuning result
 
-The second tuning experiment, `kcd1-affinity-02`, used a proper A/B profile set with both `baseline-online` and the tuned CPU-affinity profile. Each profile had five valid measured iterations.
+The second tuning experiment, `kcd1-affinity-02`, used an A/B profile set with both `baseline-online` and the tuned CPU-affinity profile. Each profile had five valid measured iterations. The archived `candidate_order` shows that `baseline-online` was measured before the tuned profile in every iteration, so this run was paired but not counterbalanced.
 
-The tuning summary selected `baseline-online` as the lower-scoring profile with `Medium` ranking confidence. The tested tuned profile was not validated and should not be recommended on the current evidence.
+The corrected tuning summary selects `baseline-online` as the lower-scoring profile with `Low` ranking confidence after applying the fixed-order caveat. The tested tuned profile was not validated and should not be recommended on the current evidence.
 
 | Profile | Valid runs | Median diagnostic score | Mean diagnostic score | Median frame P99 | Mean scheduler >5ms |
 |---|---:|---:|---:|---:|---:|
@@ -212,7 +213,7 @@ tuned-profile median:   38,806  [================    ]  +80.2% worse
 
 Frame P99 was mixed, but the primary scheduler-aware diagnostic score did not support the tuned profile. The correct conclusion is:
 
-> The tested CPU-affinity profile was not validated and should not be recommended on the current evidence for this route and system. The tool prevented a plausible tuning hypothesis from being mistaken for a validated improvement.
+> The tested CPU-affinity profile was not validated and should not be recommended on the current evidence for this route and system. The paired run was not counterbalanced, so the result should be treated as caveated low-confidence evidence rather than as a fully counterbalanced effect estimate.
 
 This is a good result for the FYP narrative. The project is about evidence-based validation, not forcing a positive tuning result.
 
@@ -228,7 +229,7 @@ This is an interpretation, not a demonstrated causal mechanism. It is still usef
 
 ## Statistical interpretation
 
-`tuning_recommendation.json` returned `NeedsRetest`, with `baseline-online` as the lower-scoring profile in this tuning run. The A/B uncertainty output warned that several metrics were noisy and that bootstrap confidence intervals crossed zero.
+`tuning_recommendation.json` returned `NeedsRetest`, with `baseline-online` as the lower-scoring profile in this tuning run. The A/B uncertainty output warned that several metrics were noisy and that bootstrap confidence intervals crossed zero. The fixed candidate order adds a separate comparability warning: profile effects may be confounded with order effects.
 
 Estimated sample requirements included approximately:
 
@@ -303,8 +304,8 @@ This case study is already useful for the report:
 2. Five valid baseline runs were collected with scheduler and frame data.
 3. The route showed real frame-pacing problems and meaningful run-to-run variance.
 4. The advisor produced a reversible CPU-affinity tuning hypothesis.
-5. A controlled A/B tuning run tested the hypothesis.
-6. The tested profile was not validated and should not be recommended on the current evidence; `baseline-online` remained lower-scoring in the measured comparison.
+5. A paired but not counterbalanced A/B tuning run tested the hypothesis.
+6. The tested profile was not validated and should not be recommended on the current evidence; `baseline-online` remained lower-scoring in the measured comparison, but the fixed order makes the conclusion low-confidence until rerun.
 7. A drop-counter pilot clarified that wakeup replacements were not ring-buffer drops and were not reduced by increasing wakeup-map capacity.
 8. A follow-up profile-explainability feature now reports rule-level task matches, classes, `comm`, `process_comm`, and proposed masks so future tuning hypotheses are easier to audit before collecting A/B data.
 9. An exploratory real-world stack add-on shows that `stutter` can capture and compare a realistic player-used configuration bundle, while still avoiding causal claims when many variables change at once.

@@ -124,12 +124,25 @@ pub async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
     if any_valid {
         comparability::check_tune_coverage_comparability(&grouped)?;
     }
-    let comparability_warnings = comparability::tune_comparability_warnings(&grouped);
+    let mut comparability_warnings = comparability::tune_comparability_warnings(&grouped);
+    comparability_warnings.extend(comparability::tune_candidate_order_warnings(
+        &candidate_order,
+    ));
 
     let profile_stats = profile_stats_from_grouped(&grouped);
     let selected_best_profile = select_best_profile(&grouped);
-    let (ranking_confidence, ranking_notes) =
+    let (mut ranking_confidence, mut ranking_notes) =
         assess_ranking_confidence(&profile_stats, &grouped, &selected_best_profile, runs);
+    let adjusted_ranking_confidence =
+        comparability::ranking_confidence_after_comparability_warnings(
+            ranking_confidence,
+            &comparability_warnings,
+        );
+    if adjusted_ranking_confidence != ranking_confidence {
+        ranking_notes
+            .push("candidate order was not counterbalanced; ranking confidence lowered".to_owned());
+        ranking_confidence = adjusted_ranking_confidence;
+    }
     let best_profile = if ranking_confidence == RankingConfidence::Unstable {
         String::new()
     } else {

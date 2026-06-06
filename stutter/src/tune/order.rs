@@ -8,12 +8,21 @@ pub(crate) fn candidate_order_for_iteration(profile_count: usize, iteration: u32
         return order;
     }
 
-    let rotation = ((iteration - 1) as usize) % profile_count;
-    order.rotate_left(rotation);
+    if profile_count == 2 {
+        if iteration.is_multiple_of(2) {
+            order.reverse();
+        }
+        return order;
+    }
 
-    if iteration.is_multiple_of(2) {
+    let zero_based = iteration.saturating_sub(1) as usize;
+    let rotation = zero_based % profile_count;
+    let reverse_block = (zero_based / profile_count) % 2 == 1;
+
+    if reverse_block {
         order.reverse();
     }
+    order.rotate_left(rotation);
 
     order
 }

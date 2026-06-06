@@ -315,6 +315,38 @@ fn missing_baseline_profile_adds_warning() {
 }
 
 #[test]
+fn recommendation_derives_fixed_candidate_order_warning_from_historical_summary() {
+    let mut summary = summary(RankingConfidence::Medium);
+    summary.candidate_order = vec![
+        TuneIterationOrder {
+            iteration: 1,
+            profiles: vec!["baseline".to_owned(), "tuned".to_owned()],
+        },
+        TuneIterationOrder {
+            iteration: 2,
+            profiles: vec!["baseline".to_owned(), "tuned".to_owned()],
+        },
+        TuneIterationOrder {
+            iteration: 3,
+            profiles: vec!["baseline".to_owned(), "tuned".to_owned()],
+        },
+    ];
+
+    let rec = build_tune_recommendation(&summary, Some("baseline"));
+
+    assert_eq!(rec.confidence, RankingConfidence::Low);
+    assert!(rec.warnings.iter().any(|warning| {
+        warning.contains("candidate-order-not-counterbalanced")
+            && warning.contains("confounded with order effect")
+    }));
+    assert!(
+        rec.warnings
+            .iter()
+            .any(|warning| warning.contains("ranking confidence lowered"))
+    );
+}
+
+#[test]
 fn markdown_contains_verdict_best_profile_confidence_and_warnings() {
     let mut summary = summary(RankingConfidence::Medium);
     summary.ranking_notes.push("note".to_owned());
