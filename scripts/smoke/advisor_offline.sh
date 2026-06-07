@@ -59,7 +59,7 @@ import json
 import sys
 with open(sys.argv[1], encoding="utf-8") as f:
     data = json.load(f)
-assert data["schema_version"] == 1
+assert data["schema_version"] == 2
 assert "verdict" in data
 assert isinstance(data["recommendations"], list)
 PY

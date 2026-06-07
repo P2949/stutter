@@ -2,6 +2,9 @@
 
 This bundle curates the small set of artifacts needed to inspect the KCD1 CPU-affinity non-validation result without loading the full raw trace archive.
 
+Machine-local home paths and usernames in presentation artifacts are sanitized
+with placeholders such as `<home>`, `<user>`, and `<repo>`.
+
 ## Layout
 
 ```text

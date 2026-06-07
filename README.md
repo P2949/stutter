@@ -2,6 +2,10 @@
 
 `stutter` is a Linux scheduler runnable-latency profiler built with Rust + Aya eBPF.
 
+For a short supervisor-facing project route, start with
+[SUPERVISOR_README.md](SUPERVISOR_README.md). The rest of this README is the
+technical user/developer manual.
+
 It measures:
 
 ```text
