@@ -457,7 +457,7 @@ mod tests {
                 DUPLICATE_DEPENDENCY_COMMAND.program,
                 DUPLICATE_DEPENDENCY_COMMAND.args
             ),
-            "cargo tree -d"
+            "cargo tree -d --color never"
         );
         assert_eq!(
             DEPENDENCY_HYGIENE_WORKFLOW.affected_paths,
@@ -491,6 +491,20 @@ syn v2.0.117
             duplicate_package_names(output),
             vec!["bitflags".to_owned(), "syn".to_owned()]
         );
+    }
+
+    #[test]
+    fn duplicate_dependency_parser_ignores_ansi_colored_tree_entries() {
+        let output = "\
+bitflags v1.3.2
+\u{1b}[2m└──\u{1b}[0m example v0.1.0
+
+bitflags v2.11.1 \u{1b}[33m\u{1b}[2m(*)\u{1b}[39m\u{1b}[22m
+\u{1b}[2m├──\u{1b}[0m other v0.1.0
+\u{1b}[2m└──\u{1b}[0m transitive v0.1.0
+";
+
+        assert_eq!(duplicate_package_names(output), vec!["bitflags".to_owned()]);
     }
 
     #[test]

@@ -18,7 +18,7 @@ pub const DEPENDENCY_HYGIENE_COMMANDS: &[CommandSpec] = &[CommandSpec {
 
 pub const DUPLICATE_DEPENDENCY_COMMAND: CommandSpec = CommandSpec {
     program: "cargo",
-    args: &["tree", "-d"],
+    args: &["tree", "-d", "--color", "never"],
 };
 
 pub const APPROVED_DUPLICATE_PACKAGES: &[&str] = &[
@@ -281,7 +281,8 @@ fn network_tls_dependency_lines(metadata: &Metadata) -> Vec<String> {
 pub fn duplicate_package_names(output: &str) -> Vec<String> {
     let mut names = BTreeSet::new();
 
-    for line in output.lines() {
+    for raw_line in output.lines() {
+        let line = strip_ansi_escape_sequences(raw_line);
         let Some(first) = line.chars().next() else {
             continue;
         };
@@ -304,6 +305,27 @@ pub fn duplicate_package_names(output: &str) -> Vec<String> {
     }
 
     names.into_iter().collect()
+}
+
+fn strip_ansi_escape_sequences(input: &str) -> String {
+    let mut output = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+
+    while let Some(character) = chars.next() {
+        if character == '\x1b' && chars.peek() == Some(&'[') {
+            chars.next();
+            for escape_character in chars.by_ref() {
+                if ('@'..='~').contains(&escape_character) {
+                    break;
+                }
+            }
+            continue;
+        }
+
+        output.push(character);
+    }
+
+    output
 }
 
 #[cfg(test)]
