@@ -26,6 +26,9 @@ if [[ ${PV} == 9999 ]]; then
 	inherit git-r3
 fi
 
+# Packaging skeleton: userspace crates are MIT OR Apache-2.0; eBPF crate is
+# MIT OR GPL-2.0-only. Final license expression should be revisited before
+# production packaging.
 LICENSE="MIT"
 SLOT="0"
 KEYWORDS=""
@@ -40,7 +43,7 @@ BDEPEND="
 
 src_compile() {
 	export RUSTC_BOOTSTRAP=1
-	RUSTUP_TOOLCHAIN=nightly cargo_src_compile -p stutter
+	RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo_src_compile -p stutter
 }
 
 src_unpack() {

@@ -47,6 +47,8 @@ The large personal launch configuration was intentionally not used. The measurem
 
 The Steam launch still used `+exec user.cfg`. The archived `user.cfg` mainly sets memory, texture streaming, material preload, and pak stream-cache options. These settings are treated as part of the repeatable workload configuration, not as the tuning variable.
 
+Archived kernel strings may contain `root@localhost`; this is the kernel build
+identity, not the runtime user identity of the benchmark process.
 
 ## Reproducibility checklist
 

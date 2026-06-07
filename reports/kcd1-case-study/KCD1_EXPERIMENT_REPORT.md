@@ -72,6 +72,11 @@ The formal recordings used explicit `--tree-pid` targeting for the KCD1/Gamescop
 
 Setup evidence: `reports/kcd1-case-study/setup/kcd1-method-notes.md`, `reports/kcd1-case-study/setup/system-info.txt`, and `reports/kcd1-case-study/setup/kcd1-config/`.
 
+> Some archived metadata records include kernel build strings containing
+> `root@localhost`. This is the kernel image build identity embedded in
+> `uname`/kernel-version metadata, not evidence that `stutter` itself was run as
+> the root user for the benchmark route.
+
 ## 5. Baseline Findings
 
 The five formal baseline runs passed the basic validity checks: each ran for about 180 seconds, stopped because `max_duration_reached`, ingested MangoHud frame data, used `monotonic_observed` frame timestamp alignment, and reported `Medium` data quality.

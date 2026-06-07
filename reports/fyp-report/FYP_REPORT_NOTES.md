@@ -1,5 +1,9 @@
 # FYP Report Planning Notes
 
+> **Internal planning scaffolding - not part of the FYP submission.**
+> This file is an evidence checklist for drafting `FYP_REPORT.md`, not a polished
+> report or supervisor-facing document.
+
 These notes keep the FYP report grounded in evidence before prose polish. The
 main report is `FYP_REPORT.md`.
 
