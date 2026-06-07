@@ -2,6 +2,11 @@
 
 This checklist applies to every new autotune action. It exists to keep autotune work tied to `TuningAction`, rollback, auditability, cooldown, and tests instead of random knob-twiddling.
 
+For FYP supervisor review, this is a future implementation checklist for
+experimental autotune work, not the current assessed delivery plan. The proposed
+FYP scope remains CPU-affinity/process-placement validation unless supervision
+explicitly changes it.
+
 For every new autotune action:
 
 ```text

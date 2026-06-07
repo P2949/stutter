@@ -1,3 +1,5 @@
+Manage experimental daemon/service components
+
 Usage: stutter daemon <COMMAND>
 
 Commands:
