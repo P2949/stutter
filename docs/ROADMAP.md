@@ -11,6 +11,14 @@ affinity, VM/kernel tuning, scheduler replacement, packaging, and broad
 hardware/game coverage are background implementation, optional extension, or
 future work unless explicitly brought into scope.
 
+## Pre-Supervisor Cleanup
+
+The canonical first-read path is `SUPERVISOR_README.md`, then the supervisor
+pitch, scope note, AI disclosure, KCD1 report, and curated evidence bundle. Large
+raw artifacts are retained for audit, but they are not required for first review.
+Keep new roadmap items from expanding the assessed scope beyond
+CPU-affinity/process-placement validation unless a supervisor explicitly agrees.
+
 ## Stages
 
 | Stage | Status | Notes |

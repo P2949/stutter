@@ -55,6 +55,9 @@ The current `stutter` prototype and KCD1 case study are preliminary work used to
 
 The core evaluated tuning area would be CPU affinity and process/thread placement. Existing support for broader areas such as daemon control, GPU power, IRQ affinity, VM knobs, remote/agent paths, system-wide autotuning, scheduler replacement, and wide hardware/game coverage would be treated as background implementation, optional extension, or future work unless explicitly agreed with the supervisor.
 
+AI coding-assistant use during prototype development is disclosed in
+[`AI_DISCLOSURE.md`](AI_DISCLOSURE.md).
+
 ## Proposed FYP scope
 
 The proposed Final Year Project would build on this prototype and focus on turning it into a rigorous game-performance evaluation methodology. The main work would be to:

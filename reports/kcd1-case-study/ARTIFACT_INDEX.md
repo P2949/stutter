@@ -6,6 +6,32 @@ the primary technical archive summary is `CASE_STUDY_SUMMARY.md`. For supervisor
 review, prefer the curated evidence bundle linked from the top-level
 `SUPERVISOR_README.md` before opening the full raw archive.
 
+## Storage policy for supervisor handoff
+
+Small curated evidence stays in Git. Large raw experiment exports are retained
+for audit, but they are not required for first supervisor review and should move
+to release assets, Git LFS, or an external archive before a lightweight
+presentation branch is created. Every moved artifact family should keep a
+checksum and a short description.
+
+Size audit from 2026-06-07:
+
+```text
+git tracked files: 2,827
+reports/: 1017M
+evidence-bundle/: 96K
+stutter/: 11M
+```
+
+| Artifact family | Current location | Size | Handoff location | Needed for first read? | Notes |
+| --- | --- | ---: | --- | --- | --- |
+| Curated KCD1 evidence bundle | `evidence-bundle/` | 96K | Git and release asset | yes | Checksum-verified small bundle. |
+| KCD1 raw spike events | `reports/kcd1-case-study/**/spike_events.json` | large | release or external archive | no | Retained for audit and deeper reproduction. |
+| KCD1 interval streams | `reports/kcd1-case-study/**/interval.json` | large | release or external archive | no | Useful for detailed trace review, not first read. |
+| Runtime-slice streams | `reports/kcd1-case-study/**/runtime_slices.json` | large | release or external archive | no | Raw scheduler/runtime context. |
+| MangoHud CSVs | `reports/kcd1-case-study/**/mangohud/*.csv` | medium/large | release or external archive | no | Keep with checksums for frame-time audit. |
+| Generated PDFs | `reports/**/*.pdf` | small/medium | Git and release assets | yes for pitch/report PDFs | Pitch PDF is the primary attachment. |
+
 ## Primary narrative
 
 - `KCD1_EXPERIMENT_REPORT.md` — polished lecturer-facing case-study report.

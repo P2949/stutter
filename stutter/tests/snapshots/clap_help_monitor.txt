@@ -1,3 +1,5 @@
+Run live scheduler/frame monitoring for selected tasks
+
 Usage: stutter monitor [OPTIONS]
 
 Options:

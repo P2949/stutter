@@ -5,6 +5,14 @@ This bundle curates the small set of artifacts needed to inspect the KCD1 CPU-af
 Machine-local home paths and usernames in presentation artifacts are sanitized
 with placeholders such as `<home>`, `<user>`, and `<repo>`.
 
+The bundle supports a narrow claim: the archived KCD1 CPU-affinity profile was
+not validated by the preliminary evidence, and the workflow could decline an
+unsupported recommendation. It does not claim a general KCD1 performance result,
+does not generalize to other machines or games, and preserves the caveat that the
+archived paired A/B run was not counterbalanced.
+
+See `EVIDENCE_LIMITATIONS.md` for the short claim-boundary note.
+
 ## Layout
 
 ```text

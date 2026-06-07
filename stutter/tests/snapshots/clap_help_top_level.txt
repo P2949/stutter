@@ -3,41 +3,41 @@ Profile scheduler runnable latency for selected tasks
 Usage: stutter [OPTIONS] [COMMAND]
 
 Commands:
-  monitor                  
-  record                   
-  bench                    
-  inspect-tree             
-  report                   
-  summary                  
-  validate                 
-  restore                  
-  apply-profile            
+  monitor                  Run live scheduler/frame monitoring for selected tasks
+  record                   Record scheduler/frame evidence for a target process tree
+  bench                    Benchmark a recording workflow against a target process tree
+  inspect-tree             Inspect a process tree before recording or profile planning
+  report                   Generate an offline report from a recording
+  summary                  Print a compact summary for one or more recordings
+  validate                 Validate a recording directory and its artifacts
+  restore                  Restore affinity state captured by stutter
+  apply-profile            Apply or explain a scoped CPU-affinity profile
   profile-plan             Explain profile targets for a process tree
-  tune                     Benchmark multiple profiles and select the best one
-  recommend                
-  prove-fix                Print a guided workflow for proving an advisor fix plan
-  release                  
-  check                    
-  compare                  
-  config                   
-  audit                    
-  advisor                  
-  doctor                   
-  profile-template         
-  inspect-irqs             
-  inspect-drm-tracepoints  
-  wayland-probe            
-  autotune                 
-  autotune-status          
-  agent                    
-  privileged-worker        
-  daemon                   
-  service                  
-  completions              
-  man                      
-  probes                   
-  rules                    
-  scenario                 
+  tune                     Benchmark candidate profiles and select a supported result
+  recommend                Compare baseline and tuned evidence before recommending
+  prove-fix                Print a guided workflow for proving a fix plan
+  release                  Run release-readiness checks and related helpers
+  check                    Check a current recording against a baseline recording
+  compare                  Compare specialized evidence paths between recordings
+  config                   Inspect and explain stutter configuration
+  audit                    Inspect local audit events from tuning actions
+  advisor                  Suggest scoped fix plans from existing evidence
+  doctor                   Run local preflight checks for stutter and eBPF support
+  profile-template         Create example CPU-affinity profile templates
+  inspect-irqs             Inspect IRQ distribution and candidate affinity targets
+  inspect-drm-tracepoints  Inspect available DRM tracepoints for display-path evidence
+  wayland-probe            Probe Wayland presentation timing support
+  autotune                 Manage experimental autotune planning and replay commands
+  autotune-status          Inspect experimental autotune controller status
+  agent                    Run experimental remote agent endpoints
+  privileged-worker        Run the privileged worker used by service paths
+  daemon                   Manage experimental daemon/service components
+  service                  Install, uninstall, or inspect service integration
+  completions              Generate shell completion scripts
+  man                      Generate a stutter manual page
+  probes                   List implemented and planned probe signals
+  rules                    Manage imported community rule metadata
+  scenario                 Create and compare repeatable benchmark scenarios
   help                     Print this message or the help of the given subcommand(s)
 
 Options:

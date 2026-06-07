@@ -1,3 +1,5 @@
+Manage experimental autotune planning and replay commands
+
 Usage: stutter autotune [OPTIONS] [COMMAND]
 
 Commands:

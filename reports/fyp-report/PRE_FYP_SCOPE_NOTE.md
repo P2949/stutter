@@ -16,6 +16,30 @@
 - One primary real-game evaluation under the final protocol.
 - Conservative recommendation verdicts: validated, regression, inconclusive, invalid experiment.
 
+## Planned validation protocol
+
+For each benchmarked workload, the FYP method should select a fixed route, warm
+shader caches, record baseline evidence, run diagnosis, generate a candidate
+profile, run `profile-plan` before applying it, confirm intended task coverage,
+pre-register the candidate list, then collect repeated A/B or A/B/A data with
+counterbalanced order.
+
+The minimum repeat policy is at least three valid repetitions per profile for a
+pilot and at least five valid repetitions per profile for the main case study,
+with eight to ten repetitions per profile used if time allows. Failed
+data-quality checks should trigger reruns rather than silent inclusion.
+
+Primary metrics should include the diagnostic score used by the tuning output,
+p95 or p99 frame time, over-threshold frame counts, and scheduler-visible
+delay/spike indicators. Secondary metrics may include median frame time, 1% low
+style summaries where available, task-class scheduler delay, MangoHud frame
+pacing outliers, eBPF drop counters, and data-quality warnings.
+
+Decision vocabulary is deliberately conservative: `validated`, `not validated`,
+`inconclusive`, `more evidence required`, or `unsafe/not applicable`. The
+archived KCD1 run was paired but not counterbalanced, so it remains preliminary
+motivation for the corrected protocol rather than a validated tuning claim.
+
 ## Out of Core Scope
 
 These may exist in the repository as background prototype or future-work areas,
@@ -34,19 +58,6 @@ changes the scope.
 
 ## Development tools and academic integrity
 
-This prototype was developed with AI coding assistant support, including
-Claude, ChatGPT/OpenAI tooling, and Codex-style review workflows where
-applicable. These tools were used as iterative review and pair-programming
-support: to critique code, suggest implementation alternatives, identify bugs,
-draft patches for review, and help refine documentation.
-
-All design decisions, accepted code changes, experimental setup, benchmark
-execution, validation runs, interpretation of results, and final project
-conclusions remain the responsibility of the author. AI-generated or
-AI-suggested material was reviewed, adapted, tested, and either accepted or
-rejected by the author before inclusion.
-
-The assessed FYP contribution is proposed as the author's methodology,
-implementation, validation, and reporting work. This disclosure is included to
-make the nature and extent of AI assistance explicit for supervisor review and
-to align with UL academic-integrity expectations.
+AI coding-assistant use during prototype development is disclosed separately in
+[`AI_DISCLOSURE.md`](AI_DISCLOSURE.md). The assessed FYP contribution remains the
+author's methodology, implementation, validation, and reporting work.
