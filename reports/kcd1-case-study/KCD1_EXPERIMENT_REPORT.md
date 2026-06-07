@@ -370,10 +370,10 @@ stutter recommend \
 Validation checks:
 
 ```bash
-RUSTUP_TOOLCHAIN=nightly cargo fmt --all -- --check
-RUSTUP_TOOLCHAIN=nightly cargo test --all
-RUSTUP_TOOLCHAIN=nightly cargo clippy --all-targets -- -D warnings
-RUSTUP_TOOLCHAIN=nightly cargo run -p xtask -- fixture-check
+RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo fmt --all -- --check
+RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo test --all
+RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo clippy --all-targets -- -D warnings
+RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -p xtask -- fixture-check
 ```
 
 Build/check evidence: `reports/kcd1-case-study/setup/build-check.txt`, `reports/kcd1-case-study/tune/kcd1-affinity-02.log`, and `reports/kcd1-case-study/results/kcd1-fix-validation-command-output.txt`.

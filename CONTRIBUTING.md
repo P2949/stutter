@@ -7,30 +7,30 @@ This repository uses `xtask` commands as the local development gate. Run them wi
 1. Format the workspace:
 
    ```sh
-   RUSTUP_TOOLCHAIN=nightly cargo fmt --all
+   RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo fmt --all
    ```
 
 2. Run the non-root CI gate before committing:
 
    ```sh
-   RUSTUP_TOOLCHAIN=nightly cargo run -p xtask -- ci
+   RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -p xtask -- ci
    ```
 
 3. For changes that touch eBPF, validation fixtures, safety-sensitive action logic, daemon/autotune behavior, or release-readiness checks, run the fuller validation gate:
 
    ```sh
-   RUSTUP_TOOLCHAIN=nightly cargo run -p xtask -- validate
+   RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -p xtask -- validate
    ```
 
    For real validation-corpus fixtures, also follow `docs/VALIDATION_CORPUS.md`:
    complete `fixture.toml`, preserve only bucketed platform details, set
    expected behavior, use a unique `sanitized_capture_id`, and run
-   `RUSTUP_TOOLCHAIN=nightly cargo run -p xtask -- fixture-check`.
+   `RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -p xtask -- fixture-check`.
 
 4. Use the preflight check when setting up a new machine or when a validation command fails before the Rust build starts:
 
    ```sh
-   RUSTUP_TOOLCHAIN=nightly cargo run -p xtask -- preflight
+   RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -p xtask -- preflight
    ```
 
 ## Action boundary and string ID migration validation
@@ -53,7 +53,7 @@ criteria, and counts.
 The normal `ci` and `validate` gates are non-root. For changes that affect eBPF loading, eBPF map names or types, tracepoint attach logic, or BPF object build/load behavior, also run the ignored privileged loader smoke test on a Linux machine with tracefs mounted and eBPF privileges:
 
 ```sh
-sudo -E env PATH="$PATH" RUSTUP_TOOLCHAIN=nightly cargo run -p xtask -- privileged-ebpf-smoke
+sudo -E env PATH="$PATH" RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -p xtask -- privileged-ebpf-smoke
 ```
 
 Run this before merging loader-sensitive changes. It intentionally stays outside the default validation flow because it requires kernel facilities and privileges that regular CI and local non-root checks should not assume.
@@ -76,7 +76,7 @@ cargo test -p stutter architecture_tests
 `cargo run -p xtask -- validate` runs the same checks and additionally builds the eBPF crate explicitly with:
 
 ```text
-rustup run nightly cargo build -p stutter-ebpf -Z build-std=core --target bpfel-unknown-none
+rustup run nightly-2026-06-06 cargo build -p stutter-ebpf -Z build-std=core --target bpfel-unknown-none
 ```
 
 `cargo run -p xtask -- privileged-ebpf-smoke` first runs preflight, then builds the eBPF crate and runs:

@@ -1255,10 +1255,10 @@ stutter recommend \
 Validation flow for submission/export:
 
 ```bash
-RUSTUP_TOOLCHAIN=nightly cargo fmt --all -- --check
-RUSTUP_TOOLCHAIN=nightly cargo test --all
-RUSTUP_TOOLCHAIN=nightly cargo clippy --all-targets -- -D warnings
-RUSTUP_TOOLCHAIN=nightly cargo run -p xtask -- fixture-check
+RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo fmt --all -- --check
+RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo test --all
+RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo clippy --all-targets -- -D warnings
+RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -p xtask -- fixture-check
 ```
 
 ### Appendix B: CPU-Affinity Profile TOML
@@ -1343,18 +1343,18 @@ Table A2. Evidence matrix:
 
 ### Appendix E: Selected Build/Test Output
 
-The latest validation flow for this report was run on 2026-06-05:
+The latest validation flow for this report was run on 2026-06-06:
 
 | Command | Result |
 | --- | --- |
-| `RUSTUP_TOOLCHAIN=nightly cargo fmt --all -- --check` | passed |
-| `RUSTUP_TOOLCHAIN=nightly cargo test --all` | passed |
-| `RUSTUP_TOOLCHAIN=nightly cargo clippy --all-targets -- -D warnings` | passed |
-| `RUSTUP_TOOLCHAIN=nightly cargo run -p xtask -- fixture-check` | passed |
+| `RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo fmt --all -- --check` | passed |
+| `RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo test --all` | passed |
+| `RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo clippy --all-targets -- -D warnings` | passed |
+| `RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -p xtask -- fixture-check` | passed |
 
 Selected output:
 
-- `cargo test --all`: the main `stutter` library test target reported 2643
+- `cargo test --all`: the main `stutter` library test target reported 2654
   passed, 0 failed, and 5 ignored; the remaining workspace unit,
   integration, golden, and doc-test targets also passed.
 - `xtask fixture-check`: 20 real fixtures, 19 synthetic fixtures, 20 distinct
