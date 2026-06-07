@@ -15,7 +15,7 @@ cargo install cargo-deny --locked
 Run the repository gate:
 
 ```sh
-RUSTUP_TOOLCHAIN=nightly cargo run -p xtask -- dependency-hygiene
+RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -p xtask -- dependency-hygiene
 ```
 
 The gate validates:
@@ -79,7 +79,7 @@ Install and run it manually with:
 
 ```sh
 cargo install cargo-udeps --locked
-RUSTUP_TOOLCHAIN=nightly cargo udeps --workspace --all-targets
+RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo udeps --workspace --all-targets
 ```
 
 Treat `cargo udeps` output as advisory until a separate patch intentionally

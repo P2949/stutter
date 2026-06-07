@@ -9,8 +9,8 @@ a Linux machine where eBPF loading is permitted.
 Build the normal userspace binary and BPF object first:
 
 ```bash
-RUSTUP_TOOLCHAIN=nightly cargo build -p stutter
-RUSTUP_TOOLCHAIN=nightly cargo run -p xtask -- preflight
+RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo build -p stutter
+RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -p xtask -- preflight
 ```
 
 Create a high-churn target tree:

@@ -4,7 +4,7 @@ set -euo pipefail
 # Navigate to repo root
 cd "$(dirname "$0")/../.."
 
-TOOLCHAIN="${RUSTUP_TOOLCHAIN:-nightly}"
+TOOLCHAIN="${RUSTUP_TOOLCHAIN:-nightly-2026-06-06}"
 
 echo "--- STAGE: cargo fmt ---"
 RUSTUP_TOOLCHAIN="$TOOLCHAIN" cargo fmt --all --check

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-: "${RUSTUP_TOOLCHAIN:=nightly}"
+: "${RUSTUP_TOOLCHAIN:=nightly-2026-06-06}"
 
 run() {
   echo
@@ -28,6 +28,6 @@ doas env \
   CARGO_HOME="$HOME/.cargo" \
   RUSTUP_HOME="$HOME/.rustup" \
   PATH="$PATH" \
-  RUSTUP_TOOLCHAIN=nightly \
+  RUSTUP_TOOLCHAIN=nightly-2026-06-06 \
   cargo run -p xtask -- privileged-ebpf-smoke
 EOF_MSG

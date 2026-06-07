@@ -3,7 +3,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-TOOLCHAIN="${RUSTUP_TOOLCHAIN:-nightly}"
+TOOLCHAIN="${RUSTUP_TOOLCHAIN:-nightly-2026-06-06}"
 
 run_test() {
   local label="$1"

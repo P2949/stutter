@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-: "${RUSTUP_TOOLCHAIN:=nightly}"
+: "${RUSTUP_TOOLCHAIN:=nightly-2026-06-06}"
 
 exec doas env \
   HOME="$HOME" \

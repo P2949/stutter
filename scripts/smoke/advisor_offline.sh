@@ -50,10 +50,10 @@ JSON
 md_out="$tmp/advisor.md"
 json_out="$tmp/advisor.json"
 
-RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-nightly}" cargo run -p stutter --quiet -- advisor --run "$run" >"$md_out"
+RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-nightly-2026-06-06}" cargo run -p stutter --quiet -- advisor --run "$run" >"$md_out"
 grep -q "Verdict" "$md_out"
 
-RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-nightly}" cargo run -p stutter --quiet -- advisor --run "$run" --json >"$json_out"
+RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-nightly-2026-06-06}" cargo run -p stutter --quiet -- advisor --run "$run" --json >"$json_out"
 python3 - "$json_out" <<'PY'
 import json
 import sys

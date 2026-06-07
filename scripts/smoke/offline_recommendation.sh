@@ -148,11 +148,11 @@ JSON
 md_out="$tmp/recommend.md"
 json_out="$tmp/recommend.json"
 
-RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-nightly}" cargo run -p stutter --quiet -- recommend --baseline "$baseline" --tune "$tune" >"$md_out"
+RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-nightly-2026-06-06}" cargo run -p stutter --quiet -- recommend --baseline "$baseline" --tune "$tune" >"$md_out"
 grep -q "Verdict" "$md_out"
 grep -q "Best profile" "$md_out"
 
-RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-nightly}" cargo run -p stutter --quiet -- recommend --baseline "$baseline" --tune "$tune" --json >"$json_out"
+RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-nightly-2026-06-06}" cargo run -p stutter --quiet -- recommend --baseline "$baseline" --tune "$tune" --json >"$json_out"
 python3 - "$json_out" <<'PY'
 import json
 import sys

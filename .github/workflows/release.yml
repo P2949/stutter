@@ -8,7 +8,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  RUSTUP_TOOLCHAIN: nightly
+  RUSTUP_TOOLCHAIN: nightly-2026-06-06
 
 jobs:
   linux-x86_64:
@@ -20,9 +20,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Rust nightly with rust-src
-        uses: dtolnay/rust-toolchain@nightly
+      - name: Install pinned Rust nightly with rust-src
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: nightly-2026-06-06
           components: rust-src
 
       - name: Cache cargo registry and build output
