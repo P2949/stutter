@@ -18,6 +18,10 @@
 
 ## Out of Core Scope
 
+These may exist in the repository as background prototype or future-work areas,
+but they are not proposed as the assessed FYP core unless supervision explicitly
+changes the scope.
+
 - General Linux game optimizer.
 - Broad autotuning platform.
 - Persistent daemon/service as assessed contribution.

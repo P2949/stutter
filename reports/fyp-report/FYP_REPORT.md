@@ -1,5 +1,10 @@
 # Evidence-Based Linux Game-Performance Tuning with `stutter`
 
+> **Draft status:** this is the long-form report draft/source, not the first
+> supervisor handoff. For supervision outreach, send
+> `FYP_SUPERVISOR_PITCH.md` and `PRE_FYP_SCOPE_NOTE.md` first; this report is
+> retained as a deeper technical draft until the assessed scope is agreed.
+
 ## 1. Abstract
 
 Linux game-performance tuning is often based on anecdotal tweaks and short play
