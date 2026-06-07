@@ -18,7 +18,7 @@ The raw MangoHud CSV used by `clean-01` and `clean-02` was no longer available
 when the artifact archive was finalized:
 
 ```text
-/home/p2949/.local/state/stutter/mangohud-kcd-clean/KingdomCome_2026-06-04_13-41-07.csv
+<home>/.local/state/stutter/mangohud-kcd-clean/KingdomCome_2026-06-04_13-41-07.csv
 ```
 
 This does not invalidate the analysis results, because the frame timing data was

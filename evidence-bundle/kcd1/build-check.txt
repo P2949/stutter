@@ -1,6 +1,6 @@
 KCD1 recommendation refresh build/check record
 Date: 2026-06-06
-Repository: /home/p2949/Desktop/stutter
+Repository: <repo>
 Branch: experimental
 
 === git status --short ===

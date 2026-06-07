@@ -15,9 +15,9 @@ warning: stutter@0.1.0:    Compiling serde v1.0.228
 warning: stutter@0.1.0:    Compiling anyhow v1.0.102
 warning: stutter@0.1.0:    Compiling itoa v1.0.18
 warning: stutter@0.1.0:    Compiling memchr v2.8.0
-warning: stutter@0.1.0:    Compiling compiler_builtins v0.1.160 (/home/p2949/.rustup/toolchains/nightly-2026-06-06-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/compiler-builtins/compiler-builtins)
+warning: stutter@0.1.0:    Compiling compiler_builtins v0.1.160 (<home>/.rustup/toolchains/nightly-2026-06-06-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/compiler-builtins/compiler-builtins)
 warning: stutter@0.1.0:    Compiling rustversion v1.0.22
-warning: stutter@0.1.0:    Compiling core v0.0.0 (/home/p2949/.rustup/toolchains/nightly-2026-06-06-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core)
+warning: stutter@0.1.0:    Compiling core v0.0.0 (<home>/.rustup/toolchains/nightly-2026-06-06-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core)
 warning: stutter@0.1.0:    Compiling version_check v0.9.5
 warning: stutter@0.1.0:    Compiling rustix v0.38.44
 warning: stutter@0.1.0:    Compiling bitflags v2.11.1
@@ -28,7 +28,7 @@ warning: stutter@0.1.0:    Compiling proc-macro2-diagnostics v0.10.1
 warning: stutter@0.1.0:    Compiling syn v2.0.117
 warning: stutter@0.1.0:    Compiling which v8.0.2
 warning: stutter@0.1.0:    Compiling which v6.0.3
-warning: stutter@0.1.0:    Compiling stutter-ebpf v0.1.0 (/home/p2949/Desktop/stutter/stutter-ebpf)
+warning: stutter@0.1.0:    Compiling stutter-ebpf v0.1.0 (<repo>/stutter-ebpf)
 warning: stutter@0.1.0:    Compiling semver v1.0.28
 warning: stutter@0.1.0:    Compiling cargo-platform v0.3.3
 warning: stutter@0.1.0:    Compiling rustc_version v0.4.1
@@ -45,9 +45,9 @@ warning: stutter@0.1.0:    Compiling aya-build v0.1.3 (https://github.com/aya-rs
 warning: stutter@0.1.0:    Compiling aya-ebpf-cty v0.2.3 (https://github.com/aya-rs/aya#18153c74)
 warning: stutter@0.1.0:    Compiling aya-ebpf-bindings v0.1.2 (https://github.com/aya-rs/aya#18153c74)
 warning: stutter@0.1.0:    Compiling aya-ebpf v0.1.2 (https://github.com/aya-rs/aya#18153c74)
-warning: stutter@0.1.0:    Compiling stutter-common v0.1.0 (/home/p2949/Desktop/stutter/stutter-common)
+warning: stutter@0.1.0:    Compiling stutter-common v0.1.0 (<repo>/stutter-common)
 warning: stutter@0.1.0:    Compiling aya-log-ebpf v0.1.2 (https://github.com/aya-rs/aya#18153c74)
-warning: stutter@0.1.0: warning: linker stderr: WARN ignoring file /home/p2949/Desktop/stutter/target/debug/build/stutter-df4aa2540fc08449/out/aya-build/target/stutter-ebpf/bpfel-unknown-none/release/deps/rustcgZXN1E/symbols.o: no embedded bitcode
+warning: stutter@0.1.0: warning: linker stderr: WARN ignoring file <repo>/target/debug/build/stutter-df4aa2540fc08449/out/aya-build/target/stutter-ebpf/bpfel-unknown-none/release/deps/rustcgZXN1E/symbols.o: no embedded bitcode
 warning: stutter@0.1.0:          WARN ignoring archive item lib.rmeta: no embedded bitcode
 warning: stutter@0.1.0:          WARN ignoring archive item lib.rmeta-link: no embedded bitcode
 warning: stutter@0.1.0:          WARN ignoring archive item lib.rmeta: no embedded bitcode
@@ -71,8 +71,8 @@ warning: stutter@0.1.0:     Finished `release` profile [optimized] target(s) in 
    Compiling tokio-rustls v0.26.4
    Compiling hyper-rustls v0.27.9
    Compiling reqwest v0.12.28
-   Compiling stutter v0.1.0 (/home/p2949/Desktop/stutter/stutter)
-   Compiling xtask v0.1.0 (/home/p2949/Desktop/stutter/xtask)
+   Compiling stutter v0.1.0 (<repo>/stutter)
+   Compiling xtask v0.1.0 (<repo>/xtask)
     Finished `test` profile [unoptimized + debuginfo] target(s) in 27.21s
      Running unittests src/lib.rs (target/debug/deps/stutter-88c0874fed8b936b)
 
@@ -3262,12 +3262,12 @@ warning: stutter@0.1.0:    Compiling camino v1.2.2
 warning: stutter@0.1.0:    Compiling serde v1.0.228
 warning: stutter@0.1.0:    Compiling thiserror v2.0.18
 warning: stutter@0.1.0:    Compiling libc v0.2.186
-warning: stutter@0.1.0:    Compiling compiler_builtins v0.1.160 (/home/p2949/.rustup/toolchains/nightly-2026-06-06-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/compiler-builtins/compiler-builtins)
+warning: stutter@0.1.0:    Compiling compiler_builtins v0.1.160 (<home>/.rustup/toolchains/nightly-2026-06-06-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/compiler-builtins/compiler-builtins)
 warning: stutter@0.1.0:    Compiling itoa v1.0.18
 warning: stutter@0.1.0:    Compiling memchr v2.8.0
 warning: stutter@0.1.0:    Compiling anyhow v1.0.102
 warning: stutter@0.1.0:    Compiling rustversion v1.0.22
-warning: stutter@0.1.0:    Compiling core v0.0.0 (/home/p2949/.rustup/toolchains/nightly-2026-06-06-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core)
+warning: stutter@0.1.0:    Compiling core v0.0.0 (<home>/.rustup/toolchains/nightly-2026-06-06-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core)
 warning: stutter@0.1.0:    Compiling version_check v0.9.5
 warning: stutter@0.1.0:    Compiling rustix v0.38.44
 warning: stutter@0.1.0:    Compiling linux-raw-sys v0.4.15
@@ -3278,7 +3278,7 @@ warning: stutter@0.1.0:    Compiling proc-macro2-diagnostics v0.10.1
 warning: stutter@0.1.0:    Compiling syn v2.0.117
 warning: stutter@0.1.0:    Compiling which v8.0.2
 warning: stutter@0.1.0:    Compiling which v6.0.3
-warning: stutter@0.1.0:    Compiling stutter-ebpf v0.1.0 (/home/p2949/Desktop/stutter/stutter-ebpf)
+warning: stutter@0.1.0:    Compiling stutter-ebpf v0.1.0 (<repo>/stutter-ebpf)
 warning: stutter@0.1.0:    Compiling semver v1.0.28
 warning: stutter@0.1.0:    Compiling cargo-platform v0.3.3
 warning: stutter@0.1.0:    Compiling rustc_version v0.4.1
@@ -3295,9 +3295,9 @@ warning: stutter@0.1.0:    Compiling aya-build v0.1.3 (https://github.com/aya-rs
 warning: stutter@0.1.0:    Compiling aya-ebpf-cty v0.2.3 (https://github.com/aya-rs/aya#18153c74)
 warning: stutter@0.1.0:    Compiling aya-ebpf-bindings v0.1.2 (https://github.com/aya-rs/aya#18153c74)
 warning: stutter@0.1.0:    Compiling aya-ebpf v0.1.2 (https://github.com/aya-rs/aya#18153c74)
-warning: stutter@0.1.0:    Compiling stutter-common v0.1.0 (/home/p2949/Desktop/stutter/stutter-common)
+warning: stutter@0.1.0:    Compiling stutter-common v0.1.0 (<repo>/stutter-common)
 warning: stutter@0.1.0:    Compiling aya-log-ebpf v0.1.2 (https://github.com/aya-rs/aya#18153c74)
-warning: stutter@0.1.0: warning: linker stderr: WARN ignoring file /home/p2949/Desktop/stutter/target/debug/build/stutter-e1307dc9805ce682/out/aya-build/target/stutter-ebpf/bpfel-unknown-none/release/deps/rustclQ5cwq/symbols.o: no embedded bitcode
+warning: stutter@0.1.0: warning: linker stderr: WARN ignoring file <repo>/target/debug/build/stutter-e1307dc9805ce682/out/aya-build/target/stutter-ebpf/bpfel-unknown-none/release/deps/rustclQ5cwq/symbols.o: no embedded bitcode
 warning: stutter@0.1.0:          WARN ignoring archive item lib.rmeta: no embedded bitcode
 warning: stutter@0.1.0:          WARN ignoring archive item lib.rmeta-link: no embedded bitcode
 warning: stutter@0.1.0:          WARN ignoring archive item lib.rmeta: no embedded bitcode
@@ -3316,8 +3316,8 @@ warning: stutter@0.1.0:   = note: `#[warn(linker_messages)]` on by default
 warning: stutter@0.1.0: 
 warning: stutter@0.1.0: 
 warning: stutter@0.1.0:     Finished `release` profile [optimized] target(s) in 9.36s
-   Compiling stutter v0.1.0 (/home/p2949/Desktop/stutter/stutter)
-   Compiling xtask v0.1.0 (/home/p2949/Desktop/stutter/xtask)
+   Compiling stutter v0.1.0 (<repo>/stutter)
+   Compiling xtask v0.1.0 (<repo>/xtask)
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 10.75s
      Running `target/debug/xtask fixture-check`
 fixture coverage
@@ -3351,11 +3351,11 @@ warning: stutter@0.1.0:    Compiling thiserror v2.0.18
 warning: stutter@0.1.0:    Compiling serde v1.0.228
 warning: stutter@0.1.0:    Compiling libc v0.2.186
 warning: stutter@0.1.0:    Compiling memchr v2.8.0
-warning: stutter@0.1.0:    Compiling compiler_builtins v0.1.160 (/home/p2949/.rustup/toolchains/nightly-2026-06-06-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/compiler-builtins/compiler-builtins)
+warning: stutter@0.1.0:    Compiling compiler_builtins v0.1.160 (<home>/.rustup/toolchains/nightly-2026-06-06-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/compiler-builtins/compiler-builtins)
 warning: stutter@0.1.0:    Compiling anyhow v1.0.102
 warning: stutter@0.1.0:    Compiling itoa v1.0.18
 warning: stutter@0.1.0:    Compiling rustversion v1.0.22
-warning: stutter@0.1.0:    Compiling core v0.0.0 (/home/p2949/.rustup/toolchains/nightly-2026-06-06-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core)
+warning: stutter@0.1.0:    Compiling core v0.0.0 (<home>/.rustup/toolchains/nightly-2026-06-06-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core)
 warning: stutter@0.1.0:    Compiling version_check v0.9.5
 warning: stutter@0.1.0:    Compiling rustix v0.38.44
 warning: stutter@0.1.0:    Compiling bitflags v2.11.1
@@ -3366,7 +3366,7 @@ warning: stutter@0.1.0:    Compiling home v0.5.12
 warning: stutter@0.1.0:    Compiling syn v2.0.117
 warning: stutter@0.1.0:    Compiling which v8.0.2
 warning: stutter@0.1.0:    Compiling which v6.0.3
-warning: stutter@0.1.0:    Compiling stutter-ebpf v0.1.0 (/home/p2949/Desktop/stutter/stutter-ebpf)
+warning: stutter@0.1.0:    Compiling stutter-ebpf v0.1.0 (<repo>/stutter-ebpf)
 warning: stutter@0.1.0:    Compiling semver v1.0.28
 warning: stutter@0.1.0:    Compiling cargo-platform v0.3.3
 warning: stutter@0.1.0:    Compiling rustc_version v0.4.1
@@ -3383,9 +3383,9 @@ warning: stutter@0.1.0:    Compiling aya-build v0.1.3 (https://github.com/aya-rs
 warning: stutter@0.1.0:    Compiling aya-ebpf-cty v0.2.3 (https://github.com/aya-rs/aya#18153c74)
 warning: stutter@0.1.0:    Compiling aya-ebpf-bindings v0.1.2 (https://github.com/aya-rs/aya#18153c74)
 warning: stutter@0.1.0:    Compiling aya-ebpf v0.1.2 (https://github.com/aya-rs/aya#18153c74)
-warning: stutter@0.1.0:    Compiling stutter-common v0.1.0 (/home/p2949/Desktop/stutter/stutter-common)
+warning: stutter@0.1.0:    Compiling stutter-common v0.1.0 (<repo>/stutter-common)
 warning: stutter@0.1.0:    Compiling aya-log-ebpf v0.1.2 (https://github.com/aya-rs/aya#18153c74)
-warning: stutter@0.1.0: warning: linker stderr: WARN ignoring file /home/p2949/Desktop/stutter/target/debug/build/stutter-d840d70aaa443153/out/aya-build/target/stutter-ebpf/bpfel-unknown-none/release/deps/rustcULDSWa/symbols.o: no embedded bitcode
+warning: stutter@0.1.0: warning: linker stderr: WARN ignoring file <repo>/target/debug/build/stutter-d840d70aaa443153/out/aya-build/target/stutter-ebpf/bpfel-unknown-none/release/deps/rustcULDSWa/symbols.o: no embedded bitcode
 warning: stutter@0.1.0:          WARN ignoring archive item lib.rmeta: no embedded bitcode
 warning: stutter@0.1.0:          WARN ignoring archive item lib.rmeta-link: no embedded bitcode
 warning: stutter@0.1.0:          WARN ignoring archive item lib.rmeta: no embedded bitcode
@@ -3409,7 +3409,7 @@ warning: stutter@0.1.0:     Finished `release` profile [optimized] target(s) in 
    Compiling tokio-rustls v0.26.4
    Compiling hyper-rustls v0.27.9
    Compiling reqwest v0.12.28
-   Compiling stutter v0.1.0 (/home/p2949/Desktop/stutter/stutter)
+   Compiling stutter v0.1.0 (<repo>/stutter)
     Finished `test` profile [unoptimized + debuginfo] target(s) in 28.12s
      Running unittests src/lib.rs (target/debug/deps/stutter-24626ca2aa40b544)
 

@@ -1,7 +1,7 @@
 === KCD1 config files ===
 total 12
--rwxr-xr-x 1 p2949 p2949 4643 Jun  3 18:13 system.cfg
--rw-r--r-- 1 p2949 p2949  416 Jun  3 18:13 user.cfg
+-rwxr-xr-x 1 <user> <user> 4643 Jun  3 18:13 system.cfg
+-rw-r--r-- 1 <user> <user>  416 Jun  3 18:13 user.cfg
 
 === sha256 ===
 fac087d335d728593fe5a0f22910eeffdf1cbdbd7f3de3e3b1c383def68f0130  reports/kcd1-case-study/setup/kcd1-config/system.cfg

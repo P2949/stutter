@@ -14,8 +14,8 @@ reports/kcd1-case-study/runs/baseline-01/spike_events.json
 reports/kcd1-case-study/runs/baseline-01/tree_events.json
 
 === MangoHud CSV used ===
-/home/p2949/.local/state/stutter/mangohud-kcd/KingdomCome_2026-06-03_18-46-57.csv
--rw-r--r-- 1 p2949 p2949 1.1M Jun  3 18:50 /home/p2949/.local/state/stutter/mangohud-kcd/KingdomCome_2026-06-03_18-46-57.csv
+<home>/.local/state/stutter/mangohud-kcd/KingdomCome_2026-06-03_18-46-57.csv
+-rw-r--r-- 1 <user> <user> 1.1M Jun  3 18:50 <home>/.local/state/stutter/mangohud-kcd/KingdomCome_2026-06-03_18-46-57.csv
 v1
 v0.8.2
 ---------------------SYSTEM INFO---------------------

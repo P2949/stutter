@@ -2,8 +2,12 @@
 name = "stutter"
 version = "0.1.0"
 edition.workspace = true
-
+description = "Linux scheduler runnable-latency profiler and evidence-based tuning workflow."
 license.workspace = true
+repository.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+publish = false
 
 [dependencies]
 stutter-common = { path = "../stutter-common", features = ["user"] }
@@ -55,7 +59,7 @@ regex = { workspace = true }
 ratatui = { workspace = true }
 crossterm = { workspace = true, features = ["event-stream"] }
 futures-util = { workspace = true }
- 
+
 [features]
 default = []
 # Deprecated no-op compatibility alias. The autotune controller is now

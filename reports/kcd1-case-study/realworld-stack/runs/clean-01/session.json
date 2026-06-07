@@ -1336,7 +1336,7 @@
     "hwmon_root": null,
     "hwmon_drm_card": null,
     "hwmon_render_node": null,
-    "mangohud_log": "/home/p2949/.local/state/stutter/mangohud-kcd-clean/KingdomCome_2026-06-04_13-41-07.csv",
+    "mangohud_log": "<home>/.local/state/stutter/mangohud-kcd-clean/KingdomCome_2026-06-04_13-41-07.csv",
     "mangohud_log_live": false,
     "tui": false,
     "summary_period_ms": 1000,

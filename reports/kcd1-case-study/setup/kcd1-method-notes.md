@@ -4,7 +4,7 @@
 - Game: Kingdom Come: Deliverance 1
 - Platform: Steam / Proton
 - Proton version: GE-Proton10-34
-- Launch options: minimal KCD1 measurement launch options; Gamescope + MangoHud logging only; no RADV experimental flags, no FSR/FSR4, no gamemode, no mimalloc, no forced Wine sync/topology. (the actual launch options are "unset WLR_XWAYLAND; MESA_SHADER_CACHE_MAX_SIZE=20G gamescope -w 1920 -h 1080 -W 1920 -H 1080 -r 100 --force-grab-cursor -f -- env DRI_PRIME=pci-0000_03_00_0! VK_LOADER_DRIVERS_SELECT='*radeon*' MESA_SHADER_CACHE_MAX_SIZE=20G MANGOHUD_CONFIG='autostart_log=1,output_folder=/home/p2949/.local/state/stutter/mangohud-kcd,log_interval=0,log_versioning=1,fps_limit=100' MANGOHUD=1 %command% +exec user.cfg") 
+- Launch options: minimal KCD1 measurement launch options; Gamescope + MangoHud logging only; no RADV experimental flags, no FSR/FSR4, no gamemode, no mimalloc, no forced Wine sync/topology. (the actual launch options are "unset WLR_XWAYLAND; MESA_SHADER_CACHE_MAX_SIZE=20G gamescope -w 1920 -h 1080 -W 1920 -H 1080 -r 100 --force-grab-cursor -f -- env DRI_PRIME=pci-0000_03_00_0! VK_LOADER_DRIVERS_SELECT='*radeon*' MESA_SHADER_CACHE_MAX_SIZE=20G MANGOHUD_CONFIG='autostart_log=1,output_folder=<home>/.local/state/stutter/mangohud-kcd,log_interval=0,log_versioning=1,fps_limit=100' MANGOHUD=1 %command% +exec user.cfg")
 - Resolution: 1920x1080 native via Gamescope
 - Refresh rate / FPS cap: 100 Hz / 100 FPS cap via MangoHud
 - Graphics preset: ultra (technically custom because everything is maxed out, but the game doesn't max out all settings at ultra preset, so it's effectively a custom preset with everything maxed out)

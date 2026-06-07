@@ -2,6 +2,15 @@
 
 `stutter` is moving from profiler toward trustworthy recommender in small, auditable steps.
 
+## FYP Presentation Boundary
+
+For supervisor/FYP presentation, the proposed assessed core is narrower than the
+whole prototype: CPU-affinity and process/thread-placement validation for
+Linux/Proton game frame pacing. Daemon control, remote agents, GPU power, IRQ
+affinity, VM/kernel tuning, scheduler replacement, packaging, and broad
+hardware/game coverage are background implementation, optional extension, or
+future work unless explicitly brought into scope.
+
 ## Stages
 
 | Stage | Status | Notes |

@@ -1343,30 +1343,38 @@ Table A2. Evidence matrix:
 
 ### Appendix E: Selected Build/Test Output
 
-The latest validation flow for this report was run on 2026-06-06:
+The latest validation flow for this report was refreshed on 2026-06-07:
 
 | Command | Result |
 | --- | --- |
+| `RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo metadata --no-deps --format-version 1` | passed |
 | `RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo fmt --all -- --check` | passed |
-| `RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo test --all` | passed |
-| `RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo clippy --all-targets -- -D warnings` | passed |
+| `RUSTUP_TOOLCHAIN=nightly-2026-06-06 bash scripts/smoke/advisor_offline.sh` | passed |
+| `RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -p xtask -- ci` | passed |
 | `RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -p xtask -- fixture-check` | passed |
+| `RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -p xtask -- dependency-hygiene` | passed |
+| `cd evidence-bundle && sha256sum -c MANIFEST.sha256` | passed |
 
 Selected output:
 
-- `cargo test --all`: the main `stutter` library test target reported 2654
-  passed, 0 failed, and 5 ignored; the remaining workspace unit,
-  integration, golden, and doc-test targets also passed.
+- `xtask ci`: formatting, no-allow-attrs, build, clippy, workspace tests,
+  offline recommendation smoke, advisor offline smoke, and architecture tests
+  all passed.
+- `advisor_offline.sh`: the JSON smoke path now asserts the current advisor
+  output schema version, `schema_version = 2`.
 - `xtask fixture-check`: 20 real fixtures, 19 synthetic fixtures, 20 distinct
   sanitized capture ids, no missing fixtures, no maturity warnings, and no
   privacy warnings.
 - validation-corpus stage inside `fixture-check`: 44 passed, 0 failed, and 2
   ignored.
+- `xtask dependency-hygiene`: cargo-deny advisories, bans, licenses, and sources
+  passed; duplicate dependency families matched the approved baseline.
+- `evidence-bundle/MANIFEST.sha256`: all curated KCD1 evidence files verified.
 
 Full command logs should stay in repository artifacts or build logs rather than
 being pasted into the main report.
 
-Appendix F: Additional KCD1 Tables Available in the Artifact Archive
+### Appendix F: Additional KCD1 Tables Available in the Artifact Archive
 
 The following supporting tables are available in the repository artifacts and
 can be used for further inspection or presentation:

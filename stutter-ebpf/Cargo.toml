@@ -2,7 +2,12 @@
 name = "stutter-ebpf"
 version = "0.1.0"
 edition.workspace = true
+description = "eBPF tracepoint programs for stutter scheduler and system telemetry."
 license.workspace = true
+repository.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+publish = false
 
 [dependencies]
 stutter-common = { path = "../stutter-common" }
