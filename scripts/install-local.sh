@@ -21,7 +21,7 @@ while [ "$#" -gt 0 ]; do
 	esac
 done
 bindir="$prefix/bin"
-toolchain="${RUSTUP_TOOLCHAIN:-nightly}"
+toolchain="${RUSTUP_TOOLCHAIN:-nightly-2026-06-06}"
 
 mkdir -p "$bindir"
 RUSTUP_TOOLCHAIN="$toolchain" cargo build --release -p stutter

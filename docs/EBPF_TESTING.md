@@ -7,7 +7,7 @@ tracefs, or BPF permissions.
 Run the local skip-only check with:
 
 ```bash
-RUSTUP_TOOLCHAIN=nightly cargo test -p stutter privileged_ -- --nocapture
+RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo test -p stutter privileged_ -- --nocapture
 ```
 
 Run the real privileged suite on a Linux system with tracefs and eBPF
@@ -15,7 +15,7 @@ permissions:
 
 ```bash
 STUTTER_RUN_PRIVILEGED_EBPF_TESTS=1 \
-RUSTUP_TOOLCHAIN=nightly \
+RUSTUP_TOOLCHAIN=nightly-2026-06-06 \
 cargo test -p stutter privileged_ -- --nocapture
 ```
 
@@ -26,7 +26,7 @@ The xtask wrapper builds the BPF object first and then runs the privileged
 suite:
 
 ```bash
-RUSTUP_TOOLCHAIN=nightly cargo xtask ebpf-smoke
+RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo xtask ebpf-smoke
 ```
 
 ## Release Privileged Smoke Recipe
@@ -35,7 +35,7 @@ Before a release or after eBPF/action-facing refactors, run a real-machine smoke
 pass in addition to the skip-aware CI tests:
 
 ```bash
-RUSTUP_TOOLCHAIN=nightly cargo xtask privileged-ebpf-smoke
+RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo xtask privileged-ebpf-smoke
 sudo stutter doctor
 sudo stutter monitor --duration 5s --target-pid "$PID"
 ```

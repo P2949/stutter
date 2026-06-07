@@ -13,15 +13,15 @@ For tracepoint-format compatibility details and bug-report diagnostics, see
 [KERNEL_COMPATIBILITY.md](KERNEL_COMPATIBILITY.md).
 
 ```bash
-rustup toolchain install nightly --component rust-src
+rustup toolchain install nightly-2026-06-06 --component rust-src
 cargo install bpf-linker
 ```
 
 ## Build
 
 ```bash
-RUSTUP_TOOLCHAIN=nightly cargo build -p stutter
-RUSTUP_TOOLCHAIN=nightly cargo build --release -p stutter
+RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo build -p stutter
+RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo build --release -p stutter
 ```
 
 ## Install Local

@@ -130,8 +130,8 @@ When changing any capacity value:
 5. Run formatting, tests, clippy, and documentation rendering:
 
    ```bash
-   RUSTUP_TOOLCHAIN=nightly cargo fmt --all
-   RUSTUP_TOOLCHAIN=nightly cargo test --all
-   RUSTUP_TOOLCHAIN=nightly cargo clippy --all-targets -- -D warnings
-   RUSTUP_TOOLCHAIN=nightly cargo doc --workspace --no-deps
+   RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo fmt --all
+   RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo test --all
+   RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo clippy --all-targets -- -D warnings
+   RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo doc --workspace --no-deps
    ```

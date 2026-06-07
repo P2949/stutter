@@ -9,7 +9,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  RUSTUP_TOOLCHAIN: nightly
+  RUSTUP_TOOLCHAIN: nightly-2026-06-06
 
 jobs:
   build:
@@ -21,9 +21,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Rust nightly with rust-src
-        uses: dtolnay/rust-toolchain@nightly
+      - name: Install pinned Rust nightly with rust-src
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: nightly-2026-06-06
           components: rust-src, rustfmt, clippy
 
       - name: Cache cargo registry and build output
@@ -63,9 +64,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Rust nightly with rust-src
-        uses: dtolnay/rust-toolchain@nightly
+      - name: Install pinned Rust nightly with rust-src
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: nightly-2026-06-06
           components: rust-src, rustfmt, clippy
 
       - name: Cache cargo registry and build output
@@ -80,10 +82,10 @@ jobs:
         run: scripts/smoke/build.sh
 
       - name: Run sleep tree churn smoke
-        run: sudo -E env RUSTUP_TOOLCHAIN=nightly RUST_LOG=info scripts/smoke/sleep_tree_churn.sh
+        run: sudo -E env RUSTUP_TOOLCHAIN=nightly-2026-06-06 RUST_LOG=info scripts/smoke/sleep_tree_churn.sh
 
       - name: Run minimal recording smoke
-        run: sudo -E env RUSTUP_TOOLCHAIN=nightly RUST_LOG=info scripts/smoke/record_minimal.sh
+        run: sudo -E env RUSTUP_TOOLCHAIN=nightly-2026-06-06 RUST_LOG=info scripts/smoke/record_minimal.sh
 
   daemon-safety:
     name: daemon safety gates
@@ -95,9 +97,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Rust nightly with rust-src
-        uses: dtolnay/rust-toolchain@nightly
+      - name: Install pinned Rust nightly with rust-src
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: nightly-2026-06-06
           components: rust-src, rustfmt, clippy
 
       - name: Cache cargo registry and build output
@@ -141,9 +144,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Rust nightly with rust-src
-        uses: dtolnay/rust-toolchain@nightly
+      - name: Install pinned Rust nightly with rust-src
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: nightly-2026-06-06
           components: rust-src
 
       - name: Cache cargo registry and build output
