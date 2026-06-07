@@ -47,11 +47,11 @@ This case study is not presented as a universal claim about KCD1 performance or 
 - quantify uncertainty in a noisy game workload;
 - decline an unsupported tuning recommendation instead of producing a false-positive tuning claim.
 
-The case study also showed that small effects in this type of workload may require substantially more data to measure precisely: depending on the metric, the tool estimated roughly 18–30+ runs per condition for small-effect detection.
+The case study also showed that small effects in this type of workload may require substantially more data to measure precisely: depending on the metric, the tool estimated roughly 18-30+ runs per condition for small-effect detection.
 
 ## Existing work and assessment boundary
 
-The current `stutter` prototype and KCD1 case study are preliminary work used to demonstrate feasibility before supervision. The proposed FYP would not be assessed as simply “the existing tool” or as a general-purpose Linux optimizer. The assessed contribution would be the formalization and evaluation of a bounded methodology: a reproducible benchmark protocol, profile explainability as a required pre-tuning step, repeated A/B comparison, uncertainty-aware reporting, and conservative recommendation verdicts.
+The current `stutter` prototype and KCD1 case study are preliminary work used to demonstrate feasibility before supervision. The proposed FYP would not be assessed as simply "the existing tool" or as a general-purpose Linux optimizer. The assessed contribution would be the formalization and evaluation of a bounded methodology: a reproducible benchmark protocol, profile explainability as a required pre-tuning step, repeated A/B comparison, uncertainty-aware reporting, and conservative recommendation verdicts.
 
 The core evaluated tuning area would be CPU affinity and process/thread placement. Existing support for broader areas such as daemon control, GPU power, IRQ affinity, VM knobs, remote/agent paths, system-wide autotuning, scheduler replacement, and wide hardware/game coverage would be treated as background implementation, optional extension, or future work unless explicitly agreed with the supervisor.
 
