@@ -6,7 +6,7 @@ use std::{
 
 use anyhow::{Context, bail};
 
-pub const DEFAULT_TOOLCHAIN: &str = "nightly";
+pub const DEFAULT_TOOLCHAIN: &str = "nightly-2026-06-06";
 
 pub fn run_cargo(root: &Path, args: &[&str]) -> anyhow::Result<()> {
     run_process(root, "cargo", args)

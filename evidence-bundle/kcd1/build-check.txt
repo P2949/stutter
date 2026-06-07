@@ -32,7 +32,7 @@ Added:
 
 === artifact refresh ===
 Command:
-RUSTUP_TOOLCHAIN=nightly cargo run -p xtask -- refresh-tune-recommendation --summary reports/kcd1-case-study/tune/kcd1-affinity-02/tuning_summary.json --baseline-profile baseline-online --out-dir reports/kcd1-case-study/tune/kcd1-affinity-02
+RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -p xtask -- refresh-tune-recommendation --summary reports/kcd1-case-study/tune/kcd1-affinity-02/tuning_summary.json --baseline-profile baseline-online --out-dir reports/kcd1-case-study/tune/kcd1-affinity-02
 
 Result:
 passed
@@ -46,14 +46,14 @@ Expected regenerated recommendation properties:
 
 === cargo fmt check ===
 Command:
-RUSTUP_TOOLCHAIN=nightly cargo fmt --all -- --check
+RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo fmt --all -- --check
 
 Result:
 passed
 
 === focused recommendation tests ===
 Command:
-RUSTUP_TOOLCHAIN=nightly cargo test -p stutter tune::recommendation
+RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo test -p stutter tune::recommendation
 
 Result:
 passed
@@ -68,7 +68,7 @@ Summary:
 
 === architecture tests ===
 Command:
-RUSTUP_TOOLCHAIN=nightly cargo test -p stutter architecture_tests
+RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo test -p stutter architecture_tests
 
 Result:
 passed
@@ -80,7 +80,7 @@ Summary:
 
 === cargo test ===
 Command:
-RUSTUP_TOOLCHAIN=nightly cargo test --all
+RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo test --all
 
 Result:
 passed
@@ -97,14 +97,14 @@ Summary:
 
 === cargo clippy ===
 Command:
-RUSTUP_TOOLCHAIN=nightly cargo clippy --all-targets -- -D warnings
+RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo clippy --all-targets -- -D warnings
 
 Result:
 passed
 
 === fixture-check ===
 Command:
-RUSTUP_TOOLCHAIN=nightly cargo run -p xtask -- fixture-check
+RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -p xtask -- fixture-check
 
 Result:
 passed
@@ -120,7 +120,7 @@ Summary:
 
 === unprivileged eBPF smoke ===
 Command:
-RUSTUP_TOOLCHAIN=nightly cargo run -p xtask -- ebpf-smoke
+RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -p xtask -- ebpf-smoke
 
 Result:
 passed
@@ -129,7 +129,7 @@ Summary:
 - cargo OK
 - bpf-linker OK
 - rustc OK
-- nightly toolchain OK
+- pinned nightly toolchain OK
 - cargo build -p stutter passed
 - non-privileged eBPF build smoke passed
 
@@ -141,7 +141,7 @@ doas env \
   CARGO_HOME="$HOME/.cargo" \
   RUSTUP_HOME="$HOME/.rustup" \
   PATH="$PATH" \
-  RUSTUP_TOOLCHAIN=nightly \
+  RUSTUP_TOOLCHAIN=nightly-2026-06-06 \
   cargo run -p xtask -- privileged-ebpf-smoke
 
 === PDF regeneration ===
