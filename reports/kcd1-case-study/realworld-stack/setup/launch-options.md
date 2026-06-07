@@ -1,8 +1,9 @@
 # KCD1 real-world stack launch options
 
-This file preserves the exact launch/scheduler setup used for the exploratory
-real-world stack comparison. The comparison is a configuration-bundle check, not
-a causal test of any individual flag.
+This file preserves the launch/scheduler setup used for the exploratory
+real-world stack comparison without keeping raw Steam command lines. The
+comparison is a configuration-bundle check, not a causal test of any individual
+flag.
 
 ## Clean stack
 
@@ -23,10 +24,10 @@ Properties:
 - no mimalloc
 - no forced Wine CPU topology
 
-Steam launch options:
+Launch shape:
 
-```bash
-MESA_SHADER_CACHE_MAX_SIZE=20G DRI_PRIME=pci-0000_03_00_0! VK_LOADER_DRIVERS_SELECT='*radeon*' gamescope -w 1920 -h 1080 -W 1920 -H 1080 -r 100 --force-grab-cursor -f -- env DRI_PRIME=pci-0000_03_00_0! VK_LOADER_DRIVERS_SELECT='*radeon*' MESA_SHADER_CACHE_MAX_SIZE=20G MANGOHUD_CONFIG='autostart_log=1,output_folder=<home>/.local/state/stutter/mangohud-kcd-clean,log_interval=0,log_versioning=1,fps_limit=100' MANGOHUD=1 %command% +exec user.cfg
+```text
+Steam -> Gamescope 1920x1080@100Hz -> MangoHud logging with 100 FPS cap -> GE-Proton10-34 -> KingdomCome.exe +exec user.cfg
 ```
 
 ## Personal stack
@@ -48,10 +49,10 @@ Properties:
 - MangoHud logging enabled
 - kept `+exec user.cfg`
 
-Steam launch options:
+Launch shape:
 
-```bash
-unset WLR_XWAYLAND; MESA_SHADER_CACHE_MAX_SIZE=20G ENABLE_GAMESCOPE_WSI=1 PULSE_LATENCY_MSEC=40 LD_PRELOAD=/usr/lib64/libmimalloc.so:/usr/lib64/libgamemodeauto.so.0 MESA_VK_ENABLE_SUBMIT_THREAD=1 MESA_DISK_CACHE_DATABASE=1 MESA_NO_ERROR=1 WINE_FULLSCREEN_FSR=1 PROTON_FSR4_UPGRADE=1 FSR4_UPGRADE=1 PROTON_FSR4_INDICATOR=1 ENABLE_LAYER_MESA_ANTI_LAG=1 RADV_PERFTEST=nggc,sam,afmf,nircache,rtcps,localbos,nogttspill RADV_EXPERIMENTAL=transfer_queue,hic,sparse,video_decode RADV_USER_ENABLED_OPTION_STRING=antilag+ RADV_TEX_ANISO=16 gamescope -w 2560 -W 3840 -h 1440 -H 2160 -r 60 -F fsr --synchronous-x11 --sharpness 20 --fsr-sharpness 20 -s 2 --force-grab-cursor --adaptive-sync --rt --immediate-flips -f -- env DRI_PRIME=pci-0000_03_00_0! VK_LOADER_DRIVERS_SELECT='*radeon*' AMD_USERQ=1 AQ_DRM_DEVICES=/dev/dri/by-path/pci-0000:03:00.0-card WLR_DRM_DEVICES=/dev/dri/by-path/pci-0000:03:00.0-card MOZ_DRM_DEVICE=/dev/dri/by-path/pci-0000:03:00.0-card VDPAU_DRIVER=radeonsi LIBVA_DRIVER_NAME=radeonsi MESA_LOADER_DRIVER_OVERRIDE=radeonsi __GLX_VENDOR_LIBRARY_NAME=mesa MESA_NO_ERROR=1 RADV_PERFTEST=nggc,sam,afmf,nircache,rtcps,localbos,nogttspill RADV_EXPERIMENTAL=transfer_queue,hic,sparse,video_decode RADV_USER_ENABLED_OPTION_STRING=antilag+ RADV_TEX_ANISO=16 ENABLE_LAYER_MESA_ANTI_LAG=1 SDL_VIDEODRIVER=wayland WINE_SIMULATE_WRITECOPY=1 WINE_DISABLE_WRITE_WATCH=1 PROTON_USE_NTSYNC=1 PROTON_NO_FSYNC=0 PROTON_NO_ESYNC=0 WINEESYNC=1 WINEFSYNC=1 PROTON_ENABLE_WAYLAND=1 PROTON_ENABLE_AMD_AGS=1 PROTON_FORCE_LARGE_ADDRESS_AWARE=1 PROTON_HEAP_DELAY_FREE=1 PROTON_USE_SECCOMP=1 PROTON_NO_XIM=0 PROTON_EAC_RUNTIME=1 PROTON_BATTLEYE_RUNTIME=1 PROTON_USE_WOW64=1 MESA_DISK_CACHE_DATABASE=1 WINE_CPU_TOPOLOGY=12:0,1,2,3,4,5,6,7,8,9,10,11 VKD3D_CONFIG=dxr,dxr12,force_static_cbv VKD3D_SHADER_MODEL=6_7 MESA_VK_ENABLE_SUBMIT_THREAD=1 PULSE_LATENCY_MSEC=40 VKD3D_FEATURE_LEVEL=12_2 MESA_SHADER_CACHE_MAX_SIZE=20G MANGOHUD_CONFIG='autostart_log=1,output_folder=<home>/.local/state/stutter/mangohud-kcd-personal,log_interval=0,log_versioning=1' MANGOHUD=1 gamemoderun %command% +exec user.cfg
+```text
+Steam -> Gamescope 2560x1440 internal / 3840x2160 output at 60Hz with FSR -> RADV/Mesa and Wine/Proton experimental flag bundle -> mimalloc + gamemode -> MangoHud logging -> GE-Proton10-34 -> KingdomCome.exe +exec user.cfg
 ```
 
 ## Personal-stack scheduler command

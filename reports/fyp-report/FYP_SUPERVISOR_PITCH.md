@@ -2,6 +2,10 @@
 
 **Proposed assessed scope:** CPU-affinity/process-placement validation for Linux/Proton game frame pacing.
 
+**Not proposed as assessed core:** a general Linux optimizer, background daemon,
+remote agent, GPU/IRQ/VM tuning platform, scheduler replacement, packaging
+project, or broad hardware/game benchmark suite.
+
 Linux gaming performance tuning often relies on community advice rather than controlled evidence. Players commonly change CPU governors, scheduler settings, Proton/Wine options, thread affinity, launch flags, or kernel features in an attempt to improve smoothness. However, noisy real-world games make it difficult to know whether a change genuinely improves performance or only appears to help due to normal run-to-run variation. This can lead to wasted effort, misplaced confidence, and even regressions when well-intentioned tweaks are applied without controlled validation.
 
 This problem affects not only Linux gamers, but also game developers and tool authors, who need reliable ways to evaluate performance changes under real-world conditions. Average FPS alone is not enough: frame pacing, stutter, 1% lows, p99 frametime, and scheduler-visible delay often better represent player-visible smoothness, especially in Proton/Wine game stacks involving game threads, Wine helpers, DXVK/VKD3D workers, Gamescope, Steam runtime processes, and compositor-related work.

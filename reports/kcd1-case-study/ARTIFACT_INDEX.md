@@ -2,7 +2,9 @@
 
 This directory contains the technical archive for the Kingdom Come: Deliverance 1
 case study. The polished lecturer-facing report is `KCD1_EXPERIMENT_REPORT.md`;
-the primary technical archive summary is `CASE_STUDY_SUMMARY.md`.
+the primary technical archive summary is `CASE_STUDY_SUMMARY.md`. For supervisor
+review, prefer the curated evidence bundle linked from the top-level
+`SUPERVISOR_README.md` before opening the full raw archive.
 
 ## Primary narrative
 
@@ -16,10 +18,10 @@ the primary technical archive summary is `CASE_STUDY_SUMMARY.md`.
 
 ## Setup and process selection
 
-- `setup/live-process-candidates.txt` — live process search output used while selecting the KCD1 process tree.
+- `setup/live-process-candidates.txt` — redacted live process selection summary; raw command-line dumps are intentionally omitted from the committed presentation archive.
 - `setup/tree-candidates/` — candidate `inspect-tree` outputs from early process-tree selection.
 - `setup/baseline-*-tree-check.txt` — final tree checks for the formal baseline runs.
-- `setup/launch-smoke-test.txt` — launch/capture smoke-test notes.
+- `setup/launch-smoke-test.txt` — redacted launch/capture smoke-test summary.
 - `setup/kcd1-config-summary.txt` — summary of archived KCD1 config files.
 
 ## Formal baseline evidence
@@ -57,7 +59,7 @@ the primary technical archive summary is `CASE_STUDY_SUMMARY.md`.
 
 - `realworld-stack/README.md` — scope of the exploratory bundle comparison.
 - `realworld-stack/realworld-stack-summary.csv` — compact clean vs personal-stack metrics.
-- `realworld-stack/setup/launch-options.md` — exact launch options and `scx_lavd` command.
+- `realworld-stack/setup/launch-options.md` — launch-option categories and `scx_lavd` command shape for the exploratory bundle comparison.
 - `realworld-stack/ARTIFACT_NOTES.md` — notes about missing raw MangoHud CSVs for two clean runs.
 - `realworld-stack/runs/clean-*` — clean-stack run artifacts.
 - `realworld-stack/runs/personal-stack-*` — personal-stack run artifacts.
