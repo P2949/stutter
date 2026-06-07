@@ -13,7 +13,7 @@ default-members = ["stutter", "stutter-common", "stutter-config", "stutter-core"
 
 [workspace.package]
 version = "0.1.0"
-authors = ["Pedro Goraieb Torby"]
+authors = ["Pedro Goraieb"]
 license = "MIT OR Apache-2.0"
 edition = "2024"
 rust-version = "1.95"
