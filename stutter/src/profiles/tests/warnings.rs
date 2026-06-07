@@ -81,11 +81,11 @@ fn profile_rule_overlap_warnings_broad_game_before_specific_render_thread_warns(
 
         [[profile.rules]]
         match_class = ["Game"]
-        affinity = "0-7"
+        affinity = "0-3"
 
         [[profile.rules]]
         match_comm = ["RenderThread"]
-        affinity = "2-5"
+        affinity = "1-2"
         "#,
     )
     .unwrap()
@@ -107,11 +107,11 @@ fn profile_rule_overlap_warnings_disjoint_classes_do_not_warn() {
 
         [[profile.rules]]
         match_class = ["Game"]
-        affinity = "0-7"
+        affinity = "0-1"
 
         [[profile.rules]]
         match_class = ["Compositor"]
-        affinity = "8-11"
+        affinity = "2-3"
         "#,
     )
     .unwrap()
@@ -130,11 +130,11 @@ fn profile_rule_overlap_warnings_catch_all_before_anything_warns() {
         name = "test"
 
         [[profile.rules]]
-        affinity = "0-7"
+        affinity = "0-3"
 
         [[profile.rules]]
         match_class = ["Game"]
-        affinity = "2-5"
+        affinity = "1-2"
         "#,
     )
     .unwrap()
@@ -160,7 +160,7 @@ fn profile_rule_overlap_warnings_exact_same_comm_warns() {
 
         [[profile.rules]]
         match_comm = ["RenderThread"]
-        affinity = "4-7"
+        affinity = "2-3"
         "#,
     )
     .unwrap()

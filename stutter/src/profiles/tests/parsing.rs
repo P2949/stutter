@@ -240,7 +240,7 @@ fn write_two_profile_file() -> (tempfile::TempDir, std::path::PathBuf) {
         name = "tuned"
 
         [[profile.rules]]
-        affinity = "1-5"
+        affinity = "1-3"
         match_comm = ["Main"]
         "#,
     )
@@ -270,7 +270,7 @@ fn load_selected_profile_selects_named_profile() {
             .as_ref()
             .unwrap()
             .to_range_string(),
-        "1-5"
+        "1-3"
     );
 }
 
