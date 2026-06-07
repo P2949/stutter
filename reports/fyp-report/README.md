@@ -7,8 +7,8 @@
 - `FYP_REPORT.md` is the long-form report draft/source for later submission or
   export. It is not the best first supervisor pitch while scope is still being
   agreed.
-- `FYP_REPORT_NOTES.md` is a planning/evidence checklist used to keep the
-  report grounded in repo artifacts.
+- `FYP_REPORT_NOTES.md` is internal planning scaffolding used to keep the
+  report grounded in repo artifacts; it is not a supervisor-facing deliverable.
 
 The KCD1 case-study source material lives in `reports/kcd1-case-study/`.
 

@@ -1,10 +1,29 @@
 # stutter
 
+[![CI](https://github.com/P2949/stutter/actions/workflows/ci.yml/badge.svg?branch=experimental)](https://github.com/P2949/stutter/actions/workflows/ci.yml?query=branch%3Aexperimental)
+
 `stutter` is a Linux scheduler runnable-latency profiler built with Rust + Aya eBPF.
 
 For a short supervisor-facing project route, start with
 [SUPERVISOR_README.md](SUPERVISOR_README.md). The rest of this README is the
 technical user/developer manual.
+
+## Contents
+
+- [Requirements](#requirements)
+- [Build](#build)
+- [Install](#install)
+- [Recommended workflow](#recommended-workflow)
+- [Recording and benchmarking](#record-a-run)
+- [Reports](#generate-a-report)
+- [Tuning and recommendations](#tune-and-recommend-profiles)
+- [Daemon and autotune modes](#daemon-and-autotune-modes)
+- [Doctor / preflight](#doctor--preflight)
+- [Applying and restoring affinity profiles](#apply-and-restore-affinity-profiles)
+- [Interpretation notes](#important-interpretation-notes)
+- [CLI flags](#cli-flags-quick-reference)
+- [Generated JSON files](#generated-json-files-overview)
+- [License](#license)
 
 It measures:
 
@@ -1011,4 +1030,4 @@ These checks reduce collisions compared to relying on `starttime` alone, but in 
 
 The userspace crates are dual-licensed MIT OR Apache-2.0.
 
-The eBPF code is dual-licensed MIT OR GPL-2.0.
+The eBPF code is dual-licensed MIT OR GPL-2.0-only.

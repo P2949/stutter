@@ -55,6 +55,27 @@ review when they change:
 These sections are informational today, while `cargo deny check` and the
 unapproved duplicate-version check remain the hard failures.
 
+## Aya git dependency
+
+Aya is intentionally pinned to a specific upstream git revision rather than a
+floating branch. The project uses Aya's userspace and eBPF-side crates together,
+and the pinned revision keeps those APIs synchronized with `Cargo.lock` for
+reproducible source checkouts. This is a prototype dependency-management choice,
+not an unpinned latest-source dependency.
+
+Supervisor note: Aya is consumed from a pinned git revision because the project
+uses Aya's userspace and eBPF-side APIs together, and the pinned revision keeps
+the source checkout reproducible.
+
+## Cargo deny bans policy
+
+`deny.toml` currently allows multiple versions and wildcard dependency
+requirements because `stutter` is still a research prototype with a large
+transitive dependency graph. The deny gate is still useful: it denies yanked
+crates, unknown registries, unknown git sources, and non-allowlisted licenses.
+Duplicate versions are highlighted for review rather than treated as release
+blockers.
+
 ## Manual unused-dependency scan
 
 `cargo machete` is useful for finding unused manifest dependencies, but it is

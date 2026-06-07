@@ -1,5 +1,7 @@
 # Stutter Supervisor Readme
 
+[![CI](https://github.com/P2949/stutter/actions/workflows/ci.yml/badge.svg?branch=experimental)](https://github.com/P2949/stutter/actions/workflows/ci.yml?query=branch%3Aexperimental)
+
 This is the curated entry point for supervisor review. The full repository is a
 large prototype and evidence archive; start with the short documents below.
 

@@ -23,8 +23,16 @@ allow = [
 ]
 
 [bans]
+# Prototype policy: keep duplicate transitive versions visible without failing
+# the build. CI still denies advisories, unknown registries, unknown git sources,
+# and non-allowlisted licenses.
 multiple-versions = "allow"
+
+# Workspace dependency versions are reviewed in Cargo.toml/Cargo.lock. Wildcards
+# are allowed here to avoid turning this advisory hygiene check into a packaging
+# policy gate while the prototype is still changing quickly.
 wildcards = "allow"
+
 highlight = "all"
 
 [sources]
