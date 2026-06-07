@@ -12,6 +12,8 @@ large prototype and evidence archive; start with the short documents below.
   supervision questions.
 - [Pre-FYP scope note](reports/fyp-report/PRE_FYP_SCOPE_NOTE.md) - separates
   existing prototype work from the proposed assessed FYP contribution.
+- [AI use disclosure](reports/fyp-report/PRE_FYP_SCOPE_NOTE.md#development-tools-and-academic-integrity) -
+  describes the role of AI coding assistants in the prototype workflow.
 - [KCD1 case-study report](reports/kcd1-case-study/KCD1_EXPERIMENT_REPORT.md) -
   polished preliminary real-game case study.
 - [Curated KCD1 evidence bundle](evidence-bundle/README.md) - small artifact set

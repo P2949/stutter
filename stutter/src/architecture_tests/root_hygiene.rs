@@ -104,7 +104,7 @@ mod tests {
             "CONTRIBUTING.md",
             "LICENSE-MIT",
             "LICENSE-APACHE",
-            "LICENSE-GPL2",
+            "LICENSE-GPL-2.0-ONLY",
             "deny.toml",
             "rust-toolchain.toml",
             "rustfmt.toml",

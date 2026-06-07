@@ -31,3 +31,22 @@ changes the scope.
 - VM/kernel tuning.
 - Scheduler replacement.
 - Wide hardware/game coverage.
+
+## Development tools and academic integrity
+
+This prototype was developed with AI coding assistant support, including
+Claude, ChatGPT/OpenAI tooling, and Codex-style review workflows where
+applicable. These tools were used as iterative review and pair-programming
+support: to critique code, suggest implementation alternatives, identify bugs,
+draft patches for review, and help refine documentation.
+
+All design decisions, accepted code changes, experimental setup, benchmark
+execution, validation runs, interpretation of results, and final project
+conclusions remain the responsibility of the author. AI-generated or
+AI-suggested material was reviewed, adapted, tested, and either accepted or
+rejected by the author before inclusion.
+
+The assessed FYP contribution is proposed as the author's methodology,
+implementation, validation, and reporting work. This disclosure is included to
+make the nature and extent of AI assistance explicit for supervisor review and
+to align with UL academic-integrity expectations.

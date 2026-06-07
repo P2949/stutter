@@ -10,7 +10,7 @@ target-test/
 **/*.rs.bk
 
 
-#llm-stuff
+# Local tool state
 .llm-runs/
 .codex
 
