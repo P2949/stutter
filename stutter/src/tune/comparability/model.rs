@@ -298,17 +298,73 @@ pub fn tune_comparability_warnings(
 pub fn tune_candidate_order_warnings(
     candidate_order: &[TuneIterationOrder],
 ) -> Vec<TuneComparabilityWarning> {
-    if !two_profile_candidate_order_is_fixed(candidate_order) {
-        return Vec::new();
+    let mut warnings = Vec::new();
+
+    if candidate_order.is_empty() {
+        warnings.push(TuneComparabilityWarning {
+            profile: None,
+            kind: "candidate-order-metadata-missing".to_owned(),
+            message: "candidate order metadata is missing; unable to assess counterbalancing".to_owned(),
+            severity: TuneComparabilitySeverity::Warning,
+        });
+        return warnings;
     }
 
-    vec![TuneComparabilityWarning {
-        profile: None,
-        kind: CANDIDATE_ORDER_NOT_COUNTERBALANCED_KIND.to_owned(),
-        message: "two-profile tuning run used the same candidate order for every iteration; profile effect may be confounded with order effect"
-            .to_owned(),
-        severity: TuneComparabilitySeverity::Warning,
-    }]
+    // Check if every iteration used the exact same order.
+    if let Some(first) = candidate_order.first() {
+        if candidate_order
+            .iter()
+            .all(|order| order.profiles.as_slice() == first.profiles.as_slice())
+        {
+            warnings.push(TuneComparabilityWarning {
+                profile: None,
+                kind: CANDIDATE_ORDER_NOT_COUNTERBALANCED_KIND.to_owned(),
+                message: "all iterations used the same candidate order; profile effect may be confounded with order effect".to_owned(),
+                severity: TuneComparabilitySeverity::Warning,
+            });
+            return warnings;
+        }
+    }
+
+    // Count how often each profile appears in the first position.
+    let mut first_counts = BTreeMap::new();
+    let mut total_with_first = 0usize;
+    for order in candidate_order.iter() {
+        if let Some(first) = order.profiles.first() {
+            *first_counts.entry(first.clone()).or_insert(0usize) += 1usize;
+            total_with_first += 1;
+        }
+    }
+
+    if total_with_first > 0 {
+        // Check the gap between the most common first-position profile and the
+        // runner-up. Alternating sequences with an odd number of runs will
+        // naturally produce a 1-count margin (e.g. 2 vs 1 for 3 runs), which is
+        // acceptable and should not trigger a warning. Flag only when the margin
+        // is 2 or more, indicating a clear imbalance.
+        let mut counts: Vec<usize> = first_counts.values().copied().collect();
+        counts.sort_unstable_by(|a, b| b.cmp(a));
+        let max = *counts.get(0).unwrap_or(&0);
+        let second = *counts.get(1).unwrap_or(&0);
+        if max >= second + 2 {
+            // Significant imbalance detected.
+            let (profile, count) = first_counts
+                .into_iter()
+                .max_by_key(|(_, c)| *c)
+                .unwrap_or_default();
+            warnings.push(TuneComparabilityWarning {
+                profile: Some(profile.clone()),
+                kind: CANDIDATE_ORDER_NOT_COUNTERBALANCED_KIND.to_owned(),
+                message: format!(
+                    "profile '{}' appears first in {}/{} iterations; candidate order may be imbalanced",
+                    profile, count, total_with_first
+                ),
+                severity: TuneComparabilitySeverity::Warning,
+            });
+        }
+    }
+
+    warnings
 }
 
 pub fn has_candidate_order_counterbalance_warning(warnings: &[TuneComparabilityWarning]) -> bool {

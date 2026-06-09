@@ -185,6 +185,7 @@ pub struct TuneCommandInput {
     pub mangohud_log: Option<PathBuf>,
     pub enforce: bool,
     pub hwmon: bool,
+    pub order_strategy: String,
 }
 
 #[derive(Debug)]

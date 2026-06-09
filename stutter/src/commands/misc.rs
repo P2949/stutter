@@ -125,6 +125,7 @@ pub async fn run_tune_command(input: input::TuneCommandInput) -> anyhow::Result<
         mangohud_log: input.mangohud_log,
         enforce: input.enforce,
         hwmon: input.hwmon,
+        order_strategy: input.order_strategy.clone(),
     })
     .await
 }

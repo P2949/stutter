@@ -490,6 +490,9 @@ fn frame_p99_metrics_are_captured_structured() {
         warmup_seconds: 10,
         restore_policy: "restore-after-each".to_owned(),
         best_profile: "best".to_owned(),
+        order_strategy: "historical".to_owned(),
+        order_balanced: true,
+        order_balance_warning: None,
         candidate_order: vec![],
         profile_stats: vec![TuneProfileStats {
             profile: "best".to_owned(),

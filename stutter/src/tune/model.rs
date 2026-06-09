@@ -29,6 +29,12 @@ pub struct TuneSummary {
     pub warmup_seconds: u64,
     pub restore_policy: String,
     pub best_profile: String,
+    #[serde(default)]
+    pub order_strategy: String,
+    #[serde(default)]
+    pub order_balanced: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub order_balance_warning: Option<String>,
     pub candidate_order: Vec<TuneIterationOrder>,
     pub profile_stats: Vec<TuneProfileStats>,
     pub ranking_confidence: RankingConfidence,
@@ -146,6 +152,7 @@ pub struct TuneCommandInput {
     pub mangohud_log: Option<PathBuf>,
     pub enforce: bool,
     pub hwmon: bool,
+    pub order_strategy: String,
 }
 
 pub struct TuneControl {

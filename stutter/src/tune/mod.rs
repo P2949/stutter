@@ -48,6 +48,7 @@ pub async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
         mangohud_log,
         enforce,
         hwmon,
+        order_strategy,
     } = input;
     let scenario_name = crate::scenario::normalize_identity_label(scenario_name.as_deref());
     if let Some(scenario_name) = scenario_name.as_deref() {
@@ -94,7 +95,7 @@ pub async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
         );
     }
 
-    let candidate_order = tune_candidate_order(&profiles, runs);
+    let candidate_order = tune_candidate_order(&profiles, runs, &order_strategy);
     let results = collect_tune_results(TuneCollectionInput {
         profiles: &profiles,
         tree_pid,
@@ -109,6 +110,7 @@ pub async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
         workload_label: workload_label.clone(),
         route_label: route_label.clone(),
         tune_output_dir: &tune_output_dir,
+        order_strategy: &order_strategy,
     })
     .await?;
 
@@ -125,19 +127,19 @@ pub async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
         comparability::check_tune_coverage_comparability(&grouped)?;
     }
     let mut comparability_warnings = comparability::tune_comparability_warnings(&grouped);
-    comparability_warnings.extend(comparability::tune_candidate_order_warnings(
-        &candidate_order,
-    ));
+    let order_warnings = comparability::tune_candidate_order_warnings(&candidate_order);
+    if !order_warnings.is_empty() {
+        comparability_warnings.extend(order_warnings.clone());
+    }
 
     let profile_stats = profile_stats_from_grouped(&grouped);
     let selected_best_profile = select_best_profile(&grouped);
     let (mut ranking_confidence, mut ranking_notes) =
         assess_ranking_confidence(&profile_stats, &grouped, &selected_best_profile, runs);
-    let adjusted_ranking_confidence =
-        comparability::ranking_confidence_after_comparability_warnings(
-            ranking_confidence,
-            &comparability_warnings,
-        );
+    let adjusted_ranking_confidence = comparability::ranking_confidence_after_comparability_warnings(
+        ranking_confidence,
+        &comparability_warnings,
+    );
     if adjusted_ranking_confidence != ranking_confidence {
         ranking_notes
             .push("candidate order was not counterbalanced; ranking confidence lowered".to_owned());
@@ -156,6 +158,15 @@ pub async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
         "restore-after-each"
     };
 
+    let order_balance_warning = {
+        let msgs: Vec<String> = order_warnings.iter().map(|w| w.message.clone()).collect();
+        if msgs.is_empty() {
+            None
+        } else {
+            Some(msgs.join("; "))
+        }
+    };
+
     let summary = TuneSummary {
         schema_version: 1,
         tree_pid,
@@ -169,6 +180,9 @@ pub async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
         warmup_seconds,
         restore_policy: restore_policy.to_owned(),
         best_profile,
+        order_strategy: order_strategy.clone(),
+        order_balanced: order_warnings.is_empty(),
+        order_balance_warning,
         candidate_order,
         profile_stats,
         ranking_confidence,

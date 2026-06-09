@@ -182,6 +182,7 @@ pub(super) fn parse_tune_command(args: TuneArgs) -> anyhow::Result<AppCommand> {
         mangohud_log: args.mangohud_log,
         enforce: args.enforce,
         hwmon: args.hwmon,
+        order_strategy: args.order_strategy,
     }))
 }
 
