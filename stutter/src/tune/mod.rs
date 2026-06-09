@@ -136,10 +136,11 @@ pub async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
     let selected_best_profile = select_best_profile(&grouped);
     let (mut ranking_confidence, mut ranking_notes) =
         assess_ranking_confidence(&profile_stats, &grouped, &selected_best_profile, runs);
-    let adjusted_ranking_confidence = comparability::ranking_confidence_after_comparability_warnings(
-        ranking_confidence,
-        &comparability_warnings,
-    );
+    let adjusted_ranking_confidence =
+        comparability::ranking_confidence_after_comparability_warnings(
+            ranking_confidence,
+            &comparability_warnings,
+        );
     if adjusted_ranking_confidence != ranking_confidence {
         ranking_notes
             .push("candidate order was not counterbalanced; ranking confidence lowered".to_owned());

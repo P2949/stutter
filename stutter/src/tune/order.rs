@@ -35,6 +35,7 @@ fn splitmix64(state: &mut u64) -> u64 {
     z ^ (z >> 31)
 }
 
+#[allow(clippy::collapsible_if)]
 pub(crate) fn candidate_order_for_iteration_with_strategy(
     profile_count: usize,
     iteration: u32,
@@ -71,10 +72,14 @@ pub(super) fn tune_candidate_order(
     (1..=runs)
         .map(|iteration| TuneIterationOrder {
             iteration,
-            profiles: candidate_order_for_iteration_with_strategy(profiles.len(), iteration, strategy)
-                .into_iter()
-                .map(|profile_idx| profiles[profile_idx].name.clone())
-                .collect(),
+            profiles: candidate_order_for_iteration_with_strategy(
+                profiles.len(),
+                iteration,
+                strategy,
+            )
+            .into_iter()
+            .map(|profile_idx| profiles[profile_idx].name.clone())
+            .collect(),
         })
         .collect()
 }
