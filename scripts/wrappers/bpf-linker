@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Wrapper to filter bpf-linker output. It locates the real bpf-linker in PATH
+# excluding this wrapper directory, runs it, and only emits full output when
+# the command fails or when STUTTER_EBPF_VERBOSE is set.
+
+wrappath="$(cd "$(dirname "$0")" && pwd)"
+
+IFS=':' read -r -a _pathparts <<< "${PATH:-}"
+real=""
+for d in "${_pathparts[@]}"; do
+  [ -z "$d" ] && continue
+  # skip our wrapper directory
+  if [ "$(cd "$d" 2>/dev/null && pwd 2>/dev/null || echo)" = "$wrappath" ]; then
+    continue
+  fi
+  if [ -x "$d/bpf-linker" ]; then
+    real="$d/bpf-linker"
+    break
+  fi
+done
+
+if [ -z "$real" ]; then
+  echo "error: failed to find 'bpf-linker' while building stutter-ebpf" >&2
+  echo "hint: install with 'cargo install bpf-linker' or set STUTTER_USE_PREBUILT_BPF=1 and STUTTER_BPF_OBJECT=/path/to/stutter" >&2
+  exit 1
+fi
+
+tmpout="$(mktemp -t bpf-linker-out.XXXXXX)"
+tmperr="$(mktemp -t bpf-linker-err.XXXXXX)"
+trap 'rm -f "$tmpout" "$tmperr"' EXIT
+
+"$real" "$@" >"$tmpout" 2>"$tmperr"
+status=$?
+
+# If failure or verbose requested, show full captured logs.
+if [ $status -ne 0 ] || [ -n "${STUTTER_EBPF_VERBOSE:-}" ]; then
+  cat "$tmpout"
+  cat "$tmperr" >&2
+fi
+
+exit $status
