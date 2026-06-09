@@ -311,15 +311,18 @@ pub fn tune_candidate_order_warnings(
         return warnings;
     }
 
-    // Check if every iteration used the exact same order.
-    if candidate_order
-        .first()
-        .map(|first| {
-            candidate_order
-                .iter()
-                .all(|order| order.profiles.as_slice() == first.profiles.as_slice())
-        })
-        .unwrap_or(false)
+    // Check if every iteration used the exact same order. Only consider this
+    // a counterbalance warning when there is more than one iteration; a
+    // single iteration cannot demonstrate imbalance.
+    if candidate_order.len() > 1
+        && candidate_order
+            .first()
+            .map(|first| {
+                candidate_order
+                    .iter()
+                    .all(|order| order.profiles.as_slice() == first.profiles.as_slice())
+            })
+            .unwrap_or(false)
     {
         warnings.push(TuneComparabilityWarning {
             profile: None,
