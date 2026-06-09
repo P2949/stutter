@@ -15,7 +15,7 @@ in every iteration, so the proposed FYP includes a corrected counterbalanced
 protocol as future assessed work.
 
 **Current handoff status, 2026-06-09:** first-contact materials are prepared for
-the `fyp-report-final-v2` supervisor release. The full raw KCD1 archive is kept
+the `fyp-report-final-v3` supervisor release. The full raw KCD1 archive is kept
 for audit/reproduction, but first review should use the pitch, scope note, KCD1
 executive summary, AI disclosure, and curated evidence bundle.
 
@@ -40,7 +40,7 @@ For a 5-minute first review:
   polished preliminary real-game case study.
 - [Curated KCD1 evidence bundle](evidence-bundle/README.md) - small artifact set
   for inspecting the non-validation result without opening the full raw archive.
-- [Supervisor-review release assets](https://github.com/P2949/stutter/releases/tag/fyp-report-final-v2) -
+- [Supervisor-review release assets](https://github.com/P2949/stutter/releases/tag/fyp-report-final-v3) -
   PDFs and bundle assets for first contact.
 
 ## Proposed Assessment Boundary
@@ -83,7 +83,7 @@ Final decision for supervisor handoff (2026-06-09):
 
 ## Current Validation Checks
 
-Supervisor handoff target: `fyp-report-final-v2`.
+Supervisor handoff target: `fyp-report-final-v3`.
 
 The exact validated commit SHA is recorded by the Git tag and GitHub release
 metadata. The release tag is the authoritative supervisor handoff target.

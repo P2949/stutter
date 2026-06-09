@@ -25,4 +25,4 @@ Regards,
 Links:
 - Repository: https://github.com/P2949/stutter/tree/main
 - Supervisor entry point: https://github.com/P2949/stutter/blob/main/SUPERVISOR_README.md
-- Release assets: https://github.com/P2949/stutter/releases/tag/fyp-report-final-v2
+- Release assets: https://github.com/P2949/stutter/releases/tag/fyp-report-final-v3

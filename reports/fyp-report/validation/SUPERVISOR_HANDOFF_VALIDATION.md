@@ -1,14 +1,16 @@
 # Supervisor handoff validation
 
 Date: 2026-06-09
-Validated handoff target: `fyp-report-final-v2`
+Validated handoff target: `fyp-report-final-v3`
 
-Commands to run before creating the release tag:
+Validation commands verified for `fyp-report-final-v3`:
 
+- `RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo fmt --all -- --check`
 - `RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -p xtask -- ci`
 - `RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -p xtask -- fixture-check`
 - `RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -p xtask -- dependency-hygiene`
 - `cd evidence-bundle && sha256sum -c MANIFEST.sha256`
+- `cd release && sha256sum -c ASSETS_SHA256SUMS`
 - `cd release && sha256sum -c SHA256SUMS`
 
 Expected result summary:
@@ -17,7 +19,8 @@ Expected result summary:
 - Fixture-check passes.
 - Dependency hygiene passes.
 - Evidence bundle manifest verifies.
-- Release archive checksum verifies.
+- Individual release asset checksums verify.
+- Assembled release archive checksum verifies.
 
 Notes:
 

@@ -1,16 +1,21 @@
 # Supervisor release notes
 
 Version: supervisor-hand-off
-Release tag: `fyp-report-final-v2`
+Release tag: `fyp-report-final-v3`
 Date: 2026-06-09
 
-Contents:
+Release assets:
 
 - `FYP_SUPERVISOR_PITCH.pdf` — supervisor pitch PDF
 - `KCD1_EXPERIMENT_REPORT.pdf` — KCD1 case-study report
 - `evidence-bundle.tar.gz` — curated KCD1 evidence bundle
 - `ASSETS_SHA256SUMS` — checksums for individual release assets
 - `SHA256SUMS` — checksum for the assembled release archive
+- `stutter-supervisor-release-fyp-report-final-v3.tar.gz` — assembled archive
+
+The assembled archive contains the PDFs, the evidence bundle,
+`ASSETS_SHA256SUMS`, and these release notes. `SHA256SUMS` is a companion
+release asset used to verify the assembled archive itself.
 
 Notes:
 
