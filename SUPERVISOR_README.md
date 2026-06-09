@@ -64,7 +64,7 @@ raw archive is not required. The 2026-06-07 size audit found `reports/` at
 
 ## Current Validation Checks
 
-Last local validation on 2026-06-07 for this supervisor-handoff working tree:
+Last local validation on 2026-06-09T12:31:36Z for commit 8745c722b3e0939d7e3f06da1de0b17db65097b9:
 
 - `RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -p xtask -- ci`
 - `RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -p xtask -- fixture-check`
