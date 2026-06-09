@@ -99,3 +99,9 @@ signal was enabled but no samples were recorded. They are preserved as produced
 by `stutter record`.
 
 Large `migration_events.json` files are intentionally excluded from Git.
+
+Final decision for supervisor handoff (2026-06-09):
+
+- Keep the full raw experiment archive in the development branch for audit and long-term reproduction, but do not require it for first supervisor review.
+- For first contact use the lightweight release archive containing `FYP_SUPERVISOR_PITCH.pdf`, `KCD1_EXPERIMENT_REPORT.pdf`, and the curated `evidence-bundle.tar.gz` (checksum-verified).
+- Long-term final-FYP artifact archival (Git LFS or external archive) will be scheduled after supervisor guidance.

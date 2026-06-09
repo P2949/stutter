@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-OUT_DIR="/tmp/stutter-evidence-export-$(date +%s)"
+if [ "${1:-}" != "" ]; then
+  OUT_DIR="$1"
+else
+  OUT_DIR="/tmp/stutter-evidence-export-$(date +%s)"
+fi
 mkdir -p "$OUT_DIR"
 
 echo "Creating evidence bundle export at $OUT_DIR"
@@ -12,7 +16,9 @@ rsync -a --exclude='**/runs/**' --exclude='**/*.tar.zst' --exclude='**/*.zst' ev
 echo "Generating checksums"
 (
   cd "$OUT_DIR/evidence-bundle"
-  sha256sum * > MANIFEST.sha256 || true
+  find . -type f ! -name MANIFEST.sha256 -printf '%P\0' \
+    | sort -z \
+    | xargs -0 sha256sum > MANIFEST.sha256
 )
 
 echo "Running basic privacy scan"

@@ -16,3 +16,13 @@ Notes:
 
 - Full validation (`xtask ci`) completed and passed on the above commit. All tests and architecture checks passed locally.
 - eBPF build noise suppressed by the `scripts/wrappers/bpf-linker` wrapper; set `STUTTER_EBPF_VERBOSE=1` to re-enable verbose linker output during builds.
+
+To verify after extraction:
+
+```bash
+cd stutter-release-assets
+sha256sum -c SHA256SUMS
+tar -xzf evidence-bundle.tar.gz
+cd evidence-bundle
+sha256sum -c MANIFEST.sha256
+```

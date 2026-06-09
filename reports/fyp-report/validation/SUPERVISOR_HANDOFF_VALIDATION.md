@@ -29,6 +29,11 @@ Notes:
 - Validation was performed on commit `8745c722b3e0939d7e3f06da1de0b17db65097b9` using the pinned toolchain `nightly-2026-06-06` and the project's `xtask ci` workflow.
 - The assembled release archive is stored in the repository at `release/` and checksummed in `release/SHA256SUMS`.
 
+Post-refresh checksum correction:
+
+- `evidence-bundle/MANIFEST.sha256` was regenerated on 2026-06-09 to correct a README.md mismatch.
+- Verification performed: `cd evidence-bundle && sha256sum -c MANIFEST.sha256` — all listed files reported OK.
+
 Next steps (completed):
 
 - Final docs sweep and release notes committed.

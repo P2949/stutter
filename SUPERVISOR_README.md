@@ -62,6 +62,12 @@ the pitch, scope note, KCD1 report, and curated evidence bundle; cloning the ful
 raw archive is not required. The 2026-06-07 size audit found `reports/` at
 1017M, `evidence-bundle/` at 96K, and `stutter/` at 11M.
 
+Final decision for supervisor handoff (2026-06-09):
+
+- Retain the full raw archive in the development branch for audit and reproduction.
+- For initial supervisor contact prefer the lightweight release archive (`FYP_SUPERVISOR_PITCH.pdf`, `KCD1_EXPERIMENT_REPORT.pdf`, `evidence-bundle.tar.gz`) which is checksum-verified.
+- Long-term archival (Git LFS or external storage) will be arranged after supervisor guidance.
+
 ## Current Validation Checks
 
 Last local validation on 2026-06-09T12:31:36Z for commit 8745c722b3e0939d7e3f06da1de0b17db65097b9:
