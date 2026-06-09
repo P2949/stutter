@@ -36,3 +36,9 @@ evidence-bundle/
 - `build-check.txt` records the local validation commands run for this artifact refresh.
 - `command-output.txt` is the secondary fix-validation command output pointer from the archived KCD1 report set.
 - Large raw run directories, migration streams, and machine-specific trace logs are intentionally excluded from this curated bundle.
+
+## Export automation:
+
+The script `scripts/artifacts/export_evidence_bundle.sh` creates a sanitized
+export of `evidence-bundle/` in `/tmp` and runs a basic privacy scan. Reviewers
+can use this to prepare release artifacts.
