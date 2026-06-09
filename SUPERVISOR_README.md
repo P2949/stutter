@@ -83,31 +83,21 @@ Final decision for supervisor handoff (2026-06-09):
 
 ## Current Validation Checks
 
-Last local validation on 2026-06-09T12:31:36Z for commit 8745c722b3e0939d7e3f06da1de0b17db65097b9:
+Supervisor handoff target: `fyp-report-final-v2`.
 
-- `RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -p xtask -- ci`
-- `RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -p xtask -- fixture-check`
-- `RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -p xtask -- dependency-hygiene`
-- `cd evidence-bundle && sha256sum -c MANIFEST.sha256`
+The exact validated commit SHA is recorded by the Git tag and GitHub release
+metadata. The release tag is the authoritative supervisor handoff target.
 
-The main non-root validation gate is:
+The local validation gate for the handoff target is:
 
 ```bash
+RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo fmt --all -- --check
 RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -p xtask -- ci
-```
-
-Useful additional checks for the evidence/reporting side are:
-
-```bash
 RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -p xtask -- fixture-check
 RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -p xtask -- dependency-hygiene
-```
-
-The curated evidence bundle is verified with:
-
-```bash
-cd evidence-bundle
-sha256sum -c MANIFEST.sha256
+cd evidence-bundle && sha256sum -c MANIFEST.sha256
+cd ../release && sha256sum -c ASSETS_SHA256SUMS
+sha256sum -c SHA256SUMS
 ```
 
 For a supervisor demo, prefer the offline path before live eBPF tracing:

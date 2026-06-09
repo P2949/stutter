@@ -2,7 +2,7 @@
 pkgname=stutter-git
 pkgver=0.1.0
 pkgrel=1
-pkgdesc="Scheduler latency recorder and conservative autotune daemon"
+pkgdesc="Linux scheduler latency profiler and tuning-validation prototype"
 arch=('x86_64')
 url="https://github.com/P2949/stutter"
 # Packaging skeleton only; not part of the proposed assessed FYP scope.

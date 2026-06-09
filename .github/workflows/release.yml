@@ -5,6 +5,7 @@ on:
   push:
     tags:
       - "v*"
+      - "fyp-report-*"
 
 env:
   CARGO_TERM_COLOR: always

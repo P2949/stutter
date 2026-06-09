@@ -4,12 +4,14 @@ Date: 2026-06-09
 Branch: main
 Handoff target: fyp-report-final-v2
 
-Checks to be verified before release:
-- xtask ci
-- xtask fixture-check
-- xtask dependency-hygiene
-- evidence-bundle MANIFEST.sha256
-- release SHA256SUMS
+Checks verified for release:
+- cargo fmt --all -- --check: passed
+- xtask ci: passed
+- xtask fixture-check: passed
+- xtask dependency-hygiene: passed
+- evidence-bundle MANIFEST.sha256: passed
+- release ASSETS_SHA256SUMS: passed
+- release SHA256SUMS: passed
 
 Notes:
 This file belongs to the small supervisor-review evidence subset. The full raw
