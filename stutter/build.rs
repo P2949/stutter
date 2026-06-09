@@ -131,13 +131,43 @@ fn ensure_cargo_bin_on_path() {
         return;
     }
 
+    // Optionally include repository-local wrapper scripts so we can intercept
+    // eBPF toolchain executables (like bpf-linker) and filter their output.
+    let repo_wrapper = PathBuf::from("..").join("scripts").join("wrappers");
+
     let current_path = env::var_os("PATH").unwrap_or_default();
-    if env::split_paths(&current_path).any(|path| path == cargo_bin) {
+    // If PATH already contains cargo_bin and repo_wrapper (when present), nothing to do.
+    let mut has_cargo_bin = false;
+    let mut has_repo_wrapper = false;
+    for p in env::split_paths(&current_path) {
+        if p == cargo_bin {
+            has_cargo_bin = true;
+        }
+        if repo_wrapper.exists() && p == repo_wrapper {
+            has_repo_wrapper = true;
+        }
+    }
+
+    if has_cargo_bin && (repo_wrapper.exists() && has_repo_wrapper || !repo_wrapper.exists()) {
         return;
     }
 
-    let mut paths = vec![cargo_bin];
-    paths.extend(env::split_paths(&current_path));
+    // Build a new PATH with repo_wrapper (if present) first, then cargo_bin, then
+    // the existing PATH entries (excluding duplicates we added).
+    let mut paths = Vec::new();
+    if repo_wrapper.exists() {
+        paths.push(repo_wrapper.clone());
+    }
+    paths.push(cargo_bin.clone());
+    for p in env::split_paths(&current_path) {
+        if p == cargo_bin {
+            continue;
+        }
+        if repo_wrapper.exists() && p == repo_wrapper {
+            continue;
+        }
+        paths.push(p);
+    }
 
     if let Ok(path) = env::join_paths(paths) {
         // SAFETY: build scripts are single-threaded here, and this happens before
