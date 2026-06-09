@@ -11,8 +11,6 @@
   agreed.
 - `FYP_REPORT_NOTES.md` is internal planning scaffolding used to keep the
   report grounded in repo artifacts; it is not a supervisor-facing deliverable.
-- `SUPERVISOR_EMAIL_DRAFT.md` is a short first-contact email draft. It is not a
-  report artifact and should be edited for the specific lecturer before sending.
 
 The recommended first-contact attachment is `FYP_SUPERVISOR_PITCH.pdf`. Do not
 send the long report first unless a supervisor asks for it.
