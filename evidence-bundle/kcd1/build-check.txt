@@ -2,7 +2,7 @@ KCD1 curated evidence bundle validation record
 
 Date: 2026-06-09
 Branch: main
-Handoff target: fyp-report-final-v2
+Handoff target: fyp-report-final-v3
 
 Checks verified for release:
 - cargo fmt --all -- --check: passed
