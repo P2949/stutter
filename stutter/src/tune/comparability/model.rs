@@ -295,6 +295,7 @@ pub fn tune_comparability_warnings(
     warnings
 }
 
+#[allow(clippy::collapsible_if)]
 pub fn tune_candidate_order_warnings(
     candidate_order: &[TuneIterationOrder],
 ) -> Vec<TuneComparabilityWarning> {
@@ -304,7 +305,8 @@ pub fn tune_candidate_order_warnings(
         warnings.push(TuneComparabilityWarning {
             profile: None,
             kind: "candidate-order-metadata-missing".to_owned(),
-            message: "candidate order metadata is missing; unable to assess counterbalancing".to_owned(),
+            message: "candidate order metadata is missing; unable to assess counterbalancing"
+                .to_owned(),
             severity: TuneComparabilitySeverity::Warning,
         });
         return warnings;
@@ -344,8 +346,8 @@ pub fn tune_candidate_order_warnings(
         // is 2 or more, indicating a clear imbalance.
         let mut counts: Vec<usize> = first_counts.values().copied().collect();
         counts.sort_unstable_by(|a, b| b.cmp(a));
-        let max = *counts.get(0).unwrap_or(&0);
-        let second = *counts.get(1).unwrap_or(&0);
+        let max = counts.first().copied().unwrap_or(0);
+        let second = counts.get(1).copied().unwrap_or(0);
         if max >= second + 2 {
             // Significant imbalance detected.
             let (profile, count) = first_counts
@@ -387,6 +389,7 @@ pub fn ranking_confidence_after_comparability_warnings(
     }
 }
 
+#[allow(dead_code)]
 fn two_profile_candidate_order_is_fixed(candidate_order: &[TuneIterationOrder]) -> bool {
     let Some(first) = candidate_order.first() else {
         return false;

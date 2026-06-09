@@ -17,7 +17,6 @@ use super::{
     model::{
         TuneCandidateSummary, TuneControl, TuneMeasureResult, TuneProfileRefreshInput, TuneSummary,
     },
-    
     profile_plan::{tune_profile_plan_summary, write_profile_plan_artifacts},
     recommendation, recommendation_html, retain_after_warmup, unix_nanos_now,
 };
