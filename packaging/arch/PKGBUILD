@@ -5,6 +5,8 @@ pkgrel=1
 pkgdesc="Scheduler latency recorder and conservative autotune daemon"
 arch=('x86_64')
 url="https://github.com/P2949/stutter"
+# Packaging skeleton: userspace crates are MIT OR Apache-2.0; eBPF crate is
+# MIT OR GPL-2.0-only. Keep this conservative until production packaging is done.
 license=('MIT')
 depends=('glibc')
 makedepends=('git' 'rustup' 'clang' 'llvm')
@@ -21,7 +23,7 @@ pkgver() {
 
 build() {
 	cd "$srcdir/stutter"
-	RUSTUP_TOOLCHAIN=nightly cargo build --release -p stutter
+	RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo build --release -p stutter
 }
 
 package() {

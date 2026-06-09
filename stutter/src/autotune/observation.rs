@@ -1,8 +1,11 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
+use stutter_core::ids::{Pid, Tid};
 
 use super::{
+    activity::ActivityLevel,
+    experiment::WindowScore,
     objective::ObjectiveSignals,
     quality::OnlineDataQuality,
     situation::{SituationClassification, SituationKind, classify_situation},
@@ -30,8 +33,8 @@ pub struct WorkloadIdentity {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProtectedTask {
-    pub tid: u32,
-    pub process_pid: u32,
+    pub tid: Tid,
+    pub process_pid: Pid,
     pub comm: String,
     pub class: TaskClass,
     pub reason: String,
@@ -39,8 +42,8 @@ pub struct ProtectedTask {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ActiveTaskSnapshot {
-    pub tid: u32,
-    pub process_pid: u32,
+    pub tid: Tid,
+    pub process_pid: Pid,
     pub comm: String,
     pub class: TaskClass,
     pub process_starttime_ticks: Option<u64>,
@@ -136,6 +139,8 @@ pub struct AutotuneObservation {
 
     pub score: StutterScore,
     pub data_quality: OnlineDataQuality,
+    #[serde(default)]
+    pub activity_level: ActivityLevel,
     pub objective_signals: ObjectiveSignals,
 
     pub primary_situation: SituationKind,
@@ -174,6 +179,7 @@ impl Default for AutotuneObservation {
             scored_samples: 0,
             score: StutterScore::default(),
             data_quality: OnlineDataQuality::default(),
+            activity_level: ActivityLevel::default(),
             objective_signals: ObjectiveSignals::default(),
             primary_situation: SituationKind::Unknown,
             situation: SituationClassification::default(),
@@ -241,6 +247,24 @@ impl AutotuneObservation {
                 || lower.contains("audio realtime")
                 || lower.contains("input process")
         })
+    }
+
+    pub fn to_window_score(&self) -> WindowScore {
+        let elapsed_nanos = u128::from(self.elapsed_ms).saturating_mul(1_000_000);
+        let started_unix_nanos = self.now_unix_nanos.saturating_sub(elapsed_nanos);
+
+        let mut score = self.score.clone();
+        score.frame_p99_ms = self.frame_p99_ms;
+        score.frame_max_ms = self.frame_max_ms;
+
+        WindowScore {
+            started_unix_nanos,
+            finished_unix_nanos: self.now_unix_nanos,
+            interval_count: self.interval_count,
+            scored_samples: self.scored_samples,
+            scored_task_count: self.scored_task_count,
+            score,
+        }
     }
 }
 
@@ -392,5 +416,57 @@ mod tests {
 
         assert!(quality.is_high());
         assert!(!quality.blocks_action());
+    }
+
+    #[test]
+    fn observation_to_window_score_preserves_sample_counts_and_score() {
+        let mut observation = AutotuneObservation {
+            interval_count: 5,
+            scored_samples: 100,
+            scored_task_count: 2,
+            ..Default::default()
+        };
+        observation.score.total = 1_000;
+        observation.score.over_1ms = 10;
+        observation.score.over_2ms = 5;
+        observation.score.over_5ms = 1;
+
+        let window = observation.to_window_score();
+
+        assert_eq!(window.interval_count, 5);
+        assert_eq!(window.scored_samples, 100);
+        assert_eq!(window.scored_task_count, 2);
+        assert_eq!(window.score.total, 1_000);
+        assert_eq!(window.score.over_1ms, 10);
+        assert_eq!(window.score.over_2ms, 5);
+        assert_eq!(window.score.over_5ms, 1);
+    }
+
+    #[test]
+    fn observation_to_window_score_uses_elapsed_ms_for_start_time() {
+        let observation = AutotuneObservation {
+            now_unix_nanos: 10_000_000_000,
+            elapsed_ms: 3_000,
+            ..Default::default()
+        };
+
+        let window = observation.to_window_score();
+
+        assert_eq!(window.started_unix_nanos, 7_000_000_000);
+        assert_eq!(window.finished_unix_nanos, 10_000_000_000);
+        assert_eq!(window.duration_seconds(), Some(3.0));
+    }
+
+    #[test]
+    fn observation_to_window_score_saturates_start_time() {
+        let observation = AutotuneObservation {
+            now_unix_nanos: 1_000,
+            elapsed_ms: u64::MAX,
+            ..Default::default()
+        };
+
+        let window = observation.to_window_score();
+
+        assert_eq!(window.started_unix_nanos, 0);
     }
 }

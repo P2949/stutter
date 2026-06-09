@@ -2,6 +2,8 @@ use std::fs;
 
 use serde::{Deserialize, Serialize};
 
+use crate::irq_inspect::{IrqLine, parse_proc_interrupts};
+
 #[derive(Clone, Serialize, Deserialize, Default, Debug)]
 pub struct SystemMetadata {
     pub kernel_osrelease: Option<String>,
@@ -9,6 +11,8 @@ pub struct SystemMetadata {
     pub cpu_online: Option<String>,
     pub cpu_possible: Option<String>,
     pub cpu_topology: Vec<CpuTopology>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub irq_lines: Vec<IrqLine>,
     pub scx_state: Option<String>,
     pub scx_ops: Option<String>,
     pub scx_enable_seq: Option<String>,
@@ -22,7 +26,6 @@ pub struct CpuTopology {
     pub physical_package_id: Option<String>,
 }
 
-#[allow(dead_code)]
 pub fn build_git_rev() -> &'static str {
     option_env!("STUTTER_GIT_REV").unwrap_or("unknown")
 }
@@ -36,6 +39,9 @@ pub fn build_feature_labels() -> Vec<&'static str> {
 
     if cfg!(feature = "otel") {
         features.push("otel");
+    }
+    if cfg!(feature = "wayland-probe") {
+        features.push("wayland-probe");
     }
     if features.is_empty() {
         features.push("default");
@@ -51,10 +57,19 @@ pub fn collect_system_metadata() -> SystemMetadata {
         cpu_online: read_trimmed("/sys/devices/system/cpu/online"),
         cpu_possible: read_trimmed("/sys/devices/system/cpu/possible"),
         cpu_topology: collect_cpu_topology(),
+        irq_lines: collect_irq_lines(),
         scx_state: read_trimmed("/sys/kernel/sched_ext/state"),
         scx_ops: read_trimmed("/sys/kernel/sched_ext/root/ops"),
         scx_enable_seq: read_trimmed("/sys/kernel/sched_ext/enable_seq"),
     }
+}
+
+fn collect_irq_lines() -> Vec<IrqLine> {
+    let Some(contents) = fs::read_to_string("/proc/interrupts").ok() else {
+        return Vec::new();
+    };
+
+    parse_proc_interrupts(&contents).unwrap_or_default()
 }
 
 fn collect_cpu_topology() -> Vec<CpuTopology> {
@@ -116,8 +131,13 @@ mod tests {
     fn build_feature_labels_report_only_optional_integrations_or_default() {
         let labels = build_feature_labels();
 
-        if cfg!(feature = "otel") {
-            assert!(labels.contains(&"otel"));
+        if cfg!(feature = "otel") || cfg!(feature = "wayland-probe") {
+            if cfg!(feature = "otel") {
+                assert!(labels.contains(&"otel"));
+            }
+            if cfg!(feature = "wayland-probe") {
+                assert!(labels.contains(&"wayland-probe"));
+            }
         } else {
             assert_eq!(labels, vec!["default"]);
         }

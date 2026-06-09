@@ -1,9 +1,9 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::collections::BTreeMap;
 
 use crate::{
     actions::{ActionId, SafetyClass},
     autotune::{
-        candidate::CandidateAction,
+        planning::candidate::CandidateAction,
         quality::OnlineDataQualityPolicy,
         runtime::{
             AutotuneDecisionStreamEntry, AutotuneRuntime, AutotuneRuntimeConfig,
@@ -11,7 +11,10 @@ use crate::{
         },
         state::SituationKind,
     },
-    daemon::{ActionSource, DaemonMode, DaemonState},
+    daemon::{
+        policy::{ActionSource, DaemonMode},
+        state::DaemonState,
+    },
     ebpf_loader::DropCountersSnapshot,
     focus::FocusGroupKind,
     process_tree::{TaskClass, TaskInfo},
@@ -21,13 +24,24 @@ use crate::{
 
 #[derive(Clone, Debug)]
 pub enum FakeDaemonStep {
-    FocusGame { confidence: f32 },
-    FocusCleared { reason: String },
+    FocusGame {
+        confidence: f32,
+    },
+    FocusCleared {
+        reason: String,
+    },
     TargetPresent,
     TargetMissing,
-    Interval { score_total: u64, samples: u64 },
-    DroppedInterval { dropped_events: u64 },
-    EvaluationTick { reason: String },
+    Interval {
+        diagnostic_raw_score_total: u64,
+        samples: u64,
+    },
+    DroppedInterval {
+        dropped_events: u64,
+    },
+    EvaluationTick {
+        reason: String,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -45,6 +59,10 @@ pub struct FakeDaemonSimulationReport {
 }
 
 impl FakeDaemonSimulationReport {
+    pub fn scenario_name(&self) -> &str {
+        &self.name
+    }
+
     pub fn decision_labels(&self) -> Vec<&str> {
         self.decisions
             .iter()
@@ -62,7 +80,17 @@ impl FakeDaemonSimulationReport {
 pub fn run_fake_daemon_scenario(
     scenario: FakeDaemonScenario,
 ) -> anyhow::Result<FakeDaemonSimulationReport> {
-    let mut runtime = AutotuneRuntime::new(simulation_runtime_config(scenario.mode));
+    run_fake_daemon_scenario_with_safety(scenario, SafetyClass::ReversibleLowRisk)
+}
+
+pub fn run_fake_daemon_scenario_with_safety(
+    scenario: FakeDaemonScenario,
+    candidate_safety_class: SafetyClass,
+) -> anyhow::Result<FakeDaemonSimulationReport> {
+    let mut runtime = AutotuneRuntime::new(simulation_runtime_config(
+        scenario.mode,
+        candidate_safety_class,
+    ));
     let mut elapsed_ms = 0_u64;
     let mut decisions = Vec::new();
 
@@ -82,6 +110,7 @@ pub fn run_fake_daemon_scenario(
     })
 }
 
+#[cfg(test)]
 pub fn assert_no_apply_without_rollback(report: &FakeDaemonSimulationReport) {
     if report.contains_decision("candidate_started") {
         assert!(
@@ -96,7 +125,10 @@ pub fn assert_no_apply_without_rollback(report: &FakeDaemonSimulationReport) {
     }
 }
 
-fn simulation_runtime_config(mode: DaemonMode) -> AutotuneRuntimeConfig {
+fn simulation_runtime_config(
+    mode: DaemonMode,
+    candidate_safety_class: SafetyClass,
+) -> AutotuneRuntimeConfig {
     let mut base = AutotuneRuntimeConfig::from_daemon_config(
         daemon_config_for_runtime_mode(mode, ActionSource::Test, Some(1234), None),
         None,
@@ -110,10 +142,10 @@ fn simulation_runtime_config(mode: DaemonMode) -> AutotuneRuntimeConfig {
         ..OnlineDataQualityPolicy::default()
     })
     .with_min_focus_confidence(0.70)
-    .with_simulated_candidates(vec![CandidateAction::Fake {
-        action_id: ActionId("cpu-affinity-profile:simulation-low-risk".to_owned()),
-        safety_class: SafetyClass::ReversibleLowRisk,
-    }])
+    .with_simulated_candidates(vec![CandidateAction::fake(
+        ActionId::new("cpu-affinity-profile:simulation-low-risk".to_owned()),
+        candidate_safety_class,
+    )])
     .with_simulated_action_effects()
 }
 
@@ -137,7 +169,7 @@ fn event_for_step(step: FakeDaemonStep, elapsed_ms: u64) -> Option<MonitorEvent>
         }),
         FakeDaemonStep::TargetPresent => Some(MonitorEvent::TargetSnapshot {
             elapsed_ms,
-            active_targets: BTreeMap::from([(1234, task_info())]),
+            active_targets: BTreeMap::from([(1234.into(), task_info())]),
             removed_targets: Vec::new(),
         }),
         FakeDaemonStep::TargetMissing => Some(MonitorEvent::TargetSnapshot {
@@ -146,11 +178,15 @@ fn event_for_step(step: FakeDaemonStep, elapsed_ms: u64) -> Option<MonitorEvent>
             removed_targets: vec![1234],
         }),
         FakeDaemonStep::Interval {
-            score_total,
+            diagnostic_raw_score_total,
             samples,
         } => Some(MonitorEvent::Interval {
             elapsed_ms,
-            records: vec![interval_record(elapsed_ms, score_total, samples)],
+            records: vec![interval_record(
+                elapsed_ms,
+                diagnostic_raw_score_total,
+                samples,
+            )],
             drop_counters: DropCountersSnapshot::default(),
         }),
         FakeDaemonStep::DroppedInterval { dropped_events } => Some(MonitorEvent::Interval {
@@ -174,11 +210,11 @@ fn event_for_step(step: FakeDaemonStep, elapsed_ms: u64) -> Option<MonitorEvent>
 
 fn task_info() -> TaskInfo {
     TaskInfo {
-        tid: 1234,
-        process_pid: 1234,
-        process_ppid: 1,
+        tid: 1234.into(),
+        process_pid: 1234.into(),
+        process_ppid: 1.into(),
         comm: "simulation-game".to_owned(),
-        process_comm: Arc::from("simulation-game"),
+        process_comm: "simulation-game".to_owned(),
         process_starttime_ticks: Some(10),
         task_starttime_ticks: Some(10),
         exe_dev: Some(1),
@@ -189,18 +225,22 @@ fn task_info() -> TaskInfo {
     }
 }
 
-fn interval_record(elapsed_ms: u64, score_total: u64, samples: u64) -> IntervalRecord {
-    interval_record_with_drops(elapsed_ms, score_total, samples, 0)
+fn interval_record(
+    elapsed_ms: u64,
+    diagnostic_raw_score_total: u64,
+    samples: u64,
+) -> IntervalRecord {
+    interval_record_with_drops(elapsed_ms, diagnostic_raw_score_total, samples, 0)
 }
 
 fn interval_record_with_drops(
     elapsed_ms: u64,
-    score_total: u64,
+    diagnostic_raw_score_total: u64,
     samples: u64,
     dropped_events: u64,
 ) -> IntervalRecord {
-    let over_5ms = score_total / 100;
-    let remainder = score_total % 100;
+    let over_5ms = diagnostic_raw_score_total / 100;
+    let remainder = diagnostic_raw_score_total % 100;
     let over_2ms = remainder / 20;
     let over_1ms = remainder % 20;
 
@@ -211,10 +251,14 @@ fn interval_record_with_drops(
         class: TaskClass::Game,
         comm: "simulation-game".to_owned(),
         process_pid: Some(1234),
-        process_comm: Arc::from("simulation-game"),
+        process_comm: "simulation-game".to_owned(),
         samples,
         stored_samples: samples,
-        max_ns: if score_total > 0 { 6_000_000 } else { 500_000 },
+        max_ns: if diagnostic_raw_score_total > 0 {
+            6_000_000
+        } else {
+            500_000
+        },
         over_1ms,
         over_2ms,
         over_5ms,
@@ -229,7 +273,7 @@ fn interval_record_with_drops(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::daemon::DaemonPhase;
+    use crate::daemon::state::DaemonPhase;
 
     fn standard_prefix() -> Vec<FakeDaemonStep> {
         vec![
@@ -261,7 +305,7 @@ mod tests {
     fn simulation_suggests_candidate_without_starting_experiment() {
         let mut steps = standard_prefix();
         steps.push(FakeDaemonStep::Interval {
-            score_total: 500,
+            diagnostic_raw_score_total: 500,
             samples: 100,
         });
 
@@ -281,7 +325,7 @@ mod tests {
     fn simulation_starts_low_risk_candidate_with_rollback() {
         let mut steps = standard_prefix();
         steps.push(FakeDaemonStep::Interval {
-            score_total: 500,
+            diagnostic_raw_score_total: 500,
             samples: 100,
         });
 
@@ -301,12 +345,12 @@ mod tests {
     fn simulation_keeps_improved_candidate() {
         let mut steps = standard_prefix();
         steps.push(FakeDaemonStep::Interval {
-            score_total: 1_000,
+            diagnostic_raw_score_total: 1_000,
             samples: 100,
         });
         steps.push(FakeDaemonStep::TargetPresent);
         steps.push(FakeDaemonStep::Interval {
-            score_total: 10,
+            diagnostic_raw_score_total: 10,
             samples: 100,
         });
 
@@ -327,12 +371,12 @@ mod tests {
     fn simulation_reverts_regressed_candidate() {
         let mut steps = standard_prefix();
         steps.push(FakeDaemonStep::Interval {
-            score_total: 10,
+            diagnostic_raw_score_total: 10,
             samples: 100,
         });
         steps.push(FakeDaemonStep::TargetPresent);
         steps.push(FakeDaemonStep::Interval {
-            score_total: 1_000,
+            diagnostic_raw_score_total: 1_000,
             samples: 100,
         });
 
@@ -353,7 +397,7 @@ mod tests {
     fn simulation_rolls_back_on_focus_switch() {
         let mut steps = standard_prefix();
         steps.push(FakeDaemonStep::Interval {
-            score_total: 500,
+            diagnostic_raw_score_total: 500,
             samples: 100,
         });
         steps.push(FakeDaemonStep::FocusCleared {
@@ -376,7 +420,7 @@ mod tests {
     fn simulation_rolls_back_when_target_disappears() {
         let mut steps = standard_prefix();
         steps.push(FakeDaemonStep::Interval {
-            score_total: 500,
+            diagnostic_raw_score_total: 500,
             samples: 100,
         });
         steps.push(FakeDaemonStep::TargetMissing);
@@ -418,7 +462,7 @@ mod tests {
         for seed in 0..16_u64 {
             let mut steps = standard_prefix();
             steps.push(FakeDaemonStep::Interval {
-                score_total: if seed % 2 == 0 { 500 } else { 50 },
+                diagnostic_raw_score_total: if seed % 2 == 0 { 500 } else { 50 },
                 samples: 100,
             });
 
@@ -426,14 +470,14 @@ mod tests {
                 0 => {
                     steps.push(FakeDaemonStep::TargetPresent);
                     steps.push(FakeDaemonStep::Interval {
-                        score_total: 5,
+                        diagnostic_raw_score_total: 5,
                         samples: 100,
                     });
                 }
                 1 => {
                     steps.push(FakeDaemonStep::TargetPresent);
                     steps.push(FakeDaemonStep::Interval {
-                        score_total: 1_500,
+                        diagnostic_raw_score_total: 1_500,
                         samples: 100,
                     });
                 }

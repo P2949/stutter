@@ -1,5 +1,4 @@
 #![cfg(test)]
-#![allow(dead_code)]
 
 use std::{
     path::PathBuf,
@@ -18,6 +17,7 @@ use crate::daemon_policy::{ActionDescriptor, ActionEffectScope, RollbackRequirem
 pub struct FakeActionSwitches {
     pub fail_preflight: bool,
     pub fail_apply: bool,
+    pub partial_apply_failure: bool,
     pub fail_verify: bool,
     pub fail_rollback: bool,
     pub slow_apply: bool,
@@ -57,7 +57,7 @@ impl Default for FakeAction {
 impl FakeAction {
     pub fn new() -> Self {
         Self {
-            action_id: ActionId("fake-action".to_owned()),
+            action_id: ActionId::new("fake-action".to_owned()),
             description: "fake action".to_owned(),
             safety_class: SafetyClass::ReversibleLowRisk,
             effect_scope: ActionEffectScope::LocalProcessTree,
@@ -86,6 +86,12 @@ impl FakeAction {
 
     pub fn with_fail_apply(mut self) -> Self {
         self.switches.fail_apply = true;
+        self
+    }
+
+    pub fn with_partial_apply_failure(mut self) -> Self {
+        self.switches.fail_apply = true;
+        self.switches.partial_apply_failure = true;
         self
     }
 
@@ -150,7 +156,7 @@ impl FakeAction {
     }
 
     pub fn with_action_id(mut self, action_id: impl Into<String>) -> Self {
-        self.action_id = ActionId(action_id.into());
+        self.action_id = ActionId::new(action_id.into());
         self
     }
 
@@ -210,7 +216,7 @@ impl TuningAction for FakeAction {
     fn descriptor(&self) -> ActionDescriptor {
         ActionDescriptor {
             action_id: self.id(),
-            action_kind: self.action_id.0.clone(),
+            action_kind: self.action_id.as_str().to_owned(),
             safety_class: self.safety_class.clone(),
             effect_scope: self.effect_scope,
             rollback: self.rollback,
@@ -238,24 +244,41 @@ impl TuningAction for FakeAction {
         Ok(self.action_state(false, self.affected_tasks))
     }
 
-    fn apply(&self) -> anyhow::Result<RollbackToken> {
-        self.push_event("apply");
+    fn apply(&self) -> crate::actions::ApplyResult {
+        let res: Result<RollbackToken, crate::actions::PartialApplyError> = (|| {
+            self.push_event("apply");
 
-        if self.switches.fail_apply {
-            anyhow::bail!("fake apply failure");
-        }
+            if self.switches.fail_apply {
+                if self.switches.partial_apply_failure {
+                    self.state.applied.store(true, Ordering::SeqCst);
+                    return Err(crate::actions::PartialApplyError {
+                        source: anyhow::anyhow!("fake apply failure after first target"),
+                        rollback: Some(RollbackToken::CpuAffinityRestoreFile {
+                            path: self.restore_path.clone(),
+                            affected_tasks: 1,
+                        }),
+                    });
+                }
 
-        if self.switches.slow_apply {
-            self.push_event("slow_apply");
-            thread::sleep(self.slow_apply_duration);
-        }
+                return Err(crate::actions::PartialApplyError {
+                    source: anyhow::anyhow!("fake apply failure"),
+                    rollback: None,
+                });
+            }
 
-        self.state.applied.store(true, Ordering::SeqCst);
+            if self.switches.slow_apply {
+                self.push_event("slow_apply");
+                thread::sleep(self.slow_apply_duration);
+            }
 
-        Ok(RollbackToken::CpuAffinityRestoreFile {
-            path: self.restore_path.clone(),
-            affected_tasks: self.affected_tasks,
-        })
+            self.state.applied.store(true, Ordering::SeqCst);
+
+            Ok(RollbackToken::CpuAffinityRestoreFile {
+                path: self.restore_path.clone(),
+                affected_tasks: self.affected_tasks,
+            })
+        })();
+        res
     }
 
     fn verify(&self) -> anyhow::Result<ActionState> {
@@ -278,5 +301,50 @@ impl TuningAction for FakeAction {
         self.state.rolled_back.store(true, Ordering::SeqCst);
         self.state.applied.store(false, Ordering::SeqCst);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    #[test]
+    fn builder_methods_feed_descriptor_and_restore_token() {
+        let restore_path = PathBuf::from("/tmp/stutter-fake-action-custom-restore.json");
+        let action = FakeAction::new()
+            .with_effect_scope(ActionEffectScope::SystemWide)
+            .with_rollback(RollbackRequirement::BestEffortOnly)
+            .with_persistent_effect(true)
+            .with_system_wide_state()
+            .with_requires_explicit_target(false)
+            .with_confidence(Some(0.75))
+            .with_restore_path(restore_path.clone());
+
+        let descriptor = action.descriptor();
+        assert_eq!(descriptor.effect_scope, ActionEffectScope::SystemWide);
+        assert_eq!(descriptor.rollback, RollbackRequirement::BestEffortOnly);
+        assert!(descriptor.persistent_effect);
+        assert!(descriptor.touches_system_wide_state);
+        assert!(!descriptor.requires_explicit_target);
+        assert_eq!(descriptor.confidence, Some(0.75));
+
+        let token = action.apply().unwrap();
+        assert!(action.applied());
+        match &token {
+            RollbackToken::CpuAffinityRestoreFile {
+                path,
+                affected_tasks,
+            } => {
+                assert_eq!(path, &restore_path);
+                assert_eq!(*affected_tasks, 5);
+            }
+            other => panic!("unexpected fake action rollback token: {other:?}"),
+        }
+
+        action.rollback(&token).unwrap();
+        assert!(action.rolled_back());
+        assert!(!action.applied());
     }
 }

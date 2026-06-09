@@ -1,8 +1,8 @@
 # Auto-tune Configuration
 
-`stutter` does not currently implement an autonomous auto-tuner. This document defines the future `[autotune]` configuration contract before parser, CLI, controller, or action-selection code is added.
+`stutter` supports daemon autotune configuration through the user config parser in `stutter/src/config_file/`.
 
-The current user config parser in `stutter/src/config_file.rs` only handles existing flat monitor defaults. Future implementation must add `[autotune]` parsing explicitly instead of relying on this document as active behavior.
+This document describes the active `[autotune]` configuration surface plus the policy fields used by the daemon runtime.
 
 ## Example
 
@@ -23,6 +23,10 @@ candidate_window_seconds = 30
 washout_seconds = 10
 cooldown_seconds = 60
 
+privileged_worker_socket_ready_timeout_ms = 2000
+privileged_worker_socket_ready_retry_ms = 50
+privileged_worker_shutdown_poll_ms = 25
+
 min_scored_samples = 100
 min_scored_intervals = 5
 max_drop_counters = 0
@@ -31,6 +35,7 @@ require_stable_target_identity = true
 min_improvement_percent = 12.5
 max_regression_percent = 7.5
 max_frame_p99_regression_ms = 2.0
+max_over_5ms_regression_per_1k_samples = 0.0
 max_runnable_p99_regression_ms = 1.0
 
 allowed_actions = [
@@ -67,6 +72,29 @@ apply-medium-risk:
 ```
 
 `HighRisk` actions are not enabled by any mode in this contract. They require manual approval or a separate explicit future configuration key.
+
+## Privileged Worker Timing
+
+Apply-medium-risk autotune can manage a separate privileged worker process. The timing fields under `[autotune]` tune process handoff without changing the safety policy:
+
+```toml
+[autotune]
+privileged_worker_socket_ready_timeout_ms = 2000
+privileged_worker_socket_ready_retry_ms = 50
+privileged_worker_shutdown_poll_ms = 25
+```
+
+All three values must be greater than zero. Socket-ready timeout is capped at `60000` ms; retry and shutdown poll intervals are capped at `10000` ms.
+
+## End-to-End Dry Run
+
+Use the live suggest-mode dry run to exercise provider selection, static gates, safe action dry-runs, planner summaries, and candidate plan-file output without mutating system state:
+
+```bash
+stutter autotune --mode suggest --dry-run-all-safe --tree-pid <PID>
+```
+
+`--dry-run-all-safe` is valid only with `--mode suggest`. It writes candidate plan files for candidates that reached the dry-run stage under daemon policy, reports dry-run affected-task counts and deny reasons in the planner summary, and refuses to start live experiments. High-risk/system-adjacent dry-run diagnostics are still opt-in through `--high-risk-dry-run`.
 
 ## Target
 
@@ -132,7 +160,17 @@ Data-quality failure blocks action before apply and forces revert during measure
 
 `max_regression_percent` is the maximum tolerated regression before a candidate must be reverted.
 
+Experiment comparison uses normalized score rates for keep/revert decisions:
+
+```text
+score_per_sample = score.total / scored_samples
+```
+
+Raw score totals are retained in diagnostics only. This keeps baseline and candidate windows comparable even when their durations or scored sample counts differ.
+
 `max_frame_p99_regression_ms` is the maximum tolerated frame p99 regression in milliseconds.
+
+`max_over_5ms_regression_per_1k_samples` is the maximum tolerated increase in over-5ms latency events per 1,000 scored samples. A value of `0.0` means the candidate must not increase the normalized over-5ms rate.
 
 `max_runnable_p99_regression_ms` is the maximum tolerated runnable-latency p99 regression in milliseconds.
 
@@ -140,19 +178,69 @@ If scoring is inconclusive, the controller must revert unless an explicit future
 
 ## Action Lists
 
-`allowed_actions` is an allowlist of action identifiers the controller may consider.
+`daemon_enabled_action_families` is an allowlist of action families the daemon may consider.
 
-`denied_actions` is a denylist of action identifiers the controller must never apply.
+`daemon_denied_action_families` is a denylist of action families the daemon must never apply.
 
 The denylist wins over the allowlist.
 
-Initial action identifiers are:
+Current action family names are:
 
 ```text
 cpu_affinity_profile
+nice
+ionice
+uclamp
+cgroup_placement
 irq_affinity
-gpu_power_profile
-global_cpu_governor
+cpu_power
+gpu_power
+vm_knob
 ```
 
-Only `cpu_affinity_profile` is appropriate for the initial low-risk autonomous design. The other listed identifiers document excluded higher-risk action families and must remain denied unless their safety design is implemented explicitly.
+## System-Wide Target Allowlists
+
+System-adjacent suggestions for CPU power, GPU power, IRQ affinity, and VM knobs require explicit target allowlists. Empty lists allow no system-wide targets by default.
+
+```toml
+[system_wide_allowlist]
+cpu_policies = ["policy0", "policy1"]
+gpu_cards = ["card0"]
+gpu_pci_ids = ["1002:*"]
+irq_devices = ["amdgpu", "xhci_hcd"]
+vm_knobs = ["proc/sys/vm/swappiness"]
+```
+
+Candidates outside these lists are denied with `system_wide_target_not_allowlisted` and are not dry-run or applied.
+
+## Workload Policy Rules
+
+`[autotune.workload_policy]` can override the built-in workload policy matrix.
+
+Empty workload policy config means built-in defaults are used.
+
+Each rule overrides one situation. Any situation not listed keeps its built-in default.
+
+```toml
+[autotune]
+
+[[autotune.workload_policy.rules]]
+situation = "browser_focused"
+allowed_families = ["nice", "ionice", "uclamp"]
+allowed_objectives = ["browser_interactivity", "desktop_interactivity"]
+autonomous_families = []
+```
+
+`allowed_families` controls which action families may be proposed for that situation.
+
+`allowed_objectives` controls which planner objectives are allowed. An empty list means all objectives are allowed for that rule.
+
+`autonomous_families` controls which allowed families may be selected in autonomous apply modes. An empty list is valid and means the rule allows suggestions but no autonomous apply for that situation.
+
+Invalid action family names, invalid objective names, duplicate situation rules, and conflicting workload policy locations produce config diagnostics and validation errors.
+
+Run `stutter daemon policy-lint` to inspect the resolved workload policy matrix. Use `--json` for structured output, and `--preset <name>` to lint a specific daemon preset.
+
+Policy lints are warnings when a rule is intentionally suggestion-only, such as an empty `autonomous_families` list. Lints are errors when policy would make denied, system-wide, high-risk, or medium-risk families autonomous in a mode that cannot safely apply them. Critical workload-policy lint errors fail daemon config loading.
+
+The legacy alias `[[autotune.workload_policy_rules]]` is still accepted, but new config should use `[[autotune.workload_policy.rules]]`.

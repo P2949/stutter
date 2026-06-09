@@ -1,4 +1,12 @@
-use super::*;
+use serde::{Deserialize, Serialize};
+use stutter_core::ids::{Pid, Tid};
+
+use super::community_rules::try_community_rules_classification;
+use crate::{ascii_match::AsciiCase, process_tree::TaskClass as SystemTaskClass};
+
+pub(crate) const SCHED_FIFO: u32 = 1;
+pub(crate) const SCHED_RR: u32 = 2;
+pub(crate) const SCHED_DEADLINE: u32 = 6;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum PriorityBand {
@@ -21,8 +29,8 @@ pub struct Classification {
 
 #[derive(Debug, Clone)]
 pub struct ProcessIdentity<'a> {
-    pub pid: u32,
-    pub ppid: u32,
+    pub pid: Pid,
+    pub ppid: Pid,
     pub comm: &'a str,
     pub cmdline: &'a str,
     pub exe_path: Option<&'a str>,
@@ -32,8 +40,8 @@ pub struct ProcessIdentity<'a> {
 
 #[derive(Debug, Clone)]
 pub struct ThreadIdentity<'a> {
-    pub tid: u32,
-    pub process_pid: u32,
+    pub tid: Tid,
+    pub process_pid: Pid,
     pub process_class: SystemTaskClass,
     pub thread_comm: &'a str,
     pub process_comm: &'a str,
@@ -41,13 +49,12 @@ pub struct ThreadIdentity<'a> {
 }
 
 pub fn classify_process(identity: &ProcessIdentity<'_>) -> Classification {
-    let comm = identity.comm.to_ascii_lowercase();
-    let cmdline = identity.cmdline.to_ascii_lowercase();
-    let exe_path = identity.exe_path.unwrap_or_default().to_ascii_lowercase();
-    let cgroup_path = identity
-        .cgroup_path
-        .unwrap_or_default()
-        .to_ascii_lowercase();
+    let comm = AsciiCase::new(identity.comm);
+    let cmdline = AsciiCase::new(identity.cmdline);
+    let exe_path = identity.exe_path.unwrap_or_default();
+    let exe_path_fold = AsciiCase::new(exe_path);
+    let cgroup_path = identity.cgroup_path.unwrap_or_default();
+    let cgroup_path_fold = AsciiCase::new(cgroup_path);
 
     let mut reasons = Vec::new();
 
@@ -57,7 +64,10 @@ pub fn classify_process(identity: &ProcessIdentity<'_>) -> Classification {
     {
         reasons.push(format!("comm '{}' looks like an IRQ thread", identity.comm));
         (SystemTaskClass::IrqThread, 0.95)
-    } else if identity.ppid == 2 || comm.starts_with("kworker") || comm.starts_with("ksoftirqd") {
+    } else if identity.ppid == Pid::new(2)
+        || comm.starts_with("kworker")
+        || comm.starts_with("ksoftirqd")
+    {
         reasons.push(format!(
             "pid={} ppid={} comm='{}' looks like a kernel thread",
             identity.pid, identity.ppid, identity.comm
@@ -67,8 +77,8 @@ pub fn classify_process(identity: &ProcessIdentity<'_>) -> Classification {
         reasons.push("comm is exactly 'wineserver'".to_owned());
         (SystemTaskClass::WineServer, 0.98)
     } else if comm == "gamescope"
-        || exe_path.contains("/gamescope")
-        || cgroup_path.contains("gamescope")
+        || exe_path_fold.contains("/gamescope")
+        || cgroup_path_fold.contains("gamescope")
     {
         reasons.push("process identity matches gamescope".to_owned());
         (SystemTaskClass::GameScope, 0.95)
@@ -93,9 +103,9 @@ pub fn classify_process(identity: &ProcessIdentity<'_>) -> Classification {
         || comm.contains("chromium")
         || comm.contains("brave")
         || comm.contains("browser")
-        || exe_path.contains("/firefox")
-        || exe_path.contains("/chrome")
-        || exe_path.contains("/chromium")
+        || exe_path_fold.contains("/firefox")
+        || exe_path_fold.contains("/chrome")
+        || exe_path_fold.contains("/chromium")
     {
         reasons.push("process identity matches a browser family".to_owned());
         if cmdline.contains("--type=gpu-process") {
@@ -107,7 +117,7 @@ pub fn classify_process(identity: &ProcessIdentity<'_>) -> Classification {
         } else if cmdline.contains("--type=utility") && cmdline.contains("network") {
             reasons.push("cmdline indicates a browser network utility child".to_owned());
             (SystemTaskClass::BrowserNetwork, 0.85)
-        } else if cgroup_path.contains("background") {
+        } else if cgroup_path_fold.contains("background") {
             reasons.push("cgroup path contains 'background'".to_owned());
             (SystemTaskClass::BrowserBackground, 0.75)
         } else {
@@ -232,16 +242,16 @@ pub fn classify_process(identity: &ProcessIdentity<'_>) -> Classification {
             identity.comm
         ));
         (SystemTaskClass::VirtualMachine, 0.85)
-    } else if identity.pid != 1
-        && !cgroup_path.contains(".service")
-        && !cgroup_path.contains("/system.slice/")
-        && let Some(res) = try_community_rules_classification(&mut reasons, identity, &cgroup_path)
+    } else if identity.pid != Pid::new(1)
+        && !cgroup_path_fold.contains(".service")
+        && !cgroup_path_fold.contains("/system.slice/")
+        && let Some(res) = try_community_rules_classification(&mut reasons, identity, cgroup_path)
     {
         res
-    } else if cgroup_path.contains("steam")
-        || cgroup_path.contains("games")
+    } else if cgroup_path_fold.contains("steam")
+        || cgroup_path_fold.contains("games")
         || cmdline.contains("steamapps")
-        || exe_path.contains("steamapps")
+        || exe_path_fold.contains("steamapps")
     {
         reasons.push("cgroup, cmdline, or exe path suggests a game process".to_owned());
         (SystemTaskClass::Game, 0.75)
@@ -251,9 +261,9 @@ pub fn classify_process(identity: &ProcessIdentity<'_>) -> Classification {
             identity.comm
         ));
         (SystemTaskClass::Unknown, 0.35)
-    } else if identity.pid == 1
-        || cgroup_path.contains(".service")
-        || cgroup_path.contains("/system.slice/")
+    } else if identity.pid == Pid::new(1)
+        || cgroup_path_fold.contains(".service")
+        || cgroup_path_fold.contains("/system.slice/")
     {
         reasons.push("pid/cgroup suggests a generic service".to_owned());
         (SystemTaskClass::Service, 0.6)
@@ -271,8 +281,8 @@ pub fn classify_process(identity: &ProcessIdentity<'_>) -> Classification {
 }
 
 pub fn classify_thread(identity: &ThreadIdentity<'_>) -> Classification {
-    let thread_comm = identity.thread_comm.to_ascii_lowercase();
-    let process_comm = identity.process_comm.to_ascii_lowercase();
+    let thread_comm = AsciiCase::new(identity.thread_comm);
+    let process_comm = AsciiCase::new(identity.process_comm);
     let mut reasons = Vec::new();
 
     let (class, confidence) = if thread_comm.starts_with("irq/")

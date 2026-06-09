@@ -1,0 +1,2 @@
+{"elapsed_ms":100,"drm_card":"card0","render_node":"renderD128","driver":"i915","engine":"bcs0","busy_percent":40.0,"source":"hwmon","confidence":"low"}
+{"elapsed_ms":100,"drm_card":"card1","render_node":"renderD129","driver":"amdgpu","engine":"gfx","busy_percent":55.0,"source":"hwmon","confidence":"low"}

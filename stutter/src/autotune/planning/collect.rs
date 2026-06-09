@@ -1,0 +1,1 @@
+//! Candidate provider collection boundary.

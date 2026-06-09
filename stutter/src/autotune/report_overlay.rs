@@ -6,8 +6,9 @@ use std::{
 use serde::Serialize;
 
 use crate::{
+    actions::ActionId,
     autotune::{
-        experiment::WindowScore,
+        experiment::{ExperimentId, WindowScore},
         history::{
             AutotuneHistoryEvent, ControllerPhase, default_autotune_history_path,
             read_autotune_history_events,
@@ -40,8 +41,8 @@ pub struct AutotuneReportEvent {
     pub phase: String,
     pub decision: String,
     pub candidate_name: Option<String>,
-    pub action_id: Option<String>,
-    pub experiment_id: Option<String>,
+    pub action_id: Option<ActionId>,
+    pub experiment_id: Option<ExperimentId>,
     pub score_delta_percent: Option<f64>,
     pub rollback_performed: bool,
     pub label: String,
@@ -163,11 +164,10 @@ fn report_event_from_history_event(
         .min(u128::from(u64::MAX)) as u64;
     let score_delta_percent =
         score_delta_percent(event.score_before.as_ref(), event.score_after.as_ref());
-    let candidate_name = event
-        .decision
-        .candidate_name
-        .clone()
-        .or_else(|| candidate_name_from_action_id(event.action_id.as_deref()));
+    let candidate_name =
+        event.decision.candidate_name.clone().or_else(|| {
+            candidate_name_from_action_id(event.action_id.as_ref().map(|id| id.as_str()))
+        });
     let label = human_label_for_event(event, candidate_name.as_deref(), score_delta_percent);
 
     AutotuneReportEvent {
@@ -182,7 +182,7 @@ fn report_event_from_history_event(
         score_delta_percent,
         rollback_performed: event.rollback_performed,
         label,
-        reason: event.reason.clone(),
+        reason: event.reason.clone().clone(),
     }
 }
 
@@ -193,7 +193,7 @@ fn human_label_for_event(
 ) -> String {
     let decision = event.decision.decision.as_str();
     let decision_lc = decision.to_ascii_lowercase();
-    let reason_lc = event.reason.to_ascii_lowercase();
+    let reason_lc = event.reason.clone().to_ascii_lowercase();
     let candidate = candidate_name.unwrap_or("candidate");
 
     if reason_lc.contains("baseline") && reason_lc.contains("started") {
@@ -238,11 +238,11 @@ fn human_label_for_event(
     }
 
     if decision_lc.contains("fault") || matches!(event.phase, ControllerPhase::Faulted) {
-        return format!("controller fault: {}", event.reason);
+        return format!("controller fault: {}", event.reason.clone());
     }
 
-    if !event.reason.trim().is_empty() {
-        return event.reason.clone();
+    if !event.reason.clone().trim().is_empty() {
+        return event.reason.clone().clone();
     }
 
     decision.to_owned()
@@ -336,8 +336,9 @@ mod tests {
         autotune::{
             experiment::WindowScore,
             history::{
-                AutotuneDecisionSummary, AutotuneHistoryEvent, AutotuneMode, ControllerPhase,
-                ObservationSummary, SituationKind, append_autotune_history_event,
+                AutotuneDecisionSummary, AutotuneHistoryEvent, AutotuneHistoryEventInput,
+                AutotuneMode, ControllerPhase, ObservationSummary, SituationKind,
+                append_autotune_history_event,
             },
         },
         recorder::{RecordedTime, SessionFile},
@@ -378,7 +379,7 @@ mod tests {
             scored_task_count: 1,
             interval_count: 1,
             scored_samples: 1,
-            score_total: total,
+            diagnostic_raw_score_total: total,
             over_1ms: 0,
             over_2ms: 0,
             over_5ms: 0,
@@ -409,24 +410,27 @@ mod tests {
         decision: &str,
         reason: &str,
     ) -> AutotuneHistoryEvent {
-        let mut event = AutotuneHistoryEvent::new(
-            "controller-1",
+        let mut event = AutotuneHistoryEvent::new(AutotuneHistoryEventInput {
+            controller_id: "controller-1".to_owned(),
             phase,
-            AutotuneMode::ApplyLowRisk,
-            None,
-            SituationKind::GameCpuSchedulerPressure,
-            observation_summary(820),
-            AutotuneDecisionSummary {
+            mode: AutotuneMode::ApplyLowRisk,
+            target: None,
+            situation: SituationKind::GameCpuSchedulerPressure,
+            observation_summary: observation_summary(820),
+            decision: AutotuneDecisionSummary {
                 decision: decision.to_owned(),
                 candidate_name: Some("game-main-suggested".to_owned()),
                 action_kind: Some("cpu_affinity_profile".to_owned()),
+                safety_class: Some(crate::actions::SafetyClass::ReversibleLowRisk),
                 eligible: true,
                 rollback_policy: "rollback-on-exit".to_owned(),
             },
-            reason,
-        )
-        .with_experiment_id("experiment-1")
-        .with_action_id("cpu-affinity-profile:game-main-suggested");
+            reason: reason.to_owned(),
+        })
+        .try_with_experiment_id("experiment-1")
+        .unwrap()
+        .try_with_action_id("cpu-affinity-profile:game-main-suggested")
+        .unwrap();
 
         event.unix_nanos = unix_nanos;
         event
@@ -518,8 +522,8 @@ mod tests {
                 phase: "Applying".to_owned(),
                 decision: "StartExperiment".to_owned(),
                 candidate_name: Some("game-main-suggested".to_owned()),
-                action_id: Some("cpu-affinity-profile:game-main-suggested".to_owned()),
-                experiment_id: Some("experiment-1".to_owned()),
+                action_id: Some("cpu-affinity-profile:game-main-suggested".into()),
+                experiment_id: Some("experiment-1".into()),
                 score_delta_percent: None,
                 rollback_performed: false,
                 label: "applied profile game-main-suggested".to_owned(),

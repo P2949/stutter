@@ -28,10 +28,18 @@ fn render_release_readiness_text(report: &ReleaseReadinessReport) -> String {
     text.push_str(&format!("passed: {}\n", report.passed));
     text.push_str("gates:\n");
     for gate in &report.gates {
+        let status = match (gate.required, gate.passed) {
+            (true, true) => "passed",
+            (true, false) => "failed",
+            (false, true) => "met",
+            (false, false) => "not claimed",
+        };
+
         text.push_str(&format!(
-            "- {}: {} - {}\n",
+            "- {}: {}{} - {}\n",
             gate.code,
-            if gate.passed { "passed" } else { "failed" },
+            status,
+            if gate.required { "" } else { " (advisory)" },
             gate.description
         ));
     }
@@ -60,5 +68,19 @@ mod tests {
         assert!(text.contains("channel: low-risk-stable"));
         assert!(text.contains("soak_tests: failed"));
         assert!(text.contains("changelog_categories: safety"));
+    }
+
+    #[test]
+    fn release_readiness_text_marks_packaging_gates_as_advisory_not_claimed() {
+        let report = evaluate_release_readiness(
+            ReleaseChannel::Experimental,
+            &ReleaseReadinessInputs::default(),
+        );
+
+        let text = render_release_readiness_text(&report);
+
+        assert!(text.contains("production_distro_packaging"));
+        assert!(text.contains("not claimed (advisory)"));
+        assert!(text.contains("separate from source readiness"));
     }
 }

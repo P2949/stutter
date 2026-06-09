@@ -6,9 +6,14 @@ use std::{
 
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
+use stutter_core::ids::EmptyStringIdError;
 
-use super::experiment::WindowScore;
 pub use super::situation::SituationKind;
+use super::{
+    experiment::{ExperimentId, WindowScore},
+    planner::PlannerSummary,
+};
+use crate::actions::{ActionId, SafetyClass};
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ControllerPhase {
@@ -49,7 +54,10 @@ pub struct ObservationSummary {
     pub scored_task_count: usize,
     pub interval_count: usize,
     pub scored_samples: u64,
-    pub score_total: u64,
+    /// Raw diagnostic score total. Kept explicit so status/history JSON is not confused
+    /// with normalized comparison metrics.
+    #[serde(alias = "diagnostic_score_total")]
+    pub diagnostic_raw_score_total: u64,
     pub over_1ms: u64,
     pub over_2ms: u64,
     pub over_5ms: u64,
@@ -64,6 +72,8 @@ pub struct AutotuneDecisionSummary {
     pub decision: String,
     pub candidate_name: Option<String>,
     pub action_kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub safety_class: Option<SafetyClass>,
     pub eligible: bool,
     pub rollback_policy: String,
 }
@@ -79,53 +89,71 @@ pub struct AutotuneHistoryEvent {
     pub situation: SituationKind,
     pub observation_summary: ObservationSummary,
     pub decision: AutotuneDecisionSummary,
-    pub experiment_id: Option<String>,
-    pub action_id: Option<String>,
+    pub experiment_id: Option<ExperimentId>,
+    pub action_id: Option<ActionId>,
     pub score_before: Option<WindowScore>,
     pub score_after: Option<WindowScore>,
     pub rollback_performed: bool,
     pub reason: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub planner: Option<PlannerSummary>,
+}
+
+pub struct AutotuneHistoryEventInput {
+    pub controller_id: String,
+    pub phase: ControllerPhase,
+    pub mode: AutotuneMode,
+    pub target: Option<TargetIdentity>,
+    pub situation: SituationKind,
+    pub observation_summary: ObservationSummary,
+    pub decision: AutotuneDecisionSummary,
+    pub reason: String,
 }
 
 impl AutotuneHistoryEvent {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        controller_id: impl Into<String>,
-        phase: ControllerPhase,
-        mode: AutotuneMode,
-        target: Option<TargetIdentity>,
-        situation: SituationKind,
-        observation_summary: ObservationSummary,
-        decision: AutotuneDecisionSummary,
-        reason: impl Into<String>,
-    ) -> Self {
+    pub fn new(input: AutotuneHistoryEventInput) -> Self {
         Self {
             schema_version: 1,
             unix_nanos: crate::audit::unix_nanos_now(),
-            controller_id: controller_id.into(),
-            phase,
-            mode,
-            target,
-            situation,
-            observation_summary,
-            decision,
+            controller_id: input.controller_id,
+            phase: input.phase,
+            mode: input.mode,
+            target: input.target,
+            situation: input.situation,
+            observation_summary: input.observation_summary,
+            decision: input.decision,
             experiment_id: None,
             action_id: None,
             score_before: None,
             score_after: None,
             rollback_performed: false,
-            reason: reason.into(),
+            reason: input.reason,
+            planner: None,
         }
     }
 
-    pub fn with_experiment_id(mut self, experiment_id: impl Into<String>) -> Self {
-        self.experiment_id = Some(experiment_id.into());
+    pub fn with_experiment_id(mut self, experiment_id: ExperimentId) -> Self {
+        self.experiment_id = Some(experiment_id);
         self
     }
 
-    pub fn with_action_id(mut self, action_id: impl Into<String>) -> Self {
-        self.action_id = Some(action_id.into());
+    pub fn with_action_id(mut self, action_id: ActionId) -> Self {
+        self.action_id = Some(action_id);
         self
+    }
+
+    pub fn try_with_experiment_id(
+        self,
+        experiment_id: impl Into<String>,
+    ) -> Result<Self, EmptyStringIdError> {
+        Ok(self.with_experiment_id(ExperimentId::try_new(experiment_id)?))
+    }
+
+    pub fn try_with_action_id(
+        self,
+        action_id: impl Into<String>,
+    ) -> Result<Self, EmptyStringIdError> {
+        Ok(self.with_action_id(ActionId::try_new(action_id)?))
     }
 
     pub fn with_scores(
@@ -141,6 +169,21 @@ impl AutotuneHistoryEvent {
     pub fn with_rollback_performed(mut self, rollback_performed: bool) -> Self {
         self.rollback_performed = rollback_performed;
         self
+    }
+
+    pub fn with_planner(mut self, planner: Option<PlannerSummary>) -> Self {
+        self.planner = planner;
+        self
+    }
+
+    pub fn validate_identity_strings(&self) -> Result<(), EmptyStringIdError> {
+        if let Some(experiment_id) = &self.experiment_id {
+            experiment_id.validate_non_empty()?;
+        }
+        if let Some(action_id) = &self.action_id {
+            action_id.validate_non_empty()?;
+        }
+        Ok(())
     }
 }
 
@@ -215,6 +258,12 @@ pub fn read_autotune_history_events(path: &Path) -> anyhow::Result<Vec<AutotuneH
         let event = serde_json::from_str::<AutotuneHistoryEvent>(&line).with_context(|| {
             format!("failed to parse autotune history event {}", path.display())
         })?;
+        event.validate_identity_strings().with_context(|| {
+            format!(
+                "invalid autotune history identity strings in {}",
+                path.display()
+            )
+        })?;
         events.push(event);
     }
 
@@ -234,7 +283,7 @@ pub fn observation_summary_from_window_score(
         scored_task_count: score.scored_task_count,
         interval_count: score.interval_count,
         scored_samples: score.scored_samples,
-        score_total: score.score.total,
+        diagnostic_raw_score_total: score.score.total,
         over_1ms: score.score.over_1ms,
         over_2ms: score.score.over_2ms,
         over_5ms: score.score.over_5ms,
@@ -296,6 +345,7 @@ mod tests {
             decision: "KeepCurrent".to_owned(),
             candidate_name: Some("game-main".to_owned()),
             action_kind: Some("cpu_affinity_profile".to_owned()),
+            safety_class: Some(SafetyClass::ReversibleLowRisk),
             eligible: true,
             rollback_policy: "rollback-on-exit".to_owned(),
         }
@@ -315,12 +365,16 @@ mod tests {
 
         let summary = observation_summary_from_window_score(true, 31, 0, "High", &score);
 
+        let json = serde_json::to_string(&summary).unwrap();
+        assert!(json.contains("\"diagnostic_raw_score_total\":143"));
+        assert!(!json.contains("\"diagnostic_score_total\""));
+
         assert!(summary.target_present);
         assert_eq!(summary.active_target_count, 31);
         assert_eq!(summary.scored_task_count, 2);
         assert_eq!(summary.interval_count, 10);
         assert_eq!(summary.scored_samples, 100);
-        assert_eq!(summary.score_total, 143);
+        assert_eq!(summary.diagnostic_raw_score_total, 143);
         assert_eq!(summary.over_1ms, 3);
         assert_eq!(summary.over_2ms, 2);
         assert_eq!(summary.over_5ms, 1);
@@ -331,23 +385,48 @@ mod tests {
     }
 
     #[test]
+    fn observation_summary_accepts_legacy_diagnostic_score_total_name() {
+        let json = r#"{
+            "target_present": true,
+            "active_target_count": 31,
+            "scored_task_count": 2,
+            "interval_count": 10,
+            "scored_samples": 100,
+            "diagnostic_score_total": 143,
+            "over_1ms": 3,
+            "over_2ms": 2,
+            "over_5ms": 1,
+            "frame_p99_ms": 12.0,
+            "frame_max_ms": 20.0,
+            "drop_counter_total": 0,
+            "data_quality": "High"
+        }"#;
+
+        let parsed: ObservationSummary = serde_json::from_str(json).unwrap();
+
+        assert_eq!(parsed.diagnostic_raw_score_total, 143);
+    }
+
+    #[test]
     fn history_event_round_trips_as_jsonl() {
         let dir = temp_dir("round-trip");
         let path = dir.join("history.jsonl");
         let before = window_score(1_000);
         let after = window_score(850);
-        let event = AutotuneHistoryEvent::new(
-            "controller-1",
-            ControllerPhase::Cooldown,
-            AutotuneMode::ApplyLowRisk,
-            Some(target()),
-            SituationKind::GameCpuSchedulerPressure,
-            observation_summary_from_window_score(true, 31, 0, "High", &after),
-            decision(),
-            "candidate improved by 15.00%; kept as current active profile",
-        )
-        .with_experiment_id("experiment-1")
-        .with_action_id("cpu-affinity-profile:game-main")
+        let event = AutotuneHistoryEvent::new(AutotuneHistoryEventInput {
+            controller_id: "controller-1".to_owned(),
+            phase: ControllerPhase::Cooldown,
+            mode: AutotuneMode::ApplyLowRisk,
+            target: Some(target()),
+            situation: SituationKind::GameCpuSchedulerPressure,
+            observation_summary: observation_summary_from_window_score(true, 31, 0, "High", &after),
+            decision: decision(),
+            reason: "candidate improved by 15.00%; kept as current active profile".to_owned(),
+        })
+        .try_with_experiment_id("experiment-1")
+        .unwrap()
+        .try_with_action_id("cpu-affinity-profile:game-main")
+        .unwrap()
         .with_scores(Some(before), Some(after))
         .with_rollback_performed(false);
 
@@ -364,10 +443,17 @@ mod tests {
             events[0].target.as_ref().map(|target| target.root_pid),
             Some(1234)
         );
-        assert_eq!(events[0].experiment_id.as_deref(), Some("experiment-1"));
         assert_eq!(
-            events[0].action_id.as_deref(),
+            events[0].experiment_id.as_ref().map(|id| id.as_str()),
+            Some("experiment-1")
+        );
+        assert_eq!(
+            events[0].action_id.as_ref().map(|id| id.as_str()),
             Some("cpu-affinity-profile:game-main")
+        );
+        assert_eq!(
+            events[0].decision.safety_class,
+            Some(SafetyClass::ReversibleLowRisk)
         );
         assert_eq!(
             events[0]
@@ -414,22 +500,29 @@ mod tests {
         ];
 
         for situation in variants {
-            let event = AutotuneHistoryEvent::new(
-                "controller-1",
-                ControllerPhase::Observing,
-                AutotuneMode::Observe,
-                None,
+            let event = AutotuneHistoryEvent::new(AutotuneHistoryEventInput {
+                controller_id: "controller-1".to_owned(),
+                phase: ControllerPhase::Observing,
+                mode: AutotuneMode::Observe,
+                target: None,
                 situation,
-                observation_summary_from_window_score(true, 1, 0, "High", &window_score(143)),
-                AutotuneDecisionSummary {
+                observation_summary: observation_summary_from_window_score(
+                    true,
+                    1,
+                    0,
+                    "High",
+                    &window_score(143),
+                ),
+                decision: AutotuneDecisionSummary {
                     decision: "Noop".to_owned(),
                     candidate_name: None,
                     action_kind: None,
+                    safety_class: None,
                     eligible: false,
                     rollback_policy: "none".to_owned(),
                 },
-                "observe mode",
-            );
+                reason: "observe mode".to_owned(),
+            });
 
             let json = serde_json::to_string(&event).unwrap();
             let parsed: AutotuneHistoryEvent = serde_json::from_str(&json).unwrap();
@@ -440,22 +533,29 @@ mod tests {
 
     #[test]
     fn browser_focused_does_not_serialize_as_compile_load() {
-        let event = AutotuneHistoryEvent::new(
-            "controller-1",
-            ControllerPhase::Observing,
-            AutotuneMode::Observe,
-            None,
-            SituationKind::BrowserFocused,
-            observation_summary_from_window_score(true, 1, 0, "High", &window_score(143)),
-            AutotuneDecisionSummary {
+        let event = AutotuneHistoryEvent::new(AutotuneHistoryEventInput {
+            controller_id: "controller-1".to_owned(),
+            phase: ControllerPhase::Observing,
+            mode: AutotuneMode::Observe,
+            target: None,
+            situation: SituationKind::BrowserFocused,
+            observation_summary: observation_summary_from_window_score(
+                true,
+                1,
+                0,
+                "High",
+                &window_score(143),
+            ),
+            decision: AutotuneDecisionSummary {
                 decision: "Noop".to_owned(),
                 candidate_name: None,
                 action_kind: None,
+                safety_class: None,
                 eligible: false,
                 rollback_policy: "none".to_owned(),
             },
-            "observe mode",
-        );
+            reason: "observe mode".to_owned(),
+        });
 
         let json = serde_json::to_string(&event).unwrap();
 
@@ -467,22 +567,29 @@ mod tests {
     fn history_reader_ignores_blank_lines() {
         let dir = temp_dir("blank-lines");
         let path = dir.join("history.jsonl");
-        let event = AutotuneHistoryEvent::new(
-            "controller-1",
-            ControllerPhase::Observing,
-            AutotuneMode::Observe,
-            None,
-            SituationKind::Unknown,
-            observation_summary_from_window_score(true, 1, 0, "High", &window_score(143)),
-            AutotuneDecisionSummary {
+        let event = AutotuneHistoryEvent::new(AutotuneHistoryEventInput {
+            controller_id: "controller-1".to_owned(),
+            phase: ControllerPhase::Observing,
+            mode: AutotuneMode::Observe,
+            target: None,
+            situation: SituationKind::Unknown,
+            observation_summary: observation_summary_from_window_score(
+                true,
+                1,
+                0,
+                "High",
+                &window_score(143),
+            ),
+            decision: AutotuneDecisionSummary {
                 decision: "Noop".to_owned(),
                 candidate_name: None,
                 action_kind: None,
+                safety_class: None,
                 eligible: false,
                 rollback_policy: "none".to_owned(),
             },
-            "observe mode",
-        );
+            reason: "observe mode".to_owned(),
+        });
 
         fs::write(&path, "\n").unwrap();
         append_autotune_history_event(&path, &event).unwrap();

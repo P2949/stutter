@@ -8,6 +8,8 @@ use std::{
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
+use crate::actions::ActionId;
+
 #[derive(Debug, Clone)]
 pub struct AuditCommandInput {
     pub path: Option<PathBuf>,
@@ -20,7 +22,7 @@ pub struct AuditEvent {
     pub schema_version: u32,
     pub unix_nanos: u128,
     pub command: String,
-    pub action_id: Option<String>,
+    pub action_id: Option<ActionId>,
     pub safety_class: Option<crate::actions::SafetyClass>,
     pub dry_run: bool,
     pub success: bool,
@@ -34,6 +36,13 @@ pub struct AuditEvent {
 }
 
 impl AuditEvent {
+    pub fn validate_identity_strings(&self) -> Result<(), stutter_core::ids::EmptyStringIdError> {
+        if let Some(action_id) = &self.action_id {
+            action_id.validate_non_empty()?;
+        }
+        Ok(())
+    }
+
     #[cfg(test)]
     pub fn new(command: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
@@ -97,10 +106,12 @@ pub fn read_audit_tail(path: &Path, tail: usize) -> anyhow::Result<Vec<AuditEven
         if line.trim().is_empty() {
             continue;
         }
-        events.push(
-            serde_json::from_str::<AuditEvent>(&line)
-                .with_context(|| format!("failed to parse audit log {}", path.display()))?,
-        );
+        let event = serde_json::from_str::<AuditEvent>(&line)
+            .with_context(|| format!("failed to parse audit log {}", path.display()))?;
+        event
+            .validate_identity_strings()
+            .with_context(|| format!("invalid audit event action_id in {}", path.display()))?;
+        events.push(event);
     }
     if events.len() > tail {
         Ok(events.split_off(events.len() - tail))
@@ -134,7 +145,7 @@ pub fn render_audit_events(events: &[AuditEvent]) -> String {
             event.success,
             event.dry_run,
             event.affected_tasks,
-            event.action_id.as_deref().unwrap_or("-"),
+            event.action_id.as_ref().map(ActionId::as_str).unwrap_or("-"),
             event
                 .action_phase
                 .map(crate::actions::ActionPhase::as_str)
@@ -190,6 +201,48 @@ mod tests {
         assert_eq!(lines.len(), 1);
         let parsed: AuditEvent = serde_json::from_str(lines[0]).unwrap();
         assert_eq!(parsed.message, "one");
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn audit_event_typed_action_id_keeps_json_shape() {
+        let mut event = event("typed");
+        event.action_id = Some(ActionId::new("profile-restore"));
+
+        let value = serde_json::to_value(&event).unwrap();
+
+        assert_eq!(value["action_id"], "profile-restore");
+    }
+
+    #[test]
+    fn read_audit_tail_rejects_empty_action_id() {
+        let dir = temp_dir("empty-action-id");
+        let path = dir.join("actions.jsonl");
+        let json = serde_json::json!({
+            "schema_version": 1,
+            "unix_nanos": 1,
+            "command": "test",
+            "action_id": "",
+            "safety_class": null,
+            "dry_run": false,
+            "success": true,
+            "affected_tasks": 0,
+            "restore_path": null,
+            "message": "bad"
+        });
+        fs::write(
+            &path,
+            format!("{}\n", serde_json::to_string(&json).unwrap()),
+        )
+        .unwrap();
+
+        let err = read_audit_tail(&path, 10).expect_err("empty action_id should be rejected");
+
+        assert!(
+            format!("{err:#}").contains("ActionId cannot be empty"),
+            "unexpected error: {err:#}"
+        );
+
         fs::remove_dir_all(dir).ok();
     }
 

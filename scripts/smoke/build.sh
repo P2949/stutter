@@ -4,19 +4,19 @@ set -euo pipefail
 # Navigate to repo root
 cd "$(dirname "$0")/../.."
 
-TOOLCHAIN="${RUSTUP_TOOLCHAIN:-nightly}"
+TOOLCHAIN="${RUSTUP_TOOLCHAIN:-nightly-2026-06-06}"
 
 echo "--- STAGE: cargo fmt ---"
-RUSTUP_TOOLCHAIN="$TOOLCHAIN" cargo fmt --check
+RUSTUP_TOOLCHAIN="$TOOLCHAIN" cargo fmt --all --check
 
 echo "--- STAGE: cargo build ---"
-RUSTUP_TOOLCHAIN="$TOOLCHAIN" cargo build
+RUSTUP_TOOLCHAIN="$TOOLCHAIN" cargo build --all-targets
 
 echo "--- STAGE: cargo clippy ---"
 RUSTUP_TOOLCHAIN="$TOOLCHAIN" cargo clippy --all-targets -- -D warnings
 
 echo "--- STAGE: cargo test ---"
-RUSTUP_TOOLCHAIN="$TOOLCHAIN" cargo test
+RUSTUP_TOOLCHAIN="$TOOLCHAIN" cargo test --all-targets
 
 echo "--- STAGE: offline workflow smoke scripts are separate CI steps ---"
 echo "scripts/smoke/offline_recommendation.sh"

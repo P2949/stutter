@@ -1,0 +1,1454 @@
+{
+  "schema_version": 1,
+  "tree_pid": 909436,
+  "scenario_name": "kcd1-rattay-route-1",
+  "scenario_hash": "2c484985116c8ff0",
+  "workload_label": "kcd1-proton-ge-10-34",
+  "route_label": "rattay-fixed-route-1",
+  "profiles_path": "reports/kcd1-case-study/profiles/kcd1-affinity-ab.toml",
+  "runs": 5,
+  "epoch_seconds": 270,
+  "warmup_seconds": 90,
+  "restore_policy": "restore-after-each",
+  "best_profile": "baseline-online",
+  "candidate_order": [
+    {
+      "iteration": 1,
+      "profiles": [
+        "baseline-online",
+        "kcd1-game-on-1-5-7-11-gamescope-on-0-6"
+      ]
+    },
+    {
+      "iteration": 2,
+      "profiles": [
+        "baseline-online",
+        "kcd1-game-on-1-5-7-11-gamescope-on-0-6"
+      ]
+    },
+    {
+      "iteration": 3,
+      "profiles": [
+        "baseline-online",
+        "kcd1-game-on-1-5-7-11-gamescope-on-0-6"
+      ]
+    },
+    {
+      "iteration": 4,
+      "profiles": [
+        "baseline-online",
+        "kcd1-game-on-1-5-7-11-gamescope-on-0-6"
+      ]
+    },
+    {
+      "iteration": 5,
+      "profiles": [
+        "baseline-online",
+        "kcd1-game-on-1-5-7-11-gamescope-on-0-6"
+      ]
+    }
+  ],
+  "profile_stats": [
+    {
+      "profile": "baseline-online",
+      "valid_runs": 5,
+      "invalid_runs": 0,
+      "median_diagnostic_raw_score_total": 21533,
+      "iqr_diagnostic_raw_score_total": 6829,
+      "worst_diagnostic_raw_score_total": 32994,
+      "mean_diagnostic_raw_score_total": 23431.4,
+      "stddev_diagnostic_raw_score_total": 6419.321404946164,
+      "median_over_5ms": 0,
+      "iqr_over_5ms": 0,
+      "mean_over_5ms": 0.2,
+      "stddev_over_5ms": 0.447213595499958,
+      "median_frame_p99_us": 38337,
+      "iqr_frame_p99_us": 1527,
+      "mean_frame_p99_us": 38559.0,
+      "stddev_frame_p99_us": 4059.950184423449
+    },
+    {
+      "profile": "kcd1-game-on-1-5-7-11-gamescope-on-0-6",
+      "valid_runs": 5,
+      "invalid_runs": 0,
+      "median_diagnostic_raw_score_total": 38806,
+      "iqr_diagnostic_raw_score_total": 10279,
+      "worst_diagnostic_raw_score_total": 98461,
+      "mean_diagnostic_raw_score_total": 49746.0,
+      "stddev_diagnostic_raw_score_total": 27660.281370586235,
+      "median_over_5ms": 0,
+      "iqr_over_5ms": 0,
+      "mean_over_5ms": 0.6,
+      "stddev_over_5ms": 1.3416407864998738,
+      "median_frame_p99_us": 37798,
+      "iqr_frame_p99_us": 2400,
+      "mean_frame_p99_us": 39222.2,
+      "stddev_frame_p99_us": 6080.9097345709715
+    }
+  ],
+  "ranking_confidence": "Low",
+  "ranking_notes": [
+    "best profile score IQR is non-zero",
+    "candidate order was not counterbalanced; ranking confidence lowered"
+  ],
+  "comparability_warnings": [
+    {
+      "profile": null,
+      "kind": "candidate-order-not-counterbalanced",
+      "message": "two-profile tuning run used the same candidate order for every iteration; profile effect may be confounded with order effect",
+      "severity": "Warning"
+    },
+    {
+      "profile": "baseline-online",
+      "kind": "drop-counters-nonzero",
+      "message": "candidate had non-zero drop counters (max=403467)",
+      "severity": "Warning"
+    },
+    {
+      "profile": "kcd1-game-on-1-5-7-11-gamescope-on-0-6",
+      "kind": "drop-counters-nonzero",
+      "message": "candidate had non-zero drop counters (max=428919)",
+      "severity": "Warning"
+    }
+  ],
+  "candidates": [
+    {
+      "profile": "baseline-online",
+      "iteration": 1,
+      "run_dir": "reports/kcd1-case-study/tune/kcd1-affinity-02/iter-001-baseline-online",
+      "applied_tasks": 4,
+      "warmup_seconds": 90,
+      "measure_seconds": 180,
+      "interval_count": 8835,
+      "samples": 8449839,
+      "scored_samples": 714121,
+      "diagnostic_raw_score_total": 19579,
+      "over_1ms": 1042,
+      "over_2ms": 92,
+      "over_5ms": 0,
+      "max_latency_ns": 4152098,
+      "frame_count": 7276,
+      "frame_max_ms": 90.9799,
+      "frame_p99_ms": 37.9018,
+      "frame_over_16ms": 7237,
+      "frame_over_33ms": 433,
+      "frame_over_50ms": 8,
+      "coverage": {
+        "unique_tracked_tasks": 92,
+        "unique_scored_tasks": 9,
+        "active_target_min": 43,
+        "active_target_max": 56,
+        "removed_task_count": 1,
+        "drop_counter_total": 391951,
+        "scored_identity_counts": [
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "wine_nsi_notifi",
+              "process_starttime_ticks": 2805712,
+              "task_starttime_ticks": 2805753,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805712,
+              "task_starttime_ticks": 2805713,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 2
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805754,
+              "task_starttime_ticks": 2805760,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805754,
+              "task_starttime_ticks": 2805777,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805754,
+              "task_starttime_ticks": 2805779,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805754,
+              "task_starttime_ticks": 2805806,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "WineServer",
+              "process_comm": "wineserver",
+              "comm": "wineserver",
+              "process_starttime_ticks": 2805706,
+              "task_starttime_ticks": 2805706,
+              "exe_dev": 66307,
+              "exe_ino": 2976229820
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "GameScope",
+              "process_comm": "gamescope-wl",
+              "comm": "gamescope",
+              "process_starttime_ticks": 2805609,
+              "task_starttime_ticks": 2805611,
+              "exe_dev": 66307,
+              "exe_ino": 2155140795
+            },
+            "count": 1
+          }
+        ]
+      },
+      "valid": true
+    },
+    {
+      "profile": "kcd1-game-on-1-5-7-11-gamescope-on-0-6",
+      "iteration": 1,
+      "run_dir": "reports/kcd1-case-study/tune/kcd1-affinity-02/iter-001-kcd1-game-on-1-5-7-11-gamescope-on-0-6",
+      "applied_tasks": 117,
+      "warmup_seconds": 90,
+      "measure_seconds": 180,
+      "interval_count": 8829,
+      "samples": 7923132,
+      "scored_samples": 695722,
+      "diagnostic_raw_score_total": 32052,
+      "over_1ms": 3311,
+      "over_2ms": 468,
+      "over_5ms": 0,
+      "max_latency_ns": 4913879,
+      "frame_count": 7205,
+      "frame_max_ms": 78.9288,
+      "frame_p99_ms": 39.9627,
+      "frame_over_16ms": 7101,
+      "frame_over_33ms": 584,
+      "frame_over_50ms": 6,
+      "coverage": {
+        "unique_tracked_tasks": 67,
+        "unique_scored_tasks": 8,
+        "active_target_min": 43,
+        "active_target_max": 55,
+        "removed_task_count": 0,
+        "drop_counter_total": 355547,
+        "scored_identity_counts": [
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "wine_nsi_notifi",
+              "process_starttime_ticks": 2805712,
+              "task_starttime_ticks": 2805753,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805712,
+              "task_starttime_ticks": 2805713,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805754,
+              "task_starttime_ticks": 2805760,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805754,
+              "task_starttime_ticks": 2805777,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805754,
+              "task_starttime_ticks": 2805779,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805754,
+              "task_starttime_ticks": 2805806,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "WineServer",
+              "process_comm": "wineserver",
+              "comm": "wineserver",
+              "process_starttime_ticks": 2805706,
+              "task_starttime_ticks": 2805706,
+              "exe_dev": 66307,
+              "exe_ino": 2976229820
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "GameScope",
+              "process_comm": "gamescope-wl",
+              "comm": "gamescope",
+              "process_starttime_ticks": 2805609,
+              "task_starttime_ticks": 2805611,
+              "exe_dev": 66307,
+              "exe_ino": 2155140795
+            },
+            "count": 1
+          }
+        ]
+      },
+      "valid": true
+    },
+    {
+      "profile": "baseline-online",
+      "iteration": 2,
+      "run_dir": "reports/kcd1-case-study/tune/kcd1-affinity-02/iter-002-baseline-online",
+      "applied_tasks": 4,
+      "warmup_seconds": 90,
+      "measure_seconds": 180,
+      "interval_count": 8828,
+      "samples": 8478602,
+      "scored_samples": 716986,
+      "diagnostic_raw_score_total": 21533,
+      "over_1ms": 1037,
+      "over_2ms": 110,
+      "over_5ms": 0,
+      "max_latency_ns": 4065029,
+      "frame_count": 7412,
+      "frame_max_ms": 86.4244,
+      "frame_p99_ms": 38.3377,
+      "frame_over_16ms": 6796,
+      "frame_over_33ms": 525,
+      "frame_over_50ms": 10,
+      "coverage": {
+        "unique_tracked_tasks": 61,
+        "unique_scored_tasks": 9,
+        "active_target_min": 43,
+        "active_target_max": 54,
+        "removed_task_count": 0,
+        "drop_counter_total": 369832,
+        "scored_identity_counts": [
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "wine_nsi_notifi",
+              "process_starttime_ticks": 2805712,
+              "task_starttime_ticks": 2805753,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805712,
+              "task_starttime_ticks": 2805713,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 2
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805754,
+              "task_starttime_ticks": 2805760,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805754,
+              "task_starttime_ticks": 2805777,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805754,
+              "task_starttime_ticks": 2805779,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805754,
+              "task_starttime_ticks": 2805806,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "WineServer",
+              "process_comm": "wineserver",
+              "comm": "wineserver",
+              "process_starttime_ticks": 2805706,
+              "task_starttime_ticks": 2805706,
+              "exe_dev": 66307,
+              "exe_ino": 2976229820
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "GameScope",
+              "process_comm": "gamescope-wl",
+              "comm": "gamescope",
+              "process_starttime_ticks": 2805609,
+              "task_starttime_ticks": 2805611,
+              "exe_dev": 66307,
+              "exe_ino": 2155140795
+            },
+            "count": 1
+          }
+        ]
+      },
+      "valid": true
+    },
+    {
+      "profile": "kcd1-game-on-1-5-7-11-gamescope-on-0-6",
+      "iteration": 2,
+      "run_dir": "reports/kcd1-case-study/tune/kcd1-affinity-02/iter-002-kcd1-game-on-1-5-7-11-gamescope-on-0-6",
+      "applied_tasks": 117,
+      "warmup_seconds": 90,
+      "measure_seconds": 180,
+      "interval_count": 8876,
+      "samples": 8136643,
+      "scored_samples": 716477,
+      "diagnostic_raw_score_total": 34566,
+      "over_1ms": 4000,
+      "over_2ms": 726,
+      "over_5ms": 3,
+      "max_latency_ns": 5857486,
+      "frame_count": 7721,
+      "frame_max_ms": 57.4356,
+      "frame_p99_ms": 37.7985,
+      "frame_over_16ms": 6546,
+      "frame_over_33ms": 445,
+      "frame_over_50ms": 3,
+      "coverage": {
+        "unique_tracked_tasks": 65,
+        "unique_scored_tasks": 8,
+        "active_target_min": 43,
+        "active_target_max": 55,
+        "removed_task_count": 0,
+        "drop_counter_total": 368184,
+        "scored_identity_counts": [
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "wine_nsi_notifi",
+              "process_starttime_ticks": 2805712,
+              "task_starttime_ticks": 2805753,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805712,
+              "task_starttime_ticks": 2805713,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805754,
+              "task_starttime_ticks": 2805760,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805754,
+              "task_starttime_ticks": 2805777,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805754,
+              "task_starttime_ticks": 2805779,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805754,
+              "task_starttime_ticks": 2805806,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "WineServer",
+              "process_comm": "wineserver",
+              "comm": "wineserver",
+              "process_starttime_ticks": 2805706,
+              "task_starttime_ticks": 2805706,
+              "exe_dev": 66307,
+              "exe_ino": 2976229820
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "GameScope",
+              "process_comm": "gamescope-wl",
+              "comm": "gamescope",
+              "process_starttime_ticks": 2805609,
+              "task_starttime_ticks": 2805611,
+              "exe_dev": 66307,
+              "exe_ino": 2155140795
+            },
+            "count": 1
+          }
+        ]
+      },
+      "valid": true
+    },
+    {
+      "profile": "baseline-online",
+      "iteration": 3,
+      "run_dir": "reports/kcd1-case-study/tune/kcd1-affinity-02/iter-003-baseline-online",
+      "applied_tasks": 4,
+      "warmup_seconds": 90,
+      "measure_seconds": 180,
+      "interval_count": 8785,
+      "samples": 8779406,
+      "scored_samples": 707538,
+      "diagnostic_raw_score_total": 16643,
+      "over_1ms": 2319,
+      "over_2ms": 353,
+      "over_5ms": 0,
+      "max_latency_ns": 4885308,
+      "frame_count": 8810,
+      "frame_max_ms": 65.5608,
+      "frame_p99_ms": 32.8773,
+      "frame_over_16ms": 5644,
+      "frame_over_33ms": 66,
+      "frame_over_50ms": 3,
+      "coverage": {
+        "unique_tracked_tasks": 60,
+        "unique_scored_tasks": 8,
+        "active_target_min": 43,
+        "active_target_max": 55,
+        "removed_task_count": 0,
+        "drop_counter_total": 394123,
+        "scored_identity_counts": [
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "wine_nsi_notifi",
+              "process_starttime_ticks": 2805712,
+              "task_starttime_ticks": 2805753,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805712,
+              "task_starttime_ticks": 2805713,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805754,
+              "task_starttime_ticks": 2805760,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805754,
+              "task_starttime_ticks": 2805777,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805754,
+              "task_starttime_ticks": 2805779,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805754,
+              "task_starttime_ticks": 2805806,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "WineServer",
+              "process_comm": "wineserver",
+              "comm": "wineserver",
+              "process_starttime_ticks": 2805706,
+              "task_starttime_ticks": 2805706,
+              "exe_dev": 66307,
+              "exe_ino": 2976229820
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "GameScope",
+              "process_comm": "gamescope-wl",
+              "comm": "gamescope",
+              "process_starttime_ticks": 2805609,
+              "task_starttime_ticks": 2805611,
+              "exe_dev": 66307,
+              "exe_ino": 2155140795
+            },
+            "count": 1
+          }
+        ]
+      },
+      "valid": true
+    },
+    {
+      "profile": "kcd1-game-on-1-5-7-11-gamescope-on-0-6",
+      "iteration": 3,
+      "run_dir": "reports/kcd1-case-study/tune/kcd1-affinity-02/iter-003-kcd1-game-on-1-5-7-11-gamescope-on-0-6",
+      "applied_tasks": 117,
+      "warmup_seconds": 90,
+      "measure_seconds": 180,
+      "interval_count": 8717,
+      "samples": 10576954,
+      "scored_samples": 700684,
+      "diagnostic_raw_score_total": 44845,
+      "over_1ms": 5355,
+      "over_2ms": 1254,
+      "over_5ms": 0,
+      "max_latency_ns": 4477725,
+      "frame_count": 7857,
+      "frame_max_ms": 85.5847,
+      "frame_p99_ms": 37.5622,
+      "frame_over_16ms": 6970,
+      "frame_over_33ms": 332,
+      "frame_over_50ms": 8,
+      "coverage": {
+        "unique_tracked_tasks": 61,
+        "unique_scored_tasks": 8,
+        "active_target_min": 43,
+        "active_target_max": 56,
+        "removed_task_count": 0,
+        "drop_counter_total": 387044,
+        "scored_identity_counts": [
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "wine_nsi_notifi",
+              "process_starttime_ticks": 2805712,
+              "task_starttime_ticks": 2805753,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805712,
+              "task_starttime_ticks": 2805713,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805754,
+              "task_starttime_ticks": 2805760,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805754,
+              "task_starttime_ticks": 2805777,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805754,
+              "task_starttime_ticks": 2805779,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805754,
+              "task_starttime_ticks": 2805806,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "WineServer",
+              "process_comm": "wineserver",
+              "comm": "wineserver",
+              "process_starttime_ticks": 2805706,
+              "task_starttime_ticks": 2805706,
+              "exe_dev": 66307,
+              "exe_ino": 2976229820
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "GameScope",
+              "process_comm": "gamescope-wl",
+              "comm": "gamescope",
+              "process_starttime_ticks": 2805609,
+              "task_starttime_ticks": 2805611,
+              "exe_dev": 66307,
+              "exe_ino": 2155140795
+            },
+            "count": 1
+          }
+        ]
+      },
+      "valid": true
+    },
+    {
+      "profile": "baseline-online",
+      "iteration": 4,
+      "run_dir": "reports/kcd1-case-study/tune/kcd1-affinity-02/iter-004-baseline-online",
+      "applied_tasks": 4,
+      "warmup_seconds": 90,
+      "measure_seconds": 180,
+      "interval_count": 8770,
+      "samples": 10959291,
+      "scored_samples": 694232,
+      "diagnostic_raw_score_total": 26408,
+      "over_1ms": 2675,
+      "over_2ms": 383,
+      "over_5ms": 0,
+      "max_latency_ns": 4152319,
+      "frame_count": 7413,
+      "frame_max_ms": 76.8152,
+      "frame_p99_ms": 39.4281,
+      "frame_over_16ms": 7173,
+      "frame_over_33ms": 410,
+      "frame_over_50ms": 7,
+      "coverage": {
+        "unique_tracked_tasks": 61,
+        "unique_scored_tasks": 8,
+        "active_target_min": 43,
+        "active_target_max": 56,
+        "removed_task_count": 0,
+        "drop_counter_total": 403467,
+        "scored_identity_counts": [
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "wine_nsi_notifi",
+              "process_starttime_ticks": 2805712,
+              "task_starttime_ticks": 2805753,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805712,
+              "task_starttime_ticks": 2805713,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805754,
+              "task_starttime_ticks": 2805760,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805754,
+              "task_starttime_ticks": 2805777,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805754,
+              "task_starttime_ticks": 2805779,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805754,
+              "task_starttime_ticks": 2805806,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "WineServer",
+              "process_comm": "wineserver",
+              "comm": "wineserver",
+              "process_starttime_ticks": 2805706,
+              "task_starttime_ticks": 2805706,
+              "exe_dev": 66307,
+              "exe_ino": 2976229820
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "GameScope",
+              "process_comm": "gamescope-wl",
+              "comm": "gamescope",
+              "process_starttime_ticks": 2805609,
+              "task_starttime_ticks": 2805611,
+              "exe_dev": 66307,
+              "exe_ino": 2155140795
+            },
+            "count": 1
+          }
+        ]
+      },
+      "valid": true
+    },
+    {
+      "profile": "kcd1-game-on-1-5-7-11-gamescope-on-0-6",
+      "iteration": 4,
+      "run_dir": "reports/kcd1-case-study/tune/kcd1-affinity-02/iter-004-kcd1-game-on-1-5-7-11-gamescope-on-0-6",
+      "applied_tasks": 117,
+      "warmup_seconds": 90,
+      "measure_seconds": 180,
+      "interval_count": 8874,
+      "samples": 7368728,
+      "scored_samples": 710991,
+      "diagnostic_raw_score_total": 38806,
+      "over_1ms": 6054,
+      "over_2ms": 1257,
+      "over_5ms": 0,
+      "max_latency_ns": 4810391,
+      "frame_count": 9428,
+      "frame_max_ms": 66.625,
+      "frame_p99_ms": 32.0332,
+      "frame_over_16ms": 5992,
+      "frame_over_33ms": 66,
+      "frame_over_50ms": 3,
+      "coverage": {
+        "unique_tracked_tasks": 85,
+        "unique_scored_tasks": 10,
+        "active_target_min": 43,
+        "active_target_max": 67,
+        "removed_task_count": 0,
+        "drop_counter_total": 353134,
+        "scored_identity_counts": [
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "steam.exe",
+              "comm": "steam.exe",
+              "process_starttime_ticks": 2805706,
+              "task_starttime_ticks": 2805837,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "wine_nsi_notifi",
+              "process_starttime_ticks": 2805712,
+              "task_starttime_ticks": 2805753,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "wine_sechost_se",
+              "process_starttime_ticks": 2805754,
+              "task_starttime_ticks": 2805754,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805712,
+              "task_starttime_ticks": 2805713,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805754,
+              "task_starttime_ticks": 2805760,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805754,
+              "task_starttime_ticks": 2805777,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805754,
+              "task_starttime_ticks": 2805779,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805754,
+              "task_starttime_ticks": 2805806,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "WineServer",
+              "process_comm": "wineserver",
+              "comm": "wineserver",
+              "process_starttime_ticks": 2805706,
+              "task_starttime_ticks": 2805706,
+              "exe_dev": 66307,
+              "exe_ino": 2976229820
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "GameScope",
+              "process_comm": "gamescope-wl",
+              "comm": "gamescope",
+              "process_starttime_ticks": 2805609,
+              "task_starttime_ticks": 2805611,
+              "exe_dev": 66307,
+              "exe_ino": 2155140795
+            },
+            "count": 1
+          }
+        ]
+      },
+      "valid": true
+    },
+    {
+      "profile": "baseline-online",
+      "iteration": 5,
+      "run_dir": "reports/kcd1-case-study/tune/kcd1-affinity-02/iter-005-baseline-online",
+      "applied_tasks": 4,
+      "warmup_seconds": 90,
+      "measure_seconds": 180,
+      "interval_count": 9074,
+      "samples": 7206501,
+      "scored_samples": 717183,
+      "diagnostic_raw_score_total": 32994,
+      "over_1ms": 2763,
+      "over_2ms": 388,
+      "over_5ms": 1,
+      "max_latency_ns": 5241777,
+      "frame_count": 8472,
+      "frame_max_ms": 706.612,
+      "frame_p99_ms": 44.2522,
+      "frame_over_16ms": 5551,
+      "frame_over_33ms": 721,
+      "frame_over_50ms": 24,
+      "coverage": {
+        "unique_tracked_tasks": 85,
+        "unique_scored_tasks": 9,
+        "active_target_min": 44,
+        "active_target_max": 65,
+        "removed_task_count": 1,
+        "drop_counter_total": 372180,
+        "scored_identity_counts": [
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "steam.exe",
+              "comm": "steam.exe",
+              "process_starttime_ticks": 2805706,
+              "task_starttime_ticks": 2805837,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "wine_nsi_notifi",
+              "process_starttime_ticks": 2805712,
+              "task_starttime_ticks": 2805753,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805712,
+              "task_starttime_ticks": 2805713,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805754,
+              "task_starttime_ticks": 2805760,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805754,
+              "task_starttime_ticks": 2805777,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805754,
+              "task_starttime_ticks": 2805779,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805754,
+              "task_starttime_ticks": 2805806,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "WineServer",
+              "process_comm": "wineserver",
+              "comm": "wineserver",
+              "process_starttime_ticks": 2805706,
+              "task_starttime_ticks": 2805706,
+              "exe_dev": 66307,
+              "exe_ino": 2976229820
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "GameScope",
+              "process_comm": "gamescope-wl",
+              "comm": "gamescope",
+              "process_starttime_ticks": 2805609,
+              "task_starttime_ticks": 2805611,
+              "exe_dev": 66307,
+              "exe_ino": 2155140795
+            },
+            "count": 1
+          }
+        ]
+      },
+      "valid": true
+    },
+    {
+      "profile": "kcd1-game-on-1-5-7-11-gamescope-on-0-6",
+      "iteration": 5,
+      "run_dir": "reports/kcd1-case-study/tune/kcd1-affinity-02/iter-005-kcd1-game-on-1-5-7-11-gamescope-on-0-6",
+      "applied_tasks": 117,
+      "warmup_seconds": 90,
+      "measure_seconds": 180,
+      "interval_count": 8665,
+      "samples": 7539797,
+      "scored_samples": 677910,
+      "diagnostic_raw_score_total": 98461,
+      "over_1ms": 4463,
+      "over_2ms": 1099,
+      "over_5ms": 0,
+      "max_latency_ns": 4866891,
+      "frame_count": 6595,
+      "frame_max_ms": 102.79,
+      "frame_p99_ms": 48.7565,
+      "frame_over_16ms": 4098,
+      "frame_over_33ms": 3216,
+      "frame_over_50ms": 36,
+      "coverage": {
+        "unique_tracked_tasks": 68,
+        "unique_scored_tasks": 10,
+        "active_target_min": 43,
+        "active_target_max": 56,
+        "removed_task_count": 0,
+        "drop_counter_total": 428919,
+        "scored_identity_counts": [
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "steam.exe",
+              "comm": "steam.exe",
+              "process_starttime_ticks": 2805706,
+              "task_starttime_ticks": 2805837,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "wine_nsi_notifi",
+              "process_starttime_ticks": 2805712,
+              "task_starttime_ticks": 2805753,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805712,
+              "task_starttime_ticks": 2805713,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 2
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805754,
+              "task_starttime_ticks": 2805760,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805754,
+              "task_starttime_ticks": 2805777,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805754,
+              "task_starttime_ticks": 2805779,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "winedevice.exe",
+              "comm": "winedevice.exe",
+              "process_starttime_ticks": 2805754,
+              "task_starttime_ticks": 2805806,
+              "exe_dev": 66307,
+              "exe_ino": 2976229821
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "WineServer",
+              "process_comm": "wineserver",
+              "comm": "wineserver",
+              "process_starttime_ticks": 2805706,
+              "task_starttime_ticks": 2805706,
+              "exe_dev": 66307,
+              "exe_ino": 2976229820
+            },
+            "count": 1
+          },
+          {
+            "identity": {
+              "class": "GameScope",
+              "process_comm": "gamescope-wl",
+              "comm": "gamescope",
+              "process_starttime_ticks": 2805609,
+              "task_starttime_ticks": 2805611,
+              "exe_dev": 66307,
+              "exe_ino": 2155140795
+            },
+            "count": 1
+          }
+        ]
+      },
+      "valid": true
+    }
+  ]
+}

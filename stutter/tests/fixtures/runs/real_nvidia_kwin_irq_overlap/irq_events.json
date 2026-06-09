@@ -1,0 +1,2 @@
+{"elapsed_ms":100,"irq":181,"cpu":4,"enter_ns":98750000,"exit_ns":104750000,"duration_ns":6000000}
+{"elapsed_ms":170,"irq":182,"cpu":7,"enter_ns":170000000,"exit_ns":171000000,"duration_ns":1000000}

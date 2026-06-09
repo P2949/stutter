@@ -54,19 +54,27 @@ io_events.json
 scx_events.json
 focus_events.json
 foreground_events.json
+runtime_slices.json
+kms_flip_events.json
+drm_fence_events.json
+wayland_presentation_events.json
+display_topology.json
+dmabuf_events.json
+gpu_engine_samples.json
 ```
 
 Selected small public examples live under:
 
 ```text
-docs/examples/artifacts/v21/
+docs/examples/artifacts/v23/
   clean_baseline/
   game_thread_scheduler_delay/
   low_quality_truncated/
+  display_timing_optional/
   README.md
 ```
 
-Do not duplicate every large regression fixture under `docs/examples/artifacts/v21/`.
+Do not duplicate every large regression fixture under `docs/examples/artifacts/v23/`.
 The larger regression corpus belongs under `stutter/tests/fixtures/runs/`.
 
 ## Fixture tiers
@@ -103,6 +111,13 @@ Current generated synthetic fixtures include:
 | `compositor_scheduler_delay`     | Synthetic compositor scheduler-delay edge case.        |
 | `foreground_window`              | Synthetic foreground-window privacy/summary edge case. |
 | `community_rules_classification` | Synthetic community-rules classification edge case.    |
+| `direct_gpu_clean`               | Clean direct-display display-path fixture.             |
+| `uhd630_cross_gpu_fence_wait`    | Cross-GPU fence display-path fixture.                  |
+| `uhd630_composited_blitter`      | iGPU blitter/composited display-path fixture.          |
+| `uhd630_kms_delay`               | KMS/pageflip display-path fixture.                     |
+| `wayland_zero_copy_good`         | Zero-copy/direct-scanout fixture.                      |
+| `dmabuf_modifier_mismatch`       | DMABUF modifier mismatch fixture.                      |
+| `missing_evidence_unknown`       | Missing-evidence display-path fixture.                 |
 
 ### Real sanitized validation recordings
 
@@ -168,7 +183,7 @@ Example:
 
 ```toml
 name = "real_game_thread_scheduler_delay"
-schema_version = 21
+schema_version = 23
 source = "sanitized-real-recording"
 quality_expectation = "High"
 description = "Game main/render thread had scheduler delay during a visible frame spike."
@@ -242,6 +257,40 @@ accepted_confidence = []
 quality_reasons_contain = []
 data_quality = "High"
 ```
+
+Supported `expected.expected_behavior` values are:
+
+```text
+must_diagnose
+must_not_diagnose
+known_miss
+informational
+```
+
+`known_miss` is the false-negative catalogue. Known-miss fixtures pass only while
+the expected diagnosis remains absent. If the diagnosis starts appearing, the
+test fails with an instruction to update the metadata to `must_diagnose`.
+
+New real fixtures should include privacy-preserving platform buckets:
+
+```toml
+[platform]
+gpu_vendor = "AMD"
+gpu_driver = "amdgpu"
+compositor = "Hyprland"
+session_type = "wayland"
+scenario = "cpu-bound"
+sanitized_capture_id = "external-amd-hyprland-cpu-v1"
+kernel_family = "linux"
+kernel_version_bucket = "6.10-6.12"
+cpu_vendor = "AMD"
+cpu_topology_bucket = "8c16t"
+display_refresh_bucket = "120-165hz"
+capture_features = ["frames", "scheduler", "foreground"]
+```
+
+Do not store exact private machine details. Use buckets for kernel, CPU topology,
+refresh rate, and workload features.
 
 Supported `expected.accepted_confidence` values are:
 
@@ -374,6 +423,7 @@ URLs with private query strings
 6. Run:
 
    ```bash
+   cargo run -p xtask -- fixture-coverage
    cargo test -p stutter validation_corpus
    ```
 
@@ -409,6 +459,7 @@ URLs with private query strings
 6. Run:
 
    ```bash
+   cargo run -p xtask -- fixture-coverage
    cargo test -p stutter validation_corpus
    ```
 
@@ -442,6 +493,10 @@ Additional fixture-specific checks should be added for:
 * frame correlation,
 * IRQ correlation window behavior,
 * block I/O correlation basis,
+* display-path suspicion score and confidence,
+* direct-scanout status,
+* DMABUF modifier/copy-required summaries,
+* GPU engine activity near frame outliers,
 * foreground-window annotation,
 * reused TID separation,
 * community-rules classification,
@@ -476,6 +531,10 @@ No private executable paths.
 
 No Steam library paths that include local machine layout.
 
+No email-like strings.
+
+No public-looking IP addresses.
+
 No cgroup names that include real usernames.
 
 No stable personally identifying process, workspace, or window names.
@@ -491,13 +550,34 @@ uses a generic title and the test explicitly documents why.
 Regenerate the committed synthetic validation fixtures with:
 
 ```bash
-cargo test -p stutter regenerate_validation_corpus -- --ignored
+cargo test -p stutter validation_corpus_tests::regenerate::regenerate_validation_corpus -- --ignored --exact
 ```
 
-Regenerate the selected public v21 examples with:
+Regenerate the selected public v23 examples with:
 
 ```bash
-cargo test -p stutter regenerate_public_examples_v21 -- --ignored
+cargo test -p stutter validation_corpus_tests::regenerate::regenerate_public_examples_v23 -- --ignored --exact
+```
+
+The maintainer wrapper runs both generators:
+
+```bash
+cargo run -p xtask -- fixture-update
+```
+
+## Coverage Report
+
+Print the coverage matrix with:
+
+```bash
+cargo run -p xtask -- fixture-coverage
+```
+
+`fixture-check` runs this first and fails if required vendor, compositor, or
+scenario cells disappear:
+
+```bash
+cargo run -p xtask -- fixture-check
 ```
 
 After regeneration, run:
@@ -529,8 +609,8 @@ cargo test -p stutter validation_corpus
 CI should not run:
 
 ```bash
-cargo test -p stutter regenerate_validation_corpus -- --ignored
-cargo test -p stutter regenerate_public_examples_v21 -- --ignored
+cargo test -p stutter validation_corpus_tests::regenerate::regenerate_validation_corpus -- --ignored --exact
+cargo test -p stutter validation_corpus_tests::regenerate::regenerate_public_examples_v23 -- --ignored --exact
 ```
 
 Smoke-check one fixture through the public CLI:
@@ -544,8 +624,7 @@ A typical local corpus maintenance pass is:
 
 ```bash
 cargo fmt --all
-cargo test -p stutter regenerate_validation_corpus -- --ignored
-cargo test -p stutter regenerate_public_examples_v21 -- --ignored
+cargo run -p xtask -- fixture-update
 cargo test -p stutter validation_corpus
 cargo run -p stutter -- validate stutter/tests/fixtures/runs/real_clean_baseline
 cargo run -p stutter -- report --analysis-json stutter/tests/fixtures/runs/real_clean_baseline >/dev/null

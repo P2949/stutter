@@ -1,4 +1,6 @@
-use std::time::{Duration, SystemTime};
+#[cfg(any(feature = "otel", test))]
+use std::time::Duration;
+use std::time::SystemTime;
 
 use anyhow::Result;
 
@@ -52,11 +54,11 @@ mod enabled {
             Self {
                 wakeup_ns: spike.wakeup_ns,
                 switch_ns: spike.switch_ns,
-                task_tid: spike.task,
+                task_tid: spike.task.as_u32(),
                 task_comm: spike.comm.clone(),
                 task_class: spike.class.to_string(),
-                process_pid: spike.process_pid.unwrap_or(0),
-                process_comm: spike.process_comm.to_string(),
+                process_pid: spike.process_pid.map(|pid| pid.as_u32()).unwrap_or(0),
+                process_comm: spike.process_comm.clone(),
                 cpu: spike.cpu,
                 wakeup_target_cpu: spike.wakeup_target_cpu,
                 latency_ns: spike.latency_ns,
@@ -149,7 +151,6 @@ mod disabled {
     use crate::recorder::SpikeEvent;
 
     #[derive(Debug, Clone)]
-    #[allow(dead_code)]
     pub struct OtelConfig {
         pub endpoint: String,
         pub service_name: String,
@@ -172,8 +173,19 @@ mod disabled {
         }
     }
 
-    pub fn spawn_exporter(_config: OtelConfig) -> Result<OtelExporterHandle> {
-        anyhow::bail!("OpenTelemetry support was not compiled in. Rebuild with --features otel.");
+    pub fn spawn_exporter(config: OtelConfig) -> Result<OtelExporterHandle> {
+        let OtelConfig {
+            endpoint,
+            service_name,
+            started_at,
+            monotonic_start_ns,
+        } = config;
+
+        anyhow::bail!(
+            "OpenTelemetry support was not compiled in. Rebuild with --features otel. \
+requested endpoint={endpoint:?} service_name={service_name:?} \
+started_at={started_at:?} monotonic_start_ns={monotonic_start_ns}"
+        );
     }
 }
 
@@ -182,7 +194,7 @@ pub use disabled::*;
 #[cfg(feature = "otel")]
 pub use enabled::*;
 
-#[allow(dead_code)]
+#[cfg(any(feature = "otel", test))]
 pub fn monotonic_ns_to_system_time(
     started_at: SystemTime,
     monotonic_start_ns: u64,

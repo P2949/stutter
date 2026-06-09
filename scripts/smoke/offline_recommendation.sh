@@ -71,9 +71,9 @@ cat >"$tune/tuning_summary.json" <<'JSON'
       "profile": "game-main-on-2-5",
       "valid_runs": 5,
       "invalid_runs": 0,
-      "median_score_total": 900,
-      "iqr_score_total": 10,
-      "worst_score_total": 950,
+      "median_diagnostic_score_total": 900,
+      "iqr_diagnostic_score_total": 10,
+      "worst_diagnostic_score_total": 950,
       "median_over_5ms": 7,
       "iqr_over_5ms": 1,
       "median_frame_p99_us": 12000,
@@ -83,9 +83,9 @@ cat >"$tune/tuning_summary.json" <<'JSON'
       "profile": "baseline-online",
       "valid_runs": 5,
       "invalid_runs": 0,
-      "median_score_total": 1210,
-      "iqr_score_total": 0,
-      "worst_score_total": 1210,
+      "median_diagnostic_score_total": 1210,
+      "iqr_diagnostic_score_total": 0,
+      "worst_diagnostic_score_total": 1210,
       "median_over_5ms": 10,
       "iqr_over_5ms": 0,
       "median_frame_p99_us": 12000,
@@ -106,7 +106,7 @@ cat >"$tune/tuning_summary.json" <<'JSON'
       "interval_count": 1,
       "samples": 100,
       "scored_samples": 100,
-      "score_total": 900,
+      "diagnostic_score_total": 900,
       "over_1ms": 8,
       "over_2ms": 8,
       "over_5ms": 7,
@@ -148,11 +148,11 @@ JSON
 md_out="$tmp/recommend.md"
 json_out="$tmp/recommend.json"
 
-RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-nightly}" cargo run -p stutter --quiet -- recommend --baseline "$baseline" --tune "$tune" >"$md_out"
+RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-nightly-2026-06-06}" cargo run -p stutter --quiet -- recommend --baseline "$baseline" --tune "$tune" >"$md_out"
 grep -q "Verdict" "$md_out"
 grep -q "Best profile" "$md_out"
 
-RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-nightly}" cargo run -p stutter --quiet -- recommend --baseline "$baseline" --tune "$tune" --json >"$json_out"
+RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-nightly-2026-06-06}" cargo run -p stutter --quiet -- recommend --baseline "$baseline" --tune "$tune" --json >"$json_out"
 python3 - "$json_out" <<'PY'
 import json
 import sys

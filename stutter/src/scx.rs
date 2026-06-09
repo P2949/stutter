@@ -37,7 +37,6 @@ impl ScxTracker {
         self.last.as_ref().and_then(|s| s.enable_seq.as_deref())
     }
 
-    #[allow(dead_code)]
     pub fn current_event(&self) -> Option<ScxEvent> {
         self.last.as_ref().map(|snapshot| ScxEvent {
             elapsed_ms: 0,

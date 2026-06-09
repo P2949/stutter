@@ -1,79 +1,100 @@
-pub mod acceptance;
-pub mod autotune;
-pub mod capabilities;
-pub mod config;
-pub mod explain;
-pub mod health;
-pub mod lifecycle;
-pub mod monitor;
-pub mod overhead;
-pub mod policy;
-pub mod privilege;
-pub mod runtime;
-pub mod soak;
-pub mod state;
-pub mod state_builders;
-pub mod store;
-pub mod watchdog;
+//! Daemon policy, state, privilege, health, and lifecycle facade.
+//!
+//! Owns:
+//! - daemon state models, policy verdicts, capability and health probes, lifecycle decisions,
+//!   watchdog/overhead/soak checks, state persistence, and privileged operation mediation.
+//!
+//! Does not own:
+//! - CLI parsing, command dispatch, direct remote request handling, report rendering, or direct
+//!   action mutation outside daemon policy and privilege boundaries.
+//!
+//! Allowed dependencies:
+//! - actions, autotune coordination, config, process tree data, recorder/session models, and
+//!   system probes needed to evaluate safe daemon behavior.
+//!
+//! Main entry points:
+//! - `DaemonRuntime`, `DaemonPolicy`, `DaemonState`, `DaemonPhase`, and core daemon config
+//!   types. Implementation-specific contracts must be imported from their owning child modules.
+//!
+//! Safety, mutation, and persistence invariants:
+//! - every daemon-authorized mutation must pass through `DaemonPolicy` and privilege checks;
+//! - persistent state must use the daemon state schema/versioned store types;
+//! - health, watchdog, and lifecycle transitions must degrade or reject unsafe operations rather
+//!   than silently continuing;
+//! - this facade should keep top-level re-exports narrow and route subsystem contracts through
+//!   owner modules or `api::daemon`.
+//!
+//! Concurrency model:
+//! - daemon state is mutated by owned runtime/store paths;
+//! - async tasks communicate through explicit channels;
+//! - privileged and kernel/host mutations remain serialized by policy/runtime boundaries.
 
-pub use acceptance::{
-    DaemonAcceptanceReport, DaemonAcceptanceStep, run_fake_daemon_acceptance_suite,
-};
-pub use autotune::{AutotuneSubsystem, AutotuneSubsystemEvent};
-pub use capabilities::{CapabilityProbe, CapabilityProbeRoot, DaemonCapabilities};
-pub use config::{
-    CgroupTargetRole, DaemonAutotuneConfig, DaemonCgroupTargetsConfig, DaemonConfig,
-    DaemonHealthConfig, DaemonPreset, DaemonRemoteConfig, DaemonRetentionConfig,
-    DaemonSafetyConfig, DaemonTargetConfig,
-};
-pub use explain::{
-    DaemonPolicyExplanation, DaemonStatusExplanation, PolicyDecisionKind, PolicyExplainLine,
-    PolicyExplanation, PolicyRuleEvaluation, policy_context_from_daemon_status,
-    policy_context_from_daemon_status_at,
-};
-pub use health::{
-    SystemHealthInputs, SystemHealthIssue, SystemHealthMonitor, SystemHealthProbeRoot,
-    SystemHealthSnapshot, SystemHealthState, SystemHealthThresholds, evaluate_system_health,
-};
-pub use lifecycle::{
-    DaemonLifecycleAction, DaemonLifecycleEvent, DaemonLifecycleInputs, DaemonLifecyclePolicy,
-    DaemonLifecycleTransition, LifecycleClockSample, SuspendResumeDetector,
-    evaluate_daemon_lifecycle_event,
-};
-pub use monitor::{MonitorShutdownSummary, MonitorSubsystem, MonitorSubsystemConfig};
-pub use overhead::{
-    DaemonOverheadBudget, DaemonOverheadIssue, DaemonOverheadMonitor, DaemonOverheadReport,
-    DaemonOverheadSnapshot, evaluate_daemon_overhead,
-};
-pub use policy::{
-    ActionDescriptor, ActionEffectScope, ActionSource, DaemonMode, DaemonPolicy,
-    DaemonPolicyBuildInput, DaemonPolicyContext, DaemonPolicyVerdict, PolicyIntent,
-    PolicyRejection, RemoteApplyPolicy, RemotePolicyContext, RollbackRequirement,
-    build_daemon_policy,
-};
-pub use privilege::{
-    PrivilegeCommandAllowlist, PrivilegeCommandRequest, PrivilegeDecision, PrivilegeProcessRole,
-    PrivilegeTransport, PrivilegedOperation, privileged_operation_audit_event,
-};
+pub(crate) mod acceptance;
+pub(crate) mod autotune;
+pub(crate) mod capabilities;
+pub(crate) mod config;
+pub(crate) mod explain;
+pub(crate) mod health;
+pub(crate) mod lifecycle;
+pub(crate) mod monitor;
+pub(crate) mod overhead;
+pub(crate) mod policy;
+pub(crate) mod privilege;
+pub(crate) mod runtime;
+#[cfg(test)]
+pub(crate) mod safety_acceptance;
+pub(crate) mod soak;
+pub(crate) mod state;
+pub(crate) mod state_builders;
+
+pub(crate) mod store;
+pub(crate) mod testing;
+pub(crate) mod watchdog;
+
+pub(crate) use config::{CgroupTargetRole, DaemonCgroupTargetsConfig, DaemonConfig, DaemonPreset};
+pub(crate) use policy::DaemonPolicy;
+pub use policy::DaemonPolicyVerdict;
 pub use runtime::{DaemonRuntime, DaemonRuntimeConfig, DaemonRuntimeEvent, DaemonTransition};
-pub use soak::{
-    DaemonSoakBudget, DaemonSoakConfig, DaemonSoakFailure, DaemonSoakMetrics, DaemonSoakProfile,
-    DaemonSoakReport, run_fake_daemon_soak,
-};
-pub use state::{
-    DAEMON_STATE_SCHEMA_VERSION, DaemonDecisionState, DaemonDegradedStatus, DaemonExperimentState,
-    DaemonFaultState, DaemonPhase, DaemonProfileEnvironment, DaemonProfileMemory,
-    DaemonProfilePartition, DaemonProfileValidation, DaemonRollbackState, DaemonState,
-    DaemonStateSnapshotWriter, DaemonTargetState, DaemonWorkloadProfile,
-    default_daemon_state_snapshot_path, load_daemon_state,
-};
-pub use state_builders::{
-    StartupRecoveryDaemonStateInput, daemon_decision_state, daemon_state_for_agent_fault,
-    daemon_state_for_record_start, daemon_state_for_startup_recovery_snapshot,
-    daemon_state_from_startup_recovery, safety_class_for_rollback_token,
-};
-pub use store::DaemonStateStore;
-pub use watchdog::{
-    DaemonSelfHealingAction, DaemonWatchdogConfig, DaemonWatchdogInputs, DaemonWatchdogIssue,
-    DaemonWatchdogReport, evaluate_daemon_watchdog,
-};
+pub(crate) use state::{DaemonPhase, DaemonState};
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn daemon_child_modules_are_not_public_submodules() {
+        let source = include_str!("mod.rs");
+
+        let public_child_modules: Vec<&str> = source
+            .lines()
+            .map(str::trim_start)
+            .filter(|line| line.starts_with("pub mod "))
+            .collect();
+
+        assert!(
+            public_child_modules.is_empty(),
+            "daemon child modules must stay crate-private and be exposed intentionally through api::daemon: {public_child_modules:?}"
+        );
+    }
+
+    #[test]
+    fn daemon_top_level_reexports_are_narrow() {
+        let source = include_str!("mod.rs");
+
+        let actual: Vec<&str> = source
+            .lines()
+            .map(str::trim)
+            .filter(|line| line.starts_with("pub(crate) use ") || line.starts_with("pub use "))
+            .collect();
+        let expected = vec![
+            "pub(crate) use config::{CgroupTargetRole, DaemonCgroupTargetsConfig, DaemonConfig, DaemonPreset};",
+            "pub(crate) use policy::DaemonPolicy;",
+            "pub use policy::DaemonPolicyVerdict;",
+            "pub use runtime::{DaemonRuntime, DaemonRuntimeConfig, DaemonRuntimeEvent, DaemonTransition};",
+            "pub(crate) use state::{DaemonPhase, DaemonState};",
+        ];
+
+        assert_eq!(
+            actual, expected,
+            "daemon top-level reexports must stay limited to the narrow runtime, policy, state, and core config facade"
+        );
+    }
+}

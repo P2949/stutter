@@ -6,10 +6,15 @@ use std::{
 };
 
 use anyhow::Context;
+use serde::{Deserialize, Serialize};
 
 use crate::actions::{
-    ActionId, ActionState, ActionWarning, GpuPowerRestoreRecord, RollbackToken, SafetyClass,
-    TuningAction,
+    ActionBoundaryError, ActionId, ActionState, ActionWarning, GpuPowerRestoreRecord,
+    RollbackToken, SafetyClass, TuningAction,
+    rollback::{
+        RollbackCandidate, RollbackHandler, RollbackPreview, RollbackResult, token_dry_run_preview,
+        token_restore_result,
+    },
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,12 +54,75 @@ impl Default for GpuPowerPolicy {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GpuPowerAction {
     pub sysfs_root: PathBuf,
     pub drm_card: String,
     pub power_dpm_force_performance_level: Option<String>,
     pub pp_power_profile_mode: Option<String>,
+}
+
+pub(crate) struct GpuPowerRollbackHandler;
+
+impl RollbackHandler for GpuPowerRollbackHandler {
+    fn id(&self) -> &'static str {
+        "gpu-power-rollback"
+    }
+
+    fn discover(&self) -> anyhow::Result<Vec<RollbackCandidate>> {
+        Ok(Vec::new())
+    }
+
+    fn dry_run(&self, _: &RollbackCandidate) -> anyhow::Result<RollbackPreview> {
+        Err(
+            ActionBoundaryError::missing_explicit_rollback_token(self.id(), "gpu-power-restore")
+                .into(),
+        )
+    }
+
+    fn restore(&self, _: RollbackCandidate) -> anyhow::Result<RollbackResult> {
+        Err(
+            ActionBoundaryError::missing_explicit_rollback_token(self.id(), "gpu-power-restore")
+                .into(),
+        )
+    }
+
+    fn supports_token(&self, token: &RollbackToken) -> bool {
+        token.as_gpu_power_restore().is_some()
+    }
+
+    fn dry_run_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackPreview> {
+        if !self.supports_token(token) {
+            return Err(ActionBoundaryError::unsupported_rollback_token(
+                self.id(),
+                "gpu-power-restore",
+                token.kind(),
+            )
+            .into());
+        }
+        Ok(token_dry_run_preview(self.id(), token, "gpu-power-restore"))
+    }
+
+    fn restore_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackResult> {
+        let Some(records) = token.as_gpu_power_restore() else {
+            return Err(ActionBoundaryError::unsupported_rollback_token(
+                self.id(),
+                "gpu-power-restore",
+                token.kind(),
+            )
+            .into());
+        };
+
+        rollback_gpu_power_records(records)?;
+
+        Ok(token_restore_result(
+            self.id(),
+            token,
+            records.len(),
+            0,
+            Vec::new(),
+        ))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -102,12 +170,16 @@ impl GpuPowerAction {
                 .with_context(|| format!("failed to verify write to {}", target.path.display()))?;
             if actual != target.requested_value {
                 rollback_gpu_power_records(&records)?;
-                anyhow::bail!(
-                    "GPU power write verification failed for {}: requested={:?} actual={:?}",
-                    target.path.display(),
-                    target.requested_value,
-                    actual
-                );
+                return Err(ActionBoundaryError::restore_failed(
+                    "gpu_power",
+                    format!(
+                        "GPU power write verification failed for {}: requested={:?} actual={:?}",
+                        target.path.display(),
+                        target.requested_value,
+                        actual
+                    ),
+                )
+                .into());
             }
         }
 
@@ -188,11 +260,11 @@ impl GpuPowerAction {
         let device_dir = self.device_dir();
 
         if !device_dir.is_dir() {
-            anyhow::bail!(
-                "GPU device sysfs directory does not exist for {}: {}",
-                self.drm_card,
-                device_dir.display()
-            );
+            return Err(ActionBoundaryError::MissingPath {
+                action_kind: "gpu_power",
+                path: device_dir,
+            }
+            .into());
         }
 
         let mut files = Vec::new();
@@ -228,7 +300,7 @@ impl GpuPowerAction {
 
 impl TuningAction for GpuPowerAction {
     fn id(&self) -> ActionId {
-        ActionId(format!(
+        ActionId::new(format!(
             "gpu-power:set:card={}:dpm={}:profile={}",
             self.drm_card,
             optional_value_label(self.power_dpm_force_performance_level.as_deref()),
@@ -246,7 +318,12 @@ impl TuningAction for GpuPowerAction {
     }
 
     fn safety_class(&self) -> SafetyClass {
-        SafetyClass::HighRisk
+        if self.pp_power_profile_mode.is_some() && self.power_dpm_force_performance_level.is_none()
+        {
+            SafetyClass::ReversibleMediumRisk
+        } else {
+            SafetyClass::HighRisk
+        }
     }
 
     fn preflight(&self) -> anyhow::Result<Vec<ActionWarning>> {
@@ -257,8 +334,9 @@ impl TuningAction for GpuPowerAction {
         self.dry_run_at(&GpuPowerPolicy::default())
     }
 
-    fn apply(&self) -> anyhow::Result<RollbackToken> {
+    fn apply(&self) -> crate::actions::ApplyResult {
         self.apply_with_policy(&GpuPowerPolicy::default())
+            .map_err(Into::into)
     }
 
     fn verify(&self) -> anyhow::Result<ActionState> {
@@ -266,8 +344,11 @@ impl TuningAction for GpuPowerAction {
     }
 
     fn rollback(&self, token: &RollbackToken) -> anyhow::Result<()> {
-        let RollbackToken::GpuPowerRestore { records } = token else {
-            anyhow::bail!("rollback token is not a GPU power restore token");
+        let Some(records) = token.as_gpu_power_restore() else {
+            return Err(crate::actions::ActionError::invalid_rollback_token_kind(
+                token.kind_error("gpu-power-restore"),
+            )
+            .into());
         };
 
         rollback_gpu_power_records(records)
@@ -279,35 +360,54 @@ fn validate_policy_and_request(
     policy: &GpuPowerPolicy,
 ) -> anyhow::Result<()> {
     if !policy.allow_gpu_power_changes {
-        anyhow::bail!("policy does not allow GPU power/performance profile changes");
+        return Err(ActionBoundaryError::PolicyDenied {
+            action_kind: "gpu_power",
+            requirement: "allow_gpu_power_changes",
+        }
+        .into());
     }
 
     validate_drm_card_name(&action.drm_card)?;
 
     if action.power_dpm_force_performance_level.is_none() && action.pp_power_profile_mode.is_none()
     {
-        anyhow::bail!(
-            "GPU power action requires power_dpm_force_performance_level, pp_power_profile_mode, or both"
-        );
+        return Err(ActionBoundaryError::InvalidRequest {
+            action_kind: "gpu_power",
+            reason: "GPU power action requires power_dpm_force_performance_level, pp_power_profile_mode, or both".to_owned(),
+        }
+        .into());
     }
 
     if policy.allowed_drm_cards.is_empty() {
-        anyhow::bail!("GPU power action requires a non-empty explicit DRM card allowlist");
+        return Err(ActionBoundaryError::PolicyDenied {
+            action_kind: "gpu_power",
+            requirement: "allowed_drm_cards_non_empty",
+        }
+        .into());
     }
 
     if !policy.allowed_drm_cards.contains(&action.drm_card) {
-        anyhow::bail!(
-            "DRM card {} is not in explicit GPU power allowlist",
-            action.drm_card
-        );
+        return Err(ActionBoundaryError::PolicyDenied {
+            action_kind: "gpu_power",
+            requirement: "allowed_drm_cards_contains_target",
+        }
+        .into());
     }
 
     if action.power_dpm_force_performance_level.is_some() && !policy.allow_force_performance_level {
-        anyhow::bail!("policy does not allow power_dpm_force_performance_level changes");
+        return Err(ActionBoundaryError::PolicyDenied {
+            action_kind: "gpu_power",
+            requirement: "allow_force_performance_level",
+        }
+        .into());
     }
 
     if action.pp_power_profile_mode.is_some() && !policy.allow_power_profile_mode {
-        anyhow::bail!("policy does not allow pp_power_profile_mode changes");
+        return Err(ActionBoundaryError::PolicyDenied {
+            action_kind: "gpu_power",
+            requirement: "allow_power_profile_mode",
+        }
+        .into());
     }
 
     if let Some(level) = &action.power_dpm_force_performance_level {
@@ -321,12 +421,18 @@ fn validate_policy_and_request(
     if is_on_battery(&action.power_supply_root())? {
         match policy.battery_policy {
             GpuBatteryPolicy::Never => {
-                anyhow::bail!("refusing GPU power/performance profile changes while on battery")
+                return Err(ActionBoundaryError::PolicyDenied {
+                    action_kind: "gpu_power",
+                    requirement: "battery_policy_allow",
+                }
+                .into());
             }
             GpuBatteryPolicy::AllowWithExplicitConfig if !policy.explicit_battery_override => {
-                anyhow::bail!(
-                    "refusing GPU power/performance profile changes while on battery without explicit battery override"
-                )
+                return Err(ActionBoundaryError::PolicyDenied {
+                    action_kind: "gpu_power",
+                    requirement: "explicit_battery_override",
+                }
+                .into());
             }
             GpuBatteryPolicy::AllowWithExplicitConfig => {}
         }
@@ -337,9 +443,11 @@ fn validate_policy_and_request(
 
 fn validate_manual_apply_policy(policy: &GpuPowerPolicy) -> anyhow::Result<()> {
     if !matches!(policy.mode, GpuPowerMode::ManualApply) {
-        anyhow::bail!(
-            "GPU power action is suggest-only; set policy mode to ManualApply for explicit manual writes"
-        );
+        return Err(ActionBoundaryError::InvalidRequest {
+            action_kind: "gpu_power",
+            reason: "GPU power action is suggest-only; set policy mode to ManualApply for explicit manual writes".to_owned(),
+        }
+        .into());
     }
 
     Ok(())
@@ -358,19 +466,39 @@ fn read_target_file(path: &Path, requested_value: &str) -> anyhow::Result<GpuPow
 
 fn validate_drm_card_name(card: &str) -> anyhow::Result<()> {
     if card.trim().is_empty() {
-        anyhow::bail!("DRM card name must not be empty");
+        return Err(ActionBoundaryError::InvalidValue {
+            action_kind: "gpu_power",
+            field: "drm_card".to_owned(),
+            reason: "DRM card name must not be empty".to_owned(),
+        }
+        .into());
     }
 
     if card.trim() != card {
-        anyhow::bail!("DRM card name must not contain leading or trailing whitespace");
+        return Err(ActionBoundaryError::InvalidValue {
+            action_kind: "gpu_power",
+            field: "drm_card".to_owned(),
+            reason: "DRM card name must not contain leading or trailing whitespace".to_owned(),
+        }
+        .into());
     }
 
     let Some(suffix) = card.strip_prefix("card") else {
-        anyhow::bail!("DRM card name must start with card");
+        return Err(ActionBoundaryError::InvalidValue {
+            action_kind: "gpu_power",
+            field: "drm_card".to_owned(),
+            reason: "DRM card name must start with card".to_owned(),
+        }
+        .into());
     };
 
     if suffix.is_empty() || !suffix.chars().all(|ch| ch.is_ascii_digit()) {
-        anyhow::bail!("DRM card name must be card followed by digits");
+        return Err(ActionBoundaryError::InvalidValue {
+            action_kind: "gpu_power",
+            field: "drm_card".to_owned(),
+            reason: "DRM card name must be card followed by digits".to_owned(),
+        }
+        .into());
     }
 
     Ok(())
@@ -382,10 +510,12 @@ fn validate_dpm_force_performance_level(value: &str) -> anyhow::Result<()> {
     match value {
         "auto" | "low" | "high" | "manual" | "profile_standard" | "profile_min_sclk"
         | "profile_min_mclk" | "profile_peak" => Ok(()),
-        other => anyhow::bail!(
-            "unsupported power_dpm_force_performance_level value {:?}",
-            other
-        ),
+        other => Err(ActionBoundaryError::UnsupportedValue {
+            action_kind: "gpu_power",
+            field: "power_dpm_force_performance_level",
+            value: other.to_owned(),
+        }
+        .into()),
     }
 }
 
@@ -395,20 +525,40 @@ fn validate_power_profile_mode(value: &str) -> anyhow::Result<()> {
 
 fn validate_sysfs_value(name: &str, value: &str) -> anyhow::Result<()> {
     if value.trim().is_empty() {
-        anyhow::bail!("{name} value must not be empty");
+        return Err(ActionBoundaryError::InvalidValue {
+            action_kind: "gpu_power",
+            field: name.to_owned(),
+            reason: format!("{name} value must not be empty"),
+        }
+        .into());
     }
 
     if value.trim() != value {
-        anyhow::bail!("{name} value must not contain leading or trailing whitespace");
+        return Err(ActionBoundaryError::InvalidValue {
+            action_kind: "gpu_power",
+            field: name.to_owned(),
+            reason: format!("{name} value must not contain leading or trailing whitespace"),
+        }
+        .into());
     }
 
     if value.len() > 64 {
-        anyhow::bail!("{name} value is too long");
+        return Err(ActionBoundaryError::InvalidValue {
+            action_kind: "gpu_power",
+            field: name.to_owned(),
+            reason: format!("{name} value is too long"),
+        }
+        .into());
     }
 
     for ch in value.chars() {
         if !(ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' || ch == ' ') {
-            anyhow::bail!("{name} value contains invalid character {ch:?}");
+            return Err(ActionBoundaryError::InvalidValue {
+                action_kind: "gpu_power",
+                field: name.to_owned(),
+                reason: format!("{name} value contains invalid character {ch:?}"),
+            }
+            .into());
         }
     }
 
@@ -417,10 +567,11 @@ fn validate_sysfs_value(name: &str, value: &str) -> anyhow::Result<()> {
 
 fn ensure_writable_file(path: &Path) -> anyhow::Result<()> {
     if !path.is_file() {
-        anyhow::bail!(
-            "required GPU power sysfs file does not exist: {}",
-            path.display()
-        );
+        return Err(ActionBoundaryError::MissingPath {
+            action_kind: "gpu_power",
+            path: path.to_path_buf(),
+        }
+        .into());
     }
 
     OpenOptions::new().write(true).open(path).with_context(|| {
@@ -505,10 +656,14 @@ fn rollback_gpu_power_records(records: &[GpuPowerRestoreRecord]) -> anyhow::Resu
     }
 
     if !failures.is_empty() {
-        anyhow::bail!(
-            "failed to rollback GPU power values: {}",
-            failures.join("; ")
-        );
+        return Err(ActionBoundaryError::restore_failed(
+            "gpu_power",
+            format!(
+                "failed to rollback GPU power values: {}",
+                failures.join("; ")
+            ),
+        )
+        .into());
     }
 
     Ok(())
@@ -528,463 +683,6 @@ fn write_trimmed(path: &Path, value: &str) -> anyhow::Result<()> {
 fn optional_value_label(value: Option<&str>) -> String {
     value.unwrap_or("keep").to_owned()
 }
-
 #[cfg(test)]
-mod tests {
-    use std::{
-        collections::BTreeSet,
-        fs,
-        path::PathBuf,
-        time::{SystemTime, UNIX_EPOCH},
-    };
-
-    use super::*;
-
-    fn temp_sysfs_root(name: &str) -> PathBuf {
-        let mut dir = std::env::temp_dir();
-        dir.push(format!(
-            "stutter-gpu-power-test-{name}-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos()
-        ));
-        fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
-    fn write_gpu_device(root: &Path, card: &str, dpm: &str, profile: &str) -> PathBuf {
-        let device = root.join("class/drm").join(card).join("device");
-        fs::create_dir_all(&device).unwrap();
-        fs::write(
-            device.join("power_dpm_force_performance_level"),
-            format!("{dpm}\n"),
-        )
-        .unwrap();
-        fs::write(device.join("pp_power_profile_mode"), format!("{profile}\n")).unwrap();
-        device
-    }
-
-    fn write_ac_power(root: &Path, online: bool) {
-        let ac = root.join("class/power_supply/AC");
-        fs::create_dir_all(&ac).unwrap();
-        fs::write(ac.join("type"), "Mains\n").unwrap();
-        fs::write(ac.join("online"), if online { "1\n" } else { "0\n" }).unwrap();
-    }
-
-    fn write_battery(root: &Path, status: &str) {
-        let battery = root.join("class/power_supply/BAT0");
-        fs::create_dir_all(&battery).unwrap();
-        fs::write(battery.join("type"), "Battery\n").unwrap();
-        fs::write(battery.join("status"), format!("{status}\n")).unwrap();
-    }
-
-    fn policy_for(cards: &[&str]) -> GpuPowerPolicy {
-        GpuPowerPolicy {
-            allow_gpu_power_changes: true,
-            mode: GpuPowerMode::SuggestOnly,
-            allowed_drm_cards: cards
-                .iter()
-                .map(|card| (*card).to_owned())
-                .collect::<BTreeSet<_>>(),
-            allow_force_performance_level: true,
-            allow_power_profile_mode: true,
-            battery_policy: GpuBatteryPolicy::Never,
-            explicit_battery_override: false,
-        }
-    }
-
-    fn manual_policy_for(cards: &[&str]) -> GpuPowerPolicy {
-        GpuPowerPolicy {
-            mode: GpuPowerMode::ManualApply,
-            ..policy_for(cards)
-        }
-    }
-
-    fn action_for(root: &Path) -> GpuPowerAction {
-        GpuPowerAction {
-            sysfs_root: root.to_path_buf(),
-            drm_card: "card0".to_owned(),
-            power_dpm_force_performance_level: Some("high".to_owned()),
-            pp_power_profile_mode: Some("3D_FULL_SCREEN".to_owned()),
-        }
-    }
-
-    #[test]
-    fn safety_class_is_high_risk() {
-        let root = temp_sysfs_root("safety");
-        let action = action_for(&root);
-
-        assert_eq!(action.safety_class(), SafetyClass::HighRisk);
-
-        fs::remove_dir_all(root).ok();
-    }
-
-    #[test]
-    fn action_id_and_description_include_card_and_requested_values() {
-        let root = temp_sysfs_root("id");
-        let action = action_for(&root);
-
-        assert_eq!(
-            action.id(),
-            ActionId("gpu-power:set:card=card0:dpm=high:profile=3D_FULL_SCREEN".to_owned())
-        );
-        assert_eq!(
-            action.describe(),
-            "set GPU power values for card0: power_dpm_force_performance_level=high, pp_power_profile_mode=3D_FULL_SCREEN"
-        );
-
-        fs::remove_dir_all(root).ok();
-    }
-
-    #[test]
-    fn preflight_rejects_default_disabled_policy() {
-        let root = temp_sysfs_root("default-disabled");
-        write_gpu_device(&root, "card0", "auto", "BOOTUP_DEFAULT");
-
-        let err = action_for(&root).preflight().unwrap_err().to_string();
-
-        assert!(err.contains("policy does not allow GPU power/performance profile changes"));
-        fs::remove_dir_all(root).ok();
-    }
-
-    #[test]
-    fn preflight_warns_that_action_is_high_risk_and_suggest_only() {
-        let root = temp_sysfs_root("suggest-only");
-        write_gpu_device(&root, "card0", "auto", "BOOTUP_DEFAULT");
-
-        let warnings = action_for(&root)
-            .preflight_at(&policy_for(&["card0"]))
-            .unwrap();
-
-        assert!(warnings.iter().any(|warning| {
-            warning
-                .message
-                .contains("high risk and should remain manual/suggest-only")
-        }));
-        assert!(warnings.iter().any(|warning| {
-            warning
-                .message
-                .contains("policy is suggest-only; no writes will be performed")
-        }));
-        fs::remove_dir_all(root).ok();
-    }
-
-    #[test]
-    fn preflight_rejects_missing_knobs() {
-        let root = temp_sysfs_root("missing-knobs");
-        let action = GpuPowerAction {
-            sysfs_root: root.clone(),
-            drm_card: "card0".to_owned(),
-            power_dpm_force_performance_level: None,
-            pp_power_profile_mode: None,
-        };
-
-        let err = action
-            .preflight_at(&policy_for(&["card0"]))
-            .unwrap_err()
-            .to_string();
-
-        assert!(err.contains("requires power_dpm_force_performance_level"));
-        fs::remove_dir_all(root).ok();
-    }
-
-    #[test]
-    fn preflight_rejects_empty_allowlist() {
-        let root = temp_sysfs_root("empty-allowlist");
-        write_gpu_device(&root, "card0", "auto", "BOOTUP_DEFAULT");
-        let mut policy = policy_for(&[]);
-        policy.allowed_drm_cards.clear();
-
-        let err = action_for(&root)
-            .preflight_at(&policy)
-            .unwrap_err()
-            .to_string();
-
-        assert!(err.contains("requires a non-empty explicit DRM card allowlist"));
-        fs::remove_dir_all(root).ok();
-    }
-
-    #[test]
-    fn preflight_rejects_card_not_in_allowlist() {
-        let root = temp_sysfs_root("card-not-allowed");
-        write_gpu_device(&root, "card0", "auto", "BOOTUP_DEFAULT");
-
-        let err = action_for(&root)
-            .preflight_at(&policy_for(&["card1"]))
-            .unwrap_err()
-            .to_string();
-
-        assert!(err.contains("DRM card card0 is not in explicit GPU power allowlist"));
-        fs::remove_dir_all(root).ok();
-    }
-
-    #[test]
-    fn preflight_rejects_invalid_drm_card_name() {
-        let root = temp_sysfs_root("bad-card");
-        let mut action = action_for(&root);
-        action.drm_card = "../card0".to_owned();
-
-        let err = action
-            .preflight_at(&policy_for(&["../card0"]))
-            .unwrap_err()
-            .to_string();
-
-        assert!(err.contains("DRM card name must start with card"));
-        fs::remove_dir_all(root).ok();
-    }
-
-    #[test]
-    fn preflight_rejects_dpm_when_not_allowed() {
-        let root = temp_sysfs_root("dpm-not-allowed");
-        write_gpu_device(&root, "card0", "auto", "BOOTUP_DEFAULT");
-        let mut policy = policy_for(&["card0"]);
-        policy.allow_force_performance_level = false;
-
-        let err = action_for(&root)
-            .preflight_at(&policy)
-            .unwrap_err()
-            .to_string();
-
-        assert!(err.contains("policy does not allow power_dpm_force_performance_level changes"));
-        fs::remove_dir_all(root).ok();
-    }
-
-    #[test]
-    fn preflight_rejects_profile_when_not_allowed() {
-        let root = temp_sysfs_root("profile-not-allowed");
-        write_gpu_device(&root, "card0", "auto", "BOOTUP_DEFAULT");
-        let mut policy = policy_for(&["card0"]);
-        policy.allow_power_profile_mode = false;
-
-        let err = action_for(&root)
-            .preflight_at(&policy)
-            .unwrap_err()
-            .to_string();
-
-        assert!(err.contains("policy does not allow pp_power_profile_mode changes"));
-        fs::remove_dir_all(root).ok();
-    }
-
-    #[test]
-    fn preflight_rejects_invalid_dpm_value() {
-        let root = temp_sysfs_root("invalid-dpm");
-        write_gpu_device(&root, "card0", "auto", "BOOTUP_DEFAULT");
-        let mut action = action_for(&root);
-        action.power_dpm_force_performance_level = Some("turbo;bad".to_owned());
-
-        let err = action
-            .preflight_at(&policy_for(&["card0"]))
-            .unwrap_err()
-            .to_string();
-
-        assert!(err.contains("power_dpm_force_performance_level value contains invalid character"));
-        fs::remove_dir_all(root).ok();
-    }
-
-    #[test]
-    fn preflight_rejects_unsupported_dpm_value() {
-        let root = temp_sysfs_root("unsupported-dpm");
-        write_gpu_device(&root, "card0", "auto", "BOOTUP_DEFAULT");
-        let mut action = action_for(&root);
-        action.power_dpm_force_performance_level = Some("turbo".to_owned());
-
-        let err = action
-            .preflight_at(&policy_for(&["card0"]))
-            .unwrap_err()
-            .to_string();
-
-        assert!(err.contains("unsupported power_dpm_force_performance_level value"));
-        fs::remove_dir_all(root).ok();
-    }
-
-    #[test]
-    fn preflight_rejects_missing_gpu_sysfs_file() {
-        let root = temp_sysfs_root("missing-file");
-        fs::create_dir_all(root.join("class/drm/card0/device")).unwrap();
-
-        let err = action_for(&root)
-            .preflight_at(&policy_for(&["card0"]))
-            .unwrap_err()
-            .to_string();
-
-        assert!(err.contains("required GPU power sysfs file does not exist"));
-        fs::remove_dir_all(root).ok();
-    }
-
-    #[test]
-    fn preflight_rejects_battery_without_override() {
-        let root = temp_sysfs_root("battery-no-override");
-        write_gpu_device(&root, "card0", "auto", "BOOTUP_DEFAULT");
-        write_ac_power(&root, false);
-        write_battery(&root, "Discharging");
-
-        let err = action_for(&root)
-            .preflight_at(&policy_for(&["card0"]))
-            .unwrap_err()
-            .to_string();
-
-        assert!(err.contains("refusing GPU power/performance profile changes while on battery"));
-        fs::remove_dir_all(root).ok();
-    }
-
-    #[test]
-    fn preflight_allows_battery_only_with_explicit_override() {
-        let root = temp_sysfs_root("battery-override");
-        write_gpu_device(&root, "card0", "auto", "BOOTUP_DEFAULT");
-        write_ac_power(&root, false);
-        write_battery(&root, "Discharging");
-
-        let mut policy = policy_for(&["card0"]);
-        policy.battery_policy = GpuBatteryPolicy::AllowWithExplicitConfig;
-        policy.explicit_battery_override = true;
-
-        action_for(&root).preflight_at(&policy).unwrap();
-
-        fs::remove_dir_all(root).ok();
-    }
-
-    #[test]
-    fn dry_run_counts_pending_changes_without_mutating() {
-        let root = temp_sysfs_root("dry-run");
-        let device = write_gpu_device(&root, "card0", "auto", "BOOTUP_DEFAULT");
-
-        let state = action_for(&root)
-            .dry_run_at(&policy_for(&["card0"]))
-            .unwrap();
-
-        assert!(!state.applied);
-        assert_eq!(state.checked_tasks, 2);
-        assert_eq!(state.affected_tasks, 2);
-        assert_eq!(state.pending_changes, 2);
-        assert_eq!(
-            read_trimmed(&device.join("power_dpm_force_performance_level")).unwrap(),
-            "auto"
-        );
-        assert_eq!(
-            read_trimmed(&device.join("pp_power_profile_mode")).unwrap(),
-            "BOOTUP_DEFAULT"
-        );
-        fs::remove_dir_all(root).ok();
-    }
-
-    #[test]
-    fn apply_with_manual_policy_writes_verifies_and_saves_every_original_value() {
-        let root = temp_sysfs_root("apply");
-        let device = write_gpu_device(&root, "card0", "auto", "BOOTUP_DEFAULT");
-
-        let token = action_for(&root)
-            .apply_with_policy(&manual_policy_for(&["card0"]))
-            .unwrap();
-
-        assert_eq!(
-            read_trimmed(&device.join("power_dpm_force_performance_level")).unwrap(),
-            "high"
-        );
-        assert_eq!(
-            read_trimmed(&device.join("pp_power_profile_mode")).unwrap(),
-            "3D_FULL_SCREEN"
-        );
-
-        match token {
-            RollbackToken::GpuPowerRestore { records } => {
-                assert_eq!(records.len(), 2);
-                assert!(records.iter().any(|record| {
-                    record.path.ends_with("power_dpm_force_performance_level")
-                        && record.original_value == "auto"
-                }));
-                assert!(records.iter().any(|record| {
-                    record.path.ends_with("pp_power_profile_mode")
-                        && record.original_value == "BOOTUP_DEFAULT"
-                }));
-            }
-            other => panic!("unexpected rollback token: {other:?}"),
-        }
-
-        fs::remove_dir_all(root).ok();
-    }
-
-    #[test]
-    fn apply_rejects_suggest_only_policy() {
-        let root = temp_sysfs_root("apply-suggest-only");
-        write_gpu_device(&root, "card0", "auto", "BOOTUP_DEFAULT");
-
-        let err = action_for(&root)
-            .apply_with_policy(&policy_for(&["card0"]))
-            .unwrap_err()
-            .to_string();
-
-        assert!(err.contains("GPU power action is suggest-only"));
-        fs::remove_dir_all(root).ok();
-    }
-
-    #[test]
-    fn rollback_restores_all_values_and_verifies() {
-        let root = temp_sysfs_root("rollback");
-        let device = write_gpu_device(&root, "card0", "high", "3D_FULL_SCREEN");
-        let action = action_for(&root);
-
-        let token = RollbackToken::GpuPowerRestore {
-            records: vec![
-                GpuPowerRestoreRecord {
-                    path: device.join("power_dpm_force_performance_level"),
-                    original_value: "auto".to_owned(),
-                },
-                GpuPowerRestoreRecord {
-                    path: device.join("pp_power_profile_mode"),
-                    original_value: "BOOTUP_DEFAULT".to_owned(),
-                },
-            ],
-        };
-
-        action.rollback(&token).unwrap();
-
-        assert_eq!(
-            read_trimmed(&device.join("power_dpm_force_performance_level")).unwrap(),
-            "auto"
-        );
-        assert_eq!(
-            read_trimmed(&device.join("pp_power_profile_mode")).unwrap(),
-            "BOOTUP_DEFAULT"
-        );
-        fs::remove_dir_all(root).ok();
-    }
-
-    #[test]
-    fn rollback_rejects_wrong_token_kind() {
-        let root = temp_sysfs_root("wrong-token");
-        let action = action_for(&root);
-
-        let err = action
-            .rollback(&RollbackToken::NiceRestore {
-                records: Vec::new(),
-            })
-            .unwrap_err()
-            .to_string();
-
-        assert!(err.contains("rollback token is not a GPU power restore token"));
-        fs::remove_dir_all(root).ok();
-    }
-
-    #[test]
-    fn gpu_power_restore_token_reports_affected_records_and_no_restore_path() {
-        let token = RollbackToken::GpuPowerRestore {
-            records: vec![
-                GpuPowerRestoreRecord {
-                    path: PathBuf::from(
-                        "/sys/class/drm/card0/device/power_dpm_force_performance_level",
-                    ),
-                    original_value: "auto".to_owned(),
-                },
-                GpuPowerRestoreRecord {
-                    path: PathBuf::from("/sys/class/drm/card0/device/pp_power_profile_mode"),
-                    original_value: "BOOTUP_DEFAULT".to_owned(),
-                },
-            ],
-        };
-
-        assert_eq!(token.affected_tasks(), 2);
-        assert!(token.restore_path().is_none());
-    }
-}
+#[path = "gpu_power/tests.rs"]
+mod tests;

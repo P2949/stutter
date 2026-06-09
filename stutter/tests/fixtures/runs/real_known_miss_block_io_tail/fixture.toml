@@ -1,0 +1,51 @@
+name = "real_known_miss_block_io_tail"
+schema_version = 23
+source = "sanitized-real-recording"
+quality_expectation = "High"
+description = "Known false-negative catalogue entry for a late block-I/O tail capture shape that current heuristics intentionally do not diagnose yet."
+
+[platform]
+gpu_vendor = "Intel"
+gpu_driver = "i915"
+compositor = "Sway"
+session_type = "wayland"
+scenario = "known-miss"
+sanitized_capture_id = "sanitized-intel-sway-known-miss-block-io-v1"
+kernel_family = "linux"
+kernel_version_bucket = "6.8-6.12"
+cpu_vendor = "Intel"
+cpu_topology_bucket = "6c12t"
+display_refresh_bucket = "90-165hz"
+capture_features = [
+    "frames",
+    "sparse-evidence",
+]
+
+[expected]
+primary_cause = "BlockIoCandidate"
+expected_behavior = "known_miss"
+accepted_confidence = []
+data_quality = "High"
+
+[expected.artifacts]
+spikes = 0
+intervals = 1
+irq_events = 0
+gpu_samples = 0
+frames = 0
+block_io_events = 0
+foreground_events = 0
+kms_flip_events = 0
+drm_fence_events = 0
+wayland_presentation_events = 0
+dmabuf_events = 0
+gpu_engine_samples = 0
+
+[expected.evidence]
+contains = []
+
+[privacy]
+titles_redacted = true
+paths_redacted = true
+hostnames_redacted = true
+usernames_redacted = true

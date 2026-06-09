@@ -59,6 +59,38 @@ pub struct ReleaseReadinessInputs {
     pub per_action_opt_in: bool,
     pub stronger_tests: bool,
     pub manual_confirmation_or_explicit_config: bool,
+    pub real_machine_validation: bool,
+    pub real_validation_matrix: bool,
+    pub false_negative_catalogue: bool,
+    pub multi_machine_validation: bool,
+    pub local_install_smoke_tests: bool,
+    pub service_doctor_smoke_tests: bool,
+    pub emergency_restore_smoke_tests: bool,
+    pub unprivileged_report_smoke_tests: bool,
+    pub packaged_artifact_layout_tests: bool,
+    pub service_start_stop_smoke_tests: bool,
+    pub rollback_drill: bool,
+
+    /// Whether distro packages may be described as production-ready.
+    ///
+    /// This is intentionally separate from service unit packaging. The current
+    /// tree ships local install helpers and service templates, but distro
+    /// package recipes remain skeletons until the eBPF artifact and install
+    /// flow are reproducible in package-manager builds.
+    pub production_distro_packaging: bool,
+
+    /// Whether the eBPF object has a reproducible package-manager build or a
+    /// documented prebuilt release artifact path suitable for distro packages.
+    pub reproducible_packaged_ebpf_object: bool,
+
+    /// Whether install/package tests cover the ebuild/PKGBUILD/tarball layout.
+    pub packaging_install_tests: bool,
+
+    /// Whether packaged service units have start/stop smoke evidence.
+    pub packaging_service_smoke_tests: bool,
+
+    /// Whether tagged release tarballs/artifacts are available for packagers.
+    pub versioned_release_tarball: bool,
 }
 
 impl Default for ReleaseReadinessInputs {
@@ -77,6 +109,23 @@ impl Default for ReleaseReadinessInputs {
             per_action_opt_in: true,
             stronger_tests: false,
             manual_confirmation_or_explicit_config: true,
+            real_machine_validation: false,
+            real_validation_matrix: false,
+            false_negative_catalogue: false,
+            multi_machine_validation: false,
+            local_install_smoke_tests: false,
+            service_doctor_smoke_tests: false,
+            emergency_restore_smoke_tests: false,
+            unprivileged_report_smoke_tests: false,
+            packaged_artifact_layout_tests: false,
+            service_start_stop_smoke_tests: false,
+            rollback_drill: false,
+
+            production_distro_packaging: false,
+            reproducible_packaged_ebpf_object: false,
+            packaging_install_tests: false,
+            packaging_service_smoke_tests: false,
+            versioned_release_tarball: false,
         }
     }
 }
@@ -101,7 +150,7 @@ pub fn evaluate_release_readiness(
     channel: ReleaseChannel,
     inputs: &ReleaseReadinessInputs,
 ) -> ReleaseReadinessReport {
-    let gates = match channel {
+    let mut gates = match channel {
         ReleaseChannel::Experimental => vec![gate(
             "experimental_channel_declared",
             true,
@@ -119,7 +168,7 @@ pub fn evaluate_release_readiness(
                 "stable_service",
                 true,
                 inputs.stable_service_packaging,
-                "observe-stable requires a stable service path",
+                "observe-stable requires stable service unit/install-script behavior, not production distro packaging",
             ),
             gate(
                 "retention_controls",
@@ -132,6 +181,24 @@ pub fn evaluate_release_readiness(
                 true,
                 inputs.health_and_status,
                 "observe-stable requires health and status surfaces",
+            ),
+            gate(
+                "local_install_smoke_tests",
+                true,
+                inputs.local_install_smoke_tests,
+                "observe-stable requires local install smoke evidence",
+            ),
+            gate(
+                "service_doctor_smoke_tests",
+                true,
+                inputs.service_doctor_smoke_tests,
+                "observe-stable requires service doctor dry-run smoke evidence",
+            ),
+            gate(
+                "unprivileged_report_smoke_tests",
+                true,
+                inputs.unprivileged_report_smoke_tests,
+                "observe-stable requires unprivileged report/recommend smoke evidence",
             ),
         ],
         ReleaseChannel::LowRiskStable => vec![
@@ -160,10 +227,52 @@ pub fn evaluate_release_readiness(
                 "low-risk-stable requires long-running soak evidence",
             ),
             gate(
+                "real_machine_validation",
+                true,
+                inputs.real_machine_validation,
+                "low-risk-stable requires real-machine validation",
+            ),
+            gate(
+                "real_validation_matrix",
+                true,
+                inputs.real_validation_matrix,
+                "low-risk-stable requires the real validation matrix gate",
+            ),
+            gate(
+                "false_negative_catalogue",
+                true,
+                inputs.false_negative_catalogue,
+                "low-risk-stable requires tracked false-negative catalogue support",
+            ),
+            gate(
                 "service_packaging",
                 true,
                 inputs.service_packaging,
-                "low-risk-stable requires service packaging",
+                "low-risk-stable requires service unit templates and local install support, not production distro packaging",
+            ),
+            gate(
+                "local_install_smoke_tests",
+                true,
+                inputs.local_install_smoke_tests,
+                "low-risk-stable requires local install smoke evidence",
+            ),
+            gate(
+                "emergency_restore_smoke_tests",
+                true,
+                inputs.emergency_restore_smoke_tests,
+                "low-risk-stable requires emergency restore smoke evidence",
+            ),
+            gate(
+                "service_start_stop_smoke_tests",
+                true,
+                inputs.service_start_stop_smoke_tests,
+                "low-risk-stable requires service start/stop smoke evidence",
+            ),
+            gate(
+                "rollback_drill",
+                true,
+                inputs.rollback_drill,
+                "low-risk-stable requires rollback drill evidence",
             ),
             gate("docs", true, inputs.docs, "low-risk-stable requires docs"),
         ],
@@ -186,8 +295,16 @@ pub fn evaluate_release_readiness(
                 inputs.manual_confirmation_or_explicit_config,
                 "medium-risk requires manual confirmation or explicit config",
             ),
+            gate(
+                "multi_machine_validation",
+                true,
+                inputs.multi_machine_validation,
+                "medium-risk requires multi-machine validation evidence",
+            ),
         ],
     };
+
+    gates.extend(packaging_roadmap_gates(inputs));
 
     ReleaseReadinessReport {
         channel,
@@ -214,6 +331,41 @@ fn gate(
     }
 }
 
+fn packaging_roadmap_gates(inputs: &ReleaseReadinessInputs) -> Vec<ReleaseGate> {
+    vec![
+        gate(
+            "production_distro_packaging",
+            false,
+            inputs.production_distro_packaging,
+            "production distro packaging is separate from source readiness and is not claimed by default",
+        ),
+        gate(
+            "reproducible_packaged_ebpf_object",
+            false,
+            inputs.reproducible_packaged_ebpf_object,
+            "production distro packaging requires a reproducible packaged eBPF object build or release artifact path",
+        ),
+        gate(
+            "packaging_install_tests",
+            false,
+            inputs.packaging_install_tests || inputs.packaged_artifact_layout_tests,
+            "production distro packaging requires install tests for ebuild/PKGBUILD/tarball layout",
+        ),
+        gate(
+            "packaging_service_smoke_tests",
+            false,
+            inputs.packaging_service_smoke_tests,
+            "production distro packaging requires packaged service start/stop smoke tests",
+        ),
+        gate(
+            "versioned_release_tarball",
+            false,
+            inputs.versioned_release_tarball,
+            "production distro packaging requires versioned release tarballs/artifacts",
+        ),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -222,6 +374,9 @@ mod tests {
     fn observe_stable_passes_only_without_apply_actions() {
         let mut inputs = ReleaseReadinessInputs {
             apply_actions_enabled: false,
+            local_install_smoke_tests: true,
+            service_doctor_smoke_tests: true,
+            unprivileged_report_smoke_tests: true,
             ..ReleaseReadinessInputs::default()
         };
         let report = evaluate_release_readiness(ReleaseChannel::ObserveStable, &inputs);
@@ -249,6 +404,35 @@ mod tests {
     }
 
     #[test]
+    fn low_risk_stable_requires_real_validation_matrix_and_false_negative_catalogue() {
+        let inputs = ReleaseReadinessInputs {
+            soak_tests: true,
+            real_machine_validation: true,
+            local_install_smoke_tests: true,
+            emergency_restore_smoke_tests: true,
+            service_start_stop_smoke_tests: true,
+            rollback_drill: true,
+            ..ReleaseReadinessInputs::default()
+        };
+
+        let report = evaluate_release_readiness(ReleaseChannel::LowRiskStable, &inputs);
+
+        assert!(!report.passed);
+        assert!(
+            report
+                .gates
+                .iter()
+                .any(|gate| gate.code == "real_validation_matrix" && !gate.passed)
+        );
+        assert!(
+            report
+                .gates
+                .iter()
+                .any(|gate| gate.code == "false_negative_catalogue" && !gate.passed)
+        );
+    }
+
+    #[test]
     fn medium_risk_requires_explicit_stronger_tests() {
         let inputs = ReleaseReadinessInputs::default();
 
@@ -269,5 +453,88 @@ mod tests {
             "low-risk".parse::<ReleaseChannel>().unwrap(),
             ReleaseChannel::LowRiskStable
         );
+    }
+
+    #[test]
+    fn release_readiness_tracks_distro_packaging_as_advisory_by_default() {
+        let report = evaluate_release_readiness(
+            ReleaseChannel::Experimental,
+            &ReleaseReadinessInputs::default(),
+        );
+
+        let gate = report
+            .gates
+            .iter()
+            .find(|gate| gate.code == "production_distro_packaging")
+            .expect("release report should track production distro packaging");
+
+        assert!(!gate.required);
+        assert!(!gate.passed);
+        assert!(
+            gate.description.contains("separate from source readiness"),
+            "gate should clearly separate packaging from source readiness"
+        );
+
+        assert!(
+            report.passed,
+            "experimental source readiness should not fail because distro packaging is not claimed"
+        );
+    }
+
+    #[test]
+    fn release_readiness_lists_packaging_roadmap_gates() {
+        let report = evaluate_release_readiness(
+            ReleaseChannel::LowRiskStable,
+            &ReleaseReadinessInputs::default(),
+        );
+
+        for code in [
+            "production_distro_packaging",
+            "reproducible_packaged_ebpf_object",
+            "packaging_install_tests",
+            "packaging_service_smoke_tests",
+            "versioned_release_tarball",
+        ] {
+            let gate = report
+                .gates
+                .iter()
+                .find(|gate| gate.code == code)
+                .unwrap_or_else(|| panic!("missing packaging gate {code}"));
+
+            assert!(
+                !gate.required,
+                "packaging roadmap gate {code} should be advisory"
+            );
+        }
+    }
+
+    #[test]
+    fn release_readiness_can_mark_distro_packaging_gates_as_met() {
+        let inputs = ReleaseReadinessInputs {
+            production_distro_packaging: true,
+            reproducible_packaged_ebpf_object: true,
+            packaging_install_tests: true,
+            packaging_service_smoke_tests: true,
+            versioned_release_tarball: true,
+            ..ReleaseReadinessInputs::default()
+        };
+
+        let report = evaluate_release_readiness(ReleaseChannel::Experimental, &inputs);
+
+        for code in [
+            "production_distro_packaging",
+            "reproducible_packaged_ebpf_object",
+            "packaging_install_tests",
+            "packaging_service_smoke_tests",
+            "versioned_release_tarball",
+        ] {
+            let gate = report
+                .gates
+                .iter()
+                .find(|gate| gate.code == code)
+                .unwrap_or_else(|| panic!("missing packaging gate {code}"));
+
+            assert!(gate.passed, "packaging gate {code} should be marked met");
+        }
     }
 }

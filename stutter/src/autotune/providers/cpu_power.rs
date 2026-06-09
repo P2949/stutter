@@ -1,9 +1,15 @@
 use crate::{
     actions::cpu_power::CpuPowerAction,
     autotune::{
-        candidate::{CandidateAction, CandidateEvidence, CpuPowerActionPlan},
         objective::ObjectiveKind,
-        providers::{CandidateProposal, CandidateProvider, CandidateProviderInput},
+        planning::{
+            candidate::{CandidateAction, CandidateEvidence},
+            executable_plan::CpuPowerActionPlan,
+        },
+        providers::{
+            CandidateProposal, CandidateProvider, CandidateProviderInput,
+            signal_quality_confidence_weight,
+        },
         situation::SituationKind,
     },
 };
@@ -16,6 +22,9 @@ pub struct CpuPowerCandidateEvidence {
     pub current_epp: Option<String>,
     pub thermal_headroom: bool,
     pub ac_power: Option<bool>,
+    pub battery_present: bool,
+    pub battery_discharging: Option<bool>,
+    pub cpu_power_on_battery_allowed: bool,
 }
 
 #[derive(Default)]
@@ -49,11 +58,15 @@ impl CandidateProvider for CpuPowerProvider {
             .filter(|available| supports_token(Some(available), "performance"))
             .map(|_| "performance".to_owned());
 
+        let Some(epp) = epp else {
+            return Vec::new();
+        };
+
         let action = CpuPowerAction {
             sysfs_root: std::path::PathBuf::from("/sys"),
             cpus: structured_evidence.related_cpus.clone(),
-            scaling_governor: Some("performance".to_owned()),
-            energy_performance_preference: epp,
+            scaling_governor: None,
+            energy_performance_preference: Some(epp),
         };
         let objective = match input.observation.primary_situation {
             SituationKind::CompileCpuBound => {
@@ -72,13 +85,16 @@ impl CandidateProvider for CpuPowerProvider {
                 evidence: vec![CandidateEvidence::new(
                     "cpu_power_structured",
                     format!(
-                        "policy={} related_cpus={:?} governor={:?} epp={:?} thermal_headroom={} ac_power={:?} limited_cpu={:?}",
+                        "policy={} related_cpus={:?} governor={:?} epp={:?} thermal_headroom={} ac_power={:?} battery_present={} battery_discharging={:?} battery_override={} limited_cpu={:?}",
                         structured_evidence.policy,
                         structured_evidence.related_cpus,
                         structured_evidence.current_governor,
                         structured_evidence.current_epp,
                         structured_evidence.thermal_headroom,
                         structured_evidence.ac_power,
+                        structured_evidence.battery_present,
+                        structured_evidence.battery_discharging,
+                        structured_evidence.cpu_power_on_battery_allowed,
                         input.observation.objective_signals.cpu_power_limited_cpu
                     ),
                     confidence,
@@ -100,6 +116,10 @@ impl CandidateProvider for CpuPowerProvider {
 
 fn cpu_power_evidence(input: &CandidateProviderInput<'_>) -> Option<CpuPowerCandidateEvidence> {
     if input.observation.objective_signals.cpu_power_limited != Some(true) {
+        return None;
+    }
+    let power_source = &input.system_context.inventory.power_source;
+    if power_source.on_battery_or_discharging() && !input.daemon_policy.allow_cpu_power_on_battery {
         return None;
     }
 
@@ -128,6 +148,9 @@ fn cpu_power_evidence(input: &CandidateProviderInput<'_>) -> Option<CpuPowerCand
 
     let thermal_headroom = input.observation.objective_signals.thermal_degraded != Some(true)
         && input.system_health.ok_for_apply;
+    if !thermal_headroom {
+        return None;
+    }
 
     Some(CpuPowerCandidateEvidence {
         policy: policy.policy.clone(),
@@ -135,7 +158,10 @@ fn cpu_power_evidence(input: &CandidateProviderInput<'_>) -> Option<CpuPowerCand
         current_governor: policy.scaling_governor.clone(),
         current_epp: policy.energy_performance_preference.clone(),
         thermal_headroom,
-        ac_power: None,
+        ac_power: power_source.ac_power_for_evidence(),
+        battery_present: power_source.battery_present,
+        battery_discharging: power_source.battery_discharging,
+        cpu_power_on_battery_allowed: input.daemon_policy.allow_cpu_power_on_battery,
     })
 }
 
@@ -161,13 +187,24 @@ fn cpu_power_confidence(
             .objective_signals
             .cpu_power_limited_cpu
             .is_some(),
+        evidence.power_source_evidence_present(),
     ]
     .into_iter()
     .filter(|present| *present)
     .count() as f32
-        / 6.0;
+        / 7.0;
 
-    (input.observation.situation.confidence * completeness).clamp(0.0, 1.0)
+    let signal_weight = signal_quality_confidence_weight(
+        input.observation.objective_signals.signal_quality.cpu_power,
+    );
+
+    (input.observation.situation.confidence * completeness * signal_weight).clamp(0.0, 1.0)
+}
+
+impl CpuPowerCandidateEvidence {
+    fn power_source_evidence_present(&self) -> bool {
+        self.ac_power.is_some() || self.battery_discharging.is_some() || !self.battery_present
+    }
 }
 
 fn parse_related_cpus(related_cpus: Option<&str>) -> Vec<u32> {
@@ -206,10 +243,14 @@ mod tests {
             controller::ControllerRuntimeState, observation::AutotuneObservation,
             system_context::SystemContextSnapshot,
         },
-        daemon::{ActionSource, DaemonCapabilities, DaemonMode, SystemHealthSnapshot},
+        daemon::{
+            capabilities::DaemonCapabilities,
+            health::SystemHealthSnapshot,
+            policy::{ActionSource, DaemonMode},
+        },
         daemon_policy::{DaemonPolicyBuildInput, build_daemon_policy},
         focus::FocusGroupKind,
-        system_inventory::{CpuPolicyInventory, SystemInventory},
+        system_inventory::{CpuPolicyInventory, PowerSourceSnapshot, SystemInventory},
     };
 
     #[test]
@@ -235,6 +276,7 @@ mod tests {
                 drm_devices: Vec::new(),
                 irq_default_smp_affinity: None,
                 irq_lines: Vec::new(),
+                power_source: Default::default(),
                 sched_ext_available: false,
                 vm_knobs: Default::default(),
                 inventory_hash: "empty-cpu-inventory".to_owned(),
@@ -289,6 +331,11 @@ mod tests {
                 drm_devices: Vec::new(),
                 irq_default_smp_affinity: None,
                 irq_lines: Vec::new(),
+                power_source: PowerSourceSnapshot {
+                    ac_online: Some(true),
+                    battery_present: false,
+                    battery_discharging: None,
+                },
                 sched_ext_available: false,
                 vm_knobs: Default::default(),
                 inventory_hash: "fake-cpu-no-epp-inventory".to_owned(),
@@ -307,13 +354,7 @@ mod tests {
             profiles: &[],
         });
 
-        assert_eq!(proposals.len(), 1);
-        let CandidateAction::CpuPower { plan } = &proposals[0].candidate else {
-            panic!("expected cpu power candidate");
-        };
-        assert_eq!(plan.action.cpus, vec![9]);
-        assert_eq!(plan.action.scaling_governor.as_deref(), Some("performance"));
-        assert_eq!(plan.action.energy_performance_preference, None);
+        assert!(proposals.is_empty());
     }
 
     #[test]
@@ -349,6 +390,11 @@ mod tests {
                 drm_devices: Vec::new(),
                 irq_default_smp_affinity: None,
                 irq_lines: Vec::new(),
+                power_source: PowerSourceSnapshot {
+                    ac_online: Some(true),
+                    battery_present: false,
+                    battery_discharging: None,
+                },
                 sched_ext_available: false,
                 vm_knobs: Default::default(),
                 inventory_hash: "fake-cpu-inventory".to_owned(),
@@ -376,6 +422,212 @@ mod tests {
         };
         assert_eq!(plan.name, "cpu-power-policy-policy9-performance");
         assert_eq!(plan.action.cpus, vec![9]);
+        assert_eq!(plan.action.scaling_governor, None);
+        assert_eq!(
+            plan.action.energy_performance_preference.as_deref(),
+            Some("performance")
+        );
+    }
+
+    #[test]
+    fn cpu_power_provider_includes_ac_power_evidence_when_ac_online() {
+        let policy = policy();
+        let proposals = proposals_for_power_source(
+            PowerSourceSnapshot {
+                ac_online: Some(true),
+                battery_present: true,
+                battery_discharging: Some(false),
+            },
+            Some(false),
+            &policy,
+        );
+
+        assert_eq!(proposals.len(), 1);
+        let CandidateAction::CpuPower { plan } = &proposals[0].candidate else {
+            panic!("expected cpu power candidate");
+        };
+        assert!(plan.evidence[0].value.contains("ac_power=Some(true)"));
+        assert!(
+            plan.evidence[0]
+                .value
+                .contains("battery_discharging=Some(false)")
+        );
+    }
+
+    #[test]
+    fn cpu_power_provider_blocks_battery_discharging_by_default() {
+        let policy = policy();
+        let proposals = proposals_for_power_source(
+            PowerSourceSnapshot {
+                ac_online: Some(false),
+                battery_present: true,
+                battery_discharging: Some(true),
+            },
+            Some(false),
+            &policy,
+        );
+
+        assert!(proposals.is_empty());
+    }
+
+    #[test]
+    fn cpu_power_provider_allows_battery_discharging_with_explicit_policy() {
+        let policy = policy_with_cpu_power_on_battery();
+        let proposals = proposals_for_power_source(
+            PowerSourceSnapshot {
+                ac_online: Some(false),
+                battery_present: true,
+                battery_discharging: Some(true),
+            },
+            Some(false),
+            &policy,
+        );
+
+        assert_eq!(proposals.len(), 1);
+        let CandidateAction::CpuPower { plan } = &proposals[0].candidate else {
+            panic!("expected cpu power candidate");
+        };
+        assert!(plan.evidence[0].value.contains("battery_override=true"));
+    }
+
+    #[test]
+    fn cpu_power_provider_allows_no_battery_desktop_without_ac_supply() {
+        let policy = policy();
+        let proposals = proposals_for_power_source(
+            PowerSourceSnapshot {
+                ac_online: None,
+                battery_present: false,
+                battery_discharging: None,
+            },
+            Some(false),
+            &policy,
+        );
+
+        assert_eq!(proposals.len(), 1);
+        let CandidateAction::CpuPower { plan } = &proposals[0].candidate else {
+            panic!("expected cpu power candidate");
+        };
+        assert!(plan.evidence[0].value.contains("ac_power=Some(true)"));
+        assert!(plan.evidence[0].value.contains("battery_present=false"));
+    }
+
+    #[test]
+    fn cpu_power_provider_blocks_thermal_degraded() {
+        let policy = policy();
+        let proposals = proposals_for_power_source(
+            PowerSourceSnapshot {
+                ac_online: Some(true),
+                battery_present: false,
+                battery_discharging: None,
+            },
+            Some(true),
+            &policy,
+        );
+
+        assert!(proposals.is_empty());
+    }
+
+    #[test]
+    fn cpu_power_provider_rejects_already_performance_policy() {
+        let provider = CpuPowerProvider;
+        let mut observation = cpu_power_limited_observation(Some(false));
+        observation.objective_signals.cpu_power_limited_cpu = Some(9);
+        let policy = policy();
+        let system_context = system_context_with_cpu_power(
+            PowerSourceSnapshot {
+                ac_online: Some(true),
+                battery_present: false,
+                battery_discharging: None,
+            },
+            Some("performance".to_owned()),
+            Some("performance".to_owned()),
+        );
+
+        let proposals = provider.propose(&CandidateProviderInput {
+            observation: &observation,
+            daemon_policy: &policy,
+            capabilities: &observation.capabilities,
+            system_health: &observation.system_health,
+            system_context: &system_context,
+            controller_state: &ControllerRuntimeState::default(),
+            profiles: &[],
+        });
+
+        assert!(proposals.is_empty());
+    }
+
+    fn proposals_for_power_source(
+        power_source: PowerSourceSnapshot,
+        thermal_degraded: Option<bool>,
+        policy: &crate::daemon::DaemonPolicy,
+    ) -> Vec<CandidateProposal> {
+        let provider = CpuPowerProvider;
+        let observation = cpu_power_limited_observation(thermal_degraded);
+        let system_context = system_context_with_cpu_power(
+            power_source,
+            Some("powersave".to_owned()),
+            Some("balance_power".to_owned()),
+        );
+
+        provider.propose(&CandidateProviderInput {
+            observation: &observation,
+            daemon_policy: policy,
+            capabilities: &observation.capabilities,
+            system_health: &observation.system_health,
+            system_context: &system_context,
+            controller_state: &ControllerRuntimeState::default(),
+            profiles: &[],
+        })
+    }
+
+    fn cpu_power_limited_observation(thermal_degraded: Option<bool>) -> AutotuneObservation {
+        let mut observation = AutotuneObservation {
+            target_present: true,
+            target_root_pid: Some(1234),
+            primary_situation: SituationKind::CompileCpuBound,
+            focus_kind: Some(FocusGroupKind::Compile),
+            focus_confidence: 0.95,
+            ..AutotuneObservation::default()
+        };
+        observation.refresh_situation_classification();
+        observation.primary_situation = SituationKind::CompileCpuBound;
+        observation.objective_signals.cpu_power_limited = Some(true);
+        observation.objective_signals.cpu_power_limited_cpu = Some(9);
+        observation.objective_signals.thermal_degraded = thermal_degraded;
+        observation
+    }
+
+    fn system_context_with_cpu_power(
+        power_source: PowerSourceSnapshot,
+        scaling_governor: Option<String>,
+        energy_performance_preference: Option<String>,
+    ) -> SystemContextSnapshot {
+        SystemContextSnapshot {
+            capabilities: DaemonCapabilities::default(),
+            health: SystemHealthSnapshot::default(),
+            inventory: SystemInventory {
+                cpu_policies: vec![CpuPolicyInventory {
+                    policy: "policy9".to_owned(),
+                    path: PathBuf::from("/fake/sys/devices/system/cpu/cpufreq/policy9"),
+                    scaling_governor,
+                    available_governors: Some("powersave performance".to_owned()),
+                    energy_performance_preference,
+                    energy_performance_available_preferences: Some(
+                        "balance_power performance".to_owned(),
+                    ),
+                    related_cpus: Some("9".to_owned()),
+                }],
+                drm_devices: Vec::new(),
+                irq_default_smp_affinity: None,
+                irq_lines: Vec::new(),
+                power_source,
+                sched_ext_available: false,
+                vm_knobs: Default::default(),
+                inventory_hash: "fake-cpu-power-source-inventory".to_owned(),
+            },
+            active_config: Default::default(),
+            sampled_at_unix_nanos: 10,
+        }
     }
 
     fn policy() -> crate::daemon::DaemonPolicy {
@@ -385,6 +637,20 @@ mod tests {
             Some(1234),
             None,
         );
+        build_daemon_policy(DaemonPolicyBuildInput {
+            config: &config,
+            remote_context: None,
+        })
+    }
+
+    fn policy_with_cpu_power_on_battery() -> crate::daemon::DaemonPolicy {
+        let mut config = crate::autotune::runtime::daemon_config_for_runtime_mode(
+            DaemonMode::Suggest,
+            ActionSource::AutotuneRuntime,
+            Some(1234),
+            None,
+        );
+        config.autotune.allow_cpu_power_on_battery = true;
         build_daemon_policy(DaemonPolicyBuildInput {
             config: &config,
             remote_context: None,

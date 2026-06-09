@@ -1,0 +1,1 @@
+{"elapsed_ms":100,"timestamp_ns":100000000,"source":"i915","card":"card0","driver":"i915","crtc_id":42,"connector":"DP-1","event_kind":"pageflip_interval","sequence":77,"request_ns":99000000,"done_ns":99800000,"duration_ns":800000,"flags":[],"confidence":"high"}

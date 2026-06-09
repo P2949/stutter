@@ -310,6 +310,8 @@ mod tests {
             cpu_psi_some: 0.0,
             mem_psi_some: 0.0,
             mem_psi_full: 0.0,
+            mem_psi_delta_us: 0,
+            mem_psi_spike: false,
             io_psi_some: 0.0,
             io_psi_full: 0.0,
             percentile_scope: "all".to_owned(),
@@ -339,6 +341,61 @@ mod tests {
         assert_eq!(config.candidate_window_ms(), 30_000);
         assert_eq!(config.min_scored_intervals, 10);
         assert_eq!(config.min_scored_samples, 100);
+    }
+
+    #[test]
+    fn candidate_measurement_progress_and_reset_are_observable() {
+        let mut state = CandidateMeasurementWindowState::new(config());
+        assert_eq!(state.config().candidate_window_ms(), 30_000);
+
+        let drop_counters = DropCountersSnapshot {
+            wakeup_data_insert_failed: 0,
+            wakeup_data_stale_entries: 0,
+            wakeup_data_replaced_entries: 0,
+            wakeup_data_consumed_read_failed: 0,
+            ringbuf_reserve_failed: 3,
+            irq_start_times_insert_failed: 0,
+            block_start_insert_failed: 0,
+            block_fallback_key_collisions: 0,
+            cpu_accounting_untracked: 0,
+            block_zero_keys: 0,
+            drm_fence_missing_start: 0,
+        };
+        let records = vec![record(1_000, 7, 10, TaskClass::Game)];
+        let status = state.observe_interval(
+            1_000_000_000,
+            1_000,
+            &records,
+            &drop_counters,
+            identity(&records),
+        );
+
+        match status {
+            CandidateMeasurementWindowStatus::Collecting {
+                elapsed_ms,
+                scored_intervals,
+                scored_samples,
+                scored_task_count,
+                drop_counter_total,
+                reasons,
+            } => {
+                assert_eq!(elapsed_ms, 0);
+                assert_eq!(scored_intervals, 1);
+                assert_eq!(scored_samples, 10);
+                assert_eq!(scored_task_count, 1);
+                assert_eq!(drop_counter_total, 3);
+                assert!(
+                    reasons
+                        .iter()
+                        .any(|reason| reason.contains("candidate measurement window not complete"))
+                );
+            }
+            other => panic!("expected collecting candidate measurement status, got {other:?}"),
+        }
+
+        state.reset();
+        assert_eq!(state.config(), &config());
+        assert!(!state.status(2_000_000_000).is_ready());
     }
 
     #[test]
@@ -470,9 +527,15 @@ mod tests {
         let drop_counters = DropCountersSnapshot {
             wakeup_data_insert_failed: 1,
             wakeup_data_stale_entries: 0,
+            wakeup_data_replaced_entries: 0,
+            wakeup_data_consumed_read_failed: 0,
             ringbuf_reserve_failed: 0,
             irq_start_times_insert_failed: 0,
             block_start_insert_failed: 0,
+            block_fallback_key_collisions: 0,
+            cpu_accounting_untracked: 0,
+            block_zero_keys: 0,
+            drm_fence_missing_start: 0,
         };
 
         for idx in 0..10 {

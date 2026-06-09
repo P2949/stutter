@@ -84,7 +84,7 @@ pub fn render_replay_timeline(entries: &[ReplayTimelineEntry]) -> String {
 fn event_to_timeline_text(event: &AutotuneHistoryEvent) -> Vec<String> {
     let mut out = Vec::new();
     let decision = event.decision.decision.as_str();
-    let reason_lower = event.reason.to_ascii_lowercase();
+    let reason_lower = event.reason.clone().to_ascii_lowercase();
 
     if event.phase == ControllerPhase::Observing && reason_lower.contains("baseline") {
         out.push("observing baseline".to_owned());
@@ -129,10 +129,10 @@ fn event_to_timeline_text(event: &AutotuneHistoryEvent) -> Vec<String> {
 
 fn fallback_timeline_text(event: &AutotuneHistoryEvent) -> String {
     let decision = humanize_decision(&event.decision.decision);
-    if event.reason.trim().is_empty() {
+    if event.reason.clone().trim().is_empty() {
         decision
     } else {
-        format!("{decision}: {}", event.reason)
+        format!("{decision}: {}", event.reason.clone())
     }
 }
 
@@ -141,7 +141,7 @@ fn candidate_name(event: &AutotuneHistoryEvent) -> String {
         .decision
         .candidate_name
         .clone()
-        .or_else(|| event.action_id.clone())
+        .or_else(|| event.action_id.as_ref().map(|id| id.as_str().to_owned()))
         .unwrap_or_else(|| "unknown".to_owned())
 }
 
@@ -151,7 +151,7 @@ fn is_improved_event(event: &AutotuneHistoryEvent) -> bool {
         return true;
     }
 
-    let reason = event.reason.to_ascii_lowercase();
+    let reason = event.reason.clone().to_ascii_lowercase();
     reason.contains("improved")
 }
 
@@ -159,7 +159,7 @@ fn is_kept_event(event: &AutotuneHistoryEvent) -> bool {
     matches!(
         event.decision.decision.as_str(),
         "KeepCurrent" | "Kept" | "Keep"
-    ) || event.reason.to_ascii_lowercase().contains("kept")
+    ) || event.reason.clone().to_ascii_lowercase().contains("kept")
 }
 
 fn push_deduped_entry(entries: &mut Vec<ReplayTimelineEntry>, entry: ReplayTimelineEntry) {
@@ -231,14 +231,14 @@ mod tests {
         }
     }
 
-    fn observation(score_total: u64) -> ObservationSummary {
+    fn observation(diagnostic_raw_score_total: u64) -> ObservationSummary {
         ObservationSummary {
             target_present: true,
             active_target_count: 31,
             scored_task_count: 2,
             interval_count: 10,
             scored_samples: 100,
-            score_total,
+            diagnostic_raw_score_total,
             over_1ms: 0,
             over_2ms: 0,
             over_5ms: 0,
@@ -280,13 +280,15 @@ mod tests {
                 decision: decision.to_owned(),
                 candidate_name: candidate.map(str::to_owned),
                 action_kind: Some("cpu_affinity_profile".to_owned()),
+                safety_class: candidate.map(|_| crate::actions::SafetyClass::ReversibleLowRisk),
                 eligible: true,
                 rollback_policy: "rollback-on-exit".to_owned(),
             },
-            experiment_id: Some("experiment-1".to_owned()),
-            action_id: candidate.map(|name| format!("cpu-affinity-profile:{name}")),
+            experiment_id: Some("experiment-1".into()),
+            action_id: candidate.map(|name| format!("cpu-affinity-profile:{name}").into()),
             score_before: None,
             score_after: None,
+            planner: None,
             rollback_performed: false,
             reason: reason.to_owned(),
         }

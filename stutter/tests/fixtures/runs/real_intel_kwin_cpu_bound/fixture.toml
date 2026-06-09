@@ -1,0 +1,54 @@
+name = "real_intel_kwin_cpu_bound"
+schema_version = 23
+source = "sanitized-real-recording"
+quality_expectation = "High"
+description = "Sanitized Intel/KWin CPU-pressure recording with CPU PSI near scheduler-latency spikes."
+
+[platform]
+gpu_vendor = "Intel"
+gpu_driver = "i915"
+compositor = "KWin"
+session_type = "wayland"
+scenario = "cpu-bound"
+sanitized_capture_id = "sanitized-intel-kwin-cpu-bound-v1"
+kernel_family = "linux"
+kernel_version_bucket = "6.8-6.12"
+cpu_vendor = "Intel"
+cpu_topology_bucket = "6c12t"
+display_refresh_bucket = "90-165hz"
+capture_features = [
+    "frames",
+    "cpu-pressure",
+]
+
+[expected]
+primary_cause = "CpuPressureCandidate"
+expected_behavior = "must_diagnose"
+accepted_confidence = [
+    "Medium",
+    "High",
+]
+data_quality = "High"
+
+[expected.artifacts]
+spikes = 3
+intervals = 3
+irq_events = 0
+gpu_samples = 0
+frames = 0
+block_io_events = 0
+foreground_events = 0
+kms_flip_events = 0
+drm_fence_events = 0
+wayland_presentation_events = 0
+dmabuf_events = 0
+gpu_engine_samples = 0
+
+[expected.evidence]
+contains = ["high CPU PSI"]
+
+[privacy]
+titles_redacted = true
+paths_redacted = true
+hostnames_redacted = true
+usernames_redacted = true

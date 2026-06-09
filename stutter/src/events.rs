@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, time::Instant};
 
 use log::{debug, info, warn};
 use stutter_common::{
-    BlockIoEvent, CpuFreqEvent, ExecEvent, IrqEvent, MigrationEvent, SchedulerEvent,
+    BlockIoEvent, CpuFreqEvent, ExecEvent, IrqEvent as RawIrqEvent, MigrationEvent, SchedulerEvent,
 };
 
 use crate::{
@@ -15,6 +15,7 @@ use crate::{
 };
 
 pub mod decode;
+pub mod domain;
 pub mod interpret;
 
 pub fn handle_irq_record(record: &IrqEventRecord) -> MonitorEvent {
@@ -46,7 +47,7 @@ pub fn handle_migration_event(
 
     let record = recorder::MigrationEventRecord {
         elapsed_ms,
-        tid: event.tid,
+        tid: event.tid.into(),
         from_cpu: event.from_cpu,
         to_cpu: event.to_cpu,
         timestamp_ns: event.timestamp_ns,
@@ -81,7 +82,7 @@ pub fn block_io_event_record(
 
     recorder::BlockIoRecord {
         elapsed_ms,
-        tid: event.tid,
+        tid: event.tid.into(),
         correlation_basis: std::borrow::Cow::Borrowed(block_io_correlation_basis),
         dev: event.dev,
         nr_sector: event.nr_sector,
@@ -164,30 +165,30 @@ impl EventRuntimeConfig {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn handle_event_with_runtime_config(
-    event: &SchedulerEvent,
-    config: &EventRuntimeConfig,
-    started: Instant,
-    tasks: &mut TaskTracker,
-    monotonic_start_ns: Option<u64>,
-    scx_ops: Option<&str>,
-    scx_state: Option<&str>,
-    scx_enable_seq: Option<&str>,
-) -> interpret::SchedulerSampleUpdate {
-    interpret::interpret_scheduler_event(
-        event,
-        &config.spike,
-        started,
-        tasks,
-        monotonic_start_ns,
-        scx_ops,
-        scx_state,
-        scx_enable_seq,
-    )
+pub struct EventHandlingContext<'a> {
+    pub config: &'a EventRuntimeConfig,
+    pub started: Instant,
+    pub tasks: &'a mut TaskTracker,
+    pub monotonic_start_ns: Option<u64>,
+    pub diagnostics: interpret::SchedulerEventDiagnostics<'a>,
 }
 
-pub fn irq_event_record(monotonic_start_ns: Option<u64>, event: &IrqEvent) -> IrqEventRecord {
+pub fn handle_event_with_runtime_config(
+    event: &SchedulerEvent,
+    context: EventHandlingContext<'_>,
+) -> interpret::SchedulerSampleUpdate {
+    interpret::interpret_scheduler_event(interpret::SchedulerEventInput {
+        event,
+        config: &context.config.spike,
+        started: context.started,
+        tasks: context.tasks,
+        monotonic_start_ns: context.monotonic_start_ns,
+        diagnostics: context.diagnostics,
+    })
+}
+
+pub fn irq_event_record(monotonic_start_ns: Option<u64>, event: &RawIrqEvent) -> IrqEventRecord {
+    let event = domain::IrqEvent::from_raw(*event);
     IrqEventRecord {
         elapsed_ms: monotonic_start_ns
             .map(|start| event.enter_ns.saturating_sub(start) / 1_000_000),
@@ -208,8 +209,8 @@ pub fn log_irq_record(record: &IrqEventRecord) {
     );
 }
 
-#[allow(dead_code)]
-pub fn log_irq_event(event: &IrqEvent) {
+pub fn log_irq_event(event: &RawIrqEvent) {
+    let event = domain::IrqEvent::from_raw(*event);
     debug!(
         "irq_event cpu={} irq={} latency={}",
         event.cpu,
@@ -230,6 +231,7 @@ mod tests {
             kind: EVENT_IRQ_LATENCY,
             irq: 44,
             cpu: 3,
+            _pad0: 0,
             enter_ns: 1_000_000,
             exit_ns: 1_250_000,
             duration_ns: 250_000,
@@ -251,6 +253,7 @@ mod tests {
             kind: EVENT_IRQ_LATENCY,
             irq: 44,
             cpu: 3,
+            _pad0: 0,
             enter_ns: 1_000_000,
             exit_ns: 1_250_000,
             duration_ns: 250_000,
@@ -271,17 +274,12 @@ mod tests {
             tid: 99,
             comm,
         };
-        let bytes = unsafe {
-            std::slice::from_raw_parts(
-                (&raw as *const ExecEvent).cast::<u8>(),
-                std::mem::size_of::<ExecEvent>(),
-            )
-        };
+        let bytes = crate::events::decode::tests::as_bytes(&raw);
 
         let mut tasks = TaskTracker::default();
         tasks
             .stats_by_task
-            .insert(99, metrics::TaskStats::new(99, "?".to_owned(), 0));
+            .insert(99.into(), metrics::TaskStats::new(99, "?".to_owned(), 0));
 
         let event = handle_exec_event(bytes, &mut tasks, 1234).unwrap();
 

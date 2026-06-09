@@ -8,8 +8,8 @@ use crate::{
         observation::{ActiveConfigSnapshot, ActiveTaskSnapshot, AutotuneObservation},
     },
     daemon::{
-        DaemonCapabilities, SystemHealthSnapshot,
-        capabilities::{CapabilityProbe, CapabilityProbeRoot},
+        capabilities::{CapabilityProbe, CapabilityProbeRoot, DaemonCapabilities},
+        health::SystemHealthSnapshot,
     },
     system_inventory::{DrmDeviceInventory, SystemInventory, SystemInventoryRoot},
 };
@@ -82,6 +82,7 @@ fn empty_inventory() -> SystemInventory {
         drm_devices: Vec::<DrmDeviceInventory>::new(),
         irq_default_smp_affinity: None,
         irq_lines: Vec::new(),
+        power_source: Default::default(),
         sched_ext_available: false,
         vm_knobs: BTreeMap::new(),
         inventory_hash: "empty".to_owned(),
@@ -95,7 +96,7 @@ mod tests {
     use super::*;
     use crate::{
         autotune::observation::ActiveTaskSnapshot,
-        daemon::{SystemHealthSnapshot, SystemHealthState},
+        daemon::health::{SystemHealthSnapshot, SystemHealthState},
         process_tree::TaskClass,
         test_support::TestRoot,
     };
@@ -140,8 +141,8 @@ mod tests {
         fs::write(task_root.join("cgroup"), "0::/user.slice/test.scope\n").unwrap();
 
         let active_tasks = vec![ActiveTaskSnapshot {
-            tid: 99,
-            process_pid: 99,
+            tid: (99).into(),
+            process_pid: (99).into(),
             comm: "test".to_owned(),
             class: TaskClass::Unknown,
             process_starttime_ticks: Some(1),
@@ -192,7 +193,7 @@ mod tests {
     fn fake_stat_line(tid: u32, comm: &str, nice: i32) -> String {
         let mut fields = vec!["0".to_owned(); 40];
         fields[0] = "S".to_owned();
-        fields[17] = nice.to_string();
+        fields[16] = nice.to_string();
         format!("{tid} ({comm}) {}\n", fields.join(" "))
     }
 }

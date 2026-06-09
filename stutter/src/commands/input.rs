@@ -1,15 +1,77 @@
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 
 use crate::{
-    autotune,
-    cli::RulesCommand,
+    autotune::commands::live::AutotuneCommandInput as LiveAutotuneCommandInput,
     config::model::MonitorConfig,
-    daemon::DaemonSoakConfig,
+    daemon::testing::DaemonSoakConfig,
     doctor::DoctorInput,
     process_tree::TaskClass,
     release::{ReleaseChannel, ReleaseReadinessInputs},
     service::ServiceCommandRequest,
 };
+
+#[derive(Debug)]
+pub enum AppCommand {
+    Monitor(MonitorCommandInput),
+    Bench(BenchCommandInput),
+    Version(VersionCommandInput),
+    Restore(RestoreCommandInput),
+    ApplyProfile(ApplyProfileCommandInput),
+    ProfilePlan(ProfilePlanCommandInput),
+    InspectTree(InspectTreeCommandInput),
+    Summary(SummaryCommandInput),
+    Validate(ValidateCommandInput),
+    Report(ReportCommandInput),
+    ReleaseCheck(ReleaseCheckCommandInput),
+    Tune(TuneCommandInput),
+    Recommend(RecommendCommandInput),
+    ProveFix(ProveFixCommandInput),
+    Check(CheckCommandInput),
+    DisplayPathCompare(DisplayPathCompareCommandInput),
+    ConfigCheck(ConfigCheckCommandInput),
+    ConfigExplain(DaemonConfigExplainCommandInput),
+    AutotuneGenerateProfiles(AutotuneGenerateProfilesCommandInput),
+    AutotuneApplyCandidate(AutotuneApplyCandidateCommandInput),
+    Autotune(AutotuneCommandInput),
+    AutotuneStatus(AutotuneStatusCommandInput),
+    AutotuneReplayHistory(AutotuneReplayHistoryCommandInput),
+    AutotuneRestore(AutotuneRestoreCommandInput),
+    Audit(AuditCommandInput),
+    AutotuneReplay(AutotuneReplayCommandInput),
+    Advisor(AdvisorCommandInput),
+    Doctor(DoctorCommandInput),
+    Probes(ProbesCommandInput),
+    ProfileTemplate(ProfileTemplateCommandInput),
+    InspectIrqs(InspectIrqsCommandInput),
+    InspectDrmTracepoints(InspectDrmTracepointsCommandInput),
+    WaylandProbe(WaylandProbeCommandInput),
+    Agent(AgentCommandInput),
+    PrivilegedWorker(PrivilegedWorkerCommandInput),
+    DaemonConfigExplain(DaemonConfigExplainCommandInput),
+    DaemonPolicyExplain(DaemonPolicyExplainCommandInput),
+    DaemonPolicyLint(DaemonPolicyLintCommandInput),
+    DaemonProfiles(DaemonProfilesCommandInput),
+    DaemonExplain(DaemonExplainCommandInput),
+    DaemonWhyNotOptimize(DaemonWhyNotOptimizeCommandInput),
+    DaemonWhatChanged(DaemonWhatChangedCommandInput),
+    DaemonStatus(DaemonStatusCommandInput),
+    DaemonWatch(DaemonWatchCommandInput),
+    DaemonDoctor(DaemonDoctorCommandInput),
+    DaemonResetState(DaemonResetStateCommandInput),
+    DaemonBenchOverhead(DaemonBenchOverheadCommandInput),
+    DaemonSoak(DaemonSoakCommandInput),
+    DaemonAcceptance(DaemonAcceptanceCommandInput),
+    DaemonPause(DaemonPauseCommandInput),
+    DaemonResume(DaemonResumeCommandInput),
+    DaemonResyncState(DaemonResyncStateCommandInput),
+    DaemonRestore(DaemonRestoreCommandInput),
+    DaemonRollbackDrill(DaemonRollbackDrillCommandInput),
+    Completions(CompletionsCommandInput),
+    Man(ManCommandInput),
+    Rules(RulesCommandInput),
+    Scenario(ScenarioCommandInput),
+    Service(ServiceCommandInput),
+}
 
 #[derive(Debug)]
 pub struct MonitorCommandInput {
@@ -37,6 +99,7 @@ pub struct VersionCommandInput {
 pub struct ApplyProfileCommandInput {
     pub tree_pid: u32,
     pub profile: PathBuf,
+    pub profile_name: Option<String>,
     pub force: bool,
     pub dry_run: bool,
     pub allow_medium_risk: bool,
@@ -44,6 +107,22 @@ pub struct ApplyProfileCommandInput {
     pub keep_applied: bool,
     pub refresh_ms: u64,
     pub enforce: bool,
+    pub explain: bool,
+    pub json: bool,
+    pub output: Option<PathBuf>,
+    pub top: usize,
+    pub highlight_comm: Vec<String>,
+}
+
+#[derive(Debug)]
+pub struct ProfilePlanCommandInput {
+    pub tree_pid: u32,
+    pub profile: PathBuf,
+    pub profile_name: Option<String>,
+    pub json: bool,
+    pub output: Option<PathBuf>,
+    pub top: usize,
+    pub highlight_comm: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -82,6 +161,15 @@ pub struct ReportCommandInput {
 }
 
 #[derive(Debug)]
+pub struct DisplayPathCompareCommandInput {
+    pub baseline: PathBuf,
+    pub test: PathBuf,
+    pub json: bool,
+    pub strict: bool,
+    pub expect: Option<crate::display_path_compare::DisplayPathExpectation>,
+}
+
+#[derive(Debug)]
 pub struct TuneCommandInput {
     pub tree_pid: u32,
     pub profiles: PathBuf,
@@ -90,18 +178,40 @@ pub struct TuneCommandInput {
     pub runs: u32,
     pub keep_best: bool,
     pub baseline_profile: Option<String>,
+    pub scenario_name: Option<String>,
+    pub workload_label: Option<String>,
+    pub route_label: Option<String>,
     pub out_dir: Option<PathBuf>,
     pub mangohud_log: Option<PathBuf>,
     pub enforce: bool,
     pub hwmon: bool,
+    pub order_strategy: String,
 }
 
 #[derive(Debug)]
 pub struct RecommendCommandInput {
-    pub baseline: PathBuf,
+    pub baseline: Vec<PathBuf>,
     pub tune: PathBuf,
+    pub fix_plan: Option<PathBuf>,
+    pub allow_scenario_mismatch: bool,
     pub json: bool,
     pub markdown: Option<PathBuf>,
+    pub html: Option<PathBuf>,
+}
+
+#[derive(Debug)]
+pub struct ProveFixCommandInput {
+    pub plan: PathBuf,
+    pub profiles: PathBuf,
+    pub tree_pid: u32,
+    pub scenario_name: Option<String>,
+    pub workload_label: Option<String>,
+    pub route_label: Option<String>,
+    pub duration_seconds: u64,
+    pub baseline_runs: Option<usize>,
+    pub test_runs: Option<usize>,
+    pub baseline_profile: String,
+    pub html: PathBuf,
 }
 
 #[derive(Debug)]
@@ -142,12 +252,17 @@ pub struct AutotuneGenerateProfilesCommandInput {
 
 #[derive(Debug)]
 pub struct AutotuneCommandInput {
-    pub input: autotune::AutotuneCommandInput,
+    pub input: LiveAutotuneCommandInput,
 }
 
 #[derive(Debug)]
 pub struct AutotuneStatusCommandInput {
     pub json: bool,
+}
+
+#[derive(Debug)]
+pub struct PrivilegedWorkerCommandInput {
+    pub socket: PathBuf,
 }
 
 #[derive(Debug)]
@@ -201,6 +316,7 @@ pub struct DoctorCommandInput {
 #[derive(Debug)]
 pub struct ProbesCommandInput {
     pub json: bool,
+    pub include_planned: bool,
 }
 
 #[derive(Debug)]
@@ -216,6 +332,20 @@ pub struct InspectIrqsCommandInput {
 }
 
 #[derive(Debug)]
+pub struct InspectDrmTracepointsCommandInput {
+    pub json: bool,
+    pub events_root: Option<PathBuf>,
+}
+
+#[derive(Debug)]
+pub struct WaylandProbeCommandInput {
+    pub duration: Duration,
+    pub output: Option<String>,
+    pub fullscreen: bool,
+    pub out_dir: PathBuf,
+}
+
+#[derive(Debug)]
 pub struct DaemonConfigExplainCommandInput {
     pub json: bool,
     pub preset: Option<String>,
@@ -223,6 +353,12 @@ pub struct DaemonConfigExplainCommandInput {
 
 #[derive(Debug)]
 pub struct DaemonPolicyExplainCommandInput {
+    pub json: bool,
+    pub preset: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct DaemonPolicyLintCommandInput {
     pub json: bool,
     pub preset: Option<String>,
 }
@@ -275,7 +411,7 @@ pub struct DaemonWhatChangedCommandInput {
 #[derive(Debug)]
 pub struct DaemonStatusCommandInput {
     pub json: bool,
-    pub explain_last: usize,
+    pub explain_last: Option<usize>,
 }
 
 #[derive(Debug)]
@@ -321,9 +457,21 @@ pub struct DaemonPauseCommandInput;
 pub struct DaemonResumeCommandInput;
 
 #[derive(Debug)]
+pub struct DaemonResyncStateCommandInput {
+    pub dry_run: bool,
+    pub json: bool,
+}
+
+#[derive(Debug)]
 pub struct DaemonRestoreCommandInput {
     pub dry_run: bool,
     pub emergency: bool,
+}
+
+#[derive(Debug)]
+pub struct DaemonRollbackDrillCommandInput {
+    pub dry_run: bool,
+    pub json: bool,
 }
 
 #[derive(Debug)]
@@ -347,6 +495,8 @@ pub struct AgentCommandInput {
     pub max_duration_seconds: u64,
     pub max_targets: usize,
     pub max_concurrent_recordings: usize,
+    pub max_unix_connections: usize,
+    pub unix_connection_timeout: Duration,
 }
 
 #[derive(Debug)]
@@ -357,6 +507,45 @@ pub struct CompletionsCommandInput {
 #[derive(Debug)]
 pub struct ManCommandInput {
     pub output: Option<PathBuf>,
+}
+
+#[derive(Debug)]
+pub enum RulesCommand {
+    Import(RulesImportCommandInput),
+    Check(RulesCheckArgs),
+    List,
+    Status,
+    Enable(RulesEnableArgs),
+    Disable,
+    Remove(RulesRemoveArgs),
+}
+
+#[derive(Debug)]
+pub struct RulesImportCommandInput {
+    pub source: PathBuf,
+    pub name: String,
+    pub source_repo: Option<String>,
+    pub source_commit: Option<String>,
+    pub license: String,
+    pub out: Option<PathBuf>,
+    pub dry_run: bool,
+}
+
+#[derive(Debug)]
+pub struct RulesCheckArgs {
+    pub source: Option<PathBuf>,
+    pub generated: Option<PathBuf>,
+}
+
+#[derive(Debug)]
+pub struct RulesEnableArgs {
+    pub name: String,
+}
+
+#[derive(Debug)]
+pub struct RulesRemoveArgs {
+    pub name: String,
+    pub dry_run: bool,
 }
 
 #[derive(Debug)]
@@ -400,7 +589,21 @@ pub struct ScenarioPathCommandInput {
 }
 
 #[derive(Debug)]
+pub enum ScenarioCommand {
+    Create(ScenarioCreateCommandInput),
+    Run(ScenarioRunCommandInput),
+    Compare(ScenarioCompareCommandInput),
+    Path(ScenarioPathCommandInput),
+    List,
+}
+
+#[derive(Debug)]
 pub struct ScenarioListCommandInput;
+
+#[derive(Debug)]
+pub struct ScenarioCommandInput {
+    pub command: ScenarioCommand,
+}
 
 #[cfg(test)]
 mod runtime_decoupling_tests {
@@ -445,19 +648,18 @@ mod runtime_decoupling_tests {
                 "stutter/src/ebpf_loader.rs",
                 include_str!("../ebpf_loader.rs"),
             ),
-            ("stutter/src/remote.rs", include_str!("../remote.rs")),
-            ("stutter/src/agent.rs", include_str!("../agent.rs")),
+            (
+                "stutter/src/remote/mod.rs",
+                include_str!("../remote/mod.rs"),
+            ),
+            ("stutter/src/agent/mod.rs", include_str!("../agent/mod.rs")),
             (
                 "stutter/src/config/layer.rs",
                 include_str!("../config/layer.rs"),
             ),
             (
-                "stutter/src/config/effective.rs",
-                include_str!("../config/effective.rs"),
-            ),
-            (
-                "stutter/src/config/merge.rs",
-                include_str!("../config/merge.rs"),
+                "stutter/src/config/merge/mod.rs",
+                include_str!("../config/merge/mod.rs"),
             ),
         ];
 

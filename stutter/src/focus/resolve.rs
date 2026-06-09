@@ -1,4 +1,17 @@
-use super::*;
+use std::path::Path;
+
+use serde::{Deserialize, Serialize};
+
+use super::{
+    foreground_scoring::apply_foreground_source_mode_to_snapshot,
+    groups::{FocusGroup, situation_for_group},
+    provider::focus_snapshot_at,
+    score::priority_band_rank,
+    snapshot::{FocusCache, FocusSnapshot},
+};
+use crate::{
+    autotune::state::SituationKind, config::FocusSource, foreground::ForegroundWindowSnapshot,
+};
 
 #[derive(Debug, Clone)]
 pub struct FocusPolicy {
@@ -248,7 +261,7 @@ impl FocusResolver {
     }
 
     fn situation_for_group(group: &FocusGroup) -> SituationKind {
-        crate::focus::situation_for_group(group)
+        situation_for_group(group)
     }
 
     fn limit_group_roots(&self, mut group: FocusGroup) -> FocusGroup {

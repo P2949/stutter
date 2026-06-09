@@ -27,6 +27,12 @@ pub enum ArtifactKind {
     RuntimeSlices,
     FocusEvents,
     ForegroundEvents,
+    KmsFlipEvents,
+    DrmFenceEvents,
+    WaylandPresentationEvents,
+    DisplayTopology,
+    DmaBufEvents,
+    GpuEngineSamples,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -51,6 +57,11 @@ pub enum ArtifactCounter {
     MigrationEvent,
     CpuFreqSample,
     ScxEvent,
+    KmsFlipEvent,
+    DrmFenceEvent,
+    WaylandPresentationEvent,
+    DmaBufEvent,
+    GpuEngineSample,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -61,6 +72,43 @@ pub struct ArtifactSpec {
     pub required: bool,
     pub legacy_aliases: &'static [&'static str],
     pub counter_field: Option<ArtifactCounter>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArtifactPath {
+    kind: ArtifactKind,
+    path: PathBuf,
+}
+
+impl ArtifactPath {
+    pub fn new(run_dir: impl AsRef<Path>, kind: ArtifactKind) -> Self {
+        Self {
+            kind,
+            path: run_dir.as_ref().join(artifact_file_name(kind)),
+        }
+    }
+
+    pub fn kind(&self) -> ArtifactKind {
+        self.kind
+    }
+
+    pub fn file_name(&self) -> &'static str {
+        artifact_file_name(self.kind)
+    }
+
+    pub fn as_path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn into_path_buf(self) -> PathBuf {
+        self.path
+    }
+}
+
+impl AsRef<Path> for ArtifactPath {
+    fn as_ref(&self) -> &Path {
+        self.as_path()
+    }
 }
 
 pub const ARTIFACT_SPECS: &[ArtifactSpec] = &[
@@ -192,6 +240,54 @@ pub const ARTIFACT_SPECS: &[ArtifactSpec] = &[
         legacy_aliases: &[],
         counter_field: Some(ArtifactCounter::ForegroundEvent),
     },
+    ArtifactSpec {
+        kind: ArtifactKind::KmsFlipEvents,
+        file_name: "kms_flip_events.json",
+        encoding: ArtifactEncoding::Ndjson,
+        required: false,
+        legacy_aliases: &[],
+        counter_field: Some(ArtifactCounter::KmsFlipEvent),
+    },
+    ArtifactSpec {
+        kind: ArtifactKind::DrmFenceEvents,
+        file_name: "drm_fence_events.json",
+        encoding: ArtifactEncoding::Ndjson,
+        required: false,
+        legacy_aliases: &[],
+        counter_field: Some(ArtifactCounter::DrmFenceEvent),
+    },
+    ArtifactSpec {
+        kind: ArtifactKind::WaylandPresentationEvents,
+        file_name: "wayland_presentation_events.json",
+        encoding: ArtifactEncoding::Ndjson,
+        required: false,
+        legacy_aliases: &[],
+        counter_field: Some(ArtifactCounter::WaylandPresentationEvent),
+    },
+    ArtifactSpec {
+        kind: ArtifactKind::DisplayTopology,
+        file_name: "display_topology.json",
+        encoding: ArtifactEncoding::JsonObject,
+        required: false,
+        legacy_aliases: &[],
+        counter_field: None,
+    },
+    ArtifactSpec {
+        kind: ArtifactKind::DmaBufEvents,
+        file_name: "dmabuf_events.json",
+        encoding: ArtifactEncoding::Ndjson,
+        required: false,
+        legacy_aliases: &[],
+        counter_field: Some(ArtifactCounter::DmaBufEvent),
+    },
+    ArtifactSpec {
+        kind: ArtifactKind::GpuEngineSamples,
+        file_name: "gpu_engine_samples.json",
+        encoding: ArtifactEncoding::Ndjson,
+        required: false,
+        legacy_aliases: &[],
+        counter_field: Some(ArtifactCounter::GpuEngineSample),
+    },
 ];
 
 #[derive(Debug, Default)]
@@ -215,7 +311,7 @@ impl ArtifactStreamRegistry {
         if spec.encoding != ArtifactEncoding::Ndjson {
             anyhow::bail!("artifact {:?} is not an NDJSON stream", kind);
         }
-        self.insert(kind, NdjsonWriter::create(run_dir.join(spec.file_name))?);
+        self.insert(kind, NdjsonWriter::create(artifact_path(run_dir, kind))?);
         Ok(())
     }
 
@@ -243,6 +339,7 @@ pub fn artifact_spec(kind: ArtifactKind) -> &'static ArtifactSpec {
     ARTIFACT_SPECS
         .iter()
         .find(|spec| spec.kind == kind)
+        // invariant: ArtifactKind enum elements are exhaustively mapped in ARTIFACT_SPECS
         .expect("ArtifactKind must have an ArtifactSpec")
 }
 
@@ -267,7 +364,7 @@ pub fn optional_artifact_kinds() -> BTreeSet<ArtifactKind> {
 }
 
 pub fn artifact_path(run_dir: &Path, kind: ArtifactKind) -> PathBuf {
-    run_dir.join(artifact_file_name(kind))
+    ArtifactPath::new(run_dir, kind).into_path_buf()
 }
 
 pub fn artifact_alias_paths(run_dir: &Path, kind: ArtifactKind) -> Vec<PathBuf> {
@@ -298,6 +395,11 @@ pub fn artifact_counter_label(counter: ArtifactCounter) -> &'static str {
         ArtifactCounter::MigrationEvent => "migration event",
         ArtifactCounter::CpuFreqSample => "CPU frequency sample",
         ArtifactCounter::ScxEvent => "SCX event",
+        ArtifactCounter::KmsFlipEvent => "KMS flip event",
+        ArtifactCounter::DrmFenceEvent => "DRM fence event",
+        ArtifactCounter::WaylandPresentationEvent => "Wayland presentation event",
+        ArtifactCounter::DmaBufEvent => "DMABUF event",
+        ArtifactCounter::GpuEngineSample => "GPU engine sample",
     }
 }
 
@@ -325,6 +427,12 @@ impl ArtifactSelection {
             ArtifactKind::FrameEvents,
             ArtifactKind::FocusEvents,
             ArtifactKind::ForegroundEvents,
+            ArtifactKind::KmsFlipEvents,
+            ArtifactKind::DrmFenceEvents,
+            ArtifactKind::WaylandPresentationEvents,
+            ArtifactKind::DisplayTopology,
+            ArtifactKind::DmaBufEvents,
+            ArtifactKind::GpuEngineSamples,
         ])
     }
 
@@ -363,6 +471,9 @@ impl ArtifactSelection {
             ArtifactKind::SpikeEvents,
             ArtifactKind::FrameEvents,
             ArtifactKind::FocusEvents,
+            ArtifactKind::DisplayTopology,
+            ArtifactKind::DmaBufEvents,
+            ArtifactKind::GpuEngineSamples,
         ]);
 
         if runtime_slices {

@@ -16,6 +16,7 @@ impl ProtectionDecision {
         matches!(self, Self::Allowed)
     }
 
+    #[cfg(test)]
     pub fn reason(&self) -> Option<&str> {
         match self {
             Self::Allowed => None,
@@ -48,12 +49,14 @@ pub fn mutation_allowed_for_pid(
     if let Some(task) = observation
         .protected_tasks
         .iter()
-        .find(|task| task.tid == pid || task.process_pid == pid)
+        .find(|task| task.tid.as_u32() == pid || task.process_pid.as_u32() == pid)
     {
         return ProtectionDecision::Protected {
             reason: format!(
                 "{candidate_family} candidate target pid={} comm={} is protected: {}",
-                task.process_pid, task.comm, task.reason
+                task.process_pid.as_u32(),
+                task.comm,
+                task.reason
             ),
         };
     }
@@ -82,8 +85,8 @@ mod tests {
             focus_kind: Some(FocusGroupKind::Game),
             focus_confidence: 0.95,
             protected_tasks: vec![ProtectedTask {
-                tid: 55,
-                process_pid: 55,
+                tid: (55).into(),
+                process_pid: (55).into(),
                 comm: "pipewire".to_owned(),
                 class: TaskClass::AudioRealtime,
                 reason: "audio realtime task".to_owned(),

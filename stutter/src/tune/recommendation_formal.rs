@@ -1,0 +1,177 @@
+use super::{
+    TuneSummary,
+    statistics::{self, FormalMetricComparison},
+};
+
+pub(super) fn formal_metrics_between_profiles(
+    summary: &TuneSummary,
+    best_profile: &str,
+    other_profile: &str,
+) -> Vec<FormalMetricComparison> {
+    let best_runs = summary
+        .candidates
+        .iter()
+        .filter(|candidate| candidate.profile == best_profile && candidate.valid)
+        .collect::<Vec<_>>();
+    let other_runs = summary
+        .candidates
+        .iter()
+        .filter(|candidate| candidate.profile == other_profile && candidate.valid)
+        .collect::<Vec<_>>();
+
+    vec![
+        statistics::compare_lower_is_better_metric(
+            "diagnostic_raw_score_total",
+            "score_points",
+            &other_runs
+                .iter()
+                .map(|run| run.diagnostic_raw_score_total as f64)
+                .collect::<Vec<_>>(),
+            &best_runs
+                .iter()
+                .map(|run| run.diagnostic_raw_score_total as f64)
+                .collect::<Vec<_>>(),
+        ),
+        statistics::compare_lower_is_better_metric(
+            "over_5ms",
+            "samples",
+            &other_runs
+                .iter()
+                .map(|run| run.over_5ms as f64)
+                .collect::<Vec<_>>(),
+            &best_runs
+                .iter()
+                .map(|run| run.over_5ms as f64)
+                .collect::<Vec<_>>(),
+        ),
+        statistics::compare_lower_is_better_metric(
+            "frame_p99_ms",
+            "ms",
+            &other_runs
+                .iter()
+                .map(|run| run.frame_p99_ms)
+                .filter(|value| *value > 0.0)
+                .collect::<Vec<_>>(),
+            &best_runs
+                .iter()
+                .map(|run| run.frame_p99_ms)
+                .filter(|value| *value > 0.0)
+                .collect::<Vec<_>>(),
+        ),
+        statistics::compare_lower_is_better_metric(
+            "frame_over_16ms",
+            "frames",
+            &other_runs
+                .iter()
+                .map(|run| run.frame_over_16ms as f64)
+                .collect::<Vec<_>>(),
+            &best_runs
+                .iter()
+                .map(|run| run.frame_over_16ms as f64)
+                .collect::<Vec<_>>(),
+        ),
+        statistics::compare_lower_is_better_metric(
+            "frame_over_33ms",
+            "frames",
+            &other_runs
+                .iter()
+                .map(|run| run.frame_over_33ms as f64)
+                .collect::<Vec<_>>(),
+            &best_runs
+                .iter()
+                .map(|run| run.frame_over_33ms as f64)
+                .collect::<Vec<_>>(),
+        ),
+        statistics::compare_lower_is_better_metric(
+            "frame_over_50ms",
+            "frames",
+            &other_runs
+                .iter()
+                .map(|run| run.frame_over_50ms as f64)
+                .collect::<Vec<_>>(),
+            &best_runs
+                .iter()
+                .map(|run| run.frame_over_50ms as f64)
+                .collect::<Vec<_>>(),
+        ),
+        statistics::compare_lower_is_better_metric(
+            "max_latency_ns",
+            "ns",
+            &other_runs
+                .iter()
+                .map(|run| run.max_latency_ns as f64)
+                .collect::<Vec<_>>(),
+            &best_runs
+                .iter()
+                .map(|run| run.max_latency_ns as f64)
+                .collect::<Vec<_>>(),
+        ),
+    ]
+}
+
+pub(super) fn extend_formal_metric_warnings(
+    warnings: &mut Vec<String>,
+    metrics: &[FormalMetricComparison],
+) {
+    for metric in metrics {
+        for warning in &metric.uncertainty_warnings {
+            push_unique(
+                warnings,
+                format!("{}: {}", metric.metric, neutral_side_labels(warning)),
+            );
+        }
+    }
+}
+
+fn push_unique(values: &mut Vec<String>, value: String) {
+    if !values.iter().any(|existing| existing == &value) {
+        values.push(value);
+    }
+}
+
+pub(super) fn extend_formal_metric_why(why: &mut Vec<String>, metrics: &[FormalMetricComparison]) {
+    for metric in metrics {
+        let ci = metric
+            .bootstrap_ci95
+            .as_ref()
+            .map(|ci| format!("95% CI [{:.3}, {:.3}]", ci.lower, ci.upper))
+            .unwrap_or_else(|| "95% CI n/a".to_owned());
+        why.push(format!(
+            "formal A/B {}: comparison_median={:.3} selected_median={:.3} selected_improvement={:.3} effect_size={} {} enough_samples={} significant={} power={}",
+            metric.metric,
+            metric.baseline_median,
+            metric.tuned_median,
+            metric.improvement_delta,
+            format_optional_float(metric.effect_size, 2),
+            ci,
+            metric.enough_samples,
+            metric.statistically_significant,
+            metric
+                .power_estimate
+                .as_ref()
+                .and_then(|estimate| estimate.estimated_runs_per_side)
+                .map(|runs| format!("{runs} runs/side"))
+                .unwrap_or_else(|| "n/a".to_owned())
+        ));
+    }
+}
+
+fn format_optional_float(value: Option<f64>, digits: usize) -> String {
+    value
+        .map(|value| format!("{value:.digits$}"))
+        .unwrap_or_else(|| "n/a".to_owned())
+}
+
+fn neutral_side_labels(value: &str) -> String {
+    value
+        .replace("baseline_runs", "comparison_runs")
+        .replace("tuned_runs", "selected_runs")
+        .replace("baseline distribution", "comparison distribution")
+        .replace("tuned distribution", "selected distribution")
+        .replace("baseline median", "comparison median")
+        .replace("tuned median", "selected median")
+        .replace("baseline_median", "comparison_median")
+        .replace("tuned_median", "selected_median")
+        .replace("baseline=", "comparison=")
+        .replace("tuned=", "selected=")
+}

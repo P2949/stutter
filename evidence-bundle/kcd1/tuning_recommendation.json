@@ -1,0 +1,415 @@
+{
+  "schema_version": 2,
+  "verdict": "NeedsRetest",
+  "best_profile": "baseline-online",
+  "baseline_profile": "baseline-online",
+  "compared_against": "best-non-baseline",
+  "confidence": "Low",
+  "summary": "Baseline profile 'baseline-online' remained best, but the result is not strong enough to trust without another run.",
+  "why": [
+    "formal A/B diagnostic_raw_score_total: comparison_median=38806.000 selected_median=21533.000 selected_improvement=17273.000 effect_size=0.86 95% CI [5644.000, 76928.000] enough_samples=true significant=true power=30 runs/side",
+    "formal A/B over_5ms: comparison_median=0.000 selected_median=0.000 selected_improvement=0.000 effect_size=0.00 95% CI [-1.000, 3.000] enough_samples=true significant=false power=n/a",
+    "formal A/B frame_p99_ms: comparison_median=37.798 selected_median=38.338 selected_improvement=-0.539 effect_size=-0.10 95% CI [-6.690, 10.419] enough_samples=true significant=false power=30 runs/side",
+    "formal A/B frame_over_16ms: comparison_median=6546.000 selected_median=6796.000 selected_improvement=-250.000 effect_size=-0.24 95% CI [-2698.000, 1419.000] enough_samples=true significant=false power=30 runs/side",
+    "formal A/B frame_over_33ms: comparison_median=445.000 selected_median=433.000 selected_improvement=12.000 effect_size=0.01 95% CI [-389.000, 2783.000] enough_samples=true significant=false power=30 runs/side",
+    "formal A/B frame_over_50ms: comparison_median=6.000 selected_median=8.000 selected_improvement=-2.000 effect_size=-0.18 95% CI [-18.000, 28.000] enough_samples=true significant=false power=30 runs/side",
+    "formal A/B max_latency_ns: comparison_median=4866891.000 selected_median=4152319.000 selected_improvement=714572.000 effect_size=1.36 95% CI [-407583.000, 1705388.000] enough_samples=true significant=false power=19 runs/side",
+    "Median score delta versus best-non-baseline 'kcd1-game-on-1-5-7-11-gamescope-on-0-6' is -17273 (-44.5%, effect_size=0.86, noise_ratio=0.32)",
+    "over_5ms delta versus 'kcd1-game-on-1-5-7-11-gamescope-on-0-6' is 0 (effect_size=0.00, noise_ratio=n/a)",
+    "frame p99 delta versus 'kcd1-game-on-1-5-7-11-gamescope-on-0-6' is 539us (effect_size=0.10, noise_ratio=0.04)",
+    "best profile 'baseline-online' had 5 valid run(s) and 0 invalid run(s)",
+    "best median score=21533 IQR=6829 worst=32994"
+  ],
+  "warnings": [
+    "best profile score IQR is non-zero",
+    "candidate order was not counterbalanced; ranking confidence lowered",
+    "comparability Warning kind=candidate-order-not-counterbalanced: two-profile tuning run used the same candidate order for every iteration; profile effect may be confounded with order effect",
+    "comparability Warning profile=baseline-online kind=drop-counters-nonzero: candidate had non-zero drop counters (max=403467)",
+    "comparability Warning profile=kcd1-game-on-1-5-7-11-gamescope-on-0-6 kind=drop-counters-nonzero: candidate had non-zero drop counters (max=428919)",
+    "best profile score IQR is non-zero (6829)",
+    "best profile is the baseline profile 'baseline-online'; comparing against the best valid non-baseline candidate",
+    "diagnostic_raw_score_total: comparison distribution is noisy: noise_ratio=0.26",
+    "diagnostic_raw_score_total: selected distribution is noisy: noise_ratio=0.32",
+    "over_5ms: bootstrap 95% CI crosses zero; A/B improvement is not statistically significant",
+    "frame_p99_ms: estimated 30 runs per side needed to detect 10% improvement at current noise",
+    "frame_p99_ms: bootstrap 95% CI crosses zero; A/B improvement is not statistically significant",
+    "frame_over_16ms: estimated 30 runs per side needed to detect 10% improvement at current noise",
+    "frame_over_16ms: bootstrap 95% CI crosses zero; A/B improvement is not statistically significant",
+    "frame_over_33ms: estimated 30 runs per side needed to detect 10% improvement at current noise",
+    "frame_over_33ms: bootstrap 95% CI crosses zero; A/B improvement is not statistically significant",
+    "frame_over_33ms: comparison distribution is noisy: noise_ratio=0.57",
+    "frame_over_33ms: selected distribution is noisy: noise_ratio=0.27",
+    "frame_over_50ms: estimated 30 runs per side needed to detect 10% improvement at current noise",
+    "frame_over_50ms: bootstrap 95% CI crosses zero; A/B improvement is not statistically significant",
+    "frame_over_50ms: comparison distribution is noisy: noise_ratio=0.83",
+    "frame_over_50ms: selected distribution is noisy: noise_ratio=0.38",
+    "max_latency_ns: estimated 19 runs per side needed to detect 10% improvement at current noise",
+    "max_latency_ns: bootstrap 95% CI crosses zero; A/B improvement is not statistically significant"
+  ],
+  "next_steps": [
+    "Rerun tune with the same workload and at least 5 runs."
+  ],
+  "best_metrics": {
+    "median_diagnostic_raw_score_total": 21533,
+    "iqr_diagnostic_raw_score_total": 6829,
+    "worst_diagnostic_raw_score_total": 32994,
+    "median_over_5ms": 0,
+    "median_frame_p99_us": 38337,
+    "valid_runs": 5,
+    "invalid_runs": 0
+  },
+  "comparison_metrics": {
+    "other_profile": "kcd1-game-on-1-5-7-11-gamescope-on-0-6",
+    "score_delta_abs": -17273,
+    "score_delta_percent": -44.511158068339945,
+    "score_effect_size": 0.8602699441368002,
+    "score_noise_ratio": 0.317141132215669,
+    "over_5ms_delta_abs": 0,
+    "over_5ms_effect_size": 0.0,
+    "over_5ms_noise_ratio": null,
+    "frame_p99_delta_us": 539,
+    "frame_p99_effect_size": 0.10425253169108954,
+    "frame_p99_noise_ratio": 0.039830972689568825,
+    "formal_metrics": [
+      {
+        "metric": "diagnostic_raw_score_total",
+        "unit": "score_points",
+        "lower_is_better": true,
+        "baseline_samples": 5,
+        "tuned_samples": 5,
+        "baseline_values": [
+          32052.0,
+          34566.0,
+          44845.0,
+          38806.0,
+          98461.0
+        ],
+        "tuned_values": [
+          19579.0,
+          21533.0,
+          16643.0,
+          26408.0,
+          32994.0
+        ],
+        "baseline_median": 38806.0,
+        "tuned_median": 21533.0,
+        "baseline_iqr": 10279.0,
+        "tuned_iqr": 6829.0,
+        "baseline_noise_ratio": 0.26488171932175436,
+        "tuned_noise_ratio": 0.317141132215669,
+        "improvement_delta": 17273.0,
+        "effect_size": 0.8602699441368002,
+        "bootstrap_ci95": {
+          "confidence_level": 0.95,
+          "lower": 5644.0,
+          "upper": 76928.0,
+          "iterations": 2000
+        },
+        "enough_samples": true,
+        "not_enough_samples_reason": null,
+        "statistically_significant": true,
+        "underpowered": true,
+        "power_estimate": {
+          "target_relative_improvement_percent": 10.0,
+          "estimated_runs_per_side": 30,
+          "reason": "normal approximation using pooled_stddev=20078.581, baseline_median=38806.000, target_delta=3880.600"
+        },
+        "uncertainty_warnings": [
+          "baseline distribution is noisy: noise_ratio=0.26",
+          "tuned distribution is noisy: noise_ratio=0.32"
+        ]
+      },
+      {
+        "metric": "over_5ms",
+        "unit": "samples",
+        "lower_is_better": true,
+        "baseline_samples": 5,
+        "tuned_samples": 5,
+        "baseline_values": [
+          0.0,
+          3.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "tuned_values": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "baseline_median": 0.0,
+        "tuned_median": 0.0,
+        "baseline_iqr": 0.0,
+        "tuned_iqr": 0.0,
+        "baseline_noise_ratio": null,
+        "tuned_noise_ratio": null,
+        "improvement_delta": 0.0,
+        "effect_size": 0.0,
+        "bootstrap_ci95": {
+          "confidence_level": 0.95,
+          "lower": -1.0,
+          "upper": 3.0,
+          "iterations": 2000
+        },
+        "enough_samples": true,
+        "not_enough_samples_reason": null,
+        "statistically_significant": false,
+        "underpowered": true,
+        "power_estimate": {
+          "target_relative_improvement_percent": 10.0,
+          "estimated_runs_per_side": null,
+          "reason": "sample-size estimate unavailable: baseline median is zero or too close to zero"
+        },
+        "uncertainty_warnings": [
+          "bootstrap 95% CI crosses zero; A/B improvement is not statistically significant"
+        ]
+      },
+      {
+        "metric": "frame_p99_ms",
+        "unit": "ms",
+        "lower_is_better": true,
+        "baseline_samples": 5,
+        "tuned_samples": 5,
+        "baseline_values": [
+          39.9627,
+          37.7985,
+          37.5622,
+          32.0332,
+          48.7565
+        ],
+        "tuned_values": [
+          37.9018,
+          38.3377,
+          32.8773,
+          39.4281,
+          44.2522
+        ],
+        "baseline_median": 37.7985,
+        "tuned_median": 38.3377,
+        "baseline_iqr": 2.400500000000001,
+        "tuned_iqr": 1.526299999999999,
+        "baseline_noise_ratio": 0.0635078111565274,
+        "tuned_noise_ratio": 0.039811986634565956,
+        "improvement_delta": -0.539200000000001,
+        "effect_size": -0.104290414498963,
+        "bootstrap_ci95": {
+          "confidence_level": 0.95,
+          "lower": -6.690000000000005,
+          "upper": 10.418800000000005,
+          "iterations": 2000
+        },
+        "enough_samples": true,
+        "not_enough_samples_reason": null,
+        "statistically_significant": false,
+        "underpowered": true,
+        "power_estimate": {
+          "target_relative_improvement_percent": 10.0,
+          "estimated_runs_per_side": 30,
+          "reason": "normal approximation using pooled_stddev=5.170, baseline_median=37.798, target_delta=3.780"
+        },
+        "uncertainty_warnings": [
+          "estimated 30 runs per side needed to detect 10% improvement at current noise",
+          "bootstrap 95% CI crosses zero; A/B improvement is not statistically significant"
+        ]
+      },
+      {
+        "metric": "frame_over_16ms",
+        "unit": "frames",
+        "lower_is_better": true,
+        "baseline_samples": 5,
+        "tuned_samples": 5,
+        "baseline_values": [
+          7101.0,
+          6546.0,
+          6970.0,
+          5992.0,
+          4098.0
+        ],
+        "tuned_values": [
+          7237.0,
+          6796.0,
+          5644.0,
+          7173.0,
+          5551.0
+        ],
+        "baseline_median": 6546.0,
+        "tuned_median": 6796.0,
+        "baseline_iqr": 978.0,
+        "tuned_iqr": 1529.0,
+        "baseline_noise_ratio": 0.14940421631530706,
+        "tuned_noise_ratio": 0.2249852854620365,
+        "improvement_delta": -250.0,
+        "effect_size": -0.23995231527122426,
+        "bootstrap_ci95": {
+          "confidence_level": 0.95,
+          "lower": -2698.0,
+          "upper": 1419.0,
+          "iterations": 2000
+        },
+        "enough_samples": true,
+        "not_enough_samples_reason": null,
+        "statistically_significant": false,
+        "underpowered": true,
+        "power_estimate": {
+          "target_relative_improvement_percent": 10.0,
+          "estimated_runs_per_side": 30,
+          "reason": "normal approximation using pooled_stddev=1041.874, baseline_median=6546.000, target_delta=654.600"
+        },
+        "uncertainty_warnings": [
+          "estimated 30 runs per side needed to detect 10% improvement at current noise",
+          "bootstrap 95% CI crosses zero; A/B improvement is not statistically significant"
+        ]
+      },
+      {
+        "metric": "frame_over_33ms",
+        "unit": "frames",
+        "lower_is_better": true,
+        "baseline_samples": 5,
+        "tuned_samples": 5,
+        "baseline_values": [
+          584.0,
+          445.0,
+          332.0,
+          66.0,
+          3216.0
+        ],
+        "tuned_values": [
+          433.0,
+          525.0,
+          66.0,
+          410.0,
+          721.0
+        ],
+        "baseline_median": 445.0,
+        "tuned_median": 433.0,
+        "baseline_iqr": 252.0,
+        "tuned_iqr": 115.0,
+        "baseline_noise_ratio": 0.5662921348314607,
+        "tuned_noise_ratio": 0.26558891454965355,
+        "improvement_delta": 12.0,
+        "effect_size": 0.012910473842580589,
+        "bootstrap_ci95": {
+          "confidence_level": 0.95,
+          "lower": -389.0,
+          "upper": 2783.0,
+          "iterations": 2000
+        },
+        "enough_samples": true,
+        "not_enough_samples_reason": null,
+        "statistically_significant": false,
+        "underpowered": true,
+        "power_estimate": {
+          "target_relative_improvement_percent": 10.0,
+          "estimated_runs_per_side": 30,
+          "reason": "normal approximation using pooled_stddev=929.478, baseline_median=445.000, target_delta=44.500"
+        },
+        "uncertainty_warnings": [
+          "estimated 30 runs per side needed to detect 10% improvement at current noise",
+          "bootstrap 95% CI crosses zero; A/B improvement is not statistically significant",
+          "baseline distribution is noisy: noise_ratio=0.57",
+          "tuned distribution is noisy: noise_ratio=0.27"
+        ]
+      },
+      {
+        "metric": "frame_over_50ms",
+        "unit": "frames",
+        "lower_is_better": true,
+        "baseline_samples": 5,
+        "tuned_samples": 5,
+        "baseline_values": [
+          6.0,
+          3.0,
+          8.0,
+          3.0,
+          36.0
+        ],
+        "tuned_values": [
+          8.0,
+          10.0,
+          3.0,
+          7.0,
+          24.0
+        ],
+        "baseline_median": 6.0,
+        "tuned_median": 8.0,
+        "baseline_iqr": 5.0,
+        "tuned_iqr": 3.0,
+        "baseline_noise_ratio": 0.8333333333333334,
+        "tuned_noise_ratio": 0.375,
+        "improvement_delta": -2.0,
+        "effect_size": -0.1750752438129634,
+        "bootstrap_ci95": {
+          "confidence_level": 0.95,
+          "lower": -18.0,
+          "upper": 28.0,
+          "iterations": 2000
+        },
+        "enough_samples": true,
+        "not_enough_samples_reason": null,
+        "statistically_significant": false,
+        "underpowered": true,
+        "power_estimate": {
+          "target_relative_improvement_percent": 10.0,
+          "estimated_runs_per_side": 30,
+          "reason": "normal approximation using pooled_stddev=11.424, baseline_median=6.000, target_delta=0.600"
+        },
+        "uncertainty_warnings": [
+          "estimated 30 runs per side needed to detect 10% improvement at current noise",
+          "bootstrap 95% CI crosses zero; A/B improvement is not statistically significant",
+          "baseline distribution is noisy: noise_ratio=0.83",
+          "tuned distribution is noisy: noise_ratio=0.38"
+        ]
+      },
+      {
+        "metric": "max_latency_ns",
+        "unit": "ns",
+        "lower_is_better": true,
+        "baseline_samples": 5,
+        "tuned_samples": 5,
+        "baseline_values": [
+          4913879.0,
+          5857486.0,
+          4477725.0,
+          4810391.0,
+          4866891.0
+        ],
+        "tuned_values": [
+          4152098.0,
+          4065029.0,
+          4885308.0,
+          4152319.0,
+          5241777.0
+        ],
+        "baseline_median": 4866891.0,
+        "tuned_median": 4152319.0,
+        "baseline_iqr": 103488.0,
+        "tuned_iqr": 733210.0,
+        "baseline_noise_ratio": 0.021263677366104974,
+        "tuned_noise_ratio": 0.17657843725397784,
+        "improvement_delta": 714572.0,
+        "effect_size": 1.3632966294969995,
+        "bootstrap_ci95": {
+          "confidence_level": 0.95,
+          "lower": -407583.0,
+          "upper": 1705388.0,
+          "iterations": 2000
+        },
+        "enough_samples": true,
+        "not_enough_samples_reason": null,
+        "statistically_significant": false,
+        "underpowered": true,
+        "power_estimate": {
+          "target_relative_improvement_percent": 10.0,
+          "estimated_runs_per_side": 19,
+          "reason": "normal approximation using pooled_stddev=524150.053, baseline_median=4866891.000, target_delta=486689.100"
+        },
+        "uncertainty_warnings": [
+          "estimated 19 runs per side needed to detect 10% improvement at current noise",
+          "bootstrap 95% CI crosses zero; A/B improvement is not statistically significant"
+        ]
+      }
+    ]
+  }
+}

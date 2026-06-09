@@ -1,0 +1,10 @@
+name = "gpu_bound_cpu_affinity_rejected"
+scenario_name = "arena-gpu-bound"
+expected_status = "rejected"
+baseline_over_5ms = [2, 2, 2, 2, 2]
+tuned_scores = [300, 300, 300, 300, 300]
+tuned_over_5ms = 3
+tuned_frame_p99_ms = 18.0
+
+[notes]
+summary = "GPU-bound case where the CPU-affinity hypothesis regresses diagnostic score and is rejected."

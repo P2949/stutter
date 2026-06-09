@@ -32,6 +32,11 @@ pub struct RecordingCounters {
     pub frame_event_count: u64,
     pub focus_event_count: u64,
     pub foreground_event_count: u64,
+    pub kms_flip_event_count: u64,
+    pub drm_fence_event_count: u64,
+    pub wayland_presentation_event_count: u64,
+    pub dmabuf_event_count: u64,
+    pub gpu_engine_sample_count: u64,
     pub process_scan_budget_exceeded_count: u64,
     pub thread_scan_limited_count: u64,
 

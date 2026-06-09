@@ -11,6 +11,21 @@ Raw artifact files are documented for debugging, testing, benchmarking, and
 offline automation, but consumers should prefer `report --analysis-json` unless
 they specifically need raw event streams.
 
+Advisor JSON is a separate recommendation artifact. `stutter advisor --json`
+emits schema-versioned reports with inline `fix_plans`; each fix plan has
+`schema_version = 1`, expected metric movement, validation recipe, safety risk,
+and stop conditions. See [docs/TUNING_WORKFLOW.md](TUNING_WORKFLOW.md).
+
+Profile plan explanation artifacts are separate audit artifacts. `stutter profile-plan --json`
+emits a profile explanation report containing the selected
+profile name, profile path, requested profile name, tree PID, snapshot task
+count, matched and unmatched task counts, per-rule actions and match criteria,
+match basis, class counts, top thread `comm`, top process `process_comm`, broad
+process-comm captures, highlighted task entries, warnings, and pending action
+counts. These artifacts explain what a profile would do before applying or
+benchmarking it. When generated from a multi-profile file, the command should
+include `--profile-name` for reproducibility.
+
 ## Canonical Artifact Registry
 
 The canonical artifact list is `stutter/src/artifacts.rs`.
@@ -45,6 +60,12 @@ A typical run directory contains:
   runtime_slices.json
   focus_events.json
   foreground_events.json
+  kms_flip_events.json
+  drm_fence_events.json
+  wayland_presentation_events.json
+  display_topology.json
+  dmabuf_events.json
+  gpu_engine_samples.json
 ```
 
 Required:
@@ -71,6 +92,12 @@ Optional streams:
 - `runtime_slices.json`
 - `focus_events.json`
 - `foreground_events.json`
+- `kms_flip_events.json`
+- `drm_fence_events.json`
+- `wayland_presentation_events.json`
+- `display_topology.json`
+- `dmabuf_events.json`
+- `gpu_engine_samples.json`
 
 ## JSON vs NDJSON
 
@@ -95,7 +122,7 @@ The schema version is stored in:
   `metadata.json`
 
 The current supported version is `recorder::SESSION_SCHEMA_VERSION`. For this
-document version, that value is `21`.
+document version, that value is `22`.
 
 Version behavior:
 
@@ -155,10 +182,41 @@ Key fields:
 - `runtime_slice_source`
 - `focus_event_count`
 - `foreground_event_count`
+- `kms_flip_event_count`
+- `drm_fence_event_count`
+- `wayland_presentation_event_count`
+- `dmabuf_event_count`
+- `gpu_engine_sample_count`
+- `display_path`
+- `config.kms_timing`
+- `config.kms_card`
+- `config.kms_connector`
+- `config.kms_crtc`
+- `config.drm_fence_latency`
+- `config.drm_fence_render_card`
+- `config.drm_fence_display_card`
+- `config.drm_fence_driver`
+- `config.wayland_presentation`
+- `config.wayland_presentation_log`
+- `config.wayland_presentation_source`
+- `config.dmabuf_tracking`
+- `config.dmabuf_log`
+- `config.gpu_engine_sampling`
+- `config.display_topology`
+- `config.display_path_label`
+- `config.display_render_gpu`
+- `config.display_scanout_gpu`
+- `config.display_connector`
 - `foreground_source`
 - `final_foreground_pid`
 - `final_foreground_app_id`
 - `final_foreground_class`
+- `final_foreground_status`
+- `final_foreground_window_id`
+- `final_foreground_workspace`
+- `final_foreground_confidence`
+- `final_foreground_stale_ms`
+- `final_foreground_reason`
 
 Consistency rules:
 
@@ -171,6 +229,12 @@ Consistency rules:
 - `frame_event_count` should match `frame_correlation.json` or
   `frame_events.json` when present.
 - `foreground_event_count` should match `foreground_events.json` when present.
+- `kms_flip_event_count` should match `kms_flip_events.json` when present.
+- `drm_fence_event_count` should match `drm_fence_events.json` when present.
+- `wayland_presentation_event_count` should match
+  `wayland_presentation_events.json` when present.
+- `dmabuf_event_count` should match `dmabuf_events.json` when present.
+- `gpu_engine_sample_count` should match `gpu_engine_samples.json` when present.
 - `event_stream_write_errors > 0` means stream artifacts may be incomplete.
 - Nonzero `drop_counters` means kernel-side event loss occurred.
 
@@ -483,6 +547,7 @@ Important fields:
 - `window_id`
 - `workspace`
 - `confidence`
+- `stale_ms`
 - `reason`
 
 Privacy:
@@ -496,7 +561,279 @@ Consistency rules:
 - The number of records should match `session.json` field
   `foreground_event_count`.
 - The final foreground identity fields in `session.json` are derived from the
-  last recorded foreground event.
+  last recorded foreground event, including status, window/container ID,
+  workspace, confidence, stale age, and provider reason.
+
+### `kms_flip_events.json`
+
+Purpose:
+
+- Optional DRM/KMS pageflip, vblank, and flip-duration evidence.
+- Helps correlate frame outliers with scanout/pageflip completion timing.
+
+Format: NDJSON.
+
+Status: Optional stream.
+
+Version behavior:
+
+- Missing file is tolerated and means the probe was unavailable or disabled.
+- Invalid present file is an error.
+- Missing KMS events are not proof that scanout timing was healthy.
+- Live collection currently emits from compatible DRM, i915, or amdgpu pageflip/vblank tracepoints.
+
+Important fields:
+
+- `elapsed_ms`
+- `timestamp_ns`
+- `source`
+- `card`
+- `driver`
+- `crtc_id`
+- `connector`
+- `event_kind`
+- `sequence`
+- `request_ns`
+- `done_ns`
+- `duration_ns`
+- `flags`
+- `confidence`
+
+Consistency rules:
+
+- The number of records should match `session.json` field
+  `kms_flip_event_count` when present.
+- Report analysis exposes a derived `kms_timing.scanout_window_estimate` summary
+  from consecutive `done_ns` timestamps. It estimates top-of-screen visibility at
+  `pageflip_done_ns` and bottom-of-screen visibility at
+  `pageflip_done_ns + refresh_period_ns`; this is not photon latency and excludes
+  monitor processing and pixel response.
+
+### `drm_fence_events.json`
+
+Purpose:
+
+- Optional DRM/dma-fence wait, signal, and interval evidence.
+- Helps identify GPU queue/fence delay near frame or KMS timing outliers.
+
+Format: NDJSON.
+
+Status: Optional stream.
+
+Version behavior:
+
+- Missing file is tolerated and means the probe was unavailable or disabled.
+- Invalid present file is an error.
+- Missing fence events are not proof that no GPU/display wait occurred.
+- Live collection can tag generic dma-fence/drm-sched, amdgpu render-side, and
+  i915 display-side providers when compatible tracepoints expose stable identity
+  fields.
+
+Important fields:
+
+- `elapsed_ms`
+- `timestamp_ns`
+- `source`
+- `event_kind`
+- `driver`
+- `card`
+- `gpu_role`
+- `pid`
+- `tid`
+- `comm`
+- `context`
+- `seqno`
+- `timeline_hash`
+- `wait_start_ns`
+- `wait_done_ns`
+- `signal_ns`
+- `duration_ns`
+- `exporter_driver`
+- `importer_driver`
+- `correlation_basis`
+- `confidence`
+
+Consistency rules:
+
+- The number of records should match `session.json` field
+  `drm_fence_event_count` when present.
+- `importer_driver` describes the wait side of an interval. `exporter_driver`
+  describes a matched signal side when the same fence key was observed. When
+  both are present, reports may emit `cross_gpu_display_wait_candidate` style
+  evidence, but must not treat it as exact copy latency.
+- `correlation_basis=context_seqno` is the strongest supported key.
+  `timeline_seqno` and `driver_time_overlap` are weaker supporting evidence.
+
+### `wayland_presentation_events.json`
+
+Purpose:
+
+- Optional Wayland presentation feedback or cooperative compositor log events.
+- Helps correlate commit-to-present delay, discarded frames, output identity,
+  and zero-copy/direct-scanout hints with frame outliers.
+
+Format: NDJSON.
+
+Status: Optional stream.
+
+Version behavior:
+
+- Missing file is tolerated and means no cooperative presentation source was
+  available or enabled.
+- Invalid present file is an error.
+- Missing Wayland presentation events are not proof that presentation timing was
+  healthy.
+- Cooperative log producers should follow `docs/WAYLAND_PRESENTATION_LOG.md`.
+- The `wayland-probe` self-test command writes the same stream for stutter's own
+  test surface when the binary is built with `--features wayland-probe`.
+
+Important fields:
+
+- `elapsed_ms`
+- `source`
+- `app_id`
+- `surface_role`
+- `commit_ns`
+- `presented_ns`
+- `commit_to_present_ns`
+- `output_name`
+- `refresh_ns`
+- `sequence`
+- `zero_copy`
+- `discarded`
+- `flags`
+- `confidence`
+
+Consistency rules:
+
+- The number of records should match `session.json` field
+  `wayland_presentation_event_count` when present.
+
+### `display_topology.json`
+
+Purpose:
+
+- Optional best-effort snapshot of display/GPU topology at recording start.
+- Helps reports and A/B comparisons distinguish direct render+scanout from
+  PRIME/cross-GPU scanout.
+
+Format: JSON object.
+
+Status: Optional artifact.
+
+Version behavior:
+
+- Missing file is tolerated for old runs.
+- Invalid present file is an error.
+- Unknown topology is unavailable evidence, not proof of direct scanout.
+
+Important fields:
+
+- `collected_at_elapsed_ms`
+- `session_type`
+- `compositor`
+- `drm_devices`
+- `connectors`
+- `guessed_path`
+- `warnings`
+
+Consistency rules:
+
+- `session.display_path` is derived from this artifact when manual display-path
+  metadata is not supplied.
+- A/B comparison may downgrade confidence when selected connector EDID or mode
+  evidence differs between runs.
+
+### `dmabuf_events.json`
+
+Purpose:
+
+- Optional cooperative DMABUF format/modifier/import evidence.
+- Helps identify cross-GPU import, linear/modifier mismatch, scanout-capability,
+  zero-copy, and copy-required candidates.
+
+Format: NDJSON.
+
+Status: Optional stream.
+
+Version behavior:
+
+- Missing file is tolerated and means no cooperative DMABUF source was available
+  or enabled.
+- Invalid present file is an error.
+- Copy-required events are candidate attribution, not exact copy latency.
+
+Important fields:
+
+- `elapsed_ms`
+- `source`
+- `app_id`
+- `surface_role`
+- `output_name`
+- `width`
+- `height`
+- `format`
+- `modifier`
+- `modifier_name`
+- `planes`
+- `allocation_driver`
+- `import_driver`
+- `allocation_card`
+- `import_card`
+- `linear`
+- `scanout_capable`
+- `zero_copy`
+- `explicit_sync`
+- `copy_required`
+- `reason`
+- `confidence`
+
+Consistency rules:
+
+- The number of records should match `session.json` field
+  `dmabuf_event_count` when present.
+- Reports aggregate this into `dmabuf_path` and display-path diagnosis evidence.
+
+### `gpu_engine_samples.json`
+
+Purpose:
+
+- Optional per-engine or engine-like GPU activity samples for multi-GPU display
+  paths.
+- Helps distinguish render-GPU pressure from scanout-GPU blitter/render activity
+  near frame outliers.
+
+Format: NDJSON.
+
+Status: Optional stream.
+
+Version behavior:
+
+- Missing file is tolerated and means engine sampling was unavailable or
+  disabled.
+- Invalid present file is an error.
+- Hwmon-derived samples are activity evidence, not exact per-client engine
+  accounting.
+
+Important fields:
+
+- `elapsed_ms`
+- `drm_card`
+- `render_node`
+- `driver`
+- `engine`
+- `busy_percent`
+- `client_pid`
+- `client_comm`
+- `source`
+- `confidence`
+
+Consistency rules:
+
+- The number of records should match `session.json` field
+  `gpu_engine_sample_count` when present.
+- Reports aggregate this into `gpu_engine_activity` and display-path diagnosis
+  evidence.
 
 ## Data-Quality Levels
 
@@ -521,6 +858,9 @@ Likely downgrade reasons include:
 - frame timestamp alignment issues
 - malformed foreground-window event artifacts
 - CPU perf open, read, or skipped-task status
+- degraded DRM fence evidence, including missing tracepoint streams,
+  signal-only events, unstable fence keys, unknown driver/role mapping, missing
+  render/display card identity, or kernel event drops
 
 ## Canonical Interface: `report --analysis-json`
 
@@ -536,6 +876,9 @@ interface. It includes:
 - `data_quality`
 - `focus_summary`
 - `foreground_summary`
+- `kms_timing`
+- `drm_fence_timing`
+- `wayland_presentation`
 
 External automation should prefer this over parsing raw report text. Text
 reports and HTML reports are user-facing and less stable. Raw artifacts are
@@ -590,6 +933,73 @@ Fields:
 - `notes[]`: display-only notes for missing frame events or notable cluster
   context.
 
+### Display Timing Summaries
+
+`kms_timing`, `drm_fence_timing`, and `wayland_presentation` are derived from
+optional display-timing streams. Missing streams are tolerated and reported as
+missing or low-confidence evidence, not as proof that scanout, fence waits, or
+presentation timing were healthy.
+
+Important `drm_fence_timing` fields:
+
+- `event_count`
+- `wait_interval_count`
+- `median_wait_ms`
+- `p95_wait_ms`
+- `p99_wait_ms`
+- `max_wait_ms`
+- `render_gpu_wait_count`
+- `display_gpu_wait_count`
+- `cross_gpu_candidate_count`
+- `waits_near_frame_outliers`
+- `waits_near_kms_delays`
+- `top_waits[]`
+- `notes[]`
+- `confidence`
+
+DRM fence data quality downgrades to Medium when requested evidence is missing,
+only signal/marker events are present, stable fence keys are absent, provider or
+GPU-role mapping is incomplete, render/display cards are not both identified, or
+kernel drop counters indicate loss. Missing fence events must never be reported
+as proof that no GPU wait occurred.
+
+Important `wayland_presentation` fields:
+
+- `event_count`
+- `presented_count`
+- `discarded_count`
+- `zero_copy_count`
+- `zero_copy_ratio`
+- `source_counts`
+- `surface_role_counts`
+- `median_commit_to_present_ms`
+- `p95_commit_to_present_ms`
+- `p99_commit_to_present_ms`
+- `max_commit_to_present_ms`
+- `delays_near_frame_outliers`
+- `delays_near_kms_delays`
+- `compositor_queue_candidate_count`
+- `outputs_seen`
+- `notes[]`
+
+### Display Path Comparison
+
+`stutter compare display-path --baseline <run> --test <run>` compares two
+controlled runs, such as a dGPU-display baseline and a UHD630/i915 scanout test.
+Runs can carry display metadata from:
+
+```text
+--display-path-label
+--display-render-gpu
+--display-scanout-gpu
+--display-connector
+```
+
+The command reports frame-pacing, KMS, DRM-fence, Wayland-presentation, and
+scheduler-control deltas. It refuses to frame one run as a high-confidence
+estimate, downgrades confidence for non-comparable runs, and uses cautious
+wording: this is an A/B estimate, not direct photon latency.
+
 ## Validation Command
 
 Expected command forms:
@@ -634,9 +1044,15 @@ Strict exit policy:
 Versioned examples live under:
 
 ```text
-docs/examples/artifacts/v21/
+docs/examples/artifacts/v23/
 ```
 
 The version number matches `recorder::SESSION_SCHEMA_VERSION`. These examples
 are sanitized, minimal, and covered by tests so they remain executable artifact
 contracts.
+
+
+## Tune recommendation HTML
+
+`tuning_recommendation.html` is a self-contained HTML view of
+`tuning_recommendation.json`, including formal A/B uncertainty charts.

@@ -13,6 +13,7 @@ pub struct SystemInventory {
     pub drm_devices: Vec<DrmDeviceInventory>,
     pub irq_default_smp_affinity: Option<String>,
     pub irq_lines: Vec<IrqLine>,
+    pub power_source: PowerSourceSnapshot,
     pub sched_ext_available: bool,
     pub vm_knobs: BTreeMap<String, String>,
     pub inventory_hash: String,
@@ -37,6 +38,25 @@ pub struct DrmDeviceInventory {
     pub pci_id: Option<String>,
     pub vendor: Option<String>,
     pub hwmon_paths: Vec<PathBuf>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PowerSourceSnapshot {
+    pub ac_online: Option<bool>,
+    pub battery_present: bool,
+    pub battery_discharging: Option<bool>,
+}
+
+impl PowerSourceSnapshot {
+    pub fn on_battery_or_discharging(&self) -> bool {
+        self.battery_discharging == Some(true)
+            || (self.battery_present && self.ac_online == Some(false))
+    }
+
+    pub fn ac_power_for_evidence(&self) -> Option<bool> {
+        self.ac_online
+            .or_else(|| (!self.battery_present).then_some(true))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -65,6 +85,7 @@ impl SystemInventory {
         let irq_default_smp_affinity =
             read_trimmed(root.proc_root.join("irq/default_smp_affinity"));
         let irq_lines = probe_irq_lines(&root.proc_root);
+        let power_source = probe_power_source(&root.sys_root);
         let sched_ext_available = root.sys_root.join("kernel/sched_ext").exists();
         let vm_knobs = probe_vm_knobs(&root.proc_root);
         let inventory_hash = inventory_hash(
@@ -72,6 +93,7 @@ impl SystemInventory {
             &drm_devices,
             irq_default_smp_affinity.as_deref(),
             &irq_lines,
+            &power_source,
             sched_ext_available,
             &vm_knobs,
         );
@@ -81,6 +103,7 @@ impl SystemInventory {
             drm_devices,
             irq_default_smp_affinity,
             irq_lines,
+            power_source,
             sched_ext_available,
             vm_knobs,
             inventory_hash,
@@ -193,6 +216,81 @@ fn probe_irq_lines(proc_root: &Path) -> Vec<IrqLine> {
     parse_proc_interrupts(&contents).unwrap_or_default()
 }
 
+fn probe_power_source(sys_root: &Path) -> PowerSourceSnapshot {
+    let power_root = sys_root.join("class/power_supply");
+    let Ok(entries) = std::fs::read_dir(power_root) else {
+        return PowerSourceSnapshot::default();
+    };
+
+    let mut ac_online = None;
+    let mut saw_ac_offline = false;
+    let mut battery_present = false;
+    let mut saw_non_discharging_battery = false;
+    let mut battery_discharging = None;
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let supply_type = read_trimmed(path.join("type"))
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+
+        if is_ac_power_supply(&supply_type) {
+            match read_boolish(path.join("online")) {
+                Some(true) => ac_online = Some(true),
+                Some(false) if ac_online != Some(true) => {
+                    saw_ac_offline = true;
+                    ac_online = Some(false);
+                }
+                _ => {}
+            }
+        } else if supply_type == "battery" {
+            battery_present = true;
+            match read_trimmed(path.join("status"))
+                .unwrap_or_default()
+                .to_ascii_lowercase()
+                .as_str()
+            {
+                "discharging" => battery_discharging = Some(true),
+                "charging" | "full" | "not charging" | "unknown"
+                    if battery_discharging != Some(true) =>
+                {
+                    saw_non_discharging_battery = true;
+                    battery_discharging = Some(false);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    if ac_online.is_none() && saw_ac_offline {
+        ac_online = Some(false);
+    }
+    if battery_discharging.is_none() && saw_non_discharging_battery {
+        battery_discharging = Some(false);
+    }
+
+    PowerSourceSnapshot {
+        ac_online,
+        battery_present,
+        battery_discharging,
+    }
+}
+
+fn is_ac_power_supply(supply_type: &str) -> bool {
+    matches!(
+        supply_type,
+        "mains" | "ac" | "usb" | "usb_c" | "usb-c" | "usb_pd" | "wireless"
+    )
+}
+
+fn read_boolish(path: impl AsRef<Path>) -> Option<bool> {
+    match read_trimmed(path)?.to_ascii_lowercase().as_str() {
+        "1" | "true" | "online" | "yes" => Some(true),
+        "0" | "false" | "offline" | "no" => Some(false),
+        _ => None,
+    }
+}
+
 fn trim_hex_prefix(value: &str) -> String {
     value.trim().trim_start_matches("0x").to_ascii_lowercase()
 }
@@ -212,6 +310,8 @@ fn probe_vm_knobs(proc_root: &Path) -> BTreeMap<String, String> {
         "sys/vm/swappiness",
         "sys/vm/dirty_ratio",
         "sys/vm/dirty_background_ratio",
+        "sys/vm/dirty_bytes",
+        "sys/vm/dirty_background_bytes",
     ] {
         if let Some(value) = read_trimmed(proc_root.join(relative)) {
             knobs.insert(relative.to_owned(), value);
@@ -225,6 +325,7 @@ fn inventory_hash(
     drm_devices: &[DrmDeviceInventory],
     irq_default_smp_affinity: Option<&str>,
     irq_lines: &[IrqLine],
+    power_source: &PowerSourceSnapshot,
     sched_ext_available: bool,
     vm_knobs: &BTreeMap<String, String>,
 ) -> String {
@@ -258,6 +359,10 @@ fn inventory_hash(
     for irq in irq_lines {
         parts.push(format!("irq:{}:{}:{}", irq.irq, irq.total, irq.name));
     }
+    parts.push(format!(
+        "power:ac={:?}:battery_present={}:battery_discharging={:?}",
+        power_source.ac_online, power_source.battery_present, power_source.battery_discharging
+    ));
     parts.push(format!("sched_ext:{sched_ext_available}"));
     for (key, value) in vm_knobs {
         parts.push(format!("vm:{key}={value}"));
@@ -376,6 +481,35 @@ mod tests {
         );
         assert_eq!(inventory.drm_devices[0].vendor.as_deref(), Some("amd"));
         assert_eq!(inventory.drm_devices[0].hwmon_paths.len(), 1);
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn fake_power_supply_inventory_reads_ac_and_battery_status() {
+        let root = temp_root("power");
+        let sys_root = root.join("sys");
+        let ac = sys_root.join("class/power_supply/AC0");
+        let battery = sys_root.join("class/power_supply/BAT0");
+        write(&ac.join("type"), "Mains\n");
+        write(&ac.join("online"), "1\n");
+        write(&battery.join("type"), "Battery\n");
+        write(&battery.join("status"), "Discharging\n");
+
+        let first = SystemInventory::probe_root(&SystemInventoryRoot {
+            proc_root: root.join("proc"),
+            sys_root: sys_root.clone(),
+        });
+        write(&battery.join("status"), "Charging\n");
+        let second = SystemInventory::probe_root(&SystemInventoryRoot {
+            proc_root: root.join("proc"),
+            sys_root,
+        });
+
+        assert_eq!(first.power_source.ac_online, Some(true));
+        assert!(first.power_source.battery_present);
+        assert_eq!(first.power_source.battery_discharging, Some(true));
+        assert_eq!(second.power_source.battery_discharging, Some(false));
+        assert_ne!(first.inventory_hash, second.inventory_hash);
         fs::remove_dir_all(root).ok();
     }
 }

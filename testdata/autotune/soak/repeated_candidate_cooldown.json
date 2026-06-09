@@ -1,1 +1,18 @@
-{"name":"repeated_candidate_cooldown","profile":"apply-low-risk-fake","duration_seconds":180,"expect_actions":true,"expect_rollbacks":true,"forbid_high_risk_apply":true}
+{
+  "name": "repeated_candidate_cooldown",
+  "mode": "apply-low-risk",
+  "ticks": [
+    { "kind": "focus_game", "confidence": 0.95 },
+    { "kind": "target_present" },
+    { "kind": "interval", "diagnostic_score_total": 100, "samples": 100 },
+    { "kind": "target_present" },
+    { "kind": "interval", "diagnostic_score_total": 1500, "samples": 100 },
+    { "kind": "target_present" },
+    { "kind": "interval", "diagnostic_score_total": 900, "samples": 100 }
+  ],
+  "assertions": [
+    "one_active_experiment_maximum",
+    "rollback_token_before_apply",
+    "cooldown_respected"
+  ]
+}

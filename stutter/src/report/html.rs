@@ -1,4 +1,11 @@
-use super::{analysis::*, text::*, *};
+use super::{
+    analysis::{block_io_correlation_basis, text_report_correlation_sections, *},
+    render::{
+        html::render_html_report,
+        text::{TextReportRenderInput, render_report},
+    },
+    *,
+};
 
 pub fn build_html_report_model(
     session: &SessionFile,
@@ -32,6 +39,7 @@ pub fn build_html_report_model(
         artifacts_summary: analysis.artifacts_summary.clone(),
         focus_summary: analysis.focus_summary.clone(),
         foreground_summary: analysis.foreground_summary.clone(),
+        display_path_diagnosis: analysis.display_path_diagnosis.clone(),
         top_tasks_by_max: top_task_rows_by_max_latency(session, top, filter_class),
         top_tasks_by_p99: top_task_rows_by_p99_latency(session, top, filter_class),
         spike_density,
@@ -45,42 +53,6 @@ pub fn build_html_report_model(
     })
 }
 
-pub fn render_html_report(model: &HtmlReportModel) -> anyhow::Result<String> {
-    let model_json = escape_json_for_script_tag(
-        &serde_json::to_string(model).context("failed to serialize HTML report model")?,
-    );
-    let session_json = escape_json_for_script_tag(
-        &serde_json::to_string(&model.session).context("failed to serialize HTML session data")?,
-    );
-    let spike_events_json = escape_json_for_script_tag(
-        &serde_json::to_string(&model.spike_events)
-            .context("failed to serialize HTML spike event data")?,
-    );
-    let spike_density_json = escape_json_for_script_tag(
-        &serde_json::to_string(&model.spike_density)
-            .context("failed to serialize HTML spike density data")?,
-    );
-    let artifacts_json = escape_json_for_script_tag(
-        &serde_json::to_string(&model.chart_artifacts)
-            .context("failed to serialize HTML chart artifact data")?,
-    );
-    let cluster_analysis_json = escape_json_for_script_tag(
-        &serde_json::to_string(&model.cluster_analysis)
-            .context("failed to serialize HTML cluster data")?,
-    );
-
-    let template = include_str!("../report_template.html");
-
-    Ok(template
-        .replace("{html_report_model_json}", &model_json)
-        .replace("{session_json}", &session_json)
-        .replace("{spike_events_json}", &spike_events_json)
-        .replace("{spike_density_json}", &spike_density_json)
-        .replace("{artifacts_json}", &artifacts_json)
-        .replace("{cluster_analysis_json}", &cluster_analysis_json)
-        .replace("{top}", &model.top_limit.to_string()))
-}
-
 pub fn write_html_report(
     path: &Path,
     html_path: &Path,
@@ -88,23 +60,36 @@ pub fn write_html_report(
     cluster_window_ms: u64,
     filter_class: Option<TaskClass>,
 ) -> anyhow::Result<()> {
+    let input = load_report_input(path)?;
     let ReportBuildResult {
         analysis,
         artifacts,
-    } = build_report_analysis_with_artifacts(path, top, cluster_window_ms, filter_class)?;
+    } = build_report_analysis_from_input(input, top, cluster_window_ms, filter_class)?;
 
-    let text_report = render_report(
-        path,
-        &analysis.session,
-        &analysis.cluster_analysis,
-        &analysis.frame_diagnoses,
+    let correlation_sections = text_report_correlation_sections(
+        &analysis.cluster_analysis.clusters,
         &artifacts,
-        &analysis.focus_summary,
-        &analysis.foreground_summary,
+        block_io_correlation_basis(&analysis.session),
+        cluster_window_ms.saturating_mul(1_000_000),
+        top,
+    );
+
+    let text_report = render_report(TextReportRenderInput {
+        path,
+        session: &analysis.session,
+        cluster_analysis: &analysis.cluster_analysis,
+        frame_diagnoses: &analysis.frame_diagnoses,
+        data_quality: &analysis.data_quality,
+        pressure_timeline: &analysis.pressure_timeline,
+        runtime_slice_summary: &analysis.runtime_slices,
+        correlation_sections: &correlation_sections,
+        focus_summary: &analysis.focus_summary,
+        foreground_summary: &analysis.foreground_summary,
+        display_path_diagnosis: Some(&analysis.display_path_diagnosis),
         top,
         cluster_window_ms,
         filter_class,
-    );
+    });
     let model = build_html_report_model(
         &analysis.session,
         &artifacts,
@@ -128,7 +113,7 @@ pub(crate) fn task_html_row(task: &SessionTask) -> TaskHtmlRow {
         active: task.active,
         class: task.class,
         process_pid: task.process_pid,
-        process_comm: task.process_comm.to_string(),
+        process_comm: task.process_comm.clone(),
         comm: task.comm.clone(),
         samples: task.latency.samples,
         spike_count: task.latency.over_1ms,

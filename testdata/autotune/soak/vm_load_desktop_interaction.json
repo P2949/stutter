@@ -1,1 +1,15 @@
-{"name":"vm_load_desktop_interaction","profile":"observe-only","duration_seconds":60,"expect_actions":false,"expect_rollbacks":false,"forbid_high_risk_apply":true}
+{
+  "name": "vm_load_desktop_interaction",
+  "mode": "suggest",
+  "ticks": [
+    { "kind": "focus_game", "confidence": 0.88 },
+    { "kind": "target_present" },
+    { "kind": "interval", "diagnostic_score_total": 260, "samples": 100 },
+    { "kind": "evaluation_tick", "reason": "vm load present; diagnostics only" }
+  ],
+  "assertions": [
+    "one_active_experiment_maximum",
+    "no_high_risk_autonomous_apply",
+    "high_risk_manual_only"
+  ]
+}

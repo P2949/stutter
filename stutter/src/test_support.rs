@@ -1,5 +1,4 @@
 #![cfg(test)]
-#![allow(dead_code)]
 
 #[cfg(unix)]
 use std::os::unix::fs as unix_fs;
@@ -426,6 +425,7 @@ mod tests {
             FakeProcess::new(100, "GameMain", 12_345)
                 .ppid(1)
                 .cgroup("/game.slice")
+                .sched_policy(1)
                 .thread(101, "RenderThread", 12_346),
         )
         .unwrap();
@@ -447,6 +447,7 @@ mod tests {
         assert_eq!(main.comm, "GameMain");
         assert_eq!(main.process_starttime_ticks, Some(12_345));
         assert_eq!(main.task_starttime_ticks, Some(12_345));
+        assert_eq!(main.sched_policy, Some(1));
         assert!(main.exe_dev.is_some());
         assert!(main.exe_ino.is_some());
 
@@ -455,6 +456,7 @@ mod tests {
         assert_eq!(render.comm, "RenderThread");
         assert_eq!(render.process_starttime_ticks, Some(12_345));
         assert_eq!(render.task_starttime_ticks, Some(12_346));
+        assert_eq!(render.sched_policy, Some(1));
     }
 
     #[test]
@@ -483,6 +485,37 @@ mod tests {
         let warnings = action.preflight_with_policy(&policy).unwrap();
 
         assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn fake_sysfs_supports_battery_power_preflight() {
+        let sysfs = FakeSysfs::new("battery-preflight");
+        sysfs
+            .write_cpu_cpufreq(0, "schedutil", "balance_performance")
+            .unwrap();
+        sysfs.write_battery("Discharging").unwrap();
+
+        let action = CpuPowerAction {
+            sysfs_root: sysfs.path().to_path_buf(),
+            cpus: vec![0],
+            scaling_governor: Some("performance".to_owned()),
+            energy_performance_preference: Some("performance".to_owned()),
+        };
+        let policy = CpuPowerPolicy {
+            allow_cpu_power_changes: true,
+            allowed_cpus: [0].into_iter().collect::<BTreeSet<_>>(),
+            allow_governor_changes: true,
+            allow_epp_changes: true,
+            battery_policy: BatteryPolicy::Never,
+            explicit_battery_override: false,
+        };
+
+        let err = action.preflight_with_policy(&policy).unwrap_err();
+
+        assert!(
+            err.to_string().contains("action_policy_denied"),
+            "unexpected CPU power preflight error: {err:#}"
+        );
     }
 
     #[test]
@@ -533,8 +566,8 @@ mod tests {
             target_cgroup: PathBuf::from("/stutter/game.slice"),
             targets: vec![CgroupPlacementTarget {
                 identity: TaskIdentity {
-                    tid: 42,
-                    process_pid: Some(42),
+                    tid: (42).into(),
+                    process_pid: Some((42).into()),
                     comm: Some("game-thread".to_owned()),
                     starttime_ticks: Some(12_345),
                 },

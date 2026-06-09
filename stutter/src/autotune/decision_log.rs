@@ -79,55 +79,59 @@ pub struct DecisionJsonlEntry {
     pub mode: AutotuneModeLabel,
     pub target_present: bool,
     pub situation: SituationKindLabel,
-    pub score_total: u64,
+    /// Raw diagnostic score total. Explicit name prevents confusion with normalized
+    /// comparison metrics while preserving legacy JSONL readability.
+    #[serde(alias = "diagnostic_score_total")]
+    pub diagnostic_raw_score_total: u64,
+    pub data_quality: OnlineDataQualityLabel,
+    pub decision: AutotuneDecisionLabel,
+    pub reason: String,
+}
+
+pub struct DecisionJsonlEntryInput {
+    pub phase: ControllerPhaseLabel,
+    pub mode: AutotuneModeLabel,
+    pub target_present: bool,
+    pub situation: SituationKindLabel,
+    pub diagnostic_raw_score_total: u64,
     pub data_quality: OnlineDataQualityLabel,
     pub decision: AutotuneDecisionLabel,
     pub reason: String,
 }
 
 impl DecisionJsonlEntry {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        phase: ControllerPhaseLabel,
-        mode: AutotuneModeLabel,
-        target_present: bool,
-        situation: SituationKindLabel,
-        score_total: u64,
-        data_quality: OnlineDataQualityLabel,
-        decision: AutotuneDecisionLabel,
-        reason: impl Into<String>,
-    ) -> Self {
+    pub fn new(input: DecisionJsonlEntryInput) -> Self {
         Self {
             schema_version: 1,
             unix_nanos: crate::audit::unix_nanos_now(),
-            phase,
-            mode,
-            target_present,
-            situation,
-            score_total,
-            data_quality,
-            decision,
-            reason: reason.into(),
+            phase: input.phase,
+            mode: input.mode,
+            target_present: input.target_present,
+            situation: input.situation,
+            diagnostic_raw_score_total: input.diagnostic_raw_score_total,
+            data_quality: input.data_quality,
+            decision: input.decision,
+            reason: input.reason,
         }
     }
 
     pub fn observe_noop(
         target_present: bool,
         situation: SituationKindLabel,
-        score_total: u64,
+        diagnostic_raw_score_total: u64,
         data_quality: OnlineDataQualityLabel,
         reason: impl Into<String>,
     ) -> Self {
-        Self::new(
-            ControllerPhaseLabel::Observing,
-            AutotuneModeLabel::Observe,
+        Self::new(DecisionJsonlEntryInput {
+            phase: ControllerPhaseLabel::Observing,
+            mode: AutotuneModeLabel::Observe,
             target_present,
             situation,
-            score_total,
+            diagnostic_raw_score_total,
             data_quality,
-            AutotuneDecisionLabel::Noop,
-            reason,
-        )
+            decision: AutotuneDecisionLabel::Noop,
+            reason: reason.into(),
+        })
     }
 }
 
@@ -207,6 +211,13 @@ mod tests {
     }
 
     #[test]
+    fn default_decision_log_path_uses_stutter_state_location() {
+        let path = default_decision_log_path();
+
+        assert!(path.ends_with(".local/state/stutter/autotune/decisions.jsonl"));
+    }
+
+    #[test]
     fn decision_entry_serializes_with_requested_schema_fields() {
         let mut entry = DecisionJsonlEntry::observe_noop(
             true,
@@ -225,7 +236,8 @@ mod tests {
         assert!(json.contains("\"mode\":\"Observe\""));
         assert!(json.contains("\"target_present\":true"));
         assert!(json.contains("\"situation\":\"GameCpuSchedulerPressure\""));
-        assert!(json.contains("\"score_total\":143"));
+        assert!(json.contains("\"diagnostic_raw_score_total\":143"));
+        assert!(!json.contains("\"diagnostic_score_total\""));
         assert!(json.contains("\"data_quality\":\"High\""));
         assert!(json.contains("\"decision\":\"Noop\""));
         assert!(json.contains(
@@ -234,6 +246,26 @@ mod tests {
 
         let parsed: DecisionJsonlEntry = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, entry);
+    }
+
+    #[test]
+    fn decision_entry_accepts_legacy_diagnostic_score_total_name() {
+        let json = r#"{
+            "schema_version":1,
+            "unix_nanos":123456,
+            "phase":"Observing",
+            "mode":"Observe",
+            "target_present":true,
+            "situation":"GameCpuSchedulerPressure",
+            "diagnostic_score_total":143,
+            "data_quality":"High",
+            "decision":"Noop",
+            "reason":"legacy field name"
+        }"#;
+
+        let parsed: DecisionJsonlEntry = serde_json::from_str(json).unwrap();
+
+        assert_eq!(parsed.diagnostic_raw_score_total, 143);
     }
 
     #[test]
@@ -250,16 +282,16 @@ mod tests {
         );
         first.unix_nanos = 123456;
 
-        let mut second = DecisionJsonlEntry::new(
-            ControllerPhaseLabel::Observing,
-            AutotuneModeLabel::Suggest,
-            true,
-            SituationKindLabel::CpuPressure,
-            200,
-            OnlineDataQualityLabel::Medium,
-            AutotuneDecisionLabel::Suggest,
-            "suggest mode; candidate would be reported but not applied",
-        );
+        let mut second = DecisionJsonlEntry::new(DecisionJsonlEntryInput {
+            phase: ControllerPhaseLabel::Observing,
+            mode: AutotuneModeLabel::Suggest,
+            target_present: true,
+            situation: SituationKindLabel::CpuPressure,
+            diagnostic_raw_score_total: 200,
+            data_quality: OnlineDataQualityLabel::Medium,
+            decision: AutotuneDecisionLabel::Suggest,
+            reason: "suggest mode; candidate would be reported but not applied".to_owned(),
+        });
         second.unix_nanos = 123457;
 
         append_decision_jsonl(&path, &first).unwrap();

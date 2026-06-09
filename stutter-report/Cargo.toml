@@ -1,0 +1,23 @@
+[package]
+name = "stutter-report"
+version = "0.1.0"
+edition.workspace = true
+description = "Report parsing, analysis, and rendering helpers for stutter artifacts."
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+stutter-core = { path = "../stutter-core" }
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lib]
+path = "src/lib.rs"

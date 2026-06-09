@@ -446,10 +446,10 @@ mod tests {
     fn test_write_ndjson_value() {
         let event = crate::recorder::SpikeEvent {
             elapsed_ms: Some(100),
-            task: 123,
+            task: 123.into(),
             active: true,
             class: TaskClass::Game,
-            process_pid: Some(123),
+            process_pid: Some(123.into()),
             process_comm: "game".into(),
             comm: "game".to_owned(),
             cpu: 1,

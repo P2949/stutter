@@ -1,1 +1,15 @@
-{"name":"compile_background_browser","profile":"apply-low-risk-fake","duration_seconds":90,"expect_actions":true,"expect_rollbacks":true,"forbid_high_risk_apply":true}
+{
+  "name": "compile_background_browser",
+  "mode": "suggest",
+  "ticks": [
+    { "kind": "focus_game", "confidence": 0.9 },
+    { "kind": "target_present" },
+    { "kind": "interval", "diagnostic_score_total": 320, "samples": 100 },
+    { "kind": "evaluation_tick", "reason": "background compile detected" }
+  ],
+  "assertions": [
+    "one_active_experiment_maximum",
+    "no_high_risk_autonomous_apply",
+    "rollback_token_before_apply"
+  ]
+}

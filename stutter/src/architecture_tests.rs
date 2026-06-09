@@ -1,97 +1,104 @@
-use std::{
-    fs,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
+
+mod action_errors;
+mod action_rollback_errors;
+mod advisor_irq_affinity_overlap;
+mod allow_attributes;
+mod allowlists;
+mod artifact_paths;
+mod autotune_facades;
+mod autotune_focus_policy;
+mod autotune_invariant_coverage;
+mod autotune_raw_score;
+mod cgroup_imports;
+mod concurrency;
+mod daemon_state;
+mod decode_coverage;
+mod dependencies;
+mod direct_prints;
+mod documentation;
+mod ebpf_layout;
+mod ebpf_switch_accounting;
+mod ebpf_wakeup_accounting;
+mod file_size;
+mod generated_templates;
+mod high_risk_apply_cli;
+mod kernel_compatibility;
+mod module_layout;
+mod mutation_paths;
+mod objectives;
+mod panic_paths;
+mod privileged_errors;
+mod probe_planning;
+mod public_api;
+mod raw_ids;
+mod release_packaging;
+mod report_migration_docs;
+mod rolling_window_privacy;
+mod root_hygiene;
+mod scanners;
+mod scratch_dir;
+mod string_id_validation;
+mod test_layout;
+mod transitional;
+mod transitional_allowlist;
+mod typed_ids;
+mod unsafe_safety;
+mod unwrap_expect;
+
+const PRODUCTION_RUST_FILE_SIZE_LIMIT_LINES: usize = 700;
+// Test files are allowed to be larger than production files, but should still
+// remain behavior-focused and navigable. Split large suites into child modules
+// rather than raising this gate.
+const TEST_RUST_FILE_SIZE_LIMIT_LINES: usize = 700;
+
+const WORKSPACE_SOURCE_ROOTS: &[&str] = &[
+    "stutter/src",
+    "stutter-ebpf/src",
+    "stutter-common/src",
+    "stutter-config/src",
+    "stutter-core/src",
+    "stutter-report/src",
+    "xtask/src",
+];
+
+fn workspace_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("stutter crate should live under workspace root")
+        .to_path_buf()
+}
+
+fn workspace_src_roots() -> Vec<PathBuf> {
+    let workspace_root = workspace_root();
+
+    WORKSPACE_SOURCE_ROOTS
+        .iter()
+        .map(|path| workspace_root.join(path))
+        .collect()
+}
+
+fn relative_to_workspace_root(path: &Path) -> String {
+    path.strip_prefix(workspace_root())
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
 
 fn crate_src_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src")
 }
 
-fn rust_files_under(path: &Path) -> Vec<PathBuf> {
-    let mut files = Vec::new();
-    collect_rust_files(path, &mut files);
-    files.sort();
-    files
+fn autotune_src_root() -> PathBuf {
+    crate_src_root().join("autotune")
 }
 
-fn collect_rust_files(path: &Path, files: &mut Vec<PathBuf>) {
-    let Ok(metadata) = fs::metadata(path) else {
-        return;
-    };
-    if metadata.is_file() {
-        if path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
-            files.push(path.to_path_buf());
-        }
-        return;
-    }
-
-    let Ok(entries) = fs::read_dir(path) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        collect_rust_files(&entry.path(), files);
-    }
-}
-
-fn assert_sources_do_not_contain(files: &[PathBuf], forbidden: &[&str]) {
-    let mut violations = Vec::new();
-
-    for file in files {
-        let source = fs::read_to_string(file).unwrap_or_default();
-        for needle in forbidden {
-            if source.contains(needle) {
-                violations.push(format!("{} contains {needle:?}", file.display()));
-            }
-        }
-    }
-
-    assert!(
-        violations.is_empty(),
-        "architecture boundary violations:\n{}",
-        violations.join("\n")
-    );
-}
-
-#[test]
-fn actions_do_not_depend_on_cli_or_command_parsing() {
-    let root = crate_src_root().join("actions");
-    let files = rust_files_under(&root);
-
-    assert_sources_do_not_contain(
-        &files,
-        &["crate::cli", "crate::commands", "AppCommand", "clap::"],
-    );
-}
-
-#[test]
-fn daemon_internals_do_not_depend_on_cli_or_command_parsing() {
-    let root = crate_src_root().join("daemon");
-    let files = rust_files_under(&root);
-
-    assert_sources_do_not_contain(
-        &files,
-        &["crate::cli", "crate::commands", "AppCommand", "clap::"],
-    );
-}
-
-#[test]
-fn event_decode_module_does_not_depend_on_recording() {
-    let files = vec![crate_src_root().join("events/decode.rs")];
-
-    assert_sources_do_not_contain(&files, &["crate::recorder", "recorder::", "LiveRecorder"]);
-}
-
-#[test]
-fn policy_module_does_not_mutate_persistent_daemon_state() {
-    let files = vec![crate_src_root().join("daemon/policy.rs")];
-
-    assert_sources_do_not_contain(
-        &files,
-        &[
-            "DaemonStateStore",
-            "DaemonStateSnapshotWriter",
-            "load_daemon_state",
-            "default_daemon_state_snapshot_path",
-        ],
-    );
+fn relative_to_crate_root(path: &Path) -> String {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_root = manifest_dir.parent().unwrap();
+    path.strip_prefix(manifest_dir)
+        .or_else(|_| path.strip_prefix(workspace_root))
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
 }

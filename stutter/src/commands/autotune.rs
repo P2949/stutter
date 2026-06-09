@@ -18,14 +18,16 @@ pub fn run_generate_profiles_command(
 }
 
 pub async fn run_autotune_command(input: input::AutotuneCommandInput) -> anyhow::Result<()> {
-    autotune::autotune_command(input.input).await
+    autotune::commands::live::autotune_command(input.input).await
 }
 
 pub fn run_apply_candidate_command(
     input: input::AutotuneApplyCandidateCommandInput,
 ) -> anyhow::Result<()> {
-    let plan =
-        autotune::candidate::apply_candidate_plan_file(&input.candidate_json, input.dry_run)?;
+    let plan = autotune::planning::plan_io::apply_candidate_plan_file(
+        &input.candidate_json,
+        input.dry_run,
+    )?;
     if input.dry_run {
         println!(
             "candidate_plan_dry_run candidate={} action_kind={} safety={:?} objective={:?}",

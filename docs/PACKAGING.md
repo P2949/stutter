@@ -1,5 +1,10 @@
 # Packaging Guide
 
+> Packaging status: distro packaging is currently skeleton/experimental. See
+> [INSTALL.md](INSTALL.md#packaging-status) and
+> [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) before describing any package path
+> as production-ready.
+
 ## Default Build
 
 Building stutter builds both the userspace binary and the eBPF object locally:
@@ -64,14 +69,22 @@ offsets into BPF globals at load time, exactly as it does for locally-built
 objects. A prebuilt object that passes validation on one kernel may fail on
 another if the kernel's tracepoint layout differs.
 
+Packagers should not perform mandatory tracepoint-layout validation against the
+build host kernel. The target runtime kernel is validated by stutter preflight;
+see [KERNEL_COMPATIBILITY.md](KERNEL_COMPATIBILITY.md).
+
 > **This is an advanced packaging escape hatch.** For most users, the default
 > local build produces the correct object automatically.
 
 ## Release Artifacts
 
-The GitHub release workflow automatically uploads the eBPF object alongside the
-binary. Packagers can download `stutter.bpf.o` from the release artifacts and
-use it with the build-time or runtime override.
+When a tagged release workflow publishes artifacts, the release should include
+the userspace binary and a matching `stutter.bpf.o` eBPF object. Packagers can
+then use that object with the build-time or runtime override.
+
+Until that artifact path is part of the release process, distro packaging should
+be treated as skeleton/experimental and local builds should use the standard
+nightly eBPF build path.
 
 ## Service Packaging
 
@@ -126,13 +139,41 @@ Use the release gate command before tagging:
 ```bash
 stutter release check --channel experimental
 stutter release check --channel observe-stable --enforce
-stutter release check --channel low-risk-stable --soak-tests --enforce
+stutter release check --channel low-risk-stable --soak-tests --real-machine-validation --enforce
+```
+
+The command above checks source/runtime readiness and service-unit/local-install
+readiness. It does not claim production-ready distro packaging. Packaging
+readiness is visible as advisory gates unless explicitly marked with:
+
+```bash
+stutter release check \
+  --channel low-risk-stable \
+  --soak-tests \
+  --real-machine-validation \
+  --production-distro-packaging \
+  --reproducible-packaged-ebpf-object \
+  --packaging-install-tests \
+  --packaging-service-smoke-tests \
+  --versioned-release-tarball
 ```
 
 `observe-stable` fails if apply actions are enabled. `low-risk-stable` requires
-the action runner, rollback, crash recovery, service packaging, docs, and soak
-test evidence. Medium-risk channels require per-action opt-in, stronger tests,
-and manual confirmation or explicit config.
+the action runner, rollback, crash recovery, service-unit/local-install support,
+docs, and soak test evidence. This is **not** the same as production-ready
+distro packaging.
+
+Production distro packaging is tracked separately by advisory release gates:
+
+- `production_distro_packaging`
+- `reproducible_packaged_ebpf_object`
+- `packaging_install_tests`
+- `packaging_service_smoke_tests`
+- `versioned_release_tarball`
+
+These gates default to `not claimed`. Do not describe Gentoo, Arch, tarball, or
+other distro packaging as production-ready unless those packaging gates are
+explicitly met and the package path has been tested.
 
 For a no-root deterministic soak smoke test:
 

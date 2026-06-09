@@ -6,12 +6,18 @@ use crate::{
         FakeDaemonScenario, FakeDaemonSimulationReport, FakeDaemonStep, run_fake_daemon_scenario,
     },
     daemon::{
-        ActionDescriptor, ActionEffectScope, ActionSource, DaemonConfig, DaemonLifecycleAction,
-        DaemonLifecycleEvent, DaemonLifecycleInputs, DaemonLifecyclePolicy, DaemonMode,
-        DaemonPhase, DaemonPolicyBuildInput, DaemonPreset, DaemonSoakConfig, DaemonSoakProfile,
-        PolicyDecisionKind, PolicyIntent, PolicyRejection, RemotePolicyContext,
-        RollbackRequirement, build_daemon_policy, evaluate_daemon_lifecycle_event,
-        run_fake_daemon_soak,
+        DaemonConfig, DaemonPhase, DaemonPreset,
+        explain::PolicyDecisionKind,
+        lifecycle::{
+            DaemonLifecycleAction, DaemonLifecycleEvent, DaemonLifecycleInputs,
+            DaemonLifecyclePolicy, evaluate_daemon_lifecycle_event,
+        },
+        policy::{
+            ActionDescriptor, ActionEffectScope, ActionSource, DaemonMode, DaemonPolicyBuildInput,
+            PolicyIntent, PolicyRejection, RemotePolicyContext, RollbackRequirement,
+            build_daemon_policy,
+        },
+        soak::{DaemonSoakConfig, DaemonSoakProfile, run_fake_daemon_soak},
     },
     release::{ReleaseChannel, ReleaseReadinessInputs, evaluate_release_readiness},
     remote::AgentAutotuneLimits,
@@ -74,7 +80,7 @@ pub fn run_fake_daemon_acceptance_suite() -> DaemonAcceptanceReport {
         "start-low-risk",
         DaemonMode::ApplyLowRisk,
         vec![FakeDaemonStep::Interval {
-            score_total: 500,
+            diagnostic_raw_score_total: 500,
             samples: 100,
         }],
     );
@@ -83,12 +89,12 @@ pub fn run_fake_daemon_acceptance_suite() -> DaemonAcceptanceReport {
         DaemonMode::ApplyLowRisk,
         vec![
             FakeDaemonStep::Interval {
-                score_total: 1_000,
+                diagnostic_raw_score_total: 1_000,
                 samples: 100,
             },
             FakeDaemonStep::TargetPresent,
             FakeDaemonStep::Interval {
-                score_total: 10,
+                diagnostic_raw_score_total: 10,
                 samples: 100,
             },
         ],
@@ -98,12 +104,12 @@ pub fn run_fake_daemon_acceptance_suite() -> DaemonAcceptanceReport {
         DaemonMode::ApplyLowRisk,
         vec![
             FakeDaemonStep::Interval {
-                score_total: 10,
+                diagnostic_raw_score_total: 10,
                 samples: 100,
             },
             FakeDaemonStep::TargetPresent,
             FakeDaemonStep::Interval {
-                score_total: 1_000,
+                diagnostic_raw_score_total: 1_000,
                 samples: 100,
             },
         ],
@@ -113,7 +119,7 @@ pub fn run_fake_daemon_acceptance_suite() -> DaemonAcceptanceReport {
         DaemonMode::ApplyLowRisk,
         vec![
             FakeDaemonStep::Interval {
-                score_total: 500,
+                diagnostic_raw_score_total: 500,
                 samples: 100,
             },
             FakeDaemonStep::FocusCleared {
@@ -126,7 +132,7 @@ pub fn run_fake_daemon_acceptance_suite() -> DaemonAcceptanceReport {
         DaemonMode::ApplyLowRisk,
         vec![
             FakeDaemonStep::Interval {
-                score_total: 500,
+                diagnostic_raw_score_total: 500,
                 samples: 100,
             },
             FakeDaemonStep::TargetMissing,
@@ -161,6 +167,13 @@ pub fn run_fake_daemon_acceptance_suite() -> DaemonAcceptanceReport {
         &ReleaseReadinessInputs {
             soak_tests: true,
             stronger_tests: true,
+            real_machine_validation: true,
+            real_validation_matrix: true,
+            false_negative_catalogue: true,
+            local_install_smoke_tests: true,
+            emergency_restore_smoke_tests: true,
+            service_start_stop_smoke_tests: true,
+            rollback_drill: true,
             ..ReleaseReadinessInputs::default()
         },
     );
@@ -424,7 +437,7 @@ fn unsafe_remote_apply_rejected() -> bool {
 
 fn acceptance_apply_descriptor() -> ActionDescriptor {
     ActionDescriptor {
-        action_id: ActionId("acceptance-low-risk-candidate".to_owned()),
+        action_id: ActionId::new("acceptance-low-risk-candidate".to_owned()),
         action_kind: "cpu_affinity_profile".to_owned(),
         safety_class: SafetyClass::ReversibleLowRisk,
         effect_scope: ActionEffectScope::LocalProcessTree,

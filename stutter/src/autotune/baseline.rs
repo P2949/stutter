@@ -76,7 +76,7 @@ impl TaskIdentityKey {
             process_pid: record.process_pid,
             class: record.class,
             comm: record.comm.clone(),
-            process_comm: record.process_comm.to_string(),
+            process_comm: record.process_comm.clone(),
         }
     }
 }
@@ -343,6 +343,8 @@ mod tests {
             cpu_psi_some: 0.0,
             mem_psi_some: 0.0,
             mem_psi_full: 0.0,
+            mem_psi_delta_us: 0,
+            mem_psi_spike: false,
             io_psi_some: 0.0,
             io_psi_full: 0.0,
             percentile_scope: "all".to_owned(),
@@ -493,9 +495,15 @@ mod tests {
         let drop_counters = DropCountersSnapshot {
             wakeup_data_insert_failed: 1,
             wakeup_data_stale_entries: 0,
+            wakeup_data_replaced_entries: 0,
+            wakeup_data_consumed_read_failed: 0,
             ringbuf_reserve_failed: 0,
             irq_start_times_insert_failed: 0,
             block_start_insert_failed: 0,
+            block_fallback_key_collisions: 0,
+            cpu_accounting_untracked: 0,
+            block_zero_keys: 0,
+            drm_fence_missing_start: 0,
         };
 
         for idx in 0..10 {
@@ -589,5 +597,73 @@ mod tests {
         assert_eq!(config.baseline_window_ms(), 30_000);
         assert_eq!(config.min_scored_intervals, 10);
         assert_eq!(config.min_scored_samples, 100);
+    }
+
+    #[test]
+    fn baseline_window_progress_reset_and_accumulator_are_observable() {
+        let mut state = BaselineWindowState::new(config());
+        assert_eq!(state.config().baseline_window_ms(), 30_000);
+
+        let drop_counters = DropCountersSnapshot {
+            wakeup_data_insert_failed: 2,
+            wakeup_data_stale_entries: 0,
+            wakeup_data_replaced_entries: 0,
+            wakeup_data_consumed_read_failed: 0,
+            ringbuf_reserve_failed: 0,
+            irq_start_times_insert_failed: 0,
+            block_start_insert_failed: 0,
+            block_fallback_key_collisions: 0,
+            cpu_accounting_untracked: 0,
+            block_zero_keys: 0,
+            drm_fence_missing_start: 0,
+        };
+        let records = vec![record(1_000, 7, 10, TaskClass::Game)];
+        let status = state.observe_interval(
+            1_000_000_000,
+            1_000,
+            &records,
+            &drop_counters,
+            identity(&records),
+        );
+
+        match status {
+            BaselineWindowStatus::Collecting {
+                elapsed_ms,
+                scored_intervals,
+                scored_samples,
+                scored_task_count,
+                drop_counter_total,
+                reasons,
+            } => {
+                assert_eq!(elapsed_ms, 0);
+                assert_eq!(scored_intervals, 1);
+                assert_eq!(scored_samples, 10);
+                assert_eq!(scored_task_count, 1);
+                assert_eq!(drop_counter_total, 2);
+                assert!(
+                    reasons
+                        .iter()
+                        .any(|reason| reason.contains("baseline window not complete"))
+                );
+            }
+            other => panic!("expected collecting baseline status, got {other:?}"),
+        }
+
+        let mut accumulator = BaselineWindowAccumulator::default();
+        accumulator.push_interval_records(&[
+            record(3_000, 3, 1, TaskClass::Game),
+            record(1_000, 1, 1, TaskClass::Game),
+            record(2_000, 2, 1, TaskClass::Game),
+        ]);
+        let ordered_elapsed = accumulator
+            .ordered_records()
+            .into_iter()
+            .map(|record| record.elapsed_ms)
+            .collect::<Vec<_>>();
+        assert_eq!(ordered_elapsed, vec![1_000, 2_000, 3_000]);
+
+        state.reset();
+        assert_eq!(state.config(), &config());
+        assert!(!state.status(2_000_000_000).is_ready());
     }
 }

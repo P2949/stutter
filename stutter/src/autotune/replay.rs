@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fs, path::PathBuf};
+use std::{fs, path::PathBuf};
 
 use anyhow::Context;
 use serde::Serialize;
@@ -6,7 +6,7 @@ use serde::Serialize;
 use crate::{
     artifacts::ArtifactSelection,
     ebpf_loader::DropCountersSnapshot,
-    process_tree::{TaskClass, TaskInfo},
+    process_tree::{TaskClass, TaskInfo, TaskMap},
     recorder::SessionTask,
     session_events::MonitorEvent,
     session_io,
@@ -123,8 +123,13 @@ impl ReplayPolicyEngine for ObserveOnlyReplayPolicy {
             | MonitorEvent::MigrationEvent { .. }
             | MonitorEvent::CpuFreqSample { .. }
             | MonitorEvent::ForegroundEvent { .. }
+            | MonitorEvent::GpuEngineSample { .. }
             | MonitorEvent::SchedulerSample { .. }
             | MonitorEvent::ScxEvent { .. }
+            | MonitorEvent::KmsFlipEvent { .. }
+            | MonitorEvent::DrmFenceEvent { .. }
+            | MonitorEvent::WaylandPresentationEvent { .. }
+            | MonitorEvent::DmaBufEvent { .. }
             | MonitorEvent::Exec { .. } => {}
         }
         Ok(())
@@ -402,11 +407,11 @@ fn final_drop_counters(drop_counters: &DropCountersSnapshot) -> DropCountersSnap
     drop_counters.clone()
 }
 
-fn active_targets_from_session_tasks(tasks: &[SessionTask]) -> BTreeMap<u32, TaskInfo> {
+fn active_targets_from_session_tasks(tasks: &[SessionTask]) -> TaskMap {
     tasks
         .iter()
         .filter(|task| task.active)
-        .map(|task| (task.task, task_info_from_session_task(task)))
+        .map(|task| (task.task.into(), task_info_from_session_task(task)))
         .collect()
 }
 
@@ -420,9 +425,9 @@ fn removed_targets_from_session_tasks(tasks: &[SessionTask]) -> Vec<u32> {
 
 fn task_info_from_session_task(task: &SessionTask) -> TaskInfo {
     TaskInfo {
-        tid: task.task,
-        process_pid: task.process_pid.unwrap_or(task.task),
-        process_ppid: 0,
+        tid: task.task.into(),
+        process_pid: task.process_pid.unwrap_or(task.task).into(),
+        process_ppid: 0.into(),
         comm: task.comm.clone(),
         process_comm: task.process_comm.clone(),
         process_starttime_ticks: task.process_starttime_ticks,
@@ -474,6 +479,7 @@ mod tests {
             exe_dev: Some(1),
             exe_ino: Some(2),
             comm: format!("task-{task}"),
+            allowed_cpus: None,
             latency: RecordedLatency::default(),
             cpu: RecordedCpuSnapshot::default(),
             top_spikes: Vec::new(),

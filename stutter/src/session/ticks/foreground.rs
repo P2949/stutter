@@ -1,0 +1,106 @@
+use crate::{session::MonitorSession, session_events::MonitorEvent};
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ForegroundTickContext;
+
+fn foreground_stale_state(snapshot: &crate::foreground::ForegroundWindowSnapshot) -> bool {
+    snapshot.stale_ms.is_some()
+}
+
+pub(crate) fn foreground_identity_changed(
+    old: Option<&crate::foreground::ForegroundWindowSnapshot>,
+    new: &crate::foreground::ForegroundWindowSnapshot,
+) -> bool {
+    let Some(old) = old else {
+        return true;
+    };
+
+    old.source != new.source
+        || old.status != new.status
+        || old.decision.target.as_ref().and_then(|t| t.pid)
+            != new.decision.target.as_ref().and_then(|t| t.pid)
+        || old
+            .decision
+            .target
+            .as_ref()
+            .and_then(|t| t.app_id.as_deref())
+            != new
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.app_id.as_deref())
+        || old
+            .decision
+            .target
+            .as_ref()
+            .and_then(|t| t.class.as_deref())
+            != new
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.class.as_deref())
+        || old
+            .decision
+            .target
+            .as_ref()
+            .and_then(|t| t.window_id.as_deref())
+            != new
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.window_id.as_deref())
+        || old
+            .decision
+            .target
+            .as_ref()
+            .and_then(|t| t.workspace.as_deref())
+            != new
+                .decision
+                .target
+                .as_ref()
+                .and_then(|t| t.workspace.as_deref())
+        || foreground_stale_state(old) != foreground_stale_state(new)
+}
+
+pub(crate) fn foreground_event_for_final_metadata(
+    current: Option<&crate::foreground::ForegroundWindowSnapshot>,
+    last_recorded: Option<&crate::foreground::ForegroundEvent>,
+    include_title: bool,
+) -> Option<crate::foreground::ForegroundEvent> {
+    current
+        .and_then(|snapshot| snapshot.to_event(include_title))
+        .or_else(|| last_recorded.cloned())
+}
+
+impl MonitorSession {
+    fn foreground_event_for_snapshot(
+        &self,
+        snapshot: &crate::foreground::ForegroundWindowSnapshot,
+    ) -> Option<MonitorEvent> {
+        snapshot
+            .to_event(self.config.focus.foreground_include_title)
+            .map(MonitorEvent::from)
+    }
+    pub(crate) async fn handle_foreground_tick(&mut self) -> anyhow::Result<()> {
+        let elapsed_ms = self.started.elapsed().as_millis() as u64;
+        let Some(resolver) = self.handles.target_refresh.foreground_resolver.as_mut() else {
+            return Ok(());
+        };
+
+        let snapshot = resolver.sample(elapsed_ms);
+        let changed = foreground_identity_changed(self.current_foreground.as_ref(), &snapshot);
+
+        if changed {
+            if self.current_foreground.is_some() {
+                self.foreground_switch_count = self.foreground_switch_count.saturating_add(1);
+            }
+            if let Some(event) = self.foreground_event_for_snapshot(&snapshot) {
+                self.dispatch_monitor_event(event).await?;
+            }
+        }
+
+        self.current_foreground = Some(snapshot);
+
+        Ok(())
+    }
+}

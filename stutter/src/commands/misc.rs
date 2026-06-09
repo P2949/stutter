@@ -2,13 +2,15 @@ use anyhow::Context;
 use serde::Serialize;
 
 use crate::{
-    advisor, audit, cli, commands::input, community_rules, config_file, doctor, irq_inspect,
-    metadata, probe_catalog, process_tree, profiles, tune, watch,
+    advisor, audit, cli, commands::input, community_rules, config_file, display_path_compare,
+    doctor, drm_fence_tracepoints, irq_inspect, metadata, probe_catalog, process_tree, profiles,
+    tune, watch, wayland_probe,
 };
 
 pub fn run_version_command(input: input::VersionCommandInput) -> anyhow::Result<()> {
     println!("stutter {}", metadata::build_version());
     if input.features {
+        println!("git_rev: {}", metadata::build_git_rev());
         println!("features: {}", metadata::build_feature_labels().join(", "));
     }
     Ok(())
@@ -25,7 +27,7 @@ struct ConfigCheckOutput {
 pub fn run_config_check_command(input: input::ConfigCheckCommandInput) -> anyhow::Result<()> {
     let user_config = config_file::load_user_config()?;
     if let Some(config) = user_config.as_ref() {
-        crate::config::layer::MonitorConfigLayer::from_user_file(config)?;
+        crate::config::layer::layer_from_user_file(config)?;
         let _ = config_file::agent_autotune_limits_from_user_config(Some(config))?;
     }
 
@@ -33,7 +35,7 @@ pub fn run_config_check_command(input: input::ConfigCheckCommandInput) -> anyhow
         .as_ref()
         .and_then(|config| config.daemon_preset.as_deref())
         .unwrap_or("observe-only")
-        .parse::<crate::daemon::DaemonPreset>()?;
+        .parse::<crate::daemon::config::DaemonPreset>()?;
     let diagnostics = user_config
         .as_ref()
         .map(|config| {
@@ -71,6 +73,7 @@ pub async fn run_apply_profile_command(
     watch::apply_profile_command(watch::ApplyProfileCommandInput {
         tree_pid: input.tree_pid,
         profile_path: input.profile,
+        profile_name: input.profile_name,
         force: input.force,
         dry_run: input.dry_run,
         allow_medium_risk: input.allow_medium_risk,
@@ -78,6 +81,24 @@ pub async fn run_apply_profile_command(
         keep_applied: input.keep_applied,
         refresh_ms: input.refresh_ms,
         enforce: input.enforce,
+        explain: input.explain,
+        json: input.json,
+        output: input.output,
+        top: input.top,
+        highlight_comm: input.highlight_comm,
+    })
+    .await
+}
+
+pub async fn run_profile_plan_command(input: input::ProfilePlanCommandInput) -> anyhow::Result<()> {
+    watch::profile_plan_command(watch::ProfilePlanCommandInput {
+        tree_pid: input.tree_pid,
+        profile_path: input.profile,
+        profile_name: input.profile_name,
+        json: input.json,
+        output: input.output,
+        top: input.top,
+        highlight_comm: input.highlight_comm,
     })
     .await
 }
@@ -97,10 +118,14 @@ pub async fn run_tune_command(input: input::TuneCommandInput) -> anyhow::Result<
         runs: input.runs,
         keep_best: input.keep_best,
         baseline_profile: input.baseline_profile,
+        scenario_name: input.scenario_name,
+        workload_label: input.workload_label,
+        route_label: input.route_label,
         out_dir: input.out_dir,
         mangohud_log: input.mangohud_log,
         enforce: input.enforce,
         hwmon: input.hwmon,
+        order_strategy: input.order_strategy.clone(),
     })
     .await
 }
@@ -131,7 +156,7 @@ pub fn run_doctor_command(input: input::DoctorCommandInput) -> anyhow::Result<()
 }
 
 pub fn run_probes_command(input: input::ProbesCommandInput) -> anyhow::Result<()> {
-    probe_catalog::probes_command(input.json)
+    probe_catalog::probes_command(input.json, input.include_planned)
 }
 
 pub fn run_profile_template_command(
@@ -147,6 +172,43 @@ pub fn run_profile_template_command(
 
 pub fn run_inspect_irqs_command(input: input::InspectIrqsCommandInput) -> anyhow::Result<()> {
     irq_inspect::run_inspect_irqs(input.json, &input.filter, input.top)
+}
+
+pub fn run_inspect_drm_tracepoints_command(
+    input: input::InspectDrmTracepointsCommandInput,
+) -> anyhow::Result<()> {
+    let discovery = input
+        .events_root
+        .as_deref()
+        .map(drm_fence_tracepoints::discover_drm_fence_tracepoints)
+        .unwrap_or_else(drm_fence_tracepoints::discover_drm_fence_tracepoints_default);
+    if input.json {
+        println!("{}", serde_json::to_string_pretty(&discovery)?);
+    } else {
+        print!("{}", drm_fence_tracepoints::render_text(&discovery));
+    }
+    Ok(())
+}
+
+pub fn run_display_path_compare_command(
+    input: input::DisplayPathCompareCommandInput,
+) -> anyhow::Result<()> {
+    display_path_compare::run_display_path_compare(display_path_compare::DisplayPathCompareInput {
+        baseline: input.baseline,
+        test: input.test,
+        json: input.json,
+        strict: input.strict,
+        expect: input.expect,
+    })
+}
+
+pub fn run_wayland_probe_command(input: input::WaylandProbeCommandInput) -> anyhow::Result<()> {
+    wayland_probe::run_wayland_probe_command(wayland_probe::WaylandProbeCommandInput {
+        duration: input.duration,
+        output: input.output,
+        fullscreen: input.fullscreen,
+        out_dir: input.out_dir,
+    })
 }
 
 pub fn run_completions_command(input: input::CompletionsCommandInput) -> anyhow::Result<()> {

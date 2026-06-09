@@ -1,7 +1,5 @@
 use std::{
-    ffi::CString,
     io,
-    os::unix::ffi::OsStrExt,
     path::{Path, PathBuf},
 };
 
@@ -451,15 +449,7 @@ fn read_trimmed(path: &Path) -> Option<String> {
 
 fn available_bytes_for_path(path: &Path) -> io::Result<u64> {
     let existing_path = nearest_existing_path(path);
-    let c_path = CString::new(existing_path.as_os_str().as_bytes())
-        .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
-    let mut stat = std::mem::MaybeUninit::<libc::statvfs>::uninit();
-    let rc = unsafe { libc::statvfs(c_path.as_ptr(), stat.as_mut_ptr()) };
-    if rc != 0 {
-        return Err(io::Error::last_os_error());
-    }
-    let stat = unsafe { stat.assume_init() };
-    Ok(stat.f_bavail.saturating_mul(stat.f_frsize))
+    crate::syscall::statvfs(&existing_path).map(|space| space.free_bytes)
 }
 
 fn nearest_existing_path(path: &Path) -> PathBuf {

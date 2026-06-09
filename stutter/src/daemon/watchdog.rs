@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-use crate::daemon::{DaemonPhase, DaemonState, SystemHealthSnapshot, SystemHealthState};
+use crate::daemon::{
+    DaemonPhase, DaemonState,
+    health::{SystemHealthSnapshot, SystemHealthState},
+};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DaemonWatchdogConfig {
@@ -269,7 +272,10 @@ fn issue(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::daemon::{DaemonExperimentState, DaemonMode, DaemonRollbackState};
+    use crate::daemon::{
+        policy::DaemonMode,
+        state::{DaemonExperimentState, DaemonRollbackState},
+    };
 
     fn healthy_inputs() -> DaemonWatchdogInputs {
         DaemonWatchdogInputs {
@@ -378,14 +384,17 @@ mod tests {
             mode: DaemonMode::ApplyLowRisk,
             phase: DaemonPhase::Apply,
             active_experiment: Some(DaemonExperimentState {
-                experiment_id: "experiment-1".to_owned(),
-                action_id: "action-1".to_owned(),
+                experiment_id: crate::autotune::experiment::ExperimentId::new("experiment-1"),
+                action_id: crate::actions::ActionId::new("action-1"),
                 candidate_name: Some("candidate".to_owned()),
+                mode: DaemonMode::ApplyLowRisk,
                 safety_class: crate::actions::SafetyClass::ReversibleLowRisk,
                 started_unix_nanos: None,
             }),
             active_rollback: Some(DaemonRollbackState {
-                action_id: "action-1".to_owned(),
+                action_id: crate::actions::ActionId::new("action-1"),
+                mode: DaemonMode::ApplyLowRisk,
+                safety_class: crate::actions::SafetyClass::ReversibleLowRisk,
                 rollback_available: true,
                 token: None,
                 manual_restore_command: Some("stutter daemon restore".to_owned()),

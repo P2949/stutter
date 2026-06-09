@@ -1,11 +1,12 @@
 name = "truncated_drop_counters"
-schema_version = 21
+schema_version = 23
 source = "synthetic-contract"
 quality_expectation = "Medium"
 description = "Synthetic low-quality fixture with truncated spike events and non-zero drop counters."
 
 [expected]
 primary_cause = "Unknown"
+expected_behavior = "must_diagnose"
 quality_reasons_contain = [
     "truncated",
     "drop",
@@ -21,6 +22,11 @@ gpu_samples = 0
 frames = 0
 block_io_events = 0
 foreground_events = 0
+kms_flip_events = 0
+drm_fence_events = 0
+wayland_presentation_events = 0
+dmabuf_events = 0
+gpu_engine_samples = 0
 
 [expected.evidence]
 contains = []

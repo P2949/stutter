@@ -1,11 +1,29 @@
 name = "real_clean_baseline"
-schema_version = 21
-source = "validation-corpus"
+schema_version = 23
+source = "sanitized-real-recording"
 quality_expectation = "High"
 description = "Real clean baseline example."
 
+[platform]
+gpu_vendor = "AMD"
+gpu_driver = "amdgpu"
+compositor = "Hyprland"
+session_type = "wayland"
+scenario = "clean"
+sanitized_capture_id = "sanitized-amd-hyprland-clean-baseline-v1"
+kernel_family = "linux"
+kernel_version_bucket = "6.8-6.12"
+cpu_vendor = "AMD"
+cpu_topology_bucket = "8c16t"
+display_refresh_bucket = "90-165hz"
+capture_features = [
+    "frames",
+    "scheduler",
+]
+
 [expected]
 primary_cause = "Unknown"
+expected_behavior = "must_diagnose"
 accepted_confidence = []
 data_quality = "High"
 
@@ -17,6 +35,11 @@ gpu_samples = 0
 frames = 0
 block_io_events = 0
 foreground_events = 0
+kms_flip_events = 0
+drm_fence_events = 0
+wayland_presentation_events = 0
+dmabuf_events = 0
+gpu_engine_samples = 0
 
 [expected.evidence]
 contains = []

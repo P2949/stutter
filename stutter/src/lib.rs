@@ -1,47 +1,59 @@
-pub mod actions;
-pub mod agent;
-pub mod alert;
-pub mod artifacts;
-pub mod autotune;
-pub mod config;
-pub mod daemon;
-pub mod daemon_policy;
-pub mod error;
-pub mod events;
-pub mod focus;
-pub mod presets;
-pub mod probe_activation;
-pub mod probe_registry;
-pub mod process_tree;
-pub mod session;
-pub mod session_events;
-pub mod session_io;
+pub mod api;
+pub(crate) mod syscall;
+
+pub(crate) mod actions;
+pub(crate) mod agent;
+pub(crate) mod alert;
+pub(crate) mod artifacts;
+pub(crate) mod autotune;
+pub(crate) mod config;
+pub(crate) mod daemon;
+pub(crate) mod daemon_policy;
+pub(crate) mod error;
+pub(crate) mod events;
+pub(crate) mod focus;
+pub(crate) mod presets;
+pub(crate) mod probe_activation;
+pub(crate) mod probe_registry;
+pub(crate) mod process;
+pub(crate) mod process_tree;
+pub(crate) mod procfs;
+pub(crate) mod session;
+pub(crate) mod session_events;
+pub(crate) mod session_io;
 
 pub(crate) mod advisor;
 pub(crate) mod affinity;
+pub(crate) mod ascii_match;
 pub(crate) mod audit;
 pub(crate) mod cli;
 pub(crate) mod commands;
 pub(crate) mod community_rules;
 pub(crate) mod config_file;
 pub(crate) mod diagnosis;
+pub(crate) mod display_path_compare;
+pub(crate) mod display_topology;
+pub(crate) mod dmabuf_log;
 pub(crate) mod doctor;
+pub(crate) mod drm_fence_tracepoints;
+pub(crate) mod drm_tracepoints;
+pub(crate) mod ebpf;
 pub(crate) mod ebpf_loader;
 pub(crate) mod flamegraph;
 pub(crate) mod foreground;
+pub(crate) mod gpu_engine;
 pub(crate) mod hwmon;
 pub(crate) mod irq_inspect;
-pub(crate) mod kernel_event;
 pub(crate) mod mangohud;
 pub(crate) mod metadata;
 pub(crate) mod metrics;
 pub(crate) mod otel;
 pub(crate) mod perf_counters;
 pub(crate) mod probe_catalog;
-pub(crate) mod procfs;
 pub(crate) mod profile_restore;
 pub(crate) mod profiles;
 pub(crate) mod prometheus;
+pub(crate) mod prove_fix;
 pub(crate) mod psi;
 pub(crate) mod recommend;
 pub(crate) mod recorder;
@@ -57,19 +69,73 @@ pub(crate) mod service;
 pub(crate) mod spike;
 pub(crate) mod summary;
 pub(crate) mod system_inventory;
-pub(crate) mod target_snapshot;
 pub(crate) mod task_class;
-pub(crate) mod task_filter;
 pub(crate) mod tasks;
 pub(crate) mod topology;
 pub(crate) mod tui;
 pub(crate) mod tune;
 pub(crate) mod validate;
 pub(crate) mod watch;
+pub(crate) mod wayland_presentation;
+pub(crate) mod wayland_probe;
 
-pub async fn run_cli() -> anyhow::Result<()> {
-    let command = cli::parse_app_command()?;
+pub use api::error::StutterError;
+
+pub async fn run_cli() -> Result<(), StutterError> {
+    run_parsed_cli(cli::parse_app_command()).await
+}
+
+#[cfg(test)]
+async fn run_cli_from<I, T>(args: I) -> Result<(), StutterError>
+where
+    I: IntoIterator<Item = T>,
+    T: Into<std::ffi::OsString> + Clone,
+{
+    run_parsed_cli(cli::parse_app_command_from(args)).await
+}
+
+async fn run_parsed_cli(command: anyhow::Result<commands::AppCommand>) -> Result<(), StutterError> {
+    let command = match command {
+        Ok(command) => command,
+        Err(err) if cli::is_successful_clap_display_error(&err) => {
+            cli::print_clap_display_error(err)?;
+            return Ok(());
+        }
+        Err(err) => return Err(StutterError::Command(err)),
+    };
+
     commands::dispatch(command).await
+}
+
+#[cfg(test)]
+mod cli_runner_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn clap_help_requests_are_successful_cli_exits() {
+        let cases = [
+            ["stutter", "--help"].as_slice(),
+            ["stutter", "daemon", "--help"].as_slice(),
+            ["stutter", "daemon", "status", "--help"].as_slice(),
+            ["stutter", "rules", "check", "--help"].as_slice(),
+            ["stutter", "profile-template", "--help"].as_slice(),
+        ];
+
+        for args in cases {
+            run_cli_from(args).await.unwrap_or_else(|err| {
+                panic!("help request was converted into an error: {args:?}: {err}")
+            });
+        }
+    }
+
+    #[tokio::test]
+    async fn real_parse_errors_still_use_command_error_path() {
+        let err = run_cli_from(["stutter", "rules", "check"])
+            .await
+            .expect_err("missing required args should remain an error");
+
+        assert!(matches!(err, StutterError::Command(_)));
+    }
 }
 
 #[cfg(test)]

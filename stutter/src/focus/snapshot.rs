@@ -1,4 +1,14 @@
-use super::{groups::*, *};
+use std::{
+    collections::BTreeMap,
+    fs,
+    path::{Path, PathBuf},
+};
+
+use super::{
+    classify::{Classification, ProcessIdentity, classify_process},
+    groups::{FocusGroup, build_focus_groups},
+};
+use crate::foreground::ForegroundWindowSnapshot;
 
 #[derive(Debug, Clone)]
 pub struct FocusSnapshot {
@@ -32,7 +42,7 @@ pub struct FocusProcess {
 #[derive(Debug, Clone, Default)]
 pub struct FocusCache {
     previous: BTreeMap<u32, FocusCounters>,
-    proc_cache: crate::process_tree::ProcessCache,
+    pub(super) proc_cache: crate::process_tree::ProcessCache,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -52,35 +62,11 @@ impl FocusCache {
     }
 }
 
-pub fn focus_snapshot_at(
-    proc_root: &Path,
-    cache: &mut FocusCache,
-    elapsed_ms: u64,
-    foreground: Option<&ForegroundWindowSnapshot>,
-) -> FocusSnapshot {
-    let budget = crate::process_tree::ScanBudget::default_proc_scan();
-    let mut budget_report = crate::process_tree::ScanBudgetReport::default();
-    let processes = crate::process_tree::scan_processes_at(
-        proc_root,
-        &mut cache.proc_cache,
-        &budget,
-        &mut budget_report,
-    );
-
-    build_focus_snapshot_from_processes(
-        proc_root,
-        cache,
-        elapsed_ms,
-        processes,
-        foreground.cloned(),
-    )
-}
-
 pub fn build_focus_snapshot_from_processes(
     proc_root: &Path,
     cache: &mut FocusCache,
     elapsed_ms: u64,
-    processes: BTreeMap<u32, crate::process_tree::ProcInfo>,
+    processes: crate::process::model::ProcessMap,
     foreground: Option<ForegroundWindowSnapshot>,
 ) -> FocusSnapshot {
     let mut children_by_parent: BTreeMap<u32, Vec<u32>> = BTreeMap::new();
@@ -107,12 +93,12 @@ pub fn build_focus_snapshot_from_processes(
         let cgroup_path = non_empty_str(&proc_info.cgroup_path);
         let is_foreground_window_process = foreground
             .as_ref()
-            .and_then(|fg| fg.pid)
+            .and_then(|fg| fg.decision.target.as_ref().and_then(|t| t.pid))
             .is_some_and(|pid| pid == proc_info.pid);
 
         let classification = classify_process(&ProcessIdentity {
-            pid: proc_info.pid,
-            ppid: proc_info.ppid,
+            pid: proc_info.pid.into(),
+            ppid: proc_info.ppid.into(),
             comm: &proc_info.comm,
             cmdline: &proc_info.cmdline,
             exe_path,

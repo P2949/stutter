@@ -1,11 +1,12 @@
 name = "old_schema_warning"
-schema_version = 21
+schema_version = 23
 source = "synthetic-contract"
 quality_expectation = "Medium"
 description = "Synthetic old-schema fixture that should warn without being rejected."
 
 [expected]
 primary_cause = "Unknown"
+expected_behavior = "must_diagnose"
 quality_reasons_contain = ["older than current"]
 accepted_confidence = []
 data_quality = "Medium"
@@ -18,6 +19,11 @@ gpu_samples = 0
 frames = 0
 block_io_events = 0
 foreground_events = 0
+kms_flip_events = 0
+drm_fence_events = 0
+wayland_presentation_events = 0
+dmabuf_events = 0
+gpu_engine_samples = 0
 
 [expected.evidence]
 contains = []

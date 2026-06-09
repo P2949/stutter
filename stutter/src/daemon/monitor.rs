@@ -10,7 +10,10 @@ use crate::{
 #[derive(Clone)]
 pub struct MonitorSubsystemConfig {
     pub monitor_config: MonitorConfig,
+    // Hwmon readers may be shared with legacy monitor setup; sampling is serialized by the reader
+    // mutex and kept outside daemon state ownership.
     pub shared_hwmon: Option<Arc<Mutex<HwmonReader>>>,
+    // Monitor events cross the daemon/session boundary through a bounded channel.
     pub event_tx: Option<mpsc::Sender<MonitorEvent>>,
 }
 
@@ -41,8 +44,8 @@ impl MonitorSubsystem {
     }
 
     pub async fn shutdown(mut self) -> anyhow::Result<MonitorShutdownSummary> {
-        let otel_exporter_existed = self.session.runtime.outputs.otel_exporter.is_some();
-        let prometheus_task_existed = self.session.runtime.outputs.prometheus_task.is_some();
+        let otel_exporter_existed = self.session.handles.exporters.otel_exporter.is_some();
+        let prometheus_task_existed = self.session.handles.exporters.prometheus_task.is_some();
 
         self.flush().await?;
 

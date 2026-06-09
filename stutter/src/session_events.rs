@@ -1,19 +1,18 @@
-use std::collections::BTreeMap;
-
 use stutter_common::SchedulerEvent;
 
 use crate::{
     alert::AlertPayload,
     diagnosis::LiveDiagnosisEntry,
-    ebpf_loader::DropCountersSnapshot,
     focus::FocusGroupKind,
-    process_tree::TaskInfo,
+    process_tree::TaskMap,
     recorder::{
-        BlockIoRecord, CpuFreqRecord, FocusEvent, ForegroundEvent, FrameEvent, GpuSample,
-        IntervalRecord, IrqEventRecord, MigrationEventRecord, SpikeEvent,
+        BlockIoRecord, CpuFreqRecord, DmaBufEventRecord, DrmFenceEventRecord, FocusEvent,
+        ForegroundEvent, FrameEvent, GpuEngineSample, GpuSample, IrqEventRecord,
+        KmsFlipEventRecord, MigrationEventRecord, SpikeEvent, WaylandPresentationEventRecord,
     },
     scx::ScxEvent,
 };
+pub use crate::{ebpf_loader::DropCountersSnapshot, recorder::IntervalRecord};
 
 pub type DaemonEvent = MonitorEvent;
 
@@ -21,7 +20,7 @@ pub type DaemonEvent = MonitorEvent;
 pub enum MonitorEvent {
     TargetSnapshot {
         elapsed_ms: u64,
-        active_targets: BTreeMap<u32, TaskInfo>,
+        active_targets: TaskMap,
         removed_targets: Vec<u32>,
     },
     Interval {
@@ -46,6 +45,9 @@ pub enum MonitorEvent {
     GpuSample {
         sample: Box<GpuSample>,
     },
+    GpuEngineSample {
+        sample: Box<GpuEngineSample>,
+    },
     IrqEvent {
         event: Box<IrqEventRecord>,
     },
@@ -63,6 +65,18 @@ pub enum MonitorEvent {
     },
     ScxEvent {
         event: Box<ScxEvent>,
+    },
+    KmsFlipEvent {
+        event: Box<KmsFlipEventRecord>,
+    },
+    DrmFenceEvent {
+        event: Box<DrmFenceEventRecord>,
+    },
+    WaylandPresentationEvent {
+        event: Box<WaylandPresentationEventRecord>,
+    },
+    DmaBufEvent {
+        event: Box<DmaBufEventRecord>,
     },
     Exec {
         elapsed_ms: u64,
@@ -122,10 +136,15 @@ impl MonitorEvent {
             | Self::Spike { .. }
             | Self::Frame { .. }
             | Self::GpuSample { .. }
+            | Self::GpuEngineSample { .. }
             | Self::IrqEvent { .. }
             | Self::IoEvent { .. }
             | Self::MigrationEvent { .. }
             | Self::CpuFreqSample { .. }
+            | Self::KmsFlipEvent { .. }
+            | Self::DrmFenceEvent { .. }
+            | Self::WaylandPresentationEvent { .. }
+            | Self::DmaBufEvent { .. }
             | Self::LiveDiagnosis { .. } => MonitorEventDeliveryClass::Droppable,
         }
     }
@@ -139,12 +158,17 @@ impl MonitorEvent {
             Self::Alert { .. } => "alert",
             Self::Frame { .. } => "frame",
             Self::GpuSample { .. } => "gpu_sample",
+            Self::GpuEngineSample { .. } => "gpu_engine_sample",
             Self::IrqEvent { .. } => "irq_event",
             Self::IoEvent { .. } => "io_event",
             Self::MigrationEvent { .. } => "migration_event",
             Self::CpuFreqSample { .. } => "cpu_freq_sample",
             Self::ForegroundEvent { .. } => "foreground_event",
             Self::ScxEvent { .. } => "scx_event",
+            Self::KmsFlipEvent { .. } => "kms_flip_event",
+            Self::DrmFenceEvent { .. } => "drm_fence_event",
+            Self::WaylandPresentationEvent { .. } => "wayland_presentation_event",
+            Self::DmaBufEvent { .. } => "dmabuf_event",
             Self::LiveDiagnosis { .. } => "live_diagnosis",
             Self::Exec { .. } => "exec",
             Self::DataQualityWarning { .. } => "data_quality_warning",
@@ -163,12 +187,17 @@ impl MonitorEvent {
             Self::Alert { payload } => Some(payload.elapsed_ms),
             Self::Frame { event } => Some(event.elapsed_ms),
             Self::GpuSample { sample } => Some(sample.elapsed_ms),
+            Self::GpuEngineSample { sample } => Some(sample.elapsed_ms),
             Self::IrqEvent { event } => event.elapsed_ms,
             Self::IoEvent { event } => Some(event.elapsed_ms),
             Self::MigrationEvent { event } => Some(event.elapsed_ms),
             Self::CpuFreqSample { event } => Some(event.elapsed_ms),
             Self::ForegroundEvent { event } => Some(event.elapsed_ms),
             Self::ScxEvent { event } => Some(event.elapsed_ms),
+            Self::KmsFlipEvent { event } => Some(event.elapsed_ms),
+            Self::DrmFenceEvent { event } => Some(event.elapsed_ms),
+            Self::WaylandPresentationEvent { event } => Some(event.elapsed_ms),
+            Self::DmaBufEvent { event } => Some(event.elapsed_ms),
             Self::LiveDiagnosis { entry } => Some(entry.elapsed_ms),
             Self::Exec { elapsed_ms, .. } => Some(*elapsed_ms),
             Self::DataQualityWarning { .. } => None,
@@ -307,6 +336,7 @@ mod tests {
                 latency_ns: 10,
                 comm: [0; 16],
                 switch_prev_pid: 0,
+                _pad0: 0,
                 switch_prev_state: 0,
             }),
             comm: "test".to_owned(),

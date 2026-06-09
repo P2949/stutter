@@ -1,5 +1,11 @@
-use std::{collections::BTreeSet, path::Path, time::Duration};
+use std::time::Duration;
+#[cfg(test)]
+use std::{collections::BTreeSet, path::Path};
 
+#[cfg(test)]
+use stutter_core::ids::{Pid, Tid};
+
+#[cfg(test)]
 use crate::{
     actions::{ActionState, TuningAction},
     process_tree::{TargetSnapshot, TargetSnapshotInput, TaskClass, TaskInfo, target_snapshot},
@@ -55,16 +61,18 @@ impl WashoutWindowConfig {
     }
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WashoutTargetSnapshot {
     pub target_present: bool,
-    pub root_pid: u32,
+    pub root_pid: Pid,
     pub active_target_count: usize,
     pub identities: BTreeSet<WashoutTaskIdentity>,
 }
 
+#[cfg(test)]
 impl WashoutTargetSnapshot {
-    pub fn absent(root_pid: u32) -> Self {
+    pub fn absent(root_pid: Pid) -> Self {
         Self {
             target_present: false,
             root_pid,
@@ -73,7 +81,7 @@ impl WashoutTargetSnapshot {
         }
     }
 
-    pub fn from_target_snapshot(root_pid: u32, snapshot: &TargetSnapshot) -> Self {
+    pub fn from_target_snapshot(root_pid: Pid, snapshot: &TargetSnapshot) -> Self {
         let identities = snapshot
             .tasks
             .values()
@@ -81,23 +89,24 @@ impl WashoutTargetSnapshot {
             .collect::<BTreeSet<_>>();
 
         Self {
-            target_present: snapshot.process_roots.contains(&root_pid) && !identities.is_empty(),
+            target_present: snapshot.process_roots.contains(&root_pid.as_u32())
+                && !identities.is_empty(),
             root_pid,
             active_target_count: identities.len(),
             identities,
         }
     }
 
-    pub fn capture(root_pid: u32) -> Self {
+    pub fn capture(root_pid: Pid) -> Self {
         Self::capture_at(Path::new("/proc"), root_pid)
     }
 
-    pub fn capture_at(proc_root: &Path, root_pid: u32) -> Self {
-        if root_pid == 0 {
+    pub fn capture_at(proc_root: &Path, root_pid: Pid) -> Self {
+        if root_pid.as_u32() == 0 {
             return Self::absent(root_pid);
         }
 
-        let tree_pids = [root_pid];
+        let tree_pids = [root_pid.as_u32()];
         let snapshot = target_snapshot(
             TargetSnapshotInput::default()
                 .proc_root(proc_root)
@@ -107,10 +116,11 @@ impl WashoutTargetSnapshot {
     }
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct WashoutTaskIdentity {
-    pub tid: u32,
-    pub process_pid: u32,
+    pub tid: Tid,
+    pub process_pid: Pid,
     pub comm: String,
     pub process_comm: String,
     pub process_starttime_ticks: Option<u64>,
@@ -120,13 +130,14 @@ pub struct WashoutTaskIdentity {
     pub class: TaskClass,
 }
 
+#[cfg(test)]
 impl WashoutTaskIdentity {
     pub fn from_task_info(task: &TaskInfo) -> Self {
         Self {
-            tid: task.tid,
-            process_pid: task.process_pid,
+            tid: task.task_id(),
+            process_pid: task.process_id(),
             comm: task.comm.clone(),
-            process_comm: task.process_comm.to_string(),
+            process_comm: task.process_comm.clone(),
             process_starttime_ticks: task.process_starttime_ticks,
             task_starttime_ticks: task.task_starttime_ticks,
             exe_dev: task.exe_dev,
@@ -136,6 +147,7 @@ impl WashoutTaskIdentity {
     }
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug)]
 pub enum WashoutWindowStatus {
     WashingOut {
@@ -153,6 +165,7 @@ pub enum WashoutWindowStatus {
     },
 }
 
+#[cfg(test)]
 impl WashoutWindowStatus {
     pub fn is_complete(&self) -> bool {
         matches!(self, Self::Complete { .. })
@@ -170,6 +183,7 @@ impl WashoutWindowStatus {
     }
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug)]
 pub struct WashoutWindowState {
     config: WashoutWindowConfig,
@@ -177,6 +191,7 @@ pub struct WashoutWindowState {
     initial_target: WashoutTargetSnapshot,
 }
 
+#[cfg(test)]
 impl WashoutWindowState {
     pub fn new(
         config: WashoutWindowConfig,
@@ -267,13 +282,15 @@ impl WashoutWindowState {
     }
 }
 
+#[cfg(test)]
 pub fn unix_nanos_now() -> u128 {
     crate::audit::unix_nanos_now()
 }
 
+#[cfg(test)]
 pub async fn run_washout_for_action<A: TuningAction>(
     action: &A,
-    tree_pid: u32,
+    tree_pid: Pid,
     config: WashoutWindowConfig,
 ) -> anyhow::Result<()> {
     let started_unix_nanos = unix_nanos_now();
@@ -303,18 +320,16 @@ pub async fn run_washout_for_action<A: TuningAction>(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use super::*;
     use crate::{actions::ActionWarning, process_tree::TaskInfo};
 
     fn task(tid: u32, comm: &str) -> TaskInfo {
         TaskInfo {
-            tid,
-            process_pid: 42,
-            process_ppid: 1,
+            tid: tid.into(),
+            process_pid: 42.into(),
+            process_ppid: 1.into(),
             comm: comm.to_owned(),
-            process_comm: Arc::from("Game.exe"),
+            process_comm: "Game.exe".to_owned(),
             process_starttime_ticks: Some(100),
             task_starttime_ticks: Some(200 + tid as u64),
             exe_dev: Some(1),
@@ -333,7 +348,7 @@ mod tests {
 
         WashoutTargetSnapshot {
             target_present: !identities.is_empty(),
-            root_pid: 42,
+            root_pid: 42.into(),
             active_target_count: identities.len(),
             identities,
         }
@@ -355,6 +370,14 @@ mod tests {
             1_000_000_000,
             target_snapshot_with_tasks(vec![task(7, "render")]),
         )
+    }
+
+    #[test]
+    fn washout_state_exposes_runner_start_timestamp() {
+        let state = state();
+
+        assert_eq!(state.started_unix_nanos(), 1_000_000_000);
+        assert_eq!(state.config().washout_ms(), 10_000);
     }
 
     #[test]
@@ -429,6 +452,8 @@ mod tests {
             Ok(verify_state(true, 31)),
         );
 
+        assert!(status.is_complete());
+
         match status {
             WashoutWindowStatus::Complete {
                 elapsed_ms,
@@ -445,11 +470,17 @@ mod tests {
     fn washout_fails_when_target_disappears() {
         let status = state().observe_verify_result(
             2_000_000_000,
-            WashoutTargetSnapshot::absent(42),
+            WashoutTargetSnapshot::absent(42.into()),
             Ok(verify_state(true, 31)),
         );
 
         assert!(status.is_failed());
+        match &status {
+            WashoutWindowStatus::Failed { elapsed_ms, .. } => {
+                assert_eq!(*elapsed_ms, 1_000);
+            }
+            other => panic!("expected failed washout, got {other:?}"),
+        }
         assert!(
             status
                 .reasons()

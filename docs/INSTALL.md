@@ -9,18 +9,28 @@
 - `bpf-linker`
 - privileges when loading eBPF programs for `monitor`, `record`, and live tracing paths
 
+For tracepoint-format compatibility details and bug-report diagnostics, see
+[KERNEL_COMPATIBILITY.md](KERNEL_COMPATIBILITY.md).
+
 ```bash
-rustup toolchain install nightly --component rust-src
+rustup toolchain install nightly-2026-06-06 --component rust-src
 cargo install bpf-linker
 ```
 
 ## Build
 
 ```bash
-RUSTUP_TOOLCHAIN=nightly cargo build -p stutter
-RUSTUP_TOOLCHAIN=nightly cargo build --release -p stutter
+RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo build -p stutter
+RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo build --release -p stutter
 ```
 
+Note: eBPF toolchain output is quieted by default to reduce build noise. To see
+the full eBPF build and linker logs, set `STUTTER_EBPF_VERBOSE=1` in your
+environment when building:
+
+```bash
+STUTTER_EBPF_VERBOSE=1 RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo build -p stutter
+```
 ## Install Local
 
 ```bash
@@ -82,6 +92,19 @@ socket `/run/stutter/agent.sock`. The standalone `stutter agent` command also
 defaults to a Unix socket under `XDG_RUNTIME_DIR` when available. Use
 `stutter agent --bind 127.0.0.1:9899` only when an HTTP TCP listener is needed
 for compatibility with an existing local client.
+
+For apply-medium-risk autotune, run the privileged mutator separately:
+
+```bash
+stutter privileged-worker --socket /run/stutter/privileged-worker.sock
+```
+
+The socket is created with mode `0600`. Point the daemon at a non-default path
+with `[autotune].privileged_worker_socket = "/run/stutter/privileged-worker.sock"`.
+Socket startup and shutdown poll timing can be tuned with
+`[autotune].privileged_worker_socket_ready_timeout_ms`,
+`[autotune].privileged_worker_socket_ready_retry_ms`, and
+`[autotune].privileged_worker_shutdown_poll_ms`.
 
 Agent auth supports a legacy full-access token through `STUTTER_AGENT_TOKEN`
 or `--bearer-token-file`, plus split tokens for safer clients. The packaged
@@ -288,3 +311,31 @@ scripts/install-local.sh
 
 A proper ebuild should be revisited once the runtime interface, eBPF object
 layout, release process, and service model are stable.
+
+See [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) for the distinction between
+source/runtime readiness, service-unit/local-install readiness, and production
+distro packaging readiness.
+
+## GNOME/KDE Wayland foreground attribution
+
+`foreground_source = "gnome"` and `foreground_source = "kde"` are supported only through trusted helper JSON providers:
+
+- `stutter-gnome-foreground --json`
+- `stutter-kde-foreground --json`
+
+The helpers must output a single JSON object with the foreground identity fields that are available:
+
+```json
+{
+  "pid": 1234,
+  "app_id": "org.example.App",
+  "class": "Example",
+  "title": "optional private title",
+  "window_id": "optional compositor window id",
+  "workspace": "optional workspace",
+  "confidence": 0.95,
+  "reason": "active foreground window from compositor helper"
+}
+```
+
+Window titles are still redacted unless foreground title capture is explicitly enabled. `stutter` intentionally does not use GNOME Shell `Eval`, KWin script injection, or a generic Wayland foreground scrape.

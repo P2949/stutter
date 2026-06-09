@@ -1,6 +1,32 @@
 # stutter
 
+[![CI](https://github.com/P2949/stutter/actions/workflows/ci.yml/badge.svg?branch=experimental)](https://github.com/P2949/stutter/actions/workflows/ci.yml?query=branch%3Aexperimental)
+
 `stutter` is a Linux scheduler runnable-latency profiler built with Rust + Aya eBPF.
+
+For supervisor review, start with [SUPERVISOR_README.md](SUPERVISOR_README.md).
+The proposed FYP scope is CPU-affinity/process-placement validation for
+Linux/Proton game frame pacing; this root README is the technical
+user/developer manual, not the first pitch. The full repository contains a large
+raw evidence archive, but first review does not require cloning or reading every
+raw artifact.
+
+## Contents
+
+- [Requirements](#requirements)
+- [Build](#build)
+- [Install](#install)
+- [Recommended workflow](#recommended-workflow)
+- [Recording and benchmarking](#record-a-run)
+- [Reports](#generate-a-report)
+- [Tuning and recommendations](#tune-and-recommend-profiles)
+- [Daemon and autotune modes](#daemon-and-autotune-modes)
+- [Doctor / preflight](#doctor--preflight)
+- [Applying and restoring affinity profiles](#apply-and-restore-affinity-profiles)
+- [Interpretation notes](#important-interpretation-notes)
+- [CLI flags](#cli-flags-quick-reference)
+- [Generated JSON files](#generated-json-files-overview)
+- [License](#license)
 
 It measures:
 
@@ -25,7 +51,7 @@ The repository pins its expected Rust toolchain in `rust-toolchain.toml`:
 
 ```toml
 [toolchain]
-channel = "nightly"
+channel = "nightly-2026-06-06"
 components = ["rust-src", "rustfmt", "clippy"]
 ```
 
@@ -39,7 +65,7 @@ cargo install bpf-linker
 `rustup` will use the repository-pinned nightly toolchain when commands are run from this checkout. If a system Rust setup interferes, use an explicit override:
 
 ```bash
-RUSTUP_TOOLCHAIN=nightly cargo build
+RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo build
 ```
 
 ## Build
@@ -112,10 +138,33 @@ foreground_source = "auto"
 foreground_poll_ms = 1000
 foreground_max_stale_ms = 2500
 foreground_include_title = false
+live_diagnosis_cluster_window_ms = 5
+
+[mangohud]
+log_live = true
+tail_idle_sleep_ms = 75
+alignment_poll_ms = 500
+
+[alerts]
+desktop_timeout_ms = 10000
 ```
 
 `foreground_include_title` defaults to `false` because browser tab titles and
 terminal titles can leak private data.
+
+`live_diagnosis_cluster_window_ms` controls how close live diagnosis evidence
+items must be to be grouped into the same candidate window. The default is `5`.
+Increase it when correlated events are slightly farther apart on a noisy system;
+decrease it when separate short spikes are being grouped together.
+
+The same setting is available as an explicit CLI override:
+
+```bash
+stutter monitor --preset diagnosis --pid 1234 --live-diagnosis-cluster-window-ms 10
+```
+
+The value must be greater than zero. Config-file values are overridden by
+presets and explicit CLI flags according to the precedence rules below.
 
 ### Monitor presets
 
@@ -166,6 +215,9 @@ Valid ranges:
 
 * `--ringbuf-size-kb`: `64..=16384`
 * `--wakeup-map-factor`: `1..=64`
+
+The shared capacity constants, BPF map multipliers, memory-budget assumptions,
+and change checklist are documented in [docs/EBPF_CAPACITY.md](docs/EBPF_CAPACITY.md).
 
 These flags are escape hatches. The automatic defaults are usually correct.
 
@@ -255,7 +307,7 @@ Note: depending on `doas`/`sudo` configuration, `$HOME` may refer to root’s ho
 For privileged live tracing, use the build-then-run workflow from the privileged runtime section rather than `doas cargo run`.
 
 ```bash
-RUST_LOG=info RUSTUP_TOOLCHAIN=nightly cargo run -- monitor \
+RUST_LOG=info RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -- monitor \
   --pid "$(pgrep -n sway)" \
   --summary-ms 1000
 ```
@@ -263,7 +315,7 @@ RUST_LOG=info RUSTUP_TOOLCHAIN=nightly cargo run -- monitor \
 Older legacy form still works:
 
 ```bash
-RUST_LOG=info RUSTUP_TOOLCHAIN=nightly cargo run -- \
+RUST_LOG=info RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -- \
   --pid "$(pgrep -n sway)"
 ```
 
@@ -272,7 +324,7 @@ RUST_LOG=info RUSTUP_TOOLCHAIN=nightly cargo run -- \
 Use this for Proton/Wine/game trees:
 
 ```bash
-RUST_LOG=info RUSTUP_TOOLCHAIN=nightly cargo run -- monitor \
+RUST_LOG=info RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -- monitor \
   --tree-pid <root-pid>
 ```
 
@@ -282,7 +334,7 @@ Add `--exclude-tree-pid <pid>` to subtract a process and all of its descendants 
 For launchers where the PID changes between runs, watch for the process name:
 
 ```bash
-RUST_LOG=info RUSTUP_TOOLCHAIN=nightly cargo run -- monitor \
+RUST_LOG=info RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -- monitor \
   --watch-process KingdomCome.exe \
   --persistent \
   --watch-poll-ms 2000 \
@@ -297,7 +349,7 @@ Use `--foreground-window` to record the currently foreground application/window
 as environmental context:
 
 ```bash
-RUST_LOG=info RUSTUP_TOOLCHAIN=nightly cargo run -- monitor \
+RUST_LOG=info RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -- monitor \
   --tree-pid <root-pid> \
   --foreground-window
 ```
@@ -309,7 +361,7 @@ active near scheduler or frame spikes.
 Foreground-aware auto-focus is explicit:
 
 ```bash
-RUST_LOG=info RUSTUP_TOOLCHAIN=nightly cargo run -- monitor \
+RUST_LOG=info RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -- monitor \
   --auto-focus \
   --focus-source hybrid \
   --foreground-source auto
@@ -359,7 +411,7 @@ storage, packaging, and runtime-loading details.
 ## Inspect a tree before tracing
 
 ```bash
-RUSTUP_TOOLCHAIN=nightly cargo run -- inspect-tree \
+RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -- inspect-tree \
   --tree-pid <root-pid>
 ```
 
@@ -405,7 +457,7 @@ Only numeric IRQ IDs can be passed to `--irq`. Non-numeric interrupt rows such a
 For real eBPF recording, prefer the privileged runtime workflow above: build once as your normal user, then run the already-built `target/debug/stutter` binary with `doas`/`sudo`. The `cargo run` examples below are mainly development shorthand and should not be combined with `doas` unless root has the same Rust and `bpf-linker` setup.
 
 ```bash
-RUST_LOG=info RUSTUP_TOOLCHAIN=nightly cargo run -- record \
+RUST_LOG=info RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -- record \
   --tree-pid <root-pid> \
   --duration 300 \
   --run-name kcd-test
@@ -429,7 +481,7 @@ Default output:
 Optional correlation inputs:
 
 ```bash
-RUST_LOG=info RUSTUP_TOOLCHAIN=nightly cargo run -- record \
+RUST_LOG=info RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -- record \
   --tree-pid <root-pid> \
   --irq-latency --irq 137 \
   --hwmon \
@@ -541,14 +593,14 @@ TUI notes:
 ## Generate a report
 
 ```bash
-RUSTUP_TOOLCHAIN=nightly cargo run -- report \
+RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -- report \
   ~/.local/state/stutter/runs/<run-dir>
 ```
 
 Show more rows or tighten spike cluster grouping:
 
 ```bash
-RUSTUP_TOOLCHAIN=nightly cargo run -- report \
+RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -- report \
   --top 25 \
   --cluster-ms 2 \
   ~/.local/state/stutter/runs/<run-dir>
@@ -557,7 +609,7 @@ RUSTUP_TOOLCHAIN=nightly cargo run -- report \
 JSON output:
 
 ```bash
-RUSTUP_TOOLCHAIN=nightly cargo run -- report \
+RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -- report \
   --json \
   ~/.local/state/stutter/runs/<run-dir>
 ```
@@ -589,7 +641,7 @@ Diagnosis output uses candidate wording intentionally. A `High` confidence diagn
 Generate a self-contained HTML report:
 
 ```bash
-RUSTUP_TOOLCHAIN=nightly cargo run -- report \
+RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -- report \
   --html report.html \
   ~/.local/state/stutter/runs/<run-dir>
 ```
@@ -671,6 +723,10 @@ Remote autotune uses the same mode labels, but remote apply support is bounded b
 
 `suggest` mode does not apply candidate changes. Candidate suggestion text always includes a dry-run command, `required_mode`, `required_safety_class`, and `rollback=stutter restore`. A manual apply command is shown only when the central CLI daemon policy would allow that candidate; high-risk candidates do not get direct apply commands. CPU-affinity-profile suggestions preserve the existing `stutter apply-profile ...` command. Generic candidate suggestions write stable plan files under `$HOME/.local/state/stutter/autotune/candidate_plans/<action_kind>-<candidate_name>.json` and use `stutter autotune apply-candidate --candidate-json <file> --dry-run`; reversible process-local plans may also show `stutter autotune apply-candidate --candidate-json <file>` when policy allows manual apply.
 
+CPU power suggestions also require power and thermal headroom. They are suppressed while a battery is discharging unless `[autotune].allow_cpu_power_on_battery = true` is explicitly configured; battery apply-time guards remain in force for actual governor/EPP writes.
+
+VM knob suggestions are policy-table driven and remain high-risk/manual-only. Current suggestions are limited to `vm.swappiness` for swap activity and dirty writeback ratio knobs when direct writeback evidence is present; ratio suggestions are skipped when the corresponding bytes knob is active.
+
 Daemon status and watch commands are intended to answer "what is it doing?"
 without reading logs:
 
@@ -704,12 +760,12 @@ Run `stutter doctor` before recording to check whether tracing is likely to work
 Useful optional checks:
 
 ```bash
-RUSTUP_TOOLCHAIN=nightly cargo run -- doctor
-RUSTUP_TOOLCHAIN=nightly cargo run -- doctor --json
-RUSTUP_TOOLCHAIN=nightly cargo run -- doctor --hwmon --hwmon-drm-card card1
-RUSTUP_TOOLCHAIN=nightly cargo run -- doctor --block-io
-RUSTUP_TOOLCHAIN=nightly cargo run -- doctor --irq-latency --irq 137
-RUSTUP_TOOLCHAIN=nightly cargo run -- doctor --faults
+RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -- doctor
+RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -- doctor --json
+RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -- doctor --hwmon --hwmon-drm-card card1
+RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -- doctor --block-io
+RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -- doctor --irq-latency --irq 137
+RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -- doctor --faults
 ```
 
 Use `--hwmon`, `--block-io`, `--irq-latency`, `--faults`, and `--mangohud-log <PATH>` to inspect the optional probes you plan to use.
@@ -719,7 +775,7 @@ Use `--hwmon`, `--block-io`, `--irq-latency`, `--faults`, and `--mangohud-log <P
 Apply a TOML profile to the current process tree:
 
 ```bash
-RUSTUP_TOOLCHAIN=nightly cargo run -- apply-profile \
+RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -- apply-profile \
   --tree-pid <root-pid> \
   --profile profile.toml
 ```
@@ -727,7 +783,7 @@ RUSTUP_TOOLCHAIN=nightly cargo run -- apply-profile \
 Preview the planned changes without changing live affinity, nice, ionice, audit state, or restore state:
 
 ```bash
-RUSTUP_TOOLCHAIN=nightly cargo run -- apply-profile \
+RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -- apply-profile \
   --dry-run \
   --tree-pid <root-pid> \
   --profile profile.toml
@@ -738,7 +794,7 @@ RUSTUP_TOOLCHAIN=nightly cargo run -- apply-profile \
 By default real application is one-shot. Use `--watch` to keep applying the profile to new threads:
 
 ```bash
-RUSTUP_TOOLCHAIN=nightly cargo run -- apply-profile \
+RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -- apply-profile \
   --tree-pid <root-pid> \
   --profile profile.toml \
   --watch
@@ -747,13 +803,13 @@ RUSTUP_TOOLCHAIN=nightly cargo run -- apply-profile \
 Watch mode restores the original masks on Ctrl-C by default. Add `--keep-applied` to leave the profile active and restore later:
 
 ```bash
-RUSTUP_TOOLCHAIN=nightly cargo run -- restore
+RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -- restore
 ```
 
 Audit a pending restore file without applying it:
 
 ```bash
-RUSTUP_TOOLCHAIN=nightly cargo run -- restore --dry-run
+RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -- restore --dry-run
 ```
 
 Inspect recent action audit events:
@@ -977,4 +1033,4 @@ These checks reduce collisions compared to relying on `starttime` alone, but in 
 
 The userspace crates are dual-licensed MIT OR Apache-2.0.
 
-The eBPF code is dual-licensed MIT OR GPL-2.0.
+The eBPF code is dual-licensed MIT OR GPL-2.0-only.

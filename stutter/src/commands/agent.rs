@@ -15,7 +15,7 @@ pub async fn run_agent_command(input: AgentCommandInput) -> anyhow::Result<()> {
     let health_thresholds = config_file::daemon_health_thresholds_from_user_config(
         user_config.as_ref(),
         None,
-        crate::daemon::ActionSource::RemoteAgent,
+        crate::daemon::policy::ActionSource::RemoteAgent,
     )?;
 
     agent::run_agent(agent::AgentConfig {
@@ -29,6 +29,8 @@ pub async fn run_agent_command(input: AgentCommandInput) -> anyhow::Result<()> {
         max_duration_seconds: input.max_duration_seconds,
         max_targets: input.max_targets,
         max_concurrent_recordings: input.max_concurrent_recordings,
+        max_unix_connections: input.max_unix_connections,
+        unix_connection_timeout: input.unix_connection_timeout,
         autotune_limits,
         health_thresholds,
         rollback_on_crash_recovery: true,

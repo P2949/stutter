@@ -323,7 +323,7 @@ fn descriptor(
     rollback: RollbackRequirement,
 ) -> ActionDescriptor {
     ActionDescriptor {
-        action_id: ActionId(format!("explain:{action_kind}")),
+        action_id: ActionId::new(format!("explain:{action_kind}")),
         action_kind: action_kind.to_owned(),
         safety_class,
         effect_scope,
@@ -369,9 +369,9 @@ pub enum PolicyDecisionKind {
     Rejected { rejection: PolicyRejection },
 }
 
-#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PolicyRuleEvaluation {
-    pub rule: &'static str,
+    pub rule: String,
     pub passed: bool,
     pub reason: String,
 }
@@ -423,8 +423,10 @@ mod tests {
         let mut state = DaemonState {
             mode: DaemonMode::ApplyLowRisk,
             cooldown_until_unix_nanos: Some(crate::audit::unix_nanos_now() + 3_600_000_000_000),
-            active_rollback: Some(crate::daemon::DaemonRollbackState {
-                action_id: "action-1".to_owned(),
+            active_rollback: Some(crate::daemon::state::DaemonRollbackState {
+                action_id: crate::actions::ActionId::new("action-1"),
+                mode: DaemonMode::ApplyLowRisk,
+                safety_class: crate::actions::SafetyClass::ReversibleLowRisk,
                 rollback_available: true,
                 token: None,
                 manual_restore_command: Some("stutter daemon emergency-restore".to_owned()),
@@ -452,6 +454,7 @@ mod tests {
             ionice_available: true,
             irq_affinity_available: true,
             gpu_sysfs_available: true,
+            privileged_worker_socket_reachable: Some(true),
         };
         let context = policy_context_from_daemon_status(&state, &health, &capabilities);
         let policy = DaemonPolicy::apply_low_risk(ActionSource::Test);
@@ -498,6 +501,7 @@ mod tests {
             ionice_available: true,
             irq_affinity_available: true,
             gpu_sysfs_available: true,
+            privileged_worker_socket_reachable: Some(true),
         };
 
         let active_context =
@@ -577,9 +581,10 @@ mod tests {
                 decision: "noop".to_owned(),
                 reason: "insufficient data".to_owned(),
                 unix_nanos: Some(1),
-                score_total: None,
+                diagnostic_current_raw_score_total: None,
                 candidate_count: None,
                 top_denied_reason: None,
+                planner: None,
                 situation: None,
                 focus_kind: None,
             }),
@@ -632,12 +637,12 @@ mod tests {
             verdict: DaemonPolicyVerdict::Allow,
             decision: PolicyDecisionKind::Allowed,
             intent: PolicyIntent::Apply,
-            action_id: ActionId("test-action".to_owned()),
+            action_id: ActionId::new("test-action".to_owned()),
             action_kind: "test".to_owned(),
             mode: DaemonMode::ApplyLowRisk,
             source: ActionSource::Test,
             evaluated_rules: vec![PolicyRuleEvaluation {
-                rule: "intent_allowed",
+                rule: "intent_allowed".to_owned(),
                 passed: true,
                 reason: "apply intent is allowed in daemon mode apply-low-risk".to_owned(),
             }],

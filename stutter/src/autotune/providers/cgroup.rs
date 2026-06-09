@@ -1,21 +1,22 @@
 use std::path::{Path, PathBuf};
 
 use crate::{
-    actions::{
-        TaskIdentity,
-        cgroup::{CgroupPlacementAction, CgroupPlacementTarget},
-    },
+    actions::cgroup::{CgroupPlacementAction, CgroupPlacementTarget},
     autotune::{
-        candidate::{CandidateAction, CandidateEvidence, CgroupPlacementActionPlan},
         objective::ObjectiveKind,
-        observation::{ActiveTaskSnapshot, is_protected_task_class},
+        planning::{
+            candidate::{CandidateAction, CandidateEvidence},
+            executable_plan::CgroupPlacementActionPlan,
+        },
         protection::mutation_allowed_for_pid,
         providers::{CandidateProposal, CandidateProvider, CandidateProviderInput},
         situation::SituationKind,
-        target_selection::{TaskTargetSelector, mutable_task_snapshots_for_observation},
+        target_selection::{
+            TargetSelectionMode, TaskTargetSelector,
+            mutable_cgroup_targets_for_observation_with_mode,
+        },
     },
     daemon::CgroupTargetRole,
-    process_tree::TaskClass,
 };
 
 #[derive(Default)]
@@ -42,7 +43,16 @@ impl CandidateProvider for CgroupProvider {
             return Vec::new();
         };
         let (role, target_cgroup, objective, rank_hint) = plan;
-        let targets = cgroup_targets_for_observation(input.observation, root_pid, role);
+        let target_selection_mode = TargetSelectionMode::from_daemon_mode(input.daemon_policy.mode);
+        let target_selection = cgroup_targets_for_observation(
+            input.observation,
+            root_pid,
+            role,
+            target_selection_mode,
+        );
+        let target_selection_denies = target_selection.deny_reasons();
+        let used_fallback_root = target_selection.used_fallback_root;
+        let targets = target_selection.items;
         if targets.is_empty() {
             return Vec::new();
         }
@@ -62,19 +72,29 @@ impl CandidateProvider for CgroupProvider {
                 ),
                 action,
                 target_root_pid: Some(root_pid),
-                evidence: vec![
-                    CandidateEvidence::new(
-                        "situation",
-                        format!("{:?}", input.observation.primary_situation),
-                        input.observation.situation.confidence,
-                    ),
-                    CandidateEvidence::new(
-                        "target_cgroup",
-                        target_cgroup.display().to_string(),
-                        1.0,
-                    ),
-                    CandidateEvidence::new("cgroup_role", role, 0.8),
-                ],
+                evidence: {
+                    let mut evidence = vec![
+                        CandidateEvidence::new(
+                            "situation",
+                            format!("{:?}", input.observation.primary_situation),
+                            input.observation.situation.confidence,
+                        ),
+                        CandidateEvidence::new(
+                            "target_cgroup",
+                            target_cgroup.display().to_string(),
+                            1.0,
+                        ),
+                        CandidateEvidence::new("cgroup_role", role, 0.8),
+                    ];
+                    if used_fallback_root {
+                        evidence.push(CandidateEvidence::new(
+                            "target_selection_fallback_root",
+                            format!("root_pid={root_pid} active_task_snapshots=missing"),
+                            0.0,
+                        ));
+                    }
+                    evidence
+                },
                 objective,
             },
         };
@@ -83,7 +103,7 @@ impl CandidateProvider for CgroupProvider {
             candidate,
             provider: self.family(),
             confidence: input.observation.situation.confidence,
-            deny_reasons: Vec::new(),
+            deny_reasons: target_selection_denies,
             objective,
             rank_hint,
         }]
@@ -140,109 +160,15 @@ fn cgroup_plan_for_situation<'a>(
 
 fn cgroup_targets_for_observation(
     observation: &crate::autotune::observation::AutotuneObservation,
-    root_pid: u32,
+    _root_pid: u32,
     role: &str,
-) -> Vec<CgroupPlacementTarget> {
+    mode: TargetSelectionMode,
+) -> crate::autotune::target_selection::MutableTaskSelection<CgroupPlacementTarget> {
     let selector = match role {
         "compile" => TaskTargetSelector::CompilerAndLinker,
         "game" => TaskTargetSelector::GameRenderAndWorkers,
-        "virtual_machine" => TaskTargetSelector::BackgroundHelpers,
+        "virtual_machine" => TaskTargetSelector::VirtualMachineAndHelpers,
         _ => TaskTargetSelector::FullTargetTree,
     };
-    let mut selected = mutable_task_snapshots_for_observation(observation, selector);
-    if selected.is_empty() {
-        selected.push(fallback_task_snapshot(observation, root_pid, role));
-    }
-
-    selected
-        .into_iter()
-        .filter(|task| cgroup_candidate_allows_task(task, role))
-        .map(|task| CgroupPlacementTarget {
-            identity: TaskIdentity {
-                tid: task.tid,
-                process_pid: Some(task.process_pid),
-                comm: Some(task.comm),
-                starttime_ticks: task.task_starttime_ticks.or(task.process_starttime_ticks),
-            },
-            class: task.class,
-        })
-        .collect()
-}
-
-fn fallback_task_snapshot(
-    observation: &crate::autotune::observation::AutotuneObservation,
-    root_pid: u32,
-    role: &str,
-) -> ActiveTaskSnapshot {
-    ActiveTaskSnapshot {
-        tid: root_pid,
-        process_pid: root_pid,
-        comm: observation
-            .workload_identity
-            .as_ref()
-            .map(|identity| format!("pid-{}", identity.root_pid))
-            .unwrap_or_else(|| format!("pid-{root_pid}")),
-        class: fallback_class_for_role(role),
-        process_starttime_ticks: observation
-            .workload_identity
-            .as_ref()
-            .and_then(|identity| identity.process_starttime_ticks),
-        task_starttime_ticks: observation
-            .workload_identity
-            .as_ref()
-            .and_then(|identity| identity.process_starttime_ticks),
-        cgroup_path: observation
-            .workload_identity
-            .as_ref()
-            .and_then(|identity| identity.cgroup_path.clone()),
-    }
-}
-
-fn fallback_class_for_role(role: &str) -> TaskClass {
-    match role {
-        "compile" => TaskClass::Compiler,
-        "game" => TaskClass::Game,
-        "virtual_machine" => TaskClass::VirtualMachine,
-        _ => TaskClass::Helper,
-    }
-}
-
-fn cgroup_candidate_allows_task(task: &ActiveTaskSnapshot, role: &str) -> bool {
-    if task.tid == 0 || is_protected_task_class(task.class) {
-        return false;
-    }
-
-    match role {
-        "compile" => matches!(
-            task.class,
-            TaskClass::BuildJob
-                | TaskClass::Compiler
-                | TaskClass::Linker
-                | TaskClass::PackageManager
-                | TaskClass::Indexer
-                | TaskClass::Helper
-        ),
-        "game" => matches!(
-            task.class,
-            TaskClass::Game
-                | TaskClass::GameHelper
-                | TaskClass::GameRenderThread
-                | TaskClass::GameWorkerThread
-                | TaskClass::WineServer
-                | TaskClass::SteamRuntime
-                | TaskClass::Helper
-        ),
-        "virtual_machine" => matches!(task.class, TaskClass::VirtualMachine | TaskClass::Helper),
-        _ => !matches!(
-            task.class,
-            TaskClass::AudioRealtime
-                | TaskClass::Input
-                | TaskClass::KernelThread
-                | TaskClass::IrqThread
-                | TaskClass::Service
-                | TaskClass::NetworkDaemon
-                | TaskClass::StorageDaemon
-                | TaskClass::Unknown
-        ),
-    }
+    mutable_cgroup_targets_for_observation_with_mode(observation, selector, mode)
 }

@@ -1,0 +1,55 @@
+{
+  "collected_at_elapsed_ms": 0,
+  "session_type": "wayland",
+  "compositor": {
+    "name": "gamescope",
+    "pid": 5900
+  },
+  "drm_devices": [
+    {
+      "card": "card0",
+      "render_node": "renderD128",
+      "driver": "i915",
+      "vendor_id": "0x8086",
+      "device_id": "0x3e92",
+      "pci_slot": "0000:00:02.0",
+      "boot_vga": true,
+      "hwmon_paths": []
+    },
+    {
+      "card": "card1",
+      "render_node": "renderD129",
+      "driver": "amdgpu",
+      "vendor_id": "0x1002",
+      "device_id": "0x744c",
+      "pci_slot": "0000:03:00.0",
+      "boot_vga": false,
+      "hwmon_paths": []
+    }
+  ],
+  "connectors": [
+    {
+      "card": "card1",
+      "name": "DP-1",
+      "status": "connected",
+      "enabled": "enabled",
+      "modes": [
+        "2560x1440@144"
+      ],
+      "edid_hash": "fixture-edid"
+    }
+  ],
+  "guessed_path": {
+    "render_card": "card1",
+    "render_driver": "amdgpu",
+    "scanout_card": "card1",
+    "scanout_driver": "amdgpu",
+    "connector": "DP-1",
+    "is_cross_gpu": false,
+    "confidence": "high",
+    "reasons": [
+      "synthetic display-path validation fixture"
+    ]
+  },
+  "warnings": []
+}

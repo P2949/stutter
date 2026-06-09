@@ -1,0 +1,6 @@
+name: sched_process_exit
+ID: 132
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+	field:pid_t pid;	offset:12;	size:4;	signed:1;

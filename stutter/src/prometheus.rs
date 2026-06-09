@@ -85,7 +85,6 @@ pub fn render_metrics(state: &PrometheusState) -> String {
     let event_stream_write_errors = state.event_stream_write_errors.load(Ordering::Relaxed);
     let ebpf_ringbuf_drops = state.ebpf_ringbuf_drops.load(Ordering::Relaxed);
 
-    #[allow(unused_mut)]
     let mut output = format!(
         concat!(
             "# HELP stutter_start_unix_seconds Unix timestamp when this stutter monitor session started.\n",

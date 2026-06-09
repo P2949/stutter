@@ -3,3 +3,5 @@ linker = "bpf-linker"
 
 [target.bpfeb-unknown-none]
 linker = "bpf-linker"
+[alias]
+xtask = "run -p xtask --"

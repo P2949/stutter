@@ -1,1 +1,19 @@
-{"name":"game_browser_game","profile":"apply-low-risk-fake","duration_seconds":120,"expect_actions":true,"expect_rollbacks":true,"forbid_high_risk_apply":true}
+{
+  "name": "game_browser_game",
+  "mode": "apply-low-risk",
+  "ticks": [
+    { "kind": "focus_game", "confidence": 0.95 },
+    { "kind": "target_present" },
+    { "kind": "interval", "diagnostic_score_total": 500, "samples": 100 },
+    { "kind": "focus_cleared", "reason": "browser foreground" },
+    { "kind": "focus_game", "confidence": 0.94 },
+    { "kind": "target_present" },
+    { "kind": "interval", "diagnostic_score_total": 450, "samples": 100 }
+  ],
+  "assertions": [
+    "one_active_experiment_maximum",
+    "rollback_token_before_apply",
+    "cooldown_respected",
+    "focus_flapping_does_not_cause_action_flapping"
+  ]
+}

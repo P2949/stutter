@@ -4,6 +4,11 @@
 
 System-changing daemon actions are enforced through `DaemonPolicy::check_action` and `ActionDescriptor`; they are not controlled only by comments, help text, or convention.
 
+Advisor fix plans carry explicit safety risk fields: safety class, effect scope,
+rollback requirement, privilege/system-wide/persistence flags, required policy
+mode, and whether the default policy allows the proposed experiment. A fix plan
+is not permission to apply a change; validation and policy still gate action.
+
 ## eBPF Privilege Boundary
 
 Recording and live tracing require privileges on most systems because `stutter` loads eBPF programs. Offline commands such as `report`, `recommend`, `advisor`, and `audit` read files and do not need root.
@@ -21,6 +26,19 @@ Privileged worker operations are represented by a typed allowlist in
 Loopback TCP requires apply/control authorization for state-changing requests.
 Non-loopback TCP is not allowed to request privileged worker operations, even
 when a bearer token is present.
+
+Medium-risk autotune apply uses a separate privileged worker instead of an
+in-process mutator. Start it with:
+
+```bash
+stutter privileged-worker --socket /run/stutter/privileged-worker.sock
+```
+
+The worker listens on a Unix domain socket with mode `0600`; that filesystem
+permission is the authentication boundary for the local control plane. The
+unsafe in-process mutator is reserved for tests and explicit development config
+(`autotune.unsafe_in_process_privileged_worker = true` with
+`experimental = true`).
 
 Every privileged operation has a stable audit action id, for example
 `privilege-start-recording`, `privilege-apply-action`, and
@@ -132,3 +150,11 @@ stutter recommend --baseline <baseline-run-dir> --tune <tune-dir>
 ```
 
 Apply only when the workload was comparable and the recommendation is stable enough to justify a manual experiment. Keep `stutter restore` available while testing.
+
+
+### A/B tuning uncertainty
+
+The HTML recommendation report exposes A/B uncertainty: distribution charts,
+bootstrap CI bands, effect size, sample counts, noise ratios, and warnings when
+the comparison is underpowered. Treat recommendations as directional when CI
+bands cross zero, sample counts are low, or noise ratios are high.

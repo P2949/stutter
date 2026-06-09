@@ -1,5 +1,10 @@
 # Report View Roadmap
 
+The rich interactive HTML report remains owned by the main `stutter` crate for
+now. `stutter-report` provides a basic self-contained HTML renderer for migrated
+`ReportModel` data; future work may either move the rich HTML pipeline into
+`stutter-report` or keep it as main-crate CLI integration.
+
 Near-term work must improve views from existing artifacts before adding new probes.
 
 In scope:

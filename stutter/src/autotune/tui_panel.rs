@@ -10,6 +10,7 @@ use crate::autotune::{
         AutotuneHistoryEvent, ControllerPhase, default_autotune_history_path,
         read_autotune_history_events,
     },
+    planner::PlannerSummary,
 };
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
@@ -24,6 +25,10 @@ pub struct AutotuneTuiPanelSnapshot {
     pub history_path: PathBuf,
     pub journal_path: PathBuf,
     pub warning: Option<String>,
+    pub planner_selected: Option<String>,
+    pub planner_eligible: Vec<String>,
+    pub planner_top_denied: Vec<String>,
+    pub planner_grouped_denials: Vec<String>,
 }
 
 impl AutotuneTuiPanelSnapshot {
@@ -39,6 +44,10 @@ impl AutotuneTuiPanelSnapshot {
             history_path,
             journal_path,
             warning: None,
+            planner_selected: None,
+            planner_eligible: Vec::new(),
+            planner_top_denied: Vec::new(),
+            planner_grouped_denials: Vec::new(),
         }
     }
 }
@@ -106,6 +115,92 @@ pub fn load_autotune_tui_panel_snapshot(
         history_path: history_path.to_path_buf(),
         journal_path: journal_path.to_path_buf(),
         warning,
+        planner_selected: planner_selected_from_summary(last.planner.as_ref()),
+        planner_eligible: planner_eligible_from_summary(last.planner.as_ref()),
+        planner_top_denied: planner_top_denied_from_summary(last.planner.as_ref()),
+        planner_grouped_denials: planner_grouped_denials_from_summary(last.planner.as_ref()),
+    }
+}
+
+fn planner_selected_from_summary(planner: Option<&PlannerSummary>) -> Option<String> {
+    planner
+        .and_then(|planner| planner.selected.as_ref())
+        .map(|selected| {
+            format!(
+                "{} {} objective={:?} confidence={:.3} evidence={}",
+                selected.action_kind,
+                selected.candidate_name,
+                selected.objective,
+                selected.confidence,
+                format_planner_evidence(&selected.evidence)
+            )
+        })
+}
+
+fn planner_eligible_from_summary(planner: Option<&PlannerSummary>) -> Vec<String> {
+    planner
+        .map(|planner| {
+            planner
+                .eligible_candidates
+                .iter()
+                .map(|candidate| {
+                    format!(
+                        "{} {} objective={:?} confidence={:.3} evidence={}",
+                        candidate.action_kind,
+                        candidate.candidate_name,
+                        candidate.objective,
+                        candidate.confidence,
+                        format_planner_evidence(&candidate.evidence)
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn planner_top_denied_from_summary(planner: Option<&PlannerSummary>) -> Vec<String> {
+    planner
+        .map(|planner| {
+            planner
+                .top_denied_candidates
+                .iter()
+                .map(|denied| {
+                    format!(
+                        "{} {} objective={:?} confidence={:.3} reasons={} evidence={}",
+                        denied.action_kind,
+                        denied.candidate_name,
+                        denied.objective,
+                        denied.confidence,
+                        if denied.deny_reason_codes.is_empty() {
+                            "none".to_owned()
+                        } else {
+                            denied.deny_reason_codes.join(",")
+                        },
+                        format_planner_evidence(&denied.evidence)
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn planner_grouped_denials_from_summary(planner: Option<&PlannerSummary>) -> Vec<String> {
+    planner
+        .map(|planner| {
+            planner
+                .grouped_denials
+                .iter()
+                .map(|denial| format!("{}={}", denial.reason_code, denial.count))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn format_planner_evidence(evidence: &[String]) -> String {
+    if evidence.is_empty() {
+        "none".to_owned()
+    } else {
+        evidence.join("|")
     }
 }
 
@@ -121,7 +216,9 @@ fn current_profile_from_events(events: &[AutotuneHistoryEvent]) -> Option<String
             return Some(candidate.clone());
         }
 
-        if let Some(candidate) = candidate_name_from_action_id(event.action_id.as_deref()) {
+        if let Some(candidate) =
+            candidate_name_from_action_id(event.action_id.as_ref().map(|id| id.as_str()))
+        {
             return Some(candidate);
         }
     }
@@ -132,7 +229,9 @@ fn current_profile_from_events(events: &[AutotuneHistoryEvent]) -> Option<String
 fn current_profile_from_journal(record: Option<&ControllerJournalRecord>) -> Option<String> {
     record
         .filter(|record| record.is_active_experiment_state())
-        .and_then(|record| candidate_name_from_action_id(record.action_id.as_deref()))
+        .and_then(|record| {
+            candidate_name_from_action_id(record.action_id.as_ref().map(|id| id.as_str()))
+        })
 }
 
 fn latest_baseline_score(events: &[AutotuneHistoryEvent]) -> Option<u64> {
@@ -151,8 +250,8 @@ fn latest_candidate_score(events: &[AutotuneHistoryEvent]) -> Option<u64> {
             return Some(score.score.total);
         }
 
-        if event.observation_summary.score_total > 0 {
-            return Some(event.observation_summary.score_total);
+        if event.observation_summary.diagnostic_raw_score_total > 0 {
+            return Some(event.observation_summary.diagnostic_raw_score_total);
         }
     }
 
@@ -193,13 +292,13 @@ fn decision_in_seconds_from_event(
         ));
     }
 
-    if let Some(remaining_ms) = parse_u64_after_key(&event.reason, "remaining_ms=") {
+    if let Some(remaining_ms) = parse_u64_after_key(&event.reason.clone(), "remaining_ms=") {
         return Some(ms_to_ceil_seconds(remaining_ms));
     }
 
     if let (Some(elapsed_ms), Some(required_ms)) = (
-        parse_u64_after_key(&event.reason, "elapsed_ms="),
-        parse_u64_after_key(&event.reason, "required_ms="),
+        parse_u64_after_key(&event.reason.clone(), "elapsed_ms="),
+        parse_u64_after_key(&event.reason.clone(), "required_ms="),
     ) {
         return Some(ms_to_ceil_seconds(required_ms.saturating_sub(elapsed_ms)));
     }
@@ -287,7 +386,7 @@ mod tests {
             scored_task_count: 2,
             interval_count: 10,
             scored_samples: 100,
-            score_total: total,
+            diagnostic_raw_score_total: total,
             over_1ms: 0,
             over_2ms: 0,
             over_5ms: 0,
@@ -326,13 +425,15 @@ mod tests {
                 decision: "Noop".to_owned(),
                 candidate_name: Some("game-main-suggested".to_owned()),
                 action_kind: Some("cpu_affinity_profile".to_owned()),
+                safety_class: Some(crate::actions::SafetyClass::ReversibleLowRisk),
                 eligible: true,
                 rollback_policy: "rollback-on-exit".to_owned(),
             },
-            experiment_id: Some("experiment-1".to_owned()),
-            action_id: Some("cpu-affinity-profile:game-main-suggested".to_owned()),
+            experiment_id: Some("experiment-1".into()),
+            action_id: Some("cpu-affinity-profile:game-main-suggested".into()),
             score_before: Some(score(412)),
             score_after: None,
+            planner: None,
             rollback_performed: false,
             reason: "candidate measurement window not complete: elapsed_ms=18000 required_ms=30000"
                 .to_owned(),
@@ -373,8 +474,8 @@ mod tests {
 
         write_controller_journal_applied(
             &journal_path,
-            "experiment-1",
-            "cpu-affinity-profile:game-main-suggested",
+            crate::autotune::experiment::ExperimentId::try_new("experiment-1").unwrap(),
+            crate::actions::ActionId::try_new("cpu-affinity-profile:game-main-suggested").unwrap(),
             RollbackToken::CpuAffinityRestoreFile {
                 path: dir.join("restore.json"),
                 affected_tasks: 31,
@@ -415,6 +516,104 @@ mod tests {
 
         assert_eq!(snapshot.current_profile, None);
         assert!(!snapshot.rollback_available);
+
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn snapshot_includes_planner_summary_fields() {
+        let dir = temp_dir("planner-summary-fields");
+        let history_path = dir.join("history.jsonl");
+        let journal_path = dir.join("controller_journal.json");
+        let mut event = measuring_event();
+        event.planner = Some(crate::autotune::planner::PlannerSummary {
+            total_proposals: 2,
+            eligible_proposals: 1,
+            selected: Some(crate::autotune::planner::PlannerSelectedSummary {
+                candidate_name: "game-main".to_owned(),
+                action_kind: "cpu_affinity_profile".to_owned(),
+                objective: crate::autotune::objective::ObjectiveKind::StutterScore,
+                safety_class: crate::actions::SafetyClass::ReversibleLowRisk,
+                confidence: 0.92,
+                rank: Some(1),
+                evidence: vec!["situation=GameFocused weight=0.95".to_owned()],
+            }),
+            eligible_candidates: vec![crate::autotune::planner::PlannerEvaluationSummary {
+                candidate_name: "game-main".to_owned(),
+                action_kind: "cpu_affinity_profile".to_owned(),
+                provider: "profile".to_owned(),
+                objective: crate::autotune::objective::ObjectiveKind::StutterScore,
+                safety_class: crate::actions::SafetyClass::ReversibleLowRisk,
+                effect_scope: crate::daemon_policy::ActionEffectScope::LocalProcessTree,
+                confidence: 0.92,
+                eligible: true,
+                rank: Some(1),
+                deny_reasons: Vec::new(),
+                deny_reason_codes: Vec::new(),
+                deny_messages: Vec::new(),
+                dry_run_affected_tasks: Some(3),
+                manual_only_reason: None,
+                evidence: vec!["situation=GameFocused weight=0.95".to_owned()],
+            }],
+            top_denied_candidates: vec![crate::autotune::planner::PlannerEvaluationSummary {
+                candidate_name: "nice-denied".to_owned(),
+                action_kind: "nice".to_owned(),
+                provider: "nice".to_owned(),
+                objective: crate::autotune::objective::ObjectiveKind::DesktopInteractivity,
+                safety_class: crate::actions::SafetyClass::ReversibleMediumRisk,
+                effect_scope: crate::daemon_policy::ActionEffectScope::LocalProcessTree,
+                confidence: 0.61,
+                eligible: false,
+                rank: Some(2),
+                deny_reasons: vec![
+                    crate::autotune::planner::CandidateDenyReason::CapabilityMissing,
+                ],
+                deny_reason_codes: vec!["capability_missing".to_owned()],
+                deny_messages: vec!["missing nice capability".to_owned()],
+                dry_run_affected_tasks: None,
+                manual_only_reason: None,
+                evidence: vec!["capability=nice weight=1.00".to_owned()],
+            }],
+            grouped_denials: vec![crate::autotune::planner::PlannerDenySummary {
+                reason: crate::autotune::planner::CandidateDenyReason::CapabilityMissing,
+                reason_code: "capability_missing".to_owned(),
+                count: 1,
+            }],
+            missing_capabilities: Vec::new(),
+            workload_blocked: Vec::new(),
+            manual_only_suggestions: Vec::new(),
+            no_action: None,
+        });
+
+        append_autotune_history_event(&history_path, &event).unwrap();
+
+        let snapshot =
+            load_autotune_tui_panel_snapshot(&history_path, &journal_path, 118_000_000_000);
+
+        assert_eq!(
+            snapshot.planner_selected.as_deref(),
+            Some(
+                "cpu_affinity_profile game-main objective=StutterScore confidence=0.920 evidence=situation=GameFocused weight=0.95"
+            )
+        );
+        assert_eq!(
+            snapshot.planner_eligible,
+            vec![
+                "cpu_affinity_profile game-main objective=StutterScore confidence=0.920 evidence=situation=GameFocused weight=0.95"
+                    .to_owned()
+            ]
+        );
+        assert_eq!(
+            snapshot.planner_top_denied,
+            vec![
+                "nice nice-denied objective=DesktopInteractivity confidence=0.610 reasons=capability_missing evidence=capability=nice weight=1.00"
+                    .to_owned()
+            ]
+        );
+        assert_eq!(
+            snapshot.planner_grouped_denials,
+            vec!["capability_missing=1".to_owned()]
+        );
 
         fs::remove_dir_all(dir).ok();
     }

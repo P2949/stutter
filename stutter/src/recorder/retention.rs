@@ -1,14 +1,15 @@
 use std::{
-    ffi::CString,
     fs, io,
-    os::unix::ffi::OsStrExt,
     path::{Path, PathBuf},
     time::{Duration, SystemTime},
 };
 
 use anyhow::Context;
 
-use crate::config::model::RecordingConfig;
+use crate::{
+    artifacts::{ArtifactKind, artifact_path},
+    config::model::RecordingConfig,
+};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RecordingRetentionPolicy {
@@ -183,7 +184,9 @@ fn discover_retention_runs(root: &Path) -> anyhow::Result<Vec<RetentionRun>> {
 }
 
 fn looks_like_stutter_run_dir(path: &Path) -> bool {
-    if path.join("session.json").is_file() || path.join("metadata.json").is_file() {
+    if artifact_path(path, ArtifactKind::Session).is_file()
+        || artifact_path(path, ArtifactKind::Metadata).is_file()
+    {
         return true;
     }
 
@@ -260,15 +263,7 @@ fn sort_oldest_first(runs: &mut [RetentionRun]) {
 
 fn available_bytes_for_path(path: &Path) -> io::Result<u64> {
     let existing_path = nearest_existing_path(path);
-    let c_path = CString::new(existing_path.as_os_str().as_bytes())
-        .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
-    let mut stat = std::mem::MaybeUninit::<libc::statvfs>::uninit();
-    let rc = unsafe { libc::statvfs(c_path.as_ptr(), stat.as_mut_ptr()) };
-    if rc != 0 {
-        return Err(io::Error::last_os_error());
-    }
-    let stat = unsafe { stat.assume_init() };
-    Ok(stat.f_bavail.saturating_mul(stat.f_frsize))
+    crate::syscall::statvfs(&existing_path).map(|space| space.free_bytes)
 }
 
 fn nearest_existing_path(path: &Path) -> PathBuf {

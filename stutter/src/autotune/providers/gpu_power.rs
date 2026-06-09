@@ -1,9 +1,15 @@
 use crate::{
     actions::gpu_power::GpuPowerAction,
     autotune::{
-        candidate::{CandidateAction, CandidateEvidence, GpuPowerActionPlan},
         objective::ObjectiveKind,
-        providers::{CandidateProposal, CandidateProvider, CandidateProviderInput},
+        planning::{
+            candidate::{CandidateAction, CandidateEvidence},
+            executable_plan::GpuPowerActionPlan,
+        },
+        providers::{
+            CandidateProposal, CandidateProvider, CandidateProviderInput,
+            signal_quality_confidence_weight,
+        },
         situation::SituationKind,
     },
 };
@@ -21,6 +27,8 @@ pub struct GpuPowerCandidateEvidence {
 
 #[derive(Default)]
 pub struct GpuPowerProvider;
+
+const MIN_MULTI_GPU_FOCUS_CONFIDENCE: f32 = 0.70;
 
 impl CandidateProvider for GpuPowerProvider {
     fn family(&self) -> &'static str {
@@ -43,12 +51,12 @@ impl CandidateProvider for GpuPowerProvider {
         let confidence = gpu_power_confidence(input, &structured_evidence);
         let candidate = CandidateAction::GpuPower {
             plan: GpuPowerActionPlan {
-                name: format!("gpu-power-{}-high", structured_evidence.drm_card),
+                name: format!("gpu-power-{}-profile", structured_evidence.drm_card),
                 action: GpuPowerAction {
                     sysfs_root: std::path::PathBuf::from("/sys"),
                     drm_card: structured_evidence.drm_card.clone(),
-                    power_dpm_force_performance_level: Some("high".to_owned()),
-                    pp_power_profile_mode: None,
+                    power_dpm_force_performance_level: None,
+                    pp_power_profile_mode: Some("3D_FULL_SCREEN".to_owned()),
                 },
                 evidence: vec![CandidateEvidence::new(
                     "gpu_power_structured",
@@ -101,8 +109,8 @@ fn gpu_power_evidence(input: &CandidateProviderInput<'_>) -> Option<GpuPowerCand
                 .find(|device| device.device == card.name)
         });
 
-    if runtime_state.and_then(|state| state.power_dpm_force_performance_level.as_deref())
-        == Some("high")
+    if runtime_state.and_then(|state| state.pp_power_profile_mode.as_deref())
+        == Some("3D_FULL_SCREEN")
     {
         return None;
     }
@@ -128,6 +136,17 @@ fn selected_gpu<'a>(
         .gpu_active_render_node
         .as_deref()
     {
+        if input.system_context.inventory.drm_devices.len() > 1 {
+            let confidence = input
+                .observation
+                .objective_signals
+                .gpu_focus_confidence
+                .unwrap_or(1.0);
+            if confidence < MIN_MULTI_GPU_FOCUS_CONFIDENCE {
+                return None;
+            }
+        }
+
         return input
             .system_context
             .inventory
@@ -164,7 +183,11 @@ fn gpu_power_confidence(
     .count() as f32
         / 7.0;
 
-    (input.observation.situation.confidence * completeness).clamp(0.0, 1.0)
+    let signal_weight = signal_quality_confidence_weight(
+        input.observation.objective_signals.signal_quality.gpu_power,
+    );
+
+    (input.observation.situation.confidence * completeness * signal_weight).clamp(0.0, 1.0)
 }
 
 #[cfg(test)]
@@ -177,7 +200,11 @@ mod tests {
             controller::ControllerRuntimeState, observation::AutotuneObservation,
             system_context::SystemContextSnapshot,
         },
-        daemon::{ActionSource, DaemonCapabilities, DaemonMode, SystemHealthSnapshot},
+        daemon::{
+            capabilities::DaemonCapabilities,
+            health::SystemHealthSnapshot,
+            policy::{ActionSource, DaemonMode},
+        },
         daemon_policy::{DaemonPolicyBuildInput, build_daemon_policy},
         focus::FocusGroupKind,
         system_inventory::{DrmDeviceInventory, SystemInventory},
@@ -226,6 +253,7 @@ mod tests {
                 ],
                 irq_default_smp_affinity: None,
                 irq_lines: Vec::new(),
+                power_source: Default::default(),
                 sched_ext_available: false,
                 vm_knobs: Default::default(),
                 inventory_hash: "fake-gpu-inventory".to_owned(),
@@ -291,6 +319,7 @@ mod tests {
                 ],
                 irq_default_smp_affinity: None,
                 irq_lines: Vec::new(),
+                power_source: Default::default(),
                 sched_ext_available: false,
                 vm_knobs: Default::default(),
                 inventory_hash: "fake-gpu-focused-inventory".to_owned(),
@@ -313,8 +342,13 @@ mod tests {
         let CandidateAction::GpuPower { plan } = &proposals[0].candidate else {
             panic!("expected gpu power candidate");
         };
-        assert_eq!(plan.name, "gpu-power-card1-high");
+        assert_eq!(plan.name, "gpu-power-card1-profile");
         assert_eq!(plan.action.drm_card, "card1");
+        assert_eq!(plan.action.power_dpm_force_performance_level, None);
+        assert_eq!(
+            plan.action.pp_power_profile_mode.as_deref(),
+            Some("3D_FULL_SCREEN")
+        );
         assert!(proposals[0].confidence > 0.0);
     }
 
@@ -348,6 +382,7 @@ mod tests {
                 }],
                 irq_default_smp_affinity: None,
                 irq_lines: Vec::new(),
+                power_source: Default::default(),
                 sched_ext_available: false,
                 vm_knobs: Default::default(),
                 inventory_hash: "fake-gpu-inventory".to_owned(),
@@ -374,8 +409,13 @@ mod tests {
         let CandidateAction::GpuPower { plan } = &proposals[0].candidate else {
             panic!("expected gpu power candidate");
         };
-        assert_eq!(plan.name, "gpu-power-card77-high");
+        assert_eq!(plan.name, "gpu-power-card77-profile");
         assert_eq!(plan.action.drm_card, "card77");
+        assert_eq!(plan.action.power_dpm_force_performance_level, None);
+        assert_eq!(
+            plan.action.pp_power_profile_mode.as_deref(),
+            Some("3D_FULL_SCREEN")
+        );
     }
 
     fn policy() -> crate::daemon::DaemonPolicy {

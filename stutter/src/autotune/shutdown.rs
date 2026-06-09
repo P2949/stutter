@@ -9,11 +9,12 @@ use tokio::signal;
 
 use super::decision_log::{
     AutotuneDecisionLabel, AutotuneModeLabel, ControllerPhaseLabel, DecisionJsonlEntry,
-    OnlineDataQualityLabel, SituationKindLabel, append_decision_jsonl,
+    DecisionJsonlEntryInput, OnlineDataQualityLabel, SituationKindLabel, append_decision_jsonl,
 };
 use crate::{
-    actions::{RollbackToken, SafetyClass},
+    actions::{ActionId, RollbackToken, SafetyClass},
     audit::{AuditEvent, append_audit_event_to_path, audit_or_warn},
+    autotune::{kept::ActiveProfileState, planning::candidate::CandidateAction},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -41,45 +42,74 @@ pub struct RollbackOnExitConfig {
 }
 
 #[derive(Clone, Debug)]
-pub struct ActiveLowRiskAction {
-    pub action_id: String,
+pub struct ActiveAutotuneAction {
+    pub action_id: ActionId,
     pub action_kind: String,
     pub safety_class: SafetyClass,
     pub rollback: RollbackToken,
+    pub candidate: Option<CandidateAction>,
 }
 
-impl ActiveLowRiskAction {
-    pub fn cpu_affinity_profile(action_id: impl Into<String>, rollback: RollbackToken) -> Self {
+impl ActiveAutotuneAction {
+    pub fn cpu_affinity_profile(action_id: ActionId, rollback: RollbackToken) -> Self {
         Self {
-            action_id: action_id.into(),
+            action_id,
             action_kind: "cpu_affinity_profile".to_owned(),
             safety_class: SafetyClass::ReversibleLowRisk,
             rollback,
+            candidate: None,
         }
+    }
+
+    pub fn try_cpu_affinity_profile(
+        action_id: impl Into<String>,
+        rollback: RollbackToken,
+    ) -> Result<Self, stutter_core::ids::EmptyStringIdError> {
+        Ok(Self::cpu_affinity_profile(
+            ActionId::try_new(action_id)?,
+            rollback,
+        ))
+    }
+
+    pub fn from_kept_candidate(kept: &crate::autotune::kept::KeptCandidateState) -> Option<Self> {
+        let descriptor = kept.candidate.descriptor();
+        if descriptor.persistent_effect {
+            return None;
+        }
+
+        Some(Self {
+            action_id: descriptor.action_id,
+            action_kind: descriptor.action_kind,
+            safety_class: descriptor.safety_class,
+            rollback: kept.rollback.clone(),
+            candidate: Some(kept.candidate.clone()),
+        })
     }
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct ActiveLowRiskActionRegistry {
-    actions: Arc<Mutex<Vec<ActiveLowRiskAction>>>,
+pub struct ActiveAutotuneActionRegistry {
+    actions: Arc<Mutex<Vec<ActiveAutotuneAction>>>,
 }
 
-impl ActiveLowRiskActionRegistry {
+impl ActiveAutotuneActionRegistry {
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn register(&self, action: ActiveLowRiskAction) {
+    pub fn register(&self, action: ActiveAutotuneAction) {
         self.actions
             .lock()
-            .expect("active low-risk action registry poisoned")
+            // invariant: registry lock is not poisoned
+            .expect("active autotune action registry poisoned")
             .push(action);
     }
 
     pub fn len(&self) -> usize {
         self.actions
             .lock()
-            .expect("active low-risk action registry poisoned")
+            // invariant: registry lock is not poisoned
+            .expect("active autotune action registry poisoned")
             .len()
     }
 
@@ -87,18 +117,20 @@ impl ActiveLowRiskActionRegistry {
         self.len() == 0
     }
 
-    pub fn drain(&self) -> Vec<ActiveLowRiskAction> {
+    pub fn drain(&self) -> Vec<ActiveAutotuneAction> {
         self.actions
             .lock()
-            .expect("active low-risk action registry poisoned")
+            // invariant: registry lock is not poisoned
+            .expect("active autotune action registry poisoned")
             .drain(..)
             .collect()
     }
 
-    pub fn snapshot(&self) -> Vec<ActiveLowRiskAction> {
+    pub fn snapshot(&self) -> Vec<ActiveAutotuneAction> {
         self.actions
             .lock()
-            .expect("active low-risk action registry poisoned")
+            // invariant: registry lock is not poisoned
+            .expect("active autotune action registry poisoned")
             .clone()
     }
 }
@@ -120,15 +152,21 @@ impl ExitRollbackSummary {
 }
 
 pub trait ExitRollbackExecutor {
-    fn rollback(&mut self, action: &ActiveLowRiskAction) -> anyhow::Result<usize>;
+    fn rollback(&mut self, action: &ActiveAutotuneAction) -> anyhow::Result<usize>;
 }
 
 #[derive(Default)]
 pub struct CpuAffinityExitRollbackExecutor;
 
 impl ExitRollbackExecutor for CpuAffinityExitRollbackExecutor {
-    fn rollback(&mut self, action: &ActiveLowRiskAction) -> anyhow::Result<usize> {
+    fn rollback(&mut self, action: &ActiveAutotuneAction) -> anyhow::Result<usize> {
         ensure_exit_rollback_action_allowed(action)?;
+
+        if let Some(candidate) = action.candidate.clone() {
+            let executor = crate::autotune::apply::executor_for_candidate_preview(candidate)?;
+            executor.rollback(&action.rollback)?;
+            return Ok(action.rollback.affected_tasks());
+        }
 
         let restore_path = action
             .rollback
@@ -147,7 +185,38 @@ impl ExitRollbackExecutor for CpuAffinityExitRollbackExecutor {
     }
 }
 
-pub fn ensure_exit_rollback_action_allowed(action: &ActiveLowRiskAction) -> anyhow::Result<()> {
+pub fn ensure_exit_rollback_action_allowed(action: &ActiveAutotuneAction) -> anyhow::Result<()> {
+    if let Some(candidate) = action.candidate.as_ref() {
+        let descriptor = candidate.descriptor();
+        if descriptor.persistent_effect {
+            anyhow::bail!(
+                "rollback-on-exit cannot restore persistent-effect actions automatically; blocked action_kind={}",
+                descriptor.action_kind
+            );
+        }
+        if action.action_kind != descriptor.action_kind {
+            anyhow::bail!(
+                "rollback-on-exit action kind mismatch; action_kind={} candidate_action_kind={}",
+                action.action_kind,
+                descriptor.action_kind
+            );
+        }
+        if action.safety_class != descriptor.safety_class {
+            anyhow::bail!(
+                "rollback-on-exit safety class mismatch; safety_class={:?} candidate_safety_class={:?}",
+                action.safety_class,
+                descriptor.safety_class
+            );
+        }
+        if action.safety_class > SafetyClass::ReversibleMediumRisk {
+            anyhow::bail!(
+                "rollback-on-exit only supports non-persistent reversible low/medium risk kept actions; blocked safety_class={:?}",
+                action.safety_class
+            );
+        }
+        return Ok(());
+    }
+
     if action.action_kind != "cpu_affinity_profile" {
         anyhow::bail!(
             "rollback-on-exit only supports CPU affinity profile actions; blocked action_kind={}",
@@ -176,7 +245,7 @@ pub fn ensure_exit_rollback_action_allowed(action: &ActiveLowRiskAction) -> anyh
 }
 
 pub fn rollback_active_low_risk_actions_on_exit(
-    registry: &ActiveLowRiskActionRegistry,
+    registry: &ActiveAutotuneActionRegistry,
     config: &RollbackOnExitConfig,
     reason: ShutdownReason,
     decision_log_path: Option<&Path>,
@@ -192,7 +261,7 @@ pub fn rollback_active_low_risk_actions_on_exit(
 }
 
 pub fn rollback_active_low_risk_actions_on_exit_with_executor<E: ExitRollbackExecutor + ?Sized>(
-    registry: &ActiveLowRiskActionRegistry,
+    registry: &ActiveAutotuneActionRegistry,
     config: &RollbackOnExitConfig,
     reason: ShutdownReason,
     decision_log_path: Option<&Path>,
@@ -282,10 +351,11 @@ pub fn rollback_active_low_risk_actions_on_exit_with_executor<E: ExitRollbackExe
     summary
 }
 
+#[cfg(test)]
 pub fn rollback_active_low_risk_actions_on_exit_with_audit_path_for_tests<
     E: ExitRollbackExecutor + ?Sized,
 >(
-    registry: &ActiveLowRiskActionRegistry,
+    registry: &ActiveAutotuneActionRegistry,
     config: &RollbackOnExitConfig,
     reason: ShutdownReason,
     decision_log_path: Option<&Path>,
@@ -319,6 +389,7 @@ pub fn rollback_active_low_risk_actions_on_exit_with_audit_path_for_tests<
                 0,
                 "rollback skipped because keep_on_exit is true".to_owned(),
             )
+            // invariant: test audit write should succeed in test fixtures
             .expect("test audit write should succeed");
         }
         write_exit_decision_event(
@@ -348,6 +419,7 @@ pub fn rollback_active_low_risk_actions_on_exit_with_audit_path_for_tests<
                         restored
                     ),
                 )
+                // invariant: test audit write should succeed in test fixtures
                 .expect("test audit write should succeed");
             }
             Err(err) => {
@@ -364,6 +436,7 @@ pub fn rollback_active_low_risk_actions_on_exit_with_audit_path_for_tests<
                         reason.as_str()
                     ),
                 )
+                // invariant: test audit write should succeed in test fixtures
                 .expect("test audit write should succeed");
             }
         }
@@ -383,7 +456,7 @@ pub fn rollback_active_low_risk_actions_on_exit_with_audit_path_for_tests<
 }
 
 fn write_exit_audit_event(
-    action: &ActiveLowRiskAction,
+    action: &ActiveAutotuneAction,
     reason: ShutdownReason,
     keep_on_exit: bool,
     success: bool,
@@ -402,7 +475,7 @@ fn write_exit_audit_event(
 
 fn write_exit_audit_event_to_path(
     path: &Path,
-    action: &ActiveLowRiskAction,
+    action: &ActiveAutotuneAction,
     reason: ShutdownReason,
     keep_on_exit: bool,
     success: bool,
@@ -423,7 +496,7 @@ fn write_exit_audit_event_to_path(
 }
 
 fn build_exit_audit_event(
-    action: &ActiveLowRiskAction,
+    action: &ActiveAutotuneAction,
     reason: ShutdownReason,
     keep_on_exit: bool,
     success: bool,
@@ -468,24 +541,24 @@ fn write_exit_decision_event(
         AutotuneDecisionLabel::Noop
     };
 
-    let entry = DecisionJsonlEntry::new(
-        if summary.failed_actions > 0 {
+    let entry = DecisionJsonlEntry::new(DecisionJsonlEntryInput {
+        phase: if summary.failed_actions > 0 {
             ControllerPhaseLabel::Faulted
         } else {
             ControllerPhaseLabel::Cooldown
         },
-        AutotuneModeLabel::ApplyLowRisk,
-        false,
-        SituationKindLabel::Unknown,
-        0,
-        if summary.failed_actions > 0 {
+        mode: AutotuneModeLabel::ApplyLowRisk,
+        target_present: false,
+        situation: SituationKindLabel::Unknown,
+        diagnostic_raw_score_total: 0,
+        data_quality: if summary.failed_actions > 0 {
             OnlineDataQualityLabel::Low
         } else {
             OnlineDataQualityLabel::High
         },
         decision,
-        reason.to_owned(),
-    );
+        reason: reason.to_owned(),
+    });
 
     if let Err(err) = append_decision_jsonl(path, &entry) {
         log::warn!("autotune_exit_decision_log_write_failed err={err:#}");
@@ -493,7 +566,7 @@ fn write_exit_decision_event(
 }
 
 pub async fn wait_for_ctrl_c_and_rollback(
-    registry: ActiveLowRiskActionRegistry,
+    registry: ActiveAutotuneActionRegistry,
     config: RollbackOnExitConfig,
     decision_log_path: Option<PathBuf>,
 ) -> ExitRollbackSummary {
@@ -517,322 +590,26 @@ pub async fn wait_for_ctrl_c_and_rollback(
 }
 
 pub fn register_cpu_affinity_rollback(
-    registry: &ActiveLowRiskActionRegistry,
+    registry: &ActiveAutotuneActionRegistry,
     action_id: impl Into<String>,
     rollback: RollbackToken,
 ) {
-    registry.register(ActiveLowRiskAction::cpu_affinity_profile(
-        action_id, rollback,
+    registry.register(ActiveAutotuneAction::cpu_affinity_profile(
+        ActionId::new(action_id),
+        rollback,
     ));
 }
 
-#[cfg(test)]
-mod tests {
-    use std::fs;
-
-    use super::*;
-
-    #[derive(Default)]
-    struct FakeExecutor {
-        calls: usize,
-        fail: bool,
-        restored: usize,
-    }
-
-    impl ExitRollbackExecutor for FakeExecutor {
-        fn rollback(&mut self, action: &ActiveLowRiskAction) -> anyhow::Result<usize> {
-            self.calls += 1;
-            ensure_exit_rollback_action_allowed(action)?;
-
-            if self.fail {
-                anyhow::bail!("intentional rollback failure");
-            }
-
-            Ok(self.restored)
+pub fn register_kept_actions_for_exit_rollback(
+    registry: &ActiveAutotuneActionRegistry,
+    active_profile_state: &ActiveProfileState,
+) {
+    for kept in active_profile_state.kept_actions.values() {
+        if let Some(action) = ActiveAutotuneAction::from_kept_candidate(kept) {
+            registry.register(action);
         }
-    }
-
-    fn temp_dir(name: &str) -> PathBuf {
-        let mut dir = std::env::temp_dir();
-        dir.push(format!(
-            "stutter-autotune-shutdown-test-{name}-{}-{}",
-            std::process::id(),
-            crate::audit::unix_nanos_now()
-        ));
-        fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
-    fn rollback_token() -> RollbackToken {
-        RollbackToken::CpuAffinityRestoreFile {
-            path: PathBuf::from("/tmp/stutter-restore.json"),
-            affected_tasks: 31,
-        }
-    }
-
-    fn action(name: &str) -> ActiveLowRiskAction {
-        ActiveLowRiskAction::cpu_affinity_profile(name, rollback_token())
-    }
-
-    #[test]
-    fn default_config_rolls_back_on_exit() {
-        assert!(!RollbackOnExitConfig::default().keep_on_exit);
-    }
-
-    #[test]
-    fn ctrl_c_rolls_back_all_active_actions_and_drains_registry() {
-        let dir = temp_dir("ctrl-c");
-        let audit_path = dir.join("audit.jsonl");
-        let decision_path = dir.join("decisions.jsonl");
-        let registry = ActiveLowRiskActionRegistry::new();
-        registry.register(action("cpu-affinity-profile:game-main"));
-        registry.register(action("cpu-affinity-profile:game-helper"));
-        let mut executor = FakeExecutor {
-            calls: 0,
-            fail: false,
-            restored: 31,
-        };
-
-        let summary = rollback_active_low_risk_actions_on_exit_with_audit_path_for_tests(
-            &registry,
-            &RollbackOnExitConfig::default(),
-            ShutdownReason::CtrlC,
-            Some(&decision_path),
-            &audit_path,
-            &mut executor,
-        );
-
-        assert_eq!(summary.reason, ShutdownReason::CtrlC);
-        assert_eq!(summary.attempted_actions, 2);
-        assert_eq!(summary.rolled_back_actions, 2);
-        assert_eq!(summary.failed_actions, 0);
-        assert_eq!(summary.skipped_actions, 0);
-        assert!(summary.success());
-        assert_eq!(executor.calls, 2);
-        assert!(registry.is_empty());
-
-        let audit_events = crate::audit::read_audit_tail(&audit_path, 10).unwrap();
-        assert_eq!(audit_events.len(), 2);
-        assert!(
-            audit_events
-                .iter()
-                .all(|event| event.command == "autotune rollback-on-exit")
-        );
-        assert!(audit_events.iter().all(|event| event.success));
-        assert!(
-            audit_events
-                .iter()
-                .all(|event| event.safety_class == Some(SafetyClass::ReversibleLowRisk))
-        );
-        assert!(
-            audit_events
-                .iter()
-                .all(|event| event.message.contains("shutdown_reason=ctrl-c"))
-        );
-
-        let decisions = crate::autotune::decision_log::read_decision_jsonl(&decision_path).unwrap();
-        assert_eq!(decisions.len(), 1);
-        assert_eq!(decisions[0].decision, AutotuneDecisionLabel::Revert);
-        assert!(decisions[0].reason.contains("shutdown reason=ctrl-c"));
-
-        fs::remove_dir_all(dir).ok();
-    }
-
-    #[test]
-    fn target_exit_rolls_back_active_actions() {
-        let registry = ActiveLowRiskActionRegistry::new();
-        registry.register(action("cpu-affinity-profile:game-main"));
-        let mut executor = FakeExecutor {
-            calls: 0,
-            fail: false,
-            restored: 31,
-        };
-
-        let summary = rollback_active_low_risk_actions_on_exit_with_executor(
-            &registry,
-            &RollbackOnExitConfig::default(),
-            ShutdownReason::TargetExit,
-            None,
-            &mut executor,
-        );
-
-        assert_eq!(summary.reason, ShutdownReason::TargetExit);
-        assert_eq!(summary.rolled_back_actions, 1);
-        assert_eq!(executor.calls, 1);
-        assert!(registry.is_empty());
-    }
-
-    #[test]
-    fn daemon_stop_rolls_back_active_actions() {
-        let registry = ActiveLowRiskActionRegistry::new();
-        registry.register(action("cpu-affinity-profile:game-main"));
-        let mut executor = FakeExecutor {
-            calls: 0,
-            fail: false,
-            restored: 31,
-        };
-
-        let summary = rollback_active_low_risk_actions_on_exit_with_executor(
-            &registry,
-            &RollbackOnExitConfig::default(),
-            ShutdownReason::DaemonStop,
-            None,
-            &mut executor,
-        );
-
-        assert_eq!(summary.reason, ShutdownReason::DaemonStop);
-        assert_eq!(summary.rolled_back_actions, 1);
-        assert_eq!(executor.calls, 1);
-        assert!(registry.is_empty());
-    }
-
-    #[test]
-    fn controller_fault_rolls_back_and_writes_fault_decision_on_failure() {
-        let dir = temp_dir("controller-fault");
-        let audit_path = dir.join("audit.jsonl");
-        let decision_path = dir.join("decisions.jsonl");
-        let registry = ActiveLowRiskActionRegistry::new();
-        registry.register(action("cpu-affinity-profile:game-main"));
-        let mut executor = FakeExecutor {
-            calls: 0,
-            fail: true,
-            restored: 0,
-        };
-
-        let summary = rollback_active_low_risk_actions_on_exit_with_audit_path_for_tests(
-            &registry,
-            &RollbackOnExitConfig::default(),
-            ShutdownReason::ControllerFault,
-            Some(&decision_path),
-            &audit_path,
-            &mut executor,
-        );
-
-        assert_eq!(summary.reason, ShutdownReason::ControllerFault);
-        assert_eq!(summary.attempted_actions, 1);
-        assert_eq!(summary.rolled_back_actions, 0);
-        assert_eq!(summary.failed_actions, 1);
-        assert!(!summary.success());
-        assert_eq!(executor.calls, 1);
-        assert!(registry.is_empty());
-
-        let audit_events = crate::audit::read_audit_tail(&audit_path, 10).unwrap();
-        assert_eq!(audit_events.len(), 1);
-        assert!(!audit_events[0].success);
-        assert!(audit_events[0].message.contains("rollback-on-exit failed"));
-        assert!(
-            audit_events[0]
-                .message
-                .contains("shutdown_reason=controller-fault")
-        );
-
-        let decisions = crate::autotune::decision_log::read_decision_jsonl(&decision_path).unwrap();
-        assert_eq!(decisions.len(), 1);
-        assert_eq!(decisions[0].phase, ControllerPhaseLabel::Faulted);
-        assert_eq!(decisions[0].decision, AutotuneDecisionLabel::Fault);
-
-        fs::remove_dir_all(dir).ok();
-    }
-
-    #[test]
-    fn keep_on_exit_skips_rollback_and_preserves_registry() {
-        let dir = temp_dir("keep");
-        let audit_path = dir.join("audit.jsonl");
-        let decision_path = dir.join("decisions.jsonl");
-        let registry = ActiveLowRiskActionRegistry::new();
-        registry.register(action("cpu-affinity-profile:game-main"));
-        let mut executor = FakeExecutor {
-            calls: 0,
-            fail: false,
-            restored: 31,
-        };
-
-        let summary = rollback_active_low_risk_actions_on_exit_with_audit_path_for_tests(
-            &registry,
-            &RollbackOnExitConfig { keep_on_exit: true },
-            ShutdownReason::CtrlC,
-            Some(&decision_path),
-            &audit_path,
-            &mut executor,
-        );
-
-        assert_eq!(summary.attempted_actions, 0);
-        assert_eq!(summary.rolled_back_actions, 0);
-        assert_eq!(summary.failed_actions, 0);
-        assert_eq!(summary.skipped_actions, 1);
-        assert_eq!(executor.calls, 0);
-        assert_eq!(registry.len(), 1);
-
-        let audit_events = crate::audit::read_audit_tail(&audit_path, 10).unwrap();
-        assert_eq!(audit_events.len(), 1);
-        assert!(audit_events[0].success);
-        assert!(
-            audit_events[0]
-                .message
-                .contains("rollback skipped because keep_on_exit is true")
-        );
-
-        let decisions = crate::autotune::decision_log::read_decision_jsonl(&decision_path).unwrap();
-        assert_eq!(decisions.len(), 1);
-        assert_eq!(decisions[0].decision, AutotuneDecisionLabel::Noop);
-        assert!(decisions[0].reason.contains("keep_on_exit true"));
-
-        fs::remove_dir_all(dir).ok();
-    }
-
-    #[test]
-    fn non_low_risk_action_is_blocked() {
-        let mut bad = action("cpu-affinity-profile:game-main");
-        bad.safety_class = SafetyClass::HighRisk;
-
-        let err = ensure_exit_rollback_action_allowed(&bad)
-            .unwrap_err()
-            .to_string();
-
-        assert!(err.contains("only supports ReversibleLowRisk"));
-    }
-
-    #[test]
-    fn non_cpu_affinity_action_is_blocked() {
-        let mut bad = action("gpu-power-profile");
-        bad.action_kind = "gpu_power_profile".to_owned();
-
-        let err = ensure_exit_rollback_action_allowed(&bad)
-            .unwrap_err()
-            .to_string();
-
-        assert!(err.contains("only supports CPU affinity profile actions"));
-    }
-
-    #[test]
-    fn non_cpu_affinity_rollback_token_is_blocked() {
-        let mut bad = action("cpu-affinity-profile:game-main");
-        bad.rollback = RollbackToken::SysfsRestore {
-            path: PathBuf::from("/sys/class/drm/card0/device/power_dpm_force_performance_level"),
-            original_value: "auto".to_owned(),
-        };
-
-        let err = ensure_exit_rollback_action_allowed(&bad)
-            .unwrap_err()
-            .to_string();
-
-        assert!(err.contains("only supports cpu-affinity-restore-file rollback tokens"));
-    }
-
-    #[test]
-    fn register_cpu_affinity_rollback_adds_active_action() {
-        let registry = ActiveLowRiskActionRegistry::new();
-
-        register_cpu_affinity_rollback(
-            &registry,
-            "cpu-affinity-profile:game-main",
-            rollback_token(),
-        );
-
-        let actions = registry.snapshot();
-        assert_eq!(actions.len(), 1);
-        assert_eq!(actions[0].action_id, "cpu-affinity-profile:game-main");
-        assert_eq!(actions[0].action_kind, "cpu_affinity_profile");
-        assert_eq!(actions[0].safety_class, SafetyClass::ReversibleLowRisk);
     }
 }
+
+#[cfg(test)]
+mod tests;

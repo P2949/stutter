@@ -4,16 +4,100 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     config::{FocusSource, ForegroundSource, TARGET_PIDS_MAX},
-    ebpf_loader::DropCountersSnapshot,
+    ebpf_loader::{DropCountersSnapshot, NativeCgroupFilterStatus},
     metadata::SystemMetadata,
     metrics::CpuPerfRecord,
     process_tree::TaskClass,
 };
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(transparent)]
+pub struct ArtifactSchemaVersion(u32);
+
+impl ArtifactSchemaVersion {
+    pub const fn new(version: u32) -> Self {
+        Self(version)
+    }
+
+    pub const fn get(self) -> u32 {
+        self.0
+    }
+
+    pub fn is_older_than(self, current: Self) -> bool {
+        self < current
+    }
+
+    pub fn is_newer_than(self, current: Self) -> bool {
+        self > current
+    }
+}
+
+impl std::fmt::Display for ArtifactSchemaVersion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl PartialEq<u32> for ArtifactSchemaVersion {
+    fn eq(&self, other: &u32) -> bool {
+        self.0 == *other
+    }
+}
+
+impl PartialEq<ArtifactSchemaVersion> for u32 {
+    fn eq(&self, other: &ArtifactSchemaVersion) -> bool {
+        *self == other.0
+    }
+}
+
+impl std::ops::Add<u32> for ArtifactSchemaVersion {
+    type Output = Self;
+
+    fn add(self, rhs: u32) -> Self::Output {
+        Self(self.0 + rhs)
+    }
+}
+
+impl std::ops::Sub<u32> for ArtifactSchemaVersion {
+    type Output = u32;
+
+    fn sub(self, rhs: u32) -> Self::Output {
+        self.0 - rhs
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
+pub struct RecordedProbeActivationWarning {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    pub message: String,
+}
+
+impl From<&crate::probe_activation::ProbeActivationWarning> for RecordedProbeActivationWarning {
+    fn from(warning: &crate::probe_activation::ProbeActivationWarning) -> Self {
+        Self {
+            key: warning.key.map(|key| {
+                crate::probe_registry::probe_spec(key)
+                    .catalog_key
+                    .to_owned()
+            }),
+            message: warning.message.clone(),
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct SessionMetadataCore {
-    pub schema_version: u32,
+    pub schema_version: ArtifactSchemaVersion,
     pub run_name: Option<String>,
+    #[serde(default)]
+    pub scenario_name: Option<String>,
+    #[serde(default)]
+    pub scenario_hash: Option<String>,
+    #[serde(default)]
+    pub workload_label: Option<String>,
+    #[serde(default)]
+    pub route_label: Option<String>,
     pub started_at: RecordedTime,
     pub ended_at: RecordedTime,
     pub monotonic_start_ns: Option<u64>,
@@ -40,6 +124,18 @@ pub struct SessionMetadataCore {
     #[serde(default)]
     pub foreground_event_count: u64,
     #[serde(default)]
+    pub kms_flip_event_count: u64,
+    #[serde(default)]
+    pub drm_fence_event_count: u64,
+    #[serde(default)]
+    pub wayland_presentation_event_count: u64,
+    #[serde(default)]
+    pub dmabuf_event_count: u64,
+    #[serde(default)]
+    pub gpu_engine_sample_count: u64,
+    #[serde(default)]
+    pub display_path: Option<DisplayPathMetadata>,
+    #[serde(default)]
     pub foreground_source: Option<String>,
     #[serde(default)]
     pub final_foreground_pid: Option<u32>,
@@ -47,6 +143,18 @@ pub struct SessionMetadataCore {
     pub final_foreground_app_id: Option<String>,
     #[serde(default)]
     pub final_foreground_class: Option<String>,
+    #[serde(default)]
+    pub final_foreground_status: Option<String>,
+    #[serde(default)]
+    pub final_foreground_window_id: Option<String>,
+    #[serde(default)]
+    pub final_foreground_workspace: Option<String>,
+    #[serde(default)]
+    pub final_foreground_confidence: Option<f32>,
+    #[serde(default)]
+    pub final_foreground_stale_ms: Option<u64>,
+    #[serde(default)]
+    pub final_foreground_reason: Option<String>,
     #[serde(default)]
     pub interval_record_count: u64,
     #[serde(default)]
@@ -91,6 +199,10 @@ pub struct SessionMetadataCore {
     pub block_io_correlation_basis: String,
     #[serde(default = "super::event_types::default_block_io_correlation_confidence_string")]
     pub block_io_correlation_confidence: String,
+    #[serde(default, skip_serializing_if = "NativeCgroupFilterStatus::is_disabled")]
+    pub native_cgroup_filter: NativeCgroupFilterStatus,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub probe_activation_warnings: Vec<RecordedProbeActivationWarning>,
     #[serde(default)]
     pub drop_counters: DropCountersSnapshot,
     #[serde(default)]
@@ -115,6 +227,38 @@ pub struct SessionFile {
     pub top_spikes: Vec<SessionSpike>,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
+pub struct DisplayPathMetadata {
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub render_gpu: Option<String>,
+    #[serde(default)]
+    pub scanout_gpu: Option<String>,
+    #[serde(default)]
+    pub connector: Option<String>,
+    #[serde(default)]
+    pub render_card: Option<String>,
+    #[serde(default)]
+    pub render_render_node: Option<String>,
+    #[serde(default)]
+    pub render_driver: Option<String>,
+    #[serde(default)]
+    pub scanout_card: Option<String>,
+    #[serde(default)]
+    pub scanout_driver: Option<String>,
+    #[serde(default)]
+    pub is_cross_gpu: Option<bool>,
+    #[serde(default)]
+    pub session_type: Option<String>,
+    #[serde(default)]
+    pub compositor: Option<String>,
+    #[serde(default)]
+    pub topology_confidence: Option<String>,
+    #[serde(default)]
+    pub topology_warnings: Vec<String>,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct MetadataFile {
     #[serde(flatten)]
@@ -125,6 +269,14 @@ pub struct MetadataFile {
 pub struct RecordedConfig {
     pub manual_pids: Vec<u32>,
     pub tree_roots: Vec<u32>,
+    #[serde(default)]
+    pub scenario_name: Option<String>,
+    #[serde(default)]
+    pub scenario_hash: Option<String>,
+    #[serde(default)]
+    pub workload_label: Option<String>,
+    #[serde(default)]
+    pub route_label: Option<String>,
     #[serde(default)]
     pub cgroupv2: Option<PathBuf>,
     #[serde(default)]
@@ -172,6 +324,8 @@ pub struct RecordedConfig {
     pub max_tasks: usize,
     pub spike_threshold_ns: u64,
     #[serde(default)]
+    pub live_diagnosis_cluster_window_ms: u64,
+    #[serde(default)]
     pub alert_threshold_ns: Option<u64>,
     #[serde(default)]
     pub alert_webhook_url: Option<String>,
@@ -196,6 +350,44 @@ pub struct RecordedConfig {
     pub runtime_slices: bool,
     #[serde(default)]
     pub runtime_slices_max_tasks: usize,
+    #[serde(default)]
+    pub kms_timing: bool,
+    #[serde(default)]
+    pub kms_card: Option<String>,
+    #[serde(default)]
+    pub kms_connector: Option<String>,
+    #[serde(default)]
+    pub kms_crtc: Option<u32>,
+    #[serde(default)]
+    pub drm_fence_latency: bool,
+    #[serde(default)]
+    pub drm_fence_render_card: Option<String>,
+    #[serde(default)]
+    pub drm_fence_display_card: Option<String>,
+    #[serde(default)]
+    pub drm_fence_driver: Option<String>,
+    #[serde(default)]
+    pub wayland_presentation: bool,
+    #[serde(default)]
+    pub wayland_presentation_log: Option<PathBuf>,
+    #[serde(default)]
+    pub wayland_presentation_source: String,
+    #[serde(default)]
+    pub dmabuf_tracking: bool,
+    #[serde(default)]
+    pub dmabuf_log: Option<PathBuf>,
+    #[serde(default)]
+    pub gpu_engine_sampling: bool,
+    #[serde(default)]
+    pub display_topology: bool,
+    #[serde(default)]
+    pub display_path_label: Option<String>,
+    #[serde(default)]
+    pub display_render_gpu: Option<String>,
+    #[serde(default)]
+    pub display_scanout_gpu: Option<String>,
+    #[serde(default)]
+    pub display_connector: Option<String>,
     #[serde(default)]
     pub otlp_endpoint: Option<String>,
     #[serde(default)]
@@ -250,6 +442,8 @@ pub(crate) fn foreground_source_arg_label(source: ForegroundSource) -> String {
         ForegroundSource::Auto => "auto",
         ForegroundSource::Sway => "sway",
         ForegroundSource::Hyprland => "hyprland",
+        ForegroundSource::Gnome => "gnome",
+        ForegroundSource::Kde => "kde",
         ForegroundSource::X11 => "x11",
     }
     .to_owned()
@@ -260,6 +454,8 @@ pub(crate) fn foreground_source_label(source: crate::foreground::ForegroundSourc
         crate::foreground::ForegroundSource::Auto => "auto",
         crate::foreground::ForegroundSource::Sway => "sway",
         crate::foreground::ForegroundSource::Hyprland => "hyprland",
+        crate::foreground::ForegroundSource::Gnome => "gnome",
+        crate::foreground::ForegroundSource::Kde => "kde",
         crate::foreground::ForegroundSource::X11 => "x11",
         crate::foreground::ForegroundSource::Unsupported => "unsupported",
     }
@@ -287,7 +483,7 @@ pub struct SessionTask {
     pub removed_ms: Option<u64>,
     pub class: TaskClass,
     pub process_pid: Option<u32>,
-    pub process_comm: std::sync::Arc<str>,
+    pub process_comm: String,
     #[serde(default)]
     pub process_starttime_ticks: Option<u64>,
     #[serde(default)]
@@ -297,6 +493,8 @@ pub struct SessionTask {
     #[serde(default)]
     pub exe_ino: Option<u64>,
     pub comm: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allowed_cpus: Option<String>,
     pub latency: RecordedLatency,
     pub cpu: RecordedCpuSnapshot,
     pub top_spikes: Vec<RecordedSpike>,
@@ -358,7 +556,7 @@ pub struct RecordedCpuSnapshot {
 pub struct RecordedSpike {
     pub class: TaskClass,
     pub process_pid: Option<u32>,
-    pub process_comm: std::sync::Arc<str>,
+    pub process_comm: String,
     pub cpu: u32,
     #[serde(default)]
     pub wakeup_target_cpu: u32,
@@ -409,7 +607,7 @@ pub struct SessionSpike {
     pub active: bool,
     pub class: TaskClass,
     pub process_pid: Option<u32>,
-    pub process_comm: std::sync::Arc<str>,
+    pub process_comm: String,
     pub comm: String,
     pub cpu: u32,
     #[serde(default)]
@@ -456,190 +654,5 @@ pub struct SessionSpike {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::foreground::ForegroundEvent;
-
-    #[test]
-    fn foreground_event_serializes_without_title_by_default() {
-        let event = ForegroundEvent::new(
-            1_000,
-            crate::foreground::ForegroundSource::Sway,
-            crate::foreground::ForegroundProviderStatus::Available,
-            Some(4242),
-            Some("steam_app_379430".to_owned()),
-            Some("steam_app_379430".to_owned()),
-            Some("Private game or browser title".to_owned()),
-            false,
-            Some("7".to_owned()),
-            Some("gaming".to_owned()),
-            0.95,
-            "focused Sway node from swaymsg get_tree",
-        );
-
-        let value = serde_json::to_value(&event).unwrap();
-
-        assert_eq!(
-            value.get("elapsed_ms").and_then(serde_json::Value::as_u64),
-            Some(1_000)
-        );
-        assert_eq!(
-            value.get("source").and_then(serde_json::Value::as_str),
-            Some("sway")
-        );
-        assert_eq!(
-            value.get("status").and_then(serde_json::Value::as_str),
-            Some("available")
-        );
-        assert_eq!(
-            value.get("pid").and_then(serde_json::Value::as_u64),
-            Some(4242)
-        );
-        assert_eq!(
-            value.get("app_id").and_then(serde_json::Value::as_str),
-            Some("steam_app_379430")
-        );
-        assert_eq!(
-            value.get("class").and_then(serde_json::Value::as_str),
-            Some("steam_app_379430")
-        );
-        assert!(value.get("title").unwrap().is_null());
-        assert_eq!(
-            value.get("workspace").and_then(serde_json::Value::as_str),
-            Some("gaming")
-        );
-    }
-
-    #[test]
-    fn foreground_event_serializes_expected_fields() {
-        let event = ForegroundEvent {
-            elapsed_ms: 1234,
-            source: crate::foreground::ForegroundSource::Sway,
-            status: crate::foreground::ForegroundProviderStatus::Available,
-            pid: Some(4242),
-            app_id: Some("steam".to_owned()),
-            class: Some("Steam".to_owned()),
-            title: None,
-            window_id: Some("123".to_owned()),
-            workspace: Some("games".to_owned()),
-            confidence: 0.95,
-            reason: "focused Sway node from swaymsg get_tree".to_owned(),
-        };
-
-        let json = serde_json::to_string(&event).unwrap();
-
-        assert!(json.contains("\"elapsed_ms\":1234"));
-        assert!(json.contains("\"source\":\"sway\""));
-        assert!(json.contains("\"status\":\"available\""));
-        assert!(json.contains("\"pid\":4242"));
-        assert!(json.contains("\"app_id\":\"steam\""));
-        assert!(json.contains("\"class\":\"Steam\""));
-        assert!(json.contains("\"title\":null"));
-        assert!(json.contains("\"window_id\":\"123\""));
-        assert!(json.contains("\"workspace\":\"games\""));
-        assert!(json.contains("\"confidence\":0.95"));
-    }
-
-    #[test]
-    fn recorded_config_defaults_foreground_fields_for_old_sessions() {
-        let config = RecordedConfig::default();
-
-        assert!(!config.foreground_window);
-        assert_eq!(config.foreground_source, "");
-        assert_eq!(config.foreground_poll_ms, 0);
-        assert_eq!(config.foreground_max_stale_ms, 0);
-        assert!(!config.foreground_include_title);
-    }
-
-    #[test]
-    fn recorded_config_defaults_auto_focus_fields_for_old_sessions() {
-        let config = RecordedConfig::default();
-
-        assert!(!config.auto_focus);
-        assert!(!config.foreground_window);
-        assert_eq!(config.focus_source, "");
-        assert_eq!(config.foreground_source, "");
-        assert_eq!(config.foreground_poll_ms, 0);
-        assert_eq!(config.foreground_max_stale_ms, 0);
-        assert!(!config.foreground_include_title);
-        assert_eq!(config.auto_focus_poll_ms, 0);
-        assert_eq!(config.auto_focus_min_confidence, 0.0);
-        assert_eq!(config.auto_focus_switch_cooldown_ms, 0);
-        assert_eq!(config.auto_focus_switch_margin, 0.0);
-        assert_eq!(config.auto_focus_required_polls, 0);
-        assert_eq!(config.auto_focus_max_roots, 0);
-    }
-
-    #[test]
-    fn session_metadata_defaults_focus_fields_for_old_sessions() {
-        let core = SessionMetadataCore::default();
-
-        assert_eq!(core.focus_mode, None);
-        assert_eq!(core.final_focus_kind, None);
-        assert_eq!(core.focus_switch_count, 0);
-        assert_eq!(core.focus_event_count, 0);
-        assert_eq!(core.foreground_event_count, 0);
-        assert_eq!(core.foreground_source, None);
-        assert_eq!(core.final_foreground_pid, None);
-        assert_eq!(core.final_foreground_app_id, None);
-        assert_eq!(core.final_foreground_class, None);
-    }
-
-    #[test]
-    fn session_artifact_serializes_block_io_correlation_basis() {
-        let session = SessionFile {
-            core: SessionMetadataCore {
-                block_io_correlation_basis:
-                    crate::ebpf_loader::BlockIoCorrelationBasis::RequestPointer
-                        .as_str()
-                        .to_owned(),
-                block_io_correlation_confidence:
-                    crate::ebpf_loader::BlockIoCorrelationBasis::RequestPointer
-                        .confidence()
-                        .to_owned(),
-                ..SessionMetadataCore::default()
-            },
-            ..SessionFile::default()
-        };
-
-        let value = serde_json::to_value(&session.core).unwrap();
-
-        assert_eq!(
-            value
-                .get("block_io_correlation_basis")
-                .and_then(serde_json::Value::as_str),
-            Some("request-pointer")
-        );
-        assert_eq!(
-            value
-                .get("block_io_correlation_confidence")
-                .and_then(serde_json::Value::as_str),
-            Some("high")
-        );
-    }
-
-    #[test]
-    fn session_metadata_defaults_block_io_correlation_basis_for_old_sessions() {
-        let json = serde_json::json!({
-            "schema_version": 0,
-            "run_name": null,
-            "started_at": RecordedTime::default(),
-            "ended_at": RecordedTime::default(),
-            "monotonic_start_ns": null,
-            "monotonic_end_ns": null,
-            "duration_ms": 0,
-            "metadata": SystemMetadata::default(),
-            "target_pids_max": 0,
-            "active_target_pids_count": 0,
-            "active_expanded_tasks": [],
-            "stop_reason": "",
-            "config": RecordedConfig::default(),
-            "tasks": [],
-            "top_spikes": []
-        });
-
-        let session: SessionFile = serde_json::from_value(json).unwrap();
-
-        assert_eq!(session.core.block_io_correlation_basis, "dev+sector");
-    }
-}
+#[path = "session_files_tests.rs"]
+mod tests;

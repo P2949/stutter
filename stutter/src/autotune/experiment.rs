@@ -2,22 +2,10 @@
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
+pub use stutter_core::ids::ExperimentId;
 
-use super::candidate::CandidateAction;
+use super::planning::candidate::CandidateAction;
 use crate::{actions::RollbackToken, scorer::StutterScore};
-
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ExperimentId(pub String);
-
-impl ExperimentId {
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct WindowScore {
@@ -30,13 +18,51 @@ pub struct WindowScore {
 }
 
 impl WindowScore {
-    pub fn score_total(&self) -> u64 {
+    pub fn diagnostic_score_total(&self) -> u64 {
         self.score.total
+    }
+
+    pub fn score_per_sample(&self) -> Option<f64> {
+        per_sample(self.score.total, self.scored_samples)
+    }
+
+    pub fn over_1ms_per_sample(&self) -> Option<f64> {
+        per_sample(self.score.over_1ms, self.scored_samples)
+    }
+
+    pub fn over_2ms_per_sample(&self) -> Option<f64> {
+        per_sample(self.score.over_2ms, self.scored_samples)
+    }
+
+    pub fn over_5ms_per_sample(&self) -> Option<f64> {
+        per_sample(self.score.over_5ms, self.scored_samples)
     }
 
     pub fn duration_unix_nanos(&self) -> u128 {
         self.finished_unix_nanos
             .saturating_sub(self.started_unix_nanos)
+    }
+
+    pub fn duration_seconds(&self) -> Option<f64> {
+        let nanos = self.duration_unix_nanos();
+        if nanos == 0 {
+            None
+        } else {
+            Some(nanos as f64 / 1_000_000_000.0)
+        }
+    }
+
+    pub fn score_per_second(&self) -> Option<f64> {
+        self.duration_seconds()
+            .map(|duration_seconds| self.score.total as f64 / duration_seconds)
+    }
+}
+
+fn per_sample(value: u64, scored_samples: u64) -> Option<f64> {
+    if scored_samples == 0 {
+        None
+    } else {
+        Some(value as f64 / scored_samples as f64)
     }
 }
 
@@ -190,7 +216,7 @@ mod tests {
 
         assert_eq!(experiment.id.as_str(), "experiment-1");
         assert_eq!(experiment.phase, ExperimentPhase::BaselineCollecting);
-        assert_eq!(experiment.baseline_score.score_total(), 143);
+        assert_eq!(experiment.baseline_score.diagnostic_score_total(), 143);
         assert!(experiment.candidate_score.is_none());
         assert!(experiment.applied_unix_nanos.is_none());
         assert!(experiment.measure_started_unix_nanos.is_none());
@@ -223,7 +249,7 @@ mod tests {
             experiment
                 .candidate_score
                 .as_ref()
-                .map(WindowScore::score_total),
+                .map(WindowScore::diagnostic_score_total),
             Some(100)
         );
 
@@ -271,6 +297,78 @@ mod tests {
         };
 
         assert_eq!(score.duration_unix_nanos(), 250);
-        assert_eq!(score.score_total(), 99);
+        assert_eq!(score.diagnostic_score_total(), 99);
+    }
+
+    #[test]
+    fn window_score_reports_per_sample_rates() {
+        let mut score = window_score(200);
+        score.scored_samples = 100;
+        score.score.over_1ms = 25;
+        score.score.over_2ms = 10;
+        score.score.over_5ms = 4;
+
+        assert_eq!(score.score_per_sample(), Some(2.0));
+        assert_eq!(score.over_1ms_per_sample(), Some(0.25));
+        assert_eq!(score.over_2ms_per_sample(), Some(0.1));
+        assert_eq!(score.over_5ms_per_sample(), Some(0.04));
+    }
+
+    #[test]
+    fn window_score_rates_are_missing_when_denominator_is_zero() {
+        let mut score = window_score(200);
+        score.scored_samples = 0;
+
+        assert_eq!(score.score_per_sample(), None);
+        assert_eq!(score.over_1ms_per_sample(), None);
+        assert_eq!(score.over_2ms_per_sample(), None);
+        assert_eq!(score.over_5ms_per_sample(), None);
+    }
+
+    #[test]
+    fn window_score_reports_duration_seconds_and_score_rate() {
+        let score = WindowScore {
+            started_unix_nanos: 1_000_000_000,
+            finished_unix_nanos: 3_500_000_000,
+            interval_count: 2,
+            scored_samples: 40,
+            scored_task_count: 1,
+            score: StutterScore {
+                total: 250,
+                ..StutterScore::default()
+            },
+        };
+
+        assert_eq!(score.duration_seconds(), Some(2.5));
+        assert_eq!(score.score_per_second(), Some(100.0));
+    }
+
+    #[test]
+    fn window_score_duration_rate_is_missing_for_zero_duration() {
+        let score = WindowScore {
+            started_unix_nanos: 500,
+            finished_unix_nanos: 500,
+            interval_count: 2,
+            scored_samples: 40,
+            scored_task_count: 1,
+            score: StutterScore {
+                total: 250,
+                ..StutterScore::default()
+            },
+        };
+
+        assert_eq!(score.duration_seconds(), None);
+        assert_eq!(score.score_per_second(), None);
+    }
+
+    #[test]
+    fn autotune_experiment_id_uses_shared_non_empty_validation() {
+        assert!(ExperimentId::try_new("").is_err());
+        assert!(ExperimentId::try_new("   ").is_err());
+
+        let experiment_id =
+            ExperimentId::try_new("experiment-1").expect("non-empty experiment id should pass");
+
+        assert_eq!(experiment_id.as_str(), "experiment-1");
     }
 }

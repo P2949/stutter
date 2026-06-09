@@ -135,10 +135,10 @@ pub fn render_autotune_prometheus_metrics(metrics: &AutotunePrometheusMetrics) -
             "# HELP stutter_autotune_active_experiment Whether autotune currently has an active applying/applied/measuring experiment according to history or controller journal.\n",
             "# TYPE stutter_autotune_active_experiment gauge\n",
             "stutter_autotune_active_experiment {active_experiment}\n",
-            "# HELP stutter_autotune_last_score Last observed autotune score_total. Lower is better.\n",
+            "# HELP stutter_autotune_last_score Last observed autotune diagnostic_raw_score_total. Lower is better.\n",
             "# TYPE stutter_autotune_last_score gauge\n",
             "stutter_autotune_last_score {last_score}\n",
-            "# HELP stutter_autotune_candidate_score Last candidate autotune score_total. Lower is better.\n",
+            "# HELP stutter_autotune_candidate_score Last candidate autotune diagnostic_raw_score_total. Lower is better.\n",
             "# TYPE stutter_autotune_candidate_score gauge\n",
             "stutter_autotune_candidate_score {candidate_score}\n",
             "# HELP stutter_autotune_rollbacks_total Total autotune rollback events recorded in autotune history.\n",
@@ -171,8 +171,8 @@ pub fn render_autotune_prometheus_metrics(metrics: &AutotunePrometheusMetrics) -
 
 fn latest_score(events: &[AutotuneHistoryEvent]) -> Option<u64> {
     for event in events.iter().rev() {
-        if event.observation_summary.score_total > 0 {
-            return Some(event.observation_summary.score_total);
+        if event.observation_summary.diagnostic_raw_score_total > 0 {
+            return Some(event.observation_summary.diagnostic_raw_score_total);
         }
 
         if let Some(score) = event.score_after.as_ref() {
@@ -193,8 +193,10 @@ fn latest_candidate_score(events: &[AutotuneHistoryEvent]) -> Option<u64> {
             return Some(score.score.total);
         }
 
-        if is_candidate_phase(event.phase) && event.observation_summary.score_total > 0 {
-            return Some(event.observation_summary.score_total);
+        if is_candidate_phase(event.phase)
+            && event.observation_summary.diagnostic_raw_score_total > 0
+        {
+            return Some(event.observation_summary.diagnostic_raw_score_total);
         }
     }
 
@@ -231,7 +233,8 @@ fn count_unique_applied_actions(events: &[AutotuneHistoryEvent]) -> u64 {
             unique.insert(
                 event
                     .action_id
-                    .clone()
+                    .as_ref()
+                    .map(|action_id| action_id.as_str().to_owned())
                     .unwrap_or_else(|| format!("event:{}", event.unix_nanos)),
             );
         }
@@ -252,7 +255,7 @@ fn is_applied_event(event: &AutotuneHistoryEvent) -> bool {
 
 fn is_blocked_event(event: &AutotuneHistoryEvent) -> bool {
     let decision = event.decision.decision.to_ascii_lowercase();
-    let reason = event.reason.to_ascii_lowercase();
+    let reason = event.reason.clone().to_ascii_lowercase();
 
     if decision.contains("entercooldown")
         || decision.contains("enter_cooldown")
@@ -359,7 +362,7 @@ mod tests {
             scored_task_count: 2,
             interval_count: 10,
             scored_samples: 100,
-            score_total: total,
+            diagnostic_raw_score_total: total,
             over_1ms: 0,
             over_2ms: 0,
             over_5ms: 0,
@@ -405,13 +408,15 @@ mod tests {
                 decision: decision.to_owned(),
                 candidate_name: Some("game-main-suggested".to_owned()),
                 action_kind: Some("cpu_affinity_profile".to_owned()),
+                safety_class: Some(crate::actions::SafetyClass::ReversibleLowRisk),
                 eligible: true,
                 rollback_policy: "rollback-on-exit".to_owned(),
             },
-            experiment_id: Some("experiment-1".to_owned()),
-            action_id: Some("cpu-affinity-profile:game-main-suggested".to_owned()),
+            experiment_id: Some("experiment-1".into()),
+            action_id: Some("cpu-affinity-profile:game-main-suggested".into()),
             score_before: Some(score(412)),
             score_after: Some(score(330)),
+            planner: None,
             rollback_performed,
             reason: reason.to_owned(),
         }
@@ -525,8 +530,8 @@ mod tests {
 
         write_controller_journal_applied(
             &journal_path,
-            "experiment-1",
-            "cpu-affinity-profile:game-main-suggested",
+            crate::autotune::experiment::ExperimentId::try_new("experiment-1").unwrap(),
+            crate::actions::ActionId::try_new("cpu-affinity-profile:game-main-suggested").unwrap(),
             RollbackToken::CpuAffinityRestoreFile {
                 path: dir.join("restore.json"),
                 affected_tasks: 31,

@@ -1,1 +1,15 @@
-{"name":"media_playback_compile","profile":"observe-only","duration_seconds":60,"expect_actions":false,"expect_rollbacks":false,"forbid_high_risk_apply":true}
+{
+  "name": "media_playback_compile",
+  "mode": "suggest",
+  "ticks": [
+    { "kind": "focus_game", "confidence": 0.72 },
+    { "kind": "target_present" },
+    { "kind": "interval", "diagnostic_score_total": 180, "samples": 100 },
+    { "kind": "focus_cleared", "reason": "media playback foreground" }
+  ],
+  "assertions": [
+    "one_active_experiment_maximum",
+    "no_high_risk_autonomous_apply",
+    "rollback_token_before_apply"
+  ]
+}

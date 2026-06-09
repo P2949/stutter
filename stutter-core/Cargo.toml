@@ -1,0 +1,17 @@
+[package]
+name = "stutter-core"
+version = "0.1.0"
+edition.workspace = true
+description = "Core data structures and analysis primitives for stutter."
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[lib]
+path = "src/lib.rs"
