@@ -35,7 +35,6 @@ fn splitmix64(state: &mut u64) -> u64 {
     z ^ (z >> 31)
 }
 
-#[allow(clippy::collapsible_if)]
 pub(crate) fn candidate_order_for_iteration_with_strategy(
     profile_count: usize,
     iteration: u32,
@@ -46,17 +45,22 @@ pub(crate) fn candidate_order_for_iteration_with_strategy(
     }
 
     if let Some(rest) = strategy.strip_prefix("seed:") {
-        if let Ok(seed) = rest.parse::<u64>() {
-            let mut order: Vec<usize> = (0..profile_count).collect();
-            if profile_count <= 1 {
+        match rest.parse::<u64>() {
+            Ok(seed) => {
+                let mut order: Vec<usize> = (0..profile_count).collect();
+                if profile_count <= 1 {
+                    return order;
+                }
+                let mut state = seed.wrapping_add(iteration as u64);
+                for i in (1..profile_count).rev() {
+                    let r = (splitmix64(&mut state) as usize) % (i + 1);
+                    order.swap(i, r);
+                }
                 return order;
             }
-            let mut state = seed.wrapping_add(iteration as u64);
-            for i in (1..profile_count).rev() {
-                let r = (splitmix64(&mut state) as usize) % (i + 1);
-                order.swap(i, r);
+            Err(_) => {
+                // fallthrough to default behavior
             }
-            return order;
         }
     }
 
