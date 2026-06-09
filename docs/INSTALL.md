@@ -24,6 +24,13 @@ RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo build -p stutter
 RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo build --release -p stutter
 ```
 
+Note: eBPF toolchain output is quieted by default to reduce build noise. To see
+the full eBPF build and linker logs, set `STUTTER_EBPF_VERBOSE=1` in your
+environment when building:
+
+```bash
+STUTTER_EBPF_VERBOSE=1 RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo build -p stutter
+```
 ## Install Local
 
 ```bash
