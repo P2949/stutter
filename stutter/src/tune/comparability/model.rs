@@ -295,7 +295,6 @@ pub fn tune_comparability_warnings(
     warnings
 }
 
-#[allow(clippy::collapsible_if)]
 pub fn tune_candidate_order_warnings(
     candidate_order: &[TuneIterationOrder],
 ) -> Vec<TuneComparabilityWarning> {
@@ -313,19 +312,22 @@ pub fn tune_candidate_order_warnings(
     }
 
     // Check if every iteration used the exact same order.
-    if let Some(first) = candidate_order.first() {
-        if candidate_order
-            .iter()
-            .all(|order| order.profiles.as_slice() == first.profiles.as_slice())
-        {
-            warnings.push(TuneComparabilityWarning {
-                profile: None,
-                kind: CANDIDATE_ORDER_NOT_COUNTERBALANCED_KIND.to_owned(),
-                message: "all iterations used the same candidate order; profile effect may be confounded with order effect".to_owned(),
-                severity: TuneComparabilitySeverity::Warning,
-            });
-            return warnings;
-        }
+    if candidate_order
+        .first()
+        .map(|first| {
+            candidate_order
+                .iter()
+                .all(|order| order.profiles.as_slice() == first.profiles.as_slice())
+        })
+        .unwrap_or(false)
+    {
+        warnings.push(TuneComparabilityWarning {
+            profile: None,
+            kind: CANDIDATE_ORDER_NOT_COUNTERBALANCED_KIND.to_owned(),
+            message: "all iterations used the same candidate order; profile effect may be confounded with order effect".to_owned(),
+            severity: TuneComparabilitySeverity::Warning,
+        });
+        return warnings;
     }
 
     // Count how often each profile appears in the first position.
@@ -389,20 +391,8 @@ pub fn ranking_confidence_after_comparability_warnings(
     }
 }
 
-#[allow(dead_code)]
-fn two_profile_candidate_order_is_fixed(candidate_order: &[TuneIterationOrder]) -> bool {
-    let Some(first) = candidate_order.first() else {
-        return false;
-    };
-    if candidate_order.len() < 2 || first.profiles.len() != 2 {
-        return false;
-    }
-
-    let first_profiles = first.profiles.as_slice();
-    candidate_order
-        .iter()
-        .all(|order| order.profiles.len() == 2 && order.profiles.as_slice() == first_profiles)
-}
+// helper removed: two_profile_candidate_order_is_fixed was unused and caused
+// `dead_code` lint failures under CI's `-D warnings` policy.
 
 fn push_median_ratio_warning<'a>(
     warnings: &mut Vec<TuneComparabilityWarning>,
