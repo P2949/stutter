@@ -23,9 +23,9 @@ Regards,
 
 Links to include:
 
-- Repository: https://github.com/P2949/stutter/tree/experimental
+- Repository: https://github.com/P2949/stutter/tree/main
 - Release assets: https://github.com/P2949/stutter/releases/tag/fyp-report-final
 - Supervisor entry point:
-  https://github.com/P2949/stutter/blob/experimental/SUPERVISOR_README.md
+  https://github.com/P2949/stutter/blob/main/SUPERVISOR_README.md
 
 Attach only `FYP_SUPERVISOR_PITCH.pdf` for first contact unless asked for more.

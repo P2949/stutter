@@ -34,6 +34,10 @@ Post-refresh checksum correction:
 - `evidence-bundle/MANIFEST.sha256` was regenerated on 2026-06-09 to correct a README.md mismatch.
 - Verification performed: `cd evidence-bundle && sha256sum -c MANIFEST.sha256` — all listed files reported OK.
 
+Follow-up commit note:
+
+- The current follow-up handoff commit changes only supervisor-facing links, script file modes, and release packaging metadata. The evidence bundle and release checksums were re-verified after those changes.
+
 Next steps (completed):
 
 - Final docs sweep and release notes committed.

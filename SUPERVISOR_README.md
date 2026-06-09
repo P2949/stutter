@@ -1,6 +1,6 @@
 # Stutter Supervisor Readme
 
-[![CI](https://github.com/P2949/stutter/actions/workflows/ci.yml/badge.svg?branch=experimental)](https://github.com/P2949/stutter/actions/workflows/ci.yml?query=branch%3Aexperimental)
+[![CI](https://github.com/P2949/stutter/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/P2949/stutter/actions/workflows/ci.yml?query=branch%3Amain)
 
 This is the curated entry point for supervisor review. `stutter` is a Rust/eBPF
 prototype for evidence-based Linux/Proton frame-pacing analysis.
