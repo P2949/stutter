@@ -10,6 +10,9 @@ Run the included script:
 scripts/demo/supervisor_offline_demo.sh
 ```
 
+This checks the curated evidence bundle, fixture hygiene, dependency policy, and
+CLI/reporting surface without requiring a live Proton workload.
+
 What it does:
 
 - Runs `xtask fixture-check` to validate test fixtures.

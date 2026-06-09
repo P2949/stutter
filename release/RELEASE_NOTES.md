@@ -12,6 +12,7 @@ Release assets:
 - `ASSETS_SHA256SUMS` — checksums for individual release assets
 - `SHA256SUMS` — checksum for the assembled release archive
 - `stutter-supervisor-release-fyp-report-final-v3.tar.gz` — assembled archive
+- `AI_DISCLOSURE.md` — AI coding-assistant disclosure for supervisor review.
 
 The assembled archive contains the PDFs, the evidence bundle,
 `ASSETS_SHA256SUMS`, and these release notes. `SHA256SUMS` is a companion
