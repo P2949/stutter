@@ -17,7 +17,7 @@ use super::{
     model::{
         TuneCandidateSummary, TuneControl, TuneMeasureResult, TuneProfileRefreshInput, TuneSummary,
     },
-    order::candidate_order_for_iteration,
+    
     profile_plan::{tune_profile_plan_summary, write_profile_plan_artifacts},
     recommendation, recommendation_html, retain_after_warmup, unix_nanos_now,
 };
@@ -40,6 +40,7 @@ pub(super) struct TuneCollectionInput<'a> {
     pub(super) workload_label: Option<String>,
     pub(super) route_label: Option<String>,
     pub(super) tune_output_dir: &'a Path,
+    pub(super) order_strategy: &'a str,
 }
 
 pub(super) async fn collect_tune_results(
@@ -71,7 +72,11 @@ pub(super) async fn collect_tune_results(
             println!("tune iteration={} status=Starting", iteration);
         }
 
-        let order = candidate_order_for_iteration(profiles.len(), iteration);
+        let order = super::order::candidate_order_for_iteration_with_strategy(
+            profiles.len(),
+            iteration,
+            input.order_strategy,
+        );
         for profile_idx in order {
             let profile = &profiles[profile_idx];
             println!(

@@ -275,6 +275,13 @@ pub(super) struct TuneArgs {
 
     #[arg(long = "hwmon", id = "hwmon")]
     pub(super) hwmon: bool,
+    #[arg(
+        long = "order",
+        default_value_t = String::from("alternating"),
+        value_name = "STR",
+        help = "Candidate order strategy: alternating, fixed, seed:<number>"
+    )]
+    pub(super) order_strategy: String,
 }
 
 #[derive(Args, Debug, Clone)]

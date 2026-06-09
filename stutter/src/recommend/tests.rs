@@ -326,6 +326,9 @@ fn write_tune_with_candidates(
         } else {
             "best".to_owned()
         },
+        order_strategy: "historical".to_owned(),
+        order_balanced: true,
+        order_balance_warning: None,
         candidate_order: vec![TuneIterationOrder {
             iteration: 1,
             profiles: vec!["best".to_owned(), "other".to_owned()],

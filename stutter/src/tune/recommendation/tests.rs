@@ -116,6 +116,9 @@ fn summary(confidence: RankingConfidence) -> TuneSummary {
         warmup_seconds: 30,
         restore_policy: "restore-after-each".to_owned(),
         best_profile: "best".to_owned(),
+        order_strategy: "historical".to_owned(),
+        order_balanced: true,
+        order_balance_warning: None,
         candidate_order: vec![TuneIterationOrder {
             iteration: 1,
             profiles: vec![
