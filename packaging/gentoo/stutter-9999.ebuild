@@ -17,18 +17,20 @@ EAPI=8
 
 inherit cargo systemd
 
-DESCRIPTION="Scheduler latency recorder and conservative autotune daemon"
+DESCRIPTION="Linux scheduler latency profiler and tuning-validation prototype"
 HOMEPAGE="https://github.com/P2949/stutter"
 EGIT_REPO_URI="https://github.com/P2949/stutter.git"
-EGIT_BRANCH="review/big-daemon-packaging-work"
+EGIT_BRANCH="main"
 
 if [[ ${PV} == 9999 ]]; then
 	inherit git-r3
 fi
 
-# Packaging skeleton: userspace crates are MIT OR Apache-2.0; eBPF crate is
-# MIT OR GPL-2.0-only. Final license expression should be revisited before
-# production packaging.
+# Packaging skeleton only; not part of the proposed assessed FYP scope.
+# The source workspace is multi-licensed: userspace crates are MIT OR Apache-2.0;
+# stutter-ebpf is MIT OR GPL-2.0-only. This skeleton declares MIT because MIT is
+# available across the packaged workspace components. Revisit before production
+# packaging.
 LICENSE="MIT"
 SLOT="0"
 KEYWORDS=""

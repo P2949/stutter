@@ -1,156 +1,22 @@
-KCD1 recommendation refresh build/check record
-Date: 2026-06-06
-Repository: <repo>
-Branch: experimental
+KCD1 curated evidence bundle validation record
 
-=== git status --short ===
-The working tree was not clean during this refresh because this turn updated the recommendation logic, regenerated KCD1 artifacts, refreshed report wording, and added the curated evidence artifacts.
+Date: 2026-06-09
+Branch: main
+Handoff target: fyp-report-final-v2
 
-Modified:
-- Cargo.lock
-- reports/fyp-report/FYP_REPORT.md
-- reports/kcd1-case-study/CASE_STUDY_SUMMARY.md
-- reports/kcd1-case-study/KCD1_EXPERIMENT_REPORT.md
-- reports/kcd1-case-study/setup/build-check.txt
-- reports/kcd1-case-study/tune/kcd1-affinity-02/tuning_recommendation.html
-- reports/kcd1-case-study/tune/kcd1-affinity-02/tuning_recommendation.json
-- reports/kcd1-case-study/tune/kcd1-affinity-02/tuning_recommendation.md
-- stutter/src/api.rs
-- stutter/src/architecture_tests/allowlists.rs
-- stutter/src/tune/recommendation.rs
-- stutter/src/tune/recommendation/tests.rs
-- stutter/src/tune/recommendation_formal.rs
-- stutter/src/tune/uncertainty_html.rs
-- xtask/Cargo.toml
-- xtask/src/main.rs
+Checks to be verified before release:
+- xtask ci
+- xtask fixture-check
+- xtask dependency-hygiene
+- evidence-bundle MANIFEST.sha256
+- release SHA256SUMS
 
-Added:
-- evidence-bundle/
-- reports/kcd1-case-study/HYPOTHESIS.md
-- stutter/src/tune/recommendation/tests/self_comparison.rs
-- xtask/src/refresh_tune_recommendation.rs
+Notes:
+This file belongs to the small supervisor-review evidence subset. The full raw
+KCD1 archive is retained under reports/kcd1-case-study/ for audit and
+reproduction, but it is not required for first supervisor review.
 
-=== artifact refresh ===
-Command:
-RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -p xtask -- refresh-tune-recommendation --summary reports/kcd1-case-study/tune/kcd1-affinity-02/tuning_summary.json --baseline-profile baseline-online --out-dir reports/kcd1-case-study/tune/kcd1-affinity-02
-
-Result:
-passed
-
-Expected regenerated recommendation properties:
-- best_profile = baseline-online
-- baseline_profile = baseline-online
-- compared_against = best-non-baseline
-- comparison_metrics.other_profile = kcd1-game-on-1-5-7-11-gamescope-on-0-6
-- comparison_metrics.score_delta_abs = -17273
-
-=== cargo fmt check ===
-Command:
-RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo fmt --all -- --check
-
-Result:
-passed
-
-=== focused recommendation tests ===
-Command:
-RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo test -p stutter tune::recommendation
-
-Result:
-passed
-
-Summary:
-- 16 recommendation tests passed before the self-comparison tests were split.
-- After the split, the full test run included the moved self-comparison tests:
-  - best_baseline_compares_against_best_non_baseline_candidate
-  - best_tuned_profile_still_compares_against_baseline
-  - best_baseline_without_other_valid_candidate_has_no_comparison_target
-  - recommendation_never_compares_best_profile_against_itself
-
-=== architecture tests ===
-Command:
-RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo test -p stutter architecture_tests
-
-Result:
-passed
-
-Summary:
-- 120 architecture tests passed.
-- The new public API facade was added to the intentional public-module list.
-- The recommendation self-comparison tests were split into a child module to keep test file size under the local architecture threshold.
-
-=== cargo test ===
-Command:
-RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo test --all
-
-Result:
-passed
-
-Summary:
-- stutter library: 2654 passed, 0 failed, 5 ignored
-- stutter integration tests: 10 passed, 0 failed
-- stutter-common: 1 passed
-- stutter-config: 30 passed
-- stutter-core: 24 passed
-- stutter-report: 30 unit tests and 4 golden tests passed
-- xtask: 17 passed
-- doc tests: passed for all workspace crates with doc tests
-
-=== cargo clippy ===
-Command:
-RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo clippy --all-targets -- -D warnings
-
-Result:
-passed
-
-=== fixture-check ===
-Command:
-RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -p xtask -- fixture-check
-
-Result:
-passed
-
-Summary:
-- real fixtures: 20
-- synthetic fixtures: 19
-- distinct sanitized capture ids: 20
-- missing: none
-- maturity warnings: none
-- privacy warnings: none
-- validation corpus test stage: 44 passed, 0 failed, 2 ignored
-
-=== unprivileged eBPF smoke ===
-Command:
-RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -p xtask -- ebpf-smoke
-
-Result:
-passed
-
-Summary:
-- cargo OK
-- bpf-linker OK
-- rustc OK
-- pinned nightly toolchain OK
-- cargo build -p stutter passed
-- non-privileged eBPF build smoke passed
-
-=== privileged eBPF smoke ===
-Not run. The privileged loader smoke requires doas/sudo credentials and was intentionally left manual:
-
-doas env \
-  HOME="$HOME" \
-  CARGO_HOME="$HOME/.cargo" \
-  RUSTUP_HOME="$HOME/.rustup" \
-  PATH="$PATH" \
-  RUSTUP_TOOLCHAIN=nightly-2026-06-06 \
-  cargo run -p xtask -- privileged-ebpf-smoke
-
-=== PDF regeneration ===
-Not run. The Markdown report sources changed, but no local PDF generator was available in this environment.
-
-Checked tools:
-- pandoc: not found
-- typst: not found
-- weasyprint: not found
-- wkhtmltopdf: not found
-- tectonic/pdflatex/xelatex: not found
-- chromium/firefox/playwright: not found
+The KCD1 result remains preliminary: the archived A/B run was paired but not
+counterbalanced. The proposed FYP methodology corrects this by requiring a
+counterbalanced repeated A/B protocol before treating a tuning result as strong
+causal evidence.

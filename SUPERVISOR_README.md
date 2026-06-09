@@ -14,7 +14,20 @@ counterbalanced because the online baseline was measured before the tuned profil
 in every iteration, so the proposed FYP includes a corrected counterbalanced
 protocol as future assessed work.
 
+**Current handoff status, 2026-06-09:** first-contact materials are prepared for
+the `fyp-report-final-v2` supervisor release. The full raw KCD1 archive is kept
+for audit/reproduction, but first review should use the pitch, scope note, KCD1
+executive summary, AI disclosure, and curated evidence bundle.
+
 ## Read First
+
+For a 5-minute first review:
+
+1. Read `FYP_SUPERVISOR_PITCH.pdf`.
+2. Skim `reports/fyp-report/PRE_FYP_SCOPE_NOTE.md`.
+3. Read the executive summary of `reports/kcd1-case-study/KCD1_EXPERIMENT_REPORT.md`.
+4. Check `reports/fyp-report/AI_DISCLOSURE.md`.
+5. Ignore the full raw `reports/` archive unless audit artifacts are requested.
 
 - [FYP supervisor pitch](reports/fyp-report/FYP_SUPERVISOR_PITCH.md) - concise
   project motivation, current prototype status, preliminary KCD1 result, and
@@ -27,7 +40,7 @@ protocol as future assessed work.
   polished preliminary real-game case study.
 - [Curated KCD1 evidence bundle](evidence-bundle/README.md) - small artifact set
   for inspecting the non-validation result without opening the full raw archive.
-- [Supervisor-review release assets](https://github.com/P2949/stutter/releases/tag/fyp-report-final) -
+- [Supervisor-review release assets](https://github.com/P2949/stutter/releases/tag/fyp-report-final-v2) -
   PDFs and bundle assets for first contact.
 
 ## Proposed Assessment Boundary

@@ -1,27 +1,32 @@
 # Supervisor release notes
 
-Version: supervisor-hand-off (experimental)
-Date: 2026-06-09T12:31:36Z
-Commit: 8745c722b3e0939d7e3f06da1de0b17db65097b9
+Version: supervisor-hand-off
+Release tag: `fyp-report-final-v2`
+Date: 2026-06-09
 
 Contents:
 
 - `FYP_SUPERVISOR_PITCH.pdf` — supervisor pitch PDF
 - `KCD1_EXPERIMENT_REPORT.pdf` — KCD1 case-study report
-- `evidence-bundle.tar.gz` — curated evidence bundle (small)
-- `stutter-supervisor-release-8745c722b3e0.tar.gz` — assembled archive
-- `SHA256SUMS` — checksums for the assembled archive
+- `evidence-bundle.tar.gz` — curated KCD1 evidence bundle
+- `ASSETS_SHA256SUMS` — checksums for individual release assets
+- `SHA256SUMS` — checksum for the assembled release archive
 
 Notes:
 
-- Full validation (`xtask ci`) completed and passed on the above commit. All tests and architecture checks passed locally.
-- eBPF build noise suppressed by the `scripts/wrappers/bpf-linker` wrapper; set `STUTTER_EBPF_VERBOSE=1` to re-enable verbose linker output during builds.
+- This release is intended for first supervisor contact.
+- The proposed assessed FYP scope is CPU-affinity/process-placement validation,
+  profile explainability, counterbalanced repeated A/B benchmarking,
+  uncertainty-aware reporting, and conservative recommendation verdicts.
+- The KCD1 result is preliminary non-validation evidence, not a universal claim
+  about KCD1 or CPU affinity.
+- The full raw archive remains in the repository for audit/reproduction, but the
+  lightweight release assets are the intended first-review materials.
 
 To verify after extraction:
 
 ```bash
-cd stutter-release-assets
-sha256sum -c SHA256SUMS
+sha256sum -c ASSETS_SHA256SUMS
 tar -xzf evidence-bundle.tar.gz
 cd evidence-bundle
 sha256sum -c MANIFEST.sha256

@@ -1,5 +1,3 @@
-# Supervisor Email Draft
-
 Subject: FYP supervision query: Linux/Proton frame-pacing validation
 
 Dear <lecturer>,
@@ -15,17 +13,16 @@ The case study is intentionally caveated: the archived A/B run was paired but
 not counterbalanced, so the FYP proposal includes a corrected counterbalanced
 validation protocol rather than claiming a tuning win.
 
+I am not asking you to review the full repository at this stage; the attached
+pitch and supervisor readme are the intended first-read.
+
 Would you be open to discussing whether this is an appropriate FYP scope, and
 whether it should be narrowed further?
 
 Regards,
 <name>
 
-Links to include:
-
+Links:
 - Repository: https://github.com/P2949/stutter/tree/main
-- Release assets: https://github.com/P2949/stutter/releases/tag/fyp-report-final
-- Supervisor entry point:
-  https://github.com/P2949/stutter/blob/main/SUPERVISOR_README.md
-
-Attach only `FYP_SUPERVISOR_PITCH.pdf` for first contact unless asked for more.
+- Supervisor entry point: https://github.com/P2949/stutter/blob/main/SUPERVISOR_README.md
+- Release assets: https://github.com/P2949/stutter/releases/tag/fyp-report-final-v2

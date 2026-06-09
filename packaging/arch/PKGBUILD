@@ -5,8 +5,11 @@ pkgrel=1
 pkgdesc="Scheduler latency recorder and conservative autotune daemon"
 arch=('x86_64')
 url="https://github.com/P2949/stutter"
-# Packaging skeleton: userspace crates are MIT OR Apache-2.0; eBPF crate is
-# MIT OR GPL-2.0-only. Keep this conservative until production packaging is done.
+# Packaging skeleton only; not part of the proposed assessed FYP scope.
+# The source workspace is multi-licensed: userspace crates are MIT OR Apache-2.0;
+# stutter-ebpf is MIT OR GPL-2.0-only. This skeleton declares MIT because MIT is
+# available across the packaged workspace components. Revisit before production
+# packaging.
 license=('MIT')
 depends=('glibc')
 makedepends=('git' 'rustup' 'clang' 'llvm')
