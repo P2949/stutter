@@ -28,7 +28,6 @@ For a 5-minute first review:
 2. Skim `reports/fyp-report/PRE_FYP_SCOPE_NOTE.md`.
 3. Read the executive summary of `reports/kcd1-case-study/KCD1_EXPERIMENT_REPORT.md`.
 4. Check `reports/fyp-report/AI_DISCLOSURE.md`.
-5. Ignore the full raw `reports/` archive unless audit artifacts are requested.
 
 - [FYP supervisor pitch](reports/fyp-report/FYP_SUPERVISOR_PITCH.md) - concise
   project motivation, current prototype status, preliminary KCD1 result, and
