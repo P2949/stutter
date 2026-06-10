@@ -1,9 +1,9 @@
 # Supervisor handoff validation
 
 Date: 2026-06-09
-Validated handoff target: `fyp-report-final-v3`
+Validated handoff target: `fyp-report-final-v4`
 
-Validation commands verified for `fyp-report-final-v3`:
+Validation commands verified for `fyp-report-final-v4`:
 
 - `RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo fmt --all -- --check`
 - `RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -p xtask -- ci`

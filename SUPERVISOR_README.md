@@ -15,7 +15,7 @@ in every iteration, so the proposed FYP includes a corrected counterbalanced
 protocol as future assessed work.
 
 **Current handoff status, 2026-06-09:** first-contact materials are prepared for
-the `fyp-report-final-v3` supervisor release. The full raw KCD1 archive is kept
+the `fyp-report-final-v4` supervisor release. The full raw KCD1 archive is kept
 for audit/reproduction, but first review should use the pitch, scope note, KCD1
 executive summary, AI disclosure, and curated evidence bundle.
 
@@ -24,7 +24,7 @@ executive summary, AI disclosure, and curated evidence bundle.
 For a 5-minute first review:
 
 1. Download and read `FYP_SUPERVISOR_PITCH.pdf` from the
-   [fyp-report-final-v3 release](https://github.com/P2949/stutter/releases/tag/fyp-report-final-v3).
+   [fyp-report-final-v4 release](https://github.com/P2949/stutter/releases/tag/fyp-report-final-v4).
 2. Skim `reports/fyp-report/PRE_FYP_SCOPE_NOTE.md`.
 3. Read the executive summary of `reports/kcd1-case-study/KCD1_EXPERIMENT_REPORT.md`.
 4. Check `reports/fyp-report/AI_DISCLOSURE.md`.
@@ -40,7 +40,7 @@ For a 5-minute first review:
   polished preliminary real-game case study.
 - [Curated KCD1 evidence bundle](evidence-bundle/README.md) - small artifact set
   for inspecting the non-validation result without opening the full raw archive.
-- [Supervisor-review release assets](https://github.com/P2949/stutter/releases/tag/fyp-report-final-v3) -
+- [Supervisor-review release assets](https://github.com/P2949/stutter/releases/tag/fyp-report-final-v4) -
   PDFs and bundle assets for first contact.
 
 ## Proposed Assessment Boundary
@@ -70,21 +70,24 @@ unless a supervisor explicitly chooses to bring one into scope.
 
 ## Large Artifacts
 
-The full repository contains a large raw evidence archive. For first review, use
-the pitch, scope note, KCD1 report, and curated evidence bundle; cloning the full
-raw archive is not required. The 2026-06-07 size audit found `reports/` at
-1017M, `evidence-bundle/` at 96K, and `stutter/` at 11M.
+The full raw KCD1 archive is no longer tracked in Git. It is published as a
+GitHub Release asset for the `fyp-report-final-v4` handoff tag.
+
+For first review, use the pitch, scope note, KCD1 report, AI disclosure, 
+and curated evidence bundle. The raw archive should only be downloaded if 
+audit or reproduction artifacts are requested.
 
 Final decision for supervisor handoff (2026-06-09):
 
-- Retain the full raw archive in the development branch for audit and reproduction.
-- For initial supervisor contact prefer the lightweight release archive (`FYP_SUPERVISOR_PITCH.pdf`, `KCD1_EXPERIMENT_REPORT.pdf`, `evidence-bundle.tar.gz`) which is checksum-verified.
-- Long-term archival (Git LFS or external storage) will be arranged after supervisor guidance.
-- if cloning the full repo locally, use `git clone --depth=1 --filter=blob:limit=1m https://github.com/P2949/stutter.git` to avoid downloading the full history of large artifacts.
+- Keep the normal repository checkout lightweight.
+- Retain the curated `evidence-bundle/` in Git.
+- Publish the full raw KCD1 archive as
+  `raw-kcd1-case-study-fyp-report-final-v4.tar.zst` on the GitHub release.
+- Keep checksums and a contents listing beside the raw archive release asset.
 
 ## Current Validation Checks
 
-Supervisor handoff target: `fyp-report-final-v3`.
+Supervisor handoff target: `fyp-report-final-v4`.
 
 The exact validated commit SHA is recorded by the Git tag and GitHub release
 metadata. The release tag is the authoritative supervisor handoff target.
