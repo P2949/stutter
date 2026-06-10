@@ -23,7 +23,8 @@ executive summary, AI disclosure, and curated evidence bundle.
 
 For a 5-minute first review:
 
-1. Read `FYP_SUPERVISOR_PITCH.pdf`.
+1. Download and read `FYP_SUPERVISOR_PITCH.pdf` from the
+   [fyp-report-final-v3 release](https://github.com/P2949/stutter/releases/tag/fyp-report-final-v3).
 2. Skim `reports/fyp-report/PRE_FYP_SCOPE_NOTE.md`.
 3. Read the executive summary of `reports/kcd1-case-study/KCD1_EXPERIMENT_REPORT.md`.
 4. Check `reports/fyp-report/AI_DISCLOSURE.md`.
@@ -80,6 +81,7 @@ Final decision for supervisor handoff (2026-06-09):
 - Retain the full raw archive in the development branch for audit and reproduction.
 - For initial supervisor contact prefer the lightweight release archive (`FYP_SUPERVISOR_PITCH.pdf`, `KCD1_EXPERIMENT_REPORT.pdf`, `evidence-bundle.tar.gz`) which is checksum-verified.
 - Long-term archival (Git LFS or external storage) will be arranged after supervisor guidance.
+- if cloning the full repo locally, use `git clone --depth=1 --filter=blob:limit=1m https://github.com/P2949/stutter.git` to avoid downloading the full history of large artifacts.
 
 ## Current Validation Checks
 
