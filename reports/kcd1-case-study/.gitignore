@@ -1,2 +1,17 @@
+# Raw KCD1 capture artifacts are published as GitHub Release assets, not tracked
+# in Git. Keep the repository lightweight and reviewable.
+
+/runs/
+/tune/
+/realworld-stack/
+/drop-counter-pilot/
+/mangohud/
+/setup/
+/profiles/
+/results/
+
+/advisor-baseline-*.json
+/fix-plan-cpu-affinity-profile.json
+
 # Too large for normal Git/GitHub; publish as release assets instead.
 **/migration_events.json
