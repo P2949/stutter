@@ -2,7 +2,7 @@ KCD1 curated evidence bundle validation record
 
 Date: 2026-06-09
 Branch: main
-Handoff target: fyp-report-final-v3
+Handoff target: fyp-report-final-v4
 
 Checks verified for release:
 - cargo fmt --all -- --check: passed
@@ -15,8 +15,9 @@ Checks verified for release:
 
 Notes:
 This file belongs to the small supervisor-review evidence subset. The full raw
-KCD1 archive is retained under reports/kcd1-case-study/ for audit and
-reproduction, but it is not required for first supervisor review.
+KCD1 archive is published as the `raw-kcd1-case-study-fyp-report-final-v4.tar.zst`
+GitHub Release asset for audit and reproduction. It is not tracked in Git and is
+not required for first supervisor review.
 
 The KCD1 result remains preliminary: the archived A/B run was paired but not
 counterbalanced. The proposed FYP methodology corrects this by requiring a

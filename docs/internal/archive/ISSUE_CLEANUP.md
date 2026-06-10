@@ -9,7 +9,7 @@ Resolved:
 
 Final handoff target:
 
-- Release/tag: `fyp-report-final-v3`
-- Release archive: `release/stutter-supervisor-release-fyp-report-final-v3.tar.gz`
+- Release/tag: `fyp-report-final-v4`
+- Release archive: `release/stutter-supervisor-release-fyp-report-final-v4.tar.gz`
 
 No manual issue cleanup remains for first supervisor contact.
