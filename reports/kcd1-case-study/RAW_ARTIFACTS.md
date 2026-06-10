@@ -13,7 +13,7 @@ Release tag:
 
 ```text
 fyp-report-final-v4
-````
+```
 
 Raw archive asset:
 
@@ -31,6 +31,12 @@ Contents listing asset:
 
 ```text
 raw-kcd1-case-study-fyp-report-final-v4.contents.txt
+```
+
+Contents listing checksum asset:
+
+```text
+raw-kcd1-case-study-fyp-report-final-v4.contents.txt.sha256
 ```
 
 ## Why this is not tracked in Git

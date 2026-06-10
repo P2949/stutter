@@ -14,7 +14,16 @@ This case study evaluates whether `stutter`, a Linux game-performance profiling 
 
 The key answer is yes: `stutter` demonstrated an evidence-based workflow for testing a real Linux/Proton game tuning hypothesis. It collected evidence, generated a plausible CPU-affinity hypothesis, tested it, did not validate it, explained why that matters, and added explainability/follow-up analysis.
 
-Primary evidence: `reports/kcd1-case-study/CASE_STUDY_SUMMARY.md`, `reports/kcd1-case-study/tune/kcd1-affinity-02/tuning_summary.json`, `reports/kcd1-case-study/tune/kcd1-affinity-02/tuning_recommendation.json`, and `reports/kcd1-case-study/profiles/kcd1-affinity-profile-plan-summary.json`.
+Primary evidence: `reports/kcd1-case-study/CASE_STUDY_SUMMARY.md`, curated copies in `evidence-bundle/kcd1/tuning_summary.json`, `evidence-bundle/kcd1/tuning_recommendation.json`, and `evidence-bundle/kcd1/profile-plan-summary.json`, with original raw paths preserved in the raw KCD1 release archive.
+
+> **Artifact location note:** raw KCD1 run directories, tuning directories,
+> MangoHud CSVs, setup logs, profile-plan artifacts, and exploratory stack
+> comparison artifacts are no longer tracked in Git. They are preserved in the
+> `raw-kcd1-case-study-fyp-report-final-v4.tar.zst` asset attached to the
+> `fyp-report-final-v4` GitHub release. In command examples, `${KCD1_RAW}`
+> denotes the root of the extracted raw archive's `reports/kcd1-case-study/`
+> directory. The normal repository checkout keeps the polished report, summary
+> files, and curated `evidence-bundle/`.
 
 ## 2. Research Motivation
 
@@ -70,7 +79,7 @@ The shader cache was pre-warmed. The main experiment intentionally excluded the 
 
 The formal recordings used explicit `--tree-pid` targeting for the KCD1/Gamescope process tree. This should be presented as explicit process-tree targeting, not as a foreground-window auto-detection demonstration.
 
-Setup evidence: `reports/kcd1-case-study/setup/kcd1-method-notes.md`, `reports/kcd1-case-study/setup/system-info.txt`, and `reports/kcd1-case-study/setup/kcd1-config/`.
+Setup evidence: setup notes, system information, and KCD1 config snapshots preserved under `${KCD1_RAW}/setup/` in the raw release archive.
 
 > Some archived metadata records include kernel build strings containing
 > `root@localhost`. This is the kernel image build identity embedded in
@@ -93,7 +102,7 @@ Baseline runs were valid but noisy. Median frametime varied noticeably across ru
 
 The evidence showed scheduler-visible tail latency and frame-pacing outliers. It does not show that scheduler delay was the only source of KCD1 stutter. The appropriate claim is narrower: the baseline data contained enough scheduler and frame evidence to justify a scoped tuning hypothesis and repeated A/B testing.
 
-Baseline evidence: `reports/kcd1-case-study/runs/baseline-*-analysis.json`, `reports/kcd1-case-study/runs/baseline-*-postcheck.txt`, and `reports/kcd1-case-study/mangohud/baseline-*.csv`.
+Baseline evidence: formal baseline analyses, postcheck files, and MangoHud CSVs preserved under `${KCD1_RAW}/runs/` and `${KCD1_RAW}/mangohud/` in the raw release archive.
 
 ## 6. Diagnostic Score Explanation
 
@@ -115,7 +124,7 @@ frame component:
 
 This score is useful inside this controlled case study because the same game, route, measurement window, and analysis path are used for the compared profiles. It should not be treated as a standalone unit that can be compared across unrelated systems or games.
 
-Score evidence: `reports/kcd1-case-study/CASE_STUDY_SUMMARY.md` and `reports/kcd1-case-study/tune/kcd1-affinity-02/tuning_summary.json`.
+Score evidence: `reports/kcd1-case-study/CASE_STUDY_SUMMARY.md` and the curated copy in `evidence-bundle/kcd1/tuning_summary.json`; the original raw file is preserved under `${KCD1_RAW}/tune/`.
 
 ## 7. Hypothesis and Profile
 
@@ -133,7 +142,7 @@ Profile rules are first-match-wins. `match_comm` checks both `task.comm` and `pr
 
 That matching behavior is important. It means the broad rule was capable of moving the major KCD worker threads, but it also means the profile compressed the game side onto 10 logical CPUs rather than keeping access to all 12 online CPUs.
 
-Profile evidence: `reports/kcd1-case-study/profiles/kcd1-affinity-ab.toml`, `reports/kcd1-case-study/advisor-baseline-*.json`, and `reports/kcd1-case-study/fix-plan-cpu-affinity-profile.json`.
+Profile evidence: profile, advisor, and fix-plan artifacts preserved under `${KCD1_RAW}/profiles/` and the raw archive root; the compact profile-plan summary is curated in `evidence-bundle/kcd1/profile-plan-summary.json`.
 
 ## 8. Profile Explainability
 
@@ -152,7 +161,7 @@ Rule 0 caught many important KCD/DXVK/Wine-side worker threads through the broad
 
 The tuned profile did not fail simply because it missed the important KCD worker threads. The explainability artifact shows that those threads were matched and would have been moved. That makes the result more interesting: a plausible profile that did catch relevant tasks still did not win under repeated A/B measurement.
 
-Explainability evidence: `reports/kcd1-case-study/profiles/kcd1-affinity-profile-plan.txt`, `reports/kcd1-case-study/profiles/kcd1-affinity-profile-plan.json`, and `reports/kcd1-case-study/profiles/kcd1-affinity-profile-plan-summary.json`.
+Explainability evidence: `${KCD1_RAW}/profiles/kcd1-affinity-profile-plan.txt`, `${KCD1_RAW}/profiles/kcd1-affinity-profile-plan.json`, and `${KCD1_RAW}/profiles/kcd1-affinity-profile-plan-summary.json`.
 
 ## 9. A/B Tuning Result
 
@@ -183,7 +192,7 @@ The tuned profile was **not validated and should not be recommended on the curre
 
 The careful interpretation is that the evidence did not support recommending the tuned profile, and the observed paired scores were consistently worse. This is not a claim that the profile is unsuitable across all conditions.
 
-A/B evidence: `reports/kcd1-case-study/tune/kcd1-affinity-02/tuning_summary.json`, `reports/kcd1-case-study/tune/kcd1-affinity-02/tuning_recommendation.json`, and `reports/kcd1-case-study/tune/kcd1-affinity-02/tuning_recommendation.md`.
+A/B evidence: curated copies in `evidence-bundle/kcd1/tuning_summary.json`, `evidence-bundle/kcd1/tuning_recommendation.json`, and `evidence-bundle/kcd1/tuning_recommendation.md`; original raw paths are preserved under `${KCD1_RAW}/tune/`.
 
 ## 10. Why the Affinity Profile Likely Failed
 
@@ -215,7 +224,7 @@ Estimated runs per side for detecting a 10% movement at the observed noise level
 
 Five runs per side is enough for a case-study demonstration and enough to avoid recommending this particular false positive. It is not enough for broad tuning claims or precise small-effect estimates. This is why the generated recommendation says `NeedsRetest` even though `baseline-online` is the lower-scoring profile in this tuning run.
 
-Uncertainty evidence: `reports/kcd1-case-study/tune/kcd1-affinity-02/tuning_recommendation.json`.
+Uncertainty evidence: curated copy in `evidence-bundle/kcd1/tuning_recommendation.json`; original raw file is preserved under `${KCD1_RAW}/tune/`.
 
 ## 12. Measurement-Quality Investigation
 
@@ -228,7 +237,7 @@ A separate drop-counter pilot investigated the recurring non-zero wakeup replace
 
 The wakeup replacement counter was not explained by ring-buffer reserve failure, and increasing `--ebpf-wakeup-map-factor` did not reduce it. The likely interpretation is wakeup timestamp churn from rapid repeated wakeups for the same target tasks. This is documented as a measurement-quality nuance, not as dropped frame data.
 
-Measurement-quality evidence: `reports/kcd1-case-study/drop-counter-pilot/mapfactor-4-comparison.txt` and `reports/kcd1-case-study/drop-counter-pilot/mapfactor-4-analysis.json`.
+Measurement-quality evidence: drop-counter pilot artifacts preserved under `${KCD1_RAW}/drop-counter-pilot/` in the raw release archive.
 
 ## 13. Exploratory Personal-Stack Add-On
 
@@ -243,9 +252,9 @@ The `Max` column is the median of each condition's per-run maximum frametime, no
 
 The personal stack did not show a clear advantage in this small sample. The value of this add-on is realism: `stutter` can capture and compare a complex player-used configuration bundle without overclaiming causality.
 
-As documented in `reports/kcd1-case-study/realworld-stack/ARTIFACT_NOTES.md`, the raw MangoHud CSV sources for `clean-01` and `clean-02` were not preserved when the archive was finalized. Their frame timing had already been ingested into the committed analysis JSON files, so the runs remain usable for this exploratory comparison, but the missing raw CSVs are a transparency limitation.
+As documented in `${KCD1_RAW}/realworld-stack/ARTIFACT_NOTES.md`, the raw MangoHud CSV sources for `clean-01` and `clean-02` were not preserved when the archive was finalized. Their frame timing had already been ingested into the committed analysis JSON files, so the runs remain usable for this exploratory comparison, but the missing raw CSVs are a transparency limitation.
 
-Exploratory evidence: `reports/kcd1-case-study/realworld-stack/realworld-stack-summary.csv`, `reports/kcd1-case-study/realworld-stack/README.md`, and `reports/kcd1-case-study/realworld-stack/setup/launch-options.md`.
+Exploratory evidence: real-world stack summary, notes, and launch-option artifacts preserved under `${KCD1_RAW}/realworld-stack/` in the raw release archive.
 
 ## 14. Limitations and Future Work
 
@@ -291,7 +300,7 @@ stutter record \
   --scenario kcd1-rattay-route-1 \
   --workload-label kcd1-proton-ge-10-34 \
   --route-label rattay-fixed-route-1 \
-  --out-dir reports/kcd1-case-study/runs/baseline-XX \
+  --out-dir ${KCD1_RAW}/runs/baseline-XX \
   --mangohud-log <KingdomCome_MANGOHUD_CSV> \
   --hwmon \
   --cpu-freq \
@@ -305,7 +314,7 @@ Profile-plan command:
 ```bash
 stutter profile-plan \
   --tree-pid <KCD1_OR_GAMESCOPE_TREE_PID> \
-  --profile reports/kcd1-case-study/profiles/kcd1-affinity-ab.toml \
+  --profile ${KCD1_RAW}/profiles/kcd1-affinity-ab.toml \
   --profile-name kcd1-game-on-1-5-7-11-gamescope-on-0-6
 ```
 
@@ -314,7 +323,7 @@ Explainable dry-run command:
 ```bash
 stutter apply-profile \
   --tree-pid <KCD1_OR_GAMESCOPE_TREE_PID> \
-  --profile reports/kcd1-case-study/profiles/kcd1-affinity-ab.toml \
+  --profile ${KCD1_RAW}/profiles/kcd1-affinity-ab.toml \
   --profile-name kcd1-game-on-1-5-7-11-gamescope-on-0-6 \
   --dry-run \
   --explain
@@ -325,7 +334,7 @@ Tune command shape:
 ```bash
 stutter tune \
   --tree-pid <KCD1_OR_GAMESCOPE_TREE_PID> \
-  --profiles reports/kcd1-case-study/profiles/kcd1-affinity-ab.toml \
+  --profiles ${KCD1_RAW}/profiles/kcd1-affinity-ab.toml \
   --runs 5 \
   --baseline-profile baseline-online \
   --warmup-seconds 90 \
@@ -335,41 +344,41 @@ stutter tune \
   --route-label rattay-fixed-route-1 \
   --mangohud-log <KingdomCome_MANGOHUD_CSV> \
   --hwmon \
-  --out-dir reports/kcd1-case-study/tune/kcd1-affinity-02
+  --out-dir ${KCD1_RAW}/tune/kcd1-affinity-02
 ```
 
 In this tune run, each epoch used 90 seconds of warm-up followed by 180 seconds of measurement; the generated summary recorded `restore_policy = "restore-after-each"`.
 
 Secondary fix-validation recommend command shape:
 
-The primary profile-vs-profile conclusion is based on `reports/kcd1-case-study/tune/kcd1-affinity-02/tuning_summary.json`; the fix-validation artifacts under `reports/kcd1-case-study/results/` are secondary and are marked `InvalidExperiment`.
+The primary profile-vs-profile conclusion is based on `${KCD1_RAW}/tune/kcd1-affinity-02/tuning_summary.json`; the fix-validation artifacts under `${KCD1_RAW}/results/` are secondary and are marked `InvalidExperiment`.
 
 ```bash
 stutter recommend \
-  --fix-plan reports/kcd1-case-study/fix-plan-cpu-affinity-profile.json \
-  --baseline reports/kcd1-case-study/runs/baseline-01 \
-  --baseline reports/kcd1-case-study/runs/baseline-02 \
-  --baseline reports/kcd1-case-study/runs/baseline-03 \
-  --baseline reports/kcd1-case-study/runs/baseline-04 \
-  --baseline reports/kcd1-case-study/runs/baseline-05 \
-  --tune reports/kcd1-case-study/tune/kcd1-affinity-02 \
-  --markdown reports/kcd1-case-study/results/kcd1-fix-validation.md \
-  --html reports/kcd1-case-study/results/kcd1-fix-validation.html
+  --fix-plan ${KCD1_RAW}/fix-plan-cpu-affinity-profile.json \
+  --baseline ${KCD1_RAW}/runs/baseline-01 \
+  --baseline ${KCD1_RAW}/runs/baseline-02 \
+  --baseline ${KCD1_RAW}/runs/baseline-03 \
+  --baseline ${KCD1_RAW}/runs/baseline-04 \
+  --baseline ${KCD1_RAW}/runs/baseline-05 \
+  --tune ${KCD1_RAW}/tune/kcd1-affinity-02 \
+  --markdown ${KCD1_RAW}/results/kcd1-fix-validation.md \
+  --html ${KCD1_RAW}/results/kcd1-fix-validation.html
 ```
 
 JSON recommendation artifact:
 
 ```bash
 stutter recommend \
-  --fix-plan reports/kcd1-case-study/fix-plan-cpu-affinity-profile.json \
-  --baseline reports/kcd1-case-study/runs/baseline-01 \
-  --baseline reports/kcd1-case-study/runs/baseline-02 \
-  --baseline reports/kcd1-case-study/runs/baseline-03 \
-  --baseline reports/kcd1-case-study/runs/baseline-04 \
-  --baseline reports/kcd1-case-study/runs/baseline-05 \
-  --tune reports/kcd1-case-study/tune/kcd1-affinity-02 \
+  --fix-plan ${KCD1_RAW}/fix-plan-cpu-affinity-profile.json \
+  --baseline ${KCD1_RAW}/runs/baseline-01 \
+  --baseline ${KCD1_RAW}/runs/baseline-02 \
+  --baseline ${KCD1_RAW}/runs/baseline-03 \
+  --baseline ${KCD1_RAW}/runs/baseline-04 \
+  --baseline ${KCD1_RAW}/runs/baseline-05 \
+  --tune ${KCD1_RAW}/tune/kcd1-affinity-02 \
   --json \
-  > reports/kcd1-case-study/results/kcd1-fix-validation.json
+  > ${KCD1_RAW}/results/kcd1-fix-validation.json
 ```
 
 Validation checks:
@@ -381,7 +390,7 @@ RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo clippy --all-targets -- -D warnings
 RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -p xtask -- fixture-check
 ```
 
-Build/check evidence: `reports/kcd1-case-study/setup/build-check.txt`, `reports/kcd1-case-study/tune/kcd1-affinity-02.log`, and `reports/kcd1-case-study/results/kcd1-fix-validation-command-output.txt`.
+Build/check evidence: curated copies in `evidence-bundle/kcd1/build-check.txt` and `evidence-bundle/kcd1/command-output.txt`, with original setup, tune-log, and results artifacts preserved in the raw release archive.
 
 ## Appendix B: Profile TOML
 
@@ -409,7 +418,7 @@ affinity = "0,6"
 match_class = ["GameScope", "Compositor", "Launcher", "SteamRuntime"]
 ```
 
-Profile file: `reports/kcd1-case-study/profiles/kcd1-affinity-ab.toml`.
+Profile file: `${KCD1_RAW}/profiles/kcd1-affinity-ab.toml`.
 
 ## Appendix C: Artifact Map
 
@@ -417,17 +426,17 @@ Profile file: `reports/kcd1-case-study/profiles/kcd1-affinity-ab.toml`.
 | --- | --- |
 | `reports/kcd1-case-study/CASE_STUDY_SUMMARY.md` | Primary archive summary |
 | `reports/kcd1-case-study/ARTIFACT_INDEX.md` | Archive map |
-| `reports/kcd1-case-study/setup/kcd1-method-notes.md` | Route and setup notes |
-| `reports/kcd1-case-study/setup/system-info.txt` | Machine, kernel, CPU, GPU, session context |
-| `reports/kcd1-case-study/runs/baseline-*-analysis.json` | Formal baseline analysis |
-| `reports/kcd1-case-study/tune/kcd1-affinity-02/tuning_summary.json` | Primary A/B profile comparison |
-| `reports/kcd1-case-study/tune/kcd1-affinity-02/tuning_recommendation.html` | Generated recommendation |
-| `reports/kcd1-case-study/tune/kcd1-affinity-02/tuning_recommendation.json` | Recommendation and uncertainty data |
-| `reports/kcd1-case-study/profiles/kcd1-affinity-profile-plan-summary.json` | Profile explainability summary |
-| `reports/kcd1-case-study/profiles/kcd1-affinity-ab.toml` | Final A/B profile |
-| `reports/kcd1-case-study/drop-counter-pilot/mapfactor-4-comparison.txt` | Measurement-quality pilot summary |
-| `reports/kcd1-case-study/realworld-stack/realworld-stack-summary.csv` | Exploratory clean vs personal-stack comparison |
-| `reports/kcd1-case-study/results/kcd1-fix-validation.json` | Secondary validation artifact; status is `InvalidExperiment` |
+| `${KCD1_RAW}/setup/kcd1-method-notes.md` | Route and setup notes |
+| `${KCD1_RAW}/setup/system-info.txt` | Machine, kernel, CPU, GPU, session context |
+| `${KCD1_RAW}/runs/baseline-*-analysis.json` | Formal baseline analysis |
+| `${KCD1_RAW}/tune/kcd1-affinity-02/tuning_summary.json` | Primary A/B profile comparison |
+| `${KCD1_RAW}/tune/kcd1-affinity-02/tuning_recommendation.html` | Generated recommendation |
+| `${KCD1_RAW}/tune/kcd1-affinity-02/tuning_recommendation.json` | Recommendation and uncertainty data |
+| `${KCD1_RAW}/profiles/kcd1-affinity-profile-plan-summary.json` | Profile explainability summary |
+| `${KCD1_RAW}/profiles/kcd1-affinity-ab.toml` | Final A/B profile |
+| `${KCD1_RAW}/drop-counter-pilot/mapfactor-4-comparison.txt` | Measurement-quality pilot summary |
+| `${KCD1_RAW}/realworld-stack/realworld-stack-summary.csv` | Exploratory clean vs personal-stack comparison |
+| `${KCD1_RAW}/results/kcd1-fix-validation.json` | Secondary validation artifact; status is `InvalidExperiment` |
 
 The primary source for the tuned-profile conclusion is `tuning_summary.json`. The fix-validation artifact is secondary because it compares the selected lower-scoring tune candidate, `baseline-online`, against the earlier formal baseline set and is marked `InvalidExperiment`.
 

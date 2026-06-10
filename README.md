@@ -7,9 +7,9 @@
 For supervisor review, start with [SUPERVISOR_README.md](SUPERVISOR_README.md).
 The proposed FYP scope is CPU-affinity/process-placement validation for
 Linux/Proton game frame pacing; this root README is the technical
-user/developer manual, not the first pitch. The full repository contains a large
-raw evidence archive, but first review does not require cloning or reading every
-raw artifact.
+user/developer manual, not the first pitch. The full raw KCD1 archive is
+published as a release asset, while the normal Git checkout keeps only the
+source tree, polished reports, and curated evidence bundle.
 
 ## Contents
 

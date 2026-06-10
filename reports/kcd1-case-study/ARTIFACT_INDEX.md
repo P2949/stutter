@@ -1,107 +1,80 @@
 # KCD1 case-study artifact index
 
-This directory contains the technical archive for the Kingdom Come: Deliverance 1
-case study. The polished lecturer-facing report is `KCD1_EXPERIMENT_REPORT.md`;
-the primary technical archive summary is `CASE_STUDY_SUMMARY.md`. For supervisor
-review, prefer the curated evidence bundle linked from the top-level
-`SUPERVISOR_README.md` before opening the full raw archive.
+This directory contains the lightweight, Git-tracked entry points for the
+Kingdom Come: Deliverance 1 case study. The polished lecturer-facing report is
+`KCD1_EXPERIMENT_REPORT.md`; the primary technical summary is
+`CASE_STUDY_SUMMARY.md`. For supervisor review, prefer the curated evidence
+bundle linked from the top-level `SUPERVISOR_README.md`.
 
 ## Storage policy for supervisor handoff
 
-Small curated evidence stays in Git. Large raw experiment exports are retained
-for audit, but they are not required for first supervisor review and should move
-to release assets, Git LFS, or an external archive before a lightweight
-presentation branch is created. Every moved artifact family should keep a
-checksum and a short description.
-
-Size audit from 2026-06-07:
+The full raw KCD1 archive is no longer tracked in Git. It is published as the
+GitHub Release asset:
 
 ```text
-git tracked files: 2,827
-reports/: 1017M
-evidence-bundle/: 96K
-stutter/: 11M
+raw-kcd1-case-study-fyp-report-final-v4.tar.zst
 ```
 
-| Artifact family | Current location | Size | Handoff location | Needed for first read? | Notes |
-| --- | --- | ---: | --- | --- | --- |
-| Curated KCD1 evidence bundle | `evidence-bundle/` | 96K | Git and release asset | yes | Checksum-verified small bundle. |
-| KCD1 raw spike events | `reports/kcd1-case-study/**/spike_events.json` | large | release or external archive | no | Retained for audit and deeper reproduction. |
-| KCD1 interval streams | `reports/kcd1-case-study/**/interval.json` | large | release or external archive | no | Useful for detailed trace review, not first read. |
-| Runtime-slice streams | `reports/kcd1-case-study/**/runtime_slices.json` | large | release or external archive | no | Raw scheduler/runtime context. |
-| MangoHud CSVs | `reports/kcd1-case-study/**/mangohud/*.csv` | medium/large | release or external archive | no | Keep with checksums for frame-time audit. |
-| Generated PDFs | `reports/**/*.pdf` | small/medium | Git and release assets | yes for pitch/report PDFs | Pitch PDF is the primary attachment. |
+on release tag:
 
-## Primary narrative
+```text
+fyp-report-final-v4
+```
 
-- `KCD1_EXPERIMENT_REPORT.md` — polished lecturer-facing case-study report.
-- `CASE_STUDY_SUMMARY.md` — summary of the method, results, limitations, and conclusions.
-- `setup/kcd1-method-notes.md` — controlled route and setup notes.
-- `setup/system-info.txt` — captured machine/software context.
-- `setup/kcd1-config/` — archived KCD1 `system.cfg` and `user.cfg`.
-- `setup/build-check.txt` — validation command output for the repo state used by the case study.
-- `setup/cli-help.txt` — relevant CLI help output.
+The normal repository checkout keeps only the source tree, polished reports,
+summary files, and curated evidence bundle. Raw artifact paths mentioned in the
+reports preserve the original experiment layout and should be read relative to
+the extracted raw archive.
 
-## Setup and process selection
+## Git-tracked first-review artifacts
 
-- `setup/live-process-candidates.txt` — redacted live process selection summary; raw command-line dumps are intentionally omitted from the committed presentation archive.
-- `setup/tree-candidates/` — candidate `inspect-tree` outputs from early process-tree selection.
-- `setup/baseline-*-tree-check.txt` — final tree checks for the formal baseline runs.
-- `setup/launch-smoke-test.txt` — redacted launch/capture smoke-test summary.
-- `setup/kcd1-config-summary.txt` — summary of archived KCD1 config files.
+| Artifact | Location | Purpose |
+| --- | --- | --- |
+| Supervisor entry point | `SUPERVISOR_README.md` | Five-minute review path and FYP scope boundary |
+| FYP pitch | `reports/fyp-report/FYP_SUPERVISOR_PITCH.md` | Short supervisor-facing proposal |
+| Scope note | `reports/fyp-report/PRE_FYP_SCOPE_NOTE.md` | Existing prototype vs proposed assessed work |
+| AI disclosure | `reports/fyp-report/AI_DISCLOSURE.md` | Development-tool transparency note |
+| KCD1 report | `reports/kcd1-case-study/KCD1_EXPERIMENT_REPORT.md` | Polished case-study narrative |
+| KCD1 summary | `reports/kcd1-case-study/CASE_STUDY_SUMMARY.md` | Technical summary of method, results, and caveats |
+| Curated evidence | `evidence-bundle/` | Small checksum-verified evidence bundle |
+| Raw artifact note | `reports/kcd1-case-study/RAW_ARTIFACTS.md` | Release-asset location for full raw archive |
 
-## Formal baseline evidence
+## Raw archive families
 
-- `runs/baseline-01` through `runs/baseline-05` — five formal baseline run directories.
-- `runs/baseline-*-analysis.json` — analysis JSON for each baseline.
-- `runs/baseline-*-postcheck.txt` — basic validity checks for each baseline.
-- `advisor-baseline-*.json` — advisor outputs used to form the CPU-affinity hypothesis.
-- `mangohud/baseline-*.csv` — archived MangoHud CSVs for the formal baseline runs.
+The following artifact families are preserved in the raw release archive, not in
+the normal Git checkout:
 
-## Affinity A/B evidence
+| Raw family | Role | Needed for first read? |
+| --- | --- | --- |
+| `setup/` | Route notes, machine context, config snapshots, tree checks | no |
+| `runs/` | Formal baseline run directories and derived analyses | no |
+| `mangohud/` | MangoHud CSV frame-time logs | no |
+| `profiles/` | CPU-affinity profile, profile-plan, and dry-run artifacts | no |
+| `tune/` | Paired A/B tune run and recommendation artifacts | no |
+| `results/` | Secondary fix-validation artifacts | no |
+| `drop-counter-pilot/` | Measurement-quality pilot artifacts | no |
+| `realworld-stack/` | Exploratory clean-vs-personal-stack comparison | no |
+| `advisor-baseline-*.json` | Advisor outputs used during hypothesis formation | no |
+| `fix-plan-cpu-affinity-profile.json` | Structured CPU-affinity fix plan | no |
 
-- `profiles/kcd1-affinity-ab.toml` — final A/B profile file.
-- `tune/kcd1-affinity-02/` — paired A/B tune run; not counterbalanced because baseline ran before tuned in every iteration.
-- `tune/kcd1-affinity-02/tuning_summary.json` — primary source for profile-vs-profile candidate statistics.
-- `tune/kcd1-affinity-02/tuning_recommendation.md` and `.html` — generated recommendation outputs.
-- `results/kcd1-fix-validation.md` and `.html` — secondary fix-validation output; status is `InvalidExperiment`, so it is not the primary source for the tuned-profile conclusion.
-- `results/kcd1-fix-validation.json` — machine-readable fix-validation JSON.
-- `results/kcd1-fix-validation-command-output.txt` — stdout paths emitted when the fix-validation artifact was generated.
+## Curated evidence copies
 
-## Profile explainability
+The most important machine-readable artifacts are copied into
+`evidence-bundle/kcd1/` so reviewers can inspect the non-validation result
+without downloading the raw archive:
 
-- `profiles/kcd1-affinity-profile-plan.txt` — human-readable profile-plan output.
-- `profiles/kcd1-affinity-profile-plan.json` — full JSON profile-plan artifact.
-- `profiles/kcd1-affinity-profile-plan-summary.json` — compact rule/task matching summary.
-- `profiles/kcd1-affinity-dry-run.txt` — earlier dry-run output retained for comparison.
-
-## Measurement-quality pilot
-
-- `drop-counter-pilot/mapfactor-4-analysis.json` — analysis for the wakeup-map-factor pilot.
-- `drop-counter-pilot/mapfactor-4-comparison.txt` — comparison showing map factor 4 did not reduce wakeup replacements.
-- `drop-counter-pilot/mapfactor-4-record.log` — recording command output.
-
-## Exploratory real-world stack comparison
-
-- `realworld-stack/README.md` — scope of the exploratory bundle comparison.
-- `realworld-stack/realworld-stack-summary.csv` — compact clean vs personal-stack metrics.
-- `realworld-stack/setup/launch-options.md` — launch-option categories and `scx_lavd` command shape for the exploratory bundle comparison.
-- `realworld-stack/ARTIFACT_NOTES.md` — notes about missing raw MangoHud CSVs for two clean runs.
-- `realworld-stack/runs/clean-*` — clean-stack run artifacts.
-- `realworld-stack/runs/personal-stack-*` — personal-stack run artifacts.
-- `realworld-stack/mangohud/` — raw MangoHud CSVs that were still available when finalized.
+- `tuning_summary.json`
+- `tuning_recommendation.json`
+- `tuning_recommendation.md`
+- `profile-plan-summary.json`
+- `build-check.txt`
+- `command-output.txt`
 
 ## Notes
 
-Some files with `.json` extension are newline-delimited event streams rather than
-single JSON documents. Some optional stream files may also be empty when that
-signal was enabled but no samples were recorded. They are preserved as produced
-by `stutter record`.
+Some files with `.json` extension in the raw archive are newline-delimited event
+streams rather than single JSON documents. Some optional stream files may also
+be empty when that signal was enabled but no samples were recorded. They are
+preserved as produced by `stutter record`.
 
-Large `migration_events.json` files are intentionally excluded from Git.
-
-Final decision for supervisor handoff (2026-06-09):
-
-- Keep the full raw experiment archive in the development branch for audit and long-term reproduction, but do not require it for first supervisor review.
-- For first contact use the lightweight release archive containing `FYP_SUPERVISOR_PITCH.pdf`, `KCD1_EXPERIMENT_REPORT.pdf`, and the curated `evidence-bundle.tar.gz` (checksum-verified).
-- Long-term final-FYP artifact archival (Git LFS or external archive) will be scheduled after supervisor guidance.
+Large `migration_events.json` files remain intentionally excluded from Git.

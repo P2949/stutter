@@ -1,5 +1,14 @@
 # KCD1 Case Study Summary
 
+> Raw artifact note: references to `${KCD1_RAW}/runs/`, `${KCD1_RAW}/tune/`,
+> `${KCD1_RAW}/profiles/`, `${KCD1_RAW}/mangohud/`,
+> `${KCD1_RAW}/drop-counter-pilot/`, `${KCD1_RAW}/realworld-stack/`, and
+> `${KCD1_RAW}/results/` refer to the original raw KCD1 archive layout. In the
+> cleaned repository, those artifacts are available from the
+> `raw-kcd1-case-study-fyp-report-final-v4.tar.zst` release asset. Curated
+> copies of the primary tuning summary, recommendation, profile-plan summary,
+> build check, and command output are kept in `evidence-bundle/kcd1/`.
+
 This document summarizes the current Kingdom Come: Deliverance 1 case-study evidence collected with `stutter`. It is intended to be committed in the repo as:
 
 ```text
@@ -159,11 +168,11 @@ After the initial KCD1 A/B experiment, `stutter` gained profile explainability o
 ```bash
 stutter profile-plan \
   --tree-pid <PID> \
-  --profile reports/kcd1-case-study/profiles/kcd1-affinity-ab.toml \
+  --profile ${KCD1_RAW}/profiles/kcd1-affinity-ab.toml \
   --profile-name kcd1-game-on-1-5-7-11-gamescope-on-0-6
 stutter apply-profile \
   --tree-pid <PID> \
-  --profile reports/kcd1-case-study/profiles/kcd1-affinity-ab.toml \
+  --profile ${KCD1_RAW}/profiles/kcd1-affinity-ab.toml \
   --profile-name kcd1-game-on-1-5-7-11-gamescope-on-0-6 \
   --dry-run \
   --explain
@@ -188,7 +197,7 @@ The corrected tuning summary selects `baseline-online` as the lower-scoring prof
 
 The `over_5ms` value is a scheduler-latency threshold count from the diagnostic score, not a frame-time threshold.
 
-This table is derived from `reports/kcd1-case-study/tune/kcd1-affinity-02/tuning_summary.json` candidate statistics. The regenerated `tuning_recommendation.json` selects `baseline-online` as best and compares it against the best valid non-baseline candidate, `kcd1-game-on-1-5-7-11-gamescope-on-0-6`. The tuned profile still does not validate on the current evidence.
+This table is derived from `${KCD1_RAW}/tune/kcd1-affinity-02/tuning_summary.json` candidate statistics. The regenerated `tuning_recommendation.json` selects `baseline-online` as best and compares it against the best valid non-baseline candidate, `kcd1-game-on-1-5-7-11-gamescope-on-0-6`. The tuned profile still does not validate on the current evidence.
 
 Lower diagnostic score is better. The tuned profile was worse on the primary diagnostic metric in every paired iteration:
 
@@ -219,7 +228,7 @@ Frame P99 was mixed, but the primary scheduler-aware diagnostic score did not su
 
 This is a good result for the FYP narrative. The project is about evidence-based validation, not forcing a positive tuning result.
 
-`reports/kcd1-case-study/results/kcd1-fix-validation.md` should be treated as a secondary validation artifact rather than the primary source for the tuned-profile conclusion. Its status is `InvalidExperiment`, and it compares the selected lower-scoring tune candidate, `baseline-online`, against the earlier formal baseline set. The tuned-profile conclusion in this summary comes from the profile candidate statistics in `tuning_summary.json`.
+`${KCD1_RAW}/results/kcd1-fix-validation.md` should be treated as a secondary validation artifact rather than the primary source for the tuned-profile conclusion. Its status is `InvalidExperiment`, and it compares the selected lower-scoring tune candidate, `baseline-online`, against the earlier formal baseline set. The tuned-profile conclusion in this summary comes from the profile candidate statistics in `tuning_summary.json`.
 
 ## Why the affinity profile likely failed
 
@@ -290,7 +299,7 @@ The correct interpretation is restrained:
 
 > The personal gaming stack was captured successfully, but this exploratory sample did not show a clear frame-pacing improvement over the stripped-down measurement setup. Because the personal stack changes many variables at once, this result should not be used to attribute causality to `scx_lavd` or any individual launch flag. It is useful as evidence that `stutter` can capture and compare realistic player-used configuration bundles without turning the result into an unsupported tuning claim.
 
-Artifact note: the raw MangoHud CSV used by `clean-01` and `clean-02` was no longer available when the archive was finalized. Their frame timing data had already been ingested into the committed `stutter` analysis JSON files, so the runs remain usable for this exploratory comparison. This limitation is documented in `reports/kcd1-case-study/realworld-stack/ARTIFACT_NOTES.md`.
+Artifact note: the raw MangoHud CSV used by `clean-01` and `clean-02` was no longer available when the archive was finalized. Their frame timing data had already been ingested into the archived `stutter` analysis JSON files, so the runs remain usable for this exploratory comparison. This limitation is documented in `${KCD1_RAW}/realworld-stack/ARTIFACT_NOTES.md`.
 
 ## Additional limitations and future work
 

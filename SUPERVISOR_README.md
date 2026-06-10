@@ -15,9 +15,10 @@ in every iteration, so the proposed FYP includes a corrected counterbalanced
 protocol as future assessed work.
 
 **Current handoff status, 2026-06-09:** first-contact materials are prepared for
-the `fyp-report-final-v4` supervisor release. The full raw KCD1 archive is kept
-for audit/reproduction, but first review should use the pitch, scope note, KCD1
-executive summary, AI disclosure, and curated evidence bundle.
+the `fyp-report-final-v4` supervisor release. The full raw KCD1 archive is
+published as a release asset for audit/reproduction; first review should use
+the pitch, scope note, KCD1 executive summary, AI disclosure, and curated
+evidence bundle.
 
 ## Read First
 
@@ -73,9 +74,9 @@ unless a supervisor explicitly chooses to bring one into scope.
 The full raw KCD1 archive is no longer tracked in Git. It is published as a
 GitHub Release asset for the `fyp-report-final-v4` handoff tag.
 
-For first review, use the pitch, scope note, KCD1 report, AI disclosure, 
-and curated evidence bundle. The raw archive should only be downloaded if 
-audit or reproduction artifacts are requested.
+For first review, use the pitch, scope note, KCD1 report, AI disclosure, and
+curated evidence bundle. The raw archive should only be downloaded if audit or
+reproduction artifacts are requested.
 
 Final decision for supervisor handoff (2026-06-09):
 
