@@ -38,7 +38,7 @@ sha256sum -c ASSETS_SHA256SUMS
 tar -xzf evidence-bundle.tar.gz
 cd evidence-bundle
 sha256sum -c MANIFEST.sha256
-````
+```
 
 To verify the raw KCD1 archive:
 
@@ -46,4 +46,3 @@ To verify the raw KCD1 archive:
 sha256sum -c raw-kcd1-case-study-fyp-report-final-v4.tar.zst.sha256
 tar -tf raw-kcd1-case-study-fyp-report-final-v4.tar.zst | head
 ```
-
