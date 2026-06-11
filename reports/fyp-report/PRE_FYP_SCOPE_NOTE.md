@@ -14,7 +14,7 @@
 - Counterbalanced A/B methodology.
 - Uncertainty-aware reporting using raw frame metrics, scheduler metrics, effect sizes, and confidence intervals.
 - One primary real-game evaluation under the final protocol.
-- Conservative recommendation verdicts: validated, regression, inconclusive, invalid experiment.
+- Conservative recommendation verdicts: validated, regression, inconclusive, unsupported, invalid experiment.
 
 ## Planned validation protocol
 

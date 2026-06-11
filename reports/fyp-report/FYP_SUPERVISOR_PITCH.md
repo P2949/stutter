@@ -47,7 +47,7 @@ This case study is not presented as a universal claim about KCD1 performance or 
 - quantify uncertainty in a noisy game workload;
 - decline an unsupported tuning recommendation instead of producing a false-positive tuning claim.
 
-The case study also showed that small effects in this type of workload may require substantially more data to measure precisely: depending on the metric, the tool estimated roughly 18-30+ runs per condition for small-effect detection.
+The case study also showed that small effects in this type of workload may require substantially more data to measure precisely: depending on the metric, the tool estimated roughly 19-30 runs per condition for small-effect detection.
 
 ## Existing work and assessment boundary
 

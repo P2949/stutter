@@ -179,7 +179,7 @@ Claims:
 
 Evidence:
 - KCD1 report limitations.
-- KCD1 uncertainty estimates of roughly 18-30+ runs per condition for some
+- KCD1 uncertainty estimates of roughly 19-30 runs per condition for some
   metrics.
 
 ## Future Work

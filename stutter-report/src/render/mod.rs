@@ -22,7 +22,7 @@ impl ReportRenderFormat {
 /// Render a report model to the requested format.
 ///
 /// For `Text`, outputs a "stutter report" header followed by the full text
-/// body produced by [`render::text::render_report`].
+/// body produced by [`text::render_report`].
 ///
 /// For `Html`, outputs a self-contained basic HTML report with the same core
 /// sections as the migrated text renderer: identity, summary, header, data

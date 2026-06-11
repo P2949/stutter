@@ -20,6 +20,7 @@ See `EVIDENCE_LIMITATIONS.md` for the short claim-boundary note.
 ```text
 evidence-bundle/
   README.md
+  EVIDENCE_LIMITATIONS.md
   MANIFEST.sha256
   kcd1/
     README_FIRST.md

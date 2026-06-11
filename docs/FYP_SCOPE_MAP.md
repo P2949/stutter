@@ -9,7 +9,7 @@ bounded validation-methodology project.
 | --- | --- | --- | --- |
 | CPU affinity/process placement | Yes | Yes | Primary tuning area to evaluate. |
 | Profile explainability | Yes | Yes | Required pre-tuning audit step. |
-| Counterbalanced A/B protocol | Planned | Yes |
+| Counterbalanced A/B protocol | Planned | Yes | Core methodology correction motivated by the fixed-order preliminary KCD1 run. |
 | Uncertainty-aware reporting | Yes / to refine | Yes | Core reporting and decision vocabulary. |
 | Conservative recommendation verdicts | Yes | Yes | Avoids turning weak evidence into advice. |
 | KCD1 preliminary case study | Yes | Supporting evidence | Motivation and feasibility evidence, not final proof. |
