@@ -14,8 +14,11 @@ counterbalanced because the online baseline was measured before the tuned profil
 in every iteration, so the proposed FYP includes a corrected counterbalanced
 protocol as future assessed work.
 
-**Current handoff status, 2026-06-09:** first-contact materials are prepared for
-the `fyp-report-final-v4` supervisor release. The full raw KCD1 archive is
+**Current handoff status, 2026-06-12:** first-contact materials are prepared for
+the `fyp-report-final-v4` supervisor release; the lightweight release assets
+were refreshed on 2026-06-12 with PDFs regenerated from the corrected
+Markdown sources via the pinned in-repo pipeline
+(`scripts/artifacts/build_supervisor_release.sh`). The full raw KCD1 archive is
 published as a release asset for audit/reproduction; first review should use
 the pitch, scope note, KCD1 executive summary, AI disclosure, and curated
 evidence bundle.

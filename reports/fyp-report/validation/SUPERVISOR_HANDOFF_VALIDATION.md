@@ -41,3 +41,20 @@ Notes:
   installed.
 - Privileged eBPF loader smoke remains a manual/local check because it requires
   sudo/doas credentials and machine-specific kernel permissions.
+
+## 2026-06-12 asset refresh
+
+The lightweight `fyp-report-final-v4` release assets were refreshed after the
+pitch's small-effect sample-size figure was corrected to the 19-30
+runs-per-condition range recorded in the KCD1 tuning-recommendation evidence:
+
+- PDFs regenerated from Markdown sources with the pinned pipeline
+  (`scripts/artifacts/build_supervisor_release.sh`, pandoc 3.6.4 + Typst
+  0.13.1, DejaVu Serif).
+- `release/evidence-bundle.tar.gz` rebuilt from the current curated bundle.
+- The assembled supervisor tarball, `ASSETS_SHA256SUMS`, and `SHA256SUMS`
+  regenerated and verified locally.
+- Refreshed assets uploaded to the existing `fyp-report-final-v4` GitHub
+  release; the raw KCD1 archive assets are unchanged. The release tag was
+  re-pointed to the refresh commit so the tag continues to match the published
+  assets.

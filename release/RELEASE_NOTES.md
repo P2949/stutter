@@ -3,6 +3,7 @@
 Version: supervisor-hand-off-v4
 Release tag: `fyp-report-final-v4`
 Date: 2026-06-09
+Asset refresh: 2026-06-12
 
 First-review checklist:
 
@@ -47,8 +48,15 @@ Notes:
 - Tracked files under `release/` and generated PDFs under `reports/` are frozen
   supervisor-review snapshots. Markdown sources remain the editable source of
   truth.
-- Markdown-derived PDFs are regenerated from repository Markdown sources without
-  browser header/footer local path metadata.
+- Markdown-derived PDFs are regenerated from repository Markdown sources with
+  the pinned in-repo pipeline (`scripts/artifacts/build_supervisor_release.sh`,
+  pandoc + Typst); no browser header/footer local path metadata is embedded.
+- 2026-06-12 asset refresh: the pitch's small-effect sample-size figure was
+  corrected to the 19-30 runs-per-condition range recorded in the KCD1
+  tuning-recommendation evidence; the pitch and KCD1 report PDFs were
+  regenerated from the corrected Markdown sources; the curated evidence
+  bundle tarball and both checksum files were rebuilt. The raw KCD1 archive
+  assets are unchanged.
 - Before sending the email, manually confirm that the raw archive, raw archive
   checksum, contents listing, and contents-listing checksum are attached to the
   GitHub Release page.
