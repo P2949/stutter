@@ -5,6 +5,7 @@ use std::{
 
 use anyhow::{Context, Result};
 
+const CLEANUP_BASELINE_PATH: &str = "docs/internal/archive/cleanup-baseline.md";
 const MAX_FILE_SIZE: usize = 1000;
 const LARGEST_FILE_LIMIT: usize = 20;
 
@@ -15,9 +16,13 @@ struct BaselineEntry {
 }
 
 pub fn run_maturity_report(root: &Path) -> Result<()> {
-    let baseline_path = root.join("docs/internal/cleanup-baseline.md");
-    let content =
-        fs::read_to_string(&baseline_path).context("Failed to read cleanup-baseline.md")?;
+    let baseline_path = root.join(CLEANUP_BASELINE_PATH);
+    let content = fs::read_to_string(&baseline_path).with_context(|| {
+        format!(
+            "failed to read maturity-report baseline at {}",
+            baseline_path.display()
+        )
+    })?;
 
     let mut baseline = Vec::new();
     let mut parsing_table = false;
@@ -443,4 +448,65 @@ fn scaffold_crate_statuses(root: &Path) -> Vec<(&'static str, &'static str)> {
         (name, status)
     })
     .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{fs, path::PathBuf};
+
+    use super::*;
+
+    fn unique_temp_dir(name: &str) -> PathBuf {
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "stutter-{name}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        path
+    }
+
+    #[test]
+    fn maturity_report_reads_archived_cleanup_baseline() {
+        let root = unique_temp_dir("maturity-report");
+        let baseline_dir = root.join("docs/internal/archive");
+        fs::create_dir_all(&baseline_dir).unwrap();
+
+        fs::write(
+            baseline_dir.join("cleanup-baseline.md"),
+            "\
+# Cleanup Baseline
+
+| LOC  | File Path | Target Phase / Split Plan |
+|------|-----------|---------------------------|
+| 1 | ./src/lib.rs | |
+",
+        )
+        .unwrap();
+
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::write(root.join("src/lib.rs"), "fn main() {}\n").unwrap();
+
+        let result = run_maturity_report(&root);
+
+        fs::remove_dir_all(&root).unwrap();
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn missing_maturity_report_baseline_error_names_path() {
+        let root = unique_temp_dir("maturity-report-missing");
+        fs::create_dir_all(&root).unwrap();
+
+        let err = run_maturity_report(&root).unwrap_err();
+
+        fs::remove_dir_all(&root).unwrap();
+
+        let message = format!("{err:#}");
+        assert!(message.contains(CLEANUP_BASELINE_PATH), "{message}");
+    }
 }

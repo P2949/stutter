@@ -20,6 +20,7 @@ pub(crate) mod uncertainty_html;
 
 #[cfg(test)]
 pub(crate) use comparability::TuneCoverageMetrics;
+pub(crate) use order::TuneOrderStrategy;
 #[cfg(test)]
 pub(crate) use order::candidate_order_for_iteration;
 use order::tune_candidate_order;
@@ -50,6 +51,9 @@ pub async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
         hwmon,
         order_strategy,
     } = input;
+    let parsed_order_strategy = order_strategy.parse::<TuneOrderStrategy>()?;
+    let order_strategy_label = parsed_order_strategy.to_string();
+
     let scenario_name = crate::scenario::normalize_identity_label(scenario_name.as_deref());
     if let Some(scenario_name) = scenario_name.as_deref() {
         crate::scenario::validate_scenario_name(scenario_name)?;
@@ -95,7 +99,7 @@ pub async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
         );
     }
 
-    let candidate_order = tune_candidate_order(&profiles, runs, &order_strategy);
+    let candidate_order = tune_candidate_order(&profiles, runs, parsed_order_strategy);
     let results = collect_tune_results(TuneCollectionInput {
         profiles: &profiles,
         tree_pid,
@@ -110,7 +114,7 @@ pub async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
         workload_label: workload_label.clone(),
         route_label: route_label.clone(),
         tune_output_dir: &tune_output_dir,
-        order_strategy: &order_strategy,
+        order_strategy: parsed_order_strategy,
     })
     .await?;
 
@@ -181,7 +185,7 @@ pub async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
         warmup_seconds,
         restore_policy: restore_policy.to_owned(),
         best_profile,
-        order_strategy: order_strategy.clone(),
+        order_strategy: order_strategy_label,
         order_balanced: order_warnings.is_empty(),
         order_balance_warning,
         candidate_order,

@@ -17,6 +17,7 @@ use super::{
     model::{
         TuneCandidateSummary, TuneControl, TuneMeasureResult, TuneProfileRefreshInput, TuneSummary,
     },
+    order::TuneOrderStrategy,
     profile_plan::{tune_profile_plan_summary, write_profile_plan_artifacts},
     recommendation, recommendation_html, retain_after_warmup, unix_nanos_now,
 };
@@ -39,7 +40,7 @@ pub(super) struct TuneCollectionInput<'a> {
     pub(super) workload_label: Option<String>,
     pub(super) route_label: Option<String>,
     pub(super) tune_output_dir: &'a Path,
-    pub(super) order_strategy: &'a str,
+    pub(super) order_strategy: TuneOrderStrategy,
 }
 
 pub(super) async fn collect_tune_results(

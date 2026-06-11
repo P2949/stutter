@@ -302,6 +302,25 @@ fn parses_tune_command() {
     );
     assert!(!input.enforce);
     assert!(!input.hwmon);
+    assert_eq!(input.order_strategy, "alternating");
+}
+
+#[test]
+fn rejects_invalid_tune_order_strategy() {
+    let err = parse_report_command([
+        "stutter",
+        "tune",
+        "--tree-pid",
+        "42",
+        "--profiles",
+        "/tmp/profiles.toml",
+        "--order",
+        "seed:nope",
+    ])
+    .unwrap_err();
+
+    let message = format!("{err:#}");
+    assert!(message.contains("invalid --order value 'seed:nope'"));
 }
 
 #[test]
@@ -329,6 +348,8 @@ fn parses_tune_optional_flags() {
         "city-loop",
         "--out-dir",
         "/tmp/tune-out",
+        "--order",
+        "seed:42",
         "--enforce",
         "--hwmon",
     ])
@@ -346,6 +367,7 @@ fn parses_tune_optional_flags() {
     assert_eq!(input.workload_label.as_deref(), Some("Game.exe"));
     assert_eq!(input.route_label.as_deref(), Some("city-loop"));
     assert_eq!(input.out_dir, Some(PathBuf::from("/tmp/tune-out")));
+    assert_eq!(input.order_strategy, "seed:42");
     assert!(input.enforce);
     assert!(input.hwmon);
 }

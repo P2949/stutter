@@ -279,7 +279,8 @@ pub(super) struct TuneArgs {
         long = "order",
         default_value_t = String::from("alternating"),
         value_name = "STR",
-        help = "Candidate order strategy: alternating, fixed, seed:<number>"
+        help = "Candidate order strategy: alternating, fixed, or seed:<number>",
+        long_help = "Candidate order strategy. Valid values are 'alternating', 'fixed', or 'seed:<number>'. Invalid values fail instead of falling back, so experiment order typos are caught before measurement."
     )]
     pub(super) order_strategy: String,
 }

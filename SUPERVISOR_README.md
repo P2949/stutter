@@ -144,8 +144,10 @@ RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -p stutter -- tune --help
 ```
 
 Normal cargo builds may emit noisy eBPF/build-script output even when validation
-passes. Treat successful exit status from the pinned validation commands as the
-authoritative signal.
+passes. The supervisor offline demo captures build, fixture-check, and
+dependency-hygiene detail under `target/supervisor-demo/` and prints a captured
+log only if that step fails. Treat successful exit status from the pinned
+validation commands as the authoritative signal.
 
 The current case-study conclusion is deliberately conservative: the KCD1
 CPU-affinity profile was plausible, but it was not validated by the preliminary

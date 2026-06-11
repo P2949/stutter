@@ -161,6 +161,8 @@ pub(super) fn parse_tune_command(args: TuneArgs) -> anyhow::Result<AppCommand> {
     if args.runs == 0 {
         anyhow::bail!("--runs must be greater than zero");
     }
+    args.order_strategy
+        .parse::<crate::tune::TuneOrderStrategy>()?;
     let scenario_name = crate::scenario::normalize_identity_label(args.scenario_name.as_deref());
     if let Some(scenario_name) = scenario_name.as_deref() {
         crate::scenario::validate_scenario_name(scenario_name)?;

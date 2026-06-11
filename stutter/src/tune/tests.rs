@@ -132,7 +132,7 @@ mod ranking_tests {
                 rules: Vec::new(),
             },
         ];
-        let orders = tune_candidate_order(&profiles, 5, "alternating");
+        let orders = tune_candidate_order(&profiles, 5, TuneOrderStrategy::Alternating);
         let summary_order = orders
             .iter()
             .map(|order| (order.iteration, order.profiles.clone()))

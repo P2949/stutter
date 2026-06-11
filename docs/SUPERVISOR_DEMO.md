@@ -10,6 +10,14 @@ Run the included script:
 scripts/demo/supervisor_offline_demo.sh
 ```
 
+The script builds the demo binaries once and captures normal cargo/build-script
+output in `target/supervisor-demo/build.log`. It also writes verbose fixture and
+dependency command output to `target/supervisor-demo/fixture-check.log` and
+`target/supervisor-demo/dependency-hygiene.log`. If a step fails, the relevant
+log is printed. On success, the visible demo output focuses on fixture-check
+summaries, dependency-hygiene summaries, CLI shape, and evidence-bundle
+checksums.
+
 This checks the curated evidence bundle, fixture hygiene, dependency policy, and
 CLI/reporting surface without requiring a live Proton workload.
 
