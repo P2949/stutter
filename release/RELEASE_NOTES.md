@@ -44,6 +44,9 @@ Notes:
 - First review should use the pitch PDF, supervisor README, scope note, AI
   disclosure, and curated evidence bundle. The raw KCD1 archive is included for
   audit/reproduction only.
+- Tracked files under `release/` and generated PDFs under `reports/` are frozen
+  supervisor-review snapshots. Markdown sources remain the editable source of
+  truth.
 - Markdown-derived PDFs are regenerated from repository Markdown sources without
   browser header/footer local path metadata.
 - Before sending the email, manually confirm that the raw archive, raw archive

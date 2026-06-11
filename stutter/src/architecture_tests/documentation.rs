@@ -43,6 +43,21 @@ fn collect_markdown_files(path: &Path, files: &mut Vec<PathBuf>) {
 }
 
 #[test]
+fn artifact_schema_doc_mentions_current_session_schema_version() {
+    let doc = fs::read_to_string(repo_root().join("docs/ARTIFACT_SCHEMA.md"))
+        .expect("docs/ARTIFACT_SCHEMA.md should be readable");
+    let expected = format!(
+        "that resolves to `{}`",
+        crate::recorder::SESSION_SCHEMA_VERSION.get()
+    );
+
+    assert!(
+        doc.contains(&expected),
+        "docs/ARTIFACT_SCHEMA.md must mention the current SESSION_SCHEMA_VERSION"
+    );
+}
+
+#[test]
 fn documentation_rejects_stale_ebpf_build_command() {
     let mut bad_matches = Vec::new();
 

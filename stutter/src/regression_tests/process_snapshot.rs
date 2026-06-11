@@ -326,7 +326,7 @@ fn watch_process_selection_treats_wine_backslashes_as_path_separators() {
         10,
         1,
         "helper",
-        r#"Z:\home\p2949\Games\KingdomCome.exe"#,
+        r#"Z:\home\tester\Games\KingdomCome.exe"#,
         &[10],
     );
     create_fake_proc(&dir, 20, 1, "other", "/bin/other KingdomCome.exe", &[20]);

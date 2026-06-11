@@ -13,6 +13,8 @@ target-test/
 # Local tool state
 .llm-runs/
 .codex
+.codex/
+.agents/
 
 # Python
 __pycache__/

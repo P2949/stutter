@@ -121,8 +121,8 @@ The schema version is stored in:
 - `metadata.core.schema_version`, serialized as top-level `schema_version` in
   `metadata.json`
 
-The current supported version is `recorder::SESSION_SCHEMA_VERSION`. For this
-document version, that value is `22`.
+The current supported version is `recorder::SESSION_SCHEMA_VERSION`; in the
+current implementation, that resolves to `23`.
 
 Version behavior:
 
