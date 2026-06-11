@@ -13,7 +13,8 @@
   report grounded in repo artifacts; it is not a supervisor-facing deliverable.
 
 The recommended first-contact attachment is `FYP_SUPERVISOR_PITCH.pdf`. Do not
-send the long report first unless a supervisor asks for it.
+send the long report first unless a supervisor asks for it, and do not frame the
+first email as a request for a full code review.
 
 The KCD1 case-study source material lives in `reports/kcd1-case-study/`.
 

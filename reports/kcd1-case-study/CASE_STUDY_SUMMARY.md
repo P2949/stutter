@@ -15,11 +15,11 @@ This document summarizes the current Kingdom Come: Deliverance 1 case-study evid
 reports/kcd1-case-study/CASE_STUDY_SUMMARY.md
 ```
 
-The purpose of this case study is not to show that `stutter` automatically repairs KCD1, or that a specific Linux tuning tweak generalizes to the game. The purpose is narrower and more useful: show that the prototype can collect evidence from a real Proton/Wine game workload, generate a scoped tuning hypothesis, and determine whether that hypothesis is validated, unsupported, or requires more evidence through repeated A/B measurements.
+The purpose of this case study is not to show that `stutter` automatically repairs KCD1, or that a specific Linux tuning tweak generalizes to the game. The purpose is narrower and more useful: demonstrate feasibility for collecting evidence from a real Proton/Wine game workload, generating a scoped tuning hypothesis, and determining whether that hypothesis is validated, unsupported, or requires more evidence through repeated A/B measurements.
 
 ## Key takeaways
 
-- This case study demonstrates that `stutter` can separate a plausible-but-unsupported tuning hypothesis from a validated improvement claim in this noisy KCD1/Proton workload.
+- This case study demonstrates feasibility for separating a plausible-but-unsupported tuning hypothesis from a validated improvement claim in this noisy KCD1/Proton workload.
 - `stutter` successfully captured and analyzed a real KCD1/Proton workload with scheduler data, process-tree data, GPU samples, and MangoHud frame timing.
 - Five formal baseline runs were valid: each ran for about 180 seconds, stopped because the maximum duration was reached, ingested frame data, and used monotonic frame timestamp alignment.
 - The baseline route was noisy but useful: median frametime ranged from about 16.3ms to 22.9ms, while p99 frametime stayed in the mid-40s to low-50s milliseconds.

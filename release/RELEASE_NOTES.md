@@ -4,6 +4,16 @@ Version: supervisor-hand-off-v4
 Release tag: `fyp-report-final-v4`
 Date: 2026-06-09
 
+First-review checklist:
+
+1. Read `FYP_SUPERVISOR_PITCH.pdf`.
+2. Skim `SUPERVISOR_README.md` in the repository root.
+3. Skim `reports/fyp-report/PRE_FYP_SCOPE_NOTE.md`.
+4. Check `reports/fyp-report/AI_DISCLOSURE.md`.
+
+The raw KCD1 archive and full source tree are for audit/reproduction only. First
+contact is not intended to ask for a full code review.
+
 Release assets:
 
 - `FYP_SUPERVISOR_PITCH.pdf` — supervisor pitch PDF.
@@ -18,6 +28,9 @@ Release assets:
 - `raw-kcd1-case-study-fyp-report-final-v4.contents.txt` — file listing for the raw KCD1 archive.
 - `raw-kcd1-case-study-fyp-report-final-v4.contents.txt.sha256` — checksum for the raw archive contents listing.
 
+The raw KCD1 archive files listed above are GitHub Release assets only; they are
+not included in the lightweight repository checkout or supervisor tarball.
+
 Notes:
 
 - This release is intended for first supervisor contact.
@@ -28,8 +41,14 @@ Notes:
   about KCD1 or CPU affinity.
 - The full raw KCD1 archive is published as a release asset instead of being
   tracked in Git, keeping normal repository clones lightweight.
-- First review should use the pitch PDF, KCD1 report, AI disclosure, and curated
-  evidence bundle. The raw KCD1 archive is included for audit/reproduction only.
+- First review should use the pitch PDF, supervisor README, scope note, AI
+  disclosure, and curated evidence bundle. The raw KCD1 archive is included for
+  audit/reproduction only.
+- Markdown-derived PDFs are regenerated from repository Markdown sources without
+  browser header/footer local path metadata.
+- Before sending the email, manually confirm that the raw archive, raw archive
+  checksum, contents listing, and contents-listing checksum are attached to the
+  GitHub Release page.
 
 To verify the lightweight evidence bundle after extraction:
 

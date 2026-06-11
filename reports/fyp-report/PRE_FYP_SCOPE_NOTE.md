@@ -35,6 +35,10 @@ delay/spike indicators. Secondary metrics may include median frame time, 1% low
 style summaries where available, task-class scheduler delay, MangoHud frame
 pacing outliers, eBPF drop counters, and data-quality warnings.
 
+The diagnostic score is an internal comparison metric, not FPS and not a direct
+player-visible smoothness score. It should be reported beside raw frame-time and
+scheduler metrics so that conclusions do not depend on a single opaque number.
+
 Decision vocabulary is deliberately conservative: `validated`, `not validated`,
 `inconclusive`, `more evidence required`, or `unsafe/not applicable`. The
 archived KCD1 run was paired but not counterbalanced, so it remains preliminary
@@ -45,6 +49,9 @@ motivation for the corrected protocol rather than a validated tuning claim.
 These may exist in the repository as background prototype or future-work areas,
 but they are not proposed as the assessed FYP core unless supervision explicitly
 changes the scope.
+
+For a compact table version of this boundary, see
+[`docs/FYP_SCOPE_MAP.md`](../../docs/FYP_SCOPE_MAP.md).
 
 - General Linux game optimizer.
 - Broad autotuning platform.

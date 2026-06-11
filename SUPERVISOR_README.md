@@ -22,19 +22,32 @@ evidence bundle.
 
 ## Read First
 
-For a 5-minute first review:
+For first review, please read only:
 
-1. Download and read `FYP_SUPERVISOR_PITCH.pdf` from the
+1. `FYP_SUPERVISOR_PITCH.pdf` from the
    [fyp-report-final-v4 release](https://github.com/P2949/stutter/releases/tag/fyp-report-final-v4).
-2. Skim `reports/fyp-report/PRE_FYP_SCOPE_NOTE.md`.
+2. `SUPERVISOR_README.md`.
+3. `reports/fyp-report/PRE_FYP_SCOPE_NOTE.md`.
+4. `reports/fyp-report/AI_DISCLOSURE.md`.
+
+The raw KCD1 archive and full source tree are for audit/reproduction only. First
+contact is not intended as a full code-review request; the intended first review
+is the short pitch and this curated supervisor README.
+
+For a slightly deeper triage pass, use this order:
+
+1. Read the pitch PDF.
+2. Skim the scope note.
 3. Read the executive summary of `reports/kcd1-case-study/KCD1_EXPERIMENT_REPORT.md`.
-4. Check `reports/fyp-report/AI_DISCLOSURE.md`.
+4. Check the AI disclosure.
 
 - [FYP supervisor pitch](reports/fyp-report/FYP_SUPERVISOR_PITCH.md) - concise
   project motivation, current prototype status, preliminary KCD1 result, and
   supervision questions.
 - [Pre-FYP scope note](reports/fyp-report/PRE_FYP_SCOPE_NOTE.md) - separates
   existing prototype work from the proposed assessed FYP contribution.
+- [FYP scope map](docs/FYP_SCOPE_MAP.md) - one-page map of what exists in the
+  prototype versus what is proposed as core assessed FYP scope.
 - [AI use disclosure](reports/fyp-report/AI_DISCLOSURE.md) -
   describes the role of AI coding assistants in the prototype workflow.
 - [KCD1 case-study report](reports/kcd1-case-study/KCD1_EXPERIMENT_REPORT.md) -
@@ -61,6 +74,15 @@ Existing daemon paths, remote/agent work, GPU power tuning, IRQ affinity, VM or
 kernel tuning, scheduler replacement, packaging, and wide hardware/game coverage
 are background prototype areas, optional extensions, or future work unless the
 supervisor explicitly chooses to include one of them.
+
+### Known caveats / not claimed
+
+This supervisor snapshot does not claim:
+
+- that `stutter` is a finished optimizer;
+- that the KCD1 affinity profile improves performance;
+- that the preliminary KCD1 A/B run is a final counterbalanced experiment;
+- that GPU/IRQ/VM/daemon/autotune features are proposed core FYP scope.
 
 ## What To Ignore For First Review
 
@@ -105,7 +127,13 @@ cd ../release && sha256sum -c ASSETS_SHA256SUMS
 sha256sum -c SHA256SUMS
 ```
 
-For a supervisor demo, prefer the offline path before live eBPF tracing:
+For a supervisor demo, prefer the offline script before live eBPF tracing:
+
+```bash
+scripts/demo/supervisor_offline_demo.sh
+```
+
+The script uses offline/safe checks first. The equivalent manual path is:
 
 ```bash
 RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -p xtask -- fixture-check

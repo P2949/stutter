@@ -36,7 +36,7 @@ In the final methodology, profile explanation would be run before A/B tuning so 
 
 A preliminary real-world case study has already been completed using *Kingdom Come: Deliverance 1* under GE-Proton on Linux/Wayland/Gamescope. The prototype collected five formal baseline runs and a five-iteration paired A/B comparison of a CPU-affinity tuning hypothesis. The archived A/B run was paired but not counterbalanced: the online baseline was measured before the tuned profile in every iteration, so the case study is treated as preliminary low-confidence evidence and as motivation for enforcing alternating order in the FYP methodology.
 
-The tested profile was plausible: it placed game/Wine tasks on CPUs `1-5,7-11` and Gamescope/runtime tasks on CPUs `0,6`. However, the profile was not validated. The online baseline had a lower primary diagnostic score in all five paired A/B iterations, with the order caveat above. This is a useful result because it demonstrates that the workflow can decline an unsupported recommendation rather than turning a plausible tweak into advice.
+The tested profile was plausible: it placed game/Wine tasks on CPUs `1-5,7-11` and Gamescope/runtime tasks on CPUs `0,6`. However, the profile was not validated. The online baseline had a lower primary diagnostic score in all five paired A/B iterations, with the order caveat above. The diagnostic score is an internal comparison metric rather than FPS or a direct smoothness score, so it should be interpreted beside raw frame-time and scheduler metrics. This is a useful result because it demonstrates the feasibility of a workflow that can decline an unsupported recommendation rather than turning a plausible tweak into advice.
 
 The case study also exposed the need for better profile auditability. In response, a profile-explainability feature was added so that the tool can show which profile rules matched important threads such as `RenderThread`, `ClothingRaycast`, `dxvk-submit`, and `wineserver` before a profile is applied.
 
@@ -70,7 +70,7 @@ The proposed Final Year Project would build on this prototype and focus on turni
 
 To keep the project achievable, the evaluation would focus on a limited set of reversible tuning areas. CPU affinity and process/thread placement would be the primary tuning area, with selected process-local scheduler controls such as `uclamp` considered only if appropriate. Broader or higher-risk system changes, such as persistent IRQ affinity changes or replacing the system scheduler, would be treated as optional extensions or future work.
 
-The current prototype and KCD1 case study show that the idea is viable. The FYP would formalize, narrow, evaluate, and present the methodology as a complete project rather than trying to become a universal Linux game optimizer.
+The current prototype and KCD1 case study demonstrate feasibility. The FYP would formalize, narrow, evaluate, and present the methodology as a complete project rather than trying to become a universal Linux game optimizer.
 
 ## Success criteria
 

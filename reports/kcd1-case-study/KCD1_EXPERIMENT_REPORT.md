@@ -4,7 +4,7 @@ Using scheduler-aware eBPF profiling to evaluate a CPU-affinity tuning hypothesi
 
 ## 1. Executive Summary
 
-This case study evaluates whether `stutter`, a Linux game-performance profiling prototype, can collect evidence from a real Proton/Wine game workload, generate a scoped tuning hypothesis, and validate whether the change supports better frame pacing. The tested CPU-affinity profile was plausible but was **not validated**: `baseline-online` had a lower primary diagnostic score than the tuned profile in all five paired A/B iterations. The archived run was paired but not counterbalanced: `baseline-online` was measured before the tuned profile in every iteration, so the result may include an order effect. The result is still useful as conservative non-validation evidence because it shows the tool can avoid false-positive tuning recommendations in a noisy real-world workload.
+This case study evaluates whether `stutter`, a Linux game-performance profiling prototype, can collect evidence from a real Proton/Wine game workload, generate a scoped tuning hypothesis, and test whether the change supports better frame pacing. The tested CPU-affinity profile was plausible but was **not validated**: `baseline-online` had a lower primary diagnostic score than the tuned profile in all five paired A/B iterations. The archived run was paired but not counterbalanced: `baseline-online` was measured before the tuned profile in every iteration, so the result may include an order effect. The result is still useful as conservative non-validation evidence because it shows the tool can avoid false-positive tuning recommendations in a noisy real-world workload.
 
 - Real game workload: Kingdom Come: Deliverance 1 under GE-Proton10-34.
 - Repeatable 180-second Rattay route from the same save.
@@ -12,7 +12,7 @@ This case study evaluates whether `stutter`, a Linux game-performance profiling 
 - Tested CPU-affinity split: game/Wine on `1-5,7-11`, Gamescope/runtime on `0,6`.
 - Result: not recommended on current evidence; the workflow worked.
 
-The key answer is yes: `stutter` demonstrated an evidence-based workflow for testing a real Linux/Proton game tuning hypothesis. It collected evidence, generated a plausible CPU-affinity hypothesis, tested it, did not validate it, explained why that matters, and added explainability/follow-up analysis.
+The key answer is yes, within the limits of a preliminary case study: `stutter` demonstrated feasibility for an evidence-based workflow that can test a real Linux/Proton game tuning hypothesis. It collected evidence, generated a plausible CPU-affinity hypothesis, tested it, did not validate it, explained why that matters, and added explainability/follow-up analysis.
 
 Primary evidence: `reports/kcd1-case-study/CASE_STUDY_SUMMARY.md`, curated copies in `evidence-bundle/kcd1/tuning_summary.json`, `evidence-bundle/kcd1/tuning_recommendation.json`, and `evidence-bundle/kcd1/profile-plan-summary.json`, with original raw paths preserved in the raw KCD1 release archive.
 
@@ -270,7 +270,7 @@ These limitations strengthen the report if they are stated plainly. The case stu
 
 ## 15. FYP Relevance
 
-This case study supports the FYP because it demonstrates the full evidence-based loop: observation, diagnosis, scoped hypothesis, reversible tuning, repeated A/B validation, uncertainty handling, and honest non-recommendation when the data does not support the tweak.
+This case study supports the FYP because it demonstrates feasibility for the evidence-based loop: observation, diagnosis, scoped hypothesis, reversible tuning, repeated A/B comparison, uncertainty handling, and honest non-recommendation when the data does not support the tweak.
 
 Expected FYP contribution:
 
