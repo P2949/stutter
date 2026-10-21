@@ -279,3 +279,14 @@ validation debt rather than synthetic substitutes.
   both child process identities ceased running within the bounded check. Final
   xtask all-target Clippy and format/diff checks passed. This is helper cleanup,
   not controller crash-after-apply recovery acceptance.
+- PASS clean-source multi-process affinity acceptance at `9130ea1`: parent and
+  two children, five tasks; each original mask `0-11`, applied mask `0`, and
+  independently restored mask `0-11`. Dry-run unchanged, durable original/task/
+  process identities checked, pre-rollback journal archived and ten audit events
+  verified. Ran as the normal user, independently of BPF/observation support.
+  [Retained evidence](evidence/live-affinity-20261021/README.md) includes the
+  receipt, selected environment, journal and sanitized audit. Full original
+  bundle: `/tmp/stutter-affinity-process-tree-20261021`.
+- PR #43 main CI run `39635725995` completed successfully at exact merge
+  `0be8ad5eb3c603a84689576aafc70263a2d5c001`. Affinity remote integration,
+  controller crash/restart recovery, fault matrix and graduation remain open.

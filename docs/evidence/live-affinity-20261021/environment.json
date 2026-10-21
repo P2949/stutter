@@ -1,0 +1,17 @@
+{
+  "binary_sha256": "f28873b634afeab65c9681e0abb0cbb56b11900f4b8ad35563f8bf0d5528d46c",
+  "binary_version": "stutter 0.1.0 (git 9130ea1)",
+  "cargo_lock_sha256": "edb02855e2c91777aace3e00eff5ec998f5a7c0f8d692128f269316ee22e1883",
+  "commit": "9130ea1640b5fefb128f73df4f4b35a13d931bcb",
+  "cpu_model": "Intel(R) Core(TM) i5-10600K CPU @ 4.10GHz",
+  "cpu_online": "0-11",
+  "distribution": "ID=nixos\nVERSION_ID=\"26.05\"",
+  "evidence_kind": "controlled_real",
+  "kernel_release": "6.18.55",
+  "proc_version": "Linux version 6.18.55 (<builder>@<buildhost>) (gcc (GCC) 15.3.0, GNU ld (GNU Binutils) 2.46) #1-NixOS SMP PREEMPT_DYNAMIC Sat Oct  3 10:39:03 UTC 2026",
+  "rust": "rustc 1.98.0-nightly (8954863c8 2026-06-05)\nbinary: rustc\ncommit-hash: 8954863c81df429ebf96ea38a16c76f209995833\ncommit-date: 2026-06-05\nhost: x86_64-unknown-linux-gnu\nrelease: 1.98.0-nightly\nLLVM version: 22.1.6",
+  "schema_version": 1,
+  "source_dirty": false,
+  "source_matches_binary": true,
+  "suite": "live_observation"
+}
