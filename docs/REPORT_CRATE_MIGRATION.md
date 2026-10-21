@@ -4,7 +4,7 @@ This document records the ownership boundary between the main `stutter` runtime
 crate and the `stutter-report` workspace crate.
 
 The initial report-crate migration is complete for the first stable boundary.
-That does **not** mean every report-related responsibility has moved out of the
+This means the initial migration checklist is closed. That does **not** mean every report-related responsibility has moved out of the
 main `stutter` crate.
 
 ## Completed migration boundary

@@ -7,7 +7,7 @@ successfully:
 - cargo run -p xtask -- ci
 - cargo run -p xtask -- fixture-check
 - cargo run -p xtask -- dependency-hygiene
-- sha256sum -c evidence-bundle/MANIFEST.sha256
+- (cd evidence-bundle && sha256sum -c MANIFEST.sha256)
 - scripts/artifacts/build_case_study_report.sh
 - verification of the raw case-study archive checksum
 - verification of the raw archive contents-listing checksum
