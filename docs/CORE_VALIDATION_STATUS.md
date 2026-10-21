@@ -191,3 +191,29 @@ validation debt rather than synthetic substitutes.
   offline recommendation and historical-schema advisor smokes. The old schema-18
   artifact rendered with the expected version warning. No live-validation or
   capability-graduation claim is made by this descriptor/documentation slice.
+
+## 2026-10-21: canonical live observation harness
+
+- Main CI runs for PR #40 (`39632255939`, `14cf359`) and PR #41
+  (`39632742284`, `8093474`) completed successfully. PR #42 remains in progress;
+  P0 completion is not yet claimed.
+- Added `xtask live-acceptance observation`, with independent observation-only
+  config, bounded subprocesses and workload cleanup, deterministic periodic
+  wakeups plus single-CPU contention, process identity checks, direct histogram
+  population checks, zero-drop requirement, artifact validation and JSON/HTML/
+  advisor pipeline. Missing prerequisites return nonzero BLOCKED, never a skip.
+- PASS development-tree privileged functional attempt on Linux 6.18.55: 4,965
+  target samples, 21 interval records, positive interval p99 and zero drop
+  counters; validator, report and advisor completed. Local original evidence:
+  `/tmp/stutter-live-root-attempt-20261021`. This generic Service workload does
+  not establish game-objective acceptance; portable export and richer controlled
+  objective evidence remain open. No mutation provider was exercised.
+- The unprivileged attempt returned nonzero BLOCKED with a retained receipt.
+  The preliminary privileged binary reported revision `69728cf` while HEAD was
+  `8ff469d`; its digest was retained but that run is not clean-source acceptance.
+  Strengthened canonical preflight to require a clean tree and matching binary
+  Git revision. A new committed-source run remains required.
+- Initial xtask test list had the two new command names in the wrong sort order;
+  corrected the expectation. Subsequent validation: 23 xtask tests passed,
+  xtask Clippy passed, and 121 architecture tests passed. Revalidation after the
+  stronger provenance preflight is pending.
