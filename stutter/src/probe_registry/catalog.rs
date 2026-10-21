@@ -474,6 +474,7 @@ pub const PROBE_REGISTRY: &[ProbeSpec] = &[
         }],
         validation_contract: "drm_fence_events.json is optional NDJSON populated from compatible fence wait/signal tracepoints; missing fence events are unavailable evidence, not proof of no GPU/display wait.",
     },
+    super::workload_progress::PROBE,
     ProbeSpec {
         key: ProbeKey::WaylandPresentationTiming,
         catalog_key: "wayland_presentation_timing",

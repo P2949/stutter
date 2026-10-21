@@ -92,3 +92,44 @@ validation debt rather than synthetic substitutes.
   2,685 passed, 0 failed, 5 ignored; lifecycle integration tests: 8 passed.
   Other default-member and integration suites passed. The historical schema-18
   advisor fixture emitted its expected old-schema warning and rendered.
+
+## 2026-10-21: remote integration and fixed-work compile progress
+
+- PR [#39](https://github.com/P2949/stutter/pull/39) merged at
+  `7fc8f3873a0aeaa53c7cab130e03c2fd69db0880`. Exact-head PR CI run
+  `39597465475` and main run `39598456469` completed successfully.
+  Issues #22 and #23 closed. The earlier all-open/no-remote statements above
+  describe their historical checkpoints and are superseded by this entry.
+  This is CI evidence, not live acceptance.
+- Stage B counterexample reproduced before comparator replacement:
+  `faster_identical_completed_compile_work_improves_despite_score_regression`
+  returned Inconclusive for 31.4 s versus 28.0 s (exit 101).
+- Implemented generic fixed-work identity/markers, clean-Git command runner,
+  bounded cooperative log reader, reliable monitor events, optional recording
+  stream, target-scoped aggregation and fixed-work comparison. See
+  [FIXED_WORK_COMPILE.md](FIXED_WORK_COMPILE.md).
+- PASS: targeted protocol/reader/runner/artifact suite (8 tests) and targeted
+  fixed-work objective suite (8 tests). Initial xtask validation caught an
+  outdated CLI command-list assertion (19 passed, 1 failed); added the new
+  `fixed-work` command to its expected public command list.
+- Broader validation is pending. No live compile performance or calibration
+  claim follows from these offline tests.
+- Initial full gate: format/build/Clippy passed; library tests reported 2,664
+  passed, 35 failed, 5 ignored. Thirty-two failures exposed an unintended global
+  quality downgrade when old runs lacked optional fixed-work markers. The
+  quality rule now keeps missing compile evidence distinct from unrelated
+  scheduler evidence. Remaining failures required the intentional API export,
+  updated help snapshots, and extracting the cooperative probe descriptor to
+  respect the existing catalog size limit. Historical fixtures were preserved.
+- Added future-timestamp, oversized-line and stale-marker reader cases, plus
+  cross-window PID and process-start-time mismatch rejection.
+- PASS final local build gate: format, all-target build, Clippy `-D warnings`,
+  all-target tests (2,699 library passed, 0 failed, 5 ignored; 8 lifecycle
+  integration passed; other integration/default-member suites passed).
+  `xtask` suite: 20 passed. Offline recommendation and advisor smokes passed;
+  the historical schema-18 fixture rendered with its expected warning.
+- PASS real command timing smoke at `a20ab25`: two package-clean `stutter-core`
+  builds emitted valid ordered matching markers, 392,871,489 ns and
+  391,818,357 ns. [Raw evidence](evidence/fixed-work-20261021/README.md) retains
+  source, manifest, commands, markers and compiler output. No tuning or
+  foreground monitor ran; this is not live objective acceptance or calibration.

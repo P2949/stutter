@@ -175,6 +175,37 @@ fn reader_skips_existing_input_and_buffers_partial_lines() {
 }
 
 #[test]
+fn reader_bounds_input_and_refuses_future_or_stale_measurements() {
+    use std::io::Write;
+    let root = crate::test_support::TestRoot::new("workload-reader-bounds");
+    for case in ["future", "oversize", "stale"] {
+        let path = root.join(case);
+        std::fs::write(&path, b"").unwrap();
+        let mut reader = WorkloadProgressReader::open_tail(&path).unwrap();
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
+        let mut marker = markers(10, "execution").start;
+        if case == "oversize" {
+            file.write_all(&vec![b'x'; 65_537]).unwrap();
+        } else {
+            if case == "future" {
+                marker.monotonic_ns = u64::MAX;
+            }
+            serde_json::to_writer(&mut file, &marker).unwrap();
+            file.write_all(b"\n").unwrap();
+        }
+        let result = reader.poll(2_000, 0);
+        if case == "stale" {
+            assert!(result.unwrap().is_empty());
+        } else {
+            assert!(result.is_err(), "case {case}");
+        }
+    }
+}
+
+#[test]
 fn reader_refuses_replacement_or_malformed_input() {
     use std::io::Write;
     let root = crate::test_support::TestRoot::new("workload-reader-invalid");

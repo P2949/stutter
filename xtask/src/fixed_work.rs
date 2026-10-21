@@ -1,4 +1,4 @@
-use std::{fs::OpenOptions, io::Write, path::Path};
+use std::{fs::OpenOptions, io::Write, os::unix::fs::OpenOptionsExt, path::Path};
 
 use anyhow::{Context, bail};
 use stutter::api::workload_progress::{FixedWorkIdentity, run_fixed_work};
@@ -14,6 +14,7 @@ pub fn run(
     let mut file = OpenOptions::new()
         .create(true)
         .append(true)
+        .custom_flags(libc::O_NONBLOCK)
         .open(markers_path)?;
     if !file.metadata()?.is_file() {
         bail!("fixed-work marker destination must be a regular file");

@@ -69,6 +69,8 @@ Options:
           
       --mangohud-log <PATH>
           
+      --workload-progress-log <PATH>
+          Tail fixed-work start/completion markers from an existing NDJSON log
       --mangohud-log-live
           
       --tui

@@ -7,6 +7,7 @@ pub enum ProbeKey {
     IrqLatency,
     GpuHwmon,
     FrameLog,
+    WorkloadProgress,
     ForegroundWindow,
     BlockIo,
     CpuFreq,

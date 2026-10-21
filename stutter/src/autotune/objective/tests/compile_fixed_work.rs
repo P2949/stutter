@@ -74,7 +74,7 @@ fn fixed_work_compares_completion_time_instead_of_activity_or_score() {
 fn mismatched_or_incomplete_compile_work_is_inconclusive() {
     let baseline = score(1_000, 12.0, 1);
     let candidate = score(800, 12.0, 1);
-    for case in 0..17 {
+    for case in 0..19 {
         let base = fixed_work(&baseline, 30_000_000_000, "baseline");
         let mut cand = fixed_work(&candidate, 20_000_000_000, "candidate");
         if case <= 12 {
@@ -132,7 +132,17 @@ fn mismatched_or_incomplete_compile_work_is_inconclusive() {
                 13 => cand.signal_quality.compile_throughput = ObjectiveSignalQuality::Approximate,
                 14 => cand.signal_quality.foreground_latency = ObjectiveSignalQuality::Missing,
                 15 => cand.compile_fixed_work = None,
-                _ => cand.memory_pressure_some_avg10_percent = Some(f32::NAN),
+                16 => cand.memory_pressure_some_avg10_percent = Some(f32::NAN),
+                17 => {
+                    let work = cand.compile_fixed_work.as_mut().unwrap();
+                    work.start.target_root_pid += 1;
+                    work.complete.target_root_pid = work.start.target_root_pid;
+                }
+                _ => {
+                    let work = cand.compile_fixed_work.as_mut().unwrap();
+                    work.start.target_starttime_ticks += 1;
+                    work.complete.target_starttime_ticks = work.start.target_starttime_ticks;
+                }
             }
         }
         let result = compare(

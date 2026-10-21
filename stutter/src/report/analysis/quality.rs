@@ -340,6 +340,7 @@ pub(crate) fn data_quality_summary(
 
 fn missing_artifact_downgrades_quality(file: &str) -> bool {
     ![
+        ArtifactKind::WorkloadProgress,
         ArtifactKind::FocusEvents,
         ArtifactKind::ForegroundEvents,
         ArtifactKind::KmsFlipEvents,
