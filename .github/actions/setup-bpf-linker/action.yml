@@ -1,0 +1,19 @@
+name: Install pinned BPF linker
+description: Install a checksum-verified Linux x86_64 linker without a host LLVM dependency
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        set -euo pipefail
+        archive="$(mktemp)"
+        trap 'rm -f "$archive"' EXIT
+        curl --fail --location --retry 3 \
+          https://github.com/aya-rs/bpf-linker/releases/download/v0.11.1/bpf-linker-x86_64-unknown-linux-musl.tar.zst \
+          --output "$archive"
+        printf '%s  %s\n' \
+          e058a6aecc9e65fa4c977b298a8e4b738424d7629769fd352eed409fb57e16e8 \
+          "$archive" | sha256sum --check
+        mkdir -p "$HOME/.cargo/bin"
+        tar --zstd --extract --file "$archive" --directory "$HOME/.cargo/bin" bpf-linker
+        "$HOME/.cargo/bin/bpf-linker" --version

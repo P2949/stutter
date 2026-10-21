@@ -33,7 +33,7 @@ jobs:
           cache-on-failure: true
 
       - name: Install bpf-linker
-        run: cargo install bpf-linker --locked
+        uses: ./.github/actions/setup-bpf-linker
 
       - name: Build release binary
         run: cargo build -p stutter --release
