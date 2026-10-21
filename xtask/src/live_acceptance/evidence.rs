@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn metadata(root: &Path, out: &Path, binary: &Path) -> anyhow::Result<()> {
+pub(super) fn metadata(root: &Path, out: &Path, binary: &Path, suite: &str) -> anyhow::Result<()> {
     let capture = |program: &str, argv: &[&str]| -> anyhow::Result<String> {
         let output = Command::new(program)
             .args(argv)
@@ -17,6 +17,16 @@ pub(super) fn metadata(root: &Path, out: &Path, binary: &Path) -> anyhow::Result
     let version = String::from_utf8(version.stdout)?.trim().to_owned();
     let source_matches_binary =
         version.contains(&format!("git {short})")) || version.contains(&format!("git {commit})"));
+    let linked_library_version = stutter::api::build_version();
+    let source_matches_harness = version == format!("stutter {linked_library_version}");
+    let harness = std::env::current_exe()?;
+    let harness_hash = Command::new("sha256sum").arg("--").arg(harness).output()?;
+    ensure!(harness_hash.status.success(), "harness hash failed");
+    let harness_hash = String::from_utf8(harness_hash.stdout)?
+        .split_whitespace()
+        .next()
+        .context("harness digest missing")?
+        .to_owned();
     let mut binary_hash_args = vec!["--".to_owned()];
     binary_hash_args.push(binary.to_string_lossy().into_owned());
     // Keep the digest only: absolute checkout and user paths are not provenance.
@@ -45,7 +55,7 @@ pub(super) fn metadata(root: &Path, out: &Path, binary: &Path) -> anyhow::Result
         "proc_version":fs::read_to_string("/proc/version")?.trim(),"distribution":os,"cpu_model":cpu_model,
         "cpu_online":fs::read_to_string("/sys/devices/system/cpu/online")?.trim(),
         "rust":capture("rustc", &["-Vv"] )?,"cargo_lock_sha256":capture("sha256sum", &["Cargo.lock"] )?.split_whitespace().next(),
-        "evidence_kind":"controlled_real","suite":"live_observation"});
+        "evidence_kind":"controlled_real","suite":suite,"linked_library_version":linked_library_version,"source_matches_harness":source_matches_harness,"harness_sha256":harness_hash});
     fs::write(
         out.join("environment.json"),
         serde_json::to_vec_pretty(&metadata)?,
@@ -54,6 +64,10 @@ pub(super) fn metadata(root: &Path, out: &Path, binary: &Path) -> anyhow::Result
     ensure!(
         source_matches_binary,
         "binary revision differs from source; rebuild stutter before acceptance"
+    );
+    ensure!(
+        source_matches_harness,
+        "xtask linked library differs from source/CLI; rebuild both binaries"
     );
     Ok(())
 }

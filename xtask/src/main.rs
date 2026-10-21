@@ -60,6 +60,11 @@ pub enum XtaskCommand {
         #[arg(long)]
         ready: PathBuf,
     },
+    #[command(hide = true)]
+    RecoveryController {
+        #[command(subcommand)]
+        mode: live_acceptance::recovery::ControllerCommand,
+    },
     #[command(about = "Generate or check objective contract documentation")]
     ObjectiveDocs {
         #[arg(long, conflicts_with = "write", required_unless_present = "write")]
@@ -290,6 +295,7 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
     let root = repo_root()?;
     match command {
         XtaskCommand::LiveAcceptance { suite } => live_acceptance::run(&root, suite),
+        XtaskCommand::RecoveryController { mode } => live_acceptance::recovery::controller(mode),
         XtaskCommand::LiveWorkload {
             seconds,
             ready,
@@ -424,6 +430,7 @@ mod tests {
                 "package-layout-check",
                 "preflight",
                 "privileged-ebpf-smoke",
+                "recovery-controller",
                 "refresh-tune-recommendation",
                 "report-golden-update",
                 "schema-check",

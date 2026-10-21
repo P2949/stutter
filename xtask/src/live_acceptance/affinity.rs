@@ -9,7 +9,7 @@ pub(super) fn run(root: &Path, out: &Path, binary: &Path) -> anyhow::Result<()> 
     let out = fs::canonicalize(out)?;
     let mut stage = "preflight";
     let result = (|| -> anyhow::Result<Value> {
-        evidence::metadata(root, &out, &root.join(binary))?;
+        evidence::metadata(root, &out, &root.join(binary), "live_affinity")?;
         let cpu = allowed_cpu()?;
         let ready = out.join("workload-ready.json");
         let mut child = OwnedChild(

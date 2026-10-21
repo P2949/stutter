@@ -74,12 +74,18 @@ pub mod artifacts {
     };
 }
 
+pub use crate::metadata::{build_git_rev, build_version};
+
 pub mod autotune {
     //! Public autotune command, planning, status, and data contract façade.
 
     pub use crate::autotune::{
         DEFAULT_MIN_FOCUS_CONFIDENCE,
         commands::live::{AutotuneCommandInput, autotune_command},
+        crash_acceptance::{
+            RecoveryCheckpoint, RecoveryControllerInput, hold_affinity_recovery_controller,
+            recover_affinity_acceptance_controller,
+        },
         objective::{
             ObjectiveDescriptor, ObjectiveFallbackPolicy, ObjectiveKind, ObjectiveMaturity,
             ObjectiveSignalQuality,

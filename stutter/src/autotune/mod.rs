@@ -35,6 +35,7 @@ pub(crate) mod commands;
 pub(crate) mod comparison;
 pub(crate) mod conflicts;
 pub(crate) mod controller_journal;
+pub(crate) mod crash_acceptance;
 
 pub(crate) mod emergency_restore;
 pub(crate) mod experiment;

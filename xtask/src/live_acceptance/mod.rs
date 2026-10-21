@@ -12,9 +12,16 @@ use clap::Subcommand;
 use serde_json::{Value, json};
 mod affinity;
 mod evidence;
+pub(crate) mod recovery;
 
 #[derive(Clone, Debug, Eq, PartialEq, Subcommand)]
 pub enum Suite {
+    Recovery {
+        #[arg(long)]
+        out: PathBuf,
+        #[arg(long)]
+        stutter_bin: PathBuf,
+    },
     Affinity {
         #[arg(long)]
         out: PathBuf,
@@ -148,12 +155,17 @@ pub fn workload(seconds: u64, ready: &Path, descendants: bool) -> anyhow::Result
                 std::hint::black_box(Instant::now());
             }
         })?;
-    fs::write(
-        ready,
-        serde_json::to_vec(
-            &json!({"pid":std::process::id(), "starttime_ticks":start_ticks(std::process::id())?}),
-        )?,
+    let temporary = ready.with_extension("tmp");
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary)?;
+    serde_json::to_writer(
+        &mut file,
+        &json!({"pid":std::process::id(), "starttime_ticks":start_ticks(std::process::id())?}),
     )?;
+    file.sync_all()?;
+    fs::rename(temporary, ready)?;
     busy.join()
         .map_err(|_| anyhow::anyhow!("busy workload panicked"))?;
     wake.join()
@@ -169,6 +181,7 @@ pub fn run(root: &Path, suite: Suite) -> anyhow::Result<()> {
             seconds,
         } => (out, stutter_bin, seconds),
         Suite::Affinity { out, stutter_bin } => return affinity::run(root, &out, &stutter_bin),
+        Suite::Recovery { out, stutter_bin } => return recovery::run(root, &out, &stutter_bin),
     };
     ensure!(cfg!(target_os = "linux"), "live acceptance requires Linux");
     fs::create_dir(&out)
@@ -181,7 +194,7 @@ pub fn run(root: &Path, suite: Suite) -> anyhow::Result<()> {
     )?;
     let mut stage = "preflight";
     let result = (|| -> anyhow::Result<Value> {
-        evidence::metadata(root, &out, &binary)?;
+        evidence::metadata(root, &out, &binary, "live_observation")?;
         command(
             &binary,
             &args(&["doctor", "--json"]),

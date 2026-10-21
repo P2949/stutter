@@ -1,0 +1,376 @@
+use std::{io::Write, os::unix::process::ExitStatusExt};
+
+use super::*;
+
+struct Actor {
+    child: OwnedChild,
+    pid: u32,
+    ticks: u64,
+    traced: bool,
+    finished: bool,
+}
+impl Drop for Actor {
+    fn drop(&mut self) {
+        if !self.finished
+            && self.child.0.try_wait().ok().flatten().is_none()
+            && start_ticks(self.pid).ok() == Some(self.ticks)
+        {
+            let _ = Command::new("kill")
+                .args(["-KILL", "--", &self.pid.to_string()])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+        }
+    }
+}
+impl Actor {
+    fn kill_and_wait(&mut self, out: &Path) -> anyhow::Result<Value> {
+        ensure!(
+            self.child.0.try_wait()?.is_none() && start_ticks(self.pid)? == self.ticks,
+            "controller exited or identity changed before SIGKILL"
+        );
+        if self.traced {
+            ensure!(
+                Command::new("kill")
+                    .args(["-KILL", "--", &self.pid.to_string()])
+                    .status()?
+                    .success(),
+                "controller SIGKILL command failed"
+            );
+        } else {
+            self.child.0.kill()?;
+        }
+        let deadline = Instant::now() + Duration::from_secs(15);
+        let status = loop {
+            if let Some(status) = self.child.0.try_wait()? {
+                break status;
+            }
+            ensure!(
+                Instant::now() < deadline,
+                "controller/tracer did not terminate after SIGKILL"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        if self.traced {
+            let trace = fs::read_to_string(out.join("syscalls.log"))?;
+            ensure!(
+                trace.lines().any(|line| line.contains("killed by SIGKILL")
+                    && (line.starts_with(&format!("{} ", self.pid))
+                        || line.trim_start().starts_with("+++"))),
+                "tracer did not observe controller SIGKILL"
+            );
+            ensure!(
+                start_ticks(self.pid).ok() != Some(self.ticks),
+                "tracer did not reap controller"
+            );
+        } else {
+            ensure!(
+                status.signal() == Some(9),
+                "controller was not terminated by SIGKILL"
+            );
+        }
+        self.finished = true;
+        Ok(
+            json!({"signal":9,"controller_pid":self.pid,"controller_starttime_ticks":self.ticks,"traced":self.traced,"wait_signal":status.signal(),"wait_code":status.code(),"termination_confirmed":true}),
+        )
+    }
+}
+fn start_actor(
+    executable: &Path,
+    out: &Path,
+    root: u32,
+    root_ticks: u64,
+    cpu: u32,
+    checkpoint: RecoveryCheckpoint,
+) -> anyhow::Result<Actor> {
+    let traced = checkpoint == RecoveryCheckpoint::MidApply;
+    let mut command = if traced {
+        let mut command = Command::new("strace");
+        command
+            .args(["-f", "--seccomp-bpf", "-yy", "-o"])
+            .arg(out.join("syscalls.log"))
+            .args([
+                "-e",
+                "trace=sched_setaffinity",
+                "-e",
+                "inject=sched_setaffinity:delay_exit=10s:when=1",
+            ])
+            .arg(executable);
+        command
+    } else {
+        Command::new(executable)
+    };
+    command
+        .args(["recovery-controller", "hold", "--out"])
+        .arg(out)
+        .args([
+            "--tree-pid",
+            &root.to_string(),
+            "--tree-ticks",
+            &root_ticks.to_string(),
+            "--cpu",
+            &cpu.to_string(),
+            "--owner-pid",
+            &std::process::id().to_string(),
+            "--owner-ticks",
+            &start_ticks(std::process::id())?.to_string(),
+            "--checkpoint",
+            checkpoint.as_str(),
+        ])
+        .env("STUTTER_CONFIG", out.join("acceptance.toml"))
+        .stdout(fs::File::create(out.join("controller.stdout"))?)
+        .stderr(fs::File::create(out.join("controller.stderr"))?);
+    let mut child = OwnedChild(command.spawn()?);
+    let started = wait_file(&out.join("controller-started.json"), &mut child, 10)?;
+    let pid = started["controller_pid"]
+        .as_u64()
+        .and_then(|pid| u32::try_from(pid).ok())
+        .context("controller PID missing")?;
+    let ticks = started["controller_starttime_ticks"]
+        .as_u64()
+        .context("controller identity missing")?;
+    ensure!(
+        start_ticks(pid)? == ticks,
+        "controller identity changed at startup"
+    );
+    ensure!(
+        traced || pid == child.0.id(),
+        "controller PID is not the owned child"
+    );
+    Ok(Actor {
+        child,
+        pid,
+        ticks,
+        traced,
+        finished: false,
+    })
+}
+fn archive(out: &Path, name: &str) -> anyhow::Result<()> {
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(out.join(format!("{name}.before-crash")))?;
+    file.write_all(&fs::read(out.join(name))?)?;
+    file.sync_all()?;
+    Ok(())
+}
+fn verify_recovery_evidence(out: &Path) -> anyhow::Result<()> {
+    let journal = read_json(&out.join("controller.json"))?;
+    ensure!(
+        journal["state"] == "clean" && journal.get("rollback_token").is_none_or(Value::is_null),
+        "recovery journal not clean"
+    );
+    let audit = fs::read_to_string(out.join("actions.jsonl"))?
+        .lines()
+        .map(serde_json::from_str::<Value>)
+        .collect::<Result<Vec<_>, _>>()?;
+    let last = audit.last().context("recovery audit missing")?;
+    ensure!(
+        last["command"] == "autotune-startup-recovery"
+            && last["success"] == true
+            && last["affected_tasks"] == 5,
+        "recovery audit does not confirm five restores"
+    );
+    let history = fs::read_to_string(out.join("history.jsonl"))?
+        .lines()
+        .map(serde_json::from_str::<Value>)
+        .collect::<Result<Vec<_>, _>>()?;
+    ensure!(
+        history.last().is_some_and(
+            |event| event["rollback_performed"] == true && event["phase"] == "cooldown"
+        ),
+        "recovery history missing successful rollback"
+    );
+    let state = read_json(&out.join("daemon-state.json"))?;
+    ensure!(
+        state["phase"] == "cooldown"
+            && state["active_rollback"].is_null()
+            && state["active_experiment"].is_null()
+            && state["faulted"].is_null(),
+        "daemon state disagrees with completed recovery"
+    );
+    Ok(())
+}
+
+pub(super) fn run(
+    executable: &Path,
+    parent: &Path,
+    cpu: u32,
+    checkpoint: RecoveryCheckpoint,
+) -> anyhow::Result<Value> {
+    let out = parent.join(checkpoint.as_str());
+    fs::create_dir(&out)?;
+    fs::write(out.join("acceptance.toml"), "# Isolated crash checkpoint\n")?;
+    let ready = out.join("workload-ready.json");
+    let mut workload = OwnedChild(
+        Command::new(executable)
+            .args([
+                "live-workload",
+                "--descendants",
+                "--seconds",
+                "90",
+                "--ready",
+            ])
+            .arg(&ready)
+            .stdout(Stdio::null())
+            .stderr(fs::File::create(out.join("workload.stderr"))?)
+            .spawn()?,
+    );
+    wait_file(&ready, &mut workload, 5)?;
+    let root = workload.0.id();
+    let root_ticks = start_ticks(root)?;
+    let before = procfs::snapshot(root, root_ticks)?;
+    let desired = cpu.to_string();
+    ensure!(
+        before.values().all(|task| task.mask != desired),
+        "no effective mask change for owned helper"
+    );
+    let result = (|| -> anyhow::Result<Value> {
+        write_json(&out.join("before.json"), &procfs::value(&before))?;
+        let mut actor = start_actor(executable, &out, root, root_ticks, cpu, checkpoint)?;
+        let at_checkpoint = if checkpoint == RecoveryCheckpoint::MidApply {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                ensure!(
+                    actor.child.0.try_wait()?.is_none(),
+                    "traced controller exited before partial mutation"
+                );
+                let current = procfs::snapshot(root, root_ticks)?;
+                let count = procfs::changed(&before, &current, &desired)?;
+                if count == 1 {
+                    break current;
+                }
+                ensure!(count == 0, "tracer missed partial-apply checkpoint");
+                ensure!(Instant::now() < deadline, "no partial mutation observed");
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        } else {
+            let ready = wait_file(&out.join("pause-ready.json"), &mut actor.child, 10)?;
+            ensure!(
+                ready["controller_pid"] == actor.pid && ready["checkpoint"] == checkpoint.as_str(),
+                "checkpoint handshake differs"
+            );
+            ensure!(
+                ready["real_verification_read_completed"]
+                    == matches!(
+                        checkpoint,
+                        RecoveryCheckpoint::DuringVerify | RecoveryCheckpoint::AfterVerify
+                    ),
+                "verification handshake differs"
+            );
+            ensure!(
+                ready["verification_returned_to_runner"]
+                    == (checkpoint == RecoveryCheckpoint::AfterVerify),
+                "verification-return handshake differs"
+            );
+            procfs::snapshot(root, root_ticks)?
+        };
+        let changed = procfs::changed(&before, &at_checkpoint, &desired)?;
+        let expected_changed = match checkpoint {
+            RecoveryCheckpoint::BeforeApply | RecoveryCheckpoint::AfterPreparation => 0,
+            RecoveryCheckpoint::MidApply => 1,
+            _ => 5,
+        };
+        ensure!(changed == expected_changed, "checkpoint mask count differs");
+        write_json(
+            &out.join("at-checkpoint.json"),
+            &procfs::value(&at_checkpoint),
+        )?;
+        let expected_tasks = if checkpoint == RecoveryCheckpoint::BeforeApply {
+            0
+        } else {
+            5
+        };
+        if expected_tasks > 0 {
+            let journal = read_json(&out.join("controller.json"))?;
+            let expected_state = if matches!(
+                checkpoint,
+                RecoveryCheckpoint::AfterPreparation | RecoveryCheckpoint::MidApply
+            ) {
+                "applying"
+            } else {
+                "applied"
+            };
+            ensure!(
+                journal["state"] == expected_state
+                    && journal["rollback_token"]["affected_tasks"] == 5,
+                "durable checkpoint token missing"
+            );
+            ensure!(
+                journal["rollback_token"]["kind"] == "cpu-affinity-restore-file"
+                    && journal["rollback_token"]["restore_path"].as_str()
+                        == out.join("restore.json").to_str(),
+                "rollback token points outside the owned checkpoint"
+            );
+            procfs::verify_saved(&before, &read_json(&out.join("restore.json"))?, &desired)?;
+            archive(&out, "controller.json")?;
+            archive(&out, "restore.json")?;
+        } else {
+            ensure!(
+                !out.join("controller.json").exists() && !out.join("restore.json").exists(),
+                "before-apply checkpoint wrote mutation state"
+            );
+        }
+        let killed = actor.kill_and_wait(&out)?;
+        let after_kill = procfs::snapshot(root, root_ticks)?;
+        ensure!(
+            after_kill == at_checkpoint,
+            "controller death changed masks; destructor cleanup cannot prove crash recovery"
+        );
+        write_json(&out.join("after-kill.json"), &procfs::value(&after_kill))?;
+        command(
+            executable,
+            &args(&[
+                "recovery-controller",
+                "recover",
+                "--out",
+                &out.to_string_lossy(),
+                "--expected-tasks",
+                &expected_tasks.to_string(),
+            ]),
+            &out,
+            "restart",
+            Duration::from_secs(15),
+        )?;
+        let restart = read_json(&out.join("restart.stdout"))?;
+        ensure!(
+            restart["controller_pid"].as_u64() != Some(u64::from(actor.pid)),
+            "restart reused killed controller PID"
+        );
+        ensure!(
+            restart["restored_tasks"] == expected_tasks && restart["journal_clean"] == true,
+            "restart did not confirm expected recovery"
+        );
+        let restored = procfs::snapshot(root, root_ticks)?;
+        ensure!(
+            restored == before,
+            "independent original identity/mask readback differs"
+        );
+        write_json(&out.join("restored.json"), &procfs::value(&restored))?;
+        if expected_tasks > 0 {
+            verify_recovery_evidence(&out)?;
+        }
+        Ok(
+            json!({"checkpoint":checkpoint.as_str(),"status":"PASS","processes":3,"tasks":5,"changed_at_kill":changed,"prepared_tasks":expected_tasks,"kill":killed,"restart":restart,"independent_restoration":true,"audit_history_state_verified":expected_tasks > 0,"before_apply_clean":expected_tasks == 0}),
+        )
+    })();
+    let _ = workload.0.kill();
+    let root_reaped = workload.0.wait().is_ok();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !procfs::stopped(&before) && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let cleanup = procfs::stopped(&before);
+    write_json(
+        &out.join("cleanup.json"),
+        &json!({"root_reaped":root_reaped,"all_owned_task_identities_ceased_running":cleanup}),
+    )?;
+    let mut result = result?;
+    ensure!(
+        cleanup && root_reaped,
+        "owned helper cleanup/reaping failed"
+    );
+    result["cleanup_verified"] = json!(true);
+    write_json(&out.join("result.json"), &result)?;
+    Ok(result)
+}
