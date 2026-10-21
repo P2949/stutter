@@ -133,3 +133,23 @@ validation debt rather than synthetic substitutes.
   391,818,357 ns. [Raw evidence](evidence/fixed-work-20261021/README.md) retains
   source, manifest, commands, markers and compiler output. No tuning or
   foreground monitor ran; this is not live objective acceptance or calibration.
+
+## 2026-10-21: objective behavioral matrix
+
+- Added a reusable matrix for all nine objective kinds, with an exhaustive
+  objective-specific fixture match. It varies primary improvement/regression,
+  unchanged values, missing signals, target disappearance, low experiment
+  quality, zero samples, thermal/throttle/CPU/GPU regressions and generic-score
+  conflict. Additional cases cover score normalization under 10x sample
+  imbalance and independent I/O/IRQ worst-latency changes at constant counts.
+- [Coverage and applicability](OBJECTIVE_CONTRACT_MATRIX.md) identifies dedicated
+  runnable sufficiency/tail and fixed-work identity/foreground/memory cases.
+  This records existing score fallbacks and guards; it does not claim new
+  browser-specific or direct foreground measurement.
+- Added the named `Objective behavioral contracts` CI step. Generated objective
+  documentation and the authoritative descriptor registry remain pending.
+- PASS local pinned environment: 43 objective tests, full library suite
+  (2,705 passed, 0 failed, 5 ignored), format check, library/test Clippy with
+  `-D warnings`, and `git diff --check`. Exact-head remote CI remains required.
+- PR #40 at `242bc2d8fa4f1c8d6fa781e9313fb418c1c723d1` has run
+  `39630897805` in progress at this checkpoint. No merge/main success is claimed.

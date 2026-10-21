@@ -1,7 +1,7 @@
 use super::*;
 use crate::workload_progress::tests::markers;
 
-fn fixed_work(score: &WindowScore, duration_ns: u64, id: &str) -> ObjectiveSignals {
+pub(super) fn fixed_work(score: &WindowScore, duration_ns: u64, id: &str) -> ObjectiveSignals {
     let mut work = markers(duration_ns, id);
     if id != "baseline" {
         work.start.monotonic_ns += 100_000_000_000;

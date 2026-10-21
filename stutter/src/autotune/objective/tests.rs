@@ -1,5 +1,6 @@
 use super::{decision::ObjectiveOutcome, *};
 mod compile_fixed_work;
+mod contract_matrix;
 mod runnable;
 use crate::{
     autotune::{
