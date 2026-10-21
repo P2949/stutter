@@ -82,3 +82,5 @@ fn read_daemon_state_snapshot(path: &Path) -> DaemonState {
 mod journal_read;
 
 mod restore;
+
+mod real_affinity;

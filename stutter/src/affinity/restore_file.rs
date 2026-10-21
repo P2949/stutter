@@ -116,13 +116,33 @@ pub fn read_restore_records(path: &Path) -> anyhow::Result<Vec<AffinityRecord>> 
 pub fn load_restore_state(path: &Path) -> anyhow::Result<RestoreState> {
     let data = fs::read_to_string(path)
         .with_context(|| format!("failed to read restore file {}", path.display()))?;
-    let state = serde_json::from_str(&data)
+    let value: serde_json::Value = serde_json::from_str(&data)
         .with_context(|| format!("failed to parse restore file {}", path.display()))?;
+    anyhow::ensure!(
+        ["affinity_records", "nice_records", "ionice_records"]
+            .iter()
+            .all(|field| value.get(*field).is_none()),
+        "profile restore format is not an affinity restore file"
+    );
+    let state: RestoreState = serde_json::from_value(value)?;
+    anyhow::ensure!(
+        (1..=3).contains(&state.schema_version),
+        "unsupported affinity restore schema {}",
+        state.schema_version
+    );
     Ok(state)
 }
 
 pub fn restore_saved(path: &Path) -> anyhow::Result<RestoreSummary> {
+    restore_saved_with_validation(path, |_| Ok(()))
+}
+
+pub(crate) fn restore_saved_with_validation(
+    path: &Path,
+    validate: impl FnOnce(&RestoreState) -> anyhow::Result<()>,
+) -> anyhow::Result<RestoreSummary> {
     let state = load_restore_state(path)?;
+    validate(&state)?;
     let (summary, errors) = restore_all(&state.records);
 
     if !errors.is_empty() {

@@ -26,16 +26,19 @@ compatibility, or release gate is implied by offline tests.
 
 1. PASS: GitHub [Core Validation milestone](https://github.com/P2949/stutter/milestone/1)
    and 17 actionable issues (#22–#38). The [backlog receipt](CORE_VALIDATION_BACKLOG.json)
-   records their URLs. All remain open pending their individual acceptance gates.
-2. Local implementation and offline checks PASS for direct runnable histogram
-   aggregation, target/task-class semantics, comparator, sufficiency/quality
-   handling, and regression-first tests. Remote integration and later live
-   acceptance/calibration gates remain open.
-3. Fixed-work compile completion protocol and foreground protection contracts.
-4. Exhaustive objective registry, full behavioral matrix, generated documentation,
-   dedicated objective CI, and full CI at the committed remote head.
-5. Canonical live observation and disposable-process affinity acceptance.
-6. Crash/startup recovery matrix and portable evidence bundles; multiple real
+   records their creation URLs. P0 issues #22–#26 and #37 are closed.
+2. PASS P0 at verified main `37ed5ce`: direct runnable histograms and comparator,
+   fixed-work compile primary/activity safety, nine-objective contracts,
+   exhaustive registry, generated documentation and visible objective CI.
+3. PASS canonical observation success path on Linux 6.18.55, merged in PR #43
+   with main CI success at `0be8ad5`. Controlled game-objective evidence and
+   portable full-bundle export remain outstanding; #27 remains open.
+4. PASS live affinity success path across three processes/five tasks. PR #44
+   merged at `bbcead0`; exact-main CI run `39638305695` passed. #28 is closed.
+   No provider graduation is implied.
+5. IN PROGRESS: crash/startup recovery matrix, including identity/restore-format
+   correctness fixes. Real controller SIGKILL/restart remains outstanding.
+6. Portable evidence bundles; multiple real
    kernel environments and basic profiler-overhead measurements.
 7. Provenance and validation coverage tooling; real diagnosis corpus, individual
    threshold/confidence calibration, and empirical score evaluation.
@@ -290,3 +293,45 @@ validation debt rather than synthetic substitutes.
 - PR #43 main CI run `39635725995` completed successfully at exact merge
   `0be8ad5eb3c603a84689576aafc70263a2d5c001`. Affinity remote integration,
   controller crash/restart recovery, fault matrix and graduation remain open.
+
+## 2026-10-21: automatic recovery identity and format correction
+
+- Before crash acceptance, two real-child regressions exposed unsafe/incorrect
+  startup paths. Both failed against the unchanged implementation (exit 101):
+  unverified legacy identity was restored by numeric TID and reported Recovered;
+  an identified historical affinity file was parsed as an empty profile file,
+  discarded, and reported Recovered with zero restored tasks. Test resources
+  were owned disposable children and isolated files; no user workload/state used.
+- Initial regression compilation caught a private CpuMask helper reference;
+  changed the test to use the public range representation before reproducing
+  the actual semantic failures. Red-run log: `/tmp/stutter-recovery-before-v2.log`.
+- Added supported-version/layout validation for restore loaders, preserving
+  historical affinity routing. Automatic startup recovery now validates complete
+  nonzero task/process identity across the entire affinity/priority record batch
+  and enough original identities for the token before any mutation. Invalid
+  state faults recovery and remains retained; explicit manual legacy behavior
+  stays separate. Fully identified stale records remain safe skips.
+- PASS first post-fix targeted suite (3 tests) and full library run (2,711 passed,
+  5 ignored). Added batch and simulated replacement-start-time real-child tests;
+  final full gate is in progress. These are real kernel restore checks, not a
+  controller crash/restart acceptance claim. Issue #29 remains open.
+- Refined automatic recovery to use a strict rollback registry whose validator
+  consumes the exact parsed state used by the restore operation, closing the
+  separate-preflight/reload gap. Manual registry behavior remains explicit and
+  separate. The first production build caught a test-only type re-export;
+  made the internal restore-state type available to the production validator.
+- PASS refined full format/build/all-target Clippy/test gate (2,714 library
+  passed, 5 ignored; 8 lifecycle integration passed; other suites passed), xtask
+  unit/descendant-cleanup integration, and explicit manual compatibility across
+  profile schema 1 and affinity schemas 1–3. Final offline smokes are pending.
+- PR #44 passed full exact-head CI run `39637052613` and merged as
+  `bbcead07661aaa68cf96aa881c7d6c5198022f32`. Main run `39638305695`
+  remains in progress at this checkpoint; #28 remains open pending integration.
+- PASS final offline recommendation and historical-schema advisor smokes; the
+  schema-18 artifact rendered with its expected warning. The two original red
+  semantic tests ran against production base `ced5f1dc454c06d59f416ccb279c4271ddb89733`
+  before the loader/recovery corrections, using only added test fixtures.
+- PR #44 main CI run `39638305695` completed successfully at exact current main
+  `bbcead07661aaa68cf96aa881c7d6c5198022f32`; #28 closed after reviewing its
+  multi-process, identity, durable-token, kernel-readback and audit criteria.
+  Recovery #29 and the remaining milestone gates stay open.
