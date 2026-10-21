@@ -123,3 +123,13 @@ validation debt rather than synthetic substitutes.
   respect the existing catalog size limit. Historical fixtures were preserved.
 - Added future-timestamp, oversized-line and stale-marker reader cases, plus
   cross-window PID and process-start-time mismatch rejection.
+- PASS final local build gate: format, all-target build, Clippy `-D warnings`,
+  all-target tests (2,699 library passed, 0 failed, 5 ignored; 8 lifecycle
+  integration passed; other integration/default-member suites passed).
+  `xtask` suite: 20 passed. Offline recommendation and advisor smokes passed;
+  the historical schema-18 fixture rendered with its expected warning.
+- PASS real command timing smoke at `a20ab25`: two package-clean `stutter-core`
+  builds emitted valid ordered matching markers, 392,871,489 ns and
+  391,818,357 ns. [Raw evidence](evidence/fixed-work-20261021/README.md) retains
+  source, manifest, commands, markers and compiler output. No tuning or
+  foreground monitor ran; this is not live objective acceptance or calibration.
