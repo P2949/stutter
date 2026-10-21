@@ -217,3 +217,22 @@ validation debt rather than synthetic substitutes.
   corrected the expectation. Subsequent validation: 23 xtask tests passed,
   xtask Clippy passed, and 121 architecture tests passed. Revalidation after the
   stronger provenance preflight is pending.
+- PR #42 passed complete exact-head CI run `39632958408` at `8ff469d`
+  and merged as `37ed5ce82e95f6335acbff2b25a7e07efe8f0169`; issues #25
+  and #26 closed. Main run `39634172998` is still in progress. Issue #37
+  closed after verifying its implementation/contracts and PR #40/main CI evidence.
+- Stronger harness validation PASS: 23 xtask tests, xtask Clippy `-D warnings`,
+  format and diff checks. Committed harness as `1e0760d`, rebuilt stutter and
+  xtask, and ran ten-second privileged acceptance from a clean tree. PASS:
+  binary version matched `1e0760d`; 9,946 target scheduler samples across 42
+  interval records; stable recorded process identity, complete histogram
+  populations, zero drop counters and successful validator/analysis/HTML/advisor.
+  [Sanitized summary](evidence/live-observation-20261021/README.md) retains selected
+  provenance and result. Original full local bundle remains at
+  `/tmp/stutter-live-clean-source-20261021`.
+- A subsequent negative attempt was BLOCKED by the clean-tree gate after evidence
+  files were added; it is not additional permission-check evidence. The earlier
+  unprivileged doctor refusal remains the recorded permission-path test.
+- Issue #27 remains open pending remote integration and the remaining acceptance
+  evidence requirements. Game-objective controlled capture, portable full export,
+  independent affinity/recovery suites, overhead and multiple kernels remain open.
