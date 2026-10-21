@@ -107,6 +107,11 @@ impl AutotuneObservationBuilder {
         objective_signals.runnable_target_starttime_ticks = workload_identity
             .as_ref()
             .and_then(|identity| identity.process_starttime_ticks);
+        if objective_signals.compile_fixed_work.as_ref().is_some_and(|work| Some(work.start.target_starttime_ticks) != objective_signals.runnable_target_starttime_ticks) {
+            objective_signals.compile_fixed_work = None;
+            objective_signals.signal_quality.compile_throughput = crate::autotune::objective::ObjectiveSignalQuality::Missing;
+            objective_signals.compile_fixed_work_unavailable_reason = Some("fixed-work target process identity no longer matches the selected target".to_owned());
+        }
         apply_focus_gpu_resolution(
             &mut objective_signals,
             input.proc_root,

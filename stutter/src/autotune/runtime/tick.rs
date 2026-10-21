@@ -87,6 +87,11 @@ impl AutotuneRuntime {
         event: MonitorEvent,
     ) -> anyhow::Result<Option<AutotuneDecisionStreamEntry>> {
         match event {
+            MonitorEvent::WorkloadProgress { record } => {
+                self.controller.window.push_workload_progress(*record);
+                // The subsequent interval tick supplies complete scheduler and
+                // foreground telemetry before deciding whether a build improved.
+            }
             MonitorEvent::TargetSnapshot { active_targets, .. } => {
                 self.update_target_snapshot(&active_targets);
             }

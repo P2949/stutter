@@ -1,5 +1,6 @@
 use super::{decision::ObjectiveOutcome, *};
 mod runnable;
+mod compile_fixed_work;
 use crate::{
     autotune::{
         comparison::{ExperimentDataQuality, ExperimentResult},

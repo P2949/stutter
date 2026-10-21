@@ -18,6 +18,7 @@ pub type DaemonEvent = MonitorEvent;
 
 #[derive(Clone, Debug)]
 pub enum MonitorEvent {
+    WorkloadProgress { record: Box<crate::workload_progress::WorkloadProgressRecord> },
     TargetSnapshot {
         elapsed_ms: u64,
         active_targets: TaskMap,
@@ -126,6 +127,7 @@ impl MonitorEvent {
                 MonitorEventDeliveryClass::AuditCritical
             }
             Self::TargetSnapshot { .. }
+            | Self::WorkloadProgress { .. }
             | Self::FocusChanged { .. }
             | Self::FocusCleared { .. }
             | Self::ForegroundEvent { .. }
@@ -151,6 +153,7 @@ impl MonitorEvent {
 
     pub fn kind(&self) -> &'static str {
         match self {
+            Self::WorkloadProgress { .. } => "workload_progress",
             Self::TargetSnapshot { .. } => "target_snapshot",
             Self::Interval { .. } => "interval",
             Self::SchedulerSample { .. } => "scheduler_sample",
@@ -180,6 +183,7 @@ impl MonitorEvent {
 
     pub fn elapsed_ms(&self) -> Option<u64> {
         match self {
+            Self::WorkloadProgress { record } => Some(record.elapsed_ms),
             Self::TargetSnapshot { elapsed_ms, .. } => Some(*elapsed_ms),
             Self::Interval { elapsed_ms, .. } => Some(*elapsed_ms),
             Self::SchedulerSample { .. } => None,

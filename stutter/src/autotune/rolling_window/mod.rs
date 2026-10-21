@@ -28,6 +28,7 @@ pub struct RollingWindow {
     gpu_samples: VecDeque<GpuSample>,
     cpu_freq_events: VecDeque<CpuFreqRecord>,
     foreground_events: VecDeque<ForegroundEvent>,
+    workload_progress: VecDeque<crate::workload_progress::WorkloadProgressRecord>,
     dropped_invalid_frames: u64,
 }
 
@@ -43,6 +44,7 @@ impl RollingWindow {
             gpu_samples: VecDeque::new(),
             cpu_freq_events: VecDeque::new(),
             foreground_events: VecDeque::new(),
+            workload_progress: VecDeque::new(),
             dropped_invalid_frames: 0,
         }
     }
@@ -71,6 +73,15 @@ impl RollingWindow {
     pub fn foreground_events(&self) -> &VecDeque<ForegroundEvent> {
         &self.foreground_events
     }
+    pub fn workload_progress(&self) -> &VecDeque<crate::workload_progress::WorkloadProgressRecord> {
+        &self.workload_progress
+    }
+
+    pub fn push_workload_progress(&mut self, record: crate::workload_progress::WorkloadProgressRecord) {
+        let elapsed_ms = record.elapsed_ms;
+        push_sorted_by_elapsed(&mut self.workload_progress, record, |record| record.elapsed_ms);
+        self.prune_to(elapsed_ms);
+    }
 
     pub fn duration(&self) -> Duration {
         self.duration
@@ -89,6 +100,7 @@ impl RollingWindow {
             && self.gpu_samples.is_empty()
             && self.cpu_freq_events.is_empty()
             && self.foreground_events.is_empty()
+            && self.workload_progress.is_empty()
     }
 
     pub fn clear(&mut self) {
@@ -100,6 +112,7 @@ impl RollingWindow {
         self.gpu_samples.clear();
         self.cpu_freq_events.clear();
         self.foreground_events.clear();
+        self.workload_progress.clear();
         self.dropped_invalid_frames = 0;
     }
 
@@ -113,6 +126,7 @@ impl RollingWindow {
             self.gpu_samples.back().map(|sample| sample.elapsed_ms),
             self.cpu_freq_events.back().map(|event| event.elapsed_ms),
             self.foreground_events.back().map(|event| event.elapsed_ms),
+            self.workload_progress.back().map(|record| record.elapsed_ms),
         ]
         .into_iter()
         .flatten()
@@ -222,6 +236,7 @@ impl RollingWindow {
         drain_front_before_elapsed(&mut self.foreground_events, start_ms, |event| {
             event.elapsed_ms
         });
+        drain_front_before_elapsed(&mut self.workload_progress, start_ms, |record| record.elapsed_ms);
     }
 
     pub fn retain_latest_window(&mut self) {
@@ -255,6 +270,7 @@ impl RollingWindow {
             .saturating_add(self.gpu_samples.len())
             .saturating_add(self.cpu_freq_events.len())
             .saturating_add(self.foreground_events.len())
+            .saturating_add(self.workload_progress.len())
     }
 
     pub fn frame_p99_ms(&self) -> f64 {

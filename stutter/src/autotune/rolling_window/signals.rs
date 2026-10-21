@@ -253,6 +253,12 @@ pub(crate) fn compute_objective_signals(
         })
     }));
     signals.runnable_target_root_pid = runnable_target.map(|(root, _)| root);
+    let work = crate::workload_progress::completed_fixed_work(window.workload_progress().iter()
+        .filter(|record| runnable_target.is_some_and(|(root, _)| record.progress.target_root_pid == root))
+        .map(|record| &record.progress));
+    signals.signal_quality.compile_throughput = if work.is_ok() { ObjectiveSignalQuality::Direct } else { ObjectiveSignalQuality::Missing };
+    signals.compile_fixed_work_unavailable_reason = work.as_ref().err().cloned();
+    signals.compile_fixed_work = work.ok();
     signals
 }
 

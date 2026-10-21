@@ -4,6 +4,11 @@
 //! this module, plus the root `run_cli` entry point and root `StutterError`
 //! re-export, instead of depending on internal module layout.
 
+pub mod workload_progress {
+    //! Fixed-work identity, marker protocol, and validated completion evidence.
+    pub use crate::workload_progress::{FixedWorkIdentity, FixedWorkMeasurement, ProgressSource, WorkloadKind, WorkloadPhase, WorkloadProgress, WorkloadProgressRecord};
+}
+
 pub mod error {
     //! Public error and warning types returned by stable crate entry points.
 

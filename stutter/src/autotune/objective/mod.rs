@@ -178,6 +178,10 @@ pub struct ObjectiveSignals {
         skip_serializing_if = "Option::is_none"
     )]
     pub compile_activity_source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compile_fixed_work: Option<crate::workload_progress::FixedWorkMeasurement>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compile_fixed_work_unavailable_reason: Option<String>,
     #[serde(default)]
     pub signal_quality: ObjectiveSignalQualitySnapshot,
 }
@@ -187,6 +191,12 @@ pub struct CompileThroughputSignal {
     pub progress_intervals: Option<u64>,
     pub progress_samples: Option<u64>,
     pub quality: ObjectiveSignalQuality,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fixed_work_elapsed_ns: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workload_identity: Option<crate::workload_progress::FixedWorkIdentity>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub degraded_reason: Option<String>,
 }
@@ -213,14 +223,15 @@ impl ObjectiveSignals {
     }
 
     pub fn compile_throughput_signal(&self) -> CompileThroughputSignal {
+        let work = compile_throughput::measurement(self);
         CompileThroughputSignal {
             progress_intervals: self.compile_activity_intervals,
             progress_samples: self.compile_activity_samples,
-            quality: ObjectiveSignalQuality::Missing,
-            degraded_reason: Some(
-                "direct compile throughput unavailable; compile activity is not completed work"
-                    .to_owned(),
-            ),
+            quality: if work.is_ok() { ObjectiveSignalQuality::Direct } else { ObjectiveSignalQuality::Missing },
+            fixed_work_elapsed_ns: work.as_ref().ok().map(|work| work.complete.elapsed_ns),
+            execution_id: work.as_ref().ok().map(|work| work.start.execution_id.clone()),
+            workload_identity: work.as_ref().ok().map(|work| work.start.identity.clone()),
+            degraded_reason: work.err(),
         }
     }
 
