@@ -47,6 +47,9 @@ jobs:
       - name: Run full fmt/build/clippy/test gate
         run: scripts/smoke/build.sh
 
+      - name: Objective behavioral contracts
+        run: cargo test -p stutter --lib autotune::objective
+
       - name: Run offline recommendation smoke
         run: scripts/smoke/offline_recommendation.sh
 

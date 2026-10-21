@@ -1,6 +1,6 @@
 use super::*;
 
-fn runnable(score: &WindowScore, p99: u64) -> ObjectiveSignals {
+pub(super) fn runnable(score: &WindowScore, p99: u64) -> ObjectiveSignals {
     ObjectiveSignals {
         runnable_latency_p99_ns: Some(p99),
         runnable_latency_p95_ns: Some(p99),
