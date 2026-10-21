@@ -104,6 +104,7 @@ fn apply_low_risk_mode_matrix_starts_experiment_and_exposes_rollback_state() {
 
 #[test]
 fn apply_medium_risk_mode_matrix_rejects_start_without_explicit_unlock() {
+    let root = crate::test_support::TestRoot::new("medium-mode-rejection");
     let daemon_config = daemon_config_for_runtime_mode(
         DaemonMode::ApplyMediumRisk,
         ActionSource::AutotuneRuntime,
@@ -113,6 +114,7 @@ fn apply_medium_risk_mode_matrix_rejects_start_without_explicit_unlock() {
     let mut config = AutotuneRuntimeConfig::from_daemon_config(daemon_config, None)
         .with_simulated_action_effects();
     config.history_log = None;
+    config.controller_journal_path = Some(root.join("controller.json"));
 
     let mut runtime = AutotuneRuntime::new(config);
     assert_eq!(runtime.config().mode(), DaemonMode::ApplyMediumRisk);

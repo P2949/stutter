@@ -147,6 +147,7 @@ mod runtime_config;
 mod config;
 
 mod daemon_state;
+mod fault_reporting;
 
 mod emission;
 

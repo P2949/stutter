@@ -51,6 +51,48 @@ Do not claim completion or graduate capabilities without the corresponding
 evidence. Missing real environments and unperformed live tests remain explicit
 validation debt rather than synthetic substitutes.
 
+## 2026-10-21: failed apply rollback visibility and fault persistence
+
+- PR #49 exact-main CI `39674653220` succeeded at
+  `36ea2eb4cda3acceb281a2e964fe6a138dba87f8`. Provider authorization is integrated
+  and the plan checkbox now reflects that verified state.
+- PR #50 published at `994a62b716f234ff22ff75eb8ef621aa2acafe95`; exact-head
+  CI `39674860017` is in progress. No merge/main success is implied yet.
+- Added a regression using the production journaled runner beneath the live
+  manager. Before the reporting fix, failed verification and failed rollback
+  left controller state Observing and hid outstanding rollback from daemon state.
+  The regression failed with exit 101; log `/tmp/stutter-fault-reporting-red.log`.
+- Journaled errors now carry the actually observed token and successful rollback
+  return through typed fields. Independent kernel verification remains separate.
+  Partial-apply error tokens pass through the
+  same journal hook before rollback, and successful partial rollback invokes the
+  cleanup hook. A failed rollback retains the manager experiment/token and faults
+  controller state instead of appearing to have no active mutation.
+- Runtime faults now emit fault decision/history and save an atomic daemon
+  snapshot before propagating the original error. Independent reporting writes
+  are all attempted; a reporting IO error is returned alongside the original
+  action error. Explicit-journal runs save `daemon_state.json` beside that journal.
+- PASS initial manager regression and synthetic end-to-end runtime matrix for
+  preflight, verification, and partial-apply failures with successful/failed
+  rollback. The matrix checks audit/history/journal/saved state and blocks another
+  provider dispatch. Expanded reporting-IO test and full gate are pending below.
+  These are synthetic fault contracts, not real SIGKILL or full #29 acceptance.
+- PASS expanded full format/build/all-target Clippy/test gate: 2,725 library
+  tests, 6 ignored, 8 lifecycle integrations and other suites. The explicit real
+  owned-child manager/startup-restore regression passed again after runtime
+  dispatch was unified. Additional xtask/docs/safety/offline checks are running.
+- PR #50 exact-head CI `39674860017` succeeded; merged as
+  `26ec9bc07674d07c9be7a0a6f2779e533cee7710`. Exact-main run `39676019146`
+  is in progress. The reporting follow-up will be rebased onto this merge before
+  publication. #47 stays open for canonical real crash evidence; #48/#29 and the
+  remaining release/corpus/calibration requirements remain outstanding.
+- PASS final 23 xtask unit tests plus descendant cleanup, xtask Clippy, objective
+  docs, autotune safety script, offline recommendation and historical-schema
+  advisor smoke. The reporting-IO test passed in the full gate: history failure
+  preserves the original typed action error while decision output and the atomic
+  daemon fault snapshot remain available. A named runtime fault-reporting CI step
+  now makes these synthetic contracts visible in daemon safety validation.
+
 ## 2026-10-21: production rollback durability before verification
 
 - PR #49 published at `464b232657ed6499aa60e71e72b0d85afae72f08` with exact-head

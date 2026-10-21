@@ -19,6 +19,43 @@ use crate::autotune::{
 };
 
 impl AutotuneRuntime {
+    pub(super) fn persist_side_effect_fault(
+        &mut self,
+        observation: &AutotuneObservation,
+        reason: &str,
+    ) -> anyhow::Result<()> {
+        let decision = AutotuneDecision::Fault {
+            reason: reason.to_owned(),
+        };
+        let entry = self.stream_entry_from_decision(observation, &decision, reason.to_owned());
+        self.last_decision = Some(entry.clone());
+        let path = self
+            .config
+            .controller_journal_path
+            .as_ref()
+            .map(|path| path.with_file_name("daemon_state.json"))
+            .unwrap_or_else(crate::daemon::state::default_daemon_state_snapshot_path);
+        // Attempt every destination even if one is unavailable. Report the
+        // persistence errors alongside the original action error, never as success.
+        let mut failures = Vec::new();
+        if let Err(error) = self.append_decision_log(&entry) {
+            failures.push(format!("decision log: {error:#}"));
+        }
+        if let Err(error) = self.append_history(observation, &decision, reason) {
+            failures.push(format!("history: {error:#}"));
+        }
+        if let Err(error) = crate::daemon::state::DaemonStateSnapshotWriter::new(path)
+            .write(&self.daemon_state_snapshot())
+        {
+            failures.push(format!("daemon snapshot: {error:#}"));
+        }
+        if let Err(error) = super::emit_decision_stream_entry(&entry) {
+            failures.push(format!("decision stream: {error:#}"));
+        }
+        anyhow::ensure!(failures.is_empty(), "{}", failures.join("; "));
+        Ok(())
+    }
+
     pub(super) fn append_history(
         &mut self,
         observation: &AutotuneObservation,

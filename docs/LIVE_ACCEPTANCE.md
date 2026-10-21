@@ -140,3 +140,25 @@ apply returns; preparation before the first mutable syscall and real SIGKILL
 acceptance are separate pending gates (#48/#29). Synthetic transaction regressions
 and the explicit owned-child manager/startup-restore test do not establish that
 full crash matrix.
+
+## Failed apply reporting
+
+The journaled action error carries the actual observed rollback token and whether
+the runner completed rollback. Runtime reporting does not infer these facts from
+an error-message string. Partial-apply tokens also enter the journal hook before
+rollback, and successful partial rollback runs the cleanup hook.
+
+If rollback fails before the manager has registered the experiment, the manager
+retains that experiment/token for manual recovery and daemon-state reporting.
+The runtime enters Faulted, emits fault decision/history, and atomically saves a
+fault snapshot as `daemon_state.json` beside an explicit controller journal (or
+at the normal default state path). This happens before returning the original
+error, so a caller's early return cannot discard the only state update. Subsequent
+mutation is blocked. If one reporting destination fails, the others are still
+attempted and the persistence error accompanies the original action error.
+
+The synthetic fault contract covers preflight failure, verification failure with
+successful/failed rollback, partial apply with successful/failed rollback, and a
+history-write failure. It checks journal, audit, history, saved daemon state and
+blocked future dispatch. Real SIGKILL, interrupted rollback, suspend/resume and
+the full physical failure matrix remain separate acceptance gates.
