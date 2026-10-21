@@ -2,55 +2,68 @@
 
 The full raw KCD1 case-study archive is intentionally not tracked in Git.
 
-The repository keeps only the polished case-study report, summary material, and
-the small curated evidence bundle. The raw run directories, MangoHud CSVs,
-profile-plan artifacts, tuning directories, setup logs, and exploratory stack
-comparison artifacts are published as a GitHub Release asset instead.
+The repository keeps the case-study report, summary material, and curated
+evidence bundle. Raw run directories, MangoHud CSVs, profile-plan artifacts,
+tuning directories, setup logs, and exploratory stack-comparison artifacts are
+published separately as a GitHub Release asset.
 
-## Release asset
+## Release
 
 Release tag:
 
 ```text
-fyp-report-final-v4
+case-study-kcd1-2026
 ```
 
 Raw archive asset:
 
 ```text
-raw-kcd1-case-study-fyp-report-final-v4.tar.zst
+stutter-kcd1-case-study-raw.tar.zst
 ```
 
 Checksum asset:
 
 ```text
-raw-kcd1-case-study-fyp-report-final-v4.tar.zst.sha256
+stutter-kcd1-case-study-raw.tar.zst.sha256
 ```
 
 Contents listing asset:
 
 ```text
-raw-kcd1-case-study-fyp-report-final-v4.contents.txt
+stutter-kcd1-case-study-raw.contents.txt
 ```
 
-Contents listing checksum asset:
+Contents-listing checksum asset:
 
 ```text
-raw-kcd1-case-study-fyp-report-final-v4.contents.txt.sha256
+stutter-kcd1-case-study-raw.contents.txt.sha256
 ```
 
-## Why this is not tracked in Git
+## Why the raw archive is not tracked in Git
 
-The raw case-study archive is useful for audit and reproduction, but it makes the
-normal repository checkout unnecessarily large for supervisor review. First
-review should use:
+The raw case-study archive is useful for audit and reproduction, but large run
+directories, trace data, and frame logs would make normal source clones
+unnecessarily large.
 
-* `SUPERVISOR_README.md`
-* `reports/fyp-report/FYP_SUPERVISOR_PITCH.md`
-* `reports/fyp-report/PRE_FYP_SCOPE_NOTE.md`
-* `reports/fyp-report/AI_DISCLOSURE.md`
-* `reports/kcd1-case-study/KCD1_EXPERIMENT_REPORT.md`
-* `evidence-bundle/`
+Start with:
 
-The raw archive should only be downloaded when audit or reproduction artifacts
-are needed.
+- `reports/kcd1-case-study/KCD1_EXPERIMENT_REPORT.md`
+- `reports/kcd1-case-study/CASE_STUDY_SUMMARY.md`
+- `reports/kcd1-case-study/ARTIFACT_INDEX.md`
+- `evidence-bundle/`
+
+Download the raw archive when full experiment artifacts are needed for deeper
+audit, re-analysis, or reproduction.
+
+Verify the archive before use:
+
+```bash
+sha256sum -c stutter-kcd1-case-study-raw.tar.zst.sha256
+zstd -t stutter-kcd1-case-study-raw.tar.zst
+```
+
+The contents listing can be verified independently with:
+
+```bash
+sha256sum -c stutter-kcd1-case-study-raw.contents.txt.sha256
+```

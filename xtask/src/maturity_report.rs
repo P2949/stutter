@@ -5,7 +5,7 @@ use std::{
 
 use anyhow::{Context, Result};
 
-const CLEANUP_BASELINE_PATH: &str = "docs/internal/archive/cleanup-baseline.md";
+const CLEANUP_BASELINE_PATH: &str = "docs/internal/cleanup-baseline.md";
 const MAX_FILE_SIZE: usize = 1000;
 const LARGEST_FILE_LIMIT: usize = 20;
 
@@ -470,9 +470,9 @@ mod tests {
     }
 
     #[test]
-    fn maturity_report_reads_archived_cleanup_baseline() {
+    fn maturity_report_reads_cleanup_baseline() {
         let root = unique_temp_dir("maturity-report");
-        let baseline_dir = root.join("docs/internal/archive");
+        let baseline_dir = root.join("docs/internal");
         fs::create_dir_all(&baseline_dir).unwrap();
 
         fs::write(

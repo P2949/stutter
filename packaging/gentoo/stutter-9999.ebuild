@@ -26,7 +26,6 @@ if [[ ${PV} == 9999 ]]; then
 	inherit git-r3
 fi
 
-# Packaging skeleton only; not part of the proposed assessed FYP scope.
 # The source workspace is multi-licensed: userspace crates are MIT OR Apache-2.0;
 # stutter-ebpf is MIT OR GPL-2.0-only. This skeleton declares MIT because MIT is
 # available across the packaged workspace components. Revisit before production

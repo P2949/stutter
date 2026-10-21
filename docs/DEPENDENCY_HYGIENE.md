@@ -63,10 +63,6 @@ and the pinned revision keeps those APIs synchronized with `Cargo.lock` for
 reproducible source checkouts. This is a prototype dependency-management choice,
 not an unpinned latest-source dependency.
 
-Supervisor note: Aya is consumed from a pinned git revision because the project
-uses Aya's userspace and eBPF-side APIs together, and the pinned revision keeps
-the source checkout reproducible.
-
 ## Cargo deny bans policy
 
 `deny.toml` currently allows multiple versions and wildcard dependency

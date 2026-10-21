@@ -1,25 +1,28 @@
-KCD1 curated evidence bundle validation record
+KCD1 curated evidence bundle validation procedure
 
-Date: 2026-06-09
-Branch: main
-Handoff target: fyp-report-final-v4
+A refreshed bundle is considered valid only when all of the following complete
+successfully:
 
-Checks verified for release:
-- cargo fmt --all -- --check: passed
-- xtask ci: passed
-- xtask fixture-check: passed
-- xtask dependency-hygiene: passed
-- evidence-bundle MANIFEST.sha256: passed
-- release ASSETS_SHA256SUMS: passed
-- release SHA256SUMS: passed
+- cargo fmt --all -- --check
+- cargo run -p xtask -- ci
+- cargo run -p xtask -- fixture-check
+- cargo run -p xtask -- dependency-hygiene
+- (cd evidence-bundle && sha256sum -c MANIFEST.sha256)
+- scripts/artifacts/build_case_study_report.sh
+- verification of the raw case-study archive checksum
+- verification of the raw archive contents-listing checksum
 
-Notes:
-This file belongs to the small supervisor-review evidence subset. The full raw
-KCD1 archive is published as the `raw-kcd1-case-study-fyp-report-final-v4.tar.zst`
-GitHub Release asset for audit and reproduction. It is not tracked in Git and is
-not required for first supervisor review.
+Raw archive:
 
-The KCD1 result remains preliminary: the archived A/B run was paired but not
-counterbalanced. The proposed FYP methodology corrects this by requiring a
-counterbalanced repeated A/B protocol before treating a tuning result as strong
-causal evidence.
+- release tag: case-study-kcd1-2026
+- archive: stutter-kcd1-case-study-raw.tar.zst
+- checksum: stutter-kcd1-case-study-raw.tar.zst.sha256
+- contents listing: stutter-kcd1-case-study-raw.contents.txt
+- contents checksum: stutter-kcd1-case-study-raw.contents.txt.sha256
+
+Methodology note:
+
+The archived KCD1 A/B run was paired but not counterbalanced. The result should
+therefore be treated as low-confidence non-validation evidence. A stronger
+follow-up experiment should use a counterbalanced repeated A/B protocol before
+treating a tuning result as strong evidence.

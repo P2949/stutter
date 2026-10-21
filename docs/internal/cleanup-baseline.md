@@ -1,8 +1,8 @@
 # Cleanup Baseline
 
-> Internal maintenance note. This document records historical refactor planning
-> and maturity-report baselines. It is not part of the proposed FYP assessment
-> scope.
+> Internal maintenance note. This document records the historical file-size
+> baseline used by `xtask maturity-report` while large modules are split and
+> refactored.
 
 This document captures the baseline of the top 50 largest files before the massive refactoring phases begin.
 Each subsequent phase should split these files and document the before/after LOC sizes.
