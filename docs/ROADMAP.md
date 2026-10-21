@@ -2,22 +2,16 @@
 
 `stutter` is moving from profiler toward trustworthy recommender in small, auditable steps.
 
-## FYP Presentation Boundary
+## Project status
 
-For supervisor/FYP presentation, the proposed assessed core is narrower than the
-whole prototype: CPU-affinity and process/thread-placement validation for
-Linux/Proton game frame pacing. Daemon control, remote agents, GPU power, IRQ
-affinity, VM/kernel tuning, scheduler replacement, packaging, and broad
-hardware/game coverage are background implementation, optional extension, or
-future work unless explicitly brought into scope.
+`stutter` is an experimental open-source project. Near-term work prioritizes
+trustworthy measurement, repeatability, explainability, conservative
+recommendation, and rollback over expanding the number of system settings it
+can modify.
 
-## Pre-Supervisor Cleanup
-
-The canonical first-read path is `SUPERVISOR_README.md`, then the supervisor
-pitch, scope note, AI disclosure, KCD1 report, and curated evidence bundle. Large
-raw artifacts are retained for audit, but they are not required for first review.
-Keep new roadmap items from expanding the assessed scope beyond
-CPU-affinity/process-placement validation unless a supervisor explicitly agrees.
+Experimental or internal subsystems may exist in-tree before they are considered
+safe or supported defaults. Roadmap status describes user-facing maturity, not
+whether prototype code exists.
 
 ## Stages
 

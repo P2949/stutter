@@ -2,14 +2,35 @@
 
 [![CI](https://github.com/P2949/stutter/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/P2949/stutter/actions/workflows/ci.yml?query=branch%3Amain)
 
-`stutter` is a Linux scheduler runnable-latency profiler built with Rust + Aya eBPF.
+`stutter` is an experimental open-source Linux scheduler runnable-latency
+profiler and evidence-based tuning toolkit built with Rust + Aya eBPF.
 
-For supervisor review, start with [SUPERVISOR_README.md](SUPERVISOR_README.md).
-The proposed FYP scope is CPU-affinity/process-placement validation for
-Linux/Proton game frame pacing; this root README is the technical
-user/developer manual, not the first pitch. The full raw KCD1 archive is
-published as a release asset, while the normal Git checkout keeps only the
-source tree, polished reports, and curated evidence bundle.
+**Status: experimental.** `stutter` is a personal open-source experimentation
+project. Interfaces, artifact schemas, tuning behavior, and supported workflows
+may change as the measurement and safety model evolves.
+
+The project explores measurement-driven approaches to frame-pacing and
+system-performance problems, particularly Linux gaming and Proton/Wine
+workloads. Recommendations are hypotheses to validate, not guaranteed fixes.
+Observation, recommendation, application, verification, and rollback are
+intentionally kept distinct.
+
+The KCD1 material under `reports/kcd1-case-study/` is a real-world case study
+showing how the workflow handles a plausible tuning hypothesis that was not
+validated by the available evidence.
+
+## Project documentation
+
+- [Project overview](docs/PROJECT_OVERVIEW.md)
+- [Experimental methodology](docs/EXPERIMENTAL_METHODOLOGY.md)
+- [Install guide](docs/INSTALL.md)
+- [Tuning workflow](docs/TUNING_WORKFLOW.md)
+- [Safety model](docs/SAFETY.md)
+- [Architecture boundaries](docs/ARCHITECTURE_BOUNDARIES.md)
+- [Artifact schema](docs/ARTIFACT_SCHEMA.md)
+- [Roadmap](docs/ROADMAP.md)
+- [KCD1 case study](reports/kcd1-case-study/)
+- [Contributing](CONTRIBUTING.md)
 
 ## Contents
 

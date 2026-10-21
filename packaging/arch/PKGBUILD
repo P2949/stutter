@@ -5,7 +5,6 @@ pkgrel=1
 pkgdesc="Linux scheduler latency profiler and tuning-validation prototype"
 arch=('x86_64')
 url="https://github.com/P2949/stutter"
-# Packaging skeleton only; not part of the proposed assessed FYP scope.
 # The source workspace is multi-licensed: userspace crates are MIT OR Apache-2.0;
 # stutter-ebpf is MIT OR GPL-2.0-only. This skeleton declares MIT because MIT is
 # available across the packaged workspace components. Revisit before production

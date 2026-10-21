@@ -7,11 +7,11 @@ become a hard architecture test.
 
 ## Status
 
-This inventory is a safety/audit document for the current prototype. The listed
-migration targets are hardening tasks and future refactor directions, not
-required preconditions for the supervisor-review snapshot. The current gate
-requires unsafe usage to be documented with `// SAFETY:` comments and tracked
-here before new unsafe usage is accepted.
+This inventory is a safety/audit document for the current experimental project.
+The listed migration targets are hardening tasks and future refactor directions,
+not prerequisites for using the documented profiler and analysis workflows. The
+current gate requires unsafe usage to be documented with `// SAFETY:` comments
+and tracked here before new unsafe usage is accepted.
 
 Generated baseline command:
 
