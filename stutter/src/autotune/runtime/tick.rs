@@ -9,7 +9,10 @@ use crate::{
     autotune::{
         controller::decide_autotune_transition,
         decision::AutotuneDecision,
-        live_experiment::{LiveExperimentEvent, LiveExperimentManagerInput},
+        live_experiment::{
+            LiveExperimentActionExecutor, LiveExperimentEvent, LiveExperimentManagerInput,
+            LiveExperimentRuntimeState, RuntimeLiveExperimentActionExecutor,
+        },
         observation::AutotuneObservation,
         observation_builder::{
             AutotuneObservationBuilder, AutotuneObservationBuilderInput, AutotuneObservationFocus,
@@ -326,6 +329,23 @@ impl AutotuneRuntime {
         decision: &AutotuneDecision,
         reason: &str,
     ) -> anyhow::Result<()> {
+        self.apply_decision_side_effects_with_executor(
+            observation,
+            decision,
+            reason,
+            &mut RuntimeLiveExperimentActionExecutor,
+        )
+    }
+
+    pub(super) fn apply_decision_side_effects_with_executor<
+        E: LiveExperimentActionExecutor + ?Sized,
+    >(
+        &mut self,
+        observation: &AutotuneObservation,
+        decision: &AutotuneDecision,
+        reason: &str,
+        executor: &mut E,
+    ) -> anyhow::Result<()> {
         if self.config.dry_run_all_safe
             && matches!(decision, AutotuneDecision::StartExperiment { .. })
         {
@@ -350,17 +370,34 @@ impl AutotuneRuntime {
             privileged_action_service: privileged_action_service.as_service(),
         };
 
-        let outcome = match self.live_experiments.apply_decision_side_effects(
-            input,
-            &mut self.controller.state,
-            &mut self.controller.active_profile_state,
-            observation,
-            decision,
-            reason,
-        ) {
+        let outcome = match self
+            .live_experiments
+            .apply_decision_side_effects_with_executor(
+                input,
+                LiveExperimentRuntimeState {
+                    controller_state: &mut self.controller.state,
+                    active_profile_state: &mut self.controller.active_profile_state,
+                },
+                observation,
+                decision,
+                reason,
+                executor,
+            ) {
             Ok(outcome) => outcome,
             Err(err) => {
-                self.fault_runtime_phase(format!("runtime decision side effect failed: {err}"));
+                let failure_reason = format!("runtime decision side effect failed: {err:#}");
+                self.fault_runtime_phase(failure_reason.clone());
+                self.pending_history_context = self
+                    .live_experiments
+                    .take_failed_apply_context()
+                    .map(Into::into);
+                if let Err(report_error) =
+                    self.persist_side_effect_fault(observation, &failure_reason)
+                {
+                    return Err(err.context(format!(
+                        "failed to persist side-effect fault report: {report_error:#}"
+                    )));
+                }
                 return Err(err);
             }
         };

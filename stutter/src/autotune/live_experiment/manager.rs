@@ -1,6 +1,9 @@
 use std::time::Duration;
 
-use super::{model::LiveExperiment, scoring::experiment_data_quality};
+use super::{
+    model::{LiveExperiment, LiveExperimentHistoryContext},
+    scoring::experiment_data_quality,
+};
 use crate::{
     actions::SafetyClass,
     autotune::{
@@ -24,6 +27,7 @@ use crate::{
 #[derive(Debug, Default)]
 pub struct LiveExperimentManager {
     pub(crate) current: Option<LiveExperiment>,
+    pub(crate) failed_apply_context: Option<LiveExperimentHistoryContext>,
 }
 
 #[doc(hidden)]
@@ -33,6 +37,9 @@ pub(crate) struct LiveExperimentRuntimeState<'a> {
 }
 
 impl LiveExperimentManager {
+    pub(crate) fn take_failed_apply_context(&mut self) -> Option<LiveExperimentHistoryContext> {
+        self.failed_apply_context.take()
+    }
     pub fn new() -> Self {
         Self::default()
     }

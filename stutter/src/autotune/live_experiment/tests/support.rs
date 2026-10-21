@@ -33,6 +33,7 @@ pub(super) struct FakeLiveExecutor {
     pub(super) rollback_calls: usize,
     pub(super) fail_apply: bool,
     pub(super) fail_rollback: bool,
+    pub(super) verify_failure: Option<bool>,
     pub(super) post_rollback_active_config: Option<ActiveConfigSnapshot>,
 }
 
@@ -45,6 +46,31 @@ impl LiveExperimentActionExecutor for FakeLiveExecutor {
         observation: &AutotuneObservation,
     ) -> anyhow::Result<RollbackToken> {
         self.apply_calls += 1;
+
+        if let Some(fail_rollback) = self.verify_failure {
+            let journal = super::super::journal::controller_journal_path(input);
+            let audit = input.audit_path.as_ref().unwrap();
+            let action = crate::actions::fake_action::FakeAction::new()
+                .with_action_id(candidate.action_id().as_str())
+                .with_restore_path(journal.with_file_name("synthetic-restore.json"))
+                .with_fail_verify();
+            let action = if fail_rollback {
+                action.with_fail_rollback()
+            } else {
+                action
+            };
+            let result = crate::autotune::action_transaction::apply_journaled_action(
+                &action,
+                crate::actions::runner::ActionRunPolicy::apply_low_risk(ActionSource::Test, false),
+                crate::autotune::action_transaction::JournaledActionInput {
+                    journal_path: &journal,
+                    audit_path: audit,
+                    experiment_id,
+                    metadata: Default::default(),
+                },
+            )?;
+            return Ok(result.rollback.unwrap());
+        }
 
         if self.fail_apply {
             anyhow::bail!("intentional apply failure");

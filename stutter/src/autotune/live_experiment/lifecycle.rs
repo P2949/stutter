@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use super::{
-    executor::{LiveExperimentActionExecutor, RuntimeLiveExperimentActionExecutor},
+    executor::LiveExperimentActionExecutor,
     journal::{
         controller_journal_metadata_for_candidate, controller_journal_path,
         write_controller_journal_phase_for_live_experiment,
@@ -39,29 +39,6 @@ use crate::{
     },
 };
 impl LiveExperimentManager {
-    pub fn apply_decision_side_effects(
-        &mut self,
-        input: LiveExperimentManagerInput<'_>,
-        controller_state: &mut ControllerRuntimeState,
-        active_profile_state: &mut ActiveProfileState,
-        observation: &AutotuneObservation,
-        decision: &AutotuneDecision,
-        reason: &str,
-    ) -> anyhow::Result<LiveExperimentOutcome> {
-        let mut executor = RuntimeLiveExperimentActionExecutor;
-        self.apply_decision_side_effects_with_executor(
-            input,
-            LiveExperimentRuntimeState {
-                controller_state,
-                active_profile_state,
-            },
-            observation,
-            decision,
-            reason,
-            &mut executor,
-        )
-    }
-
     pub(crate) fn apply_decision_side_effects_with_executor<
         E: LiveExperimentActionExecutor + ?Sized,
     >(
@@ -169,14 +146,69 @@ impl LiveExperimentManager {
         let action_kind = candidate.action_kind().to_owned();
         let safety_class = candidate.safety_class();
 
-        let rollback = self.apply_candidate_for_runtime_with_executor(
+        self.failed_apply_context = None;
+        let rollback = match self.apply_candidate_for_runtime_with_executor(
             input,
             executor,
             &candidate,
             experiment_id.as_str(),
             action_id.as_str(),
             observation,
-        )?;
+        ) {
+            Ok(token) => token,
+            Err(error) => {
+                let failure = error
+                    .downcast_ref::<crate::autotune::action_transaction::JournaledActionFailure>();
+                let rollback_completed = failure.is_some_and(|failure| failure.rollback_completed);
+                let outstanding = failure
+                    .filter(|failure| !failure.rollback_completed)
+                    .and_then(|failure| failure.rollback.clone());
+                let rollback_policy = if outstanding.is_some() {
+                    "manual-restore-required"
+                } else if rollback_completed {
+                    "rollback-completed"
+                } else {
+                    "rollback-state-unknown"
+                };
+                self.failed_apply_context = Some(LiveExperimentHistoryContext {
+                    experiment_id: experiment_id.clone(),
+                    action_id: action_id.clone(),
+                    candidate_name: candidate.profile_name().to_owned(),
+                    action_kind: action_kind.clone(),
+                    mode: input.mode,
+                    safety_class: safety_class.clone(),
+                    score_before: Some(baseline_score.clone()),
+                    score_after: None,
+                    rollback_performed: rollback_completed,
+                    rollback_policy: rollback_policy.to_owned(),
+                    cooldown_until_unix_nanos: None,
+                    manual_restore_command: Some(input.manual_restore_command.to_owned()),
+                });
+                controller_state.phase = ControllerPhase::Faulted;
+                if let Some(rollback) = outstanding {
+                    controller_state.active_experiment = Some(ControllerActiveExperiment {
+                        baseline_signals: observation.objective_signals.clone(),
+                        experiment_id: experiment_id.clone(),
+                        candidate: candidate.clone(),
+                        baseline_score: baseline_score.clone(),
+                    });
+                    self.current = Some(LiveExperiment {
+                        experiment_id,
+                        candidate,
+                        safety_class,
+                        mode: input.mode,
+                        baseline_score,
+                        baseline_signals: observation.objective_signals.clone(),
+                        baseline_active_config: observation.active_config_snapshot.clone(),
+                        applied_unix_nanos: observation.now_unix_nanos,
+                        washout_until_unix_nanos: observation.now_unix_nanos,
+                        measure_until_unix_nanos: observation.now_unix_nanos,
+                        rollback,
+                    });
+                }
+                return Err(error);
+            }
+        };
 
         controller_state.record_candidate_attempt(
             &candidate,

@@ -8,10 +8,8 @@ mod scoring;
 #[cfg(test)]
 mod tests;
 
-#[cfg(test)]
 pub(crate) use executor::{LiveExperimentActionExecutor, RuntimeLiveExperimentActionExecutor};
 pub use manager::LiveExperimentManager;
-#[cfg(test)]
 pub(crate) use manager::LiveExperimentRuntimeState;
 pub use model::{
     LiveExperiment, LiveExperimentEvent, LiveExperimentHistoryContext, LiveExperimentManagerInput,

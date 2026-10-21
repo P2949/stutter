@@ -1,6 +1,42 @@
 use super::{super::*, support::*};
 
 #[test]
+fn failed_verification_retains_outstanding_rollback_in_daemon_state() {
+    let root = crate::test_support::TestRoot::new("failed-apply-rollback-visibility");
+    let journal_path = root.join("controller.json");
+    let mut manager = LiveExperimentManager::new();
+    let mut controller = ControllerRuntimeState::default();
+    let mut profile = ActiveProfileState::default();
+    let mut executor = FakeLiveExecutor {
+        verify_failure: Some(true),
+        ..Default::default()
+    };
+    let result = manager.apply_decision_side_effects_with_executor(
+        input(journal_path.clone()),
+        LiveExperimentRuntimeState {
+            controller_state: &mut controller,
+            active_profile_state: &mut profile,
+        },
+        &observation(1_000, 1_000_000_000),
+        &AutotuneDecision::StartExperiment {
+            candidate: low_risk_candidate(),
+            reason: "fault regression".into(),
+        },
+        "fault regression",
+        &mut executor,
+    );
+    assert!(result.is_err());
+    assert_eq!(controller.phase, ControllerPhase::Faulted);
+    let journal =
+        crate::autotune::controller_journal::read_controller_journal(&journal_path).unwrap();
+    let rollback = manager
+        .daemon_rollback_state("stutter daemon emergency-restore")
+        .expect("failed rollback must remain visible");
+    assert_eq!(rollback.token.as_ref(), journal.rollback_token());
+    assert!(rollback.rollback_available);
+}
+
+#[test]
 fn manager_preserves_executor_owned_applied_transition() {
     let root = crate::test_support::TestRoot::new("executor-journal-ownership");
     let journal_path = root.join("controller.json");

@@ -233,8 +233,25 @@ where
                     if let Some(token) = partial_err.rollback {
                         audit_event.affected_tasks = token.affected_tasks();
                         audit_event.restore_path = token.restore_path().cloned();
+                        if let Err(hook_error) = hooks.run_after_apply(&token) {
+                            return Err(rollback_after_apply_hook_failure(
+                                action,
+                                &token,
+                                anyhow::anyhow!(
+                                    "partial apply failed: {source}; rollback-token hook failed: {hook_error:#}"
+                                ),
+                                audit_path,
+                                &audit_event,
+                                &mut hooks,
+                            ));
+                        }
                         match action.rollback(&token) {
                             Ok(()) => {
+                                if let Err(hook_error) = hooks.run_after_rollback(&token) {
+                                    return Err(ActionError::rollback(format!(
+                                        "partial rollback completed after apply failure: {source}; after-rollback hook failed: {hook_error:#}"
+                                    )));
+                                }
                                 append_runner_audit_event(
                                     audit_path,
                                     &audit_event,

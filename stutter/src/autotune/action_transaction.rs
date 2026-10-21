@@ -1,10 +1,13 @@
 //! Durable action-boundary transaction shared by the live controller and crash
 //! acceptance. Mutation remains in the audited production action runner.
-use std::path::Path;
+use std::{
+    cell::{Cell, RefCell},
+    path::Path,
+};
 
 use crate::{
     actions::{
-        TuningAction,
+        ActionError, RollbackToken, TuningAction,
         runner::{
             ActionHooks, ActionRunPolicy, AuditedActionResult,
             run_audited_action_with_audit_path_and_hooks,
@@ -26,6 +29,18 @@ pub(crate) struct JournaledActionInput<'a> {
     pub metadata: ControllerJournalActionMetadata,
 }
 
+/// Observations from the actual runner hooks, never inferred from error text.
+#[derive(Debug, thiserror::Error)]
+#[error("journaled action failed: {source}")]
+pub(crate) struct JournaledActionFailure {
+    #[source]
+    pub source: ActionError,
+    pub rollback: Option<RollbackToken>,
+    /// The action's rollback returned Ok, even if journal cleanup then failed.
+    /// Independent kernel verification remains a provider/live acceptance gate.
+    pub rollback_completed: bool,
+}
+
 pub(crate) fn apply_journaled_action<A: TuningAction>(
     action: &A,
     policy: ActionRunPolicy,
@@ -37,7 +52,10 @@ pub(crate) fn apply_journaled_action<A: TuningAction>(
         action.id(),
         input.metadata.clone(),
     )?;
+    let rollback = RefCell::new(None);
+    let rollback_completed = Cell::new(false);
     let hooks = ActionHooks::after_apply(|token| {
+        *rollback.borrow_mut() = Some(token.clone());
         write_controller_journal_applied_with_metadata(
             input.journal_path,
             ExperimentId::try_new(input.experiment_id)?,
@@ -50,15 +68,25 @@ pub(crate) fn apply_journaled_action<A: TuningAction>(
         )
         .map(|_| ())
     })
-    .with_after_rollback(|_| write_controller_journal_clean(input.journal_path).map(|_| ()));
-    run_audited_action_with_audit_path_and_hooks(
+    .with_after_rollback(|_| {
+        rollback_completed.set(true);
+        write_controller_journal_clean(input.journal_path).map(|_| ())
+    });
+    let result = run_audited_action_with_audit_path_and_hooks(
         "autotune candidate",
         action,
         policy,
         input.audit_path,
         hooks,
-    )
-    .map_err(Into::into)
+    );
+    result.map_err(|source| {
+        JournaledActionFailure {
+            source,
+            rollback: rollback.into_inner(),
+            rollback_completed: rollback_completed.get(),
+        }
+        .into()
+    })
 }
 
 #[cfg(test)]
@@ -195,6 +223,9 @@ mod tests {
             error.to_string().contains("after-apply hook failed"),
             "{error:#}"
         );
+        let failure = error.downcast_ref::<JournaledActionFailure>().unwrap();
+        assert!(failure.rollback_completed);
+        assert!(failure.rollback.is_some());
         assert!(action.inner.rolled_back());
         assert!(!action.inner.applied());
         assert!(!action.inner.events().contains(&"verify"));

@@ -2595,7 +2595,7 @@ The milestone should now require all of the following.
 ## Recovery
 
 - [x] startup affinity identity fix merged
-- [ ] automatic recovery capability restricted per provider
+- [x] automatic recovery capability restricted per provider
 - [ ] crash before apply
 - [ ] crash during apply
 - [ ] crash after apply
