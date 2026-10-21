@@ -3,7 +3,7 @@
 #[cfg(test)]
 use std::{path::PathBuf, time::Duration};
 
-use crate::actions::{ActionState, RollbackToken, SafetyClass};
+use crate::actions::{RollbackToken, SafetyClass};
 #[cfg(test)]
 use crate::autotune::planning::{candidate::CandidateAction, dry_run::CandidateDryRunRecord};
 
@@ -33,6 +33,5 @@ pub struct AuditedCandidateApplyOutcome {
     pub action_kind: String,
     pub affected_tasks: usize,
     pub safety_class: SafetyClass,
-    pub state: ActionState,
     pub rollback: RollbackToken,
 }

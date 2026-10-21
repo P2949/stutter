@@ -16,6 +16,7 @@ fn start_candidate_applies_action_writes_journal_registers_rollback_and_clears_w
         washout: WashoutWindowConfig::default(),
         candidate_window_seconds: 30,
         manual_restore_command: "stutter daemon emergency-restore",
+        audit_path: Some(journal_path.with_file_name("audit.jsonl")),
         controller_journal_path: Some(journal_path),
         exit_rollback_registry: Some(&registry),
         privileged_action_service: None,
@@ -28,7 +29,7 @@ fn start_candidate_applies_action_writes_journal_registers_rollback_and_clears_w
 
     let outcome = manager
         .apply_decision_side_effects_with_executor(
-            input,
+            input.clone(),
             LiveExperimentRuntimeState {
                 controller_state: &mut controller_state,
                 active_profile_state: &mut active_profile_state,
@@ -47,6 +48,15 @@ fn start_candidate_applies_action_writes_journal_registers_rollback_and_clears_w
     assert!(outcome.clear_measurement_window);
     assert!(manager.has_active_experiment());
     assert_eq!(executor.apply_calls, 1);
+    let journal = crate::autotune::controller_journal::read_controller_journal(
+        input.controller_journal_path.as_ref().unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        journal.verify_result.as_deref(),
+        Some("measurement_window_collecting"),
+        "started experiments advance to the measurement phase"
+    );
     assert_eq!(registry.len(), 1);
     assert_eq!(controller_state.phase, ControllerPhase::Measuring);
     assert!(controller_state.active_experiment.is_some());

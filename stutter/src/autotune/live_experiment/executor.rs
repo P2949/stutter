@@ -6,9 +6,9 @@ use super::{
     journal::collect_post_rollback_active_config, scoring::policy_context_for_runtime_apply, *,
 };
 use crate::{
-    actions::{RollbackToken, SafetyClass},
+    actions::{RollbackToken, SafetyClass, TuningAction},
     autotune::{
-        apply_low_risk::apply_candidate_with_audit,
+        apply_low_risk::action_from_candidate,
         observation::{ActiveConfigSnapshot, AutotuneObservation},
         planning::candidate::CandidateAction,
     },
@@ -19,6 +19,8 @@ use crate::{
 };
 
 pub(crate) trait LiveExperimentActionExecutor {
+    /// Low-risk implementations must persist Applying and Applied(token) at the
+    /// action boundary, before verification. Returning a token alone is insufficient.
     fn apply_candidate(
         &mut self,
         input: &LiveExperimentManagerInput<'_>,
@@ -41,7 +43,7 @@ impl LiveExperimentActionExecutor for RuntimeLiveExperimentActionExecutor {
         &mut self,
         input: &LiveExperimentManagerInput<'_>,
         candidate: &CandidateAction,
-        _experiment_id: &str,
+        experiment_id: &str,
         observation: &AutotuneObservation,
     ) -> anyhow::Result<RollbackToken> {
         if input.mode == DaemonMode::ApplyMediumRisk
@@ -68,16 +70,45 @@ impl LiveExperimentActionExecutor for RuntimeLiveExperimentActionExecutor {
                 })?;
             Ok(result.rollback)
         } else {
-            let outcome = apply_candidate_with_audit(candidate.clone())?;
+            let (name, mut action) = action_from_candidate(candidate.clone())?;
+            let journal_path = super::journal::controller_journal_path(input);
+            action.restore_path = Some(super::journal::reserve_experiment_restore_path(
+                &journal_path,
+            )?);
+            let audit_path = input
+                .audit_path
+                .clone()
+                .unwrap_or_else(crate::audit::default_audit_log_path);
+            let outcome = crate::autotune::action_transaction::apply_journaled_action(
+                &action,
+                crate::actions::runner::ActionRunPolicy::apply_low_risk(
+                    crate::daemon_policy::ActionSource::AutotuneRuntime,
+                    false,
+                ),
+                crate::autotune::action_transaction::JournaledActionInput {
+                    journal_path: &journal_path,
+                    audit_path: &audit_path,
+                    experiment_id,
+                    metadata: super::journal::controller_journal_metadata_for_candidate(
+                        input,
+                        candidate,
+                        observation,
+                        None,
+                        "pending_apply",
+                    ),
+                },
+            )?;
             log::info!(
                 "autotune_candidate_applied candidate={} action_kind={} affected_tasks={} safety_class={:?} state={:?}",
-                outcome.candidate_name,
-                outcome.action_kind,
-                outcome.affected_tasks,
-                outcome.safety_class,
+                name,
+                "cpu_affinity_profile",
+                outcome.state.affected_tasks,
+                action.safety_class(),
                 outcome.state
             );
-            Ok(outcome.rollback)
+            outcome
+                .rollback
+                .context("journaled apply returned without rollback token")
         }
     }
 

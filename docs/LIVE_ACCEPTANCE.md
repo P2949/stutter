@@ -115,3 +115,28 @@ manual handler. An unauthorized token faults before executor dispatch, retains
 the journal/token/manual instruction, and records failure in audit, history and
 daemon state. This permission boundary does not establish full crash durability,
 rollback repeatability, provider graduation, or completion of issue #29.
+
+## Low-risk controller transaction
+
+The low-risk runtime executor uses the shared journaled action transaction:
+`Applying → apply → durable Applied(token) → verify`. The Applied write uses
+the controller journal's synced temporary file, atomic rename and parent sync.
+The live manager checks that exact experiment/action/token instead of rewriting
+Applied after the executor returns. It subsequently advances the experiment to
+measurement as usual. A failed Applied write immediately invokes rollback and
+skips verification. Successful automatic rollback cleans the journal; failed
+rollback retains Applied/token for recovery. The runner records terminal failure
+in either case.
+
+Each real runtime apply reserves a fresh directory under the journal parent's
+`experiments/<timestamp>-<controller-pid>/restore.json`; directory entries are
+synced before use. This separates experimental restore data from shared manual
+state. Explicit audit/journal paths allow owned-process validation without user
+state or environment-variable changes.
+
+The privileged medium-risk service retains its historical delayed journal
+protocol and remains experimental. The low-risk fix protects verification after
+apply returns; preparation before the first mutable syscall and real SIGKILL
+acceptance are separate pending gates (#48/#29). Synthetic transaction regressions
+and the explicit owned-child manager/startup-restore test do not establish that
+full crash matrix.

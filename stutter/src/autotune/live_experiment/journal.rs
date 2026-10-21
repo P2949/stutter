@@ -90,6 +90,22 @@ pub(super) fn controller_journal_path(input: &LiveExperimentManagerInput<'_>) ->
         .clone()
         .unwrap_or_else(default_controller_journal_path)
 }
+
+pub(super) fn reserve_experiment_restore_path(journal_path: &Path) -> anyhow::Result<PathBuf> {
+    let parent = journal_path.parent().unwrap_or_else(|| Path::new("."));
+    let experiments = parent.join("experiments");
+    std::fs::create_dir_all(&experiments)?;
+    let directory = experiments.join(format!(
+        "{}-{}",
+        crate::audit::unix_nanos_now(),
+        std::process::id()
+    ));
+    // Never merge an experiment into existing manual or experimental state.
+    std::fs::create_dir(&directory)?;
+    std::fs::File::open(&experiments)?.sync_all()?;
+    std::fs::File::open(parent)?.sync_all()?;
+    Ok(directory.join("restore.json"))
+}
 pub(super) fn collect_post_rollback_active_config(
     observation: &AutotuneObservation,
 ) -> Option<ActiveConfigSnapshot> {

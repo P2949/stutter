@@ -1,6 +1,4 @@
-use crate::{
-    actions::cpu_affinity::CpuAffinityProfileAction, autotune::planning::candidate::CandidateAction,
-};
+use crate::autotune::planning::candidate::CandidateAction;
 
 mod audit;
 #[cfg(test)]
@@ -9,6 +7,7 @@ mod command;
 mod executor;
 #[cfg(test)]
 mod experiment;
+#[cfg(test)]
 mod model;
 #[cfg(test)]
 mod target;
@@ -47,25 +46,10 @@ pub use experiment::{
     resolve_low_risk_experiment, resolve_low_risk_experiment_with_active_profile_state,
     select_first_eligible_low_risk_candidate,
 };
-pub type AuditedCandidateApplyOutcome = model::AuditedCandidateApplyOutcome;
 #[cfg(test)]
 pub use model::{ApplyLowRiskOutcome, ApplyLowRiskPlan};
 #[cfg(test)]
 pub use target::{resolve_one_target_tree_pid, resolve_one_target_tree_pid_at};
-
-pub fn apply_cpu_affinity_candidate_with_audit(
-    candidate_name: String,
-    action: &CpuAffinityProfileAction,
-) -> anyhow::Result<AuditedCandidateApplyOutcome> {
-    audit::apply_cpu_affinity_candidate_with_audit(candidate_name, action)
-}
-
-pub fn apply_candidate_with_audit(
-    candidate: CandidateAction,
-) -> anyhow::Result<AuditedCandidateApplyOutcome> {
-    let (candidate_name, action) = action_from_candidate(candidate)?;
-    apply_cpu_affinity_candidate_with_audit(candidate_name, &action)
-}
 
 fn unsupported_low_risk_candidate<T>(candidate: &CandidateAction) -> anyhow::Result<T> {
     anyhow::bail!(

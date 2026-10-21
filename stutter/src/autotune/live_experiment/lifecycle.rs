@@ -293,19 +293,25 @@ impl LiveExperimentManager {
         }
 
         let journal_path = controller_journal_path(input);
-
-        write_controller_journal_applying_with_metadata(
-            &journal_path,
-            ExperimentId::try_new(experiment_id)?,
-            crate::actions::ActionId::try_new(action_id)?,
-            controller_journal_metadata_for_candidate(
-                input,
-                candidate,
-                observation,
-                None,
-                "pending_apply",
-            ),
-        )?;
+        // The privileged service still uses its historical protocol. Low-risk
+        // actions own these transitions inside the audited action boundary.
+        let deferred_privileged_journal = input.mode
+            == crate::daemon_policy::DaemonMode::ApplyMediumRisk
+            && candidate.safety_class() > crate::actions::SafetyClass::ReversibleLowRisk;
+        if deferred_privileged_journal {
+            write_controller_journal_applying_with_metadata(
+                &journal_path,
+                ExperimentId::try_new(experiment_id)?,
+                crate::actions::ActionId::try_new(action_id)?,
+                controller_journal_metadata_for_candidate(
+                    input,
+                    candidate,
+                    observation,
+                    None,
+                    "pending_apply",
+                ),
+            )?;
+        }
 
         let applied_rollback =
             executor.apply_candidate(input, candidate, experiment_id, observation)?;
@@ -321,19 +327,31 @@ impl LiveExperimentManager {
             );
         }
 
-        write_controller_journal_applied_with_metadata(
-            &journal_path,
-            ExperimentId::try_new(experiment_id)?,
-            crate::actions::ActionId::try_new(action_id)?,
-            applied_rollback.clone(),
-            controller_journal_metadata_for_candidate(
-                input,
-                candidate,
-                observation,
-                Some(applied_rollback.affected_tasks()),
-                "applied_pending_verify",
-            ),
-        )?;
+        if deferred_privileged_journal {
+            write_controller_journal_applied_with_metadata(
+                &journal_path,
+                ExperimentId::try_new(experiment_id)?,
+                crate::actions::ActionId::try_new(action_id)?,
+                applied_rollback.clone(),
+                controller_journal_metadata_for_candidate(
+                    input,
+                    candidate,
+                    observation,
+                    Some(applied_rollback.affected_tasks()),
+                    "applied_pending_verify",
+                ),
+            )?;
+        } else {
+            let record =
+                crate::autotune::controller_journal::read_controller_journal(&journal_path)?;
+            anyhow::ensure!(
+                record.state() == ControllerJournalState::Applied
+                    && record.rollback_token() == Some(&applied_rollback)
+                    && record.experiment_id.as_ref().map(|id| id.as_str()) == Some(experiment_id)
+                    && record.action_id.as_ref().map(|id| id.as_str()) == Some(action_id),
+                "live executor returned without its durable Applied rollback token"
+            );
+        }
 
         Ok(applied_rollback)
     }

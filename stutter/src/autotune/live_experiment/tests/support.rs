@@ -39,10 +39,10 @@ pub(super) struct FakeLiveExecutor {
 impl LiveExperimentActionExecutor for FakeLiveExecutor {
     fn apply_candidate(
         &mut self,
-        _input: &LiveExperimentManagerInput<'_>,
-        _candidate: &CandidateAction,
-        _experiment_id: &str,
-        _observation: &AutotuneObservation,
+        input: &LiveExperimentManagerInput<'_>,
+        candidate: &CandidateAction,
+        experiment_id: &str,
+        observation: &AutotuneObservation,
     ) -> anyhow::Result<RollbackToken> {
         self.apply_calls += 1;
 
@@ -50,7 +50,23 @@ impl LiveExperimentActionExecutor for FakeLiveExecutor {
             anyhow::bail!("intentional apply failure");
         }
 
-        Ok(fake_rollback())
+        let token = fake_rollback();
+        if candidate.safety_class() <= SafetyClass::ReversibleLowRisk {
+            crate::autotune::controller_journal::write_controller_journal_applied_with_metadata(
+                &super::super::journal::controller_journal_path(input),
+                ExperimentId::try_new(experiment_id)?,
+                candidate.action_id(),
+                token.clone(),
+                super::super::journal::controller_journal_metadata_for_candidate(
+                    input,
+                    candidate,
+                    observation,
+                    Some(token.affected_tasks()),
+                    "fake_verified",
+                ),
+            )?;
+        }
+        Ok(token)
     }
 
     fn rollback_candidate(
@@ -246,6 +262,7 @@ pub(super) fn input(journal_path: PathBuf) -> LiveExperimentManagerInput<'static
         washout: WashoutWindowConfig::default(),
         candidate_window_seconds: 30,
         manual_restore_command: "stutter daemon emergency-restore",
+        audit_path: Some(journal_path.with_file_name("audit.jsonl")),
         controller_journal_path: Some(journal_path),
         exit_rollback_registry: None,
         privileged_action_service: None,
@@ -265,6 +282,7 @@ pub(super) fn medium_input<'a>(
         washout: WashoutWindowConfig::default(),
         candidate_window_seconds: 30,
         manual_restore_command: "stutter daemon emergency-restore",
+        audit_path: Some(journal_path.with_file_name("audit.jsonl")),
         controller_journal_path: Some(journal_path),
         exit_rollback_registry: None,
         privileged_action_service: service,

@@ -51,6 +51,52 @@ Do not claim completion or graduate capabilities without the corresponding
 evidence. Missing real environments and unperformed live tests remain explicit
 validation debt rather than synthetic substitutes.
 
+## 2026-10-21: production rollback durability before verification
+
+- PR #49 published at `464b232657ed6499aa60e71e72b0d85afae72f08` with exact-head
+  CI `39673420733` in progress. It restricts automatic recovery per provider;
+  its main merge/success have not yet been claimed.
+- Split the preserved crash-helper branch into a bounded production transaction
+  change. Low-risk execution now uses the shared audited journal helper, writing
+  durable Applied(token) immediately after apply and before verify. The manager
+  validates experiment/action/token ownership instead of rewriting Applied after
+  return. Its subsequent Measuring transition remains legitimate and unchanged.
+- Reserved fresh per-apply restore directories under the controller journal
+  parent's `experiments/`, syncing their parent entries. These paths are linked
+  by the exact journal token and never merge into shared manual restore state.
+  Added optional explicit audit paths for isolated controller validation.
+- Transaction regression covers verification-entry token/file presence, failed
+  Applied atomic replacement causing immediate rollback without verification,
+  successful rollback cleaning the journal, and failed rollback retaining token.
+  Initial fault-test audit-category expectations used incorrect names; corrected
+  to the existing stable categories. A lifecycle assertion initially inspected
+  metadata after the legitimate Measuring transition; moved the ownership
+  assertion to the actual apply boundary. A fixture borrow error was corrected.
+- PASS explicit real owned-child production-manager apply/startup-restore test:
+  actual kernel mask changed and was independently restored; journal/token and
+  isolated restore path checked. No user process/state or global audit used.
+  Log `/tmp/stutter-durable-runtime-real.log`. This explicit host test is ignored
+  by ordinary hosted CI because it requires two allowed CPUs. It is not a
+  canonical clean-source SIGKILL/restart evidence bundle.
+- Further #47 fault-consistency work remains: an apply/verify failure can happen
+  before the manager registers the experiment. The runtime faults and the journal
+  retains a token on rollback failure, but daemon state can omit that rollback and
+  normal history emission is skipped on the error. This must be reconciled and
+  tested; no complete terminal-path consistency claim is made here.
+- Prepared rollback before first mutation (#48), real controller crash matrix
+  (#29), privileged-service durability, and portable evidence remain outstanding.
+  Full validation of this production follow-up is pending below.
+- PASS full follow-up format/build/all-target Clippy/test gate: 2,722 library
+  tests, 6 ignored, 8 lifecycle integrations and other suites. PASS 23 xtask unit
+  tests plus descendant cleanup, xtask Clippy, objective docs, autotune safety
+  script, offline recommendation and historical-schema advisor smokes. The
+  explicit real manager/startup-restore test also passed separately.
+- PR #49 exact-head CI `39673420733` succeeded and merged as
+  `36ea2eb4cda3acceb281a2e964fe6a138dba87f8`; #46 closed. Exact-main validation
+  for that merge remains pending. The durability follow-up will be rebased onto
+  this merge before publication; #47 remains open for real crash evidence and
+  terminal-path consistency.
+
 ## 2026-10-21: revised recovery-first plan and provider authorization
 
 - Adopted the user's updated repository-wide plan, preserving completed P0 and
