@@ -1,6 +1,7 @@
 mod catalog;
 mod model;
 mod probe_key;
+mod workload_progress;
 
 #[cfg(test)]
 pub use catalog::planned_probe_specs;

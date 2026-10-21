@@ -114,3 +114,12 @@ validation debt rather than synthetic substitutes.
   `fixed-work` command to its expected public command list.
 - Broader validation is pending. No live compile performance or calibration
   claim follows from these offline tests.
+- Initial full gate: format/build/Clippy passed; library tests reported 2,664
+  passed, 35 failed, 5 ignored. Thirty-two failures exposed an unintended global
+  quality downgrade when old runs lacked optional fixed-work markers. The
+  quality rule now keeps missing compile evidence distinct from unrelated
+  scheduler evidence. Remaining failures required the intentional API export,
+  updated help snapshots, and extracting the cooperative probe descriptor to
+  respect the existing catalog size limit. Historical fixtures were preserved.
+- Added future-timestamp, oversized-line and stale-marker reader cases, plus
+  cross-window PID and process-start-time mismatch rejection.
