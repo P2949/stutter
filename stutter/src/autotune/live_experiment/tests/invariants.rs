@@ -117,6 +117,7 @@ fn active_experiment_controller_decision_is_deterministic_for_identical_observat
 
     let state = ControllerRuntimeState {
         active_experiment: Some(crate::autotune::controller::ActiveExperiment {
+            baseline_signals: Default::default(),
             experiment_id: ExperimentId::new("experiment-active"),
             candidate,
             baseline_score: score(1_000),

@@ -11,6 +11,7 @@ use super::{
     },
     decision::{AutotuneDecision, CandidateAction, ExperimentId},
     experiment::WindowScore,
+    objective::{ObjectiveComparisonInput, ObjectiveKind, ObjectiveSignals, explain_for_objective},
     observation::AutotuneObservation,
     quality::OnlineDataQuality,
     state::{AutotuneMode, ControllerPhase},
@@ -90,6 +91,7 @@ pub struct ActiveExperiment {
     pub experiment_id: ExperimentId,
     pub candidate: CandidateAction,
     pub baseline_score: WindowScore,
+    pub baseline_signals: ObjectiveSignals,
 }
 
 #[derive(Clone, Debug)]
@@ -246,6 +248,38 @@ pub fn decide_autotune_transition(
             return AutotuneDecision::Revert {
                 experiment_id: active.experiment_id.clone(),
                 reason: format!("focus policy blocks active experiment: {reason}"),
+            };
+        }
+
+        if active.candidate.objective() != ObjectiveKind::StutterScore {
+            let candidate_score = observation.to_window_score();
+            let objective = explain_for_objective(ObjectiveComparisonInput {
+                objective: active.candidate.objective(),
+                baseline: &active.baseline_score,
+                candidate: &candidate_score,
+                baseline_signals: &active.baseline_signals,
+                candidate_signals: &observation.objective_signals,
+                data_quality: match observation.data_quality {
+                    OnlineDataQuality::High => super::comparison::ExperimentDataQuality::High,
+                    OnlineDataQuality::Medium { .. } => {
+                        super::comparison::ExperimentDataQuality::Medium
+                    }
+                    OnlineDataQuality::Low { .. } => super::comparison::ExperimentDataQuality::Low,
+                },
+                target_disappeared: !observation.target_present,
+            });
+            return match objective.experiment_result() {
+                ExperimentResult::Improved { .. } => AutotuneDecision::KeepCurrent {
+                    experiment_id: active.experiment_id.clone(),
+                    reason: objective.summary(),
+                },
+                // A completed experiment without demonstrated improvement must
+                // restore its candidate, rather than leave mutation active while
+                // waiting indefinitely for a missing primary metric to appear.
+                _ => AutotuneDecision::Revert {
+                    experiment_id: active.experiment_id.clone(),
+                    reason: objective.summary(),
+                },
             };
         }
 

@@ -94,6 +94,7 @@ pub(super) fn active_state_with_baseline_window(
     ControllerRuntimeState {
         phase: ControllerPhase::Measuring,
         active_experiment: Some(ActiveExperiment {
+            baseline_signals: Default::default(),
             experiment_id: ExperimentId::new("experiment-1"),
             candidate: candidate_with_safety_class(SafetyClass::ReversibleLowRisk),
             baseline_score: WindowScore {

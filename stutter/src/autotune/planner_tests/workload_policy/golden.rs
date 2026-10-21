@@ -84,6 +84,7 @@ fn run_planner_golden_case(path: &std::path::Path, case: PlannerGoldenCase) {
 
     if case.external_mutation {
         controller_state.active_experiment = Some(ActiveExperiment {
+            baseline_signals: Default::default(),
             experiment_id: ExperimentId::new("fixture-external-mutation"),
             candidate: state_candidate.clone(),
             baseline_score: window_score(100),

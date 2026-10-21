@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use super::{
     RollingWindow,
-    utils::{is_compile_progress_record, overlap_basis_label},
+    utils::{is_compile_activity_record, overlap_basis_label},
 };
 use crate::autotune::objective::{
     ObjectiveSignalQuality, ObjectiveSignalQualitySnapshot, ObjectiveSignals,
@@ -12,7 +12,10 @@ const GPU_THERMAL_DEGRADED_MILLIDEGREES: u32 = 85_000;
 const GPU_POWER_LIMIT_BUSY_PERCENT: u32 = 95;
 const GPU_POWER_LIMIT_LOW_CLOCK_MHZ: u32 = 300;
 
-pub(crate) fn compute_objective_signals(window: &RollingWindow) -> ObjectiveSignals {
+pub(crate) fn compute_objective_signals(
+    window: &RollingWindow,
+    runnable_target: Option<(u32, &BTreeSet<u32>)>,
+) -> ObjectiveSignals {
     let block_io_overlap_count = window
         .block_io_events()
         .iter()
@@ -116,20 +119,20 @@ pub(crate) fn compute_objective_signals(window: &RollingWindow) -> ObjectiveSign
             .map(|record| u64::from(record.mem_psi_spike))
             .fold(0_u64, u64::saturating_add)
     });
-    let compile_progress_elapsed = window
+    let compile_activity_elapsed = window
         .intervals()
         .iter()
-        .filter(|record| is_compile_progress_record(record))
+        .filter(|record| is_compile_activity_record(record))
         .map(|record| record.elapsed_ms)
         .collect::<BTreeSet<_>>();
-    let compile_progress_intervals = compile_progress_elapsed.len() as u64;
-    let compile_progress_samples = window
+    let compile_activity_intervals = compile_activity_elapsed.len() as u64;
+    let compile_activity_samples = window
         .intervals()
         .iter()
-        .filter(|record| is_compile_progress_record(record))
+        .filter(|record| is_compile_activity_record(record))
         .map(|record| record.samples)
         .fold(0_u64, u64::saturating_add);
-    let has_compile_progress = compile_progress_intervals > 0;
+    let has_compile_activity = compile_activity_intervals > 0;
 
     let gpu_active_render_node = latest_gpu.and_then(|sample| sample.render_node.clone());
     let gpu_drm_card = latest_gpu.and_then(|sample| sample.drm_card.clone());
@@ -182,11 +185,8 @@ pub(crate) fn compute_objective_signals(window: &RollingWindow) -> ObjectiveSign
         } else {
             ObjectiveSignalQuality::Derived
         },
-        compile_throughput: if has_compile_progress {
-            ObjectiveSignalQuality::Direct
-        } else {
-            ObjectiveSignalQuality::Missing
-        },
+        compile_throughput: ObjectiveSignalQuality::Missing,
+        runnable_latency: ObjectiveSignalQuality::Missing,
     };
 
     let irq_quality = if has_irq_events {
@@ -198,7 +198,7 @@ pub(crate) fn compute_objective_signals(window: &RollingWindow) -> ObjectiveSign
     let irq_overlap_trust = has_irq_events.then(|| irq_quality.as_str().to_owned());
     let irq_overlap_basis = has_irq_events.then(|| "irq-duration".to_owned());
 
-    ObjectiveSignals {
+    let mut signals = ObjectiveSignals {
         block_io_overlap_count: has_block_io_events.then_some(block_io_overlap_count),
         block_io_worst_latency_ns: has_block_io_events.then_some(block_io_worst_latency_ns),
         block_io_overlap_basis,
@@ -240,12 +240,20 @@ pub(crate) fn compute_objective_signals(window: &RollingWindow) -> ObjectiveSign
                 .map(|record| record.over_5ms)
                 .fold(0_u64, u64::saturating_add),
         ),
-        compile_progress_intervals: has_compile_progress.then_some(compile_progress_intervals),
-        compile_progress_samples: has_compile_progress.then_some(compile_progress_samples),
-        compile_progress_source: has_compile_progress
+        compile_activity_intervals: has_compile_activity.then_some(compile_activity_intervals),
+        compile_activity_samples: has_compile_activity.then_some(compile_activity_samples),
+        compile_activity_source: has_compile_activity
             .then(|| "build-compiler-linker-intervals".to_owned()),
         signal_quality,
-    }
+        ..ObjectiveSignals::default()
+    };
+    signals.set_runnable_latency_from_records(window.intervals().iter().filter(|record| {
+        runnable_target.is_some_and(|(root, members)| {
+            root > 0 && record.process_pid.is_some_and(|pid| members.contains(&pid))
+        })
+    }));
+    signals.runnable_target_root_pid = runnable_target.map(|(root, _)| root);
+    signals
 }
 
 fn source_quality_for_block_io_basis(basis: Option<&str>) -> ObjectiveSignalQuality {

@@ -80,6 +80,7 @@ mod tests {
         let observation = observation_with_cpu_affinity("1");
         let controller_state = ControllerRuntimeState {
             active_experiment: Some(ActiveExperiment {
+                baseline_signals: Default::default(),
                 experiment_id: ExperimentId::new("external-cpu-affinity"),
                 candidate: active_candidate,
                 baseline_score: window_score(1_000),
@@ -163,6 +164,7 @@ mod tests {
 
         let controller_state = ControllerRuntimeState {
             active_experiment: Some(ActiveExperiment {
+                baseline_signals: Default::default(),
                 experiment_id: ExperimentId::new("external-mutation"),
                 candidate: active_candidate,
                 baseline_score: window_score(1_000),
@@ -264,6 +266,7 @@ mod tests {
         capabilities.cgroup_v2_available = true;
         let controller_state = ControllerRuntimeState {
             active_experiment: Some(ActiveExperiment {
+                baseline_signals: Default::default(),
                 experiment_id: ExperimentId::new("active-cpu-placement"),
                 candidate: cpu_affinity_candidate("game-main"),
                 baseline_score: window_score(100),

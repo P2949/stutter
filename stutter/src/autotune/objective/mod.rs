@@ -7,6 +7,7 @@ mod game_frame_pacing;
 mod game_runnable_latency;
 mod io_latency;
 mod irq_overlap;
+mod runnable_signal;
 mod stutter_score;
 mod thermal;
 
@@ -84,6 +85,8 @@ pub struct ObjectiveSignalQualitySnapshot {
     pub frame_pacing: ObjectiveSignalQuality,
     pub foreground_latency: ObjectiveSignalQuality,
     #[serde(default)]
+    pub runnable_latency: ObjectiveSignalQuality,
+    #[serde(default)]
     pub compile_throughput: ObjectiveSignalQuality,
 }
 
@@ -132,11 +135,49 @@ pub struct ObjectiveSignals {
     pub frame_p99_ms: Option<f64>,
     pub foreground_over_5ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub compile_progress_intervals: Option<u64>,
+    pub runnable_latency_p50_ns: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub compile_progress_samples: Option<u64>,
+    pub runnable_latency_p95_ns: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub compile_progress_source: Option<String>,
+    pub runnable_latency_p99_ns: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runnable_latency_p999_ns: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runnable_latency_max_ns: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runnable_over_1ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runnable_over_2ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runnable_over_5ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runnable_samples: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runnable_latency_source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runnable_latency_unavailable_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runnable_target_root_pid: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runnable_target_starttime_ticks: Option<u64>,
+    #[serde(
+        default,
+        alias = "compile_progress_intervals",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub compile_activity_intervals: Option<u64>,
+    #[serde(
+        default,
+        alias = "compile_progress_samples",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub compile_activity_samples: Option<u64>,
+    #[serde(
+        default,
+        alias = "compile_progress_source",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub compile_activity_source: Option<String>,
     #[serde(default)]
     pub signal_quality: ObjectiveSignalQualitySnapshot,
 }
@@ -152,11 +193,9 @@ pub struct CompileThroughputSignal {
 
 impl CompileThroughputSignal {
     pub fn direct_progress(&self) -> Option<(u64, u64)> {
-        if self.quality != ObjectiveSignalQuality::Direct {
-            return None;
-        }
-
-        Some((self.progress_intervals?, self.progress_samples.unwrap_or(0)))
+        // Retained for source compatibility. Historical activity counts never
+        // establish direct throughput, even when old artifacts label them Direct.
+        None
     }
 }
 
@@ -174,23 +213,12 @@ impl ObjectiveSignals {
     }
 
     pub fn compile_throughput_signal(&self) -> CompileThroughputSignal {
-        if self.signal_quality.compile_throughput == ObjectiveSignalQuality::Direct
-            && self.compile_progress_intervals.is_some()
-        {
-            return CompileThroughputSignal {
-                progress_intervals: self.compile_progress_intervals,
-                progress_samples: self.compile_progress_samples,
-                quality: ObjectiveSignalQuality::Direct,
-                degraded_reason: None,
-            };
-        }
-
         CompileThroughputSignal {
-            progress_intervals: None,
-            progress_samples: None,
-            quality: ObjectiveSignalQuality::Derived,
+            progress_intervals: self.compile_activity_intervals,
+            progress_samples: self.compile_activity_samples,
+            quality: ObjectiveSignalQuality::Missing,
             degraded_reason: Some(
-                "direct compile progress intervals missing; using lower-confidence stutter-score proxy"
+                "direct compile throughput unavailable; compile activity is not completed work"
                     .to_owned(),
             ),
         }

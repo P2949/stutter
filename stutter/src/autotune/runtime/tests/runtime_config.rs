@@ -200,7 +200,9 @@ fn interval_event_updates_window_and_emits_noop_decision() {
 
 #[test]
 fn focus_change_resets_window_and_sets_focus_context() {
-    let mut runtime = runtime();
+    let mut config = AutotuneRuntimeConfig::observe(None, None, None);
+    config.history_log = None;
+    let mut runtime = AutotuneRuntime::new(config);
 
     let emitted = runtime
         .on_event(MonitorEvent::FocusChanged {

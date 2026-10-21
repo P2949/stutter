@@ -94,7 +94,7 @@ fn objective_signals_collect_io_irq_thermal_and_power_indicators() {
 }
 
 #[test]
-fn objective_signals_source_compile_throughput_from_progress_intervals() {
+fn objective_signals_detect_compile_activity_without_throughput() {
     let mut window = RollingWindow::new(Duration::from_secs(30));
     window.push_interval(IntervalRecord {
         elapsed_ms: 1_000,
@@ -123,15 +123,15 @@ fn objective_signals_source_compile_throughput_from_progress_intervals() {
 
     let signals = window.objective_signals();
 
-    assert_eq!(signals.compile_progress_intervals, Some(2));
-    assert_eq!(signals.compile_progress_samples, Some(40));
+    assert_eq!(signals.compile_activity_intervals, Some(2));
+    assert_eq!(signals.compile_activity_samples, Some(40));
     assert_eq!(
-        signals.compile_progress_source.as_deref(),
+        signals.compile_activity_source.as_deref(),
         Some("build-compiler-linker-intervals")
     );
     assert_eq!(
         signals.signal_quality.compile_throughput,
-        ObjectiveSignalQuality::Direct
+        ObjectiveSignalQuality::Missing
     );
 }
 

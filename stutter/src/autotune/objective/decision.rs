@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     ObjectiveComparisonInput, ObjectiveKind, ObjectiveSignalQuality, common,
-    common::PrimaryMetricComparison,
+    common::PrimaryMetricComparison, game_runnable_latency,
 };
 use crate::{
     autotune::comparison::{ExperimentDataQuality, ExperimentResult},
@@ -47,6 +47,18 @@ impl ObjectiveDecision {
             format!("confidence={:?}", self.confidence),
             self.primary_signal.summary.clone(),
         ];
+
+        parts.push(match &self.outcome {
+            ObjectiveOutcome::Improved {
+                improvement_percent,
+            } => format!("improvement_percent={improvement_percent:.2}"),
+            ObjectiveOutcome::Regressed { regression_percent } => {
+                format!("regression_percent={regression_percent:.2}")
+            }
+            ObjectiveOutcome::Inconclusive { reason } | ObjectiveOutcome::Invalid { reason } => {
+                format!("reason={reason}")
+            }
+        });
 
         if let Some(reason) = self.primary_signal.degraded_reason.as_ref() {
             parts.push(format!("degraded_reason={reason}"));
@@ -168,25 +180,46 @@ fn primary_signal_for(input: &ObjectiveComparisonInput<'_>) -> ObjectiveSignal {
             degraded_reason: None,
         },
         ObjectiveKind::GameRunnableLatency => ObjectiveSignal {
-            name: "runnable_latency_with_frame_guard".to_owned(),
+            name: "runnable_p99_ns".to_owned(),
             quality: pair_quality(
-                input.baseline_signals.signal_quality.foreground_latency,
-                input.candidate_signals.signal_quality.foreground_latency,
+                input.baseline_signals.signal_quality.runnable_latency,
+                input.candidate_signals.signal_quality.runnable_latency,
             ),
-            baseline: input.baseline_signals.foreground_over_5ms.map(|value| {
-                format!(
-                    "{} over_5ms events / {} samples",
-                    value, input.baseline.scored_samples
-                )
-            }),
-            candidate: input.candidate_signals.foreground_over_5ms.map(|value| {
-                format!(
-                    "{} over_5ms events / {} samples",
-                    value, input.candidate.scored_samples
-                )
-            }),
-            summary: "foreground runnable latency is primary, frame pacing is guarded".to_owned(),
-            degraded_reason: None,
+            baseline: input
+                .baseline_signals
+                .runnable_latency_p99_ns
+                .map(|value| value.to_string()),
+            candidate: input
+                .candidate_signals
+                .runnable_latency_p99_ns
+                .map(|value| value.to_string()),
+            summary: format!(
+                "merged runnable histogram p99_ns baseline={} candidate={}; samples baseline={} candidate={}; over_5ms baseline={} candidate={}; target_root baseline={} candidate={}; no fallback",
+                format_optional_u64(input.baseline_signals.runnable_latency_p99_ns),
+                format_optional_u64(input.candidate_signals.runnable_latency_p99_ns),
+                format_optional_u64(input.baseline_signals.runnable_samples),
+                format_optional_u64(input.candidate_signals.runnable_samples),
+                format_optional_u64(input.baseline_signals.runnable_over_5ms),
+                format_optional_u64(input.candidate_signals.runnable_over_5ms),
+                format_optional_u64(
+                    input
+                        .baseline_signals
+                        .runnable_target_root_pid
+                        .map(u64::from)
+                ),
+                format_optional_u64(
+                    input
+                        .candidate_signals
+                        .runnable_target_root_pid
+                        .map(u64::from)
+                ),
+            ),
+            degraded_reason: game_runnable_latency::unavailable_reason(input.baseline_signals)
+                .or_else(|| game_runnable_latency::unavailable_reason(input.candidate_signals))
+                .or_else(|| {
+                    game_runnable_latency::target_changed(input)
+                        .then(|| "runnable-latency target changed between windows".to_owned())
+                }),
         },
         ObjectiveKind::DesktopInteractivity => interactivity_signal(input, "desktop_interactivity"),
         ObjectiveKind::BrowserInteractivity => interactivity_signal(input, "browser_interactivity"),
@@ -291,16 +324,16 @@ fn compile_signal(input: &ObjectiveComparisonInput<'_>) -> ObjectiveSignal {
         name: "compile_throughput".to_owned(),
         quality,
         baseline: Some(format!(
-            "progress_intervals={} progress_samples={}",
+            "activity_intervals={} activity_samples={}",
             format_optional_u64(baseline.progress_intervals),
             format_optional_u64(baseline.progress_samples)
         )),
         candidate: Some(format!(
-            "progress_intervals={} progress_samples={}",
+            "activity_intervals={} activity_samples={}",
             format_optional_u64(candidate.progress_intervals),
             format_optional_u64(candidate.progress_samples)
         )),
-        summary: "compile progress intervals and samples".to_owned(),
+        summary: "compile activity only; direct throughput unavailable".to_owned(),
         degraded_reason,
     }
 }
@@ -423,6 +456,12 @@ fn objective_specific_guard_failures(
             failures.extend(foreground_guard_failures(input, 2.0));
         }
         ObjectiveKind::GameRunnableLatency => {
+            if game_runnable_latency::tail_regressed(input) {
+                failures.push(guard_failure(
+                    "runnable_severe_tail",
+                    "candidate increased runnable >5ms rate",
+                ));
+            }
             if common::frame_p99_comparison(input, 1.0) == PrimaryMetricComparison::Regressed {
                 failures.push(guard_failure(
                     "frame_pacing",
@@ -471,6 +510,11 @@ fn confidence_for(
     guard_failures: &[ObjectiveGuardFailure],
 ) -> Confidence {
     if matches!(outcome, ObjectiveOutcome::Invalid { .. }) {
+        return Confidence::Low;
+    }
+    if matches!(outcome, ObjectiveOutcome::Inconclusive { .. })
+        && primary_signal.degraded_reason.is_some()
+    {
         return Confidence::Low;
     }
 
