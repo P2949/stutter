@@ -157,6 +157,7 @@ mod tests {
         observation.active_config_snapshot = Some(ActiveConfigSnapshot::default());
         let controller_state = ControllerRuntimeState {
             active_experiment: Some(ActiveExperiment {
+                baseline_signals: Default::default(),
                 experiment_id: ExperimentId::new("unknown-active-config"),
                 candidate: nice_candidate(),
                 baseline_score: window_score(1_000),

@@ -48,6 +48,18 @@ impl ObjectiveDecision {
             self.primary_signal.summary.clone(),
         ];
 
+        parts.push(match &self.outcome {
+            ObjectiveOutcome::Improved {
+                improvement_percent,
+            } => format!("improvement_percent={improvement_percent:.2}"),
+            ObjectiveOutcome::Regressed { regression_percent } => {
+                format!("regression_percent={regression_percent:.2}")
+            }
+            ObjectiveOutcome::Inconclusive { reason } | ObjectiveOutcome::Invalid { reason } => {
+                format!("reason={reason}")
+            }
+        });
+
         if let Some(reason) = self.primary_signal.degraded_reason.as_ref() {
             parts.push(format!("degraded_reason={reason}"));
         }
@@ -203,7 +215,11 @@ fn primary_signal_for(input: &ObjectiveComparisonInput<'_>) -> ObjectiveSignal {
                 ),
             ),
             degraded_reason: game_runnable_latency::unavailable_reason(input.baseline_signals)
-                .or_else(|| game_runnable_latency::unavailable_reason(input.candidate_signals)),
+                .or_else(|| game_runnable_latency::unavailable_reason(input.candidate_signals))
+                .or_else(|| {
+                    game_runnable_latency::target_changed(input)
+                        .then(|| "runnable-latency target changed between windows".to_owned())
+                }),
         },
         ObjectiveKind::DesktopInteractivity => interactivity_signal(input, "desktop_interactivity"),
         ObjectiveKind::BrowserInteractivity => interactivity_signal(input, "browser_interactivity"),
@@ -494,6 +510,11 @@ fn confidence_for(
     guard_failures: &[ObjectiveGuardFailure],
 ) -> Confidence {
     if matches!(outcome, ObjectiveOutcome::Invalid { .. }) {
+        return Confidence::Low;
+    }
+    if matches!(outcome, ObjectiveOutcome::Inconclusive { .. })
+        && primary_signal.degraded_reason.is_some()
+    {
         return Confidence::Low;
     }
 

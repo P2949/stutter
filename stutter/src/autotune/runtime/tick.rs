@@ -150,7 +150,10 @@ impl AutotuneRuntime {
                     situation,
                     reasons,
                 });
-                self.target_state.root_pid = root_pids.first().copied().or(self.config.tree_pid());
+                self.target_state.root_pid = self
+                    .config
+                    .tree_pid()
+                    .or_else(|| root_pids.first().copied());
                 return self.evaluate_and_emit(Some("focus changed; measurement window reset"));
             }
             MonitorEvent::FocusCleared { reason, .. } => {
@@ -295,7 +298,12 @@ impl AutotuneRuntime {
             window: &self.controller.window,
             online_data_quality_policy: &self.config.online_data_quality_policy,
             focus: self.latest_focus.as_ref(),
-            root_pid: self.target_state.root_pid,
+            // Preserve the distinction between a configured process-tree root
+            // and a focus-derived root, so focus group helpers stay in scope.
+            root_pid: self.config.tree_pid().or(self
+                .target_state
+                .root_pid
+                .filter(|_| self.latest_focus.is_none())),
             active_target_count: self.target_state.active_targets,
             active_tasks: &self.target_state.active_tasks,
             recent_diagnoses: self.recent_diagnoses.iter().cloned().collect(),

@@ -95,16 +95,24 @@ fn runnable_missing_approximate_insufficient_or_inconsistent_is_inconclusive() {
             _ => bad.runnable_target_starttime_ticks = Some(101),
         }
         for (base_signals, candidate_signals) in [(&good, &bad), (&bad, &good)] {
-            let result = compare(
-                ObjectiveKind::GameRunnableLatency,
-                &baseline,
-                &candidate,
-                base_signals,
+            let decision = explain_for_objective(ObjectiveComparisonInput {
+                objective: ObjectiveKind::GameRunnableLatency,
+                baseline: &baseline,
+                candidate: &candidate,
+                baseline_signals: base_signals,
                 candidate_signals,
-            );
+                data_quality: ExperimentDataQuality::High,
+                target_disappeared: false,
+            });
+            let result = decision.experiment_result();
             assert!(
                 matches!(result, ExperimentResult::Inconclusive { .. }),
                 "case {case}: {result:?}"
+            );
+            assert_eq!(
+                decision.confidence,
+                crate::diagnosis::Confidence::Low,
+                "case {case}"
             );
         }
     }

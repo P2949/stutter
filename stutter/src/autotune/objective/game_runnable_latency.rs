@@ -30,11 +30,7 @@ pub(super) fn compare(
             };
         }
     };
-    if input.baseline_signals.runnable_target_root_pid
-        != input.candidate_signals.runnable_target_root_pid
-        || input.baseline_signals.runnable_target_starttime_ticks
-            != input.candidate_signals.runnable_target_starttime_ticks
-    {
+    if target_changed(&input) {
         return ExperimentResult::Inconclusive {
             reason: "runnable-latency target changed between windows".to_owned(),
         };
@@ -69,6 +65,13 @@ pub(super) fn compare(
             ),
         }
     }
+}
+
+pub(super) fn target_changed(input: &ObjectiveComparisonInput<'_>) -> bool {
+    input.baseline_signals.runnable_target_root_pid
+        != input.candidate_signals.runnable_target_root_pid
+        || input.baseline_signals.runnable_target_starttime_ticks
+            != input.candidate_signals.runnable_target_starttime_ticks
 }
 
 pub(super) fn unavailable_reason(signals: &ObjectiveSignals) -> Option<String> {

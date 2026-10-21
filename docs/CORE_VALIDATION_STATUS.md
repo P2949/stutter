@@ -27,8 +27,10 @@ compatibility, or release gate is implied by offline tests.
 1. PASS: GitHub [Core Validation milestone](https://github.com/P2949/stutter/milestone/1)
    and 17 actionable issues (#22–#38). The [backlog receipt](CORE_VALIDATION_BACKLOG.json)
    records their URLs. All remain open pending their individual acceptance gates.
-2. Direct runnable histogram aggregation, target/task-class semantics, comparator,
-   sufficiency/quality handling, and regression-first behavioral tests.
+2. Local implementation and offline checks PASS for direct runnable histogram
+   aggregation, target/task-class semantics, comparator, sufficiency/quality
+   handling, and regression-first tests. Remote integration and later live
+   acceptance/calibration gates remain open.
 3. Fixed-work compile completion protocol and foreground protection contracts.
 4. Exhaustive objective registry, full behavioral matrix, generated documentation,
    dedicated objective CI, and full CI at the committed remote head.
@@ -60,9 +62,33 @@ validation debt rather than synthetic substitutes.
 - PASS: targeted `cargo test -p stutter --lib runnable` after implementation:
   21 tests, including the semantic regressions, aggregation, corruption/overflow,
   target scoping, guardrails, explanations and backward-compatible reads.
-- Full library, formatting and Clippy validation of the final scoped version
-  pending. No remote CI or live-acceptance claim is made by this entry.
+- No remote CI or live-acceptance claim is made by this entry. Intermediate
+  failures and final local validation are recorded below.
 - Initial broader library run: 2,680 passed, 2 architecture checks failed,
   5 ignored. Failures identified new unchecked unwraps and a panic path;
   replaced them with validated populations and a conservative bound. Added
   process-start-time matching and exited-root protection before revalidation.
+- Subsequent library run passed: 2,682 passed, 0 failed, 5 ignored. The broader
+  build gate then exposed a socket lifecycle fixture with no histograms and only
+  125 scheduler samples, plus a controller transition still using generic score
+  before the final objective check. It reported a keep even though the final
+  objective check restored the action (6 integration tests passed, 1 failed).
+- Controller active state now retains baseline signals and evaluates non-score
+  objective contracts at the transition, including generic-score conflicts.
+  Completed inconclusive non-score experiments restore their candidates. Added
+  socket tests for both sufficient direct histograms and missing-histogram
+  restoration, with stream/history dispositions checked against retained state.
+  These are controlled fixture integrations through a real socket, not live
+  scheduler acceptance evidence.
+- A follow-up gate caught an old focus-change test implicitly configuring a fixed
+  root while expecting it to follow focus (2,683 library tests passed, 1 failed,
+  5 ignored). The follow-focus fixture now has no configured root; a separate
+  runtime contract covers explicit-root precedence and non-descendant focus
+  group members.
+- PASS final local gate in the pinned Nix environment:
+  `scripts/smoke/build.sh` (format, all-target build, all-target Clippy with
+  `-D warnings`, all-target tests), `scripts/smoke/offline_recommendation.sh`,
+  `scripts/smoke/advisor_offline.sh`, and `git diff --check`. Library tests:
+  2,685 passed, 0 failed, 5 ignored; lifecycle integration tests: 8 passed.
+  Other default-member and integration suites passed. The historical schema-18
+  advisor fixture emitted its expected old-schema warning and rendered.

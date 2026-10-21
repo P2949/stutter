@@ -4,6 +4,9 @@
 latency-sensitive tasks in the selected game process tree. Its primary signal is
 the p99 of the **combined scheduler-event population** in each measurement
 window. The generic stutter score never replaces that signal.
+The core scheduler probes supply wakeup-to-`sched_switch` delays. Optional
+`sched_stat_wait` totals remain separate diagnostics; preemption-only waits are
+outside this histogram population.
 
 ## Population and window
 
@@ -61,6 +64,17 @@ Decision metadata identifies `runnable_p99_ns`, both values and sample counts,
 tail counts, selected roots, quality, no fallback, and any triggered guardrail or
 unavailable reason. All added artifact fields are optional/defaulted. Old
 artifacts retain missing runnable evidence as unavailable, never as zero.
+Insufficient or unavailable evidence lowers decision confidence even when the
+underlying histogram source itself is direct.
+
+The runtime controller retains baseline objective signals and uses each
+non-score objective's comparator at the keep/revert transition. A generic-score
+regression cannot preempt a runnable-primary improvement, and a generic-score
+improvement cannot authorize a runnable-primary regression. A completed
+non-score experiment without demonstrated improvement restores its candidate;
+inconclusive evidence does not leave the mutation active indefinitely. The final
+keep operation independently rechecks the same objective contract. Decision
+stream and history reasons describe the objective used for that transition.
 
 ## Validation boundary
 

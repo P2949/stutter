@@ -125,6 +125,7 @@ fn active_experiment_unknown_config_resync_policy_abandons_experiment() {
 
     runtime.controller.state.active_experiment =
         Some(crate::autotune::controller::ActiveExperiment {
+            baseline_signals: Default::default(),
             experiment_id: ExperimentId::new("experiment-unknown-active-config"),
             candidate: controller_candidate,
             baseline_score: WindowScore {

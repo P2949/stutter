@@ -218,7 +218,7 @@ fn record_for_task(
     process_pid: u32,
     lat: RecordLatency,
 ) -> IntervalRecord {
-    IntervalRecord {
+    let mut record = IntervalRecord {
         elapsed_ms,
         task,
         active: true,
@@ -234,7 +234,45 @@ fn record_for_task(
         over_5ms: lat.over_5ms,
         percentile_scope: "task".to_owned(),
         ..IntervalRecord::default()
+    };
+    // Complete event population for the runnable objective. Activity-only
+    // fixtures cannot establish a primary throughput/latency improvement.
+    let bounds = [
+        Some(1_000),
+        Some(2_000),
+        Some(5_000),
+        Some(10_000),
+        Some(20_000),
+        Some(50_000),
+        Some(100_000),
+        Some(200_000),
+        Some(500_000),
+        Some(1_000_000),
+        Some(2_000_000),
+        Some(5_000_000),
+        Some(10_000_000),
+        Some(20_000_000),
+        Some(50_000_000),
+        None,
+    ];
+    record.histogram.resize_with(bounds.len(), Default::default);
+    for (bucket, upper) in record.histogram.iter_mut().zip(bounds) {
+        bucket.upper_bound_ns = upper;
     }
+    for (latency, count) in [
+        (lat.max_ns.min(1_000_000), lat.samples - lat.over_1ms),
+        (lat.max_ns.min(2_000_000), lat.over_1ms - lat.over_2ms),
+        (lat.max_ns.min(5_000_000), lat.over_2ms - lat.over_5ms),
+        (lat.max_ns, lat.over_5ms),
+    ] {
+        record
+            .histogram
+            .iter_mut()
+            .find(|bucket| bucket.upper_bound_ns.is_none_or(|upper| latency <= upper))
+            .expect("canonical histogram includes overflow bucket")
+            .count += count;
+    }
+    record
 }
 
 fn records(
@@ -266,15 +304,20 @@ fn records_for_task(
     task: u32,
     process_pid: u32,
     lat: RecordLatency,
+    include_histogram: bool,
 ) -> Vec<IntervalRecord> {
     (0..count)
         .map(|offset| {
-            record_for_task(
+            let mut record = record_for_task(
                 start_elapsed_ms + (offset as u64 * 1_000),
                 task,
                 process_pid,
                 lat,
-            )
+            );
+            if !include_histogram {
+                record.histogram.clear();
+            }
+            record
         })
         .collect()
 }
@@ -309,6 +352,15 @@ impl CandidateProvider for StaticCandidateProvider {
 }
 #[tokio::test(flavor = "current_thread")]
 async fn medium_risk_apply_through_unix_socket_lifecycle() -> anyhow::Result<()> {
+    medium_risk_socket_lifecycle(true).await
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn medium_risk_missing_runnable_evidence_reverts_and_reports_revert() -> anyhow::Result<()> {
+    medium_risk_socket_lifecycle(false).await
+}
+
+async fn medium_risk_socket_lifecycle(include_histogram: bool) -> anyhow::Result<()> {
     if !unix_socket_bind_supported() {
         return Ok(());
     }
@@ -376,12 +428,13 @@ async fn medium_risk_apply_through_unix_socket_lifecycle() -> anyhow::Result<()>
         tid,
         root_pid,
         RecordLatency {
-            samples: 25,
+            samples: 250,
             over_1ms: 5,
             over_2ms: 5,
             over_5ms: 2,
             max_ns: 8_000_000,
         },
+        include_histogram,
     )))?;
     assert_eq!(runtime.controller_state().phase, ControllerPhase::Observing);
 
@@ -392,12 +445,13 @@ async fn medium_risk_apply_through_unix_socket_lifecycle() -> anyhow::Result<()>
             tid,
             root_pid,
             RecordLatency {
-                samples: 25,
+                samples: 250,
                 over_1ms: 5,
                 over_2ms: 5,
                 over_5ms: 2,
                 max_ns: 8_000_000,
             },
+            include_histogram,
         )))?
         .expect("baseline window should start a medium-risk experiment through the socket");
     assert_eq!(started.decision, "candidate_started");
@@ -412,21 +466,47 @@ async fn medium_risk_apply_through_unix_socket_lifecycle() -> anyhow::Result<()>
             tid,
             root_pid,
             RecordLatency {
-                samples: 25,
+                samples: 250,
                 over_1ms: 0,
                 over_2ms: 0,
                 over_5ms: 0,
                 max_ns: 500_000,
             },
+            include_histogram,
         )))?
-        .expect("candidate measurement should keep the improved medium-risk action");
-    assert_eq!(kept.decision, "candidate_kept");
+        .expect("completed candidate measurement should emit its actual disposition");
+    let expected_decision = if include_histogram {
+        "candidate_kept"
+    } else {
+        "candidate_reverted"
+    };
+    assert_eq!(kept.decision, expected_decision);
+    assert!(kept.reason.contains("primary_signal=runnable_p99_ns"));
     assert_eq!(runtime.controller_state().phase, ControllerPhase::Cooldown);
-    assert_eq!(runtime.active_profile_state().kept_action_count(), 1);
+    assert_eq!(
+        runtime.active_profile_state().kept_action_count(),
+        usize::from(include_histogram)
+    );
 
     assert_ne!(runtime.controller_state().phase, ControllerPhase::Faulted);
     assert!(history_path.exists());
     assert!(!fs::read_to_string(&history_path)?.trim().is_empty());
+    let history = fs::read_to_string(&history_path)?
+        .lines()
+        .map(serde_json::from_str::<serde_json::Value>)
+        .collect::<Result<Vec<_>, _>>()?;
+    assert!(
+        history
+            .iter()
+            .any(|row| row["decision"]["decision"] == expected_decision)
+    );
+    if !include_histogram {
+        assert!(
+            history
+                .iter()
+                .all(|row| row["decision"]["decision"] != "candidate_kept")
+        );
+    }
 
     let restore = restore_known_autotune_actions(AutotuneRestoreCommandInput {
         journal_path: Some(journal_path.clone()),
@@ -434,7 +514,14 @@ async fn medium_risk_apply_through_unix_socket_lifecycle() -> anyhow::Result<()>
         history_path: Some(history_path),
         dry_run: false,
     })?;
-    assert_eq!(restore.status, AutotuneRestoreStatus::Restored);
+    assert_eq!(
+        restore.status,
+        if include_histogram {
+            AutotuneRestoreStatus::Restored
+        } else {
+            AutotuneRestoreStatus::Clean
+        }
+    );
     assert!(read_controller_journal(&journal_path)?.is_clean());
 
     UnixSocketPrivilegedActionService::new(&socket_path).request_shutdown()?;

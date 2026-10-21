@@ -194,6 +194,7 @@ impl LiveExperimentManager {
 
         controller_state.phase = ControllerPhase::Measuring;
         controller_state.active_experiment = Some(ControllerActiveExperiment {
+            baseline_signals: observation.objective_signals.clone(),
             experiment_id: experiment_id.clone(),
             candidate: candidate.clone(),
             baseline_score: baseline_score.clone(),

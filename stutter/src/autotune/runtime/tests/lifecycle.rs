@@ -1,6 +1,71 @@
 use super::*;
 
 #[test]
+fn runtime_preserves_selected_focus_membership_and_configured_root_precedence() {
+    for (configured_root, expected_samples) in [(None, 2_000), (Some(42), 1_000)] {
+        let mut config = AutotuneRuntimeConfig::observe(None, configured_root, None);
+        config.history_log = None;
+        let mut runtime = AutotuneRuntime::new(config);
+        let focus_event = runtime
+            .on_event(MonitorEvent::FocusChanged {
+                elapsed_ms: 0,
+                old_kind: None,
+                new_kind: FocusGroupKind::Game,
+                root_pids: vec![99],
+                member_pids: vec![42, 99],
+                confidence: 0.95,
+                score: 1.0,
+                situation: crate::autotune::state::SituationKind::GameCpuSchedulerPressure,
+                reasons: Vec::new(),
+            })
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            focus_event.target_root_pid,
+            Some(configured_root.unwrap_or(99))
+        );
+        for pid in [42, 99] {
+            runtime.target_state.active_tasks.insert(
+                pid.into(),
+                crate::process_tree::TaskInfo {
+                    tid: pid.into(),
+                    process_pid: pid.into(),
+                    process_ppid: 1.into(),
+                    comm: "game".to_owned(),
+                    process_comm: "game".to_owned(),
+                    process_starttime_ticks: Some(100),
+                    task_starttime_ticks: Some(100),
+                    exe_dev: None,
+                    exe_ino: None,
+                    class: TaskClass::Game,
+                    sched_policy: None,
+                    from_cgroup: false,
+                },
+            );
+            let mut histogram = crate::metrics::LatencyHistogram::new();
+            for _ in 0..1_000 {
+                histogram.record(1_000_000);
+            }
+            runtime.controller.window.push_interval(IntervalRecord {
+                elapsed_ms: 1_000,
+                task: pid,
+                process_pid: Some(pid),
+                class: TaskClass::Game,
+                samples: 1_000,
+                max_ns: 1_000_000,
+                histogram: histogram.snapshot(),
+                ..IntervalRecord::default()
+            });
+        }
+        let observation = runtime.build_observation();
+        assert_eq!(
+            observation.objective_signals.runnable_samples,
+            Some(expected_samples)
+        );
+    }
+}
+
+#[test]
 fn runtime_starts_with_default_observation() {
     let runtime = runtime();
     let observation = runtime.observation();
