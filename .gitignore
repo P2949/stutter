@@ -19,3 +19,6 @@ target-test/
 # Python
 __pycache__/
 *.pyc
+
+# Nix / direnv
+.direnv/

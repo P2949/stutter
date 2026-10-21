@@ -103,15 +103,13 @@ mod tests {
         fs::write(
             &hyprctl,
             r#"#!/bin/sh
-cat <<'JSON'
-{
+printf '%s\n' '{
   "address": "0xabcdef",
   "workspace": { "name": "dev" },
   "class": "kitty",
   "title": "Terminal",
   "pid": 8128
-}
-JSON
+}'
 "#,
         )
         .unwrap();

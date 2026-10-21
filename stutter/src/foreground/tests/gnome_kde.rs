@@ -201,9 +201,7 @@ mod tests {
         write_executable(
             &helper,
             r#"#!/bin/sh
-cat <<'JSON'
-{"pid":7001,"app_id":"org.gnome.Nautilus","class":"Nautilus","window_id":"gnome-1"}
-JSON
+printf '%s\n' '{"pid":7001,"app_id":"org.gnome.Nautilus","class":"Nautilus","window_id":"gnome-1"}'
 "#,
         );
 

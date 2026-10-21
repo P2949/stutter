@@ -419,10 +419,7 @@ mod tests {
     fn privileged_ebpf_smoke_command_targets_gated_loader_suite() {
         assert_eq!(
             command_texts(PRIVILEGED_EBPF_SMOKE_COMMANDS),
-            vec![
-                "cargo build -p stutter",
-                "cargo test -p stutter privileged_ -- --nocapture",
-            ]
+            vec!["bash scripts/validate-privileged-ebpf-smoke.sh"]
         );
     }
 
