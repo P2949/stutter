@@ -27,6 +27,7 @@ pub enum ArtifactKind {
     RuntimeSlices,
     FocusEvents,
     ForegroundEvents,
+    WorkloadProgress,
     KmsFlipEvents,
     DrmFenceEvents,
     WaylandPresentationEvents,
@@ -112,6 +113,8 @@ impl AsRef<Path> for ArtifactPath {
 }
 
 pub const ARTIFACT_SPECS: &[ArtifactSpec] = &[
+    ArtifactSpec { kind: ArtifactKind::WorkloadProgress, file_name: "workload_progress.json", encoding: ArtifactEncoding::Ndjson,
+        required: false, legacy_aliases: &[], counter_field: None },
     ArtifactSpec {
         kind: ArtifactKind::Session,
         file_name: "session.json",
@@ -423,6 +426,7 @@ impl ArtifactSelection {
 
     pub fn report() -> Self {
         Self::new([
+            ArtifactKind::WorkloadProgress,
             ArtifactKind::SpikeEvents,
             ArtifactKind::FrameEvents,
             ArtifactKind::FocusEvents,
@@ -461,6 +465,7 @@ impl ArtifactSelection {
 
     pub fn recording(runtime_slices: bool, foreground_events: bool) -> Self {
         let mut kinds = BTreeSet::from([
+            ArtifactKind::WorkloadProgress,
             ArtifactKind::Interval,
             ArtifactKind::IrqEvents,
             ArtifactKind::MigrationEvents,

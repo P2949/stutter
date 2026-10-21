@@ -34,6 +34,8 @@ pub struct RunArtifacts {
     pub runtime_slices: Vec<RuntimeSliceRecord>,
     pub focus_events: Vec<FocusEvent>,
     pub foreground_events: Vec<ForegroundEvent>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub workload_progress: Vec<crate::workload_progress::WorkloadProgressRecord>,
     pub kms_flip_events: Vec<KmsFlipEventRecord>,
     pub drm_fence_events: Vec<DrmFenceEventRecord>,
     pub wayland_presentation_events: Vec<WaylandPresentationEventRecord>,

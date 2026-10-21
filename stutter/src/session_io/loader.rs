@@ -154,6 +154,9 @@ pub fn load_run_artifacts(path: &Path, selection: ArtifactSelection) -> Result<R
         Vec::new()
     };
 
+    let workload_progress = if selection.contains(ArtifactKind::WorkloadProgress) {
+        loader.load_optional_ndjson(ArtifactKind::WorkloadProgress)?
+    } else { Vec::new() };
     let foreground_events = if selection.contains(ArtifactKind::ForegroundEvents) {
         loader.load_optional_ndjson(ArtifactKind::ForegroundEvents)?
     } else {
@@ -214,6 +217,7 @@ pub fn load_run_artifacts(path: &Path, selection: ArtifactSelection) -> Result<R
         runtime_slices,
         focus_events,
         foreground_events,
+        workload_progress,
         kms_flip_events,
         drm_fence_events,
         wayland_presentation_events,

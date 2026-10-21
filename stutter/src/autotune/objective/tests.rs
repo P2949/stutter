@@ -267,7 +267,7 @@ fn objective_decision_explains_missing_compile_throughput() {
         decision.outcome,
         ObjectiveOutcome::Inconclusive { .. }
     ));
-    assert_eq!(decision.primary_signal.name, "compile_throughput");
+    assert_eq!(decision.primary_signal.name, "compile_fixed_work_elapsed_ns");
     assert_eq!(
         decision.primary_signal.quality,
         ObjectiveSignalQuality::Missing

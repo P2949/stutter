@@ -35,6 +35,10 @@ impl MonitorEventSink for RecorderSink {
         ctx: &mut MonitorSinkContext<'_>,
     ) -> Result<(), SinkError> {
         match event {
+            MonitorEvent::WorkloadProgress { record } => {
+                ctx.recorder.streams.push(ArtifactKind::WorkloadProgress, record.as_ref())
+                    .map_err(|err| SinkError::new(self.name(), event.kind(), err))?;
+            }
             MonitorEvent::Interval { records, .. } => {
                 ctx.recorder.counters.interval_record_count += records.len() as u64;
 

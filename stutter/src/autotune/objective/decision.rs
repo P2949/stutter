@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
-    ObjectiveComparisonInput, ObjectiveKind, ObjectiveSignalQuality, common,
+    ObjectiveComparisonInput, ObjectiveKind, ObjectiveSignalQuality, common, compile_throughput,
     common::PrimaryMetricComparison, game_runnable_latency,
 };
 use crate::{
@@ -321,19 +321,13 @@ fn compile_signal(input: &ObjectiveComparisonInput<'_>) -> ObjectiveSignal {
         .or_else(|| candidate.degraded_reason.clone());
 
     ObjectiveSignal {
-        name: "compile_throughput".to_owned(),
+        name: "compile_fixed_work_elapsed_ns".to_owned(),
         quality,
-        baseline: Some(format!(
-            "activity_intervals={} activity_samples={}",
-            format_optional_u64(baseline.progress_intervals),
-            format_optional_u64(baseline.progress_samples)
-        )),
-        candidate: Some(format!(
-            "activity_intervals={} activity_samples={}",
-            format_optional_u64(candidate.progress_intervals),
-            format_optional_u64(candidate.progress_samples)
-        )),
-        summary: "compile activity only; direct throughput unavailable".to_owned(),
+        baseline: baseline.fixed_work_elapsed_ns.map(|value| value.to_string()),
+        candidate: candidate.fixed_work_elapsed_ns.map(|value| value.to_string()),
+        summary: format!("fixed-work completion time (lower is better): baseline_ns={} candidate_ns={}; baseline_execution={} candidate_execution={}; activity is supporting evidence only; no score fallback",
+            format_optional_u64(baseline.fixed_work_elapsed_ns), format_optional_u64(candidate.fixed_work_elapsed_ns),
+            baseline.execution_id.as_deref().unwrap_or("missing"), candidate.execution_id.as_deref().unwrap_or("missing")),
         degraded_reason,
     }
 }
@@ -454,6 +448,9 @@ fn objective_specific_guard_failures(
         ObjectiveKind::GameFramePacing
         | ObjectiveKind::CompileThroughputWithForegroundProtection => {
             failures.extend(foreground_guard_failures(input, 2.0));
+            if input.objective == ObjectiveKind::CompileThroughputWithForegroundProtection && compile_throughput::memory_pressure_regressed(input) {
+                failures.push(guard_failure("memory_pressure", "candidate increased memory PSI some avg10"));
+            }
         }
         ObjectiveKind::GameRunnableLatency => {
             if game_runnable_latency::tail_regressed(input) {
