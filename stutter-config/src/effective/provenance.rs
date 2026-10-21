@@ -413,6 +413,12 @@ pub(super) fn record_layer_provenance(
         source,
     );
 
+    record_if_present(
+        &layer.workload_progress_log,
+        provenance,
+        "recording.workload_progress_log",
+        source,
+    );
     record_if_present(&layer.mangohud_log, provenance, "mangohud.log", source);
     record_if_present(
         &layer.mangohud_log_live,

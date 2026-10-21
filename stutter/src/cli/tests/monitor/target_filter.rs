@@ -6,6 +6,23 @@
 use super::*;
 
 #[test]
+fn parses_fixed_work_progress_log_as_recording_input() {
+    let config = parse_monitor_config_for_phase15([
+        "stutter",
+        "record",
+        "--tree-pid",
+        "42",
+        "--workload-progress-log",
+        "/tmp/markers.jsonl",
+    ])
+    .unwrap();
+    assert_eq!(
+        config.recording.workload_progress_log,
+        Some(std::path::PathBuf::from("/tmp/markers.jsonl"))
+    );
+}
+
+#[test]
 fn parses_pid_targets_and_deduplicates() {
     let config = parse_monitor_config_for_phase15([
         "stutter", "monitor", "--pid", "42", "--pid", "7", "--pid", "42",

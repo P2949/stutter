@@ -161,6 +161,9 @@ fn apply_recording_layer(config: &mut RecordingConfig, layer: &MonitorConfigLaye
     if let Some(value) = layer.retain_intervals {
         config.retain_intervals = value;
     }
+    if let Some(value) = &layer.workload_progress_log {
+        config.workload_progress_log = value.clone();
+    }
     if let Some(value) = layer.retention_max_run_count {
         config.retention.max_run_count = value;
     }

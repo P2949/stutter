@@ -6,6 +6,7 @@ use clap::{Parser, Subcommand};
 pub mod dependency_hygiene;
 pub mod ebpf_manifest;
 pub mod ebpf_smoke;
+pub mod fixed_work;
 pub mod fixture_coverage;
 pub mod fixtures;
 pub mod maturity_report;
@@ -43,6 +44,18 @@ pub struct Cli {
 
 #[derive(Clone, Debug, Eq, PartialEq, Subcommand)]
 pub enum XtaskCommand {
+    #[command(
+        name = "fixed-work",
+        about = "Time identical declared work and append validated start/completion markers"
+    )]
+    FixedWork {
+        #[arg(long)]
+        identity: PathBuf,
+        #[arg(long)]
+        markers: PathBuf,
+        #[arg(long)]
+        target_root_pid: Option<u32>,
+    },
     #[command(about = "Run the non-root CI workflow used by local development")]
     Ci,
     #[command(about = "Check Rust formatting")]
@@ -253,6 +266,11 @@ fn main() -> anyhow::Result<()> {
 fn run(command: XtaskCommand) -> anyhow::Result<()> {
     let root = repo_root()?;
     match command {
+        XtaskCommand::FixedWork {
+            identity,
+            markers,
+            target_root_pid,
+        } => fixed_work::run(&identity, &markers, target_root_pid),
         XtaskCommand::Ci => run_command_specs(&root, CI_COMMANDS),
         XtaskCommand::Fmt => run_cargo(&root, &["fmt", "--check"]),
         XtaskCommand::Clippy => {

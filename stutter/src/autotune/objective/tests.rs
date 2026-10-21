@@ -1,6 +1,6 @@
 use super::{decision::ObjectiveOutcome, *};
-mod runnable;
 mod compile_fixed_work;
+mod runnable;
 use crate::{
     autotune::{
         comparison::{ExperimentDataQuality, ExperimentResult},
@@ -267,7 +267,10 @@ fn objective_decision_explains_missing_compile_throughput() {
         decision.outcome,
         ObjectiveOutcome::Inconclusive { .. }
     ));
-    assert_eq!(decision.primary_signal.name, "compile_fixed_work_elapsed_ns");
+    assert_eq!(
+        decision.primary_signal.name,
+        "compile_fixed_work_elapsed_ns"
+    );
     assert_eq!(
         decision.primary_signal.quality,
         ObjectiveSignalQuality::Missing

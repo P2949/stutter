@@ -77,10 +77,19 @@ impl RollingWindow {
         &self.workload_progress
     }
 
-    pub fn push_workload_progress(&mut self, record: crate::workload_progress::WorkloadProgressRecord) {
+    pub fn push_workload_progress(
+        &mut self,
+        record: crate::workload_progress::WorkloadProgressRecord,
+    ) {
         let elapsed_ms = record.elapsed_ms;
-        push_sorted_by_elapsed(&mut self.workload_progress, record, |record| record.elapsed_ms);
-        self.prune_to(elapsed_ms);
+        push_sorted_by_elapsed(&mut self.workload_progress, record, |record| {
+            record.elapsed_ms
+        });
+        self.prune_to(
+            self.latest_elapsed_ms()
+                .unwrap_or(elapsed_ms)
+                .max(elapsed_ms),
+        );
     }
 
     pub fn duration(&self) -> Duration {
@@ -126,7 +135,9 @@ impl RollingWindow {
             self.gpu_samples.back().map(|sample| sample.elapsed_ms),
             self.cpu_freq_events.back().map(|event| event.elapsed_ms),
             self.foreground_events.back().map(|event| event.elapsed_ms),
-            self.workload_progress.back().map(|record| record.elapsed_ms),
+            self.workload_progress
+                .back()
+                .map(|record| record.elapsed_ms),
         ]
         .into_iter()
         .flatten()
@@ -236,7 +247,9 @@ impl RollingWindow {
         drain_front_before_elapsed(&mut self.foreground_events, start_ms, |event| {
             event.elapsed_ms
         });
-        drain_front_before_elapsed(&mut self.workload_progress, start_ms, |record| record.elapsed_ms);
+        drain_front_before_elapsed(&mut self.workload_progress, start_ms, |record| {
+            record.elapsed_ms
+        });
     }
 
     pub fn retain_latest_window(&mut self) {

@@ -191,6 +191,7 @@ pub struct DisplayPathConfig {
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct RecordingConfig {
+    pub workload_progress_log: Option<PathBuf>,
     pub run_name: Option<String>,
     pub scenario_name: Option<String>,
     pub scenario_hash: Option<String>,

@@ -36,7 +36,9 @@ impl MonitorEventSink for RecorderSink {
     ) -> Result<(), SinkError> {
         match event {
             MonitorEvent::WorkloadProgress { record } => {
-                ctx.recorder.streams.push(ArtifactKind::WorkloadProgress, record.as_ref())
+                ctx.recorder
+                    .streams
+                    .push(ArtifactKind::WorkloadProgress, record.as_ref())
                     .map_err(|err| SinkError::new(self.name(), event.kind(), err))?;
             }
             MonitorEvent::Interval { records, .. } => {

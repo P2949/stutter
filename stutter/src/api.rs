@@ -6,7 +6,10 @@
 
 pub mod workload_progress {
     //! Fixed-work identity, marker protocol, and validated completion evidence.
-    pub use crate::workload_progress::{FixedWorkIdentity, FixedWorkMeasurement, ProgressSource, WorkloadKind, WorkloadPhase, WorkloadProgress, WorkloadProgressRecord};
+    pub use crate::workload_progress::{
+        FixedWorkIdentity, FixedWorkMeasurement, ProgressSource, WorkloadKind, WorkloadPhase,
+        WorkloadProgress, WorkloadProgressReader, WorkloadProgressRecord, run_fixed_work,
+    };
 }
 
 pub mod error {

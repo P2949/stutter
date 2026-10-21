@@ -140,7 +140,6 @@ mod cli_runner_tests {
 
 #[cfg(test)]
 mod architecture_tests;
-pub(crate) mod workload_progress;
 #[cfg(test)]
 mod artifact_contract_tests;
 #[cfg(test)]
@@ -155,3 +154,4 @@ mod test_fixture_builder;
 mod test_support;
 #[cfg(test)]
 mod validation_corpus_tests;
+pub(crate) mod workload_progress;

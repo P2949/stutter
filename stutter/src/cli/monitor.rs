@@ -116,6 +116,12 @@ pub(super) struct MonitorArgs {
 
     #[arg(long = "mangohud-log", value_name = "PATH")]
     pub(super) mangohud_log: Option<PathBuf>,
+    #[arg(
+        long = "workload-progress-log",
+        value_name = "PATH",
+        help = "Tail fixed-work start/completion markers from an existing NDJSON log"
+    )]
+    pub(super) workload_progress_log: Option<PathBuf>,
 
     #[arg(long = "mangohud-log-live", requires = "mangohud_log")]
     pub(super) mangohud_log_live: bool,

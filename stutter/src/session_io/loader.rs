@@ -156,7 +156,9 @@ pub fn load_run_artifacts(path: &Path, selection: ArtifactSelection) -> Result<R
 
     let workload_progress = if selection.contains(ArtifactKind::WorkloadProgress) {
         loader.load_optional_ndjson(ArtifactKind::WorkloadProgress)?
-    } else { Vec::new() };
+    } else {
+        Vec::new()
+    };
     let foreground_events = if selection.contains(ArtifactKind::ForegroundEvents) {
         loader.load_optional_ndjson(ArtifactKind::ForegroundEvents)?
     } else {

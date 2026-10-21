@@ -227,9 +227,16 @@ impl ObjectiveSignals {
         CompileThroughputSignal {
             progress_intervals: self.compile_activity_intervals,
             progress_samples: self.compile_activity_samples,
-            quality: if work.is_ok() { ObjectiveSignalQuality::Direct } else { ObjectiveSignalQuality::Missing },
+            quality: if work.is_ok() {
+                ObjectiveSignalQuality::Direct
+            } else {
+                ObjectiveSignalQuality::Missing
+            },
             fixed_work_elapsed_ns: work.as_ref().ok().map(|work| work.complete.elapsed_ns),
-            execution_id: work.as_ref().ok().map(|work| work.start.execution_id.clone()),
+            execution_id: work
+                .as_ref()
+                .ok()
+                .map(|work| work.start.execution_id.clone()),
             workload_identity: work.as_ref().ok().map(|work| work.start.identity.clone()),
             degraded_reason: work.err(),
         }

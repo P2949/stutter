@@ -110,6 +110,7 @@ impl ReplayPolicyEngine for ObserveOnlyReplayPolicy {
                 self.report.io_events += 1;
             }
             MonitorEvent::LiveDiagnosis { .. } => {}
+            MonitorEvent::WorkloadProgress { .. } => {}
             MonitorEvent::FocusChanged { .. } => {}
             MonitorEvent::FocusCleared { .. } => {}
             MonitorEvent::DataQualityWarning { message } => {
@@ -349,6 +350,11 @@ fn task_class_is_game_like(class: TaskClass) -> bool {
 
 fn events_from_artifacts(artifacts: &session_io::RunArtifacts) -> Vec<MonitorEvent> {
     let mut events = Vec::new();
+    for record in &artifacts.workload_progress {
+        events.push(MonitorEvent::WorkloadProgress {
+            record: Box::new(record.clone()),
+        });
+    }
 
     events.push(MonitorEvent::TargetSnapshot {
         elapsed_ms: artifacts.session.core.duration_ms,

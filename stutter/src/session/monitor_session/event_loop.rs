@@ -54,6 +54,10 @@ impl MonitorSession {
         watch_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
         let mut scx_tick = interval(Duration::from_millis(1_000));
+        let mut workload_progress_tick = self
+            .workload_progress_reader
+            .as_ref()
+            .map(|_| interval(Duration::from_millis(100)));
         scx_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
         let mut hwmon_tick = interval(Duration::from_millis(1_000));
@@ -126,6 +130,9 @@ impl MonitorSession {
 
         loop {
             tokio::select! {
+                _ = optional_tick(workload_progress_tick.as_mut()) => {
+                    self.handle_workload_progress_log_tick().await?;
+                }
                 res = &mut mangohud_rx => {
                     if let Ok((raw_ms, monotonic_ns)) = res {
                         self.handle_telemetry_tick(TelemetryTickContext {

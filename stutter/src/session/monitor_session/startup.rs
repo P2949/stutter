@@ -23,6 +23,17 @@ impl MonitorSession {
 
         let hwmon_runtime = HwmonRuntime::begin(&config, shared_hwmon);
         let started = Instant::now();
+        let workload_progress_reader = config
+            .recording
+            .workload_progress_log
+            .as_ref()
+            .map(|path| -> anyhow::Result<_> {
+                Ok((
+                    crate::workload_progress::WorkloadProgressReader::open_tail(path)?,
+                    crate::syscall::clock_gettime_ns(libc::CLOCK_MONOTONIC)?,
+                ))
+            })
+            .transpose()?;
         let wayland_presentation_reader = if config.probes.wayland_presentation {
             config
                 .wayland_presentation
@@ -117,6 +128,7 @@ impl MonitorSession {
             foreground_switch_count: 0,
             wayland_presentation_reader,
             dmabuf_reader,
+            workload_progress_reader,
             started,
             had_tree_roots: target_plan.had_tree_roots,
             interval_label,

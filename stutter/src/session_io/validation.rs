@@ -190,7 +190,9 @@ fn count_artifact_kind(kind: ArtifactKind, path: &Path) -> Result<usize> {
         ArtifactKind::RuntimeSlices => count_ndjson_file::<RuntimeSliceRecord>(path),
         ArtifactKind::FocusEvents => count_ndjson_file::<FocusEvent>(path),
         ArtifactKind::ForegroundEvents => count_ndjson_file::<ForegroundEvent>(path),
-        ArtifactKind::WorkloadProgress => count_ndjson_file::<crate::workload_progress::WorkloadProgressRecord>(path),
+        ArtifactKind::WorkloadProgress => {
+            count_ndjson_file::<crate::workload_progress::WorkloadProgressRecord>(path)
+        }
         ArtifactKind::KmsFlipEvents => count_ndjson_file::<KmsFlipEventRecord>(path),
         ArtifactKind::DrmFenceEvents => count_ndjson_file::<DrmFenceEventRecord>(path),
         ArtifactKind::WaylandPresentationEvents => {

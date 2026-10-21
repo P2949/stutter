@@ -18,7 +18,9 @@ pub type DaemonEvent = MonitorEvent;
 
 #[derive(Clone, Debug)]
 pub enum MonitorEvent {
-    WorkloadProgress { record: Box<crate::workload_progress::WorkloadProgressRecord> },
+    WorkloadProgress {
+        record: Box<crate::workload_progress::WorkloadProgressRecord>,
+    },
     TargetSnapshot {
         elapsed_ms: u64,
         active_targets: TaskMap,

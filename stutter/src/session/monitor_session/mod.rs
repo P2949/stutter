@@ -19,6 +19,8 @@ pub struct MonitorSession {
     pub foreground_switch_count: u64,
     pub wayland_presentation_reader: Option<WaylandPresentationLogReader>,
     pub dmabuf_reader: Option<DmaBufLogReader>,
+    pub(crate) workload_progress_reader:
+        Option<(crate::workload_progress::WorkloadProgressReader, u64)>,
 
     pub started: Instant,
     pub had_tree_roots: bool,

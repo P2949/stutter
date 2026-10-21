@@ -1,6 +1,22 @@
 use super::*;
 
 impl MonitorSession {
+    pub(crate) async fn handle_workload_progress_log_tick(&mut self) -> anyhow::Result<()> {
+        let Some((reader, start_ns)) = self.workload_progress_reader.as_mut() else {
+            return Ok(());
+        };
+        let records = reader.poll(
+            *start_ns,
+            crate::syscall::clock_gettime_ns(libc::CLOCK_MONOTONIC)?,
+        )?;
+        for record in records {
+            self.dispatch_monitor_event(MonitorEvent::WorkloadProgress {
+                record: Box::new(record),
+            })
+            .await?;
+        }
+        Ok(())
+    }
     pub(crate) async fn handle_probe_drain(
         &mut self,
         _context: ProbeDrainContext,

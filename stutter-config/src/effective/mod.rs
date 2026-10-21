@@ -378,6 +378,7 @@ mod tests {
             "recording.route_label",
             "recording.output_dir",
             "recording.retain_intervals",
+            "recording.workload_progress_log",
             "recording.retention.max_run_count",
             "recording.retention.max_total_bytes",
             "recording.retention.max_age_seconds",

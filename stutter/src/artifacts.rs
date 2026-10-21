@@ -113,8 +113,14 @@ impl AsRef<Path> for ArtifactPath {
 }
 
 pub const ARTIFACT_SPECS: &[ArtifactSpec] = &[
-    ArtifactSpec { kind: ArtifactKind::WorkloadProgress, file_name: "workload_progress.json", encoding: ArtifactEncoding::Ndjson,
-        required: false, legacy_aliases: &[], counter_field: None },
+    ArtifactSpec {
+        kind: ArtifactKind::WorkloadProgress,
+        file_name: "workload_progress.json",
+        encoding: ArtifactEncoding::Ndjson,
+        required: false,
+        legacy_aliases: &[],
+        counter_field: None,
+    },
     ArtifactSpec {
         kind: ArtifactKind::Session,
         file_name: "session.json",
