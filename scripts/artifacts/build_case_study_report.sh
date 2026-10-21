@@ -16,6 +16,11 @@ if [ "$pandoc_version" != "$EXPECTED_PANDOC" ] || [ "$typst_version" != "$EXPECT
   exit 1
 fi
 
+# Keep PDF metadata stable across rebuilds of the same committed inputs.
+export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct -- \
+  reports/kcd1-case-study/KCD1_EXPERIMENT_REPORT.md \
+  scripts/artifacts/pdf-tables.typ)"
+
 pandoc reports/kcd1-case-study/KCD1_EXPERIMENT_REPORT.md \
   -o reports/kcd1-case-study/KCD1_EXPERIMENT_REPORT.pdf \
   --pdf-engine=typst \
