@@ -1,19 +1,39 @@
 # Auto-tune Objectives
 
-Objective comparison is intentionally explicit: each objective has a primary metric when the relevant signal exists, and normalized stutter score is a guardrail or fallback rather than an implicit universal gate.
+Generated from `ObjectiveKind::descriptor()`. Regenerate with
+`cargo run -p xtask -- objective-docs --write`; CI uses `--check`.
 
-| Objective | Primary comparison | Required signals | Guardrails |
-| --- | --- | --- | --- |
-| `StutterScore` | Normalized score per sample | Scored samples | Frame p99 and over-5ms rate |
-| `GameFramePacing` | Frame p99 when frame pacing is available; normalized score fallback | Frame data when available | Foreground over-5ms rate, thermal, CPU/GPU power |
-| `GameRunnableLatency` | Merged target-game scheduler histogram p99; no fallback | Direct complete histogram population, stable identified target, at least 1,000 runnable samples | >5ms runnable rate, frame p99, foreground latency, thermal, CPU/GPU power |
-| `DesktopInteractivity` | Foreground over-5ms rate when available; normalized score fallback | Foreground latency when available | Thermal and CPU/GPU power |
-| `BrowserInteractivity` | Foreground/browser latency approximation when available; normalized score fallback | Foreground latency when available | Thermal and CPU/GPU power |
-| `CompileThroughputWithForegroundProtection` | Successful identical fixed-work completion time, lower is better; no score fallback | Ordered matching completion markers and foreground protection | Frame, foreground, thermal, CPU/GPU power, observed memory pressure |
-| `IoLatency` | Block I/O overlap count, then worst overlap latency | Block I/O overlap count and worst latency | Generic normalized score cannot regress badly |
-| `IrqOverlapReduction` | IRQ overlap count, then worst overlap latency | IRQ overlap count and worst overlap | Generic normalized score cannot regress badly |
-| `ThermalRecovery` | Degraded state recovery and throttle-count reduction | Thermal degraded state and throttle count | Generic normalized score cannot regress badly |
+Signal quality below describes the declared primary contract. Actual observation
+quality can be lower or missing. Autonomous eligibility remains subject to the
+separate experimental action, policy and safety gates; it does not enable mode
+or grant permission. No objective has graduated to Supported.
 
-## Signal Maturity
+| Objective | Primary metric | Quality | Required signals | Fallback | Guardrails | Autonomous eligible | Maturity |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `StutterScore` | `normalized_score_per_sample` | derived | scored_samples, score_total | None | target_presence, experiment_data_quality, valid_nonzero_scored_samples, thermal_degradation, thermal_throttle_count, cpu_power_limit, gpu_power_limit, frame_p99, over_5ms_rate | true | Experimental |
+| `GameFramePacing` | `frame_p99_ms` | derived | frame_p99_ms_or_explicit_score_fallback | NormalizedScoreWhenMissingOrUnchanged | target_presence, experiment_data_quality, valid_nonzero_scored_samples, thermal_degradation, thermal_throttle_count, cpu_power_limit, gpu_power_limit, foreground_over_5ms_rate, foreground_frame_pacing, generic_score | true | Experimental |
+| `GameRunnableLatency` | `runnable_p99_ns` | direct | complete_target_scheduler_histogram, stable_target_process_identity, at_least_1000_runnable_samples | None | target_presence, experiment_data_quality, valid_nonzero_scored_samples, thermal_degradation, thermal_throttle_count, cpu_power_limit, gpu_power_limit, runnable_over_5ms_rate, frame_p99, foreground_over_5ms_rate, foreground_frame_pacing | true | Validating |
+| `DesktopInteractivity` | `foreground_over_5ms_per_sample` | derived | foreground_latency_or_explicit_score_fallback | NormalizedScoreWhenMissingOrUnchanged | target_presence, experiment_data_quality, valid_nonzero_scored_samples, thermal_degradation, thermal_throttle_count, cpu_power_limit, gpu_power_limit, generic_score | true | Experimental |
+| `BrowserInteractivity` | `foreground_over_5ms_per_sample` | approximate | foreground_latency_or_explicit_score_fallback | NormalizedScoreWhenMissingOrUnchanged | target_presence, experiment_data_quality, valid_nonzero_scored_samples, thermal_degradation, thermal_throttle_count, cpu_power_limit, gpu_power_limit, generic_score | true | Experimental |
+| `CompileThroughputWithForegroundProtection` | `compile_fixed_work_elapsed_ns` | direct | successful_identical_fixed_work, stable_target_process_identity, ordered_distinct_executions, foreground_latency | None | target_presence, experiment_data_quality, valid_nonzero_scored_samples, thermal_degradation, thermal_throttle_count, cpu_power_limit, gpu_power_limit, foreground_over_5ms_rate, foreground_frame_pacing, observed_memory_pressure | true | Validating |
+| `IoLatency` | `block_io_overlap_count_then_worst_latency_ns` | direct | block_io_overlap_count, block_io_worst_latency_ns | None | target_presence, experiment_data_quality, valid_nonzero_scored_samples, thermal_degradation, thermal_throttle_count, cpu_power_limit, gpu_power_limit, generic_score | true | Experimental |
+| `IrqOverlapReduction` | `irq_overlap_count_then_worst_overlap_ns` | direct | irq_overlap_count, irq_worst_overlap_ns | None | target_presence, experiment_data_quality, valid_nonzero_scored_samples, thermal_degradation, thermal_throttle_count, cpu_power_limit, gpu_power_limit, generic_score | true | Experimental |
+| `ThermalRecovery` | `thermal_degraded_then_throttle_count` | derived | thermal_degraded, thermal_throttle_count | None | target_presence, experiment_data_quality, valid_nonzero_scored_samples, thermal_degradation, thermal_throttle_count, cpu_power_limit, gpu_power_limit, generic_score | true | Experimental |
 
-`GameRunnableLatency`, `IoLatency`, `IrqOverlapReduction`, and `ThermalRecovery` have direct primary-metric handling. The [runnable-latency contract](RUNNABLE_LATENCY_OBJECTIVE.md) defines target membership, histogram resolution, sufficiency, provisional thresholds, and validation limits. `StutterScore` is fully implemented around normalized score rates. `GameFramePacing`, `DesktopInteractivity`, and `BrowserInteractivity` use direct or derived latency signals when present and fall back to normalized score when those signals are missing. `CompileThroughputWithForegroundProtection` uses validated fixed-work completion time; missing or incomparable completed work remains inconclusive. It never uses activity counts or normalized score to claim throughput improvement. See the [fixed-work contract](FIXED_WORK_COMPILE.md) for producer responsibilities and validation limits. Historical `compile_progress_*` fields deserialize as `compile_activity_*`, and historical direct-quality labels do not restore the old comparator.
+## Limitations
+
+- `StutterScore`: Ranking proxy within comparable experiments; weights are not empirically calibrated.
+- `GameFramePacing`: Frame source quality varies; unchanged or missing primary uses explicit score fallback.
+- `GameRunnableLatency`: Merged latency-sensitive target-game histograms; finite buckets and provisional effect thresholds; live acceptance pending.
+- `DesktopInteractivity`: Existing derived foreground signal; unchanged or missing primary uses score fallback.
+- `BrowserInteractivity`: Uses the existing foreground approximation, without a browser-specific direct primary measurement.
+- `CompileThroughputWithForegroundProtection`: Cache/toolchain/environment policy is harness-declared; foreground protection is derived; provisional 10 percent threshold and live acceptance pending.
+- `IoLatency`: Overlap evidence is correlation, not proof of causal storage delay; source trust varies.
+- `IrqOverlapReduction`: Overlap evidence is correlation, not proof of causal interrupt delay.
+- `ThermalRecovery`: Thermal evidence depends on available platform telemetry.
+
+See [runnable latency](RUNNABLE_LATENCY_OBJECTIVE.md),
+[fixed-work compile completion](FIXED_WORK_COMPILE.md), and the
+[behavioral matrix](OBJECTIVE_CONTRACT_MATRIX.md) for detailed contracts and
+validation boundaries. Historical `compile_progress_*` fields deserialize as
+activity; legacy Direct labels never authorize a throughput improvement.

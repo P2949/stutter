@@ -44,6 +44,9 @@ pub struct RuntimeThreadSummary {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ReportAnalysisJson {
+    /// Contracts of this report generator, not evidence captured by the run.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub analysis_objective_contracts: Vec<crate::autotune::objective::ObjectiveDescriptor>,
     pub session: SessionFile,
     pub cluster_analysis: SpikeClusterAnalysis,
     pub frame_diagnoses: Vec<crate::diagnosis::FrameDiagnosis>,

@@ -2,6 +2,8 @@ mod browser_interactivity;
 mod common;
 mod compile_throughput;
 pub(crate) mod decision;
+mod descriptor;
+pub use descriptor::{ObjectiveDescriptor, ObjectiveFallbackPolicy, ObjectiveMaturity};
 mod desktop_interactivity;
 mod game_frame_pacing;
 mod game_runnable_latency;

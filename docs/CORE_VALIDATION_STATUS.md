@@ -153,3 +153,41 @@ validation debt rather than synthetic substitutes.
   `-D warnings`, and `git diff --check`. Exact-head remote CI remains required.
 - PR #40 at `242bc2d8fa4f1c8d6fa781e9313fb418c1c723d1` has run
   `39630897805` in progress at this checkpoint. No merge/main success is claimed.
+
+## 2026-10-21: objective descriptors and documentation
+
+- PR #40 passed complete exact-head CI run `39630897805` and merged as
+  `14cf35966809111480831de7f6561c872086e8be`. Main run `39632255939`
+  is in progress; main success is not yet established. PR #41 now targets main.
+- Added exhaustive `ObjectiveKind::descriptor()` contracts and an enumerated
+  objective registry, including primary metric/quality, required evidence,
+  explicit fallback policy, guards, autonomous eligibility, maturity and limits.
+  Eligibility does not enable automation or bypass separate action/safety policy.
+- Registry contracts are exposed through the API, source-bound optional decision
+  metadata and summaries, CLI candidate dry-run, selected-objective TUI output,
+  and analyzer-labeled report metadata. Historical decisions remain readable
+  without metadata; analyzer contracts do not invent historical measurements.
+- `xtask objective-docs --write/--check` generates all objective documentation.
+  Added CI documentation gate and tests that reject stale documents and invalid
+  CLI mode combinations. Source enumeration is checked against declared variants.
+- Initial descriptor library run: 2,706 passed, 0 failed, 5 ignored. Subsequent
+  compatibility test passed but the new TUI summary exposed an outdated exact
+  expectation (2,706 passed, 1 failed, 5 ignored); updated it to include contract
+  fields. Report metadata integration then exposed an advisor fixture initializer
+  missing the new field; updated that fixture without changing historical data.
+- Extended Clippy coverage to xtask exposed four pre-existing helper lint errors;
+  made equivalent closure/conditional simplifications, then the extended Clippy
+  check passed. Final full validation is pending.
+- PR #41 passed exact-head CI run `39631474272` at
+  `69728cfbf93491a6d16181203d23d266c6ccb666` and merged as
+  `8093474b6e99b8e49e67e1f6ea3289cce750b41d`. Issue #24 is closed.
+  Main run `39632742284` was queued at observation; main validation remains open.
+- Final full build gate PASS: format, build, all-target Clippy and tests;
+  library 2,707 passed, 0 failed, 5 ignored; lifecycle integration 8 passed;
+  other integration/default-member suites passed. xtask suite: 22 passed,
+  including drift rejection and mutually exclusive CLI modes. Remaining
+  xtask-only lint/doc/offline checks are in progress at this checkpoint.
+- PASS final xtask-only Clippy `-D warnings`, generated objective-doc check,
+  offline recommendation and historical-schema advisor smokes. The old schema-18
+  artifact rendered with the expected version warning. No live-validation or
+  capability-graduation claim is made by this descriptor/documentation slice.

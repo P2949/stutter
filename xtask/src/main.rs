@@ -11,6 +11,7 @@ pub mod fixture_coverage;
 pub mod fixtures;
 pub mod maturity_report;
 pub mod no_allow_attrs;
+pub mod objective_docs;
 pub mod ops_checks;
 pub mod preflight;
 pub mod process;
@@ -44,6 +45,13 @@ pub struct Cli {
 
 #[derive(Clone, Debug, Eq, PartialEq, Subcommand)]
 pub enum XtaskCommand {
+    #[command(about = "Generate or check objective contract documentation")]
+    ObjectiveDocs {
+        #[arg(long, conflicts_with = "write", required_unless_present = "write")]
+        check: bool,
+        #[arg(long, conflicts_with = "check", required_unless_present = "check")]
+        write: bool,
+    },
     #[command(
         name = "fixed-work",
         about = "Time identical declared work and append validated start/completion markers"
@@ -266,6 +274,9 @@ fn main() -> anyhow::Result<()> {
 fn run(command: XtaskCommand) -> anyhow::Result<()> {
     let root = repo_root()?;
     match command {
+        XtaskCommand::ObjectiveDocs { write, .. } => {
+            objective_docs::run_at(&root.join("docs/AUTOTUNE_OBJECTIVES.md"), write)
+        }
         XtaskCommand::FixedWork {
             identity,
             markers,
@@ -385,6 +396,7 @@ mod tests {
                 "local-install-smoke",
                 "maturity-report",
                 "no-allow-attrs",
+                "objective-docs",
                 "package",
                 "package-layout-check",
                 "preflight",
