@@ -80,7 +80,10 @@ pub mod autotune {
     pub use crate::autotune::{
         DEFAULT_MIN_FOCUS_CONFIDENCE,
         commands::live::{AutotuneCommandInput, autotune_command},
-        objective::ObjectiveKind,
+        objective::{
+            ObjectiveDescriptor, ObjectiveFallbackPolicy, ObjectiveKind, ObjectiveMaturity,
+            ObjectiveSignalQuality,
+        },
     };
 
     pub mod candidate {

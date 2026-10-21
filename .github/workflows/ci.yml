@@ -50,6 +50,9 @@ jobs:
       - name: Objective behavioral contracts
         run: cargo test -p stutter --lib autotune::objective
 
+      - name: Objective documentation contract
+        run: cargo run -p xtask -- objective-docs --check
+
       - name: Run offline recommendation smoke
         run: scripts/smoke/offline_recommendation.sh
 

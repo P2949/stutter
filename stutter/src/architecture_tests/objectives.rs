@@ -24,6 +24,11 @@ fn objective_kind_variants() -> Vec<&'static str> {
 fn autotune_objective_docs_cover_all_objective_kinds() {
     let docs = include_str!("../../../docs/AUTOTUNE_OBJECTIVES.md");
     let variants = objective_kind_variants();
+    assert_eq!(
+        variants.len(),
+        crate::autotune::objective::ObjectiveKind::ALL.len(),
+        "ObjectiveKind::ALL must enumerate every declared objective"
+    );
 
     assert!(
         !variants.is_empty(),

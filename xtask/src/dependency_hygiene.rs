@@ -200,7 +200,7 @@ fn unused_optional_dependency_lines(metadata: &Metadata) -> Vec<String> {
     let mut lines = metadata
         .workspace_packages()
         .into_iter()
-        .flat_map(|package| optional_dependencies_without_feature_wiring(package))
+        .flat_map(optional_dependencies_without_feature_wiring)
         .collect::<Vec<_>>();
     lines.sort();
     lines

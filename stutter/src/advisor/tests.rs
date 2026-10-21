@@ -460,6 +460,7 @@ fn analysis_builder_derives_irq_affinity_overlap_from_recorded_task_mask() {
 
     let validation = session_io::RunValidationReport::default();
     let analysis = ReportAnalysisJson {
+        analysis_objective_contracts: Vec::new(),
         session: session.clone(),
         cluster_analysis: SpikeClusterAnalysis {
             source: SpikeClusterSource::TopSpikesFallback,

@@ -29,6 +29,7 @@ pub fn run_apply_candidate_command(
         input.dry_run,
     )?;
     if input.dry_run {
+        let contract = plan.objective.descriptor();
         println!(
             "candidate_plan_dry_run candidate={} action_kind={} safety={:?} objective={:?}",
             plan.candidate.candidate_name,
@@ -36,6 +37,7 @@ pub fn run_apply_candidate_command(
             plan.descriptor.safety_class,
             plan.objective
         );
+        println!("objective_contract={}", serde_json::to_string(&contract)?);
     }
     Ok(())
 }

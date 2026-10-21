@@ -158,6 +158,7 @@ fn test_html_report_model() -> HtmlReportModel {
 
     let validation = crate::session_io::RunValidationReport::default();
     let analysis = ReportAnalysisJson {
+        analysis_objective_contracts: Vec::new(),
         session: session.clone(),
         cluster_analysis: SpikeClusterAnalysis {
             source: SpikeClusterSource::TopSpikesFallback,

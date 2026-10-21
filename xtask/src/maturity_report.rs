@@ -34,11 +34,11 @@ pub fn run_maturity_report(root: &Path) -> Result<()> {
         }
         if parsing_table && line.starts_with('|') {
             let parts: Vec<&str> = line.split('|').map(|s| s.trim()).collect();
-            if parts.len() >= 3 {
-                if let Ok(loc) = parts[1].parse::<usize>() {
-                    let path = parts[2].to_string();
-                    baseline.push(BaselineEntry { old_loc: loc, path });
-                }
+            if parts.len() >= 3
+                && let Ok(loc) = parts[1].parse::<usize>()
+            {
+                let path = parts[2].to_string();
+                baseline.push(BaselineEntry { old_loc: loc, path });
             }
         }
     }
@@ -136,15 +136,14 @@ fn find_oversized_rs_files(
         let path = entry.path();
         if path.is_dir() && should_descend_into_dir(&path) {
             find_oversized_rs_files(root, &path, baseline, oversized);
-        } else if path.extension().is_some_and(|ext| ext == "rs") {
-            if !baseline.contains(&path) {
-                if let Ok(content) = fs::read_to_string(&path) {
-                    let loc = content.lines().count();
-                    if loc > MAX_FILE_SIZE {
-                        let rel = path.strip_prefix(root).unwrap_or(&path).to_path_buf();
-                        oversized.push((rel, loc));
-                    }
-                }
+        } else if path.extension().is_some_and(|ext| ext == "rs")
+            && !baseline.contains(&path)
+            && let Ok(content) = fs::read_to_string(&path)
+        {
+            let loc = content.lines().count();
+            if loc > MAX_FILE_SIZE {
+                let rel = path.strip_prefix(root).unwrap_or(&path).to_path_buf();
+                oversized.push((rel, loc));
             }
         }
     }

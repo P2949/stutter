@@ -127,12 +127,13 @@ fn planner_selected_from_summary(planner: Option<&PlannerSummary>) -> Option<Str
         .and_then(|planner| planner.selected.as_ref())
         .map(|selected| {
             format!(
-                "{} {} objective={:?} confidence={:.3} evidence={}",
+                "{} {} objective={:?} confidence={:.3} evidence={} {}",
                 selected.action_kind,
                 selected.candidate_name,
                 selected.objective,
                 selected.confidence,
-                format_planner_evidence(&selected.evidence)
+                format_planner_evidence(&selected.evidence),
+                selected.objective.descriptor().summary()
             )
         })
 }
@@ -593,7 +594,7 @@ mod tests {
         assert_eq!(
             snapshot.planner_selected.as_deref(),
             Some(
-                "cpu_affinity_profile game-main objective=StutterScore confidence=0.920 evidence=situation=GameFocused weight=0.95"
+                "cpu_affinity_profile game-main objective=StutterScore confidence=0.920 evidence=situation=GameFocused weight=0.95 primary_metric=normalized_score_per_sample quality=derived fallback=None maturity=Experimental"
             )
         );
         assert_eq!(

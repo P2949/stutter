@@ -11,6 +11,8 @@ use crate::{
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ObjectiveDecision {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub objective_contract: Option<super::ObjectiveDescriptor>,
     pub outcome: ObjectiveOutcome,
     pub primary_signal: ObjectiveSignal,
     pub guard_failures: Vec<ObjectiveGuardFailure>,
@@ -29,6 +31,7 @@ impl ObjectiveDecision {
         let confidence = confidence_for(&outcome, &primary_signal, &guard_failures);
 
         Self {
+            objective_contract: Some(input.objective.descriptor()),
             outcome,
             primary_signal,
             guard_failures,
@@ -47,6 +50,13 @@ impl ObjectiveDecision {
             format!("confidence={:?}", self.confidence),
             self.primary_signal.summary.clone(),
         ];
+        if let Some(contract) = &self.objective_contract {
+            parts.push(format!(
+                "objective={:?} primary_metric={} fallback={:?} maturity={:?} autonomous_apply_eligible={}",
+                contract.kind, contract.primary_metric, contract.fallback_policy,
+                contract.maturity, contract.autonomous_apply_allowed,
+            ));
+        }
 
         parts.push(match &self.outcome {
             ObjectiveOutcome::Improved {

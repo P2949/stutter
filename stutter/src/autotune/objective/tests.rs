@@ -537,3 +537,33 @@ fn power_or_thermal_regression_rejects_frame_pacing_improvement() {
 
     assert!(matches!(result, ExperimentResult::Regressed { .. }));
 }
+
+#[test]
+fn decision_contract_is_source_bound_and_historical_decisions_remain_readable() {
+    let baseline = score(1_000, 12.0, 1);
+    let candidate = score(800, 12.0, 1);
+    let signals = ObjectiveSignals::from_window_score(&baseline);
+    let decision = explain_for_objective(ObjectiveComparisonInput {
+        objective: ObjectiveKind::StutterScore,
+        baseline: &baseline,
+        candidate: &candidate,
+        baseline_signals: &signals,
+        candidate_signals: &signals,
+        data_quality: ExperimentDataQuality::High,
+        target_disappeared: false,
+    });
+    assert_eq!(
+        decision.objective_contract,
+        Some(ObjectiveKind::StutterScore.descriptor())
+    );
+    assert!(
+        decision
+            .summary()
+            .contains("primary_metric=normalized_score_per_sample")
+    );
+    let mut old = serde_json::to_value(&decision).unwrap();
+    old.as_object_mut().unwrap().remove("objective_contract");
+    let restored: decision::ObjectiveDecision = serde_json::from_value(old).unwrap();
+    assert_eq!(restored.objective_contract, None);
+    assert_eq!(restored.experiment_result(), decision.experiment_result());
+}

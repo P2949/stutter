@@ -168,6 +168,10 @@ pub(crate) fn build_report_analysis_from_input(
 
     Ok(ReportBuildResult {
         analysis: ReportAnalysisJson {
+            analysis_objective_contracts: crate::autotune::objective::ObjectiveKind::ALL
+                .into_iter()
+                .map(|kind| kind.descriptor())
+                .collect(),
             session,
             cluster_analysis,
             frame_diagnoses,

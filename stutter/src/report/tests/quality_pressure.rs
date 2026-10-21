@@ -45,6 +45,13 @@ fn analysis_from_report_input_model_preserves_existing_summary_behavior() {
         session.core.duration_ms
     );
     assert_eq!(result.analysis.data_quality.level, DataQualityLevel::High);
+    assert_eq!(
+        result.analysis.analysis_objective_contracts,
+        crate::autotune::objective::ObjectiveKind::ALL
+            .into_iter()
+            .map(|kind| kind.descriptor())
+            .collect::<Vec<_>>()
+    );
     assert!(
         result
             .analysis
@@ -536,6 +543,7 @@ fn analysis_json_contains_pressure_timeline() {
     let session = minimal_session_for_report_test();
     let validation = crate::session_io::RunValidationReport::default();
     let analysis = ReportAnalysisJson {
+        analysis_objective_contracts: Vec::new(),
         session: session.clone(),
         cluster_analysis: SpikeClusterAnalysis {
             source: SpikeClusterSource::TopSpikesFallback,
