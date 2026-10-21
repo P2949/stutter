@@ -5,7 +5,7 @@
 > `${KCD1_RAW}/drop-counter-pilot/`, `${KCD1_RAW}/realworld-stack/`, and
 > `${KCD1_RAW}/results/` refer to the original raw KCD1 archive layout. In the
 > cleaned repository, those artifacts are available from the
-> `raw-kcd1-case-study-fyp-report-final-v4.tar.zst` release asset. Curated
+> `stutter-kcd1-case-study-raw.tar.zst` release asset. Curated
 > copies of the primary tuning summary, recommendation, profile-plan summary,
 > build check, and command output are kept in `evidence-bundle/kcd1/`.
 
@@ -226,7 +226,7 @@ Frame P99 was mixed, but the primary scheduler-aware diagnostic score did not su
 
 > The tested CPU-affinity profile was not validated and should not be recommended on the current evidence for this route and system. The paired run was not counterbalanced, so the result should be treated as caveated low-confidence evidence rather than as a fully counterbalanced effect estimate.
 
-This is a good result for the FYP narrative. The project is about evidence-based validation, not forcing a positive tuning result.
+This is a useful result for the project. The workflow is about evidence-based validation, not forcing a positive tuning result.
 
 `${KCD1_RAW}/results/kcd1-fix-validation.md` should be treated as a secondary validation artifact rather than the primary source for the tuned-profile conclusion. Its status is `InvalidExperiment`, and it compares the selected lower-scoring tune candidate, `baseline-online`, against the earlier formal baseline set. The tuned-profile conclusion in this summary comes from the profile candidate statistics in `tuning_summary.json`.
 

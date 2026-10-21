@@ -1,6 +1,6 @@
 # KCD1 Follow-Up Hypothesis
 
-This file is for the next serious KCD1/FYP run. It is not a retroactive decision rule for the archived `kcd1-affinity-02` run.
+This file is for the next controlled KCD1 experiment. It is not a retroactive decision rule for the archived `kcd1-affinity-02` run.
 
 ## Hypothesis
 

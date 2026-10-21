@@ -4,7 +4,7 @@ Using scheduler-aware eBPF profiling to evaluate a CPU-affinity tuning hypothesi
 
 ## 1. Executive Summary
 
-This case study evaluates whether `stutter`, a Linux game-performance profiling prototype, can collect evidence from a real Proton/Wine game workload, generate a scoped tuning hypothesis, and test whether the change supports better frame pacing. The tested CPU-affinity profile was plausible but was **not validated**: `baseline-online` had a lower primary diagnostic score than the tuned profile in all five paired A/B iterations. The archived run was paired but not counterbalanced: `baseline-online` was measured before the tuned profile in every iteration, so the result may include an order effect. The result is still useful as conservative non-validation evidence because it shows the tool can avoid false-positive tuning recommendations in a noisy real-world workload.
+This case study evaluates whether `stutter`, an experimental Linux game-performance profiling and tuning toolkit, can collect evidence from a real Proton/Wine game workload, generate a scoped tuning hypothesis, and test whether the change supports better frame pacing. The tested CPU-affinity profile was plausible but was **not validated**: `baseline-online` had a lower primary diagnostic score than the tuned profile in all five paired A/B iterations. The archived run was paired but not counterbalanced: `baseline-online` was measured before the tuned profile in every iteration, so the result may include an order effect. The result is still useful as conservative non-validation evidence because it shows the tool can avoid false-positive tuning recommendations in a noisy real-world workload.
 
 - Real game workload: Kingdom Come: Deliverance 1 under GE-Proton10-34.
 - Repeatable 180-second Rattay route from the same save.
@@ -19,19 +19,19 @@ Primary evidence: `reports/kcd1-case-study/CASE_STUDY_SUMMARY.md`, curated copie
 > **Artifact location note:** raw KCD1 run directories, tuning directories,
 > MangoHud CSVs, setup logs, profile-plan artifacts, and exploratory stack
 > comparison artifacts are no longer tracked in Git. They are preserved in the
-> `raw-kcd1-case-study-fyp-report-final-v4.tar.zst` asset attached to the
-> `fyp-report-final-v4` GitHub release. In command examples, `${KCD1_RAW}`
+> `stutter-kcd1-case-study-raw.tar.zst` asset attached to the
+> `case-study-kcd1-2026` GitHub release. In command examples, `${KCD1_RAW}`
 > denotes the root of the extracted raw archive's `reports/kcd1-case-study/`
 > directory. The normal repository checkout keeps the polished report, summary
 > files, and curated `evidence-bundle/`.
 
-## 2. Research Motivation
+## 2. Motivation
 
 Linux gaming tuning advice is often anecdotal. Players change schedulers, launch flags, CPU affinity, compositor settings, Wine/Proton options, and graphics-driver flags, then judge the result from short play sessions or average FPS. That is not enough for a noisy open-world game such as Kingdom Come: Deliverance 1. Average FPS can look acceptable while frame pacing, 1% lows, p99 frame time, or scheduler delay still make the game feel uneven.
 
 `stutter` is about evidence-based validation rather than magic automatic tuning. The aim is to determine whether a proposed tuning change is supported by repeated evidence under a controlled workload. A negative result is therefore useful. If a plausible tweak does not hold up across repeated A/B measurements, the tool should say so instead of turning a hypothesis into advice.
 
-This case study is relevant to the FYP because it tests the full loop on a real game rather than on a synthetic benchmark: observation, diagnosis, scoped hypothesis, reversible tuning, repeated validation, uncertainty handling, and honest non-recommendation when the evidence is not strong enough.
+This case study exercises the full loop on a real game rather than on a synthetic benchmark: observation, diagnosis, scoped hypothesis, reversible tuning, repeated validation, uncertainty handling, and honest non-recommendation when the evidence is not strong enough.
 
 ## 3. Tool Overview
 
@@ -268,21 +268,7 @@ Exploratory evidence: real-world stack summary, notes, and launch-option artifac
 
 These limitations strengthen the report if they are stated plainly. The case study is not trying to make a general performance claim about KCD1. It is showing that the method can handle a noisy real workload and avoid promoting a weak tuning story.
 
-## 15. FYP Relevance
-
-This case study supports the FYP because it demonstrates feasibility for the evidence-based loop: observation, diagnosis, scoped hypothesis, reversible tuning, repeated A/B comparison, uncertainty handling, and honest non-recommendation when the data does not support the tweak.
-
-Expected FYP contribution:
-
-- Benchmark methodology.
-- Statistical comparison workflow.
-- Scheduler-aware evidence.
-- Explainable tuning hypotheses.
-- Prevention of false positives.
-
-The most useful academic angle is that the result is negative for the tuning tweak but positive for the workflow. The prototype behaved like an evidence tool rather than a tweak generator.
-
-## 16. Conclusion
+## 15. Conclusion
 
 This case study validates the workflow rather than the tuning tweak. `stutter` successfully captured a complex KCD1/Proton workload, generated a plausible CPU-affinity hypothesis, tested it with repeated A/B measurements, and declined to recommend the hypothesis when the evidence did not support it. That ability to avoid false-positive tuning recommendations is central to reliable Linux game-performance tuning.
 

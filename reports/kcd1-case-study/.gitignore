@@ -1,5 +1,5 @@
-# Raw KCD1 capture artifacts are published as GitHub Release assets, not tracked
-# in Git. Keep the repository lightweight and reviewable.
+# Large raw KCD1 capture artifacts are distributed as GitHub Release assets.
+# Keep normal source clones small while retaining reproducible case-study archives.
 
 /runs/
 /tune/
