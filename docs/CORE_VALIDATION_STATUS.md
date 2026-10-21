@@ -92,8 +92,23 @@ validation debt rather than synthetic substitutes.
   Clippy, hosted prepared-ordering contract, objective docs, autotune safety and
   both offline smokes. The earlier full gate passed all integration/other suites;
   all three new explicit real preparation tests and the existing real manager/
-  startup-restore test passed. Xtаsk tests (23 plus descendant cleanup) and lint
+  startup-restore test passed. Xtask tests (23 plus descendant cleanup) and lint
   passed. Syscall-order evidence is pending a committed-source rebuild.
+- PASS clean committed-source syscall-order evidence at
+  `7c64bcf872dd4274e2f896842923d605f6710930`, with matching CLI version and
+  digests of the test binary, CLI, Cargo.lock and raw trace. The real boxed
+  production runner test proves synced restore snapshot and prepared controller
+  journal before the first affinity syscall, followed by independent startup
+  restore and clean journal. [Retained auxiliary receipt](evidence/prepared-affinity-20261021/README.md).
+- The first ordinary ptrace run failed safely before mutation with no effective
+  changes; budget-related instrumentation overhead is a plausible inference, not
+  proven causality. The successful trace used strace seccomp syscall filtering;
+  both raw attempts remain local. Receipt verification requires the two actual
+  directory syncs and ordering before the first successful affinity syscall,
+  not merely before a later restore syscall. This is not canonical SIGKILL or
+  full portable-bundle verification; #48/#29 remain open.
+- PR #51 exact-main CI `39677738918` succeeded at
+  `638e3b342486a48d945933fb144620b5945b67cb`.
 
 ## 2026-10-21: failed apply rollback visibility and fault persistence
 
