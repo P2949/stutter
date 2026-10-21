@@ -25,6 +25,7 @@ type AfterApplyHook<'a> = dyn FnMut(&RollbackToken) -> ActionHookResult + 'a;
 type RollbackHook<'a> = dyn FnMut(&RollbackToken) -> ActionHookResult + 'a;
 
 pub(crate) struct ActionHooks<'a> {
+    after_prepare: Option<Box<AfterApplyHook<'a>>>,
     after_apply: Option<Box<AfterApplyHook<'a>>>,
     after_rollback: Option<Box<RollbackHook<'a>>>,
 }
@@ -32,6 +33,7 @@ pub(crate) struct ActionHooks<'a> {
 impl<'a> ActionHooks<'a> {
     pub(crate) fn none() -> Self {
         Self {
+            after_prepare: None,
             after_apply: None,
             after_rollback: None,
         }
@@ -42,9 +44,25 @@ impl<'a> ActionHooks<'a> {
         F: FnMut(&RollbackToken) -> ActionHookResult + 'a,
     {
         Self {
+            after_prepare: None,
             after_apply: Some(Box::new(after_apply)),
             after_rollback: None,
         }
+    }
+
+    pub(crate) fn with_after_prepare<F>(mut self, after_prepare: F) -> Self
+    where
+        F: FnMut(&RollbackToken) -> ActionHookResult + 'a,
+    {
+        self.after_prepare = Some(Box::new(after_prepare));
+        self
+    }
+
+    pub(super) fn run_after_prepare(&mut self, token: &RollbackToken) -> ActionHookResult {
+        if let Some(hook) = self.after_prepare.as_mut() {
+            hook(token)?;
+        }
+        Ok(())
     }
 
     pub(crate) fn with_after_rollback<F>(mut self, after_rollback: F) -> Self

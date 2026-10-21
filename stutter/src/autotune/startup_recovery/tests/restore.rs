@@ -41,6 +41,7 @@ fn post_apply_transaction_phase_rolls_back_on_startup() {
 #[test]
 fn live_runtime_transaction_phases_roll_back_on_startup() {
     for phase in [
+        ControllerJournalState::Applying,
         ControllerJournalState::Measuring,
         ControllerJournalState::Keeping,
         ControllerJournalState::Reverting,

@@ -98,7 +98,7 @@ pub fn restore_known_autotune_actions(
                 )],
             })
         }
-        ControllerJournalState::Applying => {
+        ControllerJournalState::Applying if record.rollback_token().is_none() => {
             let (experiment_id, action_id) = journal_experiment_action(&record);
             Ok(AutotuneRestoreOutcome {
                 status: AutotuneRestoreStatus::ApplyingWithoutRollbackToken,
@@ -115,7 +115,8 @@ pub fn restore_known_autotune_actions(
                 )],
             })
         }
-        ControllerJournalState::Applied
+        ControllerJournalState::Applying
+        | ControllerJournalState::Applied
         | ControllerJournalState::Verifying
         | ControllerJournalState::Measuring
         | ControllerJournalState::Keeping

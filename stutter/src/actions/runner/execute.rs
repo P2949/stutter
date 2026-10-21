@@ -225,7 +225,8 @@ where
                 PolicyIntent::Apply,
                 &descriptor,
             )?;
-            let apply_res = action.apply();
+            let apply_res =
+                action.apply_with_prepared_rollback(&mut |token| hooks.run_after_prepare(token));
             let rollback = match apply_res {
                 Ok(token) => token,
                 Err(partial_err) => {

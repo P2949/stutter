@@ -173,6 +173,15 @@ pub fn recover_controller_journal_with_executor<E: StartupRecoveryRollbackExecut
         }
         ControllerJournalState::Applying => {
             let (experiment_id, action_id) = journal_experiment_action(&record);
+            if let Some(token) = record.rollback_token().cloned() {
+                return recover_applied_journal_record(
+                    config,
+                    executor,
+                    experiment_id,
+                    action_id,
+                    token,
+                );
+            }
             let reason =
                 "startup crash recovery found applying journal without rollback token".to_owned();
             write_startup_recovery_daemon_state_snapshot(

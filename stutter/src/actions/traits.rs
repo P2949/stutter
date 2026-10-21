@@ -27,6 +27,15 @@ pub trait TuningAction {
     fn preflight(&self) -> ActionResult<Vec<ActionWarning>>;
     fn dry_run(&self) -> ActionResult<ActionState>;
     fn apply(&self) -> ApplyResult;
+    /// Providers with crash-safe preparation invoke this callback after the
+    /// restore snapshot is durable and before the first mutable syscall.
+    /// The default is compatibility-only and makes no preparation guarantee.
+    fn apply_with_prepared_rollback(
+        &self,
+        _prepared: &mut dyn FnMut(&RollbackToken) -> anyhow::Result<()>,
+    ) -> ApplyResult {
+        self.apply()
+    }
     fn verify(&self) -> ActionResult<ActionState>;
     fn rollback(&self, token: &RollbackToken) -> ActionResult<()>;
 }
@@ -61,6 +70,13 @@ where
 
     fn apply(&self) -> ApplyResult {
         self.as_ref().apply()
+    }
+
+    fn apply_with_prepared_rollback(
+        &self,
+        prepared: &mut dyn FnMut(&RollbackToken) -> anyhow::Result<()>,
+    ) -> ApplyResult {
+        self.as_ref().apply_with_prepared_rollback(prepared)
     }
 
     fn verify(&self) -> ActionResult<ActionState> {

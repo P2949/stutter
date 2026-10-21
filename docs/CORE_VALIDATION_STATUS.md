@@ -51,6 +51,50 @@ Do not claim completion or graduate capabilities without the corresponding
 evidence. Missing real environments and unperformed live tests remain explicit
 validation debt rather than synthetic substitutes.
 
+## 2026-10-21: prepared rollback before affinity commit
+
+- PR #50 exact-main CI `39676019146` passed at `26ec9bc07674d07c9be7a0a6f2779e533cee7710`.
+  PR #51 exact-head CI `39676393561` passed and merged as
+  `638e3b342486a48d945933fb144620b5945b67cb`; exact-main run `39677738918`
+  is in progress. No main-success claim for #51 yet.
+- Two regressions reproduced the next gap before the fix (exit 101): startup
+  rejected Applying despite an available token, and the actual owned-child
+  affinity action mutated without invoking a preparation callback. Logs:
+  `/tmp/stutter-applying-token-red.log` and `/tmp/stutter-affinity-preparation-red.log`.
+- Added an affinity-only owned preparation/commit plan, strict precommit original-
+  mask/identity checks, runner preparation hook and boxed-action delegation. The
+  exact prepared token is durably written as Applying(token) before commit; startup
+  and explicit emergency restore recognize it. Tokenless historical Applying
+  retains its previous fault behavior. Priority-bearing/other providers remain
+  unqualified for this preparation protocol.
+- Found and corrected an additional durability weakness: profile restore save
+  used rename without fsync. It now uses a create-new unique temporary file,
+  file sync, atomic rename and parent-directory sync. Existing evidence of file
+  presence must not be interpreted as proof of those earlier sync guarantees.
+- PASS three explicit real owned-child tests: preparation observes the original
+  mask and identified restore file before mutation; the shared journaled boxed
+  runner observes Applying(token) before mutation and strict startup restores;
+  a rejected preparation callback leaves the kernel mask unchanged without a
+  restore syscall path. These are functional physical checks, not SIGKILL proof.
+- Initial full gate: 2,727 passed, 1 architecture failure, 9 ignored. The scanner
+  classified a new fixture as production because of its path; moved it under the
+  existing tests-directory convention without weakening the gate. Rerun full
+  format/build/Clippy/test gate passed (2,728 library tests, 9 ignored, 8 lifecycle
+  integrations, other suites). An additional hosted-CI prepared-ordering contract
+  initially had test-fixture error-conversion mistakes; corrected to its explicit
+  anyhow boundary. Final expanded checks and syscall-order evidence are pending.
+- The production before-verification token invariant is now checked in the plan
+  using the already verified PR #50 main result; #47 still requires real crash
+  evidence. The prepared-before-first-mutation checkbox stays pending integration
+  and acceptance. The preserved crash wrapper must delegate the new prepared
+  action method when extracted, so acceptance cannot accidentally bypass it.
+- PASS expanded final library suite (2,729 passed, 9 ignored), final all-target
+  Clippy, hosted prepared-ordering contract, objective docs, autotune safety and
+  both offline smokes. The earlier full gate passed all integration/other suites;
+  all three new explicit real preparation tests and the existing real manager/
+  startup-restore test passed. Xtаsk tests (23 plus descendant cleanup) and lint
+  passed. Syscall-order evidence is pending a committed-source rebuild.
+
 ## 2026-10-21: failed apply rollback visibility and fault persistence
 
 - PR #49 exact-main CI `39674653220` succeeded at

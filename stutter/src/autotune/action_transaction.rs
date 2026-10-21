@@ -15,8 +15,10 @@ use crate::{
     },
     autotune::{
         controller_journal::{
-            ControllerJournalActionMetadata, write_controller_journal_applied_with_metadata,
+            ControllerJournalActionMetadata, ControllerJournalState,
+            write_controller_journal_applied_with_metadata,
             write_controller_journal_applying_with_metadata, write_controller_journal_clean,
+            write_controller_journal_phase_with_metadata,
         },
         experiment::ExperimentId,
     },
@@ -68,6 +70,21 @@ pub(crate) fn apply_journaled_action<A: TuningAction>(
         )
         .map(|_| ())
     })
+    .with_after_prepare(|token| {
+        *rollback.borrow_mut() = Some(token.clone());
+        write_controller_journal_phase_with_metadata(
+            input.journal_path,
+            ControllerJournalState::Applying,
+            ExperimentId::try_new(input.experiment_id)?,
+            action.id(),
+            Some(token.clone()),
+            input
+                .metadata
+                .clone()
+                .with_verify_result("rollback_prepared_before_mutation"),
+        )
+        .map(|_| ())
+    })
     .with_after_rollback(|_| {
         rollback_completed.set(true);
         write_controller_journal_clean(input.journal_path).map(|_| ())
@@ -103,6 +120,7 @@ mod tests {
         inner: FakeAction,
         journal: &'a Path,
         fail_applied_write: bool,
+        prepare_first: bool,
     }
     impl TuningAction for VerifyJournal<'_> {
         fn id(&self) -> ActionId {
@@ -161,6 +179,30 @@ mod tests {
             );
             self.inner.verify()
         }
+        fn apply_with_prepared_rollback(
+            &self,
+            prepared: &mut dyn FnMut(&RollbackToken) -> anyhow::Result<()>,
+        ) -> crate::actions::ApplyResult {
+            (|| -> anyhow::Result<()> {
+                if self.prepare_first {
+                    let token = RollbackToken::CpuAffinityRestoreFile {
+                        path: self.journal.with_file_name("restore.json"),
+                        affected_tasks: 5,
+                    };
+                    std::fs::write(token.restore_path().unwrap(), b"{\"synthetic\":true}")?;
+                    prepared(&token)?;
+                    let record = read_controller_journal(self.journal)?;
+                    anyhow::ensure!(
+                        record.state() == ControllerJournalState::Applying
+                            && record.rollback_token() == Some(&token),
+                        "prepared token must precede synthetic mutation"
+                    );
+                    anyhow::ensure!(!self.inner.applied(), "preparation must not mutate");
+                }
+                Ok(())
+            })()?;
+            self.apply()
+        }
         fn rollback(&self, token: &RollbackToken) -> anyhow::Result<()> {
             self.inner.rollback(token)?;
             if self.fail_applied_write {
@@ -178,6 +220,7 @@ mod tests {
             inner: FakeAction::new().with_restore_path(root.join("restore.json")),
             journal: &journal,
             fail_applied_write: false,
+            prepare_first: false,
         };
         let result = apply_journaled_action(
             &action,
@@ -207,6 +250,7 @@ mod tests {
             inner: FakeAction::new().with_restore_path(root.join("restore.json")),
             journal: &journal,
             fail_applied_write: true,
+            prepare_first: false,
         };
         let error = apply_journaled_action(
             &action,
@@ -256,6 +300,7 @@ mod tests {
                 },
                 journal: &journal,
                 fail_applied_write: false,
+                prepare_first: false,
             };
             assert!(
                 apply_journaled_action(
@@ -290,5 +335,36 @@ mod tests {
                 })
             );
         }
+    }
+
+    #[test]
+    fn prepared_transaction_journals_token_before_provider_commit() {
+        let root = crate::test_support::TestRoot::new("prepared-transaction-contract");
+        let journal = root.join("journal.json");
+        let audit = root.join("audit.jsonl");
+        let action = VerifyJournal {
+            inner: FakeAction::new().with_restore_path(root.join("restore.json")),
+            journal: &journal,
+            fail_applied_write: false,
+            prepare_first: true,
+        };
+        let result = apply_journaled_action(
+            &action,
+            ActionRunPolicy::apply_low_risk(crate::daemon_policy::ActionSource::Test, false),
+            JournaledActionInput {
+                journal_path: &journal,
+                audit_path: &audit,
+                experiment_id: "prepared-contract",
+                metadata: Default::default(),
+            },
+        )
+        .unwrap();
+        assert!(result.state.applied);
+        assert!(
+            read_controller_journal(&journal)
+                .unwrap()
+                .rollback_token()
+                .is_some()
+        );
     }
 }
