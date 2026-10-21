@@ -12,7 +12,10 @@ const GPU_THERMAL_DEGRADED_MILLIDEGREES: u32 = 85_000;
 const GPU_POWER_LIMIT_BUSY_PERCENT: u32 = 95;
 const GPU_POWER_LIMIT_LOW_CLOCK_MHZ: u32 = 300;
 
-pub(crate) fn compute_objective_signals(window: &RollingWindow) -> ObjectiveSignals {
+pub(crate) fn compute_objective_signals(
+    window: &RollingWindow,
+    runnable_target: Option<(u32, &BTreeSet<u32>)>,
+) -> ObjectiveSignals {
     let block_io_overlap_count = window
         .block_io_events()
         .iter()
@@ -183,6 +186,7 @@ pub(crate) fn compute_objective_signals(window: &RollingWindow) -> ObjectiveSign
             ObjectiveSignalQuality::Derived
         },
         compile_throughput: ObjectiveSignalQuality::Missing,
+        runnable_latency: ObjectiveSignalQuality::Missing,
     };
 
     let irq_quality = if has_irq_events {
@@ -194,7 +198,7 @@ pub(crate) fn compute_objective_signals(window: &RollingWindow) -> ObjectiveSign
     let irq_overlap_trust = has_irq_events.then(|| irq_quality.as_str().to_owned());
     let irq_overlap_basis = has_irq_events.then(|| "irq-duration".to_owned());
 
-    ObjectiveSignals {
+    let mut signals = ObjectiveSignals {
         block_io_overlap_count: has_block_io_events.then_some(block_io_overlap_count),
         block_io_worst_latency_ns: has_block_io_events.then_some(block_io_worst_latency_ns),
         block_io_overlap_basis,
@@ -241,7 +245,15 @@ pub(crate) fn compute_objective_signals(window: &RollingWindow) -> ObjectiveSign
         compile_activity_source: has_compile_activity
             .then(|| "build-compiler-linker-intervals".to_owned()),
         signal_quality,
-    }
+        ..ObjectiveSignals::default()
+    };
+    signals.set_runnable_latency_from_records(window.intervals().iter().filter(|record| {
+        runnable_target.is_some_and(|(root, members)| {
+            root > 0 && record.process_pid.is_some_and(|pid| members.contains(&pid))
+        })
+    }));
+    signals.runnable_target_root_pid = runnable_target.map(|(root, _)| root);
+    signals
 }
 
 fn source_quality_for_block_io_basis(basis: Option<&str>) -> ObjectiveSignalQuality {

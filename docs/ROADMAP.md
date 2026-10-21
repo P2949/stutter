@@ -48,6 +48,7 @@ exist before they are considered supported defaults.
 Primary-metric implemented objectives:
 
 - `StutterScore`
+- `GameRunnableLatency` (merged target-game scheduler histogram; see [contract](RUNNABLE_LATENCY_OBJECTIVE.md))
 - `IoLatency`
 - `IrqOverlapReduction`
 - `ThermalRecovery`
@@ -60,7 +61,6 @@ Fallback-based objectives with direct or derived guardrails:
 
 Guardrail-only or missing direct signal objectives:
 
-- `GameRunnableLatency` uses normalized score until a distinct runnable-latency objective metric is exposed.
 - `CompileThroughputWithForegroundProtection` protects foreground latency but remains inconclusive without genuine throughput data. Compile activity cannot establish improvement.
 
 ## Direction

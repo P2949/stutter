@@ -62,3 +62,7 @@ validation debt rather than synthetic substitutes.
   target scoping, guardrails, explanations and backward-compatible reads.
 - Full library, formatting and Clippy validation of the final scoped version
   pending. No remote CI or live-acceptance claim is made by this entry.
+- Initial broader library run: 2,680 passed, 2 architecture checks failed,
+  5 ignored. Failures identified new unchecked unwraps and a panic path;
+  replaced them with validated populations and a conservative bound. Added
+  process-start-time matching and exited-root protection before revalidation.

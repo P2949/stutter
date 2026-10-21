@@ -7,6 +7,7 @@ mod game_frame_pacing;
 mod game_runnable_latency;
 mod io_latency;
 mod irq_overlap;
+mod runnable_signal;
 mod stutter_score;
 mod thermal;
 
@@ -84,6 +85,8 @@ pub struct ObjectiveSignalQualitySnapshot {
     pub frame_pacing: ObjectiveSignalQuality,
     pub foreground_latency: ObjectiveSignalQuality,
     #[serde(default)]
+    pub runnable_latency: ObjectiveSignalQuality,
+    #[serde(default)]
     pub compile_throughput: ObjectiveSignalQuality,
 }
 
@@ -131,6 +134,32 @@ pub struct ObjectiveSignals {
     pub dirty_writeback_events: Option<u64>,
     pub frame_p99_ms: Option<f64>,
     pub foreground_over_5ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runnable_latency_p50_ns: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runnable_latency_p95_ns: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runnable_latency_p99_ns: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runnable_latency_p999_ns: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runnable_latency_max_ns: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runnable_over_1ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runnable_over_2ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runnable_over_5ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runnable_samples: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runnable_latency_source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runnable_latency_unavailable_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runnable_target_root_pid: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runnable_target_starttime_ticks: Option<u64>,
     #[serde(
         default,
         alias = "compile_progress_intervals",

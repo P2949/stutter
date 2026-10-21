@@ -288,7 +288,15 @@ impl RollingWindow {
     }
 
     pub fn objective_signals(&self) -> ObjectiveSignals {
-        signals::compute_objective_signals(self)
+        signals::compute_objective_signals(self, None)
+    }
+
+    pub(crate) fn objective_signals_for_target(
+        &self,
+        root_pid: u32,
+        member_pids: &std::collections::BTreeSet<u32>,
+    ) -> ObjectiveSignals {
+        signals::compute_objective_signals(self, Some((root_pid, member_pids)))
     }
 
     pub fn score(&self) -> RollingWindowScore {

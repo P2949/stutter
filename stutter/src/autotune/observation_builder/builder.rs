@@ -92,7 +92,21 @@ impl AutotuneObservationBuilder {
             focus_kind,
             input.active_tasks,
         );
-        let mut objective_signals = input.window.objective_signals();
+        let runnable_members = runnable_target_processes(
+            target_root_pid,
+            input.root_pid.is_some(),
+            focus,
+            input.active_tasks,
+        );
+        let mut objective_signals = match target_root_pid {
+            Some(root) => input
+                .window
+                .objective_signals_for_target(root, &runnable_members),
+            None => input.window.objective_signals(),
+        };
+        objective_signals.runnable_target_starttime_ticks = workload_identity
+            .as_ref()
+            .and_then(|identity| identity.process_starttime_ticks);
         apply_focus_gpu_resolution(
             &mut objective_signals,
             input.proc_root,
