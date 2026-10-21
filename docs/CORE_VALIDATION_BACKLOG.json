@@ -1,0 +1,93 @@
+{
+  "milestone": {
+    "number": 1,
+    "url": "https://github.com/P2949/stutter/milestone/1"
+  },
+  "issues": [
+    {
+      "number": 22,
+      "title": "P0: Define direct GameRunnableLatency objective signal",
+      "url": "https://github.com/P2949/stutter/issues/22"
+    },
+    {
+      "number": 23,
+      "title": "P0: Prevent compile activity from being treated as compile throughput",
+      "url": "https://github.com/P2949/stutter/issues/23"
+    },
+    {
+      "number": 24,
+      "title": "P0: Add behavioral contract tests for every autotune objective",
+      "url": "https://github.com/P2949/stutter/issues/24"
+    },
+    {
+      "number": 25,
+      "title": "P0: Introduce machine-readable objective descriptors",
+      "url": "https://github.com/P2949/stutter/issues/25"
+    },
+    {
+      "number": 26,
+      "title": "P0: Make AUTOTUNE_OBJECTIVES.md validated/generated from implementation",
+      "url": "https://github.com/P2949/stutter/issues/26"
+    },
+    {
+      "number": 27,
+      "title": "P1: Add live observation acceptance harness",
+      "url": "https://github.com/P2949/stutter/issues/27"
+    },
+    {
+      "number": 28,
+      "title": "P1: Add live reversible CPU-affinity acceptance harness",
+      "url": "https://github.com/P2949/stutter/issues/28"
+    },
+    {
+      "number": 29,
+      "title": "P1: Add crash/startup recovery acceptance matrix",
+      "url": "https://github.com/P2949/stutter/issues/29"
+    },
+    {
+      "number": 30,
+      "title": "P1: Establish real-kernel compatibility corpus",
+      "url": "https://github.com/P2949/stutter/issues/30"
+    },
+    {
+      "number": 31,
+      "title": "P2: Establish diagnosis calibration corpus",
+      "url": "https://github.com/P2949/stutter/issues/31"
+    },
+    {
+      "number": 32,
+      "title": "P2: Calibrate scheduler/IRQ/I/O/GPU diagnosis thresholds",
+      "url": "https://github.com/P2949/stutter/issues/32"
+    },
+    {
+      "number": 33,
+      "title": "P2: Evaluate and calibrate StutterScore weighting",
+      "url": "https://github.com/P2949/stutter/issues/33"
+    },
+    {
+      "number": 34,
+      "title": "P2: Track validation evidence provenance and real-evidence coverage",
+      "url": "https://github.com/P2949/stutter/issues/34"
+    },
+    {
+      "number": 35,
+      "title": "P3: Define supported/experimental/internal capability tiers",
+      "url": "https://github.com/P2949/stutter/issues/35"
+    },
+    {
+      "number": 36,
+      "title": "P3: Prepare first versioned Stutter release",
+      "url": "https://github.com/P2949/stutter/issues/36"
+    },
+    {
+      "number": 37,
+      "title": "P0: Implement fixed-work compile completion time",
+      "url": "https://github.com/P2949/stutter/issues/37"
+    },
+    {
+      "number": 38,
+      "title": "P1: Characterize profiler overhead on a real workload",
+      "url": "https://github.com/P2949/stutter/issues/38"
+    }
+  ]
+}
