@@ -7,9 +7,12 @@ mod syscall;
 mod tests;
 
 pub use cpu_mask::CpuMask;
+#[cfg(test)]
+pub(crate) use restore_file::load_restore_state;
+pub(crate) use restore_file::restore_saved_with_validation;
 pub use restore_file::{default_restore_path, read_restore_records, restore_saved};
 #[cfg(test)]
-pub use restore_file::{load_restore_state, save_merged_restore_state, save_restore_state};
+pub use restore_file::{save_merged_restore_state, save_restore_state};
 #[cfg(test)]
 pub use restore_record::restore_all;
 pub(crate) use restore_record::restore_identity_status_at;

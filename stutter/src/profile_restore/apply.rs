@@ -10,7 +10,15 @@ use super::{
 use crate::affinity::{self, RestoreRecordStatus};
 
 pub fn restore_saved(path: &Path) -> anyhow::Result<ProfileRestoreSummary> {
+    restore_saved_with_validation(path, |_| Ok(()))
+}
+
+pub(crate) fn restore_saved_with_validation(
+    path: &Path,
+    validate: impl FnOnce(&ProfileRestoreState) -> anyhow::Result<()>,
+) -> anyhow::Result<ProfileRestoreSummary> {
     let state = load_restore_state(path)?;
+    validate(&state)?;
     let (summary, errors) = restore_all(&state);
 
     if !errors.is_empty() {

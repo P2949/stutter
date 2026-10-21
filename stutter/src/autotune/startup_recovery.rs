@@ -100,7 +100,7 @@ impl StartupRecoveryRollbackExecutor for RealStartupRecoveryRollbackExecutor {
         &mut self,
         token: &RollbackToken,
     ) -> anyhow::Result<StartupRecoveryRollbackSummary> {
-        let result = crate::autotune::emergency_restore::default_autotune_rollback_registry()
+        let result = crate::autotune::emergency_restore::startup_rollback_registry()
             .restore_token(token)
             .with_context(|| {
                 format!(

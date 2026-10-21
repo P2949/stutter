@@ -9,7 +9,10 @@ use crate::actions::{
     },
 };
 
-pub(crate) struct CpuAffinityRollbackHandler;
+mod identity;
+pub(crate) struct CpuAffinityRollbackHandler {
+    pub require_verified_identity: bool,
+}
 
 impl RollbackHandler for CpuAffinityRollbackHandler {
     fn id(&self) -> &'static str {
@@ -57,7 +60,7 @@ impl RollbackHandler for CpuAffinityRollbackHandler {
     }
 
     fn restore_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackResult> {
-        let Some((path, _)) = token.as_cpu_affinity_restore_file() else {
+        let Some((path, expected)) = token.as_cpu_affinity_restore_file() else {
             return Err(ActionBoundaryError::unsupported_rollback_token(
                 self.id(),
                 "cpu-affinity-restore-file",
@@ -67,7 +70,13 @@ impl RollbackHandler for CpuAffinityRollbackHandler {
         };
 
         if crate::profile_restore::load_restore_state(path).is_ok() {
-            let summary = crate::profile_restore::restore_saved(path)?;
+            let summary = crate::profile_restore::restore_saved_with_validation(path, |state| {
+                if self.require_verified_identity {
+                    identity::validate_profile(state, expected)
+                } else {
+                    Ok(())
+                }
+            })?;
             return Ok(token_restore_result(
                 self.id(),
                 token,
@@ -85,7 +94,13 @@ impl RollbackHandler for CpuAffinityRollbackHandler {
             ));
         }
 
-        let summary = crate::affinity::restore_saved(path)?;
+        let summary = crate::affinity::restore_saved_with_validation(path, |state| {
+            if self.require_verified_identity {
+                identity::validate_affinity(state, expected)
+            } else {
+                Ok(())
+            }
+        })?;
         Ok(token_restore_result(
             self.id(),
             token,

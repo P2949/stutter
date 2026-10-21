@@ -21,7 +21,17 @@ pub fn default_restore_path() -> PathBuf {
 pub fn load_restore_state(path: &Path) -> anyhow::Result<ProfileRestoreState> {
     let data = fs::read_to_string(path)
         .with_context(|| format!("failed to read profile restore file {}", path.display()))?;
-    let state = serde_json::from_str(&data)
+    let value: serde_json::Value = serde_json::from_str(&data)
         .with_context(|| format!("failed to parse profile restore file {}", path.display()))?;
+    anyhow::ensure!(
+        value.get("records").is_none(),
+        "affinity restore format is not a profile restore file"
+    );
+    let state: ProfileRestoreState = serde_json::from_value(value)?;
+    anyhow::ensure!(
+        state.schema_version == super::model::PROFILE_RESTORE_SCHEMA_VERSION,
+        "unsupported profile restore schema {}",
+        state.schema_version
+    );
     Ok(state)
 }

@@ -13,6 +13,7 @@ use anyhow::Context;
 use audit::*;
 pub use executors::restore_rollback_token;
 pub use handler::default_autotune_rollback_registry;
+pub(crate) use handler::startup_rollback_registry;
 use handler::*;
 pub use manual_command::*;
 pub use types::*;

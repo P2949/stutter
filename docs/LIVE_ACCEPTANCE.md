@@ -86,3 +86,20 @@ stdin pipe, so parent death closes the writer and causes child exit; normal
 cleanup also kills and reaps the owned child handles. The receipt records three
 processes and five tasks. Before restoration, a separate create-new copy of the
 validated rollback journal is retained as `restore.before-rollback.json`.
+
+## Automatic recovery identity policy
+
+Before automatic startup recovery restores an affinity token, every original
+record must include nonzero task/process IDs and process/task start times. This
+is validated for the entire batch before any restore syscall. Incomplete legacy
+identity, unsupported/ambiguous restore format, or too few original identities
+for the token leaves recovery faulted with its original state retained for
+manual inspection. Complete records whose start times no longer match are
+skipped without changing the replacement process.
+
+Profile restore schema 1 and historical affinity restore schemas 1–3 are routed
+by their actual record layout. An affinity `records` array cannot be interpreted
+as an empty profile file. Explicit manual restoration retains legacy identity
+compatibility for supported formats; automatic recovery has stricter identity
+requirements. The real-child regression tests exercise these semantics but do
+not replace controller SIGKILL/restart acceptance.

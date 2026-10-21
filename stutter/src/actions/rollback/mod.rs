@@ -169,8 +169,18 @@ impl RollbackRegistry {
 }
 
 pub fn default_rollback_registry() -> RollbackRegistry {
+    rollback_registry(false)
+}
+
+pub(crate) fn startup_rollback_registry() -> RollbackRegistry {
+    rollback_registry(true)
+}
+
+fn rollback_registry(require_verified_identity: bool) -> RollbackRegistry {
     let mut registry = RollbackRegistry::new();
-    registry.register(crate::actions::cpu_affinity::CpuAffinityRollbackHandler);
+    registry.register(crate::actions::cpu_affinity::CpuAffinityRollbackHandler {
+        require_verified_identity,
+    });
     registry.register(crate::actions::nice::NiceRollbackHandler);
     registry.register(crate::actions::ioprio::IoPrioRollbackHandler);
     registry.register(crate::actions::uclamp::UclampRollbackHandler);
