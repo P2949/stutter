@@ -38,6 +38,7 @@ impl CpuAffinityLowRiskExecutor {
             CandidateAction::CpuAffinityProfile { plan } => Ok(Self {
                 candidate_name: plan.profile_name,
                 action: CpuAffinityProfileAction {
+                    restore_path: None,
                     tree_pid: plan.tree_pid,
                     profile: plan.profile,
                     force_restore_overwrite: false,

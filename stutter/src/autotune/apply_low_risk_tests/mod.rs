@@ -170,6 +170,7 @@ fn apply_policy() -> ActionRunPolicy {
 
 fn test_cpu_affinity_profile_action() -> CpuAffinityProfileAction {
     CpuAffinityProfileAction {
+        restore_path: None,
         tree_pid: 0,
         profile: Profile {
             name: "game-main".to_owned(),

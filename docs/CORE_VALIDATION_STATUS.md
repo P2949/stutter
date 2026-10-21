@@ -236,3 +236,30 @@ validation debt rather than synthetic substitutes.
 - Issue #27 remains open pending remote integration and the remaining acceptance
   evidence requirements. Game-objective controlled capture, portable full export,
   independent affinity/recovery suites, overhead and multiple kernels remain open.
+
+## 2026-10-21: P0 integration and live affinity progress
+
+- P0 decision-model integration gate PASS at current remote main
+  `37ed5ce82e95f6335acbff2b25a7e07efe8f0169`: exact-main run
+  `39634172998` completed successfully. Direct histogram semantics, activity
+  safety/fixed-work primary, nine-objective behavioral contracts, exhaustive
+  descriptors, generated documentation and visible objective CI are merged.
+  This does not complete the Core Validation milestone or lift its feature freeze.
+- PR #43 remains in progress. Added independent `live-acceptance affinity`
+  suite using the existing CPU-affinity action and audited runner with an
+  explicit new restore path. Existing callers retain their default paths.
+  The suite snapshots task identities and original masks, validates dry-run,
+  durable rollback records and applied kernel masks, rolls back, independently
+  rechecks all original masks and checks the audit phases. Post-apply validation
+  errors still attempt rollback through the known isolated restore token.
+- Added refusal tests for stale root identity and pre-existing restore state.
+  The first compile caught tuple iteration over the task snapshot; fixed it to
+  iterate task values. Intermediate full library run passed (2,707 passed,
+  5 ignored). Final checks and real affinity acceptance remain pending.
+- Final local validation PASS: full format/build/all-target Clippy/test gate
+  (2,709 library passed, 5 ignored; 8 lifecycle integration passed; other suites
+  passed), 23 xtask tests and extended stutter/xtask all-target Clippy. Committing
+  and rebuilding before real affinity acceptance is required by provenance policy.
+- PR #43 passed exact-head CI run `39634530958` and merged as
+  `0be8ad5eb3c603a84689576aafc70263a2d5c001`. Main run `39635725995`
+  is in progress. Observation evidence/export follow-ups remain open.

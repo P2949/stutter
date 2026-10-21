@@ -30,6 +30,7 @@ pub(crate) fn validate_apply_profile_policy(
 ) -> anyhow::Result<crate::daemon_policy::DaemonPolicy> {
     let policy = profile_apply_policy(dry_run, allow_medium_risk, persistent_effect, source);
     let action = crate::actions::cpu_affinity::CpuAffinityProfileAction {
+        restore_path: None,
         tree_pid,
         profile: profile.clone(),
         force_restore_overwrite: force,

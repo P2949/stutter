@@ -10,10 +10,17 @@ use std::{
 use anyhow::{Context, ensure};
 use clap::Subcommand;
 use serde_json::{Value, json};
+mod affinity;
 mod evidence;
 
 #[derive(Clone, Debug, Eq, PartialEq, Subcommand)]
 pub enum Suite {
+    Affinity {
+        #[arg(long)]
+        out: PathBuf,
+        #[arg(long)]
+        stutter_bin: PathBuf,
+    },
     Observation {
         #[arg(long)]
         out: PathBuf,
@@ -121,11 +128,14 @@ pub fn workload(seconds: u64, ready: &Path) -> anyhow::Result<()> {
 }
 
 pub fn run(root: &Path, suite: Suite) -> anyhow::Result<()> {
-    let Suite::Observation {
-        out,
-        stutter_bin,
-        seconds,
-    } = suite;
+    let (out, stutter_bin, seconds) = match suite {
+        Suite::Observation {
+            out,
+            stutter_bin,
+            seconds,
+        } => (out, stutter_bin, seconds),
+        Suite::Affinity { out, stutter_bin } => return affinity::run(root, &out, &stutter_bin),
+    };
     ensure!(cfg!(target_os = "linux"), "live acceptance requires Linux");
     fs::create_dir(&out)
         .context("acceptance output must be a new directory with an existing parent")?;

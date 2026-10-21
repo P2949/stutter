@@ -80,6 +80,7 @@ pub fn action_from_candidate(
         CandidateAction::CpuAffinityProfile { plan } => Ok((
             plan.profile_name,
             CpuAffinityProfileAction {
+                restore_path: None,
                 tree_pid: plan.tree_pid,
                 profile: plan.profile,
                 force_restore_overwrite: false,

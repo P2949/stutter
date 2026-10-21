@@ -58,3 +58,24 @@ reported Git revision matches that tree. The binary's SHA-256 and version are
 retained. Commit the harness first, rebuild both binaries, then run acceptance;
 otherwise preflight is BLOCKED. The earlier development-tree attempt is useful
 functional evidence but does not satisfy this stronger provenance gate.
+
+## Independent affinity suite
+
+`xtask live-acceptance affinity --stutter-bin target/debug/stutter --out NEW_DIR`
+uses the existing CPU-affinity action and audited runner on a caller-owned
+three-task disposable helper. It runs without eBPF and does not require root
+when the host permits changing affinity of same-user tasks. Choose a host with
+more than one allowed CPU so a real mask change can be observed.
+
+It snapshots process/task start times and original masks, chooses an online CPU
+from the current allowed set, performs an audited dry-run and checks that no
+mask or restore state changed. Apply uses an explicit new restore path in the
+evidence directory. The suite checks durable original-state records, independently
+reads applied masks from procfs, rolls back, and independently checks every
+original mask and task identity again. It retains runner audit phases plus
+explicit acceptance rollback and final readback records. Post-apply evidence
+failures still trigger rollback. User audit and restore files are untouched.
+
+This suite does not prove recovery after SIGKILL, PID reuse during recovery,
+partial-apply faults, suspend/resume, or rollback-failure handling. Those require
+the separate crash/recovery matrix before provider graduation.
