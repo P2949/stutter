@@ -63,11 +63,26 @@ pub fn verify_cpu_affinity_lifecycle(
         "acceptance expects a stable disposable tree of 3 to 8 tasks"
     );
     let desired = crate::affinity::CpuMask::parse(&cpu.to_string())?;
+    let process_count = snapshot
+        .tasks
+        .values()
+        .map(|task| task.process_id())
+        .collect::<std::collections::BTreeSet<_>>()
+        .len();
+    ensure!(
+        process_count == 3,
+        "acceptance requires parent plus two disposable child processes"
+    );
     ensure!(
         desired.is_subset_of(&crate::affinity::CpuMask::online_cpus()?),
         "selected CPU is offline"
     );
     let mut original = BTreeMap::new();
+    let task_processes = snapshot
+        .tasks
+        .values()
+        .map(|task| (task.task_id().as_u32(), task.process_id().as_u32()))
+        .collect::<BTreeMap<_, _>>();
     for task in snapshot.tasks.values() {
         let tid = task.task_id().as_u32();
         let mask = kernel_mask(tid)?;
@@ -152,7 +167,18 @@ pub fn verify_cpu_affinity_lifecycle(
                     && record.applied_mask == desired,
                 "rollback state identity or original affinity differs"
             );
+            ensure!(
+                record.process_pid.map(|pid| pid.as_u32())
+                    == task_processes.get(&record.tid.as_u32()).copied(),
+                "rollback process identity differs"
+            );
         }
+        let mut archive = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(restore_path.with_extension("before-rollback.json"))?;
+        serde_json::to_writer_pretty(&mut archive, &state)?;
+        archive.sync_all()?;
         readback(&original, Some(&desired))
     })();
     let rollback = action.rollback(&token);
@@ -190,8 +216,8 @@ pub fn verify_cpu_affinity_lifecycle(
         );
     }
     Ok(
-        json!({"target_pid":tree_pid,"target_starttime_ticks":expected_starttime,"tasks":original.iter().map(|(tid,(ticks,mask))|json!({"tid":tid,"starttime_ticks":ticks,"original_mask":mask.to_range_string(),"applied_mask":desired.to_range_string(),"restored_mask":mask.to_range_string()})).collect::<Vec<_>>(),
-        "audit_events":events.len(),"dry_run_unchanged":true,"durable_rollback_verified":true,"independent_kernel_restore_verified":true}),
+        json!({"target_pid":tree_pid,"target_starttime_ticks":expected_starttime,"tasks":original.iter().map(|(tid,(ticks,mask))|json!({"tid":tid,"process_pid":task_processes.get(tid),"starttime_ticks":ticks,"original_mask":mask.to_range_string(),"applied_mask":desired.to_range_string(),"restored_mask":mask.to_range_string()})).collect::<Vec<_>>(),
+        "process_count":process_count,"audit_events":events.len(),"dry_run_unchanged":true,"durable_rollback_verified":true,"independent_kernel_restore_verified":true}),
     )
 }
 

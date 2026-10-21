@@ -263,3 +263,19 @@ validation debt rather than synthetic substitutes.
 - PR #43 passed exact-head CI run `39634530958` and merged as
   `0be8ad5eb3c603a84689576aafc70263a2d5c001`. Main run `39635725995`
   is in progress. Observation evidence/export follow-ups remain open.
+- First real affinity smoke at clean `3d5b2c9` passed: three tasks in one process
+  changed from mask `0-11` to online CPU `0` and independently restored `0-11`,
+  with ten audit records. This was a thread-scope smoke, not complete descendant-
+  process acceptance. Original local evidence: `/tmp/stutter-affinity-clean-20261021`.
+- Expanded the helper to parent plus two separate child processes (five tasks),
+  with explicit child readiness and parent-owned pipes that deliver EOF on parent
+  death. The action suite now requires three processes, checks rollback process
+  IDs, and preserves a create-new pre-rollback journal copy. Added an independent
+  process-cleanup integration test. Complete multi-process real acceptance is
+  still pending the committed-source rerun.
+- Expanded full local gate passed again; xtask unit suite 23 passed and Clippy
+  passed. Final new descendant-cleanup integration test/lint check is pending.
+- PASS descendant-cleanup integration: after SIGKILL of the disposable parent,
+  both child process identities ceased running within the bounded check. Final
+  xtask all-target Clippy and format/diff checks passed. This is helper cleanup,
+  not controller crash-after-apply recovery acceptance.

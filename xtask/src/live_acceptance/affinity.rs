@@ -14,7 +14,13 @@ pub(super) fn run(root: &Path, out: &Path, binary: &Path) -> anyhow::Result<()> 
         let ready = out.join("workload-ready.json");
         let mut child = OwnedChild(
             Command::new(std::env::current_exe()?)
-                .args(["live-workload", "--seconds", "30", "--ready"])
+                .args([
+                    "live-workload",
+                    "--descendants",
+                    "--seconds",
+                    "30",
+                    "--ready",
+                ])
                 .arg(&ready)
                 .stdout(Stdio::null())
                 .stderr(fs::File::create(out.join("workload.stderr"))?)

@@ -63,7 +63,7 @@ functional evidence but does not satisfy this stronger provenance gate.
 
 `xtask live-acceptance affinity --stutter-bin target/debug/stutter --out NEW_DIR`
 uses the existing CPU-affinity action and audited runner on a caller-owned
-three-task disposable helper. It runs without eBPF and does not require root
+five-task, three-process disposable helper. It runs without eBPF and does not require root
 when the host permits changing affinity of same-user tasks. Choose a host with
 more than one allowed CPU so a real mask change can be observed.
 
@@ -79,3 +79,10 @@ failures still trigger rollback. User audit and restore files are untouched.
 This suite does not prove recovery after SIGKILL, PID reuse during recovery,
 partial-apply faults, suspend/resume, or rollback-failure handling. Those require
 the separate crash/recovery matrix before provider graduation.
+
+The affinity helper includes two separate child processes in addition to its
+worker threads. Child readiness is explicit. Each child waits on a parent-owned
+stdin pipe, so parent death closes the writer and causes child exit; normal
+cleanup also kills and reaps the owned child handles. The receipt records three
+processes and five tasks. Before restoration, a separate create-new copy of the
+validated rollback journal is retained as `restore.before-rollback.json`.

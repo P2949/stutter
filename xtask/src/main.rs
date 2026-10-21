@@ -54,6 +54,8 @@ pub enum XtaskCommand {
     #[command(hide = true)]
     LiveWorkload {
         #[arg(long)]
+        descendants: bool,
+        #[arg(long)]
         seconds: u64,
         #[arg(long)]
         ready: PathBuf,
@@ -288,7 +290,11 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
     let root = repo_root()?;
     match command {
         XtaskCommand::LiveAcceptance { suite } => live_acceptance::run(&root, suite),
-        XtaskCommand::LiveWorkload { seconds, ready } => live_acceptance::workload(seconds, &ready),
+        XtaskCommand::LiveWorkload {
+            seconds,
+            ready,
+            descendants,
+        } => live_acceptance::workload(seconds, &ready, descendants),
         XtaskCommand::ObjectiveDocs { write, .. } => {
             objective_docs::run_at(&root.join("docs/AUTOTUNE_OBJECTIVES.md"), write)
         }
