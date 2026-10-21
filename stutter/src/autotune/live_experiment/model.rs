@@ -46,6 +46,7 @@ pub struct LiveExperimentManagerInput<'a> {
     pub candidate_window_seconds: u64,
     pub manual_restore_command: &'static str,
     pub controller_journal_path: Option<PathBuf>,
+    pub audit_path: Option<PathBuf>,
     #[cfg(test)]
     pub exit_rollback_registry: Option<&'a crate::autotune::shutdown::ActiveAutotuneActionRegistry>,
     pub privileged_action_service: Option<&'a dyn PrivilegedActionService>,

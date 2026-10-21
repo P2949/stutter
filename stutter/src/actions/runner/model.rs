@@ -37,7 +37,6 @@ impl<'a> ActionHooks<'a> {
         }
     }
 
-    #[cfg(test)]
     pub(crate) fn after_apply<F>(after_apply: F) -> Self
     where
         F: FnMut(&RollbackToken) -> ActionHookResult + 'a,
@@ -48,7 +47,6 @@ impl<'a> ActionHooks<'a> {
         }
     }
 
-    #[cfg(test)]
     pub(crate) fn with_after_rollback<F>(mut self, after_rollback: F) -> Self
     where
         F: FnMut(&RollbackToken) -> ActionHookResult + 'a,

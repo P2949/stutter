@@ -344,6 +344,7 @@ impl AutotuneRuntime {
             candidate_window_seconds: self.config.candidate_window_seconds,
             manual_restore_command: DAEMON_EMERGENCY_RESTORE_COMMAND,
             controller_journal_path: self.config.controller_journal_path.clone(),
+            audit_path: None,
             #[cfg(test)]
             exit_rollback_registry: None,
             privileged_action_service: privileged_action_service.as_service(),

@@ -24,6 +24,7 @@
 //!   state until they are verified restored;
 //! - unsupported live modes must fail before constructing a mutating runtime configuration.
 
+pub(crate) mod action_transaction;
 pub(crate) mod active_config;
 pub(crate) mod activity;
 pub(crate) mod apply;

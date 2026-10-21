@@ -7,27 +7,28 @@
 #[cfg(test)]
 use std::path::Path;
 
+#[cfg(test)]
 use anyhow::Context;
 
-use super::{model::AuditedCandidateApplyOutcome, unsupported_low_risk_candidate};
+#[cfg(test)]
+use super::model::AuditedCandidateApplyOutcome;
+use super::unsupported_low_risk_candidate;
 #[cfg(test)]
 use crate::actions::RollbackToken;
 #[cfg(test)]
 use crate::actions::runner::run_audited_action_with_audit_path;
+#[cfg(test)]
+use crate::actions::{
+    SafetyClass, TuningAction,
+    runner::{ActionHooks, ActionRunPolicy, AuditedActionResult, run_audited_action_with_hooks},
+};
 #[cfg(test)]
 use crate::autotune::controller_journal::{
     ControllerJournalActionMetadata, journal_process_identity,
     write_controller_journal_applied_with_metadata, write_controller_journal_clean,
 };
 use crate::{
-    actions::{
-        SafetyClass, TuningAction,
-        cpu_affinity::CpuAffinityProfileAction,
-        runner::{
-            ActionHooks, ActionRunPolicy, AuditedActionResult, run_audited_action_with_hooks,
-        },
-    },
-    autotune::planning::candidate::CandidateAction,
+    actions::cpu_affinity::CpuAffinityProfileAction, autotune::planning::candidate::CandidateAction,
 };
 
 #[cfg(test)]
@@ -98,13 +99,7 @@ pub fn append_low_risk_history_event(
     crate::autotune::history::append_autotune_history_event(path, event)
 }
 
-pub fn apply_cpu_affinity_candidate_with_audit(
-    candidate_name: String,
-    action: &CpuAffinityProfileAction,
-) -> anyhow::Result<AuditedCandidateApplyOutcome> {
-    apply_cpu_affinity_candidate_with_audit_hooks(candidate_name, action, ActionHooks::none())
-}
-
+#[cfg(test)]
 pub(crate) fn apply_cpu_affinity_candidate_with_audit_hooks(
     candidate_name: String,
     action: &CpuAffinityProfileAction,
@@ -114,15 +109,14 @@ pub(crate) fn apply_cpu_affinity_candidate_with_audit_hooks(
 
     let run_policy =
         ActionRunPolicy::apply_low_risk(crate::daemon_policy::ActionSource::AutotuneRuntime, false);
-    let AuditedActionResult {
-        state, rollback, ..
-    } = run_audited_action_with_hooks("autotune candidate", action, run_policy, hooks)
-        .with_context(|| {
-            format!(
-                "audited apply failed for autotune candidate '{}'",
-                candidate_name
-            )
-        })?;
+    let AuditedActionResult { rollback, .. } =
+        run_audited_action_with_hooks("autotune candidate", action, run_policy, hooks)
+            .with_context(|| {
+                format!(
+                    "audited apply failed for autotune candidate '{}'",
+                    candidate_name
+                )
+            })?;
 
     let rollback = rollback.with_context(|| {
         format!(
@@ -136,7 +130,6 @@ pub(crate) fn apply_cpu_affinity_candidate_with_audit_hooks(
         action_kind: "cpu_affinity_profile".to_owned(),
         affected_tasks: rollback.affected_tasks(),
         safety_class: action.safety_class(),
-        state,
         rollback,
     })
 }
@@ -151,15 +144,14 @@ pub fn apply_cpu_affinity_candidate_with_audit_path_for_tests(
 
     let run_policy =
         ActionRunPolicy::apply_low_risk(crate::daemon_policy::ActionSource::Test, false);
-    let AuditedActionResult {
-        state, rollback, ..
-    } = run_audited_action_with_audit_path("autotune candidate", action, run_policy, audit_path)
-        .with_context(|| {
-            format!(
-                "audited apply failed for autotune candidate '{}'",
-                candidate_name
-            )
-        })?;
+    let AuditedActionResult { rollback, .. } =
+        run_audited_action_with_audit_path("autotune candidate", action, run_policy, audit_path)
+            .with_context(|| {
+                format!(
+                    "audited apply failed for autotune candidate '{}'",
+                    candidate_name
+                )
+            })?;
 
     let rollback = rollback.with_context(|| {
         format!(
@@ -173,11 +165,11 @@ pub fn apply_cpu_affinity_candidate_with_audit_path_for_tests(
         action_kind: "cpu_affinity_profile".to_owned(),
         affected_tasks: rollback.affected_tasks(),
         safety_class: action.safety_class(),
-        state,
         rollback,
     })
 }
 
+#[cfg(test)]
 pub fn ensure_low_risk_action_allowed(
     action_kind: &str,
     safety_class: &SafetyClass,
