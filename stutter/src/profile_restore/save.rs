@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fs, path::Path};
+use std::{collections::BTreeMap, fs, io::Write, os::unix::fs::OpenOptionsExt, path::Path};
 
 use stutter_core::ids::{Pid, Tid};
 
@@ -40,9 +40,37 @@ pub fn save_restore_state(path: &Path, state: &ProfileRestoreState) -> anyhow::R
 
     let mut state = state.clone();
     state.schema_version = PROFILE_RESTORE_SCHEMA_VERSION;
-    let tmp_path = path.with_extension("json.tmp");
-    fs::write(&tmp_path, serde_json::to_vec_pretty(&state)?)?;
-    fs::rename(&tmp_path, path)?;
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let name = path
+        .file_name()
+        .ok_or_else(|| anyhow::anyhow!("restore path requires a file name"))?;
+    let mut temporary_name = name.to_os_string();
+    temporary_name.push(format!(
+        ".{}-{}.tmp",
+        std::process::id(),
+        crate::audit::unix_nanos_now()
+    ));
+    let tmp_path = parent.join(temporary_name);
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&tmp_path)?;
+    let result = (|| -> anyhow::Result<()> {
+        serde_json::to_writer_pretty(&mut file, &state)?;
+        file.write_all(b"\n")?;
+        file.sync_all()?;
+        fs::rename(&tmp_path, path)?;
+        fs::File::open(parent)?.sync_all()?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&tmp_path);
+    }
+    result?;
     Ok(())
 }
 

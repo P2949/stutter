@@ -101,6 +101,7 @@ fn dry_run_for_applied_journal_does_not_clean_journal() {
 #[test]
 fn dry_run_for_live_runtime_phases_does_not_clean_journal() {
     for phase in [
+        ControllerJournalState::Applying,
         ControllerJournalState::Measuring,
         ControllerJournalState::Keeping,
         ControllerJournalState::Reverting,

@@ -10,6 +10,9 @@ use crate::actions::{
 };
 
 mod identity;
+#[cfg(test)]
+#[path = "cpu_affinity/tests/prepared.rs"]
+mod prepared_tests;
 pub(crate) struct CpuAffinityRollbackHandler {
     pub require_verified_identity: bool,
 }
@@ -287,6 +290,38 @@ impl TuningAction for CpuAffinityProfileAction {
             pending_changes: summary.pending_changes,
             warnings,
         })
+    }
+
+    fn apply_with_prepared_rollback(
+        &self,
+        before_mutation: &mut dyn FnMut(&RollbackToken) -> anyhow::Result<()>,
+    ) -> crate::actions::ApplyResult {
+        // Priority-bearing profiles retain the manual/experimental protocol;
+        // this preparation contract qualifies affinity-only mutation.
+        if crate::profiles::profile_uses_priority_actions(&self.profile) {
+            return self.apply();
+        }
+        self.preflight()?;
+        let prepared = crate::profiles::prepared::prepare_affinity_profile(
+            self.tree_pid,
+            &self.profile,
+            &self.restore_path(),
+            self.force_restore_overwrite,
+        )?;
+        let token = RollbackToken::CpuAffinityRestoreFile {
+            path: prepared.restore_path().to_owned(),
+            affected_tasks: prepared.affected_tasks(),
+        };
+        // A rejected journal write must not even invoke a restore syscall:
+        // commit has not begun and the original snapshot remains retained.
+        before_mutation(&token)?;
+        prepared
+            .commit()
+            .map_err(|failure| crate::actions::PartialApplyError {
+                source: failure.source,
+                rollback: failure.mutation_started.then(|| token.clone()),
+            })?;
+        Ok(token)
     }
 
     fn rollback(&self, token: &RollbackToken) -> anyhow::Result<()> {

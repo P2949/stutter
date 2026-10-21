@@ -1,0 +1,39 @@
+{
+   "cargo_lock_sha256" : "edb02855e2c91777aace3e00eff5ec998f5a7c0f8d692128f269316ee22e1883",
+   "cli_binary_sha256" : "5b727b2bb5dda433b2eceff31ebf1d67c1af4431431ec40acde4df7b6ecd98b2",
+   "cli_version" : "stutter 0.1.0 (git 7c64bcf)",
+   "evidence_kind" : "controlled_real",
+   "git_clean_at_capture" : true,
+   "independent_original_mask_readback" : true,
+   "kernel_release" : "6.18.55",
+   "lib_test_binary_sha256" : "a8ec1dbee996da48e86b9bfca682e77acc50bc673ba6aaa3eea449f2c8d7ea7b",
+   "ordered_raw_trace_lines" : [
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10
+   ],
+   "ordered_steps" : [
+      "snapshot_file_sync",
+      "snapshot_atomic_rename",
+      "snapshot_parent_sync",
+      "prepared_journal_file_sync",
+      "prepared_journal_atomic_rename",
+      "prepared_journal_parent_sync",
+      "first_affinity_syscall"
+   ],
+   "portable_full_bundle_verified" : false,
+   "raw_test_output_sha256" : "e5cdc8abc3f86665533520e3d69a37a8c943533d265668d0fed41910f1eddb33",
+   "raw_trace_sha256" : "194613667b1f2633b4da0369b6a68b696cb08485e4f734ba00d53e4b4e08450c",
+   "real_sigkill_tested" : false,
+   "scope" : "Auxiliary owned-child syscall-order proof, not canonical SIGKILL/restart acceptance",
+   "source_commit" : "7c64bcf872dd4274e2f896842923d605f6710930",
+   "startup_journal_clean" : true,
+   "status" : "PASS",
+   "successful_affinity_syscalls" : 2,
+   "tracer" : "strace -- version 7.2",
+   "tracer_seccomp_filtering" : true
+}

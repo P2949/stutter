@@ -162,3 +162,30 @@ successful/failed rollback, partial apply with successful/failed rollback, and a
 history-write failure. It checks journal, audit, history, saved daemon state and
 blocked future dispatch. Real SIGKILL, interrupted rollback, suspend/resume and
 the full physical failure matrix remain separate acceptance gates.
+
+## Rollback preparation before affinity mutation
+
+Affinity-only actions support a preparation callback through the real audited
+runner (including boxed actions). Preparation captures a single owned plan and
+persists its original identities/masks using a unique temporary file, file sync,
+atomic rename and parent-directory sync. The controller then durably writes
+`Applying(token)` with `rollback_prepared_before_mutation`. Only after that
+callback returns may commit execute affinity syscalls. Commit consumes the exact
+prepared plan and revalidates original masks and process/task start times before
+mutation. Failures before commit do not trigger restore syscalls; the snapshot
+is retained. Failures after mutation may have begun return the prepared token to
+the runner's existing rollback path.
+
+Startup and explicit emergency restore now handle `Applying` with a token.
+Historical tokenless `Applying` still faults. This uses the existing journal
+schema/phase rather than adding a new Prepared enum variant. Priority-bearing
+profiles retain their experimental/manual protocol and do not inherit this
+affinity-only preparation guarantee. The default preparation method for other
+providers is compatibility-only and does not qualify automatic recovery.
+
+Earlier affinity evidence proved restore-file presence, not file/directory sync;
+the preparation work closes that newly identified durability gap. The explicit
+owned-child tests check the real callback before mutation, the journaled boxed
+runner plus startup restore, and rejection before commit. Syscall tracing and
+canonical SIGKILL/restart evidence are separate gates; the latter still keeps
+#48/#29 open.

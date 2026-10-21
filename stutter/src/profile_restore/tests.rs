@@ -13,6 +13,34 @@ use super::{
 };
 
 #[test]
+fn durable_save_does_not_reuse_an_existing_predictable_temporary_file() {
+    let root = crate::test_support::TestRoot::new("restore-temp-isolation");
+    let path = root.join("restore.json");
+    let occupied = path.with_extension("json.tmp");
+    fs::write(&occupied, "unrelated existing temporary file").unwrap();
+    save_restore_state(&path, &ProfileRestoreState::default()).unwrap();
+    assert_eq!(
+        fs::read_to_string(occupied).unwrap(),
+        "unrelated existing temporary file"
+    );
+    assert_eq!(
+        load_restore_state(&path).unwrap().schema_version,
+        PROFILE_RESTORE_SCHEMA_VERSION
+    );
+}
+
+#[test]
+fn durable_save_failure_preserves_destination_and_cleans_only_its_own_temp() {
+    let root = crate::test_support::TestRoot::new("restore-replace-failure");
+    let path = root.join("restore.json");
+    fs::create_dir(&path).unwrap();
+    fs::write(path.join("retained"), "keep").unwrap();
+    assert!(save_restore_state(&path, &ProfileRestoreState::default()).is_err());
+    assert_eq!(fs::read_to_string(path.join("retained")).unwrap(), "keep");
+    assert_eq!(fs::read_dir(root.path()).unwrap().count(), 1);
+}
+
+#[test]
 fn restore_nice_with_matching_identity() {
     let dir = temp_dir("profile-restore-nice-match");
     write_fake_task_stat(&dir, 10, 11, 100, 111);

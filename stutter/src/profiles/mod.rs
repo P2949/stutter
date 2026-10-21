@@ -12,6 +12,7 @@ mod ioprio;
 mod matching;
 pub(crate) mod parse;
 mod plan;
+pub(crate) mod prepared;
 pub(crate) mod render;
 mod summary;
 mod verify;

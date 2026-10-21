@@ -2589,7 +2589,7 @@ The milestone should now require all of the following.
 - [x] real CPU-affinity apply
 - [x] real independent restore
 - [x] multi-process target
-- [ ] durable rollback token before verification in production
+- [x] durable rollback token before verification in production
 - [ ] rollback prepared before first crash-sensitive mutation
 
 ## Recovery
