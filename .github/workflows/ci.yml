@@ -34,7 +34,7 @@ jobs:
           cache-on-failure: true
 
       - name: Install bpf-linker
-        run: cargo install bpf-linker --locked
+        uses: ./.github/actions/setup-bpf-linker
 
       - name: Install dependency hygiene tools
         run: cargo install cargo-deny --locked
@@ -77,7 +77,7 @@ jobs:
           cache-on-failure: true
 
       - name: Install bpf-linker
-        run: cargo install bpf-linker --locked
+        uses: ./.github/actions/setup-bpf-linker
 
       - name: Build first
         run: scripts/smoke/build.sh
@@ -110,7 +110,7 @@ jobs:
           cache-on-failure: true
 
       - name: Install bpf-linker
-        run: cargo install bpf-linker --locked
+        uses: ./.github/actions/setup-bpf-linker
 
       - name: Run autotune safety matrix
         run: scripts/check-autotune-safety.sh
@@ -157,7 +157,7 @@ jobs:
           cache-on-failure: true
 
       - name: Install bpf-linker
-        run: cargo install bpf-linker --locked
+        uses: ./.github/actions/setup-bpf-linker
 
       - name: Artifact contract tests
         run: cargo test -p stutter artifact_contract_tests
