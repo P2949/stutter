@@ -9,6 +9,7 @@ pub mod ebpf_smoke;
 pub mod fixed_work;
 pub mod fixture_coverage;
 pub mod fixtures;
+mod live_acceptance;
 pub mod maturity_report;
 pub mod no_allow_attrs;
 pub mod objective_docs;
@@ -45,6 +46,18 @@ pub struct Cli {
 
 #[derive(Clone, Debug, Eq, PartialEq, Subcommand)]
 pub enum XtaskCommand {
+    #[command(about = "Run canonical live observation acceptance and retain evidence")]
+    LiveAcceptance {
+        #[command(subcommand)]
+        suite: live_acceptance::Suite,
+    },
+    #[command(hide = true)]
+    LiveWorkload {
+        #[arg(long)]
+        seconds: u64,
+        #[arg(long)]
+        ready: PathBuf,
+    },
     #[command(about = "Generate or check objective contract documentation")]
     ObjectiveDocs {
         #[arg(long, conflicts_with = "write", required_unless_present = "write")]
@@ -274,6 +287,8 @@ fn main() -> anyhow::Result<()> {
 fn run(command: XtaskCommand) -> anyhow::Result<()> {
     let root = repo_root()?;
     match command {
+        XtaskCommand::LiveAcceptance { suite } => live_acceptance::run(&root, suite),
+        XtaskCommand::LiveWorkload { seconds, ready } => live_acceptance::workload(seconds, &ready),
         XtaskCommand::ObjectiveDocs { write, .. } => {
             objective_docs::run_at(&root.join("docs/AUTOTUNE_OBJECTIVES.md"), write)
         }
@@ -393,6 +408,8 @@ mod tests {
                 "fmt",
                 "generate-completions",
                 "generate-man",
+                "live-acceptance",
+                "live-workload",
                 "local-install-smoke",
                 "maturity-report",
                 "no-allow-attrs",
