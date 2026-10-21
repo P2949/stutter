@@ -57,9 +57,13 @@ pub(super) fn compare(
     if baseline.start.identity != candidate.start.identity
         || baseline.start.total_units != candidate.start.total_units
         || baseline.start.source != candidate.start.source
+        || baseline.start.target_root_pid != candidate.start.target_root_pid
+        || baseline.start.target_starttime_ticks != candidate.start.target_starttime_ticks
     {
         return ExperimentResult::Inconclusive {
-            reason: "fixed-work compile workload identities, units or sources differ".to_owned(),
+            reason:
+                "fixed-work compile workload identities, target identities, units or sources differ"
+                    .to_owned(),
         };
     }
     if baseline.start.execution_id == candidate.start.execution_id

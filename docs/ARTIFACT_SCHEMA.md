@@ -60,6 +60,7 @@ A typical run directory contains:
   runtime_slices.json
   focus_events.json
   foreground_events.json
+  workload_progress.json
   kms_flip_events.json
   drm_fence_events.json
   wayland_presentation_events.json
@@ -92,6 +93,7 @@ Optional streams:
 - `runtime_slices.json`
 - `focus_events.json`
 - `foreground_events.json`
+- `workload_progress.json`
 - `kms_flip_events.json`
 - `drm_fence_events.json`
 - `wayland_presentation_events.json`
@@ -1056,3 +1058,16 @@ contracts.
 
 `tuning_recommendation.html` is a self-contained HTML view of
 `tuning_recommendation.json`, including formal A/B uncertainty charts.
+
+## Fixed-work completion evidence
+
+`workload_progress.json` contains `WorkloadProgressRecord { elapsed_ms, progress }`.
+The schema-version-1 marker records execution ID, workload identity, source,
+phase, target root PID/start-time ticks, monotonic timestamp, elapsed nanoseconds
+and unit counts. Historical runs without it remain readable and have unavailable
+fixed-work evidence. An empty stream is not a zero-duration successful build.
+
+The cooperative `workload_progress` probe describes its quality contract.
+Only a successful ordered matching marker pair supplies direct completion time;
+raw marker presence is not proof of successful work. See
+[FIXED_WORK_COMPILE.md](FIXED_WORK_COMPILE.md) for producer trust boundaries.

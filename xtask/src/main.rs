@@ -375,6 +375,7 @@ mod tests {
                 "dependency-hygiene",
                 "ebpf-manifest",
                 "ebpf-smoke",
+                "fixed-work",
                 "fixture-check",
                 "fixture-coverage",
                 "fixture-update",

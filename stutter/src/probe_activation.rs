@@ -232,6 +232,7 @@ fn probe_requested(key: ProbeKey, config: &MonitorConfig) -> bool {
         ProbeKey::IrqLatency => config.probes.irq_latency,
         ProbeKey::GpuHwmon => config.probes.hwmon,
         ProbeKey::FrameLog => config.mangohud.log.is_some(),
+        ProbeKey::WorkloadProgress => config.recording.workload_progress_log.is_some(),
         ProbeKey::ForegroundWindow => {
             config.focus.foreground_window
                 || (config.focus.auto_focus && config.focus.focus_source != FocusSource::Heuristic)

@@ -92,3 +92,25 @@ validation debt rather than synthetic substitutes.
   2,685 passed, 0 failed, 5 ignored; lifecycle integration tests: 8 passed.
   Other default-member and integration suites passed. The historical schema-18
   advisor fixture emitted its expected old-schema warning and rendered.
+
+## 2026-10-21: remote integration and fixed-work compile progress
+
+- PR [#39](https://github.com/P2949/stutter/pull/39) merged at
+  `7fc8f3873a0aeaa53c7cab130e03c2fd69db0880`. Exact-head PR CI run
+  `39597465475` and main run `39598456469` completed successfully.
+  Issues #22 and #23 closed. The earlier all-open/no-remote statements above
+  describe their historical checkpoints and are superseded by this entry.
+  This is CI evidence, not live acceptance.
+- Stage B counterexample reproduced before comparator replacement:
+  `faster_identical_completed_compile_work_improves_despite_score_regression`
+  returned Inconclusive for 31.4 s versus 28.0 s (exit 101).
+- Implemented generic fixed-work identity/markers, clean-Git command runner,
+  bounded cooperative log reader, reliable monitor events, optional recording
+  stream, target-scoped aggregation and fixed-work comparison. See
+  [FIXED_WORK_COMPILE.md](FIXED_WORK_COMPILE.md).
+- PASS: targeted protocol/reader/runner/artifact suite (8 tests) and targeted
+  fixed-work objective suite (8 tests). Initial xtask validation caught an
+  outdated CLI command-list assertion (19 passed, 1 failed); added the new
+  `fixed-work` command to its expected public command list.
+- Broader validation is pending. No live compile performance or calibration
+  claim follows from these offline tests.
