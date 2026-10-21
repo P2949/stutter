@@ -4,6 +4,17 @@
 
 ## Project status
 
+Current engineering phase: **Core Validation**. The staged plan and completion
+gates are in [CORE_VALIDATION_PLAN.md](CORE_VALIDATION_PLAN.md); current evidence
+and remaining work are tracked in [CORE_VALIDATION_STATUS.md](CORE_VALIDATION_STATUS.md).
+
+Until this milestone is complete, work is limited to correctness, objective
+semantics, measurement and acceptance infrastructure, recovery/safety fixes,
+validation corpus work, documentation synchronization, and release engineering
+required by those tasks. New mutation providers, system-wide tunables, high-risk
+autotune, scheduler integrations, major remote-control features, new UI surfaces,
+and unrelated crate refactors are deferred.
+
 `stutter` is an experimental open-source project. Near-term work prioritizes
 trustworthy measurement, repeatability, explainability, conservative
 recommendation, and rollback over expanding the number of system settings it
@@ -50,7 +61,7 @@ Fallback-based objectives with direct or derived guardrails:
 Guardrail-only or missing direct signal objectives:
 
 - `GameRunnableLatency` uses normalized score until a distinct runnable-latency objective metric is exposed.
-- `CompileThroughputWithForegroundProtection` protects foreground latency and uses normalized score until `compile_progress_intervals` exists.
+- `CompileThroughputWithForegroundProtection` protects foreground latency but remains inconclusive without genuine throughput data. Compile activity cannot establish improvement.
 
 ## Direction
 

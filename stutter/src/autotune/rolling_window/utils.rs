@@ -55,7 +55,7 @@ pub(crate) fn is_valid_frametime_ms(value: f64) -> bool {
     value.is_finite() && value > 0.0
 }
 
-pub(crate) fn is_compile_progress_record(record: &IntervalRecord) -> bool {
+pub(crate) fn is_compile_activity_record(record: &IntervalRecord) -> bool {
     record.samples > 0
         && matches!(
             record.class,

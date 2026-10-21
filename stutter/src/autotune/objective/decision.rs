@@ -291,16 +291,16 @@ fn compile_signal(input: &ObjectiveComparisonInput<'_>) -> ObjectiveSignal {
         name: "compile_throughput".to_owned(),
         quality,
         baseline: Some(format!(
-            "progress_intervals={} progress_samples={}",
+            "activity_intervals={} activity_samples={}",
             format_optional_u64(baseline.progress_intervals),
             format_optional_u64(baseline.progress_samples)
         )),
         candidate: Some(format!(
-            "progress_intervals={} progress_samples={}",
+            "activity_intervals={} activity_samples={}",
             format_optional_u64(candidate.progress_intervals),
             format_optional_u64(candidate.progress_samples)
         )),
-        summary: "compile progress intervals and samples".to_owned(),
+        summary: "compile activity only; direct throughput unavailable".to_owned(),
         degraded_reason,
     }
 }

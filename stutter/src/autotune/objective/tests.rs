@@ -71,15 +71,70 @@ fn compile_signals(
     progress_samples: u64,
 ) -> ObjectiveSignals {
     ObjectiveSignals {
-        compile_progress_intervals: Some(progress_intervals),
-        compile_progress_samples: Some(progress_samples),
-        compile_progress_source: Some("test-progress".to_owned()),
+        compile_activity_intervals: Some(progress_intervals),
+        compile_activity_samples: Some(progress_samples),
+        compile_activity_source: Some("test-progress".to_owned()),
         signal_quality: ObjectiveSignalQualitySnapshot {
             compile_throughput: ObjectiveSignalQuality::Direct,
             ..ObjectiveSignals::from_window_score(score).signal_quality
         },
         ..ObjectiveSignals::from_window_score(score)
     }
+}
+
+#[test]
+fn longer_compile_activity_cannot_claim_improved_throughput() {
+    let baseline = score(1_000, 12.0, 1);
+    let candidate = score(800, 12.0, 1);
+    let baseline_signals = compile_signals(&baseline, 20, 2_000);
+    let candidate_signals = compile_signals(&candidate, 30, 3_000);
+    let result = compare(
+        ObjectiveKind::CompileThroughputWithForegroundProtection,
+        &baseline,
+        &candidate,
+        &baseline_signals,
+        &candidate_signals,
+    );
+    assert!(matches!(result, ExperimentResult::Inconclusive { .. }));
+}
+
+#[test]
+fn compile_activity_never_provides_a_primary_throughput_verdict() {
+    for candidate_total in [800, 1_000, 1_200] {
+        for candidate_activity in [0, 10, 20, 30] {
+            let baseline = score(1_000, 12.0, 1);
+            let candidate = score(candidate_total, 12.0, 1);
+            let result = compare(
+                ObjectiveKind::CompileThroughputWithForegroundProtection,
+                &baseline,
+                &candidate,
+                &compile_signals(&baseline, 20, 2_000),
+                &compile_signals(&candidate, candidate_activity, candidate_activity * 100),
+            );
+            assert!(matches!(result, ExperimentResult::Inconclusive { .. }));
+        }
+    }
+}
+
+#[test]
+fn historical_compile_progress_deserializes_as_activity_without_direct_throughput() {
+    let mut value = serde_json::to_value(ObjectiveSignals::default()).unwrap();
+    value["compile_progress_intervals"] = serde_json::json!(30);
+    value["compile_progress_samples"] = serde_json::json!(3_000);
+    value["compile_progress_source"] = serde_json::json!("legacy");
+    value["signal_quality"]["compile_throughput"] = serde_json::json!("direct");
+    let signals: ObjectiveSignals = serde_json::from_value(value).unwrap();
+    assert_eq!(signals.compile_activity_intervals, Some(30));
+    assert_eq!(signals.compile_activity_samples, Some(3_000));
+    assert_eq!(signals.compile_activity_source.as_deref(), Some("legacy"));
+    assert_eq!(signals.compile_throughput_signal().direct_progress(), None);
+    assert_eq!(
+        signals.compile_throughput_signal().quality,
+        ObjectiveSignalQuality::Missing
+    );
+    let serialized = serde_json::to_value(signals).unwrap();
+    assert!(serialized.get("compile_progress_intervals").is_none());
+    assert_eq!(serialized["compile_activity_intervals"], 30);
 }
 
 #[test]
@@ -137,7 +192,7 @@ fn default_score_objective_keeps_existing_improvement_path() {
 }
 
 #[test]
-fn compile_objective_direct_signal_wins_over_proxy_regression() {
+fn compile_activity_cannot_override_proxy_regression() {
     let baseline = score(1_000, 12.0, 1);
     let candidate = score(1_200, 12.0, 1);
     let baseline_signals = compile_signals(&baseline, 4, 400);
@@ -151,11 +206,11 @@ fn compile_objective_direct_signal_wins_over_proxy_regression() {
         &candidate_signals,
     );
 
-    assert!(matches!(result, ExperimentResult::Improved { .. }));
+    assert!(matches!(result, ExperimentResult::Inconclusive { .. }));
 }
 
 #[test]
-fn compile_objective_missing_direct_signal_falls_back_to_proxy() {
+fn compile_objective_missing_direct_signal_is_inconclusive() {
     let baseline = score(1_000, 12.0, 1);
     let candidate = score(800, 12.0, 1);
     let baseline_signals = ObjectiveSignals::from_window_score(&baseline);
@@ -169,28 +224,28 @@ fn compile_objective_missing_direct_signal_falls_back_to_proxy() {
         &candidate_signals,
     );
 
-    assert!(matches!(result, ExperimentResult::Improved { .. }));
+    assert!(matches!(result, ExperimentResult::Inconclusive { .. }));
 }
 
 #[test]
-fn compile_throughput_signal_missing_direct_is_degraded_fallback() {
+fn compile_throughput_signal_missing_direct_has_no_fallback() {
     let baseline = score(1_000, 12.0, 1);
     let signals = ObjectiveSignals::from_window_score(&baseline);
 
     let signal = signals.compile_throughput_signal();
 
-    assert_eq!(signal.quality, ObjectiveSignalQuality::Derived);
+    assert_eq!(signal.quality, ObjectiveSignalQuality::Missing);
     assert_eq!(signal.direct_progress(), None);
     assert!(
         signal
             .degraded_reason
             .as_deref()
-            .is_some_and(|reason| reason.contains("direct compile progress intervals missing"))
+            .is_some_and(|reason| reason.contains("direct compile throughput unavailable"))
     );
 }
 
 #[test]
-fn objective_decision_explains_direct_compile_signal() {
+fn objective_decision_explains_missing_compile_throughput() {
     let baseline = score(1_000, 12.0, 1);
     let candidate = score(1_200, 12.0, 1);
     let baseline_signals = compile_signals(&baseline, 4, 400);
@@ -208,15 +263,15 @@ fn objective_decision_explains_direct_compile_signal() {
 
     assert!(matches!(
         decision.outcome,
-        ObjectiveOutcome::Improved { .. }
+        ObjectiveOutcome::Inconclusive { .. }
     ));
     assert_eq!(decision.primary_signal.name, "compile_throughput");
     assert_eq!(
         decision.primary_signal.quality,
-        ObjectiveSignalQuality::Direct
+        ObjectiveSignalQuality::Missing
     );
     assert!(decision.guard_failures.is_empty());
-    assert_eq!(decision.confidence, crate::diagnosis::Confidence::High);
+    assert_eq!(decision.confidence, crate::diagnosis::Confidence::Low);
 }
 
 #[test]
