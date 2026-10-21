@@ -103,3 +103,15 @@ as an empty profile file. Explicit manual restoration retains legacy identity
 compatibility for supported formats; automatic recovery has stricter identity
 requirements. The real-child regression tests exercise these semantics but do
 not replace controller SIGKILL/restart acceptance.
+
+Automatic startup recovery also has an explicit per-token capability gate,
+independent of the manual rollback registry. CPU-affinity restore-file tokens
+are `VerifiedAutomatic`, conditional on the strict whole-file identity/layout
+validation above. Nice, I/O priority, uclamp, cgroup, IRQ affinity, CPU/GPU power,
+and VM tokens are `ManualOnly`. Generic arbitrary-path sysfs tokens are
+`NotRecoverable` automatically. Their explicit manual paths remain available.
+The startup registry contains only the strict affinity handler and no catch-all
+manual handler. An unauthorized token faults before executor dispatch, retains
+the journal/token/manual instruction, and records failure in audit, history and
+daemon state. This permission boundary does not establish full crash durability,
+rollback repeatability, provider graduation, or completion of issue #29.

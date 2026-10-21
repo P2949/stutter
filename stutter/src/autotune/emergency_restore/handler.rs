@@ -63,9 +63,7 @@ pub fn default_autotune_rollback_registry() -> RollbackRegistry {
 }
 
 pub(crate) fn startup_rollback_registry() -> RollbackRegistry {
-    let mut registry = crate::actions::rollback::startup_rollback_registry();
-    registry.register(AutotuneRollbackTokenHandler);
-    registry
+    crate::actions::rollback::startup_rollback_registry()
 }
 
 pub(super) fn rollback_restore_summary_from_registry_result(
