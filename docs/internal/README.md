@@ -1,11 +1,14 @@
 # Internal Developer Notes
 
-This directory contains maintenance and refactor-planning notes for the prototype.
-It is not part of the proposed FYP assessment scope and is not intended as a
-supervisor-facing deliverable.
+This directory contains maintenance baselines and refactor-planning notes that
+support repository upkeep but are not intended to be primary user
+documentation.
 
-Supervisor-facing entry points are:
+Current internal notes:
 
-- [`../SAFETY.md`](../SAFETY.md)
-- [`../ARCHITECTURE_BOUNDARIES.md`](../ARCHITECTURE_BOUNDARIES.md)
-- [`../../SUPERVISOR_README.md`](../../SUPERVISOR_README.md)
+- `CLEANUP_SEQUENCE.md` records behavior-preserving refactor rules.
+- `cleanup-baseline.md` is the baseline consumed by the `xtask maturity-report`
+  command.
+
+Public technical design, migration, safety, tuning, and architecture documents
+belong directly under `docs/`.
