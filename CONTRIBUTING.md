@@ -2,6 +2,46 @@
 
 This repository uses `xtask` commands as the local development gate. Run them with the nightly toolchain from the repository root.
 
+## Nix / NixOS development environment
+
+On systems with Nix and flakes enabled, the preferred development environment is the repository-local flake:
+
+```sh
+nix develop
+```
+
+The shell provides the pinned `nightly-2026-06-06` Rust toolchain, `rust-src`,
+`rustfmt`, `clippy`, `bpf-linker`, `cargo-deny`, `rust-analyzer`, Git, and Python
+for the offline smoke scripts.
+The flake takes bpf-linker from a separate locked nixpkgs input and builds
+it against LLVM 22 to match the pinned compiler's bitcode. The stable
+nixpkgs linker predates LLVM 22 support.
+
+The Nix development environment deliberately does not install or use rustup.
+The Rust compiler, Cargo, Rust components, and eBPF linker should resolve from
+the Nix store. Do not install `bpf-linker` with `cargo install` merely to make
+the Nix shell work.
+
+The repository still uses `RUSTUP_TOOLCHAIN=nightly-2026-06-06` as the canonical
+toolchain identity because the build and validation code also supports
+non-Nix/rustup environments. When rustup is absent, Stutter and Aya use the
+compiler already supplied on `PATH`.
+
+Before diagnosing a Nix-shell build failure, verify:
+
+```sh
+command -v rustc
+command -v cargo
+command -v bpf-linker
+command -v cargo-deny
+command -v rustup || true
+rustc --version
+cargo --version
+```
+
+The Nix-owned commands should resolve beneath `/nix/store`, and `rustup` should
+not be visible inside the Stutter Nix shell.
+
 ## Normal local flow
 
 1. Format the workspace:
@@ -50,11 +90,16 @@ criteria, and counts.
 
 ## Privileged eBPF smoke
 
-The normal `ci` and `validate` gates are non-root. For changes that affect eBPF loading, eBPF map names or types, tracepoint attach logic, or BPF object build/load behavior, also run the ignored privileged loader smoke test on a Linux machine with tracefs mounted and eBPF privileges:
+The normal `ci` and `validate` gates are non-root. For changes that affect eBPF loading, eBPF map names or types, tracepoint attach logic, or BPF object build/load behavior, also run the gated privileged loader smoke suite on a Linux machine with tracefs mounted and eBPF privileges:
 
 ```sh
-sudo -E env PATH="$PATH" RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -p xtask -- privileged-ebpf-smoke
+scripts/validate-privileged-ebpf-smoke.sh
 ```
+
+The wrapper selects `doas` when available and otherwise uses `sudo`, while
+keeping Cargo and compilation unprivileged. Only the finished loader test
+executable runs under privilege through Cargo's native target runner. Run the
+wrapper as your normal user; it rejects root invocation.
 
 Run this before merging loader-sensitive changes. It intentionally stays outside the default validation flow because it requires kernel facilities and privileges that regular CI and local non-root checks should not assume.
 
@@ -73,17 +118,18 @@ bash scripts/smoke/advisor_offline.sh
 cargo test -p stutter architecture_tests
 ```
 
-`cargo run -p xtask -- validate` runs the same checks and additionally builds the eBPF crate explicitly with:
+`cargo run -p xtask -- validate` runs the same checks and explicitly builds
+Stutter again. Its Aya build script compiles the eBPF crate for
+`bpfel-unknown-none` using `-Z build-std=core`.
 
-```text
-rustup run nightly-2026-06-06 cargo build -p stutter-ebpf -Z build-std=core --target bpfel-unknown-none
-```
+When rustup is unavailable, the Aya build path uses the current compatible
+nightly compiler supplied by the environment.
 
-`cargo run -p xtask -- privileged-ebpf-smoke` first runs preflight, then builds the eBPF crate and runs:
-
-```text
-cargo test -p stutter ebpf_loader::tests::load_and_attach_real_bpf_object_smoke_test -- --ignored --exact --nocapture
-```
+`cargo run -p xtask -- privileged-ebpf-smoke` runs preflight and invokes the
+same wrapper. The wrapper builds Stutter and runs the gated
+`ebpf_loader::privileged_loader_tests::privileged_` suite with
+`STUTTER_RUN_PRIVILEGED_EBPF_TESTS=1` on the test executable. It uses an
+explicit native target so the privilege runner cannot affect build scripts.
 
 ## CI mapping
 
