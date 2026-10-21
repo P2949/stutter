@@ -19,6 +19,7 @@ mod tests {
     #[test]
     fn controller_journal_metadata_for_cpu_affinity_action_describes_target_and_restore() {
         let action = CpuAffinityProfileAction {
+            restore_path: None,
             tree_pid: 0,
             profile: Profile {
                 name: "game-main".to_owned(),

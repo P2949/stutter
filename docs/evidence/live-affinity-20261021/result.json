@@ -1,0 +1,61 @@
+{
+  "crash_recovery": "not_run",
+  "error": null,
+  "evidence_kind": "controlled_real",
+  "measurements": {
+    "audit_events": 10,
+    "dry_run_unchanged": true,
+    "durable_rollback_verified": true,
+    "independent_kernel_restore_verified": true,
+    "process_count": 3,
+    "target_pid": 1308872,
+    "target_starttime_ticks": 10290849,
+    "tasks": [
+      {
+        "applied_mask": "0",
+        "original_mask": "0-11",
+        "process_pid": 1308872,
+        "restored_mask": "0-11",
+        "starttime_ticks": 10290849,
+        "tid": 1308872
+      },
+      {
+        "applied_mask": "0",
+        "original_mask": "0-11",
+        "process_pid": 1308873,
+        "restored_mask": "0-11",
+        "starttime_ticks": 10290849,
+        "tid": 1308873
+      },
+      {
+        "applied_mask": "0",
+        "original_mask": "0-11",
+        "process_pid": 1308874,
+        "restored_mask": "0-11",
+        "starttime_ticks": 10290850,
+        "tid": 1308874
+      },
+      {
+        "applied_mask": "0",
+        "original_mask": "0-11",
+        "process_pid": 1308872,
+        "restored_mask": "0-11",
+        "starttime_ticks": 10290851,
+        "tid": 1308875
+      },
+      {
+        "applied_mask": "0",
+        "original_mask": "0-11",
+        "process_pid": 1308872,
+        "restored_mask": "0-11",
+        "starttime_ticks": 10290851,
+        "tid": 1308876
+      }
+    ]
+  },
+  "observation_suite": "not_run",
+  "schema_version": 1,
+  "stage": "affinity_lifecycle",
+  "status": "PASS",
+  "suite": "live_affinity"
+}

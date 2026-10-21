@@ -37,6 +37,7 @@ pub fn apply_profile_to_tree(
         force_restore_overwrite,
         dry_run,
         None,
+        None,
     )
     .map(|result| result.affinity_records)
 }
@@ -52,6 +53,7 @@ pub fn apply_managed_profile_to_tree(
         profile,
         force_restore_overwrite,
         dry_run,
+        None,
         None,
     )
 }
@@ -69,6 +71,24 @@ pub fn apply_managed_profile_to_tree_cached(
         force_restore_overwrite,
         dry_run,
         Some(cache),
+        None,
+    )
+}
+
+pub fn apply_managed_profile_to_tree_at_path(
+    tree_pid: u32,
+    profile: &Profile,
+    force: bool,
+    dry_run: bool,
+    restore_path: &std::path::Path,
+) -> anyhow::Result<ProfileApplyResult> {
+    apply_managed_profile_to_tree_with_cache(
+        tree_pid,
+        profile,
+        force,
+        dry_run,
+        None,
+        Some(restore_path),
     )
 }
 
@@ -78,6 +98,7 @@ fn apply_managed_profile_to_tree_with_cache(
     force_restore_overwrite: bool,
     dry_run: bool,
     mut cache: Option<&mut ProfileApplyCache>,
+    restore_path: Option<&std::path::Path>,
 ) -> anyhow::Result<ProfileApplyResult> {
     let snapshot = process_tree::target_snapshot(
         process_tree::TargetSnapshotInput::default().tree_pids(&[tree_pid]),
@@ -108,7 +129,9 @@ fn apply_managed_profile_to_tree_with_cache(
 
     preflight_profile_plan(&planned)?;
 
-    let restore_path = profile_restore::default_restore_path();
+    let restore_path = restore_path
+        .map(std::path::Path::to_owned)
+        .unwrap_or_else(profile_restore::default_restore_path);
     let affinity_records = planned.affinity_records();
     profile_restore::save_merged_restore_state(
         &restore_path,

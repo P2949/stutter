@@ -114,6 +114,7 @@ fn apply_profile_policy_allows_persistent_effect_only_when_requested() {
     };
 
     let action = crate::actions::cpu_affinity::CpuAffinityProfileAction {
+        restore_path: None,
         tree_pid: 1234,
         profile: profile.clone(),
         force_restore_overwrite: false,

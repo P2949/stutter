@@ -87,6 +87,7 @@ impl ActionFactory for CpuAffinityActionFactory {
             return Err(ActionError::preflight("candidate family mismatch"));
         };
         Ok(Box::new(CpuAffinityProfileAction {
+            restore_path: None,
             tree_pid: plan.tree_pid,
             profile: plan.profile.clone(),
             force_restore_overwrite: false,

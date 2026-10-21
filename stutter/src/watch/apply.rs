@@ -124,6 +124,7 @@ pub async fn apply_profile_command(input: ApplyProfileCommandInput) -> anyhow::R
         }
 
         let action = crate::actions::cpu_affinity::CpuAffinityProfileAction {
+            restore_path: None,
             tree_pid,
             profile,
             force_restore_overwrite: force,
@@ -297,6 +298,7 @@ pub async fn apply_profile_to_tree_blocking(
 ) -> anyhow::Result<Vec<crate::affinity::AffinityRecord>> {
     tokio::task::spawn_blocking(move || {
         let action = crate::actions::cpu_affinity::CpuAffinityProfileAction {
+            restore_path: None,
             tree_pid,
             profile,
             force_restore_overwrite: force,
@@ -324,6 +326,7 @@ pub async fn apply_profile_to_tree_cached_blocking(
 )> {
     tokio::task::spawn_blocking(move || {
         let action = crate::actions::cpu_affinity::CpuAffinityProfileAction {
+            restore_path: None,
             tree_pid,
             profile,
             force_restore_overwrite: force,

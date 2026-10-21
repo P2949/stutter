@@ -10,10 +10,17 @@ use std::{
 use anyhow::{Context, ensure};
 use clap::Subcommand;
 use serde_json::{Value, json};
+mod affinity;
 mod evidence;
 
 #[derive(Clone, Debug, Eq, PartialEq, Subcommand)]
 pub enum Suite {
+    Affinity {
+        #[arg(long)]
+        out: PathBuf,
+        #[arg(long)]
+        stutter_bin: PathBuf,
+    },
     Observation {
         #[arg(long)]
         out: PathBuf,
@@ -85,12 +92,46 @@ fn allowed_cpu() -> anyhow::Result<u32> {
         .context("no allowed CPU for disposable workload")
 }
 
-pub fn workload(seconds: u64, ready: &Path) -> anyhow::Result<()> {
+pub fn workload(seconds: u64, ready: &Path, descendants: bool) -> anyhow::Result<()> {
     ensure!(
         (3..=90).contains(&seconds),
         "workload duration outside bound"
     );
     let deadline = Instant::now() + Duration::from_secs(seconds);
+    let mut children = Vec::new();
+    if descendants {
+        for index in 0..2 {
+            let child_ready = ready.with_extension(format!("child-{index}"));
+            let mut child = OwnedChild(
+                Command::new("sh")
+                    .args([
+                        "-c",
+                        "printf ready > \"$1\"; read -r stop",
+                        "acceptance-child",
+                    ])
+                    .arg(&child_ready)
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn()?,
+            );
+            let ready_deadline = Instant::now() + Duration::from_secs(5);
+            while !child_ready.exists() {
+                ensure!(
+                    child.0.try_wait()?.is_none(),
+                    "descendant exited before readiness"
+                );
+                ensure!(
+                    Instant::now() < ready_deadline,
+                    "descendant readiness timed out"
+                );
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            // The parent's owned stdin writer remains open. Parent death closes
+            // it in the kernel, so the child's read receives EOF and exits.
+            children.push(child);
+        }
+    }
     let busy = std::thread::Builder::new()
         .name("accept-busy".into())
         .spawn(move || {
@@ -121,11 +162,14 @@ pub fn workload(seconds: u64, ready: &Path) -> anyhow::Result<()> {
 }
 
 pub fn run(root: &Path, suite: Suite) -> anyhow::Result<()> {
-    let Suite::Observation {
-        out,
-        stutter_bin,
-        seconds,
-    } = suite;
+    let (out, stutter_bin, seconds) = match suite {
+        Suite::Observation {
+            out,
+            stutter_bin,
+            seconds,
+        } => (out, stutter_bin, seconds),
+        Suite::Affinity { out, stutter_bin } => return affinity::run(root, &out, &stutter_bin),
+    };
     ensure!(cfg!(target_os = "linux"), "live acceptance requires Linux");
     fs::create_dir(&out)
         .context("acceptance output must be a new directory with an existing parent")?;

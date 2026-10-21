@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "affinity_records": [
+    {
+      "tid": 1308872,
+      "process_pid": 1308872,
+      "process_starttime_ticks": 10290849,
+      "task_starttime_ticks": 10290849,
+      "original_mask": "0-11",
+      "applied_mask": "0"
+    },
+    {
+      "tid": 1308873,
+      "process_pid": 1308873,
+      "process_starttime_ticks": 10290849,
+      "task_starttime_ticks": 10290849,
+      "original_mask": "0-11",
+      "applied_mask": "0"
+    },
+    {
+      "tid": 1308874,
+      "process_pid": 1308874,
+      "process_starttime_ticks": 10290850,
+      "task_starttime_ticks": 10290850,
+      "original_mask": "0-11",
+      "applied_mask": "0"
+    },
+    {
+      "tid": 1308875,
+      "process_pid": 1308872,
+      "process_starttime_ticks": 10290849,
+      "task_starttime_ticks": 10290851,
+      "original_mask": "0-11",
+      "applied_mask": "0"
+    },
+    {
+      "tid": 1308876,
+      "process_pid": 1308872,
+      "process_starttime_ticks": 10290849,
+      "task_starttime_ticks": 10290851,
+      "original_mask": "0-11",
+      "applied_mask": "0"
+    }
+  ],
+  "nice_records": [],
+  "ionice_records": []
+}

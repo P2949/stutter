@@ -37,7 +37,7 @@ pub mod actions {
         RollbackRegistry, RollbackRegistryError, RollbackResult, RollbackToken,
         RollbackTokenKindError, SafetyClass, ScopeLimitExceeded, TaskIdentity, TuningAction,
         UclampRestoreRecord, VmKnobAction, VmKnobChange, VmKnobMode, VmKnobPolicy,
-        VmKnobRestoreRecord,
+        VmKnobRestoreRecord, acceptance::verify_cpu_affinity_lifecycle,
     };
 }
 

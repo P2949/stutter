@@ -236,3 +236,57 @@ validation debt rather than synthetic substitutes.
 - Issue #27 remains open pending remote integration and the remaining acceptance
   evidence requirements. Game-objective controlled capture, portable full export,
   independent affinity/recovery suites, overhead and multiple kernels remain open.
+
+## 2026-10-21: P0 integration and live affinity progress
+
+- P0 decision-model integration gate PASS at current remote main
+  `37ed5ce82e95f6335acbff2b25a7e07efe8f0169`: exact-main run
+  `39634172998` completed successfully. Direct histogram semantics, activity
+  safety/fixed-work primary, nine-objective behavioral contracts, exhaustive
+  descriptors, generated documentation and visible objective CI are merged.
+  This does not complete the Core Validation milestone or lift its feature freeze.
+- PR #43 remains in progress. Added independent `live-acceptance affinity`
+  suite using the existing CPU-affinity action and audited runner with an
+  explicit new restore path. Existing callers retain their default paths.
+  The suite snapshots task identities and original masks, validates dry-run,
+  durable rollback records and applied kernel masks, rolls back, independently
+  rechecks all original masks and checks the audit phases. Post-apply validation
+  errors still attempt rollback through the known isolated restore token.
+- Added refusal tests for stale root identity and pre-existing restore state.
+  The first compile caught tuple iteration over the task snapshot; fixed it to
+  iterate task values. Intermediate full library run passed (2,707 passed,
+  5 ignored). Final checks and real affinity acceptance remain pending.
+- Final local validation PASS: full format/build/all-target Clippy/test gate
+  (2,709 library passed, 5 ignored; 8 lifecycle integration passed; other suites
+  passed), 23 xtask tests and extended stutter/xtask all-target Clippy. Committing
+  and rebuilding before real affinity acceptance is required by provenance policy.
+- PR #43 passed exact-head CI run `39634530958` and merged as
+  `0be8ad5eb3c603a84689576aafc70263a2d5c001`. Main run `39635725995`
+  is in progress. Observation evidence/export follow-ups remain open.
+- First real affinity smoke at clean `3d5b2c9` passed: three tasks in one process
+  changed from mask `0-11` to online CPU `0` and independently restored `0-11`,
+  with ten audit records. This was a thread-scope smoke, not complete descendant-
+  process acceptance. Original local evidence: `/tmp/stutter-affinity-clean-20261021`.
+- Expanded the helper to parent plus two separate child processes (five tasks),
+  with explicit child readiness and parent-owned pipes that deliver EOF on parent
+  death. The action suite now requires three processes, checks rollback process
+  IDs, and preserves a create-new pre-rollback journal copy. Added an independent
+  process-cleanup integration test. Complete multi-process real acceptance is
+  still pending the committed-source rerun.
+- Expanded full local gate passed again; xtask unit suite 23 passed and Clippy
+  passed. Final new descendant-cleanup integration test/lint check is pending.
+- PASS descendant-cleanup integration: after SIGKILL of the disposable parent,
+  both child process identities ceased running within the bounded check. Final
+  xtask all-target Clippy and format/diff checks passed. This is helper cleanup,
+  not controller crash-after-apply recovery acceptance.
+- PASS clean-source multi-process affinity acceptance at `9130ea1`: parent and
+  two children, five tasks; each original mask `0-11`, applied mask `0`, and
+  independently restored mask `0-11`. Dry-run unchanged, durable original/task/
+  process identities checked, pre-rollback journal archived and ten audit events
+  verified. Ran as the normal user, independently of BPF/observation support.
+  [Retained evidence](evidence/live-affinity-20261021/README.md) includes the
+  receipt, selected environment, journal and sanitized audit. Full original
+  bundle: `/tmp/stutter-affinity-process-tree-20261021`.
+- PR #43 main CI run `39635725995` completed successfully at exact merge
+  `0be8ad5eb3c603a84689576aafc70263a2d5c001`. Affinity remote integration,
+  controller crash/restart recovery, fault matrix and graduation remain open.

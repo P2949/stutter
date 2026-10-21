@@ -22,6 +22,7 @@ mod keep_best_policy_tests {
             }],
         };
         let action = CpuAffinityProfileAction {
+            restore_path: None,
             tree_pid: 1234,
             profile,
             force_restore_overwrite: false,

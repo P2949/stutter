@@ -104,12 +104,18 @@ impl RollbackHandler for CpuAffinityRollbackHandler {
 }
 
 pub struct CpuAffinityProfileAction {
+    pub restore_path: Option<std::path::PathBuf>,
     pub tree_pid: u32,
     pub profile: crate::profiles::Profile,
     pub force_restore_overwrite: bool,
 }
 
 impl CpuAffinityProfileAction {
+    fn restore_path(&self) -> std::path::PathBuf {
+        self.restore_path
+            .clone()
+            .unwrap_or_else(crate::profile_restore::default_restore_path)
+    }
     pub fn descriptor_with_persistent_effect(
         &self,
         persistent_effect: bool,
@@ -215,7 +221,7 @@ impl TuningAction for CpuAffinityProfileAction {
     }
 
     fn preflight(&self) -> anyhow::Result<Vec<ActionWarning>> {
-        self.preflight_for_restore_path(&crate::profile_restore::default_restore_path())
+        self.preflight_for_restore_path(&self.restore_path())
     }
 
     fn dry_run(&self) -> anyhow::Result<ActionState> {
@@ -240,14 +246,15 @@ impl TuningAction for CpuAffinityProfileAction {
     fn apply(&self) -> crate::actions::ApplyResult {
         let res: Result<RollbackToken, crate::actions::PartialApplyError> = (|| {
             self.preflight()?;
-            let result = crate::profiles::apply_managed_profile_to_tree(
+            let result = crate::profiles::apply_managed_profile_to_tree_at_path(
                 self.tree_pid,
                 &self.profile,
                 self.force_restore_overwrite,
                 false,
+                &self.restore_path(),
             )?;
             Ok(RollbackToken::CpuAffinityRestoreFile {
-                path: crate::profile_restore::default_restore_path(),
+                path: self.restore_path(),
                 affected_tasks: result.affected_tasks(),
             })
         })();
@@ -311,6 +318,7 @@ mod tests {
 
     fn action() -> CpuAffinityProfileAction {
         CpuAffinityProfileAction {
+            restore_path: None,
             tree_pid: u32::MAX,
             profile: profile("test-profile"),
             force_restore_overwrite: false,

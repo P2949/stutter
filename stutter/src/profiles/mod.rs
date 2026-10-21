@@ -21,8 +21,8 @@ pub(crate) mod warnings;
 mod tests;
 
 pub use apply::{
-    apply_managed_profile_to_tree, apply_managed_profile_to_tree_cached, apply_profile_to_tree,
-    profile_uses_priority_actions,
+    apply_managed_profile_to_tree, apply_managed_profile_to_tree_at_path,
+    apply_managed_profile_to_tree_cached, apply_profile_to_tree, profile_uses_priority_actions,
 };
 pub use evaluate::{ProfileEvaluationInput, evaluate_profile_for_tasks};
 #[cfg(test)]
