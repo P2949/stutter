@@ -120,6 +120,9 @@ jobs:
       - name: Run autotune safety matrix
         run: scripts/check-autotune-safety.sh
 
+      - name: Startup recovery capability and identity contracts
+        run: cargo test -p stutter --lib startup_recovery
+
       - name: Fake daemon simulation
         run: cargo test -p stutter autotune::simulation
 

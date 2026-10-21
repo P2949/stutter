@@ -100,6 +100,7 @@ impl StartupRecoveryRollbackExecutor for RealStartupRecoveryRollbackExecutor {
         &mut self,
         token: &RollbackToken,
     ) -> anyhow::Result<StartupRecoveryRollbackSummary> {
+        crate::actions::rollback::recovery::require_automatic_recovery(token)?;
         let result = crate::autotune::emergency_restore::startup_rollback_registry()
             .restore_token(token)
             .with_context(|| {
@@ -263,6 +264,15 @@ fn recover_applied_journal_record<E: StartupRecoveryRollbackExecutor + ?Sized>(
     rollback_token: RollbackToken,
 ) -> anyhow::Result<StartupRecoveryOutcome> {
     let manual_restore_command = manual_restore_command_for_token(&rollback_token);
+    let manual_restore_command = if manual_restore_command.trim().is_empty() {
+        format!(
+            "inspect retained controller journal {}: token_kind={} contains no manual restore operations",
+            config.journal_path.display(),
+            rollback_token.kind()
+        )
+    } else {
+        manual_restore_command
+    };
 
     if !config.rollback_on_crash_recovery {
         let reason = format!(
@@ -292,7 +302,12 @@ fn recover_applied_journal_record<E: StartupRecoveryRollbackExecutor + ?Sized>(
         });
     }
 
-    match executor.rollback(&rollback_token) {
+    // Gate before dispatch, including custom executors. A manual registry entry
+    // must never implicitly authorize automatic startup mutation.
+    let rollback_result =
+        crate::actions::rollback::recovery::require_automatic_recovery(&rollback_token)
+            .and_then(|()| executor.rollback(&rollback_token));
+    match rollback_result {
         Ok(summary) => {
             write_controller_journal_clean(&config.journal_path).with_context(|| {
                 format!(

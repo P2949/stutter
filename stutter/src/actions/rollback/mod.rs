@@ -2,6 +2,8 @@ use std::path::PathBuf;
 
 use crate::actions::token::RollbackToken;
 
+pub(crate) mod recovery;
+
 #[derive(Debug, thiserror::Error)]
 pub enum RollbackRegistryError {
     #[error(
@@ -173,7 +175,12 @@ pub fn default_rollback_registry() -> RollbackRegistry {
 }
 
 pub(crate) fn startup_rollback_registry() -> RollbackRegistry {
-    rollback_registry(true)
+    // Never inherit manual providers or a catch-all token handler here.
+    let mut registry = RollbackRegistry::new();
+    registry.register(crate::actions::cpu_affinity::CpuAffinityRollbackHandler {
+        require_verified_identity: true,
+    });
+    registry
 }
 
 fn rollback_registry(require_verified_identity: bool) -> RollbackRegistry {

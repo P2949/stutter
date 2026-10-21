@@ -1,1713 +1,1988 @@
-# `stutter` engineering plan: correctness → validation → calibration → release
+I re-audited the repository from the current GitHub state rather than carrying the old plan forward unchanged. The biggest change is that the earlier P0 objective-correctness phase is now essentially complete; the project has moved into **recovery correctness, real-system evidence, calibration, and release-boundary work**. The audit also exposed a few new issues that were not visible in the earlier snapshot—especially around crash durability, startup recovery scope, live-evidence export, and branch/repository hygiene.
 
-The project should now enter a **consolidation and proof phase**. The audit found that the architecture is already broad and in many places quite mature, but the central measurement/decision loop needs to become more trustworthy before any more major tuning providers or subsystems are added. Pasted text
+# Stutter — Updated Repository-Wide Core Validation Plan
 
-The plan below addresses all of the issues identified in the audit:
+## 1. Current conclusion
 
-- incorrect/ambiguous autotune objective semantics;
-- `GameRunnableLatency` not directly measuring runnable latency;
-- compile activity being treated as compile throughput;
-- missing objective-level regression contracts;
-- documentation/code drift;
-- lack of repeatable real-system acceptance testing;
-- insufficient real crash/recovery validation;
-- incomplete kernel compatibility evidence;
-- diagnosis thresholds and score weights lacking empirical calibration;
-- too much synthetic evidence relative to real captures;
-- unclear feature-maturity boundaries;
-- lack of an executable GitHub issue backlog;
-- no proper first software-release boundary yet.
+The correct development sequence has changed because a substantial amount of the previous plan has already been implemented.
 
-The intended order is important:
+The repository currently has:
 
-> **Objective correctness → live end-to-end validation → recovery validation → empirical calibration → supported product boundary → first release.** Pasted text
+- 9 branches;
+- 25 issues total: 10 open and 15 closed;
+- 20 pull requests total: 1 open and 19 closed/merged;
+- a completed P0 objective-semantics phase;
+- a real clean-source live scheduler observation acceptance path;
+- a real multi-process CPU-affinity apply/restore acceptance path;
+- an open startup-recovery correctness PR;
+- an additional unmerged branch containing crash-acceptance and rollback-before-verification work.
 
----
+The current branch inventory confirms nine branches, including `main`, six historical Core Validation implementation branches that have already landed, the open `fix/startup-recovery-identity` branch, and the still-unmerged `fix/controller-rollback-before-verify` branch.
 
-# Phase 0 — Freeze scope and turn the audit into the active backlog
+The project should therefore **not restart the old plan from objective correctness**.
 
-## Goal
+The new sequence should be:
 
-Prevent new feature work from expanding the validation burden while the core semantics are corrected.
+> **finish recovery correctness → prove crash safety → finish live evidence portability → kernel/overhead validation → build real validation corpus → calibrate diagnosis/score → define supported boundary → release**
 
-The audit explicitly recommends postponing more power knobs, VM tuning, IRQ mutation, scheduler work, remote-control expansion, another UI, more telemetry integrations and large architecture refactors. Pasted text
-
-### Step 0.1 — Declare a temporary feature freeze
-
-Add a short section to `docs/ROADMAP.md` or a new development-status section:
-
-```text
-Current engineering phase: Core Validation
-
-Until the Core Validation milestone is complete:
-
-Allowed:
-- correctness fixes
-- objective semantics
-- measurement infrastructure
-- test/acceptance infrastructure
-- recovery/safety fixes
-- validation corpus work
-- documentation synchronization
-- release engineering required by the above
-
-Deferred:
-- new mutation providers
-- new system-wide tunables
-- high-risk autotune
-- scheduler replacement/integration
-- major remote-control features
-- new UI surfaces
-- unrelated crate splitting/refactoring
-```
-
-This is not a permanent product restriction. It is a development discipline.
-
-### Step 0.2 — Create a GitHub milestone
-
-Suggested milestone:
-
-```text
-Core Validation
-```
-
-The milestone ends when:
-
-- `GameRunnableLatency` has a real primary signal;
-- compile throughput can no longer produce misleading autonomous results;
-- all objectives have behavioral contracts;
-- live observation acceptance passes;
-- live low-risk mutation/rollback acceptance passes;
-- crash recovery passes;
-- initial real-world calibration corpus exists.
-
-The audit found that the roadmap is large while the issue tracker does not currently represent the actual engineering queue. Pasted text
-
-### Step 0.3 — Create the initial issue set
-
-I would create these immediately:
-
-```text
-P0: Define direct GameRunnableLatency objective signal
-
-P0: Prevent compile activity from being treated as compile throughput
-
-P0: Add behavioral contract tests for every autotune objective
-
-P0: Introduce machine-readable objective descriptors
-
-P0: Make AUTOTUNE_OBJECTIVES.md validated/generated from implementation
-
-P1: Add live observation acceptance harness
-
-P1: Add live reversible CPU-affinity acceptance harness
-
-P1: Add crash/startup recovery acceptance matrix
-
-P1: Establish real-kernel compatibility corpus
-
-P2: Establish diagnosis calibration corpus
-
-P2: Calibrate scheduler/IRQ/I/O/GPU diagnosis thresholds
-
-P2: Evaluate and calibrate StutterScore weighting
-
-P2: Track validation evidence provenance and real-evidence coverage
-
-P3: Define supported/experimental/internal capability tiers
-
-P3: Prepare first versioned Stutter release
-```
-
-Use labels such as:
-
-```text
-priority:P0
-priority:P1
-correctness
-autotune
-measurement
-safety
-validation
-kernel
-diagnosis
-release
-```
+The feature freeze should remain in place until this sequence is substantially complete.
 
 ---
 
-# Phase 1 — Lock the current bugs into regression tests
+# 2. Repository state after the new audit
 
-Do this **before fixing the implementation**.
+## 2.1 P0 is complete
 
-The point is to ensure you can prove both:
+The previous highest-priority problems have now been addressed.
 
-1. why the old behavior was wrong;
-2. that it can never silently return.
+The execution ledger records that:
 
-Use a branch such as:
+- compiler activity was renamed/demoted and can no longer independently claim throughput improvement;
+- direct combined-window runnable-latency histograms were implemented;
+- `GameRunnableLatency` now has a direct primary p99 measurement rather than generic-score fallback;
+- fixed-work compile completion was implemented;
+- all nine objectives received behavioral contract coverage;
+- objective descriptors became authoritative and machine-readable;
+- objective documentation is generated/validated;
+- dedicated objective CI exists;
+- exact-main P0 CI passed.
 
-```text
-fix/autotune-objective-semantics
-```
+Those areas should remain regression-protected, but **they are no longer active development priorities**.
 
----
+Do not reopen:
 
-## Step 1.1 — Add a failing test for `GameRunnableLatency`
-
-The current problem is that `GameRunnableLatency` effectively returns the generic experiment result unless a guardrail rejects it. Pasted text
-
-Construct two windows where:
-
-```text
-baseline runnable latency = clearly better
-candidate runnable latency = clearly worse
-
-but
-
-generic stutter score = candidate appears better
-```
-
-Expected new behavior:
-
-```text
-GameRunnableLatency => Regressed
-```
-
-Expected current behavior:
-
-```text
-GameRunnableLatency => Improved
-```
-
-or whatever generic result exposes the mismatch.
-
-This becomes the regression test proving why the change is necessary.
+- #22;
+- #23;
+- #24;
+- #25;
+- #26;
+- #37.
 
 ---
 
-## Step 1.2 — Add the inverse runnable-latency test
+# 3. Evaluation of all nine branches
 
-Create:
+| Branch | Current meaning | Action |
+|---|---|---|
+| `main` | Current authoritative integrated state at `bbcead0...` during this audit | Keep; protect it |
+| `fix/autotune-objective-semantics` | P0 work already integrated | Delete remote branch after current safety work is rebased |
+| `feat/fixed-work-compile-throughput` | Fixed-work work already integrated; branch is behind `main` with no unique commits | Delete |
+| `test/objective-contract-matrix` | Behavioral matrix already integrated | Delete |
+| `feat/objective-descriptors` | Descriptor/docs work already integrated | Delete |
+| `feat/live-observation-acceptance` | Live observation implementation already integrated; no unique work remains | Delete |
+| `feat/live-affinity-acceptance` | Live affinity implementation already integrated; no unique work remains | Delete |
+| `fix/startup-recovery-identity` | **Active PR #45**, important correctness work | Keep, finish and merge first |
+| `fix/controller-rollback-before-verify` | **Important unmerged follow-up work** based on PR #45 | Keep, rebase after #45, split/rework into next safety PR(s) |
+
+The fixed-work branch, for example, is already entirely behind current `main` with zero commits ahead, and the same is true of the merged live-acceptance branch tips.
+
+### Branch-cleanup rule
+
+Do **not** delete the two active recovery branches yet.
+
+After PR #45 is merged and `fix/controller-rollback-before-verify` is rebased onto the resulting `main`, delete the six already-merged implementation branches.
+
+That should leave approximately:
 
 ```text
-baseline:
-    runnable p99 = 4.0 ms
-
-candidate:
-    runnable p99 = 2.0 ms
-
-generic score:
-    approximately unchanged
+main
+fix/controller-rollback-before-verify
 ```
 
-Expected:
+plus whatever new branch is actively under development.
 
-```text
-Improved
-```
-
-This proves that the objective can detect improvement even when the generic score is inconclusive.
+After subsequent merges, prefer deleting merged feature branches promptly rather than allowing the repository to accumulate historical branch heads.
 
 ---
 
-## Step 1.3 — Add guardrail tests
+# 4. Add protection to `main`
 
-You need separate tests proving:
+The branch information currently reports `main` as unprotected.
 
-```text
-runnable latency improves
-BUT frame pacing materially regresses
-=> Regressed / rejected
-```
+For a project whose next work modifies crash recovery and privileged mutation semantics, that is unnecessary risk.
 
-and:
+Create a GitHub ruleset for `main`.
+
+Recommended minimum:
 
 ```text
-runnable latency improves
-BUT thermal state becomes degraded
-=> rejected
+block force pushes
+block branch deletion
+require pull request before merge
+require normal CI
+require daemon-safety
+require schema/fixture gates
+require objective-contract/docs gates
 ```
 
-and similarly for CPU/GPU power-limit guardrails.
+Do **not** make privileged live-system testing a normal public-PR requirement; it belongs to trusted release/main validation.
 
-This encodes the architectural principle from the audit:
-
-> the primary metric determines whether the objective improved; guardrails determine whether the improvement caused unacceptable damage elsewhere. Pasted text
+For a solo-maintained experimental project, there is no need to impose cumbersome review-count requirements on yourself. The important pieces are preventing accidental force pushes and ensuring ordinary CI cannot be bypassed accidentally.
 
 ---
 
-# Phase 2 — Implement a real runnable-latency objective
+# 5. Evaluation of the 15 closed issues
 
-This is the highest-value technical fix in the project.
+All 25 repository issues are visible in the current issue history.
 
----
+## #10 — Supervisor pitch PDF visual check
 
-## Step 2.1 — Define the exact semantics first
+**Status:** correctly closed.
 
-Before writing code, define what `GameRunnableLatency` means.
+This belonged to the old academic/supervisor workflow.
 
-Something like:
+PR #21 subsequently removed that project identity.
 
-> `GameRunnableLatency` measures runnable-to-running scheduler delay experienced by tasks classified as latency-sensitive members of the currently targeted game/process tree during the experiment window.
+### Action
 
-Decide explicitly which task classes count.
+None.
 
-For example:
-
-```text
-Game
-GameRenderThread
-GameWorkerThread
-GameHelper
-WineServer
-GameScope
-```
-
-Potentially some should contribute to guardrails but not the primary metric.
-
-Do not leave this implicit.
+Do not recreate this work in the current roadmap.
 
 ---
 
-## Step 2.2 — Define the primary statistic
+## #11 — Long-term raw artifact storage policy
 
-Do **not** average interval p99 values.
+**Status:** correctly closed for its original purpose.
 
-For example:
+The historical KCD1 artifact policy was resolved by moving large evidence outside the normal source tree/release workflow.
 
-```text
-interval A p99 = 1 ms from 10,000 samples
-interval B p99 = 20 ms from 4 samples
+### New implication
 
-average interval p99 = 10.5 ms
-```
+The project now has a **different** evidence-storage problem: live acceptance bundles.
 
-That does not represent the actual distribution.
+Do not reopen #11.
 
-Instead aggregate the underlying latency data across the entire measurement window.
-
-Preferred hierarchy:
-
-### Best option
-
-Merge latency histograms across the window.
-
-Then derive:
+Handle the new requirement under #27/#34 or a dedicated new issue:
 
 ```text
-p50
-p95
-p99
-p99.9 if sample volume permits
-max
->1 ms rate
->2 ms rate
->5 ms rate
-```
-
-### Acceptable alternative
-
-Maintain a window-local streaming latency histogram specifically for objective evaluation.
-
-The important part is that percentile calculations operate over the **combined sample population**.
-
----
-
-# Phase 3 — Extend `ObjectiveSignals`
-
-The audit recommends first-class runnable-latency fields rather than routing everything through the generic score. Pasted text
-
-Add something like:
-
-```rust
-pub struct ObjectiveSignals {
-    // existing...
-
-    pub runnable_latency_p95_ns: Option<u64>,
-    pub runnable_latency_p99_ns: Option<u64>,
-    pub runnable_latency_max_ns: Option<u64>,
-
-    pub runnable_over_1ms: Option<u64>,
-    pub runnable_over_2ms: Option<u64>,
-    pub runnable_over_5ms: Option<u64>,
-
-    pub runnable_samples: Option<u64>,
-
-    pub runnable_latency_source: Option<String>,
-}
-```
-
-Add to the quality snapshot:
-
-```rust
-pub runnable_latency: ObjectiveSignalQuality,
+P1: Make live acceptance evidence portable and privacy-verifiable
 ```
 
 ---
 
-## Step 3.1 — Prefer rates to raw counts
+## #12 — Confirm CI for supervisor handoff
 
-Raw:
+**Status:** correctly closed and obsolete.
 
-```text
-baseline: 10 over-5ms events
-candidate: 11 over-5ms events
-```
-
-means very little if:
-
-```text
-baseline samples: 1,000
-candidate samples: 100,000
-```
-
-Therefore derive:
-
-```text
-over_5ms_rate =
-    over_5ms / runnable_samples
-```
-
-Do the same for other thresholds.
+No further work.
 
 ---
 
-## Step 3.2 — Keep both percentile and tail-event information
+## #13 — Explicit counterbalanced tune order
 
-A good scheduler-latency objective probably should not depend on only one number.
+**Status:** correctly closed.
 
-For example:
+The issue required alternating/seeded order, artifact recording and testing. The implementation history records alternating, fixed and `seed:N` support together with persisted `candidate_order` and comparability checks.
 
-Primary:
+### Action
 
-```text
-p99 runnable latency
-```
+Keep regression coverage.
 
-Secondary:
+Do not reopen.
 
-```text
->5ms event rate
-```
-
-Supporting diagnostics:
-
-```text
-p95
-max
->1ms
->2ms
-sample count
-```
-
-That avoids a situation where a tiny p99 improvement hides a large increase in catastrophic stalls.
+Later calibration should validate whether the experiment methodology behaves well empirically, but that belongs to P2.
 
 ---
 
-# Phase 4 — Define the `GameRunnableLatency` comparator
+## #14 — Order-balance warnings
 
-Do not just write another ad-hoc `if`.
+**Status:** correctly closed.
 
-Create a clearly documented comparator.
+The implementation records `candidate-order-not-counterbalanced` and propagates the warning into JSON/Markdown/HTML recommendation output.
 
-A reasonable first policy:
+### Action
 
-```text
-1. Validate data quality.
-
-2. Require enough runnable-latency samples.
-
-3. Reject if required runnable signal is unavailable.
-
-4. Check global safety guardrails.
-
-5. Compare p99 runnable latency.
-
-6. Check >5ms rate as a tail guardrail.
-
-7. If primary change is too small for a meaningful verdict:
-      Inconclusive.
-
-8. If p99 improves sufficiently and tail rate does not regress:
-      Improved.
-
-9. If p99 regresses materially OR severe-tail rate regresses:
-      Regressed.
-
-10. Otherwise:
-      Inconclusive.
-```
-
-Do not define an aggressive improvement threshold yet. Start conservative and calibrate it later.
+No new implementation required.
 
 ---
 
-## Step 4.1 — Add sample sufficiency
+## #15 — eBPF linker warning noise
 
-A p99 based on 40 latency samples is not the same thing as a p99 from 100,000 samples.
+**Status:** correctly closed.
 
-Add a policy such as:
+The wrapper exists and verbosity can be restored explicitly through `STUTTER_EBPF_VERBOSE=1`.
 
-```text
-minimum_runnable_samples
-```
+### Action
 
-and return:
-
-```text
-Inconclusive {
-    reason: "insufficient runnable-latency samples"
-}
-```
-
-rather than pretending the result is meaningful.
+None.
 
 ---
 
-## Step 4.2 — Preserve fallback behavior only where explicitly intended
+## #16 — Offline supervisor demo
 
-If runnable latency is missing, I would **not** let `GameRunnableLatency` quietly become a generic stutter-score objective.
+**Status:** correctly closed/historical.
 
-Prefer:
+Its modern successor is not another supervisor demo.
 
-```text
-Inconclusive:
-"direct runnable-latency signal unavailable"
-```
-
-If you retain a fallback at all, make it explicit in the result metadata:
+The equivalent product work belongs to #36:
 
 ```text
-primary_metric_used = generic_score_proxy
-confidence = derived/approximate
+minimal first-release tutorial
 ```
-
-But for an autonomous apply decision, I would require the direct signal.
 
 ---
 
-# Phase 5 — Fix compile-throughput semantics immediately
+## #17 — Automated sanitized evidence export
 
-The compile issue is potentially more dangerous because the current metric can reward longer activity. Pasted text
+**Status:** historically completed, but its implementation should not be mistaken for the new live-evidence requirement.
 
-Do this in two stages.
+The existing exporter:
+
+- copies `evidence-bundle/`;
+- excludes `**/runs/**`;
+- generates `MANIFEST.sha256`;
+- runs a basic regex privacy scan.
+
+There is one concrete weakness worth fixing:
+
+```bash
+rg ... || echo "No obvious local paths found"
+```
+
+means discovering a suspicious path prints it but does **not fail the exporter**.
+
+### Action
+
+Keep #17 closed, because its original scope was fulfilled.
+
+Create the stronger live-evidence mechanism described later in this plan.
 
 ---
 
-# Stage A — Safety correction now
+## #22 — Direct `GameRunnableLatency`
 
-Do not wait until the ideal compile benchmark system exists.
+**Status:** complete.
 
-## Step 5.1 — Rename the existing signal conceptually
-
-Change:
-
-```text
-compile_progress_intervals
-compile_progress_samples
-```
-
-toward:
-
-```text
-compile_activity_intervals
-compile_activity_samples
-```
-
-and:
-
-```text
-compile_progress_source
-```
-
-toward:
-
-```text
-compile_activity_source
-```
-
-This communicates what the signal actually measures.
+Do not revisit except through calibration/regression testing.
 
 ---
 
-## Step 5.2 — Change its quality classification
+## #23 — Compile activity versus throughput
 
-It should not be:
+**Status:** complete.
 
-```text
-Direct compile throughput
-```
-
-because it isn't.
-
-At most it is:
-
-```text
-Direct compile activity detection
-```
-
-but:
-
-```text
-Approximate / Derived
-```
-
-for throughput.
+Do not reopen.
 
 ---
 
-## Step 5.3 — Prohibit it from producing `Improved`
+## #24 — Behavioral contracts for all objectives
 
-Until a genuine throughput signal exists:
+**Status:** complete.
 
-```text
-CompileThroughputWithForegroundProtection
-```
-
-must not say:
-
-```text
-Improved
-```
-
-because there were more build-active intervals.
-
-Instead:
-
-```text
-direct throughput unavailable
-=> Inconclusive
-```
-
-Optionally generic score may be included as supporting evidence:
-
-```text
-"interactive latency improved while compile activity was observed,
-but direct build-throughput measurement is unavailable."
-```
-
-That is honest.
+Do not reopen.
 
 ---
 
-## Step 5.4 — Add the critical regression test
+## #25 — Machine-readable objective descriptors
 
-Baseline:
+**Status:** complete.
 
-```text
-compile activity for 20 seconds
-```
-
-Candidate:
-
-```text
-compile activity for 30 seconds
-```
-
-Current proxy might see more active intervals in Candidate.
-
-The test must prove:
-
-```text
-candidate MUST NOT be classified as improved throughput
-```
-
-This test should remain forever.
+Do not reopen.
 
 ---
 
-# Stage B — Implement real compile throughput
+## #26 — Generated/validated objective documentation
 
-The simplest useful implementation is not compiler-plugin integration.
+**Status:** complete.
 
-Use **fixed-work completion time**.
+Do not reopen.
 
 ---
 
-## Step 5.5 — Introduce workload progress metadata
+## #28 — Live reversible CPU-affinity acceptance
 
-Create a generic mechanism rather than hardcoding Cargo.
+**Status:** complete.
+
+The current ledger records a clean-source multi-process test involving:
+
+```text
+parent + two children
+five tasks
+original mask 0-11
+applied mask 0
+independent restore to 0-11
+```
+
+with retained rollback state and audit evidence.
+
+Do not reopen #28.
+
+Crash/restart recovery is deliberately separate under #29.
+
+---
+
+## #37 — Fixed-work compile completion
+
+**Status:** complete as a functionality issue.
+
+The real command-timing smoke exists, while full real-world performance calibration remains explicitly unclaimed.
+
+### Action
+
+Do not reopen #37.
+
+Live compile-objective validation belongs to P2 corpus/calibration work.
+
+---
+
+# 6. Evaluation of the ten open issues
+
+## #27 — Live observation acceptance
+
+### Status
+
+**Mostly implemented, but not ready to close.**
+
+The canonical:
+
+```text
+xtask live-acceptance observation
+```
+
+exists.
+
+A clean-source Linux 6.18.55 run produced:
+
+- 9,946 target scheduler samples;
+- 42 target interval records;
+- stable process identity;
+- complete scheduler histograms;
+- zero drops;
+- successful validator;
+- successful analysis;
+- HTML;
+- advisor output.
+
+The acceptance validator itself explicitly records:
+
+```text
+game_objective = "not_claimed_for_generic_acceptance_workload"
+```
+
+because the deterministic workload is currently generic rather than a controlled game-objective target.
+
+### Remaining work
+
+#27 should remain open until:
+
+1. controlled `GameRunnableLatency` evidence exists;
+2. source/binary/kernel/probe evidence is exported portably;
+3. the final bundle is reproducibly sanitizable;
+4. the canonical suite—not merely legacy smoke scripts—is integrated into the trusted live-validation workflow.
+
+---
+
+## #29 — Crash/startup recovery matrix
+
+### Status
+
+**Highest priority remaining issue.**
+
+Its definition of done correctly requires:
+
+- death before/during apply;
+- partial apply;
+- forced verification failure;
+- SIGKILL after apply;
+- SIGKILL during verification;
+- restart recovery;
+- stale PID reuse;
+- suspend/resume;
+- rollback failure;
+- explicit fault state.
+
+PR #45 only addresses part of this.
+
+This issue should remain open until the full real-system matrix is complete.
+
+---
+
+## #30 — Real-kernel compatibility corpus
+
+### Status
+
+Not yet complete.
+
+Do after recovery and portable evidence tooling are stable.
+
+---
+
+## #31 — Diagnosis calibration corpus
+
+### Status
+
+Not yet started at sufficient real-world depth.
+
+Requires the provenance system from #34 first.
+
+---
+
+## #32 — Calibrate diagnosis thresholds
+
+### Status
+
+Not ready yet.
+
+Needs #31 evidence.
+
+---
+
+## #33 — Calibrate `StutterScore`
+
+### Status
+
+Not ready yet.
+
+Needs the same corpus.
+
+---
+
+## #34 — Evidence provenance and real-evidence coverage
+
+### Status
+
+Open and strategically important.
+
+I would move part of this work **earlier than #31**, because the corpus should not be collected before its provenance format exists.
+
+---
+
+## #35 — Supported/experimental/internal capability tiers
+
+### Status
+
+Correctly deferred.
+
+Do after P1/P2.
+
+---
+
+## #36 — First versioned software release
+
+### Status
+
+Correctly deferred.
+
+Do not start release polishing while #29 remains open.
+
+---
+
+## #38 — Profiler overhead
+
+### Status
+
+Open and necessary.
+
+Do after the live harness is stable, but before capability graduation.
+
+---
+
+# 7. Evaluation of all 20 PRs
+
+The repository has 20 PRs in its history, with #45 the only currently open one.
+
+## PR #1
+
+Initial automated-development import/foundation.
+
+### Assessment
+
+Historical foundation only.
+
+No action.
+
+---
+
+## PR #2
+
+Large daemon/packaging/platform expansion.
+
+### Assessment
+
+Its architecture now feeds the current daemon and recovery work.
+
+No wholesale revisit.
+
+Recovery testing should validate the resulting behavior instead.
+
+---
+
+## PR #3
+
+Experimental autotuning expansion.
+
+### Assessment
+
+Conceptually superseded by later objective/safety hardening.
+
+No direct action.
+
+---
+
+## PR #4 / #5
+
+Lint/no-allow/local-CI hygiene.
+
+### Assessment
+
+Useful infrastructure, still serving the project.
+
+No action.
+
+---
+
+## PR #6 / #7
+
+Autotune comparison/scoring architecture cleanup.
+
+### Assessment
+
+Still relevant architecture.
+
+The recent objective work built on top of it.
+
+No reopening.
+
+---
+
+## PR #8 / #9
+
+eBPF/tracepoint edge-case work and follow-up corrections.
+
+### Assessment
+
+Treat the pair as the historical stabilization of that implementation.
+
+Keep regression coverage.
+
+Kernel-matrix work in #30 will now test those assumptions against more actual kernels.
+
+---
+
+## PR #18
+
+Large supervisor/FYP handoff.
+
+### Assessment
+
+Historical.
+
+Its academic/product wrapper was deliberately superseded later.
+
+---
+
+## PR #19
+
+Dependency/linker/build hygiene.
+
+### Assessment
+
+Complete.
+
+---
+
+## PR #20
+
+Reproducible Nix development environment and physical loader testing.
+
+### Assessment
+
+Important current foundation.
+
+Keep.
+
+---
+
+## PR #21
+
+Repository conversion back to a general experimental open-source project.
+
+### Assessment
+
+Complete.
+
+Do not continue spending time on repository-identity cleanup.
+
+---
+
+## PR #39
+
+Corrected game runnable-latency and compile activity semantics.
+
+### Assessment
+
+P0 cornerstone.
+
+Complete.
+
+---
+
+## PR #40
+
+Implemented fixed-work completion-based compile throughput.
+
+### Assessment
+
+Complete functionality.
+
+Needs later empirical calibration, not redesign.
+
+---
+
+## PR #41
+
+Implemented behavioral contracts for all objectives.
+
+### Assessment
+
+Complete.
+
+---
+
+## PR #42
+
+Implemented machine-readable objective descriptors and checked/generated documentation.
+
+### Assessment
+
+Complete.
+
+---
+
+## PR #43
+
+Canonical live scheduler observation.
+
+### Assessment
+
+Merged and useful, but it only partially completes #27.
+
+The generic service workload proves the measurement pipeline, not the direct game objective.
+
+---
+
+## PR #44
+
+Real multi-process CPU-affinity apply/restore.
+
+### Assessment
+
+Merged and sufficient to close #28.
+
+Does **not** prove crash recovery.
+
+---
+
+## PR #45 — OPEN
+
+### Title
+
+`Require verified identity and correct format for startup affinity recovery`
+
+### Assessment
+
+This is the immediate PR to finish.
+
+It fixes two real correctness failures:
+
+1. automatic startup affinity recovery could use legacy numeric TIDs without verified process identity;
+2. a historical affinity `records` file could be misinterpreted as an empty profile restore file and falsely report successful recovery.
+
+The PR adds format/version routing, complete task/process identity validation, stale-identity handling and keeps explicit manual legacy restoration separate. Its own description correctly states that SIGKILL/restart recovery, failure injection and suspend/resume remain outstanding.
+
+### Important scope correction
+
+The implementation's special strict startup identity mode currently applies to the CPU-affinity handler.
+
+The startup rollback registry still registers:
+
+```text
+nice
+ioprio
+uclamp
+cgroup
+IRQ affinity
+CPU power
+GPU power
+VM knobs
+```
+
+in addition to affinity.
+
+Task-targeted handlers such as `nice`, `ioprio` and `uclamp` still contain a legacy-unverified restoration path. `NiceRollbackHandler`, for example, explicitly accepts `UnknownLegacy` and continues restoration.  The equivalent pattern exists for I/O priority and uclamp.
+
+That does not invalidate PR #45's CPU-affinity fix, but it means **“strict startup recovery” must not be described as generic across every rollback provider yet.**
+
+---
+
+# 8. Newly discovered high-priority issue: controller rollback durability window
+
+This is the most important new finding from reviewing the active branches.
+
+Current `main` performs approximately:
+
+```text
+write journal = Applying
+        ↓
+executor.apply_candidate()
+        ↓
+action runner:
+    apply
+    verify
+        ↓
+returns rollback token
+        ↓
+write journal = Applied(token)
+```
+
+The current live experiment lifecycle writes `Applying`, calls the executor, and only writes `Applied` with the rollback token after the executor returns.
+
+The low-risk executor invokes the audited action path, which includes verification before it returns.
+
+Therefore a process crash can occur:
+
+```text
+system mutation completed
+        ↓
+rollback token exists in process memory
+        ↓
+verification starts
+        ↓
+SIGKILL
+        ↓
+controller journal still says Applying with no durable token
+```
+
+Startup recovery intentionally treats `Applying` without a token as a fault because it cannot safely infer the rollback operation.
+
+That is a real crash-recovery gap.
+
+---
+
+# 9. `fix/controller-rollback-before-verify` is valuable, but currently incomplete
+
+The branch introduces a `JournaledActionInput`/`apply_journaled_action` transaction.
+
+Its after-apply hook writes:
+
+```text
+Applied
++ rollback token
++ applied_pending_verify
+```
+
+before the action runner enters verification.
+
+The runner is already structured appropriately: immediately after successful `apply()`, it executes the after-apply hook; if that hook fails, the runner attempts rollback before it proceeds to verification.
+
+The journal write itself is genuinely durable rather than merely buffered:
+
+```text
+temporary file
+→ serialize
+→ file.sync_all()
+→ atomic rename
+→ parent-directory sync
+```
+
+
+
+That is a good foundation.
+
+However, the branch's production `live_experiment/lifecycle.rs` still contains the old outer:
+
+```text
+write Applying
+→ executor.apply_candidate()
+→ write Applied(token)
+```
+
+sequence.
+
+So the new transaction primitive is not yet the single production path used by the live controller.
+
+### Conclusion
+
+Do **not** merge that branch as though the controller crash hole is completely fixed.
+
+Rebase it after #45 and finish the production integration first.
+
+---
+
+# 10. Another crash window: death during `apply()`
+
+Even persisting the token before verification does not completely satisfy #29.
+
+`CpuAffinityProfileAction::apply()` currently delegates to profile application, receives the result, and only then constructs its rollback token.
+
+The underlying profile application does something useful:
+
+```text
+plan
+→ preflight
+→ persist restore state
+→ perform actual affinity/priority mutations
+→ verify
+```
+
+The restore state is written before the first mutation.
+
+That means the data required for recovery may physically exist during a mid-apply crash, but the controller journal does not yet contain the token that points to it.
+
+This must be addressed if #29 is going to truthfully claim crash safety during apply.
+
+---
+
+# 11. Revised immediate development sequence
+
+# Phase A — Finish PR #45
+
+## Step A1 — Rebase/update PR #45 against current `main`
+
+Ensure its one logical change remains easy to review.
+
+Run:
+
+```text
+full fmt/build/clippy/test
+objective contracts
+objective docs check
+daemon safety
+schema snapshots
+offline recommendation
+offline advisor
+```
+
+The PR's head already has successful validation according to its current state, but merge should still be against current `main`.
+
+---
+
+## Step A2 — Clarify its scope
+
+Documentation should say:
+
+> automatic **CPU-affinity** startup recovery now requires verified identity.
+
+Do not say:
+
+> all startup rollback providers are now identity-safe.
+
+unless that is actually implemented before merge.
+
+---
+
+## Step A3 — Add one startup-recovery registry safety contract
+
+Before or immediately after #45, add a test enumerating all token kinds registered for automatic startup recovery.
+
+Each must declare one of:
+
+```text
+VerifiedAutomatic
+ManualOnly
+NotRecoverable
+```
+
+Do not allow a provider silently to inherit automatic startup recovery merely because its handler happens to be registered.
+
+---
+
+## Step A4 — Merge PR #45
+
+After:
+
+```text
+exact-head CI PASS
+mergeable
+full local gate PASS
+scope wording correct
+```
+
+merge it.
+
+Then require main CI to pass.
+
+---
+
+# Phase B — Restrict startup recovery to providers that actually have crash-safe identity semantics
+
+This should happen before #29 closes.
+
+Create a new issue, approximately:
+
+```text
+P1: Require explicit crash-recovery capability for every rollback token
+```
+
+## Step B1 — Add a startup-recovery capability descriptor
 
 Conceptually:
 
 ```rust
-WorkloadProgress {
-    completed_units: u64,
-    total_units: Option<u64>,
-    elapsed: Duration,
-    source: ProgressSource,
+enum AutomaticRecoveryCapability {
+    VerifiedAutomatic,
+    ManualOnly,
+    Unsupported,
 }
-```
 
-Possible sources later:
-
-```text
-ScenarioCompletion
-ExternalMarker
-Cargo
-Ninja
-CMake
-CustomCommand
-```
-
-But the first implementation can be much simpler.
-
----
-
-## Step 5.6 — Add benchmark markers
-
-Let a scenario or acceptance harness signal:
-
-```text
-WORKLOAD_START
-WORKLOAD_COMPLETE
-```
-
-For fixed work:
-
-```text
-throughput comparison = total completion time
-```
-
-Lower completion time is better.
-
-You can later support actual progress rates.
-
----
-
-## Step 5.7 — Define compile throughput as fixed-work elapsed time first
-
-This is far easier to reason about:
-
-```text
-baseline build duration = 31.4 sec
-candidate build duration = 28.0 sec
-
-improvement =
-(31.4 - 28.0) / 31.4
-```
-
-The workload must be identical.
-
-Examples:
-
-```text
-same source tree
-same target
-same clean/incremental state
-same job count
-same cache state policy
-same benchmark command
-```
-
----
-
-## Step 5.8 — Protect foreground responsiveness separately
-
-The objective name is:
-
-```text
-CompileThroughputWithForegroundProtection
-```
-
-so implement exactly that.
-
-Primary metric:
-
-```text
-fixed-work compile completion time
-```
-
-Guardrails:
-
-```text
-foreground runnable latency
-frame pacing, if relevant
-thermal state
-power-limit state
-memory pressure
-```
-
-Then the semantics are clean:
-
-```text
-Compile finished faster
-AND interactive latency did not materially degrade
-=> Improved
-```
-
----
-
-# Phase 6 — Establish formal behavioral contracts for every objective
-
-The audit recommends objective regression/contract testing for every objective. Pasted text
-
-Build a reusable test matrix.
-
-For every objective test:
-
-```text
-clear improvement
-clear regression
-no meaningful change
-missing primary signal
-insufficient data
-low-quality data
-target disappears
-thermal regression
-CPU power regression
-GPU power regression
-generic-score conflict
-```
-
-Where applicable.
-
----
-
-## Proposed matrix
-
-### `StutterScore`
-
-Test:
-
-```text
-score/sample decreases
-score/sample increases
-zero samples
-large sample imbalance
-```
-
-### `GameFramePacing`
-
-Test:
-
-```text
-p99 improves
-p99 regresses
-frames missing
-foreground regresses while p99 improves
-```
-
-### `GameRunnableLatency`
-
-Test:
-
-```text
-runnable p99 improves
-runnable tail rate worsens
-frame pacing worsens
-signal missing
-insufficient sample count
-```
-
-### `DesktopInteractivity`
-
-Test:
-
-```text
-foreground latency improvement/regression
-```
-
-### `BrowserInteractivity`
-
-Same, but with browser-target semantics.
-
-### `CompileThroughputWithForegroundProtection`
-
-Test:
-
-```text
-faster fixed work
-slower fixed work
-equal completion time
-foreground regression
-throughput signal missing
-compile activity alone
-```
-
-### `IoLatency`
-
-Test direct count and worst latency.
-
-### `IrqOverlapReduction`
-
-Same pattern.
-
-### `ThermalRecovery`
-
-Test:
-
-```text
-degraded → healthy
-healthy → degraded
-throttle reduction
-throttle increase
-```
-
----
-
-# Phase 7 — Introduce a machine-readable objective registry
-
-The audit identified documentation drift: code and `AUTOTUNE_OBJECTIVES.md` disagree about compile progress. Pasted text
-
-The solution is not more documentation.
-
-It is one authoritative metadata source.
-
----
-
-## Step 7.1 — Create `ObjectiveDescriptor`
-
-Something like:
-
-```rust
-pub struct ObjectiveDescriptor {
-    pub kind: ObjectiveKind,
-    pub primary_metric: &'static str,
-    pub primary_signal_quality: ObjectiveSignalQuality,
-    pub required_signals: &'static [&'static str],
-    pub fallback_policy: ObjectiveFallbackPolicy,
-    pub guardrails: &'static [&'static str],
-    pub autonomous_apply_allowed: bool,
-    pub maturity: ObjectiveMaturity,
-}
-```
-
-Possible maturity:
-
-```rust
-enum ObjectiveMaturity {
-    Experimental,
-    Validating,
-    Supported,
+struct RollbackRecoveryDescriptor {
+    token_kind: &'static str,
+    automatic_recovery: AutomaticRecoveryCapability,
+    identity_contract: &'static str,
+    idempotent: bool,
 }
 ```
 
 ---
 
-## Step 7.2 — Make the registry exhaustive
+## Step B2 — Start with a conservative whitelist
 
-Implement:
+Initially:
 
-```rust
-ObjectiveKind::descriptor()
+```text
+CPU affinity:
+    VerifiedAutomatic
+
+nice:
+    ManualOnly
+
+ioprio:
+    ManualOnly
+
+uclamp:
+    ManualOnly
+
+cgroup:
+    ManualOnly until proven
+
+IRQ:
+    ManualOnly until proven
+
+CPU power:
+    ManualOnly until proven
+
+GPU power:
+    ManualOnly until proven
+
+VM:
+    ManualOnly until proven
 ```
 
-with an exhaustive `match`.
+This matches the current product boundary: CPU affinity is the only low-risk provider with real acceptance evidence.
 
-Adding a new `ObjectiveKind` should fail compilation until its contract is defined.
+It prevents the generic rollback registry from accidentally granting crash-recovery maturity to experimental providers.
 
 ---
 
-## Step 7.3 — Use it at runtime
+## Step B3 — Provider graduation later
 
-Use the same descriptor for:
-
-```text
-CLI explanation
-API output
-TUI
-report metadata
-autotune decision explanation
-```
-
-Then the system can tell the user:
+When a provider gains:
 
 ```text
-Objective: game_runnable_latency
-Primary metric: runnable p99
-Signal quality: direct
-Fallback: none
-Autonomous apply: allowed
-Maturity: validating
+strict identity/resource validation
+idempotent rollback
+fault injection
+real apply/verify/rollback
+crash/restart acceptance
 ```
+
+promote its recovery capability.
+
+This should become part of #35's provider graduation criteria.
 
 ---
 
-## Step 7.4 — Validate documentation from it
+# Phase C — Rebase the unmerged crash branch
 
-Add:
+After #45:
 
-```text
-cargo run -p xtask -- objective-docs
+```bash
+git checkout fix/controller-rollback-before-verify
+git fetch origin
+git rebase origin/main
 ```
 
-Two possible modes:
+Resolve it against the merged startup-recovery implementation.
 
-```text
---write
---check
-```
-
-Generate the table in:
-
-```text
-docs/AUTOTUNE_OBJECTIVES.md
-```
-
-CI executes:
-
-```text
-cargo run -p xtask -- objective-docs --check
-```
-
-If implementation changes but documentation wasn't regenerated:
-
-```text
-CI fails
-```
-
-That permanently solves this class of drift.
+Do not retain duplicate startup fixes from the old branch history.
 
 ---
 
-# Phase 8 — Finish P0 with a dedicated objective CI gate
+# Phase D — Split the crash branch into two PRs
 
-Add a CI job or explicit step:
+This will make review much safer.
+
+## PR A — Make rollback token durable before verification
+
+Suggested branch:
 
 ```text
-cargo test -p stutter autotune::objective
+fix/controller-durable-rollback-before-verify
 ```
 
-plus:
+### Step D1 — Use one journaled action transaction in production
+
+The live low-risk controller should use the same transaction that crash acceptance uses.
+
+Required sequence:
 
 ```text
-cargo run -p xtask -- objective-docs --check
-```
-
-The important point is visibility.
-
-Objective semantics should be a clearly identifiable CI gate, not merely one tiny part of a 2,000-test suite.
-
----
-
-# P0 completion gate
-
-Do not start new tunables until all of these are true:
-
-- direct runnable-latency objective exists;
-- histogram/window aggregation is correct;
-- compile activity cannot masquerade as throughput;
-- real compile-throughput semantics exist or the objective remains safely inconclusive;
-- every objective has contract tests;
-- objective registry is authoritative;
-- objective documentation cannot drift;
-- current full CI is green.
-
-At this point the **decision model** becomes substantially more trustworthy.
-
----
-
-# Phase 9 — Build the canonical live acceptance framework
-
-The audit identified this as the next major maturity boundary. Offline and simulated CI are already strong; real privileged system testing remains primarily manual. Pasted text
-
-Create one official entry point:
-
-```text
-cargo run -p xtask -- live-acceptance
-```
-
-or:
-
-```text
-scripts/acceptance/live-core.sh
-```
-
-I slightly prefer `xtask`, with shell wrappers only for privilege transitions.
-
----
-
-# Phase 10 — Split live acceptance into two independent suites
-
-Never make basic profiler validation depend on mutation support.
-
-## Suite A
-
-```text
-live-observation
-```
-
-## Suite B
-
-```text
-live-mutation
-```
-
-This allows a system to support:
-
-```text
-recording/diagnosis
-```
-
-while still failing or disabling:
-
-```text
-autotune mutation
-```
-
----
-
-# Phase 11 — Implement live observation acceptance
-
-The audit defines the desired end-to-end sequence. Pasted text
-
-Run:
-
-### 11.1 Preflight
-
-Validate:
-
-```text
-Linux
-tracefs
-required tracepoints
-BPF capability
-kernel layouts
-output directory writable
-required userspace dependencies
-```
-
-### 11.2 Spawn a deterministic test workload
-
-Do not depend on a real game.
-
-Create something that generates:
-
-```text
-known runnable scheduler activity
-known CPU contention
-optional controlled sleeps
-```
-
-A tiny helper binary is ideal.
-
-### 11.3 Start recording
-
-Verify:
-
-```text
-eBPF loads
-required probes attach
-target discovered
-target tree remains tracked
-```
-
-### 11.4 Generate controlled contention
-
-For example:
-
-```text
-target wakes periodically
-background CPU workers contend
-```
-
-### 11.5 Stop recording
-
-Verify:
-
-```text
-clean probe detach
-no fatal drops
-```
-
-### 11.6 Validate artifacts
-
-Check:
-
-```text
-schema version
-run metadata
-interval records
-target identity
-drop counters
-objective signals
-diagnosis
-```
-
-### 11.7 Run report pipeline
-
-Generate:
-
-```text
-JSON report
-HTML report if applicable
-advisor output
-```
-
-### 11.8 Validate expected evidence
-
-Do not require exact timing.
-
-Use ranges/invariants:
-
-```text
-samples > 0
-runnable p99 > 0
-known target present
-expected class present
-no malformed artifacts
-```
-
----
-
-# Phase 12 — Build a live low-risk mutation acceptance test
-
-CPU affinity is the ideal first real mutation provider because it is:
-
-- reversible;
-- observable;
-- easy to verify;
-- relatively safe against a disposable process;
-- already central to the project's historical workflow.
-
----
-
-## Step 12.1 — Spawn a disposable process tree
-
-Example structure:
-
-```text
-acceptance-parent
- ├── worker-A
- ├── worker-B
- └── worker-C
-```
-
-Record:
-
-```text
-PID
-start time
-original affinity
-process identity
-```
-
----
-
-## Step 12.2 — Run dry-run
-
-Expected:
-
-```text
-correct process count
-correct intended masks
-no state modification
-audit dry-run event written
-```
-
----
-
-## Step 12.3 — Apply a reversible affinity change
-
-Use CPUs that are known online from runtime topology.
-
-Never hardcode masks.
-
----
-
-## Step 12.4 — Verify
-
-Read actual affinity back from the kernel.
-
-Verify:
-
-```text
-expected mask == actual mask
-```
-
----
-
-## Step 12.5 — Validate journal
-
-Before accepting success:
-
-```text
+Preflighted
+    ↓
+Applying
+    ↓
+action.apply()
+    ↓
 rollback token exists
-original state exists
-affected identity matches
-```
-
----
-
-## Step 12.6 — Roll back
-
-Restore original affinity.
-
----
-
-## Step 12.7 — Verify restoration
-
-Do not treat `rollback()` returning `Ok` as sufficient.
-
-Read the kernel state again.
-
-Require:
-
-```text
-restored == original
-```
-
----
-
-## Step 12.8 — Validate audit trail
-
-Require events for:
-
-```text
-preflight
-dry-run
-apply
+    ↓
+durably write Applied(token)
+    ↓
 verify
-rollback
-final result
+    ↓
+Verifying/Measuring
 ```
 
-The audit found that the action architecture is already good; the need is to prove it on a real machine rather than redesign it. Pasted text
+There must no longer be one transaction protocol for crash tests and another for actual autotune.
 
 ---
 
-# Phase 13 — Build a crash/recovery acceptance matrix
+## Step D2 — Eliminate the redundant post-executor journal write
 
-This is one of the most important safety milestones.
+Once the action runner's after-apply hook owns rollback-token persistence, the surrounding live manager should not independently rewrite that same phase after the entire executor returns.
 
-The existing architecture already models startup recovery and rollback journals. Now deliberately break it.
-
-The audit calls out these required failure classes: apply failure, partial apply, verification failure, target exit, daemon death after apply, restart with an outstanding journal, rollback failure, suspend/resume and PID identity issues. Pasted text
+One component should own the state transition.
 
 ---
 
-## Test 13.1 — Process dies before apply
+## Step D3 — Test the exact ordering
+
+Use a test action whose `verify()` reads the journal.
+
+At the instant `verify()` begins it must prove:
+
+```text
+state == Applied or Verifying
+rollback_token != None
+token restore state exists
+journal durable write completed
+```
+
+The current branch already begins doing this; keep the test permanently.
+
+---
+
+## Step D4 — Test after-apply journal failure
+
+Fault-inject:
+
+```text
+apply succeeds
+journal Applied write fails
+```
 
 Expected:
 
 ```text
-apply refused
-nothing mutated
+runner immediately rolls back
+rollback succeeds
+no verification
+controller enters safe fault/error state
+audit explains the journal failure
+```
+
+---
+
+## Step D5 — Test audit/journal consistency
+
+For every terminal path ensure:
+
+```text
+journal
+audit
+history
+daemon state
+```
+
+agree about whether mutation occurred and whether rollback succeeded.
+
+---
+
+# Phase E — Make CPU-affinity apply crash recoverable during the mutation itself
+
+This is required for the stronger interpretation of #29's “during apply” criterion.
+
+The clean design is a two-stage action transaction.
+
+## Step E1 — Separate rollback preparation from mutation
+
+Conceptually:
+
+```text
+prepare()
+    snapshot original state
+    write restore state
+    return PreparedRollbackToken
+
+journal Prepared(token)
+
+commit()
+    perform actual mutations
+
+verify()
+```
+
+This makes the most important invariant:
+
+> **No first system mutation occurs until enough rollback state is durable to recover after SIGKILL.**
+
+---
+
+## Step E2 — Give autotune experiments unique restore paths
+
+Current normal CPU-affinity candidate construction uses `restore_path: None`, which falls back to a shared default restore location.
+
+For live autonomous experiments, prefer an experiment-specific path:
+
+```text
+~/.local/state/stutter/autotune/experiments/<experiment-id>/restore.json
+```
+
+Benefits:
+
+- no ambiguity with previous state;
+- no merging unrelated rollback state;
+- token can reference the exact experiment;
+- evidence can retain the exact transaction;
+- cleanup becomes deterministic.
+
+Manual profile application can retain its existing compatibility behavior.
+
+---
+
+## Step E3 — Add an explicit `Prepared` controller state if useful
+
+A clearer state machine would be:
+
+```text
+Planned
+Preflighted
+Prepared          ← restore state durable; no mutation yet
+Applying          ← mutation can now happen
+Applied           ← mutation complete
+Verifying
+Measuring
+Keeping
+Reverting
+Reverted
+Clean
+Faulted
+```
+
+Then startup behavior becomes much less ambiguous.
+
+---
+
+## Step E4 — Define startup behavior for each phase
+
+### `Prepared`
+
+Rollback state exists, but mutation may not have happened.
+
+Safe response:
+
+```text
+restore idempotently
+→ verify
+→ clean
+```
+
+### `Applying`
+
+Token exists.
+
+Assume partial mutation is possible:
+
+```text
+restore
+→ independently verify
+→ clean
+```
+
+### `Applying` without token
+
+This should become impossible for crash-recoverable providers.
+
+If encountered from historical data:
+
+```text
+Faulted
+manual intervention
+```
+
+### `Applied` / `Verifying` / `Measuring`
+
+Restore from durable token.
+
+### `Reverting`
+
+Retry rollback idempotently.
+
+---
+
+# Phase F — Complete the real crash matrix
+
+Once transaction ordering is correct, turn the crash harness into a proper PR.
+
+The current branch already has a useful process-level helper: it restricts itself to a disposable sibling process tree, requires three processes/five tasks, checks PID/starttime identity and intentionally pauses so the controller can be SIGKILLed after apply or during verification.
+
+Build on that.
+
+## Step F1 — Crash before apply
+
+Expected:
+
+```text
+no mutation
+no rollback needed
+safe terminal state
+```
+
+---
+
+## Step F2 — Crash after rollback preparation but before mutation
+
+Expected:
+
+```text
+startup sees prepared token
+restore is safe/no-op
+state verified
 journal clean
 ```
 
 ---
 
-## Test 13.2 — Process dies during apply
+## Step F3 — Crash during apply
+
+Terminate after one or more task mutations.
 
 Expected:
 
 ```text
-partial mutation detected if applicable
-remaining live tasks rolled back
-dead tasks reported as skipped
-journal reaches safe terminal state
-```
-
----
-
-## Test 13.3 — Force verification failure
-
-Apply succeeds.
-
-Then deliberately make verification fail.
-
-Expected:
-
-```text
-automatic rollback
-restored state verified
-audit records verify failure + rollback
-```
-
----
-
-## Test 13.4 — Kill controller immediately after apply
-
-This is critical.
-
-Sequence:
-
-```text
-apply
-journal persists rollback state
-SIGKILL controller
-restart
-startup recovery detects outstanding mutation
-rollback
-verify original state
+startup recovery restores entire original set
+all original masks independently re-read
+no replacement process touched
 journal clean
+audit records crash recovery
 ```
-
-If this fails, do not graduate mutation support.
 
 ---
 
-## Test 13.5 — Kill controller during verification
+## Step F4 — Crash immediately after apply
 
-Same expectation:
+This specifically proves the rollback-before-verify fix.
+
+---
+
+## Step F5 — Crash during real verification
+
+The current branch already supports pausing here.
+
+Expected restore exactly as above.
+
+---
+
+## Step F6 — Crash after verification before measurement phase
+
+Another transition boundary worth covering.
+
+---
+
+## Step F7 — Crash during rollback
+
+Start rollback, kill controller part way through, restart.
+
+The `Reverting` state should make rollback safely repeatable.
+
+---
+
+## Step F8 — Force verification failure without process death
+
+Expected:
 
 ```text
-persistent rollback information must survive
+verify error
+→ automatic rollback
+→ independent original-state verification
+→ journal clean/reverted
 ```
 
 ---
 
-## Test 13.6 — Stale PID reuse
+## Step F9 — Partial apply error
 
-Create rollback state.
+Use controlled injection.
 
-Terminate the original process.
+Expected:
 
-Cause or simulate the PID being reused.
+```text
+partial rollback token
+→ rollback attempted
+→ terminal audit
+```
 
-Startup recovery must not alter the unrelated replacement process.
-
-Task identity should include enough information beyond integer PID.
+The action runner already has this model; live acceptance should now prove it at the controller boundary.
 
 ---
 
-## Test 13.7 — Suspend/resume
+## Step F10 — Rollback failure
 
-During an experiment:
+Expected:
+
+```text
+Faulted
+future mutation blocked
+rollback token retained
+manual restore command retained
+audit/history preserved
+```
+
+Do not clean the journal on rollback failure.
+
+---
+
+## Step F11 — PID/TID replacement
+
+Reproduce PID/TID reuse with differing starttime.
+
+Expected:
+
+```text
+replacement process untouched
+recovery reports identity mismatch/stale record
+```
+
+---
+
+## Step F12 — Suspend/resume
+
+During an active experiment:
 
 ```text
 suspend
 resume
 ```
 
-Expected:
+Require:
 
-```text
-measurement invalidated
-new mutation temporarily blocked
-stabilization period observed
-active experiment rolled back or reset according to policy
-```
-
----
-
-## Test 13.8 — Simulated rollback failure
-
-Use controlled fault injection.
-
-Expected:
-
-```text
-system enters explicit fault/emergency state
-autotuning stops
-no further mutations allowed
-manual restoration guidance emitted
-audit trail preserved
-```
-
-Never silently continue.
+- current experiment invalidated;
+- unsafe measurement window discarded;
+- active mutation restored or explicitly revalidated according to policy;
+- stabilization window before new experimentation;
+- no immediate “keep” based on pre-suspend data.
 
 ---
 
-# Phase 14 — Make live acceptance produce a portable evidence bundle
+## Step F13 — Close #29 only after real evidence exists
 
-Each acceptance run should save:
+Synthetic/fault-injection unit tests are necessary but insufficient.
+
+Retain a clean-source real-system evidence bundle.
+
+---
+
+# Phase G — Finish #27 properly
+
+The basic observation harness is already good.
+
+Do not rewrite it.
+
+## Step G1 — Add controlled game-objective acceptance
+
+The current generic workload proves:
 
 ```text
-kernel release
-/proc/version
-distribution info
-CPU model/topology
-tracepoint preflight result
-BPF loader result
+BPF
+scheduler tracking
+histograms
+artifacts
+reporting
+```
+
+but not:
+
+```text
+GameRunnableLatency objective semantics on a real capture
+```
+
+Add a deterministic game-like target acceptance scenario.
+
+It must produce enough directly scoped samples for:
+
+```text
+foreground/game runnable p99
+severe-tail rate
+sample sufficiency
+```
+
+and then run the same objective machinery used by autotune.
+
+---
+
+## Step G2 — Add a live fixed-work compile objective scenario
+
+#37's functionality is complete, but now prove it end-to-end:
+
+```text
+foreground latency helper
++
+fixed-work compile command
++
+ordered completion markers
++
+objective signal production
++
+foreground guards
+```
+
+This is validation, not a reason to reopen #37.
+
+---
+
+# Phase H — Build proper portable live-evidence export
+
+This is a new concrete requirement exposed by the current implementation.
+
+## Step H1 — Create one canonical exporter
+
+For example:
+
+```text
+xtask evidence-export --input <acceptance-run> --output <bundle>
+```
+
+or:
+
+```text
+xtask live-acceptance export
+```
+
+Do not make every suite invent its own export logic.
+
+---
+
+## Step H2 — Use an explicit allowlist
+
+Include:
+
+```text
+receipt
+environment metadata
 Stutter commit
-Rust version
-Aya revision
-acceptance test results
+binary digest
+Cargo.lock digest
+kernel release
+distribution
+CPU model
+probe/tracepoint preflight
 drop counters
-artifact schema versions
+target identity in sanitized form
+schema versions
+objective signal summary
+journal
+sanitized audit
+sanitized history
+validation result
 ```
 
-For privacy reasons, sanitize:
+Include raw event data only where deliberately required.
+
+---
+
+## Step H3 — Privacy must be a gate
+
+Replace the current:
+
+```bash
+rg suspicious-patterns || echo ...
+```
+
+with:
 
 ```text
-usernames
-home paths
-hostnames
-process command lines where unnecessary
-tokens
+scan
+↓
+matches?
+  yes → FAIL EXPORT
+  no  → PASS
 ```
 
-This bundle becomes the basis for kernel compatibility evidence.
+Scan at least:
+
+```text
+/home/<user>
+/root
+usernames
+hostnames
+email addresses
+repository absolute paths
+temporary absolute paths
+tokens/secrets
+unexpected environment variables
+```
+
+Prefer structured sanitization before regex detection.
 
 ---
 
-# Phase 15 — Build an explicit kernel compatibility matrix
+## Step H4 — Add `MANIFEST.sha256`
 
-Runtime kernel validation is one of the project's strong design choices. The tool refuses incompatible tracepoint layouts instead of assuming build-host compatibility. Pasted text
+Every exported file should be represented.
 
-Now collect actual evidence across kernels.
+Then add:
+
+```text
+xtask evidence-verify <bundle>
+```
+
+which:
+
+1. verifies checksums;
+2. verifies schemas;
+3. verifies required files;
+4. reruns privacy checks;
+5. verifies internal references;
+6. verifies source/binary provenance.
 
 ---
 
-## Step 15.1 — Define statuses
+## Step H5 — Define raw versus sanitized retention
 
-Do not just say "supported."
+Recommended:
+
+```text
+raw local bundle:
+    temporary/private
+    contains complete debugging evidence
+
+sanitized repository/release bundle:
+    portable
+    minimal
+    checksummed
+    privacy validated
+```
+
+Large real captures should not be committed directly to Git.
+
+---
+
+# Phase I — Modernize live CI integration
+
+Current CI still has a manual `live-smoke` job running the older:
+
+```text
+sleep_tree_churn.sh
+record_minimal.sh
+```
+
+rather than the new canonical observation/affinity/recovery suites.
+
+## Step I1 — Keep ordinary hosted CI unchanged
+
+Every PR should still receive:
+
+```text
+fmt
+build
+clippy
+tests
+objective contracts
+objective docs
+daemon safety
+schema/fixture tests
+```
+
+---
+
+## Step I2 — Reclassify the old hosted live-smoke
+
+Keep it if useful, but name it clearly:
+
+```text
+hosted-loader-smoke
+```
+
+It tests loader/basic integration.
+
+It does **not** establish product acceptance.
+
+---
+
+## Step I3 — Add trusted live-validation workflow
+
+Prefer:
+
+```text
+workflow_dispatch
++
+trusted self-hosted machine
+```
+
+or a documented local release-gate process.
+
+Never execute arbitrary public PR code with root/BPF privileges on a trusted self-hosted runner.
+
+Only:
+
+```text
+main
+specific owner-selected commit
+release candidate
+```
+
+should run there.
+
+---
+
+## Step I4 — Canonical live suites
+
+Eventually:
+
+```text
+xtask live-acceptance observation
+xtask live-acceptance affinity
+xtask live-acceptance recovery
+xtask live-acceptance overhead
+```
+
+Upload only sanitized bundles.
+
+---
+
+# Phase J — Close #27
+
+Close it once:
+
+- generic observation acceptance passes;
+- controlled game-objective acceptance passes;
+- relevant report/diagnosis/advisor pipeline passes;
+- portable evidence export passes;
+- retained exact-source real-kernel evidence exists.
+
+---
+
+# Phase K — #30 real-kernel compatibility corpus
+
+Now the acceptance harness and evidence format are stable enough to use repeatedly.
+
+## Step K1 — Define statuses
 
 Use:
 
 ```text
-Observed compatible
-Observed degraded
-Observed incompatible
+ObservedCompatible
+ObservedDegraded
+ObservedIncompatible
 Untested
 ```
 
+Never call an untested kernel supported.
+
 ---
 
-## Step 15.2 — Record kernel families
+## Step K2 — Capture at least several materially distinct kernels
 
-Eventually target examples such as:
+For every environment run:
 
 ```text
-mainline
-NixOS distro kernel
-Arch
-Fedora
-Ubuntu
-CachyOS
-Zen
-Gentoo/custom
+tracepoint preflight
+BPF loader
+canonical observation acceptance
+drop validation
+artifact validation
 ```
 
-You do not need them all immediately.
-
-Start with machines you actually have access to.
+Preserve tracepoint format dumps.
 
 ---
 
-## Step 15.3 — Preserve tracepoint fixtures
-
-For each new kernel:
-
-```text
-stutter doctor tracepoints --dump --json
-```
-
-then save compatible formats as test fixtures where appropriate.
-
----
-
-## Step 15.4 — Separate required and optional probe compatibility
-
-Matrix example:
-
-| Kernel | sched core | sched_stat_wait | IRQ | block | KMS/DRM | Overall |
-|---|---|---|---|---|---|---|
-| A | direct | direct | direct | direct | degraded | compatible |
-| B | direct | unavailable | direct | direct | unavailable | compatible/degraded |
-
-This matches Stutter's existing degraded-evidence philosophy much better than a binary yes/no.
-
----
-
-# Phase 16 — Start empirical diagnosis calibration
-
-Only after objective correctness and live safety validation are solid.
-
-The audit specifically recommends calibration rather than adding more diagnosis categories. Pasted text
-
-The current values such as:
-
-```text
-scheduler delay       2 ms
-IRQ significance      250 µs
-block I/O              1 ms
-GPU bounded            95%
-frame spike           16.6 ms
-low IPC               0.75
-cache MPKI             30
-```
-
-should be treated as hypotheses to validate, not sacred constants. Pasted text
-
----
-
-# Phase 17 — Create a validation scenario taxonomy
-
-For each cause, create:
-
-```text
-positive scenario
-negative control
-mixed scenario
-```
+## Step K3 — Separate mandatory and optional probes
 
 Example:
 
-## Scheduler-delay candidate
+| Capability | Requirement |
+|---|---|
+| `sched_wakeup` | required |
+| `sched_switch` | required |
+| scheduler auxiliary traces | optional/degraded |
+| IRQ | optional |
+| block | optional |
+| DRM/KMS | optional/degraded |
 
-Positive:
+One unavailable optional probe should not make the entire kernel “unsupported.”
 
-```text
-latency-sensitive target
-+
-controlled CPU contention
-```
+---
 
-Negative:
+## Step K4 — Add regression fixtures for new layouts
 
-```text
-same target
-+
-no contention
-```
-
-Mixed:
+When a materially new compatible kernel layout is encountered:
 
 ```text
-CPU contention + I/O activity
+capture
+sanitize
+fixture
+decoder/preflight regression test
 ```
 
 ---
 
-## IRQ-delay candidate
+# Phase L — #38 profiler overhead
 
-Positive:
+Do before product graduation.
 
-```text
-controlled heavy interrupt source
-```
+## Step L1 — Define probe configurations
 
-Negative:
+Measure:
 
 ```text
-similar CPU usage without IRQ load
-```
-
----
-
-## Block-I/O candidate
-
-Positive:
-
-```text
-controlled blocking storage activity
-```
-
-Negative:
-
-```text
-CPU workload with no significant I/O
+no Stutter
+scheduler core only
+core + IRQ
+core + block I/O
+core + GPU/display
+full supported observation set
 ```
 
 ---
 
-## GPU-bound candidate
+## Step L2 — Capture
 
-Positive:
-
-```text
-GPU saturation
-CPU relatively unconstrained
-```
-
-Negative:
+For each:
 
 ```text
-CPU-bound workload at moderate GPU load
+Stutter CPU usage
+Stutter RSS
+event rate
+ring-buffer drops
+write errors
+target throughput/FPS
+target frame-time statistics
+target scheduler statistics
 ```
 
 ---
 
-# Phase 18 — Label evidence provenance
+## Step L3 — Use repeated counterbalanced runs
 
-Every validation fixture should contain metadata:
+Do not compare:
 
 ```text
-evidence_kind:
-    synthetic
-    fixture_real
-    real_workload
-
-expected_primary_cause:
-    game_thread_scheduler_delay
-
-expected_confidence:
-    medium
-
-environment:
-    ...
-
-notes:
-    ...
+off once
+on once
 ```
 
-This implements the audit's recommendation to distinguish synthetic, fixture-real and actual real captured workloads. Pasted text
+Use the existing A/B methodology.
 
 ---
 
-# Phase 19 — Introduce validation coverage reporting
+## Step L4 — Define acceptable overhead
 
-Create something like:
+Do not invent the limit before measuring.
+
+Collect data first.
+
+Then establish supported operating guidance.
+
+---
+
+# Phase M — Start #34 before the larger P2 corpus
+
+This changes the order of the existing P2 issues slightly.
+
+The provenance schema should exist **before** collecting dozens of real captures.
+
+## Step M1 — Add evidence provenance enum
+
+```rust
+enum EvidenceKind {
+    Synthetic,
+    FixtureReal,
+    ControlledReal,
+    RealWorkload,
+}
+```
+
+---
+
+## Step M2 — Add capture metadata
+
+Every validation corpus entry should carry:
+
+```text
+evidence_kind
+source_commit
+artifact_schema
+kernel
+CPU
+GPU where relevant
+workload
+workload_version
+scenario
+expected_primary_cause
+expected_confidence
+control_type
+probe set
+drop counters
+notes
+sanitization revision
+```
+
+---
+
+## Step M3 — Add validation coverage command
+
+For example:
 
 ```text
 cargo run -p xtask -- validation-coverage
 ```
 
-Output:
+Report by:
 
 ```text
-Diagnosis: GameThreadSchedulerDelay
-  synthetic:    yes
-  fixture-real: yes
-  real:         yes
-
-Diagnosis: IrqDelayCandidate
-  synthetic:    yes
-  fixture-real: no
-  real:         no
-
-Objective: GameRunnableLatency
-  synthetic:    yes
-  controlled-real: yes
-
-Provider: CpuAffinity
-  fault-injection: yes
-  live rollback:   yes
+diagnosis kind
+objective
+provider
 ```
 
-This makes validation debt visible.
+and evidence strength:
+
+```text
+synthetic
+fixture-real
+controlled-real
+real-workload
+```
 
 ---
 
-## Add the "real evidence percentage"
+## Step M4 — Use explicit denominators
+
+A “real evidence percentage” is only meaningful if the denominator is explicit.
 
 For example:
 
 ```text
-critical behavior coverage:
-  synthetic only:       31%
-  fixture-real covered: 44%
-  real live covered:    25%
+9 objective kinds
+12 diagnosis kinds
+1 currently supported mutable provider
 ```
 
-Do not turn this into a meaningless vanity metric.
-
-Use it to identify subsystems that are supported primarily by synthetic assumptions.
+Then report actual coverage.
 
 ---
 
-# Phase 20 — Calibrate each diagnosis independently
+# Phase N — #31 real diagnosis corpus
 
-Do not tune every threshold simultaneously.
+Collect each diagnosis systematically.
 
-For each diagnosis:
+For every cause:
 
-1. collect positive cases;
-2. collect negative controls;
-3. run existing threshold;
-4. measure false positives;
-5. measure false negatives;
-6. sweep nearby threshold values;
-7. compare;
-8. choose conservative operating point;
-9. document evidence.
+```text
+positive case
+negative control
+mixed/confounded case
+```
 
-Example scheduler sweep:
+## Scheduler delay
+
+```text
+periodic latency-sensitive target
++
+controlled CPU contention
+```
+
+Control:
+
+```text
+same target without contention
+```
+
+---
+
+## Block I/O
+
+```text
+controlled blocking storage workload
+```
+
+Control:
+
+```text
+similar CPU load without storage pressure
+```
+
+---
+
+## IRQ overlap
+
+Use a controlled, reproducible interrupt-heavy workload where practical.
+
+Do not label mere overlap as causality.
+
+---
+
+## GPU-bound
+
+Capture:
+
+```text
+known GPU saturation
+```
+
+and control:
+
+```text
+CPU-bound workload with moderate GPU usage
+```
+
+---
+
+## Gaming
+
+Use both:
+
+```text
+controlled game-like scenario
+real Proton/game capture
+```
+
+The controlled case provides repeatability.
+
+The real case provides ecological validity.
+
+---
+
+## Compile
+
+Use the fixed-work protocol plus an interactive foreground workload.
+
+---
+
+## Browser/desktop
+
+Capture actual interactive latency cases after gaming/compile paths are mature.
+
+---
+
+# Phase O — #32 threshold calibration
+
+Calibrate one diagnosis at a time.
+
+Do **not** change every threshold in one PR.
+
+For scheduler delay, for example:
 
 ```text
 0.5 ms
@@ -1719,87 +1994,70 @@ Example scheduler sweep:
 4.0 ms
 ```
 
-Measure:
+For every threshold calculate:
 
 ```text
-true positive rate
-false positive rate
-confidence classification
-primary-cause selection stability
+true positives
+false positives
+false negatives
+cause-selection stability
+confidence stability
 ```
+
+The goal is not simply maximum sensitivity.
+
+For an evidence-oriented tuner, false confident diagnoses are particularly expensive.
 
 ---
 
-# Phase 21 — Calibrate confidence, not only thresholds
+# Phase P — Calibrate confidence separately from detection
 
-The more important output may be confidence.
-
-For example:
+Distinguish:
 
 ```text
-scheduler delay exists
+"We measured substantial scheduler delay"
 ```
 
-can be highly certain while:
+from:
 
 ```text
-scheduler delay caused this visible frame spike
+"Scheduler delay caused the visible frame spike"
 ```
 
-is much less certain.
+Those are different claims.
 
-Calibrate:
+Confidence must reflect:
 
-```text
-Low
-Medium
-High
-```
-
-against evidence quality and number of independent supporting signals.
+- directness;
+- temporal correlation;
+- competing explanations;
+- signal quality;
+- missing probes;
+- drop counters;
+- repeatability.
 
 ---
 
-# Phase 22 — Evaluate `StutterScore` scientifically
+# Phase Q — #33 evaluate `StutterScore`
 
-The audit points out that the score uses hand-selected weighting such as:
+Only after the corpus is meaningful.
 
-```text
->5 ms × 100
->2 ms × 20
->1 ms × 1
-```
+## Step Q1 — Write the semantic contract
 
-rather than empirically calibrated weights. Pasted text
+A defensible definition is:
 
-Do not immediately replace it with something "more mathematical."
+> StutterScore is a scalar ranking proxy for degradation between comparable controlled measurements.
 
-First determine what role the score should play.
+It is **not** an absolute percentage of user-perceived stutter.
 
 ---
 
-## Step 22.1 — Define its intended meaning
+## Step Q2 — Test monotonic behavior
 
-Possible answer:
-
-> A scalar ranking proxy for scheduler/frame-pacing degradation inside comparable experiments.
-
-Not:
-
-> An absolute user-perceived stutter percentage.
-
-This distinction is important.
-
----
-
-## Step 22.2 — Test monotonicity
-
-Controlled degradation should generally produce worse scores.
-
-Examples:
+Induce controlled scheduler delay:
 
 ```text
-0 ms induced delay
+0
 1 ms
 2 ms
 4 ms
@@ -1807,42 +2065,34 @@ Examples:
 16 ms
 ```
 
-Score should behave sensibly.
+Check whether score ranking behaves sensibly.
 
 ---
 
-## Step 22.3 — Compare against external metrics
+## Step Q3 — Compare with independent signals
 
 Correlate with:
 
 ```text
+runnable p99
+runnable severe-tail rate
 frame p99
 frame p99.9
->16.6ms frames
->33.3ms frames
-runnable p99
-runnable >5ms rate
-```
-
-If possible later:
-
-```text
-subjective visible-stutter annotations
+>16.6 ms frames
+>33 ms frames
 ```
 
 ---
 
-## Step 22.4 — Decide whether the weights actually need change
+## Step Q4 — Do not change weights just because they look arbitrary
 
-If the existing score ranks experimental severity reliably, keep it.
+Existing coefficients should remain if they rank degradation reliably.
 
-Do not optimize coefficients merely because they look arbitrary.
-
-Change only when evidence demonstrates a better model.
+Change them only when the real corpus demonstrates a materially better model.
 
 ---
 
-# Phase 23 — Prevent score calibration from changing objective semantics
+# Phase R — Do not let score calibration undo P0
 
 Even after calibration:
 
@@ -1850,35 +2100,31 @@ Even after calibration:
 GameRunnableLatency
 ```
 
-must still use runnable latency as its primary metric.
-
-Likewise:
+must remain driven by runnable latency.
 
 ```text
-CompileThroughput
+CompileThroughputWithForegroundProtection
 ```
 
-must still use compile throughput.
+must remain driven by completed fixed work.
 
-The generic score remains:
+Generic score is:
 
 ```text
-fallback
+supporting evidence
 guardrail
-supporting metric
+general objective
 ```
 
-not the universal decision oracle.
-
-This distinction was one of the central findings of the audit. Pasted text
+—not the hidden primary for every objective.
 
 ---
 
-# Phase 24 — Create explicit feature maturity levels
+# Phase S — #35 capability maturity framework
 
-Once the previous work exists, define product boundaries.
+After P1/P2 evidence exists, classify functionality.
 
-Suggested levels:
+Recommended states:
 
 ```text
 Supported
@@ -1887,48 +2133,56 @@ Internal
 Disabled
 ```
 
----
-
-## `Supported`
-
-Requires:
+## Supported requires
 
 ```text
-behavioral contract
-synthetic regression tests
-real acceptance evidence
-documented failure behavior
-stable artifact contract
+explicit semantic contract
+unit/fixture regression tests
+real-system acceptance
+known failure behavior
+stable artifact compatibility
 diagnostics
+rollback evidence where mutable
 ```
 
 ---
 
-## `Experimental`
+# Phase T — Provider graduation contract
 
-May be useful but lacks complete validation.
+Every mutable provider should need:
 
-Must say so clearly.
+```text
+[ ] explicit action descriptor
+[ ] safety class
+[ ] policy gate
+[ ] scope limit
+[ ] preflight
+[ ] dry-run
+[ ] prepared/durable rollback state where crash relevant
+[ ] apply
+[ ] verification
+[ ] rollback
+[ ] independent rollback verification
+[ ] strict startup recovery contract or explicit ManualOnly
+[ ] audit
+[ ] journal
+[ ] partial-apply test
+[ ] verification-failure test
+[ ] rollback-failure test
+[ ] live apply/restore evidence
+[ ] crash/restart acceptance
+[ ] provenance evidence
+```
+
+CPU affinity should be the first provider to satisfy the entire list.
 
 ---
 
-## `Internal`
+# Phase U — Initial capability classification
 
-Architecture/prototype code that users should not rely upon.
+Tentatively, once the remaining gates pass:
 
----
-
-## `Disabled`
-
-Known unsafe, semantically incomplete or intentionally unavailable.
-
----
-
-# Phase 25 — Apply maturity levels to current capabilities
-
-The audit suggests a narrow initial supported surface. Pasted text
-
-Likely first supported group:
+## Supported candidate
 
 ```text
 doctor
@@ -1936,638 +2190,512 @@ record
 bench
 report
 diagnose
-advisor
-recommend
-manual tune evaluation
-CPU-affinity dry-run/apply/restore
+advisor/recommend
+tune evaluation
+manual/reversible CPU-affinity workflow
 audit
 restore
 ```
 
-Experimental:
+## Experimental
 
 ```text
 always-on autotune
 medium-risk mutation
-remote mutation
-GPU power mutation
+remote state-changing control
+nice/ioprio automation
+uclamp
 IRQ affinity
-VM tuning
-system-wide/scheduler changes
+CPU/GPU power
+VM knobs
+system-wide scheduler changes
 ```
 
-These can graduate individually later.
+Do not promote those because their implementation exists.
+
+Promote them when their evidence exists.
 
 ---
 
-# Phase 26 — Add a formal provider graduation checklist
+# Phase V — #36 first versioned release
 
-Every mutable provider should meet the same standard.
-
-Create something like:
+Only start this after:
 
 ```text
-docs/PROVIDER_GRADUATION.md
-```
-
-or encode it into architecture tests.
-
-A provider cannot become supported until it has:
-
-```text
-[ ] explicit descriptor
-[ ] explicit safety class
-[ ] explicit effect scope
-[ ] preflight
-[ ] dry-run
-[ ] apply
-[ ] verify
-[ ] rollback
-[ ] durable rollback token if necessary
-[ ] audit coverage
-[ ] policy denial tests
-[ ] partial-apply fault injection
-[ ] verification-failure rollback test
-[ ] live real-system apply test
-[ ] live real-system rollback test
-[ ] recovery-after-crash test if persistent state is possible
-[ ] documentation generated/validated
-```
-
-That stops feature expansion from recreating today's validation gap.
-
----
-
-# Phase 27 — Prepare the first actual software release
-
-Do this **after P0/P1**, not before.
-
-The audit explicitly recommends waiting until the core contract is trustworthy before treating packaging/release polish as the priority. Pasted text
-
-A sensible first release could be:
-
-```text
-v0.1.0
-```
-
-provided the supported surface is narrow and explicit.
-
----
-
-## Step 27.1 — Define release contract
-
-Publish:
-
-```text
-Supported
-Experimental
-Unsupported
-Known limitations
-Supported Linux architectures
-Kernel preflight behavior
-Privilege model
-Artifact stability promise
+#27 closed
+#29 closed
+#30 sufficient initial coverage
+#38 complete
+P2 calibration has produced a defensible core
+#35 capability tiers complete
 ```
 
 ---
 
-## Step 27.2 — Reproducible build
+## Step V1 — Publish release contract
 
-Make the official release pipeline create:
+Document:
 
 ```text
-binary
-checksums
+supported commands
+experimental commands
+supported architecture
+kernel compatibility model
+privilege requirements
+artifact compatibility
+known limitations
+```
+
+---
+
+## Step V2 — Reproducible build
+
+Release should provide:
+
+```text
+binary/artifacts
 source archive
-SBOM if practical
+SHA-256 checksums
+dependency/SBOM information if practical
 release notes
 ```
 
-Do not need every distro package on day one.
-
 ---
 
-## Step 27.3 — Provide one canonical installation path
+## Step V3 — Keep installation scope narrow
 
-For example:
+Initially:
 
 ```text
 Nix
-+
 source build
 ```
 
-rather than trying to support six packaging ecosystems immediately.
+is enough.
+
+Do not delay the first release to create packaging for every distribution.
 
 ---
 
-## Step 27.4 — Create one minimal successful tutorial
+## Step V4 — Minimal tutorial
 
-Not a giant guide.
-
-Something like:
+A new user should be able to perform:
 
 ```text
-1. install
-2. stutter doctor
-3. record a workload
-4. generate report
-5. inspect diagnosis
-6. optionally evaluate CPU-affinity experiment
-7. restore
+install
+→ stutter doctor
+→ record workload
+→ generate report
+→ inspect diagnosis
+→ optionally perform reversible CPU-affinity experiment
+→ restore
 ```
 
-If a technically competent Linux user cannot complete this reliably, the project is not ready for wider packaging work.
-
 ---
 
-# Phase 28 — Perform the first release acceptance run
+## Step V5 — Fresh-checkout release candidate gate
 
-Before creating the tag:
+From a clean checkout of the exact candidate commit:
 
 ```text
-fresh checkout
-fresh development/build environment
-build
-unit CI
-fixture CI
-live observation acceptance
-live CPU-affinity acceptance
+Nix environment validation
+full build
+all tests
+Clippy
+objective contracts
+objective docs
+schema validation
+offline smokes
+canonical observation acceptance
+affinity acceptance
 crash recovery acceptance
-documentation validation
-artifact schema validation
-release build
-checksum verification
-install built release
-repeat basic doctor/record/report flow
+evidence verification
+package build
+install package
+doctor smoke
+record/report smoke
 ```
 
-Then tag:
+Only then create:
 
 ```text
 v0.1.0
 ```
 
-The tag should identify an actually validated source state.
-
 ---
 
-# Phase 29 — Only then resume breadth expansion
+# 12. Recommended new issues
 
-At this point new providers can be added again.
+The existing ten open issues are mostly well chosen, but this audit exposed work that deserves explicit tracking.
 
-But they should be selected by value and evidence availability.
+I would add approximately four new issues.
 
-I would probably use this approximate order:
+## New P1 — Durable rollback before verification
 
 ```text
-1. existing low-risk process-local providers
-2. medium-risk reversible providers
-3. GPU/power changes with strong hardware-specific verification
-4. IRQ affinity
-5. VM/system-wide knobs
-6. truly high-risk system changes
+Ensure live controller persists a verified rollback token before action verification starts.
 ```
 
-Each must go through the provider-graduation framework.
-
----
-
-# Recommended PR sequence
-
-I would avoid putting this into one enormous branch.
-
-A much healthier sequence would be:
-
-### PR 1 — Objective regression tests
-
-No semantic fixes yet.
-
-Capture current failures.
-
----
-
-### PR 2 — Direct runnable-latency window signal
-
-Add aggregation and objective signal representation.
-
-Do not yet alter every UI/report.
-
----
-
-### PR 3 — `GameRunnableLatency` semantics
-
-Switch comparator to the direct signal.
-
-Add quality/sufficiency handling.
-
----
-
-### PR 4 — Compile objective safety correction
-
-Rename/demote activity proxy.
-
-Prevent autonomous improvement claims.
-
----
-
-### PR 5 — Real fixed-work compile throughput
-
-Add scenario completion/progress protocol.
-
-Make compile objective genuinely throughput-based.
-
----
-
-### PR 6 — Objective descriptor registry
-
-Centralize contracts.
-
----
-
-### PR 7 — Objective documentation validation
-
-`xtask objective-docs --check`.
-
-Add CI gate.
-
-This closes **P0**.
-
----
-
-### PR 8 — Live observation acceptance
-
-Real kernel/eBPF/artifact/diagnosis flow.
-
----
-
-### PR 9 — Live CPU-affinity apply/rollback acceptance
-
-Add disposable-process test.
-
----
-
-### PR 10 — Crash/recovery acceptance
-
-SIGKILL, stale PID, verification failure, etc.
-
----
-
-### PR 11 — Kernel compatibility evidence tooling
-
-Standard evidence bundles and compatibility table.
-
-This closes most **P1**.
-
----
-
-### PR 12 — Validation-corpus metadata
-
-Synthetic/fixture-real/real provenance.
-
----
-
-### PR 13 — Validation coverage report
-
-Track evidence coverage.
-
----
-
-### PR 14+ — Diagnosis calibration
-
-One diagnosis family per PR where possible.
-
----
-
-### PR 15+ — Score calibration
-
-Only after diagnosis corpus is useful.
-
----
-
-### Final pre-release PR — Capability maturity and release boundary
-
-Supported/experimental classification.
-
-Then prepare `v0.1.0`.
-
----
-
-# Required CI shape when this work is finished
-
-I would eventually want CI conceptually divided into:
+Acceptance:
 
 ```text
-Static / build
-    fmt
-    clippy
-    build
-    dependency hygiene
-    architecture rules
-
-Objective correctness
-    objective contract matrix
-    objective docs validation
-
-Offline functional
-    recommendation
-    advisor
-    reports
-    artifacts
-    validation corpus
-
-Safety
-    policy
-    action runner fault injection
-    journal recovery simulation
-    watchdog
-
-Schema
-    artifact contracts
-    snapshots
-    migrations
-
-Live observation
-    self-hosted/manual target
-
-Live mutation
-    isolated self-hosted/manual target
-
-Release
-    packaging
-    reproducibility
-    install smoke
-```
-
-The live jobs do not necessarily need to block every GitHub PR immediately.
-
-But they should become required evidence for:
-
-```text
-release candidates
-loader changes
-mutation changes
-kernel-facing changes
+production path uses journal transaction
+journal fsync/rename complete before verify
+journal-write failure automatically rolls back
+SIGKILL after apply recovers
 ```
 
 ---
 
-# Cross-cutting requirement: preserve artifact compatibility
-
-Adding objective fields will affect artifacts.
-
-Do not casually mutate serialized structures.
-
-For every schema change:
-
-1. add fields as optional/defaulted where possible;
-2. old reports must still deserialize;
-3. reports generated from old runs must still render;
-4. migration/version behavior must be tested;
-5. new fields must clearly expose signal quality.
-
-For example old artifacts lacking runnable metrics should render:
+## New P1 — Crash-safe rollback preparation
 
 ```text
-Game runnable latency:
-Unavailable in artifact schema/source data
+Persist provider rollback state before first mutable syscall.
 ```
 
-not:
+Acceptance:
 
 ```text
-0 ns
+CPU-affinity restore snapshot durable before mutation
+experiment-specific restore path
+crash during apply restores original state
 ```
-
-Missing evidence must remain distinguishable from a clean measurement.
-
-That matches one of the project's strongest existing principles. Pasted text
 
 ---
 
-# Cross-cutting requirement: measure profiler overhead
-
-As the objective layer starts consuming richer scheduler histograms, make sure the profiler does not substantially perturb the workload.
-
-Add controlled tests for:
+## New P1 — Startup recovery provider capability registry
 
 ```text
-recording disabled
-core scheduler probes
-core + IRQ
-core + block
-core + GPU
-full supported probe set
+Automatic crash recovery must be explicitly authorized per rollback token/provider.
 ```
 
-Measure:
+Acceptance:
 
 ```text
-CPU overhead
-memory
-event drop rate
-ring-buffer pressure
-target performance impact
+CPU affinity VerifiedAutomatic
+unverified providers ManualOnly
+no automatic legacy task restoration by accidental registry inclusion
 ```
-
-This does not need to become a giant optimization project.
-
-It simply provides evidence that the measurement system is not materially creating the problem it measures.
 
 ---
 
-# Cross-cutting requirement: report why a decision happened
-
-Every autotune verdict should eventually expose:
+## New P1/P2 — Portable live evidence export
 
 ```text
-Objective
-Primary metric
-Baseline value
-Candidate value
-Difference
-Signal quality
-Sample count
-Guardrails checked
-Guardrails triggered
-Fallback used
-Final verdict
-Reason
+Export exact-source live acceptance evidence with checksums, schema verification and fail-closed privacy scanning.
 ```
 
-Example:
-
-```text
-Objective:
-  game_runnable_latency
-
-Primary metric:
-  runnable_p99_ns
-
-Baseline:
-  3.84 ms
-
-Candidate:
-  2.91 ms
-
-Change:
-  -24.2%
-
-Signal quality:
-  direct
-
-Samples:
-  baseline 83,241
-  candidate 85,903
-
-Guardrails:
-  frame p99: unchanged
-  >5 ms runnable rate: improved
-  thermal: unchanged
-  CPU power limit: no regression
-  GPU power limit: no regression
-
-Verdict:
-  Improved
-```
-
-This is especially useful for an experimental project because it makes incorrect assumptions inspectable.
+This can alternatively be folded into #27 and #34 if you want to keep the issue count smaller.
 
 ---
 
-# Cross-cutting requirement: keep observation and mutation separable
+# 13. Recommended PR sequence from the repository as it exists now
 
-Do not let the new acceptance architecture turn into:
+The most practical sequence is:
 
-```text
-Stutter only works if autotuning works.
-```
-
-The layers should remain:
+## PR #45 — finish and merge
 
 ```text
-observe
-↓
-diagnose
-↓
-recommend
-↓
-experiment
-↓
-apply
-↓
-verify
-↓
-rollback
+startup CPU-affinity identity
+restore-format routing
+scope wording
 ```
-
-A user should be able to stop at any level.
-
-This separation is already one of the better parts of the current project and should be preserved rather than simplified away.
 
 ---
 
-# Definition of the `Core Validation` milestone
+## Next PR — startup recovery capability restrictions
 
-I would declare the milestone complete only when all of these are true:
+Small, safety-focused.
 
-## Measurement
+```text
+VerifiedAutomatic vs ManualOnly
+block legacy/unproven automatic recovery
+```
 
-- direct runnable-latency aggregation exists;
-- objective signal quality is explicit;
-- insufficient data becomes inconclusive rather than a false result;
-- profiler overhead has at least basic characterization.
+---
+
+## Next PR — durable rollback token before verify
+
+Rebase/split `fix/controller-rollback-before-verify`.
+
+Wire the transaction into production.
+
+---
+
+## Next PR — crash-safe rollback preparation
+
+Close the mid-apply hard-crash gap.
+
+---
+
+## Next PR — controller SIGKILL/restart acceptance
+
+Use real disposable processes.
+
+Complete the majority of #29.
+
+---
+
+## Next PR — failure/suspend recovery matrix
+
+```text
+partial apply
+verify failure
+rollback failure
+PID reuse
+rollback interruption
+suspend/resume
+```
+
+Close #29.
+
+---
+
+## Next PR — portable live evidence bundles
+
+Implement exporter/verifier/privacy gate.
+
+---
+
+## Next PR — controlled game-objective live acceptance
+
+Finish #27.
+
+---
+
+## Next PR — live workflow integration
+
+Trusted self-hosted/local release gate using canonical suites.
+
+---
+
+## Next PR — kernel compatibility evidence
+
+Start #30.
+
+---
+
+## Next PR — profiler overhead
+
+Complete #38.
+
+---
+
+## Next PR — provenance + coverage schema
+
+Start/complete #34.
+
+---
+
+## Following PRs — real validation corpus
+
+#31.
+
+---
+
+## Following PRs — individual diagnosis calibration
+
+#32, preferably one diagnosis family per PR.
+
+---
+
+## Following PR — score evaluation
+
+#33.
+
+---
+
+## Following PR — maturity/provider framework
+
+#35.
+
+---
+
+## Final Core Validation sequence — release preparation
+
+#36.
+
+---
+
+# 14. Branch cleanup point
+
+After:
+
+```text
+PR45 merged
+controller crash branch rebased
+any useful commits extracted
+```
+
+delete:
+
+```text
+fix/autotune-objective-semantics
+feat/fixed-work-compile-throughput
+test/objective-contract-matrix
+feat/objective-descriptors
+feat/live-observation-acceptance
+feat/live-affinity-acceptance
+fix/startup-recovery-identity
+```
+
+after their respective merged state is confirmed.
+
+Eventually delete:
+
+```text
+fix/controller-rollback-before-verify
+```
+
+after its replacement PR(s) merge.
+
+The goal should be:
+
+```text
+main
++
+only genuinely active development branches
+```
+
+rather than using branches as historical archives. Git already preserves the merged history.
+
+---
+
+# 15. Core Validation completion definition — revised
+
+The milestone should now require all of the following.
 
 ## Objective correctness
 
-- `GameRunnableLatency` genuinely evaluates runnable latency;
-- compile activity is no longer throughput;
-- real compile throughput exists or remains safely unsupported;
-- every objective has a behavioral matrix;
-- guardrails are separated from primary metrics.
+- [x] direct runnable objective
+- [x] compile activity separated from throughput
+- [x] fixed-work completion
+- [x] nine-objective contract matrix
+- [x] descriptor registry
+- [x] generated/checked documentation
 
-## Documentation
+## Observation
 
-- objective contracts come from one authoritative registry;
-- objective documentation is generated/validated;
-- no known code/documentation disagreement remains.
+- [x] canonical real scheduler capture
+- [x] clean-source provenance
+- [x] complete histograms
+- [x] zero-drop test
+- [x] report/advisor pipeline
+- [ ] controlled direct game-objective capture
+- [ ] portable verified bundle
 
-## Live system validation
+## Mutation
 
-- real eBPF load/attach works through the canonical acceptance harness;
-- real scheduler data reaches artifacts;
-- diagnosis/report workflow completes;
-- artifacts validate.
-
-## Mutation safety
-
-- CPU-affinity live apply works;
-- verify works;
-- rollback works;
-- restored kernel state is independently checked;
-- audits are complete.
+- [x] real CPU-affinity apply
+- [x] real independent restore
+- [x] multi-process target
+- [ ] durable rollback token before verification in production
+- [ ] rollback prepared before first crash-sensitive mutation
 
 ## Recovery
 
-- controller crash after apply is automatically recovered;
-- stale PID identity is safe;
-- verification failure rolls back;
-- rollback failure creates an explicit fault state;
-- suspend/resume behavior is tested.
+- [ ] startup affinity identity fix merged
+- [ ] automatic recovery capability restricted per provider
+- [ ] crash before apply
+- [ ] crash during apply
+- [ ] crash after apply
+- [ ] crash during verify
+- [ ] crash during rollback
+- [ ] forced verify failure
+- [ ] partial apply
+- [ ] rollback failure
+- [ ] stale PID/TID replacement
+- [ ] suspend/resume
 
-## Compatibility
+## Portability
 
-- compatibility evidence exists from multiple real kernel environments;
-- degraded optional evidence is represented properly.
+- [ ] multiple real kernel environments
+- [ ] compatibility evidence corpus
+- [ ] optional-probe degradation verified
 
-## Calibration
+## Measurement integrity
 
-- initial real/fixture-real diagnosis corpus exists;
-- important heuristics have at least basic calibration evidence;
-- validation evidence provenance is tracked.
+- [ ] basic profiler overhead characterized
 
-## Product boundary
+## Validation
 
-- supported vs experimental capabilities are explicit;
-- unsupported automation cannot accidentally become default behavior.
+- [ ] provenance schema
+- [ ] coverage reporting
+- [ ] real/fixture-real diagnosis corpus
+- [ ] threshold calibration
+- [ ] confidence calibration
+- [ ] StutterScore evaluation
 
-Once that is achieved, the project has moved from:
+## Product
 
-> “large, sophisticated experimental prototype”
+- [ ] capability tiers
+- [ ] provider graduation rules
+- [ ] bounded supported surface
+- [ ] first-release contract
+- [ ] fresh-checkout release acceptance
+- [ ] `v0.1.0`
 
-to:
-
-> **“experimental tool with a genuinely trustworthy supported core.”**
-
-That is the point where expanding the autotuner becomes worthwhile.
+Only then should the feature freeze be lifted.
 
 ---
 
-# What I would start with tomorrow
+# 16. What not to work on yet
 
-If you want the shortest actionable queue from this entire plan, I would literally begin in this order:
+Continue postponing:
 
-1. Create the `Core Validation` milestone and P0/P1 issues.
-2. Create `fix/autotune-objective-semantics`.
-3. Write the failing `GameRunnableLatency` semantic regression test.
-4. Write the failing compile-duration counterexample.
-5. Design the window-level runnable latency aggregation format.
-6. Implement aggregate runnable latency signals.
-7. Switch `GameRunnableLatency` to the direct metric.
-8. Demote/rename compile activity and disable false throughput improvement verdicts.
-9. Implement fixed-work completion time as the first real compile throughput metric.
-10. Add objective descriptors and doc-generation checks.
-11. Merge the P0 sequence.
-12. Build `xtask live-acceptance observation`.
-13. Build `xtask live-acceptance affinity`.
-14. Add deliberate SIGKILL/startup-recovery acceptance.
-15. Start collecting real validation fixtures.
-16. Calibrate one diagnosis family at a time.
-17. Define supported/experimental capability tiers.
-18. Cut the first actual versioned release.
+```text
+new power providers
+new VM tunables
+new IRQ mutation features
+scheduler replacement
+major remote-control expansion
+another UI
+large crate restructuring
+new telemetry integrations
+```
 
-The key is **not allowing step 15 or the release work to distract from steps 3–14**.
+There is already enough architecture.
 
-The audit's central finding was that `stutter` already has plenty of architecture. What it needs now is proof that its most important measurement, decision and recovery promises are true in practice. Pasted text
+The remaining work is about converting existing architecture into **demonstrated guarantees**.
 
-Once that is achieved, the existing daemon, autotune, provider and remote architecture becomes an asset instead of additional validation debt.
+---
+
+# 17. Immediate next steps
+
+If development resumes right now, the correct order is:
+
+1. Finish reviewing PR #45.
+2. Make its CPU-affinity-only strict-recovery scope explicit.
+3. Add the automatic-recovery provider capability restriction.
+4. Merge #45 and verify `main`.
+5. Rebase `fix/controller-rollback-before-verify`.
+6. Wire its journaled transaction into the **actual production live-controller path**.
+7. Prove rollback state is durable before verification.
+8. Split CPU-affinity mutation into durable preparation → mutation so SIGKILL during apply is recoverable.
+9. Turn the branch's crash controller into canonical `xtask live-acceptance recovery`.
+10. Run after-apply and during-verification SIGKILL tests.
+11. Add mid-apply, rollback, verification failure, stale-identity and rollback-failure cases.
+12. Add suspend/resume acceptance.
+13. Close #29.
+14. Build the new fail-closed portable evidence exporter.
+15. Add controlled game-objective live acceptance.
+16. Close #27.
+17. Clean the six stale merged branches and protect `main`.
+18. Build the kernel corpus (#30).
+19. Characterize overhead (#38).
+20. Implement provenance/coverage (#34).
+21. Collect real diagnosis corpus (#31).
+22. Calibrate diagnoses (#32).
+23. Evaluate StutterScore (#33).
+24. Define supported capability/provider tiers (#35).
+25. Perform the fresh-checkout release gate and create the first versioned release (#36).
+
+That is now the shortest route from the current repository to a defensible first product milestone.
+
+The key change from the previous plan is that **measurement semantics are no longer the bottleneck**. They have been substantially fixed and protected. The most consequential remaining risk is now the mutation lifecycle:
+
+> **Can Stutter survive being killed at every point where it has changed the machine, know exactly what it changed, prove it is restoring the same resource it originally touched, and recover without trusting stale identity?**
+
+Until that answer is convincingly “yes” for CPU affinity, expanding autotune further would still be premature. Once it is yes, the project is ready to move from safety validation into empirical calibration and then a narrow first release.
+
+The biggest practical takeaway is that I would work almost exclusively on **PR #45 → durable rollback transaction → crash/restart acceptance** next. That chain contains the highest-severity remaining correctness work; kernel breadth, calibration, and release work all become much more useful after it is closed.

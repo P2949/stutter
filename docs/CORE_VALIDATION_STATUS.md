@@ -1,6 +1,8 @@
 # Core Validation execution ledger
 
-The authoritative requested sequence is [CORE_VALIDATION_PLAN.md](CORE_VALIDATION_PLAN.md).
+The authoritative requested sequence is the updated [CORE_VALIDATION_PLAN.md](CORE_VALIDATION_PLAN.md).
+Its repository inventory is the user's audit snapshot; this ledger records
+subsequent implementation and verification against current state.
 The milestone remains **IN PROGRESS**. No live acceptance, calibration, kernel
 compatibility, or release gate is implied by offline tests.
 
@@ -48,6 +50,57 @@ compatibility, or release gate is implied by offline tests.
 Do not claim completion or graduate capabilities without the corresponding
 evidence. Missing real environments and unperformed live tests remain explicit
 validation debt rather than synthetic substitutes.
+
+## 2026-10-21: revised recovery-first plan and provider authorization
+
+- Adopted the user's updated repository-wide plan, preserving completed P0 and
+  affinity issues. Recovery correctness precedes portable evidence, kernel and
+  overhead validation, provenance/corpus, calibration, capability tiers and release.
+- PR #45 exact-head CI `39639609726` passed at
+  `a39f6c8313e036a96e98763a5de694bf3f87e45c`; clarified its CPU-affinity-only
+  scope and merged as `7d97ec64a8b7e7854d4dfcdd1e31b2d3efdf8d35`.
+  Exact-main CI `39672453590` is in progress; no main-success claim yet.
+- Rebased the preserved controller transaction/crash-helper branch onto that
+  main. Fixed the hook return types; the journal-at-verification regression
+  passed. Production manager ownership and the during-apply gap remain open;
+  that branch has not been represented as completed crash acceptance.
+- Created #46 for explicit automatic recovery capability per token. Before the
+  gate, a real temporary-file sysfs regression failed (exit 101): the startup
+  executor accepted an unqualified arbitrary-path token. Red evidence:
+  `/tmp/stutter-recovery-capability-red.log`. No host sysfs or user state touched.
+- Added exhaustive per-token capability decisions and a strict affinity-only
+  startup registry, with no manual catch-all. Unauthorized providers are rejected
+  before dispatch and retain fault/manual recovery evidence. Explicit manual
+  registry behavior stays separate. Full new validation is pending below.
+- Created and read back active main ruleset `25590967`: force pushes/deletion
+  blocked, PR required with zero mandatory reviews, and strict up-to-date GitHub
+  Actions checks for `fmt build clippy test`, `daemon safety gates`, and
+  `schema and fixture gates`. The build job includes objective contracts/docs.
+  No bypass actors or privileged public-PR live gate were configured.
+- The expanded targeted suite exposed empty manual-operation tokens producing
+  an empty recovery hint (26 passed, 1 failed). Added an explicit retained-journal
+  inspection instruction for that malformed/empty-token case before rerunning.
+- Confirmed all seven superseded Core Validation/recovery branch tips are
+  ancestors of `7d97ec6`, then deleted their remote/local heads. Also removed
+  the merged local historical project-cleanup branch and advanced local main by
+  fast-forward. Remote inventory now has protected main plus the preserved active
+  controller branch; this new capability branch will be published for review.
+- Created #47 (durable rollback before verification) and #48 (prepared rollback
+  before first mutation), preserving the distinct gaps rather than claiming the
+  existing after-apply hook covers mid-apply death. Portable export stays tracked
+  under #27/#34. Added an explicit startup-recovery contract step to daemon CI.
+- PASS full pinned-environment format/build/all-target Clippy/test gate: 2,717
+  library tests, 5 ignored, 8 lifecycle integration tests and other suites.
+  PASS 23 xtask unit tests plus descendant-cleanup integration, xtask Clippy,
+  generated objective docs, offline recommendation, and schema-18 advisor smoke
+  with its expected older-schema warning. Final expanded startup suite passed
+  all 27 tests, including all-ten-token registry coverage and all-nine-denied-
+  token fault/audit/history/daemon-state retention. Autotune safety script passed.
+  This is provider authorization/identity validation, not full real crash-matrix
+  acceptance; #29, #47 and #48 remain open.
+- PASS exact-main PR #45 CI run `39672453590` at
+  `7d97ec64a8b7e7854d4dfcdd1e31b2d3efdf8d35`: build, daemon safety and
+  schema/fixture gates all succeeded; optional manual live-smoke was skipped.
 
 ## 2026-10-21: runnable-latency correctness
 

@@ -510,7 +510,7 @@ fn rollback_failure_enters_faulted() {
 }
 
 #[test]
-fn real_startup_recovery_executor_uses_registry_restore_for_sysfs_tokens() {
+fn real_startup_recovery_executor_refuses_unproven_sysfs_tokens() {
     let dir = temp_dir("sysfs-token");
     let path = dir.join("knob");
     fs::write(&path, "performance\n").unwrap();
@@ -520,13 +520,8 @@ fn real_startup_recovery_executor_uses_registry_restore_for_sysfs_tokens() {
     };
     let mut executor = RealStartupRecoveryRollbackExecutor;
 
-    let summary = executor.rollback(&token).unwrap();
-
-    assert_eq!(summary.affected_tasks, 1);
-    assert!(summary.message.contains("rollback_kind=sysfs-restore"));
-    assert!(summary.message.contains("restored_items=1"));
-    assert!(summary.message.contains("skipped_items=0"));
-    assert_eq!(fs::read_to_string(&path).unwrap(), "powersave");
+    assert!(executor.rollback(&token).is_err());
+    assert_eq!(fs::read_to_string(&path).unwrap(), "performance\n");
 
     fs::remove_dir_all(dir).ok();
 }
