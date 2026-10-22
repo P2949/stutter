@@ -83,7 +83,8 @@ pub mod autotune {
         DEFAULT_MIN_FOCUS_CONFIDENCE,
         commands::live::{AutotuneCommandInput, autotune_command},
         crash_acceptance::{
-            RecoveryCheckpoint, RecoveryControllerInput, hold_affinity_recovery_controller,
+            RecoveryCheckpoint, RecoveryControllerInput, SuspendResumeControllerInput,
+            hold_affinity_recovery_controller, hold_suspend_resume_controller,
             recover_affinity_acceptance_controller,
         },
         objective::{

@@ -242,7 +242,12 @@ pub struct RecoveryControllerInput<'a> {
     pub checkpoint: RecoveryCheckpoint,
 }
 
-pub fn hold_affinity_recovery_controller(input: RecoveryControllerInput<'_>) -> anyhow::Result<()> {
+/// Verifies the controller owns a disposable 3-process / 5-task tree, then
+/// publishes its identity. Returns the single-CPU mask the candidate applies.
+pub(crate) fn prepare_owned_controller(
+    input: &RecoveryControllerInput<'_>,
+    may_be_traced: bool,
+) -> anyhow::Result<crate::affinity::CpuMask> {
     let RecoveryControllerInput {
         tree_pid,
         tree_ticks,
@@ -250,8 +255,8 @@ pub fn hold_affinity_recovery_controller(input: RecoveryControllerInput<'_>) -> 
         out,
         owner_pid,
         owner_ticks,
-        checkpoint,
-    } = input;
+        ..
+    } = *input;
     ensure!(
         ticks(tree_pid)? == tree_ticks && ticks(owner_pid)? == owner_ticks,
         "disposable target/owner identity differs"
@@ -261,7 +266,7 @@ pub fn hold_affinity_recovery_controller(input: RecoveryControllerInput<'_>) -> 
         "target must be the harness's direct child"
     );
     let controller_parent = parent(std::process::id())?;
-    let traced = checkpoint.strace_injection().is_some()
+    let traced = may_be_traced
         && parent(controller_parent)? == owner_pid
         && fs::read_to_string(format!("/proc/{controller_parent}/comm"))?.trim() == "strace";
     ensure!(
@@ -311,6 +316,18 @@ pub fn hold_affinity_recovery_controller(input: RecoveryControllerInput<'_>) -> 
         "controller-started.json",
         json!({"controller_pid":std::process::id(),"controller_starttime_ticks":ticks(std::process::id())?}),
     )?;
+    Ok(desired)
+}
+
+pub fn hold_affinity_recovery_controller(input: RecoveryControllerInput<'_>) -> anyhow::Result<()> {
+    let desired = prepare_owned_controller(&input, input.checkpoint.strace_injection().is_some())?;
+    let RecoveryControllerInput {
+        tree_pid,
+        tree_ticks,
+        out,
+        checkpoint,
+        ..
+    } = input;
     if checkpoint == RecoveryCheckpoint::BeforeApply {
         pause(out, checkpoint, false)?;
     }
@@ -534,6 +551,38 @@ pub fn recover_affinity_acceptance_controller(
     );
     Ok(
         json!({"controller_pid":std::process::id(),"controller_starttime_ticks":ticks(std::process::id())?,"restored_tasks":restored,"startup_recovered":restored > 0,"journal_clean":true}),
+    )
+}
+
+/// Same ownership inputs as the checkpoint controller; no checkpoint applies.
+pub struct SuspendResumeControllerInput<'a> {
+    pub tree_pid: u32,
+    pub tree_ticks: u64,
+    pub desired_cpu: u32,
+    pub out: &'a Path,
+    pub owner_pid: u32,
+    pub owner_ticks: u64,
+    pub resume_timeout_seconds: u64,
+}
+
+pub fn hold_suspend_resume_controller(
+    input: SuspendResumeControllerInput<'_>,
+) -> anyhow::Result<()> {
+    let owned = RecoveryControllerInput {
+        tree_pid: input.tree_pid,
+        tree_ticks: input.tree_ticks,
+        desired_cpu: input.desired_cpu,
+        out: input.out,
+        owner_pid: input.owner_pid,
+        owner_ticks: input.owner_ticks,
+        checkpoint: RecoveryCheckpoint::ManagerMeasuring,
+    };
+    let desired = prepare_owned_controller(&owned, false)?;
+    super::runtime::acceptance::run_suspend_resume(
+        input.out,
+        input.tree_pid,
+        desired,
+        Duration::from_secs(input.resume_timeout_seconds),
     )
 }
 

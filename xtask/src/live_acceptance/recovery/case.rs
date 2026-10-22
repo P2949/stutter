@@ -197,22 +197,7 @@ pub(super) fn run(
     let out = parent.join(checkpoint.as_str());
     fs::create_dir(&out)?;
     fs::write(out.join("acceptance.toml"), "# Isolated crash checkpoint\n")?;
-    let ready = out.join("workload-ready.json");
-    let mut workload = OwnedChild(
-        Command::new(executable)
-            .args([
-                "live-workload",
-                "--descendants",
-                "--seconds",
-                "90",
-                "--ready",
-            ])
-            .arg(&ready)
-            .stdout(Stdio::null())
-            .stderr(fs::File::create(out.join("workload.stderr"))?)
-            .spawn()?,
-    );
-    wait_file(&ready, &mut workload, 5)?;
+    let mut workload = start_workload(executable, &out, 90)?;
     let root = workload.0.id();
     let root_ticks = start_ticks(root)?;
     let before = procfs::snapshot(root, root_ticks)?;
@@ -425,6 +410,27 @@ pub(super) fn controller_identity(value: &Value) -> anyhow::Result<(u32, u64)> {
             .as_u64()
             .context("restart controller starttime missing")?,
     ))
+}
+
+/// Spawns the owned 3-process / 5-task workload and waits until it is ready.
+pub(super) fn start_workload(
+    executable: &Path,
+    out: &Path,
+    seconds: u64,
+) -> anyhow::Result<OwnedChild> {
+    let ready = out.join("workload-ready.json");
+    let mut workload = OwnedChild(
+        Command::new(executable)
+            .args(["live-workload", "--descendants", "--seconds"])
+            .arg(seconds.to_string())
+            .arg("--ready")
+            .arg(&ready)
+            .stdout(Stdio::null())
+            .stderr(fs::File::create(out.join("workload.stderr"))?)
+            .spawn()?,
+    );
+    wait_file(&ready, &mut workload, 5)?;
+    Ok(workload)
 }
 
 #[cfg(test)]

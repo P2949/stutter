@@ -10,6 +10,7 @@ pub(crate) mod daemon_state;
 pub(crate) mod decision_view;
 pub(crate) mod emission;
 pub(crate) mod history;
+mod lifecycle;
 mod phase;
 mod plan_output;
 pub(crate) mod planning;
@@ -92,6 +93,7 @@ pub struct AutotuneRuntime {
     last_plan_result: Option<PlanResult>,
     last_dry_run_plan_files: Vec<AutotuneDryRunPlanFileSummary>,
     pending_history_context: Option<RuntimeHistoryContext>,
+    lifecycle: lifecycle::RuntimeLifecycle,
 }
 
 #[cfg(test)]

@@ -2,7 +2,7 @@
 //! failed verification after real mutation, and failed rollback. The controller
 //! exits on its own; every conclusion is re-read from the kernel and the files.
 use super::{
-    case::{archive, start_actor, verify_recovery_evidence},
+    case::{archive, start_actor, start_workload, verify_recovery_evidence},
     *,
 };
 
@@ -24,22 +24,7 @@ pub(super) fn run(
     let out = parent.join(checkpoint.as_str());
     fs::create_dir(&out)?;
     fs::write(out.join("acceptance.toml"), "# Isolated failure case\n")?;
-    let ready = out.join("workload-ready.json");
-    let mut workload = OwnedChild(
-        Command::new(executable)
-            .args([
-                "live-workload",
-                "--descendants",
-                "--seconds",
-                "90",
-                "--ready",
-            ])
-            .arg(&ready)
-            .stdout(Stdio::null())
-            .stderr(fs::File::create(out.join("workload.stderr"))?)
-            .spawn()?,
-    );
-    wait_file(&ready, &mut workload, 5)?;
+    let mut workload = start_workload(executable, &out, 90)?;
     let root = workload.0.id();
     let root_ticks = start_ticks(root)?;
     let before = procfs::snapshot(root, root_ticks)?;

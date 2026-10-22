@@ -33,6 +33,7 @@ impl AutotuneRuntime {
             last_plan_result: None,
             last_dry_run_plan_files: Vec::new(),
             pending_history_context: None,
+            lifecycle: Default::default(),
             config,
         }
     }

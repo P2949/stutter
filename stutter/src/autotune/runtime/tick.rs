@@ -103,6 +103,8 @@ impl AutotuneRuntime {
                 drop_counters,
                 ..
             } => {
+                // A suspended gap must clear the window before these intervals join it.
+                self.poll_lifecycle_clock()?;
                 let scored_samples = records
                     .iter()
                     .map(|record| record.samples)
@@ -292,7 +294,7 @@ impl AutotuneRuntime {
         Ok(Some(stream_entry))
     }
 
-    fn prepare_runtime_phase_for_evaluation(&mut self) -> anyhow::Result<()> {
+    pub(super) fn prepare_runtime_phase_for_evaluation(&mut self) -> anyhow::Result<()> {
         let next = if self.live_experiments.has_active_experiment() {
             AutotuneRuntimePhase::MeasuringCandidate
         } else {
@@ -444,7 +446,7 @@ impl AutotuneRuntime {
         self.transition_runtime_phase(next, format!("applying decision side effect: {reason}"))
     }
 
-    fn prepare_runtime_phase_for_apply_candidate(&mut self) -> anyhow::Result<()> {
+    pub(super) fn prepare_runtime_phase_for_apply_candidate(&mut self) -> anyhow::Result<()> {
         match self.runtime_phase() {
             AutotuneRuntimePhase::Idle => {
                 self.transition_runtime_phase(

@@ -6,7 +6,9 @@ mod actor;
 mod case;
 mod failure;
 mod procfs;
+mod suspend;
 pub(crate) use actor::{ControllerCommand, controller};
+pub(crate) use suspend::SuspendOptions;
 
 fn read_json(path: &Path) -> anyhow::Result<Value> {
     serde_json::from_slice(&fs::read(path)?).with_context(|| format!("read {}", path.display()))
@@ -33,6 +35,15 @@ fn wait_file(path: &Path, child: &mut OwnedChild, seconds: u64) -> anyhow::Resul
         );
         std::thread::sleep(Duration::from_millis(20));
     }
+}
+
+pub(super) fn run_suspend(
+    root: &Path,
+    out: &Path,
+    binary: &Path,
+    options: &SuspendOptions,
+) -> anyhow::Result<()> {
+    suspend::run(root, out, binary, options)
 }
 
 pub(super) fn run(root: &Path, out: &Path, binary: &Path) -> anyhow::Result<()> {

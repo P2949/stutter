@@ -153,3 +153,89 @@ fn controller_session_finish_rolls_back_active_experiment_on_clean_stop() {
     assert_eq!(runtime.controller.state.phase, ControllerPhase::Cooldown);
     assert!(runtime.controller.state.active_experiment.is_none());
 }
+
+fn simulated_runtime_with_active_experiment() -> AutotuneRuntime {
+    let mut config =
+        AutotuneRuntimeConfig::observe(None, Some(1234), None).with_simulated_action_effects();
+    config.history_log = None;
+    let mut runtime = AutotuneRuntime::new(config);
+    runtime.prepare_runtime_phase_for_apply_candidate().unwrap();
+    runtime
+        .transition_runtime_phase(AutotuneRuntimePhase::ApplyingCandidate, "test")
+        .unwrap();
+    runtime
+        .live_experiments
+        .set_current_for_tests(fake_live_experiment(CandidateAction::fake(
+            crate::actions::ActionId::new("suspend-candidate".to_owned()),
+            SafetyClass::ReversibleLowRisk,
+        )));
+    runtime
+        .controller
+        .window
+        .push_intervals([crate::recorder::IntervalRecord {
+            samples: 10,
+            ..Default::default()
+        }]);
+    runtime
+}
+
+#[test]
+fn suspend_gap_invalidates_window_reverts_candidate_and_stabilizes() {
+    use crate::daemon::lifecycle::{DaemonLifecycleAction, LifecycleClockSample};
+    let mut runtime = simulated_runtime_with_active_experiment();
+    assert_eq!(runtime.controller.window.interval_count(), 1);
+    let sample = |realtime_ms, monotonic_ms| LifecycleClockSample {
+        realtime_ms,
+        monotonic_ms,
+    };
+    assert!(
+        runtime
+            .observe_lifecycle_clock(sample(1_000_000, 1_000))
+            .unwrap()
+            .is_none()
+    );
+    // Wall clock advanced 60 s while the monotonic clock advanced 1 s: suspended.
+    let event = runtime
+        .observe_lifecycle_clock(sample(1_060_000, 2_000))
+        .unwrap()
+        .expect("resume must be detected");
+    assert!(matches!(
+        event,
+        crate::daemon::lifecycle::DaemonLifecycleEvent::ResumeDetected { slept_ms: 59_000 }
+    ));
+    assert_eq!(runtime.controller.window.interval_count(), 0);
+    assert!(!runtime.live_experiments.has_active_experiment());
+    let transition = runtime.lifecycle.last_transition.as_ref().unwrap();
+    assert!(matches!(
+        transition.event,
+        crate::daemon::lifecycle::DaemonLifecycleEvent::ResumeDetected { .. }
+    ));
+    assert!(
+        transition
+            .actions
+            .contains(&DaemonLifecycleAction::ClearMeasurementWindows)
+    );
+    assert!(transition.stabilization_ms.is_some());
+    let cooldown = runtime.controller.state.cooldown_until_unix_nanos.unwrap();
+    assert!(cooldown > crate::audit::unix_nanos_now());
+}
+
+#[test]
+fn clock_jitter_below_threshold_does_not_touch_measurements_or_candidate() {
+    use crate::daemon::lifecycle::LifecycleClockSample;
+    let mut runtime = simulated_runtime_with_active_experiment();
+    for (realtime_ms, monotonic_ms) in [(1_000_000, 1_000), (1_004_000, 2_000), (1_005_500, 3_000)]
+    {
+        assert!(
+            runtime
+                .observe_lifecycle_clock(LifecycleClockSample {
+                    realtime_ms,
+                    monotonic_ms,
+                })
+                .unwrap()
+                .is_none()
+        );
+    }
+    assert_eq!(runtime.controller.window.interval_count(), 1);
+    assert!(runtime.live_experiments.has_active_experiment());
+}
