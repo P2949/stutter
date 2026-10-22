@@ -349,6 +349,11 @@ alias `frame_events.json`) the score includes the frame terms
 unavailable (null), never zero, and the runnable-only path is unchanged. If only some levels
 have frames every level is scored runnable-only. `--require-frames` fails unless every level
 has usable frame data and is required to close the frame-aware evaluation (#33); the synthetic
-workload emits no frames and cannot close it.
+workload emits no frames and cannot close it. `--require-frames` also implies strict target
+identity: the target is resolved from the recording's own configuration (exactly one
+`tree_roots` PID, else exactly one `manual_pids` PID, or both naming the same PID) with its
+start time from the session; ambiguous or missing targets fail, and the report carries
+`target_pid`, `target_starttime_ticks` and `target_identity_source` (`tree_root`, `manual_pid`
+or, non-strict only, `legacy_sample_heuristic`). Record real series with `--tree-pid`.
 Regardless of the score, `GameRunnableLatency` keeps runnable latency as its primary and the
 compile objective keeps fixed-work elapsed time (a test asserts both descriptors).
