@@ -1,6 +1,67 @@
 use super::*;
 
-pub(super) fn metadata(root: &Path, out: &Path, binary: &Path, suite: &str) -> anyhow::Result<()> {
+/// Owns the serialized suite vocabulary shared by `environment.json` and `result.json`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum LiveAcceptanceSuite {
+    Observation,
+    Affinity,
+    Recovery,
+    #[allow(dead_code)] // Identifier reserved for a suite that lands in a later PR.
+    GameRunnable,
+    #[allow(dead_code)]
+    Overhead,
+    #[allow(dead_code)]
+    SuspendResume,
+}
+impl LiveAcceptanceSuite {
+    #[cfg(test)]
+    pub(super) const ALL: [Self; 6] = [
+        Self::Observation,
+        Self::Affinity,
+        Self::Recovery,
+        Self::GameRunnable,
+        Self::Overhead,
+        Self::SuspendResume,
+    ];
+    pub(super) fn as_str(self) -> &'static str {
+        match self {
+            Self::Observation => "live_observation",
+            Self::Affinity => "live_affinity",
+            Self::Recovery => "live_recovery",
+            Self::GameRunnable => "live_game_runnable",
+            Self::Overhead => "live_overhead",
+            Self::SuspendResume => "live_suspend_resume",
+        }
+    }
+}
+
+/// Writes `result.json` with the suite identity injected, refusing to publish a
+/// result whose suite differs from the already-written `environment.json`.
+pub(super) fn write_result(
+    out: &Path,
+    suite: LiveAcceptanceSuite,
+    mut result: Value,
+) -> anyhow::Result<()> {
+    result["suite"] = json!(suite.as_str());
+    if let Ok(bytes) = fs::read(out.join("environment.json")) {
+        let environment: Value = serde_json::from_slice(&bytes)?;
+        ensure!(
+            environment["suite"] == result["suite"],
+            "environment.json suite {} differs from result suite {}",
+            environment["suite"],
+            result["suite"]
+        );
+    }
+    fs::write(out.join("result.json"), serde_json::to_vec_pretty(&result)?)?;
+    Ok(())
+}
+
+pub(super) fn metadata(
+    root: &Path,
+    out: &Path,
+    binary: &Path,
+    suite: LiveAcceptanceSuite,
+) -> anyhow::Result<()> {
     let capture = |program: &str, argv: &[&str]| -> anyhow::Result<String> {
         let output = Command::new(program)
             .args(argv)
@@ -55,7 +116,7 @@ pub(super) fn metadata(root: &Path, out: &Path, binary: &Path, suite: &str) -> a
         "proc_version":fs::read_to_string("/proc/version")?.trim(),"distribution":os,"cpu_model":cpu_model,
         "cpu_online":fs::read_to_string("/sys/devices/system/cpu/online")?.trim(),
         "rust":capture("rustc", &["-Vv"] )?,"cargo_lock_sha256":capture("sha256sum", &["Cargo.lock"] )?.split_whitespace().next(),
-        "evidence_kind":"controlled_real","suite":suite,"linked_library_version":linked_library_version,"source_matches_harness":source_matches_harness,"harness_sha256":harness_hash});
+        "evidence_kind":"controlled_real","suite":suite.as_str(),"linked_library_version":linked_library_version,"source_matches_harness":source_matches_harness,"harness_sha256":harness_hash});
     fs::write(
         out.join("environment.json"),
         serde_json::to_vec_pretty(&metadata)?,
@@ -235,5 +296,60 @@ mod tests {
         write(&session, &interval);
         assert!(validate(&root, 42, 100).is_err());
         fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod suite_tests {
+    use super::*;
+
+    #[test]
+    fn suite_identifiers_are_stable_unique_and_live_prefixed() {
+        let names = LiveAcceptanceSuite::ALL.map(LiveAcceptanceSuite::as_str);
+        assert_eq!(
+            names,
+            [
+                "live_observation",
+                "live_affinity",
+                "live_recovery",
+                "live_game_runnable",
+                "live_overhead",
+                "live_suspend_resume"
+            ]
+        );
+        assert_eq!(
+            names
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len(),
+            names.len()
+        );
+    }
+
+    #[test]
+    fn environment_and_result_suite_agree_for_every_suite() {
+        for suite in LiveAcceptanceSuite::ALL {
+            let out = std::env::temp_dir().join(format!(
+                "stutter-suite-agreement-{}-{}",
+                std::process::id(),
+                suite.as_str()
+            ));
+            fs::create_dir_all(&out).unwrap();
+            fs::write(
+                out.join("environment.json"),
+                serde_json::to_vec(&json!({"suite":suite.as_str()})).unwrap(),
+            )
+            .unwrap();
+            write_result(&out, suite, json!({"status":"PASS"})).unwrap();
+            let environment: Value =
+                serde_json::from_slice(&fs::read(out.join("environment.json")).unwrap()).unwrap();
+            let result: Value =
+                serde_json::from_slice(&fs::read(out.join("result.json")).unwrap()).unwrap();
+            assert_eq!(environment["suite"], result["suite"]);
+            for other in LiveAcceptanceSuite::ALL.into_iter().filter(|o| *o != suite) {
+                assert!(write_result(&out, other, json!({})).is_err());
+            }
+            fs::remove_dir_all(out).unwrap();
+        }
     }
 }

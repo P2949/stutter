@@ -194,7 +194,12 @@ pub fn run(root: &Path, suite: Suite) -> anyhow::Result<()> {
     )?;
     let mut stage = "preflight";
     let result = (|| -> anyhow::Result<Value> {
-        evidence::metadata(root, &out, &binary, "live_observation")?;
+        evidence::metadata(
+            root,
+            &out,
+            &binary,
+            evidence::LiveAcceptanceSuite::Observation,
+        )?;
         command(
             &binary,
             &args(&["doctor", "--json"]),
@@ -327,14 +332,11 @@ pub fn run(root: &Path, suite: Suite) -> anyhow::Result<()> {
     } else {
         "FAIL"
     };
-    let receipt = json!({"schema_version":1,"suite":"live_observation","status":status,"stage":stage,
+    let receipt = json!({"schema_version":1,"status":status,"stage":stage,
         "evidence_kind":"controlled_real","measurements":result.as_ref().ok(),
         "error":result.as_ref().err().map(|error| format!("{error:#}")),
         "mutation_suite":"not_run","privacy":"local raw logs; inspect and sanitize before publication"});
-    fs::write(
-        out.join("result.json"),
-        serde_json::to_vec_pretty(&receipt)?,
-    )?;
+    evidence::write_result(&out, evidence::LiveAcceptanceSuite::Observation, receipt)?;
     println!("{status}: evidence {}", out.display());
     result.map(|_| ())
 }

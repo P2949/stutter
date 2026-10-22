@@ -32,15 +32,18 @@ pub enum RecoveryCheckpoint {
     AfterApply,
     DuringVerify,
     AfterVerify,
+    /// One full `LiveExperimentManager` start, killed in `Measuring`.
+    ManagerMeasuring,
 }
 impl RecoveryCheckpoint {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::BeforeApply,
         Self::AfterPreparation,
         Self::MidApply,
         Self::AfterApply,
         Self::DuringVerify,
         Self::AfterVerify,
+        Self::ManagerMeasuring,
     ];
     pub fn as_str(self) -> &'static str {
         match self {
@@ -50,6 +53,7 @@ impl RecoveryCheckpoint {
             Self::AfterApply => "after_apply",
             Self::DuringVerify => "during_verify",
             Self::AfterVerify => "after_verify",
+            Self::ManagerMeasuring => "manager_measuring",
         }
     }
 }
@@ -95,6 +99,7 @@ fn pause(
     let expected = match checkpoint {
         RecoveryCheckpoint::BeforeApply => ControllerJournalState::Clean,
         RecoveryCheckpoint::AfterPreparation => ControllerJournalState::Applying,
+        RecoveryCheckpoint::ManagerMeasuring => ControllerJournalState::Measuring,
         _ => ControllerJournalState::Applied,
     };
     ensure!(
@@ -105,6 +110,17 @@ fn pause(
         record.rollback_token().is_some() == (checkpoint != RecoveryCheckpoint::BeforeApply),
         "checkpoint rollback token mismatch"
     );
+    if checkpoint == RecoveryCheckpoint::ManagerMeasuring {
+        ensure!(
+            record.experiment_id.is_some()
+                && record.action_id.is_some()
+                && record.candidate.is_some()
+                && record.mode.is_some()
+                && record.safety_class.is_some()
+                && record.target_identity.is_some(),
+            "measuring journal lacks experiment/candidate metadata"
+        );
+    }
     publish(
         out,
         "pause-ready.json",
@@ -182,7 +198,7 @@ impl TuningAction for CheckpointAction<'_> {
 pub struct RecoveryControllerInput<'a> {
     pub tree_pid: u32,
     pub tree_ticks: u64,
-    pub cpu: u32,
+    pub desired_cpu: u32,
     pub out: &'a Path,
     pub owner_pid: u32,
     pub owner_ticks: u64,
@@ -193,7 +209,7 @@ pub fn hold_affinity_recovery_controller(input: RecoveryControllerInput<'_>) -> 
     let RecoveryControllerInput {
         tree_pid,
         tree_ticks,
-        cpu,
+        desired_cpu: cpu,
         out,
         owner_pid,
         owner_ticks,
@@ -261,6 +277,9 @@ pub fn hold_affinity_recovery_controller(input: RecoveryControllerInput<'_>) -> 
     if checkpoint == RecoveryCheckpoint::BeforeApply {
         pause(out, checkpoint, false)?;
     }
+    if checkpoint == RecoveryCheckpoint::ManagerMeasuring {
+        return hold_manager_measuring(out, tree_pid, tree_ticks, desired);
+    }
     let action = CheckpointAction {
         inner: CpuAffinityProfileAction {
             tree_pid,
@@ -309,6 +328,107 @@ pub fn hold_affinity_recovery_controller(input: RecoveryControllerInput<'_>) -> 
     pause(out, checkpoint, true)
 }
 
+/// Drives the production `LiveExperimentManager` start path (candidate → journaled
+/// apply → verify → `Measuring`) and holds there for SIGKILL. The observation is a
+/// minimal valid baseline: planner/measurement behavior is not under test here.
+fn hold_manager_measuring(
+    out: &Path,
+    tree_pid: u32,
+    tree_ticks: u64,
+    desired: crate::affinity::CpuMask,
+) -> anyhow::Result<()> {
+    use super::{
+        controller::{ControllerPolicy, ControllerRuntimeState},
+        decision::AutotuneDecision,
+        kept::ActiveProfileState,
+        live_experiment::{
+            LiveExperimentEvent, LiveExperimentManager, LiveExperimentManagerInput,
+            LiveExperimentRuntimeState, RuntimeLiveExperimentActionExecutor,
+        },
+        objective::ObjectiveSignals,
+        observation::AutotuneObservation,
+        planning::candidate::CandidateAction,
+        quality::OnlineDataQuality,
+        washout::WashoutWindowConfig,
+    };
+    let candidate = CandidateAction::cpu_affinity_profile(
+        crate::profiles::Profile {
+            name: "crash-acceptance-affinity".into(),
+            rules: vec![crate::profiles::ProfileRule {
+                affinity: Some(desired),
+                nice: None,
+                ionice: None,
+                match_class: vec![],
+                match_comm: vec![crate::process_tree::CompiledPattern::new("/.*/".into())?],
+            }],
+        },
+        tree_pid,
+    );
+    let mut observation = AutotuneObservation {
+        now_unix_nanos: crate::audit::unix_nanos_now(),
+        target_present: true,
+        target_root_pid: Some(tree_pid),
+        active_target_count: 1,
+        interval_count: 10,
+        scored_samples: 100,
+        scored_task_count: 1,
+        score: crate::scorer::StutterScore {
+            total: 1_000,
+            frame_p99_ms: 12.0,
+            frame_max_ms: 12.0,
+            over_5ms: 1,
+            ..Default::default()
+        },
+        data_quality: OnlineDataQuality::High,
+        ..AutotuneObservation::default()
+    };
+    observation.objective_signals =
+        ObjectiveSignals::from_window_score(&observation.to_window_score());
+    let daemon_policy = crate::daemon::DaemonPolicy::apply_low_risk(
+        crate::daemon_policy::ActionSource::AutotuneRuntime,
+    );
+    let input = LiveExperimentManagerInput {
+        mode: crate::daemon::policy::DaemonMode::ApplyLowRisk,
+        controller_policy: ControllerPolicy::from_daemon_policy(&daemon_policy),
+        daemon_policy,
+        simulate_action_effects: false,
+        washout: WashoutWindowConfig::default(),
+        candidate_window_seconds: 3_600,
+        manual_restore_command: "stutter daemon emergency-restore",
+        controller_journal_path: Some(out.join("controller.json")),
+        audit_path: Some(out.join("actions.jsonl")),
+        #[cfg(test)]
+        exit_rollback_registry: None,
+        privileged_action_service: None,
+    };
+    let mut manager = LiveExperimentManager::new();
+    let mut controller = ControllerRuntimeState::default();
+    let mut profile = ActiveProfileState::default();
+    let outcome = manager.apply_decision_side_effects_with_executor(
+        input,
+        LiveExperimentRuntimeState {
+            controller_state: &mut controller,
+            active_profile_state: &mut profile,
+        },
+        &observation,
+        &AutotuneDecision::StartExperiment {
+            candidate,
+            reason: "crash acceptance".into(),
+        },
+        "crash acceptance",
+        &mut RuntimeLiveExperimentActionExecutor,
+    )?;
+    ensure!(
+        outcome.event == LiveExperimentEvent::Started && manager.has_active_experiment(),
+        "manager did not reach an active measuring experiment"
+    );
+    ensure!(
+        ticks(tree_pid)? == tree_ticks,
+        "disposable target identity changed during manager apply"
+    );
+    pause(out, RecoveryCheckpoint::ManagerMeasuring, true)
+}
+
 pub fn recover_affinity_acceptance_controller(
     out: &Path,
     expected_tasks: usize,
@@ -338,7 +458,7 @@ pub fn recover_affinity_acceptance_controller(
         "recovery left outstanding journal"
     );
     Ok(
-        json!({"controller_pid":std::process::id(),"restored_tasks":restored,"startup_recovered":restored > 0,"journal_clean":true}),
+        json!({"controller_pid":std::process::id(),"controller_starttime_ticks":ticks(std::process::id())?,"restored_tasks":restored,"startup_recovered":restored > 0,"journal_clean":true}),
     )
 }
 

@@ -48,7 +48,12 @@ pub(super) fn run(root: &Path, out: &Path, binary: &Path) -> anyhow::Result<()> 
     let mut stage = "preflight".to_owned();
     let mut cases = Vec::new();
     let result = (|| -> anyhow::Result<()> {
-        evidence::metadata(root, &out, &root.join(binary), "live_recovery")?;
+        evidence::metadata(
+            root,
+            &out,
+            &root.join(binary),
+            evidence::LiveAcceptanceSuite::Recovery,
+        )?;
         let cpu = allowed_cpu()?;
         let status = fs::read_to_string("/proc/self/status")?;
         let mask = status
@@ -85,12 +90,13 @@ pub(super) fn run(root: &Path, out: &Path, binary: &Path) -> anyhow::Result<()> 
     } else {
         "FAIL"
     };
-    write_json(
-        &out.join("result.json"),
-        &json!({"schema_version":1,"suite":"live_recovery","evidence_kind":"controlled_real","status":status,"stage":stage,"cases":cases,
+    evidence::write_result(
+        &out,
+        evidence::LiveAcceptanceSuite::Recovery,
+        json!({"schema_version":1,"evidence_kind":"controlled_real","status":status,"stage":stage,"cases":cases,
         "error":result.as_ref().err().map(|error|format!("{error:#}")),
-        "scope":"production low-risk action transaction and startup recovery; separate real controller processes; fixed owned tree",
-        "not_claimed":["full daemon planner/measurement acceptance","interrupted rollback","forced verification/rollback failure physical matrix","PID reuse physical matrix","suspend/resume","provider graduation","portable verified bundle"],
+        "scope":"production low-risk action transaction (six checkpoints) and one LiveExperimentManager Measuring checkpoint; startup recovery; separate real controller processes; fixed owned tree",
+        "not_claimed":["full daemon planner/measurement acceptance (manager case uses a minimal baseline observation)","interrupted rollback","forced verification/rollback failure physical matrix","PID reuse physical matrix","suspend/resume","provider graduation","portable verified bundle"],
         "observation_suite":"not_run","privacy":"local raw evidence; canonical sanitization/export remains separate"}),
     )?;
     println!("{status}: recovery evidence {}", out.display());

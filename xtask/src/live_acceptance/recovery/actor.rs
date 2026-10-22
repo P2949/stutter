@@ -12,7 +12,7 @@ fn checkpoint(value: &str) -> Result<RecoveryCheckpoint, String> {
         .map_err(|error: anyhow::Error| error.to_string())
 }
 #[derive(Clone, Debug, Eq, PartialEq, Subcommand)]
-pub(crate) enum ControllerCommand {
+pub enum ControllerCommand {
     Hold {
         #[arg(long)]
         out: PathBuf,
@@ -49,7 +49,7 @@ pub(crate) fn controller(mode: ControllerCommand) -> anyhow::Result<()> {
         } => hold_affinity_recovery_controller(RecoveryControllerInput {
             tree_pid,
             tree_ticks,
-            cpu,
+            desired_cpu: cpu,
             owner_pid,
             owner_ticks,
             checkpoint,

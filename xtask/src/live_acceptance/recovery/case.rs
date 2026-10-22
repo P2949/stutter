@@ -145,12 +145,12 @@ fn start_actor(
         finished: false,
     })
 }
-fn archive(out: &Path, name: &str) -> anyhow::Result<()> {
+fn archive(out: &Path, source: &Path, name: &str) -> anyhow::Result<()> {
     let mut file = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(out.join(format!("{name}.before-crash")))?;
-    file.write_all(&fs::read(out.join(name))?)?;
+    file.write_all(&fs::read(source)?)?;
     file.sync_all()?;
     Ok(())
 }
@@ -254,7 +254,9 @@ pub(super) fn run(
                 ready["real_verification_read_completed"]
                     == matches!(
                         checkpoint,
-                        RecoveryCheckpoint::DuringVerify | RecoveryCheckpoint::AfterVerify
+                        RecoveryCheckpoint::DuringVerify
+                            | RecoveryCheckpoint::AfterVerify
+                            | RecoveryCheckpoint::ManagerMeasuring
                     ),
                 "verification handshake differs"
             );
@@ -288,6 +290,8 @@ pub(super) fn run(
                 RecoveryCheckpoint::AfterPreparation | RecoveryCheckpoint::MidApply
             ) {
                 "applying"
+            } else if checkpoint == RecoveryCheckpoint::ManagerMeasuring {
+                "measuring"
             } else {
                 "applied"
             };
@@ -296,15 +300,26 @@ pub(super) fn run(
                     && journal["rollback_token"]["affected_tasks"] == 5,
                 "durable checkpoint token missing"
             );
+            let restore_path = PathBuf::from(
+                journal["rollback_token"]["restore_path"]
+                    .as_str()
+                    .context("rollback token restore path missing")?,
+            );
+            // Direct transactions use the harness path; the manager reserves an isolated
+            // per-experiment path beneath the journal directory.
+            let expected_restore = if checkpoint == RecoveryCheckpoint::ManagerMeasuring {
+                restore_path.starts_with(out.join("experiments"))
+            } else {
+                restore_path == out.join("restore.json")
+            };
             ensure!(
                 journal["rollback_token"]["kind"] == "cpu-affinity-restore-file"
-                    && journal["rollback_token"]["restore_path"].as_str()
-                        == out.join("restore.json").to_str(),
+                    && expected_restore,
                 "rollback token points outside the owned checkpoint"
             );
-            procfs::verify_saved(&before, &read_json(&out.join("restore.json"))?, &desired)?;
-            archive(&out, "controller.json")?;
-            archive(&out, "restore.json")?;
+            procfs::verify_saved(&before, &read_json(&restore_path)?, &desired)?;
+            archive(&out, &out.join("controller.json"), "controller.json")?;
+            archive(&out, &restore_path, "restore.json")?;
         } else {
             ensure!(
                 !out.join("controller.json").exists() && !out.join("restore.json").exists(),
@@ -334,8 +349,8 @@ pub(super) fn run(
         )?;
         let restart = read_json(&out.join("restart.stdout"))?;
         ensure!(
-            restart["controller_pid"].as_u64() != Some(u64::from(actor.pid)),
-            "restart reused killed controller PID"
+            controller_identity(&restart)? != (actor.pid, actor.ticks),
+            "restart is the killed controller process identity"
         );
         ensure!(
             restart["restored_tasks"] == expected_tasks && restart["journal_clean"] == true,
@@ -373,4 +388,32 @@ pub(super) fn run(
     result["cleanup_verified"] = json!(true);
     write_json(&out.join("result.json"), &result)?;
     Ok(result)
+}
+
+/// Process identity is `(pid, starttime_ticks)`: Linux may legitimately reuse a numeric PID.
+fn controller_identity(value: &Value) -> anyhow::Result<(u32, u64)> {
+    Ok((
+        value["controller_pid"]
+            .as_u64()
+            .and_then(|pid| u32::try_from(pid).ok())
+            .context("restart controller PID missing")?,
+        value["controller_starttime_ticks"]
+            .as_u64()
+            .context("restart controller starttime missing")?,
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn restart_identity_is_pid_and_starttime_not_numeric_pid() {
+        let killed = (42_u32, 1_000_u64);
+        let reused_pid = json!({"controller_pid":42,"controller_starttime_ticks":2_000});
+        assert_ne!(controller_identity(&reused_pid).unwrap(), killed);
+        let same = json!({"controller_pid":42,"controller_starttime_ticks":1_000});
+        assert_eq!(controller_identity(&same).unwrap(), killed);
+        assert!(controller_identity(&json!({"controller_pid":42})).is_err());
+    }
 }
