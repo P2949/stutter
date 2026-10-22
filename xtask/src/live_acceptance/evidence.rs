@@ -26,6 +26,14 @@ impl LiveAcceptanceSuite {
     }
 }
 
+pub(super) fn unix_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| {
+            u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
+        })
+}
+
 /// Writes `result.json` with the suite identity injected, refusing to publish a
 /// result whose suite differs from the already-written `environment.json`.
 pub(super) fn write_result(
@@ -34,8 +42,15 @@ pub(super) fn write_result(
     mut result: Value,
 ) -> anyhow::Result<()> {
     result["suite"] = json!(suite.as_str());
+    result["finished_unix_ms"] = json!(unix_ms());
     if let Ok(bytes) = fs::read(out.join("environment.json")) {
         let environment: Value = serde_json::from_slice(&bytes)?;
+        result["capture_id"] = environment["capture_id"].clone();
+        result["captured_unix_ms"] = environment["captured_unix_ms"].clone();
+        ensure!(
+            environment["evidence_kind"] == result["evidence_kind"],
+            "environment.json evidence_kind differs from the result"
+        );
         ensure!(
             environment["suite"] == result["suite"],
             "environment.json suite {} differs from result suite {}",
@@ -61,6 +76,7 @@ pub(super) fn metadata(
         ensure!(output.status.success(), "metadata command {program} failed");
         Ok(String::from_utf8(output.stdout)?.trim().to_owned())
     };
+    let captured_unix_ms = unix_ms();
     let dirty = !capture("git", &["status", "--porcelain"])?.is_empty();
     let commit = capture("git", &["rev-parse", "HEAD"])?;
     let short = capture("git", &["rev-parse", "--short", "HEAD"])?;
@@ -107,7 +123,11 @@ pub(super) fn metadata(
         "proc_version":fs::read_to_string("/proc/version")?.trim(),"distribution":os,"cpu_model":cpu_model,
         "cpu_online":fs::read_to_string("/sys/devices/system/cpu/online")?.trim(),
         "rust":capture("rustc", &["-Vv"] )?,"cargo_lock_sha256":capture("sha256sum", &["Cargo.lock"] )?.split_whitespace().next(),
-        "evidence_kind":"controlled_real","suite":suite.as_str(),"linked_library_version":linked_library_version,"source_matches_harness":source_matches_harness,"harness_sha256":harness_hash});
+        "evidence_kind":"controlled_real","suite":suite.as_str(),"linked_library_version":linked_library_version,"source_matches_harness":source_matches_harness,"harness_sha256":harness_hash,
+        "captured_unix_ms":captured_unix_ms,"capture_id":format!("{}-{short}-{captured_unix_ms}",suite.as_str()),
+        "gpu_relevant":false,
+        "artifact_schema":{"evidence_result":1,"session":stutter::api::recorder::SESSION_SCHEMA_VERSION.get(),
+            "controller_journal":stutter::api::autotune::controller_journal::CONTROLLER_JOURNAL_SCHEMA_VERSION,"restore_state":1}});
     fs::write(
         out.join("environment.json"),
         serde_json::to_vec_pretty(&metadata)?,
