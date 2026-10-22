@@ -640,3 +640,37 @@ the runnable-only path is unchanged, and mixed availability scores every level r
 backward-compatible path, the frame-inclusive score, p99.9, the rates, `--require-frames`
 rejection, a monotonic example and a score/direct-metric inversion. Objective primaries are
 unchanged. This is tooling: #33 stays open until a frame-producing real series exists.
+
+## 2026-10-22: observation vs causal confidence separated (#32, offline)
+
+`Diagnosis` now carries `causal_confidence` (`NotEstablished|Low|Medium|High`) beside the
+unchanged `confidence`, which still means the candidate's evidence was observed. The policy
+lives next to the existing causal wording policy and reuses its explicit-attribution-chain
+rule: no coincident visible frame spike means `NotEstablished`; IRQ, block-I/O and GPU/fence
+candidates are `NotEstablished` without their explicit chain; scheduler overlap is capped at
+`Medium`, other context candidates at `Low`; the value never exceeds the observation
+confidence. `xtask calibrate` now reports `observation_confidence_distribution`,
+`causal_confidence_distribution`, `false_high_observation_confidence` and
+`false_high_causal_confidence` per sweep point; scoring of the detected cause is unchanged
+and independent of both. No threshold changed. This is tooling and a policy, not a
+calibration result: #32 still needs the real corpus (#31).
+
+## 2026-10-22: real suspend/resume acceptance PASS (#29)
+
+PRs #53-#65 were merged into `main` in stack order. `xtask live-acceptance suspend-resume
+--allow-system-suspend` was then run, with the operator's explicit consent, from clean
+`main` at `7a43864` (kernel 6.18.55; no RTC alarm available, woken manually). Result **PASS**
+(bundle verified, manifest sha256 `fb9cf5f7...e5ef`, pinned in `docs/evidence/index.json`):
+the low-risk CPU-affinity candidate was physically applied and `Measuring` before suspend;
+the kernel's `suspend_stats` incremented 1 -> 2; the runtime detected the 6.3 s clock gap,
+cleared the measurement window (0 intervals), reverted the candidate (journal `reverted`),
+set the stabilization cooldown, and independent `/proc` readback matched the original masks.
+
+An earlier real run (same code before the fix) exposed a harness race - the controller wrote
+`resume-handled.json` and exited before the harness polled, which was misreported as FAIL;
+fixed so the handshake file wins over the liveness check. All fourteen #29 matrix entries now
+have retained PASS evidence: before apply, after preparation, mid apply, after apply, during
+verify, after verify, manager Measuring, partial-apply error, verify failure, interrupted
+rollback, rollback failure, replacement identity (real-process startup-recovery test),
+suspend/resume, and future mutation blocked while faulted. Observation, game-runnable,
+kernel, overhead and score-degradation suites still require a privileged run.

@@ -642,3 +642,12 @@ the JSON shape stays aligned with Rust types.
 
 Real sanitized fixtures should be created through `scripts/sanitize-run-artifact.py`
 so privacy redaction is repeatable and the corpus stays trustworthy.
+
+## Observation versus causal confidence
+
+`xtask calibrate` reports two confidence dimensions per sweep point. Observation confidence is
+the existing `confidence` (the candidate's evidence was seen). Causal confidence says whether
+the candidate is established as the cause of visible stutter; it is `NotEstablished` without
+a coincident frame spike, and for IRQ, block-I/O and GPU/fence candidates without their
+explicit attribution chain. It never exceeds observation confidence. Fixture labels come from
+the known intervention, never from Stutter's own diagnosis.
