@@ -246,7 +246,9 @@ pub struct Authorization {
     /// `PATH` the suites run with, captured from the bootstrapping environment.
     pub path_env: String,
     pub grants: BTreeSet<TaskGrant>,
+    /// Hard cap on reboots; the installer lowers it to `min(candidates + reboot_slack, max_reboots)`.
     pub max_reboots: u32,
+    pub reboot_slack: u32,
     pub original_boot_entry: Option<String>,
     pub allowed_boot_entries: Vec<String>,
     pub created_unix_ms: u64,

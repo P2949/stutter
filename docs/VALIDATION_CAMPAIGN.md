@@ -136,3 +136,40 @@ durably *before* a reboot; corrupt state stops every action and never reboots.
 Tests that need real root (dropping to another uid) detect it at run time and report that they
 were skipped; the rest of the security suite (authorization, protocol, state, planning,
 capability hygiene of children, install, resume) runs unprivileged in CI.
+
+## Multi-kernel campaign (phase C)
+
+`kernel-matrix` needs at least `[kernels].required_distinct` (3) *distinct observed* kernel
+releases. The stage (`validation_campaign/kernels.rs`) is a pure planner plus a task runner:
+
+1. observe the running kernel with `kernel-compat` (a kernel the loader cannot use is a FAIL
+   result whose compatibility is `ObservedIncompatible`; that is a valid, kept observation);
+2. while fewer than the required distinct `uname -r` values are observed, choose the next
+   authorized, unused boot entry, select it **one-shot**, persist the intent
+   (`kernel.pending`) and the waiting state, and only then request the reboot;
+3. after the reboot the resume service restarts the controller; it verifies it landed on the
+   authorized entry, acknowledges the resume, and observes again;
+4. when enough kernels are observed, one last one-shot reboot returns to the original entry.
+
+A duplicate `uname -r` never counts, and a kernel is never inferred from an entry title: the
+running kernel's own release is the only authority. Entries that report the running version
+are skipped as candidates.
+
+**Stops (`BLOCKED_RESOURCE`, no further reboot):** unknown or unsupported bootloader; landing
+on an entry other than the authorized one; the reboot budget (`min(candidates + slack, max)`,
+fixed into the root-owned authorization at install time) spent; every candidate tried with too
+few kernels; a boot-selection or reboot command failing; corrupt runner state. The campaign
+never rewrites the user's NixOS/Gentoo/other boot configuration, downloads kernels, kexecs an
+unverified kernel, or substitutes a fixture for a missing kernel.
+
+**Boot adapters** (in the runner, root-only): `systemd-boot` (`bootctl list --json`,
+`set-oneshot`) and GRUB (read-only `grub.cfg` parse with nested submenu ids, `grub-reboot`,
+which needs `GRUB_DEFAULT=saved`). Discovery runs at install time as root and the candidate
+list is frozen into the authorization, overwriting anything the user-staged file carried.
+`cancel` drops a pending one-shot selection and never touches the default entry.
+
+**Crash safety.** The reboot request runs only after the waiting state is durable, and the
+runner writes its own budget/resume flag before rebooting. A task found `Running` after a
+restart is recorded as an interrupted attempt and run again. CI covers the whole machine with
+a simulated bootloader and reboots (duplicate kernels, a boot that lands elsewhere, budget
+exhaustion, too few entries, refused reboots, restarts); real reboots are evidence, not tests.

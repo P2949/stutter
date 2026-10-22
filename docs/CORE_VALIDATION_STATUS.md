@@ -752,3 +752,14 @@ root dependency of `chrt`; `bootstrap` installs the runner once through `sudo -n
 `BLOCKED_PRIVILEGE_BOOTSTRAP`; `resume` restarts the controller after privilege drop. The
 runner is not part of the product package. Real-root-only checks (dropping to another uid)
 report as skipped when the tests run unprivileged; this change produced no live evidence.
+
+## 2026-10-23: validation campaign, phase C (autonomous multi-kernel stage)
+
+Adds the boot layer (systemd-boot and GRUB adapters behind a `Shell` seam, install-time
+candidate discovery frozen into the root-owned authorization, one-shot selection, cancel that
+drops a pending selection) and the campaign's kernel stage: a pure planner, durable
+persist-before-reboot, post-reboot transition verification and restore of the original entry.
+Observed-incompatible kernels are kept as valid observations; strict verification requires the
+distinct-kernel count. The executor gained after-persist reboot requests, outcome-independent
+state updates and recovery of tasks cut off mid-run. Everything is exercised against a
+simulated machine; no real reboot or kernel evidence was produced.

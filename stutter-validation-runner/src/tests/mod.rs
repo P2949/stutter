@@ -11,6 +11,7 @@ use crate::{
 };
 
 mod authorization;
+mod boot;
 mod credentials;
 mod install;
 mod packaging;
@@ -101,6 +102,7 @@ pub(super) fn authorization(repository: &str) -> Authorization {
             grant("kernel-matrix", RunnerAction::CancelCampaign, None),
         ]),
         max_reboots: 2,
+        reboot_slack: 2,
         original_boot_entry: Some("original".to_owned()),
         allowed_boot_entries: vec!["original".to_owned(), "kernel-b".to_owned()],
         created_unix_ms: 1,

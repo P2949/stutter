@@ -7,6 +7,7 @@ pub mod cli;
 pub mod evidence;
 pub mod executor;
 pub mod graph;
+pub mod kernels;
 pub mod manifest;
 pub mod model;
 pub mod repository;
@@ -220,6 +221,9 @@ pub fn run(root: &Path, args: CampaignArgs) -> anyhow::Result<()> {
                 unix_ms: unix_ms(),
             });
             save(&loaded.dir, &loaded.state)?;
+            if let Some(message) = kernels::cancel_runner(&loaded.state) {
+                println!("{message}");
+            }
             println!(
                 "campaign {} cancelled; no evidence was deleted",
                 loaded.state.campaign_id

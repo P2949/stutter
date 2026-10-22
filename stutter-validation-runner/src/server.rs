@@ -110,12 +110,19 @@ impl Server {
             return Response::rejected(id, ErrorCode::Cancelled, "the campaign was cancelled");
         }
         match &envelope.body {
-            Request::Status => Response::ok(id, None, status_data(&self.authorization, &state)),
+            Request::Status => Response::ok(
+                id,
+                None,
+                status_data(&self.authorization, &state, self.boot.describe()),
+            ),
             Request::CancelCampaign => {
                 state.cancelled = true;
                 state.resume_pending = false;
                 state.pending_boot_entry = None;
-                self.persist(id, &state, json!({"cancelled": true}))
+                // A cancelled campaign must not leave a one-shot boot selection behind.
+                let restored = self.boot.restore_default();
+                let data = json!({"cancelled": true, "boot_restored": restored.is_ok()});
+                self.persist(id, &state, data)
             }
             _ => {
                 let Ok(_guard) = self.busy.try_lock() else {
@@ -254,7 +261,7 @@ impl Server {
     }
 }
 
-fn status_data(authorization: &Authorization, state: &RunnerState) -> Value {
+fn status_data(authorization: &Authorization, state: &RunnerState, boot: Value) -> Value {
     json!({
         "campaign_id": authorization.campaign_id,
         "reboots_used": state.reboots_used,
@@ -263,5 +270,8 @@ fn status_data(authorization: &Authorization, state: &RunnerState) -> Value {
         "resume_pending": state.resume_pending,
         "pending_boot_entry": state.pending_boot_entry,
         "grants": authorization.grants.len(),
+        "allowed_boot_entries": authorization.allowed_boot_entries,
+        "original_boot_entry": authorization.original_boot_entry,
+        "boot": boot,
     })
 }

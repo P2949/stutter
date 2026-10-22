@@ -3,9 +3,9 @@ use std::sync::Arc;
 use anyhow::{Context, bail};
 use clap::Parser;
 use stutter_validation_runner::{
-    boot::UnsupportedBoot,
+    boot::{AdapterControl, BootControl, SystemShell, UnsupportedBoot, detect_adapter},
     cli::{Cli, Command},
-    install::{Layout, execute, plan_install},
+    install::{Layout, apply_boot_discovery, execute, plan_install},
     model::Authorization,
     process::SystemExecutor,
     resume::resume_all,
@@ -37,7 +37,10 @@ fn main() -> anyhow::Result<()> {
                 Arc::new(SystemExecutor {
                     drop_to_owner: privileged,
                 }),
-                Arc::new(UnsupportedBoot),
+                match detect_adapter(Arc::new(SystemShell)) {
+                    Some(adapter) => Arc::new(AdapterControl(adapter)) as Arc<dyn BootControl>,
+                    None => Arc::new(UnsupportedBoot),
+                },
             ));
             server.serve(&socket)?;
             Ok(())
@@ -66,9 +69,19 @@ fn main() -> anyhow::Result<()> {
                 .and_then(|uid| uid.parse::<u32>().ok())
                 .unwrap_or_else(effective_uid);
             let runner = std::env::current_exe().context("locate the runner binary")?;
-            let plan = plan_install(&staged, &repository, &runner, invoker, &layout)
+            let mut plan = plan_install(&staged, &repository, &runner, invoker, &layout)
                 .map_err(anyhow::Error::msg)
                 .context("install refused")?;
+            // Boot candidates are discovered here, as root; an unknown bootloader leaves the
+            // list empty and the kernel stage reports it instead of guessing.
+            match detect_adapter(Arc::new(SystemShell)) {
+                Some(adapter) => apply_boot_discovery(&mut plan.authorization, adapter.as_ref())
+                    .map_err(anyhow::Error::msg)
+                    .context("boot discovery")?,
+                None => {
+                    println!("no supported bootloader detected; boot control stays unavailable")
+                }
+            }
             execute(&plan, root.is_none()).map_err(anyhow::Error::msg)?;
             println!("installed campaign {}", plan.authorization.campaign_id);
             Ok(())

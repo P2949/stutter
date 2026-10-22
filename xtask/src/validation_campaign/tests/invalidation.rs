@@ -237,7 +237,7 @@ fn a_software_defect_and_a_reboot_wait_are_distinct_boundaries() {
     let (_scratch2, dir2, mut state2) = setup("reboot");
     let waiting: Arc<Script> = Arc::new(|spec, _| {
         if spec.id == "kernel-matrix" {
-            return RunnerOutcome::WaitingForReboot;
+            return RunnerOutcome::waiting_for_reboot(Box::new(|| Ok(())));
         }
         pass(spec)
     });

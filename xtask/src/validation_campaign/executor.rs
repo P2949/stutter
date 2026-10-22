@@ -1,5 +1,6 @@
 //! Runs everything immediately runnable, one task at a time, until a genuine boundary.
 use std::{
+    cell::RefCell,
     collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
 };
@@ -22,6 +23,14 @@ pub struct RunContext<'a> {
     pub manifest: &'a CampaignManifest,
     pub repository: &'a Path,
     pub binaries: &'a Binaries,
+    /// State updates a runner wants applied whatever its outcome (e.g. kernel stage progress).
+    pub updates: &'a RefCell<Vec<StateUpdate>>,
+}
+
+impl RunContext<'_> {
+    pub fn record(&self, update: StateUpdate) {
+        self.updates.borrow_mut().push(update);
+    }
 }
 
 /// Fingerprint dimensions only the runner knows.
@@ -44,6 +53,9 @@ pub enum StateUpdate {
     },
 }
 
+/// The reboot request, executed by the executor once the waiting state has been saved.
+pub type AfterPersist = Box<dyn FnOnce() -> Result<(), String>>;
+
 pub enum RunnerOutcome {
     Passed {
         artifacts: Option<String>,
@@ -59,10 +71,20 @@ pub enum RunnerOutcome {
         artifacts: Option<String>,
     },
     Blocked(BlockReason),
-    WaitingForReboot,
+    /// The task asked for a reboot. `after_persist` performs the reboot request and runs only
+    /// after the waiting state is durable, so the controller can be killed immediately after.
+    WaitingForReboot {
+        after_persist: Option<AfterPersist>,
+    },
 }
 
 impl RunnerOutcome {
+    pub fn waiting_for_reboot(after_persist: AfterPersist) -> Self {
+        Self::WaitingForReboot {
+            after_persist: Some(after_persist),
+        }
+    }
+
     pub fn passed() -> Self {
         Self::Passed {
             artifacts: None,
@@ -89,6 +111,12 @@ pub struct Executor {
     pub source_check: Box<SourceCheck>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TaskFlow {
+    Done,
+    Rebooting,
+}
+
 #[derive(Debug)]
 pub struct ContinueReport {
     pub ran: Vec<String>,
@@ -110,6 +138,7 @@ impl Executor {
         state: &mut CampaignState,
         max_tasks: Option<usize>,
     ) -> anyhow::Result<ContinueReport> {
+        self.recover_interrupted(dir, state)?;
         let mut ran = Vec::new();
         let mut attempted = BTreeSet::new();
         loop {
@@ -149,13 +178,60 @@ impl Executor {
                     boundary: Boundary::FailureRequiresSourceChange,
                 });
             }
-            self.run_task(dir, state, spec)?;
+            let flow = self.run_task(dir, state, spec)?;
             ran.push(id.to_owned());
+            if flow == TaskFlow::Rebooting {
+                // The machine is about to go down: start nothing else.
+                return Ok(ContinueReport {
+                    ran,
+                    boundary: Boundary::WaitingForReboot,
+                });
+            }
         }
         Ok(ContinueReport {
             ran,
             boundary: self.boundary(state),
         })
+    }
+
+    /// A task still `Running` at startup was cut off (crash, kill, power loss). Its attempt is
+    /// recorded as interrupted and it becomes runnable again; nothing is assumed about how far
+    /// it got.
+    fn recover_interrupted(
+        &self,
+        dir: &CampaignDir,
+        state: &mut CampaignState,
+    ) -> anyhow::Result<()> {
+        let interrupted = state
+            .tasks
+            .values()
+            .filter(|task| task.status == TaskStatus::Running)
+            .map(|task| task.id.clone())
+            .collect::<Vec<_>>();
+        for id in interrupted {
+            let Some(spec) = self.graph.get(&id) else {
+                continue;
+            };
+            let attempt = TaskAttempt {
+                number: state.tasks[&id].attempts.len() as u32 + 1,
+                started_unix_ms: unix_ms(),
+                finished_unix_ms: unix_ms(),
+                outcome: AttemptOutcome::Failed {
+                    class: FailureClass::Retryable,
+                    stage: "interrupted".to_owned(),
+                    summary: "the controller stopped while this task was running".to_owned(),
+                },
+                fingerprint: state.expected_fingerprint(spec),
+                artifacts: None,
+                receipt: None,
+                limitations: Vec::new(),
+            };
+            state.record_attempt(dir, &id, attempt)?;
+            if let Some(task) = state.tasks.get_mut(&id) {
+                task.status = TaskStatus::Pending;
+            }
+        }
+        save(dir, state)
     }
 
     /// Runs one task with its bounded retries, recording every attempt.
@@ -164,7 +240,7 @@ impl Executor {
         dir: &CampaignDir,
         state: &mut CampaignState,
         spec: &TaskSpec,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<TaskFlow> {
         let budget = self.manifest.retry.default_attempts as usize;
         loop {
             let number = state.tasks[spec.id].attempts.len() as u32 + 1;
@@ -173,6 +249,7 @@ impl Executor {
             }
             save(dir, state)?;
             let started = unix_ms();
+            let collected = RefCell::new(Vec::new());
             let outcome = match self.runners.get(&spec.kind) {
                 Some(runner) => runner.run(
                     &RunContext {
@@ -181,6 +258,7 @@ impl Executor {
                         manifest: &self.manifest,
                         repository: &self.repository,
                         binaries: &self.binaries,
+                        updates: &collected,
                     },
                     spec,
                     number,
@@ -191,6 +269,7 @@ impl Executor {
                 }),
             };
             let mut fingerprint = state.expected_fingerprint(spec);
+            let mut after_persist = None;
             let (attempt_outcome, artifacts, receipt, limitations, updates) = match outcome {
                 RunnerOutcome::Passed {
                     artifacts,
@@ -231,13 +310,18 @@ impl Executor {
                     Vec::new(),
                     Vec::new(),
                 ),
-                RunnerOutcome::WaitingForReboot => (
-                    AttemptOutcome::WaitingForReboot,
-                    None,
-                    None,
-                    Vec::new(),
-                    Vec::new(),
-                ),
+                RunnerOutcome::WaitingForReboot {
+                    after_persist: action,
+                } => {
+                    after_persist = action;
+                    (
+                        AttemptOutcome::WaitingForReboot,
+                        None,
+                        None,
+                        Vec::new(),
+                        Vec::new(),
+                    )
+                }
             };
             let retryable = matches!(
                 &attempt_outcome,
@@ -262,6 +346,9 @@ impl Executor {
             };
             let passed = attempt.outcome == AttemptOutcome::Passed;
             state.record_attempt(dir, spec.id, attempt)?;
+            // Progress the runner recorded counts whatever the outcome; the outcome's own
+            // updates only on a pass.
+            self.apply_updates(state, spec, collected.take());
             if passed {
                 self.apply_updates(state, spec, updates);
             }
@@ -281,8 +368,32 @@ impl Executor {
                 }
             }
             save(dir, state)?;
+            if let Some(request_reboot) = after_persist {
+                // The waiting state is durable; only now is the reboot requested.
+                match request_reboot() {
+                    Ok(()) => return Ok(TaskFlow::Rebooting),
+                    Err(error) => {
+                        let blocked = TaskAttempt {
+                            number: state.tasks[spec.id].attempts.len() as u32 + 1,
+                            started_unix_ms: unix_ms(),
+                            finished_unix_ms: unix_ms(),
+                            outcome: AttemptOutcome::Blocked(BlockReason {
+                                class: FailureClass::BlockedResource,
+                                detail: format!("the reboot request failed: {error}"),
+                            }),
+                            fingerprint: state.expected_fingerprint(spec),
+                            artifacts: None,
+                            receipt: None,
+                            limitations: Vec::new(),
+                        };
+                        state.record_attempt(dir, spec.id, blocked)?;
+                        save(dir, state)?;
+                        return Ok(TaskFlow::Done);
+                    }
+                }
+            }
             if !(retryable && failures < budget) {
-                return Ok(());
+                return Ok(TaskFlow::Done);
             }
         }
     }

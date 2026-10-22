@@ -7,8 +7,8 @@ use crate::{
     evidence_bundle::tests::{COMMIT, Dir, raw},
     validation_campaign::{
         evidence::{
-            PipelineFailure, publish_bundle, published_capture_ids, rebuild_combined_index,
-            record_failure, reverify_task,
+            Accept, PipelineFailure, PublishRequest, publish_bundle, published_capture_ids,
+            rebuild_combined_index, record_failure, reverify_task,
         },
         model::{AttemptOutcome, TaskAttempt},
         state::CampaignDir,
@@ -31,15 +31,16 @@ fn publish(
     commit: &str,
     kinds: &[&str],
 ) -> Result<crate::validation_campaign::evidence::Published, PipelineFailure> {
-    publish_bundle(
+    publish_bundle(&PublishRequest {
         dir,
-        scratch.path(),
+        repository: scratch.path(),
         task,
         attempt,
-        &raw_dir.0,
-        commit,
-        kinds,
-    )
+        raw: &raw_dir.0,
+        expected_commit: commit,
+        allowed_kinds: kinds,
+        accept: Accept::PassOnly,
+    })
 }
 
 #[test]
@@ -226,6 +227,158 @@ fn strict_verification_rebuilds_truth_from_retained_records() {
     let problems = verify_state(&dir, &forged, &graph, &manifest);
     assert!(
         problems.iter().any(|p| p.contains("no verified bundle")),
+        "{problems:?}"
+    );
+}
+
+/// A raw `live_kernel_compat` directory for `kernel` with its own capture id.
+fn kernel_raw(kernel: &str, capture: &str, status: &str, compatibility: &str) -> Dir {
+    let raw_dir = raw("live_kernel_compat", "ok");
+    for (file, is_result) in [("environment.json", false), ("result.json", true)] {
+        let path = raw_dir.join(file);
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        value["capture_id"] = json!(capture);
+        if is_result {
+            value["status"] = json!(status);
+            value["compatibility"] = json!(compatibility);
+            let case = if status == "PASS" { "PASS" } else { "FAIL" };
+            value["cases"] = json!([{"checkpoint":"one","status":case}]);
+            if status != "PASS" {
+                value["error"] = json!("observed incompatible");
+            }
+        } else {
+            value["kernel_release"] = json!(kernel);
+        }
+        fs::write(&path, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
+    }
+    raw_dir
+}
+
+fn publish_with(
+    dir: &CampaignDir,
+    scratch: &Scratch,
+    raw_dir: &Dir,
+    attempt: u32,
+    accept: Accept,
+) -> Result<crate::validation_campaign::evidence::Published, PipelineFailure> {
+    publish_bundle(&PublishRequest {
+        dir,
+        repository: scratch.path(),
+        task: "kernel-matrix",
+        attempt,
+        raw: &raw_dir.0,
+        expected_commit: COMMIT,
+        allowed_kinds: KINDS,
+        accept,
+    })
+}
+
+#[test]
+fn an_observed_incompatible_kernel_is_a_valid_observation_only_under_the_kernel_policy() {
+    let scratch = Scratch::new("kernel-incompatible");
+    let (dir, _, _) = fresh(&scratch);
+    let incompatible = kernel_raw("6.1.0", "cap-bad", "FAIL", "ObservedIncompatible");
+    let rejected = publish_with(&dir, &scratch, &incompatible, 1, Accept::PassOnly).unwrap_err();
+    assert_eq!(
+        rejected.stage, "suite_result",
+        "an ordinary suite FAIL is never evidence"
+    );
+    let published = publish_with(
+        &dir,
+        &scratch,
+        &incompatible,
+        2,
+        Accept::PassOrObservedIncompatible,
+    )
+    .unwrap();
+    assert_eq!(published.index_entry["status"], "FAIL");
+    assert_eq!(
+        published.index_entry["compatibility"],
+        "ObservedIncompatible"
+    );
+    assert_eq!(published.index_entry["kernel_release"], "6.1.0");
+    // A FAIL that is not an incompatibility observation is rejected even under that policy.
+    let other = kernel_raw("6.2.0", "cap-other", "FAIL", "ObservedCompatible");
+    assert!(
+        publish_with(
+            &dir,
+            &scratch,
+            &other,
+            3,
+            Accept::PassOrObservedIncompatible
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn strict_verification_requires_the_distinct_kernel_count_for_the_kernel_stage() {
+    use crate::validation_campaign::model::{AttemptOutcome, TaskAttempt};
+    let scratch = Scratch::new("kernel-strict");
+    let (dir, mut state, graph) = fresh(&scratch);
+    let manifest = manifest();
+    crate::validation_campaign::state::write_atomic(
+        &dir.manifest_snapshot(),
+        super::MANIFEST_TEXT.as_bytes(),
+    )
+    .unwrap();
+    state.manifest_sha256 =
+        crate::evidence_bundle::sha256::sha256_hex(super::MANIFEST_TEXT.as_bytes());
+    state.evidence_base = COMMIT.to_owned();
+    let spec = graph.get("kernel-matrix").unwrap();
+    let pass = TaskAttempt {
+        number: 1,
+        started_unix_ms: 1,
+        finished_unix_ms: 2,
+        outcome: AttemptOutcome::Passed,
+        fingerprint: state.expected_fingerprint(spec),
+        artifacts: None,
+        receipt: None,
+        limitations: vec![],
+    };
+    state.record_attempt(&dir, "kernel-matrix", pass).unwrap();
+    for (n, (kernel, status, compat)) in [
+        ("6.18.55", "PASS", "ObservedCompatible"),
+        ("6.12.4", "PASS", "ObservedDegraded"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let raw_dir = kernel_raw(kernel, &format!("cap-{n}"), status, compat);
+        publish_with(
+            &dir,
+            &scratch,
+            &raw_dir,
+            n as u32 + 1,
+            Accept::PassOrObservedIncompatible,
+        )
+        .unwrap();
+    }
+    let problems = verify_state(&dir, &state, &graph, &manifest);
+    assert!(
+        problems
+            .iter()
+            .any(|p| p.contains("2 distinct kernels; 3 are required")),
+        "{problems:?}"
+    );
+    // The third kernel is observed as incompatible: still a distinct, kept observation.
+    let third = kernel_raw("6.1.0", "cap-2", "FAIL", "ObservedIncompatible");
+    publish_with(
+        &dir,
+        &scratch,
+        &third,
+        3,
+        Accept::PassOrObservedIncompatible,
+    )
+    .unwrap();
+    let problems = verify_state(&dir, &state, &graph, &manifest);
+    assert!(
+        !problems.iter().any(|p| p.contains("distinct kernels")),
+        "{problems:?}"
+    );
+    assert!(
+        !problems.iter().any(|p| p.contains("does not certify")),
         "{problems:?}"
     );
 }

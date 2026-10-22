@@ -22,6 +22,18 @@ fn is_hex(value: &str, length: usize) -> bool {
 }
 
 /// Identifiers become path components, so they are restricted to a safe alphabet.
+/// Boot entry ids reach `bootctl`/`grub-reboot` as plain argv (never a shell), so GRUB's nested
+/// `a>b` ids are allowed, but nothing that could be read as an option or a path.
+pub fn is_safe_boot_entry_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 256
+        && !value.starts_with('-')
+        && value.bytes().all(|b| {
+            b.is_ascii_alphanumeric()
+                || matches!(b, b'-' | b'_' | b'.' | b'+' | b':' | b'@' | b'>' | b'=')
+        })
+}
+
 pub fn is_safe_identifier(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 96
@@ -70,9 +82,13 @@ impl Authorization {
         if self
             .allowed_boot_entries
             .iter()
-            .any(|entry| !is_safe_identifier(entry))
+            .any(|entry| !is_safe_boot_entry_id(entry))
+            || self
+                .original_boot_entry
+                .as_deref()
+                .is_some_and(|entry| !is_safe_boot_entry_id(entry))
         {
-            return Err("boot entry id is not a safe identifier".to_owned());
+            return Err("boot entry id is not safe to pass to a bootloader tool".to_owned());
         }
         Ok(())
     }

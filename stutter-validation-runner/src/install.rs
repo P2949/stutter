@@ -175,3 +175,33 @@ pub fn execute(plan: &InstallPlan, activate: bool) -> Result<(), String> {
     }
     Ok(())
 }
+
+/// Freezes the boot candidates into the authorization at install time, as root, from what the
+/// bootloader reports. Whatever boot fields the (user-staged) file carried are overwritten, so
+/// the campaign user cannot choose which entries may be booted.
+pub fn apply_boot_discovery(
+    authorization: &mut Authorization,
+    adapter: &dyn crate::boot::BootAdapter,
+) -> Result<(), String> {
+    let entries = adapter.discover_entries()?;
+    let candidates = crate::boot::distinct_candidates(&entries);
+    let original = adapter.default_entry()?.or(adapter.current_entry()?);
+    let mut allowed = candidates
+        .iter()
+        .map(|entry| entry.id.clone())
+        .collect::<Vec<_>>();
+    // Returning to the original entry must always be possible, even if it duplicates a kernel.
+    if let Some(original) = &original
+        && !allowed.contains(original)
+    {
+        allowed.push(original.clone());
+    }
+    let cap = authorization.max_reboots;
+    let budget = u32::try_from(candidates.len())
+        .unwrap_or(u32::MAX)
+        .saturating_add(authorization.reboot_slack);
+    authorization.max_reboots = budget.min(cap);
+    authorization.original_boot_entry = original;
+    authorization.allowed_boot_entries = allowed;
+    authorization.validate_shape()
+}

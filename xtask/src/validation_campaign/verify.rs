@@ -97,13 +97,34 @@ pub fn verify_state(
                 }
                 Ok(entries) => {
                     let expected = state.expected_fingerprint(spec).evidence_commit;
-                    for entry in entries {
-                        if entry["status"] != "PASS" || entry["source_commit"] != expected {
+                    let mut kernels = std::collections::BTreeSet::new();
+                    for entry in &entries {
+                        // A kernel observed as incompatible is a FAIL result that is still a
+                        // valid, kept observation.
+                        let observed_incompatible = spec.kind == TaskKind::KernelMatrix
+                            && entry["status"] == "FAIL"
+                            && entry["compatibility"] == "ObservedIncompatible";
+                        if (entry["status"] != "PASS" && !observed_incompatible)
+                            || entry["source_commit"] != expected
+                        {
                             problems.push(format!(
                                 "{}: bundle {} does not certify {expected}",
                                 spec.id, entry["capture_id"]
                             ));
                         }
+                        if let Some(kernel) = entry["kernel_release"].as_str() {
+                            kernels.insert(kernel.to_owned());
+                        }
+                    }
+                    if spec.kind == TaskKind::KernelMatrix
+                        && kernels.len() < manifest.kernels.required_distinct
+                    {
+                        problems.push(format!(
+                            "{} is Passed with {} distinct kernels; {} are required",
+                            spec.id,
+                            kernels.len(),
+                            manifest.kernels.required_distinct
+                        ));
                     }
                 }
                 Err(error) => problems.push(format!("{}: {error:#}", spec.id)),
@@ -122,6 +143,5 @@ pub fn verify_state(
             }
         }
     }
-    let _ = manifest;
     problems
 }
