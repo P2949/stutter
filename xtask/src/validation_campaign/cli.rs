@@ -15,10 +15,14 @@ pub enum CampaignCommand {
         #[arg(long)]
         manifest: PathBuf,
     },
-    /// Detect (and later install) the privileged validation runner.
+    /// Install the privileged validation runner once (noninteractively), or report that it
+    /// cannot be installed.
     Bootstrap {
         #[arg(long)]
         campaign: Option<PathBuf>,
+        /// Print the authorization that would be installed and change nothing.
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Show campaign state; `--json` is the stable machine-readable form.
     Status {

@@ -2734,6 +2734,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "stutter-validation-runner"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "libc",
+ "serde",
+ "serde_json",
+ "stutter-core",
+]
+
+[[package]]
 name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3830,6 +3842,7 @@ dependencies = [
  "serde_json",
  "stutter",
  "stutter-core",
+ "stutter-validation-runner",
  "toml",
 ]
 

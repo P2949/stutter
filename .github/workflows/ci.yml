@@ -65,6 +65,9 @@ jobs:
       - name: Validation campaign state machine
         run: cargo test -p xtask validation_campaign
 
+      - name: Validation runner security
+        run: cargo test -p stutter-validation-runner
+
       - name: Calibration roles and capability evidence kinds
         run: cargo test -p xtask -- diagnosis_calibration capability_check
 

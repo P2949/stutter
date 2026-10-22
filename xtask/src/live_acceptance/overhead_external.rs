@@ -66,6 +66,7 @@ impl ExternalWorkload {
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
+                .unprivileged()
                 .spawn()
                 .with_context(|| format!("start workload {}", self.label))?,
         ))
@@ -357,6 +358,26 @@ mod tests {
                 path.display()
             );
         }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn external_workloads_run_with_no_capabilities_and_no_new_privileges() {
+        let dir = scratch("privileges");
+        let report = dir.join("status");
+        let script = format!(
+            "grep -E '^(CapInh|CapPrm|CapEff|CapAmb|NoNewPrivs):' /proc/self/status > {}",
+            report.display()
+        );
+        let workload = ExternalWorkload::new("w", &command(&["sh", "-c", &script]), None).unwrap();
+        let mut child = workload.spawn().unwrap();
+        workload.wait(&mut child).unwrap();
+        let status = fs::read_to_string(&report).unwrap();
+        for name in ["CapInh", "CapPrm", "CapEff", "CapAmb"] {
+            let line = status.lines().find(|l| l.starts_with(name)).unwrap();
+            assert!(line.ends_with("0000000000000000"), "{line}");
+        }
+        assert!(status.contains("NoNewPrivs:\t1"), "{status}");
         let _ = fs::remove_dir_all(&dir);
     }
 }

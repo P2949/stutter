@@ -225,6 +225,7 @@ pub(super) fn run_one(
                 .arg(&ready)
                 .stdout(Stdio::null())
                 .stderr(fs::File::create(dir.join("workload.stderr"))?)
+                .unprivileged()
                 .spawn()?,
         ),
         Workload::External(external) => external.spawn()?,

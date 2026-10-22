@@ -67,3 +67,16 @@ rg -n "unsafe\s*(\{|fn|impl)" stutter/src --glob '*.rs'
 5. Split Wayland and perf-counter FFI/syscall modules.
 6. Add an architecture test requiring `// SAFETY:` immediately before remaining
    non-eBPF unsafe blocks.
+
+## Validation runner (outside the main `stutter` crate)
+
+The validation-only `stutter-validation-runner` crate keeps all `unsafe` in one module,
+`stutter-validation-runner/src/sys.rs`, plus two `pre_exec` hooks that call only that module.
+Every block carries a `// SAFETY:` comment. The crate is validation infrastructure and is never
+part of the product package.
+
+| File | Purpose |
+| --- | --- |
+| `stutter-validation-runner/src/sys.rs` | `SO_PEERCRED`, `prctl` (no_new_privs, ambient/keep/bounding capabilities), `capget`/`capset`, `setgroups`/`setresuid`/`setresgid`, `sched_setaffinity`, `sched_setscheduler`, `geteuid`. |
+| `stutter-validation-runner/src/credentials.rs` | one `pre_exec` closure applying the syscall sequence above between `fork` and `exec`. |
+| `stutter-validation-runner/src/process.rs` | one `pre_exec` closure pinning a CPU and taking SCHED_FIFO for a controlled contender. |

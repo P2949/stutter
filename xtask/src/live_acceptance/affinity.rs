@@ -29,6 +29,7 @@ pub(super) fn run(root: &Path, out: &Path, binary: &Path) -> anyhow::Result<()> 
                 .arg(&ready)
                 .stdout(Stdio::null())
                 .stderr(fs::File::create(out.join("workload.stderr"))?)
+                .unprivileged()
                 .spawn()?,
         );
         let deadline = Instant::now() + Duration::from_secs(5);

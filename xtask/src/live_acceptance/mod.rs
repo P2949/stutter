@@ -17,6 +17,7 @@ mod kernel_compat;
 mod overhead;
 mod overhead_external;
 pub(crate) mod recovery;
+mod runner_burst;
 mod score_degradation;
 
 #[derive(Clone, Debug, Eq, PartialEq, Subcommand)]
@@ -375,6 +376,7 @@ pub fn run(root: &Path, suite: Suite) -> anyhow::Result<()> {
                 .arg(&ready)
                 .stdout(Stdio::null())
                 .stderr(fs::File::create(out.join("workload.stderr"))?)
+                .unprivileged()
                 .spawn()?,
         );
         let deadline = Instant::now() + Duration::from_secs(5);
@@ -500,4 +502,17 @@ pub fn burst(burst_ms: u64, period_ms: u64, seconds: u64) -> anyhow::Result<()> 
         std::thread::sleep(Duration::from_millis(period_ms - burst_ms));
     }
     Ok(())
+}
+
+/// Workloads are arbitrary code: before exec they lose every capability (including any ambient
+/// ones the runner delegated to the suite) and gain `no_new_privs`.
+pub(crate) trait Unprivileged {
+    fn unprivileged(&mut self) -> &mut Self;
+}
+
+impl Unprivileged for Command {
+    fn unprivileged(&mut self) -> &mut Self {
+        stutter_validation_runner::credentials::drop_all_privileges(self, None);
+        self
+    }
 }

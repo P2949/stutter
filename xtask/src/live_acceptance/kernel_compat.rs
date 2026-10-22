@@ -306,6 +306,7 @@ fn loader_run(binary: &Path, out: &Path) -> Result<(), String> {
                 .arg(&ready)
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
+                .unprivileged()
                 .spawn()?,
         );
         let deadline = Instant::now() + Duration::from_secs(5);

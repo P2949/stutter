@@ -1,6 +1,8 @@
 //! `xtask validation-campaign`: the deterministic, resumable Core Validation campaign. The
 //! campaign (not the LLM) owns dependencies, provenance, pass/fail state, retries and source
 //! invalidation; the LLM follows `status --json` and runs `continue`.
+pub mod backend;
+pub mod bootstrap;
 pub mod cli;
 pub mod evidence;
 pub mod executor;
@@ -145,7 +147,9 @@ fn build_executor(loaded: &Loaded, root: &Path) -> anyhow::Result<Executor> {
 pub fn run(root: &Path, args: CampaignArgs) -> anyhow::Result<()> {
     match args.command {
         CampaignCommand::Init { manifest } => init(root, &manifest),
-        CampaignCommand::Bootstrap { campaign } => bootstrap(root, campaign),
+        CampaignCommand::Bootstrap { campaign, dry_run } => {
+            bootstrap_command(root, campaign, dry_run)
+        }
         CampaignCommand::Status { json, campaign } => {
             let loaded = load_campaign(root, campaign)?;
             let report = status::build(&loaded.state, &loaded.graph, &loaded.manifest);
@@ -322,28 +326,24 @@ fn process_ids() -> (u32, u32) {
     fs::metadata("/proc/self").map_or((0, 0), |meta| (meta.uid(), meta.gid()))
 }
 
-/// Privilege detection only; installing the runner arrives in the next campaign phase.
-fn bootstrap(root: &Path, campaign: Option<PathBuf>) -> anyhow::Result<()> {
+/// Installs (or confirms) the privileged runner; `BLOCKED_PRIVILEGE_BOOTSTRAP` exits with the
+/// privilege boundary code and is a report, not a failure to hide.
+fn bootstrap_command(root: &Path, campaign: Option<PathBuf>, dry_run: bool) -> anyhow::Result<()> {
     let loaded = load_campaign(root, campaign)?;
-    let socket = Path::new("/run/stutter-validation/runner.sock");
-    let (uid, _) = process_ids();
-    if socket.exists() {
-        println!(
-            "privilege: validation runner socket present at {}",
-            socket.display()
-        );
-        return Ok(());
+    let socket = std::env::var_os(stutter_validation_runner::client::SOCKET_ENV)
+        .filter(|value| !value.is_empty())
+        .map_or_else(|| PathBuf::from(bootstrap::DEFAULT_SOCKET), PathBuf::from);
+    let outcome = bootstrap::bootstrap(
+        &loaded.dir,
+        &loaded.state,
+        &loaded.manifest,
+        &socket,
+        dry_run,
+    )?;
+    if outcome == bootstrap::BootstrapOutcome::BlockedPrivilege {
+        std::process::exit(exit_code(Boundary::BlockedPrivilege));
     }
-    if uid == 0 {
-        println!("privilege: running as root; live suites run directly");
-        return Ok(());
-    }
-    println!(
-        "BLOCKED_PRIVILEGE_BOOTSTRAP: no validation runner is installed and the campaign {} \
-         cannot obtain privilege noninteractively",
-        loaded.state.campaign_id
-    );
-    std::process::exit(exit_code(Boundary::BlockedPrivilege));
+    Ok(())
 }
 
 fn report(root: &Path, campaign: Option<PathBuf>) -> anyhow::Result<()> {

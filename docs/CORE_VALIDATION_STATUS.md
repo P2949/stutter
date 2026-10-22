@@ -740,3 +740,15 @@ phases (privileged runner, kernel/reboot, workload and corpus drivers, release a
 report an honest `BlockedResource` rather than passing. SHA-256 moved to `stutter-core::hash`
 (streaming, no whole-input copy) as the single shared implementation. No evidence was
 produced by this change.
+
+## 2026-10-23: validation campaign, phase B (privileged validation runner)
+
+Adds the validation-only `stutter-validation-runner` workspace crate: a closed set of typed
+actions over a local Unix socket authenticated with `SO_PEERCRED` against a root-owned
+authorization; profiling suites run as the campaign user with exactly the BPF/perf/rlimit
+(and, for contention suites, scheduler) capabilities, and every workload is spawned with no
+capabilities and `no_new_privs`. A typed `ExecuteSchedulerBurst` replaces the implicit
+root dependency of `chrt`; `bootstrap` installs the runner once through `sudo -n` or reports
+`BLOCKED_PRIVILEGE_BOOTSTRAP`; `resume` restarts the controller after privilege drop. The
+runner is not part of the product package. Real-root-only checks (dropping to another uid)
+report as skipped when the tests run unprivileged; this change produced no live evidence.
