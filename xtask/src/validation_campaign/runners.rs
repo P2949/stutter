@@ -10,7 +10,7 @@ use super::{
     evidence::{
         Accept, PipelineFailure, PublishRequest, Published, publish_bundle, record_failure,
     },
-    executor::{FingerprintExtras, RunContext, RunnerOutcome, TaskRunner},
+    executor::{RunContext, RunnerOutcome, TaskRunner},
     graph::{SourceBinding, TaskKind, TaskSpec},
     model::{BlockReason, FailureClass},
 };
@@ -142,7 +142,7 @@ impl TaskRunner for LiveSuiteRunner {
                 artifacts: Some(context.dir.relative(&published.bundle)),
                 receipt: Some(context.dir.relative(&published.receipt)),
                 limitations: Vec::new(),
-                fingerprint: FingerprintExtras::default(),
+                fingerprint: Box::default(),
                 updates: Vec::new(),
             },
             Err(outcome) => outcome,
@@ -299,7 +299,7 @@ impl TaskRunner for OfflineGateRunner {
             artifacts,
             receipt: None,
             limitations: Vec::new(),
-            fingerprint: FingerprintExtras::default(),
+            fingerprint: Box::default(),
             updates: Vec::new(),
         }
     }

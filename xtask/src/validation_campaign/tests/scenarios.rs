@@ -306,7 +306,8 @@ fn a_capture_counts_only_when_every_acceptance_condition_holds() {
     let set = set();
     let spec = set.get("scheduler-positive").unwrap();
     accept(spec, &good(spec)).unwrap();
-    let mutations: Vec<(&str, Box<dyn Fn(&mut CaptureEvidence)>)> = vec![
+    type Mutation = Box<dyn Fn(&mut CaptureEvidence)>;
+    let mutations: Vec<(&str, Mutation)> = vec![
         ("identity", Box::new(|e| e.target_identity_valid = false)),
         ("recording", Box::new(|e| e.recording_valid = false)),
         ("dropped", Box::new(|e| e.drops = 1)),
