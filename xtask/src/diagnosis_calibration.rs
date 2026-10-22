@@ -12,7 +12,10 @@ use anyhow::{Context, bail, ensure};
 use serde_json::json;
 use stutter::api::report::{CalibrationFamily, family_calibration_outcome};
 
-use crate::evidence_bundle::sha256::sha256_hex;
+use crate::{
+    evidence_bundle::sha256::sha256_hex,
+    fixture_coverage::{CalibrationMeta, parse_fixture_toml_text},
+};
 
 /// Evidence floors below which the decision is always "retain".
 const MIN_REAL_POSITIVES: usize = 10;
@@ -81,9 +84,13 @@ pub fn family_spec(name: &str) -> anyhow::Result<&'static FamilySpec> {
 pub struct Fixture {
     pub name: String,
     pub dir: PathBuf,
-    pub real: bool,
-    pub mixed: bool,
+    /// Name/source inference of "real". Regression sweeps may use it; sufficiency never does.
+    pub legacy_real: bool,
     pub expected_cause: String,
+    /// Explicit calibration metadata when the capture is eligible for an evidence floor.
+    pub meta: Option<CalibrationMeta>,
+    /// Why `meta` is absent.
+    pub ineligible_reason: String,
 }
 
 impl Fixture {
@@ -94,37 +101,78 @@ impl Fixture {
             cause => Some(spec.positives.contains(&cause)),
         }
     }
+
+    /// Whether the capture explicitly names this family in `[coverage].diagnoses`.
+    fn names_family(meta: &CalibrationMeta, spec: &FamilySpec) -> bool {
+        meta.diagnoses
+            .iter()
+            .any(|diagnosis| spec.positives.contains(&diagnosis.as_str()))
+    }
 }
 
-pub fn parse_fixture(dir: &Path, text: &str) -> Fixture {
-    let mut fixture = Fixture {
-        dir: dir.to_owned(),
-        ..Fixture::default()
-    };
-    let (mut section, mut source) = (String::new(), String::new());
-    for line in text.lines().map(str::trim) {
-        if line.starts_with('[') && line.ends_with(']') {
-            section = line.to_owned();
-            continue;
-        }
-        let Some((key, value)) = line.split_once('=') else {
+/// Eligible captures per family and role; only these can satisfy the evidence floors.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct Floors {
+    pub positives: usize,
+    pub negative_controls: usize,
+    pub mixed_confounded: usize,
+    /// Real-looking captures that cannot count (legacy inference, synthetic, incomplete).
+    pub ineligible_real: usize,
+    /// Eligible captures sharing a capture id with an earlier one (counted once).
+    pub duplicate_capture_ids: usize,
+}
+
+impl Floors {
+    pub fn sufficient(&self) -> bool {
+        self.positives >= MIN_REAL_POSITIVES
+            && self.negative_controls >= MIN_REAL_NEGATIVES
+            && self.mixed_confounded >= MIN_MIXED
+    }
+}
+
+/// Counts evidence floors for one family. A capture counts only when its explicit evidence
+/// kind is non-synthetic, its provenance is complete, its `control_type` is explicit and its
+/// `[coverage].diagnoses` names the family; other families' positives are not negative
+/// controls, and a mixed capture counts only for the families it names.
+pub fn family_floors(spec: &FamilySpec, fixtures: &[Fixture]) -> Floors {
+    let mut floors = Floors::default();
+    let mut seen = std::collections::BTreeSet::new();
+    for fixture in fixtures {
+        let Some(meta) = &fixture.meta else {
+            floors.ineligible_real += usize::from(fixture.legacy_real);
             continue;
         };
-        let value = value.trim().trim_matches('"').to_owned();
-        match (section.as_str(), key.trim()) {
-            ("", "name") => fixture.name = value,
-            ("", "source") => source = value,
-            ("[expected]", "primary_cause") => fixture.expected_cause = value,
-            ("[platform]", "scenario") => {
-                fixture.mixed = value.contains("mixed") || value.contains("confound");
-            }
+        if !Fixture::names_family(meta, spec) {
+            continue;
+        }
+        if !seen.insert(meta.capture_id.clone()) {
+            floors.duplicate_capture_ids += 1;
+            continue;
+        }
+        match meta.control_type.as_str() {
+            "positive" => floors.positives += 1,
+            "negative_control" => floors.negative_controls += 1,
+            "mixed_confounded" => floors.mixed_confounded += 1,
             _ => {}
         }
     }
-    fixture.real = fixture.name.starts_with("real_")
-        || source == "sanitized-real-recording"
-        || source == "validation-corpus";
-    fixture
+    floors
+}
+
+pub fn parse_fixture(dir: &Path, text: &str) -> Fixture {
+    let summary = parse_fixture_toml_text(text);
+    let (meta, ineligible_reason) = match summary.calibration_meta() {
+        Ok(meta) => (Some(meta), String::new()),
+        Err(reason) => (None, reason),
+    };
+    Fixture {
+        name: summary.name().to_owned(),
+        dir: dir.to_owned(),
+        legacy_real: summary.is_legacy_real(),
+        expected_cause: summary.primary_cause().to_owned(),
+        meta,
+        ineligible_reason,
+    }
 }
 
 pub fn load_corpus(corpus: &Path) -> anyhow::Result<(Vec<Fixture>, String)> {
@@ -267,28 +315,30 @@ pub fn run(
             "observation_confidence_distribution":observation,
             "causal_confidence_distribution":causal}));
     }
-    let count = |real: bool, positive: bool| {
+    // Regression-only counts from the legacy name/source inference; never used for sufficiency.
+    let legacy = |positive: bool| {
         labeled
             .iter()
-            .filter(|f| f.real == real && f.label(spec) == Some(positive))
+            .filter(|f| f.legacy_real && f.label(spec) == Some(positive))
             .count()
     };
-    let mixed = fixtures.iter().filter(|f| f.mixed).count();
-    let (real_pos, real_neg) = (count(true, true), count(true, false));
-    let sufficient =
-        real_pos >= MIN_REAL_POSITIVES && real_neg >= MIN_REAL_NEGATIVES && mixed >= MIN_MIXED;
-    let decision = if sufficient {
+    let floors = family_floors(spec, &fixtures);
+    let decision = if floors.sufficient() {
         "evidence_sufficient_for_review"
     } else {
         "retain_current_threshold_evidence_insufficient"
     };
-    let report = json!({"schema_version":1,"family":spec.name,"corpus_id":frozen_id,"current_threshold":spec.current,"unit":spec.unit,
-        "corpus":{"labeled":labeled.len(),"real_positive":real_pos,"real_negative_controls":real_neg,"mixed_confounded":mixed,
-            "unlabeled":fixtures.len() - labeled.len()},
-        "evidence_floors":{"real_positive":MIN_REAL_POSITIVES,"real_negative":MIN_REAL_NEGATIVES,"mixed":MIN_MIXED},
+    let report = json!({"schema_version":2,"family":spec.name,"corpus_id":frozen_id,"current_threshold":spec.current,"unit":spec.unit,
+        "corpus":{"labeled":labeled.len(),"unlabeled":fixtures.len() - labeled.len(),
+            "legacy_inferred_real_positive":legacy(true),"legacy_inferred_real_negative":legacy(false)},
+        "sufficiency":{"positives":floors.positives,"negative_controls":floors.negative_controls,
+            "mixed_confounded":floors.mixed_confounded,"ineligible_real_captures":floors.ineligible_real,
+            "duplicate_capture_ids":floors.duplicate_capture_ids,"sufficient":floors.sufficient()},
+        "evidence_floors":{"positive":MIN_REAL_POSITIVES,"negative_control":MIN_REAL_NEGATIVES,"mixed_confounded":MIN_MIXED},
         "sweep":results,"decision":decision,
         "limitations":["family-level labels; specific-cause agreement is not scored",
-            "mixed/confounded cases are only counted when fixtures are tagged mixed; none are tagged today",
+            "sufficiency counts only captures with an explicit non-synthetic evidence_kind, complete provenance, an explicit control_type and [coverage].diagnoses naming the family; legacy inferred real fixtures run in the sweep but cannot satisfy a floor",
+            "other families' positives are not negative controls; a mixed capture counts only for the families it names",
             "observation and causal confidence are reported separately; causal confidence is capped by the explicit-attribution-chain policy and visible-stutter linkage, and no causal threshold is tuned here",
             "overlap is not proven causality: IRQ/I-O overlap fixtures do not calibrate causal claims",
             "numerical optimum is never chosen mechanically; false high-confidence claims weigh more than inconclusive ones"]});
@@ -310,7 +360,7 @@ mod tests {
     fn labels_follow_the_family_and_skip_wildcards() {
         let text = "name = \"real_x\"\nsource = \"sanitized-real-recording\"\n[expected]\nprimary_cause = \"GameThreadSchedulerDelay\"\n";
         let fixture = parse_fixture(Path::new("d"), text);
-        assert!(fixture.real);
+        assert!(fixture.legacy_real);
         let (scheduler, io) = (
             family_spec("scheduler").unwrap(),
             family_spec("io").unwrap(),
@@ -322,8 +372,8 @@ mod tests {
             "name = \"c\"\n[expected]\nprimary_cause = \"IrqDelayCandidate\"\n[platform]\nscenario = \"mixed-io\"\n",
         );
         assert_eq!(
-            (control.label(scheduler), control.mixed, control.real),
-            (Some(false), true, false)
+            (control.label(scheduler), control.legacy_real),
+            (Some(false), false)
         );
         assert_eq!(control.label(family_spec("irq").unwrap()), Some(true));
         assert_eq!(
@@ -383,7 +433,11 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
         let (fixtures, id) = load_corpus(&root.join("stutter/tests/fixtures/runs")).unwrap();
         assert_eq!(id.len(), 64);
-        assert_eq!(fixtures.iter().filter(|f| f.mixed).count(), 0);
+        assert_eq!(
+            fixtures.iter().filter(|f| f.meta.is_some()).count(),
+            0,
+            "no committed capture is calibration-eligible yet"
+        );
         for (family, fixture, cause) in [
             (
                 "scheduler",
@@ -402,5 +456,164 @@ mod tests {
                     .unwrap();
             assert_eq!(outcome.cause, cause, "{family}");
         }
+    }
+
+    /// A complete explicit capture. `diagnoses` uses the multi-line array form on purpose.
+    fn capture(kind: &str, control: &str, diagnoses: &[&str], id: &str) -> Fixture {
+        let provenance = crate::fixture_coverage::REQUIRED_PROVENANCE
+            .iter()
+            .filter(|key| !matches!(**key, "control_type" | "capture_id"))
+            .map(|key| format!("{key} = \"x\"\n"))
+            .collect::<String>();
+        let list = diagnoses
+            .iter()
+            .map(|d| format!("    \"{d}\",\n"))
+            .collect::<String>();
+        let text = format!(
+            "name = \"neutral_{id}\"\nevidence_kind = \"{kind}\"\n[expected]\nprimary_cause = \"{}\"\n\
+             [provenance]\n{provenance}control_type = \"{control}\"\ncapture_id = \"{id}\"\n\
+             [coverage]\ndiagnoses = [\n{list}]\n",
+            diagnoses.first().copied().unwrap_or("Unknown")
+        );
+        parse_fixture(Path::new("d"), &text)
+    }
+    fn many(count: usize, control: &str, diagnoses: &[&str], prefix: &str) -> Vec<Fixture> {
+        (0..count)
+            .map(|i| capture("fixture_real", control, diagnoses, &format!("{prefix}-{i}")))
+            .collect()
+    }
+    const SCHED: &str = "GameThreadSchedulerDelay";
+
+    #[test]
+    fn a_real_filename_with_an_explicit_synthetic_kind_is_not_real_for_sufficiency() {
+        let text = "name = \"real_looks_real\"\nsource = \"sanitized-real-recording\"\nevidence_kind = \"synthetic\"\n";
+        let fixture = parse_fixture(Path::new("d"), text);
+        assert!(fixture.legacy_real && fixture.meta.is_none());
+        assert!(fixture.ineligible_reason.contains("synthetic"));
+        let mut explicit = capture("synthetic", "positive", &[SCHED], "s-0");
+        assert!(explicit.meta.is_none());
+        explicit.legacy_real = true;
+        assert_eq!(
+            family_floors(family_spec("scheduler").unwrap(), &[explicit]).positives,
+            0
+        );
+    }
+
+    #[test]
+    fn a_neutral_filename_with_an_explicit_real_kind_is_eligible() {
+        let fixture = capture("fixture_real", "positive", &[SCHED], "n-0");
+        assert!(!fixture.legacy_real);
+        let meta = fixture.meta.clone().expect("eligible");
+        assert_eq!(meta.control_type, "positive");
+        assert_eq!(meta.diagnoses, vec![SCHED.to_owned()]);
+        let floors = family_floors(family_spec("scheduler").unwrap(), &[fixture]);
+        assert_eq!(floors.positives, 1);
+    }
+
+    #[test]
+    fn legacy_inferred_real_fixtures_cannot_satisfy_the_floor() {
+        let legacy = (0..20)
+            .map(|i| {
+                parse_fixture(
+                    Path::new("d"),
+                    &format!(
+                        "name = \"real_{i}\"\nsource = \"sanitized-real-recording\"\n[expected]\nprimary_cause = \"{SCHED}\"\n"
+                    ),
+                )
+            })
+            .collect::<Vec<_>>();
+        let floors = family_floors(family_spec("scheduler").unwrap(), &legacy);
+        assert_eq!((floors.positives, floors.ineligible_real), (0, 20));
+        assert!(!floors.sufficient());
+    }
+
+    #[test]
+    fn incomplete_provenance_or_control_type_is_ineligible() {
+        let missing = parse_fixture(
+            Path::new("d"),
+            "name = \"x\"\nevidence_kind = \"fixture_real\"\n[provenance]\ncontrol_type = \"positive\"\n[coverage]\ndiagnoses = [\"GameThreadSchedulerDelay\"]\n",
+        );
+        assert!(missing.ineligible_reason.contains("[provenance]."));
+        let mut bad = capture("fixture_real", "positive", &[SCHED], "b-0");
+        assert!(bad.meta.is_some());
+        let text = "name = \"y\"\nevidence_kind = \"fixture_real\"\n";
+        bad = parse_fixture(Path::new("d"), text);
+        assert!(bad.meta.is_none());
+        let wrong = capture("fixture_real", "maybe", &[SCHED], "w-0");
+        assert!(wrong.ineligible_reason.contains("control_type"));
+        let no_coverage = parse_fixture(
+            Path::new("d"),
+            &format!(
+                "name = \"z\"\nevidence_kind = \"fixture_real\"\n[provenance]\n{}control_type = \"positive\"\n",
+                crate::fixture_coverage::REQUIRED_PROVENANCE
+                    .iter()
+                    .filter(|k| **k != "control_type")
+                    .map(|k| format!("{k} = \"x\"\n"))
+                    .collect::<String>()
+            ),
+        );
+        assert!(no_coverage.ineligible_reason.contains("diagnoses"));
+    }
+
+    #[test]
+    fn another_familys_positive_is_not_a_negative_control() {
+        let gpu = capture("fixture_real", "positive", &["GpuBoundCandidate"], "g-0");
+        let scheduler = family_floors(family_spec("scheduler").unwrap(), &[gpu.clone()]);
+        assert_eq!((scheduler.positives, scheduler.negative_controls), (0, 0));
+        let gpu_floors = family_floors(family_spec("gpu").unwrap(), &[gpu]);
+        assert_eq!(gpu_floors.positives, 1);
+    }
+
+    #[test]
+    fn an_explicit_negative_control_counts_only_for_the_family_it_names() {
+        let negative = capture("fixture_real", "negative_control", &[SCHED], "neg-0");
+        let floors = |name| family_floors(family_spec(name).unwrap(), &[negative.clone()]);
+        assert_eq!(floors("scheduler").negative_controls, 1);
+        assert_eq!(floors("io").negative_controls, 0);
+    }
+
+    #[test]
+    fn a_mixed_capture_counts_only_for_the_families_it_names() {
+        let mixed = capture(
+            "fixture_real",
+            "mixed_confounded",
+            &[SCHED, "BlockIoCandidate"],
+            "m-0",
+        );
+        let floors = |name| family_floors(family_spec(name).unwrap(), &[mixed.clone()]);
+        assert_eq!(floors("scheduler").mixed_confounded, 1);
+        assert_eq!(floors("io").mixed_confounded, 1);
+        assert_eq!(floors("irq").mixed_confounded, 0);
+        assert_eq!(floors("gpu").mixed_confounded, 0);
+    }
+
+    #[test]
+    fn three_scheduler_mixed_captures_cannot_satisfy_other_families_floors() {
+        let mut fixtures = many(3, "mixed_confounded", &[SCHED], "sm");
+        for family in ["irq", "gpu", "io"] {
+            let floors = family_floors(family_spec(family).unwrap(), &fixtures);
+            assert_eq!(floors.mixed_confounded, 0, "{family}");
+        }
+        fixtures.extend(many(10, "positive", &[SCHED], "sp"));
+        fixtures.extend(many(10, "negative_control", &[SCHED], "sn"));
+        let scheduler = family_floors(family_spec("scheduler").unwrap(), &fixtures);
+        assert_eq!(
+            (
+                scheduler.positives,
+                scheduler.negative_controls,
+                scheduler.mixed_confounded
+            ),
+            (10, 10, 3)
+        );
+        assert!(scheduler.sufficient());
+        assert!(!family_floors(family_spec("irq").unwrap(), &fixtures).sufficient());
+    }
+
+    #[test]
+    fn duplicate_capture_ids_are_counted_once() {
+        let mut fixtures = many(10, "positive", &[SCHED], "dup");
+        fixtures.push(capture("fixture_real", "positive", &[SCHED], "dup-3"));
+        let floors = family_floors(family_spec("scheduler").unwrap(), &fixtures);
+        assert_eq!((floors.positives, floors.duplicate_capture_ids), (10, 1));
     }
 }

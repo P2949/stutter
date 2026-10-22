@@ -705,3 +705,16 @@ sampling and statistics unchanged; only the workload differs. The receipt is `re
 runs one unmeasured warm-up for a common cache policy, requires the workload to outlive the
 profiling window, and states that representativeness is operator-declared. The controlled suite
 remains `controlled_real`. No evidence was produced here: both runs need `CAP_BPF`/root.
+
+## 2026-10-22: offline hardening before the final evidence base (#30, #33, #38, #31/#32)
+
+Four correctness fixes land before evidence collection: (1) kernel-compat no longer treats the
+dump's `not_checked` block formats as validated; `block_io` comes from the production
+preflight (`doctor --block-io`) and keeps its `dev+sector`/`request-pointer` basis; (2)
+`score-evaluate --require-frames` resolves the target from the recorded tree root or manual
+PID (never the largest-sample process) and reports `target_pid`, `target_starttime_ticks` and
+`target_identity_source`; (3) real-workload overhead rejects any workload exit inside the
+profiling window, fails on a missing A/B baseline round, and discards workload stdout/stderr;
+(4) calibration sufficiency counts only explicit non-synthetic captures with complete
+provenance, an explicit `control_type` and `[coverage].diagnoses`, per family. No evidence was
+produced here.

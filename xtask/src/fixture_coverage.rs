@@ -14,7 +14,7 @@ use crate::{
 };
 
 #[derive(Debug, Default)]
-struct FixtureTomlSummary {
+pub(crate) struct FixtureTomlSummary {
     name: String,
     source: String,
     sanitized_capture_id: Option<String>,
@@ -27,12 +27,13 @@ struct FixtureTomlSummary {
     privacy_fields: BTreeMap<String, bool>,
     evidence_kind: Option<String>,
     primary_cause: Option<String>,
-    provenance_keys: BTreeSet<String>,
+    /// `[provenance]` keys with their (unquoted) values.
+    provenance: BTreeMap<String, String>,
     coverage: Tags,
 }
 
 /// Provenance every explicitly classified (non-synthetic) capture must declare.
-const REQUIRED_PROVENANCE: [&str; 18] = [
+pub(crate) const REQUIRED_PROVENANCE: [&str; 18] = [
     "source_commit",
     "capture_id",
     "kernel",
@@ -147,7 +148,7 @@ pub fn fixture_coverage_report(root: &Path) -> anyhow::Result<FixtureCoverageRep
         };
         if summary.evidence_kind.is_some() && kind != EvidenceKind::Synthetic {
             for key in REQUIRED_PROVENANCE {
-                if !summary.provenance_keys.contains(key) {
+                if !summary.provenance.contains_key(key) {
                     report.provenance_errors.push(format!(
                         "{}: [provenance].{key} is required for explicit {} evidence",
                         path.display(),
@@ -265,7 +266,7 @@ pub fn fixture_coverage_report(root: &Path) -> anyhow::Result<FixtureCoverageRep
     Ok(report)
 }
 
-fn fixture_toml_paths(fixtures_root: &Path) -> anyhow::Result<Vec<PathBuf>> {
+pub(crate) fn fixture_toml_paths(fixtures_root: &Path) -> anyhow::Result<Vec<PathBuf>> {
     let mut paths = Vec::new();
     for entry in fs::read_dir(fixtures_root)
         .with_context(|| format!("failed to read {}", fixtures_root.display()))?
@@ -282,15 +283,19 @@ fn fixture_toml_paths(fixtures_root: &Path) -> anyhow::Result<Vec<PathBuf>> {
     Ok(paths)
 }
 
-fn parse_fixture_toml_summary(path: &Path) -> anyhow::Result<FixtureTomlSummary> {
+pub(crate) fn parse_fixture_toml_summary(path: &Path) -> anyhow::Result<FixtureTomlSummary> {
     let text =
         fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
+    Ok(parse_fixture_toml_text(&text))
+}
+
+pub(crate) fn parse_fixture_toml_text(text: &str) -> FixtureTomlSummary {
     let mut summary = FixtureTomlSummary::default();
-    let mut section = "";
-    for line in text.lines() {
+    let mut section = String::new();
+    for line in logical_lines(text) {
         let trimmed = line.trim();
         if trimmed.starts_with('[') && trimmed.ends_with(']') {
-            section = trimmed;
+            section = trimmed.to_owned();
             continue;
         }
         let Some((key, value)) = trimmed.split_once('=') else {
@@ -298,7 +303,7 @@ fn parse_fixture_toml_summary(path: &Path) -> anyhow::Result<FixtureTomlSummary>
         };
         let key = key.trim();
         let value = unquote(value.trim());
-        match (section, key) {
+        match (section.as_str(), key) {
             ("", "name") => summary.name = value,
             ("", "source") => summary.source = value,
             ("[platform]", "gpu_vendor") => summary.gpu_vendor = Some(value),
@@ -315,8 +320,9 @@ fn parse_fixture_toml_summary(path: &Path) -> anyhow::Result<FixtureTomlSummary>
             ("[expected]", "primary_cause") => summary.primary_cause = Some(value),
             ("", "evidence_kind") => summary.evidence_kind = Some(value),
             ("[provenance]", key) => {
-                summary.provenance_keys.insert(key.to_owned());
+                summary.provenance.insert(key.to_owned(), value.clone());
             }
+            ("[coverage]", "diagnoses") => summary.coverage.diagnoses = parse_list(&value),
             ("[coverage]", "objectives") => summary.coverage.objectives = parse_list(&value),
             ("[coverage]", "providers") => summary.coverage.providers = parse_list(&value),
             ("[coverage]", "kernel_capabilities") => {
@@ -330,7 +336,104 @@ fn parse_fixture_toml_summary(path: &Path) -> anyhow::Result<FixtureTomlSummary>
             _ => {}
         }
     }
-    Ok(summary)
+    summary
+}
+
+/// Joins `key = [` arrays that continue over several lines into one logical line, so the
+/// single-line list parser also reads the multi-line form fixture authors naturally write.
+fn logical_lines(text: &str) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut open: Option<String> = None;
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if let Some(joined) = open.as_mut() {
+            joined.push(' ');
+            joined.push_str(trimmed);
+            if trimmed.ends_with(']') {
+                lines.extend(open.take());
+            }
+            continue;
+        }
+        let starts_array = trimmed
+            .split_once('=')
+            .is_some_and(|(_, value)| value.trim().starts_with('['))
+            && !trimmed.ends_with(']');
+        if starts_array {
+            open = Some(trimmed.to_owned());
+        } else {
+            lines.push(trimmed.to_owned());
+        }
+    }
+    lines.extend(open);
+    lines
+}
+
+/// Allowed `[provenance].control_type` values for calibration evidence.
+pub(crate) const CALIBRATION_CONTROL_TYPES: [&str; 3] =
+    ["positive", "negative_control", "mixed_confounded"];
+
+/// What a capture explicitly declares for calibration; present only when it is eligible.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct CalibrationMeta {
+    pub kind: EvidenceKind,
+    pub control_type: String,
+    /// `[coverage].diagnoses`: the families the capture was intentionally designed to exercise.
+    pub diagnoses: Vec<String>,
+    pub capture_id: String,
+}
+
+impl FixtureTomlSummary {
+    pub(crate) fn name(&self) -> &str {
+        &self.name
+    }
+    pub(crate) fn primary_cause(&self) -> &str {
+        self.primary_cause.as_deref().unwrap_or("")
+    }
+    pub(crate) fn scenario(&self) -> &str {
+        self.scenario.as_deref().unwrap_or("")
+    }
+    /// Legacy name/source inference of "real"; still used for regression sweeps, never for
+    /// calibration sufficiency.
+    pub(crate) fn is_legacy_real(&self) -> bool {
+        self.name.starts_with("real_")
+            || self.source == "sanitized-real-recording"
+            || self.source == "validation-corpus"
+    }
+
+    /// Eligibility for a calibration evidence floor, reusing the coverage evidence model: an
+    /// explicit non-synthetic `evidence_kind`, complete `[provenance]`, an explicit
+    /// `control_type`, and an explicit `[coverage].diagnoses`. `Err` explains why not.
+    pub(crate) fn calibration_meta(&self) -> Result<CalibrationMeta, String> {
+        let kind = self
+            .evidence_kind
+            .as_deref()
+            .ok_or("no explicit evidence_kind (legacy inferred evidence)")?;
+        let kind = EvidenceKind::parse(kind).map_err(|error| format!("{error:#}"))?;
+        if kind == EvidenceKind::Synthetic {
+            return Err("explicit evidence_kind is synthetic".to_owned());
+        }
+        if let Some(key) = REQUIRED_PROVENANCE
+            .iter()
+            .find(|key| !self.provenance.contains_key(**key))
+        {
+            return Err(format!("[provenance].{key} is missing"));
+        }
+        let control_type = self.provenance["control_type"].as_str();
+        if !CALIBRATION_CONTROL_TYPES.contains(&control_type) {
+            return Err(format!(
+                "[provenance].control_type {control_type:?} is not one of {CALIBRATION_CONTROL_TYPES:?}"
+            ));
+        }
+        if self.coverage.diagnoses.is_empty() {
+            return Err("[coverage].diagnoses is missing".to_owned());
+        }
+        Ok(CalibrationMeta {
+            kind,
+            control_type: control_type.to_owned(),
+            diagnoses: self.coverage.diagnoses.clone(),
+            capture_id: self.provenance["capture_id"].clone(),
+        })
+    }
 }
 
 /// Single-line TOML arrays only: `key = ["a", "b"]` (already unquoted by the caller).
