@@ -553,7 +553,7 @@ validation debt rather than synthetic substitutes.
 
 ## 2026-10-22: real controller crash and failure matrix (PRs #53, #54)
 
-Source `8250e49` (clean committed tree, binary and harness match source, kernel
+Source `0195613` (clean committed tree; later commits are docs-only; binary and harness match source, kernel
 6.18.55, Cargo.lock sha256 `edb02855…1883`). `xtask live-acceptance recovery`
 result **PASS**, 11 cases on the owned 3-process / 5-task workload; restoration was
 re-read independently from `/proc` in every case and all owned tasks were reaped.
