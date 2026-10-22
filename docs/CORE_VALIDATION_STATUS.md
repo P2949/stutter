@@ -550,3 +550,32 @@ validation debt rather than synthetic substitutes.
   `bbcead07661aaa68cf96aa881c7d6c5198022f32`; #28 closed after reviewing its
   multi-process, identity, durable-token, kernel-readback and audit criteria.
   Recovery #29 and the remaining milestone gates stay open.
+
+## 2026-10-22: real controller crash and failure matrix (PRs #53, #54)
+
+Source `0195613` (clean committed tree; later commits are docs-only; binary and harness match source, kernel
+6.18.55, Cargo.lock sha256 `edb02855…1883`). `xtask live-acceptance recovery`
+result **PASS**, 11 cases on the owned 3-process / 5-task workload; restoration was
+re-read independently from `/proc` in every case and all owned tasks were reaped.
+
+| Case | Mechanism | Outcome |
+| --- | --- | --- |
+| before_apply | SIGKILL, no mutation | startup recovery `Clean`, 0 restored |
+| after_preparation | SIGKILL, `Applying(token)`, 0 changed | 5 restored |
+| mid_apply | SIGKILL via strace-delayed `sched_setaffinity`, 1 changed | 5 restored |
+| after_apply | SIGKILL, `Applied(token)`, 5 changed | 5 restored |
+| during_verify | SIGKILL after real verify read, before return to runner | 5 restored |
+| after_verify | SIGKILL after successful verify | 5 restored |
+| manager_measuring | SIGKILL in `LiveExperimentManager` `Measuring` | 5 restored |
+| interrupted_rollback | `Reverting(token)`, 6th syscall (first restore) stalled, 4 changed, SIGKILL | recovered idempotently, 5 restored |
+| partial_apply_failure | real EPERM on 3rd `sched_setaffinity` | runner rolled back, journal clean, runtime faulted, retry blocked |
+| verify_failure | real apply, verify fails after harness observed 5 changed | real rollback, journal clean, failure retained in audit/history |
+| rollback_failure | verify and rollback fail | token retained in journal/daemon state, 5 masks still changed, runtime faulted, retry blocked, restored via startup recovery |
+
+Replacement/stale identity (numeric ID equal, starttime differs) is covered by the
+real-process test `real_startup_recovery_skips_a_replacement_identity_without_changing_its_mask`.
+
+Limits: manager/runtime cases use a minimal baseline observation (planner and
+measurement are not under test); evidence is local raw output, not yet a portable
+bundle (PR 56); suspend/resume is PR 55. #47 closes on merge of #53; #48 on #54;
+#29 remains open until suspend/resume passes.

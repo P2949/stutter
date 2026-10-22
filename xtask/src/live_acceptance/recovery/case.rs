@@ -2,10 +2,10 @@ use std::{io::Write, os::unix::process::ExitStatusExt};
 
 use super::*;
 
-struct Actor {
-    child: OwnedChild,
-    pid: u32,
-    ticks: u64,
+pub(super) struct Actor {
+    pub(super) child: OwnedChild,
+    pub(super) pid: u32,
+    pub(super) ticks: u64,
     traced: bool,
     finished: bool,
 }
@@ -24,7 +24,7 @@ impl Drop for Actor {
     }
 }
 impl Actor {
-    fn kill_and_wait(&mut self, out: &Path) -> anyhow::Result<Value> {
+    pub(super) fn kill_and_wait(&mut self, out: &Path) -> anyhow::Result<Value> {
         ensure!(
             self.child.0.try_wait()?.is_none() && start_ticks(self.pid)? == self.ticks,
             "controller exited or identity changed before SIGKILL"
@@ -75,7 +75,7 @@ impl Actor {
         )
     }
 }
-fn start_actor(
+pub(super) fn start_actor(
     executable: &Path,
     out: &Path,
     root: u32,
@@ -83,18 +83,14 @@ fn start_actor(
     cpu: u32,
     checkpoint: RecoveryCheckpoint,
 ) -> anyhow::Result<Actor> {
-    let traced = checkpoint == RecoveryCheckpoint::MidApply;
-    let mut command = if traced {
+    let injection = checkpoint.strace_injection();
+    let traced = injection.is_some();
+    let mut command = if let Some(injection) = injection {
         let mut command = Command::new("strace");
         command
             .args(["-f", "--seccomp-bpf", "-yy", "-o"])
             .arg(out.join("syscalls.log"))
-            .args([
-                "-e",
-                "trace=sched_setaffinity",
-                "-e",
-                "inject=sched_setaffinity:delay_exit=10s:when=1",
-            ])
+            .args(["-e", "trace=sched_setaffinity", "-e", injection])
             .arg(executable);
         command
     } else {
@@ -145,7 +141,7 @@ fn start_actor(
         finished: false,
     })
 }
-fn archive(out: &Path, source: &Path, name: &str) -> anyhow::Result<()> {
+pub(super) fn archive(out: &Path, source: &Path, name: &str) -> anyhow::Result<()> {
     let mut file = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -154,7 +150,7 @@ fn archive(out: &Path, source: &Path, name: &str) -> anyhow::Result<()> {
     file.sync_all()?;
     Ok(())
 }
-fn verify_recovery_evidence(out: &Path) -> anyhow::Result<()> {
+pub(super) fn verify_recovery_evidence(out: &Path) -> anyhow::Result<()> {
     let journal = read_json(&out.join("controller.json"))?;
     ensure!(
         journal["state"] == "clean" && journal.get("rollback_token").is_none_or(Value::is_null),
@@ -228,19 +224,41 @@ pub(super) fn run(
     let result = (|| -> anyhow::Result<Value> {
         write_json(&out.join("before.json"), &procfs::value(&before))?;
         let mut actor = start_actor(executable, &out, root, root_ticks, cpu, checkpoint)?;
-        let at_checkpoint = if checkpoint == RecoveryCheckpoint::MidApply {
-            let deadline = Instant::now() + Duration::from_secs(5);
+        let at_checkpoint = if checkpoint.strace_injection().is_some() {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            let interrupted = checkpoint == RecoveryCheckpoint::InterruptedRollback;
             loop {
                 ensure!(
                     actor.child.0.try_wait()?.is_none(),
-                    "traced controller exited before partial mutation"
+                    "traced controller exited before the injected stall"
                 );
+                // Apply also passes through four changed tasks; only the production
+                // Reverting(token) journal state distinguishes the rollback stall.
+                if interrupted
+                    && read_json(&out.join("controller.json"))
+                        .map_or(true, |journal| journal["state"] != "reverting")
+                {
+                    ensure!(
+                        Instant::now() < deadline,
+                        "Reverting(token) never journaled"
+                    );
+                    std::thread::sleep(Duration::from_millis(10));
+                    continue;
+                }
                 let current = procfs::snapshot(root, root_ticks)?;
                 let count = procfs::changed(&before, &current, &desired)?;
-                if count == 1 {
+                let target = if interrupted { 4 } else { 1 };
+                if count == target {
                     break current;
                 }
-                ensure!(count == 0, "tracer missed partial-apply checkpoint");
+                ensure!(
+                    if interrupted {
+                        count > target
+                    } else {
+                        count == 0
+                    },
+                    "tracer missed the injected stall"
+                );
                 ensure!(Instant::now() < deadline, "no partial mutation observed");
                 std::thread::sleep(Duration::from_millis(10));
             }
@@ -271,6 +289,7 @@ pub(super) fn run(
         let expected_changed = match checkpoint {
             RecoveryCheckpoint::BeforeApply | RecoveryCheckpoint::AfterPreparation => 0,
             RecoveryCheckpoint::MidApply => 1,
+            RecoveryCheckpoint::InterruptedRollback => 4,
             _ => 5,
         };
         ensure!(changed == expected_changed, "checkpoint mask count differs");
@@ -292,6 +311,8 @@ pub(super) fn run(
                 "applying"
             } else if checkpoint == RecoveryCheckpoint::ManagerMeasuring {
                 "measuring"
+            } else if checkpoint == RecoveryCheckpoint::InterruptedRollback {
+                "reverting"
             } else {
                 "applied"
             };
@@ -307,7 +328,10 @@ pub(super) fn run(
             );
             // Direct transactions use the harness path; the manager reserves an isolated
             // per-experiment path beneath the journal directory.
-            let expected_restore = if checkpoint == RecoveryCheckpoint::ManagerMeasuring {
+            let expected_restore = if matches!(
+                checkpoint,
+                RecoveryCheckpoint::ManagerMeasuring | RecoveryCheckpoint::InterruptedRollback
+            ) {
                 restore_path.starts_with(out.join("experiments"))
             } else {
                 restore_path == out.join("restore.json")
@@ -391,7 +415,7 @@ pub(super) fn run(
 }
 
 /// Process identity is `(pid, starttime_ticks)`: Linux may legitimately reuse a numeric PID.
-fn controller_identity(value: &Value) -> anyhow::Result<(u32, u64)> {
+pub(super) fn controller_identity(value: &Value) -> anyhow::Result<(u32, u64)> {
     Ok((
         value["controller_pid"]
             .as_u64()

@@ -4,6 +4,7 @@ use std::time::Duration;
 #[cfg(test)]
 use std::{collections::BTreeMap, path::PathBuf};
 
+pub(crate) mod acceptance;
 pub(crate) mod config;
 pub(crate) mod daemon_state;
 pub(crate) mod decision_view;
