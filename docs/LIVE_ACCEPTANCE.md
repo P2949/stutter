@@ -326,8 +326,13 @@ unmeasured warm-up run precedes the rounds so the cache policy is the same for e
 configuration (the harness does not drop caches; wrap the command if you need that). Use
 `exec`-style invocation so the launched pid is the game: runnable p99 and the >5 ms rate are
 read for that process. Commit, binary and kernel are fixed by the clean-tree provenance check
-that every suite performs. The receipt keeps the label, the program file name, the argument
-count and digests of the command line and program, never paths or argument text. The harness
+that every suite performs. The workload's stdout and stderr are discarded (arbitrary application output cannot be
+sanitized generically, so it is never retained or exported). Every profiled run monitors the
+workload for the whole profiling window: any exit before the profiler finishes, successful or
+not, rejects the sample, and a nonzero exit after it rejects the run; a failed A or B round
+fails the suite (they are required baselines) while optional C-F probe sets stay `DEGRADED`.
+The receipt keeps the label, the program file name, the argument count and digests of the
+command line and program, never paths or argument text. The harness
 cannot verify that a command is representative: the operator declares it and the receipt says
 so. Without a workload label the run is the controlled suite exactly as before.
 

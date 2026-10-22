@@ -179,6 +179,18 @@ fn read_profiler_sample(pid: u32) -> Option<(u64, f64)> {
     Some((ticks, rss))
 }
 
+/// A profiled run is only valid if its workload was still running for the entire profiling
+/// window: any exit before the profiler finished (successful or not) rejects the sample.
+pub(super) fn ensure_workload_alive(workload: &mut OwnedChild) -> anyhow::Result<()> {
+    if let Some(status) = workload.0.try_wait()? {
+        anyhow::bail!(
+            "workload exited ({status}) before the profiling window ended; a measured run must \
+             outlive the window"
+        );
+    }
+    Ok(())
+}
+
 /// The workload one profiler configuration is measured against.
 #[derive(Clone, Copy)]
 pub(super) enum Workload<'a> {
@@ -215,7 +227,7 @@ pub(super) fn run_one(
                 .stderr(fs::File::create(dir.join("workload.stderr"))?)
                 .spawn()?,
         ),
-        Workload::External(external) => external.spawn(dir)?,
+        Workload::External(external) => external.spawn()?,
     };
     if matches!(workload, Workload::Disposable { .. }) {
         let deadline = Instant::now() + Duration::from_secs(5);
@@ -253,20 +265,23 @@ pub(super) fn run_one(
         );
         let limit = Instant::now() + Duration::from_secs(seconds + 20);
         loop {
-            let child = &mut profiler.0;
-            if let Some(status) = child.try_wait()? {
+            let record = &mut profiler.0;
+            if let Some(status) = record.try_wait()? {
                 ensure!(
                     status.success(),
                     "record exited with {status}; see record.stderr"
                 );
                 break;
             }
-            if let Some(sample) = read_profiler_sample(child.id()) {
+            // The workload must be alive for the whole profiling window.
+            ensure_workload_alive(&mut child)?;
+            if let Some(sample) = read_profiler_sample(record.id()) {
                 last = Some(sample);
             }
             ensure!(Instant::now() < limit, "record did not finish");
             std::thread::sleep(Duration::from_millis(100));
         }
+        ensure_workload_alive(&mut child)?;
     }
     let wall = started.elapsed().as_secs_f64();
     let throughput = match workload {
@@ -423,6 +438,12 @@ pub(super) fn run(
                 });
                 match attempt {
                     Ok(sample) => samples[index].push(sample),
+                    // A (no profiler) and B (scheduler core) are required baselines: a
+                    // missing or invalid round fails the suite instead of shrinking n.
+                    Err(error) if id == "A" || id == "B" => {
+                        return Err(error
+                            .context(format!("required baseline {id} failed in round {round}")));
+                    }
                     Err(error) => {
                         degraded.insert(id, format!("{error:#}"));
                     }

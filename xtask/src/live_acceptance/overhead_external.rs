@@ -57,13 +57,15 @@ impl ExternalWorkload {
         self.work_units / elapsed_seconds
     }
 
-    pub fn spawn(&self, dir: &Path) -> anyhow::Result<OwnedChild> {
+    /// The workload's own output is never retained: arbitrary application output cannot be
+    /// sanitized generically, so it goes nowhere and is not exportable evidence.
+    pub fn spawn(&self) -> anyhow::Result<OwnedChild> {
         Ok(OwnedChild(
             Command::new(&self.command[0])
                 .args(&self.command[1..])
                 .stdin(Stdio::null())
-                .stdout(fs::File::create(dir.join("workload.stdout"))?)
-                .stderr(fs::File::create(dir.join("workload.stderr"))?)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
                 .spawn()
                 .with_context(|| format!("start workload {}", self.label))?,
         ))
@@ -92,7 +94,7 @@ impl ExternalWorkload {
     pub fn warm_up(&mut self, dir: &Path, window_seconds: u64) -> anyhow::Result<f64> {
         fs::create_dir_all(dir)?;
         let started = Instant::now();
-        let mut child = self.spawn(dir)?;
+        let mut child = self.spawn()?;
         self.wait(&mut child)?;
         let elapsed = started.elapsed().as_secs_f64();
         ensure!(
@@ -218,7 +220,143 @@ mod tests {
             sample.throughput
         );
         assert!(sample.profiler_cpu_percent.is_none() && sample.event_rate.is_none());
-        assert!(dir.join("workload.stdout").is_file());
+        assert!(!dir.join("workload.stdout").exists() && !dir.join("workload.stderr").exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("stutter-ext-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// A stand-in profiler: exits successfully after `seconds` without recording anything.
+    fn fake_profiler(dir: &Path, seconds: u64) -> PathBuf {
+        let path = dir.join("fake-stutter");
+        fs::write(&path, format!("#!/bin/sh\nsleep {seconds}\n")).unwrap();
+        fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        path
+    }
+
+    fn flags() -> Vec<String> {
+        vec!["--no-hwmon".to_owned()]
+    }
+
+    #[test]
+    fn liveness_check_rejects_any_early_exit_and_accepts_a_running_workload() {
+        let running = ExternalWorkload::new("r", &command(&["sleep", "5"]), None).unwrap();
+        let mut child = running.spawn().unwrap();
+        overhead::ensure_workload_alive(&mut child).unwrap();
+        drop(child);
+        for early in [command(&["true"]), command(&["false"])] {
+            let workload = ExternalWorkload::new("e", &early, None).unwrap();
+            let mut child = workload.spawn().unwrap();
+            while child.0.try_wait().unwrap().is_none() {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            // Successful and nonzero early exits both invalidate the run.
+            let error = overhead::ensure_workload_alive(&mut child)
+                .unwrap_err()
+                .to_string();
+            assert!(
+                error.contains("before the profiling window ended"),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_measured_run_that_exits_inside_the_window_is_rejected_even_after_a_good_warm_up() {
+        let dir = scratch("early");
+        let mut workload = ExternalWorkload::new("w", &command(&["sleep", "3"]), None).unwrap();
+        workload.warm_up(&dir.join("warm-up"), 0).unwrap();
+        // The measured invocation now exits at once, while the profiler is still running.
+        let early = ExternalWorkload::new("w", &command(&["true"]), None).unwrap();
+        let error = overhead::run_one(
+            &fake_profiler(&dir, 4),
+            overhead::Workload::External(&early),
+            &dir.join("run"),
+            Some(&flags()),
+            4,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            error.contains("before the profiling window ended"),
+            "{error}"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_workload_that_outlives_the_window_passes_the_liveness_checks() {
+        let dir = scratch("alive");
+        let alive = ExternalWorkload::new("w", &command(&["sleep", "5"]), None).unwrap();
+        // The fake profiler records nothing, so the run later fails on the missing
+        // recording, which proves the liveness checks themselves were satisfied.
+        let error = overhead::run_one(
+            &fake_profiler(&dir, 1),
+            overhead::Workload::External(&alive),
+            &dir.join("run"),
+            Some(&flags()),
+            1,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(!error.contains("profiling window"), "{error}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_nonzero_workload_exit_after_the_window_rejects_the_run() {
+        let dir = scratch("nonzero");
+        let failing =
+            ExternalWorkload::new("w", &command(&["sh", "-c", "sleep 2; exit 3"]), None).unwrap();
+        let error = overhead::run_one(
+            Path::new("/nonexistent/stutter"),
+            overhead::Workload::External(&failing),
+            &dir.join("run"),
+            None,
+            1,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("workload exited"), "{error}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn raw_evidence_keeps_neither_workload_output_nor_argument_text() {
+        let dir = scratch("privacy");
+        let marker = "PRIVATE-ARGUMENT-MARKER";
+        let script = format!("echo {marker}; echo {marker} >&2; sleep 1");
+        let workload = ExternalWorkload::new("w", &command(&["sh", "-c", &script]), None).unwrap();
+        overhead::run_one(
+            Path::new("/nonexistent/stutter"),
+            overhead::Workload::External(&workload),
+            &dir.join("run"),
+            None,
+            1,
+        )
+        .unwrap();
+        let identity = workload.identity().unwrap().to_string();
+        assert!(!identity.contains(marker), "{identity}");
+        for entry in fs::read_dir(dir.join("run")).unwrap() {
+            let path = entry.unwrap().path();
+            assert!(
+                !fs::read_to_string(&path)
+                    .unwrap_or_default()
+                    .contains(marker),
+                "{}",
+                path.display()
+            );
+            assert!(
+                !path.ends_with("workload.stdout") && !path.ends_with("workload.stderr"),
+                "{}",
+                path.display()
+            );
+        }
         let _ = fs::remove_dir_all(&dir);
     }
 }
