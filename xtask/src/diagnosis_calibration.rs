@@ -558,7 +558,10 @@ mod tests {
     #[test]
     fn another_familys_positive_is_not_a_negative_control() {
         let gpu = capture("fixture_real", "positive", &["GpuBoundCandidate"], "g-0");
-        let scheduler = family_floors(family_spec("scheduler").unwrap(), &[gpu.clone()]);
+        let scheduler = family_floors(
+            family_spec("scheduler").unwrap(),
+            std::slice::from_ref(&gpu),
+        );
         assert_eq!((scheduler.positives, scheduler.negative_controls), (0, 0));
         let gpu_floors = family_floors(family_spec("gpu").unwrap(), &[gpu]);
         assert_eq!(gpu_floors.positives, 1);
@@ -567,7 +570,8 @@ mod tests {
     #[test]
     fn an_explicit_negative_control_counts_only_for_the_family_it_names() {
         let negative = capture("fixture_real", "negative_control", &[SCHED], "neg-0");
-        let floors = |name| family_floors(family_spec(name).unwrap(), &[negative.clone()]);
+        let floors =
+            |name| family_floors(family_spec(name).unwrap(), std::slice::from_ref(&negative));
         assert_eq!(floors("scheduler").negative_controls, 1);
         assert_eq!(floors("io").negative_controls, 0);
     }
@@ -580,7 +584,7 @@ mod tests {
             &[SCHED, "BlockIoCandidate"],
             "m-0",
         );
-        let floors = |name| family_floors(family_spec(name).unwrap(), &[mixed.clone()]);
+        let floors = |name| family_floors(family_spec(name).unwrap(), std::slice::from_ref(&mixed));
         assert_eq!(floors("scheduler").mixed_confounded, 1);
         assert_eq!(floors("io").mixed_confounded, 1);
         assert_eq!(floors("irq").mixed_confounded, 0);
