@@ -189,3 +189,20 @@ owned-child tests check the real callback before mutation, the journaled boxed
 runner plus startup restore, and rejection before commit. Syscall tracing and
 canonical SIGKILL/restart evidence are separate gates; the latter still keeps
 #48/#29 open.
+
+## Suspend/resume acceptance (opt-in; suspends the machine)
+
+```bash
+cargo run -p xtask -- live-acceptance suspend-resume \
+  --stutter-bin target/debug/stutter --out NEW_DIR \
+  --allow-system-suspend [--rtcwake-seconds 30] [--suspend-command "systemctl suspend"]
+```
+
+Without `--allow-system-suspend` the suite writes a `BLOCKED` receipt and never
+suspends. It starts a real low-risk CPU-affinity candidate on the owned disposable
+tree, proves it is physically applied and `Measuring`, records a pre-suspend receipt
+(including the kernel's `suspend_stats`), suspends, and requires after resume: the
+runtime's wall/monotonic clock discontinuity detection, a cleared measurement window,
+the active candidate reverted, a stabilization cooldown, and independently re-read
+original masks. Run from a clean committed tree. If `rtcwake` is not permitted, wake
+the machine manually.
