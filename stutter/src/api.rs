@@ -626,5 +626,8 @@ pub mod session_io {
 pub mod scorer {
     //! Public `StutterScore` contracts: a ranking proxy within comparable experiments.
 
-    pub use crate::scorer::{StutterScore, score_from_interval_records};
+    pub use crate::scorer::{
+        StutterScore, frame_time_percentile_ms, score_from_interval_records,
+        score_from_interval_records_and_frames,
+    };
 }

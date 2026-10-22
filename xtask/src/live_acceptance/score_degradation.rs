@@ -69,13 +69,15 @@ pub(super) fn run(root: &Path, out: &Path, binary: &Path, seconds: u64) -> anyho
             observations.push(score_evaluation::observe(
                 ms as f64,
                 &scenario.records,
+                // The disposable workload has no frame stream: runnable-only by construction.
+                &[],
                 scenario.pid,
                 scenario.ticks,
             ));
             per_level.push(value);
         }
         stage = "evaluation";
-        let evaluation = score_evaluation::evaluate(observations)?;
+        let evaluation = score_evaluation::evaluate(observations, false)?;
         monotonic = evaluation["monotonic_in_degradation"] == true;
         Ok(json!({"levels":per_level,"evaluation":evaluation}))
     })();

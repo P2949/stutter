@@ -313,6 +313,13 @@ inversions, Spearman versus level) and rank agreement with runnable p99, the >5 
 sample >1 ms counts. Existing weights (100 x >5 ms, 20 x >2 ms, 1 x >1 ms) are retained unless
 the score is not monotonic, in which case the receipt is `INCONCLUSIVE` and weights need
 review. `xtask score-evaluate --level 0:DIR --level 1:DIR ...` runs the same evaluation on
-any set of recordings. Frame metrics are not available for the synthetic workload.
+any set of recordings. When a recording has a frame stream (`frame_correlation.json`, legacy
+alias `frame_events.json`) the score includes the frame terms
+(`score_from_interval_records_and_frames`) and the report adds frame p99, p99.9 and the
+>16.6 ms and >33.3 ms rates with their rank agreement; without frames those values are
+unavailable (null), never zero, and the runnable-only path is unchanged. If only some levels
+have frames every level is scored runnable-only. `--require-frames` fails unless every level
+has usable frame data and is required to close the frame-aware evaluation (#33); the synthetic
+workload emits no frames and cannot close it.
 Regardless of the score, `GameRunnableLatency` keeps runnable latency as its primary and the
 compile objective keeps fixed-work elapsed time (a test asserts both descriptors).

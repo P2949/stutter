@@ -629,3 +629,14 @@ are not calibration claims; #32 stays open until a real positive/control/mixed c
 exists. Existence and causal confidence remain one value and are not separately calibrated;
 overlap is not proven causality. Thermal/power calibration is out of scope (corpus
 insufficient).
+
+## 2026-10-22: frame-aware StutterScore evaluator (#33, offline)
+
+`xtask score-evaluate` now reads a recording's frame stream when present, scores it with
+`score_from_interval_records_and_frames`, and reports frame p99, p99.9 and the >16.6/>33.3 ms
+rates with their Spearman agreement against the score; absent frames stay unavailable (null),
+the runnable-only path is unchanged, and mixed availability scores every level runnable-only.
+`--require-frames` fails unless every degradation level has usable frame data. Tests cover the
+backward-compatible path, the frame-inclusive score, p99.9, the rates, `--require-frames`
+rejection, a monotonic example and a score/direct-metric inversion. Objective primaries are
+unchanged. This is tooling: #33 stays open until a frame-producing real series exists.
