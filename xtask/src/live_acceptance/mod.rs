@@ -13,10 +13,32 @@ use serde_json::{Value, json};
 mod affinity;
 mod evidence;
 mod game_runnable;
+mod kernel_compat;
+mod overhead;
 pub(crate) mod recovery;
 
 #[derive(Clone, Debug, Eq, PartialEq, Subcommand)]
 pub enum Suite {
+    Overhead {
+        #[arg(long)]
+        out: PathBuf,
+        #[arg(long)]
+        stutter_bin: PathBuf,
+        #[arg(long, default_value_t = 20, value_parser = clap::value_parser!(u64).range(10..=60))]
+        seconds: u64,
+        /// Rounds of all six configurations; a multiple of 6 balances positions.
+        #[arg(long, default_value_t = 12, value_parser = clap::value_parser!(u32).range(6..=48))]
+        rounds: u32,
+        /// Seeded shuffle instead of the alternating rotation.
+        #[arg(long)]
+        seed: Option<u64>,
+    },
+    KernelCompat {
+        #[arg(long)]
+        out: PathBuf,
+        #[arg(long)]
+        stutter_bin: PathBuf,
+    },
     GameRunnable {
         #[arg(long)]
         out: PathBuf,
@@ -168,17 +190,23 @@ pub fn workload(seconds: u64, ready: &Path, descendants: bool) -> anyhow::Result
         .name("accept-busy".into())
         .spawn(move || {
             let mut value = 1_u64;
+            let mut iterations = 0_u64;
             while Instant::now() < deadline {
                 value = std::hint::black_box(value.wrapping_mul(1664525).wrapping_add(1013904223));
+                iterations += 1;
             }
+            iterations
         })?;
     let wake = std::thread::Builder::new()
         .name("accept-wake".into())
         .spawn(move || {
+            let mut wakes = 0_u64;
             while Instant::now() < deadline {
                 std::thread::sleep(Duration::from_millis(1));
                 std::hint::black_box(Instant::now());
+                wakes += 1;
             }
+            wakes
         })?;
     let temporary = ready.with_extension("tmp");
     let mut file = fs::OpenOptions::new()
@@ -191,10 +219,19 @@ pub fn workload(seconds: u64, ready: &Path, descendants: bool) -> anyhow::Result
     )?;
     file.sync_all()?;
     fs::rename(temporary, ready)?;
-    busy.join()
+    let busy_iterations = busy
+        .join()
         .map_err(|_| anyhow::anyhow!("busy workload panicked"))?;
-    wake.join()
+    let wake_count = wake
+        .join()
         .map_err(|_| anyhow::anyhow!("wakeup workload panicked"))?;
+    // Workload-side throughput for overhead acceptance; written once the run ended.
+    fs::write(
+        ready.with_extension("counts"),
+        serde_json::to_vec(
+            &json!({"busy_iterations":busy_iterations,"wake_count":wake_count,"seconds":seconds}),
+        )?,
+    )?;
     Ok(())
 }
 
@@ -206,6 +243,18 @@ pub fn run(root: &Path, suite: Suite) -> anyhow::Result<()> {
             seconds,
         } => (out, stutter_bin, seconds),
         Suite::Affinity { out, stutter_bin } => return affinity::run(root, &out, &stutter_bin),
+        Suite::Overhead {
+            out,
+            stutter_bin,
+            seconds,
+            rounds,
+            seed,
+        } => {
+            return overhead::run(root, &out, &stutter_bin, seconds, rounds, seed);
+        }
+        Suite::KernelCompat { out, stutter_bin } => {
+            return kernel_compat::run(root, &out, &stutter_bin);
+        }
         Suite::GameRunnable {
             out,
             stutter_bin,

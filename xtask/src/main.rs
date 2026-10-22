@@ -12,6 +12,7 @@ pub mod evidence_bundle;
 pub mod fixed_work;
 pub mod fixture_coverage;
 pub mod fixtures;
+pub mod kernel_matrix;
 mod live_acceptance;
 pub mod maturity_report;
 pub mod no_allow_attrs;
@@ -84,6 +85,19 @@ pub enum XtaskCommand {
         about = "Fail if a capability is Supported ahead of its evidence"
     )]
     CapabilityCheck,
+    #[command(
+        name = "kernel-matrix",
+        about = "Report observed kernel compatibility from the evidence index"
+    )]
+    KernelMatrix {
+        #[arg(long, default_value_t = 0)]
+        require: usize,
+    },
+    #[command(
+        name = "evidence-index",
+        about = "Print the evidence-index entry for a verified bundle"
+    )]
+    EvidenceIndex(evidence_bundle::VerifyArgs),
     #[command(
         name = "release-package",
         about = "Package the supported layout from the committed source"
@@ -332,6 +346,8 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
         } => live_acceptance::workload(seconds, &ready, descendants),
         XtaskCommand::ReleasePackage(args) => release_package::package_release(&root, &args),
         XtaskCommand::ReleaseVerify(args) => release_package::verify_release(&args),
+        XtaskCommand::KernelMatrix { require } => kernel_matrix::run(&root, require),
+        XtaskCommand::EvidenceIndex(args) => evidence_bundle::index_entry(&args.bundle),
         XtaskCommand::CapabilityCheck => capability_check::run(&root),
         XtaskCommand::EvidenceExport(args) => {
             evidence_bundle::export_bundle(&root, &args.raw, &args.out)
