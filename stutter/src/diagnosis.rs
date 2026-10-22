@@ -10,7 +10,7 @@ mod wording;
 
 pub(crate) use anchor::{select_anchor, select_anchor_for_diagnosis};
 pub use model::{
-    CandidateRejection, ClusterAnchor, ClusterAnchorKind, Confidence, Diagnosis,
+    CandidateRejection, CausalConfidence, ClusterAnchor, ClusterAnchorKind, Confidence, Diagnosis,
     DiagnosisCandidate, DiagnosisConfig, DiagnosisThresholdDoc, EvidenceChain, EvidenceChainKind,
     EvidenceChainNode, EvidenceChainNodeKind, EvidenceItem, EvidenceKind, FrameDiagnosis,
     LiveDiagnosisEntry, StutterCause,

@@ -280,9 +280,11 @@ tracepoint formats (`doctor tracepoints --dump`, retained verbatim) and performs
 loader/record run. State is observed, never inferred from distribution or version:
 `ObservedIncompatible` if `sched_wakeup`/`sched_switch` are not compatible or the loader
 fails; `ObservedDegraded` if only optional evidence (`sched_stat_wait`, IRQ, block I/O,
-cpu_frequency, migration, process lifecycle) is missing, naming the degraded capabilities;
-`ObservedCompatible` otherwise; `Untested` with no evidence. DRM/KMS and GPU/platform
-telemetry are not covered yet. Export and verify the bundle, then
+cpu_frequency, migration, process lifecycle, or DRM/KMS) is missing, naming the degraded
+capabilities; `ObservedCompatible` otherwise; `Untested` with no evidence. DRM/KMS is the
+optional `drm_kms` capability, read from the doctor `kms_timing` check (`stutter doctor
+--kms-timing --json`, retained as `drm-kms.stdout`); its absence degrades and never makes a
+kernel incompatible. GPU/platform telemetry stays outside this tracepoint contract. Export and verify the bundle, then
 `cargo run -p xtask -- evidence-index BUNDLE` prints its `docs/evidence/index.json` entry
 (including `kernel_release` and `compatibility`); `cargo run -p xtask -- kernel-matrix
 --require 3` reports observed kernels and fails with fewer than three distinct ones. When a
@@ -313,6 +315,13 @@ inversions, Spearman versus level) and rank agreement with runnable p99, the >5 
 sample >1 ms counts. Existing weights (100 x >5 ms, 20 x >2 ms, 1 x >1 ms) are retained unless
 the score is not monotonic, in which case the receipt is `INCONCLUSIVE` and weights need
 review. `xtask score-evaluate --level 0:DIR --level 1:DIR ...` runs the same evaluation on
-any set of recordings. Frame metrics are not available for the synthetic workload.
+any set of recordings. When a recording has a frame stream (`frame_correlation.json`, legacy
+alias `frame_events.json`) the score includes the frame terms
+(`score_from_interval_records_and_frames`) and the report adds frame p99, p99.9 and the
+>16.6 ms and >33.3 ms rates with their rank agreement; without frames those values are
+unavailable (null), never zero, and the runnable-only path is unchanged. If only some levels
+have frames every level is scored runnable-only. `--require-frames` fails unless every level
+has usable frame data and is required to close the frame-aware evaluation (#33); the synthetic
+workload emits no frames and cannot close it.
 Regardless of the score, `GameRunnableLatency` keeps runnable latency as its primary and the
 compile objective keeps fixed-work elapsed time (a test asserts both descriptors).

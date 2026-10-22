@@ -286,6 +286,29 @@ impl Confidence {
     }
 }
 
+/// How far the evidence supports the candidate having *caused* a visible stutter, as opposed to
+/// `Confidence`, which only says the candidate's evidence was observed. It is `NotEstablished`
+/// without visible-stutter linkage (and for device candidates without an explicit attribution
+/// chain) and never exceeds the observation confidence.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+pub enum CausalConfidence {
+    #[default]
+    NotEstablished,
+    Low,
+    Medium,
+    High,
+}
+
+impl From<Confidence> for CausalConfidence {
+    fn from(confidence: Confidence) -> Self {
+        match confidence {
+            Confidence::Low => Self::Low,
+            Confidence::Medium => Self::Medium,
+            Confidence::High => Self::High,
+        }
+    }
+}
+
 fn confidence_threshold_value(confidence: Confidence) -> f64 {
     match confidence {
         Confidence::Low => 1.0,
@@ -396,6 +419,9 @@ pub struct ClusterAnchor {
 pub struct Diagnosis {
     pub cause: StutterCause, // Primary cause (for compatibility)
     pub confidence: Confidence,
+    /// Separate from `confidence`: whether the primary candidate is established as the cause of
+    /// visible stutter (see `CausalConfidence`).
+    pub causal_confidence: CausalConfidence,
     pub secondary_causes: Vec<StutterCause>,
     pub evidence: Vec<String>,
     #[serde(default)]
