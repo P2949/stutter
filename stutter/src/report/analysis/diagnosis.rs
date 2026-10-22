@@ -5,13 +5,14 @@
 
 use super::*;
 
-pub(crate) fn perform_diagnosis(
+pub(crate) fn perform_diagnosis_with_config(
     clusters: &mut [SpikeCluster],
     artifacts: &session_io::RunArtifacts,
     cluster_window_ns: u64,
+    config: DiagnosisConfig,
 ) {
     for cluster in clusters {
-        let diagnosis = diagnose_cluster(cluster, artifacts, cluster_window_ns);
+        let diagnosis = diagnose_cluster_with_config(cluster, artifacts, cluster_window_ns, config);
         let diagnosis_explanation = explain_diagnosis(&diagnosis);
         let anchor = select_anchor_for_diagnosis(cluster, &diagnosis);
         cluster.anchor_task = Some(anchor.task);

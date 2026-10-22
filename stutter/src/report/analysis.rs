@@ -54,6 +54,24 @@ pub(crate) fn build_report_analysis_from_input(
     cluster_window_ms: u64,
     filter_class: Option<TaskClass>,
 ) -> anyhow::Result<ReportBuildResult> {
+    build_report_analysis_from_input_with_config(
+        input,
+        top,
+        cluster_window_ms,
+        filter_class,
+        crate::diagnosis::DiagnosisConfig::default(),
+    )
+}
+
+/// Same pipeline with explicit diagnosis thresholds, so calibration sweeps exercise the
+/// production clustering, artifact filtering and diagnosis code.
+pub(crate) fn build_report_analysis_from_input_with_config(
+    input: ReportInputModel,
+    top: usize,
+    cluster_window_ms: u64,
+    filter_class: Option<TaskClass>,
+    diagnosis_config: crate::diagnosis::DiagnosisConfig,
+) -> anyhow::Result<ReportBuildResult> {
     let mut artifacts = input.into_artifacts();
     let session = artifacts.session.clone();
 
@@ -84,10 +102,11 @@ pub(crate) fn build_report_analysis_from_input(
     artifacts.load_correlations(windows)?;
 
     let mut cluster_analysis = cluster_analysis;
-    perform_diagnosis(
+    perform_diagnosis_with_config(
         &mut cluster_analysis.clusters,
         &artifacts,
         cluster_window_ns,
+        diagnosis_config,
     );
 
     annotate_clusters_with_foreground(

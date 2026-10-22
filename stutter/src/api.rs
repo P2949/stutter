@@ -574,8 +574,9 @@ pub mod report {
         PressureTimelineCoverage, PressureTimelineSummary, PressureWindow, RegressionCheckSummary,
         RegressionMetric, RegressionViolation, ReportAnalysisJson, RuntimeSliceAnalysisSummary,
         RuntimeThreadSummary, SpikeClusterAnalysis, SpikeClusterSource, SpikeDensityBucket,
-        TaskHtmlRow, build_report_analysis, check_regression, print_batch_report,
-        print_diff_report, print_report, write_html_report,
+        TaskHtmlRow, build_report_analysis,
+        calibration::{CalibrationOutcome, scheduler_calibration_outcome},
+        check_regression, print_batch_report, print_diff_report, print_report, write_html_report,
     };
 }
 
