@@ -50,7 +50,7 @@ pub(crate) const MAX_FILE_BYTES: u64 = 16 * 1024 * 1024;
 
 /// Provenance class of the evidence; never inferred from file names.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum EvidenceKind {
+pub enum EvidenceKind {
     Synthetic,
     FixtureReal,
     ControlledReal,

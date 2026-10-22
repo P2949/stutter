@@ -149,6 +149,10 @@ pub(in crate::architecture_tests) const EXPECTED_API_PUBLIC_MODULES: &[ExpectedP
         reason: "compatibility facade for daemon policy and explanation contracts",
     },
     ExpectedPublicModule {
+        name: "diagnosis",
+        reason: "diagnosis kind registry used as a coverage denominator by repository tooling",
+    },
+    ExpectedPublicModule {
         name: "events",
         reason: "public event decoding and interpretation contracts",
     },

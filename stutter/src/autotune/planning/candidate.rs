@@ -269,3 +269,63 @@ pub trait CandidatePlan {
     fn conflict_group(&self) -> ActionConflictGroup;
     fn describe(&self) -> String;
 }
+
+/// Registry of mutation provider kinds (everything except the test-only fake).
+/// `is_mutation_provider` is an exhaustive match, so a new candidate variant cannot
+/// compile until this registry is revisited; coverage tooling uses it as a denominator.
+pub const MUTATION_PROVIDER_KINDS: [&str; 9] = [
+    "cpu_affinity_profile",
+    "nice",
+    "ionice",
+    "uclamp",
+    "cgroup_placement",
+    "irq_affinity",
+    "cpu_power",
+    "gpu_power",
+    "vm_knob",
+];
+
+impl CandidateAction {
+    pub fn is_mutation_provider(&self) -> bool {
+        match self {
+            Self::CpuAffinityProfile { .. }
+            | Self::Nice { .. }
+            | Self::IoPrio { .. }
+            | Self::Uclamp { .. }
+            | Self::CgroupPlacement { .. }
+            | Self::IrqAffinity { .. }
+            | Self::CpuPower { .. }
+            | Self::GpuPower { .. }
+            | Self::VmKnob { .. } => true,
+            Self::Fake { .. } => false,
+        }
+    }
+}
+
+#[cfg(test)]
+mod provider_registry_tests {
+    use super::*;
+
+    #[test]
+    fn registry_names_match_real_candidates_and_exclude_the_fake() {
+        let affinity = CandidateAction::cpu_affinity_profile(
+            crate::profiles::Profile {
+                name: "registry".into(),
+                rules: Vec::new(),
+            },
+            1,
+        );
+        assert!(affinity.is_mutation_provider());
+        assert!(MUTATION_PROVIDER_KINDS.contains(&affinity.action_kind()));
+        let fake = CandidateAction::fake(
+            crate::actions::ActionId::new("fake".to_owned()),
+            crate::actions::SafetyClass::ReversibleLowRisk,
+        );
+        assert!(!fake.is_mutation_provider());
+        assert!(!MUTATION_PROVIDER_KINDS.contains(&fake.action_kind()));
+        let unique = MUTATION_PROVIDER_KINDS
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(unique.len(), MUTATION_PROVIDER_KINDS.len());
+    }
+}

@@ -237,3 +237,19 @@ the exporting machine's account and host names. Raw evidence that lacks capture
 identity or artifact schema is refused: rerun the suite from the exact committed source
 rather than reconstructing metadata. `scripts/artifacts/export_evidence_bundle.sh` is the
 legacy, fail-open exporter and is not canonical.
+
+## Evidence maturity coverage
+
+`cargo run -p xtask -- fixture-coverage` reports, per diagnosis kind, objective,
+mutation provider and kernel capability (denominators come from `StutterCause::ALL`,
+`ObjectiveKind::ALL`, `MUTATION_PROVIDER_KINDS` and the probe registry), how many
+`synthetic`, `fixture_real`, `controlled_real` and `real_workload` evidence items cover
+it, plus the surfaces that are synthetic-only/uncovered or lack real-workload evidence.
+New captures declare `evidence_kind` and a complete `[provenance]` table
+(`source_commit`, `capture_id`, `kernel`, `distribution`, `cpu`, `gpu`, `compositor`,
+`workload`, `workload_version`, `scenario`, `expected_cause`, `expected_confidence`,
+`control_type`, `probe_set`, `drop_counters`, `artifact_schema`, `limitations`,
+`privacy_state`); fixtures without `evidence_kind` keep the legacy inference and are
+counted. Optional `[coverage]` single-line arrays (`objectives`, `providers`,
+`kernel_capabilities`) tag what a fixture covers. Verified live bundles are pinned by
+manifest digest in `docs/evidence/index.json`; only PASS entries count.

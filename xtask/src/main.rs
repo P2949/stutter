@@ -3,6 +3,7 @@ use std::{env, path::PathBuf};
 use anyhow::{Context, bail};
 use clap::{Parser, Subcommand};
 
+pub mod coverage_maturity;
 pub mod dependency_hygiene;
 pub mod ebpf_manifest;
 pub mod ebpf_smoke;
