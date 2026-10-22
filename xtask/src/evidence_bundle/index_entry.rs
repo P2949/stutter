@@ -20,7 +20,9 @@ fn covers(suite: &str, result: &Value) -> Value {
     }
 }
 
-pub fn index_entry(bundle: &Path) -> anyhow::Result<()> {
+/// The index entry for `bundle`, derived only after the bundle fully verifies. Release
+/// acceptance consumes this directly so an unverified or tampered bundle never yields an entry.
+pub fn verified_index_entry(bundle: &Path) -> anyhow::Result<Value> {
     verify_bundle(bundle)?;
     let receipt = read_json(&bundle.join("receipt.json"))?;
     let environment = read_json(&bundle.join("environment.json"))?;
@@ -39,6 +41,13 @@ pub fn index_entry(bundle: &Path) -> anyhow::Result<()> {
         entry["kernel_release"] = environment["kernel_release"].clone();
         entry["compatibility"] = result["compatibility"].clone();
     }
-    println!("{}", serde_json::to_string_pretty(&entry)?);
+    Ok(entry)
+}
+
+pub fn index_entry(bundle: &Path) -> anyhow::Result<()> {
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&verified_index_entry(bundle)?)?
+    );
     Ok(())
 }

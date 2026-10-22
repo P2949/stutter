@@ -630,6 +630,44 @@ exists. Existence and causal confidence remain one value and are not separately 
 overlap is not proven causality. Thermal/power calibration is out of scope (corpus
 insufficient).
 
+## 2026-10-22: exact-release evidence gate no longer self-referential (#36 prerequisite)
+
+`release-verify --require-acceptance` used to read `docs/evidence/index.json` inside the
+release archive for PASS entries whose `source_commit` equalled the release commit, which no
+commit can satisfy honestly (committing evidence for X produces Y). It now takes repeatable
+`--acceptance-bundle BUNDLE` arguments and verifies each bundle through the new
+`verified_index_entry` (which calls `verify_bundle` first). Every bundle must be PASS for
+exactly the release commit, a capture may not repeat, and the union of suites must cover
+every Supported capability's `required_evidence`. The committed index remains the
+historical catalogue and never satisfies the gate. Tests: valid exact bundles, wrong commit,
+tampered bundle, missing suite, index-alone insufficient, non-PASS in either order, and
+deterministic duplicate-suite handling.
+
+## 2026-10-22: frame-aware StutterScore evaluator (#33, offline)
+
+`xtask score-evaluate` now reads a recording's frame stream when present, scores it with
+`score_from_interval_records_and_frames`, and reports frame p99, p99.9 and the >16.6/>33.3 ms
+rates with their Spearman agreement against the score; absent frames stay unavailable (null),
+the runnable-only path is unchanged, and mixed availability scores every level runnable-only.
+`--require-frames` fails unless every degradation level has usable frame data. Tests cover the
+backward-compatible path, the frame-inclusive score, p99.9, the rates, `--require-frames`
+rejection, a monotonic example and a score/direct-metric inversion. Objective primaries are
+unchanged. This is tooling: #33 stays open until a frame-producing real series exists.
+
+## 2026-10-22: observation vs causal confidence separated (#32, offline)
+
+`Diagnosis` now carries `causal_confidence` (`NotEstablished|Low|Medium|High`) beside the
+unchanged `confidence`, which still means the candidate's evidence was observed. The policy
+lives next to the existing causal wording policy and reuses its explicit-attribution-chain
+rule: no coincident visible frame spike means `NotEstablished`; IRQ, block-I/O and GPU/fence
+candidates are `NotEstablished` without their explicit chain; scheduler overlap is capped at
+`Medium`, other context candidates at `Low`; the value never exceeds the observation
+confidence. `xtask calibrate` now reports `observation_confidence_distribution`,
+`causal_confidence_distribution`, `false_high_observation_confidence` and
+`false_high_causal_confidence` per sweep point; scoring of the detected cause is unchanged
+and independent of both. No threshold changed. This is tooling and a policy, not a
+calibration result: #32 still needs the real corpus (#31).
+
 ## 2026-10-22: real suspend/resume acceptance PASS (#29)
 
 PRs #53-#65 were merged into `main` in stack order. `xtask live-acceptance suspend-resume

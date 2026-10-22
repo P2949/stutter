@@ -36,7 +36,7 @@ pub struct VerifyArgs {
 }
 
 pub use export::export_bundle;
-pub use index_entry::index_entry;
+pub use index_entry::{index_entry, verified_index_entry};
 pub use verify::verify_bundle;
 
 pub(crate) const BUNDLE_SCHEMA_VERSION: u64 = 1;
@@ -198,4 +198,4 @@ pub(crate) fn fail_if_any(checks: &[(String, bool, String)]) -> anyhow::Result<(
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

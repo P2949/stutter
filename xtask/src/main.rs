@@ -104,6 +104,9 @@ pub enum XtaskCommand {
         /// `LEVEL_MS:RECORDING_DIR`, repeated (e.g. 0:run0 1:run1 ...).
         #[arg(long = "level", value_name = "MS:DIR", required = true)]
         levels: Vec<String>,
+        /// Fail unless every level has a usable frame stream (frame-aware closure).
+        #[arg(long = "require-frames")]
+        require_frames: bool,
     },
     #[command(
         name = "calibrate",
@@ -391,7 +394,10 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
             corpus,
             out,
         } => diagnosis_calibration::run(&root, &corpus, out.as_deref(), &family),
-        XtaskCommand::ScoreEvaluate { levels } => {
+        XtaskCommand::ScoreEvaluate {
+            levels,
+            require_frames,
+        } => {
             let parsed = levels
                 .iter()
                 .map(|l| {
@@ -401,7 +407,10 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
                 .collect::<anyhow::Result<Vec<_>>>()?;
             println!(
                 "{}",
-                serde_json::to_string_pretty(&score_evaluation::run_from_recordings(&parsed)?)?
+                serde_json::to_string_pretty(&score_evaluation::run_from_recordings(
+                    &parsed,
+                    require_frames
+                )?)?
             );
             Ok(())
         }

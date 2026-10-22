@@ -12,6 +12,9 @@ use super::{
 pub struct CalibrationOutcome {
     pub cause: String,
     pub confidence: String,
+    /// Separate from `confidence`: whether the cause is established as the cause of visible
+    /// stutter (`CausalConfidence`).
+    pub causal_confidence: String,
     pub score: Option<f32>,
 }
 
@@ -68,6 +71,7 @@ pub fn family_calibration_outcome(
         .map(|diagnosis| CalibrationOutcome {
             cause: format!("{:?}", diagnosis.cause),
             confidence: format!("{:?}", diagnosis.confidence),
+            causal_confidence: format!("{:?}", diagnosis.causal_confidence),
             score: diagnosis.primary.as_ref().map(|primary| primary.score),
         }))
 }
@@ -96,5 +100,40 @@ mod tests {
             strict.map(|o| o.cause).as_deref(),
             Some("GameThreadSchedulerDelay")
         );
+    }
+
+    #[test]
+    fn default_fixtures_report_causal_confidence_within_observation_confidence() {
+        let rank = |word: &str| {
+            ["NotEstablished", "Low", "Medium", "High"]
+                .iter()
+                .position(|w| *w == word)
+                .unwrap()
+        };
+        for (family, fixture, value) in [
+            (
+                CalibrationFamily::Scheduler,
+                "game_thread_scheduler_delay",
+                2_000_000.0,
+            ),
+            (CalibrationFamily::BlockIo, "block_io_stall", 1_000_000.0),
+            (CalibrationFamily::Irq, "irq_heavy", 250_000.0),
+            (CalibrationFamily::Gpu, "gpu_bound_clean_cpu", 95.0),
+        ] {
+            let run = crate::test_fixture_builder::fixture_path(fixture);
+            let outcome = family_calibration_outcome(&run, family, value)
+                .unwrap()
+                .unwrap();
+            assert!(
+                rank(&outcome.causal_confidence) <= rank(&outcome.confidence),
+                "{fixture}: causal {} exceeds observation {}",
+                outcome.causal_confidence,
+                outcome.confidence
+            );
+            // Scheduler overlap is temporal coincidence: High needs an explicit attribution chain.
+            if fixture == "game_thread_scheduler_delay" {
+                assert_ne!(outcome.causal_confidence, "High", "{fixture}");
+            }
+        }
     }
 }

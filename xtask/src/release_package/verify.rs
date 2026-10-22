@@ -8,7 +8,7 @@ use stutter::api::capabilities::{Capability, CapabilityTier, capability_registry
 
 use super::{
     MANIFEST_NAME, RELEASE_SCHEMA_VERSION, SBOM_NAME, SUMS_NAME, SUPPORT_NAME, VerifyArgs,
-    file_sha256, layout_entries, parse_binary_version, run,
+    acceptance::check_acceptance, file_sha256, layout_entries, parse_binary_version, run,
 };
 use crate::evidence_bundle::{is_hex, sha256::sha256_hex};
 
@@ -210,33 +210,16 @@ pub fn verify_release(args: &VerifyArgs) -> anyhow::Result<()> {
         "SBOM does not cover every Cargo.lock package"
     );
 
-    // 6. Optional: acceptance evidence for exactly this commit.
+    // 6. Optional: external verified acceptance bundles for exactly this commit. The
+    // committed evidence index is historical and is deliberately not consulted.
     if args.require_acceptance {
+        let accepted = check_acceptance(capabilities, commit, &args.acceptance_bundle)?;
+        println!("acceptance_suites={accepted:?}");
+    } else {
         ensure!(
-            !registry.is_empty(),
-            "no Supported capability: nothing may be released as supported"
+            args.acceptance_bundle.is_empty(),
+            "--acceptance-bundle requires --require-acceptance"
         );
-        let index: Value =
-            serde_json::from_slice(&fs::read(source_root.join("docs/evidence/index.json"))?)?;
-        let passing = index["entries"]
-            .as_array()
-            .context("entries")?
-            .iter()
-            .filter(|e| e["status"] == "PASS" && e["source_commit"] == commit)
-            .filter_map(|e| e["suite"].as_str().map(str::to_owned))
-            .collect::<BTreeSet<_>>();
-        for capability in capabilities
-            .iter()
-            .filter(|c| c.tier == CapabilityTier::Supported)
-        {
-            for suite in capability.required_evidence {
-                ensure!(
-                    passing.contains(*suite),
-                    "{} requires {suite} PASS evidence for exactly {commit}",
-                    capability.id
-                );
-            }
-        }
     }
     println!("release_verified={}", dir.display());
     Ok(())

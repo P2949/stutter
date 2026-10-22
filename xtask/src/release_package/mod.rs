@@ -13,8 +13,12 @@ use serde_json::{Value, json};
 
 use crate::evidence_bundle::sha256::sha256_hex;
 
+mod acceptance;
 mod sbom;
 mod verify;
+
+#[cfg(test)]
+mod acceptance_tests;
 
 pub use verify::verify_release;
 
@@ -40,10 +44,15 @@ pub struct PackageArgs {
 #[derive(clap::Args, Clone, Debug, Eq, PartialEq)]
 pub struct VerifyArgs {
     pub dir: PathBuf,
-    /// Also require every live suite needed by Supported capabilities to have a PASS
-    /// entry in docs/evidence/index.json for exactly this release's commit.
+    /// Also require every live suite needed by Supported capabilities to have a verified PASS
+    /// bundle for exactly this release's commit, supplied with `--acceptance-bundle`. The
+    /// committed docs/evidence/index.json is historical and never satisfies this gate.
     #[arg(long)]
     pub require_acceptance: bool,
+    /// Exported evidence bundle (repeatable) verified against the release commit; kept outside
+    /// the release commit.
+    #[arg(long = "acceptance-bundle", value_name = "BUNDLE")]
+    pub acceptance_bundle: Vec<PathBuf>,
 }
 
 pub(crate) fn run(root: &Path, program: &str, args: &[&str]) -> anyhow::Result<String> {

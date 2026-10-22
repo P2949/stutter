@@ -88,6 +88,7 @@ fn verify(dir: &Path, require_acceptance: bool) -> anyhow::Result<()> {
     verify_release(&VerifyArgs {
         dir: dir.to_owned(),
         require_acceptance,
+        acceptance_bundle: Vec::new(),
     })
 }
 
