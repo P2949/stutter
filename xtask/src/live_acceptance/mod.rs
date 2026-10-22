@@ -13,10 +13,17 @@ use serde_json::{Value, json};
 mod affinity;
 mod evidence;
 mod game_runnable;
+mod kernel_compat;
 pub(crate) mod recovery;
 
 #[derive(Clone, Debug, Eq, PartialEq, Subcommand)]
 pub enum Suite {
+    KernelCompat {
+        #[arg(long)]
+        out: PathBuf,
+        #[arg(long)]
+        stutter_bin: PathBuf,
+    },
     GameRunnable {
         #[arg(long)]
         out: PathBuf,
@@ -206,6 +213,9 @@ pub fn run(root: &Path, suite: Suite) -> anyhow::Result<()> {
             seconds,
         } => (out, stutter_bin, seconds),
         Suite::Affinity { out, stutter_bin } => return affinity::run(root, &out, &stutter_bin),
+        Suite::KernelCompat { out, stutter_bin } => {
+            return kernel_compat::run(root, &out, &stutter_bin);
+        }
         Suite::GameRunnable {
             out,
             stutter_bin,

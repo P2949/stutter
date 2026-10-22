@@ -15,6 +15,7 @@ use anyhow::{Context, bail, ensure};
 use serde_json::{Value, json};
 
 mod export;
+mod index_entry;
 pub(crate) mod privacy;
 pub(crate) mod sha256;
 mod verify;
@@ -35,6 +36,7 @@ pub struct VerifyArgs {
 }
 
 pub use export::export_bundle;
+pub use index_entry::index_entry;
 pub use verify::verify_bundle;
 
 pub(crate) const BUNDLE_SCHEMA_VERSION: u64 = 1;
@@ -80,12 +82,13 @@ impl EvidenceKind {
 }
 
 pub(crate) const STATUSES: [&str; 4] = ["PASS", "FAIL", "BLOCKED", "INCONCLUSIVE"];
-pub(crate) const KNOWN_SUITES: [&str; 5] = [
+pub(crate) const KNOWN_SUITES: [&str; 6] = [
     "live_observation",
     "live_affinity",
     "live_recovery",
     "live_suspend_resume",
     "live_game_runnable",
+    "live_kernel_compat",
 ];
 
 /// Environment fields copied to the portable bundle. `proc_version` is excluded on

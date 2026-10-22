@@ -8,15 +8,17 @@ pub(super) enum LiveAcceptanceSuite {
     Recovery,
     SuspendResume,
     GameRunnable,
+    KernelCompat,
 }
 impl LiveAcceptanceSuite {
     #[cfg(test)]
-    pub(super) const ALL: [Self; 5] = [
+    pub(super) const ALL: [Self; 6] = [
         Self::Observation,
         Self::Affinity,
         Self::Recovery,
         Self::SuspendResume,
         Self::GameRunnable,
+        Self::KernelCompat,
     ];
     pub(super) fn as_str(self) -> &'static str {
         match self {
@@ -25,6 +27,7 @@ impl LiveAcceptanceSuite {
             Self::Recovery => "live_recovery",
             Self::SuspendResume => "live_suspend_resume",
             Self::GameRunnable => "live_game_runnable",
+            Self::KernelCompat => "live_kernel_compat",
         }
     }
 }
@@ -327,7 +330,8 @@ mod suite_tests {
                 "live_affinity",
                 "live_recovery",
                 "live_suspend_resume",
-                "live_game_runnable"
+                "live_game_runnable",
+                "live_kernel_compat"
             ]
         );
         assert_eq!(
