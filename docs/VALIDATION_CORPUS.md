@@ -709,3 +709,13 @@ Rules:
 The report's `sufficiency` block shows the counted captures, `ineligible_real_captures` and
 `duplicate_capture_ids`; `decision` stays `retain_current_threshold_evidence_insufficient`
 until every floor is met for that family.
+
+### Calibration report datasets
+
+`xtask calibrate` builds three separate datasets per family. The **decision sweep** (`sweep`)
+contains only explicit `positive` captures whose expected cause belongs to the family and
+`negative_control` captures that name the family; TP/FP/FN/TN, precision and recall come from it
+alone. **Mixed/confounded** captures that name the family are evaluated in `mixed_sweep`
+(case count, primary causes, observation/causal confidence distributions and false-High causal
+claims) and are never scored as ordinary negatives or positives. Legacy inferred-real fixtures
+appear only in `regression_sweep` and never feed a decision or an evidence floor.

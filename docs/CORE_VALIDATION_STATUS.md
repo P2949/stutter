@@ -718,3 +718,13 @@ profiling window, fails on a missing A/B baseline round, and discards workload s
 (4) calibration sufficiency counts only explicit non-synthetic captures with complete
 provenance, an explicit `control_type` and `[coverage].diagnoses`, per family. No evidence was
 produced here.
+
+## 2026-10-22: calibration decision data uses explicit roles (campaign phase A)
+
+The threshold sweep no longer derives a binary label from `expected_cause` for every labeled
+fixture. Each capture gets a `CalibrationRole` per family from `control_type`,
+`[coverage].diagnoses` and the family: only `Positive` and `NegativeControl` feed TP/FP/FN/TN,
+mixed/confounded captures get a separate `mixed_sweep`, and legacy inferred fixtures are a
+regression-only view. Capability checking now counts only `controlled_real` and
+`real_workload` PASS entries toward a live-suite requirement, so a synthetic or fixture-real
+entry carrying a suite name no longer satisfies it.
