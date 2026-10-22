@@ -4,6 +4,7 @@ use stutter::api::autotune::RecoveryCheckpoint;
 use super::*;
 mod actor;
 mod case;
+mod failure;
 mod procfs;
 pub(crate) use actor::{ControllerCommand, controller};
 
@@ -75,7 +76,11 @@ pub(super) fn run(root: &Path, out: &Path, binary: &Path) -> anyhow::Result<()> 
         let executable = std::env::current_exe()?;
         for checkpoint in RecoveryCheckpoint::ALL {
             stage = checkpoint.as_str().to_owned();
-            cases.push(case::run(&executable, &out, cpu, checkpoint)?);
+            cases.push(if checkpoint.kills_controller() {
+                case::run(&executable, &out, cpu, checkpoint)?
+            } else {
+                failure::run(&executable, &out, cpu, checkpoint)?
+            });
         }
         ensure!(
             cases.len() == RecoveryCheckpoint::ALL.len(),
@@ -96,7 +101,7 @@ pub(super) fn run(root: &Path, out: &Path, binary: &Path) -> anyhow::Result<()> 
         json!({"schema_version":1,"evidence_kind":"controlled_real","status":status,"stage":stage,"cases":cases,
         "error":result.as_ref().err().map(|error|format!("{error:#}")),
         "scope":"production low-risk action transaction (six checkpoints) and one LiveExperimentManager Measuring checkpoint; startup recovery; separate real controller processes; fixed owned tree",
-        "not_claimed":["full daemon planner/measurement acceptance (manager case uses a minimal baseline observation)","interrupted rollback","forced verification/rollback failure physical matrix","PID reuse physical matrix","suspend/resume","provider graduation","portable verified bundle"],
+        "not_claimed":["full daemon planner/measurement acceptance (manager and runtime cases use a minimal baseline observation)","replacement-identity physical matrix (covered by startup_recovery real_affinity test)","suspend/resume","provider graduation","portable verified bundle"],
         "observation_suite":"not_run","privacy":"local raw evidence; canonical sanitization/export remains separate"}),
     )?;
     println!("{status}: recovery evidence {}", out.display());

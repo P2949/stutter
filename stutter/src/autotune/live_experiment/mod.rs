@@ -1,3 +1,4 @@
+mod acceptance;
 mod executor;
 mod journal;
 mod lifecycle;
@@ -8,6 +9,7 @@ mod scoring;
 #[cfg(test)]
 mod tests;
 
+pub(crate) use acceptance::FaultInjectingExecutor;
 pub(crate) use executor::{LiveExperimentActionExecutor, RuntimeLiveExperimentActionExecutor};
 pub use manager::LiveExperimentManager;
 pub(crate) use manager::LiveExperimentRuntimeState;

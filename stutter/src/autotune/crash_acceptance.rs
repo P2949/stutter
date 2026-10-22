@@ -34,9 +34,17 @@ pub enum RecoveryCheckpoint {
     AfterVerify,
     /// One full `LiveExperimentManager` start, killed in `Measuring`.
     ManagerMeasuring,
+    /// Production `Reverting(token)` killed after exactly one task was restored.
+    InterruptedRollback,
+    /// Second `sched_setaffinity` of the apply fails for real; runner rolls back.
+    PartialApplyFailure,
+    /// Real apply succeeds, verification fails; runner rolls back for real.
+    VerifyFailure,
+    /// Real apply succeeds, verification and rollback fail; token must be retained.
+    RollbackFailure,
 }
 impl RecoveryCheckpoint {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 11] = [
         Self::BeforeApply,
         Self::AfterPreparation,
         Self::MidApply,
@@ -44,7 +52,28 @@ impl RecoveryCheckpoint {
         Self::DuringVerify,
         Self::AfterVerify,
         Self::ManagerMeasuring,
+        Self::InterruptedRollback,
+        Self::PartialApplyFailure,
+        Self::VerifyFailure,
+        Self::RollbackFailure,
     ];
+    /// `sched_setaffinity` fault/delay injected by the harness tracer, if any.
+    pub fn strace_injection(self) -> Option<&'static str> {
+        match self {
+            Self::MidApply => Some("inject=sched_setaffinity:delay_exit=10s:when=1"),
+            // Calls 1-5 apply; call 6 restores the first task, then stalls.
+            Self::InterruptedRollback => Some("inject=sched_setaffinity:delay_exit=10s:when=6"),
+            Self::PartialApplyFailure => Some("inject=sched_setaffinity:error=EPERM:when=3"),
+            _ => None,
+        }
+    }
+    /// Cases whose controller is SIGKILLed rather than allowed to fail and exit.
+    pub fn kills_controller(self) -> bool {
+        !matches!(
+            self,
+            Self::PartialApplyFailure | Self::VerifyFailure | Self::RollbackFailure
+        )
+    }
     pub fn as_str(self) -> &'static str {
         match self {
             Self::BeforeApply => "before_apply",
@@ -54,6 +83,10 @@ impl RecoveryCheckpoint {
             Self::DuringVerify => "during_verify",
             Self::AfterVerify => "after_verify",
             Self::ManagerMeasuring => "manager_measuring",
+            Self::InterruptedRollback => "interrupted_rollback",
+            Self::PartialApplyFailure => "partial_apply_failure",
+            Self::VerifyFailure => "verify_failure",
+            Self::RollbackFailure => "rollback_failure",
         }
     }
 }
@@ -78,7 +111,11 @@ fn ticks(pid: u32) -> anyhow::Result<u64> {
     crate::process_tree::process_starttime_at(Path::new("/proc"), pid)
         .context("process identity unavailable")
 }
-fn publish(out: &Path, name: &str, value: Value) -> anyhow::Result<()> {
+pub(crate) fn publish_acceptance_handshake(
+    out: &Path,
+    name: &str,
+    value: Value,
+) -> anyhow::Result<()> {
     let temporary = out.join(format!("{name}.tmp"));
     let mut file = fs::OpenOptions::new()
         .write(true)
@@ -121,7 +158,7 @@ fn pause(
             "measuring journal lacks experiment/candidate metadata"
         );
     }
-    publish(
+    publish_acceptance_handshake(
         out,
         "pause-ready.json",
         json!({"controller_pid":std::process::id(),"controller_starttime_ticks":ticks(std::process::id())?,"checkpoint":checkpoint.as_str(),"journal_state":record.state().as_str(),"real_verification_read_completed":verification_read,"verification_returned_to_runner":checkpoint == RecoveryCheckpoint::AfterVerify}),
@@ -224,7 +261,7 @@ pub fn hold_affinity_recovery_controller(input: RecoveryControllerInput<'_>) -> 
         "target must be the harness's direct child"
     );
     let controller_parent = parent(std::process::id())?;
-    let traced = checkpoint == RecoveryCheckpoint::MidApply
+    let traced = checkpoint.strace_injection().is_some()
         && parent(controller_parent)? == owner_pid
         && fs::read_to_string(format!("/proc/{controller_parent}/comm"))?.trim() == "strace";
     ensure!(
@@ -269,7 +306,7 @@ pub fn hold_affinity_recovery_controller(input: RecoveryControllerInput<'_>) -> 
             "no observable permitted mask change"
         );
     }
-    publish(
+    publish_acceptance_handshake(
         out,
         "controller-started.json",
         json!({"controller_pid":std::process::id(),"controller_starttime_ticks":ticks(std::process::id())?}),
@@ -277,8 +314,21 @@ pub fn hold_affinity_recovery_controller(input: RecoveryControllerInput<'_>) -> 
     if checkpoint == RecoveryCheckpoint::BeforeApply {
         pause(out, checkpoint, false)?;
     }
-    if checkpoint == RecoveryCheckpoint::ManagerMeasuring {
-        return hold_manager_measuring(out, tree_pid, tree_ticks, desired);
+    match checkpoint {
+        RecoveryCheckpoint::ManagerMeasuring => {
+            return hold_manager(out, tree_pid, tree_ticks, desired, false);
+        }
+        RecoveryCheckpoint::InterruptedRollback => {
+            return hold_manager(out, tree_pid, tree_ticks, desired, true);
+        }
+        RecoveryCheckpoint::PartialApplyFailure
+        | RecoveryCheckpoint::VerifyFailure
+        | RecoveryCheckpoint::RollbackFailure => {
+            return super::runtime::acceptance::run_failure_scenario(
+                out, tree_pid, desired, checkpoint,
+            );
+        }
+        _ => {}
     }
     let action = CheckpointAction {
         inner: CpuAffinityProfileAction {
@@ -328,43 +378,31 @@ pub fn hold_affinity_recovery_controller(input: RecoveryControllerInput<'_>) -> 
     pause(out, checkpoint, true)
 }
 
-/// Drives the production `LiveExperimentManager` start path (candidate → journaled
-/// apply → verify → `Measuring`) and holds there for SIGKILL. The observation is a
-/// minimal valid baseline: planner/measurement behavior is not under test here.
-fn hold_manager_measuring(
-    out: &Path,
+/// The one disposable CPU-affinity candidate every acceptance case applies.
+pub(crate) fn acceptance_candidate(
     tree_pid: u32,
-    tree_ticks: u64,
     desired: crate::affinity::CpuMask,
-) -> anyhow::Result<()> {
-    use super::{
-        controller::{ControllerPolicy, ControllerRuntimeState},
-        decision::AutotuneDecision,
-        kept::ActiveProfileState,
-        live_experiment::{
-            LiveExperimentEvent, LiveExperimentManager, LiveExperimentManagerInput,
-            LiveExperimentRuntimeState, RuntimeLiveExperimentActionExecutor,
-        },
-        objective::ObjectiveSignals,
-        observation::AutotuneObservation,
-        planning::candidate::CandidateAction,
-        quality::OnlineDataQuality,
-        washout::WashoutWindowConfig,
-    };
-    let candidate = CandidateAction::cpu_affinity_profile(
-        crate::profiles::Profile {
-            name: "crash-acceptance-affinity".into(),
-            rules: vec![crate::profiles::ProfileRule {
-                affinity: Some(desired),
-                nice: None,
-                ionice: None,
-                match_class: vec![],
-                match_comm: vec![crate::process_tree::CompiledPattern::new("/.*/".into())?],
-            }],
-        },
-        tree_pid,
-    );
-    let mut observation = AutotuneObservation {
+) -> anyhow::Result<super::planning::candidate::CandidateAction> {
+    Ok(
+        super::planning::candidate::CandidateAction::cpu_affinity_profile(
+            crate::profiles::Profile {
+                name: "crash-acceptance-affinity".into(),
+                rules: vec![crate::profiles::ProfileRule {
+                    affinity: Some(desired),
+                    nice: None,
+                    ionice: None,
+                    match_class: vec![],
+                    match_comm: vec![crate::process_tree::CompiledPattern::new("/.*/".into())?],
+                }],
+            },
+            tree_pid,
+        ),
+    )
+}
+
+/// Minimal valid baseline: planner/measurement behavior is not under test here.
+pub(crate) fn acceptance_observation(tree_pid: u32) -> super::observation::AutotuneObservation {
+    let mut observation = super::observation::AutotuneObservation {
         now_unix_nanos: crate::audit::unix_nanos_now(),
         target_present: true,
         target_root_pid: Some(tree_pid),
@@ -379,11 +417,36 @@ fn hold_manager_measuring(
             over_5ms: 1,
             ..Default::default()
         },
-        data_quality: OnlineDataQuality::High,
-        ..AutotuneObservation::default()
+        data_quality: super::quality::OnlineDataQuality::High,
+        ..Default::default()
     };
     observation.objective_signals =
-        ObjectiveSignals::from_window_score(&observation.to_window_score());
+        super::objective::ObjectiveSignals::from_window_score(&observation.to_window_score());
+    observation
+}
+
+/// Drives the production `LiveExperimentManager` start path (candidate → journaled
+/// apply → verify → `Measuring`). Without `revert` it holds there for SIGKILL; with
+/// `revert` it then triggers the production rollback (`Reverting(token)`), which the
+/// harness tracer stalls after the first restored task.
+fn hold_manager(
+    out: &Path,
+    tree_pid: u32,
+    tree_ticks: u64,
+    desired: crate::affinity::CpuMask,
+    revert: bool,
+) -> anyhow::Result<()> {
+    use super::{
+        controller::{ControllerPolicy, ControllerRuntimeState},
+        decision::AutotuneDecision,
+        kept::ActiveProfileState,
+        live_experiment::{
+            LiveExperimentEvent, LiveExperimentManager, LiveExperimentManagerInput,
+            LiveExperimentRuntimeState, RuntimeLiveExperimentActionExecutor,
+        },
+        washout::WashoutWindowConfig,
+    };
+    let observation = acceptance_observation(tree_pid);
     let daemon_policy = crate::daemon::DaemonPolicy::apply_low_risk(
         crate::daemon_policy::ActionSource::AutotuneRuntime,
     );
@@ -404,19 +467,20 @@ fn hold_manager_measuring(
     let mut manager = LiveExperimentManager::new();
     let mut controller = ControllerRuntimeState::default();
     let mut profile = ActiveProfileState::default();
+    let mut executor = RuntimeLiveExperimentActionExecutor;
     let outcome = manager.apply_decision_side_effects_with_executor(
-        input,
+        input.clone(),
         LiveExperimentRuntimeState {
             controller_state: &mut controller,
             active_profile_state: &mut profile,
         },
         &observation,
         &AutotuneDecision::StartExperiment {
-            candidate,
+            candidate: acceptance_candidate(tree_pid, desired)?,
             reason: "crash acceptance".into(),
         },
         "crash acceptance",
-        &mut RuntimeLiveExperimentActionExecutor,
+        &mut executor,
     )?;
     ensure!(
         outcome.event == LiveExperimentEvent::Started && manager.has_active_experiment(),
@@ -426,7 +490,18 @@ fn hold_manager_measuring(
         ticks(tree_pid)? == tree_ticks,
         "disposable target identity changed during manager apply"
     );
-    pause(out, RecoveryCheckpoint::ManagerMeasuring, true)
+    if !revert {
+        return pause(out, RecoveryCheckpoint::ManagerMeasuring, true);
+    }
+    let reverted = manager.rollback_active_experiment_with_executor(
+        &input,
+        &mut controller,
+        &observation,
+        crate::audit::unix_nanos_now(),
+        "crash acceptance revert",
+        &mut executor,
+    );
+    anyhow::bail!("interrupted rollback returned without SIGKILL: {reverted:?}")
 }
 
 pub fn recover_affinity_acceptance_controller(
