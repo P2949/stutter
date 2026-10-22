@@ -8,14 +8,12 @@ use super::{evidence::LiveAcceptanceSuite, *};
 /// Scheduler core: without these the profiler cannot observe runnable latency.
 pub(super) const REQUIRED: [&str; 2] = ["sched/sched_wakeup", "sched/sched_switch"];
 /// Optional evidence and the capability it feeds; absence degrades, never invalidates.
-pub(super) const OPTIONAL: [(&str, &str); 8] = [
+pub(super) const OPTIONAL: [(&str, &str); 6] = [
     ("sched/sched_wakeup_new", "process_lifecycle"),
     ("sched/sched_migrate_task", "migration"),
     ("sched/sched_stat_wait", "sched_stat_wait"),
     ("irq/irq_handler_entry", "irq"),
     ("irq/irq_handler_exit", "irq"),
-    ("block/block_rq_issue", "block_io"),
-    ("block/block_rq_complete", "block_io"),
     ("power/cpu_frequency", "cpu_freq"),
 ];
 
@@ -70,15 +68,30 @@ pub(super) enum DrmKms {
     Unavailable(String),
 }
 
-/// Reads the `kms_timing` check out of `stutter doctor --kms-timing --json`.
+/// Block-I/O capability from the production preflight (`tracepoint_formats.details.block_rq`).
+/// The raw `block/*` formats in the tracepoint dump are `not_checked` (their variable layout
+/// is validated by that preflight), so the dump never decides this capability.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) enum BlockIo {
+    /// Usable; `correlation_basis` is `request-pointer` or the weaker `dev+sector`.
+    Usable {
+        correlation_basis: String,
+    },
+    Unavailable(String),
+}
+
+fn doctor_check<'a>(report: &'a Value, name: &str) -> Option<&'a Value> {
+    report["checks"]
+        .as_array()
+        .and_then(|checks| checks.iter().find(|check| check["name"] == name))
+}
+
+/// Reads the `kms_timing` check out of `stutter doctor --block-io --kms-timing --json`.
 pub(super) fn parse_drm_kms(doctor_json: &str) -> DrmKms {
     let Ok(report) = serde_json::from_str::<Value>(doctor_json) else {
         return DrmKms::Unavailable("doctor output is not valid JSON".into());
     };
-    let Some(check) = report["checks"]
-        .as_array()
-        .and_then(|checks| checks.iter().find(|check| check["name"] == "kms_timing"))
-    else {
+    let Some(check) = doctor_check(&report, "kms_timing") else {
         return DrmKms::Unavailable("doctor reported no kms_timing check".into());
     };
     if check["status"] == "Pass" {
@@ -98,9 +111,33 @@ pub(super) fn parse_drm_kms(doctor_json: &str) -> DrmKms {
     }
 }
 
+/// Reads block-I/O usability from the production tracepoint preflight in the same output.
+pub(super) fn parse_block_io(doctor_json: &str) -> BlockIo {
+    let Ok(report) = serde_json::from_str::<Value>(doctor_json) else {
+        return BlockIo::Unavailable("doctor output is not valid JSON".into());
+    };
+    let Some(check) = doctor_check(&report, "tracepoint_formats") else {
+        return BlockIo::Unavailable("doctor reported no tracepoint_formats check".into());
+    };
+    let details = &check["details"];
+    match details["block_rq"].as_str() {
+        Some("ok") => BlockIo::Usable {
+            correlation_basis: details["block_io_correlation_basis"]
+                .as_str()
+                .unwrap_or("unknown")
+                .to_owned(),
+        },
+        other => BlockIo::Unavailable(format!(
+            "production block-I/O preflight reports block_rq={}",
+            other.unwrap_or("absent")
+        )),
+    }
+}
+
 pub(super) struct Observed {
     pub sections: Vec<Section>,
     pub drm_kms: DrmKms,
+    pub block_io: BlockIo,
     /// `Ok` when a real loader run (record + validation) succeeded with zero drops.
     pub loader: Result<(), String>,
 }
@@ -111,11 +148,8 @@ pub(super) fn classify(observed: &Observed) -> (Compatibility, Value) {
             .sections
             .iter()
             .find(|section| section.tracepoint == name)
-            .is_some_and(|section| {
-                // `not_checked`: the format file was read but the registry has no field
-                // layout to validate (block I/O); unreadable is `unavailable`.
-                matches!(section.validation.as_str(), "compatible" | "not_checked")
-            })
+            // `not_checked` is never treated as validated.
+            .is_some_and(|section| section.validation == "compatible")
     };
     let status = |name: &str| -> Value {
         json!({"tracepoint": name, "compatible": ok(name), "validation": observed.sections.iter()
@@ -136,6 +170,9 @@ pub(super) fn classify(observed: &Observed) -> (Compatibility, Value) {
     }
     if matches!(observed.drm_kms, DrmKms::Unavailable(_)) {
         degraded.insert("drm_kms");
+    }
+    if matches!(observed.block_io, BlockIo::Unavailable(_)) {
+        degraded.insert("block_io");
     }
     let mut reasons = Vec::new();
     let state = if observed.sections.is_empty() {
@@ -163,6 +200,10 @@ pub(super) fn classify(observed: &Observed) -> (Compatibility, Value) {
             "drm_kms":match &observed.drm_kms {
                 DrmKms::Usable { provider } => json!({"observed":true,"provider":provider}),
                 DrmKms::Unavailable(reason) => json!({"observed":false,"reason":reason}),
+            },
+            "block_io":match &observed.block_io {
+                BlockIo::Usable { correlation_basis } => json!({"observed":true,"correlation_basis":correlation_basis}),
+                BlockIo::Unavailable(reason) => json!({"observed":false,"reason":reason}),
             },
             "not_covered":["GPU/platform telemetry"]}),
     )
@@ -197,12 +238,13 @@ pub(super) fn run(root: &Path, out: &Path, binary: &Path) -> anyhow::Result<()> 
             sections.iter().any(|s| s.validation != "unavailable"),
             "tracepoint formats are unreadable (permissions?): rerun privileged"
         );
-        let drm_kms = drm_kms_run(&binary, &out);
+        let (drm_kms, block_io) = optional_run(&binary, &out);
         stage = "loader";
         let loader = loader_run(&binary, &out);
         let (state, report) = classify(&Observed {
             sections,
             drm_kms,
+            block_io,
             loader,
         });
         compatibility = state;
@@ -229,20 +271,28 @@ pub(super) fn run(root: &Path, out: &Path, binary: &Path) -> anyhow::Result<()> 
     result.map(|_| ())
 }
 
-/// Optional DRM/KMS observation: a failed or unusable doctor check is `Unavailable`, never fatal.
-fn drm_kms_run(binary: &Path, out: &Path) -> DrmKms {
+/// Optional capabilities from one doctor run (`--block-io --kms-timing`): DRM/KMS from the
+/// `kms_timing` check and block I/O from the production tracepoint preflight. A failed or
+/// unusable result is `Unavailable` (degraded), never fatal.
+fn optional_run(binary: &Path, out: &Path) -> (DrmKms, BlockIo) {
+    let unavailable = |reason: String| {
+        (
+            DrmKms::Unavailable(reason.clone()),
+            BlockIo::Unavailable(reason),
+        )
+    };
     match command(
         binary,
-        &args(&["doctor", "--kms-timing", "--json"]),
+        &args(&["doctor", "--block-io", "--kms-timing", "--json"]),
         out,
-        "drm-kms",
+        "optional-capabilities",
         Duration::from_secs(15),
     ) {
-        Ok(()) => match fs::read_to_string(out.join("drm-kms.stdout")) {
-            Ok(json) => parse_drm_kms(&json),
-            Err(error) => DrmKms::Unavailable(format!("{error}")),
+        Ok(()) => match fs::read_to_string(out.join("optional-capabilities.stdout")) {
+            Ok(json) => (parse_drm_kms(&json), parse_block_io(&json)),
+            Err(error) => unavailable(format!("{error}")),
         },
-        Err(error) => DrmKms::Unavailable(format!("{error:#}")),
+        Err(error) => unavailable(format!("{error:#}")),
     }
 }
 
@@ -321,13 +371,51 @@ mod tests {
     fn drm_absent() -> DrmKms {
         DrmKms::Unavailable("no supported pageflip/vblank tracepoints found".into())
     }
-    fn state(entries: &[(&str, &str)], loader: Result<(), String>) -> Compatibility {
+    fn block_present(basis: &str) -> BlockIo {
+        BlockIo::Usable {
+            correlation_basis: basis.into(),
+        }
+    }
+    fn block_absent() -> BlockIo {
+        BlockIo::Unavailable("production block-I/O preflight reports block_rq=missing".into())
+    }
+    fn classified(
+        entries: &[(&str, &str)],
+        drm_kms: DrmKms,
+        block_io: BlockIo,
+        loader: Result<(), String>,
+    ) -> (Compatibility, Value) {
         classify(&Observed {
             sections: parse_dump(&dump(entries)),
-            drm_kms: drm_present(),
+            drm_kms,
+            block_io,
             loader,
         })
+    }
+    fn state(entries: &[(&str, &str)], loader: Result<(), String>) -> Compatibility {
+        classified(
+            entries,
+            drm_present(),
+            block_present("request-pointer"),
+            loader,
+        )
         .0
+    }
+    /// Complete dump including the raw block formats exactly as `doctor tracepoints --dump`
+    /// reports them: read, but `not_checked`.
+    fn dump_with_unchecked_block() -> Vec<(&'static str, &'static str)> {
+        let mut entries = all("compatible");
+        entries.push(("block/block_rq_issue", "not_checked"));
+        entries.push(("block/block_rq_complete", "not_checked"));
+        entries
+    }
+    fn doctor_json(kms: &str, block_rq: &str, basis: &str) -> String {
+        json!({"checks":[
+            {"name":"tracepoint_formats","status":"Pass","message":"",
+             "details":{"block_rq":block_rq,"block_io_correlation_basis":basis}},
+            {"name":"kms_timing","status":kms,"message":"KMS timing unavailable: none",
+             "details":{"selected_provider":"generic_drm"}}]})
+        .to_string()
     }
 
     #[test]
@@ -374,84 +462,115 @@ mod tests {
     #[test]
     fn degraded_capabilities_are_named() {
         let mut entries = all("compatible");
-        entries.retain(|(n, _)| !n.starts_with("irq/") && !n.starts_with("block/"));
-        let (state, report) = classify(&Observed {
-            sections: parse_dump(&dump(&entries)),
-            drm_kms: drm_present(),
-            loader: Ok(()),
-        });
+        entries.retain(|(n, _)| !n.starts_with("irq/"));
+        let (state, report) = classified(&entries, drm_present(), block_absent(), Ok(()));
         assert_eq!(state, Compatibility::ObservedDegraded);
         assert_eq!(report["degraded_capabilities"], json!(["block_io", "irq"]));
     }
 
-    fn doctor_json(status: &str) -> String {
-        json!({"checks":[{"name":"tracepoint_formats","status":"Pass","message":"","details":{}},
-            {"name":"kms_timing","status":status,"message":"KMS timing unavailable: none",
-             "details":{"selected_provider":"generic_drm"}}]})
-        .to_string()
+    #[test]
+    fn readable_but_unchecked_block_formats_do_not_prove_block_io() {
+        // The raw block formats are read (`not_checked`) yet the production preflight rejects
+        // them: the kernel is degraded for block_io, never compatible.
+        let (state, report) = classified(
+            &dump_with_unchecked_block(),
+            drm_present(),
+            block_absent(),
+            Ok(()),
+        );
+        assert_eq!(state, Compatibility::ObservedDegraded);
+        assert_eq!(report["degraded_capabilities"], json!(["block_io"]));
+        assert_eq!(report["block_io"]["observed"], json!(false));
     }
-    fn classified(drm_kms: DrmKms, entries: &[(&str, &str)]) -> (Compatibility, Value) {
-        classify(&Observed {
-            sections: parse_dump(&dump(entries)),
-            drm_kms,
-            loader: Ok(()),
-        })
+
+    #[test]
+    fn a_usable_production_block_preflight_makes_block_io_usable() {
+        let (state, report) = classified(
+            &dump_with_unchecked_block(),
+            drm_present(),
+            block_present("request-pointer"),
+            Ok(()),
+        );
+        assert_eq!(state, Compatibility::ObservedCompatible);
+        assert_eq!(report["degraded_capabilities"], json!([]));
+        assert_eq!(report["block_io"]["correlation_basis"], "request-pointer");
+    }
+
+    #[test]
+    fn the_weaker_dev_sector_fallback_is_usable_and_keeps_its_basis() {
+        let (state, report) = classified(
+            &all("compatible"),
+            drm_present(),
+            block_present("dev+sector"),
+            Ok(()),
+        );
+        assert_eq!(state, Compatibility::ObservedCompatible);
+        assert_eq!(report["block_io"]["observed"], json!(true));
+        assert_eq!(report["block_io"]["correlation_basis"], "dev+sector");
+    }
+
+    #[test]
+    fn scheduler_core_failure_is_incompatible_regardless_of_optional_state() {
+        let mut broken = all("compatible");
+        broken.retain(|(n, _)| *n != "sched/sched_wakeup");
+        broken.push(("sched/sched_wakeup", "mismatch"));
+        for (drm, block) in [
+            (drm_present(), block_present("request-pointer")),
+            (drm_absent(), block_absent()),
+            (drm_present(), block_absent()),
+        ] {
+            let (state, _) = classified(&broken, drm, block, Ok(()));
+            assert_eq!(state, Compatibility::ObservedIncompatible);
+        }
     }
 
     #[test]
     fn drm_present_keeps_a_complete_kernel_compatible() {
-        let (state, report) = classified(drm_present(), &all("compatible"));
+        let (state, report) = classified(
+            &all("compatible"),
+            drm_present(),
+            block_present("request-pointer"),
+            Ok(()),
+        );
         assert_eq!(state, Compatibility::ObservedCompatible);
         assert_eq!(report["drm_kms"]["observed"], json!(true));
         assert_eq!(report["degraded_capabilities"], json!([]));
     }
 
     #[test]
-    fn drm_absence_degrades_and_names_drm_kms() {
-        let (state, report) = classified(drm_absent(), &all("compatible"));
+    fn drm_absence_degrades_and_never_makes_the_kernel_incompatible() {
+        let (state, report) = classified(
+            &all("compatible"),
+            drm_absent(),
+            block_present("request-pointer"),
+            Ok(()),
+        );
         assert_eq!(state, Compatibility::ObservedDegraded);
         assert_eq!(report["degraded_capabilities"], json!(["drm_kms"]));
         assert_eq!(report["drm_kms"]["observed"], json!(false));
     }
 
     #[test]
-    fn drm_absence_never_makes_the_kernel_incompatible() {
-        let (state, _) = classified(drm_absent(), &all("compatible"));
-        assert_ne!(state, Compatibility::ObservedIncompatible);
-    }
-
-    #[test]
-    fn scheduler_core_failure_stays_incompatible_with_drm_present() {
-        let mut broken = all("compatible");
-        broken.retain(|(n, _)| *n != "sched/sched_wakeup");
-        broken.push(("sched/sched_wakeup", "mismatch"));
-        let (state, _) = classified(drm_present(), &broken);
-        assert_eq!(state, Compatibility::ObservedIncompatible);
-    }
-
-    #[test]
-    fn doctor_kms_check_maps_to_drm_observation() {
+    fn doctor_output_maps_to_drm_and_block_observations() {
+        let usable = doctor_json("Pass", "ok", "dev+sector");
         assert_eq!(
-            parse_drm_kms(&doctor_json("Pass")),
+            parse_drm_kms(&usable),
             DrmKms::Usable {
                 provider: "generic_drm".into()
             }
         );
+        assert_eq!(parse_block_io(&usable), block_present("dev+sector"));
+        let degraded = doctor_json("Warn", "missing", "unavailable");
+        assert!(matches!(parse_drm_kms(&degraded), DrmKms::Unavailable(_)));
+        assert!(matches!(parse_block_io(&degraded), BlockIo::Unavailable(_)));
+        // `not_requested` (probe not asked for) is never usable.
         assert!(matches!(
-            parse_drm_kms(&doctor_json("Warn")),
-            DrmKms::Unavailable(_)
+            parse_block_io(&doctor_json("Pass", "not_requested", "not_requested")),
+            BlockIo::Unavailable(_)
         ));
-        assert!(matches!(parse_drm_kms("not json"), DrmKms::Unavailable(_)));
-        assert!(matches!(parse_drm_kms("{}"), DrmKms::Unavailable(_)));
-    }
-
-    #[test]
-    fn unchecked_block_formats_count_as_observed() {
-        let mut entries = all("compatible");
-        entries.retain(|(n, _)| !n.starts_with("block/"));
-        entries.push(("block/block_rq_issue", "not_checked"));
-        entries.push(("block/block_rq_complete", "not_checked"));
-        let (state, _) = classified(drm_present(), &entries);
-        assert_eq!(state, Compatibility::ObservedCompatible);
+        for garbage in ["not json", "{}"] {
+            assert!(matches!(parse_drm_kms(garbage), DrmKms::Unavailable(_)));
+            assert!(matches!(parse_block_io(garbage), BlockIo::Unavailable(_)));
+        }
     }
 }

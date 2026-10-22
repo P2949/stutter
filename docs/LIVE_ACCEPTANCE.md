@@ -285,10 +285,16 @@ loader/record run. State is observed, never inferred from distribution or versio
 `ObservedIncompatible` if `sched_wakeup`/`sched_switch` are not compatible or the loader
 fails; `ObservedDegraded` if only optional evidence (`sched_stat_wait`, IRQ, block I/O,
 cpu_frequency, migration, process lifecycle, or DRM/KMS) is missing, naming the degraded
-capabilities; `ObservedCompatible` otherwise; `Untested` with no evidence. DRM/KMS is the
-optional `drm_kms` capability, read from the doctor `kms_timing` check (`stutter doctor
---kms-timing --json`, retained as `drm-kms.stdout`); its absence degrades and never makes a
-kernel incompatible. GPU/platform telemetry stays outside this tracepoint contract. Export and verify the bundle, then
+capabilities; `ObservedCompatible` otherwise; `Untested` with no evidence. The tracepoint dump
+reports the `block/block_rq_*` formats as `not_checked` (their variable layout is validated by
+the production block-I/O preflight), and `not_checked` is never treated as validated: the
+`block_io` capability comes from that preflight (`tracepoint_formats.details.block_rq` and
+`block_io_correlation_basis` in `stutter doctor --block-io --json`). A usable `dev+sector`
+fallback is usable and its weaker correlation basis is retained in the receipt. DRM/KMS is the
+optional `drm_kms` capability, read from the doctor `kms_timing` check. Both come from one
+`stutter doctor --block-io --kms-timing --json` run, retained as
+`optional-capabilities.stdout`; their absence degrades and never makes a kernel incompatible.
+GPU/platform telemetry stays outside this tracepoint contract. Export and verify the bundle, then
 `cargo run -p xtask -- evidence-index BUNDLE` prints its `docs/evidence/index.json` entry
 (including `kernel_release` and `compatibility`); `cargo run -p xtask -- kernel-matrix
 --require 3` reports observed kernels and fails with fewer than three distinct ones. When a
