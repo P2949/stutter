@@ -1,26 +1,81 @@
-//! Scheduler-delay diagnosis calibration over a frozen corpus. The sweep drives the
-//! production report pipeline (`scheduler_calibration_outcome`); this module only labels,
-//! scores and decides. It never edits thresholds: a change is a reviewed code change
-//! backed by the retained result, and without enough evidence the decision is to retain.
+//! Per-family diagnosis threshold calibration over a frozen corpus. The sweep drives the
+//! production report pipeline (`family_calibration_outcome`); this module only labels,
+//! scores and decides. It never edits thresholds: a change is a reviewed code change backed
+//! by the retained result, and without enough evidence the decision is to retain.
 use std::{
     collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
 };
 
-use anyhow::{Context, ensure};
-use serde_json::{Value, json};
-use stutter::api::report::scheduler_calibration_outcome;
+use anyhow::{Context, bail, ensure};
+use serde_json::json;
+use stutter::api::report::{CalibrationFamily, family_calibration_outcome};
 
 use crate::evidence_bundle::sha256::sha256_hex;
 
-pub const CURRENT_THRESHOLD_NS: u64 = 2_000_000;
-pub const DEFAULT_SWEEP_MS: [f64; 7] = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0];
-const SCHEDULER_FAMILY: [&str; 2] = ["CompositorSchedulerDelay", "GameThreadSchedulerDelay"];
 /// Evidence floors below which the decision is always "retain".
 const MIN_REAL_POSITIVES: usize = 10;
 const MIN_REAL_NEGATIVES: usize = 10;
 const MIN_MIXED: usize = 3;
+
+pub struct FamilySpec {
+    pub name: &'static str,
+    pub family: CalibrationFamily,
+    /// Expected primary causes that make a fixture a positive for this family.
+    pub positives: &'static [&'static str],
+    pub unit: &'static str,
+    /// Multiplier from the displayed unit to the library value (ns or percent).
+    pub scale: f64,
+    pub current: f64,
+    pub sweep: &'static [f64],
+}
+
+pub const FAMILIES: [FamilySpec; 4] = [
+    FamilySpec {
+        name: "scheduler",
+        family: CalibrationFamily::Scheduler,
+        positives: &["CompositorSchedulerDelay", "GameThreadSchedulerDelay"],
+        unit: "ms",
+        scale: 1_000_000.0,
+        current: 2.0,
+        sweep: &[0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0],
+    },
+    FamilySpec {
+        name: "io",
+        family: CalibrationFamily::BlockIo,
+        positives: &["BlockIoCandidate"],
+        unit: "ms",
+        scale: 1_000_000.0,
+        current: 1.0,
+        sweep: &[0.25, 0.5, 1.0, 2.0, 4.0],
+    },
+    FamilySpec {
+        name: "irq",
+        family: CalibrationFamily::Irq,
+        positives: &["IrqDelayCandidate"],
+        unit: "ms",
+        scale: 1_000_000.0,
+        current: 0.25,
+        sweep: &[0.05, 0.1, 0.25, 0.5, 1.0],
+    },
+    FamilySpec {
+        name: "gpu",
+        family: CalibrationFamily::Gpu,
+        positives: &["GpuBoundCandidate"],
+        unit: "percent busy",
+        scale: 1.0,
+        current: 95.0,
+        sweep: &[80.0, 85.0, 90.0, 95.0, 98.0],
+    },
+];
+
+pub fn family_spec(name: &str) -> anyhow::Result<&'static FamilySpec> {
+    FAMILIES
+        .iter()
+        .find(|spec| spec.name == name)
+        .with_context(|| format!("unknown family {name}; expected one of scheduler, io, irq, gpu"))
+}
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Fixture {
@@ -29,8 +84,16 @@ pub struct Fixture {
     pub real: bool,
     pub mixed: bool,
     pub expected_cause: String,
-    /// `true` positive label, `false` negative control, `None` unlabeled (e.g. `Any`).
-    pub positive: Option<bool>,
+}
+
+impl Fixture {
+    /// `Some(true)` positive for the family, `Some(false)` negative control, `None` unlabeled.
+    pub fn label(&self, spec: &FamilySpec) -> Option<bool> {
+        match self.expected_cause.as_str() {
+            "" | "Any" => None,
+            cause => Some(spec.positives.contains(&cause)),
+        }
+    }
 }
 
 pub fn parse_fixture(dir: &Path, text: &str) -> Fixture {
@@ -53,7 +116,7 @@ pub fn parse_fixture(dir: &Path, text: &str) -> Fixture {
             ("", "source") => source = value,
             ("[expected]", "primary_cause") => fixture.expected_cause = value,
             ("[platform]", "scenario") => {
-                fixture.mixed = value.contains("mixed") || value.contains("confound")
+                fixture.mixed = value.contains("mixed") || value.contains("confound");
             }
             _ => {}
         }
@@ -61,10 +124,6 @@ pub fn parse_fixture(dir: &Path, text: &str) -> Fixture {
     fixture.real = fixture.name.starts_with("real_")
         || source == "sanitized-real-recording"
         || source == "validation-corpus";
-    fixture.positive = match fixture.expected_cause.as_str() {
-        "" | "Any" => None,
-        cause => Some(SCHEDULER_FAMILY.contains(&cause)),
-    };
     fixture
 }
 
@@ -106,13 +165,13 @@ impl Counts {
 }
 
 /// `predicted` is the primary cause the pipeline produced (or `None`) with its confidence.
-pub fn score(labels: &[(bool, Option<(String, String)>)]) -> Counts {
+pub fn score(spec: &FamilySpec, labels: &[(bool, Option<(String, String)>)]) -> Counts {
     let mut counts = Counts::default();
     for (positive, predicted) in labels {
-        let scheduler = predicted
+        let hit = predicted
             .as_ref()
-            .is_some_and(|(cause, _)| SCHEDULER_FAMILY.contains(&cause.as_str()));
-        match (positive, scheduler) {
+            .is_some_and(|(cause, _)| spec.positives.contains(&cause.as_str()));
+        match (positive, hit) {
             (true, true) => counts.tp += 1,
             (true, false) => counts.fn_ += 1,
             (false, true) => {
@@ -134,34 +193,36 @@ pub fn run(
     root: &Path,
     corpus: &Path,
     out: Option<&Path>,
-    thresholds_ms: &[f64],
+    family_name: &str,
 ) -> anyhow::Result<()> {
+    let spec = family_spec(family_name)?;
     let (fixtures, frozen_id) = load_corpus(&root.join(corpus))?;
     let labeled = fixtures
         .iter()
-        .filter(|f| f.positive.is_some())
+        .filter(|f| f.label(spec).is_some())
         .collect::<Vec<_>>();
     ensure!(!labeled.is_empty(), "corpus has no labeled fixtures");
-    let mut results = Vec::new();
+    let diagnose = |fixture: &Fixture, value: f64| {
+        family_calibration_outcome(&fixture.dir, spec.family, value * spec.scale)
+            .with_context(|| format!("diagnose {}", fixture.name))
+    };
     // Agreement is measured against the current threshold, computed up front so sweep
     // order cannot matter.
     let mut baseline: BTreeMap<String, String> = BTreeMap::new();
     for fixture in &labeled {
-        let outcome = scheduler_calibration_outcome(&fixture.dir, CURRENT_THRESHOLD_NS)
-            .with_context(|| format!("diagnose {}", fixture.name))?;
         baseline.insert(
             fixture.name.clone(),
-            outcome.map(|o| o.cause).unwrap_or_default(),
+            diagnose(fixture, spec.current)?
+                .map(|o| o.cause)
+                .unwrap_or_default(),
         );
     }
-    for threshold_ms in thresholds_ms {
-        let threshold_ns = (threshold_ms * 1_000_000.0).round() as u64;
-        let mut labels = Vec::new();
+    let mut results = Vec::new();
+    for value in spec.sweep {
+        let (mut labels, mut stable) = (Vec::new(), 0);
         let mut confidences: BTreeMap<String, usize> = BTreeMap::new();
-        let mut stable = 0;
         for fixture in &labeled {
-            let outcome = scheduler_calibration_outcome(&fixture.dir, threshold_ns)
-                .with_context(|| format!("diagnose {}", fixture.name))?;
+            let outcome = diagnose(fixture, *value)?;
             let cause = outcome
                 .as_ref()
                 .map(|o| o.cause.clone())
@@ -169,7 +230,7 @@ pub fn run(
             if baseline.get(&fixture.name).is_some_and(|b| *b == cause) {
                 stable += 1;
             }
-            if SCHEDULER_FAMILY.contains(&cause.as_str()) {
+            if spec.positives.contains(&cause.as_str()) {
                 *confidences
                     .entry(
                         outcome
@@ -179,20 +240,20 @@ pub fn run(
                     .or_default() += 1;
             }
             labels.push((
-                fixture.positive == Some(true),
+                fixture.label(spec) == Some(true),
                 outcome.map(|o| (o.cause, o.confidence)),
             ));
         }
-        let counts = score(&labels);
-        results.push(json!({"threshold_ms":threshold_ms,"tp":counts.tp,"fp":counts.fp,"fn":counts.fn_,"tn":counts.tn,
+        let counts = score(spec, &labels);
+        results.push(json!({"threshold":value,"unit":spec.unit,"tp":counts.tp,"fp":counts.fp,"fn":counts.fn_,"tn":counts.tn,
             "precision":counts.precision(),"recall":counts.recall(),"false_high_confidence":counts.false_high_confidence,
             "primary_cause_agreement_with_current":stable as f64 / labeled.len() as f64,
-            "scheduler_confidence_distribution":confidences}));
+            "claim_confidence_distribution":confidences}));
     }
     let count = |real: bool, positive: bool| {
         labeled
             .iter()
-            .filter(|f| f.real == real && f.positive == Some(positive))
+            .filter(|f| f.real == real && f.label(spec) == Some(positive))
             .count()
     };
     let mixed = fixtures.iter().filter(|f| f.mixed).count();
@@ -204,20 +265,23 @@ pub fn run(
     } else {
         "retain_current_threshold_evidence_insufficient"
     };
-    let report = json!({"schema_version":1,"family":"scheduler_delay","corpus_id":frozen_id,"current_threshold_ms":2.0,
+    let report = json!({"schema_version":1,"family":spec.name,"corpus_id":frozen_id,"current_threshold":spec.current,"unit":spec.unit,
         "corpus":{"labeled":labeled.len(),"real_positive":real_pos,"real_negative_controls":real_neg,"mixed_confounded":mixed,
             "unlabeled":fixtures.len() - labeled.len()},
         "evidence_floors":{"real_positive":MIN_REAL_POSITIVES,"real_negative":MIN_REAL_NEGATIVES,"mixed":MIN_MIXED},
         "sweep":results,"decision":decision,
-        "limitations":["family-level labels (scheduler vs not); specific-cause agreement is not scored",
+        "limitations":["family-level labels; specific-cause agreement is not scored",
             "mixed/confounded cases are only counted when fixtures are tagged mixed; none are tagged today",
-            "diagnosis existence confidence and causal confidence are one value in the pipeline and are NOT separately calibrated",
+            "existence confidence and causal confidence are one value in the pipeline and are NOT separately calibrated",
+            "overlap is not proven causality: IRQ/I-O overlap fixtures do not calibrate causal claims",
             "numerical optimum is never chosen mechanically; false high-confidence claims weigh more than inconclusive ones"]});
     println!("{}", serde_json::to_string_pretty(&report)?);
     if let Some(out) = out {
         fs::write(root.join(out), serde_json::to_vec_pretty(&report)?)?;
     }
-    let _: Value = report;
+    if !FAMILIES.iter().any(|f| f.name == family_name) {
+        bail!("unreachable family");
+    }
     Ok(())
 }
 
@@ -226,38 +290,50 @@ mod tests {
     use super::*;
 
     #[test]
-    fn labels_follow_the_expected_cause_and_skip_wildcards() {
+    fn labels_follow_the_family_and_skip_wildcards() {
         let text = "name = \"real_x\"\nsource = \"sanitized-real-recording\"\n[expected]\nprimary_cause = \"GameThreadSchedulerDelay\"\n";
         let fixture = parse_fixture(Path::new("d"), text);
-        assert!(fixture.real && fixture.positive == Some(true));
+        assert!(fixture.real);
+        let (scheduler, io) = (
+            family_spec("scheduler").unwrap(),
+            family_spec("io").unwrap(),
+        );
+        assert_eq!(fixture.label(scheduler), Some(true));
+        assert_eq!(fixture.label(io), Some(false));
         let control = parse_fixture(
             Path::new("d"),
             "name = \"c\"\n[expected]\nprimary_cause = \"IrqDelayCandidate\"\n[platform]\nscenario = \"mixed-io\"\n",
         );
         assert_eq!(
-            (control.positive, control.mixed, control.real),
+            (control.label(scheduler), control.mixed, control.real),
             (Some(false), true, false)
         );
+        assert_eq!(control.label(family_spec("irq").unwrap()), Some(true));
         assert_eq!(
             parse_fixture(
                 Path::new("d"),
                 "name = \"a\"\n[expected]\nprimary_cause = \"Any\"\n"
             )
-            .positive,
+            .label(scheduler),
             None
         );
+        assert!(family_spec("thermal").is_err());
     }
 
     #[test]
     fn scoring_counts_false_high_confidence_separately() {
+        let spec = family_spec("scheduler").unwrap();
         let hit = |c: &str| Some(("GameThreadSchedulerDelay".to_owned(), c.to_owned()));
-        let counts = score(&[
-            (true, hit("High")),
-            (true, None),
-            (false, hit("High")),
-            (false, hit("Low")),
-            (false, Some(("IrqDelayCandidate".into(), "High".into()))),
-        ]);
+        let counts = score(
+            spec,
+            &[
+                (true, hit("High")),
+                (true, None),
+                (false, hit("High")),
+                (false, hit("Low")),
+                (false, Some(("IrqDelayCandidate".into(), "High".into()))),
+            ],
+        );
         assert_eq!(
             (
                 counts.tp,
@@ -274,22 +350,32 @@ mod tests {
     }
 
     #[test]
-    fn real_corpus_sweep_retains_the_threshold_because_mixed_evidence_is_missing() {
+    fn every_family_current_value_is_in_its_sweep_and_matches_the_defaults() {
+        for spec in &FAMILIES {
+            assert!(spec.sweep.contains(&spec.current), "{}", spec.name);
+        }
+        // Defaults reproduce the corpus expectations through the production pipeline.
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
         let (fixtures, id) = load_corpus(&root.join("stutter/tests/fixtures/runs")).unwrap();
         assert_eq!(id.len(), 64);
-        assert!(fixtures.iter().filter(|f| f.positive == Some(true)).count() >= 4);
         assert_eq!(fixtures.iter().filter(|f| f.mixed).count(), 0);
-        let default = scheduler_calibration_outcome(
-            &fixtures
-                .iter()
-                .find(|f| f.name == "game_thread_scheduler_delay")
-                .unwrap()
-                .dir,
-            CURRENT_THRESHOLD_NS,
-        )
-        .unwrap()
-        .unwrap();
-        assert_eq!(default.cause, "GameThreadSchedulerDelay");
+        for (family, fixture, cause) in [
+            (
+                "scheduler",
+                "game_thread_scheduler_delay",
+                "GameThreadSchedulerDelay",
+            ),
+            ("io", "block_io_stall", "BlockIoCandidate"),
+            ("irq", "irq_heavy", "IrqDelayCandidate"),
+            ("gpu", "gpu_bound_clean_cpu", "GpuBoundCandidate"),
+        ] {
+            let spec = family_spec(family).unwrap();
+            let fixture = fixtures.iter().find(|f| f.name == fixture).unwrap();
+            let outcome =
+                family_calibration_outcome(&fixture.dir, spec.family, spec.current * spec.scale)
+                    .unwrap()
+                    .unwrap();
+            assert_eq!(outcome.cause, cause, "{family}");
+        }
     }
 }

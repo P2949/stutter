@@ -15,19 +15,49 @@ pub struct CalibrationOutcome {
     pub score: Option<f32>,
 }
 
-/// Diagnoses `run` with `sched_delay_ns` as both the scheduler-delay significance and the
-/// minimum scheduler latency for a primary claim; every other threshold is the default.
-pub fn scheduler_calibration_outcome(
+/// Diagnosis families whose single significance threshold can be swept.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CalibrationFamily {
+    /// Scheduler delay; the value is nanoseconds.
+    Scheduler,
+    /// Blocking block-I/O significance; nanoseconds.
+    BlockIo,
+    /// IRQ handler significance; nanoseconds.
+    Irq,
+    /// GPU-busy bound; percent.
+    Gpu,
+}
+
+impl CalibrationFamily {
+    fn config(self, value: f64) -> DiagnosisConfig {
+        let mut config = DiagnosisConfig::default();
+        match self {
+            Self::Scheduler => {
+                config.sched_delay_significant_ns = value as u64;
+                config.min_scheduler_latency_for_primary_ns = value as u64;
+            }
+            Self::BlockIo => config.block_io_significant_ns = value as u64,
+            Self::Irq => config.irq_significant_ns = value as u64,
+            Self::Gpu => config.gpu_busy_bound_percent = value as u32,
+        }
+        config
+    }
+}
+
+/// Diagnoses `run` with one family's threshold set to `value`; every other threshold is the
+/// default. Uses the production clustering, artifact filtering and diagnosis.
+pub fn family_calibration_outcome(
     run: &Path,
-    sched_delay_ns: u64,
+    family: CalibrationFamily,
+    value: f64,
 ) -> anyhow::Result<Option<CalibrationOutcome>> {
-    let config = DiagnosisConfig {
-        sched_delay_significant_ns: sched_delay_ns,
-        min_scheduler_latency_for_primary_ns: sched_delay_ns,
-        ..DiagnosisConfig::default()
-    };
-    let result =
-        build_report_analysis_from_input_with_config(load_report_input(run)?, 10, 5, None, config)?;
+    let result = build_report_analysis_from_input_with_config(
+        load_report_input(run)?,
+        10,
+        5,
+        None,
+        family.config(value),
+    )?;
     Ok(result
         .analysis
         .cluster_analysis
@@ -40,6 +70,14 @@ pub fn scheduler_calibration_outcome(
             confidence: format!("{:?}", diagnosis.confidence),
             score: diagnosis.primary.as_ref().map(|primary| primary.score),
         }))
+}
+
+/// Scheduler-delay sweep point (nanoseconds).
+pub fn scheduler_calibration_outcome(
+    run: &Path,
+    sched_delay_ns: u64,
+) -> anyhow::Result<Option<CalibrationOutcome>> {
+    family_calibration_outcome(run, CalibrationFamily::Scheduler, sched_delay_ns as f64)
 }
 
 #[cfg(test)]
