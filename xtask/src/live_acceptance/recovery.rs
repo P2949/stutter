@@ -20,14 +20,16 @@ fn write_json(path: &Path, value: &Value) -> anyhow::Result<()> {
 fn wait_file(path: &Path, child: &mut OwnedChild, seconds: u64) -> anyhow::Result<Value> {
     let deadline = Instant::now() + Duration::from_secs(seconds);
     loop {
+        // Handshake files are published atomically and a controller may exit right after
+        // writing its last one, so the file wins over the liveness check.
+        if path.is_file() {
+            return read_json(path);
+        }
         ensure!(
             child.0.try_wait()?.is_none(),
             "owned actor exited before {}; inspect retained stderr",
             path.display()
         );
-        if path.is_file() {
-            return read_json(path);
-        }
         ensure!(
             Instant::now() < deadline,
             "readiness deadline for {}",
