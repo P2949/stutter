@@ -16,6 +16,7 @@ mod init;
 mod invalidation;
 mod kernels;
 mod manifest;
+mod scenarios;
 mod state;
 
 pub(super) const MANIFEST_TEXT: &str =

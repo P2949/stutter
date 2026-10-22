@@ -12,6 +12,7 @@ pub mod manifest;
 pub mod model;
 pub mod repository;
 pub mod runners;
+pub mod scenarios;
 pub mod state;
 pub mod status;
 pub mod verify;
