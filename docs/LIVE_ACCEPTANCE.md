@@ -46,12 +46,15 @@ The local evidence directory contains selected kernel/distribution/CPU/toolchain
 metadata, source commit and dirty flag, binary digest, doctor/tracepoint output,
 recording, reports and the result. It does not dump the environment. Raw recording
 and command logs can still contain local paths or process details: inspect and
-sanitize before publication. Portable sanitized export, a controlled game-objective fixture, and multiple-kernel evidence remain
-follow-up requirements. A development-tree PASS does not close those gates.
+sanitize before publication. Portable sanitized export exists (`evidence-export`, `evidence-verify`,
+`evidence-index`). A controlled game-objective suite, the kernel-compatibility suite and
+the overhead suite exist as tools but need privileged runs on a clean commit: tool exists
+!= current evidence exists. A development-tree PASS does not close those gates.
 
-The independent affinity, crash/recovery, suspend/resume and overhead suites are
-still outstanding. This command cannot graduate mutation support or claim a
-release boundary.
+The independent affinity, crash/recovery and suspend/resume suites have verified PASS
+bundles indexed in `docs/evidence/index.json`; observation, game-runnable, kernel
+compatibility, overhead and score-degradation have no PASS evidence yet. This command
+cannot graduate mutation support or claim a release boundary.
 
 Canonical runs require a clean committed source tree and a stutter binary whose
 reported Git revision matches that tree. The binary's SHA-256 and version are
@@ -136,10 +139,10 @@ state or environment-variable changes.
 
 The privileged medium-risk service retains its historical delayed journal
 protocol and remains experimental. The low-risk fix protects verification after
-apply returns; preparation before the first mutable syscall and real SIGKILL
-acceptance are separate pending gates (#48/#29). Synthetic transaction regressions
-and the explicit owned-child manager/startup-restore test do not establish that
-full crash matrix.
+apply returns, and rollback state is prepared before the first mutable syscall. Real
+SIGKILL/restart, interrupted-rollback and suspend/resume acceptance (#47, #48, #29, closed)
+are separate live suites with their own indexed evidence. Synthetic transaction regressions
+and the explicit owned-child manager/startup-restore test do not stand in for them.
 
 ## Failed apply reporting
 
@@ -160,8 +163,9 @@ attempted and the persistence error accompanies the original action error.
 The synthetic fault contract covers preflight failure, verification failure with
 successful/failed rollback, partial apply with successful/failed rollback, and a
 history-write failure. It checks journal, audit, history, saved daemon state and
-blocked future dispatch. Real SIGKILL, interrupted rollback, suspend/resume and
-the full physical failure matrix remain separate acceptance gates.
+blocked future dispatch. The physical counterparts (real SIGKILL/restart, interrupted rollback,
+the failure matrix and suspend/resume) are separate live suites; synthetic tests never stand
+in for their evidence.
 
 ## Rollback preparation before affinity mutation
 

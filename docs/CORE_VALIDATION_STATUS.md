@@ -3,16 +3,24 @@
 ## Current state
 
 ```text
-main: 63c30b2
-main CI: PASS
-P0 objective correctness: complete
-startup identity/layout hardening: complete
-automatic recovery capability gate: complete
-rollback-before-verification durability: complete
-failed-apply fault reporting: complete
-prepared rollback-before-mutation: complete
-current gate: real controller process-death recovery
+P0 objective semantics                 complete
+affinity safety/recovery               complete
+real suspend/resume                    PASS
+portable evidence tooling              complete
+capability framework                   implemented; no final graduation
+release tooling                        implemented; final gate pending
+
+remaining:
+privileged measurement evidence
+multi-kernel evidence
+diagnosis corpus/calibration
+frame-aware score evaluation
+capability decisions
+exact-commit release acceptance
 ```
+
+The commit under evidence collection is recorded in the plan as `EVIDENCE_BASE`; a SHA is
+deliberately not kept in this header because it goes stale with every merge.
 
 The entries below are historical and are kept intact. The current execution map is
 [CORE_VALIDATION_PLAN.md](CORE_VALIDATION_PLAN.md).
