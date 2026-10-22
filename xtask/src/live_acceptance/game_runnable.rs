@@ -114,7 +114,7 @@ pub(super) fn compare(baseline: &Value, degraded: &Value) -> anyhow::Result<Valu
     )
 }
 
-fn install_game_binary(out: &Path) -> anyhow::Result<PathBuf> {
+pub(super) fn install_game_binary(out: &Path) -> anyhow::Result<PathBuf> {
     let dir = out.join("steamapps/common/StutterAcceptanceGame");
     fs::create_dir_all(&dir)?;
     let target = dir.join("StutterAcceptanceGame");
@@ -123,36 +123,79 @@ fn install_game_binary(out: &Path) -> anyhow::Result<PathBuf> {
     Ok(target)
 }
 
-fn run_scenario(
+/// Scheduler contention applied to the target's CPU.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum Contention {
+    /// N ordinary CPU hogs (unbounded, non-deterministic delay).
+    Hogs(usize),
+    /// A SCHED_FIFO contender that holds the CPU for `ms` out of every 20 ms: the target
+    /// can be blocked for up to `ms`, a controlled degradation level.
+    Burst(u64),
+}
+
+fn spawn_contenders(
+    cpu: u32,
+    seconds: u64,
+    dir: &Path,
+    contention: Contention,
+) -> anyhow::Result<Vec<OwnedChild>> {
+    let mut children = Vec::new();
+    let executable = std::env::current_exe()?;
+    match contention {
+        Contention::Hogs(count) => {
+            for index in 0..count {
+                let ready = dir.join(format!("contender-{index}.json"));
+                children.push(OwnedChild(
+                    Command::new("taskset")
+                        .args(["-c", &cpu.to_string()])
+                        .arg(&executable)
+                        .args([
+                            "live-workload",
+                            "--seconds",
+                            &(seconds + 20).to_string(),
+                            "--ready",
+                        ])
+                        .arg(&ready)
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null())
+                        .spawn()?,
+                ));
+            }
+        }
+        Contention::Burst(0) => {}
+        Contention::Burst(ms) => children.push(OwnedChild(
+            Command::new("chrt")
+                .args(["-f", "50", "taskset", "-c", &cpu.to_string()])
+                .arg(&executable)
+                .args([
+                    "live-burst",
+                    "--burst-ms",
+                    &ms.to_string(),
+                    "--period-ms",
+                    "20",
+                    "--seconds",
+                    &(seconds + 20).to_string(),
+                ])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()?,
+        )),
+    }
+    Ok(children)
+}
+
+pub(super) fn run_scenario(
     binary: &Path,
     game: &Path,
     out: &Path,
     name: &'static str,
     cpu: u32,
     seconds: u64,
-    contenders: usize,
+    contention: Contention,
 ) -> anyhow::Result<(Scenario, Value)> {
     let dir = out.join(name);
     fs::create_dir(&dir)?;
-    let mut hogs = Vec::new();
-    for index in 0..contenders {
-        let ready = dir.join(format!("contender-{index}.json"));
-        hogs.push(OwnedChild(
-            Command::new("taskset")
-                .args(["-c", &cpu.to_string()])
-                .arg(std::env::current_exe()?)
-                .args([
-                    "live-workload",
-                    "--seconds",
-                    &(seconds + 20).to_string(),
-                    "--ready",
-                ])
-                .arg(&ready)
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()?,
-        ));
-    }
+    let hogs = spawn_contenders(cpu, seconds, &dir, contention)?;
     let ready = dir.join("workload-ready.json");
     let mut child = OwnedChild(
         Command::new("taskset")
@@ -303,10 +346,25 @@ pub(super) fn run(root: &Path, out: &Path, binary: &Path, seconds: u64) -> anyho
         let cpu = allowed_cpu()?;
         let game = install_game_binary(&out)?;
         stage = "baseline";
-        let (_, baseline) = run_scenario(&binary, &game, &out, "baseline", cpu, seconds, 0)?;
+        let (_, baseline) = run_scenario(
+            &binary,
+            &game,
+            &out,
+            "baseline",
+            cpu,
+            seconds,
+            Contention::Hogs(0),
+        )?;
         stage = "degraded";
-        let (_, degraded) =
-            run_scenario(&binary, &game, &out, "degraded", cpu, seconds, CONTENDERS)?;
+        let (_, degraded) = run_scenario(
+            &binary,
+            &game,
+            &out,
+            "degraded",
+            cpu,
+            seconds,
+            Contention::Hogs(CONTENDERS),
+        )?;
         stage = "comparison";
         let comparison = compare(&baseline, &degraded)?;
         Ok(

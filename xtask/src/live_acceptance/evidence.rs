@@ -10,10 +10,11 @@ pub(super) enum LiveAcceptanceSuite {
     GameRunnable,
     KernelCompat,
     Overhead,
+    ScoreDegradation,
 }
 impl LiveAcceptanceSuite {
     #[cfg(test)]
-    pub(super) const ALL: [Self; 7] = [
+    pub(super) const ALL: [Self; 8] = [
         Self::Observation,
         Self::Affinity,
         Self::Recovery,
@@ -21,6 +22,7 @@ impl LiveAcceptanceSuite {
         Self::GameRunnable,
         Self::KernelCompat,
         Self::Overhead,
+        Self::ScoreDegradation,
     ];
     pub(super) fn as_str(self) -> &'static str {
         match self {
@@ -31,6 +33,7 @@ impl LiveAcceptanceSuite {
             Self::GameRunnable => "live_game_runnable",
             Self::KernelCompat => "live_kernel_compat",
             Self::Overhead => "live_overhead",
+            Self::ScoreDegradation => "live_score_degradation",
         }
     }
 }
@@ -335,7 +338,8 @@ mod suite_tests {
                 "live_suspend_resume",
                 "live_game_runnable",
                 "live_kernel_compat",
-                "live_overhead"
+                "live_overhead",
+                "live_score_degradation"
             ]
         );
         assert_eq!(

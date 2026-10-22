@@ -23,6 +23,7 @@ pub mod preflight;
 pub mod process;
 pub mod refresh_tune_recommendation;
 pub mod release_package;
+pub mod score_evaluation;
 pub mod workflow;
 
 use crate::{
@@ -58,6 +59,15 @@ pub enum XtaskCommand {
         suite: live_acceptance::Suite,
     },
     #[command(hide = true)]
+    LiveBurst {
+        #[arg(long)]
+        burst_ms: u64,
+        #[arg(long)]
+        period_ms: u64,
+        #[arg(long)]
+        seconds: u64,
+    },
+    #[command(hide = true)]
     LiveWorkload {
         #[arg(long)]
         descendants: bool,
@@ -86,6 +96,15 @@ pub enum XtaskCommand {
         about = "Fail if a capability is Supported ahead of its evidence"
     )]
     CapabilityCheck,
+    #[command(
+        name = "score-evaluate",
+        about = "Evaluate StutterScore against controlled degradation recordings"
+    )]
+    ScoreEvaluate {
+        /// `LEVEL_MS:RECORDING_DIR`, repeated (e.g. 0:run0 1:run1 ...).
+        #[arg(long = "level", value_name = "MS:DIR", required = true)]
+        levels: Vec<String>,
+    },
     #[command(
         name = "calibrate-scheduler",
         about = "Sweep the scheduler-delay threshold over the frozen corpus"
@@ -350,6 +369,11 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
     match command {
         XtaskCommand::LiveAcceptance { suite } => live_acceptance::run(&root, suite),
         XtaskCommand::RecoveryController { mode } => live_acceptance::recovery::controller(mode),
+        XtaskCommand::LiveBurst {
+            burst_ms,
+            period_ms,
+            seconds,
+        } => live_acceptance::burst(burst_ms, period_ms, seconds),
         XtaskCommand::LiveWorkload {
             seconds,
             ready,
@@ -365,6 +389,20 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
             out.as_deref(),
             &diagnosis_calibration::DEFAULT_SWEEP_MS,
         ),
+        XtaskCommand::ScoreEvaluate { levels } => {
+            let parsed = levels
+                .iter()
+                .map(|l| {
+                    let (ms, dir) = l.split_once(':').context("expected MS:DIR")?;
+                    Ok((ms.parse::<f64>()?, PathBuf::from(dir)))
+                })
+                .collect::<anyhow::Result<Vec<_>>>()?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&score_evaluation::run_from_recordings(&parsed)?)?
+            );
+            Ok(())
+        }
         XtaskCommand::CapabilityCheck => capability_check::run(&root),
         XtaskCommand::EvidenceExport(args) => {
             evidence_bundle::export_bundle(&root, &args.raw, &args.out)
