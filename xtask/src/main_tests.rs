@@ -1,4 +1,3 @@
-
 use clap::CommandFactory;
 
 use super::{CI_COMMANDS, Cli, SMOKE_COMMANDS, VALIDATION_COMMANDS};
