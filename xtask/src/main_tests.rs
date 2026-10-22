@@ -54,6 +54,8 @@ fn expected_subcommands_are_registered() {
             "privileged-ebpf-smoke",
             "recovery-controller",
             "refresh-tune-recommendation",
+            "release-package",
+            "release-verify",
             "report-golden-update",
             "schema-check",
             "service-smoke",
