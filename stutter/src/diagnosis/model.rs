@@ -209,6 +209,19 @@ pub enum StutterCause {
 }
 
 impl StutterCause {
+    /// Exhaustive registry of diagnosis kinds, used as the coverage denominator.
+    pub const ALL: [Self; 9] = [
+        Self::CompositorSchedulerDelay,
+        Self::GameThreadSchedulerDelay,
+        Self::IrqDelayCandidate,
+        Self::GpuBoundCandidate,
+        Self::BlockIoCandidate,
+        Self::CpuPressureCandidate,
+        Self::CpuMonopolizationCandidate,
+        Self::RuntimeWaitCandidate,
+        Self::Unknown,
+    ];
+
     pub fn priority(&self) -> u32 {
         match self {
             StutterCause::CompositorSchedulerDelay => 1,

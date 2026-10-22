@@ -97,7 +97,9 @@ pub mod autotune {
         //! Public candidate plan and suggestion contracts.
 
         pub use crate::autotune::planning::{
-            candidate::{CandidateAction, CandidateEvidence, CandidatePlan},
+            candidate::{
+                CandidateAction, CandidateEvidence, CandidatePlan, MUTATION_PROVIDER_KINDS,
+            },
             dry_run::{
                 CandidateDryRunRecord, CandidateDryRunner, RealCandidateDryRunner,
                 dry_run_candidate, dry_run_candidates, dry_run_candidates_with_runner,
@@ -440,6 +442,12 @@ pub mod daemon_policy {
             RemotePolicyContext, RollbackRequirement, build_daemon_policy,
         },
     };
+}
+
+pub mod diagnosis {
+    //! Public diagnosis registry contracts.
+
+    pub use crate::diagnosis::StutterCause;
 }
 
 pub mod events {

@@ -6,6 +6,13 @@ use std::{
 
 use anyhow::{Context, bail};
 
+use crate::{
+    coverage_maturity::{
+        MaturityReport, Observation, Registries, Tags, build_report, read_evidence_index,
+    },
+    evidence_bundle::EvidenceKind,
+};
+
 #[derive(Debug, Default)]
 struct FixtureTomlSummary {
     name: String,
@@ -18,7 +25,33 @@ struct FixtureTomlSummary {
     data_quality: Option<String>,
     expected_behavior: Option<String>,
     privacy_fields: BTreeMap<String, bool>,
+    evidence_kind: Option<String>,
+    primary_cause: Option<String>,
+    provenance_keys: BTreeSet<String>,
+    coverage: Tags,
 }
+
+/// Provenance every explicitly classified (non-synthetic) capture must declare.
+const REQUIRED_PROVENANCE: [&str; 18] = [
+    "source_commit",
+    "capture_id",
+    "kernel",
+    "distribution",
+    "cpu",
+    "gpu",
+    "compositor",
+    "workload",
+    "workload_version",
+    "scenario",
+    "expected_cause",
+    "expected_confidence",
+    "control_type",
+    "probe_set",
+    "drop_counters",
+    "artifact_schema",
+    "limitations",
+    "privacy_state",
+];
 
 #[derive(Debug)]
 pub struct FixtureCoverageReport {
@@ -35,6 +68,8 @@ pub struct FixtureCoverageReport {
     pub missing_cells: Vec<String>,
     pub maturity_warnings: Vec<String>,
     pub privacy_warnings: Vec<String>,
+    pub provenance_errors: Vec<String>,
+    pub maturity: MaturityReport,
 }
 
 const MIN_REAL_FIXTURES: usize = 20;
@@ -53,6 +88,18 @@ pub fn run_fixture_coverage(root: &Path, html: Option<&Path>) -> anyhow::Result<
         bail!(
             "fixture coverage missing required cells: {}",
             report.missing_cells.join(", ")
+        );
+    }
+    if !report.provenance_errors.is_empty() || !report.maturity.tag_errors.is_empty() {
+        bail!(
+            "fixture provenance/coverage tags invalid: {}",
+            report
+                .provenance_errors
+                .iter()
+                .chain(&report.maturity.tag_errors)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("; ")
         );
     }
     Ok(())
@@ -74,14 +121,47 @@ pub fn fixture_coverage_report(root: &Path) -> anyhow::Result<FixtureCoverageRep
         missing_cells: Vec::new(),
         maturity_warnings: Vec::new(),
         privacy_warnings: Vec::new(),
+        provenance_errors: Vec::new(),
+        maturity: MaturityReport::default(),
     };
+    let mut observations = Vec::new();
+    let mut legacy_inferred = 0_usize;
     let mut capture_ids = BTreeSet::new();
 
     for path in fixture_toml_paths(&fixtures_root)? {
         let summary = parse_fixture_toml_summary(&path)?;
-        let is_real = summary.name.starts_with("real_")
+        let legacy_real = summary.name.starts_with("real_")
             || summary.source == "sanitized-real-recording"
             || summary.source == "validation-corpus";
+        let kind = match summary.evidence_kind.as_deref() {
+            Some(explicit) => EvidenceKind::parse(explicit)
+                .with_context(|| format!("{}: invalid evidence_kind", path.display()))?,
+            None => {
+                legacy_inferred += 1;
+                if legacy_real {
+                    EvidenceKind::FixtureReal
+                } else {
+                    EvidenceKind::Synthetic
+                }
+            }
+        };
+        if summary.evidence_kind.is_some() && kind != EvidenceKind::Synthetic {
+            for key in REQUIRED_PROVENANCE {
+                if !summary.provenance_keys.contains(key) {
+                    report.provenance_errors.push(format!(
+                        "{}: [provenance].{key} is required for explicit {} evidence",
+                        path.display(),
+                        kind.as_str()
+                    ));
+                }
+            }
+        }
+        let mut tags = summary.coverage.clone();
+        // "Any" is an expectation wildcard, not a diagnosis kind.
+        tags.diagnoses
+            .extend(summary.primary_cause.clone().filter(|cause| cause != "Any"));
+        observations.push(Observation { kind, tags });
+        let is_real = kind != EvidenceKind::Synthetic;
         if is_real {
             report.real_fixture_count += 1;
             if let Some(capture_id) = summary.sanitized_capture_id.as_deref() {
@@ -123,6 +203,8 @@ pub fn fixture_coverage_report(root: &Path) -> anyhow::Result<FixtureCoverageRep
         increment_opt(&mut report.data_quality, summary.data_quality);
     }
     report.distinct_capture_ids = capture_ids.len();
+    observations.extend(read_evidence_index(&root.join("docs/evidence/index.json"))?);
+    report.maturity = build_report(&Registries::from_code(), &observations, legacy_inferred);
 
     for required in ["AMD", "NVIDIA", "Intel"] {
         push_missing(
@@ -230,6 +312,16 @@ fn parse_fixture_toml_summary(path: &Path) -> anyhow::Result<FixtureTomlSummary>
             }
             ("[expected]", "data_quality") => summary.data_quality = Some(value),
             ("[expected]", "expected_behavior") => summary.expected_behavior = Some(value),
+            ("[expected]", "primary_cause") => summary.primary_cause = Some(value),
+            ("", "evidence_kind") => summary.evidence_kind = Some(value),
+            ("[provenance]", key) => {
+                summary.provenance_keys.insert(key.to_owned());
+            }
+            ("[coverage]", "objectives") => summary.coverage.objectives = parse_list(&value),
+            ("[coverage]", "providers") => summary.coverage.providers = parse_list(&value),
+            ("[coverage]", "kernel_capabilities") => {
+                summary.coverage.kernel_capabilities = parse_list(&value);
+            }
             ("[privacy]", key) => {
                 summary
                     .privacy_fields
@@ -239,6 +331,16 @@ fn parse_fixture_toml_summary(path: &Path) -> anyhow::Result<FixtureTomlSummary>
         }
     }
     Ok(summary)
+}
+
+/// Single-line TOML arrays only: `key = ["a", "b"]` (already unquoted by the caller).
+fn parse_list(value: &str) -> Vec<String> {
+    value
+        .trim_matches(|c| c == '[' || c == ']')
+        .split(',')
+        .map(|item| item.trim().trim_matches('"').trim_matches('\'').to_owned())
+        .filter(|item| !item.is_empty())
+        .collect()
 }
 
 fn unquote(value: &str) -> String {
@@ -310,6 +412,14 @@ fn print_fixture_coverage_report(report: &FixtureCoverageReport) {
     } else {
         println!("privacy warnings: {}", report.privacy_warnings.join("; "));
     }
+    for error in report
+        .provenance_errors
+        .iter()
+        .chain(&report.maturity.tag_errors)
+    {
+        println!("coverage error: {error}");
+    }
+    print!("{}", report.maturity.render_text());
 }
 
 fn format_counts(values: &BTreeMap<String, usize>) -> String {
@@ -435,4 +545,75 @@ fn escape_html(input: &str) -> String {
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
+}
+
+#[cfg(test)]
+mod provenance_tests {
+    use super::*;
+
+    fn report_for(fixture: &str) -> anyhow::Result<FixtureCoverageReport> {
+        let root = std::env::temp_dir().join(format!(
+            "stutter-fixture-provenance-{}-{}",
+            std::process::id(),
+            fixture.len()
+        ));
+        let dir = root.join("stutter/tests/fixtures/runs/new_capture");
+        fs::create_dir_all(&dir)?;
+        fs::write(dir.join("fixture.toml"), fixture)?;
+        let report = fixture_coverage_report(&root);
+        fs::remove_dir_all(root)?;
+        report
+    }
+
+    #[test]
+    fn explicit_real_evidence_requires_complete_provenance_and_known_tags() {
+        let partial = "name = \"new_capture\"\nevidence_kind = \"controlled_real\"\n\
+                       [provenance]\nsource_commit = \"abc\"\n";
+        let report = report_for(partial).unwrap();
+        assert!(
+            report
+                .provenance_errors
+                .iter()
+                .any(|error| error.contains("[provenance].kernel is required")),
+            "{:?}",
+            report.provenance_errors
+        );
+        assert_eq!(report.maturity.legacy_inferred_fixtures, 0);
+        let all = REQUIRED_PROVENANCE
+            .iter()
+            .map(|key| format!("{key} = \"x\"\n"))
+            .collect::<String>();
+        let complete = format!(
+            "name = \"new_capture\"\nevidence_kind = \"real_workload\"\n[provenance]\n{all}\
+             [coverage]\nobjectives = [\"GameRunnableLatency\"]\nproviders = [\"not_a_provider\"]\n"
+        );
+        let report = report_for(&complete).unwrap();
+        assert!(
+            report.provenance_errors.is_empty(),
+            "{:?}",
+            report.provenance_errors
+        );
+        assert_eq!(
+            report.maturity.tag_errors,
+            vec!["provider: unknown tag \"not_a_provider\"".to_owned()]
+        );
+        let runnable = report
+            .maturity
+            .objectives
+            .iter()
+            .find(|row| row.name == "GameRunnableLatency")
+            .unwrap();
+        assert_eq!(runnable.count(EvidenceKind::RealWorkload), 1);
+        assert!(report_for("name = \"x\"\nevidence_kind = \"guess\"\n").is_err());
+    }
+
+    #[test]
+    fn synthetic_and_legacy_fixtures_need_no_new_provenance() {
+        let report = report_for("name = \"s\"\nevidence_kind = \"synthetic\"\n").unwrap();
+        assert!(report.provenance_errors.is_empty());
+        let legacy =
+            report_for("name = \"real_old\"\nsource = \"sanitized-real-recording\"\n").unwrap();
+        assert_eq!(legacy.maturity.legacy_inferred_fixtures, 1);
+        assert_eq!(legacy.real_fixture_count, 1);
+    }
 }
