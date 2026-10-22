@@ -66,6 +66,7 @@ fn expected_subcommands_are_registered() {
             "service-smoke",
             "smoke",
             "validate",
+            "validation-campaign",
         ]
     );
 }

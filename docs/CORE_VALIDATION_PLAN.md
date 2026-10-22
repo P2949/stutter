@@ -6,6 +6,9 @@ IRQ/VM/power tuning, scheduler integrations, daemon modes, remote mutation APIs,
 UI surfaces, unrelated crate splits, or telemetry backends. Remaining work is
 validation, evidence, calibration, safety closure, and release engineering.
 
+Execution mechanism: `xtask validation-campaign` (see [VALIDATION_CAMPAIGN.md](VALIDATION_CAMPAIGN.md)); authoritative
+progress: campaign `status` plus GitHub issues; manual shell recipes are fallback/debugging only.
+
 Authoritative tracking is GitHub issues (milestone
 [Core Validation](https://github.com/P2949/stutter/milestone/1)). Dated history,
 red tests, commits, CI IDs and evidence receipts live in

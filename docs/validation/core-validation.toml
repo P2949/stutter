@@ -1,0 +1,62 @@
+# Core Validation campaign parameters. The task DAG and issue gates are encoded in
+# xtask/src/validation_campaign/graph.rs; this file holds the campaign's tunable parameters.
+# Its SHA-256 is part of every task fingerprint: editing it invalidates source-bound results.
+schema_version = 1
+name = "core-validation"
+
+[release]
+version = "0.1.0"
+tag = "v0.1.0"
+auto_tag = true
+
+[kernels]
+# Distinct observed `uname -r` values required; reboot budget = min(candidates + slack, max).
+required_distinct = 3
+reboot_slack = 2
+max_reboots = 8
+
+[corpus]
+min_positive = 10
+min_negative_control = 10
+min_mixed = 3
+# Failed attempts allowed per required successful capture before BLOCKED_RESOURCE.
+failed_attempts_per_capture = 3
+
+[overhead]
+rounds = 12
+seconds = 20
+
+[score]
+levels_ms = [0, 1, 2, 4, 8, 16]
+
+[retry]
+default_attempts = 2
+
+[policy]
+# Only tasks the graph marks optional may be listed; none are today.
+skip_tasks = []
+
+[policy.capabilities]
+supported = [
+    "doctor",
+    "record",
+    "bench",
+    "report",
+    "audit",
+    "completions_and_man",
+]
+experimental = [
+    "diagnose",
+    "advisor",
+    "tune_evaluation",
+    "restore",
+    "cpu_affinity_experiment",
+    "process_priority_and_placement",
+    "system_wide_tuning",
+    "always_on_autotune",
+    "remote_agent_mutation",
+]
+internal = [
+    "privileged_worker",
+    "fake_action_provider",
+]

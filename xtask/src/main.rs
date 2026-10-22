@@ -25,6 +25,7 @@ pub mod refresh_tune_recommendation;
 pub mod release_package;
 pub mod score_evaluation;
 pub mod score_target;
+pub mod validation_campaign;
 pub mod workflow;
 
 use crate::{
@@ -123,6 +124,11 @@ pub enum XtaskCommand {
         #[arg(long)]
         out: Option<PathBuf>,
     },
+    #[command(
+        name = "validation-campaign",
+        about = "Drive the resumable Core Validation campaign (init, status, continue, verify)"
+    )]
+    ValidationCampaign(validation_campaign::cli::CampaignArgs),
     #[command(
         name = "kernel-matrix",
         about = "Report observed kernel compatibility from the evidence index"
@@ -389,6 +395,7 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
         } => live_acceptance::workload(seconds, &ready, descendants),
         XtaskCommand::ReleasePackage(args) => release_package::package_release(&root, &args),
         XtaskCommand::ReleaseVerify(args) => release_package::verify_release(&args),
+        XtaskCommand::ValidationCampaign(args) => validation_campaign::run(&root, args),
         XtaskCommand::KernelMatrix { require } => kernel_matrix::run(&root, require),
         XtaskCommand::EvidenceIndex(args) => evidence_bundle::index_entry(&args.bundle),
         XtaskCommand::Calibrate {
