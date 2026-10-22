@@ -47,6 +47,7 @@ pub async fn dispatch(command: AppCommand) -> Result<(), StutterError> {
         AppCommand::Advisor(input) => misc::run_advisor_command(input).await,
         AppCommand::Doctor(input) => misc::run_doctor_command(input),
         AppCommand::Probes(input) => misc::run_probes_command(input),
+        AppCommand::Capabilities(input) => misc::run_capabilities_command(input),
         AppCommand::ProfileTemplate(input) => misc::run_profile_template_command(input),
         AppCommand::InspectIrqs(input) => misc::run_inspect_irqs_command(input),
         AppCommand::InspectDrmTracepoints(input) => {

@@ -137,6 +137,10 @@ pub(in crate::architecture_tests) const EXPECTED_API_PUBLIC_MODULES: &[ExpectedP
         reason: "public autotune command, planning, status, and data contracts",
     },
     ExpectedPublicModule {
+        name: "capabilities",
+        reason: "capability tier registry consumed by the CLI and repository evidence checks",
+    },
+    ExpectedPublicModule {
         name: "config",
         reason: "public configuration model, source, and merge contracts",
     },

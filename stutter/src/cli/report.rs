@@ -13,6 +13,12 @@ pub(super) struct CompletionsArgs {
 }
 
 #[derive(Args, Debug, Clone)]
+pub(super) struct CapabilitiesArgs {
+    #[arg(long)]
+    pub(super) json: bool,
+}
+
+#[derive(Args, Debug, Clone)]
 pub(super) struct ProbesArgs {
     #[arg(long)]
     pub(super) json: bool,

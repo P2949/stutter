@@ -50,6 +50,9 @@ Per-objective maturity, primary metrics, fallbacks and guardrails are defined by
 generated into [AUTOTUNE_OBJECTIVES.md](AUTOTUNE_OBJECTIVES.md). This roadmap
 intentionally does not duplicate that table.
 
+Capability tiers (Supported/Experimental/Internal/Disabled) and graduation requirements are
+defined in [CAPABILITIES.md](CAPABILITIES.md) and printed by `stutter capabilities`.
+
 ## Direction
 
 Near-term work should improve trust, repeatability, and rollback before adding broader system changes:

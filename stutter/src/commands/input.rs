@@ -41,6 +41,7 @@ pub enum AppCommand {
     Advisor(AdvisorCommandInput),
     Doctor(DoctorCommandInput),
     Probes(ProbesCommandInput),
+    Capabilities(CapabilitiesCommandInput),
     ProfileTemplate(ProfileTemplateCommandInput),
     InspectIrqs(InspectIrqsCommandInput),
     InspectDrmTracepoints(InspectDrmTracepointsCommandInput),
@@ -311,6 +312,11 @@ pub struct AdvisorCommandInput {
 #[derive(Debug)]
 pub struct DoctorCommandInput {
     pub input: DoctorInput,
+}
+
+#[derive(Debug)]
+pub struct CapabilitiesCommandInput {
+    pub json: bool,
 }
 
 #[derive(Debug)]

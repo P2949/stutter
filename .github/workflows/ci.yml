@@ -53,6 +53,9 @@ jobs:
       - name: Objective documentation contract
         run: cargo run -p xtask -- objective-docs --check
 
+      - name: Capability tiers match verified evidence
+        run: cargo run -p xtask -- capability-check
+
       - name: Run offline recommendation smoke
         run: scripts/smoke/offline_recommendation.sh
 

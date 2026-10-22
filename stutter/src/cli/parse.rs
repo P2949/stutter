@@ -77,6 +77,7 @@ where
         Some(Command::Completions(args)) => reports::parse_completions_command(args),
         Some(Command::Man(args)) => reports::parse_man_command(args),
         Some(Command::Probes(args)) => reports::parse_probes_command(args),
+        Some(Command::Capabilities(args)) => reports::parse_capabilities_command(args),
         Some(Command::Rules(args)) => rules_scenario::parse_rules_command(args),
         Some(Command::Scenario(args)) => rules_scenario::parse_scenario_command(args),
     }
