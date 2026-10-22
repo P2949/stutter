@@ -6,22 +6,23 @@ use super::super::{
     prove_fix::ProveFixArgs,
     release::{ReleaseArgs, ReleaseCommand},
     report::{
-        AdvisorArgs, ApplyProfileArgs, AuditArgs, CheckArgs, CompareArgs, CompareCommand,
-        CompletionsArgs, InspectDrmTracepointsArgs, InspectIrqsArgs, InspectTreeArgs, ManArgs,
-        ProbesArgs, ProfilePlanArgs, ProfileTemplateArgs, RecommendArgs, ReportArgs, RestoreArgs,
-        SummaryArgs, TuneArgs, WaylandProbeArgs,
+        AdvisorArgs, ApplyProfileArgs, AuditArgs, CapabilitiesArgs, CheckArgs, CompareArgs,
+        CompareCommand, CompletionsArgs, InspectDrmTracepointsArgs, InspectIrqsArgs,
+        InspectTreeArgs, ManArgs, ProbesArgs, ProfilePlanArgs, ProfileTemplateArgs, RecommendArgs,
+        ReportArgs, RestoreArgs, SummaryArgs, TuneArgs, WaylandProbeArgs,
     },
     validate::{ValidateArgs, parse_optional_task_class},
 };
 use crate::{
     commands::input::{
         AdvisorCommandInput, AppCommand, ApplyProfileCommandInput, AuditCommandInput,
-        CheckCommandInput, CompletionsCommandInput, ConfigCheckCommandInput,
-        DaemonConfigExplainCommandInput, DisplayPathCompareCommandInput, DoctorCommandInput,
-        InspectIrqsCommandInput, InspectTreeCommandInput, ManCommandInput, ProbesCommandInput,
-        ProfilePlanCommandInput, ProfileTemplateCommandInput, ProveFixCommandInput,
-        RecommendCommandInput, ReleaseCheckCommandInput, ReportCommandInput, RestoreCommandInput,
-        SummaryCommandInput, TuneCommandInput, ValidateCommandInput, WaylandProbeCommandInput,
+        CapabilitiesCommandInput, CheckCommandInput, CompletionsCommandInput,
+        ConfigCheckCommandInput, DaemonConfigExplainCommandInput, DisplayPathCompareCommandInput,
+        DoctorCommandInput, InspectIrqsCommandInput, InspectTreeCommandInput, ManCommandInput,
+        ProbesCommandInput, ProfilePlanCommandInput, ProfileTemplateCommandInput,
+        ProveFixCommandInput, RecommendCommandInput, ReleaseCheckCommandInput, ReportCommandInput,
+        RestoreCommandInput, SummaryCommandInput, TuneCommandInput, ValidateCommandInput,
+        WaylandProbeCommandInput,
     },
     release::{ReleaseChannel, ReleaseReadinessInputs},
 };
@@ -421,11 +422,35 @@ pub(super) fn parse_man_command(args: ManArgs) -> anyhow::Result<AppCommand> {
     }))
 }
 
+pub(super) fn parse_capabilities_command(args: CapabilitiesArgs) -> anyhow::Result<AppCommand> {
+    Ok(AppCommand::Capabilities(CapabilitiesCommandInput {
+        json: args.json,
+    }))
+}
+
 pub(super) fn parse_probes_command(args: ProbesArgs) -> anyhow::Result<AppCommand> {
     Ok(AppCommand::Probes(ProbesCommandInput {
         json: args.json,
         include_planned: args.include_planned,
     }))
+}
+
+#[cfg(test)]
+mod capabilities_tests {
+    use crate::{cli::parse_app_command_from, commands::input::AppCommand};
+
+    #[test]
+    fn capabilities_command_parses_with_and_without_json() {
+        for (argv, json) in [
+            (vec!["stutter", "capabilities"], false),
+            (vec!["stutter", "capabilities", "--json"], true),
+        ] {
+            match parse_app_command_from(argv).unwrap() {
+                AppCommand::Capabilities(input) => assert_eq!(input.json, json),
+                other => panic!("expected capabilities command, got {other:?}"),
+            }
+        }
+    }
 }
 
 #[cfg(test)]

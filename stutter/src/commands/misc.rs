@@ -155,6 +155,18 @@ pub fn run_doctor_command(input: input::DoctorCommandInput) -> anyhow::Result<()
     doctor::doctor_command(input.input)
 }
 
+pub fn run_capabilities_command(input: input::CapabilitiesCommandInput) -> anyhow::Result<()> {
+    if input.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(crate::capability_tiers::capability_registry())?
+        );
+    } else {
+        print!("{}", crate::capability_tiers::render_capabilities_text());
+    }
+    Ok(())
+}
+
 pub fn run_probes_command(input: input::ProbesCommandInput) -> anyhow::Result<()> {
     probe_catalog::probes_command(input.json, input.include_planned)
 }

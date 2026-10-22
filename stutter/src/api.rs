@@ -291,6 +291,15 @@ pub mod autotune {
     }
 }
 
+pub mod capabilities {
+    //! Public capability-tier registry: the user-facing Supported/Experimental boundary.
+
+    pub use crate::capability_tiers::{
+        CAPABILITIES, Capability, CapabilityClass, CapabilityTier, MUTATING_REQUIRED_EVIDENCE,
+        capability_registry, render_capabilities_text,
+    };
+}
+
 pub mod config {
     //! Public configuration model, source, and merge contracts.
 

@@ -36,6 +36,7 @@ Commands:
   completions              Generate shell completion scripts
   man                      Generate a stutter manual page
   probes                   List implemented and planned probe signals
+  capabilities             List capability tiers (Supported/Experimental/Internal/Disabled)
   rules                    Manage imported community rule metadata
   scenario                 Create and compare repeatable benchmark scenarios
   help                     Print this message or the help of the given subcommand(s)

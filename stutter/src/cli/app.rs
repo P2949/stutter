@@ -10,10 +10,10 @@ use super::{
     prove_fix::ProveFixArgs,
     release::ReleaseArgs,
     report::{
-        AdvisorArgs, ApplyProfileArgs, AuditArgs, CheckArgs, CompareArgs, CompletionsArgs,
-        InspectDrmTracepointsArgs, InspectIrqsArgs, InspectTreeArgs, ManArgs, ProbesArgs,
-        ProfilePlanArgs, ProfileTemplateArgs, RecommendArgs, ReportArgs, RestoreArgs, RulesArgs,
-        ScenarioArgs, SummaryArgs, TuneArgs, WaylandProbeArgs,
+        AdvisorArgs, ApplyProfileArgs, AuditArgs, CapabilitiesArgs, CheckArgs, CompareArgs,
+        CompletionsArgs, InspectDrmTracepointsArgs, InspectIrqsArgs, InspectTreeArgs, ManArgs,
+        ProbesArgs, ProfilePlanArgs, ProfileTemplateArgs, RecommendArgs, ReportArgs, RestoreArgs,
+        RulesArgs, ScenarioArgs, SummaryArgs, TuneArgs, WaylandProbeArgs,
     },
     service::ServiceArgs,
     validate::ValidateArgs,
@@ -121,6 +121,8 @@ pub(super) enum Command {
     Man(ManArgs),
     #[command(about = "List implemented and planned probe signals")]
     Probes(ProbesArgs),
+    #[command(about = "List capability tiers (Supported/Experimental/Internal/Disabled)")]
+    Capabilities(CapabilitiesArgs),
     #[command(about = "Manage imported community rule metadata")]
     Rules(RulesArgs),
     #[command(about = "Create and compare repeatable benchmark scenarios")]

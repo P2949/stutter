@@ -32,5 +32,6 @@ stutter
   completions
   man
   probes
+  capabilities
   rules
   scenario

@@ -26,6 +26,7 @@ pub(crate) mod advisor;
 pub(crate) mod affinity;
 pub(crate) mod ascii_match;
 pub(crate) mod audit;
+pub(crate) mod capability_tiers;
 pub(crate) mod cli;
 pub(crate) mod commands;
 pub(crate) mod community_rules;
