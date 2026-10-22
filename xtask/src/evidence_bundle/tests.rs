@@ -241,3 +241,22 @@ fn evidence_kinds_round_trip_and_unknown_is_rejected() {
     }
     assert!(EvidenceKind::parse("real").is_err());
 }
+
+#[test]
+fn real_workload_overhead_bundles_export_and_verify_with_their_own_kind() {
+    let (raw_dir, out) = (raw("live_overhead", "ok"), Dir::new("out"));
+    for file in ["environment.json", "result.json"] {
+        let path = raw_dir.join(file);
+        let mut value: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        value["evidence_kind"] = json!("real_workload");
+        fs::write(&path, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
+    }
+    let bundle = export(&raw_dir, &out).unwrap();
+    verify_bundle(&bundle).unwrap();
+    let receipt = read_json(&bundle.join("receipt.json")).unwrap();
+    assert_eq!(receipt["evidence_kind"], "real_workload");
+    assert_eq!(receipt["suite"], "live_overhead");
+    // The controlled and real-workload runs are told apart by kind, not by suite id.
+    let entry = crate::evidence_bundle::verified_index_entry(&bundle).unwrap();
+    assert_eq!(entry["evidence_kind"], "real_workload");
+}

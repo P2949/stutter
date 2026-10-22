@@ -20,7 +20,9 @@ Objective maturity is owned by `ObjectiveKind::descriptor()` and generated into
 Objective correctness (direct runnable latency, fixed-work compile primary,
 descriptor registry); startup identity/layout hardening; provider-specific
 automatic-recovery authorization; rollback token persisted before verification
-and before the first affinity mutation; failed-apply fault reporting.
+and before the first affinity mutation; failed-apply fault reporting; the physical
+recovery matrix and real suspend/resume (PASS, indexed); portable evidence tooling;
+the capability-tier registry; the release package and verifier.
 
 Transaction under test:
 
@@ -31,23 +33,30 @@ durable restore snapshot → Applying(token) → first mutable syscall
 
 Do not redesign it unless a real acceptance test exposes a defect.
 
-## Remaining sequence
+## Remaining sequence (dependency order)
 
-| Step | Work | Issues |
-| --- | --- | --- |
-| PR 53 | Canonical controller SIGKILL/restart acceptance: suite identity, `(pid, starttime)` restart identity, six transaction checkpoints, one `LiveExperimentManager` `Measuring` checkpoint | close #47, advance #48/#29 |
-| PR 54 | Interrupted rollback, partial-apply, verify-failure, rollback-failure, stale/replacement identity | close #48 |
-| PR 55 | Opt-in suspend/resume acceptance (`--allow-system-suspend`) | close #29 |
-| PR 56 | Portable evidence bundle, fail-closed privacy export, `evidence-verify` | advance #27/#34 |
-| PR 57 | Controlled real `GameRunnableLatency` acceptance | close #27 |
-| next | Real-kernel compatibility matrix | #30 |
-| next | Profiler overhead characterization | #38 |
-| next | Provenance/coverage extension, diagnosis corpus, per-family calibration, `StutterScore` evaluation | #34, #31, #32, #33 |
-| next | Capability tiers and provider graduation | #35 |
-| final | Release contract, package, fresh-checkout acceptance, tag `v0.1.0` | #36 |
+Offline readiness (done once merged, then freeze one evidence base commit):
+DRM-aware kernel compatibility (#30), observation vs causal confidence (#32),
+frame-aware `StutterScore` evaluation (#33), exact-release evidence gate (#36), and the
+representative real-workload overhead path (#38). Do not collect privileged or kernel
+evidence against code that is still changing.
 
-Issue order: recovery #47 → #48 → #29; evidence #27 → #34 (foundation) → #30 → #38;
-validation #34 → #31 → #32 → #33; product #35 → #36.
+| Step | Needs | Work | Issues |
+| --- | --- | --- | --- |
+| 1 | root/`CAP_BPF` | Observation, controlled `GameRunnableLatency`, controlled overhead (A-F) plus a representative real-workload overhead run, controlled runnable `StutterScore` | #27, #38, #33 |
+| 2 | three real kernels | `live-acceptance kernel-compat` on at least three distinct kernel releases | #30 |
+| 3 | real recordings | Diagnosis corpus to the evidence floors (per family: real positives, matched negatives, mixed/confounded) | #31 |
+| 4 | corpus | `calibrate --family scheduler\|io\|irq\|gpu`: threshold and observation/causal-confidence decisions (retain is a valid outcome) | #32 |
+| 5 | frame-producing workload | `score-evaluate --require-frames` over 0/1/2/4/8/16 ms | #33 |
+| 6 | steps 1-5 | Evidence maturity closure (`index.json`, `fixture-coverage`) and capability tiers (`capability-check`) | #34, #35 |
+| 7 | maintainer | Freeze the release candidate commit (`RC`); no evidence-index or doc commits onto it | #36 |
+| 8 | exact `RC` | Offline acceptance, fresh live suites for every Supported capability, `release-verify --require-acceptance --acceptance-bundle ...`, package-install smoke, tag `v0.1.0` at `RC` | #36 |
+
+Exported bundles are verified again (`evidence-verify`) and indexed with `evidence-index`;
+index entries are never hand-written. Exact-release acceptance consumes external bundles,
+not the committed index. Maintainer decisions that stay explicit: whether CPU affinity
+graduates, whether the documented evidence limitations are acceptable for release, and
+authorization of the final tag.
 
 ## Rules
 
