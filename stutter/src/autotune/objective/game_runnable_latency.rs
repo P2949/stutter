@@ -6,7 +6,7 @@ use crate::autotune::comparison::ExperimentResult;
 
 /// Provisional conservative thresholds, pending real-system calibration. A p99
 /// needs at least 1,000 events (roughly ten observations in its upper 1%).
-pub(crate) const MINIMUM_RUNNABLE_SAMPLES: u64 = 1_000;
+pub const MINIMUM_RUNNABLE_SAMPLES: u64 = 1_000;
 const MIN_IMPROVEMENT_PERCENT: f64 = 12.5;
 const MAX_REGRESSION_PERCENT: f64 = 7.5;
 

@@ -88,8 +88,9 @@ pub mod autotune {
             recover_affinity_acceptance_controller,
         },
         objective::{
-            ObjectiveDescriptor, ObjectiveFallbackPolicy, ObjectiveKind, ObjectiveMaturity,
-            ObjectiveSignalQuality,
+            MINIMUM_RUNNABLE_SAMPLES, ObjectiveDescriptor, ObjectiveFallbackPolicy, ObjectiveKind,
+            ObjectiveMaturity, ObjectiveSignalQuality, ObjectiveSignals,
+            game_runnable_unavailable_reason, runnable_signals_for_target,
         },
     };
 
@@ -542,19 +543,23 @@ pub mod process_tree {
 pub mod recorder {
     //! Public recording artifact schema, live recorder, retention, and writer contracts.
 
-    pub use crate::recorder::{
-        ArtifactSchemaVersion, BlockIoRecord, CpuFreqRecord, CpuPerfStatus, CsvOutput,
-        ExporterState, FinalizeRecordingInput, FocusEvent, ForegroundEvent, FrameEvent, GpuSample,
-        IntervalCsvWriter, IntervalRecord, IrqEventRecord, LiveBuffers, LiveRecorder,
-        MAX_SPIKE_EVENTS, MetadataFile, MigrationEventRecord, NdjsonWriter, RecordedConfig,
-        RecordedCpuSnapshot, RecordedLatency, RecordedSpike, RecordedTime, RecordingCounters,
-        RecordingRetentionPolicy, RecordingRetentionSummary, RecordingRun, RecordingWarning,
-        RecordingWarningKind, RuntimeSliceRecord, SESSION_SCHEMA_VERSION, ScxEvent, SessionFile,
-        SessionMetadataCore, SessionSpike, SessionTask, SpikeDiagnosticContext, SpikeEvent,
-        SpikeEventBuffer, SpikePushResult, StdoutJsonStream, SyncTracker, TreeEvent, WakerEntry,
-        apply_recording_retention, ensure_min_free_space_for_path, finalize_recording,
-        prepare_recording, print_recording_warnings, recorded_config, recorded_time,
-        recording_warnings, write_ndjson_value,
+    pub use crate::{
+        metrics::{LatencyHistogram, LatencyHistogramBucket},
+        recorder::{
+            ArtifactSchemaVersion, BlockIoRecord, CpuFreqRecord, CpuPerfStatus, CsvOutput,
+            ExporterState, FinalizeRecordingInput, FocusEvent, ForegroundEvent, FrameEvent,
+            GpuSample, IntervalCsvWriter, IntervalRecord, IrqEventRecord, LiveBuffers,
+            LiveRecorder, MAX_SPIKE_EVENTS, MetadataFile, MigrationEventRecord, NdjsonWriter,
+            RecordedConfig, RecordedCpuSnapshot, RecordedLatency, RecordedSpike, RecordedTime,
+            RecordingCounters, RecordingRetentionPolicy, RecordingRetentionSummary, RecordingRun,
+            RecordingWarning, RecordingWarningKind, RuntimeSliceRecord, SESSION_SCHEMA_VERSION,
+            ScxEvent, SessionFile, SessionMetadataCore, SessionSpike, SessionTask,
+            SpikeDiagnosticContext, SpikeEvent, SpikeEventBuffer, SpikePushResult,
+            StdoutJsonStream, SyncTracker, TreeEvent, WakerEntry, apply_recording_retention,
+            ensure_min_free_space_for_path, finalize_recording, prepare_recording,
+            print_recording_warnings, recorded_config, recorded_time, recording_warnings,
+            write_ndjson_value,
+        },
     };
 }
 

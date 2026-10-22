@@ -4,6 +4,13 @@ mod compile_throughput;
 pub(crate) mod decision;
 mod descriptor;
 pub use descriptor::{ObjectiveDescriptor, ObjectiveFallbackPolicy, ObjectiveMaturity};
+pub use game_runnable_latency::MINIMUM_RUNNABLE_SAMPLES;
+pub use runnable_signal::runnable_signals_for_target;
+
+/// Why the direct runnable-latency signal is unusable for the objective, if it is.
+pub fn game_runnable_unavailable_reason(signals: &ObjectiveSignals) -> Option<String> {
+    game_runnable_latency::unavailable_reason(signals)
+}
 mod desktop_interactivity;
 mod game_frame_pacing;
 mod game_runnable_latency;
