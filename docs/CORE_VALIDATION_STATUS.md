@@ -643,3 +643,23 @@ confidence. `xtask calibrate` now reports `observation_confidence_distribution`,
 `false_high_causal_confidence` per sweep point; scoring of the detected cause is unchanged
 and independent of both. No threshold changed. This is tooling and a policy, not a
 calibration result: #32 still needs the real corpus (#31).
+
+## 2026-10-22: real suspend/resume acceptance PASS (#29)
+
+PRs #53-#65 were merged into `main` in stack order. `xtask live-acceptance suspend-resume
+--allow-system-suspend` was then run, with the operator's explicit consent, from clean
+`main` at `7a43864` (kernel 6.18.55; no RTC alarm available, woken manually). Result **PASS**
+(bundle verified, manifest sha256 `fb9cf5f7...e5ef`, pinned in `docs/evidence/index.json`):
+the low-risk CPU-affinity candidate was physically applied and `Measuring` before suspend;
+the kernel's `suspend_stats` incremented 1 -> 2; the runtime detected the 6.3 s clock gap,
+cleared the measurement window (0 intervals), reverted the candidate (journal `reverted`),
+set the stabilization cooldown, and independent `/proc` readback matched the original masks.
+
+An earlier real run (same code before the fix) exposed a harness race - the controller wrote
+`resume-handled.json` and exited before the harness polled, which was misreported as FAIL;
+fixed so the handshake file wins over the liveness check. All fourteen #29 matrix entries now
+have retained PASS evidence: before apply, after preparation, mid apply, after apply, during
+verify, after verify, manager Measuring, partial-apply error, verify failure, interrupted
+rollback, rollback failure, replacement identity (real-process startup-recovery test),
+suspend/resume, and future mutation blocked while faulted. Observation, game-runnable,
+kernel, overhead and score-degradation suites still require a privileged run.
