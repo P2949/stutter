@@ -16,6 +16,22 @@ pub(crate) mod recovery;
 
 #[derive(Clone, Debug, Eq, PartialEq, Subcommand)]
 pub enum Suite {
+    SuspendResume {
+        #[arg(long)]
+        out: PathBuf,
+        #[arg(long)]
+        stutter_bin: PathBuf,
+        /// Required: this suite really suspends the machine.
+        #[arg(long)]
+        allow_system_suspend: bool,
+        #[arg(long, default_value = "systemctl suspend")]
+        suspend_command: String,
+        /// Arm an RTC wake alarm with `rtcwake -m no` first (needs permission).
+        #[arg(long)]
+        rtcwake_seconds: Option<u64>,
+        #[arg(long, default_value_t = 600)]
+        resume_timeout_seconds: u64,
+    },
     Recovery {
         #[arg(long)]
         out: PathBuf,
@@ -182,6 +198,26 @@ pub fn run(root: &Path, suite: Suite) -> anyhow::Result<()> {
         } => (out, stutter_bin, seconds),
         Suite::Affinity { out, stutter_bin } => return affinity::run(root, &out, &stutter_bin),
         Suite::Recovery { out, stutter_bin } => return recovery::run(root, &out, &stutter_bin),
+        Suite::SuspendResume {
+            out,
+            stutter_bin,
+            allow_system_suspend,
+            suspend_command,
+            rtcwake_seconds,
+            resume_timeout_seconds,
+        } => {
+            return recovery::run_suspend(
+                root,
+                &out,
+                &stutter_bin,
+                &recovery::SuspendOptions {
+                    allow_system_suspend,
+                    suspend_command,
+                    rtcwake_seconds,
+                    resume_timeout_seconds,
+                },
+            );
+        }
     };
     ensure!(cfg!(target_os = "linux"), "live acceptance requires Linux");
     fs::create_dir(&out)

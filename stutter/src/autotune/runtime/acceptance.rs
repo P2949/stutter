@@ -94,3 +94,104 @@ pub(crate) fn run_failure_scenario(
     fs::rename(temporary, out.join("failure-report.json"))?;
     Ok(())
 }
+
+/// Starts a real low-risk candidate, keeps it measuring across a real system
+/// suspend, and reports how the production lifecycle policy handled the resume.
+pub(crate) fn run_suspend_resume(
+    out: &Path,
+    tree_pid: u32,
+    desired: crate::affinity::CpuMask,
+    resume_timeout: std::time::Duration,
+) -> anyhow::Result<()> {
+    use crate::autotune::crash_acceptance::publish_acceptance_handshake;
+    let journal_path = out.join("controller.json");
+    let mut config = AutotuneRuntimeConfig::from_daemon_config(
+        super::daemon_config_for_runtime_mode(
+            DaemonMode::ApplyLowRisk,
+            ActionSource::AutotuneRuntime,
+            Some(tree_pid),
+            None,
+        ),
+        Some(out.join("decisions.jsonl")),
+    );
+    config.controller_journal_path = Some(journal_path.clone());
+    config.history_log = Some(out.join("history.jsonl"));
+    let mut runtime = AutotuneRuntime::new(config);
+    let observation = acceptance_observation(tree_pid);
+    runtime.apply_decision_side_effects_with_executor(
+        &observation,
+        &AutotuneDecision::StartExperiment {
+            candidate: acceptance_candidate(tree_pid, desired)?,
+            reason: "suspend/resume acceptance".into(),
+        },
+        "suspend/resume acceptance",
+        &mut FaultInjectingExecutor::default(),
+    )?;
+    ensure!(
+        runtime.live_experiments.has_active_experiment(),
+        "no active experiment before suspend"
+    );
+    // A pre-suspend interval in the rolling window: it must not survive resume.
+    runtime
+        .controller
+        .window
+        .push_intervals([crate::recorder::IntervalRecord {
+            samples: 10,
+            ..Default::default()
+        }]);
+    runtime.poll_lifecycle_clock()?;
+    let journal = read_controller_journal(&journal_path)?;
+    publish_acceptance_handshake(
+        out,
+        "suspend-ready.json",
+        json!({
+            "journal_state": journal.state().as_str(),
+            "rollback_token_present": journal.rollback_token().is_some(),
+            "active_experiment": runtime.live_experiments.has_active_experiment(),
+            "window_intervals": runtime.controller.window.interval_count(),
+        }),
+    )?;
+    let deadline = std::time::Instant::now() + resume_timeout;
+    let event = loop {
+        if let Some(event) = runtime.poll_lifecycle_clock()? {
+            break event;
+        }
+        ensure!(
+            std::time::Instant::now() < deadline,
+            "no suspend/resume discontinuity observed"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    };
+    let journal = read_controller_journal(&journal_path)?;
+    let transition = runtime
+        .lifecycle
+        .last_transition
+        .as_ref()
+        .context("lifecycle transition missing")?;
+    let slept_ms = match event {
+        crate::daemon::lifecycle::DaemonLifecycleEvent::ResumeDetected { slept_ms } => {
+            json!(slept_ms.to_string())
+        }
+        other => anyhow::bail!("unexpected lifecycle event {other:?}"),
+    };
+    let cooldown_ms = runtime
+        .controller
+        .state
+        .cooldown_until_unix_nanos
+        .map(|until| until.saturating_sub(crate::audit::unix_nanos_now()) / 1_000_000);
+    publish_acceptance_handshake(
+        out,
+        "resume-handled.json",
+        json!({
+            "slept_ms": slept_ms,
+            "actions": transition.actions.iter().map(|action| action.as_str()).collect::<Vec<_>>(),
+            "stabilization_ms": transition.stabilization_ms,
+            "window_intervals": runtime.controller.window.interval_count(),
+            "active_experiment": runtime.live_experiments.has_active_experiment(),
+            "journal_state": journal.state().as_str(),
+            "journal_token_present": journal.rollback_token().is_some(),
+            "runtime_phase": format!("{:?}", runtime.runtime_phase()),
+            "cooldown_remaining_ms": cooldown_ms.map(|ms| ms.to_string()),
+        }),
+    )
+}

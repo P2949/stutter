@@ -6,15 +6,22 @@ pub(super) enum LiveAcceptanceSuite {
     Observation,
     Affinity,
     Recovery,
+    SuspendResume,
 }
 impl LiveAcceptanceSuite {
     #[cfg(test)]
-    pub(super) const ALL: [Self; 3] = [Self::Observation, Self::Affinity, Self::Recovery];
+    pub(super) const ALL: [Self; 4] = [
+        Self::Observation,
+        Self::Affinity,
+        Self::Recovery,
+        Self::SuspendResume,
+    ];
     pub(super) fn as_str(self) -> &'static str {
         match self {
             Self::Observation => "live_observation",
             Self::Affinity => "live_affinity",
             Self::Recovery => "live_recovery",
+            Self::SuspendResume => "live_suspend_resume",
         }
     }
 }
@@ -292,7 +299,12 @@ mod suite_tests {
         let names = LiveAcceptanceSuite::ALL.map(LiveAcceptanceSuite::as_str);
         assert_eq!(
             names,
-            ["live_observation", "live_affinity", "live_recovery"]
+            [
+                "live_observation",
+                "live_affinity",
+                "live_recovery",
+                "live_suspend_resume"
+            ]
         );
         assert_eq!(
             names
