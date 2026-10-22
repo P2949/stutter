@@ -158,11 +158,19 @@ fn spawn_contenders(
                         .arg(&ready)
                         .stdout(Stdio::null())
                         .stderr(Stdio::null())
+                        .unprivileged()
                         .spawn()?,
                 ));
             }
         }
         Contention::Burst(0) => {}
+        // A campaign with a validation runner requests the contender as a typed action; the
+        // runner owns the process and ends it after the window.
+        Contention::Burst(ms) if super::runner_burst::RunnerEnv::from_process().is_some() => {
+            if let Some(env) = super::runner_burst::RunnerEnv::from_process() {
+                env.start_burst(cpu, ms, 20, seconds + 20)?;
+            }
+        }
         Contention::Burst(ms) => children.push(OwnedChild(
             Command::new("chrt")
                 .args(["-f", "50", "taskset", "-c", &cpu.to_string()])
@@ -210,6 +218,7 @@ pub(super) fn run_scenario(
             .arg(&ready)
             .stdout(Stdio::null())
             .stderr(fs::File::create(dir.join("workload.stderr"))?)
+            .unprivileged()
             .spawn()?,
     );
     let deadline = Instant::now() + Duration::from_secs(5);

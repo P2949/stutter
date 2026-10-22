@@ -8,6 +8,8 @@ use super::{
     state::{CampaignDir, InitInputs},
 };
 
+mod backend;
+mod bootstrap;
 mod evidence;
 mod graph;
 mod init;
@@ -59,10 +61,10 @@ pub(super) fn fresh(scratch: &Scratch) -> (CampaignDir, CampaignState, Graph) {
             campaign_id: "test-campaign".to_owned(),
             repository: scratch.path().to_path_buf(),
             evidence_base: BASE.to_owned(),
-            manifest_sha256: "m".repeat(64),
+            manifest_sha256: "a".repeat(64),
             cargo_lock_sha256: "c".repeat(64),
-            xtask_sha256: "x".repeat(64),
-            stutter_sha256: "s".repeat(64),
+            xtask_sha256: "b".repeat(64),
+            stutter_sha256: "e".repeat(64),
             uid: 1000,
             gid: 1000,
         },

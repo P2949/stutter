@@ -1,0 +1,13 @@
+[Unit]
+Description=Resume an authorized Stutter validation campaign after a reboot (validation only)
+After=local-fs.target
+Before=multi-user.target
+ConditionPathExists=/var/lib/stutter-validation
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/stutter-validation-runner resume --all
+RemainAfterExit=no
+
+[Install]
+WantedBy=multi-user.target

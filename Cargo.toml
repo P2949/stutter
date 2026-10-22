@@ -7,9 +7,10 @@ members = [
     "stutter-core",
     "stutter-ebpf",
     "stutter-report",
+    "stutter-validation-runner",
     "xtask",
 ]
-default-members = ["stutter", "stutter-common", "stutter-config", "stutter-core", "stutter-report"]
+default-members = ["stutter", "stutter-common", "stutter-config", "stutter-core", "stutter-report", "stutter-validation-runner"]
 
 [workspace.package]
 version = "0.1.0"

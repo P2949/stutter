@@ -1,57 +1,17 @@
-//! Task runners available in this build. Live suites run through a `SuiteBackend` (direct
-//! subprocess here; the privileged runner arrives in a later phase). A kind without a real
-//! runner reports an honest block, never a pass.
-use std::{
-    collections::BTreeMap,
-    fs,
-    path::Path,
-    process::{Command, Stdio},
-};
+//! Task runners available in this build. Live suites run through a `SuiteBackend`: directly, or
+//! through the privileged validation runner when `STUTTER_VALIDATION_RUNNER` names its socket.
+//! A kind without a real runner reports an honest block, never a pass.
+use std::{collections::BTreeMap, fs, process::Command};
 
 use serde_json::Value;
 
 use super::{
+    backend::{BackendError, SuiteBackend, SuiteInvocation, backend_from_env},
     evidence::{PipelineFailure, publish_bundle, record_failure},
     executor::{FingerprintExtras, RunContext, RunnerOutcome, TaskRunner},
     graph::{SourceBinding, TaskKind, TaskSpec},
     model::{BlockReason, FailureClass},
 };
-
-/// Executes an `xtask live-acceptance ...` invocation and returns its exit code.
-pub trait SuiteBackend {
-    fn execute(
-        &self,
-        program: &Path,
-        args: &[String],
-        cwd: &Path,
-        log: &Path,
-    ) -> std::io::Result<i32>;
-}
-
-pub struct DirectBackend;
-
-impl SuiteBackend for DirectBackend {
-    fn execute(
-        &self,
-        program: &Path,
-        args: &[String],
-        cwd: &Path,
-        log: &Path,
-    ) -> std::io::Result<i32> {
-        if let Some(parent) = log.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        let stdout = fs::File::create(log)?;
-        let status = Command::new(program)
-            .args(args)
-            .current_dir(cwd)
-            .stdout(stdout.try_clone()?)
-            .stderr(stdout)
-            .stdin(Stdio::null())
-            .status()?;
-        Ok(status.code().unwrap_or(-1))
-    }
-}
 
 /// How a live suite is parameterized.
 #[derive(Clone, Copy)]
@@ -78,34 +38,40 @@ impl TaskRunner for LiveSuiteRunner {
     fn run(&self, context: &RunContext<'_>, spec: &TaskSpec, attempt: u32) -> RunnerOutcome {
         let attempt_dir = context.dir.attempt_dir(spec.id, attempt);
         let raw = attempt_dir.join("raw");
-        let mut args = vec![
-            "live-acceptance".to_owned(),
-            self.suite.to_owned(),
-            "--stutter-bin".to_owned(),
-            context.binaries.stutter.to_string_lossy().into_owned(),
-            "--out".to_owned(),
-            raw.to_string_lossy().into_owned(),
-            "--seconds".to_owned(),
-            context.manifest.overhead.seconds.to_string(),
-        ];
-        if matches!(self.shape, SuiteShape::Overhead) {
-            args.extend([
-                "--rounds".to_owned(),
-                context.manifest.overhead.rounds.to_string(),
-            ]);
-        }
         let artifacts = Some(context.dir.relative(&attempt_dir));
         let log = attempt_dir.join("logs/suite.log");
-        if let Err(error) =
-            self.backend
-                .execute(&context.binaries.xtask, &args, context.repository, &log)
-        {
-            return RunnerOutcome::Failed {
-                class: FailureClass::Retryable,
-                stage: "launch".to_owned(),
-                summary: format!("could not start the suite: {error}"),
-                artifacts,
-            };
+        let invocation = SuiteInvocation {
+            task: spec.id,
+            suite: self.suite,
+            attempt,
+            seconds: context.manifest.overhead.seconds,
+            rounds: matches!(self.shape, SuiteShape::Overhead)
+                .then_some(context.manifest.overhead.rounds),
+            raw: &raw,
+            log: &log,
+            stutter: &context.binaries.stutter,
+            xtask: &context.binaries.xtask,
+            cwd: context.repository,
+            campaign_id: &context.state.campaign_id,
+            manifest_sha256: &context.state.manifest_sha256,
+        };
+        match self.backend.execute(&invocation) {
+            Ok(_) => {}
+            // Not authorized, or no privilege: a block, never a retry loop.
+            Err(BackendError::Privilege(detail)) => {
+                return RunnerOutcome::Blocked(BlockReason {
+                    class: FailureClass::BlockedPrivilege,
+                    detail,
+                });
+            }
+            Err(BackendError::Failed(error)) => {
+                return RunnerOutcome::Failed {
+                    class: FailureClass::Retryable,
+                    stage: "launch".to_owned(),
+                    summary: format!("could not start the suite: {error}"),
+                    artifacts,
+                };
+            }
         }
         let result: Option<Value> = fs::read(raw.join("result.json"))
             .ok()
@@ -342,7 +308,7 @@ pub fn default_runners() -> BTreeMap<TaskKind, Box<dyn TaskRunner>> {
         Box::new(LiveSuiteRunner {
             suite,
             shape,
-            backend: Box::new(DirectBackend),
+            backend: backend_from_env(),
         }) as Box<dyn TaskRunner>
     };
     runners.insert(

@@ -427,6 +427,7 @@ pub(super) fn start_workload(
             .arg(&ready)
             .stdout(Stdio::null())
             .stderr(fs::File::create(out.join("workload.stderr"))?)
+            .unprivileged()
             .spawn()?,
     );
     wait_file(&ready, &mut workload, 5)?;

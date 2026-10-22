@@ -78,3 +78,61 @@ atomic rename into `bundles/`, receipt. Partial directories never count as publi
 duplicate capture id or a bundle for another commit is rejected.
 
 Manual shell recipes in `LIVE_ACCEPTANCE.md` remain a fallback for debugging only.
+
+## Privileged runner (phase B)
+
+Live suites need BPF and scheduler privilege; the campaign must not obtain it by running the
+whole mutable `xtask` as root or by handing the agent `sudo sh`. Two trust domains result:
+
+| domain | components |
+| --- | --- |
+| normal campaign domain | `xtask validation-campaign`, the agent, repository code, workloads, Git/GitHub |
+| privileged validation domain | `stutter-validation-runner` (root service), root-owned authorization, capability delegation, boot control |
+
+`stutter-validation-runner` is a workspace crate built by the ordinary gate. It is **not** part
+of the product package (a test asserts the tarball manifest cannot contain it) and its units
+`packaging/systemd/stutter-validation-{runner,resume}.service` are validation-only.
+
+**Protocol.** Length-prefixed JSON over `/run/stutter-validation/runner.sock` (owned by the
+campaign user, mode 0600), schema-versioned, frames capped at 64 KiB, unknown fields refused.
+Requests are a closed enum: `Status`, `ExecuteLiveSuite`, `ExecuteSchedulerBurst`,
+`PrepareKernelCycle`, `SetNextBoot`, `Reboot`, `ResumeCampaign`, `CancelCampaign`. There is no
+shell, exec, command or argument field, and no caller-chosen path: executables and output
+directories derive from the authorization. Every response carries a structured error and a
+privileged receipt id (rejections are receipted too).
+
+**Authorization.** `/var/lib/stutter-validation/<campaign>/authorization.json` is root-owned
+(mode 0600) and pins the campaign id, owner uid/gid, canonical repository, manifest, runner,
+`xtask` and `stutter` digests, the `PATH` the suites run with, per-task grants
+(`task`, `action`, and for live suites exactly one suite), the reboot budget and the authorized
+boot entries. A request is accepted only if the kernel-reported peer uid (`SO_PEERCRED`)
+equals the owner, the campaign id and manifest digest match, and a grant names that exact
+(task, action, suite). The pinned binaries are re-hashed before every launch.
+
+**Capability separation.** A profiling suite runs as the campaign user with exactly
+`CAP_BPF`, `CAP_PERFMON` and `CAP_SYS_RESOURCE` (plus `CAP_SYS_NICE` for suites that create
+real-time contention), set explicitly: bounding set trimmed, ids dropped with `KEEPCAPS`,
+permitted/effective/inheritable/ambient set exactly, `no_new_privs`. Workloads (external
+commands, synthetic game processes, fio, vkmark) are spawned with *no* capabilities and
+`no_new_privs` regardless of what the parent holds. A controlled contender
+(`ExecuteSchedulerBurst`) is pinned and given SCHED_FIFO 50 while privileged, then loses all
+privilege before `exec`.
+
+**Bootstrap.** `validation-campaign bootstrap` builds the runner, writes a staged
+authorization and runs `runner install` through `sudo -n` (or directly as root). The installer
+re-validates everything (staged file owned by the invoking user, owner == invoker, repository,
+runner digest, units present) and installs only fixed files to fixed locations. Without root
+or passwordless sudo the result is `BLOCKED_PRIVILEGE_BOOTSTRAP`; authentication is never
+bypassed. After a successful bootstrap no further interaction is required. `--dry-run` prints
+the authorization without changing anything.
+
+**Resume.** The oneshot resume unit restarts the controller after a reboot: only the pinned
+`xtask validation-campaign continue --campaign ... --resume`, started after dropping root and
+all capabilities; cancelled, idle, corrupt or digest-mismatched campaigns are never resumed.
+
+**State and failure.** Runner state (reboot budget, cancel flag, resume flag) is written
+durably *before* a reboot; corrupt state stops every action and never reboots.
+
+Tests that need real root (dropping to another uid) detect it at run time and report that they
+were skipped; the rest of the security suite (authorization, protocol, state, planning,
+capability hygiene of children, install, resume) runs unprivileged in CI.

@@ -1,0 +1,27 @@
+[Unit]
+Description=Stutter validation runner (validation infrastructure, not a product component)
+Documentation=https://github.com/P2949/stutter/blob/main/docs/VALIDATION_CAMPAIGN.md
+After=local-fs.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/libexec/stutter-validation-runner serve --authorization /var/lib/stutter-validation/current/authorization.json --state-dir /var/lib/stutter-validation/current
+RuntimeDirectory=stutter-validation
+RuntimeDirectoryMode=0755
+StateDirectory=stutter-validation
+StateDirectoryMode=0700
+Restart=on-failure
+RestrictAddressFamilies=AF_UNIX
+PrivateTmp=true
+ProtectHome=read-only
+ProtectSystem=full
+NoNewPrivileges=false
+# Only what the runner fundamentally needs root for: changing uid/gid, delegating the
+# capabilities the profiling suites need, scheduler priority for contention, and boot control.
+CapabilityBoundingSet=CAP_SETUID CAP_SETGID CAP_SETPCAP CAP_BPF CAP_PERFMON CAP_SYS_RESOURCE CAP_SYS_NICE CAP_SYS_BOOT CAP_CHOWN CAP_DAC_OVERRIDE
+AmbientCapabilities=
+LockPersonality=true
+RestrictRealtime=false
+
+[Install]
+WantedBy=multi-user.target
