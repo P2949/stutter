@@ -6,31 +6,15 @@ pub(super) enum LiveAcceptanceSuite {
     Observation,
     Affinity,
     Recovery,
-    #[allow(dead_code)] // Identifier reserved for a suite that lands in a later PR.
-    GameRunnable,
-    #[allow(dead_code)]
-    Overhead,
-    #[allow(dead_code)]
-    SuspendResume,
 }
 impl LiveAcceptanceSuite {
     #[cfg(test)]
-    pub(super) const ALL: [Self; 6] = [
-        Self::Observation,
-        Self::Affinity,
-        Self::Recovery,
-        Self::GameRunnable,
-        Self::Overhead,
-        Self::SuspendResume,
-    ];
+    pub(super) const ALL: [Self; 3] = [Self::Observation, Self::Affinity, Self::Recovery];
     pub(super) fn as_str(self) -> &'static str {
         match self {
             Self::Observation => "live_observation",
             Self::Affinity => "live_affinity",
             Self::Recovery => "live_recovery",
-            Self::GameRunnable => "live_game_runnable",
-            Self::Overhead => "live_overhead",
-            Self::SuspendResume => "live_suspend_resume",
         }
     }
 }
@@ -308,14 +292,7 @@ mod suite_tests {
         let names = LiveAcceptanceSuite::ALL.map(LiveAcceptanceSuite::as_str);
         assert_eq!(
             names,
-            [
-                "live_observation",
-                "live_affinity",
-                "live_recovery",
-                "live_game_runnable",
-                "live_overhead",
-                "live_suspend_resume"
-            ]
+            ["live_observation", "live_affinity", "live_recovery"]
         );
         assert_eq!(
             names
