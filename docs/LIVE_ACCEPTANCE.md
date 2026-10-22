@@ -253,3 +253,22 @@ New captures declare `evidence_kind` and a complete `[provenance]` table
 counted. Optional `[coverage]` single-line arrays (`objectives`, `providers`,
 `kernel_capabilities`) tag what a fixture covers. Verified live bundles are pinned by
 manifest digest in `docs/evidence/index.json`; only PASS entries count.
+
+## Controlled game-runnable acceptance (needs root/CAP_BPF)
+
+```bash
+sudo target/debug/xtask live-acceptance game-runnable \
+  --stutter-bin target/debug/stutter --out NEW_DIR [--seconds 20]
+```
+
+A disposable workload is installed under `NEW_DIR/steamapps/common/...` so the production
+task classifier (not a test hook) must classify it as a game. Two scenarios run on the same
+workload pinned to one CPU: `baseline` (no contention) and `degraded` (three CPU hogs on the
+same CPU). For each: `record`, artifact validation, analysis, HTML report and advisor run,
+then the objective signal is computed from the recording by production code
+(`runnable_signals_for_target`, the same merged-histogram logic as the live controller).
+Hard requirements per scenario: stable target PID and start time, a recognised game task
+population, at least the objective's minimum scheduler samples, a complete merged histogram,
+positive runnable p99, an available severe-tail count, zero drops and a direct signal. The
+degraded p99 must be strictly worse than the baseline's. Effect-size thresholds stay
+provisional and are not tuned here. Without privileges the suite reports `BLOCKED`.

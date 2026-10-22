@@ -12,10 +12,19 @@ use clap::Subcommand;
 use serde_json::{Value, json};
 mod affinity;
 mod evidence;
+mod game_runnable;
 pub(crate) mod recovery;
 
 #[derive(Clone, Debug, Eq, PartialEq, Subcommand)]
 pub enum Suite {
+    GameRunnable {
+        #[arg(long)]
+        out: PathBuf,
+        #[arg(long)]
+        stutter_bin: PathBuf,
+        #[arg(long, default_value_t = 20, value_parser = clap::value_parser!(u64).range(10..=60))]
+        seconds: u64,
+    },
     SuspendResume {
         #[arg(long)]
         out: PathBuf,
@@ -197,6 +206,13 @@ pub fn run(root: &Path, suite: Suite) -> anyhow::Result<()> {
             seconds,
         } => (out, stutter_bin, seconds),
         Suite::Affinity { out, stutter_bin } => return affinity::run(root, &out, &stutter_bin),
+        Suite::GameRunnable {
+            out,
+            stutter_bin,
+            seconds,
+        } => {
+            return game_runnable::run(root, &out, &stutter_bin, seconds);
+        }
         Suite::Recovery { out, stutter_bin } => return recovery::run(root, &out, &stutter_bin),
         Suite::SuspendResume {
             out,

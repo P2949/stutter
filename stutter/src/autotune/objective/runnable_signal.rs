@@ -165,3 +165,65 @@ impl ObjectiveSignals {
         };
     }
 }
+
+/// Production runnable-latency signal for one identified target process, computed from
+/// recorded intervals with the same merged-histogram logic the live controller uses.
+/// Used by live acceptance so it never injects an already-computed objective signal.
+pub fn runnable_signals_for_target(
+    records: &[IntervalRecord],
+    root_pid: u32,
+    starttime_ticks: u64,
+) -> ObjectiveSignals {
+    let mut signals = ObjectiveSignals::default();
+    signals.set_runnable_latency_from_records(
+        records
+            .iter()
+            .filter(|record| record.process_pid == Some(root_pid)),
+    );
+    signals.runnable_target_root_pid = Some(root_pid);
+    signals.runnable_target_starttime_ticks = Some(starttime_ticks);
+    signals
+}
+
+#[cfg(test)]
+mod target_signal_tests {
+    use super::*;
+    use crate::metrics::LatencyHistogram;
+
+    fn record(pid: u32, class: TaskClass, samples: u64) -> IntervalRecord {
+        let mut buckets = LatencyHistogram::new().snapshot();
+        buckets[0].count = samples;
+        IntervalRecord {
+            process_pid: Some(pid),
+            class,
+            samples,
+            max_ns: 1,
+            histogram: buckets,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn only_the_target_games_scheduler_population_is_counted() {
+        let records = [
+            record(10, TaskClass::Game, 600),
+            record(10, TaskClass::GameWorkerThread, 700),
+            record(10, TaskClass::Compiler, 5_000),
+            record(11, TaskClass::Game, 9_000),
+        ];
+        let signals = runnable_signals_for_target(&records, 10, 77);
+        assert_eq!(signals.runnable_samples, Some(1_300));
+        assert_eq!(
+            signals.signal_quality.runnable_latency,
+            ObjectiveSignalQuality::Direct
+        );
+        assert_eq!(signals.runnable_target_root_pid, Some(10));
+        assert_eq!(signals.runnable_target_starttime_ticks, Some(77));
+        let other = runnable_signals_for_target(&records, 99, 1);
+        assert_eq!(
+            other.signal_quality.runnable_latency,
+            ObjectiveSignalQuality::Missing
+        );
+        assert!(other.runnable_samples.is_none());
+    }
+}
