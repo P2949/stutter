@@ -1,6 +1,6 @@
 use super::*;
 
-pub(crate) struct Dir(std::path::PathBuf);
+pub(crate) struct Dir(pub(crate) std::path::PathBuf);
 static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 impl Dir {

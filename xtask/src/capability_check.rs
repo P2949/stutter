@@ -1,5 +1,5 @@
-//! A capability may be `Supported` only if every live suite it requires has a PASS,
-//! controlled-or-real entry in the verified-evidence index. Also reports graduation gaps.
+//! A capability may be `Supported` only if every live suite it requires has a PASS entry of
+//! kind `controlled_real` or `real_workload` in the verified-evidence index. Also reports graduation gaps.
 use std::{collections::BTreeSet, fs, path::Path};
 
 use anyhow::{Context, ensure};
@@ -16,6 +16,14 @@ pub fn indexed_passing_suites(index: &Value) -> anyhow::Result<BTreeSet<String>>
         .context("entries must be an array")?
         .iter()
         .filter(|entry| entry["status"] == "PASS")
+        // A live-suite requirement is met only by real-system evidence: a synthetic or
+        // fixture-real PASS that merely carries the suite name does not count.
+        .filter(|entry| {
+            matches!(
+                entry["evidence_kind"].as_str(),
+                Some("controlled_real" | "real_workload")
+            )
+        })
         .filter_map(|entry| entry["suite"].as_str().map(str::to_owned))
         .collect())
 }
@@ -108,6 +116,24 @@ mod tests {
         assert!(
             gaps.iter()
                 .any(|gap| gap.starts_with("restore") && !gap.contains("live_recovery"))
+        );
+    }
+
+    #[test]
+    fn only_real_live_kinds_satisfy_a_suite_requirement() {
+        let entry = |kind: &str, suite: &str| serde_json::json!({"suite":suite,"status":"PASS","evidence_kind":kind});
+        let index = serde_json::json!({"schema_version":1,"entries":[
+            entry("synthetic", "live_observation"),
+            entry("fixture_real", "live_recovery"),
+            entry("controlled_real", "live_affinity"),
+            entry("real_workload", "live_overhead"),
+            {"suite":"live_kernel_compat","status":"FAIL","evidence_kind":"controlled_real"},
+            {"suite":"live_game_runnable","status":"PASS"},
+        ]});
+        let suites = indexed_passing_suites(&index).unwrap();
+        assert_eq!(
+            suites.into_iter().collect::<Vec<_>>(),
+            ["live_affinity", "live_overhead"]
         );
     }
 }

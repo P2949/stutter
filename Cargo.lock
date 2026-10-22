@@ -3826,8 +3826,11 @@ dependencies = [
  "cargo_metadata",
  "clap",
  "libc",
+ "serde",
  "serde_json",
  "stutter",
+ "stutter-core",
+ "toml",
 ]
 
 [[package]]

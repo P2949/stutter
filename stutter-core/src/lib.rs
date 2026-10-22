@@ -5,6 +5,7 @@
 //! This crate must remain independent from the main `stutter` application crate.
 
 pub mod clock;
+pub mod hash;
 pub mod ids;
 pub mod paths;
 pub mod reason;
