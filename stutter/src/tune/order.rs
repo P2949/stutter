@@ -208,3 +208,40 @@ mod tests {
         assert_eq!(first, second);
     }
 }
+
+/// Counterbalanced execution order for `count` conditions at 1-based `iteration`, using
+/// the same mechanism as `tune --order`: `Some(seed)` is the seeded shuffle, `None` the
+/// alternating rotation with reversed blocks. Shared with overhead acceptance so order
+/// handling is not reimplemented.
+pub fn counterbalanced_order(count: usize, iteration: u32, seed: Option<u64>) -> Vec<usize> {
+    let strategy = seed.map_or(TuneOrderStrategy::Alternating, TuneOrderStrategy::Seed);
+    candidate_order_for_iteration_with_strategy(count, iteration, strategy)
+}
+
+#[cfg(test)]
+mod counterbalanced_tests {
+    use super::*;
+
+    #[test]
+    fn rotation_balances_every_position_across_two_blocks() {
+        let mut position_counts = vec![vec![0_u32; 6]; 6];
+        for iteration in 1..=12 {
+            for (position, condition) in counterbalanced_order(6, iteration, None)
+                .into_iter()
+                .enumerate()
+            {
+                position_counts[condition][position] += 1;
+            }
+        }
+        assert!(position_counts.iter().flatten().all(|count| *count == 2));
+    }
+
+    #[test]
+    fn seeded_orders_are_reproducible_permutations() {
+        let order = counterbalanced_order(6, 3, Some(42));
+        assert_eq!(order, counterbalanced_order(6, 3, Some(42)));
+        let mut sorted = order.clone();
+        sorted.sort_unstable();
+        assert_eq!(sorted, vec![0, 1, 2, 3, 4, 5]);
+    }
+}

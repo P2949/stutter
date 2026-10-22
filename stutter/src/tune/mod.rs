@@ -23,6 +23,7 @@ pub(crate) use comparability::TuneCoverageMetrics;
 pub(crate) use order::TuneOrderStrategy;
 #[cfg(test)]
 pub(crate) use order::candidate_order_for_iteration;
+pub use order::counterbalanced_order;
 use order::tune_candidate_order;
 use ranking::select_best_profile;
 pub(crate) use ranking::{assess_ranking_confidence, profile_stats_from_grouped};

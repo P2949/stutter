@@ -586,6 +586,7 @@ pub mod tune_recommendation {
         RankingConfidence, TuneCandidateSummary, TuneIterationOrder, TuneProfilePlanSummary,
         TuneProfileRulePlanSummary, TuneProfileStats, TuneSummary,
         comparability::TuneCoverageMetrics,
+        counterbalanced_order,
         recommendation::{
             TuneRecommendation, TuneRecommendationComparison, TuneRecommendationMetrics,
             TuneRecommendationProfilePlanSummary, TuneRecommendationVerdict,

@@ -272,3 +272,32 @@ population, at least the objective's minimum scheduler samples, a complete merge
 positive runnable p99, an available severe-tail count, zero drops and a direct signal. The
 degraded p99 must be strictly worse than the baseline's. Effect-size thresholds stay
 provisional and are not tuned here. Without privileges the suite reports `BLOCKED`.
+
+## Kernel compatibility (needs root/CAP_BPF)
+
+`xtask live-acceptance kernel-compat --stutter-bin BIN --out DIR` validates the kernel's own
+tracepoint formats (`doctor tracepoints --dump`, retained verbatim) and performs one real
+loader/record run. State is observed, never inferred from distribution or version:
+`ObservedIncompatible` if `sched_wakeup`/`sched_switch` are not compatible or the loader
+fails; `ObservedDegraded` if only optional evidence (`sched_stat_wait`, IRQ, block I/O,
+cpu_frequency, migration, process lifecycle) is missing, naming the degraded capabilities;
+`ObservedCompatible` otherwise; `Untested` with no evidence. DRM/KMS and GPU/platform
+telemetry are not covered yet. Export and verify the bundle, then
+`cargo run -p xtask -- evidence-index BUNDLE` prints its `docs/evidence/index.json` entry
+(including `kernel_release` and `compatibility`); `cargo run -p xtask -- kernel-matrix
+--require 3` reports observed kernels and fails with fewer than three distinct ones. When a
+new real tracepoint layout appears, capture, sanitize and add it as a fixture plus a
+preflight/decoder regression; never invent layouts.
+
+## Profiler overhead (needs root/CAP_BPF)
+
+`xtask live-acceptance overhead --stutter-bin BIN --out DIR [--rounds 12] [--seconds 20]
+[--seed N]` runs a single-CPU-pinned game-path workload under six configurations: A profiler
+disabled, B scheduler core, C + IRQ, D + block I/O, E + display/GPU evidence, F full
+supported set. Order uses the project's `tune --order` mechanism (`counterbalanced_order`:
+alternating rotation or `seed:N`) and the per-round order is retained. Profiler side: CPU
+percent, peak RSS, event rate, drops, artifact write errors. Workload side: throughput
+(busy-loop iterations per second), runnable p99 and >5 ms rate. Unavailable probe sets are
+reported DEGRADED and not measured; no acceptable-overhead target is chosen. Each result
+carries a bounded claim naming kernel, probe set, median and IQR. The synthetic workload has
+no frame times, so frame metrics are not claimed.
