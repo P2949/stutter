@@ -113,21 +113,30 @@ pub fn score_from_interval_records_and_frames(
 }
 
 pub fn calculate_frame_metrics(frames: &[crate::recorder::FrameEvent]) -> (f64, f64) {
+    let max = frame_time_percentile_ms(frames, 1.0).unwrap_or(0.0);
+    let p99 = frame_time_percentile_ms(frames, 0.99).unwrap_or(0.0);
+    (max, p99)
+}
+
+/// Nearest-rank percentile of finite frame times (`fraction` in `0..=1`; `1.0` is the
+/// maximum). `None` when there are no finite frames, so callers never invent a zero.
+pub fn frame_time_percentile_ms(
+    frames: &[crate::recorder::FrameEvent],
+    fraction: f64,
+) -> Option<f64> {
     let mut times: Vec<f64> = frames
         .iter()
         .map(|f| f.frametime_ms)
         .filter(|value| value.is_finite())
         .collect();
     if times.is_empty() {
-        return (0.0, 0.0);
+        return None;
     }
     times.sort_by(|a, b| a.total_cmp(b));
-    let max = *times.last().unwrap_or(&0.0);
-    let p99_idx = ((times.len() as f64 * 0.99).ceil() as usize)
+    let index = ((times.len() as f64 * fraction).ceil() as usize)
         .saturating_sub(1)
         .min(times.len() - 1);
-    let p99 = times[p99_idx];
-    (max, p99)
+    Some(times[index])
 }
 
 #[cfg(test)]
@@ -387,6 +396,20 @@ mod tests {
         ];
 
         assert_eq!(calculate_frame_metrics(&frames), (24.0, 24.0));
+    }
+
+    #[test]
+    fn frame_time_percentile_is_nearest_rank_and_none_without_finite_frames() {
+        let frame = |frametime_ms| crate::recorder::FrameEvent {
+            elapsed_ms: 0,
+            frametime_ms,
+        };
+        assert_eq!(frame_time_percentile_ms(&[], 0.99), None);
+        assert_eq!(frame_time_percentile_ms(&[frame(f64::NAN)], 0.99), None);
+        let frames = (1..=1000).map(|i| frame(i as f64)).collect::<Vec<_>>();
+        assert_eq!(frame_time_percentile_ms(&frames, 0.99), Some(990.0));
+        assert_eq!(frame_time_percentile_ms(&frames, 0.999), Some(999.0));
+        assert_eq!(frame_time_percentile_ms(&frames, 1.0), Some(1000.0));
     }
 
     #[test]
