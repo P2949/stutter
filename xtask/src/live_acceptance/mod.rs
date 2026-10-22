@@ -16,9 +16,18 @@ mod game_runnable;
 mod kernel_compat;
 mod overhead;
 pub(crate) mod recovery;
+mod score_degradation;
 
 #[derive(Clone, Debug, Eq, PartialEq, Subcommand)]
 pub enum Suite {
+    ScoreDegradation {
+        #[arg(long)]
+        out: PathBuf,
+        #[arg(long)]
+        stutter_bin: PathBuf,
+        #[arg(long, default_value_t = 20, value_parser = clap::value_parser!(u64).range(10..=60))]
+        seconds: u64,
+    },
     Overhead {
         #[arg(long)]
         out: PathBuf,
@@ -243,6 +252,13 @@ pub fn run(root: &Path, suite: Suite) -> anyhow::Result<()> {
             seconds,
         } => (out, stutter_bin, seconds),
         Suite::Affinity { out, stutter_bin } => return affinity::run(root, &out, &stutter_bin),
+        Suite::ScoreDegradation {
+            out,
+            stutter_bin,
+            seconds,
+        } => {
+            return score_degradation::run(root, &out, &stutter_bin, seconds);
+        }
         Suite::Overhead {
             out,
             stutter_bin,
@@ -442,4 +458,22 @@ pub fn run(root: &Path, suite: Suite) -> anyhow::Result<()> {
     evidence::write_result(&out, evidence::LiveAcceptanceSuite::Observation, receipt)?;
     println!("{status}: evidence {}", out.display());
     result.map(|_| ())
+}
+
+/// Controlled scheduler-contention generator: holds the CPU for `burst_ms` of every
+/// `period_ms`. Run under SCHED_FIFO on the target's CPU by the score-degradation suite.
+pub fn burst(burst_ms: u64, period_ms: u64, seconds: u64) -> anyhow::Result<()> {
+    ensure!(
+        burst_ms < period_ms && (1..=3_600).contains(&seconds),
+        "invalid burst parameters"
+    );
+    let deadline = Instant::now() + Duration::from_secs(seconds);
+    while Instant::now() < deadline {
+        let burst_end = Instant::now() + Duration::from_millis(burst_ms);
+        while Instant::now() < burst_end {
+            std::hint::black_box(0_u64);
+        }
+        std::thread::sleep(Duration::from_millis(period_ms - burst_ms));
+    }
+    Ok(())
 }

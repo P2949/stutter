@@ -619,3 +619,9 @@ pub mod session_io {
         load_run_artifacts, load_session, validate_run_dir, validate_run_dir_shallow,
     };
 }
+
+pub mod scorer {
+    //! Public `StutterScore` contracts: a ranking proxy within comparable experiments.
+
+    pub use crate::scorer::{StutterScore, score_from_interval_records};
+}

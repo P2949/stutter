@@ -301,3 +301,18 @@ percent, peak RSS, event rate, drops, artifact write errors. Workload side: thro
 reported DEGRADED and not measured; no acceptable-overhead target is chosen. Each result
 carries a bounded claim naming kernel, probe set, median and IQR. The synthetic workload has
 no frame times, so frame metrics are not claimed.
+
+## StutterScore evaluation (needs root for the live suite)
+
+`StutterScore` is a **ranking proxy within comparable experiments**, not a human-perceived
+percentage. `xtask live-acceptance score-degradation --stutter-bin BIN --out DIR` records the
+game-path workload at 0, 1, 2, 4, 8 and 16 ms of controlled degradation (a SCHED_FIFO
+contender holding the CPU for N ms of every 20 ms; `chrt` and root required), computes the
+production score and runnable metrics per level and evaluates monotonicity (adjacent
+inversions, Spearman versus level) and rank agreement with runnable p99, the >5 ms rate and
+sample >1 ms counts. Existing weights (100 x >5 ms, 20 x >2 ms, 1 x >1 ms) are retained unless
+the score is not monotonic, in which case the receipt is `INCONCLUSIVE` and weights need
+review. `xtask score-evaluate --level 0:DIR --level 1:DIR ...` runs the same evaluation on
+any set of recordings. Frame metrics are not available for the synthetic workload.
+Regardless of the score, `GameRunnableLatency` keeps runnable latency as its primary and the
+compile objective keeps fixed-work elapsed time (a test asserts both descriptors).

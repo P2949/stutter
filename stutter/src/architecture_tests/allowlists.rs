@@ -204,6 +204,10 @@ pub(in crate::architecture_tests) const EXPECTED_API_PUBLIC_MODULES: &[ExpectedP
         name: "session_io",
         reason: "public offline session artifact loading and validation contracts",
     },
+    ExpectedPublicModule {
+        name: "scorer",
+        reason: "StutterScore ranking-proxy contract evaluated by repository tooling",
+    },
 ];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
