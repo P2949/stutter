@@ -9,7 +9,12 @@ pub(super) fn run(root: &Path, out: &Path, binary: &Path) -> anyhow::Result<()> 
     let out = fs::canonicalize(out)?;
     let mut stage = "preflight";
     let result = (|| -> anyhow::Result<Value> {
-        evidence::metadata(root, &out, &root.join(binary))?;
+        evidence::metadata(
+            root,
+            &out,
+            &root.join(binary),
+            evidence::LiveAcceptanceSuite::Affinity,
+        )?;
         let cpu = allowed_cpu()?;
         let ready = out.join("workload-ready.json");
         let mut child = OwnedChild(
@@ -61,12 +66,11 @@ pub(super) fn run(root: &Path, out: &Path, binary: &Path) -> anyhow::Result<()> 
     } else {
         "FAIL"
     };
-    fs::write(
-        out.join("result.json"),
-        serde_json::to_vec_pretty(
-            &json!({"schema_version":1,"suite":"live_affinity","status":status,"stage":stage,"evidence_kind":"controlled_real",
+    evidence::write_result(
+        &out,
+        evidence::LiveAcceptanceSuite::Affinity,
+        json!({"schema_version":1,"status":status,"stage":stage,"evidence_kind":"controlled_real",
         "measurements":result.as_ref().ok(),"error":result.as_ref().err().map(|err|format!("{err:#}")),"observation_suite":"not_run","crash_recovery":"not_run"}),
-        )?,
     )?;
     println!("{status}: affinity evidence {}", out.display());
     result.map(|_| ())

@@ -1,8 +1,23 @@
 # Core Validation execution ledger
 
-The authoritative requested sequence is the updated [CORE_VALIDATION_PLAN.md](CORE_VALIDATION_PLAN.md).
-Its repository inventory is the user's audit snapshot; this ledger records
-subsequent implementation and verification against current state.
+## Current state
+
+```text
+main: 63c30b2
+main CI: PASS
+P0 objective correctness: complete
+startup identity/layout hardening: complete
+automatic recovery capability gate: complete
+rollback-before-verification durability: complete
+failed-apply fault reporting: complete
+prepared rollback-before-mutation: complete
+current gate: real controller process-death recovery
+```
+
+The entries below are historical and are kept intact. The current execution map is
+[CORE_VALIDATION_PLAN.md](CORE_VALIDATION_PLAN.md).
+
+This ledger records implementation and verification against current state.
 The milestone remains **IN PROGRESS**. No live acceptance, calibration, kernel
 compatibility, or release gate is implied by offline tests.
 

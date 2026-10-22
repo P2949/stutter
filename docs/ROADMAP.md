@@ -45,23 +45,10 @@ exist before they are considered supported defaults.
 
 ### Objective comparison maturity
 
-Primary-metric implemented objectives:
-
-- `StutterScore`
-- `GameRunnableLatency` (merged target-game scheduler histogram; see [contract](RUNNABLE_LATENCY_OBJECTIVE.md))
-- `IoLatency`
-- `IrqOverlapReduction`
-- `ThermalRecovery`
-
-Fallback-based objectives with direct or derived guardrails:
-
-- `GameFramePacing`
-- `DesktopInteractivity`
-- `BrowserInteractivity`
-
-Guardrail-only or missing direct signal objectives:
-
-- `CompileThroughputWithForegroundProtection` protects foreground latency but remains inconclusive without genuine throughput data. Compile activity cannot establish improvement.
+Per-objective maturity, primary metrics, fallbacks and guardrails are defined by
+`ObjectiveKind::descriptor()` (`stutter/src/autotune/objective/descriptor.rs`) and
+generated into [AUTOTUNE_OBJECTIVES.md](AUTOTUNE_OBJECTIVES.md). This roadmap
+intentionally does not duplicate that table.
 
 ## Direction
 
