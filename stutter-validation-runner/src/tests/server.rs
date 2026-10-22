@@ -54,6 +54,10 @@ impl BootControl for FakeBoot {
         self.calls.0.lock().unwrap().push(format!("next:{entry}"));
         Ok(())
     }
+    fn restore_default(&self) -> Result<(), String> {
+        self.calls.0.lock().unwrap().push("restore".to_owned());
+        Ok(())
+    }
     fn reboot(&self) -> Result<(), String> {
         // The durable budget and resume flag must already be on disk when the reboot starts.
         let state = fs::read_to_string(self.state_dir.join("boot-state.json")).unwrap();
@@ -252,15 +256,12 @@ fn boot_selection_is_recorded_and_unauthorized_entries_are_refused() {
 fn cancellation_blocks_further_work_but_not_status() {
     let scratch = Scratch::new("server-cancel");
     let (server, calls) = server(&scratch, false);
-    assert_eq!(
-        server
-            .handle(
-                peer(me()),
-                envelope("kernel-matrix", Request::CancelCampaign)
-            )
-            .status,
-        ResponseStatus::Ok
+    let cancelled = server.handle(
+        peer(me()),
+        envelope("kernel-matrix", Request::CancelCampaign),
     );
+    assert_eq!(cancelled.status, ResponseStatus::Ok);
+    assert_eq!(cancelled.data.unwrap()["boot_restored"], true);
     assert_eq!(
         rejected_with(&server, me(), "live-observation", observation()),
         ErrorCode::Cancelled
@@ -275,7 +276,11 @@ fn cancellation_blocks_further_work_but_not_status() {
             .status,
         ResponseStatus::Ok
     );
-    assert!(calls.0.lock().unwrap().is_empty());
+    assert_eq!(
+        calls.0.lock().unwrap().as_slice(),
+        ["restore"],
+        "cancelling drops a pending one-shot boot selection and nothing else ran"
+    );
 }
 
 #[test]

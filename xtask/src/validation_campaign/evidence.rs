@@ -73,24 +73,56 @@ pub fn published_capture_ids(dir: &CampaignDir) -> anyhow::Result<BTreeSet<Strin
     Ok(ids)
 }
 
+/// Which suite results may be published as evidence.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Accept {
+    PassOnly,
+    /// Kernel compatibility is *observed*: a kernel the loader cannot use yields a FAIL result
+    /// whose `compatibility` is `ObservedIncompatible`. That is a valid observation to keep.
+    PassOrObservedIncompatible,
+}
+
+impl Accept {
+    pub fn allows(self, value: &Value) -> bool {
+        value["status"] == "PASS"
+            || (self == Self::PassOrObservedIncompatible
+                && value["status"] == "FAIL"
+                && value["compatibility"] == "ObservedIncompatible")
+    }
+}
+
 /// Runs the pipeline for a finished raw attempt. `expected_commit` is the commit the bundle
 /// must certify; `allowed_kinds` limits acceptable evidence kinds.
-pub fn publish_bundle(
-    dir: &CampaignDir,
-    repository: &Path,
-    task: &str,
-    attempt: u32,
-    raw: &Path,
-    expected_commit: &str,
-    allowed_kinds: &[&str],
-) -> Result<Published, PipelineFailure> {
+/// Inputs of [`publish_bundle`].
+pub struct PublishRequest<'a> {
+    pub dir: &'a CampaignDir,
+    pub repository: &'a Path,
+    pub task: &'a str,
+    pub attempt: u32,
+    pub raw: &'a Path,
+    pub expected_commit: &'a str,
+    pub allowed_kinds: &'a [&'a str],
+    pub accept: Accept,
+}
+
+pub fn publish_bundle(request: &PublishRequest<'_>) -> Result<Published, PipelineFailure> {
+    let PublishRequest {
+        dir,
+        repository,
+        task,
+        attempt,
+        raw,
+        expected_commit,
+        allowed_kinds,
+        accept,
+    } = *request;
     let result: Value = fs::read(raw.join("result.json"))
         .map_err(|error| PipelineFailure::at("suite_result", error))
         .and_then(|bytes| {
             serde_json::from_slice(&bytes)
                 .map_err(|error| PipelineFailure::at("suite_result", error))
         })?;
-    if result["status"] != "PASS" {
+    if !accept.allows(&result) {
         return Err(PipelineFailure::at(
             "suite_result",
             format!("suite reported {}", result["status"]),
@@ -104,10 +136,10 @@ pub fn publish_bundle(
         .map_err(|error| PipelineFailure::at("export", error))?;
     let entry = verified_index_entry(&partial)
         .map_err(|error| PipelineFailure::at("evidence_verify", error))?;
-    if entry["status"] != "PASS" {
+    if !accept.allows(&entry) {
         return Err(PipelineFailure::at(
             "evidence_verify",
-            "bundle receipt is not PASS",
+            "bundle receipt is not an acceptable result",
         ));
     }
     if entry["source_commit"] != expected_commit {

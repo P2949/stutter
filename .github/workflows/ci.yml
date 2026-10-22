@@ -68,6 +68,9 @@ jobs:
       - name: Validation runner security
         run: cargo test -p stutter-validation-runner
 
+      - name: Reboot simulation and kernel stage
+        run: cargo test -p xtask validation_campaign::tests::kernels
+
       - name: Calibration roles and capability evidence kinds
         run: cargo test -p xtask -- diagnosis_calibration capability_check
 

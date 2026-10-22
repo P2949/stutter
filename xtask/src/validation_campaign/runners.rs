@@ -7,7 +7,9 @@ use serde_json::Value;
 
 use super::{
     backend::{BackendError, SuiteBackend, SuiteInvocation, backend_from_env},
-    evidence::{PipelineFailure, publish_bundle, record_failure},
+    evidence::{
+        Accept, PipelineFailure, PublishRequest, Published, publish_bundle, record_failure,
+    },
     executor::{FingerprintExtras, RunContext, RunnerOutcome, TaskRunner},
     graph::{SourceBinding, TaskKind, TaskSpec},
     model::{BlockReason, FailureClass},
@@ -34,8 +36,16 @@ fn publish_failure_class(stage: &str) -> FailureClass {
     }
 }
 
-impl TaskRunner for LiveSuiteRunner {
-    fn run(&self, context: &RunContext<'_>, spec: &TaskSpec, attempt: u32) -> RunnerOutcome {
+impl LiveSuiteRunner {
+    /// Runs the suite and publishes its verified bundle. `accept` decides which results are
+    /// publishable; every other outcome is returned as the task outcome to record.
+    pub fn run_and_publish(
+        &self,
+        context: &RunContext<'_>,
+        spec: &TaskSpec,
+        attempt: u32,
+        accept: Accept,
+    ) -> Result<Published, RunnerOutcome> {
         let attempt_dir = context.dir.attempt_dir(spec.id, attempt);
         let raw = attempt_dir.join("raw");
         let artifacts = Some(context.dir.relative(&attempt_dir));
@@ -59,54 +69,51 @@ impl TaskRunner for LiveSuiteRunner {
             Ok(_) => {}
             // Not authorized, or no privilege: a block, never a retry loop.
             Err(BackendError::Privilege(detail)) => {
-                return RunnerOutcome::Blocked(BlockReason {
+                return Err(RunnerOutcome::Blocked(BlockReason {
                     class: FailureClass::BlockedPrivilege,
                     detail,
-                });
+                }));
             }
             Err(BackendError::Failed(error)) => {
-                return RunnerOutcome::Failed {
+                return Err(RunnerOutcome::Failed {
                     class: FailureClass::Retryable,
                     stage: "launch".to_owned(),
                     summary: format!("could not start the suite: {error}"),
                     artifacts,
-                };
+                });
             }
         }
         let result: Option<Value> = fs::read(raw.join("result.json"))
             .ok()
             .and_then(|bytes| serde_json::from_slice(&bytes).ok());
         let Some(result) = result else {
-            return RunnerOutcome::Failed {
+            return Err(RunnerOutcome::Failed {
                 class: FailureClass::Retryable,
                 stage: "suite_result".to_owned(),
                 summary: "the suite wrote no result.json".to_owned(),
                 artifacts,
-            };
+            });
         };
-        match result["status"].as_str() {
-            Some("BLOCKED") => {
-                return RunnerOutcome::Blocked(BlockReason {
-                    class: FailureClass::BlockedPrivilege,
-                    detail: result["error"]
-                        .as_str()
-                        .unwrap_or("suite blocked")
-                        .to_owned(),
-                });
-            }
-            Some("PASS") => {}
-            other => {
-                return RunnerOutcome::Failed {
-                    class: FailureClass::Retryable,
-                    stage: "suite_result".to_owned(),
-                    summary: format!(
-                        "suite reported {}: {}",
-                        other.unwrap_or("no status"),
-                        result["error"].as_str().unwrap_or("no error recorded")
-                    ),
-                    artifacts,
-                };
-            }
+        if result["status"] == "BLOCKED" {
+            return Err(RunnerOutcome::Blocked(BlockReason {
+                class: FailureClass::BlockedPrivilege,
+                detail: result["error"]
+                    .as_str()
+                    .unwrap_or("suite blocked")
+                    .to_owned(),
+            }));
+        }
+        if !accept.allows(&result) {
+            return Err(RunnerOutcome::Failed {
+                class: FailureClass::Retryable,
+                stage: "suite_result".to_owned(),
+                summary: format!(
+                    "suite reported {}: {}",
+                    result["status"].as_str().unwrap_or("no status"),
+                    result["error"].as_str().unwrap_or("no error recorded")
+                ),
+                artifacts,
+            });
         }
         let commit = match spec.binding {
             SourceBinding::ReleaseCandidate => {
@@ -114,15 +121,23 @@ impl TaskRunner for LiveSuiteRunner {
             }
             _ => context.state.evidence_base.clone(),
         };
-        match publish_bundle(
-            context.dir,
-            context.repository,
-            spec.id,
+        publish_bundle(&PublishRequest {
+            dir: context.dir,
+            repository: context.repository,
+            task: spec.id,
             attempt,
-            &raw,
-            &commit,
-            &["controlled_real", "real_workload"],
-        ) {
+            raw: &raw,
+            expected_commit: &commit,
+            allowed_kinds: &["controlled_real", "real_workload"],
+            accept,
+        })
+        .map_err(|failure| failed_publication(context, spec, attempt, &failure, artifacts))
+    }
+}
+
+impl TaskRunner for LiveSuiteRunner {
+    fn run(&self, context: &RunContext<'_>, spec: &TaskSpec, attempt: u32) -> RunnerOutcome {
+        match self.run_and_publish(context, spec, attempt, Accept::PassOnly) {
             Ok(published) => RunnerOutcome::Passed {
                 artifacts: Some(context.dir.relative(&published.bundle)),
                 receipt: Some(context.dir.relative(&published.receipt)),
@@ -130,7 +145,7 @@ impl TaskRunner for LiveSuiteRunner {
                 fingerprint: FingerprintExtras::default(),
                 updates: Vec::new(),
             },
-            Err(failure) => failed_publication(context, spec, attempt, &failure, artifacts),
+            Err(outcome) => outcome,
         }
     }
 }
@@ -331,9 +346,14 @@ pub fn default_runners() -> BTreeMap<TaskKind, Box<dyn TaskRunner>> {
         TaskKind::ScoreRunnable,
         live("score-degradation", SuiteShape::Seconds),
     );
+    runners.insert(
+        TaskKind::KernelMatrix,
+        Box::new(super::kernels::KernelMatrixRunner {
+            host: Box::new(super::kernels::RunnerHost),
+        }),
+    );
     for (kind, name) in [
         (TaskKind::OverheadReal, "real-workload overhead"),
-        (TaskKind::KernelMatrix, "kernel campaign"),
         (TaskKind::Corpus, "corpus"),
         (TaskKind::FrameScore, "frame score series"),
         (TaskKind::EvidenceIntegration, "evidence integration"),

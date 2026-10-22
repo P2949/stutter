@@ -14,6 +14,7 @@ mod evidence;
 mod graph;
 mod init;
 mod invalidation;
+mod kernels;
 mod manifest;
 mod state;
 

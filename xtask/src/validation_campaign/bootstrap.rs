@@ -127,6 +127,7 @@ pub fn build_authorization(
         grants: grants(),
         // Refined with the discovered boot entries by the multi-kernel phase.
         max_reboots: u32::try_from(manifest.kernels.max_reboots).unwrap_or(u32::MAX),
+        reboot_slack: u32::try_from(manifest.kernels.reboot_slack).unwrap_or(u32::MAX),
         original_boot_entry: None,
         allowed_boot_entries: Vec::new(),
         created_unix_ms: unix_ms(),
