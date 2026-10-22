@@ -68,19 +68,14 @@ pub enum XtaskCommand {
     },
     #[command(
         name = "evidence-export",
-        about = "Sanitize raw live-acceptance output into a canonical portable evidence bundle"
+        about = "Sanitize raw suite output into a portable bundle"
     )]
-    EvidenceExport {
-        #[arg(long)]
-        raw: PathBuf,
-        #[arg(long)]
-        out: PathBuf,
-    },
+    EvidenceExport(evidence_bundle::ExportArgs),
     #[command(
         name = "evidence-verify",
-        about = "Independently verify a portable evidence bundle (nonzero exit on any failure)"
+        about = "Verify a portable evidence bundle (fails closed)"
     )]
-    EvidenceVerify { bundle: PathBuf },
+    EvidenceVerify(evidence_bundle::VerifyArgs),
     #[command(about = "Generate or check objective contract documentation")]
     ObjectiveDocs {
         #[arg(long, conflicts_with = "write", required_unless_present = "write")]
@@ -317,10 +312,10 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
             ready,
             descendants,
         } => live_acceptance::workload(seconds, &ready, descendants),
-        XtaskCommand::EvidenceExport { raw, out } => {
-            evidence_bundle::export_bundle(&root, &raw, &out)
+        XtaskCommand::EvidenceExport(args) => {
+            evidence_bundle::export_bundle(&root, &args.raw, &args.out)
         }
-        XtaskCommand::EvidenceVerify { bundle } => evidence_bundle::verify_bundle(&bundle),
+        XtaskCommand::EvidenceVerify(args) => evidence_bundle::verify_bundle(&args.bundle),
         XtaskCommand::ObjectiveDocs { write, .. } => {
             objective_docs::run_at(&root.join("docs/AUTOTUNE_OBJECTIVES.md"), write)
         }

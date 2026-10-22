@@ -19,6 +19,21 @@ pub(crate) mod privacy;
 pub(crate) mod sha256;
 mod verify;
 
+/// `evidence-export` arguments.
+#[derive(clap::Args, Clone, Debug, Eq, PartialEq)]
+pub struct ExportArgs {
+    #[arg(long)]
+    pub raw: std::path::PathBuf,
+    #[arg(long)]
+    pub out: std::path::PathBuf,
+}
+
+/// `evidence-verify` arguments.
+#[derive(clap::Args, Clone, Debug, Eq, PartialEq)]
+pub struct VerifyArgs {
+    pub bundle: std::path::PathBuf,
+}
+
 pub use export::export_bundle;
 pub use verify::verify_bundle;
 
