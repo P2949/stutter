@@ -10,7 +10,7 @@ use stutter::api::{
     tune_recommendation::counterbalanced_order,
 };
 
-use super::{evidence::LiveAcceptanceSuite, *};
+use super::{evidence::LiveAcceptanceSuite, overhead_external::ExternalWorkload, *};
 
 pub(super) const CONFIGS: [(&str, &str); 6] = [
     ("A", "profiler disabled"),
@@ -179,41 +179,55 @@ fn read_profiler_sample(pid: u32) -> Option<(u64, f64)> {
     Some((ticks, rss))
 }
 
-fn run_one(
+/// The workload one profiler configuration is measured against.
+#[derive(Clone, Copy)]
+pub(super) enum Workload<'a> {
+    /// The harness' own CPU-pinned synthetic game-path workload (`controlled_real`).
+    Disposable { game: &'a Path, cpu: u32 },
+    /// An operator-supplied repeatable fixed-work command (`real_workload`).
+    External(&'a ExternalWorkload),
+}
+
+pub(super) fn run_one(
     binary: &Path,
-    game: &Path,
+    workload: Workload<'_>,
     dir: &Path,
-    cpu: u32,
     flags: Option<&[String]>,
     seconds: u64,
 ) -> anyhow::Result<Sample> {
     fs::create_dir_all(dir)?;
     let ready = dir.join("workload-ready.json");
     let workload_seconds = seconds + 4;
-    let mut workload = OwnedChild(
-        Command::new("taskset")
-            .args(["-c", &cpu.to_string()])
-            .arg(game)
-            .args([
-                "live-workload",
-                "--seconds",
-                &workload_seconds.to_string(),
-                "--ready",
-            ])
-            .arg(&ready)
-            .stdout(Stdio::null())
-            .stderr(fs::File::create(dir.join("workload.stderr"))?)
-            .spawn()?,
-    );
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while !ready.exists() {
-        ensure!(
-            workload.0.try_wait()?.is_none() && Instant::now() < deadline,
-            "workload not ready"
-        );
-        std::thread::sleep(Duration::from_millis(20));
+    let workload_started = Instant::now();
+    let mut child = match workload {
+        Workload::Disposable { game, cpu } => OwnedChild(
+            Command::new("taskset")
+                .args(["-c", &cpu.to_string()])
+                .arg(game)
+                .args([
+                    "live-workload",
+                    "--seconds",
+                    &workload_seconds.to_string(),
+                    "--ready",
+                ])
+                .arg(&ready)
+                .stdout(Stdio::null())
+                .stderr(fs::File::create(dir.join("workload.stderr"))?)
+                .spawn()?,
+        ),
+        Workload::External(external) => external.spawn(dir)?,
+    };
+    if matches!(workload, Workload::Disposable { .. }) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !ready.exists() {
+            ensure!(
+                child.0.try_wait()?.is_none() && Instant::now() < deadline,
+                "workload not ready"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
     }
-    let (pid, ticks) = (workload.0.id(), start_ticks(workload.0.id())?);
+    let (pid, ticks) = (child.0.id(), start_ticks(child.0.id())?);
     let mut last = None;
     let recordings = dir.join("recording");
     let started = Instant::now();
@@ -255,16 +269,25 @@ fn run_one(
         }
     }
     let wall = started.elapsed().as_secs_f64();
-    let limit = Instant::now() + Duration::from_secs(workload_seconds + 10);
-    while workload.0.try_wait()?.is_none() {
-        ensure!(Instant::now() < limit, "workload did not finish");
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    let counts: Value = serde_json::from_slice(&fs::read(ready.with_extension("counts"))?)?;
-    let throughput = counts["busy_iterations"]
-        .as_u64()
-        .context("busy iterations")? as f64
-        / workload_seconds as f64;
+    let throughput = match workload {
+        Workload::Disposable { .. } => {
+            let limit = Instant::now() + Duration::from_secs(workload_seconds + 10);
+            while child.0.try_wait()?.is_none() {
+                ensure!(Instant::now() < limit, "workload did not finish");
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            let counts: Value = serde_json::from_slice(&fs::read(ready.with_extension("counts"))?)?;
+            counts["busy_iterations"]
+                .as_u64()
+                .context("busy iterations")? as f64
+                / workload_seconds as f64
+        }
+        // Fixed work: throughput is work units over the whole run's elapsed time.
+        Workload::External(external) => {
+            external.wait(&mut child)?;
+            external.throughput(workload_started.elapsed().as_secs_f64())
+        }
+    };
     let mut sample = Sample {
         throughput,
         profiler_cpu_percent: last.map(|(ticks, _)| cpu_percent(ticks, wall, clock_ticks())),
@@ -320,8 +343,14 @@ pub(super) fn run(
     seconds: u64,
     rounds: u32,
     seed: Option<u64>,
+    mut external: Option<ExternalWorkload>,
 ) -> anyhow::Result<()> {
     ensure!(cfg!(target_os = "linux"), "live acceptance requires Linux");
+    let evidence_kind = if external.is_some() {
+        "real_workload"
+    } else {
+        "controlled_real"
+    };
     fs::create_dir(out).context("acceptance output must be a new directory")?;
     let out = fs::canonicalize(out)?;
     let binary = root.join(binary);
@@ -332,7 +361,13 @@ pub(super) fn run(
     let mut stage = "preflight";
     let mut cases = Vec::new();
     let result = (|| -> anyhow::Result<Value> {
-        evidence::metadata(root, &out, &binary, LiveAcceptanceSuite::Overhead)?;
+        evidence::metadata_with_kind(
+            root,
+            &out,
+            &binary,
+            LiveAcceptanceSuite::Overhead,
+            evidence_kind,
+        )?;
         command(
             &binary,
             &args(&["doctor", "--json"]),
@@ -347,13 +382,23 @@ pub(super) fn run(
         );
         let cpu = allowed_cpu()?;
         let irq = discover_irq();
-        let game = {
+        let game = if external.is_none() {
             let dir = out.join("steamapps/common/StutterOverhead");
             fs::create_dir_all(&dir)?;
             let target = dir.join("StutterOverhead");
             fs::copy(std::env::current_exe()?, &target)?;
             fs::set_permissions(&target, fs::Permissions::from_mode(0o755))?;
-            target
+            Some(target)
+        } else {
+            None
+        };
+        let warm_up_seconds = match external.as_mut() {
+            Some(workload) => Some(workload.warm_up(&out.join("warm-up"), seconds)?),
+            None => None,
+        };
+        let workload_identity = match &external {
+            Some(workload) => workload.identity()?,
+            None => json!({"label":"disposable game-path workload","declared_by":"harness"}),
         };
         stage = "runs";
         let mut samples: Vec<Vec<Sample>> = (0..CONFIGS.len()).map(|_| Vec::new()).collect();
@@ -369,7 +414,12 @@ pub(super) fn run(
                 }
                 let attempt = record_flags(id, irq).and_then(|flags| {
                     let dir = out.join(format!("runs/round{round:02}-pos{position}-{id}"));
-                    run_one(&binary, &game, &dir, cpu, flags.as_deref(), seconds)
+                    let workload = match (&external, &game) {
+                        (Some(external), _) => Workload::External(external),
+                        (None, Some(game)) => Workload::Disposable { game, cpu },
+                        (None, None) => anyhow::bail!("no workload configured"),
+                    };
+                    run_one(&binary, workload, &dir, flags.as_deref(), seconds)
                 });
                 match attempt {
                     Ok(sample) => samples[index].push(sample),
@@ -416,7 +466,9 @@ pub(super) fn run(
                     throughput["q1"].as_f64().unwrap_or(0.0), throughput["q3"].as_f64().unwrap_or(0.0), refs.len())}));
         }
         Ok(
-            json!({"configurations":configs,"rounds":rounds,"seconds":seconds,
+            json!({"workload":workload_identity,"warm_up_seconds":warm_up_seconds,
+            "cache_policy":"same workload, settings and scene in every run; one unmeasured warm-up run before the rounds; page cache not dropped by the harness",
+            "configurations":configs,"rounds":rounds,"seconds":seconds,
             "order_strategy":seed.map_or("alternating".to_owned(), |s| format!("seed:{s}")),"order":order_log,
             "irq_used":irq,"clock_ticks_per_second":clock_ticks(),"degraded":degraded}),
         )
@@ -428,10 +480,18 @@ pub(super) fn run(
     } else {
         "FAIL"
     };
-    let receipt = json!({"schema_version":1,"status":status,"stage":stage,"evidence_kind":"controlled_real","cases":cases,
-        "measurements":result.as_ref().ok(),"error":result.as_ref().err().map(|e| format!("{e:#}")),
-        "scope":"profiler overhead on a single-CPU-pinned synthetic game-path workload; counterbalanced repeated runs; profiler side (CPU, RSS, event rate, drops, write errors) and workload side (throughput, runnable p99, >5 ms rate)",
-        "not_claimed":["overhead on real games or other workloads","frame-time metrics (the synthetic workload has none)","any acceptable-overhead target","other kernels","DEGRADED probe sets are not measured","portable verified bundle until exported"]});
+    let receipt = json!({"schema_version":1,"status":status,"stage":stage,"evidence_kind":evidence_kind,"cases":cases,
+    "measurements":result.as_ref().ok(),"error":result.as_ref().err().map(|e| format!("{e:#}")),
+    "scope":if external.is_some() {
+        "profiler overhead on an operator-declared repeatable fixed-work real workload (throughput = work units over elapsed time); counterbalanced repeated runs; profiler side (CPU, RSS, event rate, drops, write errors) and workload side (throughput, runnable p99, >5 ms rate of the launched process)"
+    } else {
+        "profiler overhead on a single-CPU-pinned synthetic game-path workload; counterbalanced repeated runs; profiler side (CPU, RSS, event rate, drops, write errors) and workload side (throughput, runnable p99, >5 ms rate)"
+    },
+    "not_claimed":if external.is_some() {
+        json!(["that the workload is representative (the operator declares it)","other workloads","frame-time metrics","any acceptable-overhead target","other kernels","DEGRADED probe sets are not measured","portable verified bundle until exported"])
+    } else {
+        json!(["overhead on real games or other workloads","frame-time metrics (the synthetic workload has none)","any acceptable-overhead target","other kernels","DEGRADED probe sets are not measured","portable verified bundle until exported"])
+    }});
     evidence::write_result(&out, LiveAcceptanceSuite::Overhead, receipt)?;
     println!("{status}: overhead evidence {}", out.display());
     result.map(|_| ())

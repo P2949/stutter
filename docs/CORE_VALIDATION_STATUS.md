@@ -649,3 +649,13 @@ verify, after verify, manager Measuring, partial-apply error, verify failure, in
 rollback, rollback failure, replacement identity (real-process startup-recovery test),
 suspend/resume, and future mutation blocked while faulted. Observation, game-runnable,
 kernel, overhead and score-degradation suites still require a privileged run.
+
+## 2026-10-22: representative real-workload mode for profiler overhead (#38, offline)
+
+`live-acceptance overhead` gained an operator-supplied fixed-work workload (`--workload-label`,
+optional `--work-units`, command after `--`). It reuses the A-F probe sets, `counterbalanced_order`,
+sampling and statistics unchanged; only the workload differs. The receipt is `real_workload`
+(suite id still `live_overhead`), keeps only a label, program name, argument count and digests,
+runs one unmeasured warm-up for a common cache policy, requires the workload to outlive the
+profiling window, and states that representativeness is operator-declared. The controlled suite
+remains `controlled_real`. No evidence was produced here: both runs need `CAP_BPF`/root.
