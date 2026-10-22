@@ -607,3 +607,25 @@ evidence insufficient**. This is not a calibration claim: #32 stays open until a
 positive/control/mixed corpus (#31) exists. Causal confidence is not separately calibrated
 (the pipeline has one confidence value); I/O, IRQ, GPU families and `StutterScore` evaluation
 (#33) are not started because they need the real corpus and controlled degradation runs.
+
+## 2026-10-22: calibration sweeps for I/O, IRQ and GPU families (#32, partial)
+
+`xtask calibrate --family scheduler|io|irq|gpu` (replaces `calibrate-scheduler`) sweeps each
+family's threshold through the production report pipeline over the same frozen corpus
+(36 labeled fixtures; 0 tagged mixed). Sweeps: I/O 0.25-4 ms (current 1 ms), IRQ 0.05-1 ms
+(current 0.25 ms), GPU busy 80-98% (current 95%).
+
+| Family | Real positives | Result at every swept value | Decision |
+| --- | --- | --- | --- |
+| scheduler | 4 | 6 TP / 0 FP / 0 FN | retain, insufficient evidence |
+| io | 2 | 2 TP / 0 FP / 1 FN (known-miss fixture) | retain, insufficient evidence |
+| irq | 3 | 3 TP / 0 FP / 1 FN (known-miss fixture) | retain, insufficient evidence |
+| gpu | 1 | 1 TP / 0 FP / 1 FN (known-miss fixture) | retain, insufficient evidence |
+
+All sweeps are flat with 100% agreement with the current threshold and zero false
+high-confidence claims: the corpus cannot discriminate thresholds, and the misses are the
+documented known-miss fixtures, insensitive to any threshold. No threshold is changed. These
+are not calibration claims; #32 stays open until a real positive/control/mixed corpus (#31)
+exists. Existence and causal confidence remain one value and are not separately calibrated;
+overlap is not proven causality. Thermal/power calibration is out of scope (corpus
+insufficient).

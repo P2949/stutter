@@ -106,10 +106,13 @@ pub enum XtaskCommand {
         levels: Vec<String>,
     },
     #[command(
-        name = "calibrate-scheduler",
-        about = "Sweep the scheduler-delay threshold over the frozen corpus"
+        name = "calibrate",
+        about = "Sweep one diagnosis family threshold over the frozen corpus"
     )]
-    CalibrateScheduler {
+    Calibrate {
+        /// scheduler, io, irq or gpu.
+        #[arg(long)]
+        family: String,
         #[arg(long, default_value = "stutter/tests/fixtures/runs")]
         corpus: PathBuf,
         #[arg(long)]
@@ -383,12 +386,11 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
         XtaskCommand::ReleaseVerify(args) => release_package::verify_release(&args),
         XtaskCommand::KernelMatrix { require } => kernel_matrix::run(&root, require),
         XtaskCommand::EvidenceIndex(args) => evidence_bundle::index_entry(&args.bundle),
-        XtaskCommand::CalibrateScheduler { corpus, out } => diagnosis_calibration::run(
-            &root,
-            &corpus,
-            out.as_deref(),
-            &diagnosis_calibration::DEFAULT_SWEEP_MS,
-        ),
+        XtaskCommand::Calibrate {
+            family,
+            corpus,
+            out,
+        } => diagnosis_calibration::run(&root, &corpus, out.as_deref(), &family),
         XtaskCommand::ScoreEvaluate { levels } => {
             let parsed = levels
                 .iter()
