@@ -20,6 +20,7 @@ pub mod ops_checks;
 pub mod preflight;
 pub mod process;
 pub mod refresh_tune_recommendation;
+pub mod release_package;
 pub mod workflow;
 
 use crate::{
@@ -83,6 +84,16 @@ pub enum XtaskCommand {
         about = "Fail if a capability is Supported ahead of its evidence"
     )]
     CapabilityCheck,
+    #[command(
+        name = "release-package",
+        about = "Package the supported layout from the committed source"
+    )]
+    ReleasePackage(release_package::PackageArgs),
+    #[command(
+        name = "release-verify",
+        about = "Verify a release directory independently"
+    )]
+    ReleaseVerify(release_package::VerifyArgs),
     #[command(about = "Generate or check objective contract documentation")]
     ObjectiveDocs {
         #[arg(long, conflicts_with = "write", required_unless_present = "write")]
@@ -319,6 +330,8 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
             ready,
             descendants,
         } => live_acceptance::workload(seconds, &ready, descendants),
+        XtaskCommand::ReleasePackage(args) => release_package::package_release(&root, &args),
+        XtaskCommand::ReleaseVerify(args) => release_package::verify_release(&args),
         XtaskCommand::CapabilityCheck => capability_check::run(&root),
         XtaskCommand::EvidenceExport(args) => {
             evidence_bundle::export_bundle(&root, &args.raw, &args.out)

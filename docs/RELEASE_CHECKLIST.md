@@ -50,3 +50,35 @@ stutter release check \
 ```
 
 These flags should only be passed when the packaging evidence exists.
+
+## Release contract (v0.1.0 and later)
+
+`cargo run -p xtask -- release-package --binary BIN --bpf-object OBJ --out DIR` builds,
+from a clean committed tree, the artifacts named below; `release-verify DIR`
+recomputes and checks them independently. `.github/workflows/release.yml` runs both.
+
+- `stutter-<version>-linux-x86_64.tar.gz`: the layout in `packaging/tarball/MANIFEST.txt`,
+  reproducible (sorted names, fixed owner, commit-time mtime).
+- `stutter-<version>-source.tar.gz`: `git archive` of the exact commit.
+- `sbom.cdx.json`: CycloneDX component list derived from `Cargo.lock`.
+- `SUPPORT.md`: support statement generated from the capability registry.
+- `release-manifest.json`: version, full git revision, `Cargo.lock` / binary / eBPF object
+  digests, artifact-compatibility schema versions, supported capabilities, packaged file
+  digests.
+- `SHA256SUMS`: digests of every published file.
+
+**eBPF object:** the supported package ships `lib/stutter/stutter.bpf.o` and the binary
+embeds an identical object (`STUTTER_BPF_OBJECT` is only a runtime override). A missing,
+empty or non-ELF object is a release failure, never a warning.
+
+`release-verify` checks digests and `SHA256SUMS` coverage, unpacks both archives, matches
+the packaged layout and file digests, requires the `Cargo.lock` digest to equal the source
+archive's, requires the packaged binary to report the manifest version and git revision,
+requires the support statement and `supported_capabilities` to equal the capability
+registry (a release can never claim more than the registry), and checks the SBOM covers
+every locked package. On tags, `--require-acceptance` additionally requires a PASS entry in
+`docs/evidence/index.json` for exactly the tagged commit for every live suite required by
+every Supported capability, and refuses a release with no Supported capability.
+
+Tag `v0.1.0` only on the exact commit that passed fresh-checkout and real-system
+acceptance; do not validate one commit and tag another.

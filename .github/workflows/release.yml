@@ -37,38 +37,52 @@ jobs:
       - name: Build release binary
         run: cargo build -p stutter --release
 
-      - name: Locate eBPF object
-        id: ebpf-object
+      - name: Check the tag matches the crate version
+        if: startsWith(github.ref, 'refs/tags/v')
         run: |
-          # The eBPF object is built into OUT_DIR during the normal cargo build.
-          # Locate it so we can upload it as a separate release artifact.
-          OBJECT_PATH=$(find target/release/build -path '*/stutter-*/out/stutter' -type f | head -1)
-          if [ -z "$OBJECT_PATH" ]; then
-            echo "WARNING: eBPF object not found in build output"
-          else
-            echo "path=$OBJECT_PATH" >> "$GITHUB_OUTPUT"
-            cp "$OBJECT_PATH" stutter.bpf.o
-            echo "Found eBPF object: $OBJECT_PATH"
+          VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name=="stutter") | .version')
+          if [ "${GITHUB_REF_NAME}" != "v${VERSION}" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match crate version v${VERSION}"
+            exit 1
           fi
 
-      - name: Package artifact
+      - name: Locate eBPF object (required)
+        id: ebpf-object
         run: |
-          mkdir -p dist
-          cp target/release/stutter dist/stutter
-          cp README.md dist/
-          cp docs/INSTALL.md dist/
-          cp docs/SAFETY.md dist/
-          tar -C dist -czf stutter-linux-x86_64.tar.gz .
+          # The object is built into OUT_DIR and embedded in the binary. The supported
+          # package layout (packaging/tarball/MANIFEST.txt) also ships it at
+          # lib/stutter/stutter.bpf.o, so its absence is a release failure, not a warning.
+          OBJECT_PATH=$(find target/release/build -path '*/stutter-*/out/stutter' -type f | head -1)
+          if [ -z "$OBJECT_PATH" ]; then
+            echo "eBPF object not found in build output; refusing to release"
+            exit 1
+          fi
+          echo "path=$OBJECT_PATH" >> "$GITHUB_OUTPUT"
 
-      - name: Upload binary artifact
+      - name: Package release (layout, source archive, SBOM, manifest, SHA256SUMS)
+        run: |
+          cargo run -p xtask -- release-package \
+            --binary target/release/stutter \
+            --bpf-object "${{ steps.ebpf-object.outputs.path }}" \
+            --out dist
+
+      - name: Verify release (checksums, layout, provenance; acceptance evidence on tags)
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            # Tags require PASS evidence for exactly this commit for every Supported capability.
+            cargo run -p xtask -- release-verify dist --require-acceptance
+          else
+            cargo run -p xtask -- release-verify dist
+          fi
+
+      - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: stutter-linux-x86_64
-          path: stutter-linux-x86_64.tar.gz
-
-      - name: Upload eBPF object artifact
-        if: steps.ebpf-object.outputs.path != ''
-        uses: actions/upload-artifact@v4
-        with:
-          name: stutter-bpf-object
-          path: stutter.bpf.o
+          name: stutter-linux-x86_64-release
+          path: |
+            dist/stutter-*-linux-x86_64.tar.gz
+            dist/stutter-*-source.tar.gz
+            dist/SHA256SUMS
+            dist/release-manifest.json
+            dist/sbom.cdx.json
+            dist/SUPPORT.md
