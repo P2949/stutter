@@ -177,7 +177,7 @@ fn verify_recovery_evidence(out: &Path) -> anyhow::Result<()> {
         .collect::<Result<Vec<_>, _>>()?;
     ensure!(
         history.last().is_some_and(
-            |event| event["rollback_performed"] == true && event["phase"] == "cooldown"
+            |event| event["rollback_performed"] == true && event["phase"] == "Cooldown"
         ),
         "recovery history missing successful rollback"
     );
