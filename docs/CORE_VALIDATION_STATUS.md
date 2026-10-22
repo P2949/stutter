@@ -629,3 +629,17 @@ are not calibration claims; #32 stays open until a real positive/control/mixed c
 exists. Existence and causal confidence remain one value and are not separately calibrated;
 overlap is not proven causality. Thermal/power calibration is out of scope (corpus
 insufficient).
+
+## 2026-10-22: observation vs causal confidence separated (#32, offline)
+
+`Diagnosis` now carries `causal_confidence` (`NotEstablished|Low|Medium|High`) beside the
+unchanged `confidence`, which still means the candidate's evidence was observed. The policy
+lives next to the existing causal wording policy and reuses its explicit-attribution-chain
+rule: no coincident visible frame spike means `NotEstablished`; IRQ, block-I/O and GPU/fence
+candidates are `NotEstablished` without their explicit chain; scheduler overlap is capped at
+`Medium`, other context candidates at `Low`; the value never exceeds the observation
+confidence. `xtask calibrate` now reports `observation_confidence_distribution`,
+`causal_confidence_distribution`, `false_high_observation_confidence` and
+`false_high_causal_confidence` per sweep point; scoring of the detected cause is unchanged
+and independent of both. No threshold changed. This is tooling and a policy, not a
+calibration result: #32 still needs the real corpus (#31).

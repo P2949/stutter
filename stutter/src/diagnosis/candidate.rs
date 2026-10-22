@@ -3,8 +3,8 @@
 use std::cmp::Ordering;
 
 use super::{
-    CandidateRejection, Confidence, Diagnosis, DiagnosisCandidate, DiagnosisConfig, EvidenceItem,
-    EvidenceKind, StutterCause,
+    CandidateRejection, CausalConfidence, Confidence, Diagnosis, DiagnosisCandidate,
+    DiagnosisConfig, EvidenceItem, EvidenceKind, StutterCause,
 };
 
 fn clamp01(v: f32) -> f32 {
@@ -266,6 +266,7 @@ fn unknown_diagnosis_with_candidates(
     Diagnosis {
         cause: StutterCause::Unknown,
         confidence: Confidence::Low,
+        causal_confidence: CausalConfidence::NotEstablished,
         secondary_causes,
         evidence,
         missing_evidence,
@@ -287,6 +288,7 @@ pub(super) fn finalize_diagnosis(
         return Diagnosis {
             cause: StutterCause::Unknown,
             confidence: Confidence::Low,
+            causal_confidence: CausalConfidence::NotEstablished,
             secondary_causes: Vec::new(),
             evidence: vec!["no strong correlation found".to_owned()],
             missing_evidence,
@@ -339,6 +341,7 @@ pub(super) fn finalize_diagnosis(
     Diagnosis {
         cause: primary.cause,
         confidence: primary.confidence,
+        causal_confidence: CausalConfidence::NotEstablished,
         secondary_causes,
         evidence,
         missing_evidence,

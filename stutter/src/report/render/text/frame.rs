@@ -124,6 +124,7 @@ mod tests {
         Diagnosis {
             cause,
             confidence: Confidence::High,
+            causal_confidence: Default::default(),
             secondary_causes: Vec::new(),
             evidence: vec!["synthetic evidence".to_owned()],
             missing_evidence: Vec::new(),
