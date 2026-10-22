@@ -1,6 +1,7 @@
 //! Deterministic scenarios: model, corpus accounting, capture acceptance and fixture
 //! generation. The campaign computes corpus deficits itself; the agent never does.
 pub mod capture;
+pub mod exec;
 pub mod fixture;
 pub mod model;
 

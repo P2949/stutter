@@ -16,6 +16,7 @@ pub mod scenarios;
 pub mod state;
 pub mod status;
 pub mod verify;
+pub mod workloads;
 
 #[cfg(test)]
 mod tests;
