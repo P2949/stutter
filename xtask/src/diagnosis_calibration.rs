@@ -153,7 +153,10 @@ pub struct Counts {
     pub fp: usize,
     pub fn_: usize,
     pub tn: usize,
-    pub false_high_confidence: usize,
+    /// Negative controls called a family positive with High observation confidence.
+    pub false_high_observation: usize,
+    /// Negative controls called a family positive with High *causal* confidence.
+    pub false_high_causal: usize,
 }
 impl Counts {
     pub fn precision(&self) -> Option<f64> {
@@ -164,23 +167,32 @@ impl Counts {
     }
 }
 
-/// `predicted` is the primary cause the pipeline produced (or `None`) with its confidence.
-pub fn score(spec: &FamilySpec, labels: &[(bool, Option<(String, String)>)]) -> Counts {
+/// The primary cause the pipeline produced with its two confidence dimensions.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Prediction {
+    pub cause: String,
+    pub observation: String,
+    pub causal: String,
+}
+
+/// Cause scoring depends only on the predicted cause; the confidence dimensions are tallied
+/// separately so threshold detection stays independent of causal-confidence scoring.
+pub fn score(spec: &FamilySpec, labels: &[(bool, Option<Prediction>)]) -> Counts {
     let mut counts = Counts::default();
     for (positive, predicted) in labels {
         let hit = predicted
             .as_ref()
-            .is_some_and(|(cause, _)| spec.positives.contains(&cause.as_str()));
+            .is_some_and(|p| spec.positives.contains(&p.cause.as_str()));
         match (positive, hit) {
             (true, true) => counts.tp += 1,
             (true, false) => counts.fn_ += 1,
             (false, true) => {
                 counts.fp += 1;
-                if predicted
-                    .as_ref()
-                    .is_some_and(|(_, confidence)| confidence == "High")
-                {
-                    counts.false_high_confidence += 1;
+                if predicted.as_ref().is_some_and(|p| p.observation == "High") {
+                    counts.false_high_observation += 1;
+                }
+                if predicted.as_ref().is_some_and(|p| p.causal == "High") {
+                    counts.false_high_causal += 1;
                 }
             }
             (false, false) => counts.tn += 1,
@@ -220,7 +232,8 @@ pub fn run(
     let mut results = Vec::new();
     for value in spec.sweep {
         let (mut labels, mut stable) = (Vec::new(), 0);
-        let mut confidences: BTreeMap<String, usize> = BTreeMap::new();
+        let mut observation: BTreeMap<String, usize> = BTreeMap::new();
+        let mut causal: BTreeMap<String, usize> = BTreeMap::new();
         for fixture in &labeled {
             let outcome = diagnose(fixture, *value)?;
             let cause = outcome
@@ -230,25 +243,29 @@ pub fn run(
             if baseline.get(&fixture.name).is_some_and(|b| *b == cause) {
                 stable += 1;
             }
-            if spec.positives.contains(&cause.as_str()) {
-                *confidences
-                    .entry(
-                        outcome
-                            .as_ref()
-                            .map_or(String::new(), |o| o.confidence.clone()),
-                    )
-                    .or_default() += 1;
+            if let Some(o) = outcome
+                .as_ref()
+                .filter(|_| spec.positives.contains(&cause.as_str()))
+            {
+                *observation.entry(o.confidence.clone()).or_default() += 1;
+                *causal.entry(o.causal_confidence.clone()).or_default() += 1;
             }
             labels.push((
                 fixture.label(spec) == Some(true),
-                outcome.map(|o| (o.cause, o.confidence)),
+                outcome.map(|o| Prediction {
+                    cause: o.cause,
+                    observation: o.confidence,
+                    causal: o.causal_confidence,
+                }),
             ));
         }
         let counts = score(spec, &labels);
         results.push(json!({"threshold":value,"unit":spec.unit,"tp":counts.tp,"fp":counts.fp,"fn":counts.fn_,"tn":counts.tn,
-            "precision":counts.precision(),"recall":counts.recall(),"false_high_confidence":counts.false_high_confidence,
+            "precision":counts.precision(),"recall":counts.recall(),"false_high_observation_confidence":counts.false_high_observation,
+            "false_high_causal_confidence":counts.false_high_causal,
             "primary_cause_agreement_with_current":stable as f64 / labeled.len() as f64,
-            "claim_confidence_distribution":confidences}));
+            "observation_confidence_distribution":observation,
+            "causal_confidence_distribution":causal}));
     }
     let count = |real: bool, positive: bool| {
         labeled
@@ -272,7 +289,7 @@ pub fn run(
         "sweep":results,"decision":decision,
         "limitations":["family-level labels; specific-cause agreement is not scored",
             "mixed/confounded cases are only counted when fixtures are tagged mixed; none are tagged today",
-            "existence confidence and causal confidence are one value in the pipeline and are NOT separately calibrated",
+            "observation and causal confidence are reported separately; causal confidence is capped by the explicit-attribution-chain policy and visible-stutter linkage, and no causal threshold is tuned here",
             "overlap is not proven causality: IRQ/I-O overlap fixtures do not calibrate causal claims",
             "numerical optimum is never chosen mechanically; false high-confidence claims weigh more than inconclusive ones"]});
     println!("{}", serde_json::to_string_pretty(&report)?);
@@ -321,30 +338,38 @@ mod tests {
     }
 
     #[test]
-    fn scoring_counts_false_high_confidence_separately() {
+    fn scoring_counts_false_high_observation_and_causal_separately() {
         let spec = family_spec("scheduler").unwrap();
-        let hit = |c: &str| Some(("GameThreadSchedulerDelay".to_owned(), c.to_owned()));
+        let hit = |observation: &str, causal: &str| {
+            Some(Prediction {
+                cause: "GameThreadSchedulerDelay".to_owned(),
+                observation: observation.to_owned(),
+                causal: causal.to_owned(),
+            })
+        };
         let counts = score(
             spec,
             &[
-                (true, hit("High")),
+                (true, hit("High", "Medium")),
                 (true, None),
-                (false, hit("High")),
-                (false, hit("Low")),
-                (false, Some(("IrqDelayCandidate".into(), "High".into()))),
+                // High observation, but overlap alone never established causality.
+                (false, hit("High", "NotEstablished")),
+                (false, hit("Low", "Low")),
+                (false, hit("High", "High")),
+                (
+                    false,
+                    Some(Prediction {
+                        cause: "IrqDelayCandidate".into(),
+                        observation: "High".into(),
+                        causal: "High".into(),
+                    }),
+                ),
             ],
         );
-        assert_eq!(
-            (
-                counts.tp,
-                counts.fn_,
-                counts.fp,
-                counts.tn,
-                counts.false_high_confidence
-            ),
-            (1, 1, 2, 1, 1)
-        );
-        assert_eq!(counts.precision(), Some(1.0 / 3.0));
+        assert_eq!((counts.tp, counts.fn_, counts.fp, counts.tn), (1, 1, 3, 1));
+        assert_eq!(counts.false_high_observation, 2);
+        assert_eq!(counts.false_high_causal, 1);
+        assert_eq!(counts.precision(), Some(0.25));
         assert_eq!(counts.recall(), Some(0.5));
         assert_eq!(Counts::default().precision(), None);
     }

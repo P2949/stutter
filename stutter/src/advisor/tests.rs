@@ -424,6 +424,7 @@ fn analysis_builder_derives_irq_affinity_overlap_from_recorded_task_mask() {
     let diagnosis = Diagnosis {
         cause: StutterCause::IrqDelayCandidate,
         confidence: Confidence::Medium,
+        causal_confidence: Default::default(),
         secondary_causes: Vec::new(),
         evidence: Vec::new(),
         missing_evidence: Vec::new(),

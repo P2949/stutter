@@ -5,7 +5,7 @@
 //! IRQ/GPU/fence/block-I/O candidates as causal conclusions when the
 //! frame -> cluster -> event -> device -> recommendation chain is absent.
 
-use super::Diagnosis;
+use super::{CausalConfidence, Diagnosis, StutterCause};
 
 pub(super) fn apply_causal_wording_policy(diagnosis: &mut Diagnosis) {
     let Some(primary) = diagnosis.primary.as_ref() else {
@@ -40,6 +40,40 @@ pub(super) fn apply_causal_wording_policy(diagnosis: &mut Diagnosis) {
     );
 }
 
+/// Sets the separate causal dimension. It reuses the explicit-attribution-chain policy above:
+/// device candidates stay `NotEstablished` without their chain, and nothing is established
+/// without a visible-stutter linkage. Plain scheduler overlap is capped at `Medium`, other
+/// context candidates at `Low`; the result never exceeds the observation confidence.
+pub(super) fn apply_causal_confidence_policy(
+    diagnosis: &mut Diagnosis,
+    visible_stutter_linkage: bool,
+) {
+    diagnosis.causal_confidence = causal_confidence(diagnosis, visible_stutter_linkage);
+}
+
+fn causal_confidence(diagnosis: &Diagnosis, visible_stutter_linkage: bool) -> CausalConfidence {
+    let Some(primary) = diagnosis.primary.as_ref() else {
+        return CausalConfidence::NotEstablished;
+    };
+    if !visible_stutter_linkage {
+        return CausalConfidence::NotEstablished;
+    }
+    let ceiling = if primary.cause.requires_explicit_attribution_chain() {
+        if !diagnosis.has_explicit_evidence_chain_for_cause(primary.cause) {
+            return CausalConfidence::NotEstablished;
+        }
+        CausalConfidence::High
+    } else if matches!(
+        primary.cause,
+        StutterCause::CompositorSchedulerDelay | StutterCause::GameThreadSchedulerDelay
+    ) {
+        CausalConfidence::Medium
+    } else {
+        CausalConfidence::Low
+    };
+    CausalConfidence::from(primary.confidence).min(ceiling)
+}
+
 fn push_unique(values: &mut Vec<String>, value: impl Into<String>) {
     let value = value.into();
     if !values.iter().any(|existing| existing == &value) {
@@ -53,8 +87,8 @@ mod tests {
 
     use super::*;
     use crate::diagnosis::{
-        Confidence, DiagnosisCandidate, EvidenceChain, EvidenceChainKind, EvidenceChainNode,
-        EvidenceChainNodeKind, EvidenceItem, EvidenceKind, StutterCause,
+        CausalConfidence, Confidence, DiagnosisCandidate, EvidenceChain, EvidenceChainKind,
+        EvidenceChainNode, EvidenceChainNodeKind, EvidenceItem, EvidenceKind, StutterCause,
     };
 
     fn candidate(cause: StutterCause) -> DiagnosisCandidate {
@@ -78,6 +112,7 @@ mod tests {
         Diagnosis {
             cause,
             confidence: Confidence::High,
+            causal_confidence: CausalConfidence::NotEstablished,
             secondary_causes: Vec::new(),
             evidence: vec!["synthetic primary evidence".to_owned()],
             missing_evidence: Vec::new(),
@@ -215,5 +250,118 @@ mod tests {
 
         assert_eq!(diagnosis.summary, original_summary);
         assert!(diagnosis.missing_evidence.is_empty());
+    }
+
+    fn with_confidence(mut diagnosis: Diagnosis, confidence: Confidence) -> Diagnosis {
+        diagnosis.confidence = confidence;
+        diagnosis.primary.as_mut().unwrap().confidence = confidence;
+        diagnosis
+    }
+
+    fn causal(diagnosis: &mut Diagnosis, linkage: bool) -> CausalConfidence {
+        apply_causal_confidence_policy(diagnosis, linkage);
+        diagnosis.causal_confidence
+    }
+
+    #[test]
+    fn strong_delay_without_visible_linkage_keeps_observation_but_not_causality() {
+        let mut diagnosis = diagnosis_with_primary(StutterCause::GameThreadSchedulerDelay);
+
+        assert_eq!(
+            causal(&mut diagnosis, false),
+            CausalConfidence::NotEstablished
+        );
+        assert_eq!(diagnosis.confidence, Confidence::High);
+        assert_eq!(diagnosis.primary.unwrap().confidence, Confidence::High);
+    }
+
+    #[test]
+    fn device_overlap_without_attribution_chain_is_not_established() {
+        for cause in [
+            StutterCause::IrqDelayCandidate,
+            StutterCause::BlockIoCandidate,
+            StutterCause::GpuBoundCandidate,
+        ] {
+            let mut diagnosis = diagnosis_with_primary(cause);
+            assert_eq!(
+                causal(&mut diagnosis, true),
+                CausalConfidence::NotEstablished,
+                "{cause:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn explicit_chain_with_linkage_establishes_causality_within_observation_confidence() {
+        for (cause, kind) in [
+            (StutterCause::IrqDelayCandidate, EvidenceChainKind::Irq),
+            (StutterCause::BlockIoCandidate, EvidenceChainKind::BlockIo),
+            (StutterCause::GpuBoundCandidate, EvidenceChainKind::Gpu),
+            (StutterCause::GpuBoundCandidate, EvidenceChainKind::DrmFence),
+        ] {
+            for observation in [Confidence::Low, Confidence::Medium, Confidence::High] {
+                let mut diagnosis = with_confidence(diagnosis_with_primary(cause), observation);
+                diagnosis.evidence_chains.push(explicit_chain(kind));
+
+                let established = causal(&mut diagnosis, true);
+
+                assert_eq!(
+                    established,
+                    CausalConfidence::from(observation),
+                    "{cause:?}"
+                );
+                assert!(established <= CausalConfidence::from(observation));
+            }
+            // The same chain without a visible-stutter linkage establishes nothing.
+            let mut diagnosis = diagnosis_with_primary(cause);
+            diagnosis.evidence_chains.push(explicit_chain(kind));
+            assert_eq!(
+                causal(&mut diagnosis, false),
+                CausalConfidence::NotEstablished
+            );
+        }
+    }
+
+    #[test]
+    fn overlap_alone_never_produces_high_causal_confidence() {
+        // Scheduler overlap with a coincident frame spike is temporal coincidence: capped.
+        let mut scheduler = diagnosis_with_primary(StutterCause::CompositorSchedulerDelay);
+        assert_eq!(causal(&mut scheduler, true), CausalConfidence::Medium);
+        // Context candidates are capped lower still.
+        for cause in [
+            StutterCause::CpuPressureCandidate,
+            StutterCause::CpuMonopolizationCandidate,
+            StutterCause::RuntimeWaitCandidate,
+        ] {
+            let mut diagnosis = diagnosis_with_primary(cause);
+            assert_eq!(
+                causal(&mut diagnosis, true),
+                CausalConfidence::Low,
+                "{cause:?}"
+            );
+        }
+        // No primary: nothing to establish.
+        let mut unknown = diagnosis_with_primary(StutterCause::Unknown);
+        unknown.primary = None;
+        assert_eq!(causal(&mut unknown, true), CausalConfidence::NotEstablished);
+    }
+
+    #[test]
+    fn causal_confidence_never_exceeds_observation_confidence() {
+        for cause in [
+            StutterCause::GameThreadSchedulerDelay,
+            StutterCause::IrqDelayCandidate,
+            StutterCause::CpuPressureCandidate,
+        ] {
+            for observation in [Confidence::Low, Confidence::Medium, Confidence::High] {
+                for linkage in [false, true] {
+                    let mut diagnosis = with_confidence(diagnosis_with_primary(cause), observation);
+                    diagnosis
+                        .evidence_chains
+                        .push(explicit_chain(EvidenceChainKind::Irq));
+                    assert!(causal(&mut diagnosis, linkage) <= CausalConfidence::from(observation));
+                }
+            }
+        }
     }
 }
