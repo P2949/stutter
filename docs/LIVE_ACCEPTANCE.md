@@ -206,3 +206,34 @@ runtime's wall/monotonic clock discontinuity detection, a cleared measurement wi
 the active candidate reverted, a stabilization cooldown, and independently re-read
 original masks. Run from a clean committed tree. If `rtcwake` is not permitted, wake
 the machine manually.
+
+## Portable evidence bundles
+
+Raw suite output is local and may contain account, host and path information.
+Publishable evidence is exported and verified with:
+
+```bash
+cargo run -p xtask -- evidence-export --raw RAW_DIR --out BUNDLE_DIR
+cargo run -p xtask -- evidence-verify BUNDLE_DIR      # nonzero exit on any failure
+```
+
+Bundle layout: `receipt.json`, `environment.json`, `validation.json`,
+`MANIFEST.sha256`, `README.md`, `logs/`, `artifacts/`. The receipt records schema
+version, suite, evidence kind (`synthetic`, `fixture_real`, `controlled_real`,
+`real_workload`), source commit and dirty state, binary version and SHA-256,
+Cargo.lock SHA-256, artifact schemas, capture start/end, PASS/FAIL/BLOCKED/INCONCLUSIVE
+status and explicit `not_claimed` limitations. The environment adds kernel, distribution
+and CPU; `proc_version` is deliberately excluded because it embeds the kernel
+builder's identity.
+
+Export is sanitize → scan → manifest → independent verification, and publishes nothing
+on failure. Replacements use documented placeholders (`<EVIDENCE_DIR>`, `<CHECKOUT>`,
+`<HOME>`, `<TMP>`, `<USER>`, `<HOST>`, `<EMAIL>`); provenance values (commit, digests,
+kernel, distribution, CPU) are never redacted. The verifier rechecks manifest digests,
+required files, JSON validity, schemas, suite/kind/capture/status agreement,
+provenance, relative references, absence of raw or private artifacts (binary files,
+symlinks, key/credential names) and runs the privacy scan again, including digests of
+the exporting machine's account and host names. Raw evidence that lacks capture
+identity or artifact schema is refused: rerun the suite from the exact committed source
+rather than reconstructing metadata. `scripts/artifacts/export_evidence_bundle.sh` is the
+legacy, fail-open exporter and is not canonical.

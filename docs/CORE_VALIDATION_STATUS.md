@@ -579,3 +579,14 @@ Limits: manager/runtime cases use a minimal baseline observation (planner and
 measurement are not under test); evidence is local raw output, not yet a portable
 bundle (PR 56); suspend/resume is PR 55. #47 closes on merge of #53; #48 on #54;
 #29 remains open until suspend/resume passes.
+
+## 2026-10-22: portable evidence contract (PR 56)
+
+`xtask evidence-export` / `evidence-verify` added with tests for every rejection class
+(tampering, stale manifest, privacy classes, inconsistent receipts, raw/unexpected
+artifacts, incomplete provenance). Real verified bundles from source `ad5e04a`
+(kernel 6.18.55, clean tree): `live_affinity` (PASS) manifest sha256 `34af22a6465209126549f680a340bb9e0d52a5ba80e9cd64224bef2380151eba`;
+`live_recovery` (PASS, 11 cases) manifest sha256 `6708a9af10aa5b9d1be5f775bba127de89fb6a6c9367d62fcfbd7024ab4c8aa1`; both retained locally under
+`evidence-local/`. **Live observation bundle: not produced** — it needs root/CAP_BPF,
+which the executing session did not have; run it from a privileged shell, then export and
+verify. Advances #27/#34; #27 stays open for the controlled game-runnable gate.
