@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# NON-CANONICAL: legacy export whose privacy scan is informational (fail-open).
+# Publishable evidence must use `cargo run -p xtask -- evidence-export` and
+# `evidence-verify`, which fail closed.
 set -euo pipefail
 
 if [ "${1:-}" != "" ]; then

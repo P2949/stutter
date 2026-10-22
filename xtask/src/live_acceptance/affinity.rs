@@ -70,7 +70,9 @@ pub(super) fn run(root: &Path, out: &Path, binary: &Path) -> anyhow::Result<()> 
         &out,
         evidence::LiveAcceptanceSuite::Affinity,
         json!({"schema_version":1,"status":status,"stage":stage,"evidence_kind":"controlled_real",
-        "measurements":result.as_ref().ok(),"error":result.as_ref().err().map(|err|format!("{err:#}")),"observation_suite":"not_run","crash_recovery":"not_run"}),
+        "measurements":result.as_ref().ok(),"error":result.as_ref().err().map(|err|format!("{err:#}")),"observation_suite":"not_run","crash_recovery":"not_run",
+        "scope":"real multi-process CPU-affinity apply, physical verify and restore on an owned disposable tree",
+        "not_claimed":["controller crash, interrupted rollback and failure matrix (live recovery suite)","suspend/resume","scheduler observation","benefit of the mutation","portable verified bundle until exported"]}),
     )?;
     println!("{status}: affinity evidence {}", out.display());
     result.map(|_| ())

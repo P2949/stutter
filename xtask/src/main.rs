@@ -6,6 +6,7 @@ use clap::{Parser, Subcommand};
 pub mod dependency_hygiene;
 pub mod ebpf_manifest;
 pub mod ebpf_smoke;
+pub mod evidence_bundle;
 pub mod fixed_work;
 pub mod fixture_coverage;
 pub mod fixtures;
@@ -65,6 +66,16 @@ pub enum XtaskCommand {
         #[command(subcommand)]
         mode: live_acceptance::recovery::ControllerCommand,
     },
+    #[command(
+        name = "evidence-export",
+        about = "Sanitize raw suite output into a portable bundle"
+    )]
+    EvidenceExport(evidence_bundle::ExportArgs),
+    #[command(
+        name = "evidence-verify",
+        about = "Verify a portable evidence bundle (fails closed)"
+    )]
+    EvidenceVerify(evidence_bundle::VerifyArgs),
     #[command(about = "Generate or check objective contract documentation")]
     ObjectiveDocs {
         #[arg(long, conflicts_with = "write", required_unless_present = "write")]
@@ -301,6 +312,10 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
             ready,
             descendants,
         } => live_acceptance::workload(seconds, &ready, descendants),
+        XtaskCommand::EvidenceExport(args) => {
+            evidence_bundle::export_bundle(&root, &args.raw, &args.out)
+        }
+        XtaskCommand::EvidenceVerify(args) => evidence_bundle::verify_bundle(&args.bundle),
         XtaskCommand::ObjectiveDocs { write, .. } => {
             objective_docs::run_at(&root.join("docs/AUTOTUNE_OBJECTIVES.md"), write)
         }
@@ -413,6 +428,8 @@ mod tests {
                 "dependency-hygiene",
                 "ebpf-manifest",
                 "ebpf-smoke",
+                "evidence-export",
+                "evidence-verify",
                 "fixed-work",
                 "fixture-check",
                 "fixture-coverage",

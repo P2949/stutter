@@ -371,7 +371,9 @@ pub fn run(root: &Path, suite: Suite) -> anyhow::Result<()> {
     let receipt = json!({"schema_version":1,"status":status,"stage":stage,
         "evidence_kind":"controlled_real","measurements":result.as_ref().ok(),
         "error":result.as_ref().err().map(|error| format!("{error:#}")),
-        "mutation_suite":"not_run","privacy":"local raw logs; inspect and sanitize before publication"});
+        "mutation_suite":"not_run","privacy":"local raw logs; inspect and sanitize before publication",
+        "scope":"real scheduler observation of an owned generic workload through record, validation and report",
+        "not_claimed":["GameRunnableLatency objective (generic workload only)","kernel compatibility beyond this host","profiler overhead","portable verified bundle until exported"]});
     evidence::write_result(&out, evidence::LiveAcceptanceSuite::Observation, receipt)?;
     println!("{status}: evidence {}", out.display());
     result.map(|_| ())
