@@ -33,7 +33,10 @@ use serde::Serialize;
 
 pub use crate::error::ReportError;
 use crate::{
-    diagnosis::{Diagnosis, FrameDiagnosis, diagnose_cluster, select_anchor_for_diagnosis},
+    diagnosis::{
+        Diagnosis, DiagnosisConfig, FrameDiagnosis, diagnose_cluster, diagnose_cluster_with_config,
+        select_anchor_for_diagnosis,
+    },
     metrics::format_latency,
     process_tree::TaskClass,
     recorder::{
@@ -49,6 +52,7 @@ use crate::{
 };
 
 pub(crate) mod analysis;
+pub mod calibration;
 pub(crate) mod diff;
 pub(crate) mod html;
 pub(crate) mod load;

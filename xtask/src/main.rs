@@ -6,6 +6,7 @@ use clap::{Parser, Subcommand};
 pub mod capability_check;
 pub mod coverage_maturity;
 pub mod dependency_hygiene;
+pub mod diagnosis_calibration;
 pub mod ebpf_manifest;
 pub mod ebpf_smoke;
 pub mod evidence_bundle;
@@ -85,6 +86,16 @@ pub enum XtaskCommand {
         about = "Fail if a capability is Supported ahead of its evidence"
     )]
     CapabilityCheck,
+    #[command(
+        name = "calibrate-scheduler",
+        about = "Sweep the scheduler-delay threshold over the frozen corpus"
+    )]
+    CalibrateScheduler {
+        #[arg(long, default_value = "stutter/tests/fixtures/runs")]
+        corpus: PathBuf,
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
     #[command(
         name = "kernel-matrix",
         about = "Report observed kernel compatibility from the evidence index"
@@ -348,6 +359,12 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
         XtaskCommand::ReleaseVerify(args) => release_package::verify_release(&args),
         XtaskCommand::KernelMatrix { require } => kernel_matrix::run(&root, require),
         XtaskCommand::EvidenceIndex(args) => evidence_bundle::index_entry(&args.bundle),
+        XtaskCommand::CalibrateScheduler { corpus, out } => diagnosis_calibration::run(
+            &root,
+            &corpus,
+            out.as_deref(),
+            &diagnosis_calibration::DEFAULT_SWEEP_MS,
+        ),
         XtaskCommand::CapabilityCheck => capability_check::run(&root),
         XtaskCommand::EvidenceExport(args) => {
             evidence_bundle::export_bundle(&root, &args.raw, &args.out)

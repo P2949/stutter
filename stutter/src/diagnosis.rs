@@ -15,9 +15,7 @@ pub use model::{
     EvidenceChainNode, EvidenceChainNodeKind, EvidenceItem, EvidenceKind, FrameDiagnosis,
     LiveDiagnosisEntry, StutterCause,
 };
-pub(crate) use orchestrator::diagnose_cluster;
-#[cfg(test)]
-pub(crate) use orchestrator::diagnose_cluster_with_config;
+pub(crate) use orchestrator::{diagnose_cluster, diagnose_cluster_with_config};
 
 #[cfg(test)]
 mod tests;

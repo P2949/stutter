@@ -590,3 +590,20 @@ artifacts, incomplete provenance). Real verified bundles from source `ad5e04a`
 `evidence-local/`. **Live observation bundle: not produced** — it needs root/CAP_BPF,
 which the executing session did not have; run it from a privileged shell, then export and
 verify. Advances #27/#34; #27 stays open for the controlled game-runnable gate.
+
+## 2026-10-22: scheduler-delay calibration tooling and preliminary result (#32)
+
+`xtask calibrate-scheduler` sweeps 0.5/1/1.5/2/2.5/3/4 ms through the production report
+pipeline (`scheduler_calibration_outcome` -> `diagnose_cluster_with_config`) over the frozen
+fixture corpus (id `de53bb2c2f73...0d8e`, 36 labeled: 4 real positives, 13 real negative
+controls, 0 tagged mixed/confounded, 3 unlabeled `Any`). TP/FP/FN/TN, precision, recall,
+false-high-confidence count, agreement with the current threshold and the scheduler-claim
+confidence distribution are reported per threshold.
+
+Result: **flat** - 6 TP, 0 FP, 0 FN at every threshold, 100% agreement with the current
+2 ms; the corpus cannot discriminate between thresholds. Decision per the evidence floors
+(10 real positives, 10 real negatives, 3 mixed): **retain the current 2 ms threshold,
+evidence insufficient**. This is not a calibration claim: #32 stays open until a real
+positive/control/mixed corpus (#31) exists. Causal confidence is not separately calibrated
+(the pipeline has one confidence value); I/O, IRQ, GPU families and `StutterScore` evaluation
+(#33) are not started because they need the real corpus and controlled degradation runs.
