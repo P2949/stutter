@@ -630,6 +630,19 @@ exists. Existence and causal confidence remain one value and are not separately 
 overlap is not proven causality. Thermal/power calibration is out of scope (corpus
 insufficient).
 
+## 2026-10-22: exact-release evidence gate no longer self-referential (#36 prerequisite)
+
+`release-verify --require-acceptance` used to read `docs/evidence/index.json` inside the
+release archive for PASS entries whose `source_commit` equalled the release commit, which no
+commit can satisfy honestly (committing evidence for X produces Y). It now takes repeatable
+`--acceptance-bundle BUNDLE` arguments and verifies each bundle through the new
+`verified_index_entry` (which calls `verify_bundle` first). Every bundle must be PASS for
+exactly the release commit, a capture may not repeat, and the union of suites must cover
+every Supported capability's `required_evidence`. The committed index remains the
+historical catalogue and never satisfies the gate. Tests: valid exact bundles, wrong commit,
+tampered bundle, missing suite, index-alone insufficient, non-PASS in either order, and
+deterministic duplicate-suite handling.
+
 ## 2026-10-22: frame-aware StutterScore evaluator (#33, offline)
 
 `xtask score-evaluate` now reads a recording's frame stream when present, scores it with
