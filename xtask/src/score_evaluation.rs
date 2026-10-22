@@ -8,12 +8,14 @@ use anyhow::{Context, ensure};
 use serde_json::{Value, json};
 use stutter::api::{
     autotune::runnable_signals_for_target,
-    recorder::{FrameEvent, IntervalRecord},
+    recorder::{FrameEvent, IntervalRecord, SessionFile},
     scorer::{
         frame_time_percentile_ms, score_from_interval_records,
         score_from_interval_records_and_frames,
     },
 };
+
+use crate::score_target::{self, IdentitySource, TargetIdentity};
 
 /// Frame thresholds shared with the production score (`score_from_interval_records_and_frames`).
 const FRAME_16_6_MS: f64 = 16.6;
@@ -38,6 +40,8 @@ pub struct LevelObservation {
     pub frame_over_16_6_rate: Option<f64>,
     pub frame_over_33_3_rate: Option<f64>,
     pub frame_samples: Option<usize>,
+    /// The resolved target; `None` for synthetic observations.
+    pub identity: Option<TargetIdentity>,
 }
 
 impl LevelObservation {
@@ -92,6 +96,7 @@ pub fn observe(
         frame_over_16_6_rate: has_frames.then(|| rate(FRAME_16_6_MS)),
         frame_over_33_3_rate: has_frames.then(|| rate(FRAME_33_3_MS)),
         frame_samples: Some(frames.len()),
+        identity: None,
     }
 }
 
@@ -146,6 +151,18 @@ pub fn evaluate(
     ensure!(
         observations[0].level_ms == 0.0,
         "the zero-degradation control level is required"
+    );
+    let legacy = observations
+        .iter()
+        .filter(|o| {
+            o.identity
+                .is_some_and(|i| i.source == IdentitySource::LegacySampleHeuristic)
+        })
+        .map(|o| o.level_ms)
+        .collect::<Vec<_>>();
+    ensure!(
+        !require_frames || legacy.is_empty(),
+        "--require-frames cannot use the legacy sample-heuristic target (levels {legacy:?} ms)"
     );
     let without_frames = observations
         .iter()
@@ -207,6 +224,12 @@ pub fn evaluate(
         "score_basis": if frame_basis { "runnable_plus_frames" } else { "runnable_only" },
         "levels_ms": levels,
         "score_total": scores,
+        "targets": observations.iter().map(|o| match o.identity {
+            Some(target) => json!({"level_ms":o.level_ms,"target_pid":target.pid,
+                "target_starttime_ticks":target.starttime_ticks,
+                "target_identity_source":target.source.as_str()}),
+            None => json!({"level_ms":o.level_ms,"target_identity_source":null}),
+        }).collect::<Vec<_>>(),
         "frame_samples": observations.iter().map(|o| o.frame_samples).collect::<Vec<_>>(),
         "adjacent_inversions": inversions,
         "spearman_score_vs_level": level_rho,
@@ -230,9 +253,28 @@ pub fn run_from_recordings(
             .filter(|line| !line.trim().is_empty())
             .map(serde_json::from_str::<IntervalRecord>)
             .collect::<Result<Vec<_>, _>>()?;
-        let (pid, ticks) = target_identity(dir, &records)?;
+        let session: SessionFile =
+            serde_json::from_slice(&std::fs::read(dir.join("session.json"))?)?;
+        // `--require-frames` implies strict target identity: the closure evidence must be
+        // bound to the recorded target, never to whichever process had the most samples.
+        let target = score_target::resolve(
+            &session.config.tree_roots,
+            &session.config.manual_pids,
+            &session.tasks,
+            &records,
+            require_frames,
+        )
+        .with_context(|| format!("level {level} ms ({})", dir.display()))?;
         let frames = load_frames(dir)?;
-        observations.push(observe(*level, &records, &frames, pid, ticks));
+        let mut observation = observe(
+            *level,
+            &records,
+            &frames,
+            target.pid,
+            target.starttime_ticks,
+        );
+        observation.identity = Some(target);
+        observations.push(observation);
     }
     evaluate(observations, require_frames)
 }
@@ -254,33 +296,6 @@ fn load_frames(dir: &std::path::Path) -> anyhow::Result<Vec<FrameEvent>> {
         }
     }
     Ok(Vec::new())
-}
-
-/// The game process with the most samples, with its start time from the session.
-fn target_identity(
-    dir: &std::path::Path,
-    records: &[IntervalRecord],
-) -> anyhow::Result<(u32, u64)> {
-    let mut samples = std::collections::BTreeMap::<u32, u64>::new();
-    for record in records {
-        if let Some(pid) = record.process_pid {
-            *samples.entry(pid).or_default() += record.samples;
-        }
-    }
-    let pid = samples
-        .into_iter()
-        .max_by_key(|(_, s)| *s)
-        .map(|(pid, _)| pid)
-        .context("no sampled process")?;
-    let session: stutter::api::recorder::SessionFile =
-        serde_json::from_slice(&std::fs::read(dir.join("session.json"))?)?;
-    let ticks = session
-        .tasks
-        .iter()
-        .find(|task| task.process_pid == Some(pid))
-        .and_then(|task| task.process_starttime_ticks)
-        .context("target start time missing from session")?;
-    Ok((pid, ticks))
 }
 
 #[cfg(test)]
@@ -534,5 +549,42 @@ mod tests {
         std::fs::write(dir.join("frame_correlation.json"), "not json\n").unwrap();
         assert!(load_frames(&dir).is_err());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    fn with_identity(
+        mut observation: LevelObservation,
+        source: IdentitySource,
+    ) -> LevelObservation {
+        observation.identity = Some(TargetIdentity {
+            pid: 100,
+            starttime_ticks: 1111,
+            source,
+        });
+        observation
+    }
+
+    #[test]
+    fn require_frames_rejects_the_legacy_target_heuristic_and_reports_the_target() {
+        let framed = |source| {
+            LEVELS
+                .iter()
+                .enumerate()
+                .map(|(i, l)| with_identity(with_frames(*l, i as f64 * 10.0, 20.0, 600), source))
+                .collect::<Vec<_>>()
+        };
+        let error = evaluate(framed(IdentitySource::LegacySampleHeuristic), true)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("legacy"), "{error}");
+        let report = evaluate(framed(IdentitySource::TreeRoot), true).unwrap();
+        assert_eq!(report["targets"][0]["target_pid"], 100);
+        assert_eq!(report["targets"][0]["target_starttime_ticks"], 1111);
+        assert_eq!(report["targets"][0]["target_identity_source"], "tree_root");
+        // Exploratory (non-strict) use may still label and use the heuristic.
+        let report = evaluate(framed(IdentitySource::LegacySampleHeuristic), false).unwrap();
+        assert_eq!(
+            report["targets"][5]["target_identity_source"],
+            "legacy_sample_heuristic"
+        );
     }
 }

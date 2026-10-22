@@ -651,3 +651,61 @@ the candidate is established as the cause of visible stutter; it is `NotEstablis
 a coincident frame spike, and for IRQ, block-I/O and GPU/fence candidates without their
 explicit attribution chain. It never exceeds observation confidence. Fixture labels come from
 the known intervention, never from Stutter's own diagnosis.
+
+## Calibration fixture metadata contract
+
+`xtask calibrate --family scheduler|io|irq|gpu` only lets a capture satisfy an evidence floor
+when `fixture.toml` explicitly declares all of the following. This reuses the existing
+evidence model (`evidence_kind`, `[provenance]`, `[coverage]`) read by `xtask
+fixture-coverage`; there is no second classification.
+
+```toml
+evidence_kind = "fixture_real"      # explicit and non-synthetic (fixture_real | controlled_real | real_workload)
+
+[provenance]
+source_commit = "..."               # every key in the required provenance list is mandatory
+capture_id = "..."                  # unique per independent capture
+control_type = "negative_control"   # positive | negative_control | mixed_confounded
+# kernel, distribution, cpu, gpu, compositor, workload, workload_version, scenario,
+# expected_cause, expected_confidence, probe_set, drop_counters, artifact_schema,
+# limitations, privacy_state
+
+[coverage]
+diagnoses = ["GameThreadSchedulerDelay"]   # families the capture was designed to exercise
+```
+
+A mixed capture names every family it deliberately combines, as a single-line or multi-line
+array:
+
+```toml
+[provenance]
+control_type = "mixed_confounded"
+
+[coverage]
+diagnoses = [
+    "GameThreadSchedulerDelay",
+    "BlockIoCandidate",
+]
+```
+
+Rules:
+
+* Per family, independently: at least 10 positive, 10 matched negative-control and 3
+  mixed/confounded captures. Family membership is `[coverage].diagnoses` (scheduler:
+  `CompositorSchedulerDelay` or `GameThreadSchedulerDelay`; io: `BlockIoCandidate`; irq:
+  `IrqDelayCandidate`; gpu: `GpuBoundCandidate`).
+* Another family's positive is never a negative control, and a mixed capture counts only for
+  the families it names.
+* `real_*` names, `source = "sanitized-real-recording"` and a missing `evidence_kind` are
+  legacy inference: those fixtures still run in the regression sweep but cannot satisfy a
+  floor. An explicit `synthetic` kind never counts, whatever the file is called.
+* A repeated `capture_id` counts once; independent captures need distinct ids and, where
+  possible, different scenes and environments rather than ten copies of one condition.
+* Ground-truth labels come from the known intervention (the load or fault you applied),
+  never from Stutter's own diagnosis output.
+* Use privacy-safe names: no usernames, machine names, private project names or needless
+  game titles.
+
+The report's `sufficiency` block shows the counted captures, `ineligible_real_captures` and
+`duplicate_capture_ids`; `decision` stays `retain_current_threshold_evidence_insufficient`
+until every floor is met for that family.

@@ -24,6 +24,7 @@ pub mod process;
 pub mod refresh_tune_recommendation;
 pub mod release_package;
 pub mod score_evaluation;
+pub mod score_target;
 pub mod workflow;
 
 use crate::{
@@ -104,7 +105,8 @@ pub enum XtaskCommand {
         /// `LEVEL_MS:RECORDING_DIR`, repeated (e.g. 0:run0 1:run1 ...).
         #[arg(long = "level", value_name = "MS:DIR", required = true)]
         levels: Vec<String>,
-        /// Fail unless every level has a usable frame stream (frame-aware closure).
+        /// Fail unless every level has a usable frame stream and an explicit recorded target
+        /// (one `--tree-pid`/manual PID); implies strict target identity.
         #[arg(long = "require-frames")]
         require_frames: bool,
     },

@@ -285,10 +285,16 @@ loader/record run. State is observed, never inferred from distribution or versio
 `ObservedIncompatible` if `sched_wakeup`/`sched_switch` are not compatible or the loader
 fails; `ObservedDegraded` if only optional evidence (`sched_stat_wait`, IRQ, block I/O,
 cpu_frequency, migration, process lifecycle, or DRM/KMS) is missing, naming the degraded
-capabilities; `ObservedCompatible` otherwise; `Untested` with no evidence. DRM/KMS is the
-optional `drm_kms` capability, read from the doctor `kms_timing` check (`stutter doctor
---kms-timing --json`, retained as `drm-kms.stdout`); its absence degrades and never makes a
-kernel incompatible. GPU/platform telemetry stays outside this tracepoint contract. Export and verify the bundle, then
+capabilities; `ObservedCompatible` otherwise; `Untested` with no evidence. The tracepoint dump
+reports the `block/block_rq_*` formats as `not_checked` (their variable layout is validated by
+the production block-I/O preflight), and `not_checked` is never treated as validated: the
+`block_io` capability comes from that preflight (`tracepoint_formats.details.block_rq` and
+`block_io_correlation_basis` in `stutter doctor --block-io --json`). A usable `dev+sector`
+fallback is usable and its weaker correlation basis is retained in the receipt. DRM/KMS is the
+optional `drm_kms` capability, read from the doctor `kms_timing` check. Both come from one
+`stutter doctor --block-io --kms-timing --json` run, retained as
+`optional-capabilities.stdout`; their absence degrades and never makes a kernel incompatible.
+GPU/platform telemetry stays outside this tracepoint contract. Export and verify the bundle, then
 `cargo run -p xtask -- evidence-index BUNDLE` prints its `docs/evidence/index.json` entry
 (including `kernel_release` and `compatibility`); `cargo run -p xtask -- kernel-matrix
 --require 3` reports observed kernels and fails with fewer than three distinct ones. When a
@@ -320,8 +326,13 @@ unmeasured warm-up run precedes the rounds so the cache policy is the same for e
 configuration (the harness does not drop caches; wrap the command if you need that). Use
 `exec`-style invocation so the launched pid is the game: runnable p99 and the >5 ms rate are
 read for that process. Commit, binary and kernel are fixed by the clean-tree provenance check
-that every suite performs. The receipt keeps the label, the program file name, the argument
-count and digests of the command line and program, never paths or argument text. The harness
+that every suite performs. The workload's stdout and stderr are discarded (arbitrary application output cannot be
+sanitized generically, so it is never retained or exported). Every profiled run monitors the
+workload for the whole profiling window: any exit before the profiler finishes, successful or
+not, rejects the sample, and a nonzero exit after it rejects the run; a failed A or B round
+fails the suite (they are required baselines) while optional C-F probe sets stay `DEGRADED`.
+The receipt keeps the label, the program file name, the argument count and digests of the
+command line and program, never paths or argument text. The harness
 cannot verify that a command is representative: the operator declares it and the receipt says
 so. Without a workload label the run is the controlled suite exactly as before.
 
@@ -343,6 +354,11 @@ alias `frame_events.json`) the score includes the frame terms
 unavailable (null), never zero, and the runnable-only path is unchanged. If only some levels
 have frames every level is scored runnable-only. `--require-frames` fails unless every level
 has usable frame data and is required to close the frame-aware evaluation (#33); the synthetic
-workload emits no frames and cannot close it.
+workload emits no frames and cannot close it. `--require-frames` also implies strict target
+identity: the target is resolved from the recording's own configuration (exactly one
+`tree_roots` PID, else exactly one `manual_pids` PID, or both naming the same PID) with its
+start time from the session; ambiguous or missing targets fail, and the report carries
+`target_pid`, `target_starttime_ticks` and `target_identity_source` (`tree_root`, `manual_pid`
+or, non-strict only, `legacy_sample_heuristic`). Record real series with `--tree-pid`.
 Regardless of the score, `GameRunnableLatency` keeps runnable latency as its primary and the
 compile objective keeps fixed-work elapsed time (a test asserts both descriptors).
