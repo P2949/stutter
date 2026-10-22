@@ -9,7 +9,11 @@
       "capture_id": "live_affinity-ad5e04a-1792683041028",
       "source_commit": "ad5e04af1b36777fd8d62520db89b22824d53d0f",
       "manifest_sha256": "34af22a6465209126549f680a340bb9e0d52a5ba80e9cd64224bef2380151eba",
-      "covers": {"providers": ["cpu_affinity_profile"]}
+      "covers": {
+        "providers": [
+          "cpu_affinity_profile"
+        ]
+      }
     },
     {
       "suite": "live_recovery",
@@ -18,7 +22,24 @@
       "capture_id": "live_recovery-ad5e04a-1792683043204",
       "source_commit": "ad5e04af1b36777fd8d62520db89b22824d53d0f",
       "manifest_sha256": "6708a9af10aa5b9d1be5f775bba127de89fb6a6c9367d62fcfbd7024ab4c8aa1",
-      "covers": {"providers": ["cpu_affinity_profile"]}
+      "covers": {
+        "providers": [
+          "cpu_affinity_profile"
+        ]
+      }
+    },
+    {
+      "capture_id": "live_suspend_resume-7a43864-1792693309208",
+      "covers": {
+        "providers": [
+          "cpu_affinity_profile"
+        ]
+      },
+      "evidence_kind": "controlled_real",
+      "manifest_sha256": "fb9cf5f7c24c35abe608a1fb9183019108cc678bd62a57768a140aec0d44e5ef",
+      "source_commit": "7a43864a1b7664137101fe51c05f30fcc870d9f9",
+      "status": "PASS",
+      "suite": "live_suspend_resume"
     }
   ]
 }
