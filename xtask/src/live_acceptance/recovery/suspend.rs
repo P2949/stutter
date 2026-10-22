@@ -88,11 +88,9 @@ fn case(
     cpu: u32,
     options: &SuspendOptions,
 ) -> anyhow::Result<Value> {
-    let mut workload = start_workload(
-        executable,
-        out,
-        options.resume_timeout_seconds.saturating_add(180),
-    )?;
+    // The workload duration is monotonic (excludes time asleep), so the maximum bound
+    // covers the awake time around one suspend.
+    let mut workload = start_workload(executable, out, 90)?;
     let root = workload.0.id();
     let root_ticks = start_ticks(root)?;
     let before = procfs::snapshot(root, root_ticks)?;
