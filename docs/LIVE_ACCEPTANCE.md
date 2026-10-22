@@ -304,6 +304,23 @@ reported DEGRADED and not measured; no acceptable-overhead target is chosen. Eac
 carries a bounded claim naming kernel, probe set, median and IQR. The synthetic workload has
 no frame times, so frame metrics are not claimed.
 
+**Representative real workload (#38).** The A-F suite above stays `controlled_real`. The same
+probe-set comparison, counterbalanced order and sampling run against a repeatable real
+workload with `xtask live-acceptance overhead --stutter-bin BIN --out DIR --seconds N
+--workload-label NAME [--work-units K] -- PROGRAM ARGS...`; the receipt is `real_workload` and
+the suite id stays `live_overhead`. The command must be fixed work that terminates (a
+benchmark scene, a fixed build unit) and must outlive the `--seconds` profiling window by at
+least 2 s; throughput is `K` work units over the whole run's elapsed time. It is run
+unchanged in every configuration, so workload, settings and scene are identical; one
+unmeasured warm-up run precedes the rounds so the cache policy is the same for every
+configuration (the harness does not drop caches; wrap the command if you need that). Use
+`exec`-style invocation so the launched pid is the game: runnable p99 and the >5 ms rate are
+read for that process. Commit, binary and kernel are fixed by the clean-tree provenance check
+that every suite performs. The receipt keeps the label, the program file name, the argument
+count and digests of the command line and program, never paths or argument text. The harness
+cannot verify that a command is representative: the operator declares it and the receipt says
+so. Without a workload label the run is the controlled suite exactly as before.
+
 ## StutterScore evaluation (needs root for the live suite)
 
 `StutterScore` is a **ranking proxy within comparable experiments**, not a human-perceived

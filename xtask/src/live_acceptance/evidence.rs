@@ -80,6 +80,17 @@ pub(super) fn metadata(
     binary: &Path,
     suite: LiveAcceptanceSuite,
 ) -> anyhow::Result<()> {
+    metadata_with_kind(root, out, binary, suite, "controlled_real")
+}
+
+/// `evidence_kind` must match the result written later (`write_result` enforces it).
+pub(super) fn metadata_with_kind(
+    root: &Path,
+    out: &Path,
+    binary: &Path,
+    suite: LiveAcceptanceSuite,
+    evidence_kind: &str,
+) -> anyhow::Result<()> {
     let capture = |program: &str, argv: &[&str]| -> anyhow::Result<String> {
         let output = Command::new(program)
             .args(argv)
@@ -135,7 +146,7 @@ pub(super) fn metadata(
         "proc_version":fs::read_to_string("/proc/version")?.trim(),"distribution":os,"cpu_model":cpu_model,
         "cpu_online":fs::read_to_string("/sys/devices/system/cpu/online")?.trim(),
         "rust":capture("rustc", &["-Vv"] )?,"cargo_lock_sha256":capture("sha256sum", &["Cargo.lock"] )?.split_whitespace().next(),
-        "evidence_kind":"controlled_real","suite":suite.as_str(),"linked_library_version":linked_library_version,"source_matches_harness":source_matches_harness,"harness_sha256":harness_hash,
+        "evidence_kind":evidence_kind,"suite":suite.as_str(),"linked_library_version":linked_library_version,"source_matches_harness":source_matches_harness,"harness_sha256":harness_hash,
         "captured_unix_ms":captured_unix_ms,"capture_id":format!("{}-{short}-{captured_unix_ms}",suite.as_str()),
         "gpu_relevant":false,
         "artifact_schema":{"evidence_result":1,"session":stutter::api::recorder::SESSION_SCHEMA_VERSION.get(),

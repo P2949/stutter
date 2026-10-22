@@ -15,6 +15,7 @@ mod evidence;
 mod game_runnable;
 mod kernel_compat;
 mod overhead;
+mod overhead_external;
 pub(crate) mod recovery;
 mod score_degradation;
 
@@ -41,6 +42,16 @@ pub enum Suite {
         /// Seeded shuffle instead of the alternating rotation.
         #[arg(long)]
         seed: Option<u64>,
+        /// Measure a repeatable real workload instead of the disposable one: its name (the
+        /// receipt keeps this label, never paths or arguments). The command follows `--`.
+        #[arg(long, requires = "workload")]
+        workload_label: Option<String>,
+        /// Fixed work units one workload run performs (default 1 = runs per second).
+        #[arg(long, requires = "workload_label", value_parser = clap::value_parser!(u64).range(1..))]
+        work_units: Option<u64>,
+        /// Fixed-work command, run unchanged in every configuration: `-- PROGRAM ARGS...`.
+        #[arg(last = true, requires = "workload_label")]
+        workload: Vec<String>,
     },
     KernelCompat {
         #[arg(long)]
@@ -265,8 +276,21 @@ pub fn run(root: &Path, suite: Suite) -> anyhow::Result<()> {
             seconds,
             rounds,
             seed,
+            workload_label,
+            work_units,
+            workload,
         } => {
-            return overhead::run(root, &out, &stutter_bin, seconds, rounds, seed);
+            let external = workload_label
+                .as_deref()
+                .map(|label| {
+                    overhead_external::ExternalWorkload::new(
+                        label,
+                        &workload,
+                        work_units.map(|units| units as f64),
+                    )
+                })
+                .transpose()?;
+            return overhead::run(root, &out, &stutter_bin, seconds, rounds, seed, external);
         }
         Suite::KernelCompat { out, stutter_bin } => {
             return kernel_compat::run(root, &out, &stutter_bin);
