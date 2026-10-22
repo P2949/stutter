@@ -76,9 +76,14 @@ the packaged layout and file digests, requires the `Cargo.lock` digest to equal 
 archive's, requires the packaged binary to report the manifest version and git revision,
 requires the support statement and `supported_capabilities` to equal the capability
 registry (a release can never claim more than the registry), and checks the SBOM covers
-every locked package. On tags, `--require-acceptance` additionally requires a PASS entry in
-`docs/evidence/index.json` for exactly the tagged commit for every live suite required by
-every Supported capability, and refuses a release with no Supported capability.
+every locked package. On tags, `--require-acceptance` additionally requires, via repeatable
+`--acceptance-bundle BUNDLE`, exported evidence bundles that are verified on the spot (manifest,
+content and privacy), are `PASS`, and whose `source_commit` equals the release commit, covering
+every live suite required by every Supported capability. It refuses a release with no
+Supported capability, any bundle that fails verification (in any order), a bundle for another
+commit, a missing required suite and a capture supplied twice. The committed
+`docs/evidence/index.json` is the historical catalogue and never satisfies this gate: evidence
+for commit X cannot be committed into X, so the bundles stay outside the release commit.
 
 Tag `v0.1.0` only on the exact commit that passed fresh-checkout and real-system
 acceptance; do not validate one commit and tag another.

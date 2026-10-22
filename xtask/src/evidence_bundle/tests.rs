@@ -1,10 +1,10 @@
 use super::*;
 
-struct Dir(std::path::PathBuf);
+pub(crate) struct Dir(std::path::PathBuf);
 static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 impl Dir {
-    fn new(name: &str) -> Self {
+    pub(crate) fn new(name: &str) -> Self {
         let path = std::env::temp_dir().join(format!(
             "stutter-evidence-{name}-{}-{}",
             std::process::id(),
@@ -13,7 +13,7 @@ impl Dir {
         fs::create_dir_all(&path).unwrap();
         Self(path)
     }
-    fn join(&self, name: &str) -> std::path::PathBuf {
+    pub(crate) fn join(&self, name: &str) -> std::path::PathBuf {
         self.0.join(name)
     }
 }
@@ -23,10 +23,10 @@ impl Drop for Dir {
     }
 }
 
-const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
+pub(crate) const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
 const DIGEST: &str = "89abcdef0123456789abcdef0123456789abcdef0123456789abcdef01234567";
 
-fn environment(suite: &str) -> Value {
+pub(crate) fn environment(suite: &str) -> Value {
     json!({"schema_version":1,"suite":suite,"evidence_kind":"controlled_real",
         "capture_id":format!("{suite}-0123456-1000"),"captured_unix_ms":1000,"commit":COMMIT,
         "source_dirty":false,"source_matches_binary":true,"source_matches_harness":true,
@@ -38,7 +38,7 @@ fn environment(suite: &str) -> Value {
 }
 
 /// A raw suite directory whose logs deliberately contain local identity.
-fn raw(suite: &str, leak: &str) -> Dir {
+pub(crate) fn raw(suite: &str, leak: &str) -> Dir {
     let raw = Dir::new("raw");
     fs::write(
         raw.join("environment.json"),
@@ -71,13 +71,13 @@ fn local_leak() -> String {
     format!("home={home}/.local/state cwd=/tmp/scratch-xyz")
 }
 
-fn export(raw: &Dir, out: &Dir) -> anyhow::Result<std::path::PathBuf> {
+pub(crate) fn export(raw: &Dir, out: &Dir) -> anyhow::Result<std::path::PathBuf> {
     let bundle = out.join("bundle");
     export_bundle(Path::new("/nonexistent/checkout"), &raw.0, &bundle)?;
     Ok(bundle)
 }
 
-fn rewrite_manifest(bundle: &Path) {
+pub(crate) fn rewrite_manifest(bundle: &Path) {
     let mut manifest = String::new();
     for relative in verify::list_files(bundle).unwrap() {
         if relative != "MANIFEST.sha256" {
