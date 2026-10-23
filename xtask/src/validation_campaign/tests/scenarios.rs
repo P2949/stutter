@@ -493,3 +493,17 @@ fn host_facts_are_bucketed_and_carry_no_machine_identity() {
     assert_eq!((vendor.as_str(), bucket.as_str()), ("GenuineTest", "4c2t"));
     assert!(!format!("{vendor}{bucket}").contains("Secret"));
 }
+
+#[test]
+fn proc_stat_fields_are_read_past_hostile_command_names() {
+    use crate::validation_campaign::system_host::{last_cpu, starttime_ticks};
+    // Fields 4..21 filler, field 22 = start time, fields 23..38 filler, field 39 = processor.
+    let before = (4..22).map(|_| "0").collect::<Vec<_>>().join(" ");
+    let between = (23..39).map(|_| "0").collect::<Vec<_>>().join(" ");
+    let stat = format!("9 (a) b (c) S {before} 4242 {between} 6 0");
+    assert_eq!(
+        (starttime_ticks(&stat), last_cpu(&stat)),
+        (Some(4242), Some(6))
+    );
+    assert_eq!(starttime_ticks("nonsense"), None);
+}

@@ -110,7 +110,7 @@ pub fn plan(set: &ScenarioSet, corpus: &Path, context: &RunContext<'_>) -> (Corp
 }
 
 impl TaskRunner for CorpusRunner {
-    fn run(&self, context: &RunContext<'_>, _spec: &TaskSpec, _attempt: u32) -> RunnerOutcome {
+    fn run(&self, context: &RunContext<'_>, spec: &TaskSpec, attempt: u32) -> RunnerOutcome {
         let scenario_path = context.repository.join(SCENARIO_FILE);
         let loaded = fs::read_to_string(&scenario_path)
             .map_err(|e| e.to_string())
@@ -133,7 +133,8 @@ impl TaskRunner for CorpusRunner {
         };
         let corpus = corpus_dir(context);
         let fixtures_dir = corpus.join("fixtures");
-        let raw_root = context.dir.0.join("raw-captures");
+        let captures_root = context.dir.attempt_dir(spec.id, attempt).join("captures");
+        let mut captured = 0_u32;
         if let Err(error) = fs::create_dir_all(&fixtures_dir) {
             return RunnerOutcome::Failed {
                 class: FailureClass::Retryable,
@@ -162,7 +163,9 @@ impl TaskRunner for CorpusRunner {
             let progress = current.scenarios.iter().find(|s| s.id == next);
             let sequence = progress.map_or(0, |s| s.have + s.failed) + 1;
             let raw_capture_id = format!("{next}-{sequence}-{}", unix_ms());
-            let raw_dir = raw_root.join(&raw_capture_id);
+            captured += 1;
+            // Exactly where the privileged runner will write this capture's recording.
+            let raw_dir = captures_root.join(format!("{captured:04}")).join("raw");
             let published = load_corpus(&fixtures_dir)
                 .map(|(fixtures, _)| {
                     fixtures

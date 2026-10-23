@@ -8,6 +8,7 @@ pub mod corpus;
 pub mod evidence;
 pub mod executor;
 pub mod graph;
+pub mod host_factory;
 pub mod kernels;
 pub mod manifest;
 pub mod model;
@@ -16,6 +17,7 @@ pub mod runners;
 pub mod scenarios;
 pub mod state;
 pub mod status;
+pub mod system_host;
 pub mod verify;
 pub mod workloads;
 

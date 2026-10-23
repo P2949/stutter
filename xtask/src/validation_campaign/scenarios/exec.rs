@@ -33,6 +33,8 @@ pub struct RecordSummary {
 /// Side effects of a capture. The real implementation drives vkmark/fio/network traffic, the
 /// privileged runner (burst, recording) and the sanitizer; tests use a scripted fake.
 pub trait CaptureHost {
+    /// Tells the host where this capture's local artifacts live (`.../captures/<n>`).
+    fn set_capture_dir(&mut self, _dir: &Path) {}
     fn preflight(&mut self, spec: &ScenarioSpec) -> Result<(), String>;
     fn start_target(&mut self, spec: &ScenarioSpec) -> Result<TargetIdentity, String>;
     fn start_interventions(
@@ -92,6 +94,9 @@ fn rejected(stage: &str, reason: impl Into<String>) -> CaptureResult {
 
 pub fn run_capture(host: &mut dyn CaptureHost, request: &CaptureRequest<'_>) -> CaptureResult {
     let spec = request.spec;
+    if let Some(capture_dir) = request.raw_dir.parent() {
+        host.set_capture_dir(capture_dir);
+    }
     if let Err(error) = host.preflight(spec) {
         return rejected("preflight", error);
     }
