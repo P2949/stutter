@@ -444,7 +444,9 @@ impl CaptureHost for SystemCaptureHost {
             .arg(raw)
             .arg("--output")
             .arg(out)
-            .args(["--name", name]);
+            // The sanitizer's own `cargo run` verification would rebuild (and re-link) the pinned
+            // binary; the campaign validates with the pinned binary itself.
+            .args(["--name", name, "--no-verify"]);
         run_ok(&mut command, "the sanitizer")
     }
 
