@@ -337,7 +337,8 @@ impl ActionExecutor for SystemExecutor {
             .join(format!("{capture:04}"));
         let mangohud = crate::process::newest_csv(&capture_dir.join("mangohud"));
         let plan = plan_recording(auth, envelope, mangohud.as_deref())?;
-        self.prepare_dir(auth, &plan.raw)?;
+        // `stutter record` creates its output directory itself and refuses an existing one.
+        self.prepare_dir(auth, plan.raw.parent().unwrap_or(&plan.attempt_dir))?;
         self.run_planned(
             auth,
             &plan,
