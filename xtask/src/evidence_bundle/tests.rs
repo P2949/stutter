@@ -260,3 +260,29 @@ fn real_workload_overhead_bundles_export_and_verify_with_their_own_kind() {
     let entry = crate::evidence_bundle::verified_index_entry(&bundle).unwrap();
     assert_eq!(entry["evidence_kind"], "real_workload");
 }
+
+#[test]
+fn real_recordings_with_line_delimited_streams_export_and_the_installed_workload_is_not_evidence() {
+    let raw = raw("live_observation", "nothing");
+    fs::write(raw.join("one/interval.json"), "{\"a\":1}\n{\"a\":2}\n").unwrap();
+    fs::create_dir_all(raw.join("steamapps/common/Game")).unwrap();
+    // Far above the size limit and not text: exporting it would fail the whole bundle.
+    fs::write(
+        raw.join("steamapps/common/Game/Game"),
+        vec![0_u8; (MAX_FILE_BYTES + 1) as usize],
+    )
+    .unwrap();
+    let out = Dir::new("out");
+    let bundle = export(&raw, &out).unwrap();
+    verify_bundle(&bundle).unwrap();
+    assert!(bundle.join("artifacts/one/interval.json").is_file());
+    assert!(!bundle.join("artifacts/steamapps").exists());
+    // A genuinely broken stream is still rejected.
+    fs::write(
+        bundle.join("artifacts/one/interval.json"),
+        "{\"a\":1}\n{broken\n",
+    )
+    .unwrap();
+    rewrite_manifest(&bundle);
+    assert!(verify_bundle(&bundle).is_err());
+}

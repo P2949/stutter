@@ -11,7 +11,7 @@ schema_version = 1
 [vkmark]
 light_scene = "cube"
 light_size = "640x480"
-heavy_scene = "terrain"
+heavy_scene = "shading"
 heavy_size = "1920x1080"
 present_mode = "fifo"
 

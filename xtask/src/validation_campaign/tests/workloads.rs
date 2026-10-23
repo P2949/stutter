@@ -135,7 +135,7 @@ fn vkmark_preflight_needs_the_tools_a_display_and_the_frozen_scene() {
         .tool("mangohud", "y");
     host.outputs.insert(
         "vkmark --list-scenes".to_owned(),
-        Ok("[cube] Cube scene\n[terrain] Terrain\nclear: option\n".to_owned()),
+        Ok("[Scene] cube\n  [Option] duration\n    Description  : seconds\n[Scene] shading\n  [Option] shading\n[Scene] clear\n".to_owned()),
     );
     assert!(
         vkmark::preflight(&host, &["cube"])
@@ -144,7 +144,7 @@ fn vkmark_preflight_needs_the_tools_a_display_and_the_frozen_scene() {
     );
     host.env
         .insert("WAYLAND_DISPLAY".to_owned(), "wayland-1".to_owned());
-    let facts = vkmark::preflight(&host, &["cube", "terrain"]).unwrap();
+    let facts = vkmark::preflight(&host, &["cube", "shading"]).unwrap();
     assert_eq!(
         (facts.window_system.as_str(), facts.scenes.len()),
         ("wayland", 3)
