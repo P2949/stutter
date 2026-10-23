@@ -271,3 +271,8 @@ service keeps `ProtectHome=read-only`; a generated drop-in makes only the reposi
 `.llm-runs` and the owner's `~/.cargo` writable. Boot candidates are deduplicated by the kernel
 image an entry boots, so dozens of NixOS generations sharing one image are one candidate and a
 host with a single kernel stops without any reboot.
+
+The offline gates end with `restore-binaries` (`cargo build -p stutter -p xtask
+-p stutter-validation-runner`): the other gates rebuild `target/debug/stutter` with different
+feature sets, and the campaign pins the canonical build's digest. A plain rebuild reproduces it
+byte for byte.

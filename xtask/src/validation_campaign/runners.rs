@@ -248,6 +248,21 @@ pub const OFFLINE_GATES: &[(&str, &[&str])] = &[
     ("advisor-offline", &["scripts/smoke/advisor_offline.sh"]),
     ("xtask-tests", &["cargo", "test", "-p", "xtask"]),
     ("diff-check", &["git", "diff", "--check"]),
+    // The gates above rebuild `target/debug/stutter` with other feature sets. The campaign pins
+    // the canonical build's digest, so the last gate restores exactly that build.
+    (
+        "restore-binaries",
+        &[
+            "cargo",
+            "build",
+            "-p",
+            "stutter",
+            "-p",
+            "xtask",
+            "-p",
+            "stutter-validation-runner",
+        ],
+    ),
 ];
 
 pub struct OfflineGateRunner {
