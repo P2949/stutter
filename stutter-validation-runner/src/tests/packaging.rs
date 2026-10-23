@@ -27,7 +27,7 @@ fn the_runner_and_its_units_are_validation_only() {
             .unwrap();
     for required in [
         "Type=simple",
-        "ExecStart=/usr/local/libexec/stutter-validation-runner serve",
+        "ExecStart=/var/lib/stutter-validation/bin/stutter-validation-runner serve",
         "RuntimeDirectory=stutter-validation",
         "StateDirectory=stutter-validation",
         "Restart=on-failure",
@@ -44,7 +44,7 @@ fn the_runner_and_its_units_are_validation_only() {
         "Type=oneshot",
         "After=local-fs.target",
         "Before=multi-user.target",
-        "ExecStart=/usr/local/libexec/stutter-validation-runner resume --all",
+        "ExecStart=/var/lib/stutter-validation/bin/stutter-validation-runner resume --all",
     ] {
         assert!(resume.contains(required), "resume unit lacks {required}");
     }

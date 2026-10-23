@@ -245,6 +245,39 @@ fn duplicate_kernels_collapse_to_one_candidate_but_unidentified_entries_stay_dis
     assert_eq!(ids, ["a", "b", "x", "y"]);
 }
 
+#[test]
+fn generations_that_boot_one_kernel_image_are_a_single_candidate() {
+    // NixOS: every generation names the same image but carries its own generation number.
+    let image = "/EFI/nixos/hash-linux-6.18.55-bzImage.efi";
+    let entries = vec![
+        entry(
+            "nixos-generation-74",
+            Some(image),
+            Some("Generation 74 (Linux 6.18.55)"),
+        ),
+        entry(
+            "nixos-generation-73",
+            Some(image),
+            Some("Generation 73 (Linux 6.18.55)"),
+        ),
+        entry(
+            "nixos-generation-73-specialisation",
+            Some(image),
+            Some("Generation 73 (Linux 6.18.55)"),
+        ),
+        entry(
+            "older",
+            Some("/EFI/nixos/other-linux-6.12.9-bzImage.efi"),
+            Some("Generation 40 (Linux 6.12.9)"),
+        ),
+    ];
+    let ids = distinct_candidates(&entries)
+        .into_iter()
+        .map(|e| e.id)
+        .collect::<Vec<_>>();
+    assert_eq!(ids, ["nixos-generation-74", "older"]);
+}
+
 struct StaticAdapter {
     entries: Vec<BootEntry>,
     default: Option<String>,

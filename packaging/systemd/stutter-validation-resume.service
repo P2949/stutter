@@ -6,7 +6,7 @@ ConditionPathExists=/var/lib/stutter-validation
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/libexec/stutter-validation-runner resume --all
+ExecStart=/var/lib/stutter-validation/bin/stutter-validation-runner resume --all
 RemainAfterExit=no
 
 [Install]
