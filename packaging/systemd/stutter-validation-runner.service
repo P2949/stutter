@@ -5,7 +5,7 @@ After=local-fs.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/libexec/stutter-validation-runner serve --authorization /var/lib/stutter-validation/current/authorization.json --state-dir /var/lib/stutter-validation/current
+ExecStart=/var/lib/stutter-validation/bin/stutter-validation-runner serve --authorization /var/lib/stutter-validation/current/authorization.json --state-dir /var/lib/stutter-validation/current
 RuntimeDirectory=stutter-validation
 RuntimeDirectoryMode=0755
 StateDirectory=stutter-validation

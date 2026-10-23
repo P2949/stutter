@@ -75,15 +75,19 @@ pub fn running_kernel_release() -> Result<String, String> {
         .map_err(|error| format!("read the kernel release: {error}"))
 }
 
-/// Entries with distinct kernel identity (image + version), keeping the first of each. Entries
-/// without any identity are kept as distinct by id: they cannot be proven duplicates.
+/// Entries with distinct kernel identity, keeping the first of each. The kernel image the entry
+/// boots is the identity: two entries naming the same image file boot the same kernel whatever
+/// their titles or generation numbers say (NixOS keeps dozens of generations on one image). When
+/// the bootloader exposes no image the version string is used; entries with neither stay
+/// distinct by id because they cannot be proven duplicates.
 pub fn distinct_candidates(entries: &[BootEntry]) -> Vec<BootEntry> {
     let mut seen = std::collections::BTreeSet::new();
     let mut candidates = Vec::new();
     for entry in entries {
         let identity = match (&entry.kernel_image, &entry.version) {
+            (Some(image), _) => format!("image:{image}"),
+            (None, Some(version)) => format!("version:{version}"),
             (None, None) => format!("id:{}", entry.id),
-            (image, version) => format!("{image:?}|{version:?}"),
         };
         if seen.insert(identity) {
             candidates.push(entry.clone());

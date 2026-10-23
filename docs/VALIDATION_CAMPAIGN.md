@@ -259,3 +259,15 @@ is the candidate's `rc-live-observation` suite.
 green exact-RC CI. The annotated tag `v0.1.0` is created on the candidate and pushed. A tag that
 already exists on another commit is `FAILURE_REQUIRES_REVIEW` and is never moved, deleted or
 force-pushed; a tag already on the candidate is success.
+
+## Host layouts (NixOS and similar)
+
+The runner binary lives under `/var/lib/stutter-validation/bin` (present, root-writable and
+persistent on every layout). Units go to `/etc/systemd/system` when it is writable; when it is
+not (NixOS links it into the read-only store) they go to `/run/systemd/system`, which does not
+survive a reboot. In that case the authorization sets `max_reboots = 0`: the multi-kernel stage
+reports `BLOCKED_RESOURCE` instead of rebooting into a machine that could not resume. The
+service keeps `ProtectHome=read-only`; a generated drop-in makes only the repository's
+`.llm-runs` and the owner's `~/.cargo` writable. Boot candidates are deduplicated by the kernel
+image an entry boots, so dozens of NixOS generations sharing one image are one candidate and a
+host with a single kernel stops without any reboot.

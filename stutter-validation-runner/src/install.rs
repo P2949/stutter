@@ -13,9 +13,13 @@ use stutter_core::hash::sha256_hex;
 
 use crate::{model::Authorization, state::atomic_write};
 
-pub const RUNNER_INSTALL_PATH: &str = "/usr/local/libexec/stutter-validation-runner";
+// Under the state root rather than /usr/local: that path exists, is writable by root and survives
+// reboots on every layout, including NixOS where /usr/local is absent.
+pub const RUNNER_INSTALL_PATH: &str = "/var/lib/stutter-validation/bin/stutter-validation-runner";
 pub const STATE_ROOT: &str = "/var/lib/stutter-validation";
 pub const UNIT_DIR: &str = "/etc/systemd/system";
+/// Where units go when `UNIT_DIR` is read-only (NixOS): runtime only, gone after a reboot.
+pub const TRANSIENT_UNIT_DIR: &str = "/run/systemd/system";
 pub const UNITS: [&str; 2] = [
     "stutter-validation-runner.service",
     "stutter-validation-resume.service",
@@ -45,9 +49,71 @@ impl Layout {
     pub fn current_link(&self) -> PathBuf {
         self.under(STATE_ROOT).join("current")
     }
-    pub fn unit(&self, name: &str) -> PathBuf {
-        self.under(UNIT_DIR).join(name)
+    /// The directory units are installed to and whether it survives a reboot. A unit directory
+    /// that cannot be written (a symlink into a read-only store) falls back to the runtime one.
+    pub fn unit_dir(&self) -> (PathBuf, bool) {
+        let persistent = self.under(UNIT_DIR);
+        if writable_directory(&persistent) {
+            (persistent, true)
+        } else {
+            (self.under(TRANSIENT_UNIT_DIR), false)
+        }
     }
+    pub fn unit(&self, name: &str) -> PathBuf {
+        self.unit_dir().0.join(name)
+    }
+}
+
+/// Can files be created in `dir` (creating it if needed)? Probed, not guessed: a symlink into a
+/// read-only filesystem looks like a directory.
+fn writable_directory(dir: &Path) -> bool {
+    if fs::create_dir_all(dir).is_err() {
+        return false;
+    }
+    let probe = dir.join(format!(".stutter-probe-{}", std::process::id()));
+    let writable = fs::File::create(&probe).is_ok();
+    let _ = fs::remove_file(&probe);
+    writable
+}
+
+/// Home directory of `uid` from a passwd-format file.
+pub fn home_of(passwd: &str, uid: u32) -> Option<PathBuf> {
+    passwd.lines().find_map(|line| {
+        let fields: Vec<&str> = line.split(':').collect();
+        (fields.len() >= 6 && fields[2].parse::<u32>() == Ok(uid)).then(|| PathBuf::from(fields[5]))
+    })
+}
+
+/// A path safe to put in a unit file: no whitespace, quotes, backslashes or specifiers.
+fn unit_safe(path: &Path) -> bool {
+    path.to_str().is_some_and(|text| {
+        text.starts_with('/')
+            && text
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '.' | '_' | '-' | '+'))
+    })
+}
+
+/// The service keeps `ProtectHome=read-only`; the suites it launches write their results under
+/// the repository's `.llm-runs` and need the owner's cargo home for offline builds.
+fn runner_dropin(repository: &Path, home: Option<&Path>) -> Result<String, String> {
+    let mut paths = vec![repository.join(".llm-runs")];
+    if let Some(cargo) = home.map(|h| h.join(".cargo")).filter(|c| c.is_dir()) {
+        paths.push(cargo);
+    }
+    if let Some(bad) = paths.iter().find(|p| !unit_safe(p)) {
+        return Err(format!(
+            "{} cannot be expressed safely in a unit file",
+            bad.display()
+        ));
+    }
+    // The leading dash lets the unit start even when a path does not exist yet.
+    let joined = paths
+        .iter()
+        .map(|p| format!("-{}", p.display()))
+        .collect::<Vec<_>>()
+        .join(" ");
+    Ok(format!("[Service]\nReadWritePaths={joined}\n"))
 }
 
 /// What an install will do; computable (and testable) without touching the system.
@@ -59,6 +125,10 @@ pub struct InstallPlan {
     pub authorization_destination: PathBuf,
     pub campaign_state: PathBuf,
     pub current_link: PathBuf,
+    /// Units survive a reboot (so the resume service can run after one).
+    pub persistent_units: bool,
+    /// Drop-in for the runner service: the only writable paths under the read-only home.
+    pub dropin: (PathBuf, String),
     pub authorization: Authorization,
 }
 
@@ -95,6 +165,21 @@ pub fn plan_install(
     if sha256_hex(&runner_bytes) != authorization.runner_sha256 {
         return Err("the runner binary does not match the authorized digest".to_owned());
     }
+    let mut authorization = authorization;
+    let (unit_dir, persistent_units) = layout.unit_dir();
+    if !persistent_units {
+        // Without a resume service that outlives a reboot, rebooting would strand the campaign.
+        authorization.max_reboots = 0;
+    }
+    let home = fs::read_to_string(layout.root.join("etc/passwd"))
+        .ok()
+        .and_then(|passwd| home_of(&passwd, invoker_uid));
+    let dropin = (
+        unit_dir
+            .join("stutter-validation-runner.service.d")
+            .join("10-repository.conf"),
+        runner_dropin(&canonical, home.as_deref())?,
+    );
     let mut units = Vec::new();
     for unit in UNITS {
         let source = canonical.join("packaging/systemd").join(unit);
@@ -104,7 +189,7 @@ pub fn plan_install(
                 source.display()
             ));
         }
-        units.push((source, layout.unit(unit)));
+        units.push((source, unit_dir.join(unit)));
     }
     Ok(InstallPlan {
         runner_source: runner_source.to_path_buf(),
@@ -115,13 +200,18 @@ pub fn plan_install(
             .join("authorization.json"),
         campaign_state: layout.campaign_state(&authorization.campaign_id),
         current_link: layout.current_link(),
+        persistent_units,
+        dropin,
         authorization,
     })
 }
 
 fn install_file(source: &Path, destination: &Path, mode: u32) -> std::io::Result<()> {
-    let bytes = fs::read(source)?;
-    atomic_write(destination, &bytes)?;
+    install_bytes(&fs::read(source)?, destination, mode)
+}
+
+fn install_bytes(bytes: &[u8], destination: &Path, mode: u32) -> std::io::Result<()> {
+    atomic_write(destination, bytes)?;
     fs::set_permissions(destination, fs::Permissions::from_mode(mode))?;
     if crate::sys::effective_uid() == 0 {
         std::os::unix::fs::chown(destination, Some(0), Some(0))?;
@@ -138,6 +228,8 @@ pub fn execute(plan: &InstallPlan, activate: bool) -> Result<(), String> {
     for (source, destination) in &plan.units {
         install_file(source, destination, 0o644).map_err(|e| io("install unit", e))?;
     }
+    install_bytes(plan.dropin.1.as_bytes(), &plan.dropin.0, 0o644)
+        .map_err(|e| io("install unit drop-in", e))?;
     fs::create_dir_all(&plan.campaign_state).map_err(|e| io("create state directory", e))?;
     fs::set_permissions(&plan.campaign_state, fs::Permissions::from_mode(0o700))
         .map_err(|e| io("chmod state", e))?;
@@ -159,14 +251,17 @@ pub fn execute(plan: &InstallPlan, activate: bool) -> Result<(), String> {
     std::os::unix::fs::symlink(&plan.campaign_state, &plan.current_link)
         .map_err(|e| io("link current", e))?;
     if activate {
-        for arguments in [
-            vec!["daemon-reload"],
-            vec!["enable", "stutter-validation-runner.service"],
-            // A reinstall (new pinned binaries for the release candidate) must replace the
-            // authorization the running service already loaded.
-            vec!["restart", "stutter-validation-runner.service"],
-            vec!["enable", "stutter-validation-resume.service"],
-        ] {
+        let mut steps = vec![vec!["daemon-reload"]];
+        if plan.persistent_units {
+            steps.push(vec!["enable", "stutter-validation-runner.service"]);
+        }
+        // A reinstall (new pinned binaries for the release candidate) must replace the
+        // authorization the running service already loaded.
+        steps.push(vec!["restart", "stutter-validation-runner.service"]);
+        if plan.persistent_units {
+            steps.push(vec!["enable", "stutter-validation-resume.service"]);
+        }
+        for arguments in steps {
             let status = Command::new("systemctl")
                 .args(&arguments)
                 .status()

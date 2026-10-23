@@ -134,3 +134,96 @@ fn install_refuses_corrupt_or_symlinked_staged_files() {
     assert!(error.contains("regular file"), "{error}");
     assert!(Path::new(&f.root).parent().is_some());
 }
+
+#[test]
+fn a_read_only_unit_directory_installs_transient_units_and_forbids_reboots() {
+    let f = fixture(|auth| auth.max_reboots = 8);
+    // A file where the unit directory should be models NixOS' unwritable /etc/systemd/system.
+    fs::create_dir_all(f.root.join("etc/systemd")).unwrap();
+    fs::write(f.root.join("etc/systemd/system"), b"not a directory").unwrap();
+    let plan = plan(&f, me()).unwrap();
+    assert!(!plan.persistent_units);
+    assert_eq!(
+        plan.authorization.max_reboots, 0,
+        "no reboot without a persistent resume service"
+    );
+    execute(&plan, false).unwrap();
+    for unit in UNITS {
+        assert!(
+            f.root.join("run/systemd/system").join(unit).is_file(),
+            "{unit}"
+        );
+    }
+}
+
+#[test]
+fn a_writable_unit_directory_is_persistent_and_keeps_the_reboot_budget() {
+    let f = fixture(|auth| auth.max_reboots = 8);
+    let plan = plan(&f, me()).unwrap();
+    assert!(plan.persistent_units);
+    assert_eq!(plan.authorization.max_reboots, 8);
+}
+
+#[test]
+fn the_runner_unit_gets_a_drop_in_with_only_the_repository_runs_and_cargo_home_writable() {
+    let f = fixture(|_| {});
+    let home = f.root.join("home/user");
+    fs::create_dir_all(home.join(".cargo")).unwrap();
+    fs::create_dir_all(f.root.join("etc")).unwrap();
+    fs::write(
+        f.root.join("etc/passwd"),
+        format!(
+            "root:x:0:0::/root:/bin/sh\nuser:x:{}:100::{}:/bin/sh\n",
+            me(),
+            home.display()
+        ),
+    )
+    .unwrap();
+    let plan = plan(&f, me()).unwrap();
+    let canonical = fs::canonicalize(&f.repo).unwrap();
+    assert!(
+        plan.dropin
+            .0
+            .ends_with("stutter-validation-runner.service.d/10-repository.conf")
+    );
+    assert_eq!(
+        plan.dropin.1,
+        format!(
+            "[Service]\nReadWritePaths=-{} -{}\n",
+            canonical.join(".llm-runs").display(),
+            home.join(".cargo").display()
+        )
+    );
+    execute(&plan, false).unwrap();
+    assert!(plan.dropin.0.is_file());
+}
+
+#[test]
+fn home_directories_come_from_passwd_and_unsafe_paths_are_refused() {
+    use crate::install::home_of;
+    assert_eq!(
+        home_of("a:x:1000:100::/home/a:/bin/sh\n", 1000),
+        Some("/home/a".into())
+    );
+    assert_eq!(home_of("a:x:1000:100::/home/a:/bin/sh\n", 1), None);
+    let f = fixture(|_| {});
+    let spaced = f.repo.parent().unwrap().join("repo with space");
+    fs::rename(&f.repo, &spaced).unwrap();
+    let mut auth: Authorization = serde_json::from_slice(&fs::read(&f.staged).unwrap()).unwrap();
+    auth.repository = fs::canonicalize(&spaced)
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    fs::write(&f.staged, serde_json::to_vec(&auth).unwrap()).unwrap();
+    let error = plan_install(
+        &f.staged,
+        &spaced,
+        &f.runner,
+        me(),
+        &Layout {
+            root: f.root.clone(),
+        },
+    )
+    .unwrap_err();
+    assert!(error.contains("unit file"), "{error}");
+}
