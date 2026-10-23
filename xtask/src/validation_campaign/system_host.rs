@@ -173,6 +173,23 @@ fn read_proc(pid: u32, file: &str) -> Option<String> {
     fs::read_to_string(format!("/proc/{pid}/{file}")).ok()
 }
 
+/// A second render window needs a few seconds to reach full load; recording (and the busy
+/// sampler) start only once the GPU has stayed saturated for two samples, or after 20 s.
+fn wait_for_gpu_saturation() {
+    let mut consecutive = 0;
+    for _ in 0..20 {
+        consecutive = if gpu_busy_percent().is_some_and(|busy| busy >= MIN_GPU_BUSY_PCT) {
+            consecutive + 1
+        } else {
+            0
+        };
+        if consecutive >= 2 {
+            return;
+        }
+        std::thread::sleep(Duration::from_secs(1));
+    }
+}
+
 fn gpu_busy_percent() -> Option<u32> {
     fs::read_dir("/sys/class/drm")
         .ok()?
@@ -332,6 +349,9 @@ impl CaptureHost for SystemCaptureHost {
             }
         }
         std::thread::sleep(Duration::from_secs(2));
+        if spec.interventions.contains(&InterventionKind::GpuStressor) {
+            wait_for_gpu_saturation();
+        }
         Ok(())
     }
 
@@ -553,23 +573,36 @@ fn run_ok(command: &mut Command, what: &str) -> Result<(), String> {
     }
 }
 
+/// `(coalesced wakeups, every other dropped event)`; an unreadable object counts as total loss.
+pub fn split_drop_counters(counters: &Value) -> (u64, u64) {
+    let Some(map) = counters.as_object() else {
+        return (0, u64::MAX);
+    };
+    let replaced = map
+        .get("wakeup_data_replaced_entries")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let others = map
+        .iter()
+        .filter(|(name, _)| name.as_str() != "wakeup_data_replaced_entries")
+        .filter_map(|(_, value)| value.as_u64())
+        .sum();
+    (replaced, others)
+}
+
 fn summarize_recording(raw: &Path) -> Result<RecordSummary, String> {
     use stutter::api::recorder::SessionFile;
     let bytes = fs::read(raw.join("session.json")).map_err(|e| format!("no session.json: {e}"))?;
     let session: SessionFile = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
-    let drops = serde_json::to_value(&session.core.drop_counters)
-        .ok()
-        .and_then(|v| {
-            v.as_object()
-                .map(|m| m.values().filter_map(Value::as_u64).sum())
-        })
-        .unwrap_or(u64::MAX);
+    let counters = serde_json::to_value(&session.core.drop_counters).unwrap_or(Value::Null);
+    let (replaced_wakeups, drops) = split_drop_counters(&counters);
     let frames = fs::read_to_string(raw.join("frame_correlation.json"))
         .map(|t| t.lines().filter(|l| !l.trim().is_empty()).count() as u64)
         .unwrap_or(0);
     Ok(RecordSummary {
         valid: true,
         drops,
+        replaced_wakeups,
         write_errors: session.core.event_stream_write_errors,
         frame_samples: frames,
     })

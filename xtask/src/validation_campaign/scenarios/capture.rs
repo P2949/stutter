@@ -18,7 +18,9 @@ pub struct InterventionReport {
 pub struct CaptureEvidence {
     pub target_identity_valid: bool,
     pub recording_valid: bool,
+    /// Dropped events other than coalesced wakeups.
     pub drops: u64,
+    pub replaced_wakeups: u64,
     pub write_errors: u64,
     pub interventions: Vec<InterventionReport>,
     /// Source/campaign fingerprint still matches (HEAD, binaries, manifest).
@@ -43,6 +45,13 @@ pub fn accept(spec: &ScenarioSpec, evidence: &CaptureEvidence) -> Result<(), Vec
     );
     require(evidence.recording_valid, "the recording does not validate");
     require(evidence.drops == 0, "the recording dropped events");
+    require(
+        evidence.replaced_wakeups <= spec.accepted_wakeup_coalescing,
+        &format!(
+            "{} wakeup records were coalesced, above the scenario's {}",
+            evidence.replaced_wakeups, spec.accepted_wakeup_coalescing
+        ),
+    );
     require(evidence.write_errors == 0, "the recording had write errors");
     require(
         evidence.fingerprint_matches,

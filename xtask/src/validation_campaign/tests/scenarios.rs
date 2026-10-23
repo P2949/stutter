@@ -283,6 +283,7 @@ fn good(spec: &crate::validation_campaign::scenarios::model::ScenarioSpec) -> Ca
         target_identity_valid: true,
         recording_valid: true,
         drops: 0,
+        replaced_wakeups: 0,
         write_errors: 0,
         interventions: spec
             .interventions
@@ -506,4 +507,40 @@ fn proc_stat_fields_are_read_past_hostile_command_names() {
         (Some(4242), Some(6))
     );
     assert_eq!(starttime_ticks("nonsense"), None);
+}
+
+#[test]
+fn coalesced_wakeups_are_tolerated_only_where_the_scenario_declares_it() {
+    use crate::validation_campaign::system_host::split_drop_counters;
+    let set = super::scenarios_set();
+    let gpu = set.get("gpu-positive").unwrap();
+    let strict = set.get("clean-vkmark").unwrap();
+    assert_eq!(
+        (
+            strict.accepted_wakeup_coalescing,
+            gpu.accepted_wakeup_coalescing
+        ),
+        (0, 64)
+    );
+    let mut evidence = good(gpu);
+    evidence.replaced_wakeups = 19;
+    assert!(accept(gpu, &evidence).is_ok());
+    evidence.replaced_wakeups = 65;
+    assert!(
+        accept(gpu, &evidence)
+            .unwrap_err()
+            .iter()
+            .any(|r| r.contains("coalesced"))
+    );
+    // Other dropped events are never tolerated, and a strict scenario tolerates none.
+    let mut other = good(gpu);
+    other.drops = 1;
+    assert!(accept(gpu, &other).is_err());
+    let mut one = good(strict);
+    one.replaced_wakeups = 1;
+    assert!(accept(strict, &one).is_err());
+    // The recording's counters split into coalesced wakeups and everything else.
+    let counters = serde_json::json!({"wakeup_data_replaced_entries": 7, "ringbuf_reserve_failed": 2, "irq_start_times_insert_failed": 0});
+    assert_eq!(split_drop_counters(&counters), (7, 2));
+    assert_eq!(split_drop_counters(&serde_json::Value::Null).1, u64::MAX);
 }
