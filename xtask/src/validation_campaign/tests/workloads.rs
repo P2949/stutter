@@ -299,7 +299,7 @@ fn bounded_udp_traffic_is_rate_limited_and_stops() {
     let receiver = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
     let target = receiver.local_addr().unwrap();
     let started = std::time::Instant::now();
-    let sent = network_irq::send_traffic(target, 100, 64, 1).unwrap();
+    let sent = network_irq::send_traffic(target, 0, 100, 64, 1).unwrap();
     assert!(started.elapsed().as_secs_f64() < 3.0);
     assert!(
         (50..=130).contains(&sent),

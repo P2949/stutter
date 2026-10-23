@@ -55,7 +55,14 @@ fn probe_irq(nic: &NicSource) -> Result<u32, String> {
     };
     let before = read()?;
     let target = std::net::SocketAddr::from((nic.gateway, 9));
-    network_irq::send_traffic(target, 4_000, 512, PROBE_SECONDS).map_err(|e| e.to_string())?;
+    network_irq::send_traffic(
+        target,
+        network_irq::FLOW_SOURCE_PORT,
+        4_000,
+        512,
+        PROBE_SECONDS,
+    )
+    .map_err(|e| e.to_string())?;
     std::thread::sleep(Duration::from_millis(500));
     network_irq::best_irq(&before, &read()?, &nic.irqs, PROBE_MIN_DELTA)
         .map(|(irq, _)| irq)
