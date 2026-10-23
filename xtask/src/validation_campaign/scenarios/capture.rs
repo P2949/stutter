@@ -67,9 +67,18 @@ pub fn accept(spec: &ScenarioSpec, evidence: &CaptureEvidence) -> Result<(), Vec
             .interventions
             .iter()
             .any(|report| report.kind == *expected && report.verified);
+        let detail = evidence
+            .interventions
+            .iter()
+            .find(|report| report.kind == *expected)
+            .map(|report| report.detail.as_str())
+            .filter(|detail| !detail.is_empty());
         require(
             verified,
-            &format!("intervention {expected:?} was not independently verified"),
+            &format!(
+                "intervention {expected:?} was not independently verified{}",
+                detail.map_or_else(String::new, |d| format!(": {d}"))
+            ),
         );
     }
     // A control must not carry an intervention, and an unexpected one invalidates the capture.

@@ -54,6 +54,8 @@ fn recording_arguments_derive_from_typed_fields_and_the_authorization_only() {
             "250",
             "--out-dir",
             "/work/stutter/.llm-runs/validation/core-abc1234-1/attempts/corpus/0002/captures/0007/raw",
+            "--ebpf-wakeup-map-factor",
+            "16",
             "--hwmon",
             "--block-io",
             "--no-cpu-freq",
