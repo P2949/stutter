@@ -5,6 +5,7 @@
 pub(crate) mod artifact_manifest;
 pub(crate) mod attach;
 pub(crate) mod errors;
+pub(crate) mod ffi;
 pub(crate) mod load;
 pub(crate) mod load_plan;
 pub(crate) mod map_init;
