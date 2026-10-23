@@ -20,6 +20,9 @@ impl FixtureTomlSummary {
     pub(crate) fn name(&self) -> &str {
         &self.name
     }
+    pub(crate) fn provenance_value(&self, key: &str) -> &str {
+        self.provenance.get(key).map_or("", String::as_str)
+    }
     pub(crate) fn primary_cause(&self) -> &str {
         self.primary_cause.as_deref().unwrap_or("")
     }

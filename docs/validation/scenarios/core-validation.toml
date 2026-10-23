@@ -1,0 +1,96 @@
+# Predeclared experiments for the diagnosis corpus. Ground truth is the intervention applied
+# here, never Stutter's diagnosis output. Layout (66 independent captures):
+#   10 shared clean vkmark controls (negative for scheduler + IRQ + GPU)
+#   10 matched fio controls (negative for I/O)
+#   10 positives per family
+#   3 scheduler+I/O mixed and 3 IRQ+GPU mixed
+# If a shared control proves invalid for a family on this host, replace it with dedicated
+# controls; never duplicate one capture under several ids.
+schema_version = 1
+
+[vkmark]
+light_scene = "cube"
+light_size = "640x480"
+heavy_scene = "terrain"
+heavy_size = "1920x1080"
+present_mode = "fifo"
+
+[[scenario]]
+id = "clean-vkmark"
+control = "negative_control"
+covers = ["scheduler", "irq", "gpu"]
+target = "vkmark_light"
+interventions = []
+expected_primary_cause = "Unknown"
+seconds = 30
+count = 10
+
+[[scenario]]
+id = "io-control"
+control = "negative_control"
+covers = ["io"]
+target = "fio_fixed_work"
+interventions = []
+expected_primary_cause = "Unknown"
+seconds = 30
+count = 10
+
+[[scenario]]
+id = "scheduler-positive"
+control = "positive"
+covers = ["scheduler"]
+target = "vkmark_light"
+interventions = ["scheduler_burst"]
+expected_primary_cause = "GameThreadSchedulerDelay"
+seconds = 30
+count = 10
+
+[[scenario]]
+id = "io-positive"
+control = "positive"
+covers = ["io"]
+target = "fio_fixed_work"
+interventions = ["blocking_io"]
+expected_primary_cause = "BlockIoCandidate"
+seconds = 30
+count = 10
+
+[[scenario]]
+id = "irq-positive"
+control = "positive"
+covers = ["irq"]
+target = "vkmark_light"
+interventions = ["network_traffic"]
+expected_primary_cause = "IrqDelayCandidate"
+seconds = 30
+count = 10
+
+[[scenario]]
+id = "gpu-positive"
+control = "positive"
+covers = ["gpu"]
+target = "vkmark_gpu_heavy"
+interventions = ["gpu_stressor"]
+expected_primary_cause = "GpuBoundCandidate"
+seconds = 30
+count = 10
+
+[[scenario]]
+id = "mixed-scheduler-io"
+control = "mixed_confounded"
+covers = ["scheduler", "io"]
+target = "vkmark_light"
+interventions = ["scheduler_burst", "blocking_io"]
+expected_primary_cause = "GameThreadSchedulerDelay"
+seconds = 30
+count = 3
+
+[[scenario]]
+id = "mixed-irq-gpu"
+control = "mixed_confounded"
+covers = ["irq", "gpu"]
+target = "vkmark_gpu_heavy"
+interventions = ["network_traffic", "gpu_stressor"]
+expected_primary_cause = "GpuBoundCandidate"
+seconds = 30
+count = 3

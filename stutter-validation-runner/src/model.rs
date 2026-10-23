@@ -61,12 +61,36 @@ impl LiveSuite {
     }
 }
 
+/// Workloads the runner knows how to launch; the argv is derived here, never supplied.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub enum RegisteredWorkload {
+    FixedCompile,
+}
+
+impl RegisteredWorkload {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::FixedCompile => "fixed-compile-v1",
+        }
+    }
+}
+
+/// Probe sets for [`Request::ExecuteRecording`]. One corpus set is used for every capture so
+/// controls and positives are recorded identically.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub enum RecordProbes {
+    Core,
+    Corpus { irq: Option<u32> },
+}
+
 /// The discriminant of a request, used in authorization grants.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 pub enum RunnerAction {
     Status,
     ExecuteLiveSuite,
     ExecuteSchedulerBurst,
+    ExecuteRecording,
+    ExecuteWorkloadOverhead,
     PrepareKernelCycle,
     SetNextBoot,
     Reboot,
@@ -91,6 +115,23 @@ pub enum Request {
         period_ms: u64,
         seconds: u64,
     },
+    /// Records a campaign-owned target process with a fixed, typed probe set.
+    ExecuteRecording {
+        attempt: u32,
+        capture: u32,
+        target_pid: u32,
+        target_starttime_ticks: u64,
+        seconds: u64,
+        probes: RecordProbes,
+    },
+    /// The overhead suite against a *registered* workload; the command is derived by the runner.
+    ExecuteWorkloadOverhead {
+        workload: RegisteredWorkload,
+        attempt: u32,
+        seconds: u64,
+        rounds: u32,
+        work_units: u64,
+    },
     PrepareKernelCycle {
         entry_id: String,
     },
@@ -108,6 +149,8 @@ impl Request {
             Self::Status => RunnerAction::Status,
             Self::ExecuteLiveSuite { .. } => RunnerAction::ExecuteLiveSuite,
             Self::ExecuteSchedulerBurst { .. } => RunnerAction::ExecuteSchedulerBurst,
+            Self::ExecuteRecording { .. } => RunnerAction::ExecuteRecording,
+            Self::ExecuteWorkloadOverhead { .. } => RunnerAction::ExecuteWorkloadOverhead,
             Self::PrepareKernelCycle { .. } => RunnerAction::PrepareKernelCycle,
             Self::SetNextBoot { .. } => RunnerAction::SetNextBoot,
             Self::Reboot => RunnerAction::Reboot,

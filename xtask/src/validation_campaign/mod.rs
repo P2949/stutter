@@ -4,17 +4,24 @@
 pub mod backend;
 pub mod bootstrap;
 pub mod cli;
+pub mod corpus;
 pub mod evidence;
 pub mod executor;
+pub mod frame_score;
 pub mod graph;
+pub mod host_factory;
 pub mod kernels;
 pub mod manifest;
 pub mod model;
+pub mod overhead_real;
 pub mod repository;
 pub mod runners;
+pub mod scenarios;
 pub mod state;
 pub mod status;
+pub mod system_host;
 pub mod verify;
+pub mod workloads;
 
 #[cfg(test)]
 mod tests;
@@ -25,7 +32,7 @@ use std::{
 };
 
 use anyhow::{Context, bail, ensure};
-use cli::{CampaignArgs, CampaignCommand};
+use cli::{CampaignArgs, CampaignCommand, WorkloadCommand};
 use executor::Executor;
 use graph::Graph;
 use manifest::CampaignManifest;
@@ -145,6 +152,23 @@ fn build_executor(loaded: &Loaded, root: &Path) -> anyhow::Result<Executor> {
     .with_repository_check(root.join(manifest_rel)))
 }
 
+/// Runs a registered workload to completion; the privileged runner launches this by name.
+fn run_workload(root: &Path, workload: &WorkloadCommand) -> anyhow::Result<()> {
+    match workload {
+        WorkloadCommand::FixedCompile { cycles, target_dir } => {
+            workloads::fixed_compile::run_cycles(
+                &workloads::SystemTools,
+                root,
+                target_dir,
+                *cycles,
+                &std::time::Instant::now,
+            )
+            .map(|_| ())
+            .map_err(anyhow::Error::msg)
+        }
+    }
+}
+
 pub fn run(root: &Path, args: CampaignArgs) -> anyhow::Result<()> {
     match args.command {
         CampaignCommand::Init { manifest } => init(root, &manifest),
@@ -210,6 +234,7 @@ pub fn run(root: &Path, args: CampaignArgs) -> anyhow::Result<()> {
             ensure!(!strict || problems.is_empty(), "strict verification failed");
             Ok(())
         }
+        CampaignCommand::Workload { workload } => run_workload(root, &workload),
         CampaignCommand::Report { campaign } => report(root, campaign),
         CampaignCommand::Cancel { campaign } => {
             let mut loaded = load_campaign(root, campaign)?;

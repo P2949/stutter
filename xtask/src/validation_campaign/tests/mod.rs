@@ -10,13 +10,19 @@ use super::{
 
 mod backend;
 mod bootstrap;
+mod capture_exec;
+mod corpus;
 mod evidence;
+mod frame_score;
 mod graph;
 mod init;
 mod invalidation;
 mod kernels;
 mod manifest;
+mod overhead_real;
+mod scenarios;
 mod state;
+mod workloads;
 
 pub(super) const MANIFEST_TEXT: &str =
     include_str!("../../../../docs/validation/core-validation.toml");
@@ -73,4 +79,11 @@ pub(super) fn fresh(scratch: &Scratch) -> (CampaignDir, CampaignState, Graph) {
         &manifest(),
     );
     (dir, state, graph)
+}
+
+pub(super) fn scenarios_set() -> super::scenarios::model::ScenarioSet {
+    super::scenarios::model::ScenarioSet::parse(include_str!(
+        "../../../../docs/validation/scenarios/core-validation.toml"
+    ))
+    .unwrap()
 }

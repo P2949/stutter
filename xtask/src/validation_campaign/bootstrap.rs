@@ -96,7 +96,12 @@ pub fn grants() -> BTreeSet<TaskGrant> {
     }
     for task in ["frame-score", "corpus"] {
         grants.insert(plain(task, RunnerAction::ExecuteSchedulerBurst));
+        grants.insert(plain(task, RunnerAction::ExecuteRecording));
     }
+    grants.insert(plain(
+        "overhead-real",
+        RunnerAction::ExecuteWorkloadOverhead,
+    ));
     for action in [
         RunnerAction::Status,
         RunnerAction::ResumeCampaign,

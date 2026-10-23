@@ -173,3 +173,43 @@ runner writes its own budget/resume flag before rebooting. A task found `Running
 restart is recorded as an interrupted attempt and run again. CI covers the whole machine with
 a simulated bootloader and reboots (duplicate kernels, a boot that lands elsewhere, budget
 exhaustion, too few entries, refused reboots, restarts); real reboots are evidence, not tests.
+
+## Scenarios, corpus and workload drivers (phase D)
+
+**Scenarios** (`docs/validation/scenarios/core-validation.toml`) are predeclared experiments:
+a target (`vkmark` light/GPU-heavy or a fixed `fio` read), the interventions applied to it, a
+control type, the diagnosis families it exercises and the cause the intervention is known to
+produce. The set delivers the manifest floors (66 independent captures; the clean `vkmark`
+control is shared by the scheduler, IRQ and GPU families and a `fio` control serves I/O).
+Ground truth in a generated `fixture.toml` is the *intervention*; Stutter's diagnosis output
+is never used to label, select or filter a capture.
+
+**Capture acceptance.** A capture counts only if target identity (pid + start time) is valid,
+the recording validates with zero drops and write errors, every declared intervention was
+verified from independent telemetry (`/proc` for the SCHED_FIFO contender, `fio` JSON, the
+chosen IRQ's `/proc/interrupts` counter, DRM busy percent), no undeclared intervention was
+active, the source/binary fingerprint is unchanged, the capture id is unique, the sanitizer
+and `stutter validate` accept it, and a `vkmark` target produced frames. A rejected capture is
+appended to `corpus/rejections.ndjson`; the budget is `failed_attempts_per_capture` × needed
+captures per scenario and spending it ends the task in `BlockedResource`. Progress is
+recomputed from the fixtures on disk, so a killed run resumes where it stopped. Staging
+directories (`.staging-*`) are never read as corpus.
+
+**Privilege.** The runner only gains two typed actions: `ExecuteRecording` (the runner derives
+every `stutter record` flag from `RecordProbes` and re-checks that the target is the campaign
+user's own, unreplaced process) and `ExecuteWorkloadOverhead` (a registered workload whose
+command line the runner builds; the campaign supplies only a cycle count). Only the `corpus`
+and `frame-score` tasks may record or run the burst, only `overhead-real` may run the workload.
+
+**Tools** come from the pinned Nix shell (`vkmark`, `mangohud`, `fio`, `stress-ng`, `iputils`,
+`gh`). A missing tool, display, GPU, or controllable NIC interrupt is `BlockedResource` with the
+exact missing capability; nothing is substituted.
+
+**Real-workload overhead.** `overhead-real` rebuilds a Stutter package a frozen number of times
+in a campaign-local target directory. The cycle count is calibrated once, stored in campaign
+state and bound (with the toolchain, `Cargo.lock` and source commit) into the task fingerprint.
+
+**Frame score.** One recording per manifest degradation level (`vkmark` light with a contender
+of `level` ms per 32 ms), each retained and marked complete only after its checks pass, then
+evaluated with `--require-frames` semantics. A non-monotonic result is a recorded limitation
+for the policy phase, never rewritten.

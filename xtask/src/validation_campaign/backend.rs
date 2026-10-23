@@ -9,7 +9,7 @@ use std::{
 
 use stutter_validation_runner::{
     client::{Client, SOCKET_ENV},
-    model::{ErrorCode, LiveSuite, Request, ResponseStatus},
+    model::{ErrorCode, LiveSuite, RegisteredWorkload, Request, ResponseStatus},
 };
 
 /// Everything a backend needs; all of it derives from campaign state, none from a prompt.
@@ -19,6 +19,8 @@ pub struct SuiteInvocation<'a> {
     pub attempt: u32,
     pub seconds: u64,
     pub rounds: Option<u32>,
+    /// `Some` runs the registered fixed-compile workload instead of the built-in one.
+    pub work_units: Option<u64>,
     pub raw: &'a Path,
     pub log: &'a Path,
     pub stutter: &'a Path,
@@ -57,6 +59,26 @@ impl SuiteBackend for DirectBackend {
         }
         if let Some(rounds) = inv.rounds {
             args.extend(["--rounds".to_owned(), rounds.to_string()]);
+        }
+        if let Some(units) = inv.work_units {
+            let campaign = inv.raw.ancestors().nth(4).unwrap_or(inv.cwd);
+            args.extend([
+                "--workload-label".to_owned(),
+                super::workloads::fixed_compile::LABEL.to_owned(),
+                "--work-units".to_owned(),
+                units.to_string(),
+                "--".to_owned(),
+                inv.xtask.to_string_lossy().into_owned(),
+                "validation-campaign".to_owned(),
+                "workload".to_owned(),
+                "fixed-compile".to_owned(),
+                "--cycles".to_owned(),
+                units.to_string(),
+                "--target-dir".to_owned(),
+                super::workloads::fixed_compile::target_dir(campaign)
+                    .to_string_lossy()
+                    .into_owned(),
+            ]);
         }
         if let Some(parent) = inv.log.parent() {
             fs::create_dir_all(parent).map_err(failed)?;
@@ -106,11 +128,20 @@ impl SuiteBackend for RunnerBackend {
             campaign_id: inv.campaign_id,
             manifest_sha256: inv.manifest_sha256,
         };
-        let request = Request::ExecuteLiveSuite {
-            suite,
-            attempt: inv.attempt,
-            seconds: suite.takes_seconds().then_some(inv.seconds),
-            rounds: inv.rounds,
+        let request = match inv.work_units {
+            Some(work_units) => Request::ExecuteWorkloadOverhead {
+                workload: RegisteredWorkload::FixedCompile,
+                attempt: inv.attempt,
+                seconds: inv.seconds,
+                rounds: inv.rounds.unwrap_or_default(),
+                work_units,
+            },
+            None => Request::ExecuteLiveSuite {
+                suite,
+                attempt: inv.attempt,
+                seconds: suite.takes_seconds().then_some(inv.seconds),
+                rounds: inv.rounds,
+            },
         };
         let response = client.send(inv.task, request).map_err(|error| {
             BackendError::Privilege(format!(

@@ -70,6 +70,7 @@ fn run(backend: Scripted, scratch: &Scratch, base: &str) -> RunnerOutcome {
         suite: "observation",
         shape: SuiteShape::Seconds,
         backend: Box::new(backend),
+        work_units: None,
     };
     let spec = Graph::core()
         .unwrap()
@@ -266,6 +267,7 @@ fn the_runner_backend_sends_a_typed_request_and_maps_authorization_denials_to_bl
         attempt: 2,
         seconds: 20,
         rounds: None,
+        work_units: None,
         raw: &raw_dir,
         log: &log,
         stutter: std::path::Path::new("s"),

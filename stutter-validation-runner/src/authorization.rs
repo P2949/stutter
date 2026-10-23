@@ -5,8 +5,8 @@ use std::{fs, os::unix::fs::MetadataExt, path::Path};
 
 use crate::{
     model::{
-        Authorization, Envelope, ErrorCode, LiveSuite, Request, RunnerAction, SCHEMA_VERSION,
-        TaskGrant,
+        Authorization, Envelope, ErrorCode, LiveSuite, RecordProbes, Request, RunnerAction,
+        SCHEMA_VERSION, TaskGrant,
     },
     sys::PeerCredentials,
 };
@@ -215,6 +215,48 @@ impl Authorization {
                 }
                 if !(1..=3_600).contains(seconds) {
                     return invalid("seconds must be within 1..=3600");
+                }
+                Ok(())
+            }
+            Request::ExecuteRecording {
+                attempt,
+                capture,
+                target_pid,
+                target_starttime_ticks,
+                seconds,
+                probes,
+            } => {
+                if *attempt == 0 || *attempt > 9_999 || *capture > 9_999 {
+                    return invalid("attempt must be within 1..=9999 and capture within 0..=9999");
+                }
+                if *target_pid <= 1 || *target_starttime_ticks == 0 {
+                    return invalid("a recording needs a real target pid and start time");
+                }
+                if !(10..=300).contains(seconds) {
+                    return invalid("seconds must be within 10..=300");
+                }
+                if let RecordProbes::Corpus { irq: Some(irq) } = probes
+                    && *irq >= 4_096
+                {
+                    return invalid("irq is out of range");
+                }
+                Ok(())
+            }
+            Request::ExecuteWorkloadOverhead {
+                attempt,
+                seconds,
+                rounds,
+                work_units,
+                ..
+            } => {
+                if *attempt == 0 || *attempt > 9_999 {
+                    return invalid("attempt must be within 1..=9999");
+                }
+                if !(10..=60).contains(seconds) || !(6..=48).contains(rounds) {
+                    return invalid("seconds must be within 10..=60 and rounds within 6..=48");
+                }
+                if !(1..=100_000).contains(work_units) {
+                    return invalid("work_units must be within 1..=100000");
                 }
                 Ok(())
             }

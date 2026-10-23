@@ -61,7 +61,7 @@ pub enum RunnerOutcome {
         artifacts: Option<String>,
         receipt: Option<String>,
         limitations: Vec<String>,
-        fingerprint: FingerprintExtras,
+        fingerprint: Box<FingerprintExtras>,
         updates: Vec<StateUpdate>,
     },
     Failed {
@@ -90,7 +90,7 @@ impl RunnerOutcome {
             artifacts: None,
             receipt: None,
             limitations: Vec::new(),
-            fingerprint: FingerprintExtras::default(),
+            fingerprint: Box::default(),
             updates: Vec::new(),
         }
     }
@@ -278,7 +278,7 @@ impl Executor {
                     fingerprint: extras,
                     updates,
                 } => {
-                    merge_extras(&mut fingerprint, extras);
+                    merge_extras(&mut fingerprint, *extras);
                     (
                         AttemptOutcome::Passed,
                         artifacts,

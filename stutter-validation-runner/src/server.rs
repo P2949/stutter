@@ -161,6 +161,14 @@ impl Server {
                 .executor
                 .scheduler_burst(&self.authorization, envelope)
                 .map_or_else(from_denial, |data| Response::ok(id, None, data)),
+            Request::ExecuteRecording { .. } => self
+                .executor
+                .recording(&self.authorization, envelope)
+                .map_or_else(from_denial, |data| Response::ok(id, None, data)),
+            Request::ExecuteWorkloadOverhead { .. } => self
+                .executor
+                .workload_overhead(&self.authorization, envelope)
+                .map_or_else(from_denial, |data| Response::ok(id, None, data)),
             Request::SetNextBoot { entry_id } | Request::PrepareKernelCycle { entry_id } => {
                 match self.boot.set_next_boot(entry_id) {
                     Ok(()) => {

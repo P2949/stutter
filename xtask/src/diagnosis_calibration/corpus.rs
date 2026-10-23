@@ -17,6 +17,8 @@ pub struct Fixture {
     /// Name/source inference of "real". Regression sweeps may use it; sufficiency never does.
     pub legacy_real: bool,
     pub expected_cause: String,
+    /// `[provenance].scenario`: the predeclared scenario the capture came from.
+    pub scenario: String,
     /// Explicit calibration metadata when the capture is eligible for an evidence floor.
     pub meta: Option<CalibrationMeta>,
     /// Why `meta` is absent.
@@ -152,6 +154,7 @@ pub fn parse_fixture(dir: &Path, text: &str) -> Fixture {
         dir: dir.to_owned(),
         legacy_real: summary.is_legacy_real(),
         expected_cause: summary.primary_cause().to_owned(),
+        scenario: summary.provenance_value("scenario").to_owned(),
         meta,
         ineligible_reason,
     }
@@ -161,7 +164,13 @@ pub fn load_corpus(corpus: &Path) -> anyhow::Result<(Vec<Fixture>, String)> {
     let mut dirs = fs::read_dir(corpus)?
         .filter_map(Result::ok)
         .map(|entry| entry.path())
-        .filter(|path| path.join("fixture.toml").is_file())
+        // Dot-prefixed directories are staging areas of captures not yet accepted.
+        .filter(|path| {
+            !path
+                .file_name()
+                .is_some_and(|n| n.to_string_lossy().starts_with('.'))
+                && path.join("fixture.toml").is_file()
+        })
         .collect::<Vec<_>>();
     dirs.sort();
     let mut fixtures = Vec::new();
