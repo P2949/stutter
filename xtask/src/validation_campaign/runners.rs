@@ -248,21 +248,6 @@ pub const OFFLINE_GATES: &[(&str, &[&str])] = &[
     ("advisor-offline", &["scripts/smoke/advisor_offline.sh"]),
     ("xtask-tests", &["cargo", "test", "-p", "xtask"]),
     ("diff-check", &["git", "diff", "--check"]),
-    // The gates above rebuild `target/debug/stutter` with other feature sets. The campaign pins
-    // the canonical build's digest, so the last gate restores exactly that build.
-    (
-        "restore-binaries",
-        &[
-            "cargo",
-            "build",
-            "-p",
-            "stutter",
-            "-p",
-            "xtask",
-            "-p",
-            "stutter-validation-runner",
-        ],
-    ),
 ];
 
 pub struct OfflineGateRunner {
@@ -306,6 +291,9 @@ pub fn run_gates(
                 Command::new(&argv[0])
                     .args(&argv[1..])
                     .current_dir(repository)
+                    // The gates build with other feature sets; keeping them out of `target/`
+                    // leaves the pinned binaries untouched (and the gate cache persistent).
+                    .env("CARGO_TARGET_DIR", repository.join(".llm-runs/gate-target"))
                     .stdout(file.try_clone()?)
                     .stderr(file)
                     .status()
