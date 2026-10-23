@@ -23,7 +23,7 @@ use super::{
 
 pub const FROZEN_IRQ: &str = "corpus.irq";
 pub const WORKLOAD_VERSION: &str = "corpus-v1";
-const PROBE_SECONDS: u64 = 5;
+const PROBE_TRIALS: u32 = 8;
 const PROBE_MIN_DELTA: u64 = 500;
 
 pub struct SystemHostFactory;
@@ -45,33 +45,38 @@ fn msi_irq_names(interface: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Which candidate IRQ rises when traffic is sent to the gateway (the independently
-/// controllable source). `Err` is the honest reason there is none.
+pub fn read_interrupts() -> Result<BTreeMap<u32, u64>, String> {
+    fs::read_to_string("/proc/interrupts")
+        .map(|text| network_irq::parse_interrupts(&text))
+        .map_err(|e| e.to_string())
+}
+
+pub fn flow_plan() -> network_irq::FlowPlan {
+    network_irq::FlowPlan {
+        pps: 4_000,
+        payload: 512,
+        trial: Duration::from_secs(1),
+        min_delta: PROBE_MIN_DELTA,
+    }
+}
+
+/// The interrupt the NIC's transmit completions most often land on for fresh flows. A single
+/// flow's queue is random, so the capture steers to this one and verifies it.
 fn probe_irq(nic: &NicSource) -> Result<u32, String> {
-    let read = || -> Result<BTreeMap<u32, u64>, String> {
-        fs::read_to_string("/proc/interrupts")
-            .map(|t| network_irq::parse_interrupts(&t))
-            .map_err(|e| e.to_string())
-    };
-    let before = read()?;
     let target = std::net::SocketAddr::from((nic.gateway, 9));
-    network_irq::send_traffic(
+    network_irq::dominant_irq(
         target,
-        network_irq::FLOW_SOURCE_PORT,
-        4_000,
-        512,
-        PROBE_SECONDS,
+        &nic.irqs,
+        PROBE_TRIALS,
+        flow_plan(),
+        &read_interrupts,
     )
-    .map_err(|e| e.to_string())?;
-    std::thread::sleep(Duration::from_millis(500));
-    network_irq::best_irq(&before, &read()?, &nic.irqs, PROBE_MIN_DELTA)
-        .map(|(irq, _)| irq)
-        .ok_or_else(|| {
-            format!(
-                "no interrupt of {} rose by {PROBE_MIN_DELTA} under {PROBE_SECONDS}s of traffic",
-                nic.interface
-            )
-        })
+    .ok_or_else(|| {
+        format!(
+            "no interrupt of {} rose by {PROBE_MIN_DELTA} under {PROBE_TRIALS} fresh flows",
+            nic.interface
+        )
+    })
 }
 
 impl HostFactory for SystemHostFactory {
