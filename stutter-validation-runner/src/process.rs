@@ -512,6 +512,10 @@ pub fn plan_recording(
         "250".to_owned(),
         "--out-dir".to_owned(),
         raw.to_string_lossy().into_owned(),
+        // Heavy GPU/IO scenarios overflow the default wakeup map and count replaced entries as
+        // drops; every recording of a campaign uses the same larger one.
+        "--ebpf-wakeup-map-factor".to_owned(),
+        "16".to_owned(),
     ];
     let probe_flags: &[&str] = match probes {
         crate::model::RecordProbes::Core => &[
