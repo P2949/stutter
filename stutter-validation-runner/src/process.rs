@@ -39,6 +39,9 @@ pub struct PlannedCommand {
     pub attempt_dir: PathBuf,
     pub raw: PathBuf,
     pub path_env: String,
+    /// `CARGO_HOME` for builds: `HOME` is the attempt directory, so offline builds would find no
+    /// registry without it.
+    pub cargo_home: Option<PathBuf>,
 }
 
 fn campaign_dir(auth: &Authorization) -> PathBuf {
@@ -112,6 +115,7 @@ pub fn plan_live_suite(
         attempt_dir,
         raw,
         path_env: auth.path_env.clone(),
+        cargo_home: None,
     })
 }
 
@@ -147,6 +151,7 @@ pub fn plan_scheduler_burst(
         raw: attempt_dir.join("unused"),
         attempt_dir,
         path_env: auth.path_env.clone(),
+        cargo_home: None,
     })
 }
 
@@ -220,6 +225,9 @@ impl SystemExecutor {
             .env("PATH", &plan.path_env)
             .env("HOME", &plan.attempt_dir)
             .stdin(Stdio::null());
+        if let Some(cargo_home) = &plan.cargo_home {
+            command.env("CARGO_HOME", cargo_home);
+        }
         command
     }
 }
@@ -541,6 +549,7 @@ pub fn plan_recording(
         attempt_dir,
         raw,
         path_env: auth.path_env.clone(),
+        cargo_home: None,
     })
 }
 
@@ -600,5 +609,13 @@ pub fn plan_workload_overhead(
         attempt_dir,
         raw,
         path_env: auth.path_env.clone(),
+        cargo_home: owner_cargo_home(auth),
     })
+}
+
+/// `<owner home>/.cargo` when the owner's home directory is known and has one.
+fn owner_cargo_home(auth: &Authorization) -> Option<PathBuf> {
+    let passwd = std::fs::read_to_string("/etc/passwd").ok()?;
+    let cargo = crate::install::home_of(&passwd, auth.owner_uid)?.join(".cargo");
+    cargo.is_dir().then_some(cargo)
 }

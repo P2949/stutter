@@ -302,8 +302,16 @@ pub(super) fn run_checks(bundle: &Path) -> anyhow::Result<Vec<(String, bool, Str
             for file in &files {
                 let text = fs::read_to_string(bundle.join(file)).unwrap_or_default();
                 if file.ends_with(".json") {
-                    serde_json::from_str::<Value>(&text)
-                        .with_context(|| format!("invalid JSON in {file}"))?;
+                    // Recording streams (`interval.json`, frame correlation, ...) are one JSON
+                    // value per line; anything else is a single document.
+                    if serde_json::from_str::<Value>(&text).is_err() {
+                        for (index, line) in
+                            text.lines().filter(|l| !l.trim().is_empty()).enumerate()
+                        {
+                            serde_json::from_str::<Value>(line)
+                                .with_context(|| format!("invalid JSON in {file}:{}", index + 1))?;
+                        }
+                    }
                     count += 1;
                 } else if file.ends_with(".jsonl") {
                     for (index, line) in text.lines().filter(|l| !l.trim().is_empty()).enumerate() {

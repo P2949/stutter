@@ -62,16 +62,12 @@ pub fn command(config: &VkmarkConfig, seconds: u64, mangohud_dir: &Path) -> Comm
     .with_env("MANGOHUD_CONFIG", &mangohud_config(mangohud_dir, seconds))
 }
 
-/// Scene names from `vkmark --list-scenes` (lines like `[cube] ...` or `cube: ...`).
+/// Scene names from `vkmark --list-scenes`, whose scenes are the `[Scene] <name>` lines (the
+/// `[Option]` and `Description` lines beneath them are not scenes).
 pub fn parse_scene_list(text: &str) -> Vec<String> {
     text.lines()
-        .filter_map(|line| {
-            let line = line.trim();
-            if let Some(rest) = line.strip_prefix('[') {
-                return rest.split(']').next().map(str::to_owned);
-            }
-            line.split_once(':').map(|(name, _)| name.trim().to_owned())
-        })
+        .filter_map(|line| line.trim().strip_prefix("[Scene]"))
+        .map(|name| name.trim().to_owned())
         .filter(|name| {
             !name.is_empty()
                 && name
