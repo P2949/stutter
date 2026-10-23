@@ -321,11 +321,10 @@ impl CaptureHost for SystemCaptureHost {
                     self.spawn(&command, &self.capture_dir.join("blocker.json"), true)?;
                 }
                 InterventionKind::GpuStressor => {
-                    let command = vkmark::command(
-                        &VkmarkConfig::heavy(&self.settings.vkmark),
-                        seconds,
-                        &self.capture_dir.join("stressor-mangohud"),
-                    );
+                    // Bare vkmark: per-frame MangoHud logging slows frame submission enough to
+                    // leave the GPU short of saturation (94% against 99% measured here).
+                    let command =
+                        vkmark::bare_command(&VkmarkConfig::heavy(&self.settings.vkmark), seconds);
                     self.spawn(&command, &self.capture_dir.join("stressor.log"), false)?;
                 }
                 InterventionKind::NetworkTraffic => {
