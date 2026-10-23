@@ -74,6 +74,9 @@ jobs:
       - name: Scenario and corpus generation
         run: cargo test -p xtask -- validation_campaign::tests::scenarios validation_campaign::tests::capture_exec validation_campaign::tests::corpus validation_campaign::tests::frame_score validation_campaign::tests::overhead_real validation_campaign::tests::workloads
 
+      - name: Campaign integration, release policy and tagging
+        run: cargo test -p xtask -- validation_campaign::tests::repo_pr validation_campaign::tests::integration validation_campaign::tests::policy validation_campaign::tests::policy_tasks validation_campaign::tests::release
+
       - name: Calibration roles and capability evidence kinds
         run: cargo test -p xtask -- diagnosis_calibration capability_check
 

@@ -16,6 +16,10 @@ use super::{
     state::{CampaignDir, save, unix_ms},
 };
 
+/// Frozen-state flag a task sets after rebuilding the binaries; `continue` then re-executes
+/// itself from the fresh build instead of carrying on with the old code.
+pub const RESTART_KEY: &str = "controller.restart";
+
 /// Context handed to a runner; deliberately read-only.
 pub struct RunContext<'a> {
     pub dir: &'a CampaignDir,
@@ -43,6 +47,11 @@ pub struct FingerprintExtras {
 
 pub enum StateUpdate {
     SetReleaseCandidate(String),
+    /// Digests of the binaries built at the release candidate.
+    SetReleaseBinaries {
+        stutter_sha256: String,
+        xtask_sha256: String,
+    },
     Freeze {
         key: String,
         value: String,
@@ -180,6 +189,13 @@ impl Executor {
             }
             let flow = self.run_task(dir, state, spec)?;
             ran.push(id.to_owned());
+            if state.frozen.get(RESTART_KEY).is_some_and(|v| v == "1") {
+                // The binaries were rebuilt: the remaining tasks must run in the new process.
+                return Ok(ContinueReport {
+                    ran,
+                    boundary: Boundary::Idle,
+                });
+            }
             if flow == TaskFlow::Rebooting {
                 // The machine is about to go down: start nothing else.
                 return Ok(ContinueReport {
@@ -404,6 +420,13 @@ impl Executor {
                 StateUpdate::SetReleaseCandidate(commit) => {
                     state.release_candidate = Some(commit);
                     state.mode = CampaignMode::ReleaseCandidate;
+                }
+                StateUpdate::SetReleaseBinaries {
+                    stutter_sha256,
+                    xtask_sha256,
+                } => {
+                    state.rc_stutter_sha256 = Some(stutter_sha256);
+                    state.rc_xtask_sha256 = Some(xtask_sha256);
                 }
                 StateUpdate::Freeze { key, value } => {
                     state.frozen.insert(key, value);

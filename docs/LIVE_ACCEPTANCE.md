@@ -362,3 +362,11 @@ start time from the session; ambiguous or missing targets fail, and the report c
 or, non-strict only, `legacy_sample_heuristic`). Record real series with `--tree-pid`.
 Regardless of the score, `GameRunnableLatency` keeps runnable latency as its primary and the
 compile objective keeps fixed-work elapsed time (a test asserts both descriptors).
+
+## Exact-RC acceptance (campaign)
+
+`rc-live-observation`, `rc-game-runnable`, `rc-affinity` and `rc-recovery` run the same suites
+against the frozen release candidate through the privileged runner, pinned to the binaries built
+at that commit. Their bundles stay outside the repository and are the `--acceptance-bundle`
+inputs of `release-verify`. Exact-RC suspend/resume is not required for this release: it passed
+historically and the capabilities that depend on it remain Experimental.

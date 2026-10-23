@@ -104,7 +104,12 @@ pub fn verify_state(
                         let observed_incompatible = spec.kind == TaskKind::KernelMatrix
                             && entry["status"] == "FAIL"
                             && entry["compatibility"] == "ObservedIncompatible";
-                        if (entry["status"] != "PASS" && !observed_incompatible)
+                        // A non-monotonic score series is an empirical result, not a failure.
+                        let observed_non_monotonic = spec.kind == TaskKind::ScoreRunnable
+                            && entry["status"] == "INCONCLUSIVE";
+                        if (entry["status"] != "PASS"
+                            && !observed_incompatible
+                            && !observed_non_monotonic)
                             || entry["source_commit"] != expected
                         {
                             problems.push(format!(

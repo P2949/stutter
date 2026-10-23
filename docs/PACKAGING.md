@@ -206,3 +206,10 @@ stutter daemon acceptance --json
 |---|---|---|
 | `STUTTER_USE_PREBUILT_BPF` | Build | Set to `1` to skip local eBPF compilation and use `STUTTER_BPF_OBJECT` |
 | `STUTTER_BPF_OBJECT` | Build / Runtime | Path to a prebuilt eBPF object file |
+
+## Installation smoke (campaign)
+
+The campaign unpacks the release tarball into a fresh directory and runs the packaged
+`bin/stutter` (`--version`, `capabilities --json`, `doctor --json`, `restore --help`,
+`audit --help`, `validate` and `report --analysis-json` on the candidate's own observation
+recording) and checks `lib/stutter/stutter.bpf.o` against the release manifest.

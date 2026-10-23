@@ -109,12 +109,20 @@ pub fn check_source(
             file_sha256(&state.repository.join("Cargo.lock"))? == state.cargo_lock_sha256,
             "Cargo.lock changed"
         );
+        let (stutter_pin, xtask_pin) = if spec.binding == SourceBinding::ReleaseCandidate {
+            (
+                state.rc_stutter_sha256.clone().unwrap_or_default(),
+                state.rc_xtask_sha256.clone().unwrap_or_default(),
+            )
+        } else {
+            (state.stutter_sha256.clone(), state.xtask_sha256.clone())
+        };
         ensure!(
-            cached_file_sha256(&binaries.stutter)? == state.stutter_sha256,
+            cached_file_sha256(&binaries.stutter)? == stutter_pin,
             "stutter binary changed"
         );
         ensure!(
-            cached_file_sha256(&binaries.xtask)? == state.xtask_sha256,
+            cached_file_sha256(&binaries.xtask)? == xtask_pin,
             "xtask binary changed"
         );
         check_binary_revision(&binaries.stutter, commit)

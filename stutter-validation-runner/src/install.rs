@@ -161,7 +161,10 @@ pub fn execute(plan: &InstallPlan, activate: bool) -> Result<(), String> {
     if activate {
         for arguments in [
             vec!["daemon-reload"],
-            vec!["enable", "--now", "stutter-validation-runner.service"],
+            vec!["enable", "stutter-validation-runner.service"],
+            // A reinstall (new pinned binaries for the release candidate) must replace the
+            // authorization the running service already loaded.
+            vec!["restart", "stutter-validation-runner.service"],
             vec!["enable", "stutter-validation-resume.service"],
         ] {
             let status = Command::new("systemctl")

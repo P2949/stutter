@@ -52,34 +52,62 @@ const AFFINITY: &[&str] = &[
 ];
 
 pub const CAPABILITIES: [Capability; 17] = [
-    obs("doctor", "Local preflight checks", &["doctor"]),
-    obs("record", "Record scheduler and frame evidence", &["record"]),
+    obs(
+        "doctor",
+        "Local preflight checks",
+        &["doctor"],
+        CapabilityTier::Experimental,
+        CapabilityTier::Supported,
+    ),
+    obs(
+        "record",
+        "Record scheduler and frame evidence",
+        &["record"],
+        CapabilityTier::Experimental,
+        CapabilityTier::Supported,
+    ),
     obs(
         "bench",
         "Repeatable benchmark scenarios",
         &["bench", "scenario"],
+        CapabilityTier::Experimental,
+        CapabilityTier::Supported,
     ),
     obs(
         "report",
         "Report and HTML rendering of recordings",
         &["report", "summary", "validate"],
+        CapabilityTier::Experimental,
+        CapabilityTier::Supported,
     ),
     obs(
         "diagnose",
         "Evidence-based stutter diagnosis",
         &["report", "check"],
+        CapabilityTier::Experimental,
+        CapabilityTier::Supported,
     ),
     obs(
         "advisor",
         "Advisor and fix-plan recommendations",
         &["advisor", "recommend"],
+        CapabilityTier::Experimental,
+        CapabilityTier::Supported,
     ),
     obs(
         "tune_evaluation",
         "Baseline/candidate evaluation of tunings",
         &["tune", "recommend", "prove-fix"],
+        CapabilityTier::Experimental,
+        CapabilityTier::Supported,
     ),
-    obs("audit", "Inspect local audit events", &["audit"]),
+    obs(
+        "audit",
+        "Inspect local audit events",
+        &["audit"],
+        CapabilityTier::Experimental,
+        CapabilityTier::Supported,
+    ),
     Capability {
         id: "restore",
         title: "Restore recorded CPU-affinity state",
@@ -172,6 +200,8 @@ pub const CAPABILITIES: [Capability; 17] = [
         "completions_and_man",
         "Shell completions and manual page",
         &["completions", "man"],
+        CapabilityTier::Experimental,
+        CapabilityTier::Supported,
     ),
 ];
 
@@ -179,17 +209,26 @@ const fn obs(
     id: &'static str,
     title: &'static str,
     commands: &'static [&'static str],
+    tier: CapabilityTier,
+    target_tier: CapabilityTier,
 ) -> Capability {
     Capability {
         id,
         title,
         class: CapabilityClass::NonMutating,
-        tier: CapabilityTier::Experimental,
-        target_tier: CapabilityTier::Supported,
+        tier,
+        target_tier,
         commands,
         providers: &[],
         required_evidence: OBSERVATION,
-        limitations: "Observation is useful without mutation; real-system evidence is pending (see docs/evidence/index.json).",
+        limitations: match tier {
+            CapabilityTier::Supported => {
+                "Observation is useful without mutation; backed by indexed real-system observation, kernel and overhead evidence."
+            }
+            _ => {
+                "Observation is useful without mutation; real-system evidence is pending (see docs/evidence/index.json)."
+            }
+        },
     }
 }
 
@@ -305,13 +344,13 @@ mod tests {
     }
 
     #[test]
-    fn nothing_is_supported_by_default_in_this_evidence_free_registry() {
-        // Tier changes are made together with their evidence-index entries.
-        assert!(
-            capability_registry()
-                .iter()
-                .all(|capability| capability.tier != CapabilityTier::Supported)
-        );
+    fn no_mutating_capability_is_supported_in_the_first_release() {
+        // Which non-mutating capabilities may be Supported is decided by evidence
+        // (`xtask capability-check`); mutation never graduates implicitly.
+        assert!(capability_registry().iter().all(|capability| {
+            capability.tier != CapabilityTier::Supported
+                || capability.class == CapabilityClass::NonMutating
+        }));
     }
 
     #[test]

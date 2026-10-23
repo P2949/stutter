@@ -213,3 +213,49 @@ state and bound (with the toolchain, `Cargo.lock` and source commit) into the ta
 of `level` ms per 32 ms), each retained and marked complete only after its checks pass, then
 evaluated with `--require-frames` semantics. A non-monotonic result is a recorded limitation
 for the policy phase, never rewritten.
+
+## Integration, policy and release (phase E)
+
+**Evidence integration.** Once every collection task passed, the `evidence-integration` task
+re-verifies each published bundle from disk, derives the index entries from the verified bundles
+(never by hand), merges them into `docs/evidence/index.json` (deduplicated by capture id),
+copies the sanitized corpus fixtures into `stutter/tests/fixtures/runs`, appends a ledger entry,
+runs the offline gates on the branch and lands one pull request: branch `campaign/<id>/<task>`,
+push, PR, wait for every required check, merge, return to a clean `main`. An interrupted flow
+resumes from the branch's PR; red, pending, skipped, cancelled or neutral required checks never
+merge. The hardware-only `live smoke tests` job is the one check GitHub cannot run and is ignored.
+`gh auth status` must succeed or the task is `BlockedResource`.
+
+**Calibration and score policy** are deterministic. With every evidence floor met the current
+diagnosis thresholds and StutterScore weights are retained; weak behavior at the current
+threshold (precision or recall below 0.9, any false High observation or causal confidence) and a
+non-monotonic score series are recorded as limitations. An insufficient floor stops the campaign
+(`BlockedResource`); nothing is optimized against one corpus. A non-monotonic controlled
+series is an `INCONCLUSIVE` bundle at the `evaluation` stage and is kept as an observation.
+
+**Capability policy.** After issue gates #27 #30 #31 #32 #33 #38 are satisfied the manifest's fixed
+policy is applied to `stutter/src/capability_tiers.rs` and `docs/CAPABILITIES.md` in a pull
+request: `doctor`, `record`, `bench`, `report`, `audit` and `completions_and_man` become
+Supported; diagnosis, advisor, tune evaluation and every mutating capability stay Experimental;
+`privileged_worker` and `fake_action_provider` stay Internal. The registry change is a pure text
+transformation checked against the real registry in tests; `capability-check` and the unit tests
+gate the pull request. Mutating capabilities never become Supported in this release.
+
+**Release candidate.** `freeze-rc` syncs `main`, requires it clean, rebuilds the binaries, records
+their digests *separately* from the evidence-base digests (collection results stay current),
+re-pins the privileged runner to them and makes `continue` re-execute itself from the fresh build.
+From then on any repository change invalidates only the exact-RC tasks. `rc-offline` runs
+`scripts/release/offline-acceptance.sh` against the candidate and requires the candidate's own
+GitHub CI to be green. The four exact-RC live suites publish bundles outside the repository.
+`release-package` and `release-verify --require-acceptance` drive the existing implementation.
+`install-smoke` unpacks the packaged tarball and runs the packaged binary: version equals the
+manifest and the candidate revision, `capabilities` equals the policy, `doctor` runs to a
+verdict, `restore`/`audit` respond, and `validate` plus `report` accept the candidate's own
+observation recording; the packaged eBPF object is the manifest's ELF object. Recording with
+the packaged binary needs privilege that the runner only grants to the pinned build, so that step
+is the candidate's `rc-live-observation` suite.
+
+**Tag.** Only after strict verification, every release issue gate, `HEAD == RC`, a clean tree and
+green exact-RC CI. The annotated tag `v0.1.0` is created on the candidate and pushed. A tag that
+already exists on another commit is `FAILURE_REQUIRES_REVIEW` and is never moved, deleted or
+force-pushed; a tag already on the candidate is success.

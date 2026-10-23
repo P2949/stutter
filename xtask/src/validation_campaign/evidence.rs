@@ -80,6 +80,10 @@ pub enum Accept {
     /// Kernel compatibility is *observed*: a kernel the loader cannot use yields a FAIL result
     /// whose `compatibility` is `ObservedIncompatible`. That is a valid observation to keep.
     PassOrObservedIncompatible,
+    /// A score series that ran fine but is not monotonic is `INCONCLUSIVE` at the `evaluation`
+    /// stage. That is an empirical observation (the weights are retained and the limitation
+    /// recorded), not a failed attempt.
+    PassOrNonMonotonicScore,
 }
 
 impl Accept {
@@ -88,6 +92,9 @@ impl Accept {
             || (self == Self::PassOrObservedIncompatible
                 && value["status"] == "FAIL"
                 && value["compatibility"] == "ObservedIncompatible")
+            || (self == Self::PassOrNonMonotonicScore
+                && value["status"] == "INCONCLUSIVE"
+                && value["stage"] == "evaluation")
     }
 }
 

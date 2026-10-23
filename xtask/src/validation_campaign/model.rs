@@ -179,6 +179,12 @@ pub struct CampaignState {
     pub frozen: BTreeMap<String, String>,
     /// Set once the release candidate is chosen.
     pub release_candidate: Option<String>,
+    /// Digests of the binaries built at the release candidate; the evidence-base digests above
+    /// stay untouched so collection results remain current.
+    #[serde(default)]
+    pub rc_xtask_sha256: Option<String>,
+    #[serde(default)]
+    pub rc_stutter_sha256: Option<String>,
 }
 
 /// How a `continue` run ended.

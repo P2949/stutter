@@ -148,24 +148,33 @@ impl CampaignState {
             decisions: Vec::new(),
             frozen: Default::default(),
             release_candidate: None,
+            rc_xtask_sha256: None,
+            rc_stutter_sha256: None,
         }
     }
 
     /// The fingerprint a result for `spec` must carry to count as current.
     pub fn expected_fingerprint(&self, spec: &TaskSpec) -> TaskFingerprint {
-        let (commit, binaries) = match spec.binding {
-            SourceBinding::None => (self.evidence_base.clone(), false),
-            SourceBinding::EvidenceBase => (self.evidence_base.clone(), true),
-            SourceBinding::ReleaseCandidate => {
-                (self.release_candidate.clone().unwrap_or_default(), true)
-            }
+        let (commit, digests) = match spec.binding {
+            SourceBinding::None => (self.evidence_base.clone(), None),
+            SourceBinding::EvidenceBase => (
+                self.evidence_base.clone(),
+                Some((self.stutter_sha256.clone(), self.xtask_sha256.clone())),
+            ),
+            SourceBinding::ReleaseCandidate => (
+                self.release_candidate.clone().unwrap_or_default(),
+                Some((
+                    self.rc_stutter_sha256.clone().unwrap_or_default(),
+                    self.rc_xtask_sha256.clone().unwrap_or_default(),
+                )),
+            ),
         };
         TaskFingerprint {
             task: spec.id.to_owned(),
             evidence_commit: commit,
             manifest_sha256: self.manifest_sha256.clone(),
-            stutter_sha256: binaries.then(|| self.stutter_sha256.clone()),
-            xtask_sha256: binaries.then(|| self.xtask_sha256.clone()),
+            stutter_sha256: digests.as_ref().map(|(stutter, _)| stutter.clone()),
+            xtask_sha256: digests.map(|(_, xtask)| xtask),
             ..TaskFingerprint::default()
         }
     }

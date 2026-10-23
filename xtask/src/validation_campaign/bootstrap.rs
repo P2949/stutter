@@ -156,7 +156,15 @@ fn runner_ready(socket: &Path, state: &CampaignState) -> bool {
             manifest_sha256: &state.manifest_sha256,
         }
         .send(CAMPAIGN_TASK, Request::Status)
-        .is_ok_and(|response| response.status == ResponseStatus::Ok)
+        .is_ok_and(|response| {
+            // A runner pinned to other binaries is not ready for this state (a release-candidate
+            // rebuild changes the pins and must reinstall).
+            response.status == ResponseStatus::Ok
+                && response.data.as_ref().is_some_and(|data| {
+                    data["xtask_sha256"] == state.xtask_sha256.as_str()
+                        && data["stutter_sha256"] == state.stutter_sha256.as_str()
+                })
+        })
 }
 
 fn build_runner(repository: &Path) -> anyhow::Result<PathBuf> {

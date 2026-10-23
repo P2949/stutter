@@ -87,3 +87,10 @@ for commit X cannot be committed into X, so the bundles stay outside the release
 
 Tag `v0.1.0` only on the exact commit that passed fresh-checkout and real-system
 acceptance; do not validate one commit and tag another.
+
+## Autonomous campaign path
+
+`cargo run -p xtask -- validation-campaign continue` performs the sequence above (freeze, exact-RC
+offline and live acceptance, packaging, verification, installation smoke, tag) without
+interactive confirmation; see `docs/VALIDATION_CAMPAIGN.md`. The manual commands in this file
+remain the reference for what each step runs.

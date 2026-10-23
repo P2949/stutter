@@ -3,6 +3,7 @@
 //! invalidation; the LLM follows `status --json` and runs `continue`.
 pub mod backend;
 pub mod bootstrap;
+pub mod calibration_task;
 pub mod cli;
 pub mod corpus;
 pub mod evidence;
@@ -10,13 +11,19 @@ pub mod executor;
 pub mod frame_score;
 pub mod graph;
 pub mod host_factory;
+pub mod integration;
 pub mod kernels;
 pub mod manifest;
 pub mod model;
 pub mod overhead_real;
+pub mod policy;
+pub mod pr_task;
+pub mod release;
+pub mod repo_pr;
 pub mod repository;
 pub mod runners;
 pub mod scenarios;
+pub mod shell;
 pub mod state;
 pub mod status;
 pub mod system_host;
@@ -169,6 +176,16 @@ fn run_workload(root: &Path, workload: &WorkloadCommand) -> anyhow::Result<()> {
     }
 }
 
+/// Replaces this process with the freshly built xtask, with the same arguments.
+fn restart_controller(root: &Path) -> anyhow::Result<()> {
+    use std::os::unix::process::CommandExt;
+    let error = std::process::Command::new(root.join("target/debug/xtask"))
+        .args(std::env::args_os().skip(1))
+        .current_dir(root)
+        .exec();
+    bail!("could not restart the campaign controller: {error}")
+}
+
 pub fn run(root: &Path, args: CampaignArgs) -> anyhow::Result<()> {
     match args.command {
         CampaignCommand::Init { manifest } => init(root, &manifest),
@@ -212,6 +229,10 @@ pub fn run(root: &Path, args: CampaignArgs) -> anyhow::Result<()> {
             let report = executor.continue_campaign(&loaded.dir, &mut loaded.state, max_tasks)?;
             println!("ran: {}", report.ran.join(", "));
             println!("boundary: {:?}", report.boundary);
+            if loaded.state.frozen.remove(executor::RESTART_KEY).is_some() {
+                save(&loaded.dir, &loaded.state)?;
+                return restart_controller(root);
+            }
             let code = exit_code(report.boundary);
             if code != 0 {
                 std::process::exit(code);
