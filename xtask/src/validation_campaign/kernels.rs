@@ -437,6 +437,7 @@ impl KernelHost for RunnerHost {
             suite: "kernel-compat",
             shape: SuiteShape::Seconds,
             backend: backend_from_env(),
+            work_units: None,
         };
         let published =
             runner.run_and_publish(ctx, spec, attempt, Accept::PassOrObservedIncompatible)?;

@@ -26,6 +26,8 @@ pub struct LiveSuiteRunner {
     pub suite: &'static str,
     pub shape: SuiteShape,
     pub backend: Box<dyn SuiteBackend>,
+    /// Cycles of the registered fixed-compile workload; `Some` makes this the real-workload suite.
+    pub work_units: Option<u64>,
 }
 
 fn publish_failure_class(stage: &str) -> FailureClass {
@@ -57,6 +59,7 @@ impl LiveSuiteRunner {
             seconds: context.manifest.overhead.seconds,
             rounds: matches!(self.shape, SuiteShape::Overhead)
                 .then_some(context.manifest.overhead.rounds),
+            work_units: self.work_units,
             raw: &raw,
             log: &log,
             stutter: &context.binaries.stutter,
@@ -128,7 +131,11 @@ impl LiveSuiteRunner {
             attempt,
             raw: &raw,
             expected_commit: &commit,
-            allowed_kinds: &["controlled_real", "real_workload"],
+            allowed_kinds: if self.work_units.is_some() {
+                &["real_workload"]
+            } else {
+                &["controlled_real", "real_workload"]
+            },
             accept,
         })
         .map_err(|failure| failed_publication(context, spec, attempt, &failure, artifacts))
@@ -324,6 +331,7 @@ pub fn default_runners() -> BTreeMap<TaskKind, Box<dyn TaskRunner>> {
             suite,
             shape,
             backend: backend_from_env(),
+            work_units: None,
         }) as Box<dyn TaskRunner>
     };
     runners.insert(
@@ -353,13 +361,16 @@ pub fn default_runners() -> BTreeMap<TaskKind, Box<dyn TaskRunner>> {
         }),
     );
     runners.insert(
+        TaskKind::OverheadReal,
+        Box::new(super::overhead_real::OverheadRealRunner::system()),
+    );
+    runners.insert(
         TaskKind::Corpus,
         Box::new(super::corpus::CorpusRunner {
             factory: Box::new(super::host_factory::SystemHostFactory),
         }),
     );
     for (kind, name) in [
-        (TaskKind::OverheadReal, "real-workload overhead"),
         (TaskKind::FrameScore, "frame score series"),
         (TaskKind::EvidenceIntegration, "evidence integration"),
         (TaskKind::DiagnosisCalibration, "calibration"),

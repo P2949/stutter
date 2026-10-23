@@ -59,9 +59,26 @@ pub enum CampaignCommand {
         #[arg(long)]
         campaign: Option<PathBuf>,
     },
+    /// Internal workloads the privileged runner executes by name (not for direct use).
+    #[command(hide = true)]
+    Workload {
+        #[command(subcommand)]
+        workload: WorkloadCommand,
+    },
     /// Stop future automation; collected evidence is never deleted.
     Cancel {
         #[arg(long)]
         campaign: Option<PathBuf>,
+    },
+}
+
+#[derive(Subcommand, Clone, Debug, Eq, PartialEq)]
+pub enum WorkloadCommand {
+    /// Rebuild a Stutter package `--cycles` times in a campaign-local target directory.
+    FixedCompile {
+        #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+        cycles: u64,
+        #[arg(long)]
+        target_dir: PathBuf,
     },
 }
