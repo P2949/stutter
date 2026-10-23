@@ -57,6 +57,10 @@ pub trait ToolHost {
     fn output(&self, spec: &CommandSpec) -> Result<String, String>;
     fn env_var(&self, name: &str) -> Option<String>;
     fn read_file(&self, path: &str) -> Result<String, String>;
+    /// Digest of an executable's bytes; `None` when it cannot be read.
+    fn executable_sha256(&self, _path: &std::path::Path) -> Option<String> {
+        None
+    }
 }
 
 pub struct SystemTools;
@@ -92,6 +96,10 @@ impl ToolHost for SystemTools {
     fn read_file(&self, path: &str) -> Result<String, String> {
         std::fs::read_to_string(path).map_err(|e| format!("read {path}: {e}"))
     }
+
+    fn executable_sha256(&self, path: &std::path::Path) -> Option<String> {
+        std::fs::read(path).ok().map(|bytes| sha256_hex(&bytes))
+    }
 }
 
 /// Identity of a runtime tool, recorded so a result names exactly what produced it.
@@ -105,7 +113,7 @@ pub struct ToolIdentity {
 
 /// The tools the campaign needs, with the arguments that print their version.
 pub const RUNTIME_TOOLS: [(&str, &[&str]); 6] = [
-    ("vkmark", &["--version"]),
+    ("vkmark", &["--help"]),
     ("mangohud", &["--version"]),
     ("fio", &["--version"]),
     ("stress-ng", &["--version"]),
@@ -130,10 +138,7 @@ pub fn identify(
         .unwrap_or_default()
         .trim()
         .to_owned();
-    let sha256 = host
-        .read_file(&path.to_string_lossy())
-        .map(|text| sha256_hex(text.as_bytes()))
-        .unwrap_or_default();
+    let sha256 = host.executable_sha256(&path).unwrap_or_default();
     Ok(ToolIdentity {
         name: tool.to_owned(),
         version,

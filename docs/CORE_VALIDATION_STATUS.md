@@ -763,3 +763,13 @@ Observed-incompatible kernels are kept as valid observations; strict verificatio
 distinct-kernel count. The executor gained after-persist reboot requests, outcome-independent
 state updates and recovery of tasks cut off mid-run. Everything is exercised against a
 simulated machine; no real reboot or kernel evidence was produced.
+
+## 2026-10-23: validation campaign, phase D (scenarios, corpus and workload drivers)
+
+Adds the predeclared scenario set, capture acceptance, intervention-labelled fixture
+generation, the resumable `corpus` runner, the real-workload overhead runner (registered
+fixed-compile workload with a frozen, fingerprint-bound cycle count), the frame-series
+runner and the two typed runner actions they need (`ExecuteRecording`,
+`ExecuteWorkloadOverhead`). The Nix shell gained `vkmark`, `mangohud`, `fio`, `stress-ng`,
+`iputils` and `gh`. All behavior is exercised against scripted hosts; no real `vkmark`, `fio`,
+IRQ or GPU capture was run, so no corpus, overhead or frame-score evidence was produced.

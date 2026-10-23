@@ -14,7 +14,7 @@ use super::{
         exec::CaptureHost,
         model::{InterventionKind, ScenarioSet},
     },
-    system_host::{HostSettings, SystemCaptureHost},
+    system_host::{BURST_MS, BURST_PERIOD_MS, HostSettings, SystemCaptureHost},
     workloads::{
         SystemTools,
         network_irq::{self, NicSource},
@@ -128,6 +128,49 @@ impl HostFactory for SystemHostFactory {
             nic,
             irq,
             workload_version: WORKLOAD_VERSION.to_owned(),
+            burst_ms: BURST_MS,
+            burst_period_ms: BURST_PERIOD_MS,
         })))
     }
+}
+
+/// The real host for one frame-score degradation level: the light vkmark target plus a
+/// scheduler contender of `level_ms` ms in every `PERIOD_MS`.
+pub fn level_host(
+    context: &RunContext<'_>,
+    level_ms: u32,
+) -> Result<Box<dyn CaptureHost>, BlockReason> {
+    let socket = std::env::var_os(SOCKET_ENV)
+        .map(PathBuf::from)
+        .filter(|p| p.exists())
+        .or_else(|| {
+            PathBuf::from(DEFAULT_SOCKET)
+                .exists()
+                .then(|| PathBuf::from(DEFAULT_SOCKET))
+        })
+        .ok_or_else(|| {
+            block(
+                FailureClass::BlockedPrivilege,
+                "the privileged validation runner is not running (bootstrap it first)",
+            )
+        })?;
+    let text = fs::read_to_string(context.repository.join(super::corpus::SCENARIO_FILE))
+        .map_err(|e| block(FailureClass::BlockedResource, e.to_string()))?;
+    let set = ScenarioSet::parse(&text)
+        .map_err(|e| block(FailureClass::BlockedResource, e.to_string()))?;
+    Ok(Box::new(SystemCaptureHost::new(HostSettings {
+        socket,
+        campaign_id: context.state.campaign_id.clone(),
+        manifest_sha256: context.state.manifest_sha256.clone(),
+        task: "frame-score",
+        task_attempt: 0,
+        capture: 0,
+        scratch: context.dir.0.join("scratch"),
+        vkmark: set.vkmark,
+        nic: None,
+        irq: None,
+        workload_version: WORKLOAD_VERSION.to_owned(),
+        burst_ms: u64::from(level_ms),
+        burst_period_ms: super::frame_score::PERIOD_MS,
+    })))
 }

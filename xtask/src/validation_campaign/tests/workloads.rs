@@ -56,6 +56,11 @@ impl ToolHost for FakeTools {
             .cloned()
             .ok_or_else(|| format!("no file {path}"))
     }
+    fn executable_sha256(&self, path: &std::path::Path) -> Option<String> {
+        Some(crate::evidence_bundle::sha256::sha256_hex(
+            path.to_string_lossy().as_bytes(),
+        ))
+    }
 }
 
 #[test]
@@ -65,6 +70,11 @@ fn tools_are_identified_by_version_and_digest_and_missing_ones_are_all_reported(
         .tool("mangohud", "v0.7.2");
     let identity = identify(&host, "vkmark", &["--version"]).unwrap();
     assert_eq!(identity.version, "vkmark 2025.01");
+    assert_eq!(
+        identity.sha256.len(),
+        64,
+        "the executable digest must be recorded"
+    );
     let problems = preflight_tools(&host, &["vkmark", "fio", "gh", "unknown-tool"]).unwrap_err();
     assert_eq!(problems.len(), 3, "{problems:?}");
     assert!(problems.iter().any(|p| p.contains("fio is not on PATH")));

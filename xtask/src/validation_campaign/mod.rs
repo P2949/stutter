@@ -7,6 +7,7 @@ pub mod cli;
 pub mod corpus;
 pub mod evidence;
 pub mod executor;
+pub mod frame_score;
 pub mod graph;
 pub mod host_factory;
 pub mod kernels;

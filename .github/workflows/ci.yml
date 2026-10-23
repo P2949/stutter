@@ -71,6 +71,9 @@ jobs:
       - name: Reboot simulation and kernel stage
         run: cargo test -p xtask validation_campaign::tests::kernels
 
+      - name: Scenario and corpus generation
+        run: cargo test -p xtask -- validation_campaign::tests::scenarios validation_campaign::tests::capture_exec validation_campaign::tests::corpus validation_campaign::tests::frame_score validation_campaign::tests::overhead_real validation_campaign::tests::workloads
+
       - name: Calibration roles and capability evidence kinds
         run: cargo test -p xtask -- diagnosis_calibration capability_check
 

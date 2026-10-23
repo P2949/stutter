@@ -59,6 +59,8 @@ pub struct HostSettings {
     pub nic: Option<NicSource>,
     pub irq: Option<u32>,
     pub workload_version: String,
+    pub burst_ms: u64,
+    pub burst_period_ms: u64,
 }
 
 pub struct SystemCaptureHost {
@@ -286,8 +288,8 @@ impl CaptureHost for SystemCaptureHost {
                         .ok_or("cannot read the target's CPU")?;
                     let data = self.send(Request::ExecuteSchedulerBurst {
                         cpu,
-                        burst_ms: BURST_MS,
-                        period_ms: BURST_PERIOD_MS,
+                        burst_ms: self.settings.burst_ms,
+                        period_ms: self.settings.burst_period_ms,
                         seconds,
                     })?;
                     self.contender = data["pid"].as_u64().map(|p| p as u32);
@@ -385,8 +387,8 @@ impl CaptureHost for SystemCaptureHost {
                             scheduler_burst_established(
                                 &stat,
                                 BURST_PRIORITY,
-                                BURST_MS,
-                                BURST_PERIOD_MS,
+                                self.settings.burst_ms,
+                                self.settings.burst_period_ms,
                                 elapsed,
                             )
                         }),

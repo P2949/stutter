@@ -12,7 +12,7 @@ use std::{
 use serde_json::{Value, json};
 
 use super::{
-    executor::{FingerprintExtras, RunContext, RunnerOutcome, TaskRunner},
+    executor::{FingerprintExtras, RunContext, RunnerOutcome, StateUpdate, TaskRunner},
     graph::TaskSpec,
     model::{BlockReason, FailureClass},
     repository::{file_sha256, git},
@@ -158,6 +158,8 @@ impl TaskRunner for CorpusRunner {
                 let why = current
                     .exhausted()
                     .unwrap_or_else(|| "no scenario can make progress".to_owned());
+                let (_, summary) = plan(&set, &corpus, context);
+                freeze_summary(context, &corpus, &summary);
                 return blocked(format!("corpus generation is exhausted: {why}"));
             };
             let progress = current.scenarios.iter().find(|s| s.id == next);
@@ -194,10 +196,7 @@ impl TaskRunner for CorpusRunner {
             }
         }
         let (_, summary) = plan(&set, &corpus, context);
-        let _ = fs::write(
-            corpus.join("summary.json"),
-            serde_json::to_vec_pretty(&summary).unwrap_or_default(),
-        );
+        freeze_summary(context, &corpus, &summary);
         let Ok(scenario_sha256) = file_sha256(&scenario_path) else {
             return blocked("the scenario file disappeared".to_owned());
         };
@@ -212,4 +211,16 @@ impl TaskRunner for CorpusRunner {
             updates: Vec::new(),
         }
     }
+}
+
+/// Keeps the per-family have/need where `status --json` reads it, and next to the fixtures.
+fn freeze_summary(context: &RunContext<'_>, corpus: &Path, summary: &Value) {
+    let _ = fs::write(
+        corpus.join("summary.json"),
+        serde_json::to_vec_pretty(summary).unwrap_or_default(),
+    );
+    context.record(StateUpdate::Freeze {
+        key: "corpus.summary".to_owned(),
+        value: summary.to_string(),
+    });
 }

@@ -365,13 +365,18 @@ pub fn default_runners() -> BTreeMap<TaskKind, Box<dyn TaskRunner>> {
         Box::new(super::overhead_real::OverheadRealRunner::system()),
     );
     runners.insert(
+        TaskKind::FrameScore,
+        Box::new(super::frame_score::FrameScoreRunner {
+            make_host: Box::new(super::host_factory::level_host),
+        }),
+    );
+    runners.insert(
         TaskKind::Corpus,
         Box::new(super::corpus::CorpusRunner {
             factory: Box::new(super::host_factory::SystemHostFactory),
         }),
     );
     for (kind, name) in [
-        (TaskKind::FrameScore, "frame score series"),
         (TaskKind::EvidenceIntegration, "evidence integration"),
         (TaskKind::DiagnosisCalibration, "calibration"),
         (TaskKind::ScoreReview, "score review"),

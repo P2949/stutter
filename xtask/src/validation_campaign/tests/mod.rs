@@ -13,6 +13,7 @@ mod bootstrap;
 mod capture_exec;
 mod corpus;
 mod evidence;
+mod frame_score;
 mod graph;
 mod init;
 mod invalidation;
