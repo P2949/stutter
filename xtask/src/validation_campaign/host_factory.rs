@@ -115,7 +115,7 @@ impl HostFactory for SystemHostFactory {
         } else {
             (None, None)
         };
-        let scratch = context.dir.0.join("scratch");
+        let scratch = context.dir.0.join("workdir");
         Ok(Box::new(SystemCaptureHost::new(HostSettings {
             socket,
             campaign_id: context.state.campaign_id.clone(),
@@ -165,7 +165,7 @@ pub fn level_host(
         task: "frame-score",
         task_attempt: 0,
         capture: 0,
-        scratch: context.dir.0.join("scratch"),
+        scratch: context.dir.0.join("workdir"),
         vkmark: set.vkmark,
         nic: None,
         irq: None,
