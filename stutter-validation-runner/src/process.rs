@@ -154,6 +154,24 @@ pub fn plan_scheduler_burst(
 pub trait ActionExecutor: Send + Sync {
     fn live_suite(&self, auth: &Authorization, envelope: &Envelope) -> Result<Value, Denial>;
     fn scheduler_burst(&self, auth: &Authorization, envelope: &Envelope) -> Result<Value, Denial>;
+    /// Recording of a campaign-owned target; unsupported unless an executor provides it.
+    fn recording(&self, _auth: &Authorization, _envelope: &Envelope) -> Result<Value, Denial> {
+        Err((
+            ErrorCode::Unsupported,
+            "recording is not available".to_owned(),
+        ))
+    }
+    /// Overhead suite against a registered workload.
+    fn workload_overhead(
+        &self,
+        _auth: &Authorization,
+        _envelope: &Envelope,
+    ) -> Result<Value, Denial> {
+        Err((
+            ErrorCode::Unsupported,
+            "workload overhead is not available".to_owned(),
+        ))
+    }
 }
 
 /// The real executor. `drop_to_owner` is on for the root service; tests without root run the
@@ -206,6 +224,62 @@ impl SystemExecutor {
     }
 }
 
+impl SystemExecutor {
+    /// Runs a planned command to completion as the campaign user with `capabilities`, logging
+    /// into the attempt directory. Shared by every privileged action that waits for a child.
+    fn run_planned(
+        &self,
+        auth: &Authorization,
+        plan: &PlannedCommand,
+        label: &str,
+        capabilities: crate::credentials::CapabilitySet,
+        timeout: Duration,
+    ) -> Result<Value, Denial> {
+        self.prepare_dir(auth, &plan.attempt_dir)?;
+        let logs = plan.attempt_dir.join("logs");
+        self.prepare_dir(auth, &logs)?;
+        let log_path = logs.join(format!("{label}.log"));
+        let log = fs::File::create(&log_path).map_err(|error| failure(format!("log: {error}")))?;
+        if self.drop_to_owner {
+            std::os::unix::fs::chown(&log_path, Some(auth.owner_uid), Some(auth.owner_gid))
+                .map_err(|error| failure(format!("chown log: {error}")))?;
+        }
+        let mut command = Self::command(plan);
+        command
+            .stdout(
+                log.try_clone()
+                    .map_err(|error| failure(error.to_string()))?,
+            )
+            .stderr(log);
+        restrict_child(&mut command, self.identity(auth), capabilities);
+        let mut child = command
+            .spawn()
+            .map_err(|error| failure(format!("could not start {label}: {error}")))?;
+        let started = Instant::now();
+        let status = loop {
+            if let Some(status) = child
+                .try_wait()
+                .map_err(|error| failure(error.to_string()))?
+            {
+                break status;
+            }
+            if started.elapsed() > timeout {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(failure(format!(
+                    "{label} exceeded its time limit and was killed"
+                )));
+            }
+            std::thread::sleep(Duration::from_millis(200));
+        };
+        Ok(json!({
+            "action": label,
+            "exit_code": status.code(),
+            "raw": plan.raw.strip_prefix(&auth.repository).unwrap_or(&plan.raw).to_string_lossy(),
+        }))
+    }
+}
+
 impl ActionExecutor for SystemExecutor {
     fn live_suite(&self, auth: &Authorization, envelope: &Envelope) -> Result<Value, Denial> {
         let Request::ExecuteLiveSuite { suite, .. } = &envelope.body else {
@@ -217,50 +291,69 @@ impl ActionExecutor for SystemExecutor {
         let plan = plan_live_suite(auth, envelope)?;
         verify_pinned(&xtask_path(auth), &auth.xtask_sha256)?;
         verify_pinned(&stutter_path(auth), &auth.stutter_sha256)?;
-        self.prepare_dir(auth, &plan.attempt_dir)?;
-        let logs = plan.attempt_dir.join("logs");
-        self.prepare_dir(auth, &logs)?;
-        let log_path = logs.join("suite.log");
-        let log = fs::File::create(&log_path).map_err(|error| failure(format!("log: {error}")))?;
-        if self.drop_to_owner {
-            std::os::unix::fs::chown(&log_path, Some(auth.owner_uid), Some(auth.owner_gid))
-                .map_err(|error| failure(format!("chown log: {error}")))?;
-        }
-        let mut command = Self::command(&plan);
-        command
-            .stdout(
-                log.try_clone()
-                    .map_err(|error| failure(error.to_string()))?,
-            )
-            .stderr(log);
-        restrict_child(
-            &mut command,
-            self.identity(auth),
+        self.run_planned(
+            auth,
+            &plan,
+            suite.xtask_name(),
             profiling_capabilities(suite.needs_scheduler_priority()),
-        );
-        let mut child = command
-            .spawn()
-            .map_err(|error| failure(format!("could not start {}: {error}", suite.xtask_name())))?;
-        let started = Instant::now();
-        let status = loop {
-            if let Some(status) = child
-                .try_wait()
-                .map_err(|error| failure(error.to_string()))?
-            {
-                break status;
-            }
-            if started.elapsed() > SUITE_TIMEOUT {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(failure("the suite exceeded its time limit and was killed"));
-            }
-            std::thread::sleep(Duration::from_millis(200));
+            SUITE_TIMEOUT,
+        )
+    }
+
+    fn recording(&self, auth: &Authorization, envelope: &Envelope) -> Result<Value, Denial> {
+        let Request::ExecuteRecording {
+            target_pid,
+            target_starttime_ticks,
+            seconds,
+            capture,
+            ..
+        } = &envelope.body
+        else {
+            return Err((
+                ErrorCode::InvalidArgument,
+                "not a recording request".to_owned(),
+            ));
         };
-        Ok(json!({
-            "suite": suite.xtask_name(),
-            "exit_code": status.code(),
-            "raw": plan.raw.strip_prefix(&auth.repository).unwrap_or(&plan.raw).to_string_lossy(),
-        }))
+        verify_target(
+            Path::new("/proc"),
+            *target_pid,
+            *target_starttime_ticks,
+            auth.owner_uid,
+        )?;
+        verify_pinned(&stutter_path(auth), &auth.stutter_sha256)?;
+        let capture_dir = campaign_dir(auth)
+            .join("attempts")
+            .join(&envelope.task_id)
+            .join(format!("{:04}", recording_attempt(&envelope.body)))
+            .join("captures")
+            .join(format!("{capture:04}"));
+        let mangohud = crate::process::newest_csv(&capture_dir.join("mangohud"));
+        let plan = plan_recording(auth, envelope, mangohud.as_deref())?;
+        self.prepare_dir(auth, &plan.raw)?;
+        self.run_planned(
+            auth,
+            &plan,
+            "record",
+            profiling_capabilities(false),
+            Duration::from_secs(*seconds + 120),
+        )
+    }
+
+    fn workload_overhead(
+        &self,
+        auth: &Authorization,
+        envelope: &Envelope,
+    ) -> Result<Value, Denial> {
+        let plan = plan_workload_overhead(auth, envelope)?;
+        verify_pinned(&xtask_path(auth), &auth.xtask_sha256)?;
+        verify_pinned(&stutter_path(auth), &auth.stutter_sha256)?;
+        self.run_planned(
+            auth,
+            &plan,
+            "overhead-workload",
+            profiling_capabilities(false),
+            SUITE_TIMEOUT,
+        )
     }
 
     fn scheduler_burst(&self, auth: &Authorization, envelope: &Envelope) -> Result<Value, Denial> {
@@ -309,4 +402,203 @@ impl ActionExecutor for SystemExecutor {
 /// Capability sets a profiling suite receives; re-exported for tests and diagnostics.
 pub fn suite_capabilities(needs_scheduler_priority: bool) -> CapabilitySet {
     profiling_capabilities(needs_scheduler_priority)
+}
+
+fn recording_attempt(request: &Request) -> u32 {
+    match request {
+        Request::ExecuteRecording { attempt, .. } => *attempt,
+        _ => 0,
+    }
+}
+
+/// The newest `*.csv` in `dir` (the MangoHud log of the run that just started).
+pub fn newest_csv(dir: &Path) -> Option<PathBuf> {
+    fs::read_dir(dir)
+        .ok()?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "csv"))
+        .filter_map(|path| Some((path.metadata().ok()?.modified().ok()?, path)))
+        .max_by_key(|(modified, _)| *modified)
+        .map(|(_, path)| path)
+}
+
+/// A recording may only observe a process owned by the campaign user whose start time matches
+/// exactly: the runner never attaches to an arbitrary or replaced process.
+pub fn verify_target(
+    proc_root: &Path,
+    pid: u32,
+    starttime_ticks: u64,
+    owner_uid: u32,
+) -> Result<(), Denial> {
+    let refuse = |why: String| Err((ErrorCode::InvalidArgument, why));
+    let dir = proc_root.join(pid.to_string());
+    let stat = fs::read_to_string(dir.join("stat")).map_err(|_| {
+        (
+            ErrorCode::InvalidArgument,
+            format!("process {pid} does not exist"),
+        )
+    })?;
+    // Field 22 (after the parenthesized comm, which may itself contain spaces and parentheses).
+    let actual = stat
+        .rsplit_once(')')
+        .and_then(|(_, rest)| rest.split_whitespace().nth(19))
+        .and_then(|value| value.parse::<u64>().ok());
+    if actual != Some(starttime_ticks) {
+        return refuse(format!(
+            "process {pid} has a different start time: it was replaced"
+        ));
+    }
+    let status = fs::read_to_string(dir.join("status")).unwrap_or_default();
+    let uids = status
+        .lines()
+        .find_map(|line| line.strip_prefix("Uid:"))
+        .map(|rest| {
+            rest.split_whitespace()
+                .map(|v| v.parse::<u32>().ok())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    // Real and effective uid must both be the campaign user's.
+    if uids.len() < 2 || uids[0] != Some(owner_uid) || uids[1] != Some(owner_uid) {
+        return refuse(format!("process {pid} is not owned by the campaign user"));
+    }
+    Ok(())
+}
+
+pub fn plan_recording(
+    auth: &Authorization,
+    envelope: &Envelope,
+    mangohud_log: Option<&Path>,
+) -> Result<PlannedCommand, Denial> {
+    let Request::ExecuteRecording {
+        attempt,
+        capture,
+        target_pid,
+        seconds,
+        probes,
+        ..
+    } = &envelope.body
+    else {
+        return Err((
+            ErrorCode::InvalidArgument,
+            "not a recording request".to_owned(),
+        ));
+    };
+    let attempt_dir = campaign_dir(auth)
+        .join("attempts")
+        .join(&envelope.task_id)
+        .join(format!("{attempt:04}"));
+    let raw = attempt_dir
+        .join("captures")
+        .join(format!("{capture:04}"))
+        .join("raw");
+    let mut args = vec![
+        "record".to_owned(),
+        "--tree-pid".to_owned(),
+        target_pid.to_string(),
+        "--duration".to_owned(),
+        seconds.to_string(),
+        "--summary-ms".to_owned(),
+        "250".to_owned(),
+        "--out-dir".to_owned(),
+        raw.to_string_lossy().into_owned(),
+    ];
+    let probe_flags: &[&str] = match probes {
+        crate::model::RecordProbes::Core => &[
+            "--no-hwmon",
+            "--no-cpu-freq",
+            "--no-faults",
+            "--no-block-io",
+            "--no-stat-wait",
+        ],
+        crate::model::RecordProbes::Corpus { .. } => &[
+            "--hwmon",
+            "--block-io",
+            "--no-cpu-freq",
+            "--no-faults",
+            "--no-stat-wait",
+        ],
+    };
+    args.extend(probe_flags.iter().map(|flag| (*flag).to_owned()));
+    if let crate::model::RecordProbes::Corpus { irq: Some(irq) } = probes {
+        args.extend([
+            "--irq-latency".to_owned(),
+            "--irq".to_owned(),
+            irq.to_string(),
+        ]);
+    }
+    if let Some(log) = mangohud_log {
+        args.extend([
+            "--mangohud-log".to_owned(),
+            log.to_string_lossy().into_owned(),
+        ]);
+    }
+    Ok(PlannedCommand {
+        program: stutter_path(auth),
+        args,
+        cwd: PathBuf::from(&auth.repository),
+        attempt_dir,
+        raw,
+        path_env: auth.path_env.clone(),
+    })
+}
+
+pub fn plan_workload_overhead(
+    auth: &Authorization,
+    envelope: &Envelope,
+) -> Result<PlannedCommand, Denial> {
+    let Request::ExecuteWorkloadOverhead {
+        workload,
+        attempt,
+        seconds,
+        rounds,
+        work_units,
+    } = &envelope.body
+    else {
+        return Err((
+            ErrorCode::InvalidArgument,
+            "not a workload-overhead request".to_owned(),
+        ));
+    };
+    let attempt_dir = campaign_dir(auth)
+        .join("attempts")
+        .join(&envelope.task_id)
+        .join(format!("{attempt:04}"));
+    let raw = attempt_dir.join("raw");
+    let target_dir = campaign_dir(auth).join("workloads/fixed-compile-target");
+    let xtask = xtask_path(auth);
+    let args = vec![
+        "live-acceptance".to_owned(),
+        "overhead".to_owned(),
+        "--stutter-bin".to_owned(),
+        stutter_path(auth).to_string_lossy().into_owned(),
+        "--out".to_owned(),
+        raw.to_string_lossy().into_owned(),
+        "--seconds".to_owned(),
+        seconds.to_string(),
+        "--rounds".to_owned(),
+        rounds.to_string(),
+        "--workload-label".to_owned(),
+        workload.label().to_owned(),
+        "--work-units".to_owned(),
+        work_units.to_string(),
+        "--".to_owned(),
+        xtask.to_string_lossy().into_owned(),
+        "validation-campaign".to_owned(),
+        "workload".to_owned(),
+        "fixed-compile".to_owned(),
+        "--cycles".to_owned(),
+        work_units.to_string(),
+        "--target-dir".to_owned(),
+        target_dir.to_string_lossy().into_owned(),
+    ];
+    Ok(PlannedCommand {
+        program: xtask,
+        args,
+        cwd: PathBuf::from(&auth.repository),
+        attempt_dir,
+        raw,
+        path_env: auth.path_env.clone(),
+    })
 }

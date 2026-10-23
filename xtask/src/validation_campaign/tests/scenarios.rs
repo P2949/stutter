@@ -421,3 +421,75 @@ fn the_corpus_plan_counts_eligible_captures_once_and_schedules_the_deficit() {
     assert_eq!(short_families(&fixtures, min).len(), 4);
     assert_eq!(ControlType::NegativeControl.as_str(), "negative_control");
 }
+
+#[test]
+fn intervention_telemetry_is_judged_from_independent_proc_and_sysfs_facts() {
+    use crate::validation_campaign::scenarios::probe::*;
+    // Field 14/15 utime/stime = 300/100 ticks; rt_priority (40) = 50; policy (41) = 1.
+    let filler_before = (4..14).map(|_| "0").collect::<Vec<_>>().join(" ");
+    let filler_mid = (16..40).map(|_| "0").collect::<Vec<_>>().join(" ");
+    let stat = |policy: u32, rt: u32, utime: u64| {
+        format!("77 (live-burst) R {filler_before} {utime} 100 {filler_mid} {rt} {policy} 0")
+    };
+    assert_eq!(parse_sched(&stat(1, 50, 300)), Some((1, 50, 400)));
+    // 4 ms of every 20 ms over 30 s is 600 ticks expected; half of that is the floor.
+    scheduler_burst_established(&stat(1, 50, 300), 50, 4, 20, 30).unwrap();
+    assert!(
+        scheduler_burst_established(&stat(0, 50, 900), 50, 4, 20, 30)
+            .unwrap_err()
+            .contains("SCHED_FIFO")
+    );
+    assert!(scheduler_burst_established(&stat(1, 10, 900), 50, 4, 20, 30).is_err());
+    assert!(
+        scheduler_burst_established(&stat(1, 50, 50), 50, 4, 20, 30)
+            .unwrap_err()
+            .contains("below half")
+    );
+    assert!(scheduler_burst_established("garbage", 50, 4, 20, 30).is_err());
+    gpu_busy_established(&[95, 99, 97, 96], 90, 4).unwrap();
+    assert!(
+        gpu_busy_established(&[95, 99], 90, 4)
+            .unwrap_err()
+            .contains("fewer")
+    );
+    assert!(
+        gpu_busy_established(&[40, 50, 60, 70], 90, 4)
+            .unwrap_err()
+            .contains("below")
+    );
+}
+
+#[test]
+fn calibration_walks_a_bounded_ladder_and_stops_on_the_first_working_step() {
+    use crate::validation_campaign::scenarios::probe::first_passing;
+    let mut seen = Vec::new();
+    let found = first_passing(&[1, 2, 3, 4], &mut |step| {
+        seen.push(*step);
+        Ok(*step >= 3)
+    });
+    assert_eq!((found, seen.as_slice()), (Ok(Some(2)), &[1, 2, 3][..]));
+    assert_eq!(first_passing(&[1, 2], &mut |_| Ok(false)), Ok(None));
+    assert!(first_passing(&[1, 2], &mut |_| Err("cannot probe".into())).is_err());
+}
+
+#[test]
+fn host_facts_are_bucketed_and_carry_no_machine_identity() {
+    use crate::validation_campaign::scenarios::probe::*;
+    assert_eq!(
+        (
+            gpu_vendor("0x1002\n"),
+            gpu_vendor("0x10DE"),
+            gpu_vendor("0x8086"),
+            gpu_vendor("0x1")
+        ),
+        ("AMD", "NVIDIA", "Intel", "Unknown")
+    );
+    assert_eq!(
+        os_release_summary("NAME=\"Test OS\"\nID=testos\nVERSION_ID=\"12\"\nHOME_URL=x\n"),
+        "ID=testos VERSION_ID=12"
+    );
+    let cpuinfo = "processor : 0\nvendor_id : GenuineTest\nmodel name : Secret CPU 9000\ncpu cores : 4\nprocessor : 1\nvendor_id : GenuineTest\n";
+    let (vendor, bucket) = cpu_bucket(cpuinfo);
+    assert_eq!((vendor.as_str(), bucket.as_str()), ("GenuineTest", "4c2t"));
+    assert!(!format!("{vendor}{bucket}").contains("Secret"));
+}

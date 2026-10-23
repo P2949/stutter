@@ -16,6 +16,7 @@ mod credentials;
 mod install;
 mod packaging;
 mod process;
+mod recording;
 mod resume;
 mod server;
 

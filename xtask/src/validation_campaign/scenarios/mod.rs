@@ -4,6 +4,7 @@ pub mod capture;
 pub mod exec;
 pub mod fixture;
 pub mod model;
+pub mod probe;
 
 use std::collections::{BTreeMap, BTreeSet};
 

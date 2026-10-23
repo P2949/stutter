@@ -96,3 +96,29 @@ fn the_authorization_pins_the_campaign_and_validates() {
             .is_err()
     );
 }
+
+#[test]
+fn only_the_driver_tasks_may_record_burst_or_run_the_registered_workload() {
+    let grants = grants();
+    let tasks = |action| {
+        let mut tasks = grants
+            .iter()
+            .filter(|g| g.action == action)
+            .map(|g| g.task_id.as_str())
+            .collect::<Vec<_>>();
+        tasks.sort_unstable();
+        tasks
+    };
+    assert_eq!(
+        tasks(RunnerAction::ExecuteRecording),
+        ["corpus", "frame-score"]
+    );
+    assert_eq!(
+        tasks(RunnerAction::ExecuteSchedulerBurst),
+        ["corpus", "frame-score"]
+    );
+    assert_eq!(
+        tasks(RunnerAction::ExecuteWorkloadOverhead),
+        ["overhead-real"]
+    );
+}
