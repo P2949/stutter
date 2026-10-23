@@ -90,15 +90,21 @@ pub fn counter_rose(
     }
 }
 
+/// Source port every campaign flow uses (`0` would pick a random one): receive-side scaling
+/// hashes the flow onto one queue, so the probe and every capture must share the 4-tuple or the
+/// frozen IRQ would only rise by chance.
+pub const FLOW_SOURCE_PORT: u16 = 47_831;
+
 /// Bounded UDP sender: `pps` packets per second of `payload` bytes to `target` for `seconds`.
 /// Returns the packets actually sent. Datagrams go to the discard port; nothing is exfiltrated.
 pub fn send_traffic(
     target: SocketAddr,
+    source_port: u16,
     pps: u32,
     payload: usize,
     seconds: u64,
 ) -> std::io::Result<u64> {
-    let socket = UdpSocket::bind(("0.0.0.0", 0))?;
+    let socket = UdpSocket::bind(("0.0.0.0", source_port))?;
     socket.connect(target)?;
     let buffer = vec![0_u8; payload.clamp(1, 1_400)];
     let interval = Duration::from_secs_f64(1.0 / f64::from(pps.max(1)));

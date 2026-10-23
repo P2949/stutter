@@ -11,9 +11,10 @@ schema_version = 1
 [vkmark]
 light_scene = "cube"
 light_size = "640x480"
-heavy_scene = "shading"
-heavy_size = "1920x1080"
+heavy_scene = "texture"
+heavy_size = "3840x2160"
 present_mode = "fifo"
+heavy_present_mode = "immediate"
 
 [[scenario]]
 id = "clean-vkmark"

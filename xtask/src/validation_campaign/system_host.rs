@@ -317,7 +317,13 @@ impl CaptureHost for SystemCaptureHost {
                     ));
                     let target_addr = std::net::SocketAddr::from((nic.gateway, 9));
                     self.traffic = Some(std::thread::spawn(move || {
-                        let _ = network_irq::send_traffic(target_addr, TRAFFIC_PPS, 512, seconds);
+                        let _ = network_irq::send_traffic(
+                            target_addr,
+                            network_irq::FLOW_SOURCE_PORT,
+                            TRAFFIC_PPS,
+                            512,
+                            seconds,
+                        );
                     }));
                 }
             }

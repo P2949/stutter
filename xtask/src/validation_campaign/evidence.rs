@@ -94,7 +94,8 @@ impl Accept {
                 && value["compatibility"] == "ObservedIncompatible")
             || (self == Self::PassOrNonMonotonicScore
                 && value["status"] == "INCONCLUSIVE"
-                && value["stage"] == "evaluation")
+                // Raw results carry the stage; index entries derived from them do not.
+                && (value["stage"] == "evaluation" || value["stage"].is_null()))
     }
 }
 

@@ -33,13 +33,19 @@ impl OverheadRealRunner {
         Self {
             time_one_cycle: Box::new(|context| {
                 let target = fixed_compile::target_dir(&context.dir.0);
-                fixed_compile::run_cycles(
-                    &SystemTools,
-                    context.repository,
-                    &target,
-                    1,
-                    &Instant::now,
-                )
+                let cycle = || {
+                    fixed_compile::run_cycles(
+                        &SystemTools,
+                        context.repository,
+                        &target,
+                        1,
+                        &Instant::now,
+                    )
+                };
+                // The first cycle also compiles every dependency; only a warm cycle is what
+                // the counted runs repeat.
+                cycle()?;
+                cycle()
             }),
             backend: backend_from_env,
         }

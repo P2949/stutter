@@ -27,7 +27,8 @@ impl VkmarkConfig {
         Self {
             scene: params.heavy_scene.clone(),
             size: params.heavy_size.clone(),
-            present_mode: params.present_mode.clone(),
+            // Unthrottled presentation: a vsynced scene cannot saturate the GPU.
+            present_mode: params.heavy_present_mode.clone(),
         }
     }
 

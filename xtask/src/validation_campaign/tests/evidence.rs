@@ -382,3 +382,16 @@ fn strict_verification_requires_the_distinct_kernel_count_for_the_kernel_stage()
         "{problems:?}"
     );
 }
+
+#[test]
+fn a_non_monotonic_score_series_is_accepted_as_a_raw_result_and_as_its_index_entry() {
+    use crate::validation_campaign::evidence::Accept;
+    let raw = serde_json::json!({"status": "INCONCLUSIVE", "stage": "evaluation"});
+    let entry = serde_json::json!({"status": "INCONCLUSIVE", "suite": "live_score_degradation"});
+    assert!(Accept::PassOrNonMonotonicScore.allows(&raw));
+    assert!(Accept::PassOrNonMonotonicScore.allows(&entry));
+    // A series that failed earlier is not an observation, and no other task gets this latitude.
+    let early = serde_json::json!({"status": "INCONCLUSIVE", "stage": "levels"});
+    assert!(!Accept::PassOrNonMonotonicScore.allows(&early));
+    assert!(!Accept::PassOnly.allows(&raw));
+}
