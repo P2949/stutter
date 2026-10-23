@@ -364,7 +364,22 @@ impl CaptureHost for SystemCaptureHost {
             .unwrap_or_default();
         let data = response?;
         if data["exit_code"].as_i64() != Some(0) {
-            return Err(format!("stutter record exited {}", data["exit_code"]));
+            // The runner keeps the recorder's output next to the attempt; its tail says why.
+            let log = self
+                .capture_dir
+                .parent()
+                .and_then(Path::parent)
+                .map(|attempt| attempt.join("logs/record.log"))
+                .and_then(|path| fs::read_to_string(path).ok())
+                .map(|text| {
+                    let tail: Vec<&str> = text.lines().rev().take(3).collect();
+                    tail.into_iter().rev().collect::<Vec<_>>().join(" | ")
+                })
+                .unwrap_or_default();
+            return Err(format!(
+                "stutter record exited {}: {log}",
+                data["exit_code"]
+            ));
         }
         summarize_recording(raw)
     }
