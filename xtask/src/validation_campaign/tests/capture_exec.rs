@@ -14,21 +14,21 @@ use crate::{
 };
 
 #[derive(Default)]
-struct Script {
-    fail_at: Option<&'static str>,
-    unverified: bool,
-    unexpected_burst: bool,
-    frames: u64,
-    sanitize_writes_frames: bool,
+pub(super) struct Script {
+    pub(super) fail_at: Option<&'static str>,
+    pub(super) unverified: bool,
+    pub(super) unexpected_burst: bool,
+    pub(super) frames: u64,
+    pub(super) sanitize_writes_frames: bool,
 }
 
-struct FakeHost {
+pub(super) struct FakeHost {
     script: Script,
     log: Vec<String>,
 }
 
 impl FakeHost {
-    fn new(script: Script) -> Self {
+    pub(super) fn new(script: Script) -> Self {
         Self {
             script,
             log: Vec::new(),

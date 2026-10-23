@@ -164,7 +164,13 @@ pub fn load_corpus(corpus: &Path) -> anyhow::Result<(Vec<Fixture>, String)> {
     let mut dirs = fs::read_dir(corpus)?
         .filter_map(Result::ok)
         .map(|entry| entry.path())
-        .filter(|path| path.join("fixture.toml").is_file())
+        // Dot-prefixed directories are staging areas of captures not yet accepted.
+        .filter(|path| {
+            !path
+                .file_name()
+                .is_some_and(|n| n.to_string_lossy().starts_with('.'))
+                && path.join("fixture.toml").is_file()
+        })
         .collect::<Vec<_>>();
     dirs.sort();
     let mut fixtures = Vec::new();

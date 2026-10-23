@@ -4,6 +4,7 @@
 pub mod backend;
 pub mod bootstrap;
 pub mod cli;
+pub mod corpus;
 pub mod evidence;
 pub mod executor;
 pub mod graph;

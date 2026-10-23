@@ -11,6 +11,7 @@ use super::{
 mod backend;
 mod bootstrap;
 mod capture_exec;
+mod corpus;
 mod evidence;
 mod graph;
 mod init;
