@@ -43,6 +43,7 @@ const MIN_IRQ_DELTA: u64 = 200;
 const MIN_GPU_BUSY_PCT: u32 = 90;
 const MIN_BLOCKER_P99_NS: u64 = 5_000_000;
 const TRAFFIC_PPS: u32 = 4_000;
+const STEER_ATTEMPTS: u32 = 40;
 /// Interventions outlast the recording by this much so they can still be inspected after it.
 const TAIL_SECONDS: u64 = 15;
 
@@ -312,18 +313,20 @@ impl CaptureHost for SystemCaptureHost {
                 }
                 InterventionKind::NetworkTraffic => {
                     let nic = self.settings.nic.clone().ok_or("no NIC source")?;
-                    self.interrupts_before = Some(network_irq::parse_interrupts(
-                        &fs::read_to_string("/proc/interrupts").map_err(|e| e.to_string())?,
-                    ));
+                    let irq = self.settings.irq.ok_or("no IRQ was frozen")?;
                     let target_addr = std::net::SocketAddr::from((nic.gateway, 9));
+                    // The flow's queue is random per socket: keep only one that drives the
+                    // frozen IRQ, then measure the capture against a baseline taken after it.
+                    let socket = network_irq::steer_flow(
+                        target_addr,
+                        irq,
+                        STEER_ATTEMPTS,
+                        super::host_factory::flow_plan(),
+                        &super::host_factory::read_interrupts,
+                    )?;
+                    self.interrupts_before = Some(super::host_factory::read_interrupts()?);
                     self.traffic = Some(std::thread::spawn(move || {
-                        let _ = network_irq::send_traffic(
-                            target_addr,
-                            network_irq::FLOW_SOURCE_PORT,
-                            TRAFFIC_PPS,
-                            512,
-                            seconds,
-                        );
+                        network_irq::pump(&socket, TRAFFIC_PPS, 512, Duration::from_secs(seconds));
                     }));
                 }
             }

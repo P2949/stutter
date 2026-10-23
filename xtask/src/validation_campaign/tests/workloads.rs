@@ -369,3 +369,61 @@ fn running_cycles_executes_clean_then_build_n_times_in_the_given_directory() {
     assert!(calls[0].starts_with("cargo clean") && calls[1].starts_with("cargo build"));
     assert_eq!(calls[0], calls[2]);
 }
+
+fn quick_plan() -> network_irq::FlowPlan {
+    network_irq::FlowPlan {
+        pps: 2_000,
+        payload: 64,
+        trial: std::time::Duration::from_millis(20),
+        min_delta: 100,
+    }
+}
+
+/// Counters that advance a queue per `read` pair: the reads alternate "before" and "after" of a
+/// trial, and `winner(trial)` names the queue that rose in that trial.
+fn scripted_reads(
+    winner: impl Fn(usize) -> u32,
+) -> impl Fn() -> Result<std::collections::BTreeMap<u32, u64>, String> {
+    let calls = std::cell::Cell::new(0_usize);
+    let totals = std::cell::RefCell::new(std::collections::BTreeMap::from([
+        (1_u32, 0_u64),
+        (2, 0),
+        (3, 0),
+    ]));
+    move || {
+        let n = calls.get();
+        calls.set(n + 1);
+        // Odd calls follow a pump: the trial's winner gains 500 interrupts.
+        if n % 2 == 1 {
+            *totals.borrow_mut().get_mut(&winner(n / 2)).unwrap() += 500;
+        }
+        Ok(totals.borrow().clone())
+    }
+}
+
+#[test]
+fn steering_keeps_only_a_flow_that_drove_the_wanted_irq() {
+    let target = std::net::SocketAddr::from(([127, 0, 0, 1], 9));
+    // Trials 0 and 1 land on other queues; trial 2 finally drives IRQ 3.
+    let read = scripted_reads(|trial| if trial < 2 { 1 } else { 3 });
+    assert!(network_irq::steer_flow(target, 3, 10, quick_plan(), &read).is_ok());
+    let never = scripted_reads(|_| 1);
+    let error = network_irq::steer_flow(target, 3, 3, quick_plan(), &never).unwrap_err();
+    assert!(error.contains("no flow out of 3 drove IRQ 3"), "{error}");
+}
+
+#[test]
+fn the_probed_irq_is_the_queue_fresh_flows_most_often_land_on() {
+    let target = std::net::SocketAddr::from(([127, 0, 0, 1], 9));
+    let read = scripted_reads(|trial| [2, 3, 2, 2, 1][trial % 5]);
+    assert_eq!(
+        network_irq::dominant_irq(target, &[1, 2, 3], 5, quick_plan(), &read),
+        Some(2)
+    );
+    // Nothing responds: no controllable source.
+    let quiet = || Ok(std::collections::BTreeMap::from([(1_u32, 0_u64), (2, 0)]));
+    assert_eq!(
+        network_irq::dominant_irq(target, &[1, 2], 3, quick_plan(), &quiet),
+        None
+    );
+}
