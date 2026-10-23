@@ -112,6 +112,7 @@ pub struct VkmarkParams {
     pub heavy_scene: String,
     pub heavy_size: String,
     pub present_mode: String,
+    pub heavy_present_mode: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -159,7 +160,8 @@ impl ScenarioSet {
                 && valid_dimension(&self.vkmark.heavy_size)
                 && safe_token(&self.vkmark.light_scene)
                 && safe_token(&self.vkmark.heavy_scene)
-                && safe_token(&self.vkmark.present_mode),
+                && safe_token(&self.vkmark.present_mode)
+                && safe_token(&self.vkmark.heavy_present_mode),
             "vkmark parameters must be a scene token, a WxH size and a present mode"
         );
         let mut ids = BTreeSet::new();
