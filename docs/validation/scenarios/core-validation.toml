@@ -75,6 +75,7 @@ interventions = ["gpu_stressor"]
 expected_primary_cause = "GpuBoundCandidate"
 seconds = 30
 count = 10
+accepted_wakeup_coalescing = 64
 
 [[scenario]]
 id = "mixed-scheduler-io"
@@ -95,3 +96,4 @@ interventions = ["network_traffic", "gpu_stressor"]
 expected_primary_cause = "GpuBoundCandidate"
 seconds = 30
 count = 3
+accepted_wakeup_coalescing = 64

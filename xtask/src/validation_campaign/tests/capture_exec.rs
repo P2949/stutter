@@ -70,6 +70,7 @@ impl CaptureHost for FakeHost {
         Ok(RecordSummary {
             valid: true,
             drops: 0,
+            replaced_wakeups: 0,
             write_errors: 0,
             frame_samples: self.script.frames,
         })

@@ -25,7 +25,9 @@ pub struct TargetIdentity {
 #[derive(Clone, Debug, Default)]
 pub struct RecordSummary {
     pub valid: bool,
+    /// Dropped events other than coalesced wakeups.
     pub drops: u64,
+    pub replaced_wakeups: u64,
     pub write_errors: u64,
     pub frame_samples: u64,
 }
@@ -146,6 +148,7 @@ fn finish(
         target_identity_valid: identity_valid,
         recording_valid: summary.valid,
         drops: summary.drops,
+        replaced_wakeups: summary.replaced_wakeups,
         write_errors: summary.write_errors,
         interventions: reports,
         fingerprint_matches: (request.fingerprint_matches)(),
@@ -171,7 +174,7 @@ fn finish(
                 source_commit: request.source_commit,
                 host: &facts,
                 probe_set: &probes,
-                drop_counters: summary.drops,
+                drop_counters: summary.drops + summary.replaced_wakeups,
                 data_quality: &quality,
                 artifact_counts: &counts,
             };

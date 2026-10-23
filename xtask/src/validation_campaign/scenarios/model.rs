@@ -102,6 +102,11 @@ pub struct ScenarioSpec {
     pub seconds: u64,
     /// Independent captures required.
     pub count: usize,
+    /// Coalesced wakeup records (`wakeup_data_replaced_entries`) this scenario accepts per
+    /// capture. Every other drop counter must stay zero. Declared up front because saturating
+    /// a GPU makes driver threads wake in bursts; the count is recorded in the fixture.
+    #[serde(default)]
+    pub accepted_wakeup_coalescing: u64,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -177,6 +182,11 @@ impl ScenarioSet {
                 spec.id
             );
             ensure!(!spec.covers.is_empty(), "{}: covers no family", spec.id);
+            ensure!(
+                spec.accepted_wakeup_coalescing <= 256,
+                "{}: accepted_wakeup_coalescing is capped at 256",
+                spec.id
+            );
             ensure!(
                 (20..=300).contains(&spec.seconds) && spec.count > 0,
                 "{}: seconds must be within 20..=300 and count positive",

@@ -47,6 +47,7 @@ pub fn level_spec(level_ms: u32, seconds: u64) -> ScenarioSpec {
         },
         seconds,
         count: 1,
+        accepted_wakeup_coalescing: 0,
     }
 }
 
