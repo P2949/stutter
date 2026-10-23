@@ -427,3 +427,19 @@ fn the_probed_irq_is_the_queue_fresh_flows_most_often_land_on() {
         None
     );
 }
+
+#[test]
+fn the_gpu_stressor_is_bare_vkmark_while_the_recorded_target_goes_through_mangohud() {
+    let params = scenarios_set().vkmark;
+    let heavy = vkmark::VkmarkConfig::heavy(&params);
+    let bare = vkmark::bare_command(&heavy, 40);
+    assert_eq!(bare.program, "vkmark");
+    assert!(bare.env.is_empty());
+    assert_eq!(bare.args[..2], ["-b", "texture:duration=40.0"]);
+    assert_eq!(bare.args[2..], ["-s", "3840x2160", "-p", "immediate"]);
+    let logged = vkmark::command(&heavy, 40, std::path::Path::new("/m"));
+    assert_eq!(
+        (logged.program.as_str(), logged.args[0].as_str()),
+        ("mangohud", "vkmark")
+    );
+}

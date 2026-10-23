@@ -63,6 +63,21 @@ pub fn command(config: &VkmarkConfig, seconds: u64, mangohud_dir: &Path) -> Comm
     .with_env("MANGOHUD_CONFIG", &mangohud_config(mangohud_dir, seconds))
 }
 
+/// `vkmark` alone, for a load generator whose frames nobody records.
+pub fn bare_command(config: &VkmarkConfig, seconds: u64) -> CommandSpec {
+    CommandSpec::new(
+        "vkmark",
+        &[
+            "-b",
+            &format!("{}:duration={seconds}.0", config.scene),
+            "-s",
+            &config.size,
+            "-p",
+            &config.present_mode,
+        ],
+    )
+}
+
 /// Scene names from `vkmark --list-scenes`, whose scenes are the `[Scene] <name>` lines (the
 /// `[Option]` and `Description` lines beneath them are not scenes).
 pub fn parse_scene_list(text: &str) -> Vec<String> {
