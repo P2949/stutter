@@ -136,6 +136,16 @@ pub fn run(
     out: Option<&Path>,
     family_name: &str,
 ) -> anyhow::Result<()> {
+    let report = report(root, corpus, family_name)?;
+    println!("{}", serde_json::to_string_pretty(&report)?);
+    if let Some(out) = out {
+        fs::write(root.join(out), serde_json::to_vec_pretty(&report)?)?;
+    }
+    Ok(())
+}
+
+/// The calibration report of one family over the corpus at `root/corpus`.
+pub fn report(root: &Path, corpus: &Path, family_name: &str) -> anyhow::Result<serde_json::Value> {
     let spec = family_spec(family_name)?;
     let (fixtures, frozen_id) = load_corpus(&root.join(corpus))?;
     let diagnose = |fixture: &Fixture, value: f64| {
@@ -180,14 +190,10 @@ pub fn run(
             "observation and causal confidence are reported separately; causal confidence is capped by the explicit-attribution-chain policy and visible-stutter linkage, and no causal threshold is tuned here",
             "overlap is not proven causality: IRQ/I-O overlap fixtures do not calibrate causal claims",
             "numerical optimum is never chosen mechanically; false high-confidence claims weigh more than inconclusive ones"]});
-    println!("{}", serde_json::to_string_pretty(&report)?);
-    if let Some(out) = out {
-        fs::write(root.join(out), serde_json::to_vec_pretty(&report)?)?;
-    }
     if !FAMILIES.iter().any(|f| f.name == family_name) {
         bail!("unreachable family");
     }
-    Ok(())
+    Ok(report)
 }
 
 #[cfg(test)]

@@ -3,6 +3,7 @@
 //! invalidation; the LLM follows `status --json` and runs `continue`.
 pub mod backend;
 pub mod bootstrap;
+pub mod calibration_task;
 pub mod cli;
 pub mod corpus;
 pub mod evidence;
@@ -10,13 +11,17 @@ pub mod executor;
 pub mod frame_score;
 pub mod graph;
 pub mod host_factory;
+pub mod integration;
 pub mod kernels;
 pub mod manifest;
 pub mod model;
 pub mod overhead_real;
+pub mod pr_task;
+pub mod repo_pr;
 pub mod repository;
 pub mod runners;
 pub mod scenarios;
+pub mod shell;
 pub mod state;
 pub mod status;
 pub mod system_host;

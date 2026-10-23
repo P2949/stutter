@@ -144,7 +144,12 @@ impl LiveSuiteRunner {
 
 impl TaskRunner for LiveSuiteRunner {
     fn run(&self, context: &RunContext<'_>, spec: &TaskSpec, attempt: u32) -> RunnerOutcome {
-        match self.run_and_publish(context, spec, attempt, Accept::PassOnly) {
+        let accept = if self.suite == "score-degradation" {
+            Accept::PassOrNonMonotonicScore
+        } else {
+            Accept::PassOnly
+        };
+        match self.run_and_publish(context, spec, attempt, accept) {
             Ok(published) => RunnerOutcome::Passed {
                 artifacts: Some(context.dir.relative(&published.bundle)),
                 receipt: Some(context.dir.relative(&published.receipt)),
@@ -265,49 +270,71 @@ impl OfflineGateRunner {
     }
 }
 
+/// A gate that did not pass, with the failure class its exit implies.
+pub struct GateFailure {
+    pub stage: String,
+    pub class: FailureClass,
+    pub summary: String,
+}
+
+/// Runs the gates in order in `repository`, logging each under `attempt_dir/logs`.
+pub fn run_gates(
+    gates: &[(String, Vec<String>)],
+    repository: &std::path::Path,
+    attempt_dir: &std::path::Path,
+) -> Result<(), GateFailure> {
+    for (name, argv) in gates {
+        let log = attempt_dir.join("logs").join(format!("{name}.log"));
+        let code = fs::create_dir_all(attempt_dir.join("logs"))
+            .and_then(|()| fs::File::create(&log))
+            .and_then(|file| {
+                Command::new(&argv[0])
+                    .args(&argv[1..])
+                    .current_dir(repository)
+                    .stdout(file.try_clone()?)
+                    .stderr(file)
+                    .status()
+            })
+            .map(|status| status.code().unwrap_or(-1));
+        match code {
+            Ok(0) => {}
+            Ok(code) => {
+                return Err(GateFailure {
+                    stage: name.clone(),
+                    class: FailureClass::SoftwareDefect,
+                    summary: format!("offline gate {name} exited {code}"),
+                });
+            }
+            Err(error) => {
+                return Err(GateFailure {
+                    stage: name.clone(),
+                    class: FailureClass::Retryable,
+                    summary: format!("could not run offline gate {name}: {error}"),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
 impl TaskRunner for OfflineGateRunner {
     fn run(&self, context: &RunContext<'_>, spec: &TaskSpec, attempt: u32) -> RunnerOutcome {
         let attempt_dir = context.dir.attempt_dir(spec.id, attempt);
         let artifacts = Some(context.dir.relative(&attempt_dir));
-        for (name, argv) in &self.gates {
-            let log = attempt_dir.join("logs").join(format!("{name}.log"));
-            let code = fs::create_dir_all(attempt_dir.join("logs"))
-                .and_then(|()| fs::File::create(&log))
-                .and_then(|file| {
-                    Command::new(&argv[0])
-                        .args(&argv[1..])
-                        .current_dir(context.repository)
-                        .stdout(file.try_clone()?)
-                        .stderr(file)
-                        .status()
-                })
-                .map(|status| status.code().unwrap_or(-1));
-            match code {
-                Ok(0) => {}
-                Ok(code) => {
-                    return RunnerOutcome::Failed {
-                        class: FailureClass::SoftwareDefect,
-                        stage: name.clone(),
-                        summary: format!("offline gate {name} exited {code}"),
-                        artifacts,
-                    };
-                }
-                Err(error) => {
-                    return RunnerOutcome::Failed {
-                        class: FailureClass::Retryable,
-                        stage: name.clone(),
-                        summary: format!("could not run offline gate {name}: {error}"),
-                        artifacts,
-                    };
-                }
-            }
-        }
-        RunnerOutcome::Passed {
-            artifacts,
-            receipt: None,
-            limitations: Vec::new(),
-            fingerprint: Box::default(),
-            updates: Vec::new(),
+        match run_gates(&self.gates, context.repository, &attempt_dir) {
+            Ok(()) => RunnerOutcome::Passed {
+                artifacts,
+                receipt: None,
+                limitations: Vec::new(),
+                fingerprint: Box::default(),
+                updates: Vec::new(),
+            },
+            Err(failure) => RunnerOutcome::Failed {
+                class: failure.class,
+                stage: failure.stage,
+                summary: failure.summary,
+                artifacts,
+            },
         }
     }
 }
@@ -371,15 +398,27 @@ pub fn default_runners() -> BTreeMap<TaskKind, Box<dyn TaskRunner>> {
         }),
     );
     runners.insert(
+        TaskKind::DiagnosisCalibration,
+        Box::new(super::calibration_task::DiagnosisCalibrationRunner::system()),
+    );
+    runners.insert(
+        TaskKind::ScoreReview,
+        Box::new(super::calibration_task::ScoreReviewRunner),
+    );
+    runners.insert(
+        TaskKind::EvidenceIntegration,
+        Box::new(super::integration::IntegrationRunner {
+            tools: super::pr_task::PrTools::system(),
+            entries: Box::new(super::integration::verified_entries),
+        }),
+    );
+    runners.insert(
         TaskKind::Corpus,
         Box::new(super::corpus::CorpusRunner {
             factory: Box::new(super::host_factory::SystemHostFactory),
         }),
     );
     for (kind, name) in [
-        (TaskKind::EvidenceIntegration, "evidence integration"),
-        (TaskKind::DiagnosisCalibration, "calibration"),
-        (TaskKind::ScoreReview, "score review"),
         (TaskKind::CapabilityPolicy, "capability policy"),
         (TaskKind::ReleaseDocs, "release docs"),
         (TaskKind::FreezeRc, "release-candidate freeze"),
