@@ -33,6 +33,7 @@ rg -n "unsafe\s*(\{|fn|impl)" stutter/src --glob '*.rs'
 | `stutter/src/daemon/health.rs` | 2 | daemon | `statvfs` disk-space probe. | Move to small filesystem probe wrapper with `// SAFETY:` and fixture tests. |
 | `stutter/src/daemon/overhead.rs` | 1 | daemon | `sysconf(_SC_CLK_TCK)` for runtime accounting. | Reuse a shared checked `clock_ticks_per_second()` helper. |
 | `stutter/src/doctor.rs` | 3 | doctor/eBPF preflight | `geteuid`, `getrlimit`, and `MaybeUninit::assume_init`. | Move OS probes behind documented checked wrappers. |
+| `stutter/src/ebpf/ffi.rs` | 1 | eBPF userspace loader | `AsyncFd::register` of the ring-buffer map descriptor (tokio requires `unsafe` since the `new` constructor was deprecated as unsound). | Keep here; the `RingBuf` owns the descriptor, so the contract is local. |
 | `stutter/src/ebpf/memlock.rs` | 2 | eBPF userspace loader | `getrlimit`/`setrlimit` for memlock. | Keep in loader wrapper with local `// SAFETY:` docs. |
 | `stutter/src/ebpf/memory.rs` | 3 | eBPF userspace loader | `sysconf` memory/page-size probes. | Keep in loader wrapper with checked return handling and `// SAFETY:` docs. |
 | `stutter/src/events.rs` | 1 | event decode | Byte casting for ABI event decode. | Centralize in `events/decode.rs` with size/alignment checks. |

@@ -135,7 +135,8 @@ impl MapInitOps for AyaMapInitOps<'_> {
         )
         .context(map_init_context(EVENTS_MAP))?;
 
-        AsyncFd::new(events).context("eBPF load failed: events ringbuf async fd")
+        super::ffi::register_ring_buffer(events)
+            .context("eBPF load failed: events ringbuf async fd")
     }
 
     fn prev_faults_map(&mut self) -> anyhow::Result<Option<Self::PrevFaultsMap>> {
