@@ -413,14 +413,24 @@ pub fn default_runners() -> BTreeMap<TaskKind, Box<dyn TaskRunner>> {
         }),
     );
     runners.insert(
+        TaskKind::CapabilityPolicy,
+        Box::new(super::policy::CapabilityPolicyRunner {
+            tools: super::pr_task::PrTools::system(),
+        }),
+    );
+    runners.insert(
+        TaskKind::ReleaseDocs,
+        Box::new(super::policy::ReleaseDocsRunner {
+            tools: super::pr_task::PrTools::system(),
+        }),
+    );
+    runners.insert(
         TaskKind::Corpus,
         Box::new(super::corpus::CorpusRunner {
             factory: Box::new(super::host_factory::SystemHostFactory),
         }),
     );
     for (kind, name) in [
-        (TaskKind::CapabilityPolicy, "capability policy"),
-        (TaskKind::ReleaseDocs, "release docs"),
         (TaskKind::FreezeRc, "release-candidate freeze"),
         (TaskKind::RcOffline, "exact-RC offline acceptance"),
         (TaskKind::RcLiveObservation, "exact-RC observation"),

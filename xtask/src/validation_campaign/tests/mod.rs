@@ -21,6 +21,7 @@ mod invalidation;
 mod kernels;
 mod manifest;
 mod overhead_real;
+mod policy;
 mod policy_tasks;
 mod repo_pr;
 mod scenarios;

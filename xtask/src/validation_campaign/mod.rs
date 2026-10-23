@@ -16,6 +16,7 @@ pub mod kernels;
 pub mod manifest;
 pub mod model;
 pub mod overhead_real;
+pub mod policy;
 pub mod pr_task;
 pub mod repo_pr;
 pub mod repository;
