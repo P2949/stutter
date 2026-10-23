@@ -2,8 +2,8 @@ use std::process::Command;
 
 use crate::{
     credentials::{
-        CAP_BPF, CAP_PERFMON, CAP_SYS_NICE, CAP_SYS_RESOURCE, CapabilitySet, Identity,
-        drop_all_privileges, profiling_capabilities, restrict_child,
+        CAP_BPF, CAP_DAC_READ_SEARCH, CAP_PERFMON, CAP_SYS_NICE, CAP_SYS_RESOURCE, CapabilitySet,
+        Identity, drop_all_privileges, profiling_capabilities, restrict_child,
     },
     sys,
 };
@@ -40,7 +40,10 @@ fn field(status: &str, name: &str) -> String {
 fn profiling_capability_sets_are_minimal_and_exact() {
     let base = profiling_capabilities(false);
     assert!(
-        base.contains(CAP_BPF) && base.contains(CAP_PERFMON) && base.contains(CAP_SYS_RESOURCE)
+        base.contains(CAP_BPF)
+            && base.contains(CAP_PERFMON)
+            && base.contains(CAP_SYS_RESOURCE)
+            && base.contains(CAP_DAC_READ_SEARCH)
     );
     assert!(!base.contains(CAP_SYS_NICE));
     let with_nice = profiling_capabilities(true);

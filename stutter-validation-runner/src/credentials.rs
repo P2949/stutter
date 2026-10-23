@@ -5,6 +5,7 @@ use std::{os::unix::process::CommandExt, process::Command};
 
 use crate::sys::{self, CapSets};
 
+pub const CAP_DAC_READ_SEARCH: u32 = 2;
 pub const CAP_SETPCAP: u32 = 8;
 pub const CAP_SYS_NICE: u32 = 23;
 pub const CAP_SYS_RESOURCE: u32 = 24;
@@ -36,7 +37,8 @@ impl CapabilitySet {
 /// The capabilities a profiling suite needs: BPF, perf and rlimit overrides; contention-
 /// generating suites additionally need scheduler priority.
 pub fn profiling_capabilities(needs_scheduler_priority: bool) -> CapabilitySet {
-    let mut caps = vec![CAP_BPF, CAP_PERFMON, CAP_SYS_RESOURCE];
+    // CAP_DAC_READ_SEARCH only reads: tracefs (tracepoint formats) is root-only on most hosts.
+    let mut caps = vec![CAP_BPF, CAP_PERFMON, CAP_SYS_RESOURCE, CAP_DAC_READ_SEARCH];
     if needs_scheduler_priority {
         caps.push(CAP_SYS_NICE);
     }
