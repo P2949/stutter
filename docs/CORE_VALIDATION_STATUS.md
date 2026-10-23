@@ -773,3 +773,13 @@ runner and the two typed runner actions they need (`ExecuteRecording`,
 `ExecuteWorkloadOverhead`). The Nix shell gained `vkmark`, `mangohud`, `fio`, `stress-ng`,
 `iputils` and `gh`. All behavior is exercised against scripted hosts; no real `vkmark`, `fio`,
 IRQ or GPU capture was run, so no corpus, overhead or frame-score evidence was produced.
+
+## 2026-10-23: validation campaign, phase E (integration, policy and release automation)
+
+Adds the pull-request landing flow, evidence integration, deterministic calibration and score
+review, the capability-policy and release-docs pull requests, release-candidate freeze (separate
+RC binary digests, runner re-pin, controller restart), exact-RC offline and live acceptance,
+packaging, verification, installation smoke and the tag task. The capability registry helper now
+takes explicit tiers so the policy can be applied mechanically. All of it is exercised against
+scripted shells and machines; no evidence was produced and no capability tier was changed by
+this change.

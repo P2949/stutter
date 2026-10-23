@@ -339,18 +339,6 @@ impl TaskRunner for OfflineGateRunner {
     }
 }
 
-/// Placeholder for kinds whose real runner lands in a later phase; an honest block.
-pub struct NotYetAvailable(pub &'static str);
-
-impl TaskRunner for NotYetAvailable {
-    fn run(&self, _context: &RunContext<'_>, _spec: &TaskSpec, _attempt: u32) -> RunnerOutcome {
-        RunnerOutcome::Blocked(BlockReason {
-            class: FailureClass::BlockedResource,
-            detail: format!("the {} runner is not implemented in this build", self.0),
-        })
-    }
-}
-
 pub fn default_runners() -> BTreeMap<TaskKind, Box<dyn TaskRunner>> {
     let mut runners: BTreeMap<TaskKind, Box<dyn TaskRunner>> = BTreeMap::new();
     let live = |suite, shape| {
@@ -430,19 +418,54 @@ pub fn default_runners() -> BTreeMap<TaskKind, Box<dyn TaskRunner>> {
             factory: Box::new(super::host_factory::SystemHostFactory),
         }),
     );
-    for (kind, name) in [
-        (TaskKind::FreezeRc, "release-candidate freeze"),
-        (TaskKind::RcOffline, "exact-RC offline acceptance"),
-        (TaskKind::RcLiveObservation, "exact-RC observation"),
-        (TaskKind::RcGameRunnable, "exact-RC game-runnable"),
-        (TaskKind::RcAffinity, "exact-RC affinity"),
-        (TaskKind::RcRecovery, "exact-RC recovery"),
-        (TaskKind::ReleasePackage, "release packaging"),
-        (TaskKind::ReleaseVerify, "release verification"),
-        (TaskKind::InstallSmoke, "installation smoke"),
-        (TaskKind::Tag, "tag"),
-    ] {
-        runners.insert(kind, Box::new(NotYetAvailable(name)));
-    }
+    runners.insert(
+        TaskKind::FreezeRc,
+        Box::new(super::release::freeze::FreezeRcRunner {
+            shell: Box::new(super::shell::SystemShell),
+            repin: Box::new(super::release::freeze::repin_runner),
+        }),
+    );
+    runners.insert(
+        TaskKind::RcOffline,
+        Box::new(super::release::offline::RcOfflineRunner {
+            shell: Box::new(super::shell::SystemShell),
+            wait: super::repo_pr::WaitPolicy::default(),
+        }),
+    );
+    runners.insert(
+        TaskKind::RcLiveObservation,
+        live("observation", SuiteShape::Seconds),
+    );
+    runners.insert(
+        TaskKind::RcGameRunnable,
+        live("game-runnable", SuiteShape::Seconds),
+    );
+    runners.insert(TaskKind::RcAffinity, live("affinity", SuiteShape::Seconds));
+    runners.insert(TaskKind::RcRecovery, live("recovery", SuiteShape::Seconds));
+    runners.insert(
+        TaskKind::ReleasePackage,
+        Box::new(super::release::package::ReleasePackageRunner {
+            shell: Box::new(super::shell::SystemShell),
+        }),
+    );
+    runners.insert(
+        TaskKind::ReleaseVerify,
+        Box::new(super::release::package::ReleaseVerifyRunner {
+            shell: Box::new(super::shell::SystemShell),
+        }),
+    );
+    runners.insert(
+        TaskKind::InstallSmoke,
+        Box::new(super::release::package::InstallSmokeRunner {
+            shell: Box::new(super::shell::SystemShell),
+        }),
+    );
+    runners.insert(
+        TaskKind::Tag,
+        Box::new(super::release::tag::TagRunner {
+            shell: Box::new(super::shell::SystemShell),
+            wait: super::repo_pr::WaitPolicy::default(),
+        }),
+    );
     runners
 }

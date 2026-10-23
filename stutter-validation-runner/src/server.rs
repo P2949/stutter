@@ -278,6 +278,8 @@ fn status_data(authorization: &Authorization, state: &RunnerState, boot: Value) 
         "resume_pending": state.resume_pending,
         "pending_boot_entry": state.pending_boot_entry,
         "grants": authorization.grants.len(),
+        "xtask_sha256": authorization.xtask_sha256,
+        "stutter_sha256": authorization.stutter_sha256,
         "allowed_boot_entries": authorization.allowed_boot_entries,
         "original_boot_entry": authorization.original_boot_entry,
         "boot": boot,
