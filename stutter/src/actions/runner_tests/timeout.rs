@@ -26,7 +26,7 @@ mod tests {
         let result = run_audited_action_with_audit_path_and_hooks(
             "fake-controller",
             &action,
-            apply_policy().with_max_total_duration(Duration::from_millis(1)),
+            apply_policy().with_max_total_duration(Duration::from_millis(10)),
             &audit_path,
             ActionHooks::after_apply(|rollback| {
                 assert_eq!(rollback.affected_tasks(), 5);
@@ -130,7 +130,7 @@ mod tests {
         let result = run_audited_action_with_audit_path(
             "fake-controller",
             &action,
-            apply_policy().with_max_total_duration(Duration::from_millis(1)),
+            apply_policy().with_max_total_duration(Duration::from_millis(10)),
             &audit_path,
         );
 
