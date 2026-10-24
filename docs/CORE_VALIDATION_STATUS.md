@@ -783,3 +783,7 @@ packaging, verification, installation smoke and the tag task. The capability reg
 takes explicit tiers so the policy can be applied mechanically. All of it is exercised against
 scripted shells and machines; no evidence was produced and no capability tier was changed by
 this change.
+## Campaign core-c8b22a8-1792799432599: evidence integration
+
+Evidence collected at `c8b22a80b99bf5ab4eac27b7a0248b307e0d1bba` was re-verified from the retained bundles and indexed: live_game_runnable x1, live_kernel_compat x3, live_observation x1, live_overhead x2, live_score_degradation x1. Distinct kernels observed: 6.12.112, 6.18.55, 7.2.9. Sanitized corpus fixtures added: 66. Corpus floors: {"gpu":{"mixed_confounded":{"have":3,"need":3},"negative_control":{"have":10,"need":10},"positive":{"have":10,"need":10}},"io":{"mixed_confounded":{"have":3,"need":3},"negative_control":{"have":10,"need":10},"positive":{"have":10,"need":10}},"irq":{"mixed_confounded":{"have":3,"need":3},"negative_control":{"have":10,"need":10},"positive":{"have":10,"need":10}},"next_scenarios":[],"scheduler":{"mixed_confounded":{"have":3,"need":3},"negative_control":{"have":10,"need":10},"positive":{"have":10,"need":10}}}.
+Bundles stay with the operator; entries pin them by manifest digest.

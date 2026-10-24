@@ -1,0 +1,64 @@
+name = "real_mixed_scheduler_io_b380efe9"
+schema_version = 23
+source = "sanitized-real-recording"
+evidence_kind = "fixture_real"
+quality_expectation = "Medium"
+description = "Real capture of deliberately combined interventions (mixed-scheduler-io); the primary cause is predeclared."
+
+[provenance]
+artifact_schema = "23"
+capture_id = "sc-13f4cc2556442f53b380efe9"
+compositor = "session-default"
+control_type = "mixed_confounded"
+cpu = "GenuineIntel 6c12t"
+distribution = "ID=nixos VERSION_ID=26.05"
+drop_counters = "0"
+expected_cause = "GameThreadSchedulerDelay"
+expected_confidence = "medium_or_high"
+gpu = "AMD kernel-default"
+kernel = "6.18.55"
+limitations = "single host; ground truth is the predeclared intervention; overlap is not proven causality"
+privacy_state = "sanitized"
+probe_set = "corpus"
+scenario = "mixed-scheduler-io"
+source_commit = "c8b22a80b99bf5ab4eac27b7a0248b307e0d1bba"
+workload = "VkmarkLight"
+workload_version = "corpus-v1"
+
+[coverage]
+diagnoses = ["GameThreadSchedulerDelay", "BlockIoCandidate"]
+
+[platform]
+gpu_vendor = "AMD"
+gpu_driver = "kernel-default"
+compositor = "session-default"
+session_type = "wayland"
+scenario = "mixed-scheduler-io"
+sanitized_capture_id = "sc-13f4cc2556442f53b380efe9"
+kernel_family = "linux"
+cpu_vendor = "GenuineIntel"
+cpu_topology_bucket = "6c12t"
+capture_features = ["frames", "gpu_samples", "intervals", "irq_events", "spikes"]
+
+[expected]
+primary_cause = "GameThreadSchedulerDelay"
+expected_behavior = "must_diagnose"
+accepted_confidence = ["Medium", "High"]
+data_quality = "Medium"
+
+[expected.artifacts]
+block_io_events = 0
+frames = 2750
+gpu_samples = 31
+intervals = 321
+irq_events = 63
+spikes = 1
+
+[expected.evidence]
+contains = []
+
+[privacy]
+titles_redacted = true
+paths_redacted = true
+hostnames_redacted = true
+usernames_redacted = true

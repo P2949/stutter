@@ -1,0 +1,3398 @@
+{
+  "schema_version": 23,
+  "run_name": "real_scheduler_positive_78013d25",
+  "scenario_name": null,
+  "scenario_hash": null,
+  "workload_label": null,
+  "route_label": null,
+  "started_at": {
+    "unix_seconds": 1792801195,
+    "unix_nanos": 42116167,
+    "system_time_debug": "SystemTime { tv_sec: 1792801195, tv_nsec: 42116167 }"
+  },
+  "ended_at": {
+    "unix_seconds": 1792801225,
+    "unix_nanos": 673234457,
+    "system_time_debug": "SystemTime { tv_sec: 1792801225, tv_nsec: 673234457 }"
+  },
+  "monotonic_start_ns": 161202486551461,
+  "monotonic_end_ns": 161233117602091,
+  "duration_ms": 30631,
+  "mangohud_start_offset": 424659,
+  "mangohud_first_frame_monotonic_ns": 161202517545212,
+  "mangohud_first_frame_raw_elapsed_ms": 36544,
+  "metadata": {
+    "kernel_osrelease": "6.18.55",
+    "kernel_version": "Linux version 6.18.55 (nixbld@localhost) (gcc (GCC) 15.3.0, GNU ld (GNU Binutils) 2.46) #1-NixOS SMP PREEMPT_DYNAMIC Sat Oct  3 10:39:03 UTC 2026",
+    "cpu_online": "0-11",
+    "cpu_possible": "0-11",
+    "cpu_topology": [
+      {
+        "cpu": 0,
+        "thread_siblings_list": "0,6",
+        "core_id": "0",
+        "physical_package_id": "0"
+      },
+      {
+        "cpu": 1,
+        "thread_siblings_list": "1,7",
+        "core_id": "1",
+        "physical_package_id": "0"
+      },
+      {
+        "cpu": 2,
+        "thread_siblings_list": "2,8",
+        "core_id": "2",
+        "physical_package_id": "0"
+      },
+      {
+        "cpu": 3,
+        "thread_siblings_list": "3,9",
+        "core_id": "3",
+        "physical_package_id": "0"
+      },
+      {
+        "cpu": 4,
+        "thread_siblings_list": "4,10",
+        "core_id": "4",
+        "physical_package_id": "0"
+      },
+      {
+        "cpu": 5,
+        "thread_siblings_list": "5,11",
+        "core_id": "5",
+        "physical_package_id": "0"
+      },
+      {
+        "cpu": 6,
+        "thread_siblings_list": "0,6",
+        "core_id": "0",
+        "physical_package_id": "0"
+      },
+      {
+        "cpu": 7,
+        "thread_siblings_list": "1,7",
+        "core_id": "1",
+        "physical_package_id": "0"
+      },
+      {
+        "cpu": 8,
+        "thread_siblings_list": "2,8",
+        "core_id": "2",
+        "physical_package_id": "0"
+      },
+      {
+        "cpu": 9,
+        "thread_siblings_list": "3,9",
+        "core_id": "3",
+        "physical_package_id": "0"
+      },
+      {
+        "cpu": 10,
+        "thread_siblings_list": "4,10",
+        "core_id": "4",
+        "physical_package_id": "0"
+      },
+      {
+        "cpu": 11,
+        "thread_siblings_list": "5,11",
+        "core_id": "5",
+        "physical_package_id": "0"
+      }
+    ],
+    "irq_lines": [
+      {
+        "irq": "0",
+        "counts_by_cpu": [
+          25,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "total": 25,
+        "kind": "IR-IO-APIC",
+        "name": "2-edge timer",
+        "raw": "   0:         25          0          0          0          0          0          0          0          0          0          0          0 IR-IO-APIC    2-edge      timer"
+      },
+      {
+        "irq": "8",
+        "counts_by_cpu": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "total": 0,
+        "kind": "IR-IO-APIC",
+        "name": "8-edge rtc0",
+        "raw": "   8:          0          0          0          0          0          0          0          0          0          0          0          0 IR-IO-APIC    8-edge      rtc0"
+      },
+      {
+        "irq": "9",
+        "counts_by_cpu": [
+          4,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "total": 4,
+        "kind": "IR-IO-APIC",
+        "name": "9-fasteoi acpi",
+        "raw": "   9:          4          0          0          0          0          0          0          0          0          0          0          0 IR-IO-APIC    9-fasteoi   acpi"
+      },
+      {
+        "irq": "16",
+        "counts_by_cpu": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          23,
+          0,
+          0,
+          0
+        ],
+        "total": 23,
+        "kind": "IR-IO-APIC",
+        "name": "16-fasteoi idma64.0, i801_smbus, i2c_designware.0",
+        "raw": "  16:          0          0          0          0          0          0          0          0         23          0          0          0 IR-IO-APIC   16-fasteoi   idma64.0, i801_smbus, i2c_designware.0"
+      },
+      {
+        "irq": "17",
+        "counts_by_cpu": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "total": 0,
+        "kind": "IR-IO-APIC",
+        "name": "17-fasteoi idma64.1, i2c_designware.1",
+        "raw": "  17:          0          0          0          0          0          0          0          0          0          0          0          0 IR-IO-APIC   17-fasteoi   idma64.1, i2c_designware.1"
+      },
+      {
+        "irq": "120",
+        "counts_by_cpu": [
+          6,
+          0,
+          9,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "total": 15,
+        "kind": "IR-PCI-MSI-0000:00:01.0",
+        "name": "0-edge PCIe PME, PCIe bwctrl",
+        "raw": " 120:          6          0          9          0          0          0          0          0          0          0          0          0 IR-PCI-MSI-0000:00:01.0    0-edge      PCIe PME, PCIe bwctrl"
+      },
+      {
+        "irq": "121",
+        "counts_by_cpu": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "total": 0,
+        "kind": "IR-PCI-MSI-0000:00:1b.0",
+        "name": "0-edge PCIe PME, pciehp, PCIe bwctrl",
+        "raw": " 121:          0          0          0          0          0          0          0          0          0          0          0          0 IR-PCI-MSI-0000:00:1b.0    0-edge      PCIe PME, pciehp, PCIe bwctrl"
+      },
+      {
+        "irq": "122",
+        "counts_by_cpu": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "total": 0,
+        "kind": "IR-PCI-MSI-0000:00:1c.0",
+        "name": "0-edge PCIe PME, PCIe bwctrl",
+        "raw": " 122:          0          0          0          0          0          0          0          0          0          0          0          0 IR-PCI-MSI-0000:00:1c.0    0-edge      PCIe PME, PCIe bwctrl"
+      },
+      {
+        "irq": "123",
+        "counts_by_cpu": [
+          2,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "total": 3,
+        "kind": "IR-PCI-MSI-0000:00:1c.4",
+        "name": "0-edge PCIe PME, aerdrv, PCIe bwctrl",
+        "raw": " 123:          2          0          0          0          0          1          0          0          0          0          0          0 IR-PCI-MSI-0000:00:1c.4    0-edge      PCIe PME, aerdrv, PCIe bwctrl"
+      },
+      {
+        "irq": "124",
+        "counts_by_cpu": [
+          2,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "total": 3,
+        "kind": "IR-PCI-MSI-0000:00:1d.0",
+        "name": "0-edge PCIe PME, aerdrv, PCIe bwctrl",
+        "raw": " 124:          2          0          0          0          0          0          1          0          0          0          0          0 IR-PCI-MSI-0000:00:1d.0    0-edge      PCIe PME, aerdrv, PCIe bwctrl"
+      },
+      {
+        "irq": "125",
+        "counts_by_cpu": [
+          2,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0
+        ],
+        "total": 3,
+        "kind": "IR-PCI-MSI-0000:02:00.0",
+        "name": "0-edge PCIe bwctrl",
+        "raw": " 125:          2          0          0          0          0          0          0          1          0          0          0          0 IR-PCI-MSI-0000:02:00.0    0-edge      PCIe bwctrl"
+      },
+      {
+        "irq": "126",
+        "counts_by_cpu": [
+          12745927,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1781944,
+          0,
+          0,
+          0
+        ],
+        "total": 14527871,
+        "kind": "IR-PCI-MSI-0000:00:14.0",
+        "name": "0-edge xhci_hcd",
+        "raw": " 126:   12745927          0          0          0          0          0          0          0    1781944          0          0          0 IR-PCI-MSI-0000:00:14.0    0-edge      xhci_hcd"
+      },
+      {
+        "irq": "134",
+        "counts_by_cpu": [
+          0,
+          0,
+          0,
+          0,
+          45,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "total": 45,
+        "kind": "IR-PCI-MSI-0000:00:16.0",
+        "name": "0-edge mei_me",
+        "raw": " 134:          0          0          0          0         45          0          0          0          0          0          0          0 IR-PCI-MSI-0000:00:16.0    0-edge      mei_me"
+      },
+      {
+        "irq": "135",
+        "counts_by_cpu": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          1377,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "total": 1377,
+        "kind": "IR-PCI-MSIX-0000:07:00.0",
+        "name": "0-edge nvme0q0",
+        "raw": " 135:          0          0          0          0          0       1377          0          0          0          0          0          0 IR-PCI-MSIX-0000:07:00.0    0-edge      nvme0q0"
+      },
+      {
+        "irq": "136",
+        "counts_by_cpu": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "total": 1,
+        "kind": "IR-PCI-MSIX-0000:06:00.0",
+        "name": "0-edge enp6s0",
+        "raw": " 136:          0          0          0          0          0          0          1          0          0          0          0          0 IR-PCI-MSIX-0000:06:00.0    0-edge      enp6s0"
+      },
+      {
+        "irq": "137",
+        "counts_by_cpu": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          12438513,
+          0,
+          0,
+          0,
+          0
+        ],
+        "total": 12438513,
+        "kind": "IR-PCI-MSIX-0000:06:00.0",
+        "name": "1-edge enp6s0-TxRx-0",
+        "raw": " 137:          0          0          0          0          0          0          0   12438513          0          0          0          0 IR-PCI-MSIX-0000:06:00.0    1-edge      enp6s0-TxRx-0"
+      },
+      {
+        "irq": "138",
+        "counts_by_cpu": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          9215308,
+          0,
+          0,
+          0
+        ],
+        "total": 9215308,
+        "kind": "IR-PCI-MSIX-0000:06:00.0",
+        "name": "2-edge enp6s0-TxRx-1",
+        "raw": " 138:          0          0          0          0          0          0          0          0    9215308          0          0          0 IR-PCI-MSIX-0000:06:00.0    2-edge      enp6s0-TxRx-1"
+      },
+      {
+        "irq": "139",
+        "counts_by_cpu": [
+          0,
+          13153365,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "total": 13153365,
+        "kind": "IR-PCI-MSIX-0000:06:00.0",
+        "name": "3-edge enp6s0-TxRx-2",
+        "raw": " 139:          0   13153365          0          0          0          0          0          0          0          0          0          0 IR-PCI-MSIX-0000:06:00.0    3-edge      enp6s0-TxRx-2"
+      },
+      {
+        "irq": "140",
+        "counts_by_cpu": [
+          0,
+          0,
+          9717770,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "total": 9717770,
+        "kind": "IR-PCI-MSIX-0000:06:00.0",
+        "name": "4-edge enp6s0-TxRx-3",
+        "raw": " 140:          0          0    9717770          0          0          0          0          0          0          0          0          0 IR-PCI-MSIX-0000:06:00.0    4-edge      enp6s0-TxRx-3"
+      },
+      {
+        "irq": "141",
+        "counts_by_cpu": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          5108502,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "total": 5108502,
+        "kind": "IR-PCI-MSIX-0000:07:00.0",
+        "name": "1-edge nvme0q1",
+        "raw": " 141:          0          0          0          0          0          0    5108502          0          0          0          0          0 IR-PCI-MSIX-0000:07:00.0    1-edge      nvme0q1"
+      },
+      {
+        "irq": "142",
+        "counts_by_cpu": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          5680640,
+          0,
+          0,
+          0,
+          0
+        ],
+        "total": 5680640,
+        "kind": "IR-PCI-MSIX-0000:07:00.0",
+        "name": "2-edge nvme0q2",
+        "raw": " 142:          0          0          0          0          0          0          0    5680640          0          0          0          0 IR-PCI-MSIX-0000:07:00.0    2-edge      nvme0q2"
+      },
+      {
+        "irq": "143",
+        "counts_by_cpu": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "total": 0,
+        "kind": "IR-PCI-MSI-0000:00:17.0",
+        "name": "0-edge ahci[0000:00:17.0]",
+        "raw": " 143:          0          0          0          0          0          0          0          0          0          0          0          0 IR-PCI-MSI-0000:00:17.0    0-edge      ahci[0000:00:17.0]"
+      },
+      {
+        "irq": "144",
+        "counts_by_cpu": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          5763648,
+          0,
+          0,
+          0
+        ],
+        "total": 5763648,
+        "kind": "IR-PCI-MSIX-0000:07:00.0",
+        "name": "3-edge nvme0q3",
+        "raw": " 144:          0          0          0          0          0          0          0          0    5763648          0          0          0 IR-PCI-MSIX-0000:07:00.0    3-edge      nvme0q3"
+      },
+      {
+        "irq": "145",
+        "counts_by_cpu": [
+          61683,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          25589,
+          0
+        ],
+        "total": 87272,
+        "kind": "IR-PCI-MSIX-0000:00:14.3",
+        "name": "0-edge iwlwifi:default_queue",
+        "raw": " 145:      61683          0          0          0          0          0          0          0          0          0      25589          0 IR-PCI-MSIX-0000:00:14.3    0-edge      iwlwifi:default_queue"
+      },
+      {
+        "irq": "146",
+        "counts_by_cpu": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "total": 0,
+        "kind": "IR-PCI-MSIX-0000:00:14.3",
+        "name": "1-edge iwlwifi:queue_1",
+        "raw": " 146:          0          0          0          0          0          0          0          0          0          0          0          0 IR-PCI-MSIX-0000:00:14.3    1-edge      iwlwifi:queue_1"
+      },
+      {
+        "irq": "147",
+        "counts_by_cpu": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "total": 0,
+        "kind": "IR-PCI-MSIX-0000:00:14.3",
+        "name": "2-edge iwlwifi:queue_2",
+        "raw": " 147:          0          0          0          0          0          0          0          0          0          0          0          0 IR-PCI-MSIX-0000:00:14.3    2-edge      iwlwifi:queue_2"
+      },
+      {
+        "irq": "148",
+        "counts_by_cpu": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "total": 0,
+        "kind": "IR-PCI-MSIX-0000:00:14.3",
+        "name": "3-edge iwlwifi:queue_3",
+        "raw": " 148:          0          0          0          0          0          0          0          0          0          0          0          0 IR-PCI-MSIX-0000:00:14.3    3-edge      iwlwifi:queue_3"
+      },
+      {
+        "irq": "149",
+        "counts_by_cpu": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "total": 0,
+        "kind": "IR-PCI-MSIX-0000:00:14.3",
+        "name": "4-edge iwlwifi:queue_4",
+        "raw": " 149:          0          0          0          0          0          0          0          0          0          0          0          0 IR-PCI-MSIX-0000:00:14.3    4-edge      iwlwifi:queue_4"
+      },
+      {
+        "irq": "150",
+        "counts_by_cpu": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "total": 0,
+        "kind": "IR-PCI-MSIX-0000:00:14.3",
+        "name": "5-edge iwlwifi:queue_5",
+        "raw": " 150:          0          0          0          0          0          0          0          0          0          0          0          0 IR-PCI-MSIX-0000:00:14.3    5-edge      iwlwifi:queue_5"
+      },
+      {
+        "irq": "151",
+        "counts_by_cpu": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "total": 0,
+        "kind": "IR-PCI-MSIX-0000:00:14.3",
+        "name": "6-edge iwlwifi:queue_6",
+        "raw": " 151:          0          0          0          0          0          0          0          0          0          0          0          0 IR-PCI-MSIX-0000:00:14.3    6-edge      iwlwifi:queue_6"
+      },
+      {
+        "irq": "152",
+        "counts_by_cpu": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "total": 0,
+        "kind": "IR-PCI-MSIX-0000:00:14.3",
+        "name": "7-edge iwlwifi:queue_7",
+        "raw": " 152:          0          0          0          0          0          0          0          0          0          0          0          0 IR-PCI-MSIX-0000:00:14.3    7-edge      iwlwifi:queue_7"
+      },
+      {
+        "irq": "153",
+        "counts_by_cpu": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "total": 0,
+        "kind": "IR-PCI-MSIX-0000:00:14.3",
+        "name": "8-edge iwlwifi:queue_8",
+        "raw": " 153:          0          0          0          0          0          0          0          0          0          0          0          0 IR-PCI-MSIX-0000:00:14.3    8-edge      iwlwifi:queue_8"
+      },
+      {
+        "irq": "154",
+        "counts_by_cpu": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          5874244,
+          0,
+          0
+        ],
+        "total": 5874244,
+        "kind": "IR-PCI-MSIX-0000:07:00.0",
+        "name": "4-edge nvme0q4",
+        "raw": " 154:          0          0          0          0          0          0          0          0          0    5874244          0          0 IR-PCI-MSIX-0000:07:00.0    4-edge      nvme0q4"
+      },
+      {
+        "irq": "155",
+        "counts_by_cpu": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "total": 0,
+        "kind": "IR-PCI-MSIX-0000:00:14.3",
+        "name": "9-edge iwlwifi:queue_9",
+        "raw": " 155:          0          0          0          0          0          0          0          0          0          0          0          0 IR-PCI-MSIX-0000:00:14.3    9-edge      iwlwifi:queue_9"
+      },
+      {
+        "irq": "156",
+        "counts_by_cpu": [
+          0,
+          0,
+          0,
+          0,
+          2172107,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "total": 2172107,
+        "kind": "IR-PCI-MSIX-0000:07:00.0",
+        "name": "5-edge nvme0q5",
+        "raw": " 156:          0          0          0          0    2172107          0          0          0          0          0          0          0 IR-PCI-MSIX-0000:07:00.0    5-edge      nvme0q5"
+      },
+      {
+        "irq": "157",
+        "counts_by_cpu": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "total": 0,
+        "kind": "IR-PCI-MSIX-0000:00:14.3",
+        "name": "10-edge iwlwifi:queue_10",
+        "raw": " 157:          0          0          0          0          0          0          0          0          0          0          0          0 IR-PCI-MSIX-0000:00:14.3   10-edge      iwlwifi:queue_10"
+      },
+      {
+        "irq": "158",
+        "counts_by_cpu": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          2137410,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "total": 2137410,
+        "kind": "IR-PCI-MSIX-0000:07:00.0",
+        "name": "6-edge nvme0q6",
+        "raw": " 158:          0          0          0          0          0    2137410          0          0          0          0          0          0 IR-PCI-MSIX-0000:07:00.0    6-edge      nvme0q6"
+      },
+      {
+        "irq": "159",
+        "counts_by_cpu": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "total": 0,
+        "kind": "IR-PCI-MSIX-0000:00:14.3",
+        "name": "11-edge iwlwifi:queue_11",
+        "raw": " 159:          0          0          0          0          0          0          0          0          0          0          0          0 IR-PCI-MSIX-0000:00:14.3   11-edge      iwlwifi:queue_11"
+      },
+      {
+        "irq": "160",
+        "counts_by_cpu": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          2843070,
+          0
+        ],
+        "total": 2843070,
+        "kind": "IR-PCI-MSIX-0000:07:00.0",
+        "name": "7-edge nvme0q7",
+        "raw": " 160:          0          0          0          0          0          0          0          0          0          0    2843070          0 IR-PCI-MSIX-0000:07:00.0    7-edge      nvme0q7"
+      },
+      {
+        "irq": "161",
+        "counts_by_cpu": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "total": 0,
+        "kind": "IR-PCI-MSIX-0000:00:14.3",
+        "name": "12-edge iwlwifi:queue_12",
+        "raw": " 161:          0          0          0          0          0          0          0          0          0          0          0          0 IR-PCI-MSIX-0000:00:14.3   12-edge      iwlwifi:queue_12"
+      },
+      {
+        "irq": "162",
+        "counts_by_cpu": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          2705186
+        ],
+        "total": 2705186,
+        "kind": "IR-PCI-MSIX-0000:07:00.0",
+        "name": "8-edge nvme0q8",
+        "raw": " 162:          0          0          0          0          0          0          0          0          0          0          0    2705186 IR-PCI-MSIX-0000:07:00.0    8-edge      nvme0q8"
+      },
+      {
+        "irq": "163",
+        "counts_by_cpu": [
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          3
+        ],
+        "total": 4,
+        "kind": "IR-PCI-MSIX-0000:00:14.3",
+        "name": "13-edge iwlwifi:exception",
+        "raw": " 163:          1          0          0          0          0          0          0          0          0          0          0          3 IR-PCI-MSIX-0000:00:14.3   13-edge      iwlwifi:exception"
+      },
+      {
+        "irq": "164",
+        "counts_by_cpu": [
+          6502,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "total": 6502,
+        "kind": "IR-PCI-MSI-0000:03:00.1",
+        "name": "0-edge snd_hda_intel:card2",
+        "raw": " 164:       6502          0          0          0          0          0          0          0          0          0          0          0 IR-PCI-MSI-0000:03:00.1    0-edge      snd_hda_intel:card2"
+      },
+      {
+        "irq": "165",
+        "counts_by_cpu": [
+          414,
+          555,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "total": 969,
+        "kind": "IR-PCI-MSI-0000:00:1f.3",
+        "name": "0-edge snd_hda_intel:card1",
+        "raw": " 165:        414        555          0          0          0          0          0          0          0          0          0          0 IR-PCI-MSI-0000:00:1f.3    0-edge      snd_hda_intel:card1"
+      },
+      {
+        "irq": "166",
+        "counts_by_cpu": [
+          312686011,
+          0,
+          13121298,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "total": 325807309,
+        "kind": "IR-PCI-MSI-0000:03:00.0",
+        "name": "0-edge amdgpu",
+        "raw": " 166:  312686011          0   13121298          0          0          0          0          0          0          0          0          0 IR-PCI-MSI-0000:03:00.0    0-edge      amdgpu"
+      },
+      {
+        "irq": "NMI",
+        "counts_by_cpu": [
+          256,
+          1907,
+          1809,
+          1935,
+          1982,
+          2003,
+          2269,
+          2044,
+          2186,
+          1998,
+          2054,
+          1865
+        ],
+        "total": 22308,
+        "kind": "Non-maskable",
+        "name": "interrupts",
+        "raw": " NMI:        256       1907       1809       1935       1982       2003       2269       2044       2186       1998       2054       1865   Non-maskable interrupts"
+      },
+      {
+        "irq": "LOC",
+        "counts_by_cpu": [
+          102909002,
+          80982764,
+          91138239,
+          83695370,
+          81307990,
+          82990966,
+          88882792,
+          79674542,
+          83902831,
+          79971036,
+          80626776,
+          84354972
+        ],
+        "total": 1020437280,
+        "kind": "Local",
+        "name": "timer interrupts",
+        "raw": " LOC:  102909002   80982764   91138239   83695370   81307990   82990966   88882792   79674542   83902831   79971036   80626776   84354972   Local timer interrupts"
+      },
+      {
+        "irq": "SPU",
+        "counts_by_cpu": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "total": 0,
+        "kind": "Spurious",
+        "name": "interrupts",
+        "raw": " SPU:          0          0          0          0          0          0          0          0          0          0          0          0   Spurious interrupts"
+      },
+      {
+        "irq": "PMI",
+        "counts_by_cpu": [
+          256,
+          1907,
+          1809,
+          1935,
+          1982,
+          2003,
+          2269,
+          2044,
+          2186,
+          1998,
+          2054,
+          1865
+        ],
+        "total": 22308,
+        "kind": "Performance",
+        "name": "monitoring interrupts",
+        "raw": " PMI:        256       1907       1809       1935       1982       2003       2269       2044       2186       1998       2054       1865   Performance monitoring interrupts"
+      },
+      {
+        "irq": "IWI",
+        "counts_by_cpu": [
+          50039676,
+          5849511,
+          5021320,
+          4650744,
+          4648322,
+          4376702,
+          3688268,
+          6301043,
+          5969547,
+          4569565,
+          4838383,
+          4177141
+        ],
+        "total": 104130222,
+        "kind": "IRQ",
+        "name": "work interrupts",
+        "raw": " IWI:   50039676    5849511    5021320    4650744    4648322    4376702    3688268    6301043    5969547    4569565    4838383    4177141   IRQ work interrupts"
+      },
+      {
+        "irq": "RTR",
+        "counts_by_cpu": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "total": 0,
+        "kind": "APIC",
+        "name": "ICR read retries",
+        "raw": " RTR:          0          0          0          0          0          0          0          0          0          0          0          0   APIC ICR read retries"
+      },
+      {
+        "irq": "RES",
+        "counts_by_cpu": [
+          1261050,
+          1451085,
+          1600823,
+          676053,
+          481383,
+          1890967,
+          1635118,
+          990365,
+          1170953,
+          880215,
+          446111,
+          2262455
+        ],
+        "total": 14746578,
+        "kind": "Rescheduling",
+        "name": "interrupts",
+        "raw": " RES:    1261050    1451085    1600823     676053     481383    1890967    1635118     990365    1170953     880215     446111    2262455   Rescheduling interrupts"
+      },
+      {
+        "irq": "CAL",
+        "counts_by_cpu": [
+          33277781,
+          26625564,
+          22634895,
+          22685193,
+          21557429,
+          21561461,
+          21463432,
+          21429348,
+          21006456,
+          21058798,
+          20990043,
+          20879532
+        ],
+        "total": 275169932,
+        "kind": "Function",
+        "name": "call interrupts",
+        "raw": " CAL:   33277781   26625564   22634895   22685193   21557429   21561461   21463432   21429348   21006456   21058798   20990043   20879532   Function call interrupts"
+      },
+      {
+        "irq": "TLB",
+        "counts_by_cpu": [
+          14320908,
+          15171193,
+          14934255,
+          15502610,
+          15262308,
+          15152244,
+          14849025,
+          15238918,
+          15257641,
+          15426043,
+          15418142,
+          15023117
+        ],
+        "total": 181556404,
+        "kind": "TLB",
+        "name": "shootdowns",
+        "raw": " TLB:   14320908   15171193   14934255   15502610   15262308   15152244   14849025   15238918   15257641   15426043   15418142   15023117   TLB shootdowns"
+      },
+      {
+        "irq": "TRM",
+        "counts_by_cpu": [
+          166,
+          166,
+          166,
+          166,
+          166,
+          166,
+          166,
+          166,
+          166,
+          166,
+          166,
+          166
+        ],
+        "total": 1992,
+        "kind": "Thermal",
+        "name": "event interrupts",
+        "raw": " TRM:        166        166        166        166        166        166        166        166        166        166        166        166   Thermal event interrupts"
+      },
+      {
+        "irq": "THR",
+        "counts_by_cpu": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "total": 0,
+        "kind": "Threshold",
+        "name": "APIC interrupts",
+        "raw": " THR:          0          0          0          0          0          0          0          0          0          0          0          0   Threshold APIC interrupts"
+      },
+      {
+        "irq": "DFR",
+        "counts_by_cpu": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "total": 0,
+        "kind": "Deferred",
+        "name": "Error APIC interrupts",
+        "raw": " DFR:          0          0          0          0          0          0          0          0          0          0          0          0   Deferred Error APIC interrupts"
+      },
+      {
+        "irq": "MCE",
+        "counts_by_cpu": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "total": 0,
+        "kind": "Machine",
+        "name": "check exceptions",
+        "raw": " MCE:          0          0          0          0          0          0          0          0          0          0          0          0   Machine check exceptions"
+      },
+      {
+        "irq": "MCP",
+        "counts_by_cpu": [
+          497,
+          496,
+          496,
+          496,
+          496,
+          496,
+          496,
+          496,
+          496,
+          496,
+          496,
+          496
+        ],
+        "total": 5953,
+        "kind": "Machine",
+        "name": "check polls",
+        "raw": " MCP:        497        496        496        496        496        496        496        496        496        496        496        496   Machine check polls"
+      },
+      {
+        "irq": "ERR",
+        "counts_by_cpu": [
+          0
+        ],
+        "total": 0,
+        "kind": "",
+        "name": "",
+        "raw": " ERR:          0"
+      },
+      {
+        "irq": "MIS",
+        "counts_by_cpu": [
+          0
+        ],
+        "total": 0,
+        "kind": "",
+        "name": "",
+        "raw": " MIS:          0"
+      },
+      {
+        "irq": "PIN",
+        "counts_by_cpu": [
+          511,
+          277,
+          419,
+          636,
+          622,
+          543,
+          843,
+          818,
+          614,
+          495,
+          589,
+          721
+        ],
+        "total": 7088,
+        "kind": "Posted-interrupt",
+        "name": "notification event",
+        "raw": " PIN:        511        277        419        636        622        543        843        818        614        495        589        721   Posted-interrupt notification event"
+      },
+      {
+        "irq": "NPI",
+        "counts_by_cpu": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "total": 0,
+        "kind": "Nested",
+        "name": "posted-interrupt event",
+        "raw": " NPI:          0          0          0          0          0          0          0          0          0          0          0          0   Nested posted-interrupt event"
+      },
+      {
+        "irq": "PIW",
+        "counts_by_cpu": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "total": 0,
+        "kind": "Posted-interrupt",
+        "name": "wakeup event",
+        "raw": " PIW:          0          0          0          0          0          0          0          0          0          0          0          0   Posted-interrupt wakeup event"
+      }
+    ],
+    "scx_state": "disabled",
+    "scx_ops": null,
+    "scx_enable_seq": "0"
+  },
+  "target_pids_max": 1024,
+  "active_target_pids_count": 1,
+  "active_expanded_tasks": [
+    1112498
+  ],
+  "focus_mode": "explicit",
+  "final_focus_kind": null,
+  "focus_switch_count": 0,
+  "focus_event_count": 0,
+  "foreground_event_count": 0,
+  "kms_flip_event_count": 0,
+  "drm_fence_event_count": 0,
+  "wayland_presentation_event_count": 0,
+  "dmabuf_event_count": 0,
+  "gpu_engine_sample_count": 0,
+  "display_path": {
+    "label": "direct-scanout-gpu",
+    "render_gpu": "card1/amdgpu",
+    "scanout_gpu": "card1/amdgpu",
+    "connector": "DP-3",
+    "render_card": "card1",
+    "render_render_node": "/dev/dri/renderD128",
+    "render_driver": "amdgpu",
+    "scanout_card": "card1",
+    "scanout_driver": "amdgpu",
+    "is_cross_gpu": false,
+    "session_type": null,
+    "compositor": null,
+    "topology_confidence": "high",
+    "topology_warnings": []
+  },
+  "foreground_source": null,
+  "final_foreground_pid": null,
+  "final_foreground_app_id": null,
+  "final_foreground_class": null,
+  "final_foreground_status": null,
+  "final_foreground_window_id": null,
+  "final_foreground_workspace": null,
+  "final_foreground_confidence": null,
+  "final_foreground_stale_ms": null,
+  "final_foreground_reason": null,
+  "interval_record_count": 318,
+  "intervals_dropped": 0,
+  "spike_events_retained_count": 11,
+  "spike_events_dropped_count": 0,
+  "spike_events_truncated": false,
+  "scx_event_count": 0,
+  "irq_event_count": 126,
+  "migration_event_count": 918,
+  "cpu_freq_sample_count": 0,
+  "gpu_sample_count": 31,
+  "frame_event_count": 2704,
+  "block_io_event_count": 0,
+  "runtime_slice_count": 0,
+  "runtime_slice_read_errors": 0,
+  "runtime_slice_skipped_tasks": 0,
+  "runtime_slice_source": null,
+  "event_stream_write_errors": 0,
+  "alert_events_dropped_count": 0,
+  "alert_channel_closed_count": 0,
+  "first_event_stream_write_error": null,
+  "block_io_correlation_basis": "dev+sector",
+  "block_io_correlation_confidence": "medium",
+  "drop_counters": {
+    "lost_wakeup_timestamp_inserts": 0,
+    "wakeup_data_stale_entries": 0,
+    "wakeup_data_replaced_entries": 0,
+    "wakeup_data_consumed_read_failed": 0,
+    "ringbuf_reserve_failed": 0,
+    "irq_start_times_insert_failed": 0,
+    "block_start_insert_failed": 0,
+    "block_fallback_key_collisions": 0,
+    "cpu_accounting_untracked": 0,
+    "block_zero_keys": 0,
+    "drm_fence_missing_start": 0
+  },
+  "cpu_perf_sample_count": 0,
+  "cpu_perf_open_errors": 0,
+  "cpu_perf_read_errors": 0,
+  "cpu_perf_skipped_tasks": 0,
+  "cpu_perf_last_error": null,
+  "stop_reason": "max_duration_reached",
+  "config": {
+    "manual_pids": [],
+    "tree_roots": [
+      1112498
+    ],
+    "scenario_name": null,
+    "scenario_hash": null,
+    "workload_label": null,
+    "route_label": null,
+    "cgroupv2": null,
+    "exclude_tree_pids": [],
+    "include_comm": [],
+    "exclude_comm": [],
+    "watch_process": null,
+    "persistent": false,
+    "keep_missing_pid": false,
+    "watch_poll_ms": 2000,
+    "watch_timeout_ms": null,
+    "csv_stream": null,
+    "irq_latency": true,
+    "irqs": [
+      137
+    ],
+    "hwmon": true,
+    "hwmon_root": null,
+    "hwmon_drm_card": null,
+    "hwmon_render_node": null,
+    "mangohud_log": "/home/sanitized-user/Development/stutter/.llm-runs/validation/core-c8b22a8-1792799432599/attempts/corpus/0001/captures/0028/mangohud/vkmark_2026-10-24_01-19-18.csv",
+    "mangohud_log_live": false,
+    "tui": false,
+    "summary_period_ms": 250,
+    "epoch_period_ms": null,
+    "retain_intervals": null,
+    "max_tasks": 1024,
+    "spike_threshold_ns": 1000000,
+    "live_diagnosis_cluster_window_ms": 5,
+    "alert_threshold_ns": null,
+    "alert_webhook_url": null,
+    "follow_exec": true,
+    "verbose": false,
+    "faults": false,
+    "cpu_perf": false,
+    "cpu_perf_kernel": false,
+    "cpu_perf_max_tasks": 128,
+    "cpu_perf_cache_refs": false,
+    "block_io": true,
+    "stat_wait": false,
+    "runtime_slices": false,
+    "runtime_slices_max_tasks": 256,
+    "kms_timing": false,
+    "kms_card": null,
+    "kms_connector": null,
+    "kms_crtc": null,
+    "drm_fence_latency": false,
+    "drm_fence_render_card": null,
+    "drm_fence_display_card": null,
+    "drm_fence_driver": null,
+    "wayland_presentation": false,
+    "wayland_presentation_log": null,
+    "wayland_presentation_source": "external-log",
+    "dmabuf_tracking": false,
+    "dmabuf_log": null,
+    "gpu_engine_sampling": false,
+    "display_topology": false,
+    "display_path_label": null,
+    "display_render_gpu": null,
+    "display_scanout_gpu": null,
+    "display_connector": null,
+    "otlp_endpoint": null,
+    "otel_service_name": "stutter",
+    "auto_focus": false,
+    "foreground_window": false,
+    "focus_source": "heuristic",
+    "foreground_source": "auto",
+    "foreground_poll_ms": 1000,
+    "foreground_max_stale_ms": 2500,
+    "foreground_include_title": false,
+    "auto_focus_poll_ms": 1000,
+    "auto_focus_min_confidence": 0.6,
+    "auto_focus_switch_cooldown_ms": 5000,
+    "auto_focus_switch_margin": 0.2,
+    "auto_focus_required_polls": 2,
+    "auto_focus_max_roots": 4
+  },
+  "tasks": [
+    {
+      "task": 1112515,
+      "active": false,
+      "first_seen_ms": 5,
+      "last_seen_ms": 17457,
+      "removed_ms": 18006,
+      "class": "Service",
+      "process_pid": 1112498,
+      "process_comm": "vkmark",
+      "process_starttime_ticks": 16207881,
+      "task_starttime_ticks": 16207889,
+      "exe_dev": 35,
+      "exe_ino": 58751258,
+      "comm": "mangohud-amdgpu",
+      "latency": {
+        "samples": 16442,
+        "stored_samples": 1024,
+        "truncated_samples": 15418,
+        "percentile_scope": "histogram",
+        "histogram": [
+          {
+            "upper_bound_ns": 1000,
+            "count": 1852
+          },
+          {
+            "upper_bound_ns": 2000,
+            "count": 12078
+          },
+          {
+            "upper_bound_ns": 5000,
+            "count": 2310
+          },
+          {
+            "upper_bound_ns": 10000,
+            "count": 106
+          },
+          {
+            "upper_bound_ns": 20000,
+            "count": 38
+          },
+          {
+            "upper_bound_ns": 50000,
+            "count": 29
+          },
+          {
+            "upper_bound_ns": 100000,
+            "count": 4
+          },
+          {
+            "upper_bound_ns": 200000,
+            "count": 2
+          },
+          {
+            "upper_bound_ns": 500000,
+            "count": 10
+          },
+          {
+            "upper_bound_ns": 1000000,
+            "count": 3
+          },
+          {
+            "upper_bound_ns": 2000000,
+            "count": 2
+          },
+          {
+            "upper_bound_ns": 5000000,
+            "count": 8
+          },
+          {
+            "upper_bound_ns": 10000000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 20000000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 50000000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": null,
+            "count": 0
+          }
+        ],
+        "min_ns": 822,
+        "avg_ns": 3547,
+        "p95_ns": 5000,
+        "p99_ns": 10000,
+        "max_ns": 3362602,
+        "over_1ms": 10,
+        "over_2ms": 8,
+        "over_5ms": 0
+      },
+      "cpu": {
+        "busiest_cpu": 9,
+        "busiest_cpu_samples": 2478,
+        "worst_cpu": 5,
+        "worst_cpu_max_ns": 3362602,
+        "spikiest_cpu": 4,
+        "spikiest_cpu_spikes": 2,
+        "per_cpu": [
+          {
+            "cpu": 0,
+            "samples": 1680,
+            "max_ns": 238336,
+            "spikes": 0
+          },
+          {
+            "cpu": 1,
+            "samples": 2449,
+            "max_ns": 2914681,
+            "spikes": 1
+          },
+          {
+            "cpu": 2,
+            "samples": 1411,
+            "max_ns": 2255724,
+            "spikes": 1
+          },
+          {
+            "cpu": 3,
+            "samples": 574,
+            "max_ns": 1547835,
+            "spikes": 1
+          },
+          {
+            "cpu": 4,
+            "samples": 1459,
+            "max_ns": 3137356,
+            "spikes": 2
+          },
+          {
+            "cpu": 5,
+            "samples": 207,
+            "max_ns": 3362602,
+            "spikes": 2
+          },
+          {
+            "cpu": 6,
+            "samples": 2321,
+            "max_ns": 19632,
+            "spikes": 0
+          },
+          {
+            "cpu": 7,
+            "samples": 1623,
+            "max_ns": 3051867,
+            "spikes": 1
+          },
+          {
+            "cpu": 8,
+            "samples": 1239,
+            "max_ns": 36757,
+            "spikes": 0
+          },
+          {
+            "cpu": 9,
+            "samples": 2478,
+            "max_ns": 1926074,
+            "spikes": 1
+          },
+          {
+            "cpu": 10,
+            "samples": 468,
+            "max_ns": 2367923,
+            "spikes": 1
+          },
+          {
+            "cpu": 11,
+            "samples": 533,
+            "max_ns": 32141,
+            "spikes": 0
+          }
+        ]
+      },
+      "top_spikes": [
+        {
+          "class": "Service",
+          "process_pid": 1112498,
+          "process_comm": "vkmark",
+          "cpu": 5,
+          "wakeup_target_cpu": 5,
+          "prio": 125,
+          "latency_ns": 3362602,
+          "wakeup_ns": 161209302646582,
+          "switch_ns": 161209306009184,
+          "switch_prev_pid": 1039608,
+          "switch_prev_state": 0,
+          "switch_prev_state_label": "running",
+          "target_pending_wakeups": 0,
+          "observed_runnable_depth": 0,
+          "major_faults": 0,
+          "minor_faults": 0,
+          "scx_ops": null,
+          "scx_state": "disabled",
+          "scx_enable_seq": "0",
+          "waker_tid": 0,
+          "waker_comm": ""
+        },
+        {
+          "class": "Service",
+          "process_pid": 1112498,
+          "process_comm": "vkmark",
+          "cpu": 4,
+          "wakeup_target_cpu": 4,
+          "prio": 125,
+          "latency_ns": 3137356,
+          "wakeup_ns": 161212805609965,
+          "switch_ns": 161212808747321,
+          "switch_prev_pid": 1039598,
+          "switch_prev_state": 0,
+          "switch_prev_state_label": "running",
+          "target_pending_wakeups": 0,
+          "observed_runnable_depth": 0,
+          "major_faults": 0,
+          "minor_faults": 0,
+          "scx_ops": null,
+          "scx_state": "disabled",
+          "scx_enable_seq": "0",
+          "waker_tid": 0,
+          "waker_comm": ""
+        },
+        {
+          "class": "Service",
+          "process_pid": 1112498,
+          "process_comm": "vkmark",
+          "cpu": 7,
+          "wakeup_target_cpu": 7,
+          "prio": 125,
+          "latency_ns": 3051867,
+          "wakeup_ns": 161217780958848,
+          "switch_ns": 161217784010715,
+          "switch_prev_pid": 1039599,
+          "switch_prev_state": 0,
+          "switch_prev_state_label": "running",
+          "target_pending_wakeups": 0,
+          "observed_runnable_depth": 0,
+          "major_faults": 0,
+          "minor_faults": 0,
+          "scx_ops": null,
+          "scx_state": "disabled",
+          "scx_enable_seq": "0",
+          "waker_tid": 0,
+          "waker_comm": ""
+        },
+        {
+          "class": "Service",
+          "process_pid": 1112498,
+          "process_comm": "vkmark",
+          "cpu": 1,
+          "wakeup_target_cpu": 1,
+          "prio": 125,
+          "latency_ns": 2914681,
+          "wakeup_ns": 161207646432446,
+          "switch_ns": 161207649347127,
+          "switch_prev_pid": 1039606,
+          "switch_prev_state": 0,
+          "switch_prev_state_label": "running",
+          "target_pending_wakeups": 0,
+          "observed_runnable_depth": 0,
+          "major_faults": 0,
+          "minor_faults": 0,
+          "scx_ops": null,
+          "scx_state": "disabled",
+          "scx_enable_seq": "0",
+          "waker_tid": 0,
+          "waker_comm": ""
+        },
+        {
+          "class": "Service",
+          "process_pid": 1112498,
+          "process_comm": "vkmark",
+          "cpu": 5,
+          "wakeup_target_cpu": 5,
+          "prio": 125,
+          "latency_ns": 2884265,
+          "wakeup_ns": 161214468822552,
+          "switch_ns": 161214471706817,
+          "switch_prev_pid": 1033738,
+          "switch_prev_state": 128,
+          "switch_prev_state_label": "dead",
+          "target_pending_wakeups": 0,
+          "observed_runnable_depth": 0,
+          "major_faults": 0,
+          "minor_faults": 0,
+          "scx_ops": null,
+          "scx_state": "disabled",
+          "scx_enable_seq": "0",
+          "waker_tid": 0,
+          "waker_comm": ""
+        },
+        {
+          "class": "Service",
+          "process_pid": 1112498,
+          "process_comm": "vkmark",
+          "cpu": 4,
+          "wakeup_target_cpu": 5,
+          "prio": 125,
+          "latency_ns": 2743867,
+          "wakeup_ns": 161205952457521,
+          "switch_ns": 161205955201388,
+          "switch_prev_pid": 1039510,
+          "switch_prev_state": 1,
+          "switch_prev_state_label": "interruptible_sleep",
+          "target_pending_wakeups": 0,
+          "observed_runnable_depth": 0,
+          "major_faults": 0,
+          "minor_faults": 0,
+          "scx_ops": null,
+          "scx_state": "disabled",
+          "scx_enable_seq": "0",
+          "waker_tid": 0,
+          "waker_comm": "",
+          "cause_tags": [
+            "migration_or_cpu_mismatch"
+          ],
+          "primary_cause": "migration_or_cpu_mismatch"
+        },
+        {
+          "class": "Service",
+          "process_pid": 1112498,
+          "process_comm": "vkmark",
+          "cpu": 10,
+          "wakeup_target_cpu": 10,
+          "prio": 125,
+          "latency_ns": 2367923,
+          "wakeup_ns": 161210935952371,
+          "switch_ns": 161210938320294,
+          "switch_prev_pid": 1039607,
+          "switch_prev_state": 0,
+          "switch_prev_state_label": "running",
+          "target_pending_wakeups": 0,
+          "observed_runnable_depth": 0,
+          "major_faults": 0,
+          "minor_faults": 0,
+          "scx_ops": null,
+          "scx_state": "disabled",
+          "scx_enable_seq": "0",
+          "waker_tid": 0,
+          "waker_comm": ""
+        },
+        {
+          "class": "Service",
+          "process_pid": 1112498,
+          "process_comm": "vkmark",
+          "cpu": 2,
+          "wakeup_target_cpu": 2,
+          "prio": 125,
+          "latency_ns": 2255724,
+          "wakeup_ns": 161216100754530,
+          "switch_ns": 161216103010254,
+          "switch_prev_pid": 1039601,
+          "switch_prev_state": 0,
+          "switch_prev_state_label": "running",
+          "target_pending_wakeups": 0,
+          "observed_runnable_depth": 0,
+          "major_faults": 0,
+          "minor_faults": 0,
+          "scx_ops": null,
+          "scx_state": "disabled",
+          "scx_enable_seq": "0",
+          "waker_tid": 0,
+          "waker_comm": ""
+        },
+        {
+          "class": "Service",
+          "process_pid": 1112498,
+          "process_comm": "vkmark",
+          "cpu": 9,
+          "wakeup_target_cpu": 9,
+          "prio": 125,
+          "latency_ns": 1926074,
+          "wakeup_ns": 161219491053722,
+          "switch_ns": 161219492979796,
+          "switch_prev_pid": 1039602,
+          "switch_prev_state": 0,
+          "switch_prev_state_label": "running",
+          "target_pending_wakeups": 0,
+          "observed_runnable_depth": 0,
+          "major_faults": 0,
+          "minor_faults": 0,
+          "scx_ops": null,
+          "scx_state": "disabled",
+          "scx_enable_seq": "0",
+          "waker_tid": 0,
+          "waker_comm": ""
+        },
+        {
+          "class": "Service",
+          "process_pid": 1112498,
+          "process_comm": "vkmark",
+          "cpu": 3,
+          "wakeup_target_cpu": 3,
+          "prio": 125,
+          "latency_ns": 1547835,
+          "wakeup_ns": 161206034458574,
+          "switch_ns": 161206036006409,
+          "switch_prev_pid": 1039602,
+          "switch_prev_state": 0,
+          "switch_prev_state_label": "running",
+          "target_pending_wakeups": 0,
+          "observed_runnable_depth": 0,
+          "major_faults": 0,
+          "minor_faults": 0,
+          "scx_ops": null,
+          "scx_state": "disabled",
+          "scx_enable_seq": "0",
+          "waker_tid": 0,
+          "waker_comm": ""
+        }
+      ],
+      "migration_count": 346,
+      "cross_numa_migrations": 0,
+      "top_wakers": [
+        {
+          "waker_tid": 55225,
+          "waker_comm": "?",
+          "count": 1
+        },
+        {
+          "waker_tid": 255641,
+          "waker_comm": "?",
+          "count": 1
+        },
+        {
+          "waker_tid": 631891,
+          "waker_comm": "?",
+          "count": 1
+        },
+        {
+          "waker_tid": 1039437,
+          "waker_comm": "?",
+          "count": 1
+        },
+        {
+          "waker_tid": 1039474,
+          "waker_comm": "?",
+          "count": 1
+        },
+        {
+          "waker_tid": 1039598,
+          "waker_comm": "?",
+          "count": 15
+        },
+        {
+          "waker_tid": 1039599,
+          "waker_comm": "?",
+          "count": 3
+        },
+        {
+          "waker_tid": 1039600,
+          "waker_comm": "?",
+          "count": 12
+        },
+        {
+          "waker_tid": 1039601,
+          "waker_comm": "?",
+          "count": 4
+        },
+        {
+          "waker_tid": 1039602,
+          "waker_comm": "?",
+          "count": 18
+        },
+        {
+          "waker_tid": 1039603,
+          "waker_comm": "?",
+          "count": 2
+        },
+        {
+          "waker_tid": 1039604,
+          "waker_comm": "?",
+          "count": 11
+        },
+        {
+          "waker_tid": 1039605,
+          "waker_comm": "?",
+          "count": 3
+        },
+        {
+          "waker_tid": 1039606,
+          "waker_comm": "?",
+          "count": 3
+        },
+        {
+          "waker_tid": 1039607,
+          "waker_comm": "?",
+          "count": 6
+        },
+        {
+          "waker_tid": 1039608,
+          "waker_comm": "?",
+          "count": 6
+        },
+        {
+          "waker_tid": 1112498,
+          "waker_comm": "vkmark",
+          "count": 3
+        },
+        {
+          "waker_tid": 1113851,
+          "waker_comm": "?",
+          "count": 1
+        },
+        {
+          "waker_tid": 1115723,
+          "waker_comm": "?",
+          "count": 1
+        }
+      ],
+      "sched_policy": "SCHED_NORMAL",
+      "stat_wait_sum_ns": null,
+      "stat_wait_sum_ns_saturated": false,
+      "stat_wait_count": null
+    },
+    {
+      "task": 1112531,
+      "active": false,
+      "first_seen_ms": 5,
+      "last_seen_ms": 17455,
+      "removed_ms": 18006,
+      "class": "Service",
+      "process_pid": 1112498,
+      "process_comm": "vkmark",
+      "process_starttime_ticks": 16207881,
+      "task_starttime_ticks": 16207891,
+      "exe_dev": 35,
+      "exe_ino": 58751258,
+      "comm": "WSI swapchain e",
+      "latency": {
+        "samples": 5402,
+        "stored_samples": 1024,
+        "truncated_samples": 4378,
+        "percentile_scope": "histogram",
+        "histogram": [
+          {
+            "upper_bound_ns": 1000,
+            "count": 973
+          },
+          {
+            "upper_bound_ns": 2000,
+            "count": 3596
+          },
+          {
+            "upper_bound_ns": 5000,
+            "count": 764
+          },
+          {
+            "upper_bound_ns": 10000,
+            "count": 14
+          },
+          {
+            "upper_bound_ns": 20000,
+            "count": 28
+          },
+          {
+            "upper_bound_ns": 50000,
+            "count": 21
+          },
+          {
+            "upper_bound_ns": 100000,
+            "count": 3
+          },
+          {
+            "upper_bound_ns": 200000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 500000,
+            "count": 2
+          },
+          {
+            "upper_bound_ns": 1000000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 2000000,
+            "count": 1
+          },
+          {
+            "upper_bound_ns": 5000000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 10000000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 20000000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 50000000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": null,
+            "count": 0
+          }
+        ],
+        "min_ns": 635,
+        "avg_ns": 2105,
+        "p95_ns": 5000,
+        "p99_ns": 20000,
+        "max_ns": 1209616,
+        "over_1ms": 1,
+        "over_2ms": 0,
+        "over_5ms": 0
+      },
+      "cpu": {
+        "busiest_cpu": 2,
+        "busiest_cpu_samples": 981,
+        "worst_cpu": 10,
+        "worst_cpu_max_ns": 1209616,
+        "spikiest_cpu": 10,
+        "spikiest_cpu_spikes": 1,
+        "per_cpu": [
+          {
+            "cpu": 0,
+            "samples": 103,
+            "max_ns": 12914,
+            "spikes": 0
+          },
+          {
+            "cpu": 1,
+            "samples": 942,
+            "max_ns": 20692,
+            "spikes": 0
+          },
+          {
+            "cpu": 2,
+            "samples": 981,
+            "max_ns": 17717,
+            "spikes": 0
+          },
+          {
+            "cpu": 3,
+            "samples": 190,
+            "max_ns": 15006,
+            "spikes": 0
+          },
+          {
+            "cpu": 4,
+            "samples": 460,
+            "max_ns": 21116,
+            "spikes": 0
+          },
+          {
+            "cpu": 5,
+            "samples": 173,
+            "max_ns": 290970,
+            "spikes": 0
+          },
+          {
+            "cpu": 6,
+            "samples": 458,
+            "max_ns": 13943,
+            "spikes": 0
+          },
+          {
+            "cpu": 7,
+            "samples": 189,
+            "max_ns": 64571,
+            "spikes": 0
+          },
+          {
+            "cpu": 8,
+            "samples": 423,
+            "max_ns": 24676,
+            "spikes": 0
+          },
+          {
+            "cpu": 9,
+            "samples": 201,
+            "max_ns": 19536,
+            "spikes": 0
+          },
+          {
+            "cpu": 10,
+            "samples": 946,
+            "max_ns": 1209616,
+            "spikes": 1
+          },
+          {
+            "cpu": 11,
+            "samples": 336,
+            "max_ns": 399174,
+            "spikes": 0
+          }
+        ]
+      },
+      "top_spikes": [
+        {
+          "class": "Service",
+          "process_pid": 1112498,
+          "process_comm": "vkmark",
+          "cpu": 10,
+          "wakeup_target_cpu": 10,
+          "prio": 125,
+          "latency_ns": 1209616,
+          "wakeup_ns": 161205953518538,
+          "switch_ns": 161205954728154,
+          "switch_prev_pid": 1033736,
+          "switch_prev_state": 2,
+          "switch_prev_state_label": "uninterruptible_sleep",
+          "target_pending_wakeups": 0,
+          "observed_runnable_depth": 0,
+          "major_faults": 0,
+          "minor_faults": 0,
+          "scx_ops": null,
+          "scx_state": "disabled",
+          "scx_enable_seq": "0",
+          "waker_tid": 0,
+          "waker_comm": ""
+        }
+      ],
+      "migration_count": 236,
+      "cross_numa_migrations": 0,
+      "top_wakers": [
+        {
+          "waker_tid": 255700,
+          "waker_comm": "?",
+          "count": 19
+        },
+        {
+          "waker_tid": 1112530,
+          "waker_comm": "WSI swapchain q",
+          "count": 22
+        }
+      ],
+      "sched_policy": "SCHED_NORMAL",
+      "stat_wait_sum_ns": null,
+      "stat_wait_sum_ns_saturated": false,
+      "stat_wait_count": null
+    },
+    {
+      "task": 1112530,
+      "active": false,
+      "first_seen_ms": 5,
+      "last_seen_ms": 17450,
+      "removed_ms": 18006,
+      "class": "Service",
+      "process_pid": 1112498,
+      "process_comm": "vkmark",
+      "process_starttime_ticks": 16207881,
+      "task_starttime_ticks": 16207891,
+      "exe_dev": 35,
+      "exe_ino": 58751258,
+      "comm": "WSI swapchain q",
+      "latency": {
+        "samples": 2702,
+        "stored_samples": 1024,
+        "truncated_samples": 1678,
+        "percentile_scope": "histogram",
+        "histogram": [
+          {
+            "upper_bound_ns": 1000,
+            "count": 82
+          },
+          {
+            "upper_bound_ns": 2000,
+            "count": 1878
+          },
+          {
+            "upper_bound_ns": 5000,
+            "count": 688
+          },
+          {
+            "upper_bound_ns": 10000,
+            "count": 13
+          },
+          {
+            "upper_bound_ns": 20000,
+            "count": 22
+          },
+          {
+            "upper_bound_ns": 50000,
+            "count": 16
+          },
+          {
+            "upper_bound_ns": 100000,
+            "count": 3
+          },
+          {
+            "upper_bound_ns": 200000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 500000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 1000000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 2000000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 5000000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 10000000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 20000000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 50000000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": null,
+            "count": 0
+          }
+        ],
+        "min_ns": 702,
+        "avg_ns": 2166,
+        "p95_ns": 5000,
+        "p99_ns": 20000,
+        "max_ns": 65181,
+        "over_1ms": 0,
+        "over_2ms": 0,
+        "over_5ms": 0
+      },
+      "cpu": {
+        "busiest_cpu": 4,
+        "busiest_cpu_samples": 603,
+        "worst_cpu": 9,
+        "worst_cpu_max_ns": 65181,
+        "spikiest_cpu": null,
+        "spikiest_cpu_spikes": 0,
+        "per_cpu": [
+          {
+            "cpu": 0,
+            "samples": 415,
+            "max_ns": 27381,
+            "spikes": 0
+          },
+          {
+            "cpu": 1,
+            "samples": 312,
+            "max_ns": 18350,
+            "spikes": 0
+          },
+          {
+            "cpu": 2,
+            "samples": 141,
+            "max_ns": 19897,
+            "spikes": 0
+          },
+          {
+            "cpu": 3,
+            "samples": 18,
+            "max_ns": 26826,
+            "spikes": 0
+          },
+          {
+            "cpu": 4,
+            "samples": 603,
+            "max_ns": 63514,
+            "spikes": 0
+          },
+          {
+            "cpu": 5,
+            "samples": 109,
+            "max_ns": 40438,
+            "spikes": 0
+          },
+          {
+            "cpu": 6,
+            "samples": 462,
+            "max_ns": 49724,
+            "spikes": 0
+          },
+          {
+            "cpu": 7,
+            "samples": 44,
+            "max_ns": 18257,
+            "spikes": 0
+          },
+          {
+            "cpu": 8,
+            "samples": 216,
+            "max_ns": 21063,
+            "spikes": 0
+          },
+          {
+            "cpu": 9,
+            "samples": 130,
+            "max_ns": 65181,
+            "spikes": 0
+          },
+          {
+            "cpu": 10,
+            "samples": 170,
+            "max_ns": 44359,
+            "spikes": 0
+          },
+          {
+            "cpu": 11,
+            "samples": 82,
+            "max_ns": 21719,
+            "spikes": 0
+          }
+        ]
+      },
+      "top_spikes": [],
+      "migration_count": 205,
+      "cross_numa_migrations": 0,
+      "top_wakers": [
+        {
+          "waker_tid": 1112531,
+          "waker_comm": "WSI swapchain e",
+          "count": 19
+        }
+      ],
+      "sched_policy": "SCHED_NORMAL",
+      "stat_wait_sum_ns": null,
+      "stat_wait_sum_ns_saturated": false,
+      "stat_wait_count": null
+    },
+    {
+      "task": 1112498,
+      "active": true,
+      "first_seen_ms": 5,
+      "last_seen_ms": 17466,
+      "removed_ms": null,
+      "class": "Service",
+      "process_pid": 1112498,
+      "process_comm": "vkmark",
+      "process_starttime_ticks": 16207881,
+      "task_starttime_ticks": 16207881,
+      "exe_dev": 35,
+      "exe_ino": 58751258,
+      "comm": "vkmark",
+      "allowed_cpus": "0-11",
+      "latency": {
+        "samples": 3895,
+        "stored_samples": 1024,
+        "truncated_samples": 2871,
+        "percentile_scope": "histogram",
+        "histogram": [
+          {
+            "upper_bound_ns": 1000,
+            "count": 1009
+          },
+          {
+            "upper_bound_ns": 2000,
+            "count": 2299
+          },
+          {
+            "upper_bound_ns": 5000,
+            "count": 556
+          },
+          {
+            "upper_bound_ns": 10000,
+            "count": 5
+          },
+          {
+            "upper_bound_ns": 20000,
+            "count": 15
+          },
+          {
+            "upper_bound_ns": 50000,
+            "count": 11
+          },
+          {
+            "upper_bound_ns": 100000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 200000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 500000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 1000000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 2000000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 5000000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 10000000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 20000000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 50000000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": null,
+            "count": 0
+          }
+        ],
+        "min_ns": 611,
+        "avg_ns": 1558,
+        "p95_ns": 5000,
+        "p99_ns": 5000,
+        "max_ns": 42423,
+        "over_1ms": 0,
+        "over_2ms": 0,
+        "over_5ms": 0
+      },
+      "cpu": {
+        "busiest_cpu": 1,
+        "busiest_cpu_samples": 905,
+        "worst_cpu": 10,
+        "worst_cpu_max_ns": 42423,
+        "spikiest_cpu": null,
+        "spikiest_cpu_spikes": 0,
+        "per_cpu": [
+          {
+            "cpu": 0,
+            "samples": 885,
+            "max_ns": 19684,
+            "spikes": 0
+          },
+          {
+            "cpu": 1,
+            "samples": 905,
+            "max_ns": 15851,
+            "spikes": 0
+          },
+          {
+            "cpu": 2,
+            "samples": 242,
+            "max_ns": 3848,
+            "spikes": 0
+          },
+          {
+            "cpu": 3,
+            "samples": 2,
+            "max_ns": 2449,
+            "spikes": 0
+          },
+          {
+            "cpu": 4,
+            "samples": 133,
+            "max_ns": 21428,
+            "spikes": 0
+          },
+          {
+            "cpu": 5,
+            "samples": 10,
+            "max_ns": 3745,
+            "spikes": 0
+          },
+          {
+            "cpu": 6,
+            "samples": 397,
+            "max_ns": 25453,
+            "spikes": 0
+          },
+          {
+            "cpu": 7,
+            "samples": 143,
+            "max_ns": 21444,
+            "spikes": 0
+          },
+          {
+            "cpu": 8,
+            "samples": 1,
+            "max_ns": 2829,
+            "spikes": 0
+          },
+          {
+            "cpu": 9,
+            "samples": 243,
+            "max_ns": 17593,
+            "spikes": 0
+          },
+          {
+            "cpu": 10,
+            "samples": 247,
+            "max_ns": 42423,
+            "spikes": 0
+          },
+          {
+            "cpu": 11,
+            "samples": 687,
+            "max_ns": 20222,
+            "spikes": 0
+          }
+        ]
+      },
+      "top_spikes": [],
+      "migration_count": 118,
+      "cross_numa_migrations": 0,
+      "top_wakers": [
+        {
+          "waker_tid": 255641,
+          "waker_comm": "?",
+          "count": 13
+        },
+        {
+          "waker_tid": 255700,
+          "waker_comm": "?",
+          "count": 4
+        }
+      ],
+      "sched_policy": "SCHED_NORMAL",
+      "stat_wait_sum_ns": null,
+      "stat_wait_sum_ns_saturated": false,
+      "stat_wait_count": null
+    },
+    {
+      "task": 1112532,
+      "active": false,
+      "first_seen_ms": 5,
+      "last_seen_ms": 17466,
+      "removed_ms": 18006,
+      "class": "Service",
+      "process_pid": 1112498,
+      "process_comm": "vkmark",
+      "process_starttime_ticks": 16207881,
+      "task_starttime_ticks": 16207893,
+      "exe_dev": 35,
+      "exe_ino": 58751258,
+      "comm": "mangohud-hwinfo",
+      "latency": {
+        "samples": 67,
+        "stored_samples": 67,
+        "truncated_samples": 0,
+        "percentile_scope": "exact",
+        "histogram": [
+          {
+            "upper_bound_ns": 1000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 2000,
+            "count": 44
+          },
+          {
+            "upper_bound_ns": 5000,
+            "count": 23
+          },
+          {
+            "upper_bound_ns": 10000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 20000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 50000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 100000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 200000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 500000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 1000000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 2000000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 5000000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 10000000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 20000000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 50000000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": null,
+            "count": 0
+          }
+        ],
+        "min_ns": 1021,
+        "avg_ns": 1826,
+        "p95_ns": 2962,
+        "p99_ns": 3519,
+        "max_ns": 3519,
+        "over_1ms": 0,
+        "over_2ms": 0,
+        "over_5ms": 0
+      },
+      "cpu": {
+        "busiest_cpu": 2,
+        "busiest_cpu_samples": 24,
+        "worst_cpu": 2,
+        "worst_cpu_max_ns": 3519,
+        "spikiest_cpu": null,
+        "spikiest_cpu_spikes": 0,
+        "per_cpu": [
+          {
+            "cpu": 0,
+            "samples": 4,
+            "max_ns": 3101,
+            "spikes": 0
+          },
+          {
+            "cpu": 1,
+            "samples": 8,
+            "max_ns": 2962,
+            "spikes": 0
+          },
+          {
+            "cpu": 2,
+            "samples": 24,
+            "max_ns": 3519,
+            "spikes": 0
+          },
+          {
+            "cpu": 4,
+            "samples": 20,
+            "max_ns": 2843,
+            "spikes": 0
+          },
+          {
+            "cpu": 10,
+            "samples": 11,
+            "max_ns": 2725,
+            "spikes": 0
+          }
+        ]
+      },
+      "top_spikes": [],
+      "migration_count": 12,
+      "cross_numa_migrations": 0,
+      "top_wakers": [],
+      "sched_policy": "SCHED_NORMAL",
+      "stat_wait_sum_ns": null,
+      "stat_wait_sum_ns_saturated": false,
+      "stat_wait_count": null
+    },
+    {
+      "task": 1112514,
+      "active": false,
+      "first_seen_ms": 5,
+      "last_seen_ms": 17456,
+      "removed_ms": 18006,
+      "class": "Service",
+      "process_pid": 1112498,
+      "process_comm": "vkmark",
+      "process_starttime_ticks": 16207881,
+      "task_starttime_ticks": 16207889,
+      "exe_dev": 35,
+      "exe_ino": 58751258,
+      "comm": "vkmark:disk$0",
+      "latency": {
+        "samples": 2,
+        "stored_samples": 2,
+        "truncated_samples": 0,
+        "percentile_scope": "exact",
+        "histogram": [
+          {
+            "upper_bound_ns": 1000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 2000,
+            "count": 1
+          },
+          {
+            "upper_bound_ns": 5000,
+            "count": 1
+          },
+          {
+            "upper_bound_ns": 10000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 20000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 50000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 100000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 200000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 500000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 1000000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 2000000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 5000000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 10000000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 20000000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 50000000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": null,
+            "count": 0
+          }
+        ],
+        "min_ns": 1703,
+        "avg_ns": 2258,
+        "p95_ns": 2813,
+        "p99_ns": 2813,
+        "max_ns": 2813,
+        "over_1ms": 0,
+        "over_2ms": 0,
+        "over_5ms": 0
+      },
+      "cpu": {
+        "busiest_cpu": 0,
+        "busiest_cpu_samples": 2,
+        "worst_cpu": 0,
+        "worst_cpu_max_ns": 2813,
+        "spikiest_cpu": null,
+        "spikiest_cpu_spikes": 0,
+        "per_cpu": [
+          {
+            "cpu": 0,
+            "samples": 2,
+            "max_ns": 2813,
+            "spikes": 0
+          }
+        ]
+      },
+      "top_spikes": [],
+      "migration_count": 0,
+      "cross_numa_migrations": 0,
+      "top_wakers": [],
+      "sched_policy": "SCHED_BATCH",
+      "stat_wait_sum_ns": null,
+      "stat_wait_sum_ns_saturated": false,
+      "stat_wait_count": null
+    },
+    {
+      "task": 1112513,
+      "active": false,
+      "first_seen_ms": 5,
+      "last_seen_ms": 17456,
+      "removed_ms": 18006,
+      "class": "Service",
+      "process_pid": 1112498,
+      "process_comm": "vkmark",
+      "process_starttime_ticks": 16207881,
+      "task_starttime_ticks": 16207889,
+      "exe_dev": 35,
+      "exe_ino": 58751258,
+      "comm": "vkmark:disk$0",
+      "latency": {
+        "samples": 2,
+        "stored_samples": 2,
+        "truncated_samples": 0,
+        "percentile_scope": "exact",
+        "histogram": [
+          {
+            "upper_bound_ns": 1000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 2000,
+            "count": 1
+          },
+          {
+            "upper_bound_ns": 5000,
+            "count": 1
+          },
+          {
+            "upper_bound_ns": 10000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 20000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 50000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 100000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 200000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 500000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 1000000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 2000000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 5000000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 10000000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 20000000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": 50000000,
+            "count": 0
+          },
+          {
+            "upper_bound_ns": null,
+            "count": 0
+          }
+        ],
+        "min_ns": 1531,
+        "avg_ns": 2111,
+        "p95_ns": 2691,
+        "p99_ns": 2691,
+        "max_ns": 2691,
+        "over_1ms": 0,
+        "over_2ms": 0,
+        "over_5ms": 0
+      },
+      "cpu": {
+        "busiest_cpu": 2,
+        "busiest_cpu_samples": 1,
+        "worst_cpu": 3,
+        "worst_cpu_max_ns": 2691,
+        "spikiest_cpu": null,
+        "spikiest_cpu_spikes": 0,
+        "per_cpu": [
+          {
+            "cpu": 2,
+            "samples": 1,
+            "max_ns": 1531,
+            "spikes": 0
+          },
+          {
+            "cpu": 3,
+            "samples": 1,
+            "max_ns": 2691,
+            "spikes": 0
+          }
+        ]
+      },
+      "top_spikes": [],
+      "migration_count": 1,
+      "cross_numa_migrations": 0,
+      "top_wakers": [],
+      "sched_policy": "SCHED_BATCH",
+      "stat_wait_sum_ns": null,
+      "stat_wait_sum_ns_saturated": false,
+      "stat_wait_count": null
+    }
+  ],
+  "top_spikes": [
+    {
+      "task": 1112515,
+      "active": false,
+      "class": "Service",
+      "process_pid": 1112498,
+      "process_comm": "vkmark",
+      "comm": "mangohud-amdgpu",
+      "cpu": 5,
+      "wakeup_target_cpu": 5,
+      "prio": 125,
+      "latency_ns": 3362602,
+      "wakeup_ns": 161209302646582,
+      "switch_ns": 161209306009184,
+      "switch_prev_pid": 1039608,
+      "switch_prev_state": 0,
+      "switch_prev_state_label": "running",
+      "target_pending_wakeups": 0,
+      "observed_runnable_depth": 0,
+      "major_faults": 0,
+      "minor_faults": 0,
+      "scx_ops": null,
+      "scx_state": null,
+      "scx_enable_seq": null,
+      "waker_tid": 0,
+      "waker_comm": ""
+    },
+    {
+      "task": 1112515,
+      "active": false,
+      "class": "Service",
+      "process_pid": 1112498,
+      "process_comm": "vkmark",
+      "comm": "mangohud-amdgpu",
+      "cpu": 4,
+      "wakeup_target_cpu": 4,
+      "prio": 125,
+      "latency_ns": 3137356,
+      "wakeup_ns": 161212805609965,
+      "switch_ns": 161212808747321,
+      "switch_prev_pid": 1039598,
+      "switch_prev_state": 0,
+      "switch_prev_state_label": "running",
+      "target_pending_wakeups": 0,
+      "observed_runnable_depth": 0,
+      "major_faults": 0,
+      "minor_faults": 0,
+      "scx_ops": null,
+      "scx_state": null,
+      "scx_enable_seq": null,
+      "waker_tid": 0,
+      "waker_comm": ""
+    },
+    {
+      "task": 1112515,
+      "active": false,
+      "class": "Service",
+      "process_pid": 1112498,
+      "process_comm": "vkmark",
+      "comm": "mangohud-amdgpu",
+      "cpu": 7,
+      "wakeup_target_cpu": 7,
+      "prio": 125,
+      "latency_ns": 3051867,
+      "wakeup_ns": 161217780958848,
+      "switch_ns": 161217784010715,
+      "switch_prev_pid": 1039599,
+      "switch_prev_state": 0,
+      "switch_prev_state_label": "running",
+      "target_pending_wakeups": 0,
+      "observed_runnable_depth": 0,
+      "major_faults": 0,
+      "minor_faults": 0,
+      "scx_ops": null,
+      "scx_state": null,
+      "scx_enable_seq": null,
+      "waker_tid": 0,
+      "waker_comm": ""
+    },
+    {
+      "task": 1112515,
+      "active": false,
+      "class": "Service",
+      "process_pid": 1112498,
+      "process_comm": "vkmark",
+      "comm": "mangohud-amdgpu",
+      "cpu": 1,
+      "wakeup_target_cpu": 1,
+      "prio": 125,
+      "latency_ns": 2914681,
+      "wakeup_ns": 161207646432446,
+      "switch_ns": 161207649347127,
+      "switch_prev_pid": 1039606,
+      "switch_prev_state": 0,
+      "switch_prev_state_label": "running",
+      "target_pending_wakeups": 0,
+      "observed_runnable_depth": 0,
+      "major_faults": 0,
+      "minor_faults": 0,
+      "scx_ops": null,
+      "scx_state": null,
+      "scx_enable_seq": null,
+      "waker_tid": 0,
+      "waker_comm": ""
+    },
+    {
+      "task": 1112515,
+      "active": false,
+      "class": "Service",
+      "process_pid": 1112498,
+      "process_comm": "vkmark",
+      "comm": "mangohud-amdgpu",
+      "cpu": 5,
+      "wakeup_target_cpu": 5,
+      "prio": 125,
+      "latency_ns": 2884265,
+      "wakeup_ns": 161214468822552,
+      "switch_ns": 161214471706817,
+      "switch_prev_pid": 1033738,
+      "switch_prev_state": 128,
+      "switch_prev_state_label": "dead",
+      "target_pending_wakeups": 0,
+      "observed_runnable_depth": 0,
+      "major_faults": 0,
+      "minor_faults": 0,
+      "scx_ops": null,
+      "scx_state": null,
+      "scx_enable_seq": null,
+      "waker_tid": 0,
+      "waker_comm": ""
+    },
+    {
+      "task": 1112515,
+      "active": false,
+      "class": "Service",
+      "process_pid": 1112498,
+      "process_comm": "vkmark",
+      "comm": "mangohud-amdgpu",
+      "cpu": 4,
+      "wakeup_target_cpu": 5,
+      "prio": 125,
+      "latency_ns": 2743867,
+      "wakeup_ns": 161205952457521,
+      "switch_ns": 161205955201388,
+      "switch_prev_pid": 1039510,
+      "switch_prev_state": 1,
+      "switch_prev_state_label": "interruptible_sleep",
+      "target_pending_wakeups": 0,
+      "observed_runnable_depth": 0,
+      "major_faults": 0,
+      "minor_faults": 0,
+      "scx_ops": null,
+      "scx_state": null,
+      "scx_enable_seq": null,
+      "waker_tid": 0,
+      "waker_comm": ""
+    },
+    {
+      "task": 1112515,
+      "active": false,
+      "class": "Service",
+      "process_pid": 1112498,
+      "process_comm": "vkmark",
+      "comm": "mangohud-amdgpu",
+      "cpu": 10,
+      "wakeup_target_cpu": 10,
+      "prio": 125,
+      "latency_ns": 2367923,
+      "wakeup_ns": 161210935952371,
+      "switch_ns": 161210938320294,
+      "switch_prev_pid": 1039607,
+      "switch_prev_state": 0,
+      "switch_prev_state_label": "running",
+      "target_pending_wakeups": 0,
+      "observed_runnable_depth": 0,
+      "major_faults": 0,
+      "minor_faults": 0,
+      "scx_ops": null,
+      "scx_state": null,
+      "scx_enable_seq": null,
+      "waker_tid": 0,
+      "waker_comm": ""
+    },
+    {
+      "task": 1112515,
+      "active": false,
+      "class": "Service",
+      "process_pid": 1112498,
+      "process_comm": "vkmark",
+      "comm": "mangohud-amdgpu",
+      "cpu": 2,
+      "wakeup_target_cpu": 2,
+      "prio": 125,
+      "latency_ns": 2255724,
+      "wakeup_ns": 161216100754530,
+      "switch_ns": 161216103010254,
+      "switch_prev_pid": 1039601,
+      "switch_prev_state": 0,
+      "switch_prev_state_label": "running",
+      "target_pending_wakeups": 0,
+      "observed_runnable_depth": 0,
+      "major_faults": 0,
+      "minor_faults": 0,
+      "scx_ops": null,
+      "scx_state": null,
+      "scx_enable_seq": null,
+      "waker_tid": 0,
+      "waker_comm": ""
+    },
+    {
+      "task": 1112515,
+      "active": false,
+      "class": "Service",
+      "process_pid": 1112498,
+      "process_comm": "vkmark",
+      "comm": "mangohud-amdgpu",
+      "cpu": 9,
+      "wakeup_target_cpu": 9,
+      "prio": 125,
+      "latency_ns": 1926074,
+      "wakeup_ns": 161219491053722,
+      "switch_ns": 161219492979796,
+      "switch_prev_pid": 1039602,
+      "switch_prev_state": 0,
+      "switch_prev_state_label": "running",
+      "target_pending_wakeups": 0,
+      "observed_runnable_depth": 0,
+      "major_faults": 0,
+      "minor_faults": 0,
+      "scx_ops": null,
+      "scx_state": null,
+      "scx_enable_seq": null,
+      "waker_tid": 0,
+      "waker_comm": ""
+    },
+    {
+      "task": 1112515,
+      "active": false,
+      "class": "Service",
+      "process_pid": 1112498,
+      "process_comm": "vkmark",
+      "comm": "mangohud-amdgpu",
+      "cpu": 3,
+      "wakeup_target_cpu": 3,
+      "prio": 125,
+      "latency_ns": 1547835,
+      "wakeup_ns": 161206034458574,
+      "switch_ns": 161206036006409,
+      "switch_prev_pid": 1039602,
+      "switch_prev_state": 0,
+      "switch_prev_state_label": "running",
+      "target_pending_wakeups": 0,
+      "observed_runnable_depth": 0,
+      "major_faults": 0,
+      "minor_faults": 0,
+      "scx_ops": null,
+      "scx_state": null,
+      "scx_enable_seq": null,
+      "waker_tid": 0,
+      "waker_comm": ""
+    },
+    {
+      "task": 1112531,
+      "active": false,
+      "class": "Service",
+      "process_pid": 1112498,
+      "process_comm": "vkmark",
+      "comm": "WSI swapchain e",
+      "cpu": 10,
+      "wakeup_target_cpu": 10,
+      "prio": 125,
+      "latency_ns": 1209616,
+      "wakeup_ns": 161205953518538,
+      "switch_ns": 161205954728154,
+      "switch_prev_pid": 1033736,
+      "switch_prev_state": 2,
+      "switch_prev_state_label": "uninterruptible_sleep",
+      "target_pending_wakeups": 0,
+      "observed_runnable_depth": 0,
+      "major_faults": 0,
+      "minor_faults": 0,
+      "scx_ops": null,
+      "scx_state": null,
+      "scx_enable_seq": null,
+      "waker_tid": 0,
+      "waker_comm": ""
+    }
+  ]
+}

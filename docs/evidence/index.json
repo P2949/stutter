@@ -1,32 +1,30 @@
 {
-  "schema_version": 1,
-  "note": "Index of portable evidence bundles verified with `xtask evidence-verify`. Bundles are retained by the operator; entries pin them by manifest digest. Only PASS entries count toward coverage.",
   "entries": [
     {
-      "suite": "live_affinity",
-      "evidence_kind": "controlled_real",
-      "status": "PASS",
       "capture_id": "live_affinity-ad5e04a-1792683041028",
-      "source_commit": "ad5e04af1b36777fd8d62520db89b22824d53d0f",
-      "manifest_sha256": "34af22a6465209126549f680a340bb9e0d52a5ba80e9cd64224bef2380151eba",
       "covers": {
         "providers": [
           "cpu_affinity_profile"
         ]
-      }
+      },
+      "evidence_kind": "controlled_real",
+      "manifest_sha256": "34af22a6465209126549f680a340bb9e0d52a5ba80e9cd64224bef2380151eba",
+      "source_commit": "ad5e04af1b36777fd8d62520db89b22824d53d0f",
+      "status": "PASS",
+      "suite": "live_affinity"
     },
     {
-      "suite": "live_recovery",
-      "evidence_kind": "controlled_real",
-      "status": "PASS",
       "capture_id": "live_recovery-ad5e04a-1792683043204",
-      "source_commit": "ad5e04af1b36777fd8d62520db89b22824d53d0f",
-      "manifest_sha256": "6708a9af10aa5b9d1be5f775bba127de89fb6a6c9367d62fcfbd7024ab4c8aa1",
       "covers": {
         "providers": [
           "cpu_affinity_profile"
         ]
-      }
+      },
+      "evidence_kind": "controlled_real",
+      "manifest_sha256": "6708a9af10aa5b9d1be5f775bba127de89fb6a6c9367d62fcfbd7024ab4c8aa1",
+      "source_commit": "ad5e04af1b36777fd8d62520db89b22824d53d0f",
+      "status": "PASS",
+      "suite": "live_recovery"
     },
     {
       "capture_id": "live_suspend_resume-7a43864-1792693309208",
@@ -40,6 +38,98 @@
       "source_commit": "7a43864a1b7664137101fe51c05f30fcc870d9f9",
       "status": "PASS",
       "suite": "live_suspend_resume"
+    },
+    {
+      "capture_id": "live_game_runnable-c8b22a8-1792804437919",
+      "covers": {
+        "objectives": [
+          "GameRunnableLatency"
+        ]
+      },
+      "evidence_kind": "controlled_real",
+      "manifest_sha256": "ce44913582aa8fd4411acba7d8aec05ea07451ce64b7d43ef0c06823fb92b7ad",
+      "source_commit": "c8b22a80b99bf5ab4eac27b7a0248b307e0d1bba",
+      "status": "PASS",
+      "suite": "live_game_runnable"
+    },
+    {
+      "capture_id": "live_kernel_compat-c8b22a8-1792804516696",
+      "compatibility": "ObservedDegraded",
+      "covers": {
+        "kernel_capabilities": [
+          "scheduler_runnable_latency"
+        ]
+      },
+      "evidence_kind": "controlled_real",
+      "kernel_release": "6.18.55",
+      "manifest_sha256": "4fa1bdc37254ce11115902bfba6297794bae85fff300e368c5203b0f255c96a8",
+      "source_commit": "c8b22a80b99bf5ab4eac27b7a0248b307e0d1bba",
+      "status": "PASS",
+      "suite": "live_kernel_compat"
+    },
+    {
+      "capture_id": "live_kernel_compat-c8b22a8-1792813652957",
+      "compatibility": "ObservedIncompatible",
+      "covers": {},
+      "evidence_kind": "controlled_real",
+      "kernel_release": "6.12.112",
+      "manifest_sha256": "286dc609464eb5ad692a0675b4b4020a0cd76fe37757b5a935799c700b6b5ebf",
+      "source_commit": "c8b22a80b99bf5ab4eac27b7a0248b307e0d1bba",
+      "status": "FAIL",
+      "suite": "live_kernel_compat"
+    },
+    {
+      "capture_id": "live_kernel_compat-c8b22a8-1792813803348",
+      "compatibility": "ObservedDegraded",
+      "covers": {
+        "kernel_capabilities": [
+          "scheduler_runnable_latency"
+        ]
+      },
+      "evidence_kind": "controlled_real",
+      "kernel_release": "7.2.9",
+      "manifest_sha256": "a4f55485090c6a5d7b56a6e165bb3d68b1e280f2e0d0319ebb8ba4150a3e7451",
+      "source_commit": "c8b22a80b99bf5ab4eac27b7a0248b307e0d1bba",
+      "status": "PASS",
+      "suite": "live_kernel_compat"
+    },
+    {
+      "capture_id": "live_observation-c8b22a8-1792804557018",
+      "covers": {},
+      "evidence_kind": "controlled_real",
+      "manifest_sha256": "4f9270ed6387d198d76acca670b67b7dc0bbfded395ddfacdc00ab6ad387563d",
+      "source_commit": "c8b22a80b99bf5ab4eac27b7a0248b307e0d1bba",
+      "status": "PASS",
+      "suite": "live_observation"
+    },
+    {
+      "capture_id": "live_overhead-c8b22a8-1792804613610",
+      "covers": {},
+      "evidence_kind": "controlled_real",
+      "manifest_sha256": "c39d1dc6e27e5bc964aae73badafeb9243496bba3a7684c0be4d410b63c72939",
+      "source_commit": "c8b22a80b99bf5ab4eac27b7a0248b307e0d1bba",
+      "status": "PASS",
+      "suite": "live_overhead"
+    },
+    {
+      "capture_id": "live_overhead-c8b22a8-1792806113769",
+      "covers": {},
+      "evidence_kind": "real_workload",
+      "manifest_sha256": "7fec975a88aaffcdbc31c621fdb08846e62cd656d4e2cab56204f98efb778b77",
+      "source_commit": "c8b22a80b99bf5ab4eac27b7a0248b307e0d1bba",
+      "status": "PASS",
+      "suite": "live_overhead"
+    },
+    {
+      "capture_id": "live_score_degradation-c8b22a8-1792808118566",
+      "covers": {},
+      "evidence_kind": "controlled_real",
+      "manifest_sha256": "6b3ba77ed03fe3e0a0a99bb65a2c3deb02b9312968c8f766233fa6978c0bafa6",
+      "source_commit": "c8b22a80b99bf5ab4eac27b7a0248b307e0d1bba",
+      "status": "INCONCLUSIVE",
+      "suite": "live_score_degradation"
     }
-  ]
+  ],
+  "note": "Index of portable evidence bundles verified with `xtask evidence-verify`. Bundles are retained by the operator; entries pin them by manifest digest. Only PASS entries count toward coverage.",
+  "schema_version": 1
 }
