@@ -36,6 +36,7 @@ family = "io"
 target = "fio_fixed_work_v2"
 intervention = "blocking_io"
 metric = "target_elapsed_ms"
+accepted_block_collisions = 100000
 
 [[family]]
 family = "irq"
@@ -59,6 +60,7 @@ interventions = ["scheduler_burst", "blocking_io"]
 placement = "study_cpu"
 expected_primary_cause = "BlockIoCandidate"
 count = 6
+accepted_block_collisions = 100000
 
 [[mixed]]
 id = "mixed-irq-gpu"

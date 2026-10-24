@@ -71,6 +71,7 @@ impl CaptureHost for FakeHost {
             valid: true,
             drops: 0,
             replaced_wakeups: 0,
+            block_collisions: 0,
             write_errors: 0,
             frame_samples: self.script.frames,
         })

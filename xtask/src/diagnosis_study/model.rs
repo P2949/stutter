@@ -62,6 +62,8 @@ pub struct FamilyDef {
     pub metric: Metric,
     #[serde(default)]
     pub accepted_wakeup_coalescing: u64,
+    #[serde(default)]
+    pub accepted_block_collisions: u64,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -77,6 +79,8 @@ pub struct MixedDef {
     pub count: usize,
     #[serde(default)]
     pub accepted_wakeup_coalescing: u64,
+    #[serde(default)]
+    pub accepted_block_collisions: u64,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -174,6 +178,7 @@ impl StudyConfig {
             seconds: self.sampling.seconds,
             count: 1,
             accepted_wakeup_coalescing: 0,
+            accepted_block_collisions: 0,
             placement: Placement::Unpinned,
             informational: true,
         }
@@ -185,6 +190,7 @@ impl StudyConfig {
             target: def.target,
             placement: def.placement,
             accepted_wakeup_coalescing: def.accepted_wakeup_coalescing,
+            accepted_block_collisions: def.accepted_block_collisions,
             ..self.base(
                 format!("v2-{}-control", def.family.as_str()),
                 ControlType::NegativeControl,
@@ -200,6 +206,7 @@ impl StudyConfig {
             interventions: vec![def.intervention],
             expected_primary_cause: def.family.positive_cause().to_owned(),
             accepted_wakeup_coalescing: def.accepted_wakeup_coalescing,
+            accepted_block_collisions: def.accepted_block_collisions,
             ..self.base(
                 format!("v2-{}-positive", def.family.as_str()),
                 ControlType::Positive,
@@ -215,6 +222,7 @@ impl StudyConfig {
             interventions: def.interventions.clone(),
             expected_primary_cause: def.expected_primary_cause.clone(),
             accepted_wakeup_coalescing: def.accepted_wakeup_coalescing,
+            accepted_block_collisions: def.accepted_block_collisions,
             count: def.count,
             ..self.base(def.id.clone(), ControlType::MixedConfounded)
         }

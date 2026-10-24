@@ -21,6 +21,7 @@ pub struct CaptureEvidence {
     /// Dropped events other than coalesced wakeups.
     pub drops: u64,
     pub replaced_wakeups: u64,
+    pub block_collisions: u64,
     pub write_errors: u64,
     pub interventions: Vec<InterventionReport>,
     /// Source/campaign fingerprint still matches (HEAD, binaries, manifest).
@@ -53,6 +54,13 @@ pub fn accept(spec: &ScenarioSpec, evidence: &CaptureEvidence) -> Result<(), Vec
         &format!(
             "{} wakeup records were coalesced, above the scenario's {}",
             evidence.replaced_wakeups, spec.accepted_wakeup_coalescing
+        ),
+    );
+    require(
+        evidence.block_collisions <= spec.accepted_block_collisions,
+        &format!(
+            "{} block-I/O correlation keys collided, above the scenario's {}",
+            evidence.block_collisions, spec.accepted_block_collisions
         ),
     );
     require(evidence.write_errors == 0, "the recording had write errors");

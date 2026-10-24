@@ -28,6 +28,7 @@ pub struct RecordSummary {
     /// Dropped events other than coalesced wakeups.
     pub drops: u64,
     pub replaced_wakeups: u64,
+    pub block_collisions: u64,
     pub write_errors: u64,
     pub frame_samples: u64,
 }
@@ -178,6 +179,7 @@ fn finish(
         recording_valid: summary.valid,
         drops: summary.drops,
         replaced_wakeups: summary.replaced_wakeups,
+        block_collisions: summary.block_collisions,
         write_errors: summary.write_errors,
         placement_failure,
         interventions: reports,
@@ -204,7 +206,7 @@ fn finish(
                 source_commit: request.source_commit,
                 host: &facts,
                 probe_set: &probes,
-                drop_counters: summary.drops + summary.replaced_wakeups,
+                drop_counters: summary.drops + summary.replaced_wakeups + summary.block_collisions,
                 data_quality: &quality,
                 artifact_counts: &counts,
             };
