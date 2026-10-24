@@ -71,3 +71,9 @@ authorization of the final tag.
 - Privileged/destructive acceptance never runs for arbitrary public PR code.
 - Tag `v0.1.0` only on the exact commit that passed fresh-checkout and real-system
   acceptance.
+
+<!-- campaign-policy:start -->
+## Campaign result
+
+Campaign `core-c8b22a8-1792799432599` retained the current diagnosis thresholds and StutterScore weights; see `docs/CALIBRATION_RESULTS.md` and `docs/SCORE_EVALUATION_RESULTS.md`. Remaining explicit decisions are recorded as limitations there.
+<!-- campaign-policy:end -->
