@@ -246,11 +246,6 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
         let (fixtures, id) = load_corpus(&root.join("stutter/tests/fixtures/runs")).unwrap();
         assert_eq!(id.len(), 64);
-        assert_eq!(
-            fixtures.iter().filter(|f| f.meta.is_some()).count(),
-            0,
-            "no committed capture is calibration-eligible yet"
-        );
         for (family, fixture, cause) in [
             (
                 "scheduler",

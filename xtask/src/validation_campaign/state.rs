@@ -13,8 +13,8 @@ use super::{
     graph::{Graph, SourceBinding, TaskSpec},
     manifest::CampaignManifest,
     model::{
-        AttemptOutcome, CampaignMode, CampaignState, SCHEMA_VERSION, TaskAttempt, TaskFingerprint,
-        TaskState, TaskStatus,
+        AttemptOutcome, CampaignMode, CampaignState, FailureClass, SCHEMA_VERSION, TaskAttempt,
+        TaskFingerprint, TaskState, TaskStatus,
     },
 };
 
@@ -226,19 +226,37 @@ impl CampaignState {
                     return false;
                 };
                 let status = self.effective_status(spec);
-                (matches!(
-                    status,
-                    TaskStatus::Pending | TaskStatus::Ready | TaskStatus::Invalidated
-                ) || (include_blocked
-                    && matches!(
+                (self.retryable_defect(spec)
+                    || matches!(
                         status,
-                        TaskStatus::BlockedResource
-                            | TaskStatus::BlockedPrivilege
-                            | TaskStatus::WaitingForReboot
-                    )))
+                        TaskStatus::Pending | TaskStatus::Ready | TaskStatus::Invalidated
+                    )
+                    || (include_blocked
+                        && matches!(
+                            status,
+                            TaskStatus::BlockedResource
+                                | TaskStatus::BlockedPrivilege
+                                | TaskStatus::WaitingForReboot
+                        )))
                     && self.dependencies_satisfied(graph, spec)
             })
             .collect()
+    }
+
+    /// A source-unbound task (integration, review, policy) that failed on a defect is retried
+    /// by a later `continue`: the fix lands on `main` and cannot touch collected evidence.
+    fn retryable_defect(&self, spec: &TaskSpec) -> bool {
+        spec.binding == SourceBinding::None
+            && self.tasks.get(spec.id).is_some_and(|task| {
+                task.status == TaskStatus::Failed
+                    && matches!(
+                        task.attempts.last().map(|a| &a.outcome),
+                        Some(AttemptOutcome::Failed {
+                            class: FailureClass::SoftwareDefect,
+                            ..
+                        })
+                    )
+            })
     }
 
     /// Appends an attempt and moves the task to the status it implies.
