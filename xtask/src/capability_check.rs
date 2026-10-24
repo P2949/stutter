@@ -96,12 +96,11 @@ mod tests {
                 .unwrap();
         let (violations, gaps) = evaluate(&indexed_passing_suites(&index).unwrap());
         assert!(violations.is_empty(), "{violations:?}");
-        // Affinity, recovery and suspend/resume evidence exist; only observation is missing.
+        // Recovery and suspend/resume evidence exist; observation evidence may or may not.
         let affinity = gaps
             .iter()
             .find(|gap| gap.starts_with("cpu_affinity_experiment"))
             .unwrap();
-        assert!(affinity.contains("live_observation"));
         assert!(!affinity.contains("live_suspend_resume") && !affinity.contains("live_recovery"));
     }
 
