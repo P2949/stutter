@@ -378,6 +378,11 @@ impl Executor {
             self.apply_updates(state, spec, collected.take());
             if passed {
                 self.apply_updates(state, spec, updates);
+                // Only a tag that was actually created ends the campaign; a refused or failed
+                // one must stay retryable.
+                if spec.kind == TaskKind::Tag {
+                    state.mode = CampaignMode::Complete;
+                }
             }
             let failures = state.tasks[spec.id].failed_attempts();
             if retryable && failures >= budget {
@@ -454,9 +459,6 @@ impl Executor {
                     });
                 }
             }
-        }
-        if spec.kind == TaskKind::Tag {
-            state.mode = CampaignMode::Complete;
         }
     }
 
