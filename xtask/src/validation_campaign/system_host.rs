@@ -37,6 +37,7 @@ use super::{
 };
 
 mod study;
+pub use study::{host_is_quiet, meminfo_kb, psi_some_avg10};
 
 pub const BURST_MS: u64 = 4;
 pub const BURST_PERIOD_MS: u64 = 20;
@@ -288,7 +289,12 @@ impl CaptureHost for SystemCaptureHost {
             return Err("no independently controllable NIC IRQ source was discovered".to_owned());
         }
         fs::create_dir_all(self.capture_dir.join("mangohud")).map_err(|e| e.to_string())?;
-        fs::create_dir_all(&self.settings.scratch).map_err(|e| e.to_string())
+        fs::create_dir_all(&self.settings.scratch).map_err(|e| e.to_string())?;
+        // Only the study asks for matched, order-independent pairs.
+        if self.settings.study_cpu.is_some() {
+            self.wait_until_quiet()?;
+        }
+        Ok(())
     }
 
     fn start_target(&mut self, spec: &ScenarioSpec) -> Result<TargetIdentity, String> {

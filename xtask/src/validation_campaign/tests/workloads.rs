@@ -490,3 +490,37 @@ fn the_fixed_work_target_never_times_out_and_reports_how_long_the_work_took() {
     assert!(fio::fixed_work_summary(r#"{"jobs":[{"error":5,"job_runtime":1}]}"#).is_err());
     assert!(fio::fixed_work_summary("not json").is_err());
 }
+
+#[test]
+fn the_host_counts_as_quiet_only_when_storage_and_gpu_have_settled() {
+    use crate::validation_campaign::system_host::{host_is_quiet, meminfo_kb, psi_some_avg10};
+    let psi = "some avg10=24.58 avg60=26.81 avg300=33.18 total=2201374927\nfull avg10=24.04 avg60=26.14 avg300=32.63 total=2159766411\n";
+    assert_eq!(psi_some_avg10(psi), Some(24.58));
+    assert_eq!(psi_some_avg10("full avg10=1.0"), None);
+    let mem =
+        "MemTotal:       32000000 kB\nDirty:              2552 kB\nWriteback:             0 kB\n";
+    assert_eq!(meminfo_kb(mem, "Dirty"), Some(2552));
+    assert_eq!(meminfo_kb(mem, "Writeback"), Some(0));
+    assert_eq!(meminfo_kb(mem, "Missing"), None);
+    assert!(host_is_quiet(Some(0.2), Some(1000), Some(2)));
+    assert!(
+        host_is_quiet(Some(0.2), Some(1000), None),
+        "no GPU telemetry is not busy"
+    );
+    assert!(
+        !host_is_quiet(Some(24.0), Some(1000), Some(2)),
+        "storage still draining"
+    );
+    assert!(
+        !host_is_quiet(Some(0.2), Some(200_000), Some(2)),
+        "unwritten data"
+    );
+    assert!(
+        !host_is_quiet(Some(0.2), Some(1000), Some(95)),
+        "gpu still busy"
+    );
+    assert!(
+        !host_is_quiet(None, Some(1000), None),
+        "unreadable pressure is not quiet"
+    );
+}
