@@ -6,6 +6,7 @@ pub mod driver;
 pub mod facts;
 pub mod impact;
 pub mod inspect;
+pub mod metric;
 pub mod model;
 pub mod plan;
 pub mod promote;

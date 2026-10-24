@@ -3,8 +3,10 @@
 use std::{collections::BTreeSet, fs, path::Path};
 
 use serde_json::{Value, json};
+use stutter::api::recorder::IntervalRecord;
 
 use super::{
+    metric::merged_runnable_p99_ns,
     model::{Metric, StudyConfig},
     plan::Slot,
     store::{RunRecord, StudyDir},
@@ -25,7 +27,17 @@ pub fn primary_metric(metric: Metric, raw: &Path, host_metrics: &Value) -> Resul
         Metric::RunnableP99Ns | Metric::FrameP99Ms => {
             let observation = load_observation(0.0, raw, true).map_err(|e| format!("{e:#}"))?;
             match metric {
-                Metric::RunnableP99Ns => observation.runnable_p99_ns,
+                Metric::RunnableP99Ns => {
+                    let pid = observation.identity.map(|identity| identity.pid);
+                    let records = fs::read_to_string(raw.join("interval.json"))
+                        .map_err(|e| e.to_string())?
+                        .lines()
+                        .filter(|line| !line.trim().is_empty())
+                        .map(serde_json::from_str::<IntervalRecord>)
+                        .collect::<Result<Vec<_>, _>>()
+                        .map_err(|e| e.to_string())?;
+                    pid.and_then(|pid| merged_runnable_p99_ns(&records, pid))
+                }
                 _ => observation.frame_p99_ms,
             }
         }
