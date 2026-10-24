@@ -148,6 +148,9 @@ impl Executor {
         max_tasks: Option<usize>,
     ) -> anyhow::Result<ContinueReport> {
         self.recover_interrupted(dir, state)?;
+        if state.refreeze_after_candidate_defect(&self.graph).is_some() {
+            save(dir, state)?;
+        }
         let mut ran = Vec::new();
         let mut attempted = BTreeSet::new();
         loop {

@@ -348,3 +348,44 @@ fn a_moved_main_after_collection_is_expected_until_the_release_candidate_must_ma
     assert_eq!(report.boundary, Boundary::FailureRequiresSourceChange);
     assert_ne!(state.tasks["rc-offline"].status, TaskStatus::Passed);
 }
+
+#[test]
+fn a_defect_in_the_candidate_freezes_a_new_one_and_keeps_collection() {
+    let (_scratch, dir, mut state) = setup("refreeze");
+    let order = Arc::new(Mutex::new(Vec::new()));
+    let flaky: Arc<Script> = Arc::new(|spec, attempt| {
+        if spec.id == "rc-offline" && attempt == 1 {
+            return RunnerOutcome::Failed {
+                class: FailureClass::SoftwareDefect,
+                stage: "acceptance".into(),
+                summary: "gate failed".into(),
+                artifacts: None,
+            };
+        }
+        pass(spec)
+    });
+    let executor = executor(flaky, &order);
+    let report = executor.continue_campaign(&dir, &mut state, None).unwrap();
+    assert_eq!(report.boundary, Boundary::FailureRequiresSourceChange);
+    assert_eq!(state.tasks["rc-offline"].status, TaskStatus::Failed);
+
+    let report = executor.continue_campaign(&dir, &mut state, None).unwrap();
+    assert_eq!(report.boundary, Boundary::Complete);
+    assert_eq!(
+        state.tasks["rc-offline"].attempts.len(),
+        2,
+        "history is kept"
+    );
+    assert_eq!(state.tasks["freeze-rc"].attempts.len(), 2);
+    assert_eq!(
+        state.tasks["corpus"].attempts.len(),
+        1,
+        "collection is not rerun"
+    );
+    assert!(
+        state
+            .decisions
+            .iter()
+            .any(|d| d.decision.starts_with("new release candidate required"))
+    );
+}

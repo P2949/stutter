@@ -391,7 +391,7 @@ fn offline_acceptance_needs_a_pass_receipt_for_the_exact_candidate_and_green_ci(
     assert!(matches!(
         outcome,
         RunnerOutcome::Failed {
-            class: FailureClass::SoftwareDefect,
+            class: FailureClass::Retryable,
             ..
         }
     ));
