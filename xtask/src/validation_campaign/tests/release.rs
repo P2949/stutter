@@ -10,7 +10,7 @@ use crate::validation_campaign::{
         freeze::FreezeRcRunner,
         normalized_check_runs,
         offline::RcOfflineRunner,
-        package::{find_ebpf_object, observation_recording},
+        package::{find_ebpf_object, is_candidate_bundle, observation_recording},
         tag::create_tag,
     },
     repo_pr::WaitPolicy,
@@ -427,6 +427,27 @@ fn the_ebpf_object_is_the_newest_build_output_and_the_recording_is_found_by_its_
     assert_eq!(observation_recording(scratch.path()), None);
     fs::write(recording.join("session.json"), "{}").unwrap();
     assert_eq!(observation_recording(scratch.path()), Some(recording));
+    let newer = scratch
+        .path()
+        .join("attempts/rc-live-observation/0002/raw/observe/run");
+    fs::create_dir_all(&newer).unwrap();
+    fs::write(newer.join("session.json"), "{}").unwrap();
+    assert_eq!(observation_recording(scratch.path()), Some(newer));
+}
+
+#[test]
+fn only_the_current_candidates_bundles_count() {
+    let rc = "b3d344f14b25c82b3fcd293fda870068d01de53c";
+    assert!(is_candidate_bundle(
+        "live_affinity-b3d344f-1792819834659",
+        rc
+    ));
+    assert!(!is_candidate_bundle(
+        "live_affinity-fec0f0e-1792818002792",
+        rc
+    ));
+    assert!(!is_candidate_bundle(".partial-0002", rc));
+    assert!(!is_candidate_bundle("live_affinity-b3d344f-1", ""));
 }
 
 #[test]
