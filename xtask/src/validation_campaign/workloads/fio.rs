@@ -75,6 +75,9 @@ pub fn target_command(profile: &FioProfile, directory: &Path, seconds: u64) -> C
     }
 }
 
+/// Bytes of the fixed-work target's block size (4k).
+const FIXED_WORK_BLOCK_BYTES: u64 = 4096;
+
 /// The post-v0.1 fixed-work target: exactly `ios` direct 4k random reads at queue depth 1. Its
 /// elapsed time is the direct effect metric, so it must finish: it is never time-limited.
 pub fn fixed_work_command(profile: &FioProfile, directory: &Path, ios: u64) -> CommandSpec {
@@ -85,13 +88,14 @@ pub fn fixed_work_command(profile: &FioProfile, directory: &Path, ios: u64) -> C
             format!("--directory={}", directory.display()),
             "--output-format=json".to_owned(),
             "--rw=randread".to_owned(),
-            format!("--bs={}", profile.block_size),
+            "--bs=4k".to_owned(),
             format!("--size={}", profile.file_size),
             "--ioengine=psync".to_owned(),
             "--direct=1".to_owned(),
-            // Without this fio visits each block once and stops at size/bs I/Os.
+            // `io_size` (unlike `number_ios`) may exceed the file, so the amount of work is
+            // exactly `ios` blocks however large the count is.
             "--norandommap".to_owned(),
-            format!("--number_ios={ios}"),
+            format!("--io_size={}", ios * FIXED_WORK_BLOCK_BYTES),
         ],
         env: Vec::new(),
         cwd: None,

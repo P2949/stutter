@@ -464,7 +464,11 @@ fn the_fixed_work_target_never_times_out_and_reports_how_long_the_work_took() {
         std::path::Path::new("/scratch"),
         123_456,
     );
-    assert!(command.args.contains(&"--number_ios=123456".to_owned()));
+    assert!(
+        command
+            .args
+            .contains(&format!("--io_size={}", 123_456 * 4096))
+    );
     assert!(command.args.contains(&"--direct=1".to_owned()));
     assert!(
         command.args.contains(&"--norandommap".to_owned()),
