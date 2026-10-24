@@ -53,13 +53,21 @@ impl Binaries {
 
 /// `stutter --version` must report the source commit, and the xtask's linked library the same
 /// build as the CLI, exactly as every live suite requires.
+/// Does a `--version` text carry an abbreviation of `commit`? Git lengthens abbreviations as a
+/// repository grows, so the length is not fixed.
+pub fn reports_revision(version: &str, commit: &str) -> bool {
+    version
+        .split_once("(git ")
+        .and_then(|(_, rest)| rest.split_once(')'))
+        .is_some_and(|(token, _)| token.len() >= 7 && commit.starts_with(token))
+}
+
 pub fn check_binary_revision(stutter: &Path, commit: &str) -> anyhow::Result<()> {
     let output = Command::new(stutter).arg("--version").output()?;
     ensure!(output.status.success(), "stutter --version failed");
     let version = String::from_utf8(output.stdout)?.trim().to_owned();
-    let short = &commit[..commit.len().min(7)];
     ensure!(
-        version.contains(&format!("git {short})")) || version.contains(&format!("git {commit})")),
+        reports_revision(&version, commit),
         "stutter binary reports {version:?} but the campaign source is {commit}"
     );
     ensure!(

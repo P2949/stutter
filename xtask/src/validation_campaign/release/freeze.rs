@@ -9,7 +9,7 @@ use crate::validation_campaign::{
     executor::{RESTART_KEY, RunContext, RunnerOutcome, StateUpdate, TaskRunner},
     graph::TaskSpec,
     model::{BlockReason, FailureClass},
-    repository::file_sha256,
+    repository::{file_sha256, reports_revision},
     shell::Shell,
 };
 
@@ -102,7 +102,7 @@ impl TaskRunner for FreezeRcRunner {
         let version = self
             .shell
             .run(&stutter.to_string_lossy(), &["--version"], repo);
-        if !version.stdout.contains(&format!("git {})", &commit[..7])) {
+        if !reports_revision(&version.stdout, &commit) {
             return failed(
                 FailureClass::SoftwareDefect,
                 "revision",

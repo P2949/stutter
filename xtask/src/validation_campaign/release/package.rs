@@ -13,7 +13,7 @@ use crate::validation_campaign::{
     executor::{RunContext, RunnerOutcome, TaskRunner},
     graph::TaskSpec,
     model::FailureClass,
-    repository::file_sha256,
+    repository::{file_sha256, reports_revision},
     shell::Shell,
 };
 
@@ -41,7 +41,8 @@ pub fn find_ebpf_object(release_build: &Path) -> Option<PathBuf> {
 /// Bundle directories are named `<suite>-<short commit>-<timestamp>`; an earlier candidate's
 /// bundles stay on disk as history and must never certify a later one.
 pub fn is_candidate_bundle(name: &str, commit: &str) -> bool {
-    commit.len() >= 7 && name.contains(&format!("-{}-", &commit[..7]))
+    name.split('-')
+        .any(|token| token.len() >= 7 && commit.starts_with(token))
 }
 
 /// Published bundle directories of the current candidate's live tasks, in a stable order.
@@ -269,7 +270,9 @@ impl InstallSmokeRunner {
         let bin = binary.to_string_lossy().into_owned();
         let shell = self.shell.as_ref();
         let reported = step(shell, &bin, &["--version"], &install, "stutter --version")?;
-        if !reported.contains(&format!("stutter {version} (git {})", &revision[..7])) {
+        if !reported.starts_with(&format!("stutter {version} ("))
+            || !reports_revision(&reported, revision)
+        {
             return Err(format!(
                 "the packaged binary reports {:?}, expected version {version} at {revision}",
                 reported.trim()
