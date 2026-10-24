@@ -241,7 +241,12 @@ pub fn render(record: &CaptureRecord<'_>) -> Result<String, toml::ser::Error> {
         },
         expected: Expected {
             primary_cause: spec.expected_primary_cause.clone(),
-            expected_behavior: "must_diagnose".to_owned(),
+            expected_behavior: if spec.informational {
+                "informational"
+            } else {
+                "must_diagnose"
+            }
+            .to_owned(),
             accepted_confidence: accepted,
             data_quality: record.data_quality.to_owned(),
             artifacts: record.artifact_counts.clone(),

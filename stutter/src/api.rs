@@ -583,6 +583,12 @@ pub mod report {
     };
 }
 
+pub mod statistics {
+    //! Public formal A/B comparison contract shared with validation tooling.
+
+    pub use crate::tune::statistics::{FormalMetricComparison, compare_lower_is_better_metric};
+}
+
 pub mod tune_recommendation {
     //! Public tune recommendation artifact refresh contracts.
 

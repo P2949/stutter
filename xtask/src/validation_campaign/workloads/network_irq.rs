@@ -57,6 +57,26 @@ pub fn parse_interrupts(text: &str) -> BTreeMap<u32, u64> {
         .collect()
 }
 
+/// Per-CPU counts of every numbered interrupt line (`/proc/interrupts`): irq -> counts per CPU.
+pub fn parse_interrupts_per_cpu(text: &str) -> BTreeMap<u32, Vec<u64>> {
+    let mut lines = text.lines();
+    let cpus = lines
+        .next()
+        .map_or(0, |header| header.split_whitespace().count());
+    lines
+        .filter_map(|line| {
+            let (number, rest) = line.split_once(':')?;
+            let irq = number.trim().parse::<u32>().ok()?;
+            let counts: Vec<u64> = rest
+                .split_whitespace()
+                .take(cpus)
+                .map_while(|token| token.parse().ok())
+                .collect();
+            (counts.len() == cpus).then_some((irq, counts))
+        })
+        .collect()
+}
+
 /// The candidate NIC IRQ whose counter rose the most between two reads, if any rose by at least
 /// `min_delta`. Anything below the minimum is not an independently controllable source.
 pub fn best_irq(

@@ -189,6 +189,10 @@ pub(in crate::architecture_tests) const EXPECTED_API_PUBLIC_MODULES: &[ExpectedP
         reason: "public report loading, analysis, rendering, diffing, and regression contracts",
     },
     ExpectedPublicModule {
+        name: "statistics",
+        reason: "formal A/B comparison contract used by repository validation tooling",
+    },
+    ExpectedPublicModule {
         name: "tune_recommendation",
         reason: "public tune recommendation artifact refresh contracts for reproducible report tooling",
     },

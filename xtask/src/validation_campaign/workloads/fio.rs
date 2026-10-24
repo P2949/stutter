@@ -25,6 +25,16 @@ impl FioProfile {
         }
     }
 
+    /// The fixed-work reader of the post-v0.1 study: direct reads, so the device (not the page
+    /// cache) decides how long the work takes.
+    pub fn target_direct() -> Self {
+        Self {
+            block_size: "4k".into(),
+            file_size: "256m".into(),
+            jobs: 1,
+        }
+    }
+
     /// Direct, synchronous, fsync'ed writes that are known to occupy the device ("intervention").
     pub fn blocker() -> Self {
         Self {
@@ -63,6 +73,54 @@ pub fn target_command(profile: &FioProfile, directory: &Path, seconds: u64) -> C
         env: Vec::new(),
         cwd: None,
     }
+}
+
+/// The post-v0.1 fixed-work target: exactly `ios` direct 4k random reads at queue depth 1. Its
+/// elapsed time is the direct effect metric, so it must finish: it is never time-limited.
+pub fn fixed_work_command(profile: &FioProfile, directory: &Path, ios: u64) -> CommandSpec {
+    CommandSpec {
+        program: "fio".to_owned(),
+        args: vec![
+            "--name=target".to_owned(),
+            format!("--directory={}", directory.display()),
+            "--output-format=json".to_owned(),
+            "--rw=randread".to_owned(),
+            format!("--bs={}", profile.block_size),
+            format!("--size={}", profile.file_size),
+            "--ioengine=psync".to_owned(),
+            "--direct=1".to_owned(),
+            format!("--number_ios={ios}"),
+        ],
+        env: Vec::new(),
+        cwd: None,
+    }
+}
+
+/// What a finished fixed-work target reports: how long the fixed work took and its latency.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FixedWorkSummary {
+    pub elapsed_ms: f64,
+    pub total_ios: u64,
+    pub p99_clat_ns: Option<u64>,
+}
+
+pub fn fixed_work_summary(json: &str) -> Result<FixedWorkSummary, String> {
+    let value: Value =
+        serde_json::from_str(json).map_err(|e| format!("fio output is not JSON: {e}"))?;
+    let job = value["jobs"]
+        .as_array()
+        .and_then(|jobs| jobs.first())
+        .ok_or("fio reported no jobs")?;
+    if job["error"].as_u64().unwrap_or(0) > 0 {
+        return Err(format!("fio reported error {}", job["error"]));
+    }
+    Ok(FixedWorkSummary {
+        elapsed_ms: job["job_runtime"]
+            .as_f64()
+            .ok_or("fio reported no job_runtime")?,
+        total_ios: job["read"]["total_ios"].as_u64().unwrap_or(0),
+        p99_clat_ns: job["read"]["clat_ns"]["percentile"]["99.000000"].as_u64(),
+    })
 }
 
 /// The blocking intervention: bounded, direct, synchronous, fsync'ed writes.

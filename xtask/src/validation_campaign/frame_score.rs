@@ -10,7 +10,7 @@ use super::{
     model::{BlockReason, FailureClass},
     scenarios::{
         exec::CaptureHost,
-        model::{ControlType, Family, InterventionKind, ScenarioSpec, Target},
+        model::{ControlType, Family, InterventionKind, Placement, ScenarioSpec, Target},
     },
 };
 use crate::score_evaluation;
@@ -48,6 +48,8 @@ pub fn level_spec(level_ms: u32, seconds: u64) -> ScenarioSpec {
         seconds,
         count: 1,
         accepted_wakeup_coalescing: 0,
+        placement: Placement::Unpinned,
+        informational: false,
     }
 }
 

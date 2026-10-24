@@ -117,14 +117,14 @@ fn locate(root: &Path, explicit: Option<PathBuf>) -> anyhow::Result<CampaignDir>
     }
 }
 
-pub(super) struct Loaded {
-    dir: CampaignDir,
-    state: CampaignState,
-    manifest: CampaignManifest,
+pub(crate) struct Loaded {
+    pub(crate) dir: CampaignDir,
+    pub(crate) state: CampaignState,
+    pub(crate) manifest: CampaignManifest,
     graph: Graph,
 }
 
-pub(super) fn load_campaign(root: &Path, explicit: Option<PathBuf>) -> anyhow::Result<Loaded> {
+pub(crate) fn load_campaign(root: &Path, explicit: Option<PathBuf>) -> anyhow::Result<Loaded> {
     let dir = locate(root, explicit)?;
     let state = load(&dir)?;
     let bytes = fs::read(dir.manifest_snapshot()).context("read manifest snapshot")?;
@@ -281,6 +281,11 @@ pub fn run(root: &Path, args: CampaignArgs) -> anyhow::Result<()> {
 }
 
 pub(super) fn init(root: &Path, manifest_path: &Path) -> anyhow::Result<()> {
+    init_campaign(root, manifest_path).map(|_| ())
+}
+
+/// `init`, returning the new campaign's id.
+pub(crate) fn init_campaign(root: &Path, manifest_path: &Path) -> anyhow::Result<String> {
     init_with(root, manifest_path, &|binaries, commit| {
         repository::check_binary_revision(&binaries.stutter, commit)
     })
@@ -291,7 +296,7 @@ pub(super) fn init_with(
     root: &Path,
     manifest_path: &Path,
     binary_check: &dyn Fn(&Binaries, &str) -> anyhow::Result<()>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<String> {
     let manifest_path = if manifest_path.is_absolute() {
         manifest_path.to_path_buf()
     } else {
@@ -368,7 +373,7 @@ pub(super) fn init_with(
     save(&dir, &state)?;
     println!("campaign_id={campaign_id}");
     println!("state={}", dir.state_path().display());
-    Ok(())
+    Ok(campaign_id)
 }
 
 /// uid/gid of the invoking process: the owner of /proc/self (no unsafe code needed).
