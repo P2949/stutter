@@ -28,3 +28,15 @@ observation bundle and an empirical-benefit decision. It is not promoted yet.
 Mutating capabilities require at least `live_recovery` and `live_suspend_resume`
 (`MUTATING_REQUIRED_EVIDENCE`). Changing a tier is a code change that must ship together
 with the evidence-index entries that justify it.
+
+<!-- campaign-policy:start -->
+## v0.1.0 tier policy
+
+The validation campaign applies one fixed, conservative policy once live observation, game-runnable, kernel, overhead, corpus, calibration and score evidence all verify:
+
+- **Supported:** `doctor`, `record`, `bench`, `report`, `audit`, `completions_and_man`
+- **Experimental:** `diagnose`, `advisor`, `tune_evaluation`, `restore`, `cpu_affinity_experiment`, `process_priority_and_placement`, `system_wide_tuning`, `always_on_autotune`, `remote_agent_mutation`
+- **Internal:** `privileged_worker`, `fake_action_provider`
+
+Diagnosis stays Experimental even after calibration, and no mutating capability is promoted because CPU-affinity safety testing is strong.
+<!-- campaign-policy:end -->
