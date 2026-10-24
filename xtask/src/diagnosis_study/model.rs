@@ -49,6 +49,14 @@ pub struct Sampling {
     pub min_effect_size: f64,
     pub failed_attempts_per_capture: usize,
     pub seconds: u64,
+    /// Coalesced wakeup records and block-key collisions every capture tolerates: a desktop
+    /// host always has a little unrelated activity, and rejecting single events would turn
+    /// noise into failed slots. The counts are recorded in each fixture's `drop_counters`;
+    /// scenarios that saturate a resource declare more.
+    #[serde(default)]
+    pub background_wakeup_coalescing: u64,
+    #[serde(default)]
+    pub background_block_collisions: u64,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -177,8 +185,8 @@ impl StudyConfig {
             expected_primary_cause: "Unknown".to_owned(),
             seconds: self.sampling.seconds,
             count: 1,
-            accepted_wakeup_coalescing: 0,
-            accepted_block_collisions: 0,
+            accepted_wakeup_coalescing: self.sampling.background_wakeup_coalescing,
+            accepted_block_collisions: self.sampling.background_block_collisions,
             placement: Placement::Unpinned,
             informational: true,
         }
@@ -189,8 +197,12 @@ impl StudyConfig {
             covers: vec![def.family],
             target: def.target,
             placement: def.placement,
-            accepted_wakeup_coalescing: def.accepted_wakeup_coalescing,
-            accepted_block_collisions: def.accepted_block_collisions,
+            accepted_wakeup_coalescing: def
+                .accepted_wakeup_coalescing
+                .max(self.sampling.background_wakeup_coalescing),
+            accepted_block_collisions: def
+                .accepted_block_collisions
+                .max(self.sampling.background_block_collisions),
             ..self.base(
                 format!("v2-{}-control", def.family.as_str()),
                 ControlType::NegativeControl,
@@ -205,8 +217,12 @@ impl StudyConfig {
             placement: def.placement,
             interventions: vec![def.intervention],
             expected_primary_cause: def.family.positive_cause().to_owned(),
-            accepted_wakeup_coalescing: def.accepted_wakeup_coalescing,
-            accepted_block_collisions: def.accepted_block_collisions,
+            accepted_wakeup_coalescing: def
+                .accepted_wakeup_coalescing
+                .max(self.sampling.background_wakeup_coalescing),
+            accepted_block_collisions: def
+                .accepted_block_collisions
+                .max(self.sampling.background_block_collisions),
             ..self.base(
                 format!("v2-{}-positive", def.family.as_str()),
                 ControlType::Positive,
@@ -221,8 +237,12 @@ impl StudyConfig {
             placement: def.placement,
             interventions: def.interventions.clone(),
             expected_primary_cause: def.expected_primary_cause.clone(),
-            accepted_wakeup_coalescing: def.accepted_wakeup_coalescing,
-            accepted_block_collisions: def.accepted_block_collisions,
+            accepted_wakeup_coalescing: def
+                .accepted_wakeup_coalescing
+                .max(self.sampling.background_wakeup_coalescing),
+            accepted_block_collisions: def
+                .accepted_block_collisions
+                .max(self.sampling.background_block_collisions),
             count: def.count,
             ..self.base(def.id.clone(), ControlType::MixedConfounded)
         }
