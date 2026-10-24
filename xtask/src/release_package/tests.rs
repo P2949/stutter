@@ -106,7 +106,12 @@ fn packaged_release_verifies_and_every_tamper_is_detected() {
     let manifest: Value =
         serde_json::from_slice(&fs::read(out.join(MANIFEST_NAME)).unwrap()).unwrap();
     assert_eq!(manifest["bpf_object"]["required_in_package"], true);
-    assert_eq!(manifest["supported_capabilities"], json!([]));
+    let supported: Vec<&str> = stutter::api::capabilities::capability_registry()
+        .iter()
+        .filter(|c| c.tier == stutter::api::capabilities::CapabilityTier::Supported)
+        .map(|c| c.id)
+        .collect();
+    assert_eq!(manifest["supported_capabilities"], json!(supported));
     // Reproducible: the same commit yields byte-identical archives.
     let again = out.with_extension("again");
     let _ = fs::remove_dir_all(&again);

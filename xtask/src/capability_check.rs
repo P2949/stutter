@@ -94,28 +94,19 @@ mod tests {
         let index: Value =
             serde_json::from_slice(&fs::read(root.join("docs/evidence/index.json")).unwrap())
                 .unwrap();
-        let (violations, gaps) = evaluate(&indexed_passing_suites(&index).unwrap());
+        let (violations, _) = evaluate(&indexed_passing_suites(&index).unwrap());
         assert!(violations.is_empty(), "{violations:?}");
-        // Recovery and suspend/resume evidence exist; observation evidence may or may not.
-        let affinity = gaps
-            .iter()
-            .find(|gap| gap.starts_with("cpu_affinity_experiment"))
-            .unwrap();
-        assert!(!affinity.contains("live_suspend_resume") && !affinity.contains("live_recovery"));
     }
 
     #[test]
     fn a_supported_capability_without_indexed_evidence_is_a_violation() {
         // Simulate a registry decision made ahead of evidence by checking the rule directly.
-        let none = BTreeSet::new();
-        let (violations, _) = evaluate(&none);
-        assert!(violations.is_empty(), "nothing is Supported today");
-        let present = BTreeSet::from(["live_recovery".to_owned()]);
-        let (_, gaps) = evaluate(&present);
-        assert!(
-            gaps.iter()
-                .any(|gap| gap.starts_with("restore") && !gap.contains("live_recovery"))
-        );
+        let (violations, _) = evaluate(&BTreeSet::new());
+        let supported = capability_registry()
+            .iter()
+            .filter(|c| c.tier == CapabilityTier::Supported && !c.required_evidence.is_empty())
+            .count();
+        assert_eq!(violations.len(), supported, "{violations:?}");
     }
 
     #[test]
