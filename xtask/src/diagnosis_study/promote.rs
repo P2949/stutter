@@ -8,7 +8,7 @@ use anyhow::Context;
 
 use super::store::{RunRecord, StudyDir};
 
-fn link_tree(from: &Path, to: &Path) -> anyhow::Result<()> {
+pub fn link_tree(from: &Path, to: &Path) -> anyhow::Result<()> {
     fs::create_dir_all(to)?;
     for entry in fs::read_dir(from)? {
         let entry = entry?;

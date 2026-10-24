@@ -24,17 +24,51 @@ pub const UNITS: [&str; 2] = [
     "stutter-validation-runner.service",
     "stutter-validation-resume.service",
 ];
+/// Written by the host's declarative configuration (never by the campaign): the root-owned
+/// statement that units and `STATE_ROOT` persist across reboots.
+pub const PERSISTENCE_MARKER: &str = "/etc/stutter-validation/persistent-runner-v1.json";
+pub const MARKER_CONTRACT_VERSION: u32 = 1;
+
+/// How the units that survive (or do not survive) a reboot come to exist.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum InstallMode {
+    /// `/etc/systemd/system` is writable: the installer writes persistent units itself.
+    WritablePersistent,
+    /// The host declares the units and a persistent state root and proves it with a trusted
+    /// marker; the installer leaves the unit definitions alone.
+    ExternallyManagedPersistent,
+    /// Runtime-only units: nothing survives a reboot, so rebooting is forbidden.
+    Transient,
+}
+
+impl InstallMode {
+    pub fn persistent(self) -> bool {
+        self != Self::Transient
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PersistenceMarker {
+    contract_version: u32,
+    state_root: String,
+    services: Vec<String>,
+    repository: String,
+}
 
 /// Installation destinations under a root directory (`/` for real installs).
 #[derive(Clone, Debug)]
 pub struct Layout {
     pub root: PathBuf,
+    /// The only owner the persistence marker (and the directories above it) may have.
+    pub trusted_uid: u32,
 }
 
 impl Layout {
     pub fn system() -> Self {
         Self {
             root: PathBuf::from("/"),
+            trusted_uid: 0,
         }
     }
     fn under(&self, absolute: &str) -> PathBuf {
@@ -61,6 +95,62 @@ impl Layout {
     }
     pub fn unit(&self, name: &str) -> PathBuf {
         self.unit_dir().0.join(name)
+    }
+
+    /// Chooses the install mode. The decision rests on files only root can write; nothing the
+    /// campaign user supplies can claim persistence.
+    pub fn install_mode(&self, repository: &Path) -> InstallMode {
+        if self.externally_managed(repository).is_ok() {
+            InstallMode::ExternallyManagedPersistent
+        } else if self.unit_dir().1 {
+            InstallMode::WritablePersistent
+        } else {
+            InstallMode::Transient
+        }
+    }
+
+    /// Why the host's persistence contract is not trusted, or `Ok` when it is.
+    pub fn externally_managed(&self, repository: &Path) -> Result<(), String> {
+        let marker = self.under(PERSISTENCE_MARKER);
+        // Every directory above the marker must be controlled by the trusted user alone.
+        let mut directory = self.root.clone();
+        let relative = marker.strip_prefix(&self.root).map_err(|e| e.to_string())?;
+        for component in relative.parent().into_iter().flat_map(Path::components) {
+            directory.push(component);
+            let meta =
+                fs::metadata(&directory).map_err(|e| format!("{}: {e}", directory.display()))?;
+            if meta.uid() != self.trusted_uid || meta.mode() & 0o022 != 0 {
+                return Err(format!("{} is writable by others", directory.display()));
+            }
+        }
+        // `fs::metadata` follows the symlink a declarative host points at an immutable store file.
+        let meta = fs::metadata(&marker).map_err(|e| format!("persistence marker: {e}"))?;
+        if !meta.is_file() || meta.uid() != self.trusted_uid || meta.mode() & 0o022 != 0 {
+            return Err("the persistence marker is not a root-owned, unwritable file".to_owned());
+        }
+        let parsed: PersistenceMarker = serde_json::from_slice(
+            &fs::read(&marker).map_err(|e| format!("read persistence marker: {e}"))?,
+        )
+        .map_err(|e| format!("persistence marker is corrupt: {e}"))?;
+        if parsed.contract_version != MARKER_CONTRACT_VERSION {
+            return Err("unsupported persistence contract version".to_owned());
+        }
+        if parsed.state_root != STATE_ROOT {
+            return Err("the marker names a different state root".to_owned());
+        }
+        if parsed.services != UNITS {
+            return Err("the marker names different services".to_owned());
+        }
+        let canonical = fs::canonicalize(repository).map_err(|e| format!("repository: {e}"))?;
+        if Path::new(&parsed.repository) != canonical {
+            return Err("the marker authorizes a different repository".to_owned());
+        }
+        for unit in UNITS {
+            if !self.under(UNIT_DIR).join(unit).is_file() {
+                return Err(format!("{unit} is not defined by the host"));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -122,13 +212,15 @@ pub struct InstallPlan {
     pub runner_source: PathBuf,
     pub runner_destination: PathBuf,
     pub units: Vec<(PathBuf, PathBuf)>,
+    pub mode: InstallMode,
     pub authorization_destination: PathBuf,
     pub campaign_state: PathBuf,
     pub current_link: PathBuf,
     /// Units survive a reboot (so the resume service can run after one).
     pub persistent_units: bool,
     /// Drop-in for the runner service: the only writable paths under the read-only home.
-    pub dropin: (PathBuf, String),
+    /// Absent when the host declares the service (and its writable paths) itself.
+    pub dropin: Option<(PathBuf, String)>,
     pub authorization: Authorization,
 }
 
@@ -166,35 +258,40 @@ pub fn plan_install(
         return Err("the runner binary does not match the authorized digest".to_owned());
     }
     let mut authorization = authorization;
-    let (unit_dir, persistent_units) = layout.unit_dir();
+    let mode = layout.install_mode(&canonical);
+    let persistent_units = mode.persistent();
     if !persistent_units {
         // Without a resume service that outlives a reboot, rebooting would strand the campaign.
         authorization.max_reboots = 0;
     }
-    let home = fs::read_to_string(layout.root.join("etc/passwd"))
-        .ok()
-        .and_then(|passwd| home_of(&passwd, invoker_uid));
-    let dropin = (
-        unit_dir
-            .join("stutter-validation-runner.service.d")
-            .join("10-repository.conf"),
-        runner_dropin(&canonical, home.as_deref())?,
-    );
-    let mut units = Vec::new();
-    for unit in UNITS {
-        let source = canonical.join("packaging/systemd").join(unit);
-        if !source.is_file() {
-            return Err(format!(
-                "{} is missing from the repository",
-                source.display()
-            ));
+    let (mut units, mut dropin) = (Vec::new(), None);
+    if mode != InstallMode::ExternallyManagedPersistent {
+        let (unit_dir, _) = layout.unit_dir();
+        let home = fs::read_to_string(layout.root.join("etc/passwd"))
+            .ok()
+            .and_then(|passwd| home_of(&passwd, invoker_uid));
+        dropin = Some((
+            unit_dir
+                .join("stutter-validation-runner.service.d")
+                .join("10-repository.conf"),
+            runner_dropin(&canonical, home.as_deref())?,
+        ));
+        for unit in UNITS {
+            let source = canonical.join("packaging/systemd").join(unit);
+            if !source.is_file() {
+                return Err(format!(
+                    "{} is missing from the repository",
+                    source.display()
+                ));
+            }
+            units.push((source, unit_dir.join(unit)));
         }
-        units.push((source, unit_dir.join(unit)));
     }
     Ok(InstallPlan {
         runner_source: runner_source.to_path_buf(),
         runner_destination: layout.runner(),
         units,
+        mode,
         authorization_destination: layout
             .campaign_state(&authorization.campaign_id)
             .join("authorization.json"),
@@ -228,8 +325,9 @@ pub fn execute(plan: &InstallPlan, activate: bool) -> Result<(), String> {
     for (source, destination) in &plan.units {
         install_file(source, destination, 0o644).map_err(|e| io("install unit", e))?;
     }
-    install_bytes(plan.dropin.1.as_bytes(), &plan.dropin.0, 0o644)
-        .map_err(|e| io("install unit drop-in", e))?;
+    if let Some((path, body)) = &plan.dropin {
+        install_bytes(body.as_bytes(), path, 0o644).map_err(|e| io("install unit drop-in", e))?;
+    }
     fs::create_dir_all(&plan.campaign_state).map_err(|e| io("create state directory", e))?;
     fs::set_permissions(&plan.campaign_state, fs::Permissions::from_mode(0o700))
         .map_err(|e| io("chmod state", e))?;
@@ -251,14 +349,18 @@ pub fn execute(plan: &InstallPlan, activate: bool) -> Result<(), String> {
     std::os::unix::fs::symlink(&plan.campaign_state, &plan.current_link)
         .map_err(|e| io("link current", e))?;
     if activate {
-        let mut steps = vec![vec!["daemon-reload"]];
-        if plan.persistent_units {
-            steps.push(vec!["enable", "stutter-validation-runner.service"]);
+        // A host that declares the units owns their definitions: nothing to reload or enable.
+        let mut steps = Vec::new();
+        if plan.mode != InstallMode::ExternallyManagedPersistent {
+            steps.push(vec!["daemon-reload"]);
+            if plan.persistent_units {
+                steps.push(vec!["enable", "stutter-validation-runner.service"]);
+            }
         }
         // A reinstall (new pinned binaries for the release candidate) must replace the
         // authorization the running service already loaded.
         steps.push(vec!["restart", "stutter-validation-runner.service"]);
-        if plan.persistent_units {
+        if plan.mode == InstallMode::WritablePersistent {
             steps.push(vec!["enable", "stutter-validation-resume.service"]);
         }
         for arguments in steps {

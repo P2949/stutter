@@ -262,11 +262,30 @@ force-pushed; a tag already on the candidate is success.
 
 ## Host layouts (NixOS and similar)
 
-The runner binary lives under `/var/lib/stutter-validation/bin` (present, root-writable and
-persistent on every layout). Units go to `/etc/systemd/system` when it is writable; when it is
-not (NixOS links it into the read-only store) they go to `/run/systemd/system`, which does not
-survive a reboot. In that case the authorization sets `max_reboots = 0`: the multi-kernel stage
-reports `BLOCKED_RESOURCE` instead of rebooting into a machine that could not resume. The
+The installer chooses one of three modes, and only files root can write decide it:
+
+- **ExternallyManagedPersistent**: the host declares both units and a persistent
+  `/var/lib/stutter-validation` (a NixOS module, for instance) and states so in the root-owned
+  marker `/etc/stutter-validation/persistent-runner-v1.json`
+  (`contract_version = 1`, `state_root`, the two `services`, and the `repository` it
+  authorizes). The marker is trusted only if it parses exactly, names this state root, these
+  services and this repository, both unit definitions exist, and the marker (after following the
+  symlink a declarative host points at an immutable store file) and every directory above it are
+  owned by root and not writable by group or others. The installer then installs only the pinned
+  runner, authorization and state, leaves the unit definitions to the host, restarts the runner,
+  and keeps the reboot budget. No campaign flag or user-supplied file can claim this mode.
+- **WritablePersistent**: `/etc/systemd/system` is writable, so the installer writes the units.
+- **Transient**: otherwise units go to `/run/systemd/system`, which does not survive a reboot.
+
+Any failed check of the marker falls back to the next mode. In the transient mode the
+authorization sets `max_reboots = 0`: the multi-kernel stage reports `BLOCKED_RESOURCE` instead
+of rebooting into a machine that could not resume.
+
+The resume service orders itself after, and requires, the runner (`After=`/`Requires=`), waits
+for the runner's socket (`resume --all --wait-for-runner 120`) before starting the controller,
+and uses `KillMode=process` so the detached controller outlives the oneshot unit. Both units are
+conditioned on an installed `current/authorization.json`, so an idle machine with no campaign
+shows no failed units. In the writable and transient modes the
 service keeps `ProtectHome=read-only`; a generated drop-in makes only the repository's
 `.llm-runs` and the owner's `~/.cargo` writable. Boot candidates are deduplicated by the kernel
 image an entry boots, so dozens of NixOS generations sharing one image are one candidate and a

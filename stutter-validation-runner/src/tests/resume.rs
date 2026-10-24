@@ -117,3 +117,28 @@ fn cancelled_idle_corrupt_or_tampered_campaigns_are_never_resumed() {
     std::thread::sleep(Duration::from_millis(200));
     assert!(!marker.exists(), "no controller ran in any skipped case");
 }
+
+#[test]
+fn the_resume_service_waits_for_the_runner_socket_and_gives_up_after_its_budget() {
+    use std::cell::Cell;
+
+    use crate::resume::wait_for_runner;
+    let scratch = Scratch::new("resume-wait");
+    let socket = scratch.path().join("runner.sock");
+    let slept = Cell::new(0_u32);
+    // The socket appears during the third wait.
+    let appeared = scratch.path().join("runner.sock");
+    let sleep = |_: std::time::Duration| {
+        slept.set(slept.get() + 1);
+        if slept.get() == 3 {
+            std::fs::write(&appeared, b"").unwrap();
+        }
+    };
+    assert!(wait_for_runner(&socket, 10, &sleep));
+    assert_eq!(slept.get(), 3);
+    std::fs::remove_file(&socket).unwrap();
+    let never = std::cell::Cell::new(0_u32);
+    assert!(!wait_for_runner(&socket, 4, &|_| never.set(never.get() + 1)));
+    assert_eq!(never.get(), 3, "one sleep fewer than the attempts");
+    assert!(!wait_for_runner(&scratch.path().join("absent"), 0, &|_| {}));
+}

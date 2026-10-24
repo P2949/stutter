@@ -73,6 +73,12 @@ pub enum StudyCommand {
         #[arg(long)]
         study: Option<PathBuf>,
     },
+    /// Fixes the calibration/holdout split (once), sweeps both parts for every family whose
+    /// impact study passed and records the threshold decisions. Never edits a threshold.
+    Calibrate {
+        #[arg(long)]
+        study: Option<PathBuf>,
+    },
     /// Takes one capture of `scenario` outside the plan (pair 1000+): proves a scenario's host
     /// behaviour without spending the plan's slots. Never counts toward a decision.
     #[command(hide = true)]
@@ -116,6 +122,24 @@ pub fn run(root: &Path, args: StudyArgs) -> anyhow::Result<()> {
             Ok(())
         }
         StudyCommand::Smoke { study, scenario } => smoke(root, study, &scenario),
+        StudyCommand::Calibrate { study } => {
+            let (dir, header, config) = open(root, study)?;
+            let result = super::calibrate::calibrate(root, &dir, &header, &config)?;
+            for (name, family) in result["families"].as_object().into_iter().flatten() {
+                println!(
+                    "{name}: {} selected {} changed {} logic_gap {}",
+                    family["status"],
+                    family["selected_threshold"],
+                    family["changed"],
+                    family["diagnosis_logic_gap"]
+                );
+            }
+            println!(
+                "decisions={}",
+                dir.calibration().join("decisions.json").display()
+            );
+            Ok(())
+        }
         StudyCommand::Report { study } => {
             let (dir, header, config) = open(root, study)?;
             inspect::report(&dir, &header, &config)?;

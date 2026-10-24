@@ -34,6 +34,7 @@ fn the_runner_and_its_units_are_validation_only() {
         "RestrictAddressFamilies=AF_UNIX",
         "PrivateTmp=true",
         "ProtectHome=",
+        "ConditionPathExists=/var/lib/stutter-validation/current/authorization.json",
     ] {
         assert!(service.contains(required), "runner unit lacks {required}");
     }
@@ -42,9 +43,12 @@ fn the_runner_and_its_units_are_validation_only() {
             .unwrap();
     for required in [
         "Type=oneshot",
-        "After=local-fs.target",
+        "After=local-fs.target stutter-validation-runner.service",
+        "Requires=stutter-validation-runner.service",
         "Before=multi-user.target",
-        "ExecStart=/var/lib/stutter-validation/bin/stutter-validation-runner resume --all",
+        "KillMode=process",
+        "ConditionPathExists=/var/lib/stutter-validation/current/authorization.json",
+        "ExecStart=/var/lib/stutter-validation/bin/stutter-validation-runner resume --all --wait-for-runner",
     ] {
         assert!(resume.contains(required), "resume unit lacks {required}");
     }
