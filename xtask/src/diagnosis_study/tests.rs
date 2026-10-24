@@ -458,3 +458,135 @@ mod calibration {
         assert!(logic_gap && !changed);
     }
 }
+
+mod continuation {
+    use std::fs;
+
+    use super::{
+        super::{
+            facts::choose_traffic_cpus,
+            import::{import_families, same_definition},
+            model::StudyConfig,
+            store::{Decision, Outcome, Role, RunRecord, StudyDir, StudyHeader},
+        },
+        TEXT,
+    };
+    use crate::validation_campaign::scenarios::model::Family;
+
+    #[test]
+    fn traffic_senders_avoid_cpu_zero_the_target_the_interrupt_and_their_cores() {
+        let allowed: Vec<u32> = (0..12).collect();
+        // Study CPU 1 and IRQ CPU 7 are SMT siblings of 7 and 1; 6 and 0 pair as well.
+        let chosen = choose_traffic_cpus(&allowed, &[1, 7], 3);
+        assert_eq!(chosen, vec![2, 3, 4]);
+        assert!(choose_traffic_cpus(&[0, 1], &[1], 3).is_empty());
+    }
+
+    #[test]
+    fn only_unchanged_families_have_the_same_definition() {
+        let old = StudyConfig::parse(TEXT).unwrap();
+        let changed =
+            StudyConfig::parse(&TEXT.replace("gpu_stressors = 2", "gpu_stressors = 3")).unwrap();
+        assert!(same_definition(&old, &changed, Family::Scheduler));
+        assert!(same_definition(&old, &changed, Family::Io));
+        assert!(!same_definition(&old, &changed, Family::Gpu));
+        let traffic =
+            StudyConfig::parse(&TEXT.replace("pps_per_thread = 25000", "pps_per_thread = 1000"))
+                .unwrap();
+        assert!(!same_definition(&old, &traffic, Family::Irq));
+        assert!(same_definition(&old, &traffic, Family::Io));
+    }
+
+    fn run(family: Family, role: Role, pair: usize) -> RunRecord {
+        RunRecord {
+            seq: pair as u64 + 1,
+            scenario: format!(
+                "v2-{}-{}",
+                family.as_str(),
+                if role == Role::Control {
+                    "control"
+                } else {
+                    "positive"
+                }
+            ),
+            family: Some(family),
+            role,
+            pair,
+            accepted: true,
+            stage: None,
+            reasons: vec![],
+            capture_id: Some(format!("sc-{pair}")),
+            fixture: Some(format!("real_fx_{}_{pair}", family.as_str())),
+            metrics: serde_json::json!({"primary": 1.0}),
+            unix_ms: 0,
+        }
+    }
+
+    #[test]
+    fn a_passed_unchanged_family_is_imported_with_its_evidence_and_provenance() {
+        let root = std::env::temp_dir().join(format!("stutter-import-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let (from, into) = (StudyDir(root.join("old")), StudyDir(root.join("new")));
+        for dir in [&from, &into] {
+            fs::create_dir_all(dir.fixtures()).unwrap();
+            fs::create_dir_all(dir.impact()).unwrap();
+        }
+        let config = StudyConfig::parse(TEXT).unwrap();
+        for family in [Family::Scheduler, Family::Irq] {
+            let r = run(family, Role::Control, 0);
+            let name = r.fixture.clone().unwrap();
+            fs::create_dir_all(from.fixtures().join(&name)).unwrap();
+            fs::write(from.fixtures().join(&name).join("fixture.toml"), "x").unwrap();
+            from.append_run(&r).unwrap();
+        }
+        fs::write(from.impact().join("scheduler-15.json"), "{}").unwrap();
+        from.append_decision(&Decision {
+            family: Family::Scheduler,
+            pairs: 15,
+            outcome: Outcome::Pass,
+            report_sha256: "0".repeat(64),
+            unix_ms: 0,
+        })
+        .unwrap();
+        from.append_decision(&Decision {
+            family: Family::Irq,
+            pairs: 30,
+            outcome: Outcome::Invalid,
+            report_sha256: "0".repeat(64),
+            unix_ms: 0,
+        })
+        .unwrap();
+        let header = StudyHeader {
+            schema_version: 1,
+            study_id: "v2-old".into(),
+            base_commit: "a".repeat(40),
+            config_sha256: "0".repeat(64),
+            companion_campaign: "c".into(),
+            frozen: Default::default(),
+            imports: vec![],
+            created_unix_ms: 0,
+        };
+        // An invalid family is never imported.
+        assert!(import_families(&from, &header, &config, &into, &config, &[Family::Irq]).is_err());
+        let import = import_families(
+            &from,
+            &header,
+            &config,
+            &into,
+            &config,
+            &[Family::Scheduler],
+        )
+        .unwrap();
+        assert_eq!((import.runs, import.from_study.as_str()), (1, "v2-old"));
+        assert_eq!(into.runs().unwrap().len(), 1);
+        assert_eq!(into.decisions().unwrap().len(), 1);
+        assert!(into.impact().join("scheduler-15.json").is_file());
+        assert!(
+            into.fixtures()
+                .join("real_fx_scheduler_0/fixture.toml")
+                .is_file()
+        );
+        assert!(!into.fixtures().join("real_fx_irq_0").exists());
+        let _ = fs::remove_dir_all(&root);
+    }
+}

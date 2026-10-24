@@ -26,6 +26,15 @@ seconds = 30
 background_wakeup_coalescing = 16
 background_block_collisions = 16
 
+# The v0.1-style single 4 kpps sender had no measurable effect on the target (the IRQ family
+# closed as invalid at the cap). The study's design is a stronger sender: several flows, each
+# verified to drive the frozen interrupt, paced precisely and confined to CPUs that share no
+# core with the target or the interrupt, so the load reaches the target only through the IRQ.
+[irq_traffic]
+threads = 4
+pps_per_thread = 25000
+payload = 18
+
 [[family]]
 family = "scheduler"
 target = "vkmark_light"
@@ -52,7 +61,10 @@ family = "gpu"
 target = "vkmark_gpu_heavy"
 intervention = "gpu_stressor"
 metric = "frame_p99_ms"
-accepted_wakeup_coalescing = 64
+# Two stressors: a single one did not keep the GPU above the 90% verification bar while the
+# desktop was also in use.
+gpu_stressors = 2
+accepted_wakeup_coalescing = 128
 
 [[mixed]]
 id = "mixed-scheduler-io"
@@ -72,4 +84,4 @@ interventions = ["network_traffic", "gpu_stressor"]
 placement = "irq_cpu"
 expected_primary_cause = "GpuBoundCandidate"
 count = 6
-accepted_wakeup_coalescing = 64
+accepted_wakeup_coalescing = 128
