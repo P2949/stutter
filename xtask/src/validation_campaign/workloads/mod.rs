@@ -112,13 +112,14 @@ pub struct ToolIdentity {
 }
 
 /// The tools the campaign needs, with the arguments that print their version.
-pub const RUNTIME_TOOLS: [(&str, &[&str]); 6] = [
+pub const RUNTIME_TOOLS: [(&str, &[&str]); 7] = [
     ("vkmark", &["--help"]),
     ("mangohud", &["--version"]),
     ("fio", &["--version"]),
     ("stress-ng", &["--version"]),
     ("ping", &["-V"]),
     ("gh", &["--version"]),
+    ("taskset", &["--version"]),
 ];
 
 /// Identifies `tool`; `Err` names exactly what is missing or unusable.
