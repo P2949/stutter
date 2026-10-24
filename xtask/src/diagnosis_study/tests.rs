@@ -85,6 +85,27 @@ fn the_committed_study_is_valid_and_matched() {
         assert!(control.interventions.is_empty() && !positive.interventions.is_empty());
         assert!(control.informational && positive.informational);
     }
+    // Matched pairs tolerate the same background noise, and saturating scenarios declare more.
+    for def in &config.families {
+        let (control, positive) = (config.control_spec(def), config.positive_spec(def));
+        assert_eq!(
+            control.accepted_wakeup_coalescing,
+            positive.accepted_wakeup_coalescing
+        );
+        assert_eq!(
+            control.accepted_block_collisions,
+            positive.accepted_block_collisions
+        );
+        assert!(
+            control.accepted_wakeup_coalescing >= 16 && control.accepted_block_collisions >= 16
+        );
+    }
+    assert_eq!(
+        config
+            .positive_spec(config.family(Family::Io).unwrap())
+            .accepted_block_collisions,
+        100_000
+    );
     // The GPU control is the heavy target, never the light clean scene.
     let gpu = config.family(Family::Gpu).unwrap();
     assert_eq!(config.control_spec(gpu).target, gpu.target);
