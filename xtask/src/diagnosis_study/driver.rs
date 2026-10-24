@@ -141,20 +141,24 @@ fn locate(root: &Path, explicit: Option<PathBuf>) -> anyhow::Result<StudyDir> {
         }));
     }
     let base = root.join(STUDY_ROOT);
-    let mut found: Vec<PathBuf> = fs::read_dir(&base)
+    // The newest study (by creation time, not by name) that has not finished.
+    let mut found: Vec<(u64, PathBuf)> = fs::read_dir(&base)
         .into_iter()
         .flatten()
         .flatten()
         .map(|e| e.path())
-        .filter(|p| p.join("study.json").is_file())
+        .filter_map(|path| {
+            let header = StudyDir(path.clone()).load_header().ok()?;
+            Some((header.created_unix_ms, path))
+        })
         .collect();
     found.sort();
-    match found.len() {
-        0 => bail!(
+    match found.pop() {
+        Some((_, path)) => Ok(StudyDir(path)),
+        None => bail!(
             "no study under {}; run `diagnosis-study init`",
             base.display()
         ),
-        _ => Ok(StudyDir(found.pop().expect("non-empty"))),
     }
 }
 
