@@ -1,0 +1,13 @@
+{"elapsed_ms":5,"action":"added","tid":1195257,"process_pid":1195257,"process_ppid":979774,"comm":"vkmark","process_comm":"vkmark","class":"Service","from_cgroup":false}
+{"elapsed_ms":5,"action":"added","tid":1195279,"process_pid":1195257,"process_ppid":979774,"comm":"vkmark:disk$0","process_comm":"vkmark","class":"Service","from_cgroup":false}
+{"elapsed_ms":5,"action":"added","tid":1195280,"process_pid":1195257,"process_ppid":979774,"comm":"vkmark:disk$0","process_comm":"vkmark","class":"Service","from_cgroup":false}
+{"elapsed_ms":5,"action":"added","tid":1195281,"process_pid":1195257,"process_ppid":979774,"comm":"mangohud-amdgpu","process_comm":"vkmark","class":"Service","from_cgroup":false}
+{"elapsed_ms":5,"action":"added","tid":1195289,"process_pid":1195257,"process_ppid":979774,"comm":"WSI swapchain q","process_comm":"vkmark","class":"Service","from_cgroup":false}
+{"elapsed_ms":5,"action":"added","tid":1195290,"process_pid":1195257,"process_ppid":979774,"comm":"WSI swapchain e","process_comm":"vkmark","class":"Service","from_cgroup":false}
+{"elapsed_ms":5,"action":"added","tid":1195291,"process_pid":1195257,"process_ppid":979774,"comm":"mangohud-hwinfo","process_comm":"vkmark","class":"Service","from_cgroup":false}
+{"elapsed_ms":26006,"action":"removed","tid":1195279,"process_pid":1195257,"process_ppid":979774,"comm":"vkmark:disk$0","process_comm":"vkmark","class":"Service","from_cgroup":false}
+{"elapsed_ms":26006,"action":"removed","tid":1195280,"process_pid":1195257,"process_ppid":979774,"comm":"vkmark:disk$0","process_comm":"vkmark","class":"Service","from_cgroup":false}
+{"elapsed_ms":26006,"action":"removed","tid":1195281,"process_pid":1195257,"process_ppid":979774,"comm":"mangohud-amdgpu","process_comm":"vkmark","class":"Service","from_cgroup":false}
+{"elapsed_ms":26006,"action":"removed","tid":1195289,"process_pid":1195257,"process_ppid":979774,"comm":"WSI swapchain q","process_comm":"vkmark","class":"Service","from_cgroup":false}
+{"elapsed_ms":26006,"action":"removed","tid":1195290,"process_pid":1195257,"process_ppid":979774,"comm":"WSI swapchain e","process_comm":"vkmark","class":"Service","from_cgroup":false}
+{"elapsed_ms":26006,"action":"removed","tid":1195291,"process_pid":1195257,"process_ppid":979774,"comm":"mangohud-hwinfo","process_comm":"vkmark","class":"Service","from_cgroup":false}

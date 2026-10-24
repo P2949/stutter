@@ -1,0 +1,64 @@
+name = "real_io_positive_5ccfbe45"
+schema_version = 23
+source = "sanitized-real-recording"
+evidence_kind = "fixture_real"
+quality_expectation = "Medium"
+description = "Real capture of a known intervention (io-positive): ground truth is the applied intervention."
+
+[provenance]
+artifact_schema = "23"
+capture_id = "sc-e42c5e52d3d970c05ccfbe45"
+compositor = "session-default"
+control_type = "positive"
+cpu = "GenuineIntel 6c12t"
+distribution = "ID=nixos VERSION_ID=26.05"
+drop_counters = "0"
+expected_cause = "BlockIoCandidate"
+expected_confidence = "medium_or_high"
+gpu = "AMD kernel-default"
+kernel = "6.18.55"
+limitations = "single host; ground truth is the predeclared intervention; overlap is not proven causality"
+privacy_state = "sanitized"
+probe_set = "corpus"
+scenario = "io-positive"
+source_commit = "c8b22a80b99bf5ab4eac27b7a0248b307e0d1bba"
+workload = "FioFixedWork"
+workload_version = "corpus-v1"
+
+[coverage]
+diagnoses = ["BlockIoCandidate"]
+
+[platform]
+gpu_vendor = "AMD"
+gpu_driver = "kernel-default"
+compositor = "session-default"
+session_type = "wayland"
+scenario = "io-positive"
+sanitized_capture_id = "sc-e42c5e52d3d970c05ccfbe45"
+kernel_family = "linux"
+cpu_vendor = "GenuineIntel"
+cpu_topology_bucket = "6c12t"
+capture_features = ["gpu_samples", "intervals", "irq_events"]
+
+[expected]
+primary_cause = "BlockIoCandidate"
+expected_behavior = "must_diagnose"
+accepted_confidence = ["Medium", "High"]
+data_quality = "Medium"
+
+[expected.artifacts]
+block_io_events = 0
+frames = 0
+gpu_samples = 31
+intervals = 360
+irq_events = 372
+spikes = 0
+
+[expected.evidence]
+contains = []
+
+[privacy]
+titles_redacted = true
+paths_redacted = true
+hostnames_redacted = true
+usernames_redacted = true

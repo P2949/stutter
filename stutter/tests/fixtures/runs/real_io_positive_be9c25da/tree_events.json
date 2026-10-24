@@ -1,0 +1,3 @@
+{"elapsed_ms":0,"action":"added","tid":1161376,"process_pid":1161376,"process_ppid":979774,"comm":"fio","process_comm":"fio","class":"Service","from_cgroup":false}
+{"elapsed_ms":0,"action":"added","tid":1161403,"process_pid":1161376,"process_ppid":979774,"comm":"fio","process_comm":"fio","class":"Service","from_cgroup":false}
+{"elapsed_ms":0,"action":"added","tid":1161404,"process_pid":1161404,"process_ppid":1161376,"comm":"fio","process_comm":"fio","class":"Service","from_cgroup":false}

@@ -1,0 +1,7 @@
+{"elapsed_ms":13,"action":"added","tid":1000404,"process_pid":1000404,"process_ppid":979774,"comm":"vkmark","process_comm":"vkmark","class":"Service","from_cgroup":false}
+{"elapsed_ms":13,"action":"added","tid":1000426,"process_pid":1000404,"process_ppid":979774,"comm":"vkmark:disk$0","process_comm":"vkmark","class":"Service","from_cgroup":false}
+{"elapsed_ms":13,"action":"added","tid":1000427,"process_pid":1000404,"process_ppid":979774,"comm":"vkmark:disk$0","process_comm":"vkmark","class":"Service","from_cgroup":false}
+{"elapsed_ms":13,"action":"added","tid":1000428,"process_pid":1000404,"process_ppid":979774,"comm":"mangohud-amdgpu","process_comm":"vkmark","class":"Service","from_cgroup":false}
+{"elapsed_ms":13,"action":"added","tid":1000436,"process_pid":1000404,"process_ppid":979774,"comm":"WSI swapchain q","process_comm":"vkmark","class":"Service","from_cgroup":false}
+{"elapsed_ms":13,"action":"added","tid":1000437,"process_pid":1000404,"process_ppid":979774,"comm":"WSI swapchain e","process_comm":"vkmark","class":"Service","from_cgroup":false}
+{"elapsed_ms":13,"action":"added","tid":1000438,"process_pid":1000404,"process_ppid":979774,"comm":"mangohud-hwinfo","process_comm":"vkmark","class":"Service","from_cgroup":false}
