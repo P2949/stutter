@@ -38,8 +38,15 @@ pub fn find_ebpf_object(release_build: &Path) -> Option<PathBuf> {
         .map(|(_, path)| path)
 }
 
-/// Published bundle directories of the exact-RC live tasks, in a stable order.
+/// Bundle directories are named `<suite>-<short commit>-<timestamp>`; an earlier candidate's
+/// bundles stay on disk as history and must never certify a later one.
+pub fn is_candidate_bundle(name: &str, commit: &str) -> bool {
+    commit.len() >= 7 && name.contains(&format!("-{}-", &commit[..7]))
+}
+
+/// Published bundle directories of the current candidate's live tasks, in a stable order.
 pub fn rc_bundles(context: &RunContext<'_>) -> Vec<PathBuf> {
+    let commit = context.state.release_candidate.clone().unwrap_or_default();
     let mut bundles = Vec::new();
     for task in RC_LIVE_TASKS {
         let mut dirs: Vec<PathBuf> = fs::read_dir(context.dir.bundles().join(task))
@@ -48,8 +55,8 @@ pub fn rc_bundles(context: &RunContext<'_>) -> Vec<PathBuf> {
             .filter_map(Result::ok)
             .map(|e| e.path())
             .filter(|p| {
-                !p.file_name()
-                    .is_some_and(|n| n.to_string_lossy().starts_with('.'))
+                p.file_name()
+                    .is_some_and(|n| is_candidate_bundle(&n.to_string_lossy(), &commit))
             })
             .collect();
         dirs.sort();
@@ -192,7 +199,11 @@ pub fn observation_recording(campaign: &Path) -> Option<PathBuf> {
             .filter(|p| p.is_dir())
             .collect();
         children.sort();
-        children.iter().find_map(|child| walk(child, depth - 1))
+        // Newest attempt first: earlier attempts may belong to an earlier candidate.
+        children
+            .iter()
+            .rev()
+            .find_map(|child| walk(child, depth - 1))
     }
     walk(&campaign.join("attempts/rc-live-observation"), 6)
 }
@@ -246,6 +257,7 @@ impl InstallSmokeRunner {
             "tar",
             &[
                 "-xzf",
+                "--strip-components=1",
                 &package.join(&tarball).to_string_lossy(),
                 "-C",
                 &install.to_string_lossy(),

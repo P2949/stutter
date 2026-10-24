@@ -5,6 +5,8 @@
 # Usage: scripts/release/offline-acceptance.sh <commit> <receipt.json> [repo-url-or-path]
 set -uo pipefail
 commit="${1:?commit}"; receipt="${2:?receipt path}"; source="${3:-.}"
+# Unix-socket tests fail on long temp paths; a controller inside `nix develop` has a deep TMPDIR.
+export TMPDIR=/tmp
 work="$(mktemp -d)"; trap 'rm -rf "$work"' EXIT
 git clone -q "$source" "$work/src" && git -C "$work/src" checkout -q "$commit" || { echo "cannot check out $commit"; exit 2; }
 head="$(git -C "$work/src" rev-parse HEAD)"
