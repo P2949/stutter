@@ -170,6 +170,7 @@ impl SystemCaptureHost {
     fn vkmark_config(&self, target: Target) -> VkmarkConfig {
         match target {
             Target::VkmarkGpuHeavy => VkmarkConfig::heavy(&self.settings.vkmark),
+            Target::VkmarkLightUnpaced => VkmarkConfig::light_unpaced(&self.settings.vkmark),
             _ => VkmarkConfig::light(&self.settings.vkmark),
         }
     }
@@ -264,7 +265,10 @@ impl CaptureHost for SystemCaptureHost {
     fn preflight(&mut self, spec: &ScenarioSpec) -> Result<(), String> {
         let tools = SystemTools;
         let mut wanted: Vec<&str> = Vec::new();
-        let vkmark_target = matches!(spec.target, Target::VkmarkLight | Target::VkmarkGpuHeavy);
+        let vkmark_target = matches!(
+            spec.target,
+            Target::VkmarkLight | Target::VkmarkLightUnpaced | Target::VkmarkGpuHeavy
+        );
         if vkmark_target || spec.interventions.contains(&InterventionKind::GpuStressor) {
             vkmark::preflight(
                 &tools,

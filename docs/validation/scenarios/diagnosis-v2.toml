@@ -51,7 +51,10 @@ accepted_block_collisions = 100000
 
 [[family]]
 family = "irq"
-target = "vkmark_light"
+# Unpaced: a vsync-paced scene has idle time to absorb interrupts (the first designs, a 640x480
+# vsynced cube under 4 kpps and then ~1M interrupts per capture, left its frame time unchanged
+# at 7.8 ms), so its frame time would not reveal them. Unpaced, frame time is CPU time.
+target = "vkmark_light_unpaced"
 intervention = "network_traffic"
 placement = "irq_cpu"
 metric = "frame_p99_ms"
@@ -64,7 +67,9 @@ metric = "frame_p99_ms"
 # Two stressors: a single one did not keep the GPU above the 90% verification bar while the
 # desktop was also in use.
 gpu_stressors = 2
-accepted_wakeup_coalescing = 128
+# Two saturating stressors make driver threads wake in bursts (369-423 coalesced records
+# measured per capture).
+accepted_wakeup_coalescing = 1024
 
 [[mixed]]
 id = "mixed-scheduler-io"
@@ -84,4 +89,4 @@ interventions = ["network_traffic", "gpu_stressor"]
 placement = "irq_cpu"
 expected_primary_cause = "GpuBoundCandidate"
 count = 6
-accepted_wakeup_coalescing = 128
+accepted_wakeup_coalescing = 1024

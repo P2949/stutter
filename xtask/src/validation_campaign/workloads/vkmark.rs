@@ -23,6 +23,14 @@ impl VkmarkConfig {
         }
     }
 
+    /// The light scene without vsync: its frame time is its CPU time.
+    pub fn light_unpaced(params: &VkmarkParams) -> Self {
+        Self {
+            present_mode: params.heavy_present_mode.clone(),
+            ..Self::light(params)
+        }
+    }
+
     pub fn heavy(params: &VkmarkParams) -> Self {
         Self {
             scene: params.heavy_scene.clone(),
