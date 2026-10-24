@@ -145,6 +145,8 @@ impl HostFactory for SystemHostFactory {
             study_cpu: None,
             irq_cpu: None,
             fixed_work_ios: None,
+            gpu_stressors: 1,
+            traffic: super::system_host::TrafficPlan::v0_1(),
         })))
     }
 }
@@ -190,5 +192,7 @@ pub fn level_host(
         study_cpu: None,
         irq_cpu: None,
         fixed_work_ios: None,
+        gpu_stressors: 1,
+        traffic: super::system_host::TrafficPlan::v0_1(),
     })))
 }

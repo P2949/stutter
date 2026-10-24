@@ -37,7 +37,7 @@ use super::{
 };
 
 mod study;
-pub use study::{host_is_quiet, meminfo_kb, psi_some_avg10};
+pub use study::{TrafficPlan, host_is_quiet, meminfo_kb, psi_some_avg10};
 
 pub const BURST_MS: u64 = 4;
 pub const BURST_PERIOD_MS: u64 = 20;
@@ -45,8 +45,8 @@ pub const BURST_PRIORITY: u32 = 50;
 const MIN_IRQ_DELTA: u64 = 200;
 const MIN_GPU_BUSY_PCT: u32 = 90;
 const MIN_BLOCKER_P99_NS: u64 = 5_000_000;
-const TRAFFIC_PPS: u32 = 4_000;
-const STEER_ATTEMPTS: u32 = 40;
+pub(crate) const TRAFFIC_PPS: u32 = 4_000;
+pub(crate) const STEER_ATTEMPTS: u32 = 40;
 /// Interventions outlast the recording by this much so they can still be inspected after it.
 const TAIL_SECONDS: u64 = 15;
 
@@ -70,6 +70,10 @@ pub struct HostSettings {
     pub study_cpu: Option<u32>,
     pub irq_cpu: Option<u32>,
     pub fixed_work_ios: Option<u64>,
+    /// Concurrent heavy `vkmark` stressors of the GPU intervention (1 outside the study).
+    pub gpu_stressors: u32,
+    /// The NIC interrupt traffic generator.
+    pub traffic: TrafficPlan,
 }
 
 pub struct SystemCaptureHost {
@@ -77,7 +81,7 @@ pub struct SystemCaptureHost {
     children: Vec<Child>,
     capture_dir: PathBuf,
     contender: Option<u32>,
-    traffic: Option<JoinHandle<()>>,
+    traffic: Vec<JoinHandle<()>>,
     interrupts_before: Option<std::collections::BTreeMap<u32, u64>>,
     gpu_samples: Vec<u32>,
     started: Option<std::time::Instant>,
@@ -94,7 +98,7 @@ impl SystemCaptureHost {
             children: Vec::new(),
             capture_dir: PathBuf::new(),
             contender: None,
-            traffic: None,
+            traffic: Vec::new(),
             interrupts_before: None,
             gpu_samples: Vec::new(),
             started: None,
@@ -290,6 +294,11 @@ impl CaptureHost for SystemCaptureHost {
         }
         fs::create_dir_all(self.capture_dir.join("mangohud")).map_err(|e| e.to_string())?;
         fs::create_dir_all(&self.settings.scratch).map_err(|e| e.to_string())?;
+        // Nothing measured or placed by an earlier capture may leak into this one.
+        self.observed.clear();
+        self.placement_result = None;
+        self.target_pid = None;
+        self.gpu_samples.clear();
         // Only the study asks for matched, order-independent pairs.
         if self.settings.study_cpu.is_some() {
             self.wait_until_quiet()?;
@@ -358,32 +367,8 @@ impl CaptureHost for SystemCaptureHost {
                     );
                     self.spawn(&command, &self.capture_dir.join("blocker.json"), true)?;
                 }
-                InterventionKind::GpuStressor => {
-                    // Bare vkmark: per-frame MangoHud logging slows frame submission enough to
-                    // leave the GPU short of saturation (94% against 99% measured here).
-                    let command =
-                        vkmark::bare_command(&VkmarkConfig::heavy(&self.settings.vkmark), seconds);
-                    self.spawn(&command, &self.capture_dir.join("stressor.log"), false)?;
-                }
-                InterventionKind::NetworkTraffic => {
-                    let nic = self.settings.nic.clone().ok_or("no NIC source")?;
-                    let irq = self.settings.irq.ok_or("no IRQ was frozen")?;
-                    let target_addr = std::net::SocketAddr::from((nic.gateway, 9));
-                    // The flow's queue is random per socket: keep only one that drives the
-                    // frozen IRQ, then measure the capture against a baseline taken after it.
-                    let socket = network_irq::steer_flow(
-                        target_addr,
-                        irq,
-                        STEER_ATTEMPTS,
-                        super::host_factory::flow_plan(),
-                        &super::host_factory::read_interrupts,
-                    )?;
-                    self.interrupts_before = Some(super::host_factory::read_interrupts()?);
-                    self.irq_cpu_before = study::read_per_cpu().ok();
-                    self.traffic = Some(std::thread::spawn(move || {
-                        network_irq::pump(&socket, TRAFFIC_PPS, 512, Duration::from_secs(seconds));
-                    }));
-                }
+                InterventionKind::GpuStressor => self.start_gpu_stressors(seconds)?,
+                InterventionKind::NetworkTraffic => self.start_traffic(seconds)?,
             }
         }
         std::thread::sleep(Duration::from_secs(2));
@@ -512,7 +497,7 @@ impl CaptureHost for SystemCaptureHost {
             let _ = child.wait();
         }
         self.children.clear();
-        if let Some(handle) = self.traffic.take() {
+        for handle in self.traffic.drain(..) {
             let _ = handle.join();
         }
         self.contender = None;

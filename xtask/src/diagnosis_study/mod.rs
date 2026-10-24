@@ -6,6 +6,7 @@ pub mod capture;
 pub mod driver;
 pub mod facts;
 pub mod impact;
+pub mod import;
 pub mod inspect;
 pub mod metric;
 pub mod model;

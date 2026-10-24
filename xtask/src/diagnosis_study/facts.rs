@@ -43,6 +43,26 @@ pub fn choose_study_cpu(allowed: &[u32], irq_cpu: u32) -> Option<u32> {
     allowed.iter().copied().find(|c| *c != 0 && *c != irq_cpu)
 }
 
+/// CPUs for the traffic senders: permitted, not CPU 0, and sharing no core with the target's CPU
+/// or the CPU that services the interrupt (`siblings` lists each excluded CPU's SMT siblings).
+pub fn choose_traffic_cpus(allowed: &[u32], excluded: &[u32], want: usize) -> Vec<u32> {
+    allowed
+        .iter()
+        .copied()
+        .filter(|c| *c != 0 && !excluded.contains(c))
+        .take(want)
+        .collect()
+}
+
+fn siblings_of(cpu: u32) -> Vec<u32> {
+    fs::read_to_string(format!(
+        "/sys/devices/system/cpu/cpu{cpu}/topology/thread_siblings_list"
+    ))
+    .ok()
+    .and_then(|list| parse_cpu_list(&list))
+    .unwrap_or_else(|| vec![cpu])
+}
+
 /// Fixed-work size from an unloaded I/O rate, so the control run lasts about 20 s.
 pub fn fixed_work_ios(iops: f64) -> u64 {
     ((iops * FIXED_WORK_SECONDS) as u64).clamp(FIXED_WORK_MIN_IOS, FIXED_WORK_MAX_IOS)
@@ -147,6 +167,17 @@ pub fn freeze_missing(frozen: &mut Frozen, scratch: &Path) -> Result<(), String>
             choose_study_cpu(&allowed, irq_cpu)
                 .ok_or_else(|| format!("no permitted CPU other than 0 and {irq_cpu}"))?,
         );
+    }
+    if frozen.traffic_cpus.is_empty() {
+        let allowed = allowed_cpus().ok_or("the permitted CPU list is unreadable")?;
+        let mut excluded = Vec::new();
+        for cpu in [frozen.study_cpu, frozen.irq_cpu].into_iter().flatten() {
+            excluded.extend(siblings_of(cpu));
+        }
+        frozen.traffic_cpus = choose_traffic_cpus(&allowed, &excluded, 3);
+        if frozen.traffic_cpus.is_empty() {
+            return Err("no permitted CPU is free of the target and the interrupt".to_owned());
+        }
     }
     if frozen.fixed_work_ios.is_none() {
         frozen.fixed_work_ios = Some(freeze_fixed_work(scratch)?);

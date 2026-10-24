@@ -139,6 +139,32 @@ pub fn pump(socket: &UdpSocket, pps: u32, payload: usize, duration: Duration) ->
     sent
 }
 
+/// Like [`pump`] for rates where a sleep per packet cannot keep up: gaps shorter than half a
+/// millisecond are spun, longer ones slept. Returns the packets actually sent.
+pub fn pump_precise(socket: &UdpSocket, pps: u32, payload: usize, duration: Duration) -> u64 {
+    let buffer = vec![0_u8; payload.clamp(1, 1_400)];
+    let interval = Duration::from_secs_f64(1.0 / f64::from(pps.max(1)));
+    let (start, deadline) = (Instant::now(), Instant::now() + duration);
+    let mut sent = 0_u64;
+    while Instant::now() < deadline {
+        let due = start + interval.saturating_mul(u32::try_from(sent).unwrap_or(u32::MAX));
+        let now = Instant::now();
+        if now < due {
+            let wait = due - now;
+            if wait > Duration::from_micros(500) {
+                std::thread::sleep(wait - Duration::from_micros(300));
+            } else {
+                std::hint::spin_loop();
+                continue;
+            }
+        }
+        if socket.send(&buffer).is_ok() {
+            sent += 1;
+        }
+    }
+    sent
+}
+
 /// Bounded UDP sender on a fresh flow (see [`open_flow`]).
 pub fn send_traffic(
     target: SocketAddr,
