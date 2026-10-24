@@ -13,7 +13,7 @@ use super::{
 const FREEZE: &str = "freeze-rc";
 const DECISION: &str = "new release candidate required";
 /// Candidates a campaign may burn before the failure is a real blocker.
-pub const MAX_REFREEZES: usize = 3;
+pub const MAX_REFREEZES: usize = 5;
 
 impl CampaignState {
     /// Returns the reason when a new release candidate was prepared.
