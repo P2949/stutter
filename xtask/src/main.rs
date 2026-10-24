@@ -152,6 +152,11 @@ pub enum XtaskCommand {
         about = "Verify a release directory independently"
     )]
     ReleaseVerify(release_package::VerifyArgs),
+    #[command(
+        name = "release-publish",
+        about = "Verify a release and publish it to GitHub idempotently"
+    )]
+    ReleasePublish(release_package::PublishArgs),
     #[command(about = "Generate or check objective contract documentation")]
     ObjectiveDocs {
         #[arg(long, conflicts_with = "write", required_unless_present = "write")]
@@ -395,6 +400,7 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
         } => live_acceptance::workload(seconds, &ready, descendants),
         XtaskCommand::ReleasePackage(args) => release_package::package_release(&root, &args),
         XtaskCommand::ReleaseVerify(args) => release_package::verify_release(&args),
+        XtaskCommand::ReleasePublish(args) => release_package::publish_release(&root, &args),
         XtaskCommand::ValidationCampaign(args) => validation_campaign::run(&root, args),
         XtaskCommand::KernelMatrix { require } => kernel_matrix::run(&root, require),
         XtaskCommand::EvidenceIndex(args) => evidence_bundle::index_entry(&args.bundle),

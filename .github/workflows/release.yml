@@ -66,14 +66,12 @@ jobs:
             --bpf-object "${{ steps.ebpf-object.outputs.path }}" \
             --out dist
 
-      - name: Verify release (checksums, layout, provenance; acceptance evidence on tags)
+      - name: Verify package (checksums, layout, provenance; no live acceptance)
         run: |
-          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
-            # Tags require PASS evidence for exactly this commit for every Supported capability.
-            cargo run -p xtask -- release-verify dist --require-acceptance
-          else
-            cargo run -p xtask -- release-verify dist
-          fi
+          # A hosted runner has no exact-commit live acceptance bundles, so this is a secondary
+          # reproducible-build and packaging check. Authoritative publication is done locally:
+          # release-verify --require-acceptance with the external bundles, then release-publish.
+          cargo run -p xtask -- release-verify dist
 
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
