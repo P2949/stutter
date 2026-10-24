@@ -14,6 +14,41 @@ pub(super) fn read_per_cpu() -> Result<BTreeMap<u32, Vec<u64>>, String> {
         .map_err(|e| e.to_string())
 }
 
+/// Longest a capture waits for the host to settle after the previous one.
+const QUIESCE_CAP_SECONDS: u64 = 240;
+/// Pressure (percent of the last 10 s) and unwritten data below which storage counts as idle.
+const QUIET_IO_PSI_PERCENT: f64 = 1.0;
+const QUIET_DIRTY_KB: u64 = 64 * 1024;
+const QUIET_GPU_BUSY_PERCENT: u32 = 10;
+const QUIET_SAMPLES: u32 = 3;
+
+/// `some avg10` of a `/proc/pressure/*` file.
+pub fn psi_some_avg10(text: &str) -> Option<f64> {
+    text.lines()
+        .find(|line| line.starts_with("some "))?
+        .split_whitespace()
+        .find_map(|field| field.strip_prefix("avg10="))?
+        .parse()
+        .ok()
+}
+
+/// A `/proc/meminfo` value in kB.
+pub fn meminfo_kb(text: &str, key: &str) -> Option<u64> {
+    text.lines()
+        .find_map(|line| line.strip_prefix(key)?.strip_prefix(':'))?
+        .split_whitespace()
+        .next()?
+        .parse()
+        .ok()
+}
+
+/// Is the host idle enough that the previous capture cannot leak into the next one?
+pub fn host_is_quiet(io_psi: Option<f64>, dirty_kb: Option<u64>, gpu: Option<u32>) -> bool {
+    io_psi.is_some_and(|p| p < QUIET_IO_PSI_PERCENT)
+        && dirty_kb.is_some_and(|k| k < QUIET_DIRTY_KB)
+        && gpu.is_none_or(|g| g < QUIET_GPU_BUSY_PERCENT)
+}
+
 /// `Cpus_allowed_list` of a process, as written by the kernel.
 fn allowed_cpus(pid: u32) -> Option<String> {
     read_proc(pid, "status")?
@@ -29,6 +64,36 @@ fn effective_irq_cpus(irq: u32) -> Option<String> {
 }
 
 impl SystemCaptureHost {
+    /// Blocks until storage and the GPU have settled after the previous capture: a blocker's
+    /// writeback or a stressor's clocks would otherwise leak into the next run and bias a
+    /// matched pair. `Err` when the host never settles; the capture is then rejected, not run.
+    pub(super) fn wait_until_quiet(&self) -> Result<(), String> {
+        let mut consecutive = 0;
+        let mut last = String::new();
+        for _ in 0..QUIESCE_CAP_SECONDS {
+            let io = fs::read_to_string("/proc/pressure/io").ok();
+            let mem = fs::read_to_string("/proc/meminfo").ok().unwrap_or_default();
+            let dirty = meminfo_kb(&mem, "Dirty")
+                .zip(meminfo_kb(&mem, "Writeback"))
+                .map(|(d, w)| d + w);
+            let io_psi = io.as_deref().and_then(psi_some_avg10);
+            let gpu = gpu_busy_percent();
+            last = format!("io pressure {io_psi:?}, unwritten {dirty:?} kB, gpu busy {gpu:?}");
+            consecutive = if host_is_quiet(io_psi, dirty, gpu) {
+                consecutive + 1
+            } else {
+                0
+            };
+            if consecutive >= QUIET_SAMPLES {
+                return Ok(());
+            }
+            std::thread::sleep(Duration::from_secs(1));
+        }
+        Err(format!(
+            "the host did not settle within {QUIESCE_CAP_SECONDS} s ({last})"
+        ))
+    }
+
     /// The CPU the scenario puts its target on, if any.
     pub(super) fn placement_cpu(&self, spec: &ScenarioSpec) -> Result<Option<u32>, String> {
         match spec.placement {
