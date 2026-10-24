@@ -389,3 +389,23 @@ fn a_defect_in_the_candidate_freezes_a_new_one_and_keeps_collection() {
             .any(|d| d.decision.starts_with("new release candidate required"))
     );
 }
+
+#[test]
+fn main_moving_under_a_frozen_candidate_freezes_a_new_one() {
+    let (_scratch, dir, mut state) = setup("moved-candidate");
+    let order = Arc::new(Mutex::new(Vec::new()));
+    let moved = Arc::new(AtomicBool::new(true));
+    let flag = moved.clone();
+    let mut executor = executor(all_pass(), &order);
+    executor.source_check = Box::new(move |_, spec| {
+        if spec.id == "rc-offline" && flag.swap(false, Ordering::SeqCst) {
+            Err("HEAD moved".to_owned())
+        } else {
+            Ok(())
+        }
+    });
+    let report = executor.continue_campaign(&dir, &mut state, None).unwrap();
+    assert_eq!(report.boundary, Boundary::Complete);
+    assert_eq!(state.tasks["freeze-rc"].attempts.len(), 2);
+    assert_eq!(state.tasks["corpus"].attempts.len(), 1);
+}

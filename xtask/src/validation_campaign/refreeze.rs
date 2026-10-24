@@ -37,6 +37,16 @@ impl CampaignState {
                     _ => None,
                 }
             })?;
+        self.new_candidate(graph, defect.clone()).then_some(defect)
+    }
+
+    /// Invalidates the candidate and everything downstream of `freeze-rc` so that a fresh
+    /// candidate is frozen at the current `main`. Refused when collection is not intact or the
+    /// candidate budget is spent.
+    pub fn new_candidate(&mut self, graph: &Graph, reason: String) -> bool {
+        if self.mode != CampaignMode::ReleaseCandidate {
+            return false;
+        }
         let collection_intact = graph
             .specs()
             .filter(|spec| spec.binding == SourceBinding::EvidenceBase)
@@ -47,7 +57,7 @@ impl CampaignState {
             .filter(|d| d.task == FREEZE && d.decision.starts_with(DECISION))
             .count();
         if !collection_intact || used >= MAX_REFREEZES {
-            return None;
+            return false;
         }
         for id in std::iter::once(FREEZE).chain(graph.dependents(FREEZE)) {
             if let Some(task) = self.tasks.get_mut(id)
@@ -63,10 +73,10 @@ impl CampaignState {
         self.mode = CampaignMode::Collector;
         self.decisions.push(CampaignDecision {
             task: FREEZE.to_owned(),
-            decision: format!("{DECISION}: {defect}"),
+            decision: format!("{DECISION}: {reason}"),
             limitations: Vec::new(),
             unix_ms: unix_ms(),
         });
-        Some(defect)
+        true
     }
 }

@@ -14,7 +14,7 @@ use crate::validation_campaign::{
         tag::create_tag,
     },
     repo_pr::WaitPolicy,
-    repository::Binaries,
+    repository::{Binaries, reports_revision},
     shell::{Shell, ShellOutput},
 };
 
@@ -448,6 +448,14 @@ fn only_the_current_candidates_bundles_count() {
     ));
     assert!(!is_candidate_bundle(".partial-0002", rc));
     assert!(!is_candidate_bundle("live_affinity-b3d344f-1", ""));
+    assert!(is_candidate_bundle(
+        "live_affinity-b3d344fa-1792819834659",
+        "b3d344fa14b25c82b3fcd293fda870068d01de53"
+    ));
+    assert!(reports_revision("stutter 0.1.0 (git b3d344f)", rc));
+    assert!(reports_revision("stutter 0.1.0 (git b3d344f1)", rc));
+    assert!(!reports_revision("stutter 0.1.0 (git fec0f0e)", rc));
+    assert!(!reports_revision("stutter 0.1.0 (git b3d3)", rc));
 }
 
 #[test]

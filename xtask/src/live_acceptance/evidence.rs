@@ -107,7 +107,7 @@ pub(super) fn metadata_with_kind(
     ensure!(version.status.success(), "binary version command failed");
     let version = String::from_utf8(version.stdout)?.trim().to_owned();
     let source_matches_binary =
-        version.contains(&format!("git {short})")) || version.contains(&format!("git {commit})"));
+        crate::validation_campaign::repository::reports_revision(&version, &commit);
     let linked_library_version = stutter::api::build_version();
     let source_matches_harness = version == format!("stutter {linked_library_version}");
     let harness = std::env::current_exe()?;
