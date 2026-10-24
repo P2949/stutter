@@ -15,7 +15,7 @@ use super::{
     impact::evaluate,
     inspect,
     model::{CONFIG_FILE, StudyConfig},
-    plan::{Action, next_action},
+    plan::{Action, Slot, next_action},
     promote::promote,
     store::{Decision, Outcome, Role, RunRecord, StudyDir, StudyHeader},
 };
@@ -27,7 +27,7 @@ use crate::{
         host_factory::msi_irq_names,
         model::CampaignMode,
         repository::{Binaries, cached_file_sha256, git},
-        scenarios::model::Family,
+        scenarios::model::{ControlType, Family},
         state::{CampaignDir, save, unix_ms},
         system_host::{BURST_MS, BURST_PERIOD_MS, HostSettings, SystemCaptureHost},
         workloads::{SystemTools, network_irq},
@@ -73,6 +73,14 @@ pub enum StudyCommand {
         #[arg(long)]
         study: Option<PathBuf>,
     },
+    /// Takes one capture of `scenario` outside the plan (pair 1000+): proves a scenario's host
+    /// behaviour without spending the plan's slots. Never counts toward a decision.
+    #[command(hide = true)]
+    Smoke {
+        #[arg(long)]
+        study: Option<PathBuf>,
+        scenario: String,
+    },
 }
 
 pub fn run(root: &Path, args: StudyArgs) -> anyhow::Result<()> {
@@ -107,6 +115,7 @@ pub fn run(root: &Path, args: StudyArgs) -> anyhow::Result<()> {
             ensure!(!strict || problems.is_empty(), "strict verification failed");
             Ok(())
         }
+        StudyCommand::Smoke { study, scenario } => smoke(root, study, &scenario),
         StudyCommand::Report { study } => {
             let (dir, header, config) = open(root, study)?;
             inspect::report(&dir, &header, &config)?;
@@ -250,11 +259,17 @@ fn promote_family(
     Ok(promoted)
 }
 
-fn continue_study(
-    root: &Path,
-    explicit: Option<PathBuf>,
-    max_captures: Option<usize>,
-) -> anyhow::Result<()> {
+struct Prepared {
+    study: StudyDir,
+    header: StudyHeader,
+    config: StudyConfig,
+    companion: validation_campaign::Loaded,
+    host: SystemCaptureHost,
+}
+
+/// Everything a capture needs: the verified study, the authorized runner and a host built from
+/// the frozen facts. Blocks (and exits) with the shared exit codes when a resource is missing.
+fn prepare(root: &Path, explicit: Option<PathBuf>) -> anyhow::Result<Prepared> {
     let (study, mut header, config) = open(root, explicit)?;
     let bytes = fs::read(study.0.join("config.toml"))?;
     ensure!(
@@ -305,7 +320,7 @@ fn continue_study(
     study.save_header(&header)?;
     let nic = network_irq::discover(&SystemTools, &|iface| msi_irq_names(iface))
         .map_err(anyhow::Error::msg)?;
-    let mut host = SystemCaptureHost::new(HostSettings {
+    let host = SystemCaptureHost::new(HostSettings {
         socket: socket(),
         campaign_id: companion.state.campaign_id.clone(),
         manifest_sha256: companion.state.manifest_sha256.clone(),
@@ -323,6 +338,76 @@ fn continue_study(
         irq_cpu: header.frozen.irq_cpu,
         fixed_work_ios: header.frozen.fixed_work_ios,
     });
+    Ok(Prepared {
+        study,
+        header,
+        config,
+        companion,
+        host,
+    })
+}
+
+fn smoke(root: &Path, explicit: Option<PathBuf>, scenario: &str) -> anyhow::Result<()> {
+    let Prepared {
+        study,
+        header,
+        config,
+        companion,
+        mut host,
+    } = prepare(root, explicit)?;
+    let spec = config.scenario(scenario)?;
+    let runs = study.runs()?;
+    let seq = runs.iter().map(|r| r.seq).max().unwrap_or(0) + 1;
+    let pair = 1000 + runs.iter().filter(|r| r.pair >= 1000).count();
+    let slot = Slot {
+        scenario: scenario.to_owned(),
+        family: spec
+            .covers
+            .first()
+            .copied()
+            .filter(|_| spec.covers.len() == 1),
+        role: match spec.control {
+            ControlType::NegativeControl => Role::Control,
+            ControlType::Positive => Role::Positive,
+            ControlType::MixedConfounded => Role::Mixed,
+        },
+        pair,
+    };
+    let session = Session {
+        study: &study,
+        study_id: &header.study_id,
+        base_commit: &header.base_commit,
+        config: &config,
+        companion: &companion.dir,
+    };
+    let check = || integrity(root, &header, &companion.state).is_ok();
+    let record = capture_once(&session, &mut host, &slot, seq, 0, &check)?;
+    study.append_run(&record)?;
+    println!(
+        "smoke {scenario}: {} {} {}",
+        if record.accepted {
+            "accepted"
+        } else {
+            "rejected"
+        },
+        record.reasons.join("; "),
+        record.metrics
+    );
+    Ok(())
+}
+
+fn continue_study(
+    root: &Path,
+    explicit: Option<PathBuf>,
+    max_captures: Option<usize>,
+) -> anyhow::Result<()> {
+    let Prepared {
+        study,
+        header,
+        config,
+        companion,
+        mut host,
+    } = prepare(root, explicit)?;
     let session = Session {
         study: &study,
         study_id: &header.study_id,
