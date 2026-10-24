@@ -24,6 +24,7 @@ mod overhead_real;
 mod policy;
 mod policy_tasks;
 mod release;
+mod release_lifecycle;
 mod repo_pr;
 mod scenarios;
 mod state;
