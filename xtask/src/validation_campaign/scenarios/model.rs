@@ -123,6 +123,11 @@ pub struct ScenarioSpec {
     /// a GPU makes driver threads wake in bursts; the count is recorded in the fixture.
     #[serde(default)]
     pub accepted_wakeup_coalescing: u64,
+    /// Block-I/O requests whose fallback correlation key collided (`block_fallback_key_collisions`)
+    /// this scenario accepts per capture. Declared up front for scenarios that deliberately
+    /// saturate storage; the count is recorded in the fixture's `drop_counters`.
+    #[serde(default)]
+    pub accepted_block_collisions: u64,
     #[serde(default)]
     pub placement: Placement,
     /// Calibration labels, not regression assertions: the generated fixture is
@@ -204,6 +209,11 @@ impl ScenarioSet {
                 spec.id
             );
             ensure!(!spec.covers.is_empty(), "{}: covers no family", spec.id);
+            ensure!(
+                spec.accepted_block_collisions <= 1_000_000,
+                "{}: accepted_block_collisions is capped at 1000000",
+                spec.id
+            );
             ensure!(
                 spec.accepted_wakeup_coalescing <= 256,
                 "{}: accepted_wakeup_coalescing is capped at 256",

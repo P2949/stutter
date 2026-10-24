@@ -284,6 +284,7 @@ fn good(spec: &crate::validation_campaign::scenarios::model::ScenarioSpec) -> Ca
         recording_valid: true,
         drops: 0,
         replaced_wakeups: 0,
+        block_collisions: 0,
         write_errors: 0,
         interventions: spec
             .interventions
@@ -548,4 +549,28 @@ fn coalesced_wakeups_are_tolerated_only_where_the_scenario_declares_it() {
     let counters = serde_json::json!({"wakeup_data_replaced_entries": 7, "ringbuf_reserve_failed": 2, "irq_start_times_insert_failed": 0});
     assert_eq!(split_drop_counters(&counters), (7, 2));
     assert_eq!(split_drop_counters(&serde_json::Value::Null).1, u64::MAX);
+    // Block-key collisions are neither coalesced wakeups nor other drops: they have their own
+    // declared allowance.
+    let busy =
+        serde_json::json!({"block_fallback_key_collisions": 13_240, "ringbuf_reserve_failed": 0});
+    assert_eq!(split_drop_counters(&busy), (0, 0));
+    assert_eq!(
+        crate::validation_campaign::system_host::block_collisions(&busy),
+        13_240
+    );
+}
+
+#[test]
+fn block_key_collisions_are_tolerated_only_where_the_scenario_declares_it() {
+    let set = super::scenarios_set();
+    let spec = set.get("scheduler-positive").unwrap();
+    let mut evidence = good(spec);
+    evidence.block_collisions = 1;
+    assert!(accept(spec, &evidence).is_err());
+    let mut tolerant = spec.clone();
+    tolerant.accepted_block_collisions = 100_000;
+    evidence.block_collisions = 13_240;
+    accept(&tolerant, &evidence).unwrap();
+    evidence.block_collisions = 100_001;
+    assert!(accept(&tolerant, &evidence).is_err());
 }

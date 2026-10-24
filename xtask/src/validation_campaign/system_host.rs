@@ -623,7 +623,17 @@ fn run_ok(command: &mut Command, what: &str) -> Result<(), String> {
     }
 }
 
+/// Block-I/O fallback-key collisions of a recording: reported on their own because a scenario
+/// that saturates storage can declare an allowance for them.
+pub fn block_collisions(counters: &Value) -> u64 {
+    counters
+        .get("block_fallback_key_collisions")
+        .and_then(Value::as_u64)
+        .unwrap_or(0)
+}
+
 /// `(coalesced wakeups, every other dropped event)`; an unreadable object counts as total loss.
+/// Block-key collisions are neither (see [`block_collisions`]).
 pub fn split_drop_counters(counters: &Value) -> (u64, u64) {
     let Some(map) = counters.as_object() else {
         return (0, u64::MAX);
@@ -634,7 +644,12 @@ pub fn split_drop_counters(counters: &Value) -> (u64, u64) {
         .unwrap_or(0);
     let others = map
         .iter()
-        .filter(|(name, _)| name.as_str() != "wakeup_data_replaced_entries")
+        .filter(|(name, _)| {
+            !matches!(
+                name.as_str(),
+                "wakeup_data_replaced_entries" | "block_fallback_key_collisions"
+            )
+        })
         .filter_map(|(_, value)| value.as_u64())
         .sum();
     (replaced, others)
@@ -653,6 +668,7 @@ fn summarize_recording(raw: &Path) -> Result<RecordSummary, String> {
         valid: true,
         drops,
         replaced_wakeups,
+        block_collisions: block_collisions(&counters),
         write_errors: session.core.event_stream_write_errors,
         frame_samples: frames,
     })

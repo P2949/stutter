@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use super::*;
 
 /// How long a fixed-work target may keep running after the recording ends.
-pub(super) const FIXED_WORK_WAIT_SECONDS: u64 = 150;
+pub(super) const FIXED_WORK_WAIT_SECONDS: u64 = 300;
 
 pub(super) fn read_per_cpu() -> Result<BTreeMap<u32, Vec<u64>>, String> {
     fs::read_to_string("/proc/interrupts")
