@@ -67,6 +67,7 @@
           pkgs.fio
           pkgs.stress-ng
           pkgs.iputils
+          pkgs.util-linux
           pkgs.gh
         ];
 
