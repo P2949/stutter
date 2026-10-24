@@ -59,6 +59,7 @@ fn expected_subcommands_are_registered() {
             "recovery-controller",
             "refresh-tune-recommendation",
             "release-package",
+            "release-publish",
             "release-verify",
             "report-golden-update",
             "schema-check",

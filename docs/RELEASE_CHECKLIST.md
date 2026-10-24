@@ -55,7 +55,9 @@ These flags should only be passed when the packaging evidence exists.
 
 `cargo run -p xtask -- release-package --binary BIN --bpf-object OBJ --out DIR` builds,
 from a clean committed tree, the artifacts named below; `release-verify DIR`
-recomputes and checks them independently. `.github/workflows/release.yml` runs both.
+recomputes and checks them independently. `.github/workflows/release.yml` runs both as a secondary
+reproducible-build check: a hosted runner has no live acceptance bundles, so it runs
+`release-verify` without `--require-acceptance` and never declares live acceptance.
 
 - `stutter-<version>-linux-x86_64.tar.gz`: the layout in `packaging/tarball/MANIFEST.txt`,
   reproducible (sorted names, fixed owner, commit-time mtime).
@@ -87,6 +89,22 @@ for commit X cannot be committed into X, so the bundles stay outside the release
 
 Tag `v0.1.0` only on the exact commit that passed fresh-checkout and real-system
 acceptance; do not validate one commit and tag another.
+
+## Publication (authoritative sequence)
+
+```text
+exact-RC live acceptance -> release-package -> release-verify --require-acceptance
+  -> install smoke -> tag -> release-publish
+```
+
+`cargo run -p xtask -- release-publish DIR --acceptance-bundle BUNDLE... --notes NOTES.md`
+re-runs the independent verification with the external bundles, requires the local and origin
+tag to resolve to the manifest's commit, and only then creates the GitHub Release (non-draft,
+attached to the existing tag) with the six assets. It is idempotent: an identical release is a
+no-op, missing assets are uploaded, and an asset whose remote digest differs or a release on
+another tag is a hard failure; nothing is ever overwritten. A historical package must be
+verified and published with the xtask built from its own tag, because verification compares the
+package with the capability registry compiled into the verifier.
 
 ## Autonomous campaign path
 

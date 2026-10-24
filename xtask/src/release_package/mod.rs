@@ -14,12 +14,14 @@ use serde_json::{Value, json};
 use crate::evidence_bundle::sha256::sha256_hex;
 
 mod acceptance;
+mod publish;
 mod sbom;
 mod verify;
 
 #[cfg(test)]
 mod acceptance_tests;
 
+pub use publish::{PublishArgs, publish_release};
 pub use verify::verify_release;
 
 pub(crate) const RELEASE_SCHEMA_VERSION: u64 = 1;
