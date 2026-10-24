@@ -50,6 +50,7 @@ fn plan(f: &Fixture, uid: u32) -> Result<crate::install::InstallPlan, String> {
         uid,
         &Layout {
             root: f.root.clone(),
+            trusted_uid: me(),
         },
     )
 }
@@ -61,6 +62,7 @@ fn a_valid_staged_authorization_installs_fixed_files_to_fixed_places() {
     execute(&plan, false).unwrap();
     let layout = Layout {
         root: f.root.clone(),
+        trusted_uid: me(),
     };
     assert_eq!(fs::read(layout.runner()).unwrap(), b"runner-bytes");
     assert_eq!(
@@ -128,6 +130,7 @@ fn install_refuses_corrupt_or_symlinked_staged_files() {
         me(),
         &Layout {
             root: f.root.clone(),
+            trusted_uid: me(),
         },
     )
     .unwrap_err();
@@ -181,13 +184,10 @@ fn the_runner_unit_gets_a_drop_in_with_only_the_repository_runs_and_cargo_home_w
     .unwrap();
     let plan = plan(&f, me()).unwrap();
     let canonical = fs::canonicalize(&f.repo).unwrap();
-    assert!(
-        plan.dropin
-            .0
-            .ends_with("stutter-validation-runner.service.d/10-repository.conf")
-    );
+    let (dropin_path, dropin_body) = plan.dropin.clone().expect("a writable host gets a drop-in");
+    assert!(dropin_path.ends_with("stutter-validation-runner.service.d/10-repository.conf"));
     assert_eq!(
-        plan.dropin.1,
+        dropin_body,
         format!(
             "[Service]\nReadWritePaths=-{} -{}\n",
             canonical.join(".llm-runs").display(),
@@ -195,7 +195,7 @@ fn the_runner_unit_gets_a_drop_in_with_only_the_repository_runs_and_cargo_home_w
         )
     );
     execute(&plan, false).unwrap();
-    assert!(plan.dropin.0.is_file());
+    assert!(dropin_path.is_file());
 }
 
 #[test]
@@ -222,8 +222,158 @@ fn home_directories_come_from_passwd_and_unsafe_paths_are_refused() {
         me(),
         &Layout {
             root: f.root.clone(),
+            trusted_uid: me(),
         },
     )
     .unwrap_err();
     assert!(error.contains("unit file"), "{error}");
+}
+
+mod externally_managed {
+    use std::os::unix::fs::PermissionsExt;
+
+    use super::*;
+    use crate::install::InstallMode;
+
+    fn layout(f: &Fixture, trusted_uid: u32) -> Layout {
+        Layout {
+            root: f.root.clone(),
+            trusted_uid,
+        }
+    }
+
+    /// A sysroot in which the host declares both units and the persistence contract.
+    fn declare(f: &Fixture, change: impl FnOnce(&mut serde_json::Value)) {
+        let units = f.root.join("etc/systemd/system");
+        fs::create_dir_all(&units).unwrap();
+        for unit in UNITS {
+            fs::write(units.join(unit), "[Unit]\n").unwrap();
+        }
+        let directory = f.root.join("etc/stutter-validation");
+        fs::create_dir_all(&directory).unwrap();
+        for dir in [f.root.join("etc"), directory.clone()] {
+            fs::set_permissions(dir, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let mut marker = serde_json::json!({
+            "contract_version": 1,
+            "state_root": "/var/lib/stutter-validation",
+            "services": UNITS,
+            "repository": fs::canonicalize(&f.repo).unwrap(),
+        });
+        change(&mut marker);
+        let file = directory.join("persistent-runner-v1.json");
+        fs::write(&file, marker.to_string()).unwrap();
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o644)).unwrap();
+    }
+
+    fn mode(f: &Fixture) -> InstallMode {
+        layout(f, me()).install_mode(&f.repo)
+    }
+
+    #[test]
+    fn a_trusted_marker_preserves_the_reboot_budget_and_leaves_the_units_to_the_host() {
+        let f = fixture(|auth| auth.max_reboots = 5);
+        declare(&f, |_| {});
+        assert_eq!(mode(&f), InstallMode::ExternallyManagedPersistent);
+        let plan = plan(&f, me()).unwrap();
+        assert_eq!(plan.mode, InstallMode::ExternallyManagedPersistent);
+        assert!(plan.units.is_empty() && plan.dropin.is_none());
+        assert_eq!(plan.authorization.max_reboots, 5);
+        execute(&plan, false).unwrap();
+        let installed = layout(&f, me());
+        assert_eq!(fs::read(installed.runner()).unwrap(), b"runner-bytes");
+        assert!(
+            installed
+                .campaign_state("core-abc1234-1")
+                .join("authorization.json")
+                .is_file()
+        );
+        // The declared units are untouched.
+        for unit in UNITS {
+            assert_eq!(
+                fs::read_to_string(f.root.join("etc/systemd/system").join(unit)).unwrap(),
+                "[Unit]\n"
+            );
+        }
+    }
+
+    #[test]
+    fn nothing_but_a_complete_root_owned_contract_is_trusted() {
+        type Change = Box<dyn FnOnce(&mut serde_json::Value)>;
+        let corruptions: Vec<(&str, Change)> = vec![
+            (
+                "version",
+                Box::new(|m| m["contract_version"] = serde_json::json!(2)),
+            ),
+            (
+                "state root",
+                Box::new(|m| m["state_root"] = serde_json::json!("/var/lib/other")),
+            ),
+            (
+                "services",
+                Box::new(|m| {
+                    m["services"] = serde_json::json!(["stutter-validation-runner.service"])
+                }),
+            ),
+            (
+                "repository",
+                Box::new(|m| m["repository"] = serde_json::json!("/elsewhere")),
+            ),
+            (
+                "extra field",
+                Box::new(|m| m["persistent"] = serde_json::json!(true)),
+            ),
+        ];
+        for (name, change) in corruptions {
+            let f = fixture(|_| {});
+            declare(&f, change);
+            assert_ne!(mode(&f), InstallMode::ExternallyManagedPersistent, "{name}");
+        }
+        // The file or its directory being writable by others, or owned by someone else.
+        let f = fixture(|_| {});
+        declare(&f, |_| {});
+        let file = f
+            .root
+            .join("etc/stutter-validation/persistent-runner-v1.json");
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o664)).unwrap();
+        assert_ne!(
+            mode(&f),
+            InstallMode::ExternallyManagedPersistent,
+            "writable file"
+        );
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o644)).unwrap();
+        fs::set_permissions(
+            f.root.join("etc/stutter-validation"),
+            fs::Permissions::from_mode(0o775),
+        )
+        .unwrap();
+        assert_ne!(
+            mode(&f),
+            InstallMode::ExternallyManagedPersistent,
+            "writable directory"
+        );
+        fs::set_permissions(
+            f.root.join("etc/stutter-validation"),
+            fs::Permissions::from_mode(0o755),
+        )
+        .unwrap();
+        assert_eq!(mode(&f), InstallMode::ExternallyManagedPersistent);
+        assert_ne!(
+            layout(&f, me().wrapping_add(1)).install_mode(&f.repo),
+            InstallMode::ExternallyManagedPersistent,
+            "a marker owned by another user is not the trusted one"
+        );
+        // A missing unit definition or a missing marker is not a contract either.
+        fs::remove_file(f.root.join("etc/systemd/system").join(UNITS[1])).unwrap();
+        assert_ne!(
+            mode(&f),
+            InstallMode::ExternallyManagedPersistent,
+            "missing unit"
+        );
+        assert_ne!(
+            mode(&fixture(|_| {})),
+            InstallMode::ExternallyManagedPersistent,
+            "no marker"
+        );
+    }
 }

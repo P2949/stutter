@@ -29,6 +29,11 @@ pub enum Command {
         all: bool,
         #[arg(long, default_value = "/var/lib/stutter-validation")]
         state_root: PathBuf,
+        /// Wait up to this many seconds for the runner's socket before resuming anything.
+        #[arg(long, default_value_t = 0)]
+        wait_for_runner: u32,
+        #[arg(long, default_value = "/run/stutter-validation/runner.sock")]
+        socket: PathBuf,
     },
     /// One-time install from a staged authorization (run via `sudo -n` by `bootstrap`).
     Install {

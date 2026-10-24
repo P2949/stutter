@@ -1,13 +1,16 @@
 [Unit]
 Description=Resume an authorized Stutter validation campaign after a reboot (validation only)
-After=local-fs.target
+After=local-fs.target stutter-validation-runner.service
+Requires=stutter-validation-runner.service
 Before=multi-user.target
-ConditionPathExists=/var/lib/stutter-validation
+ConditionPathExists=/var/lib/stutter-validation/current/authorization.json
 
 [Service]
 Type=oneshot
-ExecStart=/var/lib/stutter-validation/bin/stutter-validation-runner resume --all
+ExecStart=/var/lib/stutter-validation/bin/stutter-validation-runner resume --all --wait-for-runner 120
 RemainAfterExit=no
+# The resumed controller is detached from this oneshot and must outlive it.
+KillMode=process
 
 [Install]
 WantedBy=multi-user.target

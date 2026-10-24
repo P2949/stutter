@@ -45,9 +45,23 @@ fn main() -> anyhow::Result<()> {
             server.serve(&socket)?;
             Ok(())
         }
-        Command::Resume { all, state_root } => {
+        Command::Resume {
+            all,
+            state_root,
+            wait_for_runner,
+            socket,
+        } => {
             if !all {
                 bail!("resume requires --all");
+            }
+            if wait_for_runner > 0
+                && !stutter_validation_runner::resume::wait_for_runner(
+                    &socket,
+                    wait_for_runner,
+                    &std::thread::sleep,
+                )
+            {
+                bail!("the runner did not start serving on {}", socket.display());
             }
             for line in resume_all(&state_root, privileged) {
                 println!("{line}");
@@ -60,7 +74,10 @@ fn main() -> anyhow::Result<()> {
             root,
         } => {
             let layout = match &root {
-                Some(root) => Layout { root: root.clone() },
+                Some(root) => Layout {
+                    root: root.clone(),
+                    trusted_uid: effective_uid(),
+                },
                 None => Layout::system(),
             };
             // SUDO_UID is set by sudo to the real invoking user; a direct root run has none.
@@ -83,6 +100,7 @@ fn main() -> anyhow::Result<()> {
                 }
             }
             execute(&plan, root.is_none()).map_err(anyhow::Error::msg)?;
+            println!("install_mode={:?}", plan.mode);
             println!("installed campaign {}", plan.authorization.campaign_id);
             Ok(())
         }

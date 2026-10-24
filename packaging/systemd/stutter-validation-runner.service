@@ -2,6 +2,8 @@
 Description=Stutter validation runner (validation infrastructure, not a product component)
 Documentation=https://github.com/P2949/stutter/blob/main/docs/VALIDATION_CAMPAIGN.md
 After=local-fs.target
+# An idle machine (no campaign installed) must not produce a failed unit.
+ConditionPathExists=/var/lib/stutter-validation/current/authorization.json
 
 [Service]
 Type=simple

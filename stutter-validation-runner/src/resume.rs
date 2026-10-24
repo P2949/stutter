@@ -42,6 +42,20 @@ pub fn plan_resume(auth: &Authorization) -> ResumePlan {
     }
 }
 
+/// Waits until the runner's socket exists, so a resumed controller never races a runner that
+/// systemd has started but that is not serving yet. `sleep` is injectable for tests.
+pub fn wait_for_runner(socket: &Path, attempts: u32, sleep: &dyn Fn(std::time::Duration)) -> bool {
+    for attempt in 0..attempts {
+        if socket.exists() {
+            return true;
+        }
+        if attempt + 1 < attempts {
+            sleep(std::time::Duration::from_secs(1));
+        }
+    }
+    socket.exists()
+}
+
 /// Starts the controller for one campaign, detached, as the campaign user with no capabilities.
 pub fn resume_controller(auth: &Authorization, drop_to_owner: bool) -> Result<u32, Denial> {
     verify_pinned(&xtask_path(auth), &auth.xtask_sha256)?;

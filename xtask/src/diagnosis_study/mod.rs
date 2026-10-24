@@ -1,6 +1,7 @@
 //! Post-v0.1 diagnosis evidence study: matched controls, independent intervention and
 //! target-impact proof, informational calibration labels. A resumable driver reuses the
 //! scenario/capture machinery and the privileged runner; it does not replicate the campaign.
+pub mod calibrate;
 pub mod capture;
 pub mod driver;
 pub mod facts;

@@ -269,3 +269,192 @@ fn malformed_studies_are_rejected() {
     );
     assert!(StudyConfig::parse(&mismatch).is_err());
 }
+
+mod promotion {
+    use std::fs;
+
+    use super::super::{
+        promote::{annotate, promote},
+        store::{Role, RunRecord, StudyDir},
+    };
+    use crate::{
+        diagnosis_calibration::load_corpus, validation_campaign::scenarios::model::Family,
+    };
+
+    const FIXTURE: &str = include_str!(
+        "../../../stutter/tests/fixtures/runs/real_clean_vkmark_0af7e274/fixture.toml"
+    );
+
+    #[test]
+    fn annotation_keeps_the_fixture_eligible_and_adds_the_study_links() {
+        let extra = [
+            ("study", "diagnosis-v2".to_owned()),
+            ("matched_group", "scheduler-pair-3".to_owned()),
+            ("target_impact_report_sha256", "a".repeat(64)),
+        ];
+        let text = annotate(FIXTURE, &extra).unwrap();
+        let dir = std::env::temp_dir().join(format!("stutter-annotate-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let fixture = dir.join("real_x");
+        fs::create_dir_all(&fixture).unwrap();
+        fs::write(fixture.join("fixture.toml"), &text).unwrap();
+        let (fixtures, _) = load_corpus(&dir).unwrap();
+        let meta = fixtures[0]
+            .meta
+            .as_ref()
+            .expect("still calibration-eligible");
+        assert_eq!(meta.control_type, "negative_control");
+        assert!(text.contains("matched_group = \"scheduler-pair-3\""));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn promotion_links_files_rewrites_only_the_copy_and_is_idempotent() {
+        let root = std::env::temp_dir().join(format!("stutter-promote-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let study = StudyDir(root.clone());
+        let original = study.fixtures().join("real_v2_x");
+        fs::create_dir_all(&original).unwrap();
+        fs::write(original.join("fixture.toml"), FIXTURE).unwrap();
+        fs::write(original.join("interval.json"), "{}\n").unwrap();
+        let run = RunRecord {
+            seq: 1,
+            scenario: "v2-scheduler-control".into(),
+            family: Some(Family::Scheduler),
+            role: Role::Control,
+            pair: 0,
+            accepted: true,
+            stage: None,
+            reasons: vec![],
+            capture_id: Some("sc-x".into()),
+            fixture: Some("real_v2_x".into()),
+            metrics: serde_json::json!({"primary": 1.0, "supporting": {"placement": {"cpu": 1}}}),
+            unix_ms: 0,
+        };
+        promote(&study, "v2-test", &run, "scheduler-pair-0", &"b".repeat(64)).unwrap();
+        promote(&study, "v2-test", &run, "scheduler-pair-0", &"b".repeat(64)).unwrap();
+        let promoted = study.calibration().join("fixtures/real_v2_x");
+        assert!(
+            fs::read_to_string(promoted.join("fixture.toml"))
+                .unwrap()
+                .contains("study_id")
+        );
+        assert!(
+            !fs::read_to_string(original.join("fixture.toml"))
+                .unwrap()
+                .contains("study_id"),
+            "the acceptance-time fixture is never modified"
+        );
+        assert_eq!(
+            fs::read_to_string(promoted.join("interval.json")).unwrap(),
+            "{}\n"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+}
+
+mod calibration {
+    use serde_json::json;
+
+    use super::super::calibrate::{Decision, Part, Row, build_split, decide};
+    use crate::diagnosis_calibration::parse_fixture;
+
+    fn row(t: f64, tp: u64, fp: u64, fn_: u64, fh: u64) -> Row {
+        let p = (tp + fp > 0).then(|| tp as f64 / (tp + fp) as f64);
+        let r = (tp + fn_ > 0).then(|| tp as f64 / (tp + fn_) as f64);
+        Row {
+            threshold: t,
+            tp,
+            fp,
+            fn_,
+            precision: p,
+            recall: r,
+            false_high_observation: fh,
+            false_high_causal: 0,
+        }
+    }
+
+    fn fixture(id: &str, scenario: &str) -> crate::diagnosis_calibration::Fixture {
+        let keys = crate::fixture_coverage::REQUIRED_PROVENANCE
+            .iter()
+            .filter(|k| !matches!(**k, "control_type" | "capture_id" | "scenario"))
+            .map(|k| format!("{k} = \"x\"\n"))
+            .collect::<String>();
+        let text = format!(
+            "name = \"f_{id}\"\nevidence_kind = \"fixture_real\"\n[expected]\nprimary_cause = \"GameThreadSchedulerDelay\"\n[provenance]\n{keys}control_type = \"positive\"\ncapture_id = \"{id}\"\nscenario = \"{scenario}\"\n[coverage]\ndiagnoses = [\"GameThreadSchedulerDelay\"]\n"
+        );
+        parse_fixture(std::path::Path::new("d"), &text)
+    }
+
+    #[test]
+    fn the_split_is_deterministic_stratified_and_balanced() {
+        let fixtures: Vec<_> = (0..15)
+            .map(|i| fixture(&format!("a-{i}"), "v2-scheduler-positive"))
+            .chain((0..14).map(|i| fixture(&format!("b-{i}"), "v2-scheduler-control")))
+            .collect();
+        let first = build_split(&fixtures);
+        assert_eq!(first, build_split(&fixtures));
+        let reversed: Vec<_> = fixtures.iter().rev().cloned().collect();
+        let mut again = build_split(&reversed);
+        let mut original = first.clone();
+        again.sort_by(|a, b| a.capture_id.cmp(&b.capture_id));
+        original.sort_by(|a, b| a.capture_id.cmp(&b.capture_id));
+        assert_eq!(again, original, "the split does not depend on input order");
+        for scenario in ["v2-scheduler-positive", "v2-scheduler-control"] {
+            let of = |part| {
+                first
+                    .iter()
+                    .filter(|e| e.scenario == scenario && e.part == part)
+                    .count()
+            };
+            let (cal, hold) = (of(Part::Calibration), of(Part::Holdout));
+            assert!(
+                cal.abs_diff(hold) <= 1 && cal + hold > 0,
+                "{scenario}: {cal}/{hold}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_threshold_is_replaced_only_when_the_holdout_agrees() {
+        let none = json!({});
+        // Calibration prefers 1.0 (better recall, same precision); the holdout confirms.
+        let calibration = [row(2.0, 3, 0, 7, 0), row(1.0, 6, 0, 4, 0)];
+        let holdout = [row(2.0, 2, 0, 8, 0), row(1.0, 5, 0, 5, 0)];
+        let decision = decide(2.0, &calibration, &holdout, &none, &none);
+        assert!(decision.changed && decision.selected == 1.0, "{decision:?}");
+        // The holdout shows more false positives: retain.
+        let worse = [row(2.0, 2, 0, 8, 0), row(1.0, 5, 3, 5, 0)];
+        let decision = decide(2.0, &calibration, &worse, &none, &none);
+        assert!(
+            !decision.changed && decision.selected == 2.0,
+            "{decision:?}"
+        );
+        assert!(
+            decision
+                .reasons
+                .iter()
+                .any(|r| r.contains("does not generalize"))
+        );
+        // A candidate that adds a false-high claim is not even considered.
+        let risky = [row(2.0, 3, 0, 7, 0), row(1.0, 9, 0, 1, 2)];
+        let decision = decide(2.0, &risky, &holdout, &none, &none);
+        assert!(!decision.changed, "{decision:?}");
+    }
+
+    #[test]
+    fn mixed_behavior_can_veto_a_change_and_an_empty_sweep_is_a_logic_gap() {
+        let calibration = [row(2.0, 3, 0, 7, 0), row(1.0, 6, 0, 4, 0)];
+        let holdout = [row(2.0, 2, 0, 8, 0), row(1.0, 5, 0, 5, 0)];
+        let mixed = json!({"mixed_sweep": [
+            {"threshold": 2.0, "mixed_false_high_causal_claims": 0},
+            {"threshold": 1.0, "mixed_false_high_causal_claims": 1}]});
+        let decision = decide(2.0, &calibration, &holdout, &json!({}), &mixed);
+        assert!(!decision.changed, "{decision:?}");
+        let blind = [row(2.0, 0, 0, 10, 0), row(1.0, 0, 1, 10, 0)];
+        let Decision {
+            logic_gap, changed, ..
+        } = decide(2.0, &blind, &blind, &json!({}), &json!({}));
+        assert!(logic_gap && !changed);
+    }
+}
