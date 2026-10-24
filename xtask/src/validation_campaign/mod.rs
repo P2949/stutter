@@ -18,6 +18,7 @@ pub mod model;
 pub mod overhead_real;
 pub mod policy;
 pub mod pr_task;
+pub mod refreeze;
 pub mod release;
 pub mod repo_pr;
 pub mod repository;

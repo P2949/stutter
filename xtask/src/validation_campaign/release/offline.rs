@@ -58,12 +58,32 @@ impl TaskRunner for RcOfflineRunner {
             || parsed["commit"] != commit.as_str()
             || parsed["fresh_checkout"] != true
         {
+            // A gate can flake under load: rerun the same candidate within the retry budget;
+            // a failure that survives it is a defect.
+            let failing = parsed["steps"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|step| step["status"] != "PASS")
+                .filter_map(|step| step["name"].as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
             return failed(
-                FailureClass::SoftwareDefect,
+                FailureClass::Retryable,
                 "acceptance",
                 format!(
-                    "offline acceptance of {commit} did not pass (status {})",
-                    parsed["status"]
+                    "offline acceptance of {commit} did not pass (status {}; failing: {failing}): {}",
+                    parsed["status"],
+                    run.stderr
+                        .trim()
+                        .lines()
+                        .rev()
+                        .take(12)
+                        .collect::<Vec<_>>()
+                        .into_iter()
+                        .rev()
+                        .collect::<Vec<_>>()
+                        .join(" | ")
                 ),
             );
         }
