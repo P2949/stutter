@@ -89,6 +89,8 @@ pub fn fixed_work_command(profile: &FioProfile, directory: &Path, ios: u64) -> C
             format!("--size={}", profile.file_size),
             "--ioengine=psync".to_owned(),
             "--direct=1".to_owned(),
+            // Without this fio visits each block once and stops at size/bs I/Os.
+            "--norandommap".to_owned(),
             format!("--number_ios={ios}"),
         ],
         env: Vec::new(),
