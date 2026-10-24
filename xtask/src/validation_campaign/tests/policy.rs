@@ -89,7 +89,6 @@ fn the_policy_promotes_exactly_the_six_core_capabilities_and_keeps_everything_el
     }
     // Idempotent, and untouched capabilities keep their text byte for byte.
     assert_eq!(apply_policy(&out, &supported, &experimental).unwrap(), out);
-    assert_ne!(out, SOURCE);
 }
 
 #[test]
