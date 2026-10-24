@@ -4,7 +4,7 @@ use std::fs;
 
 use super::{
     evidence::reverify_task,
-    graph::{Graph, TaskKind},
+    graph::{Graph, SourceBinding, TaskKind},
     manifest::CampaignManifest,
     model::{AttemptOutcome, CampaignMode, CampaignState, TaskAttempt, TaskStatus},
     state::CampaignDir,
@@ -92,11 +92,22 @@ pub fn verify_state(
         }
         if produces_bundles(spec.kind) {
             match reverify_task(dir, spec.id) {
-                Ok(entries) if entries.is_empty() => {
-                    problems.push(format!("{} is Passed but has no verified bundle", spec.id));
-                }
                 Ok(entries) => {
                     let expected = state.expected_fingerprint(spec).evidence_commit;
+                    // Earlier candidates keep their bundles as history; only the current
+                    // candidate's count.
+                    let entries: Vec<_> = if spec.binding == SourceBinding::ReleaseCandidate {
+                        entries
+                            .into_iter()
+                            .filter(|e| e["source_commit"] == expected.as_str())
+                            .collect()
+                    } else {
+                        entries
+                    };
+                    if entries.is_empty() {
+                        problems.push(format!("{} is Passed but has no verified bundle", spec.id));
+                        continue;
+                    }
                     let mut kernels = std::collections::BTreeSet::new();
                     for entry in &entries {
                         // A kernel observed as incompatible is a FAIL result that is still a

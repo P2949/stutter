@@ -256,8 +256,8 @@ impl InstallSmokeRunner {
             self.shell.as_ref(),
             "tar",
             &[
-                "-xzf",
                 "--strip-components=1",
+                "-xzf",
                 &package.join(&tarball).to_string_lossy(),
                 "-C",
                 &install.to_string_lossy(),
