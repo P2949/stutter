@@ -17,9 +17,10 @@ pub(super) fn read_per_cpu() -> Result<BTreeMap<u32, Vec<u64>>, String> {
 /// Longest a capture waits for the host to settle after the previous one.
 const QUIESCE_CAP_SECONDS: u64 = 240;
 /// Pressure (percent of the last 10 s) and unwritten data below which storage counts as idle.
+/// Only what the previous capture can leave behind is waited for: the desktop's own activity
+/// (a game, a browser) is outside the study's control and is not a reason to wait.
 const QUIET_IO_PSI_PERCENT: f64 = 1.0;
 const QUIET_DIRTY_KB: u64 = 64 * 1024;
-const QUIET_GPU_BUSY_PERCENT: u32 = 10;
 const QUIET_SAMPLES: u32 = 3;
 
 /// `some avg10` of a `/proc/pressure/*` file.
@@ -42,11 +43,9 @@ pub fn meminfo_kb(text: &str, key: &str) -> Option<u64> {
         .ok()
 }
 
-/// Is the host idle enough that the previous capture cannot leak into the next one?
-pub fn host_is_quiet(io_psi: Option<f64>, dirty_kb: Option<u64>, gpu: Option<u32>) -> bool {
-    io_psi.is_some_and(|p| p < QUIET_IO_PSI_PERCENT)
-        && dirty_kb.is_some_and(|k| k < QUIET_DIRTY_KB)
-        && gpu.is_none_or(|g| g < QUIET_GPU_BUSY_PERCENT)
+/// Has storage settled enough that the previous capture cannot leak into the next one?
+pub fn host_is_quiet(io_psi: Option<f64>, dirty_kb: Option<u64>) -> bool {
+    io_psi.is_some_and(|p| p < QUIET_IO_PSI_PERCENT) && dirty_kb.is_some_and(|k| k < QUIET_DIRTY_KB)
 }
 
 /// `Cpus_allowed_list` of a process, as written by the kernel.
@@ -64,9 +63,8 @@ fn effective_irq_cpus(irq: u32) -> Option<String> {
 }
 
 impl SystemCaptureHost {
-    /// Blocks until storage and the GPU have settled after the previous capture: a blocker's
-    /// writeback or a stressor's clocks would otherwise leak into the next run and bias a
-    /// matched pair. `Err` when the host never settles; the capture is then rejected, not run.
+    /// Blocks until storage has settled after the previous capture: a blocker's writeback
+    /// would otherwise leak into the next run and bias a matched pair. `Err` when the host never settles; the capture is then rejected, not run.
     pub(super) fn wait_until_quiet(&self) -> Result<(), String> {
         let mut consecutive = 0;
         let mut last = String::new();
@@ -77,9 +75,8 @@ impl SystemCaptureHost {
                 .zip(meminfo_kb(&mem, "Writeback"))
                 .map(|(d, w)| d + w);
             let io_psi = io.as_deref().and_then(psi_some_avg10);
-            let gpu = gpu_busy_percent();
-            last = format!("io pressure {io_psi:?}, unwritten {dirty:?} kB, gpu busy {gpu:?}");
-            consecutive = if host_is_quiet(io_psi, dirty, gpu) {
+            last = format!("io pressure {io_psi:?}, unwritten {dirty:?} kB");
+            consecutive = if host_is_quiet(io_psi, dirty) {
                 consecutive + 1
             } else {
                 0
