@@ -29,7 +29,7 @@ use crate::{
         repository::{Binaries, cached_file_sha256, git},
         scenarios::model::{ControlType, Family},
         state::{CampaignDir, save, unix_ms},
-        system_host::{BURST_MS, BURST_PERIOD_MS, HostSettings, SystemCaptureHost},
+        system_host::{BURST_MS, BURST_PERIOD_MS, HostSettings, SystemCaptureHost, TrafficPlan},
         workloads::{SystemTools, network_irq},
     },
 };
@@ -49,7 +49,13 @@ pub struct StudyArgs {
 #[derive(clap::Subcommand, Clone, Debug, Eq, PartialEq)]
 pub enum StudyCommand {
     /// Create a study at the clean `main` HEAD (and its runner-authorization campaign).
-    Init,
+    Init {
+        /// Take over the passed, unchanged families of an earlier study (comma-separated).
+        #[arg(long, requires = "import_families")]
+        import_from: Option<PathBuf>,
+        #[arg(long, value_delimiter = ',')]
+        import_families: Vec<String>,
+    },
     Status {
         #[arg(long)]
         json: bool,
@@ -91,7 +97,10 @@ pub enum StudyCommand {
 
 pub fn run(root: &Path, args: StudyArgs) -> anyhow::Result<()> {
     match args.command {
-        StudyCommand::Init => init(root),
+        StudyCommand::Init {
+            import_from,
+            import_families,
+        } => init(root, import_from, &import_families),
         StudyCommand::Status { json, study } => {
             let (dir, header, config) = open(root, study)?;
             let status = inspect::status(&dir, &header, &config)?;
@@ -197,7 +206,11 @@ fn open(
     Ok((dir, header, config))
 }
 
-fn init(root: &Path) -> anyhow::Result<()> {
+fn init(
+    root: &Path,
+    import_from: Option<PathBuf>,
+    import_families: &[String],
+) -> anyhow::Result<()> {
     let (_, config_sha256, bytes) = load_config(root)?;
     let companion = validation_campaign::init_campaign(root, Path::new(COMPANION_MANIFEST))?;
     let commit = git(root, &["rev-parse", "HEAD"])?;
@@ -206,15 +219,39 @@ fn init(root: &Path) -> anyhow::Result<()> {
     fs::create_dir_all(dir.fixtures())?;
     fs::create_dir_all(dir.impact())?;
     fs::write(dir.0.join("config.toml"), &bytes)?;
-    dir.save_header(&StudyHeader {
+    let mut header = StudyHeader {
         schema_version: super::store::SCHEMA_VERSION,
         study_id: study_id.clone(),
         base_commit: commit,
         config_sha256,
         companion_campaign: companion,
         frozen: Default::default(),
+        imports: Vec::new(),
         created_unix_ms: unix_ms(),
-    })?;
+    };
+    if let Some(from) = import_from {
+        let (from_dir, from_header, from_config) = open(root, Some(from))?;
+        let new_config = StudyConfig::parse(std::str::from_utf8(&bytes)?)?;
+        let families = import_families
+            .iter()
+            .map(|name| {
+                Family::ALL
+                    .iter()
+                    .copied()
+                    .find(|f| f.as_str() == name)
+                    .with_context(|| format!("unknown family {name}"))
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        header.imports.push(super::import::import_families(
+            &from_dir,
+            &from_header,
+            &from_config,
+            &dir,
+            &new_config,
+            &families,
+        )?);
+    }
+    dir.save_header(&header)?;
     println!("study_id={study_id}");
     println!("study={}", dir.0.display());
     Ok(())
@@ -365,6 +402,16 @@ fn prepare(root: &Path, explicit: Option<PathBuf>) -> anyhow::Result<Prepared> {
         study_cpu: header.frozen.study_cpu,
         irq_cpu: header.frozen.irq_cpu,
         fixed_work_ios: header.frozen.fixed_work_ios,
+        gpu_stressors: config.gpu_stressors(),
+        traffic: config
+            .irq_traffic
+            .as_ref()
+            .map_or_else(TrafficPlan::v0_1, |t| TrafficPlan {
+                threads: t.threads,
+                pps_per_thread: t.pps_per_thread,
+                payload: t.payload,
+                cpus: header.frozen.traffic_cpus.clone(),
+            }),
     });
     Ok(Prepared {
         study,

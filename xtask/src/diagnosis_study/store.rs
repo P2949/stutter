@@ -66,6 +66,20 @@ pub struct Frozen {
     pub irq: Option<u32>,
     pub irq_cpu: Option<u32>,
     pub fixed_work_ios: Option<u64>,
+    /// CPUs the interrupt traffic senders are confined to (never the target's, the IRQ's or
+    /// their SMT siblings).
+    #[serde(default)]
+    pub traffic_cpus: Vec<u32>,
+}
+
+/// Evidence taken over from an earlier study whose definition of these families is identical.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct Import {
+    pub from_study: String,
+    pub from_base_commit: String,
+    pub families: Vec<Family>,
+    pub runs: usize,
+    pub runs_sha256: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -77,6 +91,8 @@ pub struct StudyHeader {
     /// The core-validation campaign that only anchors the privileged runner's authorization.
     pub companion_campaign: String,
     pub frozen: Frozen,
+    #[serde(default)]
+    pub imports: Vec<Import>,
     pub created_unix_ms: u64,
 }
 

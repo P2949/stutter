@@ -68,10 +68,26 @@ pub struct FamilyDef {
     #[serde(default)]
     pub placement: Placement,
     pub metric: Metric,
+    /// Concurrent GPU stressor processes (the GPU family only).
+    #[serde(default = "one")]
+    pub gpu_stressors: u32,
     #[serde(default)]
     pub accepted_wakeup_coalescing: u64,
     #[serde(default)]
     pub accepted_block_collisions: u64,
+}
+
+fn one() -> u32 {
+    1
+}
+
+/// The NIC interrupt intervention's traffic generator.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct IrqTraffic {
+    pub threads: u32,
+    pub pps_per_thread: u32,
+    pub payload: usize,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -98,6 +114,8 @@ pub struct StudyConfig {
     pub study: String,
     pub vkmark: VkmarkParams,
     pub sampling: Sampling,
+    #[serde(default)]
+    pub irq_traffic: Option<IrqTraffic>,
     #[serde(rename = "family")]
     pub families: Vec<FamilyDef>,
     #[serde(rename = "mixed", default)]
@@ -253,6 +271,13 @@ impl StudyConfig {
             Some(spec) => Ok(spec),
             None => bail!("unknown study scenario {id}"),
         }
+    }
+}
+
+impl StudyConfig {
+    pub fn gpu_stressors(&self) -> u32 {
+        self.family(Family::Gpu)
+            .map_or(1, |def| def.gpu_stressors.max(1))
     }
 }
 
