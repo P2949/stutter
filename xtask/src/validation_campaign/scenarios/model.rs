@@ -72,6 +72,22 @@ pub enum Target {
     VkmarkGpuHeavy,
     /// `fio` fixed-work process tree.
     FioFixedWork,
+    /// `fio` job doing a fixed number of direct reads (post-v0.1 study): its elapsed time is
+    /// the direct effect metric.
+    FioFixedWorkV2,
+}
+
+/// Where the target process runs. Pinning is done by launching the owned child under an
+/// explicit CPU mask, never by privileged mutation.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Placement {
+    #[default]
+    Unpinned,
+    /// The study's frozen permitted CPU (also where a scheduler burst contends).
+    StudyCpu,
+    /// The CPU that actually services the frozen NIC interrupt.
+    IrqCpu,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
@@ -107,6 +123,12 @@ pub struct ScenarioSpec {
     /// a GPU makes driver threads wake in bursts; the count is recorded in the fixture.
     #[serde(default)]
     pub accepted_wakeup_coalescing: u64,
+    #[serde(default)]
+    pub placement: Placement,
+    /// Calibration labels, not regression assertions: the generated fixture is
+    /// `expected_behavior = "informational"` so false negatives can be measured.
+    #[serde(default)]
+    pub informational: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -159,7 +181,7 @@ impl ScenarioSet {
         self.scenarios.iter().find(|spec| spec.id == id)
     }
 
-    fn validate_shape(&self) -> anyhow::Result<()> {
+    pub(crate) fn validate_shape(&self) -> anyhow::Result<()> {
         ensure!(
             valid_dimension(&self.vkmark.light_size)
                 && valid_dimension(&self.vkmark.heavy_size)

@@ -35,7 +35,7 @@ fn block(class: FailureClass, detail: impl Into<String>) -> BlockReason {
     }
 }
 
-fn msi_irq_names(interface: &str) -> Vec<String> {
+pub(crate) fn msi_irq_names(interface: &str) -> Vec<String> {
     fs::read_dir(format!("/sys/class/net/{interface}/device/msi_irqs"))
         .map(|dir| {
             dir.filter_map(Result::ok)
@@ -62,7 +62,7 @@ pub fn flow_plan() -> network_irq::FlowPlan {
 
 /// The interrupt the NIC's transmit completions most often land on for fresh flows. A single
 /// flow's queue is random, so the capture steers to this one and verifies it.
-fn probe_irq(nic: &NicSource) -> Result<u32, String> {
+pub(crate) fn probe_irq(nic: &NicSource) -> Result<u32, String> {
     let target = std::net::SocketAddr::from((nic.gateway, 9));
     network_irq::dominant_irq(
         target,
@@ -142,6 +142,9 @@ impl HostFactory for SystemHostFactory {
             workload_version: WORKLOAD_VERSION.to_owned(),
             burst_ms: BURST_MS,
             burst_period_ms: BURST_PERIOD_MS,
+            study_cpu: None,
+            irq_cpu: None,
+            fixed_work_ios: None,
         })))
     }
 }
@@ -184,5 +187,8 @@ pub fn level_host(
         workload_version: WORKLOAD_VERSION.to_owned(),
         burst_ms: u64::from(level_ms),
         burst_period_ms: super::frame_score::PERIOD_MS,
+        study_cpu: None,
+        irq_cpu: None,
+        fixed_work_ios: None,
     })))
 }

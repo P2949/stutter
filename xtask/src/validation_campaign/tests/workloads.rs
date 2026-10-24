@@ -443,3 +443,42 @@ fn the_gpu_stressor_is_bare_vkmark_while_the_recorded_target_goes_through_mangoh
         ("mangohud", "vkmark")
     );
 }
+
+#[test]
+fn per_cpu_interrupt_counts_keep_each_cpu_apart() {
+    let text = "           CPU0       CPU1       CPU2\n  45:         10         20       3000  IR-PCI-MSIX  enp5s0-tx-0\n  46:          0          0          0  IR-PCI-MSIX  enp5s0-tx-1\nNMI:          1          2          3  Non-maskable\n";
+    let counts = network_irq::parse_interrupts_per_cpu(text);
+    assert_eq!(counts.get(&45), Some(&vec![10, 20, 3000]));
+    assert_eq!(counts.get(&46), Some(&vec![0, 0, 0]));
+    assert_eq!(
+        counts.len(),
+        2,
+        "named lines such as NMI are not numbered interrupts"
+    );
+}
+
+#[test]
+fn the_fixed_work_target_never_times_out_and_reports_how_long_the_work_took() {
+    let command = fio::fixed_work_command(
+        &fio::FioProfile::target_direct(),
+        std::path::Path::new("/scratch"),
+        123_456,
+    );
+    assert!(command.args.contains(&"--number_ios=123456".to_owned()));
+    assert!(command.args.contains(&"--direct=1".to_owned()));
+    assert!(
+        !command
+            .args
+            .iter()
+            .any(|a| a.contains("runtime") || a.contains("time_based")),
+        "{:?}",
+        command.args
+    );
+    let json = r#"{"jobs":[{"error":0,"job_runtime":21345,"read":{"total_ios":123456,"clat_ns":{"percentile":{"99.000000":412000}}}}]}"#;
+    let summary = fio::fixed_work_summary(json).unwrap();
+    assert_eq!(summary.elapsed_ms, 21345.0);
+    assert_eq!(summary.total_ios, 123_456);
+    assert_eq!(summary.p99_clat_ns, Some(412_000));
+    assert!(fio::fixed_work_summary(r#"{"jobs":[{"error":5,"job_runtime":1}]}"#).is_err());
+    assert!(fio::fixed_work_summary("not json").is_err());
+}

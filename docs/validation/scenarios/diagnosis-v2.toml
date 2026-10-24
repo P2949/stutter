@@ -1,0 +1,71 @@
+# Post-v0.1 diagnosis evidence study (study schema 1). Ground truth is the predeclared
+# intervention, never Stutter's diagnosis output. Each family is a matched pair: the same
+# target and configuration with and without the intervention, captured in counterbalanced
+# AB/BA order. A family's captures may enter calibration only after an independent
+# target-impact test (direct metric, bootstrap CI excluding zero in the worsening direction
+# and a non-trivial effect size) passes; a family that cannot show impact at the cap is
+# closed as invalid for calibration and its thresholds are never touched.
+study_schema_version = 1
+study = "diagnosis-v2"
+
+[vkmark]
+light_scene = "cube"
+light_size = "640x480"
+heavy_scene = "texture"
+heavy_size = "3840x2160"
+present_mode = "fifo"
+heavy_present_mode = "immediate"
+
+[sampling]
+initial_pairs = 15
+max_pairs = 30
+extension_step = 5
+min_effect_size = 0.5
+failed_attempts_per_capture = 3
+seconds = 30
+
+[[family]]
+family = "scheduler"
+target = "vkmark_light"
+intervention = "scheduler_burst"
+placement = "study_cpu"
+metric = "runnable_p99_ns"
+
+[[family]]
+family = "io"
+target = "fio_fixed_work_v2"
+intervention = "blocking_io"
+metric = "target_elapsed_ms"
+
+[[family]]
+family = "irq"
+target = "vkmark_light"
+intervention = "network_traffic"
+placement = "irq_cpu"
+metric = "frame_p99_ms"
+
+[[family]]
+family = "gpu"
+target = "vkmark_gpu_heavy"
+intervention = "gpu_stressor"
+metric = "frame_p99_ms"
+accepted_wakeup_coalescing = 64
+
+[[mixed]]
+id = "mixed-scheduler-io"
+covers = ["scheduler", "io"]
+target = "fio_fixed_work_v2"
+interventions = ["scheduler_burst", "blocking_io"]
+placement = "study_cpu"
+expected_primary_cause = "BlockIoCandidate"
+count = 6
+
+[[mixed]]
+id = "mixed-irq-gpu"
+covers = ["irq", "gpu"]
+target = "vkmark_gpu_heavy"
+interventions = ["network_traffic", "gpu_stressor"]
+placement = "irq_cpu"
+expected_primary_cause = "GpuBoundCandidate"
+count = 6
+accepted_wakeup_coalescing = 64

@@ -299,6 +299,7 @@ fn good(spec: &crate::validation_campaign::scenarios::model::ScenarioSpec) -> Ca
         sanitizer_ok: true,
         fixture_valid: true,
         frame_samples: 1800,
+        placement_failure: None,
     }
 }
 
@@ -310,6 +311,10 @@ fn a_capture_counts_only_when_every_acceptance_condition_holds() {
     type Mutation = Box<dyn Fn(&mut CaptureEvidence)>;
     let mutations: Vec<(&str, Mutation)> = vec![
         ("identity", Box::new(|e| e.target_identity_valid = false)),
+        (
+            "placement",
+            Box::new(|e| e.placement_failure = Some("the target moved".to_owned())),
+        ),
         ("recording", Box::new(|e| e.recording_valid = false)),
         ("dropped", Box::new(|e| e.drops = 1)),
         ("write errors", Box::new(|e| e.write_errors = 1)),

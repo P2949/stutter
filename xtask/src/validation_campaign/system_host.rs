@@ -25,7 +25,7 @@ use super::{
         capture::InterventionReport,
         exec::{CaptureHost, RecordSummary, TargetIdentity},
         fixture::HostFacts,
-        model::{InterventionKind, ScenarioSet, ScenarioSpec, Target},
+        model::{InterventionKind, Placement, ScenarioSet, ScenarioSpec, Target},
         probe::{self, gpu_busy_established, scheduler_burst_established},
     },
     workloads::{
@@ -35,6 +35,8 @@ use super::{
         vkmark::{self, VkmarkConfig},
     },
 };
+
+mod study;
 
 pub const BURST_MS: u64 = 4;
 pub const BURST_PERIOD_MS: u64 = 20;
@@ -62,6 +64,11 @@ pub struct HostSettings {
     pub workload_version: String,
     pub burst_ms: u64,
     pub burst_period_ms: u64,
+    /// Study placement facts, frozen once: the permitted CPU, the CPU that services the NIC
+    /// interrupt, and the fixed-work target's I/O count. All `None` outside the study.
+    pub study_cpu: Option<u32>,
+    pub irq_cpu: Option<u32>,
+    pub fixed_work_ios: Option<u64>,
 }
 
 pub struct SystemCaptureHost {
@@ -73,6 +80,10 @@ pub struct SystemCaptureHost {
     interrupts_before: Option<std::collections::BTreeMap<u32, u64>>,
     gpu_samples: Vec<u32>,
     started: Option<std::time::Instant>,
+    target_pid: Option<u32>,
+    placement_result: Option<Result<(), String>>,
+    irq_cpu_before: Option<std::collections::BTreeMap<u32, Vec<u64>>>,
+    observed: serde_json::Map<String, Value>,
 }
 
 impl SystemCaptureHost {
@@ -86,6 +97,10 @@ impl SystemCaptureHost {
             interrupts_before: None,
             gpu_samples: Vec::new(),
             started: None,
+            target_pid: None,
+            placement_result: None,
+            irq_cpu_before: None,
+            observed: serde_json::Map::new(),
         }
     }
 
@@ -138,7 +153,13 @@ impl SystemCaptureHost {
     }
 
     fn window(&self, spec: &ScenarioSpec) -> u64 {
-        spec.seconds + TAIL_SECONDS + 10
+        // A fixed-work target must be allowed to finish after the recording ends.
+        let finish = if spec.target == Target::FioFixedWorkV2 {
+            study::FIXED_WORK_WAIT_SECONDS
+        } else {
+            0
+        };
+        spec.seconds + TAIL_SECONDS + 10 + finish
     }
 
     fn vkmark_config(&self, target: Target) -> VkmarkConfig {
@@ -248,10 +269,13 @@ impl CaptureHost for SystemCaptureHost {
                 ],
             )?;
         }
-        if spec.target == Target::FioFixedWork
+        if matches!(spec.target, Target::FioFixedWork | Target::FioFixedWorkV2)
             || spec.interventions.contains(&InterventionKind::BlockingIo)
         {
             wanted.push("fio");
+        }
+        if spec.placement != Placement::Unpinned {
+            wanted.push("taskset");
         }
         if !wanted.is_empty() {
             super::workloads::preflight_tools(&tools, &wanted).map_err(|p| p.join("; "))?;
@@ -273,14 +297,24 @@ impl CaptureHost for SystemCaptureHost {
             Target::FioFixedWork => {
                 fio::target_command(&FioProfile::target(), &self.settings.scratch, seconds)
             }
+            Target::FioFixedWorkV2 => fio::fixed_work_command(
+                &FioProfile::target_direct(),
+                &self.settings.scratch,
+                self.settings
+                    .fixed_work_ios
+                    .ok_or("the fixed-work I/O count was not calibrated")?,
+            ),
             other => vkmark::command(
                 &self.vkmark_config(other),
                 seconds,
                 &self.capture_dir.join("mangohud"),
             ),
         };
+        let command = self.pinned(spec, command)?;
         let log = self.capture_dir.join("target.log");
-        let pid = self.spawn(&command, &log, spec.target == Target::FioFixedWork)?;
+        let fio_target = matches!(spec.target, Target::FioFixedWork | Target::FioFixedWorkV2);
+        let pid = self.spawn(&command, &log, fio_target)?;
+        self.target_pid = Some(pid);
         std::thread::sleep(Duration::from_secs(3));
         let ticks = read_proc(pid, "stat")
             .and_then(|stat| starttime_ticks(&stat))
@@ -301,9 +335,7 @@ impl CaptureHost for SystemCaptureHost {
         for kind in &spec.interventions {
             match kind {
                 InterventionKind::SchedulerBurst => {
-                    let cpu = read_proc(target.pid, "stat")
-                        .and_then(|stat| last_cpu(&stat))
-                        .ok_or("cannot read the target's CPU")?;
+                    let cpu = self.burst_cpu(spec, target)?;
                     let data = self.send(Request::ExecuteSchedulerBurst {
                         cpu,
                         burst_ms: self.settings.burst_ms,
@@ -341,6 +373,7 @@ impl CaptureHost for SystemCaptureHost {
                         &super::host_factory::read_interrupts,
                     )?;
                     self.interrupts_before = Some(super::host_factory::read_interrupts()?);
+                    self.irq_cpu_before = study::read_per_cpu().ok();
                     self.traffic = Some(std::thread::spawn(move || {
                         network_irq::pump(&socket, TRAFFIC_PPS, 512, Duration::from_secs(seconds));
                     }));
@@ -409,7 +442,22 @@ impl CaptureHost for SystemCaptureHost {
                 data["exit_code"]
             ));
         }
+        self.note_gpu_busy();
+        if self.placement_result.is_none() {
+            let _ = self.check_placement(spec);
+        }
+        self.wait_fixed_work(spec)?;
         summarize_recording(raw)
+    }
+
+    fn verify_placement(&mut self, spec: &ScenarioSpec) -> Result<(), String> {
+        self.placement_result
+            .take()
+            .unwrap_or_else(|| self.check_placement(spec))
+    }
+
+    fn study_metrics(&mut self) -> Value {
+        Value::Object(self.observed.clone())
     }
 
     fn verify_interventions(
@@ -544,7 +592,10 @@ impl SystemCaptureHost {
         fio::blocking_established(&fio::summarize(&text)?, 50, MIN_BLOCKER_P99_NS)
     }
 
-    fn verify_irq(&self) -> Result<(), String> {
+    fn verify_irq(&mut self) -> Result<(), String> {
+        if self.settings.irq_cpu.is_some() {
+            return self.verify_irq_on_cpu();
+        }
         let irq = self.settings.irq.ok_or("no IRQ was frozen")?;
         let before = self
             .interrupts_before

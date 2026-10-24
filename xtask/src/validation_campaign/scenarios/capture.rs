@@ -29,6 +29,9 @@ pub struct CaptureEvidence {
     pub sanitizer_ok: bool,
     pub fixture_valid: bool,
     pub frame_samples: u64,
+    /// Why the target did not stay where the experiment placed it; `None` when it did (or the
+    /// scenario does not constrain placement).
+    pub placement_failure: Option<String>,
 }
 
 /// All acceptance conditions; `Err` lists every reason the attempt cannot count.
@@ -53,6 +56,9 @@ pub fn accept(spec: &ScenarioSpec, evidence: &CaptureEvidence) -> Result<(), Vec
         ),
     );
     require(evidence.write_errors == 0, "the recording had write errors");
+    if let Some(reason) = &evidence.placement_failure {
+        require(false, &format!("target placement not verified: {reason}"));
+    }
     require(
         evidence.fingerprint_matches,
         "the source/campaign fingerprint changed",

@@ -248,35 +248,43 @@ pub fn run_from_recordings(
 ) -> anyhow::Result<Value> {
     let mut observations = Vec::new();
     for (level, dir) in levels {
-        let records = std::fs::read_to_string(dir.join("interval.json"))?
-            .lines()
-            .filter(|line| !line.trim().is_empty())
-            .map(serde_json::from_str::<IntervalRecord>)
-            .collect::<Result<Vec<_>, _>>()?;
-        let session: SessionFile =
-            serde_json::from_slice(&std::fs::read(dir.join("session.json"))?)?;
-        // `--require-frames` implies strict target identity: the closure evidence must be
-        // bound to the recorded target, never to whichever process had the most samples.
-        let target = score_target::resolve(
-            &session.config.tree_roots,
-            &session.config.manual_pids,
-            &session.tasks,
-            &records,
-            require_frames,
-        )
-        .with_context(|| format!("level {level} ms ({})", dir.display()))?;
-        let frames = load_frames(dir)?;
-        let mut observation = observe(
-            *level,
-            &records,
-            &frames,
-            target.pid,
-            target.starttime_ticks,
-        );
-        observation.identity = Some(target);
-        observations.push(observation);
+        observations.push(load_observation(*level, dir, require_frames)?);
     }
     evaluate(observations, require_frames)
+}
+
+/// Direct metrics and production score of one recording directory for its resolved target.
+/// `strict` binds the evidence to the recorded target identity, never to whichever process
+/// had the most samples.
+pub fn load_observation(
+    level_ms: f64,
+    dir: &std::path::Path,
+    strict: bool,
+) -> anyhow::Result<LevelObservation> {
+    let records = std::fs::read_to_string(dir.join("interval.json"))?
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(serde_json::from_str::<IntervalRecord>)
+        .collect::<Result<Vec<_>, _>>()?;
+    let session: SessionFile = serde_json::from_slice(&std::fs::read(dir.join("session.json"))?)?;
+    let target = score_target::resolve(
+        &session.config.tree_roots,
+        &session.config.manual_pids,
+        &session.tasks,
+        &records,
+        strict,
+    )
+    .with_context(|| format!("level {level_ms} ms ({})", dir.display()))?;
+    let frames = load_frames(dir)?;
+    let mut observation = observe(
+        level_ms,
+        &records,
+        &frames,
+        target.pid,
+        target.starttime_ticks,
+    );
+    observation.identity = Some(target);
+    Ok(observation)
 }
 
 /// Frame stream of a recording (NDJSON): the canonical `frame_correlation.json`, then the

@@ -7,6 +7,7 @@ pub mod capability_check;
 pub mod coverage_maturity;
 pub mod dependency_hygiene;
 pub mod diagnosis_calibration;
+pub mod diagnosis_study;
 pub mod ebpf_manifest;
 pub mod ebpf_smoke;
 pub mod evidence_bundle;
@@ -129,6 +130,11 @@ pub enum XtaskCommand {
         about = "Drive the resumable Core Validation campaign (init, status, continue, verify)"
     )]
     ValidationCampaign(validation_campaign::cli::CampaignArgs),
+    #[command(
+        name = "diagnosis-study",
+        about = "Drive the post-v0.1 diagnosis evidence study (init, status, continue, verify, report)"
+    )]
+    DiagnosisStudy(diagnosis_study::StudyArgs),
     #[command(
         name = "kernel-matrix",
         about = "Report observed kernel compatibility from the evidence index"
@@ -402,6 +408,7 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
         XtaskCommand::ReleaseVerify(args) => release_package::verify_release(&args),
         XtaskCommand::ReleasePublish(args) => release_package::publish_release(&root, &args),
         XtaskCommand::ValidationCampaign(args) => validation_campaign::run(&root, args),
+        XtaskCommand::DiagnosisStudy(args) => diagnosis_study::run(&root, args),
         XtaskCommand::KernelMatrix { require } => kernel_matrix::run(&root, require),
         XtaskCommand::EvidenceIndex(args) => evidence_bundle::index_entry(&args.bundle),
         XtaskCommand::Calibrate {

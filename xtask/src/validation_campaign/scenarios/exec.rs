@@ -52,6 +52,16 @@ pub trait CaptureHost {
     ) -> Result<RecordSummary, String>;
     /// Independent telemetry about each applied intervention, gathered while it is still active.
     fn verify_interventions(&mut self, spec: &ScenarioSpec, raw: &Path) -> Vec<InterventionReport>;
+    /// Whether the target stayed where the scenario's placement put it; checked while the
+    /// capture is still running. Scenarios without a placement always pass.
+    fn verify_placement(&mut self, _spec: &ScenarioSpec) -> Result<(), String> {
+        Ok(())
+    }
+    /// Supporting measurements of the finished capture (direct effect metrics, telemetry),
+    /// gathered by the host while the capture ran. `Null` when the host measures nothing extra.
+    fn study_metrics(&mut self) -> serde_json::Value {
+        serde_json::Value::Null
+    }
     fn stop_all(&mut self);
     fn sanitize(&mut self, raw: &Path, out: &Path, name: &str) -> Result<(), String>;
     /// `data_quality.level` of the recording (a statement about the data, not a diagnosis).
@@ -115,7 +125,7 @@ pub fn run_capture(host: &mut dyn CaptureHost, request: &CaptureRequest<'_>) -> 
 fn capture_inner(
     host: &mut dyn CaptureHost,
     request: &CaptureRequest<'_>,
-) -> Result<(RecordSummary, Vec<InterventionReport>, bool), CaptureResult> {
+) -> Result<Captured, CaptureResult> {
     let spec = request.spec;
     let target = host.start_target(spec).map_err(|e| rejected("launch", e))?;
     host.start_interventions(spec, target)
@@ -124,16 +134,35 @@ fn capture_inner(
         .record(spec, target, request.raw_dir)
         .map_err(|e| rejected("record", e))?;
     let reports = host.verify_interventions(spec, request.raw_dir);
+    let placement_failure = host.verify_placement(spec).err();
     let identity_valid = target.pid != 0 && target.starttime_ticks != 0;
-    Ok((summary, reports, identity_valid))
+    Ok(Captured {
+        summary,
+        reports,
+        identity_valid,
+        placement_failure,
+    })
+}
+
+/// What a finished capture attempt hands to acceptance.
+struct Captured {
+    summary: RecordSummary,
+    reports: Vec<InterventionReport>,
+    identity_valid: bool,
+    placement_failure: Option<String>,
 }
 
 fn finish(
     host: &mut dyn CaptureHost,
     request: &CaptureRequest<'_>,
-    captured: (RecordSummary, Vec<InterventionReport>, bool),
+    captured: Captured,
 ) -> CaptureResult {
-    let (summary, reports, identity_valid) = captured;
+    let Captured {
+        summary,
+        reports,
+        identity_valid,
+        placement_failure,
+    } = captured;
     let spec = request.spec;
     let capture_id = sanitized_capture_id(
         request.campaign_id,
@@ -150,6 +179,7 @@ fn finish(
         drops: summary.drops,
         replaced_wakeups: summary.replaced_wakeups,
         write_errors: summary.write_errors,
+        placement_failure,
         interventions: reports,
         fingerprint_matches: (request.fingerprint_matches)(),
         capture_id_unique: !request.published_ids.contains(&capture_id),

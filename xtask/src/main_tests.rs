@@ -32,6 +32,7 @@ fn expected_subcommands_are_registered() {
             "ci",
             "clippy",
             "dependency-hygiene",
+            "diagnosis-study",
             "ebpf-manifest",
             "ebpf-smoke",
             "evidence-export",
