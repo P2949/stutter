@@ -81,8 +81,10 @@ pub fn accept(spec: &ScenarioSpec, evidence: &CaptureEvidence) -> Result<(), Vec
         "the generated fixture does not validate",
     );
     require(
-        !matches!(spec.target, Target::VkmarkLight | Target::VkmarkGpuHeavy)
-            || evidence.frame_samples > 0,
+        !matches!(
+            spec.target,
+            Target::VkmarkLight | Target::VkmarkLightUnpaced | Target::VkmarkGpuHeavy
+        ) || evidence.frame_samples > 0,
         "a vkmark target must produce a non-empty frame stream",
     );
     for expected in &spec.interventions {

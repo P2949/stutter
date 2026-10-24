@@ -68,6 +68,9 @@ impl ControlType {
 pub enum Target {
     /// Light, latency-sensitive `vkmark` scene (frame source: MangoHud).
     VkmarkLight,
+    /// The light scene presented without vsync: CPU-bound, so CPU time lost to an interrupt
+    /// shows up in its frame times (a vsync-paced scene hides it in idle time).
+    VkmarkLightUnpaced,
     /// `vkmark` at a frozen GPU-saturating configuration.
     VkmarkGpuHeavy,
     /// `fio` fixed-work process tree.
@@ -215,8 +218,8 @@ impl ScenarioSet {
                 spec.id
             );
             ensure!(
-                spec.accepted_wakeup_coalescing <= 256,
-                "{}: accepted_wakeup_coalescing is capped at 256",
+                spec.accepted_wakeup_coalescing <= 2048,
+                "{}: accepted_wakeup_coalescing is capped at 2048",
                 spec.id
             );
             ensure!(
