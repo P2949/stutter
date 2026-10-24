@@ -107,7 +107,13 @@ The version output includes the Cargo package version and the Git revision when 
 
 ## Install
 
-For a local technical-user install:
+**Verified release tarball (v0.1.0).** Download `stutter-0.1.0-linux-x86_64.tar.gz`, `SHA256SUMS` and
+`SUPPORT.md` from the [GitHub Release](https://github.com/P2949/stutter/releases/tag/v0.1.0), check
+them with `sha256sum -c SHA256SUMS`, and read `SUPPORT.md` first: only `doctor`, `record`, `bench`,
+`report`, `audit` and `completions_and_man` are Supported; everything else is Experimental. The
+tarball is an unprivileged layout, not a distribution package.
+
+**From source**, for a local technical-user install:
 
 ```bash
 scripts/install-local.sh

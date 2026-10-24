@@ -4,16 +4,21 @@
 
 ## Project status
 
-Current engineering phase: **Core Validation**. The staged plan and completion
-gates are in [CORE_VALIDATION_PLAN.md](CORE_VALIDATION_PLAN.md); current evidence
-and remaining work are tracked in [CORE_VALIDATION_STATUS.md](CORE_VALIDATION_STATUS.md).
+Current engineering phase: **Post-v0.1 Evidence Hardening**. Core Validation is
+complete and `v0.1.0` is released ([releases/v0.1.0.md](releases/v0.1.0.md)); the staged
+plan is in [CORE_VALIDATION_PLAN.md](CORE_VALIDATION_PLAN.md) and the historical ledger in
+[CORE_VALIDATION_STATUS.md](CORE_VALIDATION_STATUS.md).
 
-Until this milestone is complete, work is limited to correctness, objective
-semantics, measurement and acceptance infrastructure, recovery/safety fixes,
-validation corpus work, documentation synchronization, and release engineering
-required by those tasks. New mutation providers, system-wide tunables, high-risk
-autotune, scheduler integrations, major remote-control features, new UI surfaces,
-and unrelated crate refactors are deferred.
+The v0.1 evidence left honest limitations: diagnosis recall was 0.0 at the current
+thresholds, StutterScore was non-monotonic in both studies, and the multi-kernel cycle needed
+manual reboot orchestration. This phase fixes the ground truth before any tuning: a stronger
+diagnosis corpus with matched controls and independent target-impact proof, recalibration only
+against it (with a held-out set), a broader StutterScore workload matrix without changing
+weights, release-publication and lifecycle hardening, and persistent autonomous multi-kernel
+resume on NixOS. No new user-facing Supported or mutating functionality is added until this
+work is complete: new mutation providers, system-wide tunables, high-risk autotune, scheduler
+integrations, major remote-control features, new UI surfaces and unrelated crate refactors
+remain deferred.
 
 `stutter` is an experimental open-source project. Near-term work prioritizes
 trustworthy measurement, repeatability, explainability, conservative

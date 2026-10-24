@@ -3,31 +3,18 @@
 ## Current state
 
 ```text
-P0 objective semantics                 complete
-affinity safety/recovery               complete
-real suspend/resume                    PASS
-portable evidence tooling              complete
-capability framework                   implemented; no final graduation
-release tooling                        implemented; final gate pending
-
-remaining:
-privileged measurement evidence
-multi-kernel evidence
-diagnosis corpus/calibration
-frame-aware score evaluation
-capability decisions
-exact-commit release acceptance
+Core Validation                        COMPLETE
+v0.1.0                                 released (tag + GitHub Release at the verified RC)
+diagnosis calibration                  Experimental: the v0.1 corpus produced 0.0 recall at the current thresholds
+StutterScore                           Experimental: non-monotonic in both v0.1 studies
+mutating capabilities                  Experimental
+current engineering phase              Post-v0.1 Evidence Hardening
 ```
 
-The commit under evidence collection is recorded in the plan as `EVIDENCE_BASE`; a SHA is
-deliberately not kept in this header because it goes stale with every merge.
-
-The entries below are historical and are kept intact. The current execution map is
-[CORE_VALIDATION_PLAN.md](CORE_VALIDATION_PLAN.md).
-
-This ledger records implementation and verification against current state.
-The milestone remains **IN PROGRESS**. No live acceptance, calibration, kernel
-compatibility, or release gate is implied by offline tests.
+The entries below are a historical ledger and are kept intact; the sections that describe
+work as outstanding were true when written. The release facts are in
+[releases/v0.1.0.md](releases/v0.1.0.md), the campaign that produced them in
+[VALIDATION_CAMPAIGN.md](VALIDATION_CAMPAIGN.md) and the ledger entries at the end of this file.
 
 ## 2026-10-21: scope and first safety correction
 
@@ -47,32 +34,10 @@ compatibility, or release gate is implied by offline tests.
 - PASS: `cargo fmt --all --check`, `git diff --check`, and
   `cargo clippy -p stutter --lib -- -D warnings` in the pinned Nix environment.
 
-## Outstanding gates, in execution order
+## Outstanding gates, in execution order (historical, as of 2026-10-21)
 
-1. PASS: GitHub [Core Validation milestone](https://github.com/P2949/stutter/milestone/1)
-   and 17 actionable issues (#22–#38). The [backlog receipt](CORE_VALIDATION_BACKLOG.json)
-   records their creation URLs. P0 issues #22–#26 and #37 are closed.
-2. PASS P0 at verified main `37ed5ce`: direct runnable histograms and comparator,
-   fixed-work compile primary/activity safety, nine-objective contracts,
-   exhaustive registry, generated documentation and visible objective CI.
-3. PASS canonical observation success path on Linux 6.18.55, merged in PR #43
-   with main CI success at `0be8ad5`. Controlled game-objective evidence and
-   portable full-bundle export remain outstanding; #27 remains open.
-4. PASS live affinity success path across three processes/five tasks. PR #44
-   merged at `bbcead0`; exact-main CI run `39638305695` passed. #28 is closed.
-   No provider graduation is implied.
-5. IN PROGRESS: crash/startup recovery matrix, including identity/restore-format
-   correctness fixes. Real controller SIGKILL/restart remains outstanding.
-6. Portable evidence bundles; multiple real
-   kernel environments and basic profiler-overhead measurements.
-7. Provenance and validation coverage tooling; real diagnosis corpus, individual
-   threshold/confidence calibration, and empirical score evaluation.
-8. Capability tiers and provider graduation; release contract, reproducible
-   packaging, installation tutorial, fresh-checkout release acceptance and tag.
-
-Do not claim completion or graduate capabilities without the corresponding
-evidence. Missing real environments and unperformed live tests remain explicit
-validation debt rather than synthetic substitutes.
+This list recorded the plan before execution. Every gate has since passed or been resolved by
+the autonomous validation campaign; see "Current state" above and the campaign entries below.
 
 ## 2026-10-21: prepared rollback before affinity commit
 
