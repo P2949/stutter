@@ -177,6 +177,14 @@ impl Executor {
             if spec.binding != SourceBinding::None
                 && let Err(reason) = (self.source_check)(state, spec)
             {
+                // The candidate moved under a finished collection: freeze a new one.
+                if spec.binding == SourceBinding::ReleaseCandidate
+                    && state.new_candidate(&self.graph, format!("source changed: {reason}"))
+                {
+                    save(dir, state)?;
+                    attempted.clear();
+                    continue;
+                }
                 state.invalidate(&self.graph, spec.binding);
                 state.decisions.push(CampaignDecision {
                     task: id.to_owned(),
