@@ -104,6 +104,7 @@ pub fn verify(root: &Path, dir: &CampaignDir, state: &MutationState) -> Vec<Stri
             super::graph::Stage::Mechanical
                 | super::graph::Stage::FaultMatrix
                 | super::graph::Stage::SuspendResume
+                | super::graph::Stage::EvidenceIntegrate
         ) && task.status == TaskStatus::Passed
         {
             match reverify_task(dir, stage.as_str()) {

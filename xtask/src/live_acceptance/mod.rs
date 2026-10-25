@@ -573,3 +573,26 @@ impl Unprivileged for Command {
         self
     }
 }
+
+/// Provenance and result for the aggregate benefit evidence of a mutation campaign: the stored
+/// pairs, the frozen thresholds and the single holdout verdict. `status` is `PASS` only when the
+/// holdout passed; the caller exports and verifies the directory like any other suite output.
+pub(crate) fn write_benefit_summary(
+    root: &Path,
+    out: &Path,
+    binary: &Path,
+    status: &str,
+    body: Value,
+) -> anyhow::Result<()> {
+    evidence::metadata(
+        root,
+        out,
+        &root.join(binary),
+        evidence::LiveAcceptanceSuite::AffinityBenefit,
+    )?;
+    let mut result = body;
+    result["schema_version"] = json!(1);
+    result["status"] = json!(status);
+    result["evidence_kind"] = json!("controlled_real");
+    evidence::write_result(out, evidence::LiveAcceptanceSuite::AffinityBenefit, result)
+}

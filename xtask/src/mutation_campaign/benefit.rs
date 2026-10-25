@@ -34,6 +34,9 @@ pub enum Order {
 pub struct PairResult {
     pub scenario: Scenario,
     pub pair: usize,
+    /// The runner attempt whose directory holds the pair's raw artifacts.
+    #[serde(default)]
+    pub attempt: u32,
     pub order: Order,
     pub baseline: RunnableSummaryRecord,
     pub candidate: RunnableSummaryRecord,
