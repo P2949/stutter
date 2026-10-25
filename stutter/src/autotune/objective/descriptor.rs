@@ -114,7 +114,7 @@ impl ObjectiveKind {
                     "foreground_frame_pacing",
                 ],
                 Validating,
-                "Merged latency-sensitive target-game histograms; finite buckets and provisional effect thresholds; live acceptance pending.",
+                "Merged latency-sensitive target-game histograms; finite buckets and provisional effect thresholds; live observation, affinity and game-runnable acceptance exist, and the remaining limitation is decision-threshold calibration.",
             ),
             Self::DesktopInteractivity => (
                 "foreground_over_5ms_per_sample",

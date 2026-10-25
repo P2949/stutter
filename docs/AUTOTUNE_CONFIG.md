@@ -160,7 +160,7 @@ Data-quality failure blocks action before apply and forces revert during measure
 
 `max_regression_percent` is the maximum tolerated regression before a candidate must be reverted.
 
-Experiment comparison uses normalized score rates for keep/revert decisions:
+Keep/revert is decided by the candidate's own objective (`candidate.objective()`; see [AUTOTUNE_OBJECTIVES.md](AUTOTUNE_OBJECTIVES.md)). The normalized `StutterScore` rate below is the metric of the `StutterScore` objective only, which stays Experimental and composite; CPU-affinity candidates under game scheduler pressure use `GameRunnableLatency`. Normalized score rates:
 
 ```text
 score_per_sample = score.total / scored_samples
@@ -244,3 +244,20 @@ Run `stutter daemon policy-lint` to inspect the resolved workload policy matrix.
 Policy lints are warnings when a rule is intentionally suggestion-only, such as an empty `autonomous_families` list. Lints are errors when policy would make denied, system-wide, high-risk, or medium-risk families autonomous in a mode that cannot safely apply them. Critical workload-policy lint errors fail daemon config loading.
 
 The legacy alias `[[autotune.workload_policy_rules]]` is still accepted, but new config should use `[[autotune.workload_policy.rules]]`.
+
+## Autonomous apply is gated by product maturity
+
+Normal autonomous apply (`apply-low-risk`, `apply-medium-risk`) requires, in addition to every
+policy, health and conflict check above:
+
+1. the candidate's objective is `Supported` and allows autonomous apply;
+2. the product capability that governs the candidate's operation is `Supported`;
+3. an exact contract for the operation, workload, pressure, objective and effect scope exists
+   in `stutter/src/autotune/autonomous_support/`.
+
+The registry is empty until an operation completes its graduation campaign, so normal
+autonomous apply is denied with the stable reason codes `objective_not_supported`,
+`capability_tier_not_supported`, `operation_not_in_support_registry` or
+`operation_not_autonomous`. Suggest and benchmark modes are unaffected. A validation campaign
+may hold an override for exactly one operation and objective; it never authorises other
+operations, remote callers or high-risk operations.
