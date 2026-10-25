@@ -207,9 +207,22 @@ fn a_validation_override_authorises_exactly_one_operation_and_objective() {
     other_objective.validation_override = Some(&grant);
     assert!(autonomous_apply_gate(&other_objective).is_err());
 
-    let mut remote = exact;
+    // A remote caller never uses an override: for a tuple only an override could authorise (not the
+    // registered one) it is refused.
+    let uclamp_grant = ValidationOverride {
+        operation: MutationOperationKind::Uclamp,
+        objective: ObjectiveKind::GameRunnableLatency,
+        campaign_id: "mutation-campaign-1".to_owned(),
+    };
+    let mut remote = input(
+        MutationOperationKind::Uclamp,
+        ObjectiveKind::GameRunnableLatency,
+    );
     remote.source = ActionSource::RemoteAgent;
+    remote.validation_override = Some(&uclamp_grant);
     assert!(autonomous_apply_gate(&remote).is_err());
+    remote.source = ActionSource::AutotuneRuntime;
+    assert_eq!(autonomous_apply_gate(&remote), Ok(()));
 }
 
 #[test]

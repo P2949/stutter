@@ -50,9 +50,9 @@ with the evidence-index entries that justify it.
 
 The validation campaign applies one fixed, conservative policy once live observation, game-runnable, kernel, overhead, corpus, calibration and score evidence all verify:
 
-- **Supported:** `doctor`, `record`, `bench`, `report`, `audit`, `completions_and_man`
-- **Experimental:** `diagnose`, `advisor`, `tune_evaluation`, `restore`, `cpu_affinity_experiment`, `process_priority_and_placement`, `system_wide_tuning`, `always_on_autotune`, `remote_agent_mutation`
+- **Supported:** `doctor`, `record`, `bench`, `report`, `audit`, `completions_and_man`, `cpu_affinity_experiment`
+- **Experimental:** `diagnose`, `advisor`, `tune_evaluation`, `restore`, `process_priority_and_placement`, `system_wide_tuning`, `always_on_autotune`, `remote_agent_mutation`
 - **Internal:** `privileged_worker`, `fake_action_provider`
 
-Diagnosis stays Experimental even after calibration, and no mutating capability is promoted because CPU-affinity safety testing is strong.
+Diagnosis stays Experimental even after calibration. CPU affinity is Supported only for its graduated scheduler-pressure tuple (see the autonomous support matrix above); no other mutating capability is promoted.
 <!-- campaign-policy:end -->

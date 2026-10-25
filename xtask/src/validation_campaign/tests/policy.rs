@@ -46,7 +46,8 @@ fn tiers_of(source: &str, id: &str) -> (String, String) {
 }
 
 #[test]
-fn the_policy_promotes_exactly_the_six_core_capabilities_and_keeps_everything_else_conservative() {
+fn the_policy_promotes_the_core_capabilities_and_the_graduated_cpu_affinity_and_keeps_the_rest_conservative()
+ {
     let (supported, experimental) = policy();
     let out = apply_policy(SOURCE, &supported, &experimental).unwrap();
     for id in [
@@ -56,6 +57,7 @@ fn the_policy_promotes_exactly_the_six_core_capabilities_and_keeps_everything_el
         "report",
         "audit",
         "completions_and_man",
+        "cpu_affinity_experiment",
     ] {
         assert_eq!(
             tiers_of(&out, id),
@@ -68,7 +70,6 @@ fn the_policy_promotes_exactly_the_six_core_capabilities_and_keeps_everything_el
         "advisor",
         "tune_evaluation",
         "restore",
-        "cpu_affinity_experiment",
         "process_priority_and_placement",
         "system_wide_tuning",
         "always_on_autotune",

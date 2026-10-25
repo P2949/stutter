@@ -345,12 +345,15 @@ mod tests {
     }
 
     #[test]
-    fn no_mutating_capability_is_supported_in_the_first_release() {
+    fn only_graduated_mutating_capabilities_are_supported() {
         // Which non-mutating capabilities may be Supported is decided by evidence
-        // (`xtask capability-check`); mutation never graduates implicitly.
+        // (`xtask capability-check`); mutation never graduates implicitly: each mutating
+        // capability named here completed a graduation campaign.
+        const GRADUATED: &[&str] = &["cpu_affinity_experiment"];
         assert!(capability_registry().iter().all(|capability| {
             capability.tier != CapabilityTier::Supported
                 || capability.class == CapabilityClass::NonMutating
+                || GRADUATED.contains(&capability.id)
         }));
     }
 
