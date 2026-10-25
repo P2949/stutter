@@ -218,7 +218,7 @@ impl CampaignState {
         ) {
             return Vec::new();
         }
-        graph
+        let mut ready: Vec<&'static str> = graph
             .topological()
             .into_iter()
             .filter(|id| {
@@ -240,7 +240,15 @@ impl CampaignState {
                         )))
                     && self.dependencies_satisfied(graph, spec)
             })
-            .collect()
+            .collect();
+        // A stage that asked for a reboot is finished first: after the machine returns, the
+        // interrupted work resumes before any new task starts (the sort is stable).
+        ready.sort_by_key(|id| {
+            graph
+                .get(id)
+                .is_none_or(|spec| self.effective_status(spec) != TaskStatus::WaitingForReboot)
+        });
+        ready
     }
 
     /// A source-unbound task (integration, review, policy) that failed on a defect is retried

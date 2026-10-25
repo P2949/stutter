@@ -46,6 +46,9 @@ pub enum CampaignCommand {
         /// Resume after a reboot (invoked by the validation resume service).
         #[arg(long)]
         resume: bool,
+        /// Run only this task, if it is ready (its dependencies are never bypassed).
+        #[arg(long)]
+        only: Option<String>,
     },
     /// Rebuild campaign truth from retained receipts instead of cached statuses.
     Verify {

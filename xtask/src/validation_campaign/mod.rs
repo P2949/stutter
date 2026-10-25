@@ -156,6 +156,7 @@ fn build_executor(loaded: &Loaded, root: &Path) -> anyhow::Result<Executor> {
         repository: root.to_path_buf(),
         binaries: binaries.clone(),
         source_check: Box::new(|_, _| Ok(())),
+        only: None,
     }
     .with_repository_check(root.join(manifest_rel)))
 }
@@ -216,6 +217,7 @@ pub fn run(root: &Path, args: CampaignArgs) -> anyhow::Result<()> {
             campaign,
             max_tasks,
             resume,
+            only,
         } => {
             let mut loaded = load_campaign(root, campaign)?;
             loaded.state.require_mode(&[
@@ -226,7 +228,11 @@ pub fn run(root: &Path, args: CampaignArgs) -> anyhow::Result<()> {
             if resume {
                 println!("resuming campaign {}", loaded.state.campaign_id);
             }
-            let executor = build_executor(&loaded, root)?;
+            let mut executor = build_executor(&loaded, root)?;
+            if let Some(only) = &only {
+                ensure!(loaded.graph.get(only).is_some(), "unknown task {only}");
+            }
+            executor.only = only;
             let report = executor.continue_campaign(&loaded.dir, &mut loaded.state, max_tasks)?;
             println!("ran: {}", report.ran.join(", "));
             println!("boundary: {:?}", report.boundary);

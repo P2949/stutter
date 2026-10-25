@@ -442,6 +442,7 @@ fn executor(world: &Rc<World>) -> Executor {
             }
             Ok(())
         }),
+        only: None,
     }
 }
 

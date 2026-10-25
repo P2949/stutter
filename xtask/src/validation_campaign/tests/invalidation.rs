@@ -47,6 +47,7 @@ fn executor(script: Arc<Script>, order: &Arc<Mutex<Vec<String>>>) -> Executor {
             xtask: PathBuf::from("x"),
         },
         source_check: Box::new(|_, _| Ok(())),
+        only: None,
     }
 }
 
@@ -408,4 +409,34 @@ fn main_moving_under_a_frozen_candidate_freezes_a_new_one() {
     assert_eq!(report.boundary, Boundary::Complete);
     assert_eq!(state.tasks["freeze-rc"].attempts.len(), 2);
     assert_eq!(state.tasks["corpus"].attempts.len(), 1);
+}
+
+#[test]
+fn only_runs_the_named_ready_task_and_a_reboot_wait_resumes_first() {
+    let (_scratch, dir, mut state) = setup("only");
+    let order = Arc::new(Mutex::new(Vec::new()));
+    let mut executor = executor(all_pass(), &order);
+    // `offline-ready` gates the collection: naming a task whose dependency is unmet runs nothing.
+    executor.only = Some("kernel-matrix".to_owned());
+    let report = executor.continue_campaign(&dir, &mut state, None).unwrap();
+    assert!(report.ran.is_empty(), "{:?}", report.ran);
+    executor.only = Some("offline-ready".to_owned());
+    let report = executor.continue_campaign(&dir, &mut state, None).unwrap();
+    assert_eq!(report.ran, vec!["offline-ready".to_owned()]);
+    executor.only = Some("kernel-matrix".to_owned());
+    let report = executor.continue_campaign(&dir, &mut state, None).unwrap();
+    assert_eq!(report.ran, vec!["kernel-matrix".to_owned()]);
+    // A task waiting for a reboot is resumed before any other pending task.
+    let (_scratch, _dir, mut state) = setup("resume-first");
+    state.tasks.get_mut("kernel-matrix").unwrap().status = TaskStatus::WaitingForReboot;
+    state.tasks.get_mut("offline-ready").unwrap().status = TaskStatus::Passed;
+    let graph = Graph::core().unwrap();
+    for spec in graph.specs() {
+        if spec.id == "offline-ready" {
+            state.tasks.get_mut("offline-ready").unwrap().fingerprint =
+                Some(state.expected_fingerprint(spec));
+        }
+    }
+    let ready = state.runnable(&graph, true);
+    assert_eq!(ready.first().copied(), Some("kernel-matrix"), "{ready:?}");
 }

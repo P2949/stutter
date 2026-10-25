@@ -118,6 +118,8 @@ pub struct Executor {
     pub repository: PathBuf,
     pub binaries: Binaries,
     pub source_check: Box<SourceCheck>,
+    /// Run only this task (it must already be runnable; dependencies are never bypassed).
+    pub only: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -163,10 +165,9 @@ impl Executor {
             if state.mode == CampaignMode::Invalidated {
                 break;
             }
-            let next = state
-                .runnable(&self.graph, true)
-                .into_iter()
-                .find(|id| !attempted.contains(id));
+            let next = state.runnable(&self.graph, true).into_iter().find(|id| {
+                !attempted.contains(id) && self.only.as_deref().is_none_or(|only| only == *id)
+            });
             let Some(id) = next else { break };
             attempted.insert(id);
             let Some(spec) = self.graph.get(id) else {

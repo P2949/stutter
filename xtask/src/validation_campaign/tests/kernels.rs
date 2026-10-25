@@ -180,6 +180,7 @@ fn executor(host: Rc<RefCell<Machine>>) -> Executor {
             xtask: PathBuf::from("x"),
         },
         source_check: Box::new(|_, _| Ok(())),
+        only: None,
     }
 }
 
