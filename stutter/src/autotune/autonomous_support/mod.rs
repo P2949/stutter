@@ -30,9 +30,24 @@ pub struct AutonomousContract {
     pub prerequisites: &'static [&'static str],
 }
 
-/// Every Supported autonomous contract. Empty until an operation completes its graduation
-/// campaign; each addition comes with its exact-commit evidence.
-pub const AUTONOMOUS_CONTRACTS: &[AutonomousContract] = &[];
+/// Every Supported autonomous contract. An addition comes with the exact-commit evidence of its
+/// graduation campaign (`xtask mutation-campaign`) and nothing here widens beyond that tuple.
+pub const AUTONOMOUS_CONTRACTS: &[AutonomousContract] = &[
+    // M4: CPU affinity for a stable, explicitly identified game under scheduler pressure, judged
+    // by the target's own runnable latency.
+    AutonomousContract {
+        operation: MutationOperationKind::CpuAffinityProfile,
+        workload: WorkloadKind::Game,
+        pressure: PressureKind::Scheduler,
+        objective: ObjectiveKind::GameRunnableLatency,
+        effect_scope: ActionEffectScope::LocalProcessTree,
+        prerequisites: &[
+            "explicit_or_stable_game_target",
+            "baseline_runnable_population_of_at_least_1000_samples",
+            "prepared_rollback_token_durable_before_first_write",
+        ],
+    },
+];
 
 /// Authorises exactly one operation and objective for one validation campaign. It never
 /// authorises other operations or objectives, remote callers, or high-risk operations.

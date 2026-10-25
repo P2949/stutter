@@ -42,7 +42,7 @@ mod tests {
     }
 
     #[test]
-    fn game_cpu_affinity_profile_is_denied_autonomously_until_it_is_supported() {
+    fn game_cpu_affinity_profile_judged_by_the_composite_score_is_denied_autonomously() {
         let evaluation = evaluate_static_candidate(
             DaemonMode::ApplyLowRisk,
             SituationKind::GameCpuSchedulerPressure,

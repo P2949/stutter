@@ -138,8 +138,11 @@ fn preflight_checks(context: &StageContext<'_>) -> Vec<(&'static str, bool, Stri
     )];
     let maturity = objective.map(|kind| kind.descriptor().maturity);
     checks.push((
-        "objective_validating",
-        maturity == Some(ObjectiveMaturity::Validating),
+        "objective_can_be_validated",
+        matches!(
+            maturity,
+            Some(ObjectiveMaturity::Validating | ObjectiveMaturity::Supported)
+        ),
         format!(
             "objective {} maturity {maturity:?}",
             context.state.objective

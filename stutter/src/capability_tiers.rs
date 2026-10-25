@@ -122,14 +122,14 @@ pub const CAPABILITIES: [Capability; 17] = [
     },
     Capability {
         id: "cpu_affinity_experiment",
-        title: "Explicit reversible CPU-affinity experiment",
+        title: "Autonomous CPU-affinity tuning of a game under scheduler pressure",
         class: CapabilityClass::Mutating,
-        tier: CapabilityTier::Experimental,
-        target_tier: CapabilityTier::Experimental,
+        tier: CapabilityTier::Supported,
+        target_tier: CapabilityTier::Supported,
         commands: &["tune", "autotune"],
         providers: &["cpu_affinity_profile"],
         required_evidence: AFFINITY,
-        limitations: "Low-risk, per-process-tree scope only; benefit is not claimed without calibration evidence.",
+        limitations: "Supported autonomous apply only for a stable, explicitly identified game under scheduler pressure, judged by its own runnable latency (GameRunnableLatency); every other workload, pressure or objective stays suggest-only or manual. Low-risk, per-process-tree scope.",
     },
     Capability {
         id: "process_priority_and_placement",

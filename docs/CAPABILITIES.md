@@ -21,10 +21,25 @@ Mutation providers do not inherit each other's maturity: a registry test require
 entry of `MUTATION_PROVIDER_KINDS` to be governed by exactly one capability, and
 providers other than `cpu_affinity_profile` cannot target `Supported` in the first
 release (`nice`, `ioprio`, `uclamp`, `cgroup placement`, IRQ affinity, CPU/GPU power and
-VM settings stay Experimental). CPU affinity is the first graduation candidate; its
-observation, affinity, recovery and suspend/resume evidence is indexed; the remaining
-gap is the empirical-benefit decision for the exact scheduler-pressure scope. It is not
-promoted yet.
+VM settings stay Experimental). CPU affinity is the first operation to graduate
+(`xtask mutation-campaign`, see [MUTATION_CAMPAIGN.md](MUTATION_CAMPAIGN.md)): its observation,
+affinity, recovery, suspend/resume and matched-pair benefit evidence is indexed at the campaign
+commit, and `GameRunnableLatency` is the `Supported` objective that decides its keep/revert.
+
+## Autonomous support matrix
+
+A tier does not by itself authorise autonomous apply. Normal autonomous apply requires the
+objective to be `Supported`, the operation's capability to be `Supported`, and an exact contract in
+`stutter/src/autotune/autonomous_support/` (operation, workload, pressure, objective, effect scope,
+prerequisites). Today the registry holds one contract:
+
+| Operation | Workload | Pressure | Objective | Scope |
+| --- | --- | --- | --- | --- |
+| CPU-affinity profile | stable, explicitly identified game | scheduler | `GameRunnableLatency` | local process tree |
+
+Everything outside the matrix is suggest-only, benchmark-only, manual or rejected: other
+affinity contexts, `process_priority_and_placement`, system-wide tuning and always-on autotune
+stay Experimental.
 
 Mutating capabilities require at least `live_recovery` and `live_suspend_resume`
 (`MUTATING_REQUIRED_EVIDENCE`). Changing a tier is a code change that must ship together
