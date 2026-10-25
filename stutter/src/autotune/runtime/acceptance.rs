@@ -75,7 +75,7 @@ pub(crate) fn run_failure_scenario(
         .context("injected failure unexpectedly succeeded")?;
     let typed = error
         .downcast_ref::<JournaledActionFailure>()
-        .context("runner outcome type was not preserved")?;
+        .with_context(|| format!("runner outcome type was not preserved: {error:#}"))?;
     let journal = read_controller_journal(&journal_path)?;
     let phase = runtime.runtime_phase();
     ensure!(
