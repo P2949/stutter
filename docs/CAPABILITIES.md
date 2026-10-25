@@ -22,8 +22,9 @@ entry of `MUTATION_PROVIDER_KINDS` to be governed by exactly one capability, and
 providers other than `cpu_affinity_profile` cannot target `Supported` in the first
 release (`nice`, `ioprio`, `uclamp`, `cgroup placement`, IRQ affinity, CPU/GPU power and
 VM settings stay Experimental). CPU affinity is the first graduation candidate; its
-recovery, affinity and suspend/resume evidence is indexed; the remaining gaps are the
-observation bundle and an empirical-benefit decision. It is not promoted yet.
+observation, affinity, recovery and suspend/resume evidence is indexed; the remaining
+gap is the empirical-benefit decision for the exact scheduler-pressure scope. It is not
+promoted yet.
 
 Mutating capabilities require at least `live_recovery` and `live_suspend_resume`
 (`MUTATING_REQUIRED_EVIDENCE`). Changing a tier is a code change that must ship together

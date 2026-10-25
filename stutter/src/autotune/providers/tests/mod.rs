@@ -233,3 +233,51 @@ fn a_candidates_objective_is_the_same_at_every_stage() {
     assert_eq!(plan_file.objective, candidate.objective());
     assert_eq!(request.objective, candidate.objective());
 }
+
+#[test]
+fn direct_runnable_pressure_makes_affinity_candidates_eligible_without_a_diagnosis() {
+    let mut observation = provider_observation(SituationKind::Unknown, FocusGroupKind::Game);
+    observation.active_tasks = vec![active_task_snapshot()];
+    observation.recent_diagnoses = Vec::new();
+    observation.objective_signals.runnable_latency_p99_ns = Some(3_000_000);
+    observation.objective_signals.runnable_samples =
+        Some(crate::autotune::objective::MINIMUM_RUNNABLE_SAMPLES);
+    observation.refresh_situation_classification();
+    assert_eq!(
+        observation.primary_situation,
+        SituationKind::GameCpuSchedulerPressure
+    );
+
+    let profiles = vec![crate::profiles::Profile {
+        name: "game-isolate-render".to_owned(),
+        rules: vec![crate::profiles::ProfileRule {
+            affinity: Some(crate::affinity::CpuMask::parse("0").unwrap()),
+            nice: None,
+            ionice: None,
+            match_class: vec![TaskClass::Game],
+            match_comm: Vec::new(),
+        }],
+    }];
+    let policy = policy(DaemonMode::Suggest);
+    let health = SystemHealthSnapshot::default();
+    let context = system_context_for_observation(&observation);
+    let state = ControllerRuntimeState::default();
+    let capabilities = crate::daemon::capabilities::DaemonCapabilities::default();
+    let proposals = crate::autotune::providers::cpu_affinity::CpuAffinityProvider.propose(
+        &CandidateProviderInput {
+            observation: &observation,
+            daemon_policy: &policy,
+            capabilities: &capabilities,
+            system_health: &health,
+            system_context: &context,
+            controller_state: &state,
+            profiles: &profiles,
+        },
+    );
+    assert!(!proposals.is_empty());
+    assert!(
+        proposals
+            .iter()
+            .all(|proposal| proposal.candidate.objective() == ObjectiveKind::GameRunnableLatency)
+    );
+}

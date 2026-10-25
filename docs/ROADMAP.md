@@ -60,6 +60,11 @@ exist before they are considered supported defaults.
 
 ### Objective comparison maturity
 
+Autotune control model v2 (M3): the candidate plan is the single authority for its objective;
+objective maturity and product-capability tiers are runtime gates for normal autonomous apply
+(see [AUTOTUNE_CONFIG.md](AUTOTUNE_CONFIG.md)); nothing is autonomous until an operation
+completes graduation.
+
 Per-objective maturity, primary metrics, fallbacks and guardrails are defined by
 `ObjectiveKind::descriptor()` (`stutter/src/autotune/objective/descriptor.rs`) and
 generated into [AUTOTUNE_OBJECTIVES.md](AUTOTUNE_OBJECTIVES.md). This roadmap

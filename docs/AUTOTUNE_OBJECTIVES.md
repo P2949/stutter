@@ -24,7 +24,7 @@ or grant permission. No objective has graduated to Supported.
 
 - `StutterScore`: Ranking proxy within comparable experiments; weights are not empirically calibrated.
 - `GameFramePacing`: Frame source quality varies; unchanged or missing primary uses explicit score fallback.
-- `GameRunnableLatency`: Merged latency-sensitive target-game histograms; finite buckets and provisional effect thresholds; live acceptance pending.
+- `GameRunnableLatency`: Merged latency-sensitive target-game histograms; finite buckets and provisional effect thresholds; live observation, affinity and game-runnable acceptance exist, and the remaining limitation is decision-threshold calibration.
 - `DesktopInteractivity`: Existing derived foreground signal; unchanged or missing primary uses score fallback.
 - `BrowserInteractivity`: Uses the existing foreground approximation, without a browser-specific direct primary measurement.
 - `CompileThroughputWithForegroundProtection`: Cache/toolchain/environment policy is harness-declared; foreground protection is derived; provisional 10 percent threshold and live acceptance pending.

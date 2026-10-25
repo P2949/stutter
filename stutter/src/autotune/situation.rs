@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    autotune::situation_model::{PressureKind, direct_pressure_evidence},
     daemon::health::SystemHealthState,
     diagnosis::{Confidence, StutterCause},
     focus::FocusGroupKind,
@@ -135,6 +136,28 @@ pub fn classify_situation(
         promote_kind(&mut classification, kind, weight);
     }
 
+    // Direct telemetry establishes pressure on its own; a diagnosis may only corroborate it.
+    for pressure in direct_pressure_evidence(&observation.objective_signals) {
+        let Some(kind) = situation_from_pressure(observation, pressure.kind) else {
+            continue;
+        };
+        push_evidence(
+            &mut classification,
+            format!("direct_{}", pressure.signal),
+            pressure.value.clone(),
+            pressure.weight,
+        );
+        classification
+            .reason_codes
+            .push(format!("direct_pressure_{:?}", pressure.kind).to_ascii_lowercase());
+        promote_direct_pressure(
+            &mut classification,
+            base_situation_from_focus(observation),
+            kind,
+            pressure.weight,
+        );
+    }
+
     if observation.frame_count == 0 && matches!(classification.primary, SituationKind::GameGpuBound)
     {
         classification
@@ -224,6 +247,37 @@ fn situation_from_diagnosis(
     }
 }
 
+/// The situation a pressure implies for the focused workload, when it implies one.
+fn situation_from_pressure(
+    observation: &crate::autotune::observation::AutotuneObservation,
+    pressure: PressureKind,
+) -> Option<SituationKind> {
+    match pressure {
+        PressureKind::Scheduler | PressureKind::Cpu => Some(cpu_pressure_situation(observation)),
+        PressureKind::Gpu => match observation.focus_kind {
+            Some(FocusGroupKind::Game) => Some(SituationKind::GameGpuBound),
+            Some(FocusGroupKind::Browser) => Some(SituationKind::BrowserGpuVideo),
+            _ => None,
+        },
+        PressureKind::Io | PressureKind::Memory => {
+            if matches!(observation.focus_kind, Some(FocusGroupKind::Browser)) {
+                Some(SituationKind::BrowserIoPressure)
+            } else if matches!(observation.focus_kind, Some(FocusGroupKind::Compile))
+                && observation
+                    .recent_diagnoses
+                    .iter()
+                    .any(|entry| matches!(entry.anchor_class, TaskClass::Linker))
+            {
+                Some(SituationKind::CompileLinkerPressure)
+            } else {
+                Some(SituationKind::IoPressure)
+            }
+        }
+        PressureKind::Irq => Some(SituationKind::IrqPressure),
+        PressureKind::Thermal | PressureKind::Power => Some(SituationKind::ThermalOrPowerLimit),
+    }
+}
+
 fn cpu_pressure_situation(
     observation: &crate::autotune::observation::AutotuneObservation,
 ) -> SituationKind {
@@ -255,6 +309,25 @@ fn confidence_weight(confidence: Confidence) -> f32 {
         Confidence::High => 0.95,
         Confidence::Medium => 0.70,
         Confidence::Low => 0.40,
+    }
+}
+
+/// Direct pressure refines the plain focus situation (for example `BrowserFocused`) into a
+/// pressure situation; it never displaces a situation a stronger signal already established.
+fn promote_direct_pressure(
+    classification: &mut SituationClassification,
+    base: SituationKind,
+    kind: SituationKind,
+    weight: f32,
+) {
+    if classification.primary == base && base.pressure().is_none() {
+        if base != kind {
+            classification.secondary.push(base);
+        }
+        classification.primary = kind;
+        classification.confidence = classification.confidence.max(weight);
+    } else {
+        promote_kind(classification, kind, weight);
     }
 }
 
@@ -452,5 +525,162 @@ mod tests {
         let classification = classify_situation(&observation);
 
         assert_eq!(classification.primary, SituationKind::Idle);
+    }
+}
+
+#[cfg(test)]
+mod direct_pressure_tests {
+    use super::*;
+    use crate::autotune::{
+        objective::{MINIMUM_RUNNABLE_SAMPLES, ObjectiveSignals},
+        observation::AutotuneObservation,
+    };
+
+    fn focused(kind: FocusGroupKind, signals: ObjectiveSignals) -> AutotuneObservation {
+        AutotuneObservation {
+            target_present: true,
+            target_root_pid: Some(1234),
+            active_target_count: 1,
+            focus_kind: Some(kind),
+            focus_confidence: 0.92,
+            focus_roots: vec![1234],
+            objective_signals: signals,
+            recent_diagnoses: Vec::new(),
+            ..AutotuneObservation::default()
+        }
+    }
+
+    #[test]
+    fn stable_runnable_latency_is_scheduler_pressure_without_any_diagnosis() {
+        let observation = focused(
+            FocusGroupKind::Game,
+            ObjectiveSignals {
+                runnable_latency_p99_ns: Some(3_000_000),
+                runnable_samples: Some(MINIMUM_RUNNABLE_SAMPLES),
+                ..ObjectiveSignals::default()
+            },
+        );
+        let classification = classify_situation(&observation);
+        assert_eq!(
+            classification.primary,
+            SituationKind::GameCpuSchedulerPressure
+        );
+        assert!(
+            classification
+                .reason_codes
+                .contains(&"direct_pressure_scheduler".to_owned())
+        );
+    }
+
+    #[test]
+    fn too_few_or_too_fast_runnable_samples_create_no_pressure() {
+        for (p99, samples) in [
+            (3_000_000, MINIMUM_RUNNABLE_SAMPLES - 1),
+            (1_999_999, MINIMUM_RUNNABLE_SAMPLES),
+        ] {
+            let observation = focused(
+                FocusGroupKind::Game,
+                ObjectiveSignals {
+                    runnable_latency_p99_ns: Some(p99),
+                    runnable_samples: Some(samples),
+                    ..ObjectiveSignals::default()
+                },
+            );
+            assert_eq!(
+                classify_situation(&observation).primary,
+                SituationKind::GameFocused
+            );
+        }
+    }
+
+    #[test]
+    fn each_direct_signal_creates_its_pressure_without_diagnosis() {
+        let cases = [
+            (
+                FocusGroupKind::Game,
+                ObjectiveSignals {
+                    gpu_busy_percent: Some(96),
+                    ..ObjectiveSignals::default()
+                },
+                SituationKind::GameGpuBound,
+            ),
+            (
+                FocusGroupKind::Browser,
+                ObjectiveSignals {
+                    gpu_power_limited: Some(true),
+                    ..ObjectiveSignals::default()
+                },
+                SituationKind::BrowserGpuVideo,
+            ),
+            (
+                FocusGroupKind::Desktop,
+                ObjectiveSignals {
+                    block_io_overlap_count: Some(3),
+                    ..ObjectiveSignals::default()
+                },
+                SituationKind::IoPressure,
+            ),
+            (
+                FocusGroupKind::Desktop,
+                ObjectiveSignals {
+                    irq_overlap_count: Some(2),
+                    ..ObjectiveSignals::default()
+                },
+                SituationKind::IrqPressure,
+            ),
+            (
+                FocusGroupKind::Desktop,
+                ObjectiveSignals {
+                    swap_activity_events: Some(4),
+                    ..ObjectiveSignals::default()
+                },
+                SituationKind::IoPressure,
+            ),
+            (
+                FocusGroupKind::Game,
+                ObjectiveSignals {
+                    cpu_power_limited: Some(true),
+                    ..ObjectiveSignals::default()
+                },
+                SituationKind::ThermalOrPowerLimit,
+            ),
+            (
+                FocusGroupKind::Game,
+                ObjectiveSignals {
+                    thermal_degraded: Some(true),
+                    ..ObjectiveSignals::default()
+                },
+                SituationKind::ThermalOrPowerLimit,
+            ),
+        ];
+        for (focus, signals, expected) in cases {
+            let observation = focused(focus, signals);
+            assert!(observation.recent_diagnoses.is_empty());
+            assert_eq!(classify_situation(&observation).primary, expected);
+        }
+    }
+
+    #[test]
+    fn a_diagnosis_may_corroborate_but_is_not_required() {
+        let mut observation = focused(
+            FocusGroupKind::Game,
+            ObjectiveSignals {
+                runnable_latency_p99_ns: Some(3_000_000),
+                runnable_samples: Some(MINIMUM_RUNNABLE_SAMPLES),
+                ..ObjectiveSignals::default()
+            },
+        );
+        let direct = classify_situation(&observation).primary;
+        observation.recent_diagnoses = vec![crate::diagnosis::LiveDiagnosisEntry {
+            elapsed_ms: 1,
+            cause: StutterCause::GameThreadSchedulerDelay,
+            confidence: Confidence::High,
+            anchor_class: TaskClass::GameRenderThread,
+            anchor_comm: "game".to_owned(),
+            evidence: Vec::new(),
+        }];
+        let corroborated = classify_situation(&observation);
+        assert_eq!(corroborated.primary, direct);
+        assert!(corroborated.confidence >= 0.90);
     }
 }

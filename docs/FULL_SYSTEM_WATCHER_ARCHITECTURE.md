@@ -12,7 +12,10 @@ mutate the machine. Providers return candidates; mutation only happens through a
    counter evidence.
 3. Build an `AutotuneObservation` with focus, health, capabilities, workload
    identity, protected tasks, and the cheap active configuration snapshot.
-4. Resolve focus and classify the situation with `SituationClassification`.
+4. Resolve focus and classify the situation with `SituationClassification`. Workload and
+   pressure are independent dimensions: direct telemetry (runnable latency, GPU busy or
+   power-limited, block-I/O or IRQ overlap, swap or writeback activity, thermal or power
+   limits) establishes pressure without any diagnosis, which may only corroborate it.
 5. Evaluate data quality, health, focus stability, protected-task warnings, and
    target identity.
 6. Ask registered candidate providers for proposals.
@@ -41,8 +44,10 @@ and quality gates, records denials, and selects at most one candidate.
 Action execution converts a selected candidate into a `TuningAction` and runs it
 through the action runner. Rollback tokens are required before autonomous apply.
 
-Verification compares baseline and candidate windows with an objective selected
-for the workload, not a single global score for every case.
+Verification compares baseline and candidate windows with the objective the candidate
+carries (`candidate.objective()` is the single authority), not a single global score for
+every case. Autonomous apply additionally passes the product-maturity gate in
+`autotune::autonomous_support`.
 
 Rollback is owned by action implementations, controller journals, startup
 recovery, shutdown handling, and emergency restore.
