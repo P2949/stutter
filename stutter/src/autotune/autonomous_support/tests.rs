@@ -260,3 +260,21 @@ fn an_operation_without_a_prepared_transaction_is_never_autonomous_even_when_reg
         Err(AutonomousDenial::PreparedTransactionMissing)
     );
 }
+
+#[test]
+fn a_campaign_holding_the_run_excludes_every_other_operation_even_a_supported_one() {
+    let uclamp_grant = ValidationOverride {
+        operation: MutationOperationKind::Uclamp,
+        objective: ObjectiveKind::GameRunnableLatency,
+        campaign_id: "mutation-campaign-2".to_owned(),
+    };
+    // Without the campaign, the graduated affinity tuple is autonomous...
+    assert_eq!(autonomous_apply_gate(&affinity()), Ok(()));
+    // ...while the campaign owns the run, only its own operation may be applied.
+    let mut during = affinity();
+    during.validation_override = Some(&uclamp_grant);
+    assert_eq!(
+        autonomous_apply_gate(&during),
+        Err(AutonomousDenial::OutsideValidationScope)
+    );
+}
