@@ -230,6 +230,15 @@ impl CandidateAction {
         self.plan().objective()
     }
 
+    /// The typed contract this candidate is judged by: the primary objective alone decides
+    /// keep/revert; mechanism evidence and guardrails can only withhold a keep.
+    pub fn experiment_contract(&self) -> crate::autotune::objective::contract::ExperimentContract {
+        crate::autotune::objective::contract::ExperimentContract::for_operation(
+            self.operation_kind(),
+            self.objective(),
+        )
+    }
+
     pub fn describe(&self) -> String {
         self.plan().describe()
     }

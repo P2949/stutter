@@ -113,6 +113,7 @@ pub(super) fn active_state_with_baseline_window(
         }),
         cooldown_until_unix_nanos: None,
         candidate_memory: CandidateMemory::default(),
+        validation_override: None,
     }
 }
 

@@ -1,12 +1,13 @@
 use std::time::Duration;
 
 use super::{
-    model::{LiveExperiment, LiveExperimentHistoryContext},
+    model::{LiveExperiment, LiveExperimentHistoryContext, LiveExperimentManagerInput},
     scoring::experiment_data_quality,
 };
 use crate::{
     actions::SafetyClass,
     autotune::{
+        autonomous_support::{AutonomousGateInput, autonomous_apply_gate},
         comparison::ExperimentResult,
         controller::ControllerRuntimeState,
         decision::AutotuneDecision,
@@ -119,6 +120,31 @@ impl LiveExperimentManager {
         }
 
         None
+    }
+
+    /// Defence in depth behind the planner: a candidate that skipped planning still cannot start
+    /// an autonomous experiment unless the product-maturity gate allows its exact tuple. The
+    /// test-only fake candidate is not a mutation and is exempt.
+    pub(crate) fn validate_autonomous_support(
+        input: &LiveExperimentManagerInput<'_>,
+        controller_state: &ControllerRuntimeState,
+        observation: &AutotuneObservation,
+        candidate: &CandidateAction,
+    ) -> anyhow::Result<()> {
+        if !candidate.is_mutation_provider() {
+            return Ok(());
+        }
+        let gate = AutonomousGateInput {
+            operation: candidate.operation_kind(),
+            objective: candidate.objective(),
+            situation: observation.primary_situation,
+            effect_scope: candidate.effect_scope(),
+            source: input.daemon_policy.source,
+            validation_override: controller_state.validation_override.as_ref(),
+        };
+        autonomous_apply_gate(&gate).map_err(|denial| {
+            anyhow::anyhow!("{}: {}", denial.reason_code(), denial.message(&gate))
+        })
     }
 
     pub fn validate_start_candidate(

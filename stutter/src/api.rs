@@ -81,6 +81,10 @@ pub mod autotune {
 
     pub use crate::autotune::{
         DEFAULT_MIN_FOCUS_CONFIDENCE,
+        autonomous_support::{
+            AUTONOMOUS_CONTRACTS, AutonomousContract, AutonomousDenial, AutonomousGateInput,
+            ValidationOverride, autonomous_apply_gate,
+        },
         commands::live::{AutotuneCommandInput, autotune_command},
         crash_acceptance::{
             RecoveryCheckpoint, RecoveryControllerInput, SuspendResumeControllerInput,
@@ -92,6 +96,8 @@ pub mod autotune {
             ObjectiveMaturity, ObjectiveSignalQuality, ObjectiveSignals,
             game_runnable_unavailable_reason, runnable_signals_for_target,
         },
+        operation::MutationOperationKind,
+        situation_model::{PressureKind, WorkloadKind},
     };
 
     pub mod candidate {

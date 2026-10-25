@@ -42,12 +42,55 @@ mod tests {
     }
 
     #[test]
-    fn game_cpu_affinity_profile_stays_apply_low_risk_eligible() {
+    fn game_cpu_affinity_profile_is_denied_autonomously_until_it_is_supported() {
         let evaluation = evaluate_static_candidate(
             DaemonMode::ApplyLowRisk,
             SituationKind::GameCpuSchedulerPressure,
             FocusGroupKind::Game,
             cpu_affinity_candidate("game-main"),
+        );
+
+        assert!(!evaluation.eligible);
+        assert!(
+            evaluation
+                .deny_reasons
+                .contains(&CandidateDenyReason::ObjectiveNotSupported)
+        );
+        assert!(
+            !evaluation
+                .deny_reasons
+                .contains(&CandidateDenyReason::NotAutonomousForWorkload)
+        );
+    }
+
+    #[test]
+    fn game_cpu_affinity_profile_is_apply_low_risk_eligible_under_an_exact_validation_override() {
+        let candidate = cpu_affinity_candidate_for(
+            "game-main",
+            crate::autotune::objective::ObjectiveKind::GameRunnableLatency,
+        );
+        let state = ControllerRuntimeState {
+            validation_override: Some(crate::autotune::autonomous_support::ValidationOverride {
+                operation: candidate.operation_kind(),
+                objective: candidate.objective(),
+                campaign_id: "test-campaign".to_owned(),
+            }),
+            ..ControllerRuntimeState::default()
+        };
+        let policy = policy(DaemonMode::ApplyLowRisk);
+        let mut observation = observation_for_situation(
+            SituationKind::GameCpuSchedulerPressure,
+            FocusGroupKind::Game,
+        );
+        enable_capability_for_candidate(&mut observation, &candidate);
+        let evaluation = evaluate_candidate_with_runner(
+            &policy,
+            &observation,
+            &observation.capabilities,
+            &state,
+            candidate,
+            1.0,
+            &mut CountingDryRunner::default(),
         );
 
         assert!(

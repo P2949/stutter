@@ -18,6 +18,7 @@ fn cooldown_blocks_repeated_action() {
         active_experiment: None,
         cooldown_until_unix_nanos: Some(11_000_000_000),
         candidate_memory: CandidateMemory::default(),
+        validation_override: None,
     };
     let candidate = candidate_with_safety_class(SafetyClass::ReversibleLowRisk);
 

@@ -5,6 +5,7 @@ use crate::{
     autotune::{
         active_config::{ActiveConfigMatch, ActiveConfigMatchInput},
         activity::ActivityLevel,
+        autonomous_support::{AutonomousGateInput, autonomous_apply_gate},
         candidate_memory::CandidateContextHashInput,
         planning::{
             candidate::{CandidateAction, CandidateEvidence},
@@ -152,6 +153,21 @@ pub(crate) fn evaluate_proposal_static(
             proposal.candidate.action_kind(),
             workload_policy.autonomous_families
         ));
+    }
+
+    if mode_requires_autonomous_workload_family(input.daemon_policy.mode) {
+        let gate = AutonomousGateInput {
+            operation: proposal.candidate.operation_kind(),
+            objective: proposal.candidate.objective(),
+            situation: input.observation.primary_situation,
+            effect_scope: descriptor.effect_scope,
+            source: input.daemon_policy.source,
+            validation_override: input.controller_state.validation_override.as_ref(),
+        };
+        if let Err(denial) = autonomous_apply_gate(&gate) {
+            deny_reasons.push(denial.deny_reason());
+            deny_messages.push(denial.message(&gate));
+        }
     }
 
     if !workload_policy.allows_objective(proposal.candidate.objective()) {

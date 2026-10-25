@@ -14,7 +14,7 @@ use stutter::api::{
         NiceAction, NicePolicy, SafetyClass, TaskIdentity, VmKnobAction, VmKnobChange,
     },
     autotune::{
-        ObjectiveKind,
+        ObjectiveKind, ValidationOverride,
         activity::ActivityLevel,
         candidate::{
             CandidateAction, CandidateEvidence, CandidatePlanFile, GpuPowerActionPlan,
@@ -393,7 +393,13 @@ async fn medium_risk_socket_lifecycle(include_histogram: bool) -> anyhow::Result
     daemon_config.autotune.unsafe_in_process_privileged_worker = false;
     daemon_config.autotune.privileged_worker_socket = Some(socket_path.clone());
 
+    let grant = ValidationOverride {
+        operation: candidate.operation_kind(),
+        objective: candidate.objective(),
+        campaign_id: "medium-risk-socket-lifecycle-test".to_owned(),
+    };
     let mut config = AutotuneRuntimeConfig::from_daemon_config(daemon_config, None)
+        .with_validation_override(grant)
         .with_simulated_candidates(vec![candidate])
         .with_candidate_window_seconds(1)
         .with_washout(0, 1);

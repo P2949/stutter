@@ -100,6 +100,8 @@ pub struct ControllerRuntimeState {
     pub active_experiment: Option<ActiveExperiment>,
     pub cooldown_until_unix_nanos: Option<u128>,
     pub candidate_memory: CandidateMemory,
+    /// Set only by a validation campaign; normal product paths leave it unset (fail closed).
+    pub validation_override: Option<crate::autotune::autonomous_support::ValidationOverride>,
 }
 
 impl Default for ControllerRuntimeState {
@@ -109,6 +111,7 @@ impl Default for ControllerRuntimeState {
             active_experiment: None,
             cooldown_until_unix_nanos: None,
             candidate_memory: CandidateMemory::default(),
+            validation_override: None,
         }
     }
 }

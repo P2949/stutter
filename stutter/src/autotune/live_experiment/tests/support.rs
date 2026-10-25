@@ -175,6 +175,24 @@ pub(super) fn low_risk_candidate() -> CandidateAction {
     )
 }
 
+/// A medium-risk candidate on a Validating objective, with the exact override a validation
+/// campaign would hold, for tests that start a real autonomous experiment.
+pub(super) fn validated_medium_risk_candidate(
+    controller_state: &mut ControllerRuntimeState,
+) -> CandidateAction {
+    let mut candidate = medium_risk_candidate();
+    if let CandidateAction::Nice { plan } = &mut candidate {
+        plan.objective = ObjectiveKind::GameRunnableLatency;
+    }
+    controller_state.validation_override =
+        Some(crate::autotune::autonomous_support::ValidationOverride {
+            operation: candidate.operation_kind(),
+            objective: candidate.objective(),
+            campaign_id: "live-experiment-test".to_owned(),
+        });
+    candidate
+}
+
 pub(super) fn medium_risk_candidate() -> CandidateAction {
     CandidateAction::Nice {
         plan: NiceActionPlan {
@@ -324,6 +342,7 @@ fn medium_risk_experiment_state_uses_actual_mode_and_safety_class() {
     let mut active_profile_state = ActiveProfileState::default();
     let mut executor = FakeLiveExecutor::default();
     let observation = observation(1_000, 1_000_000_000);
+    let candidate = validated_medium_risk_candidate(&mut controller_state);
 
     let outcome = manager
         .apply_decision_side_effects_with_executor(
@@ -334,7 +353,7 @@ fn medium_risk_experiment_state_uses_actual_mode_and_safety_class() {
             },
             &observation,
             &AutotuneDecision::StartExperiment {
-                candidate: medium_risk_candidate(),
+                candidate,
                 reason: "medium candidate passed gate".to_owned(),
             },
             "medium candidate passed gate",
