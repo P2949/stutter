@@ -84,6 +84,7 @@ pub(super) fn kept_event() -> AutotuneHistoryEvent {
         score_before: Some(score(1_000)),
         score_after: Some(score(818)),
         planner: None,
+        objective_evidence: None,
         rollback_performed: false,
         reason: "candidate improved by 18.20%; kept as current active profile".to_owned(),
     }

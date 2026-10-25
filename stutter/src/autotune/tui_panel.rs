@@ -435,6 +435,7 @@ mod tests {
             score_before: Some(score(412)),
             score_after: None,
             planner: None,
+            objective_evidence: None,
             rollback_performed: false,
             reason: "candidate measurement window not complete: elapsed_ms=18000 required_ms=30000"
                 .to_owned(),

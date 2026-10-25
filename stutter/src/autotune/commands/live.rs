@@ -94,6 +94,27 @@ fn runtime_config_for_command(
 }
 
 pub async fn autotune_command(input: AutotuneCommandInput) -> anyhow::Result<()> {
+    autotune_command_with(input, None).await
+}
+
+/// Blocking form for harnesses that own no async runtime.
+pub fn autotune_command_blocking(
+    input: AutotuneCommandInput,
+    validation_override: Option<crate::autotune::autonomous_support::ValidationOverride>,
+) -> anyhow::Result<()> {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(autotune_command_with(input, validation_override))
+}
+
+/// The live controller with an optional validation override. Only an in-process validation
+/// campaign passes one: the CLI and the remote agent always pass `None`, so the override can
+/// never be requested by a user flag or a remote caller.
+pub async fn autotune_command_with(
+    input: AutotuneCommandInput,
+    validation_override: Option<crate::autotune::autonomous_support::ValidationOverride>,
+) -> anyhow::Result<()> {
     let mode = input.mode;
     ensure_supported_live_autotune_mode(mode, input.allow_medium_risk, input.dry_run_all_safe)?;
 
@@ -152,7 +173,8 @@ pub async fn autotune_command(input: AutotuneCommandInput) -> anyhow::Result<()>
         .map(|loaded| loaded.profiles.clone())
         .unwrap_or_default();
 
-    let runtime_config = runtime_config_for_command(&input, mode, profile_list)?;
+    let mut runtime_config = runtime_config_for_command(&input, mode, profile_list)?;
+    runtime_config.validation_override = validation_override;
 
     let duration = if matches!(mode, DaemonMode::ApplyLowRisk | DaemonMode::ApplyMediumRisk) {
         None

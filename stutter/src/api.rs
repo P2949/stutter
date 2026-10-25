@@ -85,7 +85,10 @@ pub mod autotune {
             AUTONOMOUS_CONTRACTS, AutonomousContract, AutonomousDenial, AutonomousGateInput,
             ValidationOverride, autonomous_apply_gate,
         },
-        commands::live::{AutotuneCommandInput, autotune_command},
+        commands::live::{
+            AutotuneCommandInput, autotune_command, autotune_command_blocking,
+            autotune_command_with,
+        },
         comparison::ExperimentResult,
         crash_acceptance::{
             RecoveryCheckpoint, RecoveryControllerInput, SuspendResumeControllerInput,

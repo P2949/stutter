@@ -64,6 +64,18 @@ fn keep_current_records_kept_state_and_clears_active_experiment() {
     assert_eq!(controller_state.phase, ControllerPhase::Cooldown);
     assert!(controller_state.active_experiment.is_none());
     assert_eq!(active_profile_state.kept_action_count(), 1);
+    let evidence = outcome
+        .history_context
+        .as_ref()
+        .and_then(|context| context.objective_evidence.as_ref())
+        .expect("a kept experiment records the comparison that kept it");
+    assert_eq!(evidence.objective, low_risk_candidate().objective());
+    assert!(
+        evidence.decision.experiment_result()
+            != crate::autotune::comparison::ExperimentResult::Invalid {
+                reason: String::new()
+            }
+    );
     assert_eq!(executor.rollback_calls, 0);
     assert_eq!(
         outcome
@@ -132,4 +144,45 @@ fn compare_keep_result_rejects_io_candidate_when_live_io_signal_regresses() {
 
     assert!(matches!(result, ExperimentResult::Regressed { .. }));
     assert_eq!(experiment.candidate.objective(), ObjectiveKind::IoLatency);
+}
+
+#[test]
+fn a_keep_point_that_is_not_improved_reverts_and_records_why() {
+    let journal_path = temp_journal_path("keep-point-regressed");
+    let mut manager = LiveExperimentManager::new();
+    manager.set_current_for_tests(live_experiment());
+    let mut controller_state = ControllerRuntimeState::default();
+    let mut active_profile_state = ActiveProfileState::default();
+    let mut executor = FakeLiveExecutor::default();
+    let observation = observation(1_200, 400);
+
+    let outcome = manager
+        .apply_decision_side_effects_with_executor(
+            input(journal_path),
+            LiveExperimentRuntimeState {
+                controller_state: &mut controller_state,
+                active_profile_state: &mut active_profile_state,
+            },
+            &observation,
+            &AutotuneDecision::KeepCurrent {
+                experiment_id: ExperimentId::new("experiment-active"),
+                reason: "candidate looked fine".to_owned(),
+            },
+            "candidate looked fine",
+            &mut executor,
+        )
+        .unwrap();
+
+    assert_eq!(outcome.event, LiveExperimentEvent::Reverted);
+    assert_eq!(executor.rollback_calls, 1);
+    let evidence = outcome
+        .history_context
+        .and_then(|context| context.objective_evidence)
+        .expect("a revert caused by the keep-point comparison records that comparison");
+    assert!(!matches!(
+        evidence.decision.experiment_result(),
+        crate::autotune::comparison::ExperimentResult::Improved { .. }
+    ));
+    // The evidence is consumed by the revert it caused.
+    assert!(manager.pending_objective_evidence.is_none());
 }

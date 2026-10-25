@@ -134,6 +134,7 @@ impl AutotuneRuntime {
                 .with_experiment_id(context.experiment_id.clone())
                 .with_action_id(context.action_id.clone())
                 .with_scores(context.score_before.clone(), context.score_after.clone())
+                .with_objective_evidence(context.objective_evidence.clone())
                 .with_rollback_performed(context.rollback_performed);
         } else {
             history = history.with_scores(None, Some(score));
@@ -270,6 +271,7 @@ impl AutotuneRuntime {
             input.context.score_before.clone(),
             input.context.score_after.clone(),
         )
+        .with_objective_evidence(input.context.objective_evidence.clone())
         .with_rollback_performed(input.rollback_performed)
     }
 }

@@ -74,6 +74,8 @@ pub struct LiveExperimentHistoryContext {
     pub rollback_policy: String,
     pub cooldown_until_unix_nanos: Option<u128>,
     pub manual_restore_command: Option<String>,
+    /// The objective comparison that decided keep or revert, when one was made.
+    pub objective_evidence: Option<crate::autotune::objective::ObjectiveEvidence>,
 }
 #[derive(Clone, Debug)]
 pub struct LiveExperimentOutcome {
