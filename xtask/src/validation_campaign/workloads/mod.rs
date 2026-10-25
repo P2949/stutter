@@ -5,6 +5,7 @@
 pub mod fio;
 pub mod fixed_compile;
 pub mod network_irq;
+pub mod vkcube;
 pub mod vkmark;
 
 use std::path::PathBuf;
@@ -112,7 +113,8 @@ pub struct ToolIdentity {
 }
 
 /// The tools the campaign needs, with the arguments that print their version.
-pub const RUNTIME_TOOLS: [(&str, &[&str]); 7] = [
+pub const RUNTIME_TOOLS: [(&str, &[&str]); 8] = [
+    ("vkcube", &["--help"]),
     ("vkmark", &["--help"]),
     ("mangohud", &["--version"]),
     ("fio", &["--version"]),

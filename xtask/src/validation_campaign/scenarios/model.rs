@@ -73,11 +73,29 @@ pub enum Target {
     VkmarkLightUnpaced,
     /// `vkmark` at a frozen GPU-saturating configuration.
     VkmarkGpuHeavy,
+    /// `vkcube` at a small size, vsync-paced (second rendering workload of the score matrix).
+    VkcubeLight,
+    /// `vkcube` at 4K without vsync: a CPU-bound submit loop, a different regime from vkmark.
+    VkcubeUnpaced,
     /// `fio` fixed-work process tree.
     FioFixedWork,
     /// `fio` job doing a fixed number of direct reads (post-v0.1 study): its elapsed time is
     /// the direct effect metric.
     FioFixedWorkV2,
+}
+
+impl Target {
+    /// Targets whose recording must carry a MangoHud frame stream.
+    pub fn produces_frames(self) -> bool {
+        matches!(
+            self,
+            Self::VkmarkLight
+                | Self::VkmarkLightUnpaced
+                | Self::VkmarkGpuHeavy
+                | Self::VkcubeLight
+                | Self::VkcubeUnpaced
+        )
+    }
 }
 
 /// Where the target process runs. Pinning is done by launching the owned child under an

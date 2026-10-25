@@ -64,7 +64,7 @@ fn failed(stage: &str, summary: String, class: FailureClass) -> RunnerOutcome {
 }
 
 /// One level end to end; whatever happens, nothing it started is left running.
-fn capture_level(
+pub(crate) fn capture_level(
     host: &mut dyn CaptureHost,
     spec: &ScenarioSpec,
     raw: &Path,

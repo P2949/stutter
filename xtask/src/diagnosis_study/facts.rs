@@ -155,6 +155,16 @@ fn freeze_fixed_work(scratch: &Path) -> Result<u64, String> {
     ))
 }
 
+/// The score matrix needs only a permitted CPU other than CPU 0 for its pinned target.
+pub fn freeze_study_cpu_only(frozen: &mut Frozen) -> Result<(), String> {
+    if frozen.study_cpu.is_none() {
+        let allowed = allowed_cpus().ok_or("the permitted CPU list is unreadable")?;
+        frozen.study_cpu =
+            Some(choose_study_cpu(&allowed, u32::MAX).ok_or("no permitted CPU other than 0")?);
+    }
+    Ok(())
+}
+
 /// Freezes whatever is not frozen yet; `Err` is an honest resource block.
 pub fn freeze_missing(frozen: &mut Frozen, scratch: &Path) -> Result<(), String> {
     if frozen.irq.is_none() || frozen.irq_cpu.is_none() {

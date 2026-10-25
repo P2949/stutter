@@ -37,8 +37,8 @@ use crate::{
 pub const STUDY_ROOT: &str = ".llm-runs/studies/diagnosis-v2";
 const COMPANION_MANIFEST: &str = "docs/validation/core-validation.toml";
 /// Exit codes shared with the campaign: scripts branch on them without parsing.
-const EXIT_BLOCKED_RESOURCE: i32 = 11;
-const EXIT_BLOCKED_PRIVILEGE: i32 = 12;
+pub(crate) const EXIT_BLOCKED_RESOURCE: i32 = 11;
+pub(crate) const EXIT_BLOCKED_PRIVILEGE: i32 = 12;
 
 #[derive(clap::Args, Clone, Debug, Eq, PartialEq)]
 pub struct StudyArgs {
@@ -269,7 +269,7 @@ fn init(
 }
 
 /// Source and binaries are exactly what the study was initialized with.
-fn integrity(
+pub(crate) fn integrity(
     root: &Path,
     header: &StudyHeader,
     companion: &validation_campaign::model::CampaignState,
@@ -299,12 +299,12 @@ fn integrity(
     Ok(())
 }
 
-fn blocked(code: i32, message: &str) -> ! {
+pub(crate) fn blocked(code: i32, message: &str) -> ! {
     println!("{message}");
     std::process::exit(code)
 }
 
-fn socket() -> PathBuf {
+pub(crate) fn socket() -> PathBuf {
     std::env::var_os(SOCKET_ENV)
         .filter(|v| !v.is_empty())
         .map_or_else(|| PathBuf::from(DEFAULT_SOCKET), PathBuf::from)
