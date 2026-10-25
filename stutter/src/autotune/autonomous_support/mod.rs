@@ -75,6 +75,8 @@ pub enum AutonomousDenial {
     ObjectiveNotSupported(ObjectiveMaturity),
     ObjectiveAutonomousApplyNotAllowed,
     CapabilityTierNotSupported,
+    /// The operation has no prepared-before-mutation transaction yet.
+    PreparedTransactionMissing,
     NotInSupportRegistry,
 }
 
@@ -86,6 +88,7 @@ impl AutonomousDenial {
             Self::ObjectiveNotSupported(_) => Reason::ObjectiveNotSupported,
             Self::ObjectiveAutonomousApplyNotAllowed => Reason::ObjectiveAutonomousApplyNotAllowed,
             Self::CapabilityTierNotSupported => Reason::CapabilityTierNotSupported,
+            Self::PreparedTransactionMissing => Reason::PreparedTransactionMissing,
             Self::NotInSupportRegistry => Reason::NotInSupportRegistry,
         }
     }
@@ -96,6 +99,7 @@ impl AutonomousDenial {
             Self::ObjectiveNotSupported(_) => "objective_not_supported",
             Self::ObjectiveAutonomousApplyNotAllowed => "objective_autonomous_apply_not_allowed",
             Self::CapabilityTierNotSupported => "capability_tier_not_supported",
+            Self::PreparedTransactionMissing => "prepared_transaction_missing",
             Self::NotInSupportRegistry => "operation_not_in_support_registry",
         }
     }
@@ -116,6 +120,10 @@ impl AutonomousDenial {
             ),
             Self::CapabilityTierNotSupported => format!(
                 "product capability for operation {} is not Supported",
+                input.operation.as_str()
+            ),
+            Self::PreparedTransactionMissing => format!(
+                "operation {} has no prepared-before-mutation transaction",
                 input.operation.as_str()
             ),
             Self::NotInSupportRegistry => format!(
@@ -203,6 +211,9 @@ pub(crate) fn autonomous_apply_gate_with(
     }
     if !facts.capability_supported {
         return Err(AutonomousDenial::CapabilityTierNotSupported);
+    }
+    if !input.operation.prepared_transaction_implemented() {
+        return Err(AutonomousDenial::PreparedTransactionMissing);
     }
     if !registry_allows(input, facts.contracts) {
         return Err(AutonomousDenial::NotInSupportRegistry);

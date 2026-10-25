@@ -98,6 +98,13 @@ impl MutationOperationKind {
         }
     }
 
+    /// Whether the operation has a real prepared-before-mutation transaction (a verified restore
+    /// snapshot durable before the first write). A Supported autonomous contract requires it;
+    /// each operation flips to `true` when its transaction lands and passes the fault matrix.
+    pub const fn prepared_transaction_implemented(self) -> bool {
+        matches!(self, Self::CpuAffinityProfile)
+    }
+
     /// Operations that stay manual (HighRisk) for the whole roadmap.
     pub fn is_manual_only(self) -> bool {
         matches!(
@@ -117,7 +124,15 @@ impl CandidateAction {
     /// riskier attribute than the family's default classify as the riskier operation.
     pub fn operation_kind(&self) -> MutationOperationKind {
         match self {
-            Self::CpuAffinityProfile { .. } => MutationOperationKind::CpuAffinityProfile,
+            // A profile that also changes nice/ionice is a different, riskier operation with the
+            // legacy transaction; it is not the graduated affinity operation.
+            Self::CpuAffinityProfile { plan } => {
+                if crate::profiles::profile_uses_priority_actions(&plan.profile) {
+                    MutationOperationKind::Unclassified
+                } else {
+                    MutationOperationKind::CpuAffinityProfile
+                }
+            }
             Self::Nice { .. } => MutationOperationKind::Nice,
             Self::IoPrio { .. } => MutationOperationKind::IoPrio,
             Self::Uclamp { .. } => MutationOperationKind::Uclamp,

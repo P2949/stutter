@@ -154,6 +154,11 @@ fn preflight_checks(context: &StageContext<'_>) -> Vec<(&'static str, bool, Stri
             .any(|contract| contract.operation == op)
     });
     checks.push((
+        "prepared_transaction_implemented",
+        operation.is_some_and(|op| op.prepared_transaction_implemented()),
+        "a prepared-before-mutation transaction exists for the operation".to_owned(),
+    ));
+    checks.push((
         "not_already_registered",
         !registered,
         "the autonomous support registry does not yet cover the operation".to_owned(),

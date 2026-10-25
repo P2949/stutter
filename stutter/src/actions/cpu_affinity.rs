@@ -292,6 +292,11 @@ impl TuningAction for CpuAffinityProfileAction {
         })
     }
 
+    fn prepared_before_mutation(&self) -> bool {
+        // Affinity-only profiles qualify; priority-bearing ones keep the legacy protocol.
+        !crate::profiles::profile_uses_priority_actions(&self.profile)
+    }
+
     fn apply_with_prepared_rollback(
         &self,
         before_mutation: &mut dyn FnMut(&RollbackToken) -> anyhow::Result<()>,

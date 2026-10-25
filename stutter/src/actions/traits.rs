@@ -27,6 +27,12 @@ pub trait TuningAction {
     fn preflight(&self) -> ActionResult<Vec<ActionWarning>>;
     fn dry_run(&self) -> ActionResult<ActionState>;
     fn apply(&self) -> ApplyResult;
+    /// Whether `apply_with_prepared_rollback` really makes a verified restore snapshot durable
+    /// before the first mutable syscall. Autonomous Supported operations require it; the default
+    /// (`false`) marks an action that only has the legacy `apply()` protocol.
+    fn prepared_before_mutation(&self) -> bool {
+        false
+    }
     /// Providers with crash-safe preparation invoke this callback after the
     /// restore snapshot is durable and before the first mutable syscall.
     /// The default is compatibility-only and makes no preparation guarantee.
@@ -70,6 +76,10 @@ where
 
     fn apply(&self) -> ApplyResult {
         self.as_ref().apply()
+    }
+
+    fn prepared_before_mutation(&self) -> bool {
+        self.as_ref().prepared_before_mutation()
     }
 
     fn apply_with_prepared_rollback(
