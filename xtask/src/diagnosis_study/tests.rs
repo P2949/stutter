@@ -590,3 +590,20 @@ mod continuation {
         let _ = fs::remove_dir_all(&root);
     }
 }
+
+#[test]
+fn a_report_digest_survives_a_write_and_read_of_awkward_floats() {
+    // The digest is recomputed from the parsed report: parsing must give the printed value back.
+    for value in [
+        -0.006_699_999_999_999_984_f64,
+        0.1 + 0.2,
+        1.0 / 3.0,
+        -4_900_000.123_456_789,
+    ] {
+        let report =
+            json!({"comparison": {"improvement_delta": value, "effect_size": value * 3.7}});
+        let printed = report.to_string();
+        let reread: serde_json::Value = serde_json::from_str(&printed).unwrap();
+        assert_eq!(reread.to_string(), printed, "{value}");
+    }
+}
