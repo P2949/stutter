@@ -23,6 +23,8 @@ pub struct SuiteInvocation<'a> {
     pub work_units: Option<u64>,
     pub raw: &'a Path,
     pub log: &'a Path,
+    /// Extra suite arguments a direct run appends (a runner request carries its own typed fields).
+    pub extra_args: &'a [String],
     pub stutter: &'a Path,
     pub xtask: &'a Path,
     pub cwd: &'a Path,
@@ -64,6 +66,7 @@ impl SuiteBackend for DirectBackend {
             // This suite really suspends the machine; a campaign stage asks for it explicitly.
             args.push("--allow-system-suspend".to_owned());
         }
+        args.extend(inv.extra_args.iter().cloned());
         if let Some(units) = inv.work_units {
             let campaign = inv.raw.ancestors().nth(4).unwrap_or(inv.cwd);
             args.extend([

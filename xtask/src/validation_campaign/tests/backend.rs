@@ -271,6 +271,7 @@ fn the_runner_backend_sends_a_typed_request_and_maps_authorization_denials_to_bl
         work_units: None,
         raw: &raw_dir,
         log: &log,
+        extra_args: &[],
         stutter: std::path::Path::new("s"),
         xtask: std::path::Path::new("x"),
         cwd: std::path::Path::new("."),

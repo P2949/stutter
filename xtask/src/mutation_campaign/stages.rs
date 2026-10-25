@@ -177,6 +177,15 @@ fn run_suite_stage(
             format!("stage {} has no known suite configured", stage.as_str()),
         );
     };
+    let extra_args: Vec<String> = if suite == "suspend-resume" {
+        // Arm an RTC wake alarm so the machine resumes by itself: a campaign never waits for a person.
+        vec![
+            "--rtcwake-seconds".to_owned(),
+            context.operation.suspend_wake_seconds.to_string(),
+        ]
+    } else {
+        Vec::new()
+    };
     let task = stage.as_str();
     let attempt_dir = context.dir.attempt_dir(task, attempt);
     let raw = attempt_dir.join("raw");
@@ -191,6 +200,7 @@ fn run_suite_stage(
         work_units: None,
         raw: &raw,
         log: &log,
+        extra_args: &extra_args,
         stutter: &context.binaries.stutter,
         xtask: &context.binaries.xtask,
         cwd: context.repository,
