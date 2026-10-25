@@ -62,6 +62,7 @@ impl LiveSuiteRunner {
             work_units: self.work_units,
             raw: &raw,
             log: &log,
+            extra_args: &[],
             stutter: &context.binaries.stutter,
             xtask: &context.binaries.xtask,
             cwd: context.repository,

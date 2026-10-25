@@ -143,13 +143,27 @@ fn case(
         let pre = json!({"unix_ms":unix_ms().to_string(),"suspend_stats_success":suspends_before,"controller":ready});
         write_json(&out.join("pre-suspend-receipt.json"), &pre)?;
         if let Some(seconds) = options.rtcwake_seconds {
+            let arm = args(&["-m", "no", "-s", &seconds.to_string()]);
+            // Writing the RTC alarm needs privilege. An unprivileged campaign user falls back to
+            // non-interactive sudo, and never to a password prompt.
             command(
                 Path::new("rtcwake"),
-                &args(&["-m", "no", "-s", &seconds.to_string()]),
+                &arm,
                 out,
                 "rtcwake-arm",
                 Duration::from_secs(10),
             )
+            .or_else(|_| {
+                let mut sudo = args(&["-n", "rtcwake"]);
+                sudo.extend(arm.clone());
+                command(
+                    Path::new("sudo"),
+                    &sudo,
+                    out,
+                    "rtcwake-arm-sudo",
+                    Duration::from_secs(10),
+                )
+            })
             .map_err(|error| blocked(format!("could not arm RTC wake alarm: {error:#}")))?;
         }
         let mut words = options.suspend_command.split_whitespace();

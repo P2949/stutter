@@ -67,6 +67,9 @@ pub struct OperationSection {
     #[serde(default)]
     pub skip: Vec<SkipEntry>,
     pub suites: SuiteMap,
+    /// Seconds until the RTC alarm wakes the machine after the suspend stage suspends it.
+    #[serde(default = "default_suspend_wake_seconds")]
+    pub suspend_wake_seconds: u64,
     pub scenarios: ScenarioMap,
     pub thresholds: ThresholdGrid,
 }
@@ -79,6 +82,10 @@ pub struct MutationManifest {
     pub benefit: BenefitSection,
     #[serde(default)]
     pub operation: BTreeMap<String, OperationSection>,
+}
+
+fn default_suspend_wake_seconds() -> u64 {
+    60
 }
 
 impl MutationManifest {
@@ -199,6 +206,10 @@ impl OperationSection {
                 );
             }
         }
+        ensure!(
+            (30..=600).contains(&self.suspend_wake_seconds),
+            "suspend_wake_seconds must be within 30..=600"
+        );
         ensure!(
             self.suites.mechanical.is_some() && self.suites.fault_matrix.is_some(),
             "mechanical and fault_matrix suites must be named"
