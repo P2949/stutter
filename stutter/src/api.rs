@@ -86,7 +86,7 @@ pub mod autotune {
             ValidationOverride, autonomous_apply_gate,
         },
         commands::live::{
-            AutotuneCommandInput, autotune_command, autotune_command_blocking,
+            AutotuneCommandInput, ValidationRun, autotune_command, autotune_command_blocking,
             autotune_command_with,
         },
         comparison::ExperimentResult,

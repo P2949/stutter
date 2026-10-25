@@ -68,6 +68,24 @@ pub enum MutationCommand {
         #[arg(long)]
         campaign: Option<PathBuf>,
     },
+    /// Measures one benefit pair outside the plan (pair 1000+) and prints it: proves the harness
+    /// on this host without spending the plan's pairs. Never counts toward a decision.
+    #[command(hide = true)]
+    SmokePair {
+        #[arg(long)]
+        campaign: Option<PathBuf>,
+        #[arg(value_enum)]
+        scenario: SmokeScenario,
+        #[arg(long, default_value_t = 1000)]
+        pair: usize,
+    },
+}
+
+#[derive(clap::ValueEnum, Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SmokeScenario {
+    Beneficial,
+    Neutral,
+    Regression,
 }
 
 /// Process exit code per boundary, shared with the Core Validation campaign.
@@ -134,6 +152,11 @@ pub fn run(root: &Path, args: MutationArgs) -> anyhow::Result<()> {
             println!("report_json={}", path.display());
             Ok(())
         }
+        MutationCommand::SmokePair {
+            campaign,
+            scenario,
+            pair,
+        } => smoke_pair(root, campaign, scenario, pair),
         MutationCommand::Cancel { campaign } => {
             let dir = store::locate(root, campaign)?;
             let mut state = store::load(&dir)?;
@@ -371,7 +394,11 @@ fn production_runner(_root: &Path) -> anyhow::Result<super::stages::ProductionRu
     Ok(super::stages::ProductionRunner {
         suites: validation_campaign::backend::backend_from_env(),
         suspend: Box::new(validation_campaign::backend::DirectBackend),
-        harness: Box::new(super::runner::UnavailableHarness),
+        harness: Box::new(super::harness::RunnerHarness {
+            socket: std::env::var_os(SOCKET_ENV)
+                .filter(|value| !value.is_empty())
+                .map_or_else(|| PathBuf::from(DEFAULT_SOCKET), PathBuf::from),
+        }),
     })
 }
 
@@ -521,5 +548,67 @@ pub fn drive_with(
         if state.mode == MutationMode::Complete {
             return Ok(Boundary::Complete);
         }
+    }
+}
+
+fn smoke_pair(
+    root: &Path,
+    explicit: Option<PathBuf>,
+    scenario: SmokeScenario,
+    pair: usize,
+) -> anyhow::Result<()> {
+    use super::{
+        benefit::{Order, Scenario},
+        runner::BenefitHarness,
+    };
+    let dir = store::locate(root, explicit)?;
+    let state = store::load(&dir)?;
+    let (manifest, _) = MutationManifest::load(&store::manifest_snapshot(&dir))?;
+    let operation = manifest.operation(&state.operation)?;
+    if let Err(reason) = integrity(root, &dir, &state) {
+        bail!("the campaign is not at its pinned source: {reason}");
+    }
+    let socket = std::env::var_os(SOCKET_ENV)
+        .filter(|value| !value.is_empty())
+        .map_or_else(|| PathBuf::from(DEFAULT_SOCKET), PathBuf::from);
+    if bootstrap::bootstrap_target(
+        &dir,
+        &runner_auth::target(&state, operation, root),
+        &socket,
+        false,
+    )? == BootstrapOutcome::BlockedPrivilege
+    {
+        bail!("BLOCKED_PRIVILEGE_BOOTSTRAP");
+    }
+    let binaries = Binaries::for_repository(root)?;
+    let context = StageContext {
+        repository: root,
+        dir: &dir,
+        state: &state,
+        manifest: &manifest,
+        operation,
+        binaries: &binaries,
+    };
+    let harness = super::harness::RunnerHarness { socket };
+    let (scenario, order) = (
+        match scenario {
+            SmokeScenario::Beneficial => Scenario::Beneficial,
+            SmokeScenario::Neutral => Scenario::Neutral,
+            SmokeScenario::Regression => Scenario::Regression,
+        },
+        if pair.is_multiple_of(2) {
+            Order::BaselineFirst
+        } else {
+            Order::CandidateFirst
+        },
+    );
+    let objective =
+        super::benefit_stage::objective_kind(&state.objective).context("unknown objective")?;
+    match harness.measure(&context, objective, scenario, pair, order) {
+        Ok(result) => {
+            println!("{}", serde_json::to_string_pretty(&result)?);
+            Ok(())
+        }
+        Err(error) => bail!("pair failed: {error:?}"),
     }
 }

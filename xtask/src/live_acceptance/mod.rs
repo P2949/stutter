@@ -11,6 +11,7 @@ use anyhow::{Context, ensure};
 use clap::Subcommand;
 use serde_json::{Value, json};
 mod affinity;
+mod affinity_benefit;
 mod evidence;
 mod game_runnable;
 mod kernel_compat;
@@ -96,6 +97,35 @@ pub enum Suite {
         #[arg(long)]
         stutter_bin: PathBuf,
     },
+    /// One matched pair of the CPU-affinity benefit experiment (a mutation campaign's stage).
+    AffinityBenefit {
+        #[arg(long)]
+        out: PathBuf,
+        #[arg(long)]
+        stutter_bin: PathBuf,
+        #[arg(long, value_enum)]
+        scenario: affinity_benefit::Scenario,
+        #[arg(long)]
+        pair: u32,
+        #[arg(long, value_enum)]
+        order: affinity_benefit::Order,
+        #[arg(long, default_value_t = 20, value_parser = clap::value_parser!(u64).range(10..=60))]
+        seconds: u64,
+    },
+    /// The production live controller for one benefit pair; spawned by `affinity-benefit`.
+    #[command(hide = true)]
+    AffinityBenefitController {
+        #[arg(long)]
+        pid: u32,
+        #[arg(long)]
+        profiles: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+        #[arg(long)]
+        window_seconds: u64,
+        #[arg(long)]
+        stutter_bin: PathBuf,
+    },
     Observation {
         #[arg(long)]
         out: PathBuf,
@@ -169,7 +199,7 @@ fn allowed_cpu() -> anyhow::Result<u32> {
 
 pub fn workload(seconds: u64, ready: &Path, descendants: bool) -> anyhow::Result<()> {
     ensure!(
-        (3..=90).contains(&seconds),
+        (3..=600).contains(&seconds),
         "workload duration outside bound"
     );
     let deadline = Instant::now() + Duration::from_secs(seconds);
@@ -264,6 +294,33 @@ pub fn run(root: &Path, suite: Suite) -> anyhow::Result<()> {
             seconds,
         } => (out, stutter_bin, seconds),
         Suite::Affinity { out, stutter_bin } => return affinity::run(root, &out, &stutter_bin),
+        Suite::AffinityBenefit {
+            out,
+            stutter_bin,
+            scenario,
+            pair,
+            order,
+            seconds,
+        } => {
+            return affinity_benefit::run(
+                root,
+                &out,
+                &stutter_bin,
+                &affinity_benefit::Spec {
+                    scenario,
+                    pair,
+                    order,
+                    seconds,
+                },
+            );
+        }
+        Suite::AffinityBenefitController {
+            pid,
+            profiles,
+            out,
+            window_seconds,
+            stutter_bin: _,
+        } => return affinity_benefit::run_controller(pid, &profiles, &out, window_seconds),
         Suite::ScoreDegradation {
             out,
             stutter_bin,

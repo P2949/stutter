@@ -23,6 +23,8 @@ pub struct BenefitSection {
     pub step: usize,
     pub calibration_parts: usize,
     pub holdout_parts: usize,
+    /// Seconds of each measurement window of one pair (the suite's `--seconds`, 10..=60).
+    pub window_seconds: u64,
     pub min_beneficial_keep_rate: f64,
 }
 
@@ -124,6 +126,7 @@ impl MutationManifest {
                 && benefit.max_pairs >= benefit.initial_pairs
                 && benefit.calibration_parts >= 1
                 && benefit.holdout_parts >= 1
+                && (10..=60).contains(&benefit.window_seconds)
                 && benefit.min_beneficial_keep_rate > 0.0
                 && benefit.min_beneficial_keep_rate <= 1.0,
             "benefit pair counts and the split must be positive and ordered"

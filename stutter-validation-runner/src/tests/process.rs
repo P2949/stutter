@@ -12,6 +12,7 @@ fn suite(suite: LiveSuite, seconds: Option<u64>, rounds: Option<u32>) -> Request
         attempt: 3,
         seconds,
         rounds,
+        benefit: None,
     }
 }
 

@@ -97,23 +97,34 @@ pub async fn autotune_command(input: AutotuneCommandInput) -> anyhow::Result<()>
     autotune_command_with(input, None).await
 }
 
+/// What an in-process validation campaign adds to the live controller: the exact-scope override
+/// and state paths isolated from the user's real autotune state. The CLI and the remote agent
+/// never construct one, so the override cannot be requested by a flag or by a remote caller.
+#[derive(Clone, Debug)]
+pub struct ValidationRun {
+    pub grant: crate::autotune::autonomous_support::ValidationOverride,
+    pub history_log: PathBuf,
+    pub controller_journal_path: PathBuf,
+    /// How long the monitor session runs. The candidate window is `duration_seconds`; a whole
+    /// experiment (baseline, washout, candidate window) needs a longer session.
+    pub session_seconds: u64,
+}
+
 /// Blocking form for harnesses that own no async runtime.
 pub fn autotune_command_blocking(
     input: AutotuneCommandInput,
-    validation_override: Option<crate::autotune::autonomous_support::ValidationOverride>,
+    validation: Option<ValidationRun>,
 ) -> anyhow::Result<()> {
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?
-        .block_on(autotune_command_with(input, validation_override))
+        .block_on(autotune_command_with(input, validation))
 }
 
-/// The live controller with an optional validation override. Only an in-process validation
-/// campaign passes one: the CLI and the remote agent always pass `None`, so the override can
-/// never be requested by a user flag or a remote caller.
+/// The live controller with optional validation-campaign settings.
 pub async fn autotune_command_with(
     input: AutotuneCommandInput,
-    validation_override: Option<crate::autotune::autonomous_support::ValidationOverride>,
+    validation: Option<ValidationRun>,
 ) -> anyhow::Result<()> {
     let mode = input.mode;
     ensure_supported_live_autotune_mode(mode, input.allow_medium_risk, input.dry_run_all_safe)?;
@@ -166,7 +177,13 @@ pub async fn autotune_command_with(
         );
     }
 
-    let monitor_config = crate::cli::autotune_monitor_config(&input)?;
+    let monitor_config = match validation.as_ref() {
+        Some(run) => crate::cli::autotune_monitor_config(&AutotuneCommandInput {
+            duration_seconds: Some(run.session_seconds),
+            ..input.clone()
+        })?,
+        None => crate::cli::autotune_monitor_config(&input)?,
+    };
 
     let profile_list = loaded_profiles
         .as_ref()
@@ -174,7 +191,11 @@ pub async fn autotune_command_with(
         .unwrap_or_default();
 
     let mut runtime_config = runtime_config_for_command(&input, mode, profile_list)?;
-    runtime_config.validation_override = validation_override;
+    if let Some(run) = validation {
+        runtime_config.validation_override = Some(run.grant);
+        runtime_config.history_log = Some(run.history_log);
+        runtime_config.controller_journal_path = Some(run.controller_journal_path);
+    }
 
     let duration = if matches!(mode, DaemonMode::ApplyLowRisk | DaemonMode::ApplyMediumRisk) {
         None

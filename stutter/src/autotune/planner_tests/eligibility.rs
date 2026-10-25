@@ -82,6 +82,9 @@ mod tests {
             SituationKind::GameCpuSchedulerPressure,
             FocusGroupKind::Game,
         );
+        crate::autotune::objective::runnable_signal::complete_runnable_population_for_tests(
+            &mut observation.objective_signals,
+        );
         enable_capability_for_candidate(&mut observation, &candidate);
         let evaluation = evaluate_candidate_with_runner(
             &policy,
@@ -102,6 +105,58 @@ mod tests {
             !evaluation
                 .deny_reasons
                 .contains(&CandidateDenyReason::NotAutonomousForWorkload)
+        );
+    }
+
+    #[test]
+    fn an_experiment_waits_for_a_baseline_the_objective_can_decide_on() {
+        let candidate = cpu_affinity_candidate_for(
+            "game-main",
+            crate::autotune::objective::ObjectiveKind::GameRunnableLatency,
+        );
+        let state = ControllerRuntimeState {
+            validation_override: Some(crate::autotune::autonomous_support::ValidationOverride {
+                operation: candidate.operation_kind(),
+                objective: candidate.objective(),
+                campaign_id: "test-campaign".to_owned(),
+            }),
+            ..ControllerRuntimeState::default()
+        };
+        let evaluate = |mode, populated: bool| {
+            let policy = policy(mode);
+            let mut observation = observation_for_situation(
+                SituationKind::GameCpuSchedulerPressure,
+                FocusGroupKind::Game,
+            );
+            enable_capability_for_candidate(&mut observation, &candidate);
+            if populated {
+                crate::autotune::objective::runnable_signal::complete_runnable_population_for_tests(
+                    &mut observation.objective_signals,
+                );
+            }
+            evaluate_candidate_with_runner(
+                &policy,
+                &observation,
+                &observation.capabilities,
+                &state,
+                candidate.clone(),
+                1.0,
+                &mut CountingDryRunner::default(),
+            )
+        };
+        let waiting = evaluate(DaemonMode::ApplyLowRisk, false);
+        assert!(!waiting.eligible);
+        assert!(
+            waiting
+                .deny_reasons
+                .contains(&CandidateDenyReason::ObjectiveSignalMissing)
+        );
+        assert!(evaluate(DaemonMode::ApplyLowRisk, true).eligible);
+        // A suggestion needs no baseline.
+        assert!(
+            !evaluate(DaemonMode::Suggest, false)
+                .deny_reasons
+                .contains(&CandidateDenyReason::ObjectiveSignalMissing)
         );
     }
 

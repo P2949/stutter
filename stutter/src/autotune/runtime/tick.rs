@@ -303,11 +303,44 @@ impl AutotuneRuntime {
         self.transition_runtime_phase(next, "evaluating monitor event")
     }
 
+    /// An explicitly named process tree whose tasks are a game is the focused workload: the user
+    /// chose it, so no desktop focus inference is needed. Other explicit targets keep their
+    /// previous (unfocused) behaviour until they have their own contract.
+    fn explicit_target_focus(&self) -> Option<AutotuneObservationFocus> {
+        let root = self.config.tree_pid()?;
+        if self.latest_focus.is_some()
+            || !self
+                .target_state
+                .active_tasks
+                .values()
+                .any(|task| crate::scorer::class_contributes_to_score(task.class))
+        {
+            return None;
+        }
+        let mut members: Vec<u32> = self
+            .target_state
+            .active_tasks
+            .values()
+            .map(|task| task.process_pid.as_u32())
+            .collect();
+        members.sort_unstable();
+        members.dedup();
+        Some(AutotuneObservationFocus {
+            kind: crate::focus::FocusGroupKind::Game,
+            root_pids: vec![root],
+            member_pids: members,
+            confidence: 1.0,
+            situation: crate::autotune::situation::SituationKind::GameFocused,
+            reasons: vec!["explicit target (--tree-pid) is a game".to_owned()],
+        })
+    }
+
     pub(super) fn build_observation(&self) -> AutotuneObservation {
+        let explicit_focus = self.explicit_target_focus();
         AutotuneObservationBuilder::build(AutotuneObservationBuilderInput {
             window: &self.controller.window,
             online_data_quality_policy: &self.config.online_data_quality_policy,
-            focus: self.latest_focus.as_ref(),
+            focus: self.latest_focus.as_ref().or(explicit_focus.as_ref()),
             // Preserve the distinction between a configured process-tree root
             // and a focus-derived root, so focus group helpers stay in scope.
             root_pid: self.config.tree_pid().or(self

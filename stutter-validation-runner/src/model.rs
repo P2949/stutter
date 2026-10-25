@@ -45,6 +45,8 @@ pub enum LiveSuite {
     KernelCompat,
     Affinity,
     Recovery,
+    /// One matched pair of the CPU-affinity benefit experiment (needs a `BenefitSpec`).
+    AffinityBenefit,
 }
 
 impl LiveSuite {
@@ -58,6 +60,7 @@ impl LiveSuite {
             Self::KernelCompat => "kernel-compat",
             Self::Affinity => "affinity",
             Self::Recovery => "recovery",
+            Self::AffinityBenefit => "affinity-benefit",
         }
     }
 
@@ -72,6 +75,7 @@ impl LiveSuite {
             Self::KernelCompat,
             Self::Affinity,
             Self::Recovery,
+            Self::AffinityBenefit,
         ]
         .into_iter()
         .find(|suite| suite.xtask_name() == name)
@@ -80,14 +84,50 @@ impl LiveSuite {
     pub fn takes_seconds(self) -> bool {
         matches!(
             self,
-            Self::Observation | Self::GameRunnable | Self::Overhead | Self::ScoreDegradation
+            Self::Observation
+                | Self::GameRunnable
+                | Self::Overhead
+                | Self::ScoreDegradation
+                | Self::AffinityBenefit
         )
     }
 
     /// Suites that apply SCHED_FIFO contention themselves need `CAP_SYS_NICE` as well.
     pub fn needs_scheduler_priority(self) -> bool {
-        matches!(self, Self::GameRunnable | Self::ScoreDegradation)
+        matches!(
+            self,
+            Self::GameRunnable | Self::ScoreDegradation | Self::AffinityBenefit
+        )
     }
+}
+
+/// The contention scenario of one benefit pair; the runner derives the argv from it.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BenefitScenario {
+    Beneficial,
+    Neutral,
+    Regression,
+}
+
+impl BenefitScenario {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Beneficial => "beneficial",
+            Self::Neutral => "neutral",
+            Self::Regression => "regression",
+        }
+    }
+}
+
+/// Typed parameters of one benefit pair.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct BenefitSpec {
+    pub scenario: BenefitScenario,
+    pub pair: u32,
+    /// Which of the two CPUs carries the baseline contention (counterbalancing).
+    pub baseline_first: bool,
 }
 
 /// Workloads the runner knows how to launch; the argv is derived here, never supplied.
@@ -137,6 +177,9 @@ pub enum Request {
         attempt: u32,
         seconds: Option<u64>,
         rounds: Option<u32>,
+        /// Required for, and only for, the benefit suite.
+        #[serde(default)]
+        benefit: Option<BenefitSpec>,
     },
     ExecuteSchedulerBurst {
         cpu: u32,

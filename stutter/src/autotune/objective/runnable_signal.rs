@@ -185,6 +185,19 @@ pub fn runnable_signals_for_target(
     signals
 }
 
+/// A complete, consistent runnable-latency population for tests whose subject is not the signal.
+#[cfg(test)]
+pub(crate) fn complete_runnable_population_for_tests(signals: &mut ObjectiveSignals) {
+    signals.signal_quality.runnable_latency = ObjectiveSignalQuality::Direct;
+    signals.runnable_latency_source = Some(RUNNABLE_HISTOGRAM_SOURCE.to_owned());
+    signals.runnable_target_root_pid = Some(1234);
+    signals.runnable_target_starttime_ticks = Some(1);
+    signals.runnable_latency_p99_ns = Some(8_000_000);
+    signals.runnable_latency_max_ns = Some(12_000_000);
+    signals.runnable_samples = Some(2_000);
+    signals.runnable_over_5ms = Some(20);
+}
+
 #[cfg(test)]
 mod target_signal_tests {
     use super::*;

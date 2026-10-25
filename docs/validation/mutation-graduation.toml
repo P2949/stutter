@@ -17,6 +17,7 @@ step = 5
 # Stable persisted split of the scenarios' pairs: `calibration` parts to one `holdout` part.
 calibration_parts = 2
 holdout_parts = 1
+window_seconds = 20
 # The share of beneficial pairs the frozen thresholds must keep on the holdout. Neutral and
 # regression pairs must never be kept.
 min_beneficial_keep_rate = 0.8
@@ -59,7 +60,9 @@ neutral = "affinity-quiet"
 regression = "affinity-colocated"
 
 [operation.cpu_affinity_profile.thresholds]
-# A conservative grid around the product defaults (12.5 % / 7.5 % / 1000 samples).
-min_improvement_percent = [10.0, 12.5, 15.0, 20.0]
-max_regression_percent = [5.0, 7.5, 10.0]
+# A conservative grid around the product defaults (12.5 % / 7.5 % / 1000 samples). The runnable
+# p99 is a histogram bucket bound, so one bucket step is already about 25 %: the grid extends
+# upward so a stricter criterion can be chosen if neutral pairs move by a bucket.
+min_improvement_percent = [10.0, 12.5, 15.0, 20.0, 25.0, 30.0, 40.0]
+max_regression_percent = [5.0, 7.5, 10.0, 15.0]
 min_samples = [1000]

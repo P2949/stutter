@@ -1,4 +1,5 @@
 mod acceptance;
+mod evidence;
 mod executor;
 mod journal;
 mod lifecycle;

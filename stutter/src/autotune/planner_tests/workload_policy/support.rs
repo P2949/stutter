@@ -167,6 +167,17 @@ pub(super) fn build_fixture_observation(case: &PlannerGoldenCase) -> AutotuneObs
         ..SystemHealthSnapshot::default()
     };
 
+    // A fixture about a runnable-latency candidate observes a complete runnable population.
+    if case
+        .expected_evaluations
+        .iter()
+        .any(|evaluation| evaluation.objective == "game_runnable_latency")
+    {
+        crate::autotune::objective::runnable_signal::complete_runnable_population_for_tests(
+            &mut observation.objective_signals,
+        );
+    }
+
     if case.low_data_quality {
         observation.data_quality = OnlineDataQuality::Low {
             reasons: vec!["fixture low data quality".to_owned()],

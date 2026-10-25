@@ -89,6 +89,7 @@ fn unapproved_actions_and_tasks_are_rejected() {
         attempt: 1,
         seconds: Some(20),
         rounds: Some(12),
+        benefit: None,
     };
     auth.authorize(&peer(me()), &envelope("overhead-controlled", overhead), 8)
         .unwrap();
@@ -152,6 +153,7 @@ fn arguments_are_bounded() {
         attempt,
         seconds,
         rounds,
+        benefit: None,
     };
     assert!(run(observation(0, Some(20), None)).is_err());
     assert!(run(observation(1, Some(5), None)).is_err());
@@ -260,4 +262,48 @@ fn the_authorization_file_must_be_root_owned_and_tamper_proof_when_strict() {
         crate::model::Authorization::load(&link, false).is_err(),
         "symlinks are refused"
     );
+}
+
+#[test]
+fn the_benefit_suite_needs_its_spec_and_nothing_else_may_carry_one() {
+    use crate::model::{BenefitScenario, BenefitSpec};
+    let spec = BenefitSpec {
+        scenario: BenefitScenario::Beneficial,
+        pair: 3,
+        baseline_first: true,
+    };
+    let mut auth = authorization("/work/stutter");
+    auth.grants.insert(grant(
+        "benefit_calibration",
+        RunnerAction::ExecuteLiveSuite,
+        Some(LiveSuite::AffinityBenefit),
+    ));
+    let request = |suite, benefit| Request::ExecuteLiveSuite {
+        suite,
+        attempt: 1,
+        seconds: Some(20),
+        rounds: None,
+        benefit,
+    };
+    let authorize =
+        |request| auth.authorize(&peer(me()), &envelope("benefit_calibration", request), 8);
+    assert!(authorize(request(LiveSuite::AffinityBenefit, Some(spec))).is_ok());
+    assert_eq!(
+        authorize(request(LiveSuite::AffinityBenefit, None))
+            .unwrap_err()
+            .0,
+        ErrorCode::InvalidArgument
+    );
+    let too_far = BenefitSpec {
+        pair: 10_000,
+        ..spec
+    };
+    assert_eq!(
+        authorize(request(LiveSuite::AffinityBenefit, Some(too_far)))
+            .unwrap_err()
+            .0,
+        ErrorCode::InvalidArgument
+    );
+    // A different suite never takes the spec (and is not granted to this task anyway).
+    assert!(authorize(request(LiveSuite::Observation, Some(spec))).is_err());
 }

@@ -145,6 +145,7 @@ impl SuiteBackend for RunnerBackend {
                 attempt: inv.attempt,
                 seconds: suite.takes_seconds().then_some(inv.seconds),
                 rounds: inv.rounds,
+                benefit: None,
             },
         };
         let response = client.send(inv.task, request).map_err(|error| {

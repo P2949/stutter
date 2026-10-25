@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use super::{
+    evidence::objective_evidence_for,
     executor::LiveExperimentActionExecutor,
     journal::{
         controller_journal_metadata_for_candidate, controller_journal_path,
@@ -617,7 +618,10 @@ impl LiveExperimentManager {
                     ),
                     cooldown_until_unix_nanos: Some(cooldown_until_unix_nanos),
                     manual_restore_command: Some(input.manual_restore_command.to_owned()),
-                    objective_evidence: self.pending_objective_evidence.take(),
+                    objective_evidence: self
+                        .pending_objective_evidence
+                        .take()
+                        .or_else(|| Some(objective_evidence_for(&experiment, observation))),
                 };
 
                 controller_state
@@ -673,7 +677,10 @@ impl LiveExperimentManager {
             rollback_policy: "rollback-performed".to_owned(),
             cooldown_until_unix_nanos: Some(cooldown_until_unix_nanos),
             manual_restore_command: Some(input.manual_restore_command.to_owned()),
-            objective_evidence: self.pending_objective_evidence.take(),
+            objective_evidence: self
+                .pending_objective_evidence
+                .take()
+                .or_else(|| Some(objective_evidence_for(&experiment, observation))),
         };
 
         controller_state.enter_cooldown_after_revert(&input.controller_policy, now_unix_nanos);

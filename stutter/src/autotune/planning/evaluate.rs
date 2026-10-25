@@ -168,6 +168,19 @@ pub(crate) fn evaluate_proposal_static(
             deny_reasons.push(denial.deny_reason());
             deny_messages.push(denial.message(&gate));
         }
+
+        // An experiment started on a baseline the objective cannot decide on would never
+        // conclude; suggestions need no baseline and are unaffected.
+        if let Some(reason) = crate::autotune::objective::baseline_unavailable_reason(
+            proposal.candidate.objective(),
+            &input.observation.objective_signals,
+        ) {
+            deny_reasons.push(CandidateDenyReason::ObjectiveSignalMissing);
+            deny_messages.push(format!(
+                "objective {:?} cannot decide on this baseline yet: {reason}",
+                proposal.candidate.objective()
+            ));
+        }
     }
 
     if !workload_policy.allows_objective(proposal.candidate.objective()) {
