@@ -419,6 +419,18 @@ pub(crate) fn acceptance_candidate(
     )
 }
 
+/// The override a validation campaign holds for the acceptance candidate: exactly its operation and
+/// objective, nothing else.
+pub(crate) fn acceptance_override(
+    candidate: &super::planning::candidate::CandidateAction,
+) -> super::autonomous_support::ValidationOverride {
+    super::autonomous_support::ValidationOverride {
+        operation: candidate.operation_kind(),
+        objective: candidate.objective(),
+        campaign_id: "crash-acceptance".to_owned(),
+    }
+}
+
 /// Minimal valid baseline: planner/measurement behavior is not under test here.
 pub(crate) fn acceptance_observation(tree_pid: u32) -> super::observation::AutotuneObservation {
     let mut observation = super::observation::AutotuneObservation {
@@ -487,11 +499,7 @@ fn hold_manager(
     let mut manager = LiveExperimentManager::new();
     // The validation framework holds an override for exactly this operation and objective.
     let mut controller = ControllerRuntimeState {
-        validation_override: Some(super::autonomous_support::ValidationOverride {
-            operation: candidate.operation_kind(),
-            objective: candidate.objective(),
-            campaign_id: "crash-acceptance".to_owned(),
-        }),
+        validation_override: Some(acceptance_override(&candidate)),
         ..ControllerRuntimeState::default()
     };
     let mut profile = ActiveProfileState::default();
