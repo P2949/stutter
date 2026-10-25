@@ -142,3 +142,20 @@ fn the_resume_service_waits_for_the_runner_socket_and_gives_up_after_its_budget(
     assert_eq!(never.get(), 3, "one sleep fewer than the attempts");
     assert!(!wait_for_runner(&scratch.path().join("absent"), 0, &|_| {}));
 }
+
+#[test]
+fn the_resumed_controller_gets_the_owners_home_not_the_repository() {
+    use std::path::Path;
+
+    use crate::resume::controller_home;
+    let passwd = "root:x:0:0::/root:/bin/sh\nme:x:1000:100::/home/me:/bin/sh\n";
+    assert_eq!(
+        controller_home(passwd, 1000, Path::new("/home/me/Development/stutter")),
+        Path::new("/home/me")
+    );
+    assert_eq!(
+        controller_home(passwd, 4242, Path::new("/work/stutter")),
+        Path::new("/work/stutter"),
+        "an owner without a passwd entry falls back to the repository"
+    );
+}
