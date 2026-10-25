@@ -60,7 +60,6 @@ fn state(scratch: &Scratch, manifest: &MutationManifest) -> (CampaignDir, Mutati
         created_unix_ms: 1,
         operation: "cpu_affinity_profile".to_owned(),
         objective: section.objective.clone(),
-        companion_campaign: "core".to_owned(),
         tasks: section
             .stage_list()
             .unwrap()

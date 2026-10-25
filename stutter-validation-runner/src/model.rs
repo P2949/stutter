@@ -4,7 +4,36 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
+
+/// Which controller a campaign's authorization serves. The runner derives the campaign
+/// directory and the reboot-resume command from this typed kind and nothing else: there is no
+/// caller-supplied program or argument vector.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ControllerKind {
+    CoreValidation,
+    MutationGraduation,
+}
+
+impl ControllerKind {
+    /// Campaign state root, relative to the authorized repository.
+    pub const fn campaign_root(self) -> &'static str {
+        match self {
+            Self::CoreValidation => ".llm-runs/validation",
+            Self::MutationGraduation => ".llm-runs/mutation-validation",
+        }
+    }
+
+    /// The xtask subcommand pair that resumes a campaign of this kind (followed by
+    /// `--campaign <dir> --resume`).
+    pub const fn resume_subcommand(self) -> [&'static str; 2] {
+        match self {
+            Self::CoreValidation => ["validation-campaign", "continue"],
+            Self::MutationGraduation => ["mutation-campaign", "continue"],
+        }
+    }
+}
 
 /// Live-acceptance suites the runner may launch (as the campaign UID, with fixed capabilities).
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
@@ -276,6 +305,7 @@ pub struct TaskGrant {
 #[serde(deny_unknown_fields)]
 pub struct Authorization {
     pub schema_version: u32,
+    pub controller: ControllerKind,
     pub campaign_id: String,
     pub owner_uid: u32,
     pub owner_gid: u32,

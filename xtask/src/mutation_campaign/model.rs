@@ -51,8 +51,6 @@ pub struct MutationState {
     pub created_unix_ms: u64,
     pub operation: String,
     pub objective: String,
-    /// The Core Validation campaign that anchors the privileged runner's authorization.
-    pub companion_campaign: String,
     /// Stage id -> state; skipped stages are absent and listed in `skipped`.
     pub tasks: BTreeMap<String, TaskState>,
     /// Explicitly skipped stages with their manifest reasons.

@@ -194,7 +194,7 @@ fn run_suite_stage(
         stutter: &context.binaries.stutter,
         xtask: &context.binaries.xtask,
         cwd: context.repository,
-        campaign_id: &context.state.companion_campaign,
+        campaign_id: &context.state.campaign_id,
         manifest_sha256: &context.state.manifest_sha256,
     };
     match backend.execute(&invocation) {

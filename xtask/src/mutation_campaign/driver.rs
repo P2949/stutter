@@ -7,6 +7,7 @@ use std::{
 };
 
 use anyhow::{Context, bail, ensure};
+use stutter_validation_runner::client::SOCKET_ENV;
 
 use super::{
     graph::Stage,
@@ -14,10 +15,11 @@ use super::{
     manifest::{MANIFEST_FILE, MutationManifest},
     model::{MutationMode, MutationState, SCHEMA_VERSION},
     runner::{StageContext, StageOutcome, StageRunner},
-    store,
+    runner_auth, store,
 };
 use crate::validation_campaign::{
     self,
+    bootstrap::{self, BootstrapOutcome, DEFAULT_SOCKET},
     model::{
         AttemptOutcome, BlockReason, Boundary, FailureClass, TaskAttempt, TaskFingerprint,
         TaskState, TaskStatus,
@@ -25,8 +27,6 @@ use crate::validation_campaign::{
     repository::{Binaries, cached_file_sha256, git},
     state::{CampaignDir, unix_ms},
 };
-
-const COMPANION_MANIFEST: &str = "docs/validation/core-validation.toml";
 
 #[derive(clap::Args, Clone, Debug, Eq, PartialEq)]
 pub struct MutationArgs {
@@ -158,7 +158,6 @@ fn init(root: &Path, operation: &str) -> anyhow::Result<()> {
     );
     let binaries = Binaries::for_repository(root)?;
     validation_campaign::repository::check_binary_revision(&binaries.stutter, &evidence_base)?;
-    let companion = validation_campaign::init_campaign(root, Path::new(COMPANION_MANIFEST))?;
     let campaign_id = format!(
         "mut-{}-{}-{}",
         operation.replace('_', "-"),
@@ -184,7 +183,6 @@ fn init(root: &Path, operation: &str) -> anyhow::Result<()> {
         created_unix_ms: unix_ms(),
         operation: operation.to_owned(),
         objective: section.objective.clone(),
-        companion_campaign: companion,
         tasks: stages
             .iter()
             .map(|stage| (stage.as_str().to_owned(), TaskState::new(stage.as_str())))
@@ -349,6 +347,22 @@ fn continue_campaign(
     let dir = store::locate(root, explicit)?;
     let (manifest, _) = MutationManifest::load(&store::manifest_snapshot(&dir))
         .context("read the retained manifest snapshot")?;
+    let state = store::load(&dir)?;
+    let operation = manifest.operation(&state.operation)?;
+    let socket = std::env::var_os(SOCKET_ENV)
+        .filter(|value| !value.is_empty())
+        .map_or_else(|| PathBuf::from(DEFAULT_SOCKET), PathBuf::from);
+    if state.mode == MutationMode::Active
+        && bootstrap::bootstrap_target(
+            &dir,
+            &runner_auth::target(&state, operation, root),
+            &socket,
+            false,
+        )? == BootstrapOutcome::BlockedPrivilege
+    {
+        println!("BLOCKED_PRIVILEGE_BOOTSTRAP: not root and passwordless sudo is unavailable");
+        return Ok(Boundary::BlockedPrivilege);
+    }
     let runner = production_runner(root)?;
     drive(root, &dir, &manifest, &runner, max_stages)
 }

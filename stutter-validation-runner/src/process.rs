@@ -46,7 +46,7 @@ pub struct PlannedCommand {
 
 fn campaign_dir(auth: &Authorization) -> PathBuf {
     Path::new(&auth.repository)
-        .join(".llm-runs/validation")
+        .join(auth.controller.campaign_root())
         .join(&auth.campaign_id)
 }
 

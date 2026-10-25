@@ -27,13 +27,14 @@ pub struct ResumePlan {
 
 pub fn plan_resume(auth: &Authorization) -> ResumePlan {
     let campaign = Path::new(&auth.repository)
-        .join(".llm-runs/validation")
+        .join(auth.controller.campaign_root())
         .join(&auth.campaign_id);
+    let [command, subcommand] = auth.controller.resume_subcommand();
     ResumePlan {
         program: xtask_path(auth),
         args: vec![
-            "validation-campaign".to_owned(),
-            "continue".to_owned(),
+            command.to_owned(),
+            subcommand.to_owned(),
             "--campaign".to_owned(),
             campaign.to_string_lossy().into_owned(),
             "--resume".to_owned(),

@@ -224,6 +224,7 @@ fn the_runner_backend_sends_a_typed_request_and_maps_authorization_denials_to_bl
         suite: Some(LiveSuite::Observation),
     });
     let authorization = Authorization {
+        controller: stutter_validation_runner::model::ControllerKind::CoreValidation,
         schema_version: 1,
         campaign_id: state.campaign_id.clone(),
         owner_uid: uid,

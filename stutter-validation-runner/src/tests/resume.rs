@@ -2,7 +2,7 @@ use std::{fs, os::unix::fs::PermissionsExt, time::Duration};
 
 use super::{Scratch, authorization, me};
 use crate::{
-    model::Authorization,
+    model::{Authorization, SCHEMA_VERSION},
     resume::{plan_resume, resume_all},
     state::{RunnerState, StateDir},
 };
@@ -52,7 +52,7 @@ fn campaign(
     let state = StateDir(dir);
     state
         .save(&RunnerState {
-            schema_version: 1,
+            schema_version: SCHEMA_VERSION,
             campaign_id: auth.campaign_id.clone(),
             resume_pending,
             cancelled,
@@ -157,5 +157,52 @@ fn the_resumed_controller_gets_the_owners_home_not_the_repository() {
         controller_home(passwd, 4242, Path::new("/work/stutter")),
         Path::new("/work/stutter"),
         "an owner without a passwd entry falls back to the repository"
+    );
+}
+
+#[test]
+fn the_controller_kind_alone_selects_the_campaign_root_and_resume_command() {
+    use crate::model::ControllerKind;
+    let mut auth = authorization("/work/stutter");
+    auth.campaign_id = "mut-cpu-affinity-profile-abc1234-1".to_owned();
+    auth.controller = ControllerKind::MutationGraduation;
+    let plan = plan_resume(&auth);
+    assert_eq!(
+        plan.program,
+        std::path::Path::new("/work/stutter/target/debug/xtask")
+    );
+    assert_eq!(
+        plan.args,
+        [
+            "mutation-campaign",
+            "continue",
+            "--campaign",
+            "/work/stutter/.llm-runs/mutation-validation/mut-cpu-affinity-profile-abc1234-1",
+            "--resume",
+        ]
+    );
+    auth.controller = ControllerKind::CoreValidation;
+    assert_eq!(plan_resume(&auth).args[0], "validation-campaign");
+}
+
+#[test]
+fn live_suite_attempts_live_under_the_controllers_own_campaign_root() {
+    use crate::{model::ControllerKind, process::plan_live_suite};
+    let mut auth = authorization("/work/stutter");
+    auth.controller = ControllerKind::MutationGraduation;
+    let envelope = super::envelope(
+        "mechanical_apply_verify_rollback",
+        crate::model::Request::ExecuteLiveSuite {
+            suite: crate::model::LiveSuite::Affinity,
+            attempt: 1,
+            seconds: None,
+            rounds: None,
+        },
+    );
+    let plan = plan_live_suite(&auth, &envelope).unwrap();
+    assert!(
+        plan.raw.starts_with("/work/stutter/.llm-runs/mutation-validation/core-abc1234-1/attempts/mechanical_apply_verify_rollback/0001"),
+        "{:?}",
+        plan.raw
     );
 }
