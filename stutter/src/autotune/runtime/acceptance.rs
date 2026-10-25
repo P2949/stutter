@@ -11,7 +11,9 @@ use crate::{
     autotune::{
         action_transaction::JournaledActionFailure,
         controller_journal::read_controller_journal,
-        crash_acceptance::{RecoveryCheckpoint, acceptance_candidate, acceptance_observation},
+        crash_acceptance::{
+            RecoveryCheckpoint, acceptance_candidate, acceptance_observation, acceptance_override,
+        },
         decision::AutotuneDecision,
         live_experiment::FaultInjectingExecutor,
     },
@@ -43,10 +45,12 @@ pub(crate) fn run_failure_scenario(
     );
     config.controller_journal_path = Some(journal_path.clone());
     config.history_log = Some(out.join("history.jsonl"));
+    let candidate = acceptance_candidate(tree_pid, desired)?;
+    config.validation_override = Some(acceptance_override(&candidate));
     let mut runtime = AutotuneRuntime::new(config);
     let observation = acceptance_observation(tree_pid);
     let decision = AutotuneDecision::StartExperiment {
-        candidate: acceptance_candidate(tree_pid, desired)?,
+        candidate,
         reason: "physical failure acceptance".into(),
     };
     let mut executor = FaultInjectingExecutor {
@@ -116,12 +120,14 @@ pub(crate) fn run_suspend_resume(
     );
     config.controller_journal_path = Some(journal_path.clone());
     config.history_log = Some(out.join("history.jsonl"));
+    let candidate = acceptance_candidate(tree_pid, desired)?;
+    config.validation_override = Some(acceptance_override(&candidate));
     let mut runtime = AutotuneRuntime::new(config);
     let observation = acceptance_observation(tree_pid);
     runtime.apply_decision_side_effects_with_executor(
         &observation,
         &AutotuneDecision::StartExperiment {
-            candidate: acceptance_candidate(tree_pid, desired)?,
+            candidate,
             reason: "suspend/resume acceptance".into(),
         },
         "suspend/resume acceptance",
