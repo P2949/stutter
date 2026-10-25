@@ -49,6 +49,7 @@ const AFFINITY: &[&str] = &[
     "live_affinity",
     "live_recovery",
     "live_suspend_resume",
+    "live_affinity_benefit",
 ];
 
 pub const CAPABILITIES: [Capability; 17] = [

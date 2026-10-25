@@ -66,6 +66,7 @@ fn summary(value: &Value) -> Option<RunnableSummaryRecord> {
 /// Reads the pair the suite wrote; `None` when it is incomplete.
 pub fn read_pair(
     raw: &std::path::Path,
+    attempt: u32,
     scenario: Scenario,
     pair: usize,
     order: Order,
@@ -74,6 +75,7 @@ pub fn read_pair(
     Some(PairResult {
         scenario,
         pair,
+        attempt,
         order,
         baseline: summary(&value["baseline"])?,
         candidate: summary(&value["candidate"])?,
@@ -143,7 +145,7 @@ impl BenefitHarness for RunnerHarness {
                 result["error"].as_str().unwrap_or("no error recorded")
             )));
         }
-        read_pair(&raw, scenario, pair, order)
+        read_pair(&raw, attempt, scenario, pair, order)
             .ok_or_else(|| HarnessError::Defect("the pair record is incomplete".to_owned()))
     }
 }
@@ -164,13 +166,13 @@ mod tests {
             "placement_observed":true,"guardrails_ok":true,"manager_kept":true}"#,
         )
         .unwrap();
-        let pair = read_pair(&dir, Scenario::Beneficial, 4, Order::CandidateFirst).unwrap();
+        let pair = read_pair(&dir, 1, Scenario::Beneficial, 4, Order::CandidateFirst).unwrap();
         assert_eq!(pair.baseline.p99_ns, 9_000_000);
         assert_eq!(pair.candidate.samples, 2_600);
         assert!(pair.placement_observed && pair.manager_kept);
         // An incomplete population is not a pair.
         fs::write(dir.join("pair.json"), br#"{"baseline":{"p99_ns":1}}"#).unwrap();
-        assert!(read_pair(&dir, Scenario::Beneficial, 4, Order::CandidateFirst).is_none());
+        assert!(read_pair(&dir, 1, Scenario::Beneficial, 4, Order::CandidateFirst).is_none());
         let _ = fs::remove_dir_all(&dir);
     }
 }

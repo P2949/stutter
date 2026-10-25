@@ -282,6 +282,7 @@ fn pair(scenario: Scenario, index: usize, candidate_p99: u64) -> PairResult {
     PairResult {
         scenario,
         pair: index,
+        attempt: 0,
         order: Order::BaselineFirst,
         baseline: RunnableSummaryRecord {
             p99_ns: 10_000_000,

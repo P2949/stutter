@@ -12,6 +12,10 @@ fn covers(suite: &str, result: &Value) -> Value {
         "live_affinity" | "live_recovery" | "live_suspend_resume" => {
             json!({"providers": ["cpu_affinity_profile"]})
         }
+        "live_affinity_benefit" => json!({
+            "providers": ["cpu_affinity_profile"],
+            "objectives": ["GameRunnableLatency"],
+        }),
         "live_game_runnable" => json!({"objectives": ["GameRunnableLatency"]}),
         "live_kernel_compat" if result["compatibility"] != "ObservedIncompatible" => {
             json!({"kernel_capabilities": ["scheduler_runnable_latency"]})

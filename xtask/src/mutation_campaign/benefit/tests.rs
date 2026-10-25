@@ -12,6 +12,7 @@ fn pair(scenario: Scenario, index: usize, baseline_p99: u64, candidate_p99: u64)
     PairResult {
         scenario,
         pair: index,
+        attempt: 0,
         order: if index.is_multiple_of(2) {
             Order::BaselineFirst
         } else {
