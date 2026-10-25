@@ -401,7 +401,7 @@ pub(crate) fn acceptance_candidate(
     desired: crate::affinity::CpuMask,
 ) -> anyhow::Result<super::planning::candidate::CandidateAction> {
     Ok(
-        super::planning::candidate::CandidateAction::cpu_affinity_profile(
+        super::planning::candidate::CandidateAction::cpu_affinity_profile_for(
             crate::profiles::Profile {
                 name: "crash-acceptance-affinity".into(),
                 rules: vec![crate::profiles::ProfileRule {
@@ -413,6 +413,8 @@ pub(crate) fn acceptance_candidate(
                 }],
             },
             tree_pid,
+            // The final control path: scheduler pressure on a game is judged by its runnable latency.
+            super::objective::ObjectiveKind::GameRunnableLatency,
         ),
     )
 }
@@ -481,8 +483,17 @@ fn hold_manager(
         exit_rollback_registry: None,
         privileged_action_service: None,
     };
+    let candidate = acceptance_candidate(tree_pid, desired)?;
     let mut manager = LiveExperimentManager::new();
-    let mut controller = ControllerRuntimeState::default();
+    // The validation framework holds an override for exactly this operation and objective.
+    let mut controller = ControllerRuntimeState {
+        validation_override: Some(super::autonomous_support::ValidationOverride {
+            operation: candidate.operation_kind(),
+            objective: candidate.objective(),
+            campaign_id: "crash-acceptance".to_owned(),
+        }),
+        ..ControllerRuntimeState::default()
+    };
     let mut profile = ActiveProfileState::default();
     let mut executor = RuntimeLiveExperimentActionExecutor;
     let outcome = manager.apply_decision_side_effects_with_executor(
@@ -493,7 +504,7 @@ fn hold_manager(
         },
         &observation,
         &AutotuneDecision::StartExperiment {
-            candidate: acceptance_candidate(tree_pid, desired)?,
+            candidate,
             reason: "crash acceptance".into(),
         },
         "crash acceptance",
