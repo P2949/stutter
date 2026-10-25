@@ -16,6 +16,13 @@ pub struct Measured {
     pub level_ms: f64,
     pub score_total: f64,
     pub runnable_score_total: f64,
+    /// The same score when the explicitly named target's generic-class tasks count as the
+    /// target (the rule the diagnosis uses); the recorded classes leave a non-game target's
+    /// runnable terms empty.
+    #[serde(default)]
+    pub explicit_target_score_total: f64,
+    #[serde(default)]
+    pub explicit_target_runnable_score_total: f64,
     pub over_1ms: f64,
     pub over_2ms: f64,
     pub over_5ms: f64,
@@ -107,8 +114,31 @@ fn pooled(runs: &[&Measured]) -> Value {
     Value::Object(out)
 }
 
-/// The whole analysis: per profile and pooled.
+/// Both readings of the score, side by side: as recorded, and with the explicit target counted.
 pub fn analyze(by_profile: &BTreeMap<Profile, Vec<Measured>>) -> Value {
+    let explicit: BTreeMap<Profile, Vec<Measured>> = by_profile
+        .iter()
+        .map(|(profile, runs)| {
+            let mapped = runs
+                .iter()
+                .map(|m| Measured {
+                    score_total: m.explicit_target_score_total,
+                    runnable_score_total: m.explicit_target_runnable_score_total,
+                    ..m.clone()
+                })
+                .collect();
+            (*profile, mapped)
+        })
+        .collect();
+    json!({
+        "as_recorded": analyze_variant(by_profile),
+        "explicit_target": analyze_variant(&explicit),
+        "note": "as_recorded is today's behavior (only game-class tasks contribute to the runnable terms); explicit_target counts the named process's generic-class tasks. Weights are identical in both.",
+    })
+}
+
+/// One reading: per profile and pooled.
+fn analyze_variant(by_profile: &BTreeMap<Profile, Vec<Measured>>) -> Value {
     let mut profiles = serde_json::Map::new();
     let mut every: Vec<&Measured> = Vec::new();
     let mut inversions = 0;
@@ -195,7 +225,7 @@ mod tests {
                 .flat_map(|l| (0..3).map(move |r| run(*l, l * 10.0 + f64::from(r), l * 1e6 + 1.0)))
                 .collect::<Vec<_>>(),
         );
-        let result = analyze(&data);
+        let result = analyze_variant(&data);
         assert_eq!(result["every_profile_monotonic"], true);
         assert_eq!(result["total_adjacent_inversions"], 0);
         assert!(result["pooled"]["score_vs_level"].as_f64().unwrap() > 0.9);
@@ -218,7 +248,7 @@ mod tests {
             .map(|(l, s)| run(*l, *s, l * 1e6 + 1.0))
             .collect::<Vec<_>>(),
         );
-        let result = analyze(&data);
+        let result = analyze_variant(&data);
         assert_eq!(result["every_profile_monotonic"], false);
         assert!(result["total_adjacent_inversions"].as_u64().unwrap() >= 1);
         assert!(
