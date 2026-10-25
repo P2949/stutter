@@ -51,6 +51,7 @@ fn expected_subcommands_are_registered() {
             "live-workload",
             "local-install-smoke",
             "maturity-report",
+            "mutation-campaign",
             "no-allow-attrs",
             "objective-docs",
             "package",

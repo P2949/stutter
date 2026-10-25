@@ -17,6 +17,7 @@ pub mod fixtures;
 pub mod kernel_matrix;
 mod live_acceptance;
 pub mod maturity_report;
+pub mod mutation_campaign;
 pub mod no_allow_attrs;
 pub mod objective_docs;
 pub mod ops_checks;
@@ -136,6 +137,8 @@ pub enum XtaskCommand {
         about = "Drive the post-v0.1 diagnosis evidence study (init, status, continue, verify, report)"
     )]
     DiagnosisStudy(diagnosis_study::StudyArgs),
+    /// Generic mutation-graduation campaign (init/status/continue/verify/report/cancel).
+    MutationCampaign(mutation_campaign::MutationArgs),
     #[command(
         name = "score-matrix",
         about = "Drive the StutterScore workload-matrix evidence study (init, status, continue, report)"
@@ -415,6 +418,7 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
         XtaskCommand::ReleasePublish(args) => release_package::publish_release(&root, &args),
         XtaskCommand::ValidationCampaign(args) => validation_campaign::run(&root, args),
         XtaskCommand::DiagnosisStudy(args) => diagnosis_study::run(&root, args),
+        XtaskCommand::MutationCampaign(args) => mutation_campaign::run(&root, args),
         XtaskCommand::ScoreMatrix(args) => score_matrix::run(&root, args),
         XtaskCommand::KernelMatrix { require } => kernel_matrix::run(&root, require),
         XtaskCommand::EvidenceIndex(args) => evidence_bundle::index_entry(&args.bundle),
