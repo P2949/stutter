@@ -24,7 +24,7 @@ use crate::{
         driver::{EXIT_BLOCKED_PRIVILEGE, EXIT_BLOCKED_RESOURCE, blocked, integrity, socket},
         facts::freeze_study_cpu_only,
         metric::{merged_runnable_over_rate, merged_runnable_p99_ns},
-        store::{StudyDir, StudyHeader, append_ndjson, read_ndjson},
+        store::{Import, StudyDir, StudyHeader, append_ndjson, read_ndjson},
     },
     evidence_bundle::sha256::sha256_hex,
     score_evaluation::load_observation,
@@ -51,7 +51,12 @@ pub struct MatrixArgs {
 #[derive(clap::Subcommand, Clone, Debug, Eq, PartialEq)]
 pub enum MatrixCommand {
     /// Create a matrix study at the clean `main` HEAD (and its runner-authorization campaign).
-    Init,
+    Init {
+        /// Take over every accepted recording of an earlier study with the same definition, so
+        /// only its missing cells are taken again.
+        #[arg(long)]
+        topup_of: Option<PathBuf>,
+    },
     Status {
         #[arg(long)]
         study: Option<PathBuf>,
@@ -88,7 +93,7 @@ fn runs_path(dir: &StudyDir) -> PathBuf {
 
 pub fn run(root: &Path, args: MatrixArgs) -> anyhow::Result<()> {
     match args.command {
-        MatrixCommand::Init => init(root),
+        MatrixCommand::Init { topup_of } => init(root, topup_of),
         MatrixCommand::Status { study } => {
             let (dir, header, config) = open(root, study)?;
             let runs: Vec<MatrixRun> = read_ndjson(&runs_path(&dir))?;
@@ -147,7 +152,7 @@ fn open(
     Ok((dir, header, config))
 }
 
-fn init(root: &Path) -> anyhow::Result<()> {
+fn init(root: &Path, topup_of: Option<PathBuf>) -> anyhow::Result<()> {
     let bytes = fs::read(root.join(CONFIG_FILE)).context("read the matrix definition")?;
     MatrixConfig::parse(std::str::from_utf8(&bytes)?)?;
     let companion = validation_campaign::init_campaign(root, Path::new(COMPANION_MANIFEST))?;
@@ -156,7 +161,7 @@ fn init(root: &Path) -> anyhow::Result<()> {
     let dir = StudyDir(root.join(STUDY_ROOT).join(&id));
     fs::create_dir_all(&dir.0)?;
     fs::write(dir.0.join("config.toml"), &bytes)?;
-    dir.save_header(&StudyHeader {
+    let mut header = StudyHeader {
         schema_version: 1,
         study_id: id.clone(),
         base_commit: commit,
@@ -165,7 +170,29 @@ fn init(root: &Path) -> anyhow::Result<()> {
         frozen: Default::default(),
         imports: Vec::new(),
         created_unix_ms: unix_ms(),
-    })?;
+    };
+    if let Some(from) = topup_of {
+        let (from_dir, from_header, _) = open(root, Some(from))?;
+        anyhow::ensure!(
+            from_header.config_sha256 == header.config_sha256,
+            "the earlier study used a different matrix definition; its recordings cannot be taken over"
+        );
+        let kept: Vec<MatrixRun> = read_ndjson(&runs_path(&from_dir))?;
+        let mut lines = String::new();
+        for run in &kept {
+            lines.push_str(&serde_json::to_string(run)?);
+            lines.push('\n');
+            append_ndjson(&runs_path(&dir), run)?;
+        }
+        header.imports.push(Import {
+            from_study: from_header.study_id,
+            from_base_commit: from_header.base_commit,
+            families: Vec::new(),
+            runs: kept.len(),
+            runs_sha256: sha256_hex(lines.as_bytes()),
+        });
+    }
+    dir.save_header(&header)?;
     println!("study_id={id}\nstudy={}", dir.0.display());
     Ok(())
 }
@@ -344,11 +371,12 @@ fn continue_matrix(
     dir.save_header(&header)?;
     let path = runs_path(&dir);
     let mut taken = 0;
-    for slot in slots(&config) {
+    // Until nothing is missing: a rejected attempt is retried within its budget, never skipped.
+    loop {
         let runs: Vec<MatrixRun> = read_ndjson(&path)?;
-        if accepted(&runs, &slot) {
-            continue;
-        }
+        let Some(slot) = slots(&config).into_iter().find(|s| !accepted(&runs, s)) else {
+            break;
+        };
         if failures(&runs, &slot) >= config.failed_attempts_per_capture {
             blocked(
                 EXIT_BLOCKED_RESOURCE,
