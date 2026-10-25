@@ -81,6 +81,7 @@ pub mod autotune {
 
     pub use crate::autotune::{
         DEFAULT_MIN_FOCUS_CONFIDENCE,
+        acceptance_mutation::{AcceptanceMutation, AcceptanceTarget},
         autonomous_support::{
             AUTONOMOUS_CONTRACTS, AutonomousContract, AutonomousDenial, AutonomousGateInput,
             ValidationOverride, autonomous_apply_gate,
@@ -92,8 +93,8 @@ pub mod autotune {
         comparison::ExperimentResult,
         crash_acceptance::{
             RecoveryCheckpoint, RecoveryControllerInput, SuspendResumeControllerInput,
-            hold_affinity_recovery_controller, hold_suspend_resume_controller,
-            recover_affinity_acceptance_controller,
+            hold_recovery_controller, hold_suspend_resume_controller,
+            recover_acceptance_controller,
         },
         objective::{
             DEFAULT_MAX_REGRESSION_PERCENT, DEFAULT_MIN_IMPROVEMENT_PERCENT,

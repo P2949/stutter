@@ -1,5 +1,5 @@
 //! Canonical real SIGKILL/restart recovery, independent of BPF observation.
-use stutter::api::autotune::RecoveryCheckpoint;
+use stutter::api::autotune::{AcceptanceMutation, AcceptanceTarget, RecoveryCheckpoint};
 
 use super::*;
 mod actor;
@@ -8,6 +8,12 @@ mod failure;
 mod procfs;
 mod suspend;
 pub(crate) use actor::{ControllerCommand, controller};
+
+pub(crate) fn parse_mutation(value: &str) -> Result<AcceptanceMutation, String> {
+    value
+        .parse()
+        .map_err(|error: anyhow::Error| error.to_string())
+}
 pub(crate) use suspend::SuspendOptions;
 
 fn read_json(path: &Path) -> anyhow::Result<Value> {
@@ -43,12 +49,27 @@ pub(super) fn run_suspend(
     root: &Path,
     out: &Path,
     binary: &Path,
+    mutation: AcceptanceMutation,
     options: &SuspendOptions,
 ) -> anyhow::Result<()> {
-    suspend::run(root, out, binary, options)
+    suspend::run(root, out, binary, mutation, options)
 }
 
-pub(super) fn run(root: &Path, out: &Path, binary: &Path) -> anyhow::Result<()> {
+/// The value the mutation applies on this host: a CPU the harness may use, or a `uclamp.min`.
+fn target_for(mutation: AcceptanceMutation) -> anyhow::Result<AcceptanceTarget> {
+    let value = match mutation {
+        AcceptanceMutation::Affinity => allowed_cpu()?,
+        AcceptanceMutation::Uclamp => mutation.default_value(),
+    };
+    Ok(AcceptanceTarget { mutation, value })
+}
+
+pub(super) fn run(
+    root: &Path,
+    out: &Path,
+    binary: &Path,
+    mutation: AcceptanceMutation,
+) -> anyhow::Result<()> {
     ensure!(
         cfg!(target_os = "linux"),
         "recovery acceptance requires Linux"
@@ -68,17 +89,19 @@ pub(super) fn run(root: &Path, out: &Path, binary: &Path) -> anyhow::Result<()> 
             &root.join(binary),
             evidence::LiveAcceptanceSuite::Recovery,
         )?;
-        let cpu = allowed_cpu()?;
-        let status = fs::read_to_string("/proc/self/status")?;
-        let mask = status
-            .lines()
-            .find_map(|line| line.strip_prefix("Cpus_allowed_list:"))
-            .context("missing harness allowed mask")?
-            .trim();
-        ensure!(
-            mask != cpu.to_string(),
-            "recovery mutation acceptance requires at least two allowed CPUs"
-        );
+        let target = target_for(mutation)?;
+        if mutation == AcceptanceMutation::Affinity {
+            let status = fs::read_to_string("/proc/self/status")?;
+            let mask = status
+                .lines()
+                .find_map(|line| line.strip_prefix("Cpus_allowed_list:"))
+                .context("missing harness allowed mask")?
+                .trim();
+            ensure!(
+                mask != target.value.to_string(),
+                "recovery mutation acceptance requires at least two allowed CPUs"
+            );
+        }
         command(
             Path::new("strace"),
             &args(&["--version"]),
@@ -90,9 +113,9 @@ pub(super) fn run(root: &Path, out: &Path, binary: &Path) -> anyhow::Result<()> 
         for checkpoint in RecoveryCheckpoint::ALL {
             stage = checkpoint.as_str().to_owned();
             cases.push(if checkpoint.kills_controller() {
-                case::run(&executable, &out, cpu, checkpoint)?
+                case::run(&executable, &out, target, checkpoint)?
             } else {
-                failure::run(&executable, &out, cpu, checkpoint)?
+                failure::run(&executable, &out, target, checkpoint)?
             });
         }
         ensure!(
@@ -111,9 +134,9 @@ pub(super) fn run(root: &Path, out: &Path, binary: &Path) -> anyhow::Result<()> 
     evidence::write_result(
         &out,
         evidence::LiveAcceptanceSuite::Recovery,
-        json!({"schema_version":1,"evidence_kind":"controlled_real","status":status,"stage":stage,"cases":cases,
+        json!({"schema_version":1,"evidence_kind":"controlled_real","status":status,"stage":stage,"mutation":mutation.as_str(),"cases":cases,
         "error":result.as_ref().err().map(|error|format!("{error:#}")),
-        "scope":"production low-risk action transaction (six checkpoints) and one LiveExperimentManager Measuring checkpoint; startup recovery; separate real controller processes; fixed owned tree",
+        "scope":format!("production {} action transaction (six checkpoints) and one LiveExperimentManager Measuring checkpoint; startup recovery; separate real controller processes; fixed owned tree", mutation.as_str()),
         "not_claimed":["full daemon planner/measurement acceptance (manager and runtime cases use a minimal baseline observation)","replacement-identity physical matrix (covered by startup_recovery real_affinity test)","suspend/resume","provider graduation","portable verified bundle"],
         "observation_suite":"not_run","privacy":"local raw evidence; canonical sanitization/export remains separate"}),
     )?;

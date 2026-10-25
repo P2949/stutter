@@ -10,6 +10,7 @@ use anyhow::{Context, ensure};
 use serde_json::{Value, json};
 
 use super::{
+    acceptance_mutation::{AcceptanceMutation, AcceptanceTarget},
     action_transaction::{JournaledActionInput, apply_journaled_action},
     controller_journal::{
         ControllerJournalActionMetadata, ControllerJournalState, journal_process_identity,
@@ -19,9 +20,9 @@ use super::{
         StartupRecoveryConfig, StartupRecoveryOutcome, recover_controller_journal_on_startup,
     },
 };
-use crate::actions::{
-    ActionId, ActionState, ActionWarning, RollbackToken, SafetyClass, TuningAction,
-    cpu_affinity::CpuAffinityProfileAction, runner::ActionRunPolicy,
+use crate::{
+    actions::{ActionId, ActionState, ActionWarning, RollbackToken, SafetyClass, TuningAction},
+    daemon::privilege::{InProcessPrivilegedActionService, PrivilegedActionService},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -57,13 +58,14 @@ impl RecoveryCheckpoint {
         Self::VerifyFailure,
         Self::RollbackFailure,
     ];
-    /// `sched_setaffinity` fault/delay injected by the harness tracer, if any.
-    pub fn strace_injection(self) -> Option<&'static str> {
+    /// The fault/delay the harness tracer injects into the mutation's syscall, if any.
+    pub fn strace_injection(self, mutation: AcceptanceMutation) -> Option<String> {
+        let syscall = mutation.syscall();
         match self {
-            Self::MidApply => Some("inject=sched_setaffinity:delay_exit=10s:when=1"),
+            Self::MidApply => Some(format!("inject={syscall}:delay_exit=10s:when=1")),
             // Calls 1-5 apply; call 6 restores the first task, then stalls.
-            Self::InterruptedRollback => Some("inject=sched_setaffinity:delay_exit=10s:when=6"),
-            Self::PartialApplyFailure => Some("inject=sched_setaffinity:error=EPERM:when=3"),
+            Self::InterruptedRollback => Some(format!("inject={syscall}:delay_exit=10s:when=6")),
+            Self::PartialApplyFailure => Some(format!("inject={syscall}:error=EPERM:when=3")),
             _ => None,
         }
     }
@@ -171,7 +173,7 @@ fn pause(
 }
 
 struct CheckpointAction<'a> {
-    inner: CpuAffinityProfileAction,
+    inner: Box<dyn TuningAction>,
     out: &'a Path,
     checkpoint: RecoveryCheckpoint,
 }
@@ -196,6 +198,9 @@ impl TuningAction for CheckpointAction<'_> {
     }
     fn apply(&self) -> crate::actions::ApplyResult {
         self.inner.apply()
+    }
+    fn prepared_before_mutation(&self) -> bool {
+        self.inner.prepared_before_mutation()
     }
     fn apply_with_prepared_rollback(
         &self,
@@ -235,7 +240,9 @@ impl TuningAction for CheckpointAction<'_> {
 pub struct RecoveryControllerInput<'a> {
     pub tree_pid: u32,
     pub tree_ticks: u64,
-    pub desired_cpu: u32,
+    pub mutation: AcceptanceMutation,
+    /// A CPU number (affinity) or a `uclamp.min` (uclamp).
+    pub value: u32,
     pub out: &'a Path,
     pub owner_pid: u32,
     pub owner_ticks: u64,
@@ -243,15 +250,16 @@ pub struct RecoveryControllerInput<'a> {
 }
 
 /// Verifies the controller owns a disposable 3-process / 5-task tree, then
-/// publishes its identity. Returns the single-CPU mask the candidate applies.
+/// publishes its identity. Returns the target the candidate applies.
 pub(crate) fn prepare_owned_controller(
     input: &RecoveryControllerInput<'_>,
     may_be_traced: bool,
-) -> anyhow::Result<crate::affinity::CpuMask> {
+) -> anyhow::Result<AcceptanceTarget> {
     let RecoveryControllerInput {
         tree_pid,
         tree_ticks,
-        desired_cpu: cpu,
+        mutation,
+        value,
         out,
         owner_pid,
         owner_ticks,
@@ -299,28 +307,42 @@ pub(crate) fn prepare_owned_controller(
                 == 3,
         "expected three disposable processes and five tasks"
     );
-    let desired = crate::affinity::CpuMask::parse(&cpu.to_string())?;
-    ensure!(
-        desired.is_subset_of(&crate::affinity::CpuMask::online_cpus()?),
-        "selected CPU offline"
-    );
-    for task in snapshot.tasks.values() {
-        let original = crate::affinity::read_allowed_mask(task.task_id())?;
-        ensure!(
-            desired.is_subset_of(&original) && desired != original,
-            "no observable permitted mask change"
-        );
+    match mutation {
+        AcceptanceMutation::Affinity => {
+            let desired = crate::affinity::CpuMask::parse(&value.to_string())?;
+            ensure!(
+                desired.is_subset_of(&crate::affinity::CpuMask::online_cpus()?),
+                "selected CPU offline"
+            );
+            for task in snapshot.tasks.values() {
+                let original = crate::affinity::read_allowed_mask(task.task_id())?;
+                ensure!(
+                    desired.is_subset_of(&original) && desired != original,
+                    "no observable permitted mask change"
+                );
+            }
+        }
+        AcceptanceMutation::Uclamp => {
+            for task in snapshot.tasks.values() {
+                let (min, _) =
+                    crate::actions::uclamp::read_current_uclamp(task.task_id().as_u32())?;
+                ensure!(min != value, "no observable uclamp change");
+            }
+        }
     }
     publish_acceptance_handshake(
         out,
         "controller-started.json",
         json!({"controller_pid":std::process::id(),"controller_starttime_ticks":ticks(std::process::id())?}),
     )?;
-    Ok(desired)
+    Ok(AcceptanceTarget { mutation, value })
 }
 
-pub fn hold_affinity_recovery_controller(input: RecoveryControllerInput<'_>) -> anyhow::Result<()> {
-    let desired = prepare_owned_controller(&input, input.checkpoint.strace_injection().is_some())?;
+pub fn hold_recovery_controller(input: RecoveryControllerInput<'_>) -> anyhow::Result<()> {
+    let desired = prepare_owned_controller(
+        &input,
+        input.checkpoint.strace_injection(input.mutation).is_some(),
+    )?;
     let RecoveryControllerInput {
         tree_pid,
         tree_ticks,
@@ -348,36 +370,20 @@ pub fn hold_affinity_recovery_controller(input: RecoveryControllerInput<'_>) -> 
         _ => {}
     }
     let action = CheckpointAction {
-        inner: CpuAffinityProfileAction {
-            tree_pid,
-            restore_path: Some(out.join("restore.json")),
-            force_restore_overwrite: false,
-            profile: crate::profiles::Profile {
-                name: "crash-acceptance-affinity".into(),
-                rules: vec![crate::profiles::ProfileRule {
-                    affinity: Some(desired),
-                    nice: None,
-                    ionice: None,
-                    match_class: vec![],
-                    match_comm: vec![crate::process_tree::CompiledPattern::new("/.*/".into())?],
-                }],
-            },
-        },
+        inner: desired.action(tree_pid, Some(out.join("restore.json")))?,
         out,
         checkpoint,
     };
     let metadata = ControllerJournalActionMetadata::default()
-        .with_candidate("crash-acceptance-affinity")
+        .with_candidate(desired.mutation.candidate_name())
         .with_target_identity(journal_process_identity(
             tree_pid,
             Some(tree_ticks),
             Some(5),
         ))
-        .with_mode(crate::daemon_policy::DaemonMode::ApplyLowRisk)
-        .with_safety_class(SafetyClass::ReversibleLowRisk);
-    let mut policy =
-        ActionRunPolicy::apply_low_risk(crate::daemon_policy::ActionSource::AutotuneRuntime, false);
-    policy.max_affected_tasks = Some(8);
+        .with_mode(desired.mutation.mode())
+        .with_safety_class(desired.mutation.safety_class());
+    let policy = desired.policy();
     apply_journaled_action(
         &action,
         policy,
@@ -395,28 +401,32 @@ pub fn hold_affinity_recovery_controller(input: RecoveryControllerInput<'_>) -> 
     pause(out, checkpoint, true)
 }
 
-/// The one disposable CPU-affinity candidate every acceptance case applies.
-pub(crate) fn acceptance_candidate(
-    tree_pid: u32,
-    desired: crate::affinity::CpuMask,
-) -> anyhow::Result<super::planning::candidate::CandidateAction> {
-    Ok(
-        super::planning::candidate::CandidateAction::cpu_affinity_profile_for(
-            crate::profiles::Profile {
-                name: "crash-acceptance-affinity".into(),
-                rules: vec![crate::profiles::ProfileRule {
-                    affinity: Some(desired),
-                    nice: None,
-                    ionice: None,
-                    match_class: vec![],
-                    match_comm: vec![crate::process_tree::CompiledPattern::new("/.*/".into())?],
-                }],
-            },
-            tree_pid,
-            // The final control path: scheduler pressure on a game is judged by its runnable latency.
-            super::objective::ObjectiveKind::GameRunnableLatency,
-        ),
-    )
+/// The daemon policy the acceptance controller runs under for the mutation's risk class.
+pub(crate) fn acceptance_daemon_policy(
+    mutation: AcceptanceMutation,
+) -> crate::daemon::DaemonPolicy {
+    let source = crate::daemon_policy::ActionSource::AutotuneRuntime;
+    match mutation.mode() {
+        crate::daemon::policy::DaemonMode::ApplyMediumRisk => {
+            crate::daemon::DaemonPolicy::apply_medium_risk(source)
+        }
+        _ => crate::daemon::DaemonPolicy::apply_low_risk(source),
+    }
+}
+
+/// Medium-risk mutation reaches the kernel through a privileged action service. A disposable
+/// acceptance tree is owned by the same user, so the in-process service is the exact production
+/// code path without a root worker; low-risk mutation needs none.
+pub(crate) fn acceptance_privileged_service(
+    mutation: AcceptanceMutation,
+    out: &Path,
+) -> Option<InProcessPrivilegedActionService> {
+    (mutation.mode() == crate::daemon::policy::DaemonMode::ApplyMediumRisk).then(|| {
+        InProcessPrivilegedActionService::with_proc_root_and_audit_path(
+            "/proc",
+            out.join("privilege-audit.jsonl"),
+        )
+    })
 }
 
 /// The override a validation campaign holds for the acceptance candidate: exactly its operation and
@@ -464,7 +474,7 @@ fn hold_manager(
     out: &Path,
     tree_pid: u32,
     tree_ticks: u64,
-    desired: crate::affinity::CpuMask,
+    desired: AcceptanceTarget,
     revert: bool,
 ) -> anyhow::Result<()> {
     use super::{
@@ -478,11 +488,10 @@ fn hold_manager(
         washout::WashoutWindowConfig,
     };
     let observation = acceptance_observation(tree_pid);
-    let daemon_policy = crate::daemon::DaemonPolicy::apply_low_risk(
-        crate::daemon_policy::ActionSource::AutotuneRuntime,
-    );
+    let service = acceptance_privileged_service(desired.mutation, out);
+    let daemon_policy = acceptance_daemon_policy(desired.mutation);
     let input = LiveExperimentManagerInput {
-        mode: crate::daemon::policy::DaemonMode::ApplyLowRisk,
+        mode: desired.mutation.mode(),
         controller_policy: ControllerPolicy::from_daemon_policy(&daemon_policy),
         daemon_policy,
         simulate_action_effects: false,
@@ -493,9 +502,9 @@ fn hold_manager(
         audit_path: Some(out.join("actions.jsonl")),
         #[cfg(test)]
         exit_rollback_registry: None,
-        privileged_action_service: None,
+        privileged_action_service: service.as_ref().map(|s| s as &dyn PrivilegedActionService),
     };
-    let candidate = acceptance_candidate(tree_pid, desired)?;
+    let candidate = desired.candidate(tree_pid)?;
     let mut manager = LiveExperimentManager::new();
     // The validation framework holds an override for exactly this operation and objective.
     let mut controller = ControllerRuntimeState {
@@ -540,10 +549,7 @@ fn hold_manager(
     anyhow::bail!("interrupted rollback returned without SIGKILL: {reverted:?}")
 }
 
-pub fn recover_affinity_acceptance_controller(
-    out: &Path,
-    expected_tasks: usize,
-) -> anyhow::Result<Value> {
+pub fn recover_acceptance_controller(out: &Path, expected_tasks: usize) -> anyhow::Result<Value> {
     ensure!(
         expected_tasks == 0 || expected_tasks == 5,
         "unexpected recovery scope"
@@ -577,7 +583,8 @@ pub fn recover_affinity_acceptance_controller(
 pub struct SuspendResumeControllerInput<'a> {
     pub tree_pid: u32,
     pub tree_ticks: u64,
-    pub desired_cpu: u32,
+    pub mutation: AcceptanceMutation,
+    pub value: u32,
     pub out: &'a Path,
     pub owner_pid: u32,
     pub owner_ticks: u64,
@@ -590,7 +597,8 @@ pub fn hold_suspend_resume_controller(
     let owned = RecoveryControllerInput {
         tree_pid: input.tree_pid,
         tree_ticks: input.tree_ticks,
-        desired_cpu: input.desired_cpu,
+        mutation: input.mutation,
+        value: input.value,
         out: input.out,
         owner_pid: input.owner_pid,
         owner_ticks: input.owner_ticks,

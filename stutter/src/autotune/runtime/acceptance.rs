@@ -9,11 +9,10 @@ use serde_json::json;
 use super::{AutotuneRuntime, AutotuneRuntimeConfig, AutotuneRuntimePhase};
 use crate::{
     autotune::{
+        acceptance_mutation::AcceptanceTarget,
         action_transaction::JournaledActionFailure,
         controller_journal::read_controller_journal,
-        crash_acceptance::{
-            RecoveryCheckpoint, acceptance_candidate, acceptance_observation, acceptance_override,
-        },
+        crash_acceptance::{RecoveryCheckpoint, acceptance_observation, acceptance_override},
         decision::AutotuneDecision,
         live_experiment::FaultInjectingExecutor,
     },
@@ -24,7 +23,7 @@ use crate::{
 pub(crate) fn run_failure_scenario(
     out: &Path,
     tree_pid: u32,
-    desired: crate::affinity::CpuMask,
+    desired: AcceptanceTarget,
     scenario: RecoveryCheckpoint,
 ) -> anyhow::Result<()> {
     let verify_failure = match scenario {
@@ -36,7 +35,7 @@ pub(crate) fn run_failure_scenario(
     let journal_path = out.join("controller.json");
     let mut config = AutotuneRuntimeConfig::from_daemon_config(
         super::daemon_config_for_runtime_mode(
-            DaemonMode::ApplyLowRisk,
+            desired.mutation.mode(),
             ActionSource::AutotuneRuntime,
             Some(tree_pid),
             None,
@@ -45,7 +44,14 @@ pub(crate) fn run_failure_scenario(
     );
     config.controller_journal_path = Some(journal_path.clone());
     config.history_log = Some(out.join("history.jsonl"));
-    let candidate = acceptance_candidate(tree_pid, desired)?;
+    // Medium-risk mutation goes through the production privileged-service path; a disposable
+    // tree owned by this user needs no root worker, so the service runs in this process.
+    config
+        .daemon_config
+        .autotune
+        .unsafe_in_process_privileged_worker =
+        desired.mutation.mode() == DaemonMode::ApplyMediumRisk;
+    let candidate = desired.candidate(tree_pid)?;
     config.validation_override = Some(acceptance_override(&candidate));
     let mut runtime = AutotuneRuntime::new(config);
     let observation = acceptance_observation(tree_pid);
@@ -104,14 +110,14 @@ pub(crate) fn run_failure_scenario(
 pub(crate) fn run_suspend_resume(
     out: &Path,
     tree_pid: u32,
-    desired: crate::affinity::CpuMask,
+    desired: AcceptanceTarget,
     resume_timeout: std::time::Duration,
 ) -> anyhow::Result<()> {
     use crate::autotune::crash_acceptance::publish_acceptance_handshake;
     let journal_path = out.join("controller.json");
     let mut config = AutotuneRuntimeConfig::from_daemon_config(
         super::daemon_config_for_runtime_mode(
-            DaemonMode::ApplyLowRisk,
+            desired.mutation.mode(),
             ActionSource::AutotuneRuntime,
             Some(tree_pid),
             None,
@@ -120,7 +126,14 @@ pub(crate) fn run_suspend_resume(
     );
     config.controller_journal_path = Some(journal_path.clone());
     config.history_log = Some(out.join("history.jsonl"));
-    let candidate = acceptance_candidate(tree_pid, desired)?;
+    // Medium-risk mutation goes through the production privileged-service path; a disposable
+    // tree owned by this user needs no root worker, so the service runs in this process.
+    config
+        .daemon_config
+        .autotune
+        .unsafe_in_process_privileged_worker =
+        desired.mutation.mode() == DaemonMode::ApplyMediumRisk;
+    let candidate = desired.candidate(tree_pid)?;
     config.validation_override = Some(acceptance_override(&candidate));
     let mut runtime = AutotuneRuntime::new(config);
     let observation = acceptance_observation(tree_pid);

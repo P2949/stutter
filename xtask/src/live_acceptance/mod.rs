@@ -74,6 +74,9 @@ pub enum Suite {
         out: PathBuf,
         #[arg(long)]
         stutter_bin: PathBuf,
+        /// The mutation under test: `affinity` or `uclamp`.
+        #[arg(long, default_value = "affinity", value_parser = recovery::parse_mutation)]
+        mutation: stutter::api::autotune::AcceptanceMutation,
         /// Required: this suite really suspends the machine.
         #[arg(long)]
         allow_system_suspend: bool,
@@ -90,6 +93,9 @@ pub enum Suite {
         out: PathBuf,
         #[arg(long)]
         stutter_bin: PathBuf,
+        /// The mutation under test: `affinity` or `uclamp`.
+        #[arg(long, default_value = "affinity", value_parser = recovery::parse_mutation)]
+        mutation: stutter::api::autotune::AcceptanceMutation,
     },
     Affinity {
         #[arg(long)]
@@ -360,10 +366,15 @@ pub fn run(root: &Path, suite: Suite) -> anyhow::Result<()> {
         } => {
             return game_runnable::run(root, &out, &stutter_bin, seconds);
         }
-        Suite::Recovery { out, stutter_bin } => return recovery::run(root, &out, &stutter_bin),
+        Suite::Recovery {
+            out,
+            stutter_bin,
+            mutation,
+        } => return recovery::run(root, &out, &stutter_bin, mutation),
         Suite::SuspendResume {
             out,
             stutter_bin,
+            mutation,
             allow_system_suspend,
             suspend_command,
             rtcwake_seconds,
@@ -373,6 +384,7 @@ pub fn run(root: &Path, suite: Suite) -> anyhow::Result<()> {
                 root,
                 &out,
                 &stutter_bin,
+                mutation,
                 &recovery::SuspendOptions {
                     allow_system_suspend,
                     suspend_command,

@@ -2,7 +2,9 @@
 //! failed verification after real mutation, and failed rollback. The controller
 //! exits on its own; every conclusion is re-read from the kernel and the files.
 use super::{
-    case::{archive, start_actor, start_workload, verify_recovery_evidence},
+    case::{
+        archive, saved_state, start_actor, start_workload, token_tasks, verify_recovery_evidence,
+    },
     *,
 };
 
@@ -18,52 +20,63 @@ fn last_json_line(path: &Path) -> anyhow::Result<Value> {
 pub(super) fn run(
     executable: &Path,
     parent: &Path,
-    cpu: u32,
+    target: AcceptanceTarget,
     checkpoint: RecoveryCheckpoint,
 ) -> anyhow::Result<Value> {
+    let mutation = target.mutation;
     let out = parent.join(checkpoint.as_str());
     fs::create_dir(&out)?;
     fs::write(out.join("acceptance.toml"), "# Isolated failure case\n")?;
     let mut workload = start_workload(executable, &out, 90)?;
     let root = workload.0.id();
     let root_ticks = start_ticks(root)?;
-    let before = procfs::snapshot(root, root_ticks)?;
-    let desired = cpu.to_string();
+    let before = procfs::snapshot(mutation, root, root_ticks)?;
+    let desired = target.value;
     ensure!(
-        before.values().all(|task| task.mask != desired),
-        "no effective mask change for owned helper"
+        before
+            .values()
+            .all(|task| procfs::applied_value(mutation, &task.mask, desired)
+                .is_ok_and(|v| v != task.mask)),
+        "no effective property change for owned helper"
     );
     let result = (|| -> anyhow::Result<Value> {
         write_json(&out.join("before.json"), &procfs::value(&before))?;
-        let mut actor = start_actor(executable, &out, root, root_ticks, cpu, checkpoint)?;
+        let mut actor = start_actor(executable, &out, root, root_ticks, target, checkpoint)?;
         let mut token_before = Value::Null;
         let mut changed_at_verify = Value::Null;
         if checkpoint != RecoveryCheckpoint::PartialApplyFailure {
             wait_file(&out.join("verify-failure-ready.json"), &mut actor.child, 20)?;
-            let current = procfs::snapshot(root, root_ticks)?;
-            let changed = procfs::changed(&before, &current, &desired)?;
+            let current = procfs::snapshot(mutation, root, root_ticks)?;
+            let changed = procfs::changed(mutation, &before, &current, desired)?;
             ensure!(changed == 5, "real apply did not change all five tasks");
             write_json(
                 &out.join("at-verify-failure.json"),
                 &procfs::value(&current),
             )?;
             let journal = read_json(&out.join("controller.json"))?;
+            let token = &journal["rollback_token"];
             ensure!(
-                journal["state"] == "applied" && journal["rollback_token"]["affected_tasks"] == 5,
+                journal["state"] == "applied" && token_tasks(token) == Some(5),
                 "durable token missing before verification failure"
             );
-            let restore_path = PathBuf::from(
-                journal["rollback_token"]["restore_path"]
-                    .as_str()
-                    .context("restore path missing")?,
-            );
-            ensure!(
-                restore_path.starts_with(out.join("experiments")),
-                "restore state outside the owned experiment directory"
-            );
-            procfs::verify_saved(&before, &read_json(&restore_path)?, &desired)?;
+            let saved = saved_state(token, mutation)?;
+            if let Some((restore_path, _)) = &saved {
+                ensure!(
+                    restore_path.starts_with(out.join("experiments")),
+                    "restore state outside the owned experiment directory"
+                );
+            }
+            procfs::verify_saved(
+                mutation,
+                &before,
+                token,
+                saved.as_ref().map(|(_, saved)| saved),
+                desired,
+            )?;
             archive(&out, &out.join("controller.json"), "controller.json")?;
-            archive(&out, &restore_path, "restore.json")?;
+            if let Some((restore_path, _)) = &saved {
+                archive(&out, restore_path, "restore.json")?;
+            }
             token_before = journal["rollback_token"].clone();
             changed_at_verify = json!(changed);
             fs::write(out.join("verify-failure-ack"), b"")?;
@@ -110,7 +123,7 @@ pub(super) fn run(
         let state = read_json(&out.join("daemon_state.json"))?;
         ensure!(state["phase"] == "faulted", "daemon state is not faulted");
         let journal = read_json(&out.join("controller.json"))?;
-        let after_failure = procfs::snapshot(root, root_ticks)?;
+        let after_failure = procfs::snapshot(mutation, root, root_ticks)?;
         write_json(
             &out.join("after-failure.json"),
             &procfs::value(&after_failure),
@@ -134,7 +147,7 @@ pub(super) fn run(
                 "failed rollback lost token ownership"
             );
             ensure!(
-                procfs::changed(&before, &after_failure, &desired)? == 5,
+                procfs::changed(mutation, &before, &after_failure, desired)? == 5,
                 "failed rollback must leave the retained physical mutation visible"
             );
             command(
@@ -156,7 +169,7 @@ pub(super) fn run(
                 recovery["restored_tasks"] == 5 && recovery["journal_clean"] == true,
                 "emergency recovery did not confirm restoration"
             );
-            let restored = procfs::snapshot(root, root_ticks)?;
+            let restored = procfs::snapshot(mutation, root, root_ticks)?;
             ensure!(
                 restored == before,
                 "independent readback differs after emergency recovery"
