@@ -272,6 +272,7 @@ pub(super) async fn write_tune_summary(
                         restore_path: Some(crate::profile_restore::default_restore_path()),
                         action_phase: None,
                         error_category: None,
+                        operation: None,
                         message: format!(
                             "failed to apply best tune profile '{}': {err:#}",
                             profile.name
@@ -299,6 +300,7 @@ pub(super) async fn write_tune_summary(
                 restore_path: Some(crate::profile_restore::default_restore_path()),
                 action_phase: None,
                 error_category: None,
+                operation: None,
                 message: "kept best tune profile applied".to_owned(),
             });
         }
@@ -406,6 +408,7 @@ pub async fn measure_tune_candidate(
                 restore_path: Some(crate::profile_restore::default_restore_path()),
                 action_phase: None,
                 error_category: None,
+                operation: None,
                 message: format!(
                     "failed to apply tune candidate profile '{}': {err:#}",
                     profile.name
@@ -434,6 +437,7 @@ pub async fn measure_tune_candidate(
         restore_path: Some(crate::profile_restore::default_restore_path()),
         action_phase: None,
         error_category: None,
+        operation: None,
         message: format!("applied tune candidate profile '{}'", profile.name),
     });
     let should_force_refresh = force_restore_overwrite && initial_apply.affected_tasks() == 0;

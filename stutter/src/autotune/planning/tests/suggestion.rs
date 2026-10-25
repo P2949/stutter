@@ -437,6 +437,7 @@ fn render_candidate_suggestion_escapes_reason_and_commands() {
                 confidence: None,
             },
             objective: ObjectiveKind::StutterScore,
+            operation: crate::autotune::operation::MutationOperationKind::CpuAffinityProfile,
             evidence: Vec::new(),
             affected_tasks: 31,
             safety: SafetyClass::ReversibleLowRisk,
@@ -550,4 +551,45 @@ fn high_risk_suggestion_suppresses_manual_apply_command() {
     assert!(rendered.contains("required_mode=apply-high-risk"));
     assert!(rendered.contains("manual_apply_command=none"));
     assert!(!rendered.contains("manual_apply_command=\"stutter apply-profile"));
+}
+
+#[test]
+fn candidate_plan_file_carries_and_enforces_the_operation() {
+    let candidate = CandidateAction::Nice {
+        plan: NiceActionPlan {
+            name: "nice-compile".to_owned(),
+            action: NiceAction {
+                targets: vec![TaskIdentity {
+                    tid: (1234).into(),
+                    process_pid: Some((1234).into()),
+                    comm: Some("cc1".to_owned()),
+                    starttime_ticks: Some(77),
+                }],
+                nice: 5,
+                policy: NicePolicy::default(),
+            },
+            target_root_pid: Some(1234),
+            evidence: vec![CandidateEvidence::new("cpu_pressure", "high", 0.9)],
+            objective: ObjectiveKind::DesktopInteractivity,
+        },
+    };
+    let plan_dir = temp_candidate_plan_dir("operation-mismatch");
+    let path = candidate_plan_path(&candidate, &plan_dir);
+    let plan = write_candidate_plan_file(&path, &candidate, Some(1)).unwrap();
+    assert_eq!(
+        plan.operation,
+        crate::autotune::operation::MutationOperationKind::Nice
+    );
+    let mut tampered: serde_json::Value =
+        serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    tampered["operation"] = serde_json::json!("uclamp");
+    fs::write(&path, serde_json::to_vec(&tampered).unwrap()).unwrap();
+    let error = apply_candidate_plan_file(&path, true)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("candidate_plan_operation_mismatch"),
+        "{error}"
+    );
+    let _ = fs::remove_dir_all(&plan_dir);
 }

@@ -36,6 +36,7 @@ pub(crate) fn audit_agent_event_with_safety(
         restore_path: None,
         action_phase: None,
         error_category: None,
+        operation: None,
         message,
     });
 }

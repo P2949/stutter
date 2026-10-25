@@ -32,6 +32,9 @@ pub struct AuditEvent {
     pub action_phase: Option<crate::actions::ActionPhase>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error_category: Option<String>,
+    /// The mutation operation the event concerns, when it concerns one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation: Option<crate::autotune::operation::MutationOperationKind>,
     pub message: String,
 }
 
@@ -57,6 +60,7 @@ impl AuditEvent {
             restore_path: None,
             action_phase: None,
             error_category: None,
+            operation: None,
             message: message.into(),
         }
     }

@@ -126,6 +126,10 @@ fn validate_candidate_plan_request(
         return Err(PrivilegedWorkerError::CandidatePlanObjectiveMismatch.into());
     }
 
+    if request.plan.operation != request.plan.candidate.operation_kind() {
+        return Err(PrivilegedWorkerError::CandidatePlanOperationMismatch.into());
+    }
+
     if request.plan.evidence_count == 0
         && request.plan.candidate.evidence().is_empty()
         && request.plan.candidate.action_kind() != "cpu_affinity_profile"

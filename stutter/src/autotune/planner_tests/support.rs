@@ -206,7 +206,17 @@ impl CandidateProvider for StaticProvider {
 }
 
 pub(crate) fn cpu_affinity_candidate(name: &str) -> CandidateAction {
-    CandidateAction::cpu_affinity_profile(
+    cpu_affinity_candidate_for(
+        name,
+        crate::autotune::objective::ObjectiveKind::StutterScore,
+    )
+}
+
+pub(crate) fn cpu_affinity_candidate_for(
+    name: &str,
+    objective: crate::autotune::objective::ObjectiveKind,
+) -> CandidateAction {
+    CandidateAction::cpu_affinity_profile_for(
         Profile {
             name: name.to_owned(),
             rules: vec![ProfileRule {
@@ -218,6 +228,7 @@ pub(crate) fn cpu_affinity_candidate(name: &str) -> CandidateAction {
             }],
         },
         1234,
+        objective,
     )
 }
 

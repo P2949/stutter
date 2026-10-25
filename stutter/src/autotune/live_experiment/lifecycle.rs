@@ -132,6 +132,7 @@ impl LiveExperimentManager {
         if !Self::validate_start_candidate(input.mode, &input.daemon_policy, &candidate)? {
             return Ok(LiveExperimentOutcome::noop());
         }
+        Self::validate_autonomous_support(input, controller_state, observation, &candidate)?;
 
         let baseline_score = window_score_from_observation(observation);
         validate_window_score_for_apply("baseline", &baseline_score)?;

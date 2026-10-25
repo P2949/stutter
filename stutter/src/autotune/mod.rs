@@ -45,10 +45,12 @@ pub(crate) mod gpu_focus;
 pub(crate) mod history;
 pub(crate) mod history_replay;
 
+pub(crate) mod autonomous_support;
 pub(crate) mod kept;
 pub(crate) mod live_experiment;
 #[cfg(test)]
 pub(crate) mod measurement;
+pub(crate) mod operation;
 
 pub(crate) mod planning;
 pub(crate) mod profiles;
@@ -60,6 +62,7 @@ pub(crate) mod resolution;
 #[cfg(test)]
 pub(crate) mod shutdown;
 pub(crate) mod situation;
+pub(crate) mod situation_model;
 pub(crate) mod status;
 pub(crate) mod system_context;
 pub(crate) mod target_selection;

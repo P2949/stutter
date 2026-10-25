@@ -1,4 +1,8 @@
 use super::support::*;
+use crate::autotune::{
+    autonomous_support::ValidationOverride, objective::ObjectiveKind,
+    operation::MutationOperationKind,
+};
 
 #[test]
 fn planner_golden_cases() {
@@ -38,6 +42,7 @@ fn planner_golden_cases() {
         "low_data_quality.json",
         "media_playback.json",
         "memory_pressure_swappiness_medium_risk.json",
+        "normal_path_fails_closed.json",
         "recording_active.json",
         "thermal_degraded.json",
         "virtual_machine_load.json",
@@ -66,6 +71,10 @@ fn run_planner_golden_case(path: &std::path::Path, case: PlannerGoldenCase) {
     let mut controller_state = ControllerRuntimeState::default();
     let state_candidate =
         state_candidate_for_action_kind(first_fixture_action_kind(&case), &profiles);
+
+    if !case.normal_product_path {
+        controller_state.validation_override = fixture_validation_override(&case);
+    }
 
     if case.cooldown_active {
         controller_state.record_candidate_result(
@@ -278,4 +287,25 @@ fn run_planner_golden_case(path: &std::path::Path, case: PlannerGoldenCase) {
     let summary = result.summary();
     assert_eq!(summary.total_proposals, case.expected_total_proposals);
     assert_eq!(summary.eligible_proposals, case.expected_eligible_proposals);
+}
+
+/// The exact override a validation campaign would hold for the fixture's first candidate, so the
+/// workload-policy fixtures keep testing policy rather than product maturity.
+fn fixture_validation_override(case: &PlannerGoldenCase) -> Option<ValidationOverride> {
+    let first = case.expected_evaluations.first()?;
+    let action_kind = if first.action_kind == "ionice" {
+        "io_prio"
+    } else {
+        first.action_kind.as_str()
+    };
+    let operation = MutationOperationKind::ALL
+        .into_iter()
+        .find(|operation| operation.as_str() == action_kind)?;
+    let objective: ObjectiveKind =
+        serde_json::from_value(serde_json::Value::String(first.objective.clone())).ok()?;
+    Some(ValidationOverride {
+        operation,
+        objective,
+        campaign_id: "planner-golden-fixture".to_owned(),
+    })
 }

@@ -40,6 +40,10 @@ pub(super) struct PlannerGoldenCase {
     // rolling-window/observation signal path directly.
     #[serde(default)]
     pub(super) hardware_signals: Option<serde_json::Value>,
+    /// Run the planner as the product does, with no validation override: autonomous apply
+    /// must fail closed because no objective or operation is Supported yet.
+    #[serde(default)]
+    pub(super) normal_product_path: bool,
 }
 
 #[derive(Debug, Default, Deserialize)]

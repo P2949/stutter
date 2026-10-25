@@ -152,6 +152,7 @@ pub fn restore_profile_state_from_paths(
                     restore_path: Some(affinity_path.clone()),
                     action_phase: None,
                     error_category: None,
+                    operation: None,
                     message: format!("restore failed: {err:#}"),
                 });
                 return Err(err);
@@ -184,6 +185,7 @@ pub fn restore_profile_state_from_paths(
                     restore_path: Some(profile_path.clone()),
                     action_phase: None,
                     error_category: None,
+                    operation: None,
                     message: format!("restore failed: {err:#}"),
                 });
                 return Err(err);
@@ -204,6 +206,7 @@ pub fn restore_profile_state_from_paths(
             restore_path: Some(profile_path.clone()),
             action_phase: None,
             error_category: None,
+            operation: None,
             message: format!(
                 "affinity={} nice={} ionice={} skipped_dead={} skipped_identity_mismatch={} legacy_unverified={} errors={}",
                 summary.affinity,

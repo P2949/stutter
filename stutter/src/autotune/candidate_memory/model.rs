@@ -76,6 +76,8 @@ pub struct WorkloadActionMemory {
     pub action_id: ActionId,
     pub action_kind: String,
     pub objective: ObjectiveKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation: Option<crate::autotune::operation::MutationOperationKind>,
     pub situation: SituationKind,
     pub last_result: CandidateMemoryResult,
     /// Raw score-total delta retained as a coarse historical hint.

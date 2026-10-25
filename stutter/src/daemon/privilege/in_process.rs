@@ -54,6 +54,7 @@ impl InProcessPrivilegedActionService {
             reason_code: input.reason_code,
             detail: input.detail,
             affected_tasks: input.affected_tasks,
+            mutation: input.mutation,
         });
     }
 
@@ -78,6 +79,7 @@ impl InProcessPrivilegedActionService {
             reason_code,
             detail,
             affected_tasks,
+            mutation: None,
         });
     }
 
@@ -105,6 +107,7 @@ impl PrivilegedActionService for InProcessPrivilegedActionService {
             success: true,
             reason_code: "request_received",
             detail: "privilege dry-run request received",
+            mutation: Some(request.plan.operation),
             affected_tasks: 0,
         });
         if let Err(err) = validate_candidate_plan_request(&request, PolicyIntent::DryRun) {
@@ -118,6 +121,7 @@ impl PrivilegedActionService for InProcessPrivilegedActionService {
                 success: false,
                 reason_code: &reason_code,
                 detail: &detail,
+                mutation: Some(request.plan.operation),
                 affected_tasks: 0,
             });
             return Err(err);
@@ -130,6 +134,7 @@ impl PrivilegedActionService for InProcessPrivilegedActionService {
             success: true,
             reason_code: "policy_allowed",
             detail: "candidate plan passed dry-run validation",
+            mutation: Some(request.plan.operation),
             affected_tasks: 0,
         });
         let executor = executor_for_candidate_preview(request.plan.candidate)?;
@@ -152,6 +157,7 @@ impl PrivilegedActionService for InProcessPrivilegedActionService {
                     success: true,
                     reason_code: "dry_run_completed",
                     detail: &format!("privileged dry-run completed {executor_label}"),
+                    mutation: Some(request.plan.operation),
                     affected_tasks: record.affected_tasks,
                 });
                 Ok(record)
@@ -167,6 +173,7 @@ impl PrivilegedActionService for InProcessPrivilegedActionService {
                     success: false,
                     reason_code: &reason_code,
                     detail: &detail,
+                    mutation: Some(request.plan.operation),
                     affected_tasks: 0,
                 });
                 Err(err)
@@ -184,6 +191,7 @@ impl PrivilegedActionService for InProcessPrivilegedActionService {
             success: true,
             reason_code: "request_received",
             detail: "privilege apply request received",
+            mutation: Some(request.plan.operation),
             affected_tasks: 0,
         });
         if let Err(err) = validate_candidate_plan_request(&request, PolicyIntent::Apply) {
@@ -197,6 +205,7 @@ impl PrivilegedActionService for InProcessPrivilegedActionService {
                 success: false,
                 reason_code: &reason_code,
                 detail: &detail,
+                mutation: Some(request.plan.operation),
                 affected_tasks: 0,
             });
             return Err(err);
@@ -209,6 +218,7 @@ impl PrivilegedActionService for InProcessPrivilegedActionService {
             success: true,
             reason_code: "policy_allowed",
             detail: "candidate plan passed apply validation",
+            mutation: Some(request.plan.operation),
             affected_tasks: 0,
         });
         if let Err(err) = revalidate_candidate_targets(&request.plan.candidate, &self.proc_root) {
@@ -222,6 +232,7 @@ impl PrivilegedActionService for InProcessPrivilegedActionService {
                 success: false,
                 reason_code: &reason_code,
                 detail: &detail,
+                mutation: Some(request.plan.operation),
                 affected_tasks: 0,
             });
             return Err(err);
@@ -234,6 +245,7 @@ impl PrivilegedActionService for InProcessPrivilegedActionService {
             success: true,
             reason_code: "apply_started",
             detail: "privileged apply started",
+            mutation: Some(request.plan.operation),
             affected_tasks: 0,
         });
         let apply_candidate =
@@ -268,6 +280,7 @@ impl PrivilegedActionService for InProcessPrivilegedActionService {
                     success: false,
                     reason_code: &reason_code,
                     detail: &detail,
+                    mutation: Some(request.plan.operation),
                     affected_tasks: 0,
                 });
                 return Err(err);
@@ -285,6 +298,7 @@ impl PrivilegedActionService for InProcessPrivilegedActionService {
                     success: false,
                     reason_code: "privileged_apply_missing_rollback",
                     detail,
+                    mutation: Some(request.plan.operation),
                     affected_tasks: result.state.affected_tasks,
                 });
                 return Err(PrivilegedWorkerError::MissingRollbackToken.into());
@@ -298,6 +312,7 @@ impl PrivilegedActionService for InProcessPrivilegedActionService {
             success: true,
             reason_code: "apply_completed",
             detail: &format!("privileged apply completed {executor_label}"),
+            mutation: Some(request.plan.operation),
             affected_tasks: result.state.affected_tasks,
         });
         Ok(ApplyResult {

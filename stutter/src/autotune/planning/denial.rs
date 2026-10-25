@@ -32,6 +32,14 @@ pub enum CandidateDenyReason {
     ExternalMutationDetected,
     KeptActionNoLongerActive,
     ObjectiveNotAllowedForWorkload,
+    /// Normal autonomous apply requires a Supported objective that allows it.
+    ObjectiveNotSupported,
+    ObjectiveAutonomousApplyNotAllowed,
+    /// The product capability or autonomous support registry does not cover the operation.
+    CapabilityTierNotSupported,
+    NotInSupportRegistry,
+    /// Unclassified or manual-only operations are never autonomous.
+    OperationNotAutonomous,
     ObjectiveSignalMissing,
     TargetSnapshotMissing,
     WorkloadIdle,
@@ -67,6 +75,11 @@ impl CandidateDenyReason {
             Self::ExternalMutationDetected => "external_mutation_detected",
             Self::KeptActionNoLongerActive => "kept_action_no_longer_active",
             Self::ObjectiveNotAllowedForWorkload => "objective_not_allowed_for_workload",
+            Self::ObjectiveNotSupported => "objective_not_supported",
+            Self::ObjectiveAutonomousApplyNotAllowed => "objective_autonomous_apply_not_allowed",
+            Self::CapabilityTierNotSupported => "capability_tier_not_supported",
+            Self::NotInSupportRegistry => "operation_not_in_support_registry",
+            Self::OperationNotAutonomous => "operation_not_autonomous",
             Self::ObjectiveSignalMissing => "objective_signal_missing",
             Self::TargetSnapshotMissing => "target_snapshot_missing",
             Self::WorkloadIdle => "workload_idle",

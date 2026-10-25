@@ -17,7 +17,8 @@ impl AutotuneRuntime {
     pub fn new(config: AutotuneRuntimeConfig) -> Self {
         let daemon_policy = config.daemon_policy.clone();
         let window_seconds = config.window_seconds;
-        let controller = OnlineAutotuneController::new(daemon_policy, window_seconds);
+        let mut controller = OnlineAutotuneController::new(daemon_policy, window_seconds);
+        controller.state.validation_override = config.validation_override.clone();
 
         Self {
             target_state: RuntimeTargetState::new(config.tree_pid()),

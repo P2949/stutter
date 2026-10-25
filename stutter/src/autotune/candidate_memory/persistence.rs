@@ -114,6 +114,7 @@ impl CandidateMemory {
             action_id: action_id.clone(),
             action_kind,
             objective: candidate.objective(),
+            operation: Some(candidate.operation_kind()),
             situation: context.situation,
             last_result: record.result.clone(),
             score_delta,

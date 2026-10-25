@@ -19,6 +19,10 @@ fn privileged_worker_error_reason_codes_are_stable() {
             "candidate_plan_objective_mismatch",
         ),
         (
+            PrivilegedWorkerError::CandidatePlanOperationMismatch,
+            "candidate_plan_operation_mismatch",
+        ),
+        (
             PrivilegedWorkerError::CandidatePlanMissingEvidence,
             "candidate_plan_missing_evidence",
         ),

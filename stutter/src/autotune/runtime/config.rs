@@ -38,6 +38,9 @@ pub struct AutotuneRuntimeConfig {
     pub dry_run_plan_dir: Option<PathBuf>,
     pub simulated_candidates: Vec<CandidateAction>,
     pub simulate_action_effects: bool,
+    /// Granted only by a validation campaign for its exact operation and objective; the product
+    /// leaves it unset, so normal autonomous apply stays behind the support registry.
+    pub validation_override: Option<crate::autotune::autonomous_support::ValidationOverride>,
 }
 
 fn resolve_workload_policy_config(
@@ -173,6 +176,7 @@ impl AutotuneRuntimeConfig {
             dry_run_plan_dir: None,
             simulated_candidates: Vec::new(),
             simulate_action_effects: false,
+            validation_override: None,
         }
     }
 
@@ -228,6 +232,14 @@ impl AutotuneRuntimeConfig {
 
     pub fn with_simulated_candidates(mut self, candidates: Vec<CandidateAction>) -> Self {
         self.simulated_candidates = candidates;
+        self
+    }
+
+    pub fn with_validation_override(
+        mut self,
+        grant: crate::autotune::autonomous_support::ValidationOverride,
+    ) -> Self {
+        self.validation_override = Some(grant);
         self
     }
 

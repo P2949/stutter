@@ -54,7 +54,7 @@ fn medium_risk_active_apply_experiment_exposes_daemon_rollback_state_after_start
     let mut active_profile_state = ActiveProfileState::default();
     let mut executor = FakeLiveExecutor::default();
     let observation = observation(1_000, 1_000_000_000);
-    let candidate = medium_risk_candidate();
+    let candidate = validated_medium_risk_candidate(&mut controller_state);
     let expected_action_id = candidate.action_id();
 
     let outcome = manager
