@@ -333,7 +333,18 @@ fn handle_privileged_worker_connection(
         }
     };
     let shutdown = matches!(request, PrivilegedWorkerRequest::Shutdown);
-    let response = execute_privileged_worker_request(request, service);
+    let response = if matches!(request, PrivilegedWorkerRequest::ApplyPrepared { .. }) {
+        let audit_sink = PrivilegeAuditSink::default();
+        let mut exchange = CommitExchange::new(&stream, commit_timeout());
+        execute_privileged_worker_request_inner(
+            request,
+            service,
+            &audit_sink,
+            Some(&mut |token: &RollbackToken| exchange.prepare_and_wait(token)),
+        )
+    } else {
+        execute_privileged_worker_request(request, service)
+    };
     serde_json::to_writer(&mut stream, &response)?;
     stream.write_all(b"\n")?;
     stream.flush()?;
@@ -365,6 +376,19 @@ pub(crate) fn execute_privileged_worker_request_with_audit_sink(
     request: PrivilegedWorkerRequest,
     service: &dyn PrivilegedActionService,
     audit_sink: &PrivilegeAuditSink,
+) -> PrivilegedWorkerResponse {
+    execute_privileged_worker_request_inner(request, service, audit_sink, None)
+}
+
+/// The commit barrier of a two-phase apply: called with the durable rollback token, it answers
+/// the controller and returns only once the controller committed.
+type CommitBarrier<'a> = &'a mut dyn FnMut(&RollbackToken) -> anyhow::Result<()>;
+
+fn execute_privileged_worker_request_inner(
+    request: PrivilegedWorkerRequest,
+    service: &dyn PrivilegedActionService,
+    audit_sink: &PrivilegeAuditSink,
+    barrier: Option<CommitBarrier<'_>>,
 ) -> PrivilegedWorkerResponse {
     let operation = request.operation();
     let request_name = request.request_name();
@@ -442,6 +466,32 @@ pub(crate) fn execute_privileged_worker_request_with_audit_sink(
                 })
                 .map(|result| PrivilegedWorkerResponse::Apply { result })
         }),
+        PrivilegedWorkerRequest::ApplyPrepared {
+            plan,
+            policy,
+            context,
+            max_plan_age_nanos,
+        } => match barrier {
+            Some(barrier) => plan.into_plan_request().and_then(|plan| {
+                service
+                    .apply_candidate_prepared(
+                        CandidateApplyRequest {
+                            plan,
+                            policy,
+                            context,
+                            max_plan_age_nanos,
+                        },
+                        barrier,
+                    )
+                    .map(|result| PrivilegedWorkerResponse::Apply { result })
+            }),
+            None => Err(anyhow::anyhow!(
+                "privileged_prepared_apply_requires_stream: apply_prepared needs the exchange connection"
+            )),
+        },
+        PrivilegedWorkerRequest::CommitPrepared { .. } => Err(anyhow::anyhow!(
+            "privileged_commit_without_prepare: a commit is only valid as the answer to a prepare"
+        )),
         PrivilegedWorkerRequest::Rollback {
             plan,
             token,
@@ -477,6 +527,13 @@ pub(crate) fn execute_privileged_worker_request_with_audit_sink(
             "apply_completed",
             "privileged worker apply completed",
             result.state.affected_tasks,
+        ),
+        PrivilegedWorkerResponse::Prepared { .. } => (
+            true,
+            "prepared",
+            "prepared",
+            "privileged worker prepared a restore snapshot",
+            0,
         ),
         PrivilegedWorkerResponse::Rollback { result } => (
             true,
@@ -522,6 +579,92 @@ pub(crate) fn execute_privileged_worker_request_with_audit_sink(
     );
 
     response
+}
+
+static COMMIT_TIMEOUT_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(15_000);
+
+fn commit_timeout() -> Duration {
+    Duration::from_millis(COMMIT_TIMEOUT_MS.load(std::sync::atomic::Ordering::Relaxed))
+}
+
+/// How long a prepared apply waits for the controller's commit; tests shorten it.
+#[cfg(test)]
+pub(crate) fn set_commit_timeout_for_tests(timeout: Duration) {
+    COMMIT_TIMEOUT_MS.store(
+        u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX),
+        std::sync::atomic::Ordering::Relaxed,
+    );
+}
+
+/// One two-phase exchange on a connection: send `Prepared`, then wait for exactly one
+/// `CommitPrepared`. Anything else (abort, wrong digest, silence, a closed connection) aborts the
+/// apply before the first mutable write.
+struct CommitExchange<'a> {
+    stream: &'a UnixStream,
+    timeout: Duration,
+}
+
+impl<'a> CommitExchange<'a> {
+    fn new(stream: &'a UnixStream, timeout: Duration) -> Self {
+        Self { stream, timeout }
+    }
+
+    fn prepare_and_wait(&mut self, token: &RollbackToken) -> anyhow::Result<()> {
+        let digest = rollback_snapshot_digest(token);
+        let mut writer = self.stream;
+        let prepared = PrivilegedWorkerResponse::Prepared {
+            rollback: token.clone(),
+            snapshot_digest: digest.clone(),
+        };
+        serde_json::to_writer(&mut writer, &prepared)?;
+        writer.write_all(b"\n")?;
+        writer.flush()?;
+        self.stream.set_read_timeout(Some(self.timeout))?;
+        let mut reader = BufReader::new(self.stream.try_clone()?);
+        let mut line = String::new();
+        let read = reader.read_line(&mut line);
+        match read {
+            Ok(0) => Err(PrivilegedWorkerError::CommitRejected {
+                reason: "the controller closed the connection after the prepare".to_owned(),
+            }
+            .into()),
+            Ok(_) => match serde_json::from_str::<PrivilegedWorkerRequest>(&line) {
+                Ok(PrivilegedWorkerRequest::CommitPrepared {
+                    commit: true,
+                    snapshot_digest,
+                }) if snapshot_digest == digest => Ok(()),
+                Ok(PrivilegedWorkerRequest::CommitPrepared { commit: true, .. }) => {
+                    Err(PrivilegedWorkerError::CommitRejected {
+                        reason: "the commit names a different snapshot than the one prepared"
+                            .to_owned(),
+                    }
+                    .into())
+                }
+                Ok(PrivilegedWorkerRequest::CommitPrepared { commit: false, .. }) => {
+                    Err(PrivilegedWorkerError::CommitRejected {
+                        reason: "the controller aborted the prepared apply".to_owned(),
+                    }
+                    .into())
+                }
+                _ => Err(PrivilegedWorkerError::CommitRejected {
+                    reason: "the answer to the prepare was not a commit".to_owned(),
+                }
+                .into()),
+            },
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) =>
+            {
+                Err(PrivilegedWorkerError::CommitExpired {
+                    timeout_ms: self.timeout.as_millis(),
+                }
+                .into())
+            }
+            Err(error) => Err(error.into()),
+        }
+    }
 }
 
 fn record_worker_boundary_audit(

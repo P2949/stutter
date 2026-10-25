@@ -182,6 +182,28 @@ impl PrivilegedActionService for InProcessPrivilegedActionService {
     }
 
     fn apply_candidate(&self, request: CandidateApplyRequest) -> anyhow::Result<ApplyResult> {
+        self.apply_candidate_inner(request, None)
+    }
+
+    fn apply_candidate_prepared(
+        &self,
+        request: CandidateApplyRequest,
+        prepared: &mut PreparedHook<'_>,
+    ) -> anyhow::Result<ApplyResult> {
+        self.apply_candidate_inner(request, Some(prepared))
+    }
+
+    fn rollback(&self, request: RollbackRequest) -> anyhow::Result<RollbackResult> {
+        self.rollback_inner(request)
+    }
+}
+
+impl InProcessPrivilegedActionService {
+    fn apply_candidate_inner(
+        &self,
+        request: CandidateApplyRequest,
+        prepared: Option<&mut PreparedHook<'_>>,
+    ) -> anyhow::Result<ApplyResult> {
         let descriptor = request.plan.descriptor.clone();
         self.audit_candidate_boundary(CandidateBoundaryAuditInput {
             stage: "request_received",
@@ -267,7 +289,27 @@ impl PrivilegedActionService for InProcessPrivilegedActionService {
             max_total_duration: None,
             dry_run: false,
         };
-        let result = match executor.apply_with_audit(run_policy) {
+        let prepared_requested = prepared.is_some();
+        let barrier_reached = std::cell::Cell::new(false);
+        let applied = match prepared {
+            Some(prepared) => {
+                if !executor.prepared_before_mutation() {
+                    return Err(anyhow::anyhow!(
+                        "prepared_transaction_missing: {} has no prepared-before-mutation transaction",
+                        executor.action_kind()
+                    ));
+                }
+                executor.apply_with_prepared_hook(run_policy, &mut |token| {
+                    barrier_reached.set(true);
+                    prepared(token)
+                })
+            }
+            None => executor.apply_with_audit(run_policy),
+        };
+        if applied.is_ok() && prepared_requested && !barrier_reached.get() {
+            return Err(PrivilegedWorkerError::PreparedHookNotInvoked.into());
+        }
+        let result = match applied {
             Ok(result) => result,
             Err(err) => {
                 let detail = format!("{err:#}");
@@ -321,7 +363,7 @@ impl PrivilegedActionService for InProcessPrivilegedActionService {
         })
     }
 
-    fn rollback(&self, request: RollbackRequest) -> anyhow::Result<RollbackResult> {
+    fn rollback_inner(&self, request: RollbackRequest) -> anyhow::Result<RollbackResult> {
         let descriptor = request.candidate.descriptor();
         self.audit_rollback_boundary(
             "rollback_requested",

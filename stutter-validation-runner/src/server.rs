@@ -169,6 +169,14 @@ impl Server {
                 .executor
                 .workload_overhead(&self.authorization, envelope)
                 .map_or_else(from_denial, |data| Response::ok(id, None, data)),
+            Request::StartAutotunePrivilegedWorker => self
+                .executor
+                .start_privileged_worker(&self.authorization)
+                .map_or_else(from_denial, |data| Response::ok(id, None, data)),
+            Request::StopAutotunePrivilegedWorker => self
+                .executor
+                .stop_privileged_worker(&self.authorization)
+                .map_or_else(from_denial, |data| Response::ok(id, None, data)),
             Request::SetNextBoot { entry_id } | Request::PrepareKernelCycle { entry_id } => {
                 match self.boot.set_next_boot(entry_id) {
                     Ok(()) => {

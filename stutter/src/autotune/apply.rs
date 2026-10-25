@@ -41,6 +41,23 @@ pub trait CandidateActionExecutor {
     }
     fn dry_run(&self) -> anyhow::Result<CandidateDryRunRecord>;
     fn apply_with_audit(&self, run_policy: ActionRunPolicy) -> anyhow::Result<AuditedActionResult>;
+    /// Whether the executor's action makes a verified restore snapshot durable before it mutates.
+    fn prepared_before_mutation(&self) -> bool {
+        false
+    }
+    /// `apply_with_audit` with the commit barrier: `prepared` runs with the durable rollback token
+    /// after preparation and before the first mutable write; an error aborts with no mutation.
+    fn apply_with_prepared_hook(
+        &self,
+        run_policy: ActionRunPolicy,
+        prepared: &mut dyn FnMut(&RollbackToken) -> anyhow::Result<()>,
+    ) -> anyhow::Result<AuditedActionResult> {
+        let _ = (run_policy, prepared);
+        anyhow::bail!(
+            "prepared_transaction_missing: action kind {} has no prepared-before-mutation transaction",
+            self.action_kind()
+        )
+    }
     fn rollback(&self, token: &RollbackToken) -> anyhow::Result<()>;
 }
 
@@ -90,6 +107,24 @@ impl CandidateActionExecutor for BoxedActionExecutor {
             &self.action,
             run_policy,
             ActionHooks::none(),
+        )
+        .map_err(anyhow::Error::new)
+    }
+
+    fn prepared_before_mutation(&self) -> bool {
+        self.action.prepared_before_mutation()
+    }
+
+    fn apply_with_prepared_hook(
+        &self,
+        run_policy: ActionRunPolicy,
+        prepared: &mut dyn FnMut(&RollbackToken) -> anyhow::Result<()>,
+    ) -> anyhow::Result<AuditedActionResult> {
+        run_audited_action_with_hooks(
+            "autotune candidate",
+            &self.action,
+            run_policy,
+            ActionHooks::none().with_after_prepare(prepared),
         )
         .map_err(anyhow::Error::new)
     }

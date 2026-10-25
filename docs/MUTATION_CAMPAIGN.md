@@ -84,3 +84,14 @@ the `affinity-benefit` live suite (typed `BenefitSpec`: scenario, pair, order):
 The controller waits for a baseline the objective can decide on (a direct population with at least
 1000 runnable samples) before it starts an experiment, and an explicit `--tree-pid` target whose
 tasks are a game is the focused workload without any desktop focus inference.
+
+## Privileged worker for medium-risk operations
+
+An operation that mutates through the privileged worker sets `privileged_worker = true` in its
+manifest section. The campaign controller stays the campaign user: it asks the runner (typed
+`StartAutotunePrivilegedWorker`, granted only to the campaign task) to start the pinned
+`stutter privileged-worker` as root. The runner derives everything: the pinned binary (its digest is
+re-checked), the fixed arguments, and a socket in a root-owned directory that it hands to the
+campaign user with mode 0600. `StopAutotunePrivilegedWorker` (or the end of the run) stops it. The
+controller never runs under `sudo`, never uses the in-process unsafe worker, and the worker's apply
+protocol is the two-phase prepare / durable journal / commit described in `DAEMON_CONTRACT.md`.

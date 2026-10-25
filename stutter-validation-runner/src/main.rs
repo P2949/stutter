@@ -34,9 +34,13 @@ fn main() -> anyhow::Result<()> {
             let server = Arc::new(Server::new(
                 authorization,
                 StateDir(state_dir),
-                Arc::new(SystemExecutor {
-                    drop_to_owner: privileged,
-                }),
+                Arc::new(SystemExecutor::new(
+                    privileged,
+                    socket
+                        .parent()
+                        .map(std::path::Path::to_path_buf)
+                        .unwrap_or_default(),
+                )),
                 match detect_adapter(Arc::new(SystemShell)) {
                     Some(adapter) => Arc::new(AdapterControl(adapter)) as Arc<dyn BootControl>,
                     None => Arc::new(UnsupportedBoot),
