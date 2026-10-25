@@ -32,7 +32,7 @@ use crate::{
         decision::AutotuneDecision,
         experiment::ExperimentId,
         kept::{ActiveProfileState, KeptCandidateState},
-        objective::{ObjectiveComparisonInput, explain_for_objective},
+        objective::{ObjectiveComparisonInput, ObjectiveEvidence, explain_for_objective},
         observation::AutotuneObservation,
         planning::candidate::CandidateAction,
         state::ControllerPhase,
@@ -184,6 +184,7 @@ impl LiveExperimentManager {
                     rollback_policy: rollback_policy.to_owned(),
                     cooldown_until_unix_nanos: None,
                     manual_restore_command: Some(input.manual_restore_command.to_owned()),
+                    objective_evidence: None,
                 });
                 controller_state.phase = ControllerPhase::Faulted;
                 if let Some(rollback) = outstanding {
@@ -285,6 +286,7 @@ impl LiveExperimentManager {
             rollback_policy: "rollback-on-restore".to_owned(),
             cooldown_until_unix_nanos: None,
             manual_restore_command: Some(input.manual_restore_command.to_owned()),
+            objective_evidence: None,
         };
 
         log::info!(
@@ -417,6 +419,12 @@ impl LiveExperimentManager {
             target_disappeared: !observation.target_present,
         });
         debug_assert_eq!(result, objective_decision.experiment_result());
+        let evidence = ObjectiveEvidence {
+            objective: experiment.candidate.objective(),
+            baseline_signals: experiment.baseline_signals.clone(),
+            candidate_signals: observation.objective_signals.clone(),
+            decision: objective_decision.clone(),
+        };
 
         match result {
             ExperimentResult::Improved { .. } => {
@@ -480,6 +488,7 @@ impl LiveExperimentManager {
                     rollback_policy: "rollback-on-restore".to_owned(),
                     cooldown_until_unix_nanos: Some(cooldown_until_unix_nanos),
                     manual_restore_command: Some(input.manual_restore_command.to_owned()),
+                    objective_evidence: Some(evidence.clone()),
                 };
 
                 controller_state.enter_cooldown_after_keep(
@@ -495,6 +504,7 @@ impl LiveExperimentManager {
             }
             other => {
                 self.current = Some(experiment);
+                self.pending_objective_evidence = Some(evidence);
                 self.rollback_active_experiment_with_executor(
                     input,
                     controller_state,
@@ -607,6 +617,7 @@ impl LiveExperimentManager {
                     ),
                     cooldown_until_unix_nanos: Some(cooldown_until_unix_nanos),
                     manual_restore_command: Some(input.manual_restore_command.to_owned()),
+                    objective_evidence: self.pending_objective_evidence.take(),
                 };
 
                 controller_state
@@ -662,6 +673,7 @@ impl LiveExperimentManager {
             rollback_policy: "rollback-performed".to_owned(),
             cooldown_until_unix_nanos: Some(cooldown_until_unix_nanos),
             manual_restore_command: Some(input.manual_restore_command.to_owned()),
+            objective_evidence: self.pending_objective_evidence.take(),
         };
 
         controller_state.enter_cooldown_after_revert(&input.controller_policy, now_unix_nanos);

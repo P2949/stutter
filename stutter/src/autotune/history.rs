@@ -97,6 +97,9 @@ pub struct AutotuneHistoryEvent {
     pub reason: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub planner: Option<PlannerSummary>,
+    /// The typed objective comparison behind a keep or revert.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub objective_evidence: Option<super::objective::ObjectiveEvidence>,
 }
 
 pub struct AutotuneHistoryEventInput {
@@ -129,6 +132,7 @@ impl AutotuneHistoryEvent {
             rollback_performed: false,
             reason: input.reason,
             planner: None,
+            objective_evidence: None,
         }
     }
 
@@ -168,6 +172,14 @@ impl AutotuneHistoryEvent {
 
     pub fn with_rollback_performed(mut self, rollback_performed: bool) -> Self {
         self.rollback_performed = rollback_performed;
+        self
+    }
+
+    pub fn with_objective_evidence(
+        mut self,
+        evidence: Option<super::objective::ObjectiveEvidence>,
+    ) -> Self {
+        self.objective_evidence = evidence;
         self
     }
 

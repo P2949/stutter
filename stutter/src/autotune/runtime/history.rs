@@ -25,6 +25,7 @@ pub(crate) struct RuntimeHistoryContext {
     pub(crate) rollback_policy: String,
     pub(crate) cooldown_until_unix_nanos: Option<u128>,
     pub(crate) manual_restore_command: Option<String>,
+    pub(crate) objective_evidence: Option<crate::autotune::objective::ObjectiveEvidence>,
 }
 
 impl RuntimeHistoryContext {
@@ -63,6 +64,7 @@ impl From<LiveExperimentHistoryContext> for RuntimeHistoryContext {
             rollback_policy: context.rollback_policy,
             cooldown_until_unix_nanos: context.cooldown_until_unix_nanos,
             manual_restore_command: context.manual_restore_command,
+            objective_evidence: context.objective_evidence,
         }
     }
 }

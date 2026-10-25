@@ -289,6 +289,7 @@ mod tests {
             score_before: None,
             score_after: None,
             planner: None,
+            objective_evidence: None,
             rollback_performed: false,
             reason: reason.to_owned(),
         }

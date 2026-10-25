@@ -417,6 +417,7 @@ mod tests {
             score_before: Some(score(412)),
             score_after: Some(score(330)),
             planner: None,
+            objective_evidence: None,
             rollback_performed,
             reason: reason.to_owned(),
         }

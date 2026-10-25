@@ -4,7 +4,9 @@ mod compile_throughput;
 pub(crate) mod contract;
 pub(crate) mod decision;
 mod descriptor;
+mod evidence;
 pub use descriptor::{ObjectiveDescriptor, ObjectiveFallbackPolicy, ObjectiveMaturity};
+pub use evidence::ObjectiveEvidence;
 pub use game_runnable_latency::{
     DEFAULT_MAX_REGRESSION_PERCENT, DEFAULT_MIN_IMPROVEMENT_PERCENT, MINIMUM_RUNNABLE_SAMPLES,
     RunnableSummary, RunnableThresholds, decide_runnable,

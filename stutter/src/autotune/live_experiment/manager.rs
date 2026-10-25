@@ -13,7 +13,7 @@ use crate::{
         decision::AutotuneDecision,
         experiment::{ExperimentId, WindowScore},
         kept::ActiveProfileState,
-        objective::{ObjectiveComparisonInput, compare_for_objective},
+        objective::{ObjectiveComparisonInput, ObjectiveEvidence, compare_for_objective},
         observation::AutotuneObservation,
         planning::candidate::CandidateAction,
         washout::WashoutWindowConfig,
@@ -29,6 +29,8 @@ use crate::{
 pub struct LiveExperimentManager {
     pub(crate) current: Option<LiveExperiment>,
     pub(crate) failed_apply_context: Option<LiveExperimentHistoryContext>,
+    /// The comparison that decided the last keep-point, consumed by the revert it triggers.
+    pub(crate) pending_objective_evidence: Option<ObjectiveEvidence>,
 }
 
 #[doc(hidden)]
