@@ -6,7 +6,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use super::{models::*, system::*};
+use super::{models::*, read_current_uclamp, system::*};
 use crate::actions::{
     ActionId, RollbackToken, SafetyClass, TaskIdentity, TaskRestoreIdentity, TuningAction,
     UclampRestoreRecord,
@@ -431,4 +431,53 @@ fn prepared_apply_aborts_without_writing_when_a_target_drifts_after_preparation(
 #[test]
 fn prepared_apply_is_declared_prepared() {
     assert!(action_for(1, Some(1), None).prepared_before_mutation());
+}
+
+/// A real process that exits between apply and rollback: the restore skips it and still succeeds
+/// (the target-exit case of the acceptance matrix), while a live sibling is restored.
+#[test]
+fn rollback_skips_a_task_that_exited_and_restores_the_one_that_did_not() {
+    use std::process::{Command, Stdio};
+    let spawn = || {
+        Command::new("sleep")
+            .arg("30")
+            .stdout(Stdio::null())
+            .spawn()
+            .expect("sleep is available")
+    };
+    let (mut doomed, mut survivor) = (spawn(), spawn());
+    let identity = |pid: u32| {
+        let ticks = crate::process_tree::process_starttime_at(Path::new("/proc"), pid)
+            .expect("task start time");
+        TaskIdentity {
+            tid: pid.into(),
+            process_pid: Some(pid.into()),
+            comm: None,
+            starttime_ticks: Some(ticks),
+        }
+    };
+    let action = UclampAction {
+        targets: vec![identity(doomed.id()), identity(survivor.id())],
+        values: UclampValues {
+            sched_util_min: Some(300),
+            sched_util_max: None,
+        },
+    };
+    let mut token = None;
+    let applied = action.apply_with_prepared_rollback(&mut |prepared| {
+        token = Some(prepared.clone());
+        Ok(())
+    });
+    let token = applied.expect("apply succeeds on this user's own children");
+    assert_eq!(token.as_uclamp_restore().unwrap().len(), 2);
+    doomed.kill().unwrap();
+    doomed.wait().unwrap();
+    action.rollback(&token).expect("an exited task is skipped");
+    action
+        .rollback(&token)
+        .expect("restoring twice changes nothing");
+    let min = read_current_uclamp(survivor.id()).unwrap().0;
+    assert_eq!(min, 0, "the surviving task was restored");
+    survivor.kill().unwrap();
+    survivor.wait().unwrap();
 }

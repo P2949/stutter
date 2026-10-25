@@ -286,6 +286,7 @@ fn the_benefit_suite_needs_its_spec_and_nothing_else_may_carry_one() {
         seconds: Some(20),
         rounds: None,
         benefit,
+        mutation: None,
     };
     let authorize =
         |request| auth.authorize(&peer(me()), &envelope("benefit_calibration", request), 8);
@@ -308,4 +309,30 @@ fn the_benefit_suite_needs_its_spec_and_nothing_else_may_carry_one() {
     );
     // A different suite never takes the spec (and is not granted to this task anyway).
     assert!(authorize(request(LiveSuite::Observation, Some(spec))).is_err());
+}
+
+#[test]
+fn only_the_recovery_lifecycle_and_benefit_suites_take_a_mutation() {
+    use crate::model::Mutation;
+    let mut auth = authorization("/work/stutter");
+    for suite in [LiveSuite::Observation, LiveSuite::Recovery] {
+        auth.grants
+            .insert(grant("t", RunnerAction::ExecuteLiveSuite, Some(suite)));
+    }
+    let request = |suite, mutation| Request::ExecuteLiveSuite {
+        suite,
+        attempt: 1,
+        seconds: None,
+        rounds: None,
+        benefit: None,
+        mutation,
+    };
+    let authorize = |request| auth.authorize(&peer(me()), &envelope("t", request), 8);
+    assert!(authorize(request(LiveSuite::Recovery, Some(Mutation::Uclamp))).is_ok());
+    assert_eq!(
+        authorize(request(LiveSuite::Observation, Some(Mutation::Uclamp)))
+            .unwrap_err()
+            .0,
+        ErrorCode::InvalidArgument
+    );
 }
