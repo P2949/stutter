@@ -63,6 +63,7 @@
           # collection time): frame workload, frame logging, storage and CPU stress, network
           # reachability probe, repository automation.
           pkgs.vkmark
+          pkgs.vulkan-tools
           pkgs.mangohud
           pkgs.fio
           pkgs.stress-ng

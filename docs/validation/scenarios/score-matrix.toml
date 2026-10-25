@@ -1,0 +1,19 @@
+# StutterScore evidence matrix (post-v0.1). Four workload profiles, six controlled
+# scheduler-degradation levels, five repetitions with the level order counterbalanced across
+# repetitions (a balanced Latin square, never always 0 -> 16). The study retains each recording's
+# score and direct metrics and decides nothing about weights: they stay as in v0.1.
+schema_version = 1
+seconds = 30
+repetitions = 5
+levels_ms = [0, 1, 2, 4, 8, 16]
+# The contender's period; only its burst length varies with the level.
+period_ms = 32
+failed_attempts_per_capture = 3
+
+[vkmark]
+light_scene = "cube"
+light_size = "640x480"
+heavy_scene = "texture"
+heavy_size = "3840x2160"
+present_mode = "fifo"
+heavy_present_mode = "immediate"

@@ -154,7 +154,7 @@ pub fn read_ndjson<T: DeserializeOwned>(path: &Path) -> anyhow::Result<Vec<T>> {
         .collect()
 }
 
-fn append_ndjson<T: Serialize>(path: &Path, record: &T) -> anyhow::Result<()> {
+pub fn append_ndjson<T: Serialize>(path: &Path, record: &T) -> anyhow::Result<()> {
     let mut file = fs::OpenOptions::new()
         .create(true)
         .append(true)

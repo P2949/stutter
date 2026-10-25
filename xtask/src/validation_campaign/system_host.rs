@@ -32,6 +32,7 @@ use super::{
         CommandSpec, SystemTools,
         fio::{self, FioProfile},
         network_irq::{self, NicSource},
+        vkcube::{self, VkcubeConfig},
         vkmark::{self, VkmarkConfig},
     },
 };
@@ -269,6 +270,9 @@ impl CaptureHost for SystemCaptureHost {
             spec.target,
             Target::VkmarkLight | Target::VkmarkLightUnpaced | Target::VkmarkGpuHeavy
         );
+        if matches!(spec.target, Target::VkcubeLight | Target::VkcubeUnpaced) {
+            vkcube::preflight(&tools)?;
+        }
         if vkmark_target || spec.interventions.contains(&InterventionKind::GpuStressor) {
             vkmark::preflight(
                 &tools,
@@ -322,6 +326,16 @@ impl CaptureHost for SystemCaptureHost {
                 self.settings
                     .fixed_work_ios
                     .ok_or("the fixed-work I/O count was not calibrated")?,
+            ),
+            Target::VkcubeLight => vkcube::command(
+                &VkcubeConfig::light(),
+                seconds,
+                &self.capture_dir.join("mangohud"),
+            ),
+            Target::VkcubeUnpaced => vkcube::command(
+                &VkcubeConfig::unpaced(),
+                seconds,
+                &self.capture_dir.join("mangohud"),
             ),
             other => vkmark::command(
                 &self.vkmark_config(other),

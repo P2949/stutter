@@ -2,7 +2,7 @@
 //! whose intervention did not establish itself is a failed attempt: it never counts toward the
 //! requested captures, and a bounded retry budget turns persistent failure into an honest
 //! `BlockedResource` instead of a padded corpus.
-use super::model::{ControlType, InterventionKind, ScenarioSpec, Target};
+use super::model::{ControlType, InterventionKind, ScenarioSpec};
 
 /// Result of the *independent* telemetry check of one applied intervention.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -81,11 +81,8 @@ pub fn accept(spec: &ScenarioSpec, evidence: &CaptureEvidence) -> Result<(), Vec
         "the generated fixture does not validate",
     );
     require(
-        !matches!(
-            spec.target,
-            Target::VkmarkLight | Target::VkmarkLightUnpaced | Target::VkmarkGpuHeavy
-        ) || evidence.frame_samples > 0,
-        "a vkmark target must produce a non-empty frame stream",
+        !spec.target.produces_frames() || evidence.frame_samples > 0,
+        "a rendering target must produce a non-empty frame stream",
     );
     for expected in &spec.interventions {
         let verified = evidence

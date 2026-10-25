@@ -48,6 +48,30 @@ pub fn merged_runnable_p99_ns(records: &[IntervalRecord], pid: u32) -> Option<f6
     Some(max_ns as f64)
 }
 
+/// Share of the target's runnable samples above `threshold_ns`, from the merged histograms
+/// (conservative: a bucket counts only if its lower bound is at or above the threshold).
+pub fn merged_runnable_over_rate(
+    records: &[IntervalRecord],
+    pid: u32,
+    threshold_ns: u64,
+) -> Option<f64> {
+    let (mut over, mut total) = (0_u64, 0_u64);
+    for record in records
+        .iter()
+        .filter(|r| r.process_pid == Some(pid) && !r.histogram.is_empty())
+    {
+        let mut lower = 0_u64;
+        for bucket in &record.histogram {
+            total = total.checked_add(bucket.count)?;
+            if lower >= threshold_ns {
+                over = over.checked_add(bucket.count)?;
+            }
+            lower = bucket.upper_bound_ns.unwrap_or(u64::MAX);
+        }
+    }
+    (total > 0).then(|| over as f64 / total as f64)
+}
+
 #[cfg(test)]
 mod tests {
     use stutter::api::recorder::{IntervalRecord, LatencyHistogram};
