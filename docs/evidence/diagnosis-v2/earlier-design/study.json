@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "study_id": "v2-dcbcc84-1792864018609",
+  "base_commit": "dcbcc84ed0643392a03fa7f36046b045560ae006",
+  "config_sha256": "de5c6c5da97ffa33c42287f2906c064874bb83d7504f5d6439ef5ce6e5bf0dd8",
+  "companion_campaign": "core-dcbcc84-1792863985231",
+  "frozen": {
+    "study_cpu": 1,
+    "irq": 162,
+    "irq_cpu": 4,
+    "fixed_work_ios": 283496
+  },
+  "created_unix_ms": 1792864018609
+}

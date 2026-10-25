@@ -1,0 +1,20 @@
+{
+ "accepted": {
+  "mixed-scheduler-io": 6,
+  "v2-gpu-control": 15,
+  "v2-gpu-positive": 15,
+  "v2-io-control": 15,
+  "v2-io-positive": 15,
+  "v2-irq-control": 30,
+  "v2-irq-positive": 30,
+  "v2-scheduler-control": 15,
+  "v2-scheduler-positive": 15
+ },
+ "rejected": {
+  "mixed-scheduler-io:preflight": 5,
+  "v2-io-control:preflight": 7,
+  "v2-io-positive:preflight": 7,
+  "v2-irq-positive:acceptance": 9
+ },
+ "total_runs": 188
+}
