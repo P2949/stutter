@@ -1,0 +1,65 @@
+# Mutation graduation campaigns: the parameters of `xtask mutation-campaign`. One section per
+# operation; the generic stage order is fixed in code. Editing this file changes its digest and
+# therefore invalidates every source-bound result of a running campaign.
+schema_version = 1
+name = "mutation-graduation"
+
+[retry]
+# Attempts per stage before a retryable failure becomes a failure.
+default_attempts = 2
+
+[benefit]
+# Matched counterbalanced AB/BA pairs: take the initial number, then top up by `step` to `max_pairs`
+# only while the result is underpowered or noisy.
+initial_pairs = 15
+max_pairs = 30
+step = 5
+# Stable persisted split of the scenarios' pairs: `calibration` parts to one `holdout` part.
+calibration_parts = 2
+holdout_parts = 1
+# The share of beneficial pairs the frozen thresholds must keep on the holdout. Neutral and
+# regression pairs must never be kept.
+min_beneficial_keep_rate = 0.8
+
+[operation.cpu_affinity_profile]
+operation = "cpu_affinity_profile"
+objective = "game_runnable_latency"
+capability = "cpu_affinity_experiment"
+workload = "game"
+pressure = "scheduler"
+effect_scope = "local_process_tree"
+# The stages this operation runs, in the generic order. Skipping a required stage needs an
+# explicit `skip` entry with a reason.
+stages = [
+  "preflight",
+  "mechanical",
+  "fault_matrix",
+  "suspend_resume",
+  "benefit_calibration",
+  "benefit_holdout",
+  "evidence_integrate",
+  "tier_decision",
+]
+# Affinity changes no kernel-visible resource that differs across kernels: the kernel matrix is
+# not required for this operation.
+skip = [
+  { stage = "kernel_matrix", reason = "per-process CPU affinity has no kernel-specific interface; the core kernel matrix already covers the recorder on every supported kernel" },
+]
+
+[operation.cpu_affinity_profile.suites]
+mechanical = "affinity"
+fault_matrix = "recovery"
+suspend_resume = "suspend-resume"
+
+[operation.cpu_affinity_profile.scenarios]
+# Beneficial: contention on the baseline placement; neutral: no contention; regression: a
+# placement that makes the target measurably worse.
+beneficial = "affinity-contended"
+neutral = "affinity-quiet"
+regression = "affinity-colocated"
+
+[operation.cpu_affinity_profile.thresholds]
+# A conservative grid around the product defaults (12.5 % / 7.5 % / 1000 samples).
+min_improvement_percent = [10.0, 12.5, 15.0, 20.0]
+max_regression_percent = [5.0, 7.5, 10.0]
+min_samples = [1000]

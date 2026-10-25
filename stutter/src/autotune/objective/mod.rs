@@ -5,7 +5,10 @@ pub(crate) mod contract;
 pub(crate) mod decision;
 mod descriptor;
 pub use descriptor::{ObjectiveDescriptor, ObjectiveFallbackPolicy, ObjectiveMaturity};
-pub use game_runnable_latency::MINIMUM_RUNNABLE_SAMPLES;
+pub use game_runnable_latency::{
+    DEFAULT_MAX_REGRESSION_PERCENT, DEFAULT_MIN_IMPROVEMENT_PERCENT, MINIMUM_RUNNABLE_SAMPLES,
+    RunnableSummary, RunnableThresholds, decide_runnable,
+};
 pub use runnable_signal::runnable_signals_for_target;
 
 /// Why the direct runnable-latency signal is unusable for the objective, if it is.
