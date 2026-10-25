@@ -1,3 +1,4 @@
+mod acceptance;
 mod action;
 pub mod handler;
 pub mod models;
@@ -7,6 +8,7 @@ mod validate;
 #[cfg(test)]
 mod tests;
 
+pub use acceptance::verify_uclamp_lifecycle;
 pub(crate) use handler::UclampRollbackHandler;
 pub use models::{UclampAction, UclampValues};
 

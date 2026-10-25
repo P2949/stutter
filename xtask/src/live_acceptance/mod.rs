@@ -97,11 +97,15 @@ pub enum Suite {
         #[arg(long, default_value = "affinity", value_parser = recovery::parse_mutation)]
         mutation: stutter::api::autotune::AcceptanceMutation,
     },
+    /// Dry-run, audited apply, durable token, readback and rollback of one mutation.
     Affinity {
         #[arg(long)]
         out: PathBuf,
         #[arg(long)]
         stutter_bin: PathBuf,
+        /// The mutation under test: `affinity` or `uclamp`.
+        #[arg(long, default_value = "affinity", value_parser = recovery::parse_mutation)]
+        mutation: stutter::api::autotune::AcceptanceMutation,
     },
     /// One matched pair of the CPU-affinity benefit experiment (a mutation campaign's stage).
     AffinityBenefit {
@@ -299,7 +303,11 @@ pub fn run(root: &Path, suite: Suite) -> anyhow::Result<()> {
             stutter_bin,
             seconds,
         } => (out, stutter_bin, seconds),
-        Suite::Affinity { out, stutter_bin } => return affinity::run(root, &out, &stutter_bin),
+        Suite::Affinity {
+            out,
+            stutter_bin,
+            mutation,
+        } => return affinity::run(root, &out, &stutter_bin, mutation),
         Suite::AffinityBenefit {
             out,
             stutter_bin,
