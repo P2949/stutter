@@ -121,11 +121,21 @@ pub fn try_promote_to_apply_candidate(
 
 impl CandidateAction {
     pub fn cpu_affinity_profile(profile: Profile, tree_pid: u32) -> Self {
+        Self::cpu_affinity_profile_for(profile, tree_pid, ObjectiveKind::StutterScore)
+    }
+
+    /// A CPU-affinity candidate judged by the given objective.
+    pub fn cpu_affinity_profile_for(
+        profile: Profile,
+        tree_pid: u32,
+        objective: ObjectiveKind,
+    ) -> Self {
         Self::CpuAffinityProfile {
             plan: CpuAffinityProfilePlan {
                 profile_name: profile.name.clone(),
                 profile,
                 tree_pid,
+                objective,
             },
         }
     }

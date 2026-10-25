@@ -1,5 +1,6 @@
 pub(crate) mod cgroup;
 pub(crate) mod classify;
+pub(crate) mod explicit_target;
 pub(crate) mod model;
 pub(crate) mod procfs;
 

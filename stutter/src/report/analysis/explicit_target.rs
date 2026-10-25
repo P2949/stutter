@@ -5,14 +5,7 @@
 //! explicitly named process whose class is only such a generic fallback are treated as the
 //! target. Infrastructure and specialised classes (compositor, audio, browser, kernel, build
 //! tools, ...) are never reclassified: naming a process does not make its helpers a game.
-use crate::{process_tree::TaskClass, spike::SpikeCluster};
-
-fn is_generic_fallback(class: TaskClass) -> bool {
-    matches!(
-        class,
-        TaskClass::Service | TaskClass::Helper | TaskClass::Render | TaskClass::Unknown
-    )
-}
+use crate::{process::explicit_target::class_for_explicit_target, spike::SpikeCluster};
 
 /// Reclassifies generic-class points of the explicitly named processes as the target.
 pub(crate) fn promote_explicit_targets(clusters: &mut [SpikeCluster], explicit_pids: &[u32]) {
@@ -20,20 +13,17 @@ pub(crate) fn promote_explicit_targets(clusters: &mut [SpikeCluster], explicit_p
         return;
     }
     for point in clusters.iter_mut().flat_map(|c| c.points.iter_mut()) {
-        if point
+        let named = point
             .process_pid
-            .is_some_and(|pid| explicit_pids.contains(&pid))
-            && is_generic_fallback(point.class)
-        {
-            point.class = TaskClass::Game;
-        }
+            .is_some_and(|pid| explicit_pids.contains(&pid));
+        point.class = class_for_explicit_target(point.class, named);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::spike::SpikePoint;
+    use crate::{process_tree::TaskClass, spike::SpikePoint};
 
     fn point(pid: u32, class: TaskClass) -> SpikePoint {
         SpikePoint {

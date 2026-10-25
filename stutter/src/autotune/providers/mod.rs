@@ -29,7 +29,6 @@ pub struct CandidateProposal {
     pub provider: &'static str,
     pub confidence: f32,
     pub deny_reasons: Vec<String>,
-    pub objective: ObjectiveKind,
     pub rank_hint: u32,
 }
 
@@ -104,7 +103,8 @@ pub struct CandidateProviderMetadata {
     pub capability_requirements: &'static [&'static str],
     pub conflict_group: ActionConflictGroup,
     pub cooldown_key: &'static str,
-    pub objective: ObjectiveKind,
+    /// Descriptive only: the candidate plan is the authority for the objective a candidate uses.
+    pub supported_objectives: &'static [ObjectiveKind],
     pub policy_coverage: &'static [&'static str],
 }
 
@@ -270,7 +270,7 @@ fn provider_metadata_for_family(family: CandidateFamily) -> CandidateProviderMet
             capability_requirements: &["sched_setaffinity", "procfs"],
             conflict_group: ActionConflictGroup::CpuPlacement,
             cooldown_key: "cpu_affinity_profile",
-            objective: ObjectiveKind::StutterScore,
+            supported_objectives: &[ObjectiveKind::StutterScore],
             policy_coverage: &[
                 "daemon_mode",
                 "safety_class",
@@ -289,7 +289,7 @@ fn provider_metadata_for_family(family: CandidateFamily) -> CandidateProviderMet
             capability_requirements: &["setpriority", "procfs"],
             conflict_group: ActionConflictGroup::CpuPriority,
             cooldown_key: "nice",
-            objective: ObjectiveKind::DesktopInteractivity,
+            supported_objectives: &[ObjectiveKind::DesktopInteractivity],
             policy_coverage: &[
                 "daemon_mode",
                 "safety_class",
@@ -308,7 +308,7 @@ fn provider_metadata_for_family(family: CandidateFamily) -> CandidateProviderMet
             capability_requirements: &["ioprio_set", "procfs"],
             conflict_group: ActionConflictGroup::IoPriority,
             cooldown_key: "ionice",
-            objective: ObjectiveKind::DesktopInteractivity,
+            supported_objectives: &[ObjectiveKind::DesktopInteractivity],
             policy_coverage: &[
                 "daemon_mode",
                 "safety_class",
@@ -328,7 +328,7 @@ fn provider_metadata_for_family(family: CandidateFamily) -> CandidateProviderMet
             capability_requirements: &["sched_setattr", "procfs"],
             conflict_group: ActionConflictGroup::CpuPriority,
             cooldown_key: "uclamp",
-            objective: ObjectiveKind::GameRunnableLatency,
+            supported_objectives: &[ObjectiveKind::GameRunnableLatency],
             policy_coverage: &[
                 "daemon_mode",
                 "safety_class",
@@ -348,7 +348,7 @@ fn provider_metadata_for_family(family: CandidateFamily) -> CandidateProviderMet
             capability_requirements: &["cgroup_v2", "cgroup.procs"],
             conflict_group: ActionConflictGroup::CgroupPlacement,
             cooldown_key: "cgroup_placement",
-            objective: ObjectiveKind::DesktopInteractivity,
+            supported_objectives: &[ObjectiveKind::DesktopInteractivity],
             policy_coverage: &[
                 "daemon_mode",
                 "safety_class",
@@ -367,7 +367,7 @@ fn provider_metadata_for_family(family: CandidateFamily) -> CandidateProviderMet
             capability_requirements: &["proc_irq", "irq_device_identity"],
             conflict_group: ActionConflictGroup::IrqPlacement,
             cooldown_key: "irq_affinity",
-            objective: ObjectiveKind::GameRunnableLatency,
+            supported_objectives: &[ObjectiveKind::GameRunnableLatency],
             policy_coverage: &[
                 "suggest_only",
                 "manual_only_high_risk",
@@ -385,7 +385,7 @@ fn provider_metadata_for_family(family: CandidateFamily) -> CandidateProviderMet
             capability_requirements: &["sysfs_cpu_cpufreq", "power_supply"],
             conflict_group: ActionConflictGroup::CpuPower,
             cooldown_key: "cpu_power",
-            objective: ObjectiveKind::GameRunnableLatency,
+            supported_objectives: &[ObjectiveKind::GameRunnableLatency],
             policy_coverage: &[
                 "suggest_only",
                 "manual_only_high_risk",
@@ -404,7 +404,7 @@ fn provider_metadata_for_family(family: CandidateFamily) -> CandidateProviderMet
             capability_requirements: &["sysfs_drm", "gpu_focus_identity"],
             conflict_group: ActionConflictGroup::GpuPower,
             cooldown_key: "gpu_power",
-            objective: ObjectiveKind::GameFramePacing,
+            supported_objectives: &[ObjectiveKind::GameFramePacing],
             policy_coverage: &[
                 "suggest_only",
                 "manual_only_high_risk",
@@ -423,7 +423,7 @@ fn provider_metadata_for_family(family: CandidateFamily) -> CandidateProviderMet
             capability_requirements: &["proc_sys_vm", "memory_pressure_evidence"],
             conflict_group: ActionConflictGroup::VmMemory,
             cooldown_key: "vm_knob",
-            objective: ObjectiveKind::DesktopInteractivity,
+            supported_objectives: &[ObjectiveKind::DesktopInteractivity],
             policy_coverage: &[
                 "suggest_only",
                 "manual_only_high_risk",
@@ -441,7 +441,7 @@ fn provider_metadata_for_family(family: CandidateFamily) -> CandidateProviderMet
             capability_requirements: &["unknown"],
             conflict_group: ActionConflictGroup::None,
             cooldown_key: "unknown",
-            objective: ObjectiveKind::StutterScore,
+            supported_objectives: &[ObjectiveKind::StutterScore],
             policy_coverage: &["provider_registered"],
         },
     }

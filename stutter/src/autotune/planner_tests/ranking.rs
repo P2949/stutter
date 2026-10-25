@@ -23,7 +23,6 @@ mod tests {
                 provider: low_confidence.action_kind(),
                 confidence: 0.80,
                 deny_reasons: Vec::new(),
-                objective: low_confidence.objective(),
                 rank_hint: 1,
             },
             CandidateProposal {
@@ -31,7 +30,6 @@ mod tests {
                 provider: high_confidence.action_kind(),
                 confidence: 0.90,
                 deny_reasons: Vec::new(),
-                objective: high_confidence.objective(),
                 rank_hint: 1,
             },
         ];

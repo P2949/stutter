@@ -83,7 +83,6 @@ impl CandidateProvider for GpuPowerProvider {
             provider: self.family(),
             confidence,
             deny_reasons: Vec::new(),
-            objective: ObjectiveKind::GameFramePacing,
             rank_hint: 85,
         }]
     }

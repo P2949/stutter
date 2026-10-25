@@ -19,6 +19,7 @@ pub struct CpuAffinityProfilePlan {
     pub profile_name: String,
     pub profile: Profile,
     pub tree_pid: u32,
+    pub objective: ObjectiveKind,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -230,7 +231,7 @@ impl CandidatePlan for CpuAffinityProfilePlan {
     }
 
     fn objective(&self) -> ObjectiveKind {
-        ObjectiveKind::StutterScore
+        self.objective
     }
 
     fn conflict_group(&self) -> ActionConflictGroup {
