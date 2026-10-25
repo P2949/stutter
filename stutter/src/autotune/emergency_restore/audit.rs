@@ -29,6 +29,7 @@ pub(super) fn write_emergency_restore_audit_event(
         restore_path: rollback_token.restore_path().cloned(),
         action_phase: None,
         error_category: None,
+        operation: None,
         message,
     };
 

@@ -49,6 +49,7 @@ pub(crate) mod kept;
 pub(crate) mod live_experiment;
 #[cfg(test)]
 pub(crate) mod measurement;
+pub(crate) mod operation;
 
 pub(crate) mod planning;
 pub(crate) mod profiles;

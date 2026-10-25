@@ -17,7 +17,7 @@ use super::{
 };
 use crate::{
     actions::SafetyClass,
-    autotune::objective::ObjectiveKind,
+    autotune::{objective::ObjectiveKind, operation::MutationOperationKind},
     daemon::explain::{PolicyDecisionKind, PolicyExplanation},
     daemon_policy::{ActionDescriptor, ActionSource, DaemonPolicy, PolicyIntent},
 };
@@ -31,6 +31,7 @@ pub struct CandidatePlanFile {
     #[serde(skip_deserializing, default = "default_policy_explanation")]
     pub policy_explanation: PolicyExplanation,
     pub objective: ObjectiveKind,
+    pub operation: MutationOperationKind,
     pub evidence: Vec<CandidateEvidence>,
     pub dry_run_command: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -52,7 +53,7 @@ pub struct CandidatePlanSummary {
 }
 
 impl CandidatePlanFile {
-    pub const SCHEMA_VERSION: u32 = 2;
+    pub const SCHEMA_VERSION: u32 = 3;
 
     pub fn from_suggestion(suggestion: &CandidateSuggestion) -> Self {
         let policy = policy_for_candidate_plan_descriptor(&suggestion.descriptor);
@@ -77,6 +78,7 @@ impl CandidatePlanFile {
             policy_intent,
             policy_explanation,
             objective: suggestion.objective,
+            operation: suggestion.operation,
             evidence: suggestion.evidence.clone(),
             dry_run_command: suggestion
                 .dry_run_command
@@ -134,6 +136,7 @@ impl CandidatePlanFile {
             policy_intent,
             policy_explanation,
             objective: candidate.objective(),
+            operation: candidate.operation_kind(),
             evidence: candidate.evidence().to_vec(),
             dry_run_command: format!(
                 "stutter autotune apply-candidate --candidate-json {candidate_json} --dry-run"
@@ -286,6 +289,17 @@ pub fn apply_candidate_plan_file(path: &Path, dry_run: bool) -> anyhow::Result<C
             "unsupported_candidate_plan_schema: got {} expected {}",
             plan.schema_version,
             CandidatePlanFile::SCHEMA_VERSION
+        );
+    }
+
+    if let Some(executable) = plan.executable.clone()
+        && executable.into_candidate().operation_kind() != plan.operation
+    {
+        anyhow::bail!(
+            "candidate_plan_operation_mismatch: candidate '{}' action_kind={} declares operation {} but its payload performs a different one",
+            plan.candidate.candidate_name,
+            plan.candidate.action_kind,
+            plan.operation.as_str()
         );
     }
 

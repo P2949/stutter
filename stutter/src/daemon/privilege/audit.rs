@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use super::{PrivilegeProcessRole, PrivilegeTransport, PrivilegedOperation};
 use crate::{
     audit::{AuditEvent, append_audit_event_to_path},
+    autotune::operation::MutationOperationKind,
     daemon_policy::{ActionDescriptor, PolicyIntent},
 };
 
@@ -25,6 +26,7 @@ pub fn privileged_operation_audit_event(
         restore_path: None,
         action_phase: None,
         error_category: None,
+        operation: None,
         message: message.into(),
     }
 }
@@ -105,6 +107,7 @@ impl PrivilegeAuditSink {
                 restore_path: None,
                 action_phase: None,
                 error_category: Some(input.reason_code.to_owned()),
+                operation: input.mutation,
                 message,
             },
         )
@@ -124,6 +127,7 @@ pub(crate) struct PrivilegeBoundaryAuditInput<'a> {
     pub(crate) reason_code: &'a str,
     pub(crate) detail: &'a str,
     pub(crate) affected_tasks: usize,
+    pub(crate) mutation: Option<MutationOperationKind>,
 }
 
 pub(crate) struct CandidateBoundaryAuditInput<'a> {
@@ -135,4 +139,5 @@ pub(crate) struct CandidateBoundaryAuditInput<'a> {
     pub(crate) reason_code: &'a str,
     pub(crate) detail: &'a str,
     pub(crate) affected_tasks: usize,
+    pub(crate) mutation: Option<MutationOperationKind>,
 }

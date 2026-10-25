@@ -515,6 +515,7 @@ fn build_exit_audit_event(
         restore_path: action.rollback.restore_path().cloned(),
         action_phase: None,
         error_category: None,
+        operation: None,
         message: format!(
             "{} shutdown_reason={} keep_on_exit={}",
             message,

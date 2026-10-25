@@ -22,6 +22,9 @@ pub enum PrivilegedWorkerError {
     #[error("candidate_plan_objective_mismatch: candidate objective changed")]
     CandidatePlanObjectiveMismatch,
 
+    #[error("candidate_plan_operation_mismatch: candidate operation changed")]
+    CandidatePlanOperationMismatch,
+
     #[error("candidate_plan_missing_evidence: candidate plan has no evidence")]
     CandidatePlanMissingEvidence,
 
@@ -103,6 +106,7 @@ impl PrivilegedWorkerError {
             Self::InvalidActionDescriptor { .. } => "privileged_worker_invalid_action_descriptor",
             Self::CandidatePlanDescriptorMismatch => "candidate_plan_descriptor_mismatch",
             Self::CandidatePlanObjectiveMismatch => "candidate_plan_objective_mismatch",
+            Self::CandidatePlanOperationMismatch => "candidate_plan_operation_mismatch",
             Self::CandidatePlanMissingEvidence => "candidate_plan_missing_evidence",
             Self::UnsupportedSchema { .. } => "privileged_worker_unsupported_schema",
             Self::UnsupportedCandidatePlanSchema { .. } => {

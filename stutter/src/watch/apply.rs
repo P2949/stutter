@@ -196,6 +196,7 @@ pub async fn apply_profile_command(input: ApplyProfileCommandInput) -> anyhow::R
         restore_path: Some(crate::profile_restore::default_restore_path()),
         action_phase: None,
         error_category: None,
+        operation: None,
         message: format!(
             "initial profile application completed affinity={} nice={} ionice={}",
             apply_result.affinity_records.len(),

@@ -99,6 +99,7 @@ where
         restore_path: None,
         action_phase: None,
         error_category: None,
+        operation: None,
         message: String::new(),
     };
 

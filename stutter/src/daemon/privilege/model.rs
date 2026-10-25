@@ -7,6 +7,7 @@ use crate::{
     actions::{ActionState, RollbackToken, SafetyClass},
     autotune::{
         objective::ObjectiveKind,
+        operation::MutationOperationKind,
         planning::{
             candidate::CandidateAction, dry_run::CandidateDryRunRecord, plan_io::CandidatePlanFile,
         },
@@ -165,6 +166,7 @@ pub struct CandidatePlanRequest {
     pub candidate: CandidateAction,
     pub descriptor: ActionDescriptor,
     pub objective: ObjectiveKind,
+    pub operation: MutationOperationKind,
     pub evidence_count: usize,
     pub created_unix_nanos: u128,
 }
@@ -174,6 +176,7 @@ impl CandidatePlanRequest {
         Self {
             descriptor: candidate.descriptor(),
             objective: candidate.objective(),
+            operation: candidate.operation_kind(),
             evidence_count: candidate.evidence().len(),
             candidate,
             created_unix_nanos,
@@ -208,7 +211,7 @@ pub struct RollbackResult {
     pub affected_tasks: usize,
 }
 
-pub const PRIVILEGED_WORKER_IPC_SCHEMA_VERSION: u32 = 1;
+pub const PRIVILEGED_WORKER_IPC_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PrivilegedWorkerCandidatePlan {
@@ -216,6 +219,7 @@ pub struct PrivilegedWorkerCandidatePlan {
     pub plan_file: CandidatePlanFile,
     pub descriptor: ActionDescriptor,
     pub objective: ObjectiveKind,
+    pub operation: MutationOperationKind,
     pub evidence_count: usize,
     #[serde(with = "serde_u128_string")]
     pub created_unix_nanos: u128,
@@ -228,6 +232,7 @@ impl PrivilegedWorkerCandidatePlan {
             plan_file: CandidatePlanFile::from_candidate(&request.candidate, None),
             descriptor: request.descriptor.clone(),
             objective: request.objective,
+            operation: request.operation,
             evidence_count: request.evidence_count,
             created_unix_nanos: request.created_unix_nanos,
         }
@@ -268,6 +273,7 @@ impl PrivilegedWorkerCandidatePlan {
             || self.plan_file.descriptor.safety_class != self.descriptor.safety_class
             || self.plan_file.descriptor.effect_scope != self.descriptor.effect_scope
             || self.plan_file.objective != self.objective
+            || self.plan_file.operation != self.operation
         {
             return Err(PrivilegedWorkerError::CandidatePlanMetadataMismatch.into());
         }
@@ -290,10 +296,14 @@ impl PrivilegedWorkerCandidatePlan {
         };
 
         let candidate = executable.into_candidate();
+        if candidate.operation_kind() != self.operation {
+            return Err(PrivilegedWorkerError::CandidatePlanOperationMismatch.into());
+        }
         Ok(CandidatePlanRequest {
             candidate,
             descriptor: self.descriptor,
             objective: self.objective,
+            operation: self.operation,
             evidence_count: self.evidence_count,
             created_unix_nanos: self.created_unix_nanos,
         })

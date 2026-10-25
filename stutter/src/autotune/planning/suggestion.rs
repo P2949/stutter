@@ -9,7 +9,7 @@ use super::{
 };
 use crate::{
     actions::SafetyClass,
-    autotune::objective::ObjectiveKind,
+    autotune::{objective::ObjectiveKind, operation::MutationOperationKind},
     daemon_policy::{
         ActionDescriptor, ActionEffectScope, ActionSource, DaemonMode, DaemonPolicy, PolicyIntent,
         RollbackRequirement,
@@ -22,6 +22,7 @@ pub struct CandidateSuggestion {
     pub action_kind: String,
     pub descriptor: ActionDescriptor,
     pub objective: ObjectiveKind,
+    pub operation: MutationOperationKind,
     pub evidence: Vec<CandidateEvidence>,
     pub affected_tasks: usize,
     pub safety: SafetyClass,
@@ -114,6 +115,7 @@ pub fn suggestion_from_candidate_dry_run_record(
         action_kind: candidate.action_kind().to_owned(),
         descriptor: candidate.descriptor(),
         objective: candidate.objective(),
+        operation: candidate.operation_kind(),
         evidence: candidate.evidence().to_vec(),
         affected_tasks: record.affected_tasks,
         safety: record.safety_class.clone(),
@@ -176,6 +178,7 @@ fn cpu_affinity_suggestion_from_dry_run_record(
         action_kind: "cpu_affinity_profile".to_owned(),
         descriptor,
         objective: ObjectiveKind::StutterScore,
+        operation: MutationOperationKind::CpuAffinityProfile,
         evidence: Vec::new(),
         affected_tasks: record.affected_tasks,
         safety: record.safety_class.clone(),

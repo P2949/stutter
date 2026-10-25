@@ -19,6 +19,7 @@ pub fn restore_profile_watch_on_exit() -> anyhow::Result<()> {
                 restore_path: Some(path.clone()),
                 action_phase: None,
                 error_category: None,
+                operation: None,
                 message: format!(
                     "watch restore completed affinity={} nice={} ionice={} skipped_dead={} skipped_identity_mismatch={}",
                     summary.affinity,
@@ -50,6 +51,7 @@ pub fn restore_profile_watch_on_exit() -> anyhow::Result<()> {
                 restore_path: Some(path.clone()),
                 action_phase: None,
                 error_category: None,
+                operation: None,
                 message: format!("restore failed: {err:#}"),
             });
             return Err(err);

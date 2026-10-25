@@ -400,6 +400,7 @@ pub(crate) fn execute_privileged_worker_request_with_audit_sink(
             reason_code: &decision.reason_code,
             detail: &decision.message,
             affected_tasks: 0,
+            mutation: None,
         },
     );
 
@@ -516,6 +517,7 @@ pub(crate) fn execute_privileged_worker_request_with_audit_sink(
             reason_code,
             detail,
             affected_tasks,
+            mutation: None,
         },
     );
 
