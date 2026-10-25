@@ -113,7 +113,6 @@ impl CandidateProvider for VmKnobProvider {
                     provider: self.family(),
                     confidence,
                     deny_reasons: Vec::new(),
-                    objective,
                     rank_hint: vm_knob_rank_hint(&evidence_model),
                 }
             })

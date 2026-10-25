@@ -10,9 +10,11 @@ use anyhow::{Context, bail};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use stutter::api::{
-    process_tree::TaskClass,
     recorder::{FrameEvent, IntervalRecord},
-    scorer::{score_from_interval_records, score_from_interval_records_and_frames},
+    scorer::{
+        score_from_interval_records_and_frames_for_explicit_targets,
+        score_from_interval_records_for_explicit_targets,
+    },
 };
 
 use super::{
@@ -293,21 +295,13 @@ fn explicit_target_scores(
         .iter()
         .filter(|r| r.process_pid == Some(pid))
         .cloned()
-        .map(|mut r| {
-            if matches!(
-                r.class,
-                TaskClass::Service | TaskClass::Helper | TaskClass::Render | TaskClass::Unknown
-            ) {
-                r.class = TaskClass::Game;
-            }
-            r
-        })
         .collect();
-    let runnable = score_from_interval_records(&target).total as f64;
+    let runnable = score_from_interval_records_for_explicit_targets(&target, &[pid]).total as f64;
     let total = if frames.is_empty() {
         runnable
     } else {
-        score_from_interval_records_and_frames(&target, frames).total as f64
+        score_from_interval_records_and_frames_for_explicit_targets(&target, frames, &[pid]).total
+            as f64
     };
     (total, runnable)
 }

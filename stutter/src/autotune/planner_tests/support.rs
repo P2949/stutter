@@ -200,7 +200,6 @@ impl CandidateProvider for StaticProvider {
             provider: self.family(),
             confidence: 1.0,
             deny_reasons: Vec::new(),
-            objective: self.candidate.objective(),
             rank_hint: 1,
         }]
     }
@@ -473,7 +472,6 @@ pub(crate) fn proposal_for_candidate(
         provider: candidate.action_kind(),
         confidence,
         deny_reasons: Vec::new(),
-        objective: candidate.objective(),
         rank_hint: 1,
     }
 }

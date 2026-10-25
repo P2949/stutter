@@ -37,7 +37,8 @@ impl CandidateProvider for CpuAffinityProvider {
 
         candidates
             .into_iter()
-            .filter_map(|candidate| {
+            .filter_map(|mut candidate| {
+                route_objective(&mut candidate, input.observation.primary_situation);
                 let rank_hint =
                     rank_for_candidate(&candidate, input.observation.primary_situation)?;
                 Some(CandidateProposal {
@@ -45,11 +46,20 @@ impl CandidateProvider for CpuAffinityProvider {
                     provider: self.family(),
                     confidence: input.observation.focus_confidence,
                     deny_reasons: Vec::new(),
-                    objective: ObjectiveKind::StutterScore,
                     rank_hint: u32::from(rank_hint),
                 })
             })
             .collect()
+    }
+}
+
+/// Scheduler pressure on a game is judged by the game's own runnable latency, not by the composite
+/// StutterScore. Other contexts keep their objective until they have their own contract.
+fn route_objective(candidate: &mut CandidateAction, situation: SituationKind) {
+    if situation == SituationKind::GameCpuSchedulerPressure
+        && let CandidateAction::CpuAffinityProfile { plan } = candidate
+    {
+        plan.objective = ObjectiveKind::GameRunnableLatency;
     }
 }
 

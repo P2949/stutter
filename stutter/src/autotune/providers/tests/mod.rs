@@ -94,7 +94,6 @@ fn calibration_proposal(provider: &'static str, confidence: f32) -> CandidatePro
         provider,
         confidence,
         deny_reasons: Vec::new(),
-        objective: ObjectiveKind::DesktopInteractivity,
         rank_hint: 1,
     }
 }
@@ -166,3 +165,71 @@ mod nice;
 mod ioprio;
 
 mod uclamp;
+
+#[test]
+fn scheduler_pressure_affinity_candidates_use_the_games_runnable_latency() {
+    let mut observation = provider_observation(
+        SituationKind::GameCpuSchedulerPressure,
+        FocusGroupKind::Game,
+    );
+    observation.active_tasks = vec![active_task_snapshot()];
+    let profiles = vec![crate::profiles::Profile {
+        name: "game-isolate-render".to_owned(),
+        rules: vec![crate::profiles::ProfileRule {
+            affinity: Some(crate::affinity::CpuMask::parse("0").unwrap()),
+            nice: None,
+            ionice: None,
+            match_class: vec![TaskClass::Game],
+            match_comm: Vec::new(),
+        }],
+    }];
+    let policy = policy(DaemonMode::Suggest);
+    let health = SystemHealthSnapshot::default();
+    let context = system_context_for_observation(&observation);
+    let state = ControllerRuntimeState::default();
+    let capabilities = crate::daemon::capabilities::DaemonCapabilities::default();
+    let proposals = crate::autotune::providers::cpu_affinity::CpuAffinityProvider.propose(
+        &CandidateProviderInput {
+            observation: &observation,
+            daemon_policy: &policy,
+            capabilities: &capabilities,
+            system_health: &health,
+            system_context: &context,
+            controller_state: &state,
+            profiles: &profiles,
+        },
+    );
+    assert!(!proposals.is_empty());
+    for proposal in proposals {
+        assert_eq!(
+            proposal.candidate.objective(),
+            ObjectiveKind::GameRunnableLatency
+        );
+    }
+}
+
+#[test]
+fn a_candidates_objective_is_the_same_at_every_stage() {
+    use crate::{
+        autotune::planning::plan_io::CandidatePlanFile, daemon::privilege::CandidatePlanRequest,
+    };
+    let candidate = CandidateAction::cpu_affinity_profile_for(
+        crate::profiles::Profile {
+            name: "game".to_owned(),
+            rules: Vec::new(),
+        },
+        1234,
+        ObjectiveKind::GameRunnableLatency,
+    );
+    let plan_file = CandidatePlanFile::from_candidate_with_policy(
+        &candidate,
+        None,
+        &policy(DaemonMode::Suggest),
+        crate::daemon::policy::PolicyIntent::Apply,
+        None,
+    );
+    let request = CandidatePlanRequest::from_candidate(candidate.clone(), 0);
+    assert_eq!(candidate.objective(), ObjectiveKind::GameRunnableLatency);
+    assert_eq!(plan_file.objective, candidate.objective());
+    assert_eq!(request.objective, candidate.objective());
+}

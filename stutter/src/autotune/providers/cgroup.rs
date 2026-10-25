@@ -104,7 +104,6 @@ impl CandidateProvider for CgroupProvider {
             provider: self.family(),
             confidence: input.observation.situation.confidence,
             deny_reasons: target_selection_denies,
-            objective,
             rank_hint,
         }]
     }

@@ -71,7 +71,10 @@ fn registered_providers_expose_complete_policy_metadata() {
             }
         }
 
-        let objective = format!("{:?}", metadata.objective);
-        assert!(!objective.is_empty());
+        assert!(
+            !metadata.supported_objectives.is_empty(),
+            "{} must name the objectives it can propose",
+            metadata.family
+        );
     }
 }

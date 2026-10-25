@@ -633,7 +633,9 @@ pub mod scorer {
     //! Public `StutterScore` contracts: a ranking proxy within comparable experiments.
 
     pub use crate::scorer::{
-        StutterScore, frame_time_percentile_ms, score_from_interval_records,
-        score_from_interval_records_and_frames,
+        StutterScore, frame_time_percentile_ms, records_for_explicit_targets,
+        score_from_interval_records, score_from_interval_records_and_frames,
+        score_from_interval_records_and_frames_for_explicit_targets,
+        score_from_interval_records_for_explicit_targets,
     };
 }

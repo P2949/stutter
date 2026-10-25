@@ -250,6 +250,7 @@ fn cpu_affinity_suggestion_preserves_apply_profile_and_does_not_write_plan_file(
             profile_name: "game".to_owned(),
             profile,
             tree_pid: 1234,
+            objective: crate::autotune::objective::ObjectiveKind::StutterScore,
         },
     };
     let records = vec![CandidateDryRunRecord {
@@ -336,6 +337,7 @@ fn cpu_affinity_candidate_plan_file_is_manual_only_with_stable_rejection() {
                 }],
             },
             tree_pid: 1234,
+            objective: crate::autotune::objective::ObjectiveKind::StutterScore,
         },
     };
     let plan_path = candidate_plan_path(&candidate, &plan_dir);

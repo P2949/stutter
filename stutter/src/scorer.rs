@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{autotune::state::SituationKind, metrics::IntervalRecord, process_tree::TaskClass};
+use crate::{
+    autotune::state::SituationKind, metrics::IntervalRecord,
+    process::explicit_target::class_for_explicit_target, process_tree::TaskClass,
+};
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct StutterScore {
@@ -137,6 +140,44 @@ pub fn frame_time_percentile_ms(
         .saturating_sub(1)
         .min(times.len() - 1);
     Some(times[index])
+}
+
+/// Reclassifies the generic-class tasks of explicitly named processes as the target, so a named
+/// workload that is not a known game still counts. Specialised classes and unrelated processes
+/// are unchanged, and with no named process the records are returned as recorded.
+pub fn records_for_explicit_targets(
+    records: &[IntervalRecord],
+    explicit_pids: &[u32],
+) -> Vec<IntervalRecord> {
+    records
+        .iter()
+        .cloned()
+        .map(|mut record| {
+            let named = record
+                .process_pid
+                .is_some_and(|pid| explicit_pids.contains(&pid));
+            record.class = class_for_explicit_target(record.class, named);
+            record
+        })
+        .collect()
+}
+
+pub fn score_from_interval_records_for_explicit_targets(
+    records: &[IntervalRecord],
+    explicit_pids: &[u32],
+) -> StutterScore {
+    score_from_interval_records(&records_for_explicit_targets(records, explicit_pids))
+}
+
+pub fn score_from_interval_records_and_frames_for_explicit_targets(
+    records: &[IntervalRecord],
+    frames: &[crate::recorder::FrameEvent],
+    explicit_pids: &[u32],
+) -> StutterScore {
+    score_from_interval_records_and_frames(
+        &records_for_explicit_targets(records, explicit_pids),
+        frames,
+    )
 }
 
 #[cfg(test)]
@@ -458,5 +499,72 @@ mod tests {
 
         record.class = TaskClass::Compositor;
         assert_eq!(score_from_interval_records(&[record]).total, 0);
+    }
+}
+
+#[cfg(test)]
+mod explicit_target_tests {
+    use super::*;
+
+    fn record(pid: u32, class: TaskClass, over_5ms: u64) -> IntervalRecord {
+        IntervalRecord {
+            elapsed_ms: 0,
+            task: 1,
+            active: true,
+            class,
+            comm: String::new(),
+            process_pid: Some(pid),
+            process_comm: String::new(),
+            samples: 1,
+            stored_samples: 1,
+            truncated_samples: 0,
+            min_ns: 0,
+            avg_ns: 0,
+            p95_ns: 0,
+            p99_ns: 0,
+            max_ns: 6_000_000,
+            over_1ms: 0,
+            over_2ms: 0,
+            over_5ms,
+            busiest_cpu: None,
+            busiest_cpu_samples: 0,
+            worst_cpu: None,
+            worst_cpu_max_ns: 0,
+            ..IntervalRecord::default()
+        }
+    }
+
+    #[test]
+    fn a_generic_task_of_the_named_process_counts_as_the_target() {
+        let records = [record(10, TaskClass::Service, 2)];
+        assert_eq!(score_from_interval_records(&records).total, 0);
+        assert_eq!(
+            score_from_interval_records_for_explicit_targets(&records, &[10]).total,
+            200
+        );
+    }
+
+    #[test]
+    fn specialised_classes_and_other_processes_are_unchanged() {
+        let records = [
+            record(10, TaskClass::Compositor, 3),
+            record(11, TaskClass::Service, 4),
+        ];
+        assert_eq!(
+            score_from_interval_records_for_explicit_targets(&records, &[10]),
+            score_from_interval_records(&records)
+        );
+    }
+
+    #[test]
+    fn without_a_named_target_the_historical_score_is_unchanged() {
+        let records = [
+            record(10, TaskClass::Service, 2),
+            record(11, TaskClass::Game, 1),
+        ];
+        assert_eq!(
+            score_from_interval_records_for_explicit_targets(&records, &[]),
+            score_from_interval_records(&records)
+        );
     }
 }

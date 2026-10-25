@@ -154,11 +154,12 @@ pub(crate) fn evaluate_proposal_static(
         ));
     }
 
-    if !workload_policy.allows_objective(proposal.objective) {
+    if !workload_policy.allows_objective(proposal.candidate.objective()) {
         deny_reasons.push(CandidateDenyReason::ObjectiveNotAllowedForWorkload);
         deny_messages.push(format!(
             "workload policy for {:?} does not allow objective {:?}",
-            input.observation.primary_situation, proposal.objective
+            input.observation.primary_situation,
+            proposal.candidate.objective()
         ));
     }
 
@@ -348,7 +349,7 @@ pub(crate) fn evaluate_proposal_static(
         deny_reasons,
         deny_messages,
         evidence,
-        objective: proposal.objective,
+        objective: proposal.candidate.objective(),
         rank: Some(rank_with_workload_memory(
             proposal.rank_hint,
             input

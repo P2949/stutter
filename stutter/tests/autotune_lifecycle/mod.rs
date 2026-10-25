@@ -345,7 +345,6 @@ impl CandidateProvider for StaticCandidateProvider {
             provider: self.family(),
             confidence: 1.0,
             deny_reasons: Vec::new(),
-            objective: ObjectiveKind::GameRunnableLatency,
             rank_hint: 0,
         }]
     }

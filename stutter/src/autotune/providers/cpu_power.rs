@@ -108,7 +108,6 @@ impl CandidateProvider for CpuPowerProvider {
             provider: self.family(),
             confidence,
             deny_reasons: Vec::new(),
-            objective,
             rank_hint: 80,
         }]
     }

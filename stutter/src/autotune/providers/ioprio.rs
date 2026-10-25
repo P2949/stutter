@@ -97,7 +97,6 @@ impl CandidateProvider for IoPrioProvider {
             provider: self.family(),
             confidence: input.observation.situation.confidence,
             deny_reasons: target_selection_denies,
-            objective: ObjectiveKind::IoLatency,
             rank_hint: 20,
         }]
     }

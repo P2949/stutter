@@ -110,7 +110,6 @@ impl CandidateProvider for IrqAffinityProvider {
             provider: self.family(),
             confidence: irq_confidence(input, &evidence_model),
             deny_reasons: Vec::new(),
-            objective: ObjectiveKind::IrqOverlapReduction,
             rank_hint: 60,
         }]
     }
