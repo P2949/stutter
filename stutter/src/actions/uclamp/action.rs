@@ -82,6 +82,90 @@ impl UclampAction {
         })
     }
 
+    /// Original-value records for every target that really changes, each bound to the observed
+    /// task identity. `require_identity` demands a start time so a recycled TID cannot match.
+    fn plan_records(
+        &self,
+        proc_root: &Path,
+        policy: &UclampPolicy,
+        require_identity: bool,
+    ) -> anyhow::Result<Vec<(UclampRestoreRecord, UclampCurrentValues)>> {
+        let snapshots = self.collect_target_snapshots_at(proc_root, policy)?;
+        let mut plan = Vec::new();
+        for (snapshot, _) in snapshots {
+            if require_identity {
+                anyhow::ensure!(
+                    snapshot.starttime_ticks.is_some() && snapshot.process_pid.is_some(),
+                    "uclamp target tid={} lacks a complete task identity",
+                    snapshot.tid
+                );
+            }
+            if !requested_values_differ(self.values, snapshot.current) {
+                continue;
+            }
+            let identity = TaskRestoreIdentity::observed(
+                snapshot.tid,
+                snapshot.process_pid,
+                snapshot.comm.clone(),
+                snapshot.starttime_ticks,
+                snapshot.exe.clone(),
+            );
+            let requested = UclampCurrentValues {
+                sched_util_min: self.values.requested_min_or(snapshot.current),
+                sched_util_max: self.values.requested_max_or(snapshot.current),
+            };
+            plan.push((
+                UclampRestoreRecord::new(
+                    identity,
+                    snapshot.current.sched_util_min,
+                    snapshot.current.sched_util_max,
+                ),
+                requested,
+            ));
+        }
+        Ok(plan)
+    }
+
+    pub(crate) fn apply_prepared_at(
+        &self,
+        proc_root: &Path,
+        policy: &UclampPolicy,
+        before_mutation: &mut dyn FnMut(&RollbackToken) -> anyhow::Result<()>,
+    ) -> ApplyResult {
+        let plan = self.plan_records(proc_root, policy, true)?;
+        let token = uclamp_token(&plan);
+        // The identity-complete original values are durable before the first write.
+        before_mutation(&token)?;
+        // Anything that moved between preparation and commit means the snapshot no longer
+        // describes the host; abort with zero writes rather than restore a stale value.
+        let current = self.plan_records(proc_root, policy, true)?;
+        if !current
+            .iter()
+            .map(|(record, _)| record)
+            .eq(plan.iter().map(|(record, _)| record))
+        {
+            return Err(anyhow::anyhow!(
+                "uclamp target drifted between preparation and commit; nothing was written"
+            )
+            .into());
+        }
+        self.apply_plan(plan)
+    }
+
+    fn apply_plan(&self, plan: Vec<(UclampRestoreRecord, UclampCurrentValues)>) -> ApplyResult {
+        crate::actions::transaction::ApplyTransaction::new().apply_planned_loop(
+            plan,
+            |(record, requested)| {
+                set_task_uclamp(record.tid(), *requested).map_err(|e| {
+                    e.context(format!("failed to set uclamp for tid={}", record.tid()))
+                })
+            },
+            |records| RollbackToken::UclampRestore {
+                records: records.into_iter().map(|(record, _)| record).collect(),
+            },
+        )
+    }
+
     fn collect_target_snapshots_at(
         &self,
         proc_root: &Path,
@@ -147,54 +231,23 @@ impl TuningAction for UclampAction {
     }
 
     fn apply(&self) -> ApplyResult {
-        (|| {
-            let policy = UclampPolicy::default();
-            let snapshots = self.collect_target_snapshots_at(Path::new("/proc"), &policy)?;
-            let filtered_snapshots: Vec<_> = snapshots
-                .into_iter()
-                .filter(|(snapshot, _)| requested_values_differ(self.values, snapshot.current))
-                .collect();
+        let plan = self.plan_records(Path::new("/proc"), &UclampPolicy::default(), false)?;
+        self.apply_plan(plan)
+    }
 
-            let records = filtered_snapshots
-                .into_iter()
-                .map(|(snapshot, _)| {
-                    let identity = TaskRestoreIdentity::observed(
-                        snapshot.tid,
-                        snapshot.process_pid,
-                        snapshot.comm.clone(),
-                        snapshot.starttime_ticks,
-                        snapshot.exe.clone(),
-                    );
+    fn prepared_before_mutation(&self) -> bool {
+        true
+    }
 
-                    let requested = UclampCurrentValues {
-                        sched_util_min: self.values.requested_min_or(snapshot.current),
-                        sched_util_max: self.values.requested_max_or(snapshot.current),
-                    };
-
-                    (
-                        UclampRestoreRecord::new(
-                            identity,
-                            snapshot.current.sched_util_min,
-                            snapshot.current.sched_util_max,
-                        ),
-                        requested,
-                    )
-                })
-                .collect::<Vec<_>>();
-
-            let tx = crate::actions::transaction::ApplyTransaction::new();
-            tx.apply_planned_loop(
-                records,
-                |(record, requested)| {
-                    set_task_uclamp(record.tid(), *requested).map_err(|e| {
-                        e.context(format!("failed to set uclamp for tid={}", record.tid()))
-                    })
-                },
-                |records| RollbackToken::UclampRestore {
-                    records: records.into_iter().map(|(record, _)| record).collect(),
-                },
-            )
-        })()
+    fn apply_with_prepared_rollback(
+        &self,
+        before_mutation: &mut dyn FnMut(&RollbackToken) -> anyhow::Result<()>,
+    ) -> ApplyResult {
+        self.apply_prepared_at(
+            Path::new("/proc"),
+            &UclampPolicy::default(),
+            before_mutation,
+        )
     }
 
     fn verify(&self) -> anyhow::Result<ActionState> {
@@ -282,6 +335,12 @@ impl TuningAction for UclampAction {
         Ok(())
     }
 }
+fn uclamp_token(plan: &[(UclampRestoreRecord, UclampCurrentValues)]) -> RollbackToken {
+    RollbackToken::UclampRestore {
+        records: plan.iter().map(|(record, _)| record.clone()).collect(),
+    }
+}
+
 fn requested_values_differ(values: UclampValues, current: UclampCurrentValues) -> bool {
     values
         .sched_util_min

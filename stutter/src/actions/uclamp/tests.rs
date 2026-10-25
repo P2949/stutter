@@ -381,3 +381,54 @@ fn rollback_token_reports_affected_tasks() {
     assert_eq!(token.affected_tasks(), 2);
     assert!(token.restore_path().is_none());
 }
+
+fn run_prepared(
+    proc_root: &Path,
+    action: &UclampAction,
+    hook: &mut dyn FnMut(&RollbackToken) -> anyhow::Result<()>,
+) -> crate::actions::ApplyResult {
+    action.apply_prepared_at(proc_root, &UclampPolicy::default(), hook)
+}
+
+#[test]
+fn prepared_hook_sees_every_original_value_with_full_identity_before_any_write() {
+    let root = temp_proc_root("prepared-hook");
+    write_fake_task(&root, 4242, "game-thread", 12345, 0, 1024);
+    let mut seen = None;
+    // The hook rejects, so the (fake) task is never written; the token it saw is the snapshot.
+    let err = run_prepared(&root, &action_for(4242, Some(512), None), &mut |token| {
+        seen = Some(token.clone());
+        anyhow::bail!("journal refused")
+    })
+    .unwrap_err();
+    assert!(format!("{:#}", err.source).contains("journal refused"));
+    assert!(err.rollback.is_none());
+    let token = seen.expect("hook invoked");
+    let records = token.as_uclamp_restore().expect("uclamp token");
+    assert_eq!(records.len(), 1);
+    assert_eq!(
+        (records[0].original_util_min, records[0].original_util_max),
+        (0, 1024)
+    );
+    assert_eq!(records[0].restore_identity().starttime_ticks, Some(12345));
+}
+
+#[test]
+fn prepared_apply_aborts_without_writing_when_a_target_drifts_after_preparation() {
+    let root = temp_proc_root("prepared-drift");
+    write_fake_task(&root, 4343, "game-thread", 12345, 0, 1024);
+    let root_for_hook = root.clone();
+    let err = run_prepared(&root, &action_for(4343, Some(512), None), &mut |_| {
+        // Another actor changes the clamp after the snapshot became durable.
+        write_fake_task(&root_for_hook, 4343, "game-thread", 12345, 100, 1024);
+        Ok(())
+    })
+    .unwrap_err();
+    assert!(format!("{:#}", err.source).contains("drifted"));
+    assert!(err.rollback.is_none());
+}
+
+#[test]
+fn prepared_apply_is_declared_prepared() {
+    assert!(action_for(1, Some(1), None).prepared_before_mutation());
+}
