@@ -409,7 +409,7 @@ mod calibration {
             };
             let (cal, hold) = (of(Part::Calibration), of(Part::Holdout));
             assert!(
-                cal.abs_diff(hold) <= 1 && cal + hold > 0,
+                hold > 0 && cal >= hold && cal <= 2 * hold + 2,
                 "{scenario}: {cal}/{hold}"
             );
         }

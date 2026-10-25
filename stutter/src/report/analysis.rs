@@ -5,6 +5,7 @@ mod correlation;
 mod density;
 mod diagnosis;
 mod display_path;
+mod explicit_target;
 mod foreground;
 mod format;
 mod frame;
@@ -102,6 +103,14 @@ pub(crate) fn build_report_analysis_from_input_with_config(
     artifacts.load_correlations(windows)?;
 
     let mut cluster_analysis = cluster_analysis;
+    let explicit: Vec<u32> = session
+        .config
+        .tree_roots
+        .iter()
+        .chain(&session.config.manual_pids)
+        .copied()
+        .collect();
+    explicit_target::promote_explicit_targets(&mut cluster_analysis.clusters, &explicit);
     perform_diagnosis_with_config(
         &mut cluster_analysis.clusters,
         &artifacts,
