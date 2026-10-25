@@ -141,13 +141,12 @@ fn a_contract_authorises_exactly_its_tuple() {
     other_workload.situation = SituationKind::CompileCpuBound;
     let mut other_pressure = affinity();
     other_pressure.situation = SituationKind::GameGpuBound;
-    for denied in [
-        other_operation,
-        other_objective,
-        other_scope,
-        other_workload,
-        other_pressure,
-    ] {
+    // Another operation is refused for lacking a prepared transaction before the registry is read.
+    assert_eq!(
+        autonomous_apply_gate_with(&other_operation, facts(&contracts)),
+        Err(AutonomousDenial::PreparedTransactionMissing)
+    );
+    for denied in [other_objective, other_scope, other_workload, other_pressure] {
         assert_eq!(
             autonomous_apply_gate_with(&denied, facts(&contracts)),
             Err(AutonomousDenial::NotInSupportRegistry),
@@ -242,5 +241,22 @@ fn an_override_cannot_exercise_an_experimental_objective() {
         Err(AutonomousDenial::ObjectiveNotSupported(
             ObjectiveMaturity::Experimental
         ))
+    );
+}
+
+#[test]
+fn an_operation_without_a_prepared_transaction_is_never_autonomous_even_when_registered() {
+    let uclamp = AutonomousContract {
+        operation: MutationOperationKind::Uclamp,
+        ..CONTRACT
+    };
+    let contracts = [uclamp];
+    let gated = input(
+        MutationOperationKind::Uclamp,
+        ObjectiveKind::GameRunnableLatency,
+    );
+    assert_eq!(
+        autonomous_apply_gate_with(&gated, facts(&contracts)),
+        Err(AutonomousDenial::PreparedTransactionMissing)
     );
 }

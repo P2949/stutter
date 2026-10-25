@@ -218,3 +218,24 @@ fn real_rejected_prepared_callback_never_mutates() {
     );
     assert!(path.is_file(), "retain original snapshot for inspection");
 }
+
+#[test]
+fn only_affinity_only_profiles_claim_the_prepared_transaction() {
+    let action = |nice: Option<i32>| CpuAffinityProfileAction {
+        restore_path: None,
+        tree_pid: 1,
+        force_restore_overwrite: false,
+        profile: crate::profiles::Profile {
+            name: "claim".into(),
+            rules: vec![crate::profiles::ProfileRule {
+                affinity: Some(crate::affinity::CpuMask::parse("0").unwrap()),
+                nice,
+                ionice: None,
+                match_class: vec![],
+                match_comm: vec![],
+            }],
+        },
+    };
+    assert!(action(None).prepared_before_mutation());
+    assert!(!action(Some(5)).prepared_before_mutation());
+}

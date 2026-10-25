@@ -209,3 +209,55 @@ fn operation_names_are_unique_and_round_trip_through_json() {
         );
     }
 }
+
+#[test]
+fn an_affinity_profile_that_also_changes_priority_is_not_the_graduated_operation() {
+    use crate::profiles::{Profile, ProfileRule};
+    let rule = |nice: Option<i32>| ProfileRule {
+        affinity: Some(crate::affinity::CpuMask::parse("0").unwrap()),
+        nice,
+        ionice: None,
+        match_class: Vec::new(),
+        match_comm: Vec::new(),
+    };
+    let affinity_only = CandidateAction::cpu_affinity_profile(
+        Profile {
+            name: "a".to_owned(),
+            rules: vec![rule(None)],
+        },
+        1,
+    );
+    let with_priority = CandidateAction::cpu_affinity_profile(
+        Profile {
+            name: "b".to_owned(),
+            rules: vec![rule(Some(5))],
+        },
+        1,
+    );
+    assert_eq!(
+        affinity_only.operation_kind(),
+        MutationOperationKind::CpuAffinityProfile
+    );
+    assert_eq!(
+        with_priority.operation_kind(),
+        MutationOperationKind::Unclassified
+    );
+}
+
+#[test]
+fn only_operations_with_a_prepared_transaction_can_be_registered() {
+    use crate::autotune::autonomous_support::AUTONOMOUS_CONTRACTS;
+    for contract in AUTONOMOUS_CONTRACTS {
+        assert!(
+            contract.operation.prepared_transaction_implemented(),
+            "{contract:?}"
+        );
+    }
+    for operation in MutationOperationKind::ALL {
+        assert_eq!(
+            operation.prepared_transaction_implemented(),
+            operation == MutationOperationKind::CpuAffinityProfile,
+            "{operation:?}"
+        );
+    }
+}

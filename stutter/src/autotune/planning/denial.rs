@@ -37,6 +37,7 @@ pub enum CandidateDenyReason {
     ObjectiveAutonomousApplyNotAllowed,
     /// The product capability or autonomous support registry does not cover the operation.
     CapabilityTierNotSupported,
+    PreparedTransactionMissing,
     NotInSupportRegistry,
     /// Unclassified or manual-only operations are never autonomous.
     OperationNotAutonomous,
@@ -78,6 +79,7 @@ impl CandidateDenyReason {
             Self::ObjectiveNotSupported => "objective_not_supported",
             Self::ObjectiveAutonomousApplyNotAllowed => "objective_autonomous_apply_not_allowed",
             Self::CapabilityTierNotSupported => "capability_tier_not_supported",
+            Self::PreparedTransactionMissing => "prepared_transaction_missing",
             Self::NotInSupportRegistry => "operation_not_in_support_registry",
             Self::OperationNotAutonomous => "operation_not_autonomous",
             Self::ObjectiveSignalMissing => "objective_signal_missing",
