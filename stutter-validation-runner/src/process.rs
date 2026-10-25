@@ -82,6 +82,7 @@ pub fn plan_live_suite(
         attempt,
         seconds,
         rounds,
+        benefit,
     } = &envelope.body
     else {
         return Err((
@@ -107,6 +108,21 @@ pub fn plan_live_suite(
     }
     if let Some(rounds) = rounds {
         args.extend(["--rounds".to_owned(), rounds.to_string()]);
+    }
+    if let Some(spec) = benefit {
+        args.extend([
+            "--scenario".to_owned(),
+            spec.scenario.as_str().to_owned(),
+            "--pair".to_owned(),
+            spec.pair.to_string(),
+            "--order".to_owned(),
+            if spec.baseline_first {
+                "baseline-first"
+            } else {
+                "candidate-first"
+            }
+            .to_owned(),
+        ]);
     }
     Ok(PlannedCommand {
         program: xtask_path(auth),

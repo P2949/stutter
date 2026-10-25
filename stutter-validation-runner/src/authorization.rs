@@ -181,6 +181,7 @@ impl Authorization {
                 attempt,
                 seconds,
                 rounds,
+                benefit,
             } => {
                 if *attempt == 0 || *attempt > 9_999 {
                     return invalid("attempt must be within 1..=9999");
@@ -196,6 +197,14 @@ impl Authorization {
                 }
                 if rounds.is_some_and(|r| !(6..=48).contains(&r)) {
                     return invalid("rounds must be within 6..=48");
+                }
+                match (suite, benefit) {
+                    (LiveSuite::AffinityBenefit, Some(spec)) if spec.pair <= 9_999 => {}
+                    (LiveSuite::AffinityBenefit, _) => {
+                        return invalid("the benefit suite needs a benefit spec with pair <= 9999");
+                    }
+                    (_, Some(_)) => return invalid("only the benefit suite takes a benefit spec"),
+                    (_, None) => {}
                 }
                 Ok(())
             }

@@ -14,6 +14,19 @@ pub use game_runnable_latency::{
 pub use runnable_signal::runnable_signals_for_target;
 
 /// Why the direct runnable-latency signal is unusable for the objective, if it is.
+/// Why the baseline window cannot yet support the objective's decision, when the objective needs a
+/// direct population (a measured runnable-latency histogram with enough samples). An experiment
+/// started on such a baseline could never conclude, so planning waits instead.
+pub fn baseline_unavailable_reason(
+    kind: ObjectiveKind,
+    signals: &ObjectiveSignals,
+) -> Option<String> {
+    match kind {
+        ObjectiveKind::GameRunnableLatency => game_runnable_unavailable_reason(signals),
+        _ => None,
+    }
+}
+
 pub fn game_runnable_unavailable_reason(signals: &ObjectiveSignals) -> Option<String> {
     game_runnable_latency::unavailable_reason(signals)
 }
@@ -22,7 +35,7 @@ mod game_frame_pacing;
 mod game_runnable_latency;
 mod io_latency;
 mod irq_overlap;
-mod runnable_signal;
+pub(crate) mod runnable_signal;
 mod stutter_score;
 mod thermal;
 

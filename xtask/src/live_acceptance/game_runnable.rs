@@ -133,7 +133,7 @@ pub(super) enum Contention {
     Burst(u64),
 }
 
-fn spawn_contenders(
+pub(super) fn spawn_contenders(
     cpu: u32,
     seconds: u64,
     dir: &Path,

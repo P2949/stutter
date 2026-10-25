@@ -1,4 +1,3 @@
-//! The privilege surface of a mutation campaign: which typed runner actions each stage may
 //! request. Derived from the operation's manifest section; nothing is chosen by a prompt.
 use std::{collections::BTreeSet, path::Path};
 
@@ -21,19 +20,20 @@ pub fn grants(operation: &OperationSection) -> BTreeSet<TaskGrant> {
             });
         }
     }
-    // The benefit harness takes real recordings and applies controlled scheduler contention.
-    for stage in [Stage::BenefitCalibration, Stage::BenefitHoldout] {
-        for action in [
-            RunnerAction::ExecuteSchedulerBurst,
-            RunnerAction::ExecuteRecording,
-        ] {
-            grants.insert(TaskGrant {
-                task_id: stage.as_str().to_owned(),
-                action,
-                suite: None,
-            });
-        }
-    }
+    // The benefit stage measures its pairs with the benefit suite, nothing else. The holdout
+    // stage reads the stored pairs and needs no privilege.
+    grants.insert(TaskGrant {
+        task_id: Stage::BenefitCalibration.as_str().to_owned(),
+        action: RunnerAction::ExecuteLiveSuite,
+        suite: Some(LiveSuite::AffinityBenefit),
+    });
+    // Its controlled scheduler contention is requested as a typed burst, never started by the
+    // suite itself with privilege.
+    grants.insert(TaskGrant {
+        task_id: Stage::BenefitCalibration.as_str().to_owned(),
+        action: RunnerAction::ExecuteSchedulerBurst,
+        suite: None,
+    });
     for action in [
         RunnerAction::Status,
         RunnerAction::ResumeCampaign,
@@ -91,7 +91,12 @@ mod tests {
             .iter()
             .filter(|g| g.action == RunnerAction::ExecuteLiveSuite)
             .collect();
-        assert_eq!(live.len(), 2);
+        assert_eq!(live.len(), 3);
+        assert!(grants.contains(&TaskGrant {
+            task_id: "benefit_calibration".to_owned(),
+            action: RunnerAction::ExecuteLiveSuite,
+            suite: Some(LiveSuite::AffinityBenefit),
+        }));
         assert!(grants.contains(&TaskGrant {
             task_id: "mechanical_apply_verify_rollback".to_owned(),
             action: RunnerAction::ExecuteLiveSuite,

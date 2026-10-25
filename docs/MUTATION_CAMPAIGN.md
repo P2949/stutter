@@ -62,3 +62,25 @@ followed by `--campaign <dir> --resume`) from that kind alone; there is no calle
 The grants name each stage's live suite, the recording and scheduler-burst actions the benefit
 stages use, and campaign status/resume/cancel. A mutation campaign is never granted a reboot or a
 boot-entry change.
+
+## The CPU-affinity benefit harness
+
+Each pair is one live experiment through the production controller, requested from the runner as
+the `affinity-benefit` live suite (typed `BenefitSpec`: scenario, pair, order):
+
+1. a disposable game-like process tree (installed under `steamapps/common/` so the production
+   classifier recognises it) runs on CPU `c0`;
+2. controlled `SCHED_FIFO` contention holds a CPU for part of every 20 ms; the scenario decides
+   where: **beneficial** contends `c0` only, **neutral** contends both CPUs equally, **regression**
+   contends the destination much harder than the origin. The pair order swaps which of the two
+   physical CPUs plays `c0`, which counterbalances CPU identity;
+3. the real `autotune apply-low-risk` session observes the target, classifies the situation from
+   direct telemetry, asks the affinity provider for a candidate, plans (exact-scope validation
+   override only), applies it for real, measures the target's runnable-latency histogram again and
+   keeps or reverts by `GameRunnableLatency`;
+4. the populations the objective compared are read back from the typed `objective_evidence` in the
+   controller's own history, so thresholds can be swept offline over the stored pairs.
+
+The controller waits for a baseline the objective can decide on (a direct population with at least
+1000 runnable samples) before it starts an experiment, and an explicit `--tree-pid` target whose
+tasks are a game is the focused workload without any desktop focus inference.

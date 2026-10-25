@@ -7,6 +7,7 @@ pub mod benefit_stage;
 pub mod decision;
 pub mod driver;
 pub mod graph;
+pub mod harness;
 pub mod inspect;
 pub mod manifest;
 pub mod model;
