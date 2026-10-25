@@ -256,7 +256,10 @@ fn only_operations_with_a_prepared_transaction_can_be_registered() {
     for operation in MutationOperationKind::ALL {
         assert_eq!(
             operation.prepared_transaction_implemented(),
-            operation == MutationOperationKind::CpuAffinityProfile,
+            matches!(
+                operation,
+                MutationOperationKind::CpuAffinityProfile | MutationOperationKind::Uclamp
+            ),
             "{operation:?}"
         );
     }

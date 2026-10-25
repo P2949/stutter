@@ -132,7 +132,7 @@ fn a_supported_tuple_passes_only_with_every_condition() {
 fn a_contract_authorises_exactly_its_tuple() {
     let contracts = [CONTRACT];
     let mut other_operation = affinity();
-    other_operation.operation = MutationOperationKind::Uclamp;
+    other_operation.operation = MutationOperationKind::Nice;
     let mut other_objective = affinity();
     other_objective.objective = ObjectiveKind::StutterScore;
     let mut other_scope = affinity();
@@ -246,13 +246,13 @@ fn an_override_cannot_exercise_an_experimental_objective() {
 
 #[test]
 fn an_operation_without_a_prepared_transaction_is_never_autonomous_even_when_registered() {
-    let uclamp = AutonomousContract {
-        operation: MutationOperationKind::Uclamp,
+    let nice = AutonomousContract {
+        operation: MutationOperationKind::Nice,
         ..CONTRACT
     };
-    let contracts = [uclamp];
+    let contracts = [nice];
     let gated = input(
-        MutationOperationKind::Uclamp,
+        MutationOperationKind::Nice,
         ObjectiveKind::GameRunnableLatency,
     );
     assert_eq!(

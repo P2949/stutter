@@ -52,7 +52,7 @@ const AFFINITY: &[&str] = &[
     "live_affinity_benefit",
 ];
 
-pub const CAPABILITIES: [Capability; 17] = [
+pub const CAPABILITIES: [Capability; 20] = [
     obs(
         "doctor",
         "Local preflight checks",
@@ -132,15 +132,48 @@ pub const CAPABILITIES: [Capability; 17] = [
         limitations: "Supported autonomous apply only for a stable, explicitly identified game under scheduler pressure, judged by its own runnable latency (GameRunnableLatency); every other workload, pressure or objective stays suggest-only or manual. Low-risk, per-process-tree scope.",
     },
     Capability {
-        id: "process_priority_and_placement",
-        title: "nice, ioprio, uclamp and cgroup placement",
+        id: "uclamp_experiment",
+        title: "Per-task utilisation clamps (uclamp)",
         class: CapabilityClass::Mutating,
         tier: CapabilityTier::Experimental,
         target_tier: CapabilityTier::Experimental,
         commands: &["autotune"],
-        providers: &["nice", "ionice", "uclamp", "cgroup_placement"],
+        providers: &["uclamp"],
         required_evidence: &[],
-        limitations: "Medium-risk; does not inherit CPU-affinity maturity.",
+        limitations: "Medium-risk; evaluated by its own graduation campaign and does not inherit CPU-affinity maturity.",
+    },
+    Capability {
+        id: "nice_experiment",
+        title: "Process niceness (nice)",
+        class: CapabilityClass::Mutating,
+        tier: CapabilityTier::Experimental,
+        target_tier: CapabilityTier::Experimental,
+        commands: &["autotune"],
+        providers: &["nice"],
+        required_evidence: &[],
+        limitations: "Medium-risk; evaluated by its own graduation campaign and does not inherit CPU-affinity maturity.",
+    },
+    Capability {
+        id: "ioprio_experiment",
+        title: "I/O priority (ionice)",
+        class: CapabilityClass::Mutating,
+        tier: CapabilityTier::Experimental,
+        target_tier: CapabilityTier::Experimental,
+        commands: &["autotune"],
+        providers: &["ionice"],
+        required_evidence: &[],
+        limitations: "Medium-risk; evaluated by its own graduation campaign and does not inherit CPU-affinity maturity.",
+    },
+    Capability {
+        id: "cgroup_placement_experiment",
+        title: "cgroup placement",
+        class: CapabilityClass::Mutating,
+        tier: CapabilityTier::Experimental,
+        target_tier: CapabilityTier::Experimental,
+        commands: &["autotune"],
+        providers: &["cgroup_placement"],
+        required_evidence: &[],
+        limitations: "Medium-risk; evaluated by its own graduation campaign and does not inherit CPU-affinity maturity.",
     },
     Capability {
         id: "system_wide_tuning",

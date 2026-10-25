@@ -213,6 +213,14 @@ impl OperationSection {
                 );
             }
         }
+        if let Some(mutation) = &self.mutation {
+            ensure!(
+                mutation
+                    .parse::<stutter::api::autotune::AcceptanceMutation>()
+                    .is_ok(),
+                "unknown acceptance mutation {mutation:?}"
+            );
+        }
         ensure!(
             (30..=600).contains(&self.suspend_wake_seconds),
             "suspend_wake_seconds must be within 30..=600"
