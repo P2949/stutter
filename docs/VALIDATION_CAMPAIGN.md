@@ -281,6 +281,10 @@ Any failed check of the marker falls back to the next mode. In the transient mod
 authorization sets `max_reboots = 0`: the multi-kernel stage reports `BLOCKED_RESOURCE` instead
 of rebooting into a machine that could not resume.
 
+`continue --only <task>` runs just that task when it is already ready (dependencies are never bypassed); a task
+waiting for a reboot is always resumed before any other pending task, so the machine returning from a
+kernel boot continues the kernel stage first.
+
 The resume service orders itself after, and requires, the runner (`After=`/`Requires=`), waits
 for the runner's socket (`resume --all --wait-for-runner 120`) before starting the controller,
 and uses `KillMode=process` so the detached controller outlives the oneshot unit. Both units are
