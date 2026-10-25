@@ -191,3 +191,47 @@ fn irq_affinity_restore_skips_when_irq_identity_changes() {
 
     fs::remove_dir_all(dir).ok();
 }
+
+#[test]
+fn verified_restore_skips_recycled_missing_and_unverifiable_tasks() {
+    let root =
+        std::env::temp_dir().join(format!("stutter-verified-restore-{}", std::process::id()));
+    let stat = |tid: u32, start: u64| {
+        let dir = root.join(tid.to_string());
+        fs::create_dir_all(&dir).unwrap();
+        // pid (comm) state ppid pgrp session tty tpgid flags minflt cminflt majflt cmajflt utime
+        // stime cutime cstime priority nice threads itrealvalue starttime
+        fs::write(
+            dir.join("stat"),
+            format!("{tid} (t) S 1 1 1 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 {start} 0 0\n"),
+        )
+        .unwrap();
+        fs::write(dir.join("status"), format!("Name:\tt\nTgid:\t{tid}\n")).unwrap();
+    };
+    stat(1, 100); // same task
+    stat(2, 999); // recycled: different start time
+    stat(4, 100); // identity lacks a start time
+    let identity = |tid: &u32| match *tid {
+        1 | 2 => TaskRestoreIdentity::observed(*tid, Some(*tid), None, Some(100), None),
+        3 => TaskRestoreIdentity::observed(*tid, Some(*tid), None, Some(100), None), // exited
+        _ => TaskRestoreIdentity::observed(*tid, Some(*tid), None, None, None),
+    };
+    let mut written = Vec::new();
+    let summary = restore_verified_task_records(
+        &root,
+        "test-restore",
+        &[1_u32, 2, 3, 4],
+        identity,
+        |tid| {
+            written.push(*tid);
+            Ok(())
+        },
+        |tid| format!("failed {tid}"),
+    )
+    .unwrap();
+    assert_eq!(written, vec![1]);
+    assert_eq!(summary.restored_items, 1);
+    assert_eq!(summary.skipped_missing, 1);
+    assert_eq!(summary.skipped_identity_mismatch, 2);
+    let _ = fs::remove_dir_all(&root);
+}
