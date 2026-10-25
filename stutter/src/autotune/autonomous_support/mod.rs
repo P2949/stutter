@@ -58,6 +58,22 @@ pub struct ValidationOverride {
     pub campaign_id: String,
 }
 
+impl ValidationOverride {
+    /// Whether this override is the campaign's own exact operation and objective, held by a local
+    /// caller. Only such a candidate may bypass the per-workload autonomous-family table: the
+    /// campaign is the evidence that decides whether the table may ever list it.
+    pub fn covers(
+        &self,
+        operation: MutationOperationKind,
+        objective: ObjectiveKind,
+        source: ActionSource,
+    ) -> bool {
+        source != ActionSource::RemoteAgent
+            && self.operation == operation
+            && self.objective == objective
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AutonomousGateInput<'a> {
     pub operation: MutationOperationKind,

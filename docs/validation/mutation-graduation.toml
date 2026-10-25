@@ -66,3 +66,49 @@ regression = "affinity-colocated"
 min_improvement_percent = [10.0, 12.5, 15.0, 20.0, 25.0, 30.0, 40.0]
 max_regression_percent = [5.0, 7.5, 10.0, 15.0]
 min_samples = [1000]
+
+[operation.uclamp]
+operation = "uclamp"
+objective = "game_runnable_latency"
+capability = "uclamp_experiment"
+workload = "game"
+pressure = "scheduler"
+effect_scope = "local_process_tree"
+# The fault matrix, mechanical lifecycle and benefit pair drive the uclamp mutation.
+mutation = "uclamp"
+# `uclamp.min` is raised on the game's own tasks. The user owning the disposable target may do that
+# unprivileged on this kernel, so the privileged-service path runs in-process.
+privileged_worker = false
+stages = [
+  "preflight",
+  "mechanical",
+  "fault_matrix",
+  "suspend_resume",
+  "benefit_calibration",
+  "benefit_holdout",
+  "evidence_integrate",
+  "tier_decision",
+]
+skip = [
+  { stage = "kernel_matrix", reason = "per-task utilisation clamps are a core scheduler interface present on every supported kernel; the core kernel matrix already covers the recorder on each of them" },
+]
+
+[operation.uclamp.suites]
+mechanical = "affinity"
+fault_matrix = "recovery"
+suspend_resume = "suspend-resume"
+
+[operation.uclamp.scenarios]
+# Uclamp has no placement to improve or worsen, so the three scenarios differ only in the
+# contention the game runs under; the frozen hypothesis is that a raised `uclamp.min` shortens the
+# game's runnable wait under scheduler pressure. Pre-registered: beneficial is the strongest case
+# (heavy burst contention on the game's CPU), neutral and regression repeat the quiet and the
+# colocated cases so a clamp that only adds noise is caught as a false keep.
+beneficial = "affinity-contended"
+neutral = "affinity-quiet"
+regression = "affinity-colocated"
+
+[operation.uclamp.thresholds]
+min_improvement_percent = [10.0, 12.5, 15.0, 20.0, 25.0, 30.0, 40.0]
+max_regression_percent = [5.0, 7.5, 10.0, 15.0]
+min_samples = [1000]
