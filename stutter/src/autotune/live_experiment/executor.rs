@@ -52,17 +52,40 @@ impl LiveExperimentActionExecutor for RuntimeLiveExperimentActionExecutor {
             let service = input
                 .privileged_action_service
                 .ok_or_else(|| anyhow::anyhow!("privileged_worker_required: apply-medium-risk requires a privileged action service"))?;
-            let result = service
-                .apply_candidate(CandidateApplyRequest {
-                    plan: CandidatePlanRequest::from_candidate(
-                        candidate.clone(),
-                        observation.now_unix_nanos,
-                    ),
-                    policy: input.daemon_policy.clone(),
-                    context: policy_context_for_runtime_apply(observation),
-                    max_plan_age_nanos: Duration::from_secs(30).as_nanos(),
+            let request = CandidateApplyRequest {
+                plan: CandidatePlanRequest::from_candidate(
+                    candidate.clone(),
+                    observation.now_unix_nanos,
+                ),
+                policy: input.daemon_policy.clone(),
+                context: policy_context_for_runtime_apply(observation),
+                max_plan_age_nanos: Duration::from_secs(30).as_nanos(),
+            };
+            let result = if candidate.operation_kind().prepared_transaction_implemented() {
+                // Prepare -> journal Applying(token) durably -> commit. The worker performs no write
+                // to the target until this journal write has succeeded.
+                let journal_path = super::journal::controller_journal_path(input);
+                service.apply_candidate_prepared(request, &mut |token| {
+                    crate::autotune::controller_journal::write_controller_journal_phase_with_metadata(
+                        &journal_path,
+                        crate::autotune::controller_journal::ControllerJournalState::Applying,
+                        crate::autotune::experiment::ExperimentId::try_new(experiment_id)?,
+                        candidate.action_id(),
+                        Some(token.clone()),
+                        super::journal::controller_journal_metadata_for_candidate(
+                            input,
+                            candidate,
+                            observation,
+                            Some(token.affected_tasks()),
+                            "rollback_prepared_before_mutation",
+                        ),
+                    )
+                    .map(|_| ())
                 })
-                .with_context(|| {
+            } else {
+                service.apply_candidate(request)
+            }
+            .with_context(|| {
                     format!(
                         "privileged apply failed for autotune candidate '{}'",
                         candidate.candidate_name()

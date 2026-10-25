@@ -97,6 +97,24 @@ pub enum PrivilegedWorkerError {
 
     #[error("privileged_apply_missing_rollback: privileged apply completed without rollback token")]
     MissingRollbackToken,
+
+    #[error(
+        "privileged_prepared_apply_unsupported: this privileged service has no two-phase apply"
+    )]
+    PreparedApplyUnsupported,
+
+    #[error(
+        "privileged_prepared_hook_not_invoked: the action mutated without reaching the commit barrier"
+    )]
+    PreparedHookNotInvoked,
+
+    #[error("privileged_commit_rejected: {reason}")]
+    CommitRejected { reason: String },
+
+    #[error(
+        "privileged_commit_expired: no commit frame arrived within {timeout_ms} ms of the prepare"
+    )]
+    CommitExpired { timeout_ms: u128 },
 }
 
 impl PrivilegedWorkerError {
@@ -128,6 +146,10 @@ impl PrivilegedWorkerError {
             Self::RefusingNonSocket { .. } => "privileged_worker_socket_refusing_non_socket",
             Self::EmptyRequest => "privileged_worker_empty_request",
             Self::MissingRollbackToken => "privileged_apply_missing_rollback",
+            Self::PreparedApplyUnsupported => "privileged_prepared_apply_unsupported",
+            Self::PreparedHookNotInvoked => "privileged_prepared_hook_not_invoked",
+            Self::CommitRejected { .. } => "privileged_commit_rejected",
+            Self::CommitExpired { .. } => "privileged_commit_expired",
         }
     }
 

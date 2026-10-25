@@ -108,6 +108,61 @@ impl PrivilegedActionService for UnixSocketPrivilegedActionService {
         }
     }
 
+    fn apply_candidate_prepared(
+        &self,
+        request: CandidateApplyRequest,
+        prepared: &mut PreparedHook<'_>,
+    ) -> anyhow::Result<ApplyResult> {
+        let mut stream = UnixStream::connect(self.socket_path()).with_context(|| {
+            format!(
+                "failed to connect to privileged worker socket {}",
+                self.socket_path().display()
+            )
+        })?;
+        send_frame(
+            &mut stream,
+            &PrivilegedWorkerRequest::ApplyPrepared {
+                plan: PrivilegedWorkerCandidatePlan::from_plan_request(&request.plan),
+                policy: request.policy,
+                context: request.context,
+                max_plan_age_nanos: request.max_plan_age_nanos,
+            },
+        )?;
+        let mut reader = BufReader::new(stream.try_clone()?);
+        let (token, digest) = match read_frame(&mut reader, self.socket_path())? {
+            PrivilegedWorkerResponse::Prepared {
+                rollback,
+                snapshot_digest,
+            } => (rollback, snapshot_digest),
+            response @ PrivilegedWorkerResponse::Error { .. } => return Err(response.into_error()),
+            other => return Err(unexpected_response_error(other)),
+        };
+        // The digest binds the commit to exactly this token; a worker that misreports it is refused.
+        // The caller's hook journals the token durably and only then may the worker mutate.
+        let decision: anyhow::Result<()> = if rollback_snapshot_digest(&token) == digest {
+            prepared(&token)
+        } else {
+            Err(PrivilegedWorkerError::CommitRejected {
+                reason: "the worker reported a snapshot digest that does not match its token"
+                    .to_owned(),
+            }
+            .into())
+        };
+        send_frame(
+            &mut stream,
+            &PrivilegedWorkerRequest::CommitPrepared {
+                commit: decision.is_ok(),
+                snapshot_digest: digest,
+            },
+        )?;
+        decision?;
+        match read_frame(&mut reader, self.socket_path())? {
+            PrivilegedWorkerResponse::Apply { result } => Ok(result),
+            response @ PrivilegedWorkerResponse::Error { .. } => Err(response.into_error()),
+            other => Err(unexpected_response_error(other)),
+        }
+    }
+
     fn rollback(&self, request: RollbackRequest) -> anyhow::Result<RollbackResult> {
         let response = self.call_worker(PrivilegedWorkerRequest::Rollback {
             plan: PrivilegedWorkerCandidatePlan::from_plan_request(
@@ -126,4 +181,36 @@ impl PrivilegedActionService for UnixSocketPrivilegedActionService {
             other => Err(unexpected_response_error(other)),
         }
     }
+}
+
+fn send_frame(stream: &mut UnixStream, request: &PrivilegedWorkerRequest) -> anyhow::Result<()> {
+    serde_json::to_writer(&mut *stream, request)?;
+    stream.write_all(b"\n")?;
+    stream.flush()?;
+    Ok(())
+}
+
+fn read_frame(
+    reader: &mut BufReader<UnixStream>,
+    socket_path: &Path,
+) -> anyhow::Result<PrivilegedWorkerResponse> {
+    let mut line = String::new();
+    reader.read_line(&mut line).with_context(|| {
+        format!(
+            "failed to read privileged worker response from {}",
+            socket_path.display()
+        )
+    })?;
+    if line.trim().is_empty() {
+        return Err(PrivilegedWorkerError::EmptyResponse {
+            socket_path: socket_path.to_path_buf(),
+        }
+        .into());
+    }
+    serde_json::from_str(&line).with_context(|| {
+        format!(
+            "failed to decode privileged worker response from {}",
+            socket_path.display()
+        )
+    })
 }

@@ -211,7 +211,12 @@ pub struct RollbackResult {
     pub affected_tasks: usize,
 }
 
-pub const PRIVILEGED_WORKER_IPC_SCHEMA_VERSION: u32 = 2;
+pub const PRIVILEGED_WORKER_IPC_SCHEMA_VERSION: u32 = 3;
+
+/// Binds a commit to the exact rollback token the worker prepared: the digest of its canonical JSON.
+pub fn rollback_snapshot_digest(token: &RollbackToken) -> String {
+    stutter_core::hash::sha256_hex(&serde_json::to_vec(token).unwrap_or_default())
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PrivilegedWorkerCandidatePlan {
@@ -333,13 +338,32 @@ pub enum PrivilegedWorkerRequest {
         policy: DaemonPolicy,
         context: DaemonPolicyContext,
     },
+    /// Two-phase apply. The worker prepares (policy, identity, original state, a durable restore
+    /// snapshot; zero writes to the target), answers `Prepared` and waits on the same connection for
+    /// one `CommitPrepared`. Only then does it perform the first mutable write.
+    ApplyPrepared {
+        plan: PrivilegedWorkerCandidatePlan,
+        policy: DaemonPolicy,
+        context: DaemonPolicyContext,
+        #[serde(with = "serde_u128_string")]
+        max_plan_age_nanos: u128,
+    },
+    /// The controller's answer to `Prepared`, valid only as the second frame of an `ApplyPrepared`
+    /// exchange. `commit: false` aborts with no mutation.
+    CommitPrepared {
+        commit: bool,
+        snapshot_digest: String,
+    },
     Shutdown,
 }
 
 impl PrivilegedWorkerRequest {
     pub(crate) fn operation(&self) -> PrivilegedOperation {
         match self {
-            Self::DryRun { .. } | Self::Apply { .. } => PrivilegedOperation::ApplyAction,
+            Self::DryRun { .. }
+            | Self::Apply { .. }
+            | Self::ApplyPrepared { .. }
+            | Self::CommitPrepared { .. } => PrivilegedOperation::ApplyAction,
             Self::Rollback { .. } => PrivilegedOperation::RollbackAction,
             Self::Shutdown => PrivilegedOperation::ControlDaemon,
         }
@@ -349,6 +373,8 @@ impl PrivilegedWorkerRequest {
         match self {
             Self::DryRun { .. } => "dry_run",
             Self::Apply { .. } => "apply",
+            Self::ApplyPrepared { .. } => "apply_prepared",
+            Self::CommitPrepared { .. } => "commit_prepared",
             Self::Rollback { .. } => "rollback",
             Self::Shutdown => "shutdown",
         }
@@ -357,7 +383,9 @@ impl PrivilegedWorkerRequest {
     pub(crate) fn policy_intent(&self) -> Option<PolicyIntent> {
         match self {
             Self::DryRun { .. } => Some(PolicyIntent::DryRun),
-            Self::Apply { .. } => Some(PolicyIntent::Apply),
+            Self::Apply { .. } | Self::ApplyPrepared { .. } | Self::CommitPrepared { .. } => {
+                Some(PolicyIntent::Apply)
+            }
             Self::Rollback { .. } => Some(PolicyIntent::Rollback),
             Self::Shutdown => None,
         }
@@ -365,10 +393,11 @@ impl PrivilegedWorkerRequest {
 
     pub(crate) fn descriptor(&self) -> Option<&ActionDescriptor> {
         match self {
-            Self::DryRun { plan, .. } | Self::Apply { plan, .. } | Self::Rollback { plan, .. } => {
-                Some(&plan.descriptor)
-            }
-            Self::Shutdown => None,
+            Self::DryRun { plan, .. }
+            | Self::Apply { plan, .. }
+            | Self::ApplyPrepared { plan, .. }
+            | Self::Rollback { plan, .. } => Some(&plan.descriptor),
+            Self::CommitPrepared { .. } | Self::Shutdown => None,
         }
     }
 }
@@ -381,6 +410,12 @@ pub enum PrivilegedWorkerResponse {
     },
     Apply {
         result: ApplyResult,
+    },
+    /// First answer of `ApplyPrepared`: the restore snapshot is durable on the worker side and
+    /// nothing has been mutated.
+    Prepared {
+        rollback: RollbackToken,
+        snapshot_digest: String,
     },
     Rollback {
         result: RollbackResult,

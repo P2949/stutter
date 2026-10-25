@@ -12,8 +12,14 @@ use std::{
 
 use anyhow::Context;
 
+#[cfg(test)]
 use crate::{
-    actions::runner::ActionRunPolicy,
+    actions::TaskIdentity,
+    autotune::planning::candidate::CandidateAction,
+    daemon_policy::{DaemonPolicy, DaemonPolicyContext},
+};
+use crate::{
+    actions::{RollbackToken, runner::ActionRunPolicy},
     autotune::{
         apply::{executor_for_apply_candidate, executor_for_candidate_preview},
         planning::{
@@ -22,12 +28,6 @@ use crate::{
         },
     },
     daemon_policy::{ActionDescriptor, PolicyIntent},
-};
-#[cfg(test)]
-use crate::{
-    actions::{RollbackToken, TaskIdentity},
-    autotune::planning::candidate::CandidateAction,
-    daemon_policy::{DaemonPolicy, DaemonPolicyContext},
 };
 
 mod allowlist;
@@ -46,6 +46,8 @@ pub use in_process::InProcessPrivilegedActionService;
 pub use model::*;
 pub(crate) use revalidate::revalidate_candidate_targets;
 pub use socket::UnixSocketPrivilegedActionService;
+#[cfg(test)]
+pub(crate) use worker::set_commit_timeout_for_tests;
 pub use worker::{
     PrivilegedWorkerHandle, default_privileged_worker_socket_path, run_privileged_worker,
     run_privileged_worker_with_service,
@@ -56,12 +58,26 @@ pub(crate) use worker::{
     wait_for_privileged_worker_socket_with_timing,
 };
 
+/// The commit barrier of a two-phase apply.
+pub type PreparedHook<'a> = dyn FnMut(&RollbackToken) -> anyhow::Result<()> + 'a;
+
 pub trait PrivilegedActionService: fmt::Debug + Send + Sync {
     fn dry_run_candidate(
         &self,
         request: CandidateApplyRequest,
     ) -> anyhow::Result<CandidateDryRunRecord>;
     fn apply_candidate(&self, request: CandidateApplyRequest) -> anyhow::Result<ApplyResult>;
+    /// Two-phase apply (see `PrivilegedWorkerRequest::ApplyPrepared`): `prepared` runs with the
+    /// durable rollback token after preparation and before the first mutable write; returning an
+    /// error aborts with no mutation.
+    fn apply_candidate_prepared(
+        &self,
+        request: CandidateApplyRequest,
+        prepared: &mut PreparedHook<'_>,
+    ) -> anyhow::Result<ApplyResult> {
+        let _ = (request, prepared);
+        Err(PrivilegedWorkerError::PreparedApplyUnsupported.into())
+    }
     fn rollback(&self, request: RollbackRequest) -> anyhow::Result<RollbackResult>;
 }
 
