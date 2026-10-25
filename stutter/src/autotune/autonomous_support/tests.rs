@@ -40,15 +40,54 @@ fn affinity() -> AutonomousGateInput<'static> {
 }
 
 #[test]
-fn nothing_is_supported_today_so_normal_autonomous_apply_fails_closed() {
-    assert!(AUTONOMOUS_CONTRACTS.is_empty());
+fn only_the_graduated_tuple_is_autonomous() {
+    assert_eq!(AUTONOMOUS_CONTRACTS.len(), 1);
     for operation in MutationOperationKind::ALL {
         for objective in ObjectiveKind::ALL {
-            assert!(
-                autonomous_apply_gate(&input(operation, objective)).is_err(),
-                "{operation:?} / {objective:?} must not be autonomous"
+            let allowed = autonomous_apply_gate(&input(operation, objective)).is_ok();
+            assert_eq!(
+                allowed,
+                operation == MutationOperationKind::CpuAffinityProfile
+                    && objective == ObjectiveKind::GameRunnableLatency,
+                "{operation:?} / {objective:?}"
             );
         }
+    }
+}
+
+#[test]
+fn the_graduated_tuple_does_not_extend_to_other_workloads_pressures_or_scopes() {
+    let granted = affinity();
+    assert_eq!(autonomous_apply_gate(&granted), Ok(()));
+    for other in [
+        SituationKind::GameFocused,
+        SituationKind::GameGpuBound,
+        SituationKind::CompileCpuBound,
+        SituationKind::BrowserCpuPressure,
+        SituationKind::CpuPressure,
+        SituationKind::Unknown,
+    ] {
+        let mut gated = granted;
+        gated.situation = other;
+        assert_eq!(
+            autonomous_apply_gate(&gated),
+            Err(AutonomousDenial::NotInSupportRegistry),
+            "{other:?}"
+        );
+    }
+    let mut wider = granted;
+    wider.effect_scope = ActionEffectScope::SystemWide;
+    assert_eq!(
+        autonomous_apply_gate(&wider),
+        Err(AutonomousDenial::NotInSupportRegistry)
+    );
+}
+
+#[test]
+fn registered_contracts_are_never_manual_operations_and_state_their_prerequisites() {
+    for contract in AUTONOMOUS_CONTRACTS {
+        assert!(!contract.operation.is_manual_only(), "{contract:?}");
+        assert!(!contract.prerequisites.is_empty(), "{contract:?}");
     }
 }
 
@@ -168,9 +207,22 @@ fn a_validation_override_authorises_exactly_one_operation_and_objective() {
     other_objective.validation_override = Some(&grant);
     assert!(autonomous_apply_gate(&other_objective).is_err());
 
-    let mut remote = exact;
+    // A remote caller never uses an override: for a tuple only an override could authorise (not the
+    // registered one) it is refused.
+    let uclamp_grant = ValidationOverride {
+        operation: MutationOperationKind::Uclamp,
+        objective: ObjectiveKind::GameRunnableLatency,
+        campaign_id: "mutation-campaign-1".to_owned(),
+    };
+    let mut remote = input(
+        MutationOperationKind::Uclamp,
+        ObjectiveKind::GameRunnableLatency,
+    );
     remote.source = ActionSource::RemoteAgent;
+    remote.validation_override = Some(&uclamp_grant);
     assert!(autonomous_apply_gate(&remote).is_err());
+    remote.source = ActionSource::AutotuneRuntime;
+    assert_eq!(autonomous_apply_gate(&remote), Ok(()));
 }
 
 #[test]

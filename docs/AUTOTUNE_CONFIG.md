@@ -255,8 +255,9 @@ policy, health and conflict check above:
 3. an exact contract for the operation, workload, pressure, objective and effect scope exists
    in `stutter/src/autotune/autonomous_support/`.
 
-The registry is empty until an operation completes its graduation campaign, so normal
-autonomous apply is denied with the stable reason codes `objective_not_supported`,
+The registry holds only operations that completed a graduation campaign (today: CPU affinity for a
+stable game under scheduler pressure, judged by `GameRunnableLatency`). Everything else is denied with
+the stable reason codes `objective_not_supported`,
 `capability_tier_not_supported`, `operation_not_in_support_registry` or
 `operation_not_autonomous`. Suggest and benchmark modes are unaffected. A validation campaign
 may hold an override for exactly one operation and objective; it never authorises other

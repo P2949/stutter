@@ -44,13 +44,13 @@ supported = [
     "report",
     "audit",
     "completions_and_man",
+    "cpu_affinity_experiment",
 ]
 experimental = [
     "diagnose",
     "advisor",
     "tune_evaluation",
     "restore",
-    "cpu_affinity_experiment",
     "process_priority_and_placement",
     "system_wide_tuning",
     "always_on_autotune",

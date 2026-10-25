@@ -138,7 +138,7 @@ pub fn policy_section(
             .join(", ")
     };
     format!(
-        "{START}\n## v0.1.0 tier policy\n\nThe validation campaign applies one fixed, conservative policy once live observation, game-runnable, kernel, overhead, corpus, calibration and score evidence all verify:\n\n- **Supported:** {}\n- **Experimental:** {}\n- **Internal:** {}\n\nDiagnosis stays Experimental even after calibration, and no mutating capability is promoted because CPU-affinity safety testing is strong.\n{END}\n",
+        "{START}\n## v0.1.0 tier policy\n\nThe validation campaign applies one fixed, conservative policy once live observation, game-runnable, kernel, overhead, corpus, calibration and score evidence all verify:\n\n- **Supported:** {}\n- **Experimental:** {}\n- **Internal:** {}\n\nDiagnosis stays Experimental even after calibration. CPU affinity is Supported only for its graduated scheduler-pressure tuple (see the autonomous support matrix above); no other mutating capability is promoted.\n{END}\n",
         list(supported),
         list(experimental),
         list(internal)

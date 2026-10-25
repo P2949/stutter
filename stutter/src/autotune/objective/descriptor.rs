@@ -64,7 +64,7 @@ impl ObjectiveKind {
         use ObjectiveFallbackPolicy::{
             None, NormalizedScoreWhenMissingOrUnchanged as ScoreFallback,
         };
-        use ObjectiveMaturity::{Experimental, Validating};
+        use ObjectiveMaturity::{Experimental, Supported, Validating};
         use ObjectiveSignalQuality::{Approximate, Derived, Direct};
         // Exhaustive: new objectives cannot compile without a contract decision.
         let (metric, quality, required, fallback, guards, maturity, limitations): (
@@ -113,8 +113,8 @@ impl ObjectiveKind {
                     "foreground_over_5ms_rate",
                     "foreground_frame_pacing",
                 ],
-                Validating,
-                "Merged latency-sensitive target-game histograms; finite buckets and provisional effect thresholds; live observation, affinity and game-runnable acceptance exist, and the remaining limitation is decision-threshold calibration.",
+                Supported,
+                "Merged latency-sensitive target-game histograms; finite buckets (a p99 moves in steps of about 25 percent) and thresholds validated by the CPU-affinity graduation campaign. Supported only for the exact tuples in the autonomous support registry.",
             ),
             Self::DesktopInteractivity => (
                 "foreground_over_5ms_per_sample",
@@ -215,7 +215,13 @@ mod tests {
             assert!(!descriptor.primary_metric.is_empty());
             assert!(!descriptor.required_signals.is_empty());
             assert!(!descriptor.limitations.is_empty());
-            assert_ne!(descriptor.maturity, ObjectiveMaturity::Supported);
+            // An objective is Supported only after a graduation campaign; today that is
+            // GameRunnableLatency alone.
+            assert_eq!(
+                descriptor.maturity == ObjectiveMaturity::Supported,
+                kind == ObjectiveKind::GameRunnableLatency,
+                "{kind:?}"
+            );
             let json = serde_json::to_string(&descriptor).unwrap();
             assert_eq!(
                 serde_json::from_str::<ObjectiveDescriptor>(&json).unwrap(),
