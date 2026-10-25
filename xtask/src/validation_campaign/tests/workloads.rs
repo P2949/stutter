@@ -513,3 +513,29 @@ fn the_host_counts_as_quiet_only_when_storage_has_settled() {
         "unreadable pressure is not quiet"
     );
 }
+
+#[test]
+fn a_tool_that_prints_usage_and_exits_unsuccessfully_is_still_identified() {
+    struct UsageOnly;
+    impl ToolHost for UsageOnly {
+        fn find(&self, _: &str) -> Option<PathBuf> {
+            Some(PathBuf::from("/bin/vkcube"))
+        }
+        fn output(&self, _: &CommandSpec) -> Result<String, String> {
+            Err("vkcube exited exit status: 1".to_owned())
+        }
+        fn output_lenient(&self, _: &CommandSpec) -> Result<String, String> {
+            Ok("Usage:\n  vkcube [--c <framecount>]\n".to_owned())
+        }
+        fn env_var(&self, _: &str) -> Option<String> {
+            None
+        }
+        fn read_file(&self, _: &str) -> Result<String, String> {
+            Err("none".to_owned())
+        }
+    }
+    let identity = identify(&UsageOnly, "vkcube", &["--help"]).unwrap();
+    assert_eq!(identity.version, "Usage:");
+    // Only the usage form is lenient: a real version query must still succeed.
+    assert!(identify(&UsageOnly, "vkcube", &["--version"]).is_err());
+}

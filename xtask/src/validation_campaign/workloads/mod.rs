@@ -56,6 +56,11 @@ pub trait ToolHost {
     fn find(&self, tool: &str) -> Option<PathBuf>;
     /// Runs `spec` to completion and returns stdout (`Err` on launch failure or non-zero exit).
     fn output(&self, spec: &CommandSpec) -> Result<String, String>;
+    /// Like [`output`](Self::output) but an unsuccessful exit status is not an error: some tools
+    /// (`vkcube --help`) print their usage and exit 1.
+    fn output_lenient(&self, spec: &CommandSpec) -> Result<String, String> {
+        self.output(spec)
+    }
     fn env_var(&self, name: &str) -> Option<String>;
     fn read_file(&self, path: &str) -> Result<String, String>;
     /// Digest of an executable's bytes; `None` when it cannot be read.
@@ -88,6 +93,17 @@ impl ToolHost for SystemTools {
             return Err(format!("{} exited {}", spec.program, output.status));
         }
         String::from_utf8(output.stdout).map_err(|e| format!("{} output: {e}", spec.program))
+    }
+
+    fn output_lenient(&self, spec: &CommandSpec) -> Result<String, String> {
+        let mut command = std::process::Command::new(&spec.program);
+        command.args(&spec.args).envs(spec.env.iter().cloned());
+        let output = command
+            .output()
+            .map_err(|e| format!("could not run {}: {e}", spec.program))?;
+        let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
+        text.push_str(&String::from_utf8_lossy(&output.stderr));
+        Ok(text)
     }
 
     fn env_var(&self, name: &str) -> Option<String> {
@@ -133,8 +149,14 @@ pub fn identify(
     let path = host.find(tool).ok_or_else(|| {
         format!("{tool} is not on PATH (it must come from the pinned Nix environment)")
     })?;
-    let version = host
-        .output(&CommandSpec::new(tool, version_args))
+    let spec = CommandSpec::new(tool, version_args);
+    // A usage text is the only "version" some tools print, and they exit unsuccessfully doing it.
+    let printed = if version_args == ["--help"] {
+        host.output_lenient(&spec)
+    } else {
+        host.output(&spec)
+    };
+    let version = printed
         .map_err(|error| format!("{tool} did not report a version: {error}"))?
         .lines()
         .next()

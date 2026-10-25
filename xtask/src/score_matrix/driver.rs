@@ -9,6 +9,11 @@ use std::{
 use anyhow::{Context, bail};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use stutter::api::{
+    process_tree::TaskClass,
+    recorder::{FrameEvent, IntervalRecord},
+    scorer::{score_from_interval_records, score_from_interval_records_and_frames},
+};
 
 use super::{
     analyze::{Measured, analyze},
@@ -228,8 +233,12 @@ fn measure(raw: &Path, level_ms: u32) -> anyhow::Result<Measured> {
         .filter(|l| !l.trim().is_empty())
         .map(serde_json::from_str)
         .collect::<Result<Vec<_>, _>>()?;
+    let frames = load_frames(raw)?;
+    let explicit = explicit_target_scores(&records, &frames, pid);
     Ok(Measured {
         level_ms: f64::from(level_ms),
+        explicit_target_score_total: explicit.0,
+        explicit_target_runnable_score_total: explicit.1,
         score_total: observation.score_total,
         runnable_score_total: observation.runnable_score_total,
         over_1ms: observation.over_1ms,
@@ -244,6 +253,50 @@ fn measure(raw: &Path, level_ms: u32) -> anyhow::Result<Measured> {
         frame_over_33_3_rate: observation.frame_over_33_3_rate,
         frame_samples: observation.frame_samples,
     })
+}
+
+/// The production score of the target's records after generic-class tasks of the named process
+/// count as the target: `(frame-inclusive total, runnable-only total)`.
+fn explicit_target_scores(
+    records: &[IntervalRecord],
+    frames: &[FrameEvent],
+    pid: u32,
+) -> (f64, f64) {
+    let target: Vec<IntervalRecord> = records
+        .iter()
+        .filter(|r| r.process_pid == Some(pid))
+        .cloned()
+        .map(|mut r| {
+            if matches!(
+                r.class,
+                TaskClass::Service | TaskClass::Helper | TaskClass::Render | TaskClass::Unknown
+            ) {
+                r.class = TaskClass::Game;
+            }
+            r
+        })
+        .collect();
+    let runnable = score_from_interval_records(&target).total as f64;
+    let total = if frames.is_empty() {
+        runnable
+    } else {
+        score_from_interval_records_and_frames(&target, frames).total as f64
+    };
+    (total, runnable)
+}
+
+fn load_frames(raw: &Path) -> anyhow::Result<Vec<FrameEvent>> {
+    for name in ["frame_correlation.json", "frame_events.json"] {
+        let path = raw.join(name);
+        if path.is_file() {
+            return fs::read_to_string(&path)?
+                .lines()
+                .filter(|l| !l.trim().is_empty())
+                .map(|l| serde_json::from_str(l).map_err(Into::into))
+                .collect();
+        }
+    }
+    Ok(Vec::new())
 }
 
 fn continue_matrix(
