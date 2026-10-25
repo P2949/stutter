@@ -1,0 +1,578 @@
+[
+  {
+    "capture_id": "sc-6bb961afa007ade920aca0bb",
+    "fixture": "real_mixed_scheduler_io_20aca0bb",
+    "scenario": "mixed-scheduler-io",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-fb58db14a783f0fdd7c1e027",
+    "fixture": "real_mixed_scheduler_io_d7c1e027",
+    "scenario": "mixed-scheduler-io",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-2e641b35981c7f380d64cde1",
+    "fixture": "real_mixed_scheduler_io_0d64cde1",
+    "scenario": "mixed-scheduler-io",
+    "part": "holdout"
+  },
+  {
+    "capture_id": "sc-6ee37a93865c557d687585cd",
+    "fixture": "real_mixed_scheduler_io_687585cd",
+    "scenario": "mixed-scheduler-io",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-d12115d593a60e42ad2e8ba1",
+    "fixture": "real_mixed_scheduler_io_ad2e8ba1",
+    "scenario": "mixed-scheduler-io",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-254ff06f976863eaf709dc3e",
+    "fixture": "real_mixed_scheduler_io_f709dc3e",
+    "scenario": "mixed-scheduler-io",
+    "part": "holdout"
+  },
+  {
+    "capture_id": "sc-36257ae76a0153fdf309f51c",
+    "fixture": "real_v2_gpu_control_f309f51c",
+    "scenario": "v2-gpu-control",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-b165d83e11d9cfd97cdb53b2",
+    "fixture": "real_v2_gpu_control_7cdb53b2",
+    "scenario": "v2-gpu-control",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-47c03fbc880112d5e3493826",
+    "fixture": "real_v2_gpu_control_e3493826",
+    "scenario": "v2-gpu-control",
+    "part": "holdout"
+  },
+  {
+    "capture_id": "sc-ca87485157d7f3dc9c6bd024",
+    "fixture": "real_v2_gpu_control_9c6bd024",
+    "scenario": "v2-gpu-control",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-76ee01222a226f946cb3cfb3",
+    "fixture": "real_v2_gpu_control_6cb3cfb3",
+    "scenario": "v2-gpu-control",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-2633a5fbae0f93ae5b868af2",
+    "fixture": "real_v2_gpu_control_5b868af2",
+    "scenario": "v2-gpu-control",
+    "part": "holdout"
+  },
+  {
+    "capture_id": "sc-18c21d9a59856e11b2434a0e",
+    "fixture": "real_v2_gpu_control_b2434a0e",
+    "scenario": "v2-gpu-control",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-eae3ebc90f4f3a79f1b9b7a1",
+    "fixture": "real_v2_gpu_control_f1b9b7a1",
+    "scenario": "v2-gpu-control",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-b00f96359e971262dab1fa6f",
+    "fixture": "real_v2_gpu_control_dab1fa6f",
+    "scenario": "v2-gpu-control",
+    "part": "holdout"
+  },
+  {
+    "capture_id": "sc-c81672ce97c30629078064b1",
+    "fixture": "real_v2_gpu_control_078064b1",
+    "scenario": "v2-gpu-control",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-a81e997274ce038c842edb2b",
+    "fixture": "real_v2_gpu_control_842edb2b",
+    "scenario": "v2-gpu-control",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-56dbddcb76751728ffad978b",
+    "fixture": "real_v2_gpu_control_ffad978b",
+    "scenario": "v2-gpu-control",
+    "part": "holdout"
+  },
+  {
+    "capture_id": "sc-56b2e1660820bceadbea3977",
+    "fixture": "real_v2_gpu_control_dbea3977",
+    "scenario": "v2-gpu-control",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-5e16315a5637a48cf7e2fb3c",
+    "fixture": "real_v2_gpu_control_f7e2fb3c",
+    "scenario": "v2-gpu-control",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-8c9465df32b2c90e6618f195",
+    "fixture": "real_v2_gpu_control_6618f195",
+    "scenario": "v2-gpu-control",
+    "part": "holdout"
+  },
+  {
+    "capture_id": "sc-e0aec4eabb5df6e6c198abda",
+    "fixture": "real_v2_gpu_positive_c198abda",
+    "scenario": "v2-gpu-positive",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-4eac35b97bf21fec6a118ca6",
+    "fixture": "real_v2_gpu_positive_6a118ca6",
+    "scenario": "v2-gpu-positive",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-dabaaa715b18b763947aa0fc",
+    "fixture": "real_v2_gpu_positive_947aa0fc",
+    "scenario": "v2-gpu-positive",
+    "part": "holdout"
+  },
+  {
+    "capture_id": "sc-73b31dccb9bb58b0ab93b490",
+    "fixture": "real_v2_gpu_positive_ab93b490",
+    "scenario": "v2-gpu-positive",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-e3e205188c9f828a3e3a1594",
+    "fixture": "real_v2_gpu_positive_3e3a1594",
+    "scenario": "v2-gpu-positive",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-688fad851f2595117b7c7a77",
+    "fixture": "real_v2_gpu_positive_7b7c7a77",
+    "scenario": "v2-gpu-positive",
+    "part": "holdout"
+  },
+  {
+    "capture_id": "sc-2e9b2663033f92919cbd0d20",
+    "fixture": "real_v2_gpu_positive_9cbd0d20",
+    "scenario": "v2-gpu-positive",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-3bef77e9c770dab654242a0c",
+    "fixture": "real_v2_gpu_positive_54242a0c",
+    "scenario": "v2-gpu-positive",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-3b647c34577ecb1c6ec33d92",
+    "fixture": "real_v2_gpu_positive_6ec33d92",
+    "scenario": "v2-gpu-positive",
+    "part": "holdout"
+  },
+  {
+    "capture_id": "sc-bbf8fd2b184224509c27583d",
+    "fixture": "real_v2_gpu_positive_9c27583d",
+    "scenario": "v2-gpu-positive",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-a50fd7c4259b2aaa161bc031",
+    "fixture": "real_v2_gpu_positive_161bc031",
+    "scenario": "v2-gpu-positive",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-313af746f7c91a9f3ebd754e",
+    "fixture": "real_v2_gpu_positive_3ebd754e",
+    "scenario": "v2-gpu-positive",
+    "part": "holdout"
+  },
+  {
+    "capture_id": "sc-d3d28254b314202378ebfb2c",
+    "fixture": "real_v2_gpu_positive_78ebfb2c",
+    "scenario": "v2-gpu-positive",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-de12018e72e86294749beb41",
+    "fixture": "real_v2_gpu_positive_749beb41",
+    "scenario": "v2-gpu-positive",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-7b12b17b25f315f4cc7b0ac6",
+    "fixture": "real_v2_gpu_positive_cc7b0ac6",
+    "scenario": "v2-gpu-positive",
+    "part": "holdout"
+  },
+  {
+    "capture_id": "sc-7ee30fdb7d6474c33ea556ae",
+    "fixture": "real_v2_io_control_3ea556ae",
+    "scenario": "v2-io-control",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-5a5c6d8c35ed56a94f1703df",
+    "fixture": "real_v2_io_control_4f1703df",
+    "scenario": "v2-io-control",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-f25fd7f1e902e16860d1a1ae",
+    "fixture": "real_v2_io_control_60d1a1ae",
+    "scenario": "v2-io-control",
+    "part": "holdout"
+  },
+  {
+    "capture_id": "sc-67527c80c1e131541ba9479e",
+    "fixture": "real_v2_io_control_1ba9479e",
+    "scenario": "v2-io-control",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-6aeba46035512fdee3a2f593",
+    "fixture": "real_v2_io_control_e3a2f593",
+    "scenario": "v2-io-control",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-260eb5f2f571fe1bae70d129",
+    "fixture": "real_v2_io_control_ae70d129",
+    "scenario": "v2-io-control",
+    "part": "holdout"
+  },
+  {
+    "capture_id": "sc-f4e8f8cb7ca6b93a0aa610bf",
+    "fixture": "real_v2_io_control_0aa610bf",
+    "scenario": "v2-io-control",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-01bdc4084d785b70fbc5e1dd",
+    "fixture": "real_v2_io_control_fbc5e1dd",
+    "scenario": "v2-io-control",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-8ad9a8ad7f97fc708bd6f047",
+    "fixture": "real_v2_io_control_8bd6f047",
+    "scenario": "v2-io-control",
+    "part": "holdout"
+  },
+  {
+    "capture_id": "sc-034492209cc0545bf92b825e",
+    "fixture": "real_v2_io_control_f92b825e",
+    "scenario": "v2-io-control",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-e32a4de875ee1980b51a60c1",
+    "fixture": "real_v2_io_control_b51a60c1",
+    "scenario": "v2-io-control",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-d54c69a1be7f3ad2335c5f98",
+    "fixture": "real_v2_io_control_335c5f98",
+    "scenario": "v2-io-control",
+    "part": "holdout"
+  },
+  {
+    "capture_id": "sc-ddf95e24dc684cf727bd8876",
+    "fixture": "real_v2_io_control_27bd8876",
+    "scenario": "v2-io-control",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-aec8ede75dfb67205a83c383",
+    "fixture": "real_v2_io_control_5a83c383",
+    "scenario": "v2-io-control",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-88ea73faa3372498f7e8aed9",
+    "fixture": "real_v2_io_control_f7e8aed9",
+    "scenario": "v2-io-control",
+    "part": "holdout"
+  },
+  {
+    "capture_id": "sc-27570a27975f48bd480fe744",
+    "fixture": "real_v2_io_positive_480fe744",
+    "scenario": "v2-io-positive",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-e08f42241c2400e48b33570e",
+    "fixture": "real_v2_io_positive_8b33570e",
+    "scenario": "v2-io-positive",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-a977885d2ee0c97178884ef0",
+    "fixture": "real_v2_io_positive_78884ef0",
+    "scenario": "v2-io-positive",
+    "part": "holdout"
+  },
+  {
+    "capture_id": "sc-24e333b7851e9529e94da67e",
+    "fixture": "real_v2_io_positive_e94da67e",
+    "scenario": "v2-io-positive",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-804010ab9019d76bc38ea385",
+    "fixture": "real_v2_io_positive_c38ea385",
+    "scenario": "v2-io-positive",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-5849899a3f164b53439c68f9",
+    "fixture": "real_v2_io_positive_439c68f9",
+    "scenario": "v2-io-positive",
+    "part": "holdout"
+  },
+  {
+    "capture_id": "sc-099a0587daee7a1d1c082ef9",
+    "fixture": "real_v2_io_positive_1c082ef9",
+    "scenario": "v2-io-positive",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-c8a500f61690dcf8f36bf374",
+    "fixture": "real_v2_io_positive_f36bf374",
+    "scenario": "v2-io-positive",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-7d281a99e9e8531cb27172ef",
+    "fixture": "real_v2_io_positive_b27172ef",
+    "scenario": "v2-io-positive",
+    "part": "holdout"
+  },
+  {
+    "capture_id": "sc-eab1e240b88ef29d5db1b548",
+    "fixture": "real_v2_io_positive_5db1b548",
+    "scenario": "v2-io-positive",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-1e5eaaffe48c0475f7844619",
+    "fixture": "real_v2_io_positive_f7844619",
+    "scenario": "v2-io-positive",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-75c9d8dd5927223d75895163",
+    "fixture": "real_v2_io_positive_75895163",
+    "scenario": "v2-io-positive",
+    "part": "holdout"
+  },
+  {
+    "capture_id": "sc-fcb474518033074beb9f614d",
+    "fixture": "real_v2_io_positive_eb9f614d",
+    "scenario": "v2-io-positive",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-c6734fd1958c3c5d6a8f8e9f",
+    "fixture": "real_v2_io_positive_6a8f8e9f",
+    "scenario": "v2-io-positive",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-4ed51f97d60d0ba04a74b61e",
+    "fixture": "real_v2_io_positive_4a74b61e",
+    "scenario": "v2-io-positive",
+    "part": "holdout"
+  },
+  {
+    "capture_id": "sc-0f57a4639edf7d5008c3d7cd",
+    "fixture": "real_v2_scheduler_control_08c3d7cd",
+    "scenario": "v2-scheduler-control",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-35019056b3d4533ba8f11be7",
+    "fixture": "real_v2_scheduler_control_a8f11be7",
+    "scenario": "v2-scheduler-control",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-6589a83e6115e818f5842912",
+    "fixture": "real_v2_scheduler_control_f5842912",
+    "scenario": "v2-scheduler-control",
+    "part": "holdout"
+  },
+  {
+    "capture_id": "sc-5ea6c573808fa1bc278cee96",
+    "fixture": "real_v2_scheduler_control_278cee96",
+    "scenario": "v2-scheduler-control",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-848899893a49ed78111446f2",
+    "fixture": "real_v2_scheduler_control_111446f2",
+    "scenario": "v2-scheduler-control",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-a41ff7189e04ba77ed15c74b",
+    "fixture": "real_v2_scheduler_control_ed15c74b",
+    "scenario": "v2-scheduler-control",
+    "part": "holdout"
+  },
+  {
+    "capture_id": "sc-b82cdea581bfe422569f425e",
+    "fixture": "real_v2_scheduler_control_569f425e",
+    "scenario": "v2-scheduler-control",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-2fc92757f87c16f345f361e5",
+    "fixture": "real_v2_scheduler_control_45f361e5",
+    "scenario": "v2-scheduler-control",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-ecbe25773e398989248b5746",
+    "fixture": "real_v2_scheduler_control_248b5746",
+    "scenario": "v2-scheduler-control",
+    "part": "holdout"
+  },
+  {
+    "capture_id": "sc-db11ff962bfdf3ca456bb777",
+    "fixture": "real_v2_scheduler_control_456bb777",
+    "scenario": "v2-scheduler-control",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-50511595be4b8c5625742ebe",
+    "fixture": "real_v2_scheduler_control_25742ebe",
+    "scenario": "v2-scheduler-control",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-75a587c96f7142ed5b0e9d10",
+    "fixture": "real_v2_scheduler_control_5b0e9d10",
+    "scenario": "v2-scheduler-control",
+    "part": "holdout"
+  },
+  {
+    "capture_id": "sc-ced49d73aa6caa5f3f80cd96",
+    "fixture": "real_v2_scheduler_control_3f80cd96",
+    "scenario": "v2-scheduler-control",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-1418bd0324933237504e2de6",
+    "fixture": "real_v2_scheduler_control_504e2de6",
+    "scenario": "v2-scheduler-control",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-a118cca4f5f557183251929d",
+    "fixture": "real_v2_scheduler_control_3251929d",
+    "scenario": "v2-scheduler-control",
+    "part": "holdout"
+  },
+  {
+    "capture_id": "sc-03b343e456fa589feb90bb4b",
+    "fixture": "real_v2_scheduler_positive_eb90bb4b",
+    "scenario": "v2-scheduler-positive",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-69225612b923cc3e86d90c49",
+    "fixture": "real_v2_scheduler_positive_86d90c49",
+    "scenario": "v2-scheduler-positive",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-352b4cb55cdea1bc572b90ea",
+    "fixture": "real_v2_scheduler_positive_572b90ea",
+    "scenario": "v2-scheduler-positive",
+    "part": "holdout"
+  },
+  {
+    "capture_id": "sc-0d010a078865e0d3f6d90944",
+    "fixture": "real_v2_scheduler_positive_f6d90944",
+    "scenario": "v2-scheduler-positive",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-22c6bfda2e037d31db9eedb8",
+    "fixture": "real_v2_scheduler_positive_db9eedb8",
+    "scenario": "v2-scheduler-positive",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-46a00ed530a4c29f58cf8636",
+    "fixture": "real_v2_scheduler_positive_58cf8636",
+    "scenario": "v2-scheduler-positive",
+    "part": "holdout"
+  },
+  {
+    "capture_id": "sc-4f8a1af83a370284dbada196",
+    "fixture": "real_v2_scheduler_positive_dbada196",
+    "scenario": "v2-scheduler-positive",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-7eb3105b675b08464b2b8392",
+    "fixture": "real_v2_scheduler_positive_4b2b8392",
+    "scenario": "v2-scheduler-positive",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-ba20a08068267ca6e4dcadf7",
+    "fixture": "real_v2_scheduler_positive_e4dcadf7",
+    "scenario": "v2-scheduler-positive",
+    "part": "holdout"
+  },
+  {
+    "capture_id": "sc-2ba242f87fa1be6959a4424c",
+    "fixture": "real_v2_scheduler_positive_59a4424c",
+    "scenario": "v2-scheduler-positive",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-93f6b5ff7fc4d1ede99ac653",
+    "fixture": "real_v2_scheduler_positive_e99ac653",
+    "scenario": "v2-scheduler-positive",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-81474973a3f367b238cdffab",
+    "fixture": "real_v2_scheduler_positive_38cdffab",
+    "scenario": "v2-scheduler-positive",
+    "part": "holdout"
+  },
+  {
+    "capture_id": "sc-eb69f975d886e5d5b16023d2",
+    "fixture": "real_v2_scheduler_positive_b16023d2",
+    "scenario": "v2-scheduler-positive",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-27292f4584a82f6f46a8f1ee",
+    "fixture": "real_v2_scheduler_positive_46a8f1ee",
+    "scenario": "v2-scheduler-positive",
+    "part": "calibration"
+  },
+  {
+    "capture_id": "sc-897f9c3dc4ce26124f08077d",
+    "fixture": "real_v2_scheduler_positive_4f08077d",
+    "scenario": "v2-scheduler-positive",
+    "part": "holdout"
+  }
+]

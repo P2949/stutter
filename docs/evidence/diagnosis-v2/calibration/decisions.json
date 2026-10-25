@@ -1,0 +1,1744 @@
+{
+  "captures": {
+    "calibration": 64,
+    "holdout": 32
+  },
+  "corpus_id": "b91f47ce7fe9083b038c31ed87591b6716bf69ba0a2705ac7f5a73bcd4aeacd1",
+  "diagnosis_remains": "Experimental",
+  "families": {
+    "gpu": {
+      "calibration": {
+        "corpus": {
+          "decision_mixed_confounded": 0,
+          "decision_negative_controls": 10,
+          "decision_positives": 10,
+          "duplicate_capture_ids": 0,
+          "regression_only_legacy": 0
+        },
+        "corpus_id": "8d7ccfbb53d520d327bdd58cea67af7c1793b5d965df981821ce7fb883ed1f16",
+        "current_threshold": 95.0,
+        "decision": "retain_current_threshold_evidence_insufficient",
+        "evidence_floors": {
+          "mixed_confounded": 3,
+          "negative_control": 10,
+          "positive": 10
+        },
+        "family": "gpu",
+        "limitations": [
+          "family-level labels; specific-cause agreement is not scored",
+          "the decision sweep uses only explicit positives and matched negative controls for this family; mixed captures are reported separately and legacy inferred fixtures only in the regression-only sweep",
+          "sufficiency counts only captures with an explicit non-synthetic evidence_kind, complete provenance, an explicit control_type and [coverage].diagnoses naming the family",
+          "other families' positives are never this family's negative controls; a mixed capture counts only for the families it names",
+          "observation and causal confidence are reported separately; causal confidence is capped by the explicit-attribution-chain policy and visible-stutter linkage, and no causal threshold is tuned here",
+          "overlap is not proven causality: IRQ/I-O overlap fixtures do not calibrate causal claims",
+          "numerical optimum is never chosen mechanically; false high-confidence claims weigh more than inconclusive ones"
+        ],
+        "mixed_sweep": [
+          {
+            "mixed_case_count": 0,
+            "mixed_causal_confidence": {},
+            "mixed_false_high_causal_claims": 0,
+            "mixed_observation_confidence": {},
+            "mixed_primary_causes": {},
+            "threshold": 80.0,
+            "unit": "percent busy"
+          },
+          {
+            "mixed_case_count": 0,
+            "mixed_causal_confidence": {},
+            "mixed_false_high_causal_claims": 0,
+            "mixed_observation_confidence": {},
+            "mixed_primary_causes": {},
+            "threshold": 85.0,
+            "unit": "percent busy"
+          },
+          {
+            "mixed_case_count": 0,
+            "mixed_causal_confidence": {},
+            "mixed_false_high_causal_claims": 0,
+            "mixed_observation_confidence": {},
+            "mixed_primary_causes": {},
+            "threshold": 90.0,
+            "unit": "percent busy"
+          },
+          {
+            "mixed_case_count": 0,
+            "mixed_causal_confidence": {},
+            "mixed_false_high_causal_claims": 0,
+            "mixed_observation_confidence": {},
+            "mixed_primary_causes": {},
+            "threshold": 95.0,
+            "unit": "percent busy"
+          },
+          {
+            "mixed_case_count": 0,
+            "mixed_causal_confidence": {},
+            "mixed_false_high_causal_claims": 0,
+            "mixed_observation_confidence": {},
+            "mixed_primary_causes": {},
+            "threshold": 98.0,
+            "unit": "percent busy"
+          }
+        ],
+        "regression_sweep": [
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 0,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 0.0,
+            "recall": null,
+            "threshold": 80.0,
+            "tn": 0,
+            "tp": 0,
+            "unit": "percent busy"
+          },
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 0,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 0.0,
+            "recall": null,
+            "threshold": 85.0,
+            "tn": 0,
+            "tp": 0,
+            "unit": "percent busy"
+          },
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 0,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 0.0,
+            "recall": null,
+            "threshold": 90.0,
+            "tn": 0,
+            "tp": 0,
+            "unit": "percent busy"
+          },
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 0,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 0.0,
+            "recall": null,
+            "threshold": 95.0,
+            "tn": 0,
+            "tp": 0,
+            "unit": "percent busy"
+          },
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 0,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 0.0,
+            "recall": null,
+            "threshold": 98.0,
+            "tn": 0,
+            "tp": 0,
+            "unit": "percent busy"
+          }
+        ],
+        "schema_version": 3,
+        "sufficiency": {
+          "duplicate_capture_ids": 0,
+          "ineligible_real_captures": 0,
+          "mixed_confounded": 0,
+          "negative_controls": 10,
+          "positives": 10,
+          "sufficient": false
+        },
+        "sweep": [
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 10,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 1.0,
+            "recall": 0.0,
+            "threshold": 80.0,
+            "tn": 10,
+            "tp": 0,
+            "unit": "percent busy"
+          },
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 10,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 1.0,
+            "recall": 0.0,
+            "threshold": 85.0,
+            "tn": 10,
+            "tp": 0,
+            "unit": "percent busy"
+          },
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 10,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 1.0,
+            "recall": 0.0,
+            "threshold": 90.0,
+            "tn": 10,
+            "tp": 0,
+            "unit": "percent busy"
+          },
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 10,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 1.0,
+            "recall": 0.0,
+            "threshold": 95.0,
+            "tn": 10,
+            "tp": 0,
+            "unit": "percent busy"
+          },
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 10,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 1.0,
+            "recall": 0.0,
+            "threshold": 98.0,
+            "tn": 10,
+            "tp": 0,
+            "unit": "percent busy"
+          }
+        ],
+        "unit": "percent busy"
+      },
+      "changed": false,
+      "current_threshold": 95.0,
+      "diagnosis_logic_gap": true,
+      "holdout": {
+        "corpus": {
+          "decision_mixed_confounded": 0,
+          "decision_negative_controls": 5,
+          "decision_positives": 5,
+          "duplicate_capture_ids": 0,
+          "regression_only_legacy": 0
+        },
+        "corpus_id": "53aa6fadff4f109d6b76d2ee46a4e762791e15b0e3ab92a72719cf0a8e66df0a",
+        "current_threshold": 95.0,
+        "decision": "retain_current_threshold_evidence_insufficient",
+        "evidence_floors": {
+          "mixed_confounded": 3,
+          "negative_control": 10,
+          "positive": 10
+        },
+        "family": "gpu",
+        "limitations": [
+          "family-level labels; specific-cause agreement is not scored",
+          "the decision sweep uses only explicit positives and matched negative controls for this family; mixed captures are reported separately and legacy inferred fixtures only in the regression-only sweep",
+          "sufficiency counts only captures with an explicit non-synthetic evidence_kind, complete provenance, an explicit control_type and [coverage].diagnoses naming the family",
+          "other families' positives are never this family's negative controls; a mixed capture counts only for the families it names",
+          "observation and causal confidence are reported separately; causal confidence is capped by the explicit-attribution-chain policy and visible-stutter linkage, and no causal threshold is tuned here",
+          "overlap is not proven causality: IRQ/I-O overlap fixtures do not calibrate causal claims",
+          "numerical optimum is never chosen mechanically; false high-confidence claims weigh more than inconclusive ones"
+        ],
+        "mixed_sweep": [
+          {
+            "mixed_case_count": 0,
+            "mixed_causal_confidence": {},
+            "mixed_false_high_causal_claims": 0,
+            "mixed_observation_confidence": {},
+            "mixed_primary_causes": {},
+            "threshold": 80.0,
+            "unit": "percent busy"
+          },
+          {
+            "mixed_case_count": 0,
+            "mixed_causal_confidence": {},
+            "mixed_false_high_causal_claims": 0,
+            "mixed_observation_confidence": {},
+            "mixed_primary_causes": {},
+            "threshold": 85.0,
+            "unit": "percent busy"
+          },
+          {
+            "mixed_case_count": 0,
+            "mixed_causal_confidence": {},
+            "mixed_false_high_causal_claims": 0,
+            "mixed_observation_confidence": {},
+            "mixed_primary_causes": {},
+            "threshold": 90.0,
+            "unit": "percent busy"
+          },
+          {
+            "mixed_case_count": 0,
+            "mixed_causal_confidence": {},
+            "mixed_false_high_causal_claims": 0,
+            "mixed_observation_confidence": {},
+            "mixed_primary_causes": {},
+            "threshold": 95.0,
+            "unit": "percent busy"
+          },
+          {
+            "mixed_case_count": 0,
+            "mixed_causal_confidence": {},
+            "mixed_false_high_causal_claims": 0,
+            "mixed_observation_confidence": {},
+            "mixed_primary_causes": {},
+            "threshold": 98.0,
+            "unit": "percent busy"
+          }
+        ],
+        "regression_sweep": [
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 0,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 0.0,
+            "recall": null,
+            "threshold": 80.0,
+            "tn": 0,
+            "tp": 0,
+            "unit": "percent busy"
+          },
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 0,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 0.0,
+            "recall": null,
+            "threshold": 85.0,
+            "tn": 0,
+            "tp": 0,
+            "unit": "percent busy"
+          },
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 0,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 0.0,
+            "recall": null,
+            "threshold": 90.0,
+            "tn": 0,
+            "tp": 0,
+            "unit": "percent busy"
+          },
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 0,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 0.0,
+            "recall": null,
+            "threshold": 95.0,
+            "tn": 0,
+            "tp": 0,
+            "unit": "percent busy"
+          },
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 0,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 0.0,
+            "recall": null,
+            "threshold": 98.0,
+            "tn": 0,
+            "tp": 0,
+            "unit": "percent busy"
+          }
+        ],
+        "schema_version": 3,
+        "sufficiency": {
+          "duplicate_capture_ids": 0,
+          "ineligible_real_captures": 0,
+          "mixed_confounded": 0,
+          "negative_controls": 5,
+          "positives": 5,
+          "sufficient": false
+        },
+        "sweep": [
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 5,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 1.0,
+            "recall": 0.0,
+            "threshold": 80.0,
+            "tn": 5,
+            "tp": 0,
+            "unit": "percent busy"
+          },
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 5,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 1.0,
+            "recall": 0.0,
+            "threshold": 85.0,
+            "tn": 5,
+            "tp": 0,
+            "unit": "percent busy"
+          },
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 5,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 1.0,
+            "recall": 0.0,
+            "threshold": 90.0,
+            "tn": 5,
+            "tp": 0,
+            "unit": "percent busy"
+          },
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 5,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 1.0,
+            "recall": 0.0,
+            "threshold": 95.0,
+            "tn": 5,
+            "tp": 0,
+            "unit": "percent busy"
+          },
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 5,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 1.0,
+            "recall": 0.0,
+            "threshold": 98.0,
+            "tn": 5,
+            "tp": 0,
+            "unit": "percent busy"
+          }
+        ],
+        "unit": "percent busy"
+      },
+      "reasons": [
+        "the calibration set prefers the current threshold"
+      ],
+      "selected_threshold": 95.0,
+      "status": "calibrated",
+      "unit": "percent busy"
+    },
+    "io": {
+      "calibration": {
+        "corpus": {
+          "decision_mixed_confounded": 4,
+          "decision_negative_controls": 10,
+          "decision_positives": 10,
+          "duplicate_capture_ids": 0,
+          "regression_only_legacy": 0
+        },
+        "corpus_id": "8d7ccfbb53d520d327bdd58cea67af7c1793b5d965df981821ce7fb883ed1f16",
+        "current_threshold": 1.0,
+        "decision": "evidence_sufficient_for_review",
+        "evidence_floors": {
+          "mixed_confounded": 3,
+          "negative_control": 10,
+          "positive": 10
+        },
+        "family": "io",
+        "limitations": [
+          "family-level labels; specific-cause agreement is not scored",
+          "the decision sweep uses only explicit positives and matched negative controls for this family; mixed captures are reported separately and legacy inferred fixtures only in the regression-only sweep",
+          "sufficiency counts only captures with an explicit non-synthetic evidence_kind, complete provenance, an explicit control_type and [coverage].diagnoses naming the family",
+          "other families' positives are never this family's negative controls; a mixed capture counts only for the families it names",
+          "observation and causal confidence are reported separately; causal confidence is capped by the explicit-attribution-chain policy and visible-stutter linkage, and no causal threshold is tuned here",
+          "overlap is not proven causality: IRQ/I-O overlap fixtures do not calibrate causal claims",
+          "numerical optimum is never chosen mechanically; false high-confidence claims weigh more than inconclusive ones"
+        ],
+        "mixed_sweep": [
+          {
+            "mixed_case_count": 4,
+            "mixed_causal_confidence": {},
+            "mixed_false_high_causal_claims": 0,
+            "mixed_observation_confidence": {},
+            "mixed_primary_causes": {
+              "none": 4
+            },
+            "threshold": 0.25,
+            "unit": "ms"
+          },
+          {
+            "mixed_case_count": 4,
+            "mixed_causal_confidence": {},
+            "mixed_false_high_causal_claims": 0,
+            "mixed_observation_confidence": {},
+            "mixed_primary_causes": {
+              "none": 4
+            },
+            "threshold": 0.5,
+            "unit": "ms"
+          },
+          {
+            "mixed_case_count": 4,
+            "mixed_causal_confidence": {},
+            "mixed_false_high_causal_claims": 0,
+            "mixed_observation_confidence": {},
+            "mixed_primary_causes": {
+              "none": 4
+            },
+            "threshold": 1.0,
+            "unit": "ms"
+          },
+          {
+            "mixed_case_count": 4,
+            "mixed_causal_confidence": {},
+            "mixed_false_high_causal_claims": 0,
+            "mixed_observation_confidence": {},
+            "mixed_primary_causes": {
+              "none": 4
+            },
+            "threshold": 2.0,
+            "unit": "ms"
+          },
+          {
+            "mixed_case_count": 4,
+            "mixed_causal_confidence": {},
+            "mixed_false_high_causal_claims": 0,
+            "mixed_observation_confidence": {},
+            "mixed_primary_causes": {
+              "none": 4
+            },
+            "threshold": 4.0,
+            "unit": "ms"
+          }
+        ],
+        "regression_sweep": [
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 0,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 0.0,
+            "recall": null,
+            "threshold": 0.25,
+            "tn": 0,
+            "tp": 0,
+            "unit": "ms"
+          },
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 0,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 0.0,
+            "recall": null,
+            "threshold": 0.5,
+            "tn": 0,
+            "tp": 0,
+            "unit": "ms"
+          },
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 0,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 0.0,
+            "recall": null,
+            "threshold": 1.0,
+            "tn": 0,
+            "tp": 0,
+            "unit": "ms"
+          },
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 0,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 0.0,
+            "recall": null,
+            "threshold": 2.0,
+            "tn": 0,
+            "tp": 0,
+            "unit": "ms"
+          },
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 0,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 0.0,
+            "recall": null,
+            "threshold": 4.0,
+            "tn": 0,
+            "tp": 0,
+            "unit": "ms"
+          }
+        ],
+        "schema_version": 3,
+        "sufficiency": {
+          "duplicate_capture_ids": 0,
+          "ineligible_real_captures": 0,
+          "mixed_confounded": 4,
+          "negative_controls": 10,
+          "positives": 10,
+          "sufficient": true
+        },
+        "sweep": [
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 10,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 1.0,
+            "recall": 0.0,
+            "threshold": 0.25,
+            "tn": 10,
+            "tp": 0,
+            "unit": "ms"
+          },
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 10,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 1.0,
+            "recall": 0.0,
+            "threshold": 0.5,
+            "tn": 10,
+            "tp": 0,
+            "unit": "ms"
+          },
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 10,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 1.0,
+            "recall": 0.0,
+            "threshold": 1.0,
+            "tn": 10,
+            "tp": 0,
+            "unit": "ms"
+          },
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 10,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 1.0,
+            "recall": 0.0,
+            "threshold": 2.0,
+            "tn": 10,
+            "tp": 0,
+            "unit": "ms"
+          },
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 10,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 1.0,
+            "recall": 0.0,
+            "threshold": 4.0,
+            "tn": 10,
+            "tp": 0,
+            "unit": "ms"
+          }
+        ],
+        "unit": "ms"
+      },
+      "changed": false,
+      "current_threshold": 1.0,
+      "diagnosis_logic_gap": true,
+      "holdout": {
+        "corpus": {
+          "decision_mixed_confounded": 2,
+          "decision_negative_controls": 5,
+          "decision_positives": 5,
+          "duplicate_capture_ids": 0,
+          "regression_only_legacy": 0
+        },
+        "corpus_id": "53aa6fadff4f109d6b76d2ee46a4e762791e15b0e3ab92a72719cf0a8e66df0a",
+        "current_threshold": 1.0,
+        "decision": "retain_current_threshold_evidence_insufficient",
+        "evidence_floors": {
+          "mixed_confounded": 3,
+          "negative_control": 10,
+          "positive": 10
+        },
+        "family": "io",
+        "limitations": [
+          "family-level labels; specific-cause agreement is not scored",
+          "the decision sweep uses only explicit positives and matched negative controls for this family; mixed captures are reported separately and legacy inferred fixtures only in the regression-only sweep",
+          "sufficiency counts only captures with an explicit non-synthetic evidence_kind, complete provenance, an explicit control_type and [coverage].diagnoses naming the family",
+          "other families' positives are never this family's negative controls; a mixed capture counts only for the families it names",
+          "observation and causal confidence are reported separately; causal confidence is capped by the explicit-attribution-chain policy and visible-stutter linkage, and no causal threshold is tuned here",
+          "overlap is not proven causality: IRQ/I-O overlap fixtures do not calibrate causal claims",
+          "numerical optimum is never chosen mechanically; false high-confidence claims weigh more than inconclusive ones"
+        ],
+        "mixed_sweep": [
+          {
+            "mixed_case_count": 2,
+            "mixed_causal_confidence": {},
+            "mixed_false_high_causal_claims": 0,
+            "mixed_observation_confidence": {},
+            "mixed_primary_causes": {
+              "none": 2
+            },
+            "threshold": 0.25,
+            "unit": "ms"
+          },
+          {
+            "mixed_case_count": 2,
+            "mixed_causal_confidence": {},
+            "mixed_false_high_causal_claims": 0,
+            "mixed_observation_confidence": {},
+            "mixed_primary_causes": {
+              "none": 2
+            },
+            "threshold": 0.5,
+            "unit": "ms"
+          },
+          {
+            "mixed_case_count": 2,
+            "mixed_causal_confidence": {},
+            "mixed_false_high_causal_claims": 0,
+            "mixed_observation_confidence": {},
+            "mixed_primary_causes": {
+              "none": 2
+            },
+            "threshold": 1.0,
+            "unit": "ms"
+          },
+          {
+            "mixed_case_count": 2,
+            "mixed_causal_confidence": {},
+            "mixed_false_high_causal_claims": 0,
+            "mixed_observation_confidence": {},
+            "mixed_primary_causes": {
+              "none": 2
+            },
+            "threshold": 2.0,
+            "unit": "ms"
+          },
+          {
+            "mixed_case_count": 2,
+            "mixed_causal_confidence": {},
+            "mixed_false_high_causal_claims": 0,
+            "mixed_observation_confidence": {},
+            "mixed_primary_causes": {
+              "none": 2
+            },
+            "threshold": 4.0,
+            "unit": "ms"
+          }
+        ],
+        "regression_sweep": [
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 0,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 0.0,
+            "recall": null,
+            "threshold": 0.25,
+            "tn": 0,
+            "tp": 0,
+            "unit": "ms"
+          },
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 0,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 0.0,
+            "recall": null,
+            "threshold": 0.5,
+            "tn": 0,
+            "tp": 0,
+            "unit": "ms"
+          },
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 0,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 0.0,
+            "recall": null,
+            "threshold": 1.0,
+            "tn": 0,
+            "tp": 0,
+            "unit": "ms"
+          },
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 0,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 0.0,
+            "recall": null,
+            "threshold": 2.0,
+            "tn": 0,
+            "tp": 0,
+            "unit": "ms"
+          },
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 0,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 0.0,
+            "recall": null,
+            "threshold": 4.0,
+            "tn": 0,
+            "tp": 0,
+            "unit": "ms"
+          }
+        ],
+        "schema_version": 3,
+        "sufficiency": {
+          "duplicate_capture_ids": 0,
+          "ineligible_real_captures": 0,
+          "mixed_confounded": 2,
+          "negative_controls": 5,
+          "positives": 5,
+          "sufficient": false
+        },
+        "sweep": [
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 5,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 1.0,
+            "recall": 0.0,
+            "threshold": 0.25,
+            "tn": 5,
+            "tp": 0,
+            "unit": "ms"
+          },
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 5,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 1.0,
+            "recall": 0.0,
+            "threshold": 0.5,
+            "tn": 5,
+            "tp": 0,
+            "unit": "ms"
+          },
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 5,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 1.0,
+            "recall": 0.0,
+            "threshold": 1.0,
+            "tn": 5,
+            "tp": 0,
+            "unit": "ms"
+          },
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 5,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 1.0,
+            "recall": 0.0,
+            "threshold": 2.0,
+            "tn": 5,
+            "tp": 0,
+            "unit": "ms"
+          },
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 5,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 1.0,
+            "recall": 0.0,
+            "threshold": 4.0,
+            "tn": 5,
+            "tp": 0,
+            "unit": "ms"
+          }
+        ],
+        "unit": "ms"
+      },
+      "reasons": [
+        "the calibration set prefers the current threshold"
+      ],
+      "selected_threshold": 1.0,
+      "status": "calibrated",
+      "unit": "ms"
+    },
+    "irq": {
+      "reason": "its target-impact study did not pass",
+      "status": "not_calibrated"
+    },
+    "scheduler": {
+      "calibration": {
+        "corpus": {
+          "decision_mixed_confounded": 4,
+          "decision_negative_controls": 10,
+          "decision_positives": 10,
+          "duplicate_capture_ids": 0,
+          "regression_only_legacy": 0
+        },
+        "corpus_id": "8d7ccfbb53d520d327bdd58cea67af7c1793b5d965df981821ce7fb883ed1f16",
+        "current_threshold": 2.0,
+        "decision": "evidence_sufficient_for_review",
+        "evidence_floors": {
+          "mixed_confounded": 3,
+          "negative_control": 10,
+          "positive": 10
+        },
+        "family": "scheduler",
+        "limitations": [
+          "family-level labels; specific-cause agreement is not scored",
+          "the decision sweep uses only explicit positives and matched negative controls for this family; mixed captures are reported separately and legacy inferred fixtures only in the regression-only sweep",
+          "sufficiency counts only captures with an explicit non-synthetic evidence_kind, complete provenance, an explicit control_type and [coverage].diagnoses naming the family",
+          "other families' positives are never this family's negative controls; a mixed capture counts only for the families it names",
+          "observation and causal confidence are reported separately; causal confidence is capped by the explicit-attribution-chain policy and visible-stutter linkage, and no causal threshold is tuned here",
+          "overlap is not proven causality: IRQ/I-O overlap fixtures do not calibrate causal claims",
+          "numerical optimum is never chosen mechanically; false high-confidence claims weigh more than inconclusive ones"
+        ],
+        "mixed_sweep": [
+          {
+            "mixed_case_count": 4,
+            "mixed_causal_confidence": {},
+            "mixed_false_high_causal_claims": 0,
+            "mixed_observation_confidence": {},
+            "mixed_primary_causes": {
+              "none": 4
+            },
+            "threshold": 0.5,
+            "unit": "ms"
+          },
+          {
+            "mixed_case_count": 4,
+            "mixed_causal_confidence": {},
+            "mixed_false_high_causal_claims": 0,
+            "mixed_observation_confidence": {},
+            "mixed_primary_causes": {
+              "none": 4
+            },
+            "threshold": 1.0,
+            "unit": "ms"
+          },
+          {
+            "mixed_case_count": 4,
+            "mixed_causal_confidence": {},
+            "mixed_false_high_causal_claims": 0,
+            "mixed_observation_confidence": {},
+            "mixed_primary_causes": {
+              "none": 4
+            },
+            "threshold": 1.5,
+            "unit": "ms"
+          },
+          {
+            "mixed_case_count": 4,
+            "mixed_causal_confidence": {},
+            "mixed_false_high_causal_claims": 0,
+            "mixed_observation_confidence": {},
+            "mixed_primary_causes": {
+              "none": 4
+            },
+            "threshold": 2.0,
+            "unit": "ms"
+          },
+          {
+            "mixed_case_count": 4,
+            "mixed_causal_confidence": {},
+            "mixed_false_high_causal_claims": 0,
+            "mixed_observation_confidence": {},
+            "mixed_primary_causes": {
+              "none": 4
+            },
+            "threshold": 2.5,
+            "unit": "ms"
+          },
+          {
+            "mixed_case_count": 4,
+            "mixed_causal_confidence": {},
+            "mixed_false_high_causal_claims": 0,
+            "mixed_observation_confidence": {},
+            "mixed_primary_causes": {
+              "none": 4
+            },
+            "threshold": 3.0,
+            "unit": "ms"
+          },
+          {
+            "mixed_case_count": 4,
+            "mixed_causal_confidence": {},
+            "mixed_false_high_causal_claims": 0,
+            "mixed_observation_confidence": {},
+            "mixed_primary_causes": {
+              "none": 4
+            },
+            "threshold": 4.0,
+            "unit": "ms"
+          }
+        ],
+        "regression_sweep": [
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 0,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 0.0,
+            "recall": null,
+            "threshold": 0.5,
+            "tn": 0,
+            "tp": 0,
+            "unit": "ms"
+          },
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 0,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 0.0,
+            "recall": null,
+            "threshold": 1.0,
+            "tn": 0,
+            "tp": 0,
+            "unit": "ms"
+          },
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 0,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 0.0,
+            "recall": null,
+            "threshold": 1.5,
+            "tn": 0,
+            "tp": 0,
+            "unit": "ms"
+          },
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 0,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 0.0,
+            "recall": null,
+            "threshold": 2.0,
+            "tn": 0,
+            "tp": 0,
+            "unit": "ms"
+          },
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 0,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 0.0,
+            "recall": null,
+            "threshold": 2.5,
+            "tn": 0,
+            "tp": 0,
+            "unit": "ms"
+          },
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 0,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 0.0,
+            "recall": null,
+            "threshold": 3.0,
+            "tn": 0,
+            "tp": 0,
+            "unit": "ms"
+          },
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 0,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 0.0,
+            "recall": null,
+            "threshold": 4.0,
+            "tn": 0,
+            "tp": 0,
+            "unit": "ms"
+          }
+        ],
+        "schema_version": 3,
+        "sufficiency": {
+          "duplicate_capture_ids": 0,
+          "ineligible_real_captures": 0,
+          "mixed_confounded": 4,
+          "negative_controls": 10,
+          "positives": 10,
+          "sufficient": true
+        },
+        "sweep": [
+          {
+            "causal_confidence_distribution": {
+              "NotEstablished": 11
+            },
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 1,
+            "fp": 2,
+            "observation_confidence_distribution": {
+              "Medium": 11
+            },
+            "precision": 0.8181818181818182,
+            "primary_cause_agreement_with_current": 1.0,
+            "recall": 0.9,
+            "threshold": 0.5,
+            "tn": 8,
+            "tp": 9,
+            "unit": "ms"
+          },
+          {
+            "causal_confidence_distribution": {
+              "NotEstablished": 11
+            },
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 1,
+            "fp": 2,
+            "observation_confidence_distribution": {
+              "Medium": 11
+            },
+            "precision": 0.8181818181818182,
+            "primary_cause_agreement_with_current": 1.0,
+            "recall": 0.9,
+            "threshold": 1.0,
+            "tn": 8,
+            "tp": 9,
+            "unit": "ms"
+          },
+          {
+            "causal_confidence_distribution": {
+              "NotEstablished": 11
+            },
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 1,
+            "fp": 2,
+            "observation_confidence_distribution": {
+              "Medium": 11
+            },
+            "precision": 0.8181818181818182,
+            "primary_cause_agreement_with_current": 1.0,
+            "recall": 0.9,
+            "threshold": 1.5,
+            "tn": 8,
+            "tp": 9,
+            "unit": "ms"
+          },
+          {
+            "causal_confidence_distribution": {
+              "NotEstablished": 11
+            },
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 1,
+            "fp": 2,
+            "observation_confidence_distribution": {
+              "Medium": 11
+            },
+            "precision": 0.8181818181818182,
+            "primary_cause_agreement_with_current": 1.0,
+            "recall": 0.9,
+            "threshold": 2.0,
+            "tn": 8,
+            "tp": 9,
+            "unit": "ms"
+          },
+          {
+            "causal_confidence_distribution": {
+              "NotEstablished": 11
+            },
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 1,
+            "fp": 2,
+            "observation_confidence_distribution": {
+              "Medium": 11
+            },
+            "precision": 0.8181818181818182,
+            "primary_cause_agreement_with_current": 1.0,
+            "recall": 0.9,
+            "threshold": 2.5,
+            "tn": 8,
+            "tp": 9,
+            "unit": "ms"
+          },
+          {
+            "causal_confidence_distribution": {
+              "NotEstablished": 10
+            },
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 1,
+            "fp": 1,
+            "observation_confidence_distribution": {
+              "Medium": 10
+            },
+            "precision": 0.9,
+            "primary_cause_agreement_with_current": 0.95,
+            "recall": 0.9,
+            "threshold": 3.0,
+            "tn": 9,
+            "tp": 9,
+            "unit": "ms"
+          },
+          {
+            "causal_confidence_distribution": {
+              "NotEstablished": 3
+            },
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 7,
+            "fp": 0,
+            "observation_confidence_distribution": {
+              "Medium": 3
+            },
+            "precision": 1.0,
+            "primary_cause_agreement_with_current": 0.6,
+            "recall": 0.3,
+            "threshold": 4.0,
+            "tn": 10,
+            "tp": 3,
+            "unit": "ms"
+          }
+        ],
+        "unit": "ms"
+      },
+      "changed": false,
+      "current_threshold": 2.0,
+      "diagnosis_logic_gap": false,
+      "holdout": {
+        "corpus": {
+          "decision_mixed_confounded": 2,
+          "decision_negative_controls": 5,
+          "decision_positives": 5,
+          "duplicate_capture_ids": 0,
+          "regression_only_legacy": 0
+        },
+        "corpus_id": "53aa6fadff4f109d6b76d2ee46a4e762791e15b0e3ab92a72719cf0a8e66df0a",
+        "current_threshold": 2.0,
+        "decision": "retain_current_threshold_evidence_insufficient",
+        "evidence_floors": {
+          "mixed_confounded": 3,
+          "negative_control": 10,
+          "positive": 10
+        },
+        "family": "scheduler",
+        "limitations": [
+          "family-level labels; specific-cause agreement is not scored",
+          "the decision sweep uses only explicit positives and matched negative controls for this family; mixed captures are reported separately and legacy inferred fixtures only in the regression-only sweep",
+          "sufficiency counts only captures with an explicit non-synthetic evidence_kind, complete provenance, an explicit control_type and [coverage].diagnoses naming the family",
+          "other families' positives are never this family's negative controls; a mixed capture counts only for the families it names",
+          "observation and causal confidence are reported separately; causal confidence is capped by the explicit-attribution-chain policy and visible-stutter linkage, and no causal threshold is tuned here",
+          "overlap is not proven causality: IRQ/I-O overlap fixtures do not calibrate causal claims",
+          "numerical optimum is never chosen mechanically; false high-confidence claims weigh more than inconclusive ones"
+        ],
+        "mixed_sweep": [
+          {
+            "mixed_case_count": 2,
+            "mixed_causal_confidence": {},
+            "mixed_false_high_causal_claims": 0,
+            "mixed_observation_confidence": {},
+            "mixed_primary_causes": {
+              "none": 2
+            },
+            "threshold": 0.5,
+            "unit": "ms"
+          },
+          {
+            "mixed_case_count": 2,
+            "mixed_causal_confidence": {},
+            "mixed_false_high_causal_claims": 0,
+            "mixed_observation_confidence": {},
+            "mixed_primary_causes": {
+              "none": 2
+            },
+            "threshold": 1.0,
+            "unit": "ms"
+          },
+          {
+            "mixed_case_count": 2,
+            "mixed_causal_confidence": {},
+            "mixed_false_high_causal_claims": 0,
+            "mixed_observation_confidence": {},
+            "mixed_primary_causes": {
+              "none": 2
+            },
+            "threshold": 1.5,
+            "unit": "ms"
+          },
+          {
+            "mixed_case_count": 2,
+            "mixed_causal_confidence": {},
+            "mixed_false_high_causal_claims": 0,
+            "mixed_observation_confidence": {},
+            "mixed_primary_causes": {
+              "none": 2
+            },
+            "threshold": 2.0,
+            "unit": "ms"
+          },
+          {
+            "mixed_case_count": 2,
+            "mixed_causal_confidence": {},
+            "mixed_false_high_causal_claims": 0,
+            "mixed_observation_confidence": {},
+            "mixed_primary_causes": {
+              "none": 2
+            },
+            "threshold": 2.5,
+            "unit": "ms"
+          },
+          {
+            "mixed_case_count": 2,
+            "mixed_causal_confidence": {},
+            "mixed_false_high_causal_claims": 0,
+            "mixed_observation_confidence": {},
+            "mixed_primary_causes": {
+              "none": 2
+            },
+            "threshold": 3.0,
+            "unit": "ms"
+          },
+          {
+            "mixed_case_count": 2,
+            "mixed_causal_confidence": {},
+            "mixed_false_high_causal_claims": 0,
+            "mixed_observation_confidence": {},
+            "mixed_primary_causes": {
+              "none": 2
+            },
+            "threshold": 4.0,
+            "unit": "ms"
+          }
+        ],
+        "regression_sweep": [
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 0,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 0.0,
+            "recall": null,
+            "threshold": 0.5,
+            "tn": 0,
+            "tp": 0,
+            "unit": "ms"
+          },
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 0,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 0.0,
+            "recall": null,
+            "threshold": 1.0,
+            "tn": 0,
+            "tp": 0,
+            "unit": "ms"
+          },
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 0,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 0.0,
+            "recall": null,
+            "threshold": 1.5,
+            "tn": 0,
+            "tp": 0,
+            "unit": "ms"
+          },
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 0,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 0.0,
+            "recall": null,
+            "threshold": 2.0,
+            "tn": 0,
+            "tp": 0,
+            "unit": "ms"
+          },
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 0,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 0.0,
+            "recall": null,
+            "threshold": 2.5,
+            "tn": 0,
+            "tp": 0,
+            "unit": "ms"
+          },
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 0,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 0.0,
+            "recall": null,
+            "threshold": 3.0,
+            "tn": 0,
+            "tp": 0,
+            "unit": "ms"
+          },
+          {
+            "causal_confidence_distribution": {},
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 0,
+            "fp": 0,
+            "observation_confidence_distribution": {},
+            "precision": null,
+            "primary_cause_agreement_with_current": 0.0,
+            "recall": null,
+            "threshold": 4.0,
+            "tn": 0,
+            "tp": 0,
+            "unit": "ms"
+          }
+        ],
+        "schema_version": 3,
+        "sufficiency": {
+          "duplicate_capture_ids": 0,
+          "ineligible_real_captures": 0,
+          "mixed_confounded": 2,
+          "negative_controls": 5,
+          "positives": 5,
+          "sufficient": false
+        },
+        "sweep": [
+          {
+            "causal_confidence_distribution": {
+              "NotEstablished": 5
+            },
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 0,
+            "fp": 0,
+            "observation_confidence_distribution": {
+              "Medium": 5
+            },
+            "precision": 1.0,
+            "primary_cause_agreement_with_current": 1.0,
+            "recall": 1.0,
+            "threshold": 0.5,
+            "tn": 5,
+            "tp": 5,
+            "unit": "ms"
+          },
+          {
+            "causal_confidence_distribution": {
+              "NotEstablished": 5
+            },
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 0,
+            "fp": 0,
+            "observation_confidence_distribution": {
+              "Medium": 5
+            },
+            "precision": 1.0,
+            "primary_cause_agreement_with_current": 1.0,
+            "recall": 1.0,
+            "threshold": 1.0,
+            "tn": 5,
+            "tp": 5,
+            "unit": "ms"
+          },
+          {
+            "causal_confidence_distribution": {
+              "NotEstablished": 5
+            },
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 0,
+            "fp": 0,
+            "observation_confidence_distribution": {
+              "Medium": 5
+            },
+            "precision": 1.0,
+            "primary_cause_agreement_with_current": 1.0,
+            "recall": 1.0,
+            "threshold": 1.5,
+            "tn": 5,
+            "tp": 5,
+            "unit": "ms"
+          },
+          {
+            "causal_confidence_distribution": {
+              "NotEstablished": 5
+            },
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 0,
+            "fp": 0,
+            "observation_confidence_distribution": {
+              "Medium": 5
+            },
+            "precision": 1.0,
+            "primary_cause_agreement_with_current": 1.0,
+            "recall": 1.0,
+            "threshold": 2.0,
+            "tn": 5,
+            "tp": 5,
+            "unit": "ms"
+          },
+          {
+            "causal_confidence_distribution": {
+              "NotEstablished": 5
+            },
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 0,
+            "fp": 0,
+            "observation_confidence_distribution": {
+              "Medium": 5
+            },
+            "precision": 1.0,
+            "primary_cause_agreement_with_current": 1.0,
+            "recall": 1.0,
+            "threshold": 2.5,
+            "tn": 5,
+            "tp": 5,
+            "unit": "ms"
+          },
+          {
+            "causal_confidence_distribution": {
+              "NotEstablished": 5
+            },
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 0,
+            "fp": 0,
+            "observation_confidence_distribution": {
+              "Medium": 5
+            },
+            "precision": 1.0,
+            "primary_cause_agreement_with_current": 1.0,
+            "recall": 1.0,
+            "threshold": 3.0,
+            "tn": 5,
+            "tp": 5,
+            "unit": "ms"
+          },
+          {
+            "causal_confidence_distribution": {
+              "NotEstablished": 1
+            },
+            "false_high_causal_confidence": 0,
+            "false_high_observation_confidence": 0,
+            "fn": 4,
+            "fp": 0,
+            "observation_confidence_distribution": {
+              "Medium": 1
+            },
+            "precision": 1.0,
+            "primary_cause_agreement_with_current": 0.6,
+            "recall": 0.2,
+            "threshold": 4.0,
+            "tn": 5,
+            "tp": 1,
+            "unit": "ms"
+          }
+        ],
+        "unit": "ms"
+      },
+      "reasons": [
+        "calibration prefers 4 but the holdout does not generalize it",
+        "holdout recall does not improve"
+      ],
+      "selected_threshold": 2.0,
+      "status": "calibrated",
+      "unit": "ms"
+    }
+  },
+  "mixed_scenarios": [
+    "mixed-scheduler-io",
+    "mixed-irq-gpu"
+  ],
+  "schema_version": 1,
+  "selection_rule": "calibration: no new false-high claims, then precision, then recall, then smallest change; replaced only if the untouched holdout also improves recall without lower precision, more false positives, more false-high claims or worse mixed behavior",
+  "split_sha256": "30f6ff41990827fe07817c44865185b052ac4e9236212769d36ce51bc57b00b4",
+  "study_id": "v2-e2ca040-1792881489877"
+}

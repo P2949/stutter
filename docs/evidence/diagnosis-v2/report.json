@@ -1,0 +1,145 @@
+{
+  "limitations": [
+    "single host; ground truth is the predeclared intervention and its independent verification",
+    "the direct effect metric is the target's own runnable p99, frame p99 or fixed-work elapsed time, never a diagnosis output",
+    "captures of a family enter calibration only if its target-impact study passed",
+    "the privileged runner is authorized through a companion core-validation campaign; no release task of it is run"
+  ],
+  "rejections": {
+    "mixed-scheduler-io:preflight": 5,
+    "v2-io-control:preflight": 7,
+    "v2-io-positive:preflight": 7,
+    "v2-irq-positive:acceptance": 9
+  },
+  "schema_version": 1,
+  "study": {
+    "base_commit": "e2ca04074371d4dda39e58186da0bd4394b01c4e",
+    "blocked": null,
+    "companion_campaign": "core-e2ca040-1792881458759",
+    "complete": true,
+    "families": {
+      "gpu": {
+        "accepted_controls": 15,
+        "accepted_positives": 15,
+        "decision": "pass",
+        "rejected": 0,
+        "target_pairs": null
+      },
+      "io": {
+        "accepted_controls": 17,
+        "accepted_positives": 17,
+        "decision": "pass",
+        "rejected": 14,
+        "target_pairs": null
+      },
+      "irq": {
+        "accepted_controls": 30,
+        "accepted_positives": 30,
+        "decision": "invalid",
+        "rejected": 9,
+        "target_pairs": null
+      },
+      "scheduler": {
+        "accepted_controls": 15,
+        "accepted_positives": 15,
+        "decision": "pass",
+        "rejected": 0,
+        "target_pairs": null
+      }
+    },
+    "frozen": {
+      "fixed_work_ios": 284143,
+      "irq": 163,
+      "irq_cpu": 7,
+      "study_cpu": 1,
+      "traffic_cpus": [
+        2,
+        3,
+        4
+      ]
+    },
+    "mixed": [
+      {
+        "accepted": 6,
+        "eligible": true,
+        "id": "mixed-scheduler-io",
+        "needed": 6,
+        "rejected": 5
+      },
+      {
+        "accepted": 0,
+        "eligible": false,
+        "id": "mixed-irq-gpu",
+        "needed": 6,
+        "rejected": 0
+      }
+    ],
+    "next": {
+      "action": "done"
+    },
+    "runs": 188,
+    "study_id": "v2-e2ca040-1792881489877"
+  },
+  "target_impact": {
+    "gpu": {
+      "bootstrap_ci95": {
+        "confidence_level": 0.95,
+        "iterations": 2000,
+        "lower": -0.17364400000000002,
+        "upper": -0.12902000000000002
+      },
+      "control_median": 0.163715,
+      "effect_size": -4.968608394776939,
+      "improvement_delta": -0.16456700000000002,
+      "outcome": "pass",
+      "pairs": 15,
+      "positive_median": 0.328282,
+      "report_sha256": "705a56b2bbc30ccea5d4699dbd92879dab36ec304b41946ab8597d7a9d4d6689"
+    },
+    "io": {
+      "bootstrap_ci95": {
+        "confidence_level": 0.95,
+        "iterations": 2000,
+        "lower": -113179.0,
+        "upper": -108700.0
+      },
+      "control_median": 19916.0,
+      "effect_size": -30.766280559424526,
+      "improvement_delta": -112396.0,
+      "outcome": "pass",
+      "pairs": 15,
+      "positive_median": 132312.0,
+      "report_sha256": "b669168c7ad5e5722b3ac3a73b961e53797dba7a8a15c27563527914148f3d15"
+    },
+    "irq": {
+      "bootstrap_ci95": {
+        "confidence_level": 0.95,
+        "iterations": 2000,
+        "lower": -0.173066,
+        "upper": 0.04902699999999999
+      },
+      "control_median": 0.258355,
+      "effect_size": 0.004669201326489776,
+      "improvement_delta": 0.0011510000000000131,
+      "outcome": "invalid",
+      "pairs": 30,
+      "positive_median": 0.257204,
+      "report_sha256": "4aa80775aae4eebccdee3fb88c839ed893d4e6894a9708af74d321549974cd82"
+    },
+    "scheduler": {
+      "bootstrap_ci95": {
+        "confidence_level": 0.95,
+        "iterations": 2000,
+        "lower": -4800000.0,
+        "upper": -4500000.0
+      },
+      "control_median": 500000.0,
+      "effect_size": -17.062071325515852,
+      "improvement_delta": -4500000.0,
+      "outcome": "pass",
+      "pairs": 15,
+      "positive_median": 5000000.0,
+      "report_sha256": "98c983be310d99058bee005be2f6e0eb4f8b251c600c888e6f9175ff800e5fec"
+    }
+  }
+}
