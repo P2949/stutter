@@ -459,6 +459,17 @@ pub(crate) fn acceptance_observation(tree_pid: u32) -> super::observation::Autot
             ..Default::default()
         },
         data_quality: super::quality::OnlineDataQuality::High,
+        // The privileged boundary refuses a workload whose identity is not pinned.
+        workload_identity: Some(super::observation::WorkloadIdentity {
+            root_pid: tree_pid,
+            process_starttime_ticks: ticks(tree_pid).ok(),
+            exe_dev: None,
+            exe_ino: None,
+            cgroup_path: None,
+            focus_kind: None,
+            class_distribution: Default::default(),
+            stable_hash: format!("crash-acceptance-{tree_pid}"),
+        }),
         ..Default::default()
     };
     observation.objective_signals =
