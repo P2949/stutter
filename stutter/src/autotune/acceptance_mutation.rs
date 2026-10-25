@@ -91,7 +91,12 @@ impl AcceptanceTarget {
     pub fn policy(self) -> ActionRunPolicy {
         let source = crate::daemon_policy::ActionSource::AutotuneRuntime;
         let mut policy = match self.mutation.mode() {
-            DaemonMode::ApplyMediumRisk => ActionRunPolicy::apply_medium_risk(source, false),
+            DaemonMode::ApplyMediumRisk => {
+                let mut policy = ActionRunPolicy::apply_medium_risk(source, false);
+                // The explicit medium-risk unlock the validation harness is granted.
+                policy.policy = crate::daemon::DaemonPolicy::apply_medium_risk(source);
+                policy
+            }
             _ => ActionRunPolicy::apply_low_risk(source, false),
         };
         policy.max_affected_tasks = Some(8);

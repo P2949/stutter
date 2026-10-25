@@ -125,11 +125,13 @@ impl LiveExperimentActionExecutor for FaultInjectingExecutor {
             .audit_path
             .clone()
             .unwrap_or_else(|| out.join("actions.jsonl"));
-        let policy = crate::actions::runner::ActionRunPolicy::for_action(
-            &action,
-            false,
-            crate::daemon_policy::ActionSource::AutotuneRuntime,
-        );
+        let source = crate::daemon_policy::ActionSource::AutotuneRuntime;
+        let mut policy =
+            crate::actions::runner::ActionRunPolicy::for_action(&action, false, source);
+        if candidate.safety_class() > SafetyClass::ReversibleLowRisk {
+            // The explicit medium-risk unlock the validation harness is granted.
+            policy.policy = crate::daemon::DaemonPolicy::apply_medium_risk(source);
+        }
         let journal_input = crate::autotune::action_transaction::JournaledActionInput {
             journal_path: &journal_path,
             audit_path: &audit_path,
