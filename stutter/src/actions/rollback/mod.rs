@@ -180,6 +180,9 @@ pub(crate) fn startup_rollback_registry() -> RollbackRegistry {
     registry.register(crate::actions::cpu_affinity::CpuAffinityRollbackHandler {
         require_verified_identity: true,
     });
+    registry.register(crate::actions::uclamp::UclampRollbackHandler {
+        require_verified_identity: true,
+    });
     registry
 }
 
@@ -190,7 +193,9 @@ fn rollback_registry(require_verified_identity: bool) -> RollbackRegistry {
     });
     registry.register(crate::actions::nice::NiceRollbackHandler);
     registry.register(crate::actions::ioprio::IoPrioRollbackHandler);
-    registry.register(crate::actions::uclamp::UclampRollbackHandler);
+    registry.register(crate::actions::uclamp::UclampRollbackHandler {
+        require_verified_identity,
+    });
     registry.register(crate::actions::cgroup::CgroupRollbackHandler);
     registry.register(crate::actions::irq_affinity::IrqAffinityRollbackHandler);
     registry.register(crate::actions::cpu_power::CpuPowerRollbackHandler);
