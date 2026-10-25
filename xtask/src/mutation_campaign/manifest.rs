@@ -67,6 +67,10 @@ pub struct OperationSection {
     #[serde(default)]
     pub skip: Vec<SkipEntry>,
     pub suites: SuiteMap,
+    /// The operation mutates through the privileged worker: the campaign asks the runner to start
+    /// the pinned worker as root and stop it afterwards. The controller itself never runs as root.
+    #[serde(default)]
+    pub privileged_worker: bool,
     /// Seconds until the RTC alarm wakes the machine after the suspend stage suspends it.
     #[serde(default = "default_suspend_wake_seconds")]
     pub suspend_wake_seconds: u64,

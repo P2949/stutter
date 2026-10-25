@@ -34,6 +34,18 @@ pub fn grants(operation: &OperationSection) -> BTreeSet<TaskGrant> {
         action: RunnerAction::ExecuteSchedulerBurst,
         suite: None,
     });
+    if operation.privileged_worker {
+        for action in [
+            RunnerAction::StartAutotunePrivilegedWorker,
+            RunnerAction::StopAutotunePrivilegedWorker,
+        ] {
+            grants.insert(TaskGrant {
+                task_id: CAMPAIGN_TASK.to_owned(),
+                action,
+                suite: None,
+            });
+        }
+    }
     for action in [
         RunnerAction::Status,
         RunnerAction::ResumeCampaign,
@@ -122,5 +134,36 @@ mod tests {
                 "{grant:?}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod worker_grant_tests {
+    use super::*;
+    use crate::mutation_campaign::manifest::MutationManifest;
+
+    #[test]
+    fn the_privileged_worker_is_granted_only_to_operations_that_declare_it() {
+        let manifest = MutationManifest::parse(include_str!(
+            "../../../docs/validation/mutation-graduation.toml"
+        ))
+        .unwrap();
+        let mut operation = manifest.operation("cpu_affinity_profile").unwrap().clone();
+        let has_worker = |operation: &OperationSection| {
+            grants(operation)
+                .iter()
+                .any(|g| g.action == RunnerAction::StartAutotunePrivilegedWorker)
+        };
+        assert!(!has_worker(&operation), "affinity needs no root worker");
+        operation.privileged_worker = true;
+        assert!(has_worker(&operation));
+        // The grant belongs to the campaign task, never to a stage.
+        assert!(grants(&operation).iter().all(|g| {
+            !matches!(
+                g.action,
+                RunnerAction::StartAutotunePrivilegedWorker
+                    | RunnerAction::StopAutotunePrivilegedWorker
+            ) || g.task_id == CAMPAIGN_TASK
+        }));
     }
 }

@@ -182,6 +182,19 @@ pub trait ActionExecutor: Send + Sync {
             "recording is not available".to_owned(),
         ))
     }
+    /// Starts the campaign's pinned privileged autotune worker; unsupported unless provided.
+    fn start_privileged_worker(&self, _auth: &Authorization) -> Result<Value, Denial> {
+        Err((
+            ErrorCode::Unsupported,
+            "the privileged autotune worker is not available".to_owned(),
+        ))
+    }
+    fn stop_privileged_worker(&self, _auth: &Authorization) -> Result<Value, Denial> {
+        Err((
+            ErrorCode::Unsupported,
+            "the privileged autotune worker is not available".to_owned(),
+        ))
+    }
     /// Overhead suite against a registered workload.
     fn workload_overhead(
         &self,
@@ -199,9 +212,46 @@ pub trait ActionExecutor: Send + Sync {
 /// same code path with it off (ids unchanged) and assert on the resulting process state.
 pub struct SystemExecutor {
     pub drop_to_owner: bool,
+    /// Root-owned directory holding the privileged worker's socket (never a user-writable one).
+    pub worker_dir: PathBuf,
+    worker: std::sync::Mutex<Option<std::process::Child>>,
+}
+
+/// How long the worker may take to create its socket.
+const WORKER_READY_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// The fixed socket of a campaign's privileged worker.
+pub fn worker_socket_path(worker_dir: &Path, auth: &Authorization) -> PathBuf {
+    worker_dir.join(format!("worker-{}.sock", auth.campaign_id))
+}
+
+/// The privileged worker launch: the pinned stutter binary and a socket the runner derived.
+pub fn plan_privileged_worker(auth: &Authorization, worker_dir: &Path) -> PlannedCommand {
+    let socket = worker_socket_path(worker_dir, auth);
+    PlannedCommand {
+        program: stutter_path(auth),
+        args: vec![
+            "privileged-worker".to_owned(),
+            "--socket".to_owned(),
+            socket.to_string_lossy().into_owned(),
+        ],
+        cwd: PathBuf::from(&auth.repository),
+        attempt_dir: worker_dir.to_path_buf(),
+        raw: socket,
+        path_env: auth.path_env.clone(),
+        cargo_home: None,
+    }
 }
 
 impl SystemExecutor {
+    pub fn new(drop_to_owner: bool, worker_dir: PathBuf) -> Self {
+        Self {
+            drop_to_owner,
+            worker_dir,
+            worker: std::sync::Mutex::new(None),
+        }
+    }
+
     fn identity(&self, auth: &Authorization) -> Option<Identity> {
         self.drop_to_owner.then_some(Identity {
             uid: auth.owner_uid,
@@ -305,6 +355,73 @@ impl SystemExecutor {
 }
 
 impl ActionExecutor for SystemExecutor {
+    fn start_privileged_worker(&self, auth: &Authorization) -> Result<Value, Denial> {
+        let mut slot = self
+            .worker
+            .lock()
+            .map_err(|_| failure("worker state is poisoned"))?;
+        if let Some(child) = slot.as_mut()
+            && child
+                .try_wait()
+                .map_err(|e| failure(e.to_string()))?
+                .is_none()
+        {
+            let socket = worker_socket_path(&self.worker_dir, auth);
+            return Ok(json!({"socket": socket, "pid": child.id(), "already_running": true}));
+        }
+        verify_pinned(&stutter_path(auth), &auth.stutter_sha256)?;
+        fs::create_dir_all(&self.worker_dir).map_err(|e| failure(format!("mkdir: {e}")))?;
+        let plan = plan_privileged_worker(auth, &self.worker_dir);
+        let socket = plan.raw.clone();
+        let _ = fs::remove_file(&socket);
+        // Runs with the runner's own identity (root): the whole point is the privileged writes.
+        let mut command = Self::command(&plan);
+        command
+            .env("HOME", &self.worker_dir)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        let mut child = command
+            .spawn()
+            .map_err(|e| failure(format!("could not start the privileged worker: {e}")))?;
+        let started = Instant::now();
+        while !socket.exists() {
+            if child
+                .try_wait()
+                .map_err(|e| failure(e.to_string()))?
+                .is_some()
+                || started.elapsed() > WORKER_READY_TIMEOUT
+            {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(failure("the privileged worker did not create its socket"));
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        fs::set_permissions(&socket, fs::Permissions::from_mode(0o600))
+            .map_err(|e| failure(format!("chmod socket: {e}")))?;
+        if self.drop_to_owner {
+            std::os::unix::fs::chown(&socket, Some(auth.owner_uid), Some(auth.owner_gid))
+                .map_err(|e| failure(format!("chown socket: {e}")))?;
+        }
+        let pid = child.id();
+        *slot = Some(child);
+        Ok(json!({"socket": socket, "pid": pid, "already_running": false}))
+    }
+
+    fn stop_privileged_worker(&self, auth: &Authorization) -> Result<Value, Denial> {
+        let mut slot = self
+            .worker
+            .lock()
+            .map_err(|_| failure("worker state is poisoned"))?;
+        let stopped = slot.take().is_some_and(|mut child| {
+            let _ = child.kill();
+            let _ = child.wait();
+            true
+        });
+        let _ = fs::remove_file(worker_socket_path(&self.worker_dir, auth));
+        Ok(json!({"stopped": stopped}))
+    }
+
     fn live_suite(&self, auth: &Authorization, envelope: &Envelope) -> Result<Value, Denial> {
         let Request::ExecuteLiveSuite { suite, .. } = &envelope.body else {
             return Err((

@@ -19,6 +19,7 @@ mod process;
 mod recording;
 mod resume;
 mod server;
+mod worker;
 
 pub(super) const MANIFEST: &str =
     "1111111111111111111111111111111111111111111111111111111111111111";

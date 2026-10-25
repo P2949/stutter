@@ -386,8 +386,18 @@ fn continue_campaign(
         println!("BLOCKED_PRIVILEGE_BOOTSTRAP: not root and passwordless sudo is unavailable");
         return Ok(Boundary::BlockedPrivilege);
     }
+    let worker = operation.privileged_worker;
+    if worker && state.mode == MutationMode::Active {
+        let worker_socket = super::harness::privileged_worker(&socket, &state, true)?;
+        println!("privileged_worker_socket={worker_socket:?}");
+    }
     let runner = production_runner(root)?;
-    drive(root, &dir, &manifest, &runner, max_stages)
+    let boundary = drive(root, &dir, &manifest, &runner, max_stages);
+    if worker {
+        // Best effort: the runner also stops the worker with the campaign.
+        let _ = super::harness::privileged_worker(&socket, &state, false);
+    }
+    boundary
 }
 
 fn production_runner(_root: &Path) -> anyhow::Result<super::stages::ProductionRunner> {

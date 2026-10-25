@@ -283,6 +283,8 @@ impl Authorization {
                 Ok(())
             }
             Request::Status
+            | Request::StartAutotunePrivilegedWorker
+            | Request::StopAutotunePrivilegedWorker
             | Request::Reboot
             | Request::ResumeCampaign
             | Request::CancelCampaign => Ok(()),

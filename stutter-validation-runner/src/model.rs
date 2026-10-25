@@ -160,6 +160,8 @@ pub enum RunnerAction {
     ExecuteSchedulerBurst,
     ExecuteRecording,
     ExecuteWorkloadOverhead,
+    StartAutotunePrivilegedWorker,
+    StopAutotunePrivilegedWorker,
     PrepareKernelCycle,
     SetNextBoot,
     Reboot,
@@ -204,6 +206,10 @@ pub enum Request {
         rounds: u32,
         work_units: u64,
     },
+    /// Starts the campaign's pinned `stutter privileged-worker` as root on a fixed socket the runner
+    /// derives (owned by the campaign user). No path, argument or program is caller-supplied.
+    StartAutotunePrivilegedWorker,
+    StopAutotunePrivilegedWorker,
     PrepareKernelCycle {
         entry_id: String,
     },
@@ -223,6 +229,8 @@ impl Request {
             Self::ExecuteSchedulerBurst { .. } => RunnerAction::ExecuteSchedulerBurst,
             Self::ExecuteRecording { .. } => RunnerAction::ExecuteRecording,
             Self::ExecuteWorkloadOverhead { .. } => RunnerAction::ExecuteWorkloadOverhead,
+            Self::StartAutotunePrivilegedWorker => RunnerAction::StartAutotunePrivilegedWorker,
+            Self::StopAutotunePrivilegedWorker => RunnerAction::StopAutotunePrivilegedWorker,
             Self::PrepareKernelCycle { .. } => RunnerAction::PrepareKernelCycle,
             Self::SetNextBoot { .. } => RunnerAction::SetNextBoot,
             Self::Reboot => RunnerAction::Reboot,

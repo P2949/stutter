@@ -150,6 +150,35 @@ impl BenefitHarness for RunnerHarness {
     }
 }
 
+/// Starts (or stops) the campaign's privileged worker through the runner and returns the socket the
+/// controller connects to. The runner derives the program, arguments and socket itself.
+pub fn privileged_worker(
+    socket: &std::path::Path,
+    state: &super::model::MutationState,
+    start: bool,
+) -> anyhow::Result<Option<PathBuf>> {
+    use crate::validation_campaign::bootstrap::CAMPAIGN_TASK;
+    let client = Client {
+        socket,
+        campaign_id: &state.campaign_id,
+        manifest_sha256: &state.manifest_sha256,
+    };
+    let request = if start {
+        Request::StartAutotunePrivilegedWorker
+    } else {
+        Request::StopAutotunePrivilegedWorker
+    };
+    let response = client.send(CAMPAIGN_TASK, request)?;
+    anyhow::ensure!(
+        response.status == ResponseStatus::Ok,
+        "the runner refused the privileged worker request: {:?}",
+        response.error
+    );
+    Ok(response
+        .data
+        .and_then(|data| data["socket"].as_str().map(PathBuf::from)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
