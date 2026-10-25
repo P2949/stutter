@@ -459,6 +459,8 @@ pub(crate) fn acceptance_observation(tree_pid: u32) -> super::observation::Autot
             ..Default::default()
         },
         data_quality: super::quality::OnlineDataQuality::High,
+        // The privileged boundary refuses an action whose kernel capability is not probed.
+        capabilities: crate::daemon::capabilities::CapabilityProbe::default().probe(),
         // The privileged boundary refuses a workload whose identity is not pinned.
         workload_identity: Some(super::observation::WorkloadIdentity {
             root_pid: tree_pid,
