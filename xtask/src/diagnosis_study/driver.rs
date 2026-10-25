@@ -84,6 +84,9 @@ pub enum StudyCommand {
     Calibrate {
         #[arg(long)]
         study: Option<PathBuf>,
+        /// Sweep the calibration part only (never loads the holdout); for designing a change.
+        #[arg(long)]
+        calibration_only: bool,
     },
     /// Takes one capture of `scenario` outside the plan (pair 1000+): proves a scenario's host
     /// behaviour without spending the plan's slots. Never counts toward a decision.
@@ -131,9 +134,17 @@ pub fn run(root: &Path, args: StudyArgs) -> anyhow::Result<()> {
             Ok(())
         }
         StudyCommand::Smoke { study, scenario } => smoke(root, study, &scenario),
-        StudyCommand::Calibrate { study } => {
+        StudyCommand::Calibrate {
+            study,
+            calibration_only,
+        } => {
             let (dir, header, config) = open(root, study)?;
-            let result = super::calibrate::calibrate(root, &dir, &header, &config)?;
+            let mode = if calibration_only {
+                super::calibrate::Mode::CalibrationOnly
+            } else {
+                super::calibrate::Mode::Final
+            };
+            let result = super::calibrate::calibrate(root, &dir, &header, &config, mode)?;
             for (name, family) in result["families"].as_object().into_iter().flatten() {
                 println!(
                     "{name}: {} selected {} changed {} logic_gap {}",

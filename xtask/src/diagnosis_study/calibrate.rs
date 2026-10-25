@@ -37,8 +37,10 @@ pub struct SplitEntry {
     pub part: Part,
 }
 
-/// Deterministic split: within each scenario, captures ordered by `sha256(capture_id)` alternate
-/// calibration, holdout, calibration, ... so both parts always see both roles of every family.
+/// Deterministic split: within each scenario, captures ordered by `sha256(capture_id)` go
+/// calibration, calibration, holdout, calibration, calibration, holdout, ... (2:1), so both parts
+/// always see both roles of every family and 15 matched pairs leave the calibration part with
+/// the evidence floor of 10 positives and 10 controls.
 pub fn build_split(fixtures: &[Fixture]) -> Vec<SplitEntry> {
     let mut by_scenario: std::collections::BTreeMap<String, Vec<(String, &Fixture)>> =
         Default::default();
@@ -61,10 +63,10 @@ pub fn build_split(fixtures: &[Fixture]) -> Vec<SplitEntry> {
                     .unwrap_or_default(),
                 fixture: fixture.name.clone(),
                 scenario: scenario.clone(),
-                part: if index % 2 == 0 {
-                    Part::Calibration
-                } else {
+                part: if index % 3 == 2 {
                     Part::Holdout
+                } else {
+                    Part::Calibration
                 },
             });
         }
@@ -270,12 +272,24 @@ fn materialize(
     Ok(dir)
 }
 
-/// Splits (once), sweeps both parts for every family whose impact study passed and decides.
+/// Which parts a run may look at.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Mode {
+    /// Sweeps the calibration part only; the holdout is never loaded. Used while designing a
+    /// diagnosis change.
+    CalibrationOnly,
+    /// The single final evaluation: both parts, thresholds decided. Refused if one was recorded.
+    Final,
+}
+
+/// Splits (once), sweeps the parts allowed by `mode` for every family whose impact study
+/// passed and, in the final mode, decides.
 pub fn calibrate(
     root: &Path,
     study: &StudyDir,
     header: &StudyHeader,
     config: &StudyConfig,
+    mode: Mode,
 ) -> anyhow::Result<Value> {
     ensure!(
         study.0.join(COMPLETE_MARKER).is_file(),
@@ -284,6 +298,11 @@ pub fn calibrate(
     let decisions = study.decisions()?;
     let (fixtures, corpus_id) = load_corpus(&study.calibration().join("fixtures"))
         .context("the study has no promoted calibration fixtures")?;
+    let final_path = study.calibration().join("decisions.json");
+    ensure!(
+        mode == Mode::CalibrationOnly || !final_path.exists(),
+        "the final holdout evaluation was already run; it is never repeated"
+    );
     let split_path = study.calibration().join("split.json");
     let split: Vec<SplitEntry> = match fs::read(&split_path) {
         Ok(bytes) => {
@@ -302,7 +321,9 @@ pub fn calibrate(
         }
     };
     let cal_dir = materialize(study, &split, Part::Calibration, "set-calibration")?;
-    let hold_dir = materialize(study, &split, Part::Holdout, "set-holdout")?;
+    let hold_dir = (mode == Mode::Final)
+        .then(|| materialize(study, &split, Part::Holdout, "set-holdout"))
+        .transpose()?;
     let mut families = serde_json::Map::new();
     for spec in &FAMILIES {
         let family = Family::ALL
@@ -318,7 +339,14 @@ pub fn calibrate(
             continue;
         }
         let cal = report(root, &cal_dir, spec.name)?;
-        let hold = report(root, &hold_dir, spec.name)?;
+        let Some(hold_dir) = &hold_dir else {
+            families.insert(
+                spec.name.to_owned(),
+                json!({"status": "calibration_only", "calibration": cal}),
+            );
+            continue;
+        };
+        let hold = report(root, hold_dir, spec.name)?;
         let decision = decide(
             spec.current,
             &rows(&cal, "sweep"),
@@ -353,9 +381,11 @@ pub fn calibrate(
         "diagnosis_remains": "Experimental",
         "mixed_scenarios": config.mixed.iter().map(|m| m.id.clone()).collect::<Vec<_>>(),
     });
-    fs::write(
-        study.calibration().join("decisions.json"),
-        serde_json::to_vec_pretty(&result)?,
-    )?;
+    let out = if mode == Mode::Final {
+        final_path
+    } else {
+        study.calibration().join("calibration-only.json")
+    };
+    fs::write(out, serde_json::to_vec_pretty(&result)?)?;
     Ok(result)
 }
