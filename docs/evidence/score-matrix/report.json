@@ -1,0 +1,1746 @@
+{
+  "analysis": {
+    "as_recorded": {
+      "decision": "the score does not reliably preserve the ordering across these workloads: weights stay, tune_evaluation stays Experimental, and a score redesign or objective-specific scores is a future design issue",
+      "every_profile_monotonic": false,
+      "pooled": {
+        "frame_p99": {
+          "direct_vs_level": 0.42935326976056104,
+          "score_vs_direct": 0.3957322760423663
+        },
+        "frame_p99_9": {
+          "direct_vs_level": 0.6786824323183671,
+          "score_vs_direct": 0.6817029376566303
+        },
+        "runnable_p99": {
+          "direct_vs_level": 0.5741487083805723,
+          "score_vs_direct": 0.45419257548075076
+        },
+        "score_vs_level": 0.6767476169205222
+      },
+      "profiles": {
+        "vkcube-heavy": {
+          "evaluation": {
+            "adjacent_inversions": 0,
+            "frame_evidence": "frame metrics present at every level; score includes the frame terms",
+            "frame_samples": [
+              272178,
+              156028,
+              151034,
+              139805,
+              120937,
+              79621
+            ],
+            "interpretation": "ranking proxy within comparable experiments; not a human-perceived percentage",
+            "levels_ms": [
+              0.0,
+              1.0,
+              2.0,
+              4.0,
+              8.0,
+              16.0
+            ],
+            "monotonic_in_degradation": false,
+            "primaries_unchanged": [
+              "GameRunnableLatency: runnable latency is primary",
+              "CompileThroughputWithForegroundProtection: fixed-work elapsed time is primary"
+            ],
+            "schema_version": 2,
+            "score_basis": "runnable_plus_frames",
+            "score_total": [
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              39.0
+            ],
+            "spearman_score_vs": {
+              "frame_over_16_6_rate": 1.0,
+              "frame_over_33_3_rate": null,
+              "frame_p99": 0.6546536707079772,
+              "frame_p99_9": 0.6546536707079772,
+              "runnable_over_5ms_rate": 0.6956083436402525,
+              "runnable_p99": 0.6642111641550715,
+              "sample_over_1ms": null
+            },
+            "spearman_score_vs_level": 0.6546536707079772,
+            "targets": [
+              {
+                "level_ms": 0.0,
+                "target_identity_source": null
+              },
+              {
+                "level_ms": 1.0,
+                "target_identity_source": null
+              },
+              {
+                "level_ms": 2.0,
+                "target_identity_source": null
+              },
+              {
+                "level_ms": 4.0,
+                "target_identity_source": null
+              },
+              {
+                "level_ms": 8.0,
+                "target_identity_source": null
+              },
+              {
+                "level_ms": 16.0,
+                "target_identity_source": null
+              }
+            ],
+            "weights": "retained (100 x >5 ms, 20 x >2 ms, 1 x >1 ms; frame terms unchanged)",
+            "weights_decision": "review: score is not monotonic in controlled degradation"
+          },
+          "per_level": [
+            {
+              "frame_over_16_6_rate_median": 0.0,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 1.91454,
+              "frame_p99_ms_median": 0.176728,
+              "level_ms": 0,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.003860882666834076,
+              "runnable_over_5ms_rate_median": 0.0,
+              "runnable_p99_ns_median": 1000000.0,
+              "score_total_median": 0.0,
+              "score_total_values": [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "frame_over_16_6_rate_median": 0.0,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 1.80638,
+              "frame_p99_ms_median": 0.197624,
+              "level_ms": 1,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.003508442189017323,
+              "runnable_over_5ms_rate_median": 0.0,
+              "runnable_p99_ns_median": 1000000.0,
+              "score_total_median": 0.0,
+              "score_total_values": [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "frame_over_16_6_rate_median": 0.0,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 2.15968,
+              "frame_p99_ms_median": 0.202319,
+              "level_ms": 2,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.004791238877481177,
+              "runnable_over_5ms_rate_median": 0.0,
+              "runnable_p99_ns_median": 2000000.0,
+              "score_total_median": 0.0,
+              "score_total_values": [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "frame_over_16_6_rate_median": 0.0,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 4.14657,
+              "frame_p99_ms_median": 0.203051,
+              "level_ms": 4,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.0331695747924784,
+              "runnable_over_5ms_rate_median": 0.0006502173094692173,
+              "runnable_p99_ns_median": 5000000.0,
+              "score_total_median": 0.0,
+              "score_total_values": [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "frame_over_16_6_rate_median": 0.0,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 8.15385,
+              "frame_p99_ms_median": 0.230855,
+              "level_ms": 8,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.038296878648711764,
+              "runnable_over_5ms_rate_median": 0.03541682883163384,
+              "runnable_p99_ns_median": 10000000.0,
+              "score_total_median": 0.0,
+              "score_total_values": [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "frame_over_16_6_rate_median": 0.00048787200240183137,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 16.166,
+              "frame_p99_ms_median": 0.563756,
+              "level_ms": 16,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.052520553872782344,
+              "runnable_over_5ms_rate_median": 0.04895067070532237,
+              "runnable_p99_ns_median": 18727478.0,
+              "score_total_median": 39.0,
+              "score_total_values": [
+                42.0,
+                39.0,
+                37.0,
+                39.0,
+                38.0
+              ]
+            }
+          ],
+          "recordings": 30,
+          "within_profile_recordings": {
+            "frame_p99": {
+              "direct_vs_level": 0.9076366161183663,
+              "score_vs_direct": 0.6491202226119457
+            },
+            "frame_p99_9": {
+              "direct_vs_level": 0.9459715787867197,
+              "score_vs_direct": 0.6429511814255597
+            },
+            "runnable_p99": {
+              "direct_vs_level": 0.9832998295029693,
+              "score_vs_direct": 0.6638929626827734
+            },
+            "score_vs_level": 0.6513617563054435
+          }
+        },
+        "vkcube-light": {
+          "evaluation": {
+            "adjacent_inversions": 0,
+            "frame_evidence": "frame metrics present at every level; score includes the frame terms",
+            "frame_samples": [
+              4657,
+              3021,
+              3010,
+              3027,
+              3020,
+              3015
+            ],
+            "interpretation": "ranking proxy within comparable experiments; not a human-perceived percentage",
+            "levels_ms": [
+              0.0,
+              1.0,
+              2.0,
+              4.0,
+              8.0,
+              16.0
+            ],
+            "monotonic_in_degradation": false,
+            "primaries_unchanged": [
+              "GameRunnableLatency: runnable latency is primary",
+              "CompileThroughputWithForegroundProtection: fixed-work elapsed time is primary"
+            ],
+            "schema_version": 2,
+            "score_basis": "runnable_plus_frames",
+            "score_total": [
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              574.0
+            ],
+            "spearman_score_vs": {
+              "frame_over_16_6_rate": 1.0,
+              "frame_over_33_3_rate": null,
+              "frame_p99": 0.6546536707079772,
+              "frame_p99_9": 0.6546536707079772,
+              "runnable_over_5ms_rate": 0.6956083436402525,
+              "runnable_p99": 0.6546536707079772,
+              "sample_over_1ms": null
+            },
+            "spearman_score_vs_level": 0.6546536707079772,
+            "targets": [
+              {
+                "level_ms": 0.0,
+                "target_identity_source": null
+              },
+              {
+                "level_ms": 1.0,
+                "target_identity_source": null
+              },
+              {
+                "level_ms": 2.0,
+                "target_identity_source": null
+              },
+              {
+                "level_ms": 4.0,
+                "target_identity_source": null
+              },
+              {
+                "level_ms": 8.0,
+                "target_identity_source": null
+              },
+              {
+                "level_ms": 16.0,
+                "target_identity_source": null
+              }
+            ],
+            "weights": "retained (100 x >5 ms, 20 x >2 ms, 1 x >1 ms; frame terms unchanged)",
+            "weights_decision": "review: score is not monotonic in controlled degradation"
+          },
+          "per_level": [
+            {
+              "frame_over_16_6_rate_median": 0.0,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 8.41779,
+              "frame_p99_ms_median": 7.68299,
+              "level_ms": 0,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.00011582117211026175,
+              "runnable_over_5ms_rate_median": 0.0,
+              "runnable_p99_ns_median": 500000.0,
+              "score_total_median": 0.0,
+              "score_total_values": [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "frame_over_16_6_rate_median": 0.0,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 8.54107,
+              "frame_p99_ms_median": 7.733,
+              "level_ms": 1,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.00018381789773597623,
+              "runnable_over_5ms_rate_median": 0.0,
+              "runnable_p99_ns_median": 1000000.0,
+              "score_total_median": 0.0,
+              "score_total_values": [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "frame_over_16_6_rate_median": 0.0,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 9.24251,
+              "frame_p99_ms_median": 8.41888,
+              "level_ms": 2,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.005366112376376626,
+              "runnable_over_5ms_rate_median": 0.0,
+              "runnable_p99_ns_median": 2000000.0,
+              "score_total_median": 0.0,
+              "score_total_values": [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "frame_over_16_6_rate_median": 0.0,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 11.3561,
+              "frame_p99_ms_median": 10.4099,
+              "level_ms": 4,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.040528052805280525,
+              "runnable_over_5ms_rate_median": 0.00009958175662218681,
+              "runnable_p99_ns_median": 5000000.0,
+              "score_total_median": 0.0,
+              "score_total_values": [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "frame_over_16_6_rate_median": 0.0,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 14.9634,
+              "frame_p99_ms_median": 14.33,
+              "level_ms": 8,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.06570326831642395,
+              "runnable_over_5ms_rate_median": 0.0509811320754717,
+              "runnable_p99_ns_median": 9543971.0,
+              "score_total_median": 0.0,
+              "score_total_values": [
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "frame_over_16_6_rate_median": 0.19071310116086235,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 22.8676,
+              "frame_p99_ms_median": 22.2792,
+              "level_ms": 16,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.10316329438586491,
+              "runnable_over_5ms_rate_median": 0.10299230550014249,
+              "runnable_p99_ns_median": 17658043.0,
+              "score_total_median": 574.0,
+              "score_total_values": [
+                575.0,
+                574.0,
+                572.0,
+                577.0,
+                571.0
+              ]
+            }
+          ],
+          "recordings": 30,
+          "within_profile_recordings": {
+            "frame_p99": {
+              "direct_vs_level": 0.9549915700028028,
+              "score_vs_direct": 0.6812894487960401
+            },
+            "frame_p99_9": {
+              "direct_vs_level": 0.9549915700028028,
+              "score_vs_direct": 0.6917953141279417
+            },
+            "runnable_p99": {
+              "direct_vs_level": 0.9846632583707293,
+              "score_vs_direct": 0.6995662244714043
+            },
+            "score_vs_level": 0.6857292004018509
+          }
+        },
+        "vkmark-heavy": {
+          "evaluation": {
+            "adjacent_inversions": 0,
+            "frame_evidence": "frame metrics present at every level; score includes the frame terms",
+            "frame_samples": [
+              231994,
+              126886,
+              122711,
+              112746,
+              89881,
+              63757
+            ],
+            "interpretation": "ranking proxy within comparable experiments; not a human-perceived percentage",
+            "levels_ms": [
+              0.0,
+              1.0,
+              2.0,
+              4.0,
+              8.0,
+              16.0
+            ],
+            "monotonic_in_degradation": false,
+            "primaries_unchanged": [
+              "GameRunnableLatency: runnable latency is primary",
+              "CompileThroughputWithForegroundProtection: fixed-work elapsed time is primary"
+            ],
+            "schema_version": 2,
+            "score_basis": "runnable_plus_frames",
+            "score_total": [
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              37.0
+            ],
+            "spearman_score_vs": {
+              "frame_over_16_6_rate": 1.0,
+              "frame_over_33_3_rate": null,
+              "frame_p99": 0.6546536707079772,
+              "frame_p99_9": 0.6546536707079772,
+              "runnable_over_5ms_rate": 0.6956083436402525,
+              "runnable_p99": 0.31622776601683794,
+              "sample_over_1ms": null
+            },
+            "spearman_score_vs_level": 0.6546536707079772,
+            "targets": [
+              {
+                "level_ms": 0.0,
+                "target_identity_source": null
+              },
+              {
+                "level_ms": 1.0,
+                "target_identity_source": null
+              },
+              {
+                "level_ms": 2.0,
+                "target_identity_source": null
+              },
+              {
+                "level_ms": 4.0,
+                "target_identity_source": null
+              },
+              {
+                "level_ms": 8.0,
+                "target_identity_source": null
+              },
+              {
+                "level_ms": 16.0,
+                "target_identity_source": null
+              }
+            ],
+            "weights": "retained (100 x >5 ms, 20 x >2 ms, 1 x >1 ms; frame terms unchanged)",
+            "weights_decision": "review: score is not monotonic in controlled degradation"
+          },
+          "per_level": [
+            {
+              "frame_over_16_6_rate_median": 0.0,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 2.18127,
+              "frame_p99_ms_median": 0.199404,
+              "level_ms": 0,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.00006117284339846202,
+              "runnable_over_5ms_rate_median": 0.0,
+              "runnable_p99_ns_median": 50000.0,
+              "score_total_median": 0.0,
+              "score_total_values": [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "frame_over_16_6_rate_median": 0.0,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 2.23631,
+              "frame_p99_ms_median": 0.293981,
+              "level_ms": 1,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.00007946397323247608,
+              "runnable_over_5ms_rate_median": 0.0,
+              "runnable_p99_ns_median": 20000.0,
+              "score_total_median": 0.0,
+              "score_total_values": [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "frame_over_16_6_rate_median": 0.0,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 2.25009,
+              "frame_p99_ms_median": 0.288844,
+              "level_ms": 2,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.00024900609302664365,
+              "runnable_over_5ms_rate_median": 0.0,
+              "runnable_p99_ns_median": 20000.0,
+              "score_total_median": 0.0,
+              "score_total_values": [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "frame_over_16_6_rate_median": 0.0,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 4.16387,
+              "frame_p99_ms_median": 0.350858,
+              "level_ms": 4,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.0013748541751519988,
+              "runnable_over_5ms_rate_median": 0.000010339337041708886,
+              "runnable_p99_ns_median": 50000.0,
+              "score_total_median": 0.0,
+              "score_total_values": [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "frame_over_16_6_rate_median": 0.0,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 8.19366,
+              "frame_p99_ms_median": 0.755652,
+              "level_ms": 8,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.001706773016087603,
+              "runnable_over_5ms_rate_median": 0.0016536626817821897,
+              "runnable_p99_ns_median": 50000.0,
+              "score_total_median": 0.0,
+              "score_total_values": [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "frame_over_16_6_rate_median": 0.0005886310124453414,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 16.213,
+              "frame_p99_ms_median": 1.57829,
+              "level_ms": 16,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.0023354353322132667,
+              "runnable_over_5ms_rate_median": 0.0022994702233580916,
+              "runnable_p99_ns_median": 50000.0,
+              "score_total_median": 37.0,
+              "score_total_values": [
+                26.0,
+                35.0,
+                44.0,
+                37.0,
+                37.0
+              ]
+            }
+          ],
+          "recordings": 30,
+          "within_profile_recordings": {
+            "frame_p99": {
+              "direct_vs_level": 0.9346965897666157,
+              "score_vs_direct": 0.6450075284876884
+            },
+            "frame_p99_9": {
+              "direct_vs_level": 0.9053816183143455,
+              "score_vs_direct": 0.6450075284876884
+            },
+            "runnable_p99": {
+              "direct_vs_level": 0.4042112654807904,
+              "score_vs_direct": 0.3545325393549048
+            },
+            "score_vs_level": 0.6513617563054435
+          }
+        },
+        "vkmark-light": {
+          "evaluation": {
+            "adjacent_inversions": 0,
+            "frame_evidence": "frame metrics present at every level; score includes the frame terms",
+            "frame_samples": [
+              4658,
+              2862,
+              2865,
+              2856,
+              2849,
+              2790
+            ],
+            "interpretation": "ranking proxy within comparable experiments; not a human-perceived percentage",
+            "levels_ms": [
+              0.0,
+              1.0,
+              2.0,
+              4.0,
+              8.0,
+              16.0
+            ],
+            "monotonic_in_degradation": false,
+            "primaries_unchanged": [
+              "GameRunnableLatency: runnable latency is primary",
+              "CompileThroughputWithForegroundProtection: fixed-work elapsed time is primary"
+            ],
+            "schema_version": 2,
+            "score_basis": "runnable_plus_frames",
+            "score_total": [
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              482.0
+            ],
+            "spearman_score_vs": {
+              "frame_over_16_6_rate": 1.0,
+              "frame_over_33_3_rate": null,
+              "frame_p99": 0.6546536707079772,
+              "frame_p99_9": 0.6546536707079772,
+              "runnable_over_5ms_rate": 0.7745966692414834,
+              "runnable_p99": 0.6546536707079772,
+              "sample_over_1ms": null
+            },
+            "spearman_score_vs_level": 0.6546536707079772,
+            "targets": [
+              {
+                "level_ms": 0.0,
+                "target_identity_source": null
+              },
+              {
+                "level_ms": 1.0,
+                "target_identity_source": null
+              },
+              {
+                "level_ms": 2.0,
+                "target_identity_source": null
+              },
+              {
+                "level_ms": 4.0,
+                "target_identity_source": null
+              },
+              {
+                "level_ms": 8.0,
+                "target_identity_source": null
+              },
+              {
+                "level_ms": 16.0,
+                "target_identity_source": null
+              }
+            ],
+            "weights": "retained (100 x >5 ms, 20 x >2 ms, 1 x >1 ms; frame terms unchanged)",
+            "weights_decision": "review: score is not monotonic in controlled degradation"
+          },
+          "per_level": [
+            {
+              "frame_over_16_6_rate_median": 0.0,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 9.03105,
+              "frame_p99_ms_median": 7.89271,
+              "level_ms": 0,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.0001595150741745095,
+              "runnable_over_5ms_rate_median": 0.0,
+              "runnable_p99_ns_median": 200000.0,
+              "score_total_median": 0.0,
+              "score_total_values": [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "frame_over_16_6_rate_median": 0.0,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 9.28718,
+              "frame_p99_ms_median": 8.00018,
+              "level_ms": 1,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.000198144050724877,
+              "runnable_over_5ms_rate_median": 0.0,
+              "runnable_p99_ns_median": 1000000.0,
+              "score_total_median": 0.0,
+              "score_total_values": [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "frame_over_16_6_rate_median": 0.0,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 9.63725,
+              "frame_p99_ms_median": 8.50439,
+              "level_ms": 2,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.002709483191169092,
+              "runnable_over_5ms_rate_median": 0.0,
+              "runnable_p99_ns_median": 2000000.0,
+              "score_total_median": 0.0,
+              "score_total_values": [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "frame_over_16_6_rate_median": 0.0,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 11.386,
+              "frame_p99_ms_median": 10.5144,
+              "level_ms": 4,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.02700901469711319,
+              "runnable_over_5ms_rate_median": 0.0,
+              "runnable_p99_ns_median": 4657482.0,
+              "score_total_median": 0.0,
+              "score_total_values": [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "frame_over_16_6_rate_median": 0.0,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 15.5637,
+              "frame_p99_ms_median": 14.5075,
+              "level_ms": 8,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.04275477707006369,
+              "runnable_over_5ms_rate_median": 0.03264840182648402,
+              "runnable_p99_ns_median": 8903464.0,
+              "score_total_median": 0.0,
+              "score_total_values": [
+                0.0,
+                1.0,
+                1.0,
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "frame_over_16_6_rate_median": 0.17275985663082438,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 23.9462,
+              "frame_p99_ms_median": 22.6677,
+              "level_ms": 16,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.05494875619496704,
+              "runnable_over_5ms_rate_median": 0.05480440744839532,
+              "runnable_p99_ns_median": 18237243.0,
+              "score_total_median": 482.0,
+              "score_total_values": [
+                490.0,
+                482.0,
+                473.0,
+                479.0,
+                482.0
+              ]
+            }
+          ],
+          "recordings": 30,
+          "within_profile_recordings": {
+            "frame_p99": {
+              "direct_vs_level": 0.9707765546309483,
+              "score_vs_direct": 0.717118219801961
+            },
+            "frame_p99_9": {
+              "direct_vs_level": 0.9392065853746573,
+              "score_vs_direct": 0.7153171694382893
+            },
+            "runnable_p99": {
+              "direct_vs_level": 0.99131448214768,
+              "score_vs_direct": 0.7338444028286175
+            },
+            "score_vs_level": 0.7226267603020408
+          }
+        }
+      },
+      "question": "Does one scalar score reliably preserve the ordering of the direct evidence across distinct workloads?",
+      "schema_version": 1,
+      "total_adjacent_inversions": 0,
+      "weights": "unchanged; this study decides nothing about weights"
+    },
+    "explicit_target": {
+      "decision": "the score does not reliably preserve the ordering across these workloads: weights stay, tune_evaluation stays Experimental, and a score redesign or objective-specific scores is a future design issue",
+      "every_profile_monotonic": false,
+      "pooled": {
+        "frame_p99": {
+          "direct_vs_level": 0.42935326976056104,
+          "score_vs_direct": 0.34695525202367045
+        },
+        "frame_p99_9": {
+          "direct_vs_level": 0.6786824323183671,
+          "score_vs_direct": 0.5529768612010231
+        },
+        "runnable_p99": {
+          "direct_vs_level": 0.5741487083805723,
+          "score_vs_direct": 0.6479191788957983
+        },
+        "score_vs_level": 0.9260411076284009
+      },
+      "profiles": {
+        "vkcube-heavy": {
+          "evaluation": {
+            "adjacent_inversions": 2,
+            "frame_evidence": "frame metrics present at every level; score includes the frame terms",
+            "frame_samples": [
+              272178,
+              156028,
+              151034,
+              139805,
+              120937,
+              79621
+            ],
+            "interpretation": "ranking proxy within comparable experiments; not a human-perceived percentage",
+            "levels_ms": [
+              0.0,
+              1.0,
+              2.0,
+              4.0,
+              8.0,
+              16.0
+            ],
+            "monotonic_in_degradation": false,
+            "primaries_unchanged": [
+              "GameRunnableLatency: runnable latency is primary",
+              "CompileThroughputWithForegroundProtection: fixed-work elapsed time is primary"
+            ],
+            "schema_version": 2,
+            "score_basis": "runnable_plus_frames",
+            "score_total": [
+              2715.0,
+              2519.0,
+              4002.0,
+              22635.0,
+              111737.0,
+              111061.0
+            ],
+            "spearman_score_vs": {
+              "frame_over_16_6_rate": 0.3927922024247863,
+              "frame_over_33_3_rate": null,
+              "frame_p99": 0.8857142857142857,
+              "frame_p99_9": 0.9428571428571428,
+              "runnable_over_5ms_rate": 0.8804062740424285,
+              "runnable_p99": 0.9276336570439175,
+              "sample_over_1ms": null
+            },
+            "spearman_score_vs_level": 0.8857142857142857,
+            "targets": [
+              {
+                "level_ms": 0.0,
+                "target_identity_source": null
+              },
+              {
+                "level_ms": 1.0,
+                "target_identity_source": null
+              },
+              {
+                "level_ms": 2.0,
+                "target_identity_source": null
+              },
+              {
+                "level_ms": 4.0,
+                "target_identity_source": null
+              },
+              {
+                "level_ms": 8.0,
+                "target_identity_source": null
+              },
+              {
+                "level_ms": 16.0,
+                "target_identity_source": null
+              }
+            ],
+            "weights": "retained (100 x >5 ms, 20 x >2 ms, 1 x >1 ms; frame terms unchanged)",
+            "weights_decision": "review: score is not monotonic in controlled degradation"
+          },
+          "per_level": [
+            {
+              "frame_over_16_6_rate_median": 0.0,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 1.91454,
+              "frame_p99_ms_median": 0.176728,
+              "level_ms": 0,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.003860882666834076,
+              "runnable_over_5ms_rate_median": 0.0,
+              "runnable_p99_ns_median": 1000000.0,
+              "score_total_median": 2715.0,
+              "score_total_values": [
+                2949.0,
+                2626.0,
+                2597.0,
+                2715.0,
+                3165.0
+              ]
+            },
+            {
+              "frame_over_16_6_rate_median": 0.0,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 1.80638,
+              "frame_p99_ms_median": 0.197624,
+              "level_ms": 1,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.003508442189017323,
+              "runnable_over_5ms_rate_median": 0.0,
+              "runnable_p99_ns_median": 1000000.0,
+              "score_total_median": 2519.0,
+              "score_total_values": [
+                2806.0,
+                2519.0,
+                2437.0,
+                2480.0,
+                2685.0
+              ]
+            },
+            {
+              "frame_over_16_6_rate_median": 0.0,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 2.15968,
+              "frame_p99_ms_median": 0.202319,
+              "level_ms": 2,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.004791238877481177,
+              "runnable_over_5ms_rate_median": 0.0,
+              "runnable_p99_ns_median": 2000000.0,
+              "score_total_median": 4002.0,
+              "score_total_values": [
+                4641.0,
+                4124.0,
+                4002.0,
+                3224.0,
+                3833.0
+              ]
+            },
+            {
+              "frame_over_16_6_rate_median": 0.0,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 4.14657,
+              "frame_p99_ms_median": 0.203051,
+              "level_ms": 4,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.0331695747924784,
+              "runnable_over_5ms_rate_median": 0.0006502173094692173,
+              "runnable_p99_ns_median": 5000000.0,
+              "score_total_median": 22635.0,
+              "score_total_values": [
+                23242.0,
+                21345.0,
+                22687.0,
+                22220.0,
+                22635.0
+              ]
+            },
+            {
+              "frame_over_16_6_rate_median": 0.0,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 8.15385,
+              "frame_p99_ms_median": 0.230855,
+              "level_ms": 8,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.038296878648711764,
+              "runnable_over_5ms_rate_median": 0.03541682883163384,
+              "runnable_p99_ns_median": 10000000.0,
+              "score_total_median": 111737.0,
+              "score_total_values": [
+                112301.0,
+                112251.0,
+                110973.0,
+                111737.0,
+                111620.0
+              ]
+            },
+            {
+              "frame_over_16_6_rate_median": 0.00048787200240183137,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 16.166,
+              "frame_p99_ms_median": 0.563756,
+              "level_ms": 16,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.052520553872782344,
+              "runnable_over_5ms_rate_median": 0.04895067070532237,
+              "runnable_p99_ns_median": 18727478.0,
+              "score_total_median": 111061.0,
+              "score_total_values": [
+                110492.0,
+                111247.0,
+                110982.0,
+                111674.0,
+                111061.0
+              ]
+            }
+          ],
+          "recordings": 30,
+          "within_profile_recordings": {
+            "frame_p99": {
+              "direct_vs_level": 0.9076366161183663,
+              "score_vs_direct": 0.7953281423804227
+            },
+            "frame_p99_9": {
+              "direct_vs_level": 0.9459715787867197,
+              "score_vs_direct": 0.9381535038932147
+            },
+            "runnable_p99": {
+              "direct_vs_level": 0.9832998295029693,
+              "score_vs_direct": 0.9262607410364188
+            },
+            "score_vs_level": 0.8963616270982624
+          }
+        },
+        "vkcube-light": {
+          "evaluation": {
+            "adjacent_inversions": 0,
+            "frame_evidence": "frame metrics present at every level; score includes the frame terms",
+            "frame_samples": [
+              4657,
+              3021,
+              3010,
+              3027,
+              3020,
+              3015
+            ],
+            "interpretation": "ranking proxy within comparable experiments; not a human-perceived percentage",
+            "levels_ms": [
+              0.0,
+              1.0,
+              2.0,
+              4.0,
+              8.0,
+              16.0
+            ],
+            "monotonic_in_degradation": true,
+            "primaries_unchanged": [
+              "GameRunnableLatency: runnable latency is primary",
+              "CompileThroughputWithForegroundProtection: fixed-work elapsed time is primary"
+            ],
+            "schema_version": 2,
+            "score_basis": "runnable_plus_frames",
+            "score_total": [
+              145.0,
+              370.0,
+              4547.0,
+              26376.0,
+              172762.0,
+              219645.0
+            ],
+            "spearman_score_vs": {
+              "frame_over_16_6_rate": 0.6546536707079772,
+              "frame_over_33_3_rate": null,
+              "frame_p99": 1.0,
+              "frame_p99_9": 1.0,
+              "runnable_over_5ms_rate": 0.9411239481143202,
+              "runnable_p99": 1.0,
+              "sample_over_1ms": null
+            },
+            "spearman_score_vs_level": 1.0,
+            "targets": [
+              {
+                "level_ms": 0.0,
+                "target_identity_source": null
+              },
+              {
+                "level_ms": 1.0,
+                "target_identity_source": null
+              },
+              {
+                "level_ms": 2.0,
+                "target_identity_source": null
+              },
+              {
+                "level_ms": 4.0,
+                "target_identity_source": null
+              },
+              {
+                "level_ms": 8.0,
+                "target_identity_source": null
+              },
+              {
+                "level_ms": 16.0,
+                "target_identity_source": null
+              }
+            ],
+            "weights": "retained (100 x >5 ms, 20 x >2 ms, 1 x >1 ms; frame terms unchanged)",
+            "weights_decision": "retain: no empirical case for change"
+          },
+          "per_level": [
+            {
+              "frame_over_16_6_rate_median": 0.0,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 8.41779,
+              "frame_p99_ms_median": 7.68299,
+              "level_ms": 0,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.00011582117211026175,
+              "runnable_over_5ms_rate_median": 0.0,
+              "runnable_p99_ns_median": 500000.0,
+              "score_total_median": 145.0,
+              "score_total_values": [
+                292.0,
+                53.0,
+                116.0,
+                232.0,
+                145.0
+              ]
+            },
+            {
+              "frame_over_16_6_rate_median": 0.0,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 8.54107,
+              "frame_p99_ms_median": 7.733,
+              "level_ms": 1,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.00018381789773597623,
+              "runnable_over_5ms_rate_median": 0.0,
+              "runnable_p99_ns_median": 1000000.0,
+              "score_total_median": 370.0,
+              "score_total_values": [
+                450.0,
+                370.0,
+                157.0,
+                304.0,
+                850.0
+              ]
+            },
+            {
+              "frame_over_16_6_rate_median": 0.0,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 9.24251,
+              "frame_p99_ms_median": 8.41888,
+              "level_ms": 2,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.005366112376376626,
+              "runnable_over_5ms_rate_median": 0.0,
+              "runnable_p99_ns_median": 2000000.0,
+              "score_total_median": 4547.0,
+              "score_total_values": [
+                5526.0,
+                5276.0,
+                4547.0,
+                3098.0,
+                3983.0
+              ]
+            },
+            {
+              "frame_over_16_6_rate_median": 0.0,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 11.3561,
+              "frame_p99_ms_median": 10.4099,
+              "level_ms": 4,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.040528052805280525,
+              "runnable_over_5ms_rate_median": 0.00009958175662218681,
+              "runnable_p99_ns_median": 5000000.0,
+              "score_total_median": 26376.0,
+              "score_total_values": [
+                26440.0,
+                25408.0,
+                26164.0,
+                26551.0,
+                26376.0
+              ]
+            },
+            {
+              "frame_over_16_6_rate_median": 0.0,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 14.9634,
+              "frame_p99_ms_median": 14.33,
+              "level_ms": 8,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.06570326831642395,
+              "runnable_over_5ms_rate_median": 0.0509811320754717,
+              "runnable_p99_ns_median": 9543971.0,
+              "score_total_median": 172762.0,
+              "score_total_values": [
+                172762.0,
+                176492.0,
+                172997.0,
+                171607.0,
+                170774.0
+              ]
+            },
+            {
+              "frame_over_16_6_rate_median": 0.19071310116086235,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 22.8676,
+              "frame_p99_ms_median": 22.2792,
+              "level_ms": 16,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.10316329438586491,
+              "runnable_over_5ms_rate_median": 0.10299230550014249,
+              "runnable_p99_ns_median": 17658043.0,
+              "score_total_median": 219645.0,
+              "score_total_values": [
+                218725.0,
+                219298.0,
+                220450.0,
+                219645.0,
+                219853.0
+              ]
+            }
+          ],
+          "recordings": 30,
+          "within_profile_recordings": {
+            "frame_p99": {
+              "direct_vs_level": 0.9549915700028028,
+              "score_vs_direct": 0.9652947719688543
+            },
+            "frame_p99_9": {
+              "direct_vs_level": 0.9549915700028028,
+              "score_vs_direct": 0.9657397107897664
+            },
+            "runnable_p99": {
+              "direct_vs_level": 0.9846632583707293,
+              "score_vs_direct": 0.9754691807069935
+            },
+            "score_vs_level": 0.9820515436510522
+          }
+        },
+        "vkmark-heavy": {
+          "evaluation": {
+            "adjacent_inversions": 2,
+            "frame_evidence": "frame metrics present at every level; score includes the frame terms",
+            "frame_samples": [
+              231994,
+              126886,
+              122711,
+              112746,
+              89881,
+              63757
+            ],
+            "interpretation": "ranking proxy within comparable experiments; not a human-perceived percentage",
+            "levels_ms": [
+              0.0,
+              1.0,
+              2.0,
+              4.0,
+              8.0,
+              16.0
+            ],
+            "monotonic_in_degradation": false,
+            "primaries_unchanged": [
+              "GameRunnableLatency: runnable latency is primary",
+              "CompileThroughputWithForegroundProtection: fixed-work elapsed time is primary"
+            ],
+            "schema_version": 2,
+            "score_basis": "runnable_plus_frames",
+            "score_total": [
+              1464.0,
+              1132.0,
+              3706.0,
+              15022.0,
+              83407.0,
+              82408.0
+            ],
+            "spearman_score_vs": {
+              "frame_over_16_6_rate": 0.3927922024247863,
+              "frame_over_33_3_rate": null,
+              "frame_p99": 0.7714285714285715,
+              "frame_p99_9": 0.8857142857142857,
+              "runnable_over_5ms_rate": 0.8804062740424285,
+              "runnable_p99": 0.6210590034081188,
+              "sample_over_1ms": null
+            },
+            "spearman_score_vs_level": 0.8857142857142857,
+            "targets": [
+              {
+                "level_ms": 0.0,
+                "target_identity_source": null
+              },
+              {
+                "level_ms": 1.0,
+                "target_identity_source": null
+              },
+              {
+                "level_ms": 2.0,
+                "target_identity_source": null
+              },
+              {
+                "level_ms": 4.0,
+                "target_identity_source": null
+              },
+              {
+                "level_ms": 8.0,
+                "target_identity_source": null
+              },
+              {
+                "level_ms": 16.0,
+                "target_identity_source": null
+              }
+            ],
+            "weights": "retained (100 x >5 ms, 20 x >2 ms, 1 x >1 ms; frame terms unchanged)",
+            "weights_decision": "review: score is not monotonic in controlled degradation"
+          },
+          "per_level": [
+            {
+              "frame_over_16_6_rate_median": 0.0,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 2.18127,
+              "frame_p99_ms_median": 0.199404,
+              "level_ms": 0,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.00006117284339846202,
+              "runnable_over_5ms_rate_median": 0.0,
+              "runnable_p99_ns_median": 50000.0,
+              "score_total_median": 1464.0,
+              "score_total_values": [
+                1464.0,
+                1395.0,
+                2094.0,
+                1850.0,
+                1377.0
+              ]
+            },
+            {
+              "frame_over_16_6_rate_median": 0.0,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 2.23631,
+              "frame_p99_ms_median": 0.293981,
+              "level_ms": 1,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.00007946397323247608,
+              "runnable_over_5ms_rate_median": 0.0,
+              "runnable_p99_ns_median": 20000.0,
+              "score_total_median": 1132.0,
+              "score_total_values": [
+                1311.0,
+                830.0,
+                1132.0,
+                1308.0,
+                1021.0
+              ]
+            },
+            {
+              "frame_over_16_6_rate_median": 0.0,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 2.25009,
+              "frame_p99_ms_median": 0.288844,
+              "level_ms": 2,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.00024900609302664365,
+              "runnable_over_5ms_rate_median": 0.0,
+              "runnable_p99_ns_median": 20000.0,
+              "score_total_median": 3706.0,
+              "score_total_values": [
+                3706.0,
+                3290.0,
+                3803.0,
+                3897.0,
+                3515.0
+              ]
+            },
+            {
+              "frame_over_16_6_rate_median": 0.0,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 4.16387,
+              "frame_p99_ms_median": 0.350858,
+              "level_ms": 4,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.0013748541751519988,
+              "runnable_over_5ms_rate_median": 0.000010339337041708886,
+              "runnable_p99_ns_median": 50000.0,
+              "score_total_median": 15022.0,
+              "score_total_values": [
+                15375.0,
+                8749.0,
+                15022.0,
+                6863.0,
+                15714.0
+              ]
+            },
+            {
+              "frame_over_16_6_rate_median": 0.0,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 8.19366,
+              "frame_p99_ms_median": 0.755652,
+              "level_ms": 8,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.001706773016087603,
+              "runnable_over_5ms_rate_median": 0.0016536626817821897,
+              "runnable_p99_ns_median": 50000.0,
+              "score_total_median": 83407.0,
+              "score_total_values": [
+                82772.0,
+                83407.0,
+                81880.0,
+                88130.0,
+                85492.0
+              ]
+            },
+            {
+              "frame_over_16_6_rate_median": 0.0005886310124453414,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 16.213,
+              "frame_p99_ms_median": 1.57829,
+              "level_ms": 16,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.0023354353322132667,
+              "runnable_over_5ms_rate_median": 0.0022994702233580916,
+              "runnable_p99_ns_median": 50000.0,
+              "score_total_median": 82408.0,
+              "score_total_values": [
+                82305.0,
+                82408.0,
+                86053.0,
+                79079.0,
+                83899.0
+              ]
+            }
+          ],
+          "recordings": 30,
+          "within_profile_recordings": {
+            "frame_p99": {
+              "direct_vs_level": 0.9346965897666157,
+              "score_vs_direct": 0.7810901001112347
+            },
+            "frame_p99_9": {
+              "direct_vs_level": 0.9053816183143455,
+              "score_vs_direct": 0.8522803114571746
+            },
+            "runnable_p99": {
+              "direct_vs_level": 0.4042112654807904,
+              "score_vs_direct": 0.4762196532688122
+            },
+            "score_vs_level": 0.8941066292942416
+          }
+        },
+        "vkmark-light": {
+          "evaluation": {
+            "adjacent_inversions": 0,
+            "frame_evidence": "frame metrics present at every level; score includes the frame terms",
+            "frame_samples": [
+              4658,
+              2862,
+              2865,
+              2856,
+              2849,
+              2790
+            ],
+            "interpretation": "ranking proxy within comparable experiments; not a human-perceived percentage",
+            "levels_ms": [
+              0.0,
+              1.0,
+              2.0,
+              4.0,
+              8.0,
+              16.0
+            ],
+            "monotonic_in_degradation": true,
+            "primaries_unchanged": [
+              "GameRunnableLatency: runnable latency is primary",
+              "CompileThroughputWithForegroundProtection: fixed-work elapsed time is primary"
+            ],
+            "schema_version": 2,
+            "score_basis": "runnable_plus_frames",
+            "score_total": [
+              197.0,
+              224.0,
+              2296.0,
+              16683.0,
+              109245.0,
+              138291.0
+            ],
+            "spearman_score_vs": {
+              "frame_over_16_6_rate": 0.6546536707079772,
+              "frame_over_33_3_rate": null,
+              "frame_p99": 1.0,
+              "frame_p99_9": 1.0,
+              "runnable_over_5ms_rate": 0.8451542547285166,
+              "runnable_p99": 1.0,
+              "sample_over_1ms": null
+            },
+            "spearman_score_vs_level": 1.0,
+            "targets": [
+              {
+                "level_ms": 0.0,
+                "target_identity_source": null
+              },
+              {
+                "level_ms": 1.0,
+                "target_identity_source": null
+              },
+              {
+                "level_ms": 2.0,
+                "target_identity_source": null
+              },
+              {
+                "level_ms": 4.0,
+                "target_identity_source": null
+              },
+              {
+                "level_ms": 8.0,
+                "target_identity_source": null
+              },
+              {
+                "level_ms": 16.0,
+                "target_identity_source": null
+              }
+            ],
+            "weights": "retained (100 x >5 ms, 20 x >2 ms, 1 x >1 ms; frame terms unchanged)",
+            "weights_decision": "retain: no empirical case for change"
+          },
+          "per_level": [
+            {
+              "frame_over_16_6_rate_median": 0.0,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 9.03105,
+              "frame_p99_ms_median": 7.89271,
+              "level_ms": 0,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.0001595150741745095,
+              "runnable_over_5ms_rate_median": 0.0,
+              "runnable_p99_ns_median": 200000.0,
+              "score_total_median": 197.0,
+              "score_total_values": [
+                291.0,
+                197.0,
+                127.0,
+                511.0,
+                192.0
+              ]
+            },
+            {
+              "frame_over_16_6_rate_median": 0.0,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 9.28718,
+              "frame_p99_ms_median": 8.00018,
+              "level_ms": 1,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.000198144050724877,
+              "runnable_over_5ms_rate_median": 0.0,
+              "runnable_p99_ns_median": 1000000.0,
+              "score_total_median": 224.0,
+              "score_total_values": [
+                213.0,
+                252.0,
+                170.0,
+                447.0,
+                224.0
+              ]
+            },
+            {
+              "frame_over_16_6_rate_median": 0.0,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 9.63725,
+              "frame_p99_ms_median": 8.50439,
+              "level_ms": 2,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.002709483191169092,
+              "runnable_over_5ms_rate_median": 0.0,
+              "runnable_p99_ns_median": 2000000.0,
+              "score_total_median": 2296.0,
+              "score_total_values": [
+                2112.0,
+                2422.0,
+                2296.0,
+                1814.0,
+                3008.0
+              ]
+            },
+            {
+              "frame_over_16_6_rate_median": 0.0,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 11.386,
+              "frame_p99_ms_median": 10.5144,
+              "level_ms": 4,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.02700901469711319,
+              "runnable_over_5ms_rate_median": 0.0,
+              "runnable_p99_ns_median": 4657482.0,
+              "score_total_median": 16683.0,
+              "score_total_values": [
+                16727.0,
+                16748.0,
+                16683.0,
+                16683.0,
+                16658.0
+              ]
+            },
+            {
+              "frame_over_16_6_rate_median": 0.0,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 15.5637,
+              "frame_p99_ms_median": 14.5075,
+              "level_ms": 8,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.04275477707006369,
+              "runnable_over_5ms_rate_median": 0.03264840182648402,
+              "runnable_p99_ns_median": 8903464.0,
+              "score_total_median": 109245.0,
+              "score_total_values": [
+                109400.0,
+                103985.0,
+                110325.0,
+                109245.0,
+                97897.0
+              ]
+            },
+            {
+              "frame_over_16_6_rate_median": 0.17275985663082438,
+              "frame_over_33_3_rate_median": 0.0,
+              "frame_p99_9_ms_median": 23.9462,
+              "frame_p99_ms_median": 22.6677,
+              "level_ms": 16,
+              "recordings": 5,
+              "runnable_over_2ms_rate_median": 0.05494875619496704,
+              "runnable_over_5ms_rate_median": 0.05480440744839532,
+              "runnable_p99_ns_median": 18237243.0,
+              "score_total_median": 138291.0,
+              "score_total_values": [
+                138381.0,
+                136662.0,
+                140372.0,
+                138291.0,
+                137733.0
+              ]
+            }
+          ],
+          "recordings": 30,
+          "within_profile_recordings": {
+            "frame_p99": {
+              "direct_vs_level": 0.9707765546309483,
+              "score_vs_direct": 0.9738569422816077
+            },
+            "frame_p99_9": {
+              "direct_vs_level": 0.9392065853746573,
+              "score_vs_direct": 0.9484926079384267
+            },
+            "runnable_p99": {
+              "direct_vs_level": 0.99131448214768,
+              "score_vs_direct": 0.9618930063765185
+            },
+            "score_vs_level": 0.9618635619759589
+          }
+        }
+      },
+      "question": "Does one scalar score reliably preserve the ordering of the direct evidence across distinct workloads?",
+      "schema_version": 1,
+      "total_adjacent_inversions": 4,
+      "weights": "unchanged; this study decides nothing about weights"
+    },
+    "note": "as_recorded is today's behavior (only game-class tasks contribute to the runnable terms); explicit_target counts the named process's generic-class tasks. Weights are identical in both."
+  },
+  "base_commit": "691967332c91f2154fe0456f1bc1a5aa5bcd8fd3",
+  "limitations": [
+    "single host; the desktop was in use during collection",
+    "the contender is a SCHED_FIFO burst pinned to the target's CPU; levels order scheduler degradation only",
+    "vkcube is a second rendering workload but a trivial scene: its 'heavy' profile is unpaced and CPU-bound, not GPU-heavy"
+  ],
+  "planned": 120,
+  "recordings": 120,
+  "rejected_attempts": [
+    {
+      "level_ms": 16,
+      "profile": "vkmark-heavy",
+      "reasons": [
+        "intervention SchedulerBurst was not verified: the contender is gone"
+      ],
+      "repetition": 3
+    },
+    {
+      "level_ms": 1,
+      "profile": "vkcube-heavy",
+      "reasons": [
+        "intervention SchedulerBurst was not verified: the contender is gone"
+      ],
+      "repetition": 3
+    }
+  ],
+  "study_id": "m-6919673-1792907978989"
+}

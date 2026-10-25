@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "study_id": "m-6919673-1792907978989",
+  "base_commit": "691967332c91f2154fe0456f1bc1a5aa5bcd8fd3",
+  "config_sha256": "0267225215915b9ebd05be58bf420e14a9c6eb8f8ae963d8672890577f85f299",
+  "companion_campaign": "core-6919673-1792907947270",
+  "frozen": {
+    "study_cpu": 1,
+    "irq": null,
+    "irq_cpu": null,
+    "fixed_work_ios": null,
+    "traffic_cpus": []
+  },
+  "imports": [
+    {
+      "from_study": "m-9b36bf6-1792898968791",
+      "from_base_commit": "9b36bf62e9bc54b5841bcca3aebb45acb2425276",
+      "families": [],
+      "runs": 120,
+      "runs_sha256": "42744734bb1672d0e3c36cb6231656f1c9c62a4527aad1950b743ba95882ccb1"
+    }
+  ],
+  "created_unix_ms": 1792907978989
+}
