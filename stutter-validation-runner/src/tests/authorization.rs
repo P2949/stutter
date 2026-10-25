@@ -90,6 +90,7 @@ fn unapproved_actions_and_tasks_are_rejected() {
         seconds: Some(20),
         rounds: Some(12),
         benefit: None,
+        mutation: None,
     };
     auth.authorize(&peer(me()), &envelope("overhead-controlled", overhead), 8)
         .unwrap();
@@ -154,6 +155,7 @@ fn arguments_are_bounded() {
         seconds,
         rounds,
         benefit: None,
+        mutation: None,
     };
     assert!(run(observation(0, Some(20), None)).is_err());
     assert!(run(observation(1, Some(5), None)).is_err());

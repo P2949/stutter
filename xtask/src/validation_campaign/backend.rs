@@ -25,6 +25,8 @@ pub struct SuiteInvocation<'a> {
     pub log: &'a Path,
     /// Extra suite arguments a direct run appends (a runner request carries its own typed fields).
     pub extra_args: &'a [String],
+    /// The mutation a recovery, lifecycle or benefit suite drives (`None` is the suite's default).
+    pub mutation: Option<&'a str>,
     pub stutter: &'a Path,
     pub xtask: &'a Path,
     pub cwd: &'a Path,
@@ -67,6 +69,9 @@ impl SuiteBackend for DirectBackend {
             args.push("--allow-system-suspend".to_owned());
         }
         args.extend(inv.extra_args.iter().cloned());
+        if let Some(mutation) = inv.mutation {
+            args.extend(["--mutation".to_owned(), mutation.to_owned()]);
+        }
         if let Some(units) = inv.work_units {
             let campaign = inv.raw.ancestors().nth(4).unwrap_or(inv.cwd);
             args.extend([
@@ -100,6 +105,17 @@ impl SuiteBackend for DirectBackend {
             .status()
             .map_err(failed)?;
         Ok(status.code().unwrap_or(-1))
+    }
+}
+
+fn runner_mutation(name: &str) -> Result<stutter_validation_runner::model::Mutation, BackendError> {
+    use stutter_validation_runner::model::Mutation;
+    match name {
+        "affinity" => Ok(Mutation::Affinity),
+        "uclamp" => Ok(Mutation::Uclamp),
+        other => Err(BackendError::Failed(format!(
+            "the runner does not know the mutation {other}"
+        ))),
     }
 }
 
@@ -149,6 +165,10 @@ impl SuiteBackend for RunnerBackend {
                 seconds: suite.takes_seconds().then_some(inv.seconds),
                 rounds: inv.rounds,
                 benefit: None,
+                mutation: match inv.mutation {
+                    None => None,
+                    Some(name) => Some(runner_mutation(name)?),
+                },
             },
         };
         let response = client.send(inv.task, request).map_err(|error| {

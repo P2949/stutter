@@ -121,14 +121,19 @@ pub enum Suite {
         order: affinity_benefit::Order,
         #[arg(long, default_value_t = 20, value_parser = clap::value_parser!(u64).range(10..=60))]
         seconds: u64,
+        /// The mutation under test: `affinity` or `uclamp`.
+        #[arg(long, default_value = "affinity", value_parser = recovery::parse_mutation)]
+        mutation: stutter::api::autotune::AcceptanceMutation,
     },
     /// The production live controller for one benefit pair; spawned by `affinity-benefit`.
     #[command(hide = true)]
     AffinityBenefitController {
         #[arg(long)]
         pid: u32,
+        #[arg(long, default_value = "affinity", value_parser = recovery::parse_mutation)]
+        mutation: stutter::api::autotune::AcceptanceMutation,
         #[arg(long)]
-        profiles: PathBuf,
+        profiles: Option<PathBuf>,
         #[arg(long)]
         out: PathBuf,
         #[arg(long)]
@@ -315,6 +320,7 @@ pub fn run(root: &Path, suite: Suite) -> anyhow::Result<()> {
             pair,
             order,
             seconds,
+            mutation,
         } => {
             return affinity_benefit::run(
                 root,
@@ -325,16 +331,26 @@ pub fn run(root: &Path, suite: Suite) -> anyhow::Result<()> {
                     pair,
                     order,
                     seconds,
+                    mutation,
                 },
             );
         }
         Suite::AffinityBenefitController {
             pid,
+            mutation,
             profiles,
             out,
             window_seconds,
             stutter_bin: _,
-        } => return affinity_benefit::run_controller(pid, &profiles, &out, window_seconds),
+        } => {
+            return affinity_benefit::run_controller(
+                mutation,
+                pid,
+                profiles.as_deref(),
+                &out,
+                window_seconds,
+            );
+        }
         Suite::ScoreDegradation {
             out,
             stutter_bin,

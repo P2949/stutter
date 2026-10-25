@@ -133,5 +133,6 @@ pub(super) fn observation() -> Request {
         seconds: Some(20),
         rounds: None,
         benefit: None,
+        mutation: None,
     }
 }

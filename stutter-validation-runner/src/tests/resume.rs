@@ -198,6 +198,7 @@ fn live_suite_attempts_live_under_the_controllers_own_campaign_root() {
             seconds: None,
             rounds: None,
             benefit: None,
+            mutation: None,
         },
     );
     let plan = plan_live_suite(&auth, &envelope).unwrap();

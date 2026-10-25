@@ -13,6 +13,7 @@ fn suite(suite: LiveSuite, seconds: Option<u64>, rounds: Option<u32>) -> Request
         seconds,
         rounds,
         benefit: None,
+        mutation: None,
     }
 }
 

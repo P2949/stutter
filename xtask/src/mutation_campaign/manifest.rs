@@ -67,6 +67,9 @@ pub struct OperationSection {
     #[serde(default)]
     pub skip: Vec<SkipEntry>,
     pub suites: SuiteMap,
+    /// The mutation the recovery, lifecycle and benefit suites drive; absent means CPU affinity.
+    #[serde(default)]
+    pub mutation: Option<String>,
     /// The operation mutates through the privileged worker: the campaign asks the runner to start
     /// the pinned worker as root and stop it afterwards. The controller itself never runs as root.
     #[serde(default)]
