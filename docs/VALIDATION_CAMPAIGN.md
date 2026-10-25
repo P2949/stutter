@@ -281,6 +281,17 @@ Any failed check of the marker falls back to the next mode. In the transient mod
 authorization sets `max_reboots = 0`: the multi-kernel stage reports `BLOCKED_RESOURCE` instead
 of rebooting into a machine that could not resume.
 
+**Proof (issue #103).** On the NixOS desktop with the declarative module, a disposable campaign was
+bootstrapped once (`install_mode=ExternallyManagedPersistent`, reboot budget preserved) and
+`continue --only kernel-matrix` was run. Without any further human or agent action the runner
+observed 6.18.55, set the next boot, rebooted, was resumed by the resume service, observed 7.2.9,
+rebooted, observed 6.12.112, returned to the default entry (generation 83) and stopped with three
+distinct kernels and 3 of 5 reboots used. The runner state survived the ephemeral-root reset on the
+persisted `/var/lib/stutter-validation`. The audit trail is in
+[evidence/persistent-resume/proof.json](evidence/persistent-resume/proof.json). The resumed
+controller must not run with `HOME` inside the repository (cargo's cache dirtied the tree); it gets
+the owner's home.
+
 `continue --only <task>` runs just that task when it is already ready (dependencies are never bypassed); a task
 waiting for a reboot is always resumed before any other pending task, so the machine returning from a
 kernel boot continues the kernel stage first.

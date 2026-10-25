@@ -56,17 +56,26 @@ pub fn wait_for_runner(socket: &Path, attempts: u32, sleep: &dyn Fn(std::time::D
     socket.exists()
 }
 
+/// `HOME` of the resumed controller: the campaign owner's real home, so cargo's caches land in
+/// `~/.cargo` and not inside the repository (an untracked `.cargo` there dirties the tree the
+/// campaign requires to be clean). Falls back to the repository when the owner has no entry.
+pub fn controller_home(passwd: &str, uid: u32, repository: &Path) -> PathBuf {
+    crate::install::home_of(passwd, uid).unwrap_or_else(|| repository.to_path_buf())
+}
+
 /// Starts the controller for one campaign, detached, as the campaign user with no capabilities.
 pub fn resume_controller(auth: &Authorization, drop_to_owner: bool) -> Result<u32, Denial> {
     verify_pinned(&xtask_path(auth), &auth.xtask_sha256)?;
     let plan = plan_resume(auth);
+    let passwd = fs::read_to_string("/etc/passwd").unwrap_or_default();
+    let home = controller_home(&passwd, auth.owner_uid, &plan.cwd);
     let mut command = Command::new(&plan.program);
     command
         .args(&plan.args)
         .current_dir(&plan.cwd)
         .env_clear()
         .env("PATH", &auth.path_env)
-        .env("HOME", &plan.cwd)
+        .env("HOME", &home)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());

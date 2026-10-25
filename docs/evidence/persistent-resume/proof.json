@@ -1,0 +1,152 @@
+{
+ "issue": 103,
+ "campaign_disposable": true,
+ "install_mode": "ExternallyManagedPersistent",
+ "reboot_budget": {
+  "max_reboots": 5,
+  "used": 3
+ },
+ "kernels_observed": [
+  {
+   "capture_id": "live_kernel_compat-18a90427-1792911372784",
+   "kernel_release": "6.18.55",
+   "compatibility": "ObservedDegraded",
+   "status": "PASS"
+  },
+  {
+   "capture_id": "live_kernel_compat-18a90427-1792911490627",
+   "kernel_release": "7.2.9",
+   "compatibility": "ObservedDegraded",
+   "status": "PASS"
+  },
+  {
+   "capture_id": "live_kernel_compat-18a90427-1792911607548",
+   "kernel_release": "6.12.112",
+   "compatibility": "ObservedIncompatible",
+   "status": "FAIL"
+  }
+ ],
+ "runner_receipt_sequence": [
+  {
+   "t_s": 78.2,
+   "action": "ExecuteLiveSuite",
+   "status": "Ok"
+  },
+  {
+   "t_s": 78.5,
+   "action": "SetNextBoot",
+   "status": "Ok"
+  },
+  {
+   "t_s": 78.5,
+   "action": "Reboot",
+   "status": "Ok"
+  },
+  {
+   "t_s": 157.8,
+   "action": "ResumeCampaign",
+   "status": "Ok"
+  },
+  {
+   "t_s": 176.0,
+   "action": "ResumeCampaign",
+   "status": "Rejected"
+  },
+  {
+   "t_s": 196.0,
+   "action": "ExecuteLiveSuite",
+   "status": "Ok"
+  },
+  {
+   "t_s": 196.3,
+   "action": "SetNextBoot",
+   "status": "Ok"
+  },
+  {
+   "t_s": 196.3,
+   "action": "Reboot",
+   "status": "Ok"
+  },
+  {
+   "t_s": 274.8,
+   "action": "ResumeCampaign",
+   "status": "Ok"
+  },
+  {
+   "t_s": 291.8,
+   "action": "ResumeCampaign",
+   "status": "Rejected"
+  },
+  {
+   "t_s": 307.5,
+   "action": "ExecuteLiveSuite",
+   "status": "Ok"
+  },
+  {
+   "t_s": 307.6,
+   "action": "SetNextBoot",
+   "status": "Ok"
+  },
+  {
+   "t_s": 307.7,
+   "action": "Reboot",
+   "status": "Ok"
+  },
+  {
+   "t_s": 385.7,
+   "action": "ResumeCampaign",
+   "status": "Ok"
+  },
+  {
+   "t_s": 400.7,
+   "action": "ResumeCampaign",
+   "status": "Rejected"
+  },
+  {
+   "t_s": 704.9,
+   "action": "ExecuteLiveSuite",
+   "status": "Rejected"
+  },
+  {
+   "t_s": 705.1,
+   "action": "ExecuteLiveSuite",
+   "status": "Rejected"
+  },
+  {
+   "t_s": 705.3,
+   "action": "ExecuteLiveSuite",
+   "status": "Rejected"
+  },
+  {
+   "t_s": 705.5,
+   "action": "ExecuteLiveSuite",
+   "status": "Rejected"
+  },
+  {
+   "t_s": 705.7,
+   "action": "ExecuteLiveSuite",
+   "status": "Rejected"
+  },
+  {
+   "t_s": 705.9,
+   "action": "ExecuteLiveSuite",
+   "status": "Rejected"
+  },
+  {
+   "t_s": 740.3,
+   "action": "ExecuteLiveSuite",
+   "status": "Ok"
+  }
+ ],
+ "boot_state_after": {
+  "reboots_used": 3,
+  "resume_pending": false,
+  "pending_boot_entry": null,
+  "current_entry": "nixos-generation-83.conf (the default)"
+ },
+ "manual_steps": "none after the first bootstrap: no bootctl command, no re-bootstrap, no agent action between boots; the resume service continued the campaign after each boot",
+ "observed_defects": [
+  "the resumed controller ran with HOME set to the repository, so cargo created an untracked .cargo cache that dirtied the tree and invalidated the (disposable) campaign after the kernel stage; fixed by giving it the owner's home",
+  "a second ResumeCampaign per boot was rejected harmlessly (already resumed)"
+ ]
+}
