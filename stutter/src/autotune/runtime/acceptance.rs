@@ -47,7 +47,10 @@ pub(crate) fn run_failure_scenario(
     // Medium-risk mutation goes through the production privileged-service path; a disposable
     // tree owned by this user needs no root worker, so the service runs in this process.
     let medium = desired.mutation.mode() == DaemonMode::ApplyMediumRisk;
-    config.daemon_config.autotune.unsafe_in_process_privileged_worker = medium;
+    config
+        .daemon_config
+        .autotune
+        .unsafe_in_process_privileged_worker = medium;
     config.daemon_config.autotune.allow_medium_risk_apply = medium;
     let candidate = desired.candidate(tree_pid)?;
     config.validation_override = Some(acceptance_override(&candidate));
@@ -127,7 +130,10 @@ pub(crate) fn run_suspend_resume(
     // Medium-risk mutation goes through the production privileged-service path; a disposable
     // tree owned by this user needs no root worker, so the service runs in this process.
     let medium = desired.mutation.mode() == DaemonMode::ApplyMediumRisk;
-    config.daemon_config.autotune.unsafe_in_process_privileged_worker = medium;
+    config
+        .daemon_config
+        .autotune
+        .unsafe_in_process_privileged_worker = medium;
     config.daemon_config.autotune.allow_medium_risk_apply = medium;
     let candidate = desired.candidate(tree_pid)?;
     config.validation_override = Some(acceptance_override(&candidate));

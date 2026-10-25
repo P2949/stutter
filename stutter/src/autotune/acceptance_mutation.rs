@@ -152,7 +152,11 @@ impl AcceptanceTarget {
                     name: self.mutation.candidate_name().to_owned(),
                     action: self.uclamp_action(tree_pid),
                     target_root_pid: Some(tree_pid),
-                    evidence: Vec::new(),
+                    evidence: vec![CandidateEvidence::new(
+                        "situation",
+                        "GameCpuSchedulerPressure",
+                        1.0,
+                    )],
                     objective,
                 },
             },
