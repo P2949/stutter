@@ -20,6 +20,16 @@ work is complete: new mutation providers, system-wide tunables, high-risk autotu
 integrations, major remote-control features, new UI surfaces and unrelated crate refactors
 remain deferred.
 
+Results so far (all Experimental, no weight or threshold changed):
+
+- v0.1.0 is published as a GitHub Release with verified assets; future releases go through the
+  idempotent `xtask release-publish` ([RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md)).
+- Diagnosis corpus v2 and recalibration: [DIAGNOSIS_CALIBRATION_V2.md](DIAGNOSIS_CALIBRATION_V2.md).
+- StutterScore across a workload matrix: [SCORE_EVALUATION_V2.md](SCORE_EVALUATION_V2.md); the
+  open design question is tracked in issue #129.
+- Persistent autonomous multi-kernel resume on NixOS is proven end to end
+  ([VALIDATION_CAMPAIGN.md](VALIDATION_CAMPAIGN.md)).
+
 `stutter` is an experimental open-source project. Near-term work prioritizes
 trustworthy measurement, repeatability, explainability, conservative
 recommendation, and rollback over expanding the number of system settings it
