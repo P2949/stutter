@@ -5,7 +5,10 @@ use std::path::PathBuf;
 
 use anyhow::Context;
 
-use super::planning::{candidate::CandidateAction, executable_plan::UclampActionPlan};
+use super::planning::{
+    candidate::{CandidateAction, CandidateEvidence},
+    executable_plan::UclampActionPlan,
+};
 use crate::{
     actions::{
         SafetyClass, TaskIdentity, TuningAction,
