@@ -11,6 +11,7 @@ pub mod inspect;
 pub mod manifest;
 pub mod model;
 pub mod runner;
+pub mod runner_auth;
 pub mod stages;
 pub mod store;
 

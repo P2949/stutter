@@ -15,7 +15,8 @@ use anyhow::{Context, ensure};
 use stutter_validation_runner::{
     client::Client,
     model::{
-        Authorization, LiveSuite, Request, ResponseStatus, RunnerAction, SCHEMA_VERSION, TaskGrant,
+        Authorization, ControllerKind, LiveSuite, Request, ResponseStatus, RunnerAction,
+        SCHEMA_VERSION, TaskGrant,
     },
 };
 
@@ -112,27 +113,74 @@ pub fn grants() -> BTreeSet<TaskGrant> {
     grants
 }
 
+/// Everything the runner pins for one campaign, whichever controller owns it.
+#[derive(Clone, Debug)]
+pub struct RunnerTarget {
+    pub campaign_id: String,
+    pub uid: u32,
+    pub gid: u32,
+    pub repository: PathBuf,
+    pub manifest_sha256: String,
+    pub xtask_sha256: String,
+    pub stutter_sha256: String,
+    pub controller: ControllerKind,
+    pub grants: BTreeSet<TaskGrant>,
+    pub max_reboots: u32,
+    pub reboot_slack: u32,
+}
+
+impl RunnerTarget {
+    pub fn for_core(state: &CampaignState, manifest: &CampaignManifest) -> Self {
+        Self {
+            campaign_id: state.campaign_id.clone(),
+            uid: state.uid,
+            gid: state.gid,
+            repository: state.repository.clone(),
+            manifest_sha256: state.manifest_sha256.clone(),
+            xtask_sha256: state.xtask_sha256.clone(),
+            stutter_sha256: state.stutter_sha256.clone(),
+            controller: ControllerKind::CoreValidation,
+            grants: grants(),
+            // Refined with the discovered boot entries by the multi-kernel phase.
+            max_reboots: u32::try_from(manifest.kernels.max_reboots).unwrap_or(u32::MAX),
+            reboot_slack: u32::try_from(manifest.kernels.reboot_slack).unwrap_or(u32::MAX),
+        }
+    }
+}
+
 pub fn build_authorization(
     state: &CampaignState,
     manifest: &CampaignManifest,
     runner_sha256: &str,
     path_env: &str,
 ) -> Authorization {
+    authorization_for(
+        &RunnerTarget::for_core(state, manifest),
+        runner_sha256,
+        path_env,
+    )
+}
+
+pub fn authorization_for(
+    target: &RunnerTarget,
+    runner_sha256: &str,
+    path_env: &str,
+) -> Authorization {
     Authorization {
         schema_version: SCHEMA_VERSION,
-        campaign_id: state.campaign_id.clone(),
-        owner_uid: state.uid,
-        owner_gid: state.gid,
-        repository: state.repository.to_string_lossy().into_owned(),
-        manifest_sha256: state.manifest_sha256.clone(),
+        controller: target.controller,
+        campaign_id: target.campaign_id.clone(),
+        owner_uid: target.uid,
+        owner_gid: target.gid,
+        repository: target.repository.to_string_lossy().into_owned(),
+        manifest_sha256: target.manifest_sha256.clone(),
         runner_sha256: runner_sha256.to_owned(),
-        xtask_sha256: state.xtask_sha256.clone(),
-        stutter_sha256: state.stutter_sha256.clone(),
+        xtask_sha256: target.xtask_sha256.clone(),
+        stutter_sha256: target.stutter_sha256.clone(),
         path_env: path_env.to_owned(),
-        grants: grants(),
-        // Refined with the discovered boot entries by the multi-kernel phase.
-        max_reboots: u32::try_from(manifest.kernels.max_reboots).unwrap_or(u32::MAX),
-        reboot_slack: u32::try_from(manifest.kernels.reboot_slack).unwrap_or(u32::MAX),
+        grants: target.grants.clone(),
+        max_reboots: target.max_reboots,
+        reboot_slack: target.reboot_slack,
         original_boot_entry: None,
         allowed_boot_entries: Vec::new(),
         created_unix_ms: unix_ms(),
@@ -148,7 +196,7 @@ pub enum BootstrapOutcome {
 }
 
 /// Is a runner serving this campaign right now?
-fn runner_ready(socket: &Path, state: &CampaignState) -> bool {
+fn runner_ready(socket: &Path, state: &RunnerTarget) -> bool {
     socket.exists()
         && Client {
             socket,
@@ -186,6 +234,20 @@ pub fn bootstrap(
     socket: &Path,
     dry_run: bool,
 ) -> anyhow::Result<BootstrapOutcome> {
+    bootstrap_target(
+        dir,
+        &RunnerTarget::for_core(state, manifest),
+        socket,
+        dry_run,
+    )
+}
+
+pub fn bootstrap_target(
+    dir: &CampaignDir,
+    state: &RunnerTarget,
+    socket: &Path,
+    dry_run: bool,
+) -> anyhow::Result<BootstrapOutcome> {
     if runner_ready(socket, state) {
         println!(
             "the validation runner already serves campaign {}",
@@ -203,9 +265,8 @@ pub fn bootstrap(
         return Ok(BootstrapOutcome::BlockedPrivilege);
     }
     let runner = build_runner(&state.repository)?;
-    let authorization = build_authorization(
+    let authorization = authorization_for(
         state,
-        manifest,
         &file_sha256(&runner)?,
         &std::env::var("PATH").unwrap_or_default(),
     );

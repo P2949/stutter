@@ -75,6 +75,7 @@ pub(super) fn grant(task: &str, action: RunnerAction, suite: Option<LiveSuite>) 
 pub(super) fn authorization(repository: &str) -> Authorization {
     Authorization {
         schema_version: SCHEMA_VERSION,
+        controller: crate::model::ControllerKind::CoreValidation,
         campaign_id: "core-abc1234-1".to_owned(),
         owner_uid: me(),
         owner_gid: me(),

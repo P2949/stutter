@@ -51,3 +51,14 @@ that still cannot separate the scenarios is a `ValidationFailure`, recorded as
 
 A mechanism observation can only withhold a keep, never create one: the primary workload
 objective decides.
+
+## Privilege and reboot resume
+
+A mutation campaign authorizes itself with the privileged validation runner; the
+authorization carries a typed `controller` (`core_validation` or `mutation_graduation`). The
+runner derives the campaign directory (`.llm-runs/validation` or `.llm-runs/mutation-validation`)
+and the reboot-resume command (`validation-campaign continue` or `mutation-campaign continue`,
+followed by `--campaign <dir> --resume`) from that kind alone; there is no caller-supplied argv.
+The grants name each stage's live suite, the recording and scheduler-burst actions the benefit
+stages use, and campaign status/resume/cancel. A mutation campaign is never granted a reboot or a
+boot-entry change.

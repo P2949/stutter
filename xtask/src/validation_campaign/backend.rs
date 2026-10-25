@@ -60,6 +60,10 @@ impl SuiteBackend for DirectBackend {
         if let Some(rounds) = inv.rounds {
             args.extend(["--rounds".to_owned(), rounds.to_string()]);
         }
+        if inv.suite == "suspend-resume" {
+            // This suite really suspends the machine; a campaign stage asks for it explicitly.
+            args.push("--allow-system-suspend".to_owned());
+        }
         if let Some(units) = inv.work_units {
             let campaign = inv.raw.ancestors().nth(4).unwrap_or(inv.cwd);
             args.extend([
