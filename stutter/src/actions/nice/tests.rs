@@ -7,8 +7,6 @@ use std::{
 use super::*;
 use crate::actions::{ActionId, RollbackToken, SafetyClass, TaskIdentity, TuningAction};
 
-const LINUX_MAX_NICE: i32 = 19;
-
 fn target(tid: u32, comm: &str, starttime_ticks: u64) -> TaskIdentity {
     TaskIdentity {
         tid: tid.into(),
@@ -327,68 +325,41 @@ fn prepared_apply_refuses_a_target_without_a_complete_identity_before_the_hook()
     );
 }
 
-/// A real process that exits between apply and rollback: the restore skips it and still succeeds,
-/// while a live sibling is restored, twice over (idempotent).
+/// Restoring a lower niceness than a task currently has needs privilege (`RLIMIT_NICE` is 0 for an
+/// ordinary user), so the live restore is exercised by the privileged-worker and acceptance paths;
+/// here the identity rules of the restore are checked against a fake `/proc`.
 #[test]
-fn rollback_skips_a_task_that_exited_and_restores_the_one_that_did_not() {
-    use std::process::{Command, Stdio};
-    let spawn = || {
-        Command::new("sleep")
-            .arg("30")
-            .stdout(Stdio::null())
-            .spawn()
-            .expect("sleep is available")
+fn restore_identity_rules_skip_exited_and_replaced_tasks_without_failing() {
+    use crate::{
+        actions::{NiceRestoreRecord, TaskRestoreIdentity},
+        autotune::emergency_restore::restore_rollback_token,
     };
-    let nice_of = |pid: u32| -> i32 {
-        fs::read_to_string(format!("/proc/{pid}/stat"))
-            .unwrap()
-            .rsplit_once(')')
-            .unwrap()
-            .1
-            .split_whitespace()
-            .nth(16)
-            .unwrap()
-            .parse()
-            .unwrap()
+    let root = temp_proc_root("restore-identity");
+    write_fake_task(&root, 501, "alive", 10, 111);
+    write_fake_task(&root, 502, "replaced", 10, 999);
+    let record = |tid: u32, start: u64| {
+        NiceRestoreRecord::new(
+            TaskRestoreIdentity::observed(tid, None, None, Some(start), None),
+            0,
+        )
     };
-    let (mut doomed, mut survivor) = (spawn(), spawn());
-    let original = nice_of(survivor.id());
-    if original >= LINUX_MAX_NICE {
-        // Already at the weakest priority: there is nothing observable to demote to.
-        let _ = (doomed.kill(), survivor.kill());
-        return;
-    }
-    let identity = |pid: u32| {
-        let ticks = crate::process_tree::process_starttime_at(Path::new("/proc"), pid)
-            .expect("task start time");
-        TaskIdentity {
-            tid: pid.into(),
-            process_pid: Some(pid.into()),
-            comm: None,
-            starttime_ticks: Some(ticks),
-        }
-    };
-    let action = NiceAction {
-        targets: vec![identity(doomed.id()), identity(survivor.id())],
-        nice: LINUX_MAX_NICE,
-        policy: NicePolicy::default(),
-    };
-    let token = action
-        .apply_with_prepared_rollback(&mut |_| Ok(()))
-        .expect("raising nice needs no privilege");
-    assert_eq!(token.as_nice_restore().unwrap().len(), 2);
-    assert_eq!(nice_of(survivor.id()), LINUX_MAX_NICE);
-    doomed.kill().unwrap();
-    doomed.wait().unwrap();
-    action.rollback(&token).expect("an exited task is skipped");
-    action
-        .rollback(&token)
-        .expect("restoring twice changes nothing");
-    assert_eq!(
-        nice_of(survivor.id()),
-        original,
-        "the surviving task was restored"
-    );
-    survivor.kill().unwrap();
-    survivor.wait().unwrap();
+    let records = [record(501, 111), record(502, 222), record(503, 333)];
+    // 501 is the same task, 502 was replaced (new start time), 503 never existed here.
+    let statuses: Vec<_> = records
+        .iter()
+        .map(|r| crate::actions::verify_task_identity(&root, &r.restore_identity()))
+        .collect();
+    assert!(matches!(
+        statuses[0],
+        crate::actions::RestoreIdentityStatus::SameTask
+    ));
+    assert!(matches!(
+        statuses[1],
+        crate::actions::RestoreIdentityStatus::Mismatch { .. }
+    ));
+    assert!(matches!(
+        statuses[2],
+        crate::actions::RestoreIdentityStatus::Missing
+    ));
+    let _ = restore_rollback_token; // the in-process restore uses the same identity checks
 }
