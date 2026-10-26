@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# The full deterministic CI before anything leaves the machine; the logic lives in xtask.
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+if [ -n "${IN_NIX_SHELL:-}" ]; then
+  exec cargo run -q -p xtask -- ci
+fi
+exec nix develop --command cargo run -q -p xtask -- ci

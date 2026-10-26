@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Cheap admission gate; the logic lives in xtask, not here.
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+if [ -n "${IN_NIX_SHELL:-}" ]; then
+  exec cargo run -q -p xtask -- verify-fast
+fi
+exec nix develop --command cargo run -q -p xtask -- verify-fast
