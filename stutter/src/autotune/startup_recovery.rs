@@ -628,9 +628,12 @@ fn candidate_name_from_action_id(action_id: &str) -> Option<String> {
         .filter(|candidate| !candidate.trim().is_empty())
 }
 
+mod gate;
 mod ledger;
 #[cfg(test)]
 mod ledger_tests;
+
+pub use gate::{recover_before_start, startup_recovery_config_for_runtime};
 mod privileged;
 
 #[cfg(test)]
