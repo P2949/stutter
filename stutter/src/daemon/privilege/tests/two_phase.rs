@@ -105,7 +105,17 @@ fn request() -> CandidateApplyRequest {
 }
 
 fn raw_exchange(socket: &Path) -> (UnixStream, BufReader<UnixStream>) {
-    let mut stream = UnixStream::connect(socket).unwrap();
+    // The worker thread may not have bound its socket yet: retry briefly instead of racing it.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let mut stream = loop {
+        match UnixStream::connect(socket) {
+            Ok(stream) => break stream,
+            Err(error) if std::time::Instant::now() >= deadline => {
+                panic!("worker socket never accepted: {error}")
+            }
+            Err(_) => std::thread::sleep(std::time::Duration::from_millis(10)),
+        }
+    };
     let plan = PrivilegedWorkerCandidatePlan::from_plan_request(&request().plan);
     let line = serde_json::to_string(&PrivilegedWorkerRequest::ApplyPrepared {
         plan,
