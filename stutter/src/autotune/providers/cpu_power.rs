@@ -130,18 +130,14 @@ fn cpu_power_evidence(input: &CandidateProviderInput<'_>) -> Option<CpuPowerCand
         .iter()
         .find(|policy| parse_related_cpus(policy.related_cpus.as_deref()).contains(&limited_cpu))?;
 
-    if !supports_token(policy.available_governors.as_deref(), "performance") {
-        return None;
-    }
-
     let related_cpus = parse_related_cpus(policy.related_cpus.as_deref());
     if related_cpus.is_empty() {
         return None;
     }
 
-    let already_performance = policy.scaling_governor.as_deref() == Some("performance")
-        && policy.energy_performance_preference.as_deref() == Some("performance");
-    if already_performance {
+    // EPP-only autonomy: the governor is neither required nor changed, so the only question is
+    // whether the preference already has the desired value.
+    if policy.energy_performance_preference.as_deref() == Some("performance") {
         return None;
     }
 
@@ -654,5 +650,110 @@ mod tests {
             config: &config,
             remote_context: None,
         })
+    }
+
+    fn propose_epp(
+        available_governors: &str,
+        governor: &str,
+        epp: &str,
+        available_epp: &str,
+    ) -> Vec<CandidateProposal> {
+        let mut observation = AutotuneObservation {
+            target_present: true,
+            target_root_pid: Some(1234),
+            primary_situation: SituationKind::GameCpuSchedulerPressure,
+            focus_kind: Some(FocusGroupKind::Game),
+            focus_confidence: 0.95,
+            ..AutotuneObservation::default()
+        };
+        observation.refresh_situation_classification();
+        observation.primary_situation = SituationKind::GameCpuSchedulerPressure;
+        observation.objective_signals.cpu_power_limited = Some(true);
+        observation.objective_signals.cpu_power_limited_cpu = Some(3);
+        let policy = policy();
+        let system_context = SystemContextSnapshot {
+            capabilities: DaemonCapabilities::default(),
+            health: SystemHealthSnapshot::default(),
+            inventory: SystemInventory {
+                cpu_policies: vec![CpuPolicyInventory {
+                    policy: "policy3".to_owned(),
+                    path: PathBuf::from("/fake/sys/devices/system/cpu/cpufreq/policy3"),
+                    scaling_governor: Some(governor.to_owned()),
+                    available_governors: Some(available_governors.to_owned()),
+                    energy_performance_preference: Some(epp.to_owned()),
+                    energy_performance_available_preferences: Some(available_epp.to_owned()),
+                    related_cpus: Some("3".to_owned()),
+                }],
+                drm_devices: Vec::new(),
+                irq_default_smp_affinity: None,
+                irq_lines: Vec::new(),
+                power_source: PowerSourceSnapshot {
+                    ac_online: Some(true),
+                    battery_present: false,
+                    battery_discharging: None,
+                },
+                sched_ext_available: false,
+                vm_knobs: Default::default(),
+                inventory_hash: "epp".to_owned(),
+            },
+            active_config: Default::default(),
+            sampled_at_unix_nanos: 10,
+        };
+        CpuPowerProvider.propose(&CandidateProviderInput {
+            observation: &observation,
+            daemon_policy: &policy,
+            capabilities: &observation.capabilities,
+            system_health: &observation.system_health,
+            system_context: &system_context,
+            controller_state: &ControllerRuntimeState::default(),
+            profiles: &[],
+        })
+    }
+
+    #[test]
+    fn epp_is_proposed_without_a_performance_governor_and_never_touches_the_governor() {
+        // intel_pstate active mode offers only powersave; EPP-only autonomy must not need more.
+        let proposals = propose_epp(
+            "powersave",
+            "powersave",
+            "balance_performance",
+            "default performance balance_performance balance_power power",
+        );
+        assert_eq!(proposals.len(), 1);
+        let CandidateAction::CpuPower { plan } = &proposals[0].candidate else {
+            panic!("expected cpu power candidate");
+        };
+        assert_eq!(
+            plan.action.energy_performance_preference.as_deref(),
+            Some("performance")
+        );
+        assert!(plan.action.scaling_governor.is_none());
+    }
+
+    #[test]
+    fn nothing_is_proposed_when_the_preference_already_has_the_desired_value() {
+        // Regardless of the governor.
+        for governor in ["powersave", "performance"] {
+            let proposals = propose_epp(
+                "powersave performance",
+                governor,
+                "performance",
+                "default performance balance_performance",
+            );
+            assert!(proposals.is_empty(), "governor {governor}");
+        }
+    }
+
+    #[test]
+    fn the_desired_token_must_be_available_for_the_policy() {
+        assert!(
+            propose_epp(
+                "powersave",
+                "powersave",
+                "balance_performance",
+                "default balance_performance balance_power power"
+            )
+            .is_empty()
+        );
     }
 }

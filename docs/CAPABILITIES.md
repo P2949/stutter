@@ -38,7 +38,7 @@ prerequisites). Today the registry holds one contract:
 | CPU-affinity profile | stable, explicitly identified game | scheduler | `GameRunnableLatency` | local process tree |
 
 Everything outside the matrix is suggest-only, benchmark-only, manual or rejected: other
-affinity contexts, `uclamp_experiment`, `nice_experiment`, `ioprio_experiment`, `cgroup_placement_experiment`, system-wide tuning and always-on autotune
+affinity contexts, `uclamp_experiment`, `nice_experiment`, `ioprio_experiment`, `cgroup_placement_experiment`, every system-wide operation capability and always-on autotune
 stay Experimental.
 
 Mutating capabilities require at least `live_recovery` and `live_suspend_resume`
@@ -51,7 +51,7 @@ with the evidence-index entries that justify it.
 The validation campaign applies one fixed, conservative policy once live observation, game-runnable, kernel, overhead, corpus, calibration and score evidence all verify:
 
 - **Supported:** `doctor`, `record`, `bench`, `report`, `audit`, `completions_and_man`, `cpu_affinity_experiment`
-- **Experimental:** `diagnose`, `advisor`, `tune_evaluation`, `restore`, `uclamp_experiment`, `nice_experiment`, `ioprio_experiment`, `cgroup_placement_experiment`, `system_wide_tuning`, `always_on_autotune`, `remote_agent_mutation`
+- **Experimental:** `diagnose`, `advisor`, `tune_evaluation`, `restore`, `uclamp_experiment`, `nice_experiment`, `ioprio_experiment`, `cgroup_placement_experiment`, `cpu_power_epp`, `cpu_power_governor`, `gpu_power_profile`, `gpu_force_performance`, `vm_swappiness`, `vm_dirty_background_ratio`, `vm_dirty_ratio`, `irq_affinity_known_device`, `irq_affinity_storage_or_unknown`, `always_on_autotune`, `remote_agent_mutation`
 - **Internal:** `privileged_worker`, `fake_action_provider`
 
 Diagnosis stays Experimental even after calibration. CPU affinity is Supported only for its graduated scheduler-pressure tuple (see the autonomous support matrix above); no other mutating capability is promoted.
