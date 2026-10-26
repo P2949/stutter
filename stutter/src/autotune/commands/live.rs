@@ -204,7 +204,12 @@ pub async fn autotune_command_with(
             duration_seconds: Some(run.session_seconds),
             ..input.clone()
         })?,
-        None => crate::cli::autotune_monitor_config(&input)?,
+        None => crate::cli::autotune_monitor_config(&AutotuneCommandInput {
+            // In an apply mode `--duration-seconds` is the candidate window, not the length of the
+            // session: the session runs until its workload exits or it is stopped.
+            duration_seconds: input.duration_seconds.filter(|_| !mode.supports_apply()),
+            ..input.clone()
+        })?,
     };
 
     let profile_list = loaded_profiles
@@ -218,6 +223,11 @@ pub async fn autotune_command_with(
         profile_list,
         validation.as_ref().and_then(|run| run.game_cgroup.clone()),
     )?;
+    // A live session persists its journal, ledger and candidate memory beside each other.
+    if runtime_config.controller_journal_path.is_none() {
+        runtime_config.controller_journal_path =
+            Some(crate::autotune::controller_journal::default_controller_journal_path());
+    }
     if let Some(run) = validation {
         if run.grant.operation == crate::autotune::operation::MutationOperationKind::Nice {
             // The controller restores demoted tasks on shutdown; see `raise_nice_rlimit_for_validation`.

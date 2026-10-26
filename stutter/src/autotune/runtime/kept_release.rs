@@ -58,21 +58,45 @@ impl AutotuneRuntime {
         );
         Ok(release.failed)
     }
-}
 
-impl AutotuneRuntime {
     /// Remember what was tried, beside the controller journal, so a restart does not retry a
     /// losing candidate immediately. Best effort: a write failure only costs one repeated trial.
     pub(super) fn persist_candidate_memory(&self) {
-        let Some(journal) = &self.config.controller_journal_path else {
+        let Some(path) = candidate_memory_path_for(&self.config) else {
             return;
         };
-        let path = crate::autotune::candidate_memory::persistence::candidate_memory_path(journal);
         if let Err(error) = self.controller.state.candidate_memory.save(&path) {
             log::warn!(
                 "candidate memory not persisted to {}: {error:#}",
                 path.display()
             );
         }
+    }
+}
+
+/// Beside the controller journal the session was configured with; a session with no journal (a
+/// unit-test runtime) persists nothing. A live session always has one.
+pub(super) fn candidate_memory_path_for(
+    config: &super::AutotuneRuntimeConfig,
+) -> Option<std::path::PathBuf> {
+    let journal = config.controller_journal_path.as_deref()?;
+    Some(crate::autotune::candidate_memory::persistence::candidate_memory_path(journal))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::autotune::runtime::AutotuneRuntimeConfig;
+
+    #[test]
+    fn candidate_memory_follows_the_journal_the_session_uses() {
+        let mut config = AutotuneRuntimeConfig::apply_low_risk(None, Some(1), None);
+        config.controller_journal_path = Some("/run/x/controller.json".into());
+        assert_eq!(
+            candidate_memory_path_for(&config),
+            Some(std::path::PathBuf::from("/run/x/candidate-memory.json"))
+        );
+        config.controller_journal_path = None;
+        assert_eq!(candidate_memory_path_for(&config), None);
     }
 }

@@ -9,6 +9,10 @@ pub(super) fn rollback_verification_for_experiment(
     post_rollback_active_config: Option<&ActiveConfigSnapshot>,
     observation: &AutotuneObservation,
 ) -> Option<RollbackVerification> {
+    // A workload that is gone has no tasks left to verify; the restore itself succeeded.
+    if !observation.target_present {
+        return None;
+    }
     let baseline = experiment.baseline_active_config.as_ref()?;
     Some(match post_rollback_active_config {
         Some(post_rollback) => verify_rollback_restored_baseline(

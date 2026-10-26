@@ -118,6 +118,22 @@ impl StartupRecoveryRollbackExecutor for RealStartupRecoveryRollbackExecutor {
                 ),
             });
         }
+        // The restore file is made durable before the first write and removed once it has been
+        // restored: its absence means the restore already happened (an experiment was rolled
+        // back and the controller died before it could say so). Treat it as restored rather than
+        // refusing to start forever.
+        if let RollbackToken::CpuAffinityRestoreFile { path, .. } = token
+            && !path.exists()
+        {
+            return Ok(StartupRecoveryRollbackSummary {
+                affected_tasks: 0,
+                message: format!(
+                    "rollback_kind={} restore file {} is gone: already restored",
+                    rollback_token_kind(token),
+                    path.display()
+                ),
+            });
+        }
         let result = crate::autotune::emergency_restore::startup_rollback_registry()
             .restore_token(token)
             .with_context(|| {

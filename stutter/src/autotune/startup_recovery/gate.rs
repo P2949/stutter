@@ -114,3 +114,29 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod missing_restore_file {
+    use super::super::*;
+
+    #[test]
+    fn a_restore_file_that_is_gone_means_the_restore_already_happened() {
+        let token = RollbackToken::CpuAffinityRestoreFile {
+            path: std::env::temp_dir().join(format!(
+                "stutter-gone-restore-{}-{}.json",
+                std::process::id(),
+                crate::audit::unix_nanos_now()
+            )),
+            affected_tasks: 3,
+        };
+        let summary = RealStartupRecoveryRollbackExecutor::default()
+            .rollback(&token)
+            .unwrap();
+        assert_eq!(summary.affected_tasks, 0);
+        assert!(
+            summary.message.contains("already restored"),
+            "{}",
+            summary.message
+        );
+    }
+}
