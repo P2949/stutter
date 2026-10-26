@@ -55,10 +55,12 @@ pub fn verify_nice_lifecycle(
         expected_starttime,
         audit_path,
         apply_policy,
-        build: &|targets| NiceAction {
-            targets,
-            nice,
-            policy: NicePolicy::default(),
+        build: &|targets| {
+            Ok(NiceAction {
+                targets,
+                nice,
+                policy: NicePolicy::default(),
+            })
         },
         read: &state,
         applied: &|_| Ok(nice.to_string()),

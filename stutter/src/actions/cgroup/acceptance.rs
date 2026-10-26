@@ -71,18 +71,20 @@ pub fn verify_cgroup_lifecycle(
         expected_starttime,
         audit_path,
         apply_policy,
-        build: &|targets: Vec<TaskIdentity>| CgroupPlacementAction {
-            cgroup_root: "/sys/fs/cgroup".into(),
-            target_cgroup: target.clone().into(),
-            targets: targets
-                .into_iter()
-                .map(|identity| CgroupPlacementTarget {
-                    identity,
-                    class: crate::process_tree::TaskClass::Game,
-                })
-                .collect(),
-            cpuset_cpus: None,
-            cpuset_mems: None,
+        build: &|targets: Vec<TaskIdentity>| {
+            Ok(CgroupPlacementAction {
+                cgroup_root: "/sys/fs/cgroup".into(),
+                target_cgroup: target.clone().into(),
+                targets: targets
+                    .into_iter()
+                    .map(|identity| CgroupPlacementTarget {
+                        identity,
+                        class: crate::process_tree::TaskClass::Game,
+                    })
+                    .collect(),
+                cpuset_cpus: None,
+                cpuset_mems: None,
+            })
         },
         read: &state,
         applied: &|original| sibling_target(original),

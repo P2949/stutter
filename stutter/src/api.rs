@@ -38,8 +38,8 @@ pub mod actions {
         RollbackTokenKindError, SafetyClass, ScopeLimitExceeded, TaskIdentity, TuningAction,
         UclampRestoreRecord, VmKnobAction, VmKnobChange, VmKnobMode, VmKnobPolicy,
         VmKnobRestoreRecord, acceptance::verify_cpu_affinity_lifecycle,
-        cgroup::verify_cgroup_lifecycle, nice::verify_nice_lifecycle,
-        uclamp::verify_uclamp_lifecycle,
+        cgroup::verify_cgroup_lifecycle, cpu_power::verify_cpu_power_lifecycle,
+        nice::verify_nice_lifecycle, uclamp::verify_uclamp_lifecycle,
     };
 }
 
@@ -83,7 +83,9 @@ pub mod autotune {
 
     pub use crate::autotune::{
         DEFAULT_MIN_FOCUS_CONFIDENCE,
-        acceptance_mutation::{AcceptanceMutation, AcceptanceTarget},
+        acceptance_mutation::{
+            ACCEPTANCE_SYSFS_ENV, AcceptanceMutation, AcceptanceTarget, prepare_acceptance_sysfs,
+        },
         autonomous_support::{
             AUTONOMOUS_CONTRACTS, AutonomousContract, AutonomousDenial, AutonomousGateInput,
             ValidationOverride, autonomous_apply_gate,

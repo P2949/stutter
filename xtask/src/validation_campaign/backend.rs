@@ -183,6 +183,7 @@ fn runner_mutation(name: &str) -> Result<stutter_validation_runner::model::Mutat
         "uclamp" => Ok(Mutation::Uclamp),
         "nice" => Ok(Mutation::Nice),
         "cgroup" => Ok(Mutation::Cgroup),
+        "cpu_power_epp" => Ok(Mutation::CpuPowerEpp),
         other => Err(BackendError::Failed(format!(
             "the runner does not know the mutation {other}"
         ))),

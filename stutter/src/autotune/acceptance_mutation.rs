@@ -7,13 +7,16 @@ use anyhow::Context;
 
 use super::planning::{
     candidate::{CandidateAction, CandidateEvidence},
-    executable_plan::{CgroupPlacementActionPlan, NiceActionPlan, UclampActionPlan},
+    executable_plan::{
+        CgroupPlacementActionPlan, CpuPowerActionPlan, NiceActionPlan, UclampActionPlan,
+    },
 };
 use crate::{
     actions::{
         SafetyClass, TaskIdentity, TuningAction,
         cgroup::{CgroupPlacementAction, CgroupPlacementTarget},
         cpu_affinity::CpuAffinityProfileAction,
+        cpu_power::CpuPowerAction,
         nice::{NiceAction, NicePolicy},
         runner::ActionRunPolicy,
         uclamp::{UclampAction, UclampValues},
@@ -27,10 +30,73 @@ pub enum AcceptanceMutation {
     Uclamp,
     Nice,
     Cgroup,
+    CpuPowerEpp,
+}
+
+/// Where a CPU-power acceptance case keeps the sysfs fixture it mutates. The fault matrix drives
+/// the real transaction, journal and recovery code against a faithful per-task `cpufreq` tree
+/// (never `/sys`), so every checkpoint can be killed and re-observed without root.
+pub const ACCEPTANCE_SYSFS_ENV: &str = "STUTTER_ACCEPTANCE_SYSFS_ROOT";
+
+/// Creates the `cpu<id>/cpufreq` fixture for each id; the owned tree's task ids stand in for CPUs.
+pub fn prepare_acceptance_sysfs(root: &std::path::Path, ids: &[u32]) -> anyhow::Result<()> {
+    for id in ids {
+        let dir = root.join(format!("devices/system/cpu/cpu{id}/cpufreq"));
+        std::fs::create_dir_all(&dir)?;
+        for (file, value) in [
+            ("energy_performance_preference", "balance_performance"),
+            (
+                "energy_performance_available_preferences",
+                "default performance balance_performance balance_power power",
+            ),
+            ("scaling_governor", "powersave"),
+            ("scaling_driver", "acceptance-pstate"),
+        ] {
+            std::fs::write(dir.join(file), format!("{value}\n"))?;
+        }
+        std::fs::write(dir.join("related_cpus"), format!("{id}\n"))?;
+    }
+    Ok(())
+}
+
+fn acceptance_sysfs_root() -> anyhow::Result<PathBuf> {
+    std::env::var_os(ACCEPTANCE_SYSFS_ENV)
+        .map(PathBuf::from)
+        .with_context(|| format!("{ACCEPTANCE_SYSFS_ENV} is not set"))
+}
+
+/// The medium-risk policy of the validation harness: the explicit medium-risk unlock and, for a
+/// system-wide operation, the scope permission plus the exact operation on the allowlist.
+pub fn acceptance_policy(mutation: AcceptanceMutation) -> crate::daemon::DaemonPolicy {
+    let source = crate::daemon_policy::ActionSource::AutotuneRuntime;
+    let mut config = crate::daemon::DaemonConfig {
+        mode: mutation.mode(),
+        source,
+        ..crate::daemon::DaemonConfig::default()
+    };
+    config.autotune.allow_medium_risk_apply = mutation.mode() == DaemonMode::ApplyMediumRisk;
+    if mutation == AcceptanceMutation::CpuPowerEpp {
+        config.safety.allow_system_wide_apply = true;
+        config
+            .safety
+            .system_wide_allowlist
+            .operations
+            .insert("cpu_power_epp".to_owned());
+    }
+    crate::daemon_policy::build_daemon_policy(crate::daemon_policy::DaemonPolicyBuildInput {
+        config: &config,
+        remote_context: None,
+    })
 }
 
 impl AcceptanceMutation {
-    pub const ALL: [Self; 4] = [Self::Affinity, Self::Uclamp, Self::Nice, Self::Cgroup];
+    pub const ALL: [Self; 5] = [
+        Self::Affinity,
+        Self::Uclamp,
+        Self::Nice,
+        Self::Cgroup,
+        Self::CpuPowerEpp,
+    ];
 
     pub fn as_str(self) -> &'static str {
         match self {
@@ -38,6 +104,7 @@ impl AcceptanceMutation {
             Self::Uclamp => "uclamp",
             Self::Nice => "nice",
             Self::Cgroup => "cgroup",
+            Self::CpuPowerEpp => "cpu_power_epp",
         }
     }
 
@@ -49,7 +116,7 @@ impl AcceptanceMutation {
             Self::Nice => "setpriority",
             // Moving a task is a write of its id to the destination cgroup's `cgroup.procs`; the
             // tracer filters on that path.
-            Self::Cgroup => "write",
+            Self::Cgroup | Self::CpuPowerEpp => "write",
         }
     }
 
@@ -65,14 +132,18 @@ impl AcceptanceMutation {
     pub fn mode(self) -> DaemonMode {
         match self {
             Self::Affinity => DaemonMode::ApplyLowRisk,
-            Self::Uclamp | Self::Nice | Self::Cgroup => DaemonMode::ApplyMediumRisk,
+            Self::Uclamp | Self::Nice | Self::Cgroup | Self::CpuPowerEpp => {
+                DaemonMode::ApplyMediumRisk
+            }
         }
     }
 
     pub fn safety_class(self) -> SafetyClass {
         match self {
             Self::Affinity => SafetyClass::ReversibleLowRisk,
-            Self::Uclamp | Self::Nice | Self::Cgroup => SafetyClass::ReversibleMediumRisk,
+            Self::Uclamp | Self::Nice | Self::Cgroup | Self::CpuPowerEpp => {
+                SafetyClass::ReversibleMediumRisk
+            }
         }
     }
 
@@ -83,7 +154,7 @@ impl AcceptanceMutation {
             Self::Uclamp => 256,
             Self::Nice => 10,
             // The cgroup is chosen by the harness, not by a number.
-            Self::Cgroup => 0,
+            Self::Cgroup | Self::CpuPowerEpp => 0,
         }
     }
 
@@ -93,6 +164,7 @@ impl AcceptanceMutation {
             Self::Uclamp => "crash-acceptance-uclamp",
             Self::Nice => "crash-acceptance-nice",
             Self::Cgroup => "crash-acceptance-cgroup",
+            Self::CpuPowerEpp => "crash-acceptance-cpu-power-epp",
         }
     }
 }
@@ -121,7 +193,7 @@ impl AcceptanceTarget {
             DaemonMode::ApplyMediumRisk => {
                 let mut policy = ActionRunPolicy::apply_medium_risk(source, false);
                 // The explicit medium-risk unlock the validation harness is granted.
-                policy.policy = crate::daemon::DaemonPolicy::apply_medium_risk(source);
+                policy.policy = acceptance_policy(self.mutation);
                 policy
             }
             _ => ActionRunPolicy::apply_low_risk(source, false),
@@ -146,6 +218,9 @@ impl AcceptanceTarget {
             AcceptanceMutation::Uclamp => Box::new(self.uclamp_action(tree_pid)),
             AcceptanceMutation::Nice => Box::new(self.nice_action(tree_pid)),
             AcceptanceMutation::Cgroup => Box::new(self.cgroup_action(tree_pid)?),
+            AcceptanceMutation::CpuPowerEpp => crate::actions::default_action_factory_registry()
+                .build(&self.candidate(tree_pid)?)
+                .map_err(anyhow::Error::new)?,
         })
     }
 
@@ -194,6 +269,18 @@ impl AcceptanceTarget {
         })
     }
 
+    fn epp_action(self, tree_pid: u32) -> anyhow::Result<CpuPowerAction> {
+        Ok(CpuPowerAction {
+            sysfs_root: acceptance_sysfs_root()?,
+            cpus: Self::tree_targets(tree_pid)
+                .iter()
+                .map(|identity| identity.tid.as_u32())
+                .collect(),
+            scaling_governor: None,
+            energy_performance_preference: Some("performance".to_owned()),
+        })
+    }
+
     fn nice_action(self, tree_pid: u32) -> NiceAction {
         NiceAction {
             targets: Self::tree_targets(tree_pid),
@@ -229,6 +316,18 @@ impl AcceptanceTarget {
                 tree_pid,
                 objective,
             ),
+            AcceptanceMutation::CpuPowerEpp => CandidateAction::CpuPower {
+                plan: CpuPowerActionPlan {
+                    name: self.mutation.candidate_name().to_owned(),
+                    action: self.epp_action(tree_pid)?,
+                    evidence: vec![CandidateEvidence::new(
+                        "situation",
+                        "GameCpuSchedulerPressure",
+                        1.0,
+                    )],
+                    objective,
+                },
+            },
             AcceptanceMutation::Cgroup => CandidateAction::CgroupPlacement {
                 plan: CgroupPlacementActionPlan {
                     name: self.mutation.candidate_name().to_owned(),
@@ -297,7 +396,7 @@ mod tests {
                 mutation
             );
         }
-        assert!("cpu_power".parse::<AcceptanceMutation>().is_err());
+        assert!("gpu_power".parse::<AcceptanceMutation>().is_err());
     }
 
     #[test]

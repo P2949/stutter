@@ -59,12 +59,14 @@ pub fn verify_uclamp_lifecycle(
         expected_starttime,
         audit_path,
         apply_policy,
-        build: &|targets| UclampAction {
-            targets,
-            values: UclampValues {
-                sched_util_min: Some(util_min),
-                sched_util_max: None,
-            },
+        build: &|targets| {
+            Ok(UclampAction {
+                targets,
+                values: UclampValues {
+                    sched_util_min: Some(util_min),
+                    sched_util_max: None,
+                },
+            })
         },
         read: &state,
         applied: &|original| with_min(original, util_min),

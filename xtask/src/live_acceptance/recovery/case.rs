@@ -90,6 +90,14 @@ pub(super) fn start_actor(
         command
             .args(["-f", "--seccomp-bpf", "-yy", "-o"])
             .arg(out.join("syscalls.log"));
+        if target.mutation == AcceptanceMutation::CpuPowerEpp {
+            // Only the writes that change a preference are traced: the fixture's EPP files.
+            for tid in tree_tids(root)? {
+                command.arg("-P").arg(out.join(format!(
+                    "fake-sysfs/devices/system/cpu/cpu{tid}/cpufreq/energy_performance_preference"
+                )));
+            }
+        }
         if target.mutation == AcceptanceMutation::Cgroup {
             // Only the writes that move a task are traced: the destination's `cgroup.procs` for
             // the apply and the origin's for the restore.
@@ -128,6 +136,7 @@ pub(super) fn start_actor(
         .env("STUTTER_CONFIG", out.join("acceptance.toml"))
         // The in-process privileged service audits under $HOME; keep that inside the case.
         .env("HOME", out)
+        .env(ACCEPTANCE_SYSFS_ENV, out.join("fake-sysfs"))
         .stdout(fs::File::create(out.join("controller.stdout"))?)
         .stderr(fs::File::create(out.join("controller.stderr"))?);
     let mut child = OwnedChild(command.spawn()?);
@@ -185,6 +194,40 @@ fn cgroup_procs_of_origin(root: u32) -> anyhow::Result<PathBuf> {
     Ok(Path::new("/sys/fs/cgroup")
         .join(Path::new(original.trim()).strip_prefix("/")?)
         .join("cgroup.procs"))
+}
+
+/// Every task id of the owned tree rooted at `root`.
+pub(super) fn tree_tids(root: u32) -> anyhow::Result<Vec<u32>> {
+    let children = fs::read_to_string(format!("/proc/{root}/task/{root}/children"))?;
+    let mut pids: Vec<u32> = children
+        .split_whitespace()
+        .filter_map(|pid| pid.parse().ok())
+        .collect();
+    pids.push(root);
+    let mut tids = Vec::new();
+    for pid in pids {
+        for entry in fs::read_dir(format!("/proc/{pid}/task"))? {
+            tids.push(entry?.file_name().to_string_lossy().parse()?);
+        }
+    }
+    tids.sort_unstable();
+    Ok(tids)
+}
+
+/// Prepares the per-task cpufreq fixture of a CPU power case before anything is snapshotted.
+pub(super) fn prepare_fixture(
+    out: &Path,
+    root: u32,
+    mutation: AcceptanceMutation,
+) -> anyhow::Result<()> {
+    if mutation == AcceptanceMutation::CpuPowerEpp {
+        let fixture = out.join("fake-sysfs");
+        prepare_acceptance_sysfs(&fixture, &tree_tids(root)?)?;
+        procfs::set_sysfs_fixture(Some(fixture));
+    } else {
+        procfs::set_sysfs_fixture(None);
+    }
+    Ok(())
 }
 
 /// `cgroup.procs` of the `target` sibling of the cgroup the tree runs in.
@@ -280,6 +323,7 @@ pub(super) fn run(
     let mut workload = start_workload(executable, &out, 90)?;
     let root = workload.0.id();
     let root_ticks = start_ticks(root)?;
+    prepare_fixture(&out, root, mutation)?;
     let before = procfs::snapshot(mutation, root, root_ticks)?;
     let desired = target.value;
     ensure!(

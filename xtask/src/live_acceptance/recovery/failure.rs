@@ -30,6 +30,7 @@ pub(super) fn run(
     let mut workload = start_workload(executable, &out, 90)?;
     let root = workload.0.id();
     let root_ticks = start_ticks(root)?;
+    case::prepare_fixture(&out, root, mutation)?;
     let before = procfs::snapshot(mutation, root, root_ticks)?;
     let desired = target.value;
     ensure!(

@@ -16,8 +16,10 @@ use crate::actions::{
     },
 };
 
+mod acceptance;
 mod prepared;
 
+pub use acceptance::verify_cpu_power_lifecycle;
 pub(crate) use prepared::rollback_verified;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
