@@ -47,12 +47,13 @@ impl Scenario {
         use game_runnable::Contention::{Burst, Hogs};
         match (mutation, self) {
             // A priority change can only help against contention that shares the CPU by weight:
-            // ordinary hogs on the target's CPU. Neutral puts the same hogs where they cannot
-            // contend with the target; regression is contention no priority change can touch (a
-            // SCHED_FIFO burst), so a keep there would be a false keep.
+            // ordinary hogs on the target's CPU. Neutral and regression keep the hogs visible as
+            // offenders (on the other CPU) while the target's contention is a SCHED_FIFO burst no
+            // priority change can touch, at two levels, so any keep there is a false keep. The
+            // burst also makes the situation scheduler pressure, which the provider needs.
             (AcceptanceMutation::Nice, Self::Beneficial) => (Hogs(3), Burst(0)),
-            (AcceptanceMutation::Nice, Self::Neutral) => (Burst(0), Hogs(3)),
-            (AcceptanceMutation::Nice, Self::Regression) => (Burst(8), Hogs(3)),
+            (AcceptanceMutation::Nice, Self::Neutral) => (Burst(8), Hogs(3)),
+            (AcceptanceMutation::Nice, Self::Regression) => (Burst(2), Hogs(3)),
             (_, Self::Beneficial) => (Burst(8), Burst(0)),
             (_, Self::Neutral) => (Burst(8), Burst(8)),
             (_, Self::Regression) => (Burst(2), Burst(10)),
