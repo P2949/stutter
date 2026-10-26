@@ -10,10 +10,7 @@ use anyhow::Context;
 
 use super::{executor::RuntimeLiveExperimentActionExecutor, *};
 use crate::{
-    actions::{
-        ActionId, ActionState, ActionWarning, RollbackToken, SafetyClass, TuningAction,
-        cpu_affinity::CpuAffinityProfileAction,
-    },
+    actions::{ActionId, ActionState, ActionWarning, RollbackToken, SafetyClass, TuningAction},
     autotune::{
         apply_low_risk::action_from_candidate,
         crash_acceptance::publish_acceptance_handshake,
@@ -27,7 +24,7 @@ pub(crate) const VERIFY_FAILURE_READY: &str = "verify-failure-ready.json";
 pub(crate) const VERIFY_FAILURE_ACK: &str = "verify-failure-ack";
 
 struct VerifyFailureAction<'a> {
-    inner: CpuAffinityProfileAction,
+    inner: Box<dyn TuningAction>,
     out: &'a Path,
     rollback_fails: bool,
 }
@@ -52,6 +49,9 @@ impl TuningAction for VerifyFailureAction<'_> {
     }
     fn apply(&self) -> crate::actions::ApplyResult {
         self.inner.apply()
+    }
+    fn prepared_before_mutation(&self) -> bool {
+        self.inner.prepared_before_mutation()
     }
     fn apply_with_prepared_rollback(
         &self,
@@ -103,11 +103,20 @@ impl LiveExperimentActionExecutor for FaultInjectingExecutor {
         observation: &AutotuneObservation,
     ) -> anyhow::Result<RollbackToken> {
         self.apply_calls += 1;
-        let (_, mut action) = action_from_candidate(candidate.clone())?;
         let journal_path = super::journal::controller_journal_path(input);
-        action.restore_path = Some(super::journal::reserve_experiment_restore_path(
-            &journal_path,
-        )?);
+        let action: Box<dyn TuningAction> = if candidate.operation_kind()
+            == crate::autotune::operation::MutationOperationKind::CpuAffinityProfile
+        {
+            let (_, mut action) = action_from_candidate(candidate.clone())?;
+            action.restore_path = Some(super::journal::reserve_experiment_restore_path(
+                &journal_path,
+            )?);
+            Box::new(action)
+        } else {
+            crate::actions::default_action_factory_registry()
+                .build(candidate)
+                .map_err(anyhow::Error::new)?
+        };
         let out = journal_path
             .parent()
             .context("journal path has no directory")?
@@ -116,10 +125,13 @@ impl LiveExperimentActionExecutor for FaultInjectingExecutor {
             .audit_path
             .clone()
             .unwrap_or_else(|| out.join("actions.jsonl"));
-        let policy = crate::actions::runner::ActionRunPolicy::apply_low_risk(
-            crate::daemon_policy::ActionSource::AutotuneRuntime,
-            false,
-        );
+        let source = crate::daemon_policy::ActionSource::AutotuneRuntime;
+        let mut policy =
+            crate::actions::runner::ActionRunPolicy::for_action(&action, false, source);
+        if candidate.safety_class() > SafetyClass::ReversibleLowRisk {
+            // The explicit medium-risk unlock the validation harness is granted.
+            policy.policy = crate::daemon::DaemonPolicy::apply_medium_risk(source);
+        }
         let journal_input = crate::autotune::action_transaction::JournaledActionInput {
             journal_path: &journal_path,
             audit_path: &audit_path,

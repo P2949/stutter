@@ -108,6 +108,9 @@ pub struct ValidationRun {
     /// How long the monitor session runs. The candidate window is `duration_seconds`; a whole
     /// experiment (baseline, washout, candidate window) needs a longer session.
     pub session_seconds: u64,
+    /// Medium-risk mutation goes through the production privileged-service path; a campaign
+    /// whose disposable target the controller's own user owns runs that service in-process.
+    pub in_process_privileged: bool,
 }
 
 /// Blocking form for harnesses that own no async runtime.
@@ -195,6 +198,10 @@ pub async fn autotune_command_with(
         runtime_config.validation_override = Some(run.grant);
         runtime_config.history_log = Some(run.history_log);
         runtime_config.controller_journal_path = Some(run.controller_journal_path);
+        runtime_config
+            .daemon_config
+            .autotune
+            .unsafe_in_process_privileged_worker = run.in_process_privileged;
     }
 
     let duration = if matches!(mode, DaemonMode::ApplyLowRisk | DaemonMode::ApplyMediumRisk) {

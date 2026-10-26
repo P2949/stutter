@@ -182,7 +182,18 @@ impl Authorization {
                 seconds,
                 rounds,
                 benefit,
+                mutation,
             } => {
+                if mutation.is_some()
+                    && !matches!(
+                        suite,
+                        LiveSuite::Recovery | LiveSuite::Affinity | LiveSuite::AffinityBenefit
+                    )
+                {
+                    return invalid(
+                        "only the recovery, lifecycle and benefit suites take a mutation",
+                    );
+                }
                 if *attempt == 0 || *attempt > 9_999 {
                     return invalid("attempt must be within 1..=9999");
                 }

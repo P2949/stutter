@@ -6,7 +6,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use super::{models::*, system::*};
+use super::{models::*, read_current_uclamp, system::*};
 use crate::actions::{
     ActionId, RollbackToken, SafetyClass, TaskIdentity, TaskRestoreIdentity, TuningAction,
     UclampRestoreRecord,
@@ -380,4 +380,104 @@ fn rollback_token_reports_affected_tasks() {
 
     assert_eq!(token.affected_tasks(), 2);
     assert!(token.restore_path().is_none());
+}
+
+fn run_prepared(
+    proc_root: &Path,
+    action: &UclampAction,
+    hook: &mut dyn FnMut(&RollbackToken) -> anyhow::Result<()>,
+) -> crate::actions::ApplyResult {
+    action.apply_prepared_at(proc_root, &UclampPolicy::default(), hook)
+}
+
+#[test]
+fn prepared_hook_sees_every_original_value_with_full_identity_before_any_write() {
+    let root = temp_proc_root("prepared-hook");
+    write_fake_task(&root, 4242, "game-thread", 12345, 0, 1024);
+    let mut seen = None;
+    // The hook rejects, so the (fake) task is never written; the token it saw is the snapshot.
+    let err = run_prepared(&root, &action_for(4242, Some(512), None), &mut |token| {
+        seen = Some(token.clone());
+        anyhow::bail!("journal refused")
+    })
+    .unwrap_err();
+    assert!(format!("{:#}", err.source).contains("journal refused"));
+    assert!(err.rollback.is_none());
+    let token = seen.expect("hook invoked");
+    let records = token.as_uclamp_restore().expect("uclamp token");
+    assert_eq!(records.len(), 1);
+    assert_eq!(
+        (records[0].original_util_min, records[0].original_util_max),
+        (0, 1024)
+    );
+    assert_eq!(records[0].restore_identity().starttime_ticks, Some(12345));
+}
+
+#[test]
+fn prepared_apply_aborts_without_writing_when_a_target_drifts_after_preparation() {
+    let root = temp_proc_root("prepared-drift");
+    write_fake_task(&root, 4343, "game-thread", 12345, 0, 1024);
+    let root_for_hook = root.clone();
+    let err = run_prepared(&root, &action_for(4343, Some(512), None), &mut |_| {
+        // Another actor changes the clamp after the snapshot became durable.
+        write_fake_task(&root_for_hook, 4343, "game-thread", 12345, 100, 1024);
+        Ok(())
+    })
+    .unwrap_err();
+    assert!(format!("{:#}", err.source).contains("drifted"));
+    assert!(err.rollback.is_none());
+}
+
+#[test]
+fn prepared_apply_is_declared_prepared() {
+    assert!(action_for(1, Some(1), None).prepared_before_mutation());
+}
+
+/// A real process that exits between apply and rollback: the restore skips it and still succeeds
+/// (the target-exit case of the acceptance matrix), while a live sibling is restored.
+#[test]
+fn rollback_skips_a_task_that_exited_and_restores_the_one_that_did_not() {
+    use std::process::{Command, Stdio};
+    let spawn = || {
+        Command::new("sleep")
+            .arg("30")
+            .stdout(Stdio::null())
+            .spawn()
+            .expect("sleep is available")
+    };
+    let (mut doomed, mut survivor) = (spawn(), spawn());
+    let identity = |pid: u32| {
+        let ticks = crate::process_tree::process_starttime_at(Path::new("/proc"), pid)
+            .expect("task start time");
+        TaskIdentity {
+            tid: pid.into(),
+            process_pid: Some(pid.into()),
+            comm: None,
+            starttime_ticks: Some(ticks),
+        }
+    };
+    let action = UclampAction {
+        targets: vec![identity(doomed.id()), identity(survivor.id())],
+        values: UclampValues {
+            sched_util_min: Some(300),
+            sched_util_max: None,
+        },
+    };
+    let mut token = None;
+    let applied = action.apply_with_prepared_rollback(&mut |prepared| {
+        token = Some(prepared.clone());
+        Ok(())
+    });
+    let token = applied.expect("apply succeeds on this user's own children");
+    assert_eq!(token.as_uclamp_restore().unwrap().len(), 2);
+    doomed.kill().unwrap();
+    doomed.wait().unwrap();
+    action.rollback(&token).expect("an exited task is skipped");
+    action
+        .rollback(&token)
+        .expect("restoring twice changes nothing");
+    let min = read_current_uclamp(survivor.id()).unwrap().0;
+    assert_eq!(min, 0, "the surviving task was restored");
+    survivor.kill().unwrap();
+    survivor.wait().unwrap();
 }

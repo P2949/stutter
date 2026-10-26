@@ -82,9 +82,10 @@ impl MutationOperationKind {
     pub fn capability_id(self) -> Option<&'static str> {
         match self {
             Self::CpuAffinityProfile => Some("cpu_affinity_experiment"),
-            Self::Uclamp | Self::Nice | Self::IoPrio | Self::CgroupPlacement => {
-                Some("process_priority_and_placement")
-            }
+            Self::Uclamp => Some("uclamp_experiment"),
+            Self::Nice => Some("nice_experiment"),
+            Self::IoPrio => Some("ioprio_experiment"),
+            Self::CgroupPlacement => Some("cgroup_placement_experiment"),
             Self::CpuPowerEpp
             | Self::CpuPowerGovernor
             | Self::GpuPowerProfile
@@ -102,7 +103,7 @@ impl MutationOperationKind {
     /// snapshot durable before the first write). A Supported autonomous contract requires it;
     /// each operation flips to `true` when its transaction lands and passes the fault matrix.
     pub const fn prepared_transaction_implemented(self) -> bool {
-        matches!(self, Self::CpuAffinityProfile)
+        matches!(self, Self::CpuAffinityProfile | Self::Uclamp)
     }
 
     /// Operations that stay manual (HighRisk) for the whole roadmap.

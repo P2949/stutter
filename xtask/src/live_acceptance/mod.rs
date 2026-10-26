@@ -74,6 +74,9 @@ pub enum Suite {
         out: PathBuf,
         #[arg(long)]
         stutter_bin: PathBuf,
+        /// The mutation under test: `affinity` or `uclamp`.
+        #[arg(long, default_value = "affinity", value_parser = recovery::parse_mutation)]
+        mutation: stutter::api::autotune::AcceptanceMutation,
         /// Required: this suite really suspends the machine.
         #[arg(long)]
         allow_system_suspend: bool,
@@ -90,12 +93,19 @@ pub enum Suite {
         out: PathBuf,
         #[arg(long)]
         stutter_bin: PathBuf,
+        /// The mutation under test: `affinity` or `uclamp`.
+        #[arg(long, default_value = "affinity", value_parser = recovery::parse_mutation)]
+        mutation: stutter::api::autotune::AcceptanceMutation,
     },
+    /// Dry-run, audited apply, durable token, readback and rollback of one mutation.
     Affinity {
         #[arg(long)]
         out: PathBuf,
         #[arg(long)]
         stutter_bin: PathBuf,
+        /// The mutation under test: `affinity` or `uclamp`.
+        #[arg(long, default_value = "affinity", value_parser = recovery::parse_mutation)]
+        mutation: stutter::api::autotune::AcceptanceMutation,
     },
     /// One matched pair of the CPU-affinity benefit experiment (a mutation campaign's stage).
     AffinityBenefit {
@@ -111,14 +121,19 @@ pub enum Suite {
         order: affinity_benefit::Order,
         #[arg(long, default_value_t = 20, value_parser = clap::value_parser!(u64).range(10..=60))]
         seconds: u64,
+        /// The mutation under test: `affinity` or `uclamp`.
+        #[arg(long, default_value = "affinity", value_parser = recovery::parse_mutation)]
+        mutation: stutter::api::autotune::AcceptanceMutation,
     },
     /// The production live controller for one benefit pair; spawned by `affinity-benefit`.
     #[command(hide = true)]
     AffinityBenefitController {
         #[arg(long)]
         pid: u32,
+        #[arg(long, default_value = "affinity", value_parser = recovery::parse_mutation)]
+        mutation: stutter::api::autotune::AcceptanceMutation,
         #[arg(long)]
-        profiles: PathBuf,
+        profiles: Option<PathBuf>,
         #[arg(long)]
         out: PathBuf,
         #[arg(long)]
@@ -293,7 +308,11 @@ pub fn run(root: &Path, suite: Suite) -> anyhow::Result<()> {
             stutter_bin,
             seconds,
         } => (out, stutter_bin, seconds),
-        Suite::Affinity { out, stutter_bin } => return affinity::run(root, &out, &stutter_bin),
+        Suite::Affinity {
+            out,
+            stutter_bin,
+            mutation,
+        } => return affinity::run(root, &out, &stutter_bin, mutation),
         Suite::AffinityBenefit {
             out,
             stutter_bin,
@@ -301,6 +320,7 @@ pub fn run(root: &Path, suite: Suite) -> anyhow::Result<()> {
             pair,
             order,
             seconds,
+            mutation,
         } => {
             return affinity_benefit::run(
                 root,
@@ -311,16 +331,26 @@ pub fn run(root: &Path, suite: Suite) -> anyhow::Result<()> {
                     pair,
                     order,
                     seconds,
+                    mutation,
                 },
             );
         }
         Suite::AffinityBenefitController {
             pid,
+            mutation,
             profiles,
             out,
             window_seconds,
             stutter_bin: _,
-        } => return affinity_benefit::run_controller(pid, &profiles, &out, window_seconds),
+        } => {
+            return affinity_benefit::run_controller(
+                mutation,
+                pid,
+                profiles.as_deref(),
+                &out,
+                window_seconds,
+            );
+        }
         Suite::ScoreDegradation {
             out,
             stutter_bin,
@@ -360,10 +390,15 @@ pub fn run(root: &Path, suite: Suite) -> anyhow::Result<()> {
         } => {
             return game_runnable::run(root, &out, &stutter_bin, seconds);
         }
-        Suite::Recovery { out, stutter_bin } => return recovery::run(root, &out, &stutter_bin),
+        Suite::Recovery {
+            out,
+            stutter_bin,
+            mutation,
+        } => return recovery::run(root, &out, &stutter_bin, mutation),
         Suite::SuspendResume {
             out,
             stutter_bin,
+            mutation,
             allow_system_suspend,
             suspend_command,
             rtcwake_seconds,
@@ -373,6 +408,7 @@ pub fn run(root: &Path, suite: Suite) -> anyhow::Result<()> {
                 root,
                 &out,
                 &stutter_bin,
+                mutation,
                 &recovery::SuspendOptions {
                     allow_system_suspend,
                     suspend_command,

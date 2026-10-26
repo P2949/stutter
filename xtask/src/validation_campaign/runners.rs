@@ -63,6 +63,7 @@ impl LiveSuiteRunner {
             raw: &raw,
             log: &log,
             extra_args: &[],
+            mutation: None,
             stutter: &context.binaries.stutter,
             xtask: &context.binaries.xtask,
             cwd: context.repository,

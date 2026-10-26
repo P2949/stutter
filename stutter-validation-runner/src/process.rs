@@ -83,6 +83,7 @@ pub fn plan_live_suite(
         seconds,
         rounds,
         benefit,
+        mutation,
     } = &envelope.body
     else {
         return Err((
@@ -108,6 +109,9 @@ pub fn plan_live_suite(
     }
     if let Some(rounds) = rounds {
         args.extend(["--rounds".to_owned(), rounds.to_string()]);
+    }
+    if let Some(mutation) = mutation {
+        args.extend(["--mutation".to_owned(), mutation.as_str().to_owned()]);
     }
     if let Some(spec) = benefit {
         args.extend([

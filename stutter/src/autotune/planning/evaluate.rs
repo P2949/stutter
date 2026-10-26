@@ -143,7 +143,19 @@ pub(crate) fn evaluate_proposal_static(
         ));
     }
 
+    let validated_by_campaign = input
+        .controller_state
+        .validation_override
+        .as_ref()
+        .is_some_and(|grant| {
+            grant.covers(
+                proposal.candidate.operation_kind(),
+                proposal.candidate.objective(),
+                input.daemon_policy.source,
+            )
+        });
     if mode_requires_autonomous_workload_family(input.daemon_policy.mode)
+        && !validated_by_campaign
         && !workload_policy.allows_autonomous_candidate(&proposal.candidate)
     {
         deny_reasons.push(CandidateDenyReason::NotAutonomousForWorkload);

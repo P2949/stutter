@@ -63,6 +63,18 @@ The grants name each stage's live suite, the recording and scheduler-burst actio
 stages use, and campaign status/resume/cancel. A mutation campaign is never granted a reboot or a
 boot-entry change.
 
+## One harness, one mutation per operation
+
+The fault matrix (`recovery`), the mechanical lifecycle (`affinity`), the suspend/resume stage and
+the benefit pair are parameterised by the operation's `mutation` (`affinity` or `uclamp` today;
+absent means affinity). The mutation decides the action the owned disposable tree receives, the
+syscall the tracer injects faults and stalls into, the kernel property the harness reads back
+independently, and the shape of the durable token. Adding an operation adds a mutation variant, not
+a copy of the harness. While a campaign's validation override is held, no other operation is applied
+or measured: every candidate outside the override's operation is denied as
+`outside_validation_scope`, and the override alone bypasses the per-workload autonomous-family
+table for exactly its own operation and objective.
+
 ## The CPU-affinity benefit harness
 
 Each pair is one live experiment through the production controller, requested from the runner as

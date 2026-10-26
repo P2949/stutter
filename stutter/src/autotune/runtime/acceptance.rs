@@ -9,11 +9,10 @@ use serde_json::json;
 use super::{AutotuneRuntime, AutotuneRuntimeConfig, AutotuneRuntimePhase};
 use crate::{
     autotune::{
+        acceptance_mutation::AcceptanceTarget,
         action_transaction::JournaledActionFailure,
         controller_journal::read_controller_journal,
-        crash_acceptance::{
-            RecoveryCheckpoint, acceptance_candidate, acceptance_observation, acceptance_override,
-        },
+        crash_acceptance::{RecoveryCheckpoint, acceptance_observation, acceptance_override},
         decision::AutotuneDecision,
         live_experiment::FaultInjectingExecutor,
     },
@@ -21,10 +20,29 @@ use crate::{
     daemon_policy::ActionSource,
 };
 
+/// Medium-risk mutation goes through the production privileged-service path with the explicit
+/// unlock a validation harness is granted; a disposable tree owned by this user needs no root
+/// worker, so the service runs in this process.
+fn acceptance_daemon_config(
+    target: AcceptanceTarget,
+    tree_pid: u32,
+) -> crate::daemon::DaemonConfig {
+    let mut daemon_config = super::daemon_config_for_runtime_mode(
+        target.mutation.mode(),
+        ActionSource::AutotuneRuntime,
+        Some(tree_pid),
+        None,
+    );
+    let medium = target.mutation.mode() == DaemonMode::ApplyMediumRisk;
+    daemon_config.autotune.unsafe_in_process_privileged_worker = medium;
+    daemon_config.autotune.allow_medium_risk_apply = medium;
+    daemon_config
+}
+
 pub(crate) fn run_failure_scenario(
     out: &Path,
     tree_pid: u32,
-    desired: crate::affinity::CpuMask,
+    desired: AcceptanceTarget,
     scenario: RecoveryCheckpoint,
 ) -> anyhow::Result<()> {
     let verify_failure = match scenario {
@@ -35,17 +53,12 @@ pub(crate) fn run_failure_scenario(
     };
     let journal_path = out.join("controller.json");
     let mut config = AutotuneRuntimeConfig::from_daemon_config(
-        super::daemon_config_for_runtime_mode(
-            DaemonMode::ApplyLowRisk,
-            ActionSource::AutotuneRuntime,
-            Some(tree_pid),
-            None,
-        ),
+        acceptance_daemon_config(desired, tree_pid),
         Some(out.join("decisions.jsonl")),
     );
     config.controller_journal_path = Some(journal_path.clone());
     config.history_log = Some(out.join("history.jsonl"));
-    let candidate = acceptance_candidate(tree_pid, desired)?;
+    let candidate = desired.candidate(tree_pid)?;
     config.validation_override = Some(acceptance_override(&candidate));
     let mut runtime = AutotuneRuntime::new(config);
     let observation = acceptance_observation(tree_pid);
@@ -68,7 +81,7 @@ pub(crate) fn run_failure_scenario(
         .context("injected failure unexpectedly succeeded")?;
     let typed = error
         .downcast_ref::<JournaledActionFailure>()
-        .context("runner outcome type was not preserved")?;
+        .with_context(|| format!("runner outcome type was not preserved: {error:#}"))?;
     let journal = read_controller_journal(&journal_path)?;
     let phase = runtime.runtime_phase();
     ensure!(
@@ -104,23 +117,18 @@ pub(crate) fn run_failure_scenario(
 pub(crate) fn run_suspend_resume(
     out: &Path,
     tree_pid: u32,
-    desired: crate::affinity::CpuMask,
+    desired: AcceptanceTarget,
     resume_timeout: std::time::Duration,
 ) -> anyhow::Result<()> {
     use crate::autotune::crash_acceptance::publish_acceptance_handshake;
     let journal_path = out.join("controller.json");
     let mut config = AutotuneRuntimeConfig::from_daemon_config(
-        super::daemon_config_for_runtime_mode(
-            DaemonMode::ApplyLowRisk,
-            ActionSource::AutotuneRuntime,
-            Some(tree_pid),
-            None,
-        ),
+        acceptance_daemon_config(desired, tree_pid),
         Some(out.join("decisions.jsonl")),
     );
     config.controller_journal_path = Some(journal_path.clone());
     config.history_log = Some(out.join("history.jsonl"));
-    let candidate = acceptance_candidate(tree_pid, desired)?;
+    let candidate = desired.candidate(tree_pid)?;
     config.validation_override = Some(acceptance_override(&candidate));
     let mut runtime = AutotuneRuntime::new(config);
     let observation = acceptance_observation(tree_pid);

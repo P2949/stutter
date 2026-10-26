@@ -135,12 +135,63 @@ where
     ))
 }
 
+/// Like `restore_task_records`, but a record is only written while its task is still the very
+/// task that was changed: a recycled TID, an unverifiable identity or an exited task is skipped
+/// and counted, never overwritten.
+pub(super) fn restore_verified_task_records<T, Identity, Apply, Describe>(
+    proc_root: &Path,
+    rollback_kind: &'static str,
+    records: &[T],
+    identity: Identity,
+    mut apply: Apply,
+    describe_failure: Describe,
+) -> anyhow::Result<RollbackRestoreSummary>
+where
+    Identity: Fn(&T) -> TaskRestoreIdentity,
+    Apply: FnMut(&T) -> Result<(), std::io::Error>,
+    Describe: FnMut(&T) -> String,
+{
+    let mut mismatched = Vec::new();
+    let mut summary = restore_task_records(
+        rollback_kind,
+        records,
+        |record| match verify_task_identity(proc_root, &identity(record)) {
+            RestoreIdentityStatus::SameTask => apply(record),
+            RestoreIdentityStatus::Missing => Err(std::io::Error::from_raw_os_error(libc::ESRCH)),
+            RestoreIdentityStatus::UnknownLegacy => {
+                mismatched.push(format!(
+                    "tid={} has no verifiable identity",
+                    identity(record).tid
+                ));
+                Ok(())
+            }
+            RestoreIdentityStatus::Mismatch { reason } => {
+                mismatched.push(format!("tid={} {reason}", identity(record).tid));
+                Ok(())
+            }
+        },
+        describe_failure,
+    )?;
+    // Skipped tasks were reported as restored by the inner counter; reclassify them.
+    summary.restored_items -= mismatched.len();
+    summary.skipped_items += mismatched.len();
+    summary.skipped_identity_mismatch += mismatched.len();
+    summary.messages.extend(
+        mismatched
+            .into_iter()
+            .map(|m| format!("skipped_identity_mismatch {m}")),
+    );
+    Ok(summary)
+}
+
 pub(super) fn restore_nice_records(
     records: &[NiceRestoreRecord],
 ) -> anyhow::Result<RollbackRestoreSummary> {
-    restore_task_records(
+    restore_verified_task_records(
+        Path::new("/proc"),
         "nice-restore",
         records,
+        |record| record.restore_identity(),
         |record| crate::actions::syscalls::setpriority_process(record.tid(), record.original_nice),
         |record| {
             format!(
@@ -155,9 +206,11 @@ pub(super) fn restore_nice_records(
 pub(super) fn restore_ioprio_records(
     records: &[IoPrioRestoreRecord],
 ) -> anyhow::Result<RollbackRestoreSummary> {
-    restore_task_records(
+    restore_verified_task_records(
+        Path::new("/proc"),
         "ioprio-restore",
         records,
+        |record| record.restore_identity(),
         |record| crate::actions::syscalls::ioprio_set_process(record.tid(), record.original_ioprio),
         |record| {
             format!(
@@ -172,9 +225,11 @@ pub(super) fn restore_ioprio_records(
 pub(super) fn restore_uclamp_records(
     records: &[UclampRestoreRecord],
 ) -> anyhow::Result<RollbackRestoreSummary> {
-    restore_task_records(
+    restore_verified_task_records(
+        Path::new("/proc"),
         "uclamp-restore",
         records,
+        |record| record.restore_identity(),
         |record| {
             crate::actions::syscalls::sched_setattr(
                 record.tid(),

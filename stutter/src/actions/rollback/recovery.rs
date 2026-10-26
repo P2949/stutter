@@ -32,8 +32,8 @@ pub(crate) fn recovery_descriptor(token: &RollbackToken) -> RollbackRecoveryDesc
             "legacy task identity accepted by manual I/O-priority restoration",
         ),
         RollbackToken::UclampRestore { .. } => (
-            ManualOnly,
-            "legacy task identity accepted by manual uclamp restoration",
+            VerifiedAutomatic,
+            "complete process/task IDs and task start times from the prepared snapshot; each task re-verified immediately before its write; exited or replaced tasks skipped; legacy records without a start time are never restored automatically",
         ),
         RollbackToken::CgroupRestore { .. } => (
             ManualOnly,

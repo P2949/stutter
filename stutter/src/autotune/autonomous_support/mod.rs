@@ -58,6 +58,22 @@ pub struct ValidationOverride {
     pub campaign_id: String,
 }
 
+impl ValidationOverride {
+    /// Whether this override is the campaign's own exact operation and objective, held by a local
+    /// caller. Only such a candidate may bypass the per-workload autonomous-family table: the
+    /// campaign is the evidence that decides whether the table may ever list it.
+    pub fn covers(
+        &self,
+        operation: MutationOperationKind,
+        objective: ObjectiveKind,
+        source: ActionSource,
+    ) -> bool {
+        source != ActionSource::RemoteAgent
+            && self.operation == operation
+            && self.objective == objective
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AutonomousGateInput<'a> {
     pub operation: MutationOperationKind,
@@ -78,6 +94,8 @@ pub enum AutonomousDenial {
     /// The operation has no prepared-before-mutation transaction yet.
     PreparedTransactionMissing,
     NotInSupportRegistry,
+    /// A validation campaign owns the run: only its own operation may be applied.
+    OutsideValidationScope,
 }
 
 impl AutonomousDenial {
@@ -90,6 +108,7 @@ impl AutonomousDenial {
             Self::CapabilityTierNotSupported => Reason::CapabilityTierNotSupported,
             Self::PreparedTransactionMissing => Reason::PreparedTransactionMissing,
             Self::NotInSupportRegistry => Reason::NotInSupportRegistry,
+            Self::OutsideValidationScope => Reason::OutsideValidationScope,
         }
     }
 
@@ -101,6 +120,7 @@ impl AutonomousDenial {
             Self::CapabilityTierNotSupported => "capability_tier_not_supported",
             Self::PreparedTransactionMissing => "prepared_transaction_missing",
             Self::NotInSupportRegistry => "operation_not_in_support_registry",
+            Self::OutsideValidationScope => "outside_validation_scope",
         }
     }
 
@@ -124,6 +144,10 @@ impl AutonomousDenial {
             ),
             Self::PreparedTransactionMissing => format!(
                 "operation {} has no prepared-before-mutation transaction",
+                input.operation.as_str()
+            ),
+            Self::OutsideValidationScope => format!(
+                "operation {} is outside the validation campaign's scope",
                 input.operation.as_str()
             ),
             Self::NotInSupportRegistry => format!(
@@ -189,18 +213,22 @@ pub(crate) fn autonomous_apply_gate_with(
     }
 
     // A validation campaign may exercise exactly its own operation/objective, only through a
-    // local caller, and only for an objective that is at least Validating.
+    // local caller, and only for an objective that is at least Validating. While it holds the
+    // run, no other operation is applied: a measurement attributes its effect to one mutation.
     if let Some(grant) = input.validation_override
         && input.source != ActionSource::RemoteAgent
-        && grant.operation == input.operation
-        && grant.objective == input.objective
     {
-        return match facts.maturity {
-            ObjectiveMaturity::Experimental => {
-                Err(AutonomousDenial::ObjectiveNotSupported(facts.maturity))
-            }
-            ObjectiveMaturity::Validating | ObjectiveMaturity::Supported => Ok(()),
-        };
+        if grant.operation != input.operation {
+            return Err(AutonomousDenial::OutsideValidationScope);
+        }
+        if grant.objective == input.objective {
+            return match facts.maturity {
+                ObjectiveMaturity::Experimental => {
+                    Err(AutonomousDenial::ObjectiveNotSupported(facts.maturity))
+                }
+                ObjectiveMaturity::Validating | ObjectiveMaturity::Supported => Ok(()),
+            };
+        }
     }
 
     if facts.maturity != ObjectiveMaturity::Supported {

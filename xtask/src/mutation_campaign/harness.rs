@@ -7,7 +7,9 @@ use serde_json::Value;
 use stutter::api::autotune::ObjectiveKind;
 use stutter_validation_runner::{
     client::Client,
-    model::{BenefitScenario, BenefitSpec, ErrorCode, LiveSuite, Request, ResponseStatus},
+    model::{
+        BenefitScenario, BenefitSpec, ErrorCode, LiveSuite, Mutation, Request, ResponseStatus,
+    },
 };
 
 use super::{
@@ -106,6 +108,14 @@ impl BenefitHarness for RunnerHarness {
             attempt,
             seconds: Some(context.manifest.benefit.window_seconds),
             rounds: None,
+            mutation: match context.operation.mutation.as_deref() {
+                None => None,
+                Some("affinity") => Some(Mutation::Affinity),
+                Some("uclamp") => Some(Mutation::Uclamp),
+                Some(other) => {
+                    return Err(HarnessError::Defect(format!("unknown mutation {other}")));
+                }
+            },
             benefit: Some(BenefitSpec {
                 scenario: scenario_of(scenario),
                 pair: pair as u32,

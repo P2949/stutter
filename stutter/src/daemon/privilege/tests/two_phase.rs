@@ -263,7 +263,9 @@ fn a_duplicate_commit_cannot_apply_twice() {
         snapshot_digest: digest,
     };
     send(&mut stream, &commit);
-    send(&mut stream, &commit);
+    // The worker may already have answered and closed the exchange, so the duplicate frame can
+    // legitimately meet a closed socket; what matters is that it is never applied.
+    let _ = stream.write_all(format!("{}\n", serde_json::to_string(&commit).unwrap()).as_bytes());
     assert!(matches!(
         read_response(&mut reader),
         PrivilegedWorkerResponse::Apply { .. }

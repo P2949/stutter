@@ -80,17 +80,20 @@ pub(super) fn start_actor(
     out: &Path,
     root: u32,
     root_ticks: u64,
-    cpu: u32,
+    target: AcceptanceTarget,
     checkpoint: RecoveryCheckpoint,
 ) -> anyhow::Result<Actor> {
-    let injection = checkpoint.strace_injection();
+    let injection = checkpoint.strace_injection(target.mutation);
     let traced = injection.is_some();
     let mut command = if let Some(injection) = injection {
         let mut command = Command::new("strace");
         command
             .args(["-f", "--seccomp-bpf", "-yy", "-o"])
             .arg(out.join("syscalls.log"))
-            .args(["-e", "trace=sched_setaffinity", "-e", injection])
+            .arg("-e")
+            .arg(format!("trace={}", target.mutation.syscall()))
+            .arg("-e")
+            .arg(injection)
             .arg(executable);
         command
     } else {
@@ -104,8 +107,10 @@ pub(super) fn start_actor(
             &root.to_string(),
             "--tree-ticks",
             &root_ticks.to_string(),
-            "--cpu",
-            &cpu.to_string(),
+            "--mutation",
+            target.mutation.as_str(),
+            "--value",
+            &target.value.to_string(),
             "--owner-pid",
             &std::process::id().to_string(),
             "--owner-ticks",
@@ -114,6 +119,8 @@ pub(super) fn start_actor(
             checkpoint.as_str(),
         ])
         .env("STUTTER_CONFIG", out.join("acceptance.toml"))
+        // The in-process privileged service audits under $HOME; keep that inside the case.
+        .env("HOME", out)
         .stdout(fs::File::create(out.join("controller.stdout"))?)
         .stderr(fs::File::create(out.join("controller.stderr"))?);
     let mut child = OwnedChild(command.spawn()?);
@@ -150,6 +157,33 @@ pub(super) fn archive(out: &Path, source: &Path, name: &str) -> anyhow::Result<(
     file.sync_all()?;
     Ok(())
 }
+/// How many tasks the durable token covers, in the token's own vocabulary.
+pub(super) fn token_tasks(token: &Value) -> Option<u64> {
+    token["affected_tasks"].as_u64().or_else(|| {
+        token["records"]
+            .as_array()
+            .map(|records| records.len() as u64)
+    })
+}
+
+/// The independent snapshot of the durable original state a token names: affinity keeps it in a
+/// restore file the token points at (returned as its path), uclamp inside the token itself.
+pub(super) fn saved_state(
+    token: &Value,
+    mutation: AcceptanceMutation,
+) -> anyhow::Result<Option<(PathBuf, Value)>> {
+    if mutation != AcceptanceMutation::Affinity {
+        return Ok(None);
+    }
+    let path = PathBuf::from(
+        token["restore_path"]
+            .as_str()
+            .context("rollback token restore path missing")?,
+    );
+    let saved = read_json(&path)?;
+    Ok(Some((path, saved)))
+}
+
 pub(super) fn verify_recovery_evidence(out: &Path) -> anyhow::Result<()> {
     let journal = read_json(&out.join("controller.json"))?;
     ensure!(
@@ -191,25 +225,29 @@ pub(super) fn verify_recovery_evidence(out: &Path) -> anyhow::Result<()> {
 pub(super) fn run(
     executable: &Path,
     parent: &Path,
-    cpu: u32,
+    target: AcceptanceTarget,
     checkpoint: RecoveryCheckpoint,
 ) -> anyhow::Result<Value> {
+    let mutation = target.mutation;
     let out = parent.join(checkpoint.as_str());
     fs::create_dir(&out)?;
     fs::write(out.join("acceptance.toml"), "# Isolated crash checkpoint\n")?;
     let mut workload = start_workload(executable, &out, 90)?;
     let root = workload.0.id();
     let root_ticks = start_ticks(root)?;
-    let before = procfs::snapshot(root, root_ticks)?;
-    let desired = cpu.to_string();
+    let before = procfs::snapshot(mutation, root, root_ticks)?;
+    let desired = target.value;
     ensure!(
-        before.values().all(|task| task.mask != desired),
-        "no effective mask change for owned helper"
+        before
+            .values()
+            .all(|task| procfs::applied_value(mutation, &task.mask, desired)
+                .is_ok_and(|v| v != task.mask)),
+        "no effective property change for owned helper"
     );
     let result = (|| -> anyhow::Result<Value> {
         write_json(&out.join("before.json"), &procfs::value(&before))?;
-        let mut actor = start_actor(executable, &out, root, root_ticks, cpu, checkpoint)?;
-        let at_checkpoint = if checkpoint.strace_injection().is_some() {
+        let mut actor = start_actor(executable, &out, root, root_ticks, target, checkpoint)?;
+        let at_checkpoint = if checkpoint.strace_injection(mutation).is_some() {
             let deadline = Instant::now() + Duration::from_secs(10);
             let interrupted = checkpoint == RecoveryCheckpoint::InterruptedRollback;
             loop {
@@ -230,8 +268,8 @@ pub(super) fn run(
                     std::thread::sleep(Duration::from_millis(10));
                     continue;
                 }
-                let current = procfs::snapshot(root, root_ticks)?;
-                let count = procfs::changed(&before, &current, &desired)?;
+                let current = procfs::snapshot(mutation, root, root_ticks)?;
+                let count = procfs::changed(mutation, &before, &current, desired)?;
                 let target = if interrupted { 4 } else { 1 };
                 if count == target {
                     break current;
@@ -268,16 +306,19 @@ pub(super) fn run(
                     == (checkpoint == RecoveryCheckpoint::AfterVerify),
                 "verification-return handshake differs"
             );
-            procfs::snapshot(root, root_ticks)?
+            procfs::snapshot(mutation, root, root_ticks)?
         };
-        let changed = procfs::changed(&before, &at_checkpoint, &desired)?;
+        let changed = procfs::changed(mutation, &before, &at_checkpoint, desired)?;
         let expected_changed = match checkpoint {
             RecoveryCheckpoint::BeforeApply | RecoveryCheckpoint::AfterPreparation => 0,
             RecoveryCheckpoint::MidApply => 1,
             RecoveryCheckpoint::InterruptedRollback => 4,
             _ => 5,
         };
-        ensure!(changed == expected_changed, "checkpoint mask count differs");
+        ensure!(
+            changed == expected_changed,
+            "checkpoint changed-task count differs"
+        );
         write_json(
             &out.join("at-checkpoint.json"),
             &procfs::value(&at_checkpoint),
@@ -301,34 +342,39 @@ pub(super) fn run(
             } else {
                 "applied"
             };
+            let token = &journal["rollback_token"];
             ensure!(
-                journal["state"] == expected_state
-                    && journal["rollback_token"]["affected_tasks"] == 5,
+                journal["state"] == expected_state && token_tasks(token) == Some(5),
                 "durable checkpoint token missing"
             );
-            let restore_path = PathBuf::from(
-                journal["rollback_token"]["restore_path"]
-                    .as_str()
-                    .context("rollback token restore path missing")?,
-            );
-            // Direct transactions use the harness path; the manager reserves an isolated
-            // per-experiment path beneath the journal directory.
-            let expected_restore = if matches!(
-                checkpoint,
-                RecoveryCheckpoint::ManagerMeasuring | RecoveryCheckpoint::InterruptedRollback
-            ) {
-                restore_path.starts_with(out.join("experiments"))
-            } else {
-                restore_path == out.join("restore.json")
-            };
-            ensure!(
-                journal["rollback_token"]["kind"] == "cpu-affinity-restore-file"
-                    && expected_restore,
-                "rollback token points outside the owned checkpoint"
-            );
-            procfs::verify_saved(&before, &read_json(&restore_path)?, &desired)?;
+            let saved = saved_state(token, mutation)?;
+            if let Some((restore_path, _)) = &saved {
+                // Direct transactions use the harness path; the manager reserves an isolated
+                // per-experiment path beneath the journal directory.
+                let expected_restore = if matches!(
+                    checkpoint,
+                    RecoveryCheckpoint::ManagerMeasuring | RecoveryCheckpoint::InterruptedRollback
+                ) {
+                    restore_path.starts_with(out.join("experiments"))
+                } else {
+                    *restore_path == out.join("restore.json")
+                };
+                ensure!(
+                    token["kind"] == "cpu-affinity-restore-file" && expected_restore,
+                    "rollback token points outside the owned checkpoint"
+                );
+            }
+            procfs::verify_saved(
+                mutation,
+                &before,
+                token,
+                saved.as_ref().map(|(_, saved)| saved),
+                desired,
+            )?;
             archive(&out, &out.join("controller.json"), "controller.json")?;
-            archive(&out, &restore_path, "restore.json")?;
+            if let Some((restore_path, _)) = &saved {
+                archive(&out, restore_path, "restore.json")?;
+            }
         } else {
             ensure!(
                 !out.join("controller.json").exists() && !out.join("restore.json").exists(),
@@ -336,10 +382,10 @@ pub(super) fn run(
             );
         }
         let killed = actor.kill_and_wait(&out)?;
-        let after_kill = procfs::snapshot(root, root_ticks)?;
+        let after_kill = procfs::snapshot(mutation, root, root_ticks)?;
         ensure!(
             after_kill == at_checkpoint,
-            "controller death changed masks; destructor cleanup cannot prove crash recovery"
+            "controller death changed the property; destructor cleanup cannot prove crash recovery"
         );
         write_json(&out.join("after-kill.json"), &procfs::value(&after_kill))?;
         command(
@@ -365,10 +411,10 @@ pub(super) fn run(
             restart["restored_tasks"] == expected_tasks && restart["journal_clean"] == true,
             "restart did not confirm expected recovery"
         );
-        let restored = procfs::snapshot(root, root_ticks)?;
+        let restored = procfs::snapshot(mutation, root, root_ticks)?;
         ensure!(
             restored == before,
-            "independent original identity/mask readback differs"
+            "independent original identity/property readback differs"
         );
         write_json(&out.join("restored.json"), &procfs::value(&restored))?;
         if expected_tasks > 0 {

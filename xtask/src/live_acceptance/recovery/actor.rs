@@ -2,9 +2,8 @@ use std::path::PathBuf;
 
 use clap::Subcommand;
 use stutter::api::autotune::{
-    RecoveryCheckpoint, RecoveryControllerInput, SuspendResumeControllerInput,
-    hold_affinity_recovery_controller, hold_suspend_resume_controller,
-    recover_affinity_acceptance_controller,
+    AcceptanceMutation, RecoveryCheckpoint, RecoveryControllerInput, SuspendResumeControllerInput,
+    hold_recovery_controller, hold_suspend_resume_controller, recover_acceptance_controller,
 };
 
 fn checkpoint(value: &str) -> Result<RecoveryCheckpoint, String> {
@@ -21,8 +20,11 @@ pub enum ControllerCommand {
         tree_pid: u32,
         #[arg(long)]
         tree_ticks: u64,
-        #[arg(long)]
-        cpu: u32,
+        #[arg(long, default_value = "affinity", value_parser = super::parse_mutation)]
+        mutation: AcceptanceMutation,
+        /// A CPU number (affinity) or a `uclamp.min` (uclamp).
+        #[arg(long, alias = "cpu")]
+        value: u32,
         #[arg(long)]
         owner_pid: u32,
         #[arg(long)]
@@ -43,8 +45,10 @@ pub enum ControllerCommand {
         tree_pid: u32,
         #[arg(long)]
         tree_ticks: u64,
-        #[arg(long)]
-        cpu: u32,
+        #[arg(long, default_value = "affinity", value_parser = super::parse_mutation)]
+        mutation: AcceptanceMutation,
+        #[arg(long, alias = "cpu")]
+        value: u32,
         #[arg(long)]
         owner_pid: u32,
         #[arg(long)]
@@ -59,14 +63,16 @@ pub(crate) fn controller(mode: ControllerCommand) -> anyhow::Result<()> {
             out,
             tree_pid,
             tree_ticks,
-            cpu,
+            mutation,
+            value,
             owner_pid,
             owner_ticks,
             checkpoint,
-        } => hold_affinity_recovery_controller(RecoveryControllerInput {
+        } => hold_recovery_controller(RecoveryControllerInput {
             tree_pid,
             tree_ticks,
-            desired_cpu: cpu,
+            mutation,
+            value,
             owner_pid,
             owner_ticks,
             checkpoint,
@@ -76,14 +82,16 @@ pub(crate) fn controller(mode: ControllerCommand) -> anyhow::Result<()> {
             out,
             tree_pid,
             tree_ticks,
-            cpu,
+            mutation,
+            value,
             owner_pid,
             owner_ticks,
             resume_timeout_seconds,
         } => hold_suspend_resume_controller(SuspendResumeControllerInput {
             tree_pid,
             tree_ticks,
-            desired_cpu: cpu,
+            mutation,
+            value,
             out: &out,
             owner_pid,
             owner_ticks,
@@ -93,10 +101,7 @@ pub(crate) fn controller(mode: ControllerCommand) -> anyhow::Result<()> {
             out,
             expected_tasks,
         } => {
-            println!(
-                "{}",
-                recover_affinity_acceptance_controller(&out, expected_tasks)?
-            );
+            println!("{}", recover_acceptance_controller(&out, expected_tasks)?);
             Ok(())
         }
     }

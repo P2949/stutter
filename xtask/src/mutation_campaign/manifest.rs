@@ -67,6 +67,9 @@ pub struct OperationSection {
     #[serde(default)]
     pub skip: Vec<SkipEntry>,
     pub suites: SuiteMap,
+    /// The mutation the recovery, lifecycle and benefit suites drive; absent means CPU affinity.
+    #[serde(default)]
+    pub mutation: Option<String>,
     /// The operation mutates through the privileged worker: the campaign asks the runner to start
     /// the pinned worker as root and stop it afterwards. The controller itself never runs as root.
     #[serde(default)]
@@ -209,6 +212,14 @@ impl OperationSection {
                     stage.as_str()
                 );
             }
+        }
+        if let Some(mutation) = &self.mutation {
+            ensure!(
+                mutation
+                    .parse::<stutter::api::autotune::AcceptanceMutation>()
+                    .is_ok(),
+                "unknown acceptance mutation {mutation:?}"
+            );
         }
         ensure!(
             (30..=600).contains(&self.suspend_wake_seconds),

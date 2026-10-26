@@ -41,6 +41,8 @@ pub enum CandidateDenyReason {
     NotInSupportRegistry,
     /// Unclassified or manual-only operations are never autonomous.
     OperationNotAutonomous,
+    /// A validation campaign holds an override for a different operation: nothing else runs.
+    OutsideValidationScope,
     ObjectiveSignalMissing,
     TargetSnapshotMissing,
     WorkloadIdle,
@@ -82,6 +84,7 @@ impl CandidateDenyReason {
             Self::PreparedTransactionMissing => "prepared_transaction_missing",
             Self::NotInSupportRegistry => "operation_not_in_support_registry",
             Self::OperationNotAutonomous => "operation_not_autonomous",
+            Self::OutsideValidationScope => "outside_validation_scope",
             Self::ObjectiveSignalMissing => "objective_signal_missing",
             Self::TargetSnapshotMissing => "target_snapshot_missing",
             Self::WorkloadIdle => "workload_idle",

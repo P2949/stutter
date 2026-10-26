@@ -31,6 +31,7 @@ pub(super) fn run(
     root: &Path,
     out: &Path,
     binary: &Path,
+    mutation: AcceptanceMutation,
     options: &SuspendOptions,
 ) -> anyhow::Result<()> {
     ensure!(
@@ -56,8 +57,8 @@ pub(super) fn run(
             &root.join(binary),
             LiveAcceptanceSuite::SuspendResume,
         )?;
-        let cpu = allowed_cpu()?;
-        cases.push(case(&std::env::current_exe()?, &out, cpu, options)?);
+        let target = super::target_for(mutation)?;
+        cases.push(case(&std::env::current_exe()?, &out, target, options)?);
         Ok(())
     })();
     let blocked_error = result
@@ -74,7 +75,8 @@ pub(super) fn run(
         LiveAcceptanceSuite::SuspendResume,
         json!({"schema_version":1,"evidence_kind":"controlled_real","status":status,"cases":cases,
         "error":result.as_ref().err().map(|error|format!("{error:#}")),
-        "scope":"one real system suspend/resume with an active low-risk CPU-affinity candidate; production lifecycle policy in AutotuneRuntime",
+        "mutation":mutation.as_str(),
+        "scope":format!("one real system suspend/resume with an active {} candidate; production lifecycle policy in AutotuneRuntime", mutation.as_str()),
         "not_claimed":["suspend during apply/verify/rollback","multiple suspend cycles","planner/measurement behavior after stabilization","portable verified bundle"],
         "privacy":"local raw evidence; canonical sanitization/export remains separate"}),
     )?;
@@ -85,19 +87,23 @@ pub(super) fn run(
 fn case(
     executable: &Path,
     out: &Path,
-    cpu: u32,
+    target: AcceptanceTarget,
     options: &SuspendOptions,
 ) -> anyhow::Result<Value> {
+    let mutation = target.mutation;
     // The workload duration is monotonic (excludes time asleep), so the maximum bound
     // covers the awake time around one suspend.
     let mut workload = start_workload(executable, out, 90)?;
     let root = workload.0.id();
     let root_ticks = start_ticks(root)?;
-    let before = procfs::snapshot(root, root_ticks)?;
-    let desired = cpu.to_string();
+    let before = procfs::snapshot(mutation, root, root_ticks)?;
+    let desired = target.value;
     ensure!(
-        before.values().all(|task| task.mask != desired),
-        "no effective mask change for owned helper"
+        before
+            .values()
+            .all(|task| procfs::applied_value(mutation, &task.mask, desired)
+                .is_ok_and(|v| v != task.mask)),
+        "no effective property change for owned helper"
     );
     let result = (|| -> anyhow::Result<Value> {
         write_json(&out.join("before.json"), &procfs::value(&before))?;
@@ -110,8 +116,10 @@ fn case(
                     &root.to_string(),
                     "--tree-ticks",
                     &root_ticks.to_string(),
-                    "--cpu",
-                    &cpu.to_string(),
+                    "--mutation",
+                    mutation.as_str(),
+                    "--value",
+                    &target.value.to_string(),
                     "--owner-pid",
                     &std::process::id().to_string(),
                     "--owner-ticks",
@@ -120,6 +128,7 @@ fn case(
                     &options.resume_timeout_seconds.to_string(),
                 ])
                 .env("STUTTER_CONFIG", out.join("acceptance.toml"))
+                .env("HOME", out)
                 .stdout(fs::File::create(out.join("controller.stdout"))?)
                 .stderr(fs::File::create(out.join("controller.stderr"))?)
                 .spawn()?,
@@ -133,9 +142,9 @@ fn case(
                 && ready["window_intervals"] == 1,
             "pre-suspend controller state differs: {ready}"
         );
-        let at_ready = procfs::snapshot(root, root_ticks)?;
+        let at_ready = procfs::snapshot(mutation, root, root_ticks)?;
         ensure!(
-            procfs::changed(&before, &at_ready, &desired)? == 5,
+            procfs::changed(mutation, &before, &at_ready, desired)? == 5,
             "candidate is not physically applied before suspend"
         );
         write_json(&out.join("at-suspend.json"), &procfs::value(&at_ready))?;
@@ -226,7 +235,7 @@ fn case(
                 .is_some_and(|ms| ms > 0),
             "no stabilization cooldown after resume"
         );
-        let restored = procfs::snapshot(root, root_ticks)?;
+        let restored = procfs::snapshot(mutation, root, root_ticks)?;
         ensure!(
             restored == before,
             "independent readback differs after resume"

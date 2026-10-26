@@ -1,6 +1,14 @@
 use super::*;
 use crate::actions::rollback::recovery::{AutomaticRecoveryCapability, recovery_descriptor};
 
+/// The tokens whose provider has passed its fault matrix and may be restored at startup.
+fn automatically_recoverable(token: &RollbackToken) -> bool {
+    matches!(
+        token,
+        RollbackToken::CpuAffinityRestoreFile { .. } | RollbackToken::UclampRestore { .. }
+    )
+}
+
 fn token_inventory() -> Vec<RollbackToken> {
     vec![
         RollbackToken::CpuAffinityRestoreFile {
@@ -28,13 +36,13 @@ fn token_inventory() -> Vec<RollbackToken> {
 #[test]
 fn startup_registry_has_only_explicitly_authorized_providers_and_no_manual_fallback() {
     let registry = crate::autotune::emergency_restore::startup_rollback_registry();
-    assert_eq!(registry.handlers().len(), 1);
+    assert_eq!(registry.handlers().len(), 2);
     let mut kinds = std::collections::BTreeSet::new();
     for token in token_inventory() {
         let descriptor = recovery_descriptor(&token);
         assert!(kinds.insert(descriptor.token_kind));
         assert!(!descriptor.identity_contract.is_empty());
-        let automatic = matches!(token, RollbackToken::CpuAffinityRestoreFile { .. });
+        let automatic = automatically_recoverable(&token);
         assert_eq!(
             descriptor.automatic_recovery == AutomaticRecoveryCapability::VerifiedAutomatic,
             automatic
@@ -65,7 +73,10 @@ fn startup_registry_has_only_explicitly_authorized_providers_and_no_manual_fallb
 
 #[test]
 fn unproven_provider_faults_before_executor_dispatch_and_retains_recovery_evidence() {
-    for token in token_inventory().into_iter().skip(1) {
+    for token in token_inventory()
+        .into_iter()
+        .filter(|token| !automatically_recoverable(token))
+    {
         let root = crate::test_support::TestRoot::new(token.kind());
         let config = config_for_dir(root.path(), true);
         write_controller_journal_applied(

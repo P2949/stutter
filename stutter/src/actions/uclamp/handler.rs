@@ -10,7 +10,10 @@ use crate::actions::{
     verify_task_identity,
 };
 
-pub(crate) struct UclampRollbackHandler;
+pub(crate) struct UclampRollbackHandler {
+    /// Startup recovery never restores a record whose task identity cannot be verified.
+    pub(crate) require_verified_identity: bool,
+}
 
 impl RollbackHandler for UclampRollbackHandler {
     fn id(&self) -> &'static str {
@@ -86,6 +89,13 @@ impl RollbackHandler for UclampRollbackHandler {
                     );
                     log::warn!("{}", msg);
                     messages.push(msg);
+                    continue;
+                }
+                RestoreIdentityStatus::UnknownLegacy if self.require_verified_identity => {
+                    skipped_identity_mismatch += 1;
+                    messages.push(format!(
+                        "uclamp restore refused unverifiable identity for tid={tid}"
+                    ));
                     continue;
                 }
                 RestoreIdentityStatus::UnknownLegacy => {

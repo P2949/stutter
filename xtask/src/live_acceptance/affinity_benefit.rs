@@ -11,8 +11,8 @@ use std::{
 };
 
 use stutter::api::autotune::{
-    AutotuneCommandInput, MutationOperationKind, ObjectiveKind, ValidationOverride, ValidationRun,
-    autotune_command_blocking,
+    AcceptanceMutation, AutotuneCommandInput, MutationOperationKind, ObjectiveKind,
+    ValidationOverride, ValidationRun, autotune_command_blocking,
 };
 
 use super::*;
@@ -57,6 +57,7 @@ pub enum Order {
 }
 
 pub(super) struct Spec {
+    pub mutation: AcceptanceMutation,
     pub scenario: Scenario,
     pub pair: u32,
     pub order: Order,
@@ -120,17 +121,19 @@ fn profile_toml(destination: u32) -> String {
 /// The controller input for a CPU-affinity pair: the production defaults for everything the
 /// experiment does not control.
 fn controller_input(
+    mutation: AcceptanceMutation,
     pid: u32,
-    profiles: PathBuf,
+    profiles: Option<PathBuf>,
     decision_log: PathBuf,
     window_seconds: u64,
 ) -> AutotuneCommandInput {
+    let medium = mutation.mode() == stutter::api::daemon::DaemonMode::ApplyMediumRisk;
     AutotuneCommandInput {
         config: None,
         watch_process: None,
         tree_pid: Some(pid),
-        profiles: Some(profiles),
-        mode: stutter::api::daemon::DaemonMode::ApplyLowRisk,
+        profiles,
+        mode: mutation.mode(),
         decision_log: Some(decision_log),
         duration_seconds: Some(window_seconds),
         washout_seconds: 2,
@@ -149,7 +152,7 @@ fn controller_input(
         foreground_poll_ms: 1000,
         foreground_max_stale_ms: 2500,
         allow_system_wide_suggestions: false,
-        allow_medium_risk: false,
+        allow_medium_risk: medium,
         high_risk_dry_run: false,
         dry_run_all_safe: false,
     }
@@ -157,20 +160,25 @@ fn controller_input(
 
 /// The hidden controller process: runs the production live controller until it is signalled.
 pub(super) fn run_controller(
+    mutation: AcceptanceMutation,
     pid: u32,
-    profiles: &Path,
+    profiles: Option<&Path>,
     out: &Path,
     window_seconds: u64,
 ) -> anyhow::Result<()> {
     let grant = ValidationOverride {
-        operation: MutationOperationKind::CpuAffinityProfile,
+        operation: match mutation {
+            AcceptanceMutation::Affinity => MutationOperationKind::CpuAffinityProfile,
+            AcceptanceMutation::Uclamp => MutationOperationKind::Uclamp,
+        },
         objective: ObjectiveKind::GameRunnableLatency,
         campaign_id: "affinity-benefit".to_owned(),
     };
     autotune_command_blocking(
         controller_input(
+            mutation,
             pid,
-            profiles.to_path_buf(),
+            profiles.map(Path::to_path_buf),
             out.join("decision.jsonl"),
             window_seconds,
         ),
@@ -179,8 +187,31 @@ pub(super) fn run_controller(
             history_log: out.join("history.jsonl"),
             controller_journal_path: out.join("controller.json"),
             session_seconds: window_seconds * 3 + 60,
+            in_process_privileged: mutation.mode()
+                == stutter::api::daemon::DaemonMode::ApplyMediumRisk,
         }),
     )
+}
+
+/// Whether the controller's mutation is physically visible on any task of `pid`.
+fn mutation_observed(mutation: AcceptanceMutation, pid: u32, destination: &str) -> bool {
+    match mutation {
+        AcceptanceMutation::Affinity => task_affinities(pid).iter().any(|a| a == destination),
+        AcceptanceMutation::Uclamp => fs::read_dir(format!("/proc/{pid}/task"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .any(|entry| {
+                fs::read_to_string(entry.path().join("sched")).is_ok_and(|sched| {
+                    sched.lines().any(|line| {
+                        line.split_once(':').is_some_and(|(key, value)| {
+                            key.trim() == "uclamp.min"
+                                && value.trim().parse::<u32>().is_ok_and(|min| min > 0)
+                        })
+                    })
+                })
+            }),
+    }
 }
 
 /// `Cpus_allowed_list` of every task of `pid`, to observe the placement the controller applied.
@@ -240,7 +271,11 @@ pub(super) fn run(root: &Path, out: &Path, binary: &Path, spec: &Spec) -> anyhow
             Order::CandidateFirst => (b, a),
         };
         let game = game_runnable::install_game_binary(&out)?;
-        fs::write(out.join("profiles.toml"), profile_toml(c1))?;
+        let profiles = (spec.mutation == AcceptanceMutation::Affinity).then(|| {
+            let path = out.join("profiles.toml");
+            fs::write(&path, profile_toml(c1)).map(|()| path)
+        });
+        let profiles = profiles.transpose()?;
         let total = (spec.seconds * 3 + 120).min(600);
         let (contention0, contention1) = spec.scenario.contention();
         let mut contenders = game_runnable::spawn_contenders(c0, total, &out, contention0)?;
@@ -280,8 +315,12 @@ pub(super) fn run(root: &Path, out: &Path, binary: &Path, spec: &Spec) -> anyhow
                 .args(["live-acceptance", "affinity-benefit-controller"])
                 .args(["--pid", &pid.to_string(), "--window-seconds"])
                 .arg(spec.seconds.to_string())
-                .arg("--profiles")
-                .arg(out.join("profiles.toml"))
+                .args(["--mutation", spec.mutation.as_str()])
+                .args(
+                    profiles
+                        .iter()
+                        .flat_map(|path| ["--profiles".as_ref(), path.as_os_str()]),
+                )
                 .arg("--out")
                 .arg(&out)
                 .arg("--stutter-bin")
@@ -309,8 +348,7 @@ pub(super) fn run(root: &Path, out: &Path, binary: &Path, spec: &Spec) -> anyhow
                 target.0.try_wait()?.is_none(),
                 "the target exited during the experiment"
             );
-            let affinities = task_affinities(pid);
-            placement_observed |= !affinities.is_empty() && affinities.contains(&destination);
+            placement_observed |= mutation_observed(spec.mutation, pid, &destination);
             if let Some(found) = experiment_from_history(&history) {
                 event = Some(found);
                 break;
@@ -360,7 +398,8 @@ pub(super) fn run(root: &Path, out: &Path, binary: &Path, spec: &Spec) -> anyhow
         "evidence_kind": "controlled_real",
         "pair": result.as_ref().ok(),
         "error": result.as_ref().err().map(|err| format!("{err:#}")),
-        "scope": "one matched pair of the CPU-affinity benefit experiment through the production live controller",
+        "mutation": spec.mutation.as_str(),
+        "scope": format!("one matched pair of the {} benefit experiment through the production live controller", spec.mutation.as_str()),
     });
     fs::write(out.join("result.json"), serde_json::to_vec_pretty(&body)?)?;
     if let Ok(pair) = &result {

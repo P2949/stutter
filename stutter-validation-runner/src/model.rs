@@ -101,6 +101,23 @@ impl LiveSuite {
     }
 }
 
+/// The mutation an acceptance or benefit suite drives; the runner derives the argv from it.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Mutation {
+    Affinity,
+    Uclamp,
+}
+
+impl Mutation {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Affinity => "affinity",
+            Self::Uclamp => "uclamp",
+        }
+    }
+}
+
 /// The contention scenario of one benefit pair; the runner derives the argv from it.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -182,6 +199,9 @@ pub enum Request {
         /// Required for, and only for, the benefit suite.
         #[serde(default)]
         benefit: Option<BenefitSpec>,
+        /// Which mutation the recovery, lifecycle or benefit suite drives (default: affinity).
+        #[serde(default)]
+        mutation: Option<Mutation>,
     },
     ExecuteSchedulerBurst {
         cpu: u32,

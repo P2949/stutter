@@ -132,7 +132,7 @@ fn a_supported_tuple_passes_only_with_every_condition() {
 fn a_contract_authorises_exactly_its_tuple() {
     let contracts = [CONTRACT];
     let mut other_operation = affinity();
-    other_operation.operation = MutationOperationKind::Uclamp;
+    other_operation.operation = MutationOperationKind::Nice;
     let mut other_objective = affinity();
     other_objective.objective = ObjectiveKind::StutterScore;
     let mut other_scope = affinity();
@@ -246,17 +246,35 @@ fn an_override_cannot_exercise_an_experimental_objective() {
 
 #[test]
 fn an_operation_without_a_prepared_transaction_is_never_autonomous_even_when_registered() {
-    let uclamp = AutonomousContract {
-        operation: MutationOperationKind::Uclamp,
+    let nice = AutonomousContract {
+        operation: MutationOperationKind::Nice,
         ..CONTRACT
     };
-    let contracts = [uclamp];
+    let contracts = [nice];
     let gated = input(
-        MutationOperationKind::Uclamp,
+        MutationOperationKind::Nice,
         ObjectiveKind::GameRunnableLatency,
     );
     assert_eq!(
         autonomous_apply_gate_with(&gated, facts(&contracts)),
         Err(AutonomousDenial::PreparedTransactionMissing)
+    );
+}
+
+#[test]
+fn a_campaign_holding_the_run_excludes_every_other_operation_even_a_supported_one() {
+    let uclamp_grant = ValidationOverride {
+        operation: MutationOperationKind::Uclamp,
+        objective: ObjectiveKind::GameRunnableLatency,
+        campaign_id: "mutation-campaign-2".to_owned(),
+    };
+    // Without the campaign, the graduated affinity tuple is autonomous...
+    assert_eq!(autonomous_apply_gate(&affinity()), Ok(()));
+    // ...while the campaign owns the run, only its own operation may be applied.
+    let mut during = affinity();
+    during.validation_override = Some(&uclamp_grant);
+    assert_eq!(
+        autonomous_apply_gate(&during),
+        Err(AutonomousDenial::OutsideValidationScope)
     );
 }

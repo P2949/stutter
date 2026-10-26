@@ -1,6 +1,12 @@
 use super::*;
 
-pub(super) fn run(root: &Path, out: &Path, binary: &Path) -> anyhow::Result<()> {
+pub(super) fn run(
+    root: &Path,
+    out: &Path,
+    binary: &Path,
+    mutation: stutter::api::autotune::AcceptanceMutation,
+) -> anyhow::Result<()> {
+    use stutter::api::autotune::AcceptanceMutation;
     ensure!(
         cfg!(target_os = "linux"),
         "affinity acceptance requires Linux"
@@ -15,7 +21,10 @@ pub(super) fn run(root: &Path, out: &Path, binary: &Path) -> anyhow::Result<()> 
             &root.join(binary),
             evidence::LiveAcceptanceSuite::Affinity,
         )?;
-        let cpu = allowed_cpu()?;
+        let value = match mutation {
+            AcceptanceMutation::Affinity => allowed_cpu()?,
+            AcceptanceMutation::Uclamp => mutation.default_value(),
+        };
         let ready = out.join("workload-ready.json");
         let mut child = OwnedChild(
             Command::new(std::env::current_exe()?)
@@ -47,13 +56,21 @@ pub(super) fn run(root: &Path, out: &Path, binary: &Path) -> anyhow::Result<()> 
         let pid = child.0.id();
         let ticks = start_ticks(pid)?;
         stage = "affinity_lifecycle";
-        let result = stutter::api::actions::verify_cpu_affinity_lifecycle(
-            pid,
-            ticks,
-            cpu,
-            &out.join("restore.json"),
-            &out.join("actions.jsonl"),
-        )?;
+        let result = match mutation {
+            AcceptanceMutation::Affinity => stutter::api::actions::verify_cpu_affinity_lifecycle(
+                pid,
+                ticks,
+                value,
+                &out.join("restore.json"),
+                &out.join("actions.jsonl"),
+            )?,
+            AcceptanceMutation::Uclamp => stutter::api::actions::verify_uclamp_lifecycle(
+                pid,
+                ticks,
+                value,
+                &out.join("actions.jsonl"),
+            )?,
+        };
         ensure!(
             child.0.try_wait()?.is_none() && start_ticks(pid)? == ticks,
             "target identity did not survive lifecycle"
@@ -70,9 +87,9 @@ pub(super) fn run(root: &Path, out: &Path, binary: &Path) -> anyhow::Result<()> 
     evidence::write_result(
         &out,
         evidence::LiveAcceptanceSuite::Affinity,
-        json!({"schema_version":1,"status":status,"stage":stage,"evidence_kind":"controlled_real",
+        json!({"schema_version":1,"status":status,"stage":stage,"evidence_kind":"controlled_real","mutation":mutation.as_str(),
         "measurements":result.as_ref().ok(),"error":result.as_ref().err().map(|err|format!("{err:#}")),"observation_suite":"not_run","crash_recovery":"not_run",
-        "scope":"real multi-process CPU-affinity apply, physical verify and restore on an owned disposable tree",
+        "scope":format!("real multi-process {} apply, physical verify and restore on an owned disposable tree", mutation.as_str()),
         "not_claimed":["controller crash, interrupted rollback and failure matrix (live recovery suite)","suspend/resume","scheduler observation","benefit of the mutation","portable verified bundle until exported"]}),
     )?;
     println!("{status}: affinity evidence {}", out.display());

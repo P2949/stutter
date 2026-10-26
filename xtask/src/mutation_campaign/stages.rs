@@ -209,6 +209,7 @@ fn run_suite_stage(
         raw: &raw,
         log: &log,
         extra_args: &extra_args,
+        mutation: context.operation.mutation.as_deref(),
         stutter: &context.binaries.stutter,
         xtask: &context.binaries.xtask,
         cwd: context.repository,
