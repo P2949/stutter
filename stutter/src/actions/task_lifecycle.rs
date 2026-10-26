@@ -24,7 +24,7 @@ pub(crate) struct LifecycleSpec<'a, A> {
     /// The policy of the apply step (the explicit unlock a validation harness is granted).
     pub apply_policy: ActionRunPolicy,
     /// Builds the action for the tasks of the owned tree.
-    pub build: &'a dyn Fn(Vec<TaskIdentity>) -> A,
+    pub build: &'a dyn Fn(Vec<TaskIdentity>) -> anyhow::Result<A>,
     /// The observable state of one task, read straight from the kernel.
     pub read: &'a dyn Fn(u32) -> anyhow::Result<String>,
     /// The state a task has once the mutation is applied, derived from its original state.
@@ -113,7 +113,7 @@ pub(crate) fn verify_task_lifecycle<A: TuningAction>(
             .values()
             .map(TaskIdentity::from_task_info)
             .collect(),
-    );
+    )?;
     let source = crate::daemon_policy::ActionSource::Cli;
     let mut dry_policy = ActionRunPolicy::dry_run(source);
     dry_policy.max_affected_tasks = Some(8);

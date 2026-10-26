@@ -109,6 +109,7 @@ pub enum Mutation {
     Uclamp,
     Nice,
     Cgroup,
+    CpuPowerEpp,
 }
 
 impl Mutation {
@@ -123,6 +124,7 @@ impl Mutation {
             Self::Uclamp => "uclamp",
             Self::Nice => "nice",
             Self::Cgroup => "cgroup",
+            Self::CpuPowerEpp => "cpu_power_epp",
         }
     }
 }

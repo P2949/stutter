@@ -36,6 +36,14 @@ fn acceptance_daemon_config(
     let medium = target.mutation.mode() == DaemonMode::ApplyMediumRisk;
     daemon_config.autotune.unsafe_in_process_privileged_worker = medium;
     daemon_config.autotune.allow_medium_risk_apply = medium;
+    if target.mutation == crate::autotune::acceptance_mutation::AcceptanceMutation::CpuPowerEpp {
+        daemon_config.safety.allow_system_wide_apply = true;
+        daemon_config
+            .safety
+            .system_wide_allowlist
+            .operations
+            .insert("cpu_power_epp".to_owned());
+    }
     daemon_config
 }
 

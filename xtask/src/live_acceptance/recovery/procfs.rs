@@ -20,6 +20,23 @@ pub(super) struct TaskMask {
     pub mask: String,
 }
 
+static SYSFS_FIXTURE: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync::Mutex::new(None);
+
+/// The sysfs fixture of the case being run (CPU power mutations); `None` for every other mutation.
+pub(super) fn set_sysfs_fixture(root: Option<std::path::PathBuf>) {
+    if let Ok(mut slot) = SYSFS_FIXTURE.lock() {
+        *slot = root;
+    }
+}
+
+fn sysfs_fixture() -> anyhow::Result<std::path::PathBuf> {
+    SYSFS_FIXTURE
+        .lock()
+        .ok()
+        .and_then(|slot| slot.clone())
+        .context("no sysfs fixture for this case")
+}
+
 /// One task's property read straight from procfs.
 fn read_property(mutation: AcceptanceMutation, pid: u32, tid: u32) -> anyhow::Result<String> {
     match mutation {
@@ -32,6 +49,11 @@ fn read_property(mutation: AcceptanceMutation, pid: u32, tid: u32) -> anyhow::Re
                 .trim()
                 .to_owned())
         }
+        AcceptanceMutation::CpuPowerEpp => Ok(fs::read_to_string(sysfs_fixture()?.join(format!(
+            "devices/system/cpu/cpu{tid}/cpufreq/energy_performance_preference"
+        )))?
+        .trim()
+        .to_owned()),
         AcceptanceMutation::Cgroup => {
             let text = fs::read_to_string(format!("/proc/{pid}/task/{tid}/cgroup"))?;
             Ok(text
@@ -73,6 +95,7 @@ pub(super) fn applied_value(
 ) -> anyhow::Result<String> {
     Ok(match mutation {
         AcceptanceMutation::Affinity | AcceptanceMutation::Nice => desired.to_string(),
+        AcceptanceMutation::CpuPowerEpp => "performance".to_owned(),
         // The tree moves into the `target` sibling of the leaf it started in.
         AcceptanceMutation::Cgroup => std::path::Path::new(original)
             .parent()
@@ -192,7 +215,42 @@ pub(super) fn verify_saved(
         AcceptanceMutation::Uclamp => verify_saved_uclamp(before, token),
         AcceptanceMutation::Nice => verify_saved_nice(before, token),
         AcceptanceMutation::Cgroup => verify_saved_cgroup(before, token),
+        AcceptanceMutation::CpuPowerEpp => verify_saved_epp(before, token),
     }
+}
+
+fn verify_saved_epp(before: &Snapshot, token: &Value) -> anyhow::Result<()> {
+    ensure!(
+        token["kind"] == "CpuPowerRestore",
+        "cpu power token kind differs"
+    );
+    let records = token["records"]
+        .as_array()
+        .context("cpu power token records missing")?;
+    ensure!(records.len() == before.len(), "token record count differs");
+    let fixture = sysfs_fixture()?;
+    for task in before.values() {
+        let path = fixture.join(format!(
+            "devices/system/cpu/cpu{}/cpufreq/energy_performance_preference",
+            task.tid
+        ));
+        let record = records
+            .iter()
+            .find(|record| record["path"].as_str() == path.to_str())
+            .with_context(|| format!("no token record for the fixture of task {}", task.tid))?;
+        ensure!(
+            record["original_value"].as_str() == Some(task.mask.as_str()),
+            "token original value differs for {}",
+            task.tid
+        );
+        ensure!(
+            record["identity"]["attribute"] == "energy_performance_preference"
+                && record["identity"]["boot_id"].is_string(),
+            "token cpufreq identity incomplete for {}",
+            task.tid
+        );
+    }
+    Ok(())
 }
 
 fn verify_saved_cgroup(before: &Snapshot, token: &Value) -> anyhow::Result<()> {

@@ -183,6 +183,7 @@ pub(super) fn run_controller(
             AcceptanceMutation::Uclamp => MutationOperationKind::Uclamp,
             AcceptanceMutation::Nice => MutationOperationKind::Nice,
             AcceptanceMutation::Cgroup => MutationOperationKind::CgroupPlacement,
+            AcceptanceMutation::CpuPowerEpp => MutationOperationKind::CpuPowerEpp,
         },
         objective: ObjectiveKind::GameRunnableLatency,
         campaign_id: "affinity-benefit".to_owned(),
@@ -247,6 +248,8 @@ fn mutation_observed(
     contenders: &[u32],
 ) -> bool {
     match mutation {
+        // The EPP benefit study is not a pair of this harness (it needs the privileged worker).
+        AcceptanceMutation::CpuPowerEpp => false,
         AcceptanceMutation::Cgroup => fs::read_dir(format!("/proc/{pid}/task"))
             .into_iter()
             .flatten()

@@ -347,6 +347,16 @@ pub(crate) fn prepare_owned_controller(
                 ensure!(min != value, "no observable uclamp change");
             }
         }
+        AcceptanceMutation::CpuPowerEpp => {
+            let root = std::env::var_os(super::acceptance_mutation::ACCEPTANCE_SYSFS_ENV)
+                .context("the acceptance sysfs fixture is not named")?;
+            ensure!(
+                std::path::Path::new(&root)
+                    .join("devices/system/cpu")
+                    .is_dir(),
+                "the acceptance sysfs fixture does not exist"
+            );
+        }
         AcceptanceMutation::Cgroup => {
             // Construct the action now: it creates the target cgroup and proves the delegation.
             AcceptanceTarget { mutation, value }.action(tree_pid, None)?;
@@ -439,7 +449,7 @@ pub(crate) fn acceptance_daemon_policy(
     let source = crate::daemon_policy::ActionSource::AutotuneRuntime;
     match mutation.mode() {
         crate::daemon::policy::DaemonMode::ApplyMediumRisk => {
-            crate::daemon::DaemonPolicy::apply_medium_risk(source)
+            super::acceptance_mutation::acceptance_policy(mutation)
         }
         _ => crate::daemon::DaemonPolicy::apply_low_risk(source),
     }

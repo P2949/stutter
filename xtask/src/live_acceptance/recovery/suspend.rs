@@ -99,6 +99,7 @@ fn case(
     let mut workload = start_workload(executable, out, 90)?;
     let root = workload.0.id();
     let root_ticks = start_ticks(root)?;
+    case::prepare_fixture(out, root, mutation)?;
     let before = procfs::snapshot(mutation, root, root_ticks)?;
     let desired = target.value;
     ensure!(
@@ -132,6 +133,7 @@ fn case(
                 ])
                 .env("STUTTER_CONFIG", out.join("acceptance.toml"))
                 .env("HOME", out)
+                .env(ACCEPTANCE_SYSFS_ENV, out.join("fake-sysfs"))
                 .stdout(fs::File::create(out.join("controller.stdout"))?)
                 .stderr(fs::File::create(out.join("controller.stderr"))?)
                 .spawn()?,

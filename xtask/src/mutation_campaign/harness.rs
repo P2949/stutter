@@ -114,6 +114,7 @@ impl BenefitHarness for RunnerHarness {
                 Some("uclamp") => Some(Mutation::Uclamp),
                 Some("nice") => Some(Mutation::Nice),
                 Some("cgroup") => Some(Mutation::Cgroup),
+                Some("cpu_power_epp") => Some(Mutation::CpuPowerEpp),
                 Some(other) => {
                     return Err(HarnessError::Defect(format!("unknown mutation {other}")));
                 }

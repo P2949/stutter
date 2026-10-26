@@ -1,5 +1,8 @@
 //! Canonical real SIGKILL/restart recovery, independent of BPF observation.
-use stutter::api::autotune::{AcceptanceMutation, AcceptanceTarget, RecoveryCheckpoint};
+use stutter::api::autotune::{
+    ACCEPTANCE_SYSFS_ENV, AcceptanceMutation, AcceptanceTarget, RecoveryCheckpoint,
+    prepare_acceptance_sysfs,
+};
 
 use super::*;
 mod actor;
@@ -59,9 +62,10 @@ pub(super) fn run_suspend(
 fn target_for(mutation: AcceptanceMutation) -> anyhow::Result<AcceptanceTarget> {
     let value = match mutation {
         AcceptanceMutation::Affinity => allowed_cpu()?,
-        AcceptanceMutation::Uclamp | AcceptanceMutation::Nice | AcceptanceMutation::Cgroup => {
-            mutation.default_value()
-        }
+        AcceptanceMutation::Uclamp
+        | AcceptanceMutation::Nice
+        | AcceptanceMutation::Cgroup
+        | AcceptanceMutation::CpuPowerEpp => mutation.default_value(),
     };
     Ok(AcceptanceTarget { mutation, value })
 }
