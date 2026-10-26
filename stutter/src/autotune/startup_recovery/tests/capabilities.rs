@@ -9,6 +9,7 @@ fn automatically_recoverable(token: &RollbackToken) -> bool {
             | RollbackToken::UclampRestore { .. }
             | RollbackToken::NiceRestore { .. }
             | RollbackToken::CgroupRestore { .. }
+            | RollbackToken::CpuPowerRestore { .. }
     )
 }
 
@@ -39,7 +40,7 @@ fn token_inventory() -> Vec<RollbackToken> {
 #[test]
 fn startup_registry_has_only_explicitly_authorized_providers_and_no_manual_fallback() {
     let registry = crate::autotune::emergency_restore::startup_rollback_registry();
-    assert_eq!(registry.handlers().len(), 4);
+    assert_eq!(registry.handlers().len(), 5);
     let mut kinds = std::collections::BTreeSet::new();
     for token in token_inventory() {
         let descriptor = recovery_descriptor(&token);

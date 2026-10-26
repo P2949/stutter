@@ -10,13 +10,14 @@ use crate::{
     actions::{
         RollbackToken, TaskIdentity,
         cgroup::{CgroupPlacementAction, CgroupPlacementTarget},
+        cpu_power::CpuPowerAction,
         nice::{NiceAction, NicePolicy},
     },
     autotune::{
         objective::ObjectiveKind,
         planning::{
             candidate::{CandidateAction, CandidateEvidence},
-            executable_plan::{CgroupPlacementActionPlan, NiceActionPlan},
+            executable_plan::{CgroupPlacementActionPlan, CpuPowerActionPlan, NiceActionPlan},
         },
     },
     daemon::{
@@ -31,7 +32,7 @@ use crate::{
 pub(super) fn needs_privileged_restore(token: &RollbackToken) -> bool {
     matches!(
         token,
-        RollbackToken::NiceRestore { .. } | RollbackToken::CgroupRestore { .. }
+        RollbackToken::NiceRestore { .. } | RollbackToken::CpuPowerRestore { .. }
     )
 }
 
@@ -104,6 +105,31 @@ fn candidate_for(token: &RollbackToken) -> anyhow::Result<CandidateAction> {
                         cpuset_mems: None,
                     },
                     target_root_pid: None,
+                    evidence,
+                    objective: ObjectiveKind::GameRunnableLatency,
+                },
+            })
+        }
+        RollbackToken::CpuPowerRestore { records } => {
+            anyhow::ensure!(
+                records.iter().all(|r| r.identity.is_some()),
+                "a CPU power record without a cpufreq identity is never restored automatically"
+            );
+            let cpus: Vec<u32> = records
+                .iter()
+                .filter_map(|r| r.identity.as_ref().map(|identity| identity.cpu))
+                .collect();
+            Ok(CandidateAction::CpuPower {
+                plan: CpuPowerActionPlan {
+                    name: "startup-recovery-cpu-power".to_owned(),
+                    action: CpuPowerAction {
+                        sysfs_root: std::path::PathBuf::from("/sys"),
+                        cpus,
+                        scaling_governor: None,
+                        energy_performance_preference: records
+                            .first()
+                            .map(|r| r.original_value.clone()),
+                    },
                     evidence,
                     objective: ObjectiveKind::GameRunnableLatency,
                 },

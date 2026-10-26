@@ -105,7 +105,11 @@ impl MutationOperationKind {
     pub const fn prepared_transaction_implemented(self) -> bool {
         matches!(
             self,
-            Self::CpuAffinityProfile | Self::Uclamp | Self::Nice | Self::CgroupPlacement
+            Self::CpuAffinityProfile
+                | Self::Uclamp
+                | Self::Nice
+                | Self::CgroupPlacement
+                | Self::CpuPowerEpp
         )
     }
 

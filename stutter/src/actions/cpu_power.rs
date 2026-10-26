@@ -13,9 +13,12 @@ use crate::actions::{
     RollbackToken, SafetyClass, TuningAction,
     rollback::{
         RollbackCandidate, RollbackHandler, RollbackPreview, RollbackResult, token_dry_run_preview,
-        token_restore_result,
     },
 };
+
+mod prepared;
+
+pub(crate) use prepared::{boot_id, rollback_verified};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BatteryPolicy {
@@ -54,7 +57,10 @@ pub struct CpuPowerAction {
     pub energy_performance_preference: Option<String>,
 }
 
-pub(crate) struct CpuPowerRollbackHandler;
+pub(crate) struct CpuPowerRollbackHandler {
+    /// Startup recovery never replays a record whose cpufreq resource cannot be rediscovered.
+    pub(crate) require_verified_identity: bool,
+}
 
 impl RollbackHandler for CpuPowerRollbackHandler {
     fn id(&self) -> &'static str {
@@ -105,15 +111,18 @@ impl RollbackHandler for CpuPowerRollbackHandler {
             .into());
         };
 
-        rollback_cpu_power_records(records)?;
+        let outcome = rollback_verified(records, self.require_verified_identity)?;
 
-        Ok(token_restore_result(
-            self.id(),
-            token,
-            records.len(),
-            0,
-            Vec::new(),
-        ))
+        Ok(RollbackResult {
+            handler_id: self.id(),
+            restore_path: token.restore_path().cloned().unwrap_or_default(),
+            restored: outcome.restored,
+            skipped_dead: 0,
+            skipped_identity_mismatch: outcome.skipped_identity_mismatch,
+            legacy_unverified: 0,
+            errors: 0,
+            messages: outcome.messages,
+        })
     }
 }
 
@@ -149,6 +158,7 @@ impl CpuPowerAction {
             records.push(CpuPowerRestoreRecord {
                 path: target.path.clone(),
                 original_value: target.original_value.clone(),
+                identity: prepared::resource_identity(target.cpu, &target.path),
             });
 
             if target.original_value == target.requested_value {
@@ -334,7 +344,18 @@ impl TuningAction for CpuPowerAction {
             .into());
         };
 
-        rollback_cpu_power_records(records)
+        rollback_verified(records, false).map(|_| ())
+    }
+
+    fn prepared_before_mutation(&self) -> bool {
+        true
+    }
+
+    fn apply_with_prepared_rollback(
+        &self,
+        before_mutation: &mut dyn FnMut(&RollbackToken) -> anyhow::Result<()>,
+    ) -> crate::actions::ApplyResult {
+        self.apply_prepared_with_policy(&CpuPowerPolicy::default(), before_mutation)
     }
 }
 
@@ -542,7 +563,7 @@ fn is_on_battery(power_supply_root: &Path) -> anyhow::Result<bool> {
     Ok(false)
 }
 
-fn rollback_cpu_power_records(records: &[CpuPowerRestoreRecord]) -> anyhow::Result<()> {
+pub(super) fn rollback_cpu_power_records(records: &[CpuPowerRestoreRecord]) -> anyhow::Result<()> {
     let mut failures = Vec::new();
 
     for record in records.iter().rev() {

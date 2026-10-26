@@ -87,6 +87,7 @@ fn restore_rollback_token_supports_all_sysfs_record_collections() {
         records: vec![CpuPowerRestoreRecord {
             path: cpu_path.clone(),
             original_value: "cpu-original".to_owned(),
+            identity: None,
         }],
     })
     .unwrap();

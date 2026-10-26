@@ -330,6 +330,24 @@ pub struct GpuPowerRestoreRecord {
 pub struct CpuPowerRestoreRecord {
     pub path: PathBuf,
     pub original_value: String,
+    /// The cpufreq resource the path belonged to when the value was read. Records written before
+    /// this existed have none and are never restored automatically.
+    #[serde(default)]
+    pub identity: Option<CpuPowerResourceIdentity>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CpuPowerResourceIdentity {
+    pub cpu: u32,
+    /// The real cpufreq policy directory name (`policyN`).
+    pub policy: String,
+    pub related_cpus: Vec<u32>,
+    /// The controlled attribute file (`energy_performance_preference`).
+    pub attribute: String,
+    pub driver: Option<String>,
+    /// The legal values of the attribute when the original was read.
+    pub available_values: Option<String>,
+    pub boot_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
