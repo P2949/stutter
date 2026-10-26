@@ -227,3 +227,24 @@ pub fn effective_uid() -> u32 {
     // SAFETY: geteuid takes no arguments and cannot fail.
     unsafe { libc::geteuid() }
 }
+
+/// Writes `0` (the calling process) into the given `cgroup.procs`. Raw syscalls only, so it is
+/// safe between fork and exec.
+pub fn join_cgroup(procs_file: &std::ffi::CStr) -> io::Result<()> {
+    // SAFETY: `procs_file` is a valid NUL-terminated path; the buffer outlives the call.
+    let fd = unsafe { libc::open(procs_file.as_ptr(), libc::O_WRONLY | libc::O_CLOEXEC) };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let zero = b"0";
+    // SAFETY: `fd` is open and `zero` is a valid one-byte buffer.
+    let written = unsafe { libc::write(fd, zero.as_ptr().cast(), zero.len()) };
+    let result = if written == 1 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    };
+    // SAFETY: `fd` was opened above and is closed exactly once.
+    unsafe { libc::close(fd) };
+    result
+}
