@@ -4,6 +4,7 @@
 //! decisions, and state transitions that affect apply-mode safety.
 
 mod invariants;
+mod kept;
 mod lifecycle;
 mod rollback;
 mod runtime_executor;

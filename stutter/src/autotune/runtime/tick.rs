@@ -2,16 +2,15 @@ use std::path::Path;
 
 use super::{
     AutotuneDecisionStreamEntry, AutotuneRuntime, AutotuneRuntimePhase,
-    DAEMON_EMERGENCY_RESTORE_COMMAND, DEFAULT_RECENT_DIAGNOSIS_LIMIT,
-    decision_view::decision_reason, emit_decision_stream_entry,
+    DEFAULT_RECENT_DIAGNOSIS_LIMIT, decision_view::decision_reason, emit_decision_stream_entry,
 };
 use crate::{
     autotune::{
         controller::decide_autotune_transition,
         decision::AutotuneDecision,
         live_experiment::{
-            LiveExperimentActionExecutor, LiveExperimentEvent, LiveExperimentManagerInput,
-            LiveExperimentRuntimeState, RuntimeLiveExperimentActionExecutor,
+            LiveExperimentActionExecutor, LiveExperimentEvent, LiveExperimentRuntimeState,
+            RuntimeLiveExperimentActionExecutor,
         },
         observation::AutotuneObservation,
         observation_builder::{
@@ -30,13 +29,13 @@ use crate::{
     session_events::MonitorEvent,
 };
 
-struct ResolvedPrivilegedActionService {
+pub(super) struct ResolvedPrivilegedActionService {
     socket_service: Option<UnixSocketPrivilegedActionService>,
     in_process_service: Option<InProcessPrivilegedActionService>,
 }
 
 impl ResolvedPrivilegedActionService {
-    fn as_service(&self) -> Option<&dyn PrivilegedActionService> {
+    pub(super) fn as_service(&self) -> Option<&dyn PrivilegedActionService> {
         self.socket_service
             .as_ref()
             .map(|service| service as &dyn PrivilegedActionService)
@@ -48,7 +47,7 @@ impl ResolvedPrivilegedActionService {
     }
 }
 
-fn resolve_privileged_action_service(
+pub(super) fn resolve_privileged_action_service(
     config: &super::AutotuneRuntimeConfig,
 ) -> anyhow::Result<ResolvedPrivilegedActionService> {
     let use_privileged_service =
@@ -245,6 +244,12 @@ impl AutotuneRuntime {
 
         let observation = self.build_observation();
         self.last_observation = observation.clone();
+        if !observation.target_present && self.has_kept_actions() && !self.has_active_experiment() {
+            // The workload the kept actions were kept for is gone.
+            if let Err(error) = self.release_kept_actions("workload exited") {
+                log::warn!("kept action release on workload exit failed: {error:#}");
+            }
+        }
 
         let decision =
             if let Some(decision) = self.live_experiments.active_window_decision(&observation) {
@@ -439,20 +444,7 @@ impl AutotuneRuntime {
         self.transition_for_decision(decision, reason)?;
 
         let privileged_action_service = resolve_privileged_action_service(&self.config)?;
-        let input = LiveExperimentManagerInput {
-            mode: self.config.mode(),
-            daemon_policy: self.config.daemon_policy.clone(),
-            controller_policy: self.controller.policy.clone(),
-            simulate_action_effects: self.config.simulate_action_effects,
-            washout: self.config.washout.clone(),
-            candidate_window_seconds: self.config.candidate_window_seconds,
-            manual_restore_command: DAEMON_EMERGENCY_RESTORE_COMMAND,
-            controller_journal_path: self.config.controller_journal_path.clone(),
-            audit_path: None,
-            #[cfg(test)]
-            exit_rollback_registry: None,
-            privileged_action_service: privileged_action_service.as_service(),
-        };
+        let input = self.live_experiment_input(privileged_action_service.as_service());
 
         let outcome = match self
             .live_experiments
@@ -492,6 +484,8 @@ impl AutotuneRuntime {
             outcome.clear_measurement_window,
             outcome.history_context.is_some()
         );
+
+        self.persist_candidate_memory();
 
         if outcome.clear_measurement_window {
             self.controller.window.clear();

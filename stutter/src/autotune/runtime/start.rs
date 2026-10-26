@@ -19,6 +19,12 @@ impl AutotuneRuntime {
         let window_seconds = config.window_seconds;
         let mut controller = OnlineAutotuneController::new(daemon_policy, window_seconds);
         controller.state.validation_override = config.validation_override.clone();
+        if let Some(journal) = &config.controller_journal_path {
+            controller.state.candidate_memory =
+                crate::autotune::candidate_memory::CandidateMemory::load(
+                    &crate::autotune::candidate_memory::persistence::candidate_memory_path(journal),
+                );
+        }
 
         Self {
             target_state: RuntimeTargetState::new(config.tree_pid()),

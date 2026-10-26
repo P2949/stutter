@@ -239,3 +239,42 @@ fn clock_jitter_below_threshold_does_not_touch_measurements_or_candidate() {
     assert_eq!(runtime.controller.window.interval_count(), 1);
     assert!(runtime.live_experiments.has_active_experiment());
 }
+
+#[test]
+fn stopping_the_controller_rolls_back_kept_actions_too() {
+    use crate::autotune::kept::KeptCandidateState;
+    let mut config = AutotuneRuntimeConfig::apply_low_risk(None, Some(1234), None)
+        .with_simulated_action_effects();
+    config.history_log = None;
+    let mut runtime = AutotuneRuntime::new(config);
+    let candidate = CandidateAction::fake(
+        crate::actions::ActionId::new("fake-kept-on-stop".to_owned()),
+        SafetyClass::ReversibleLowRisk,
+    );
+    let window = fake_live_experiment(candidate.clone()).baseline_score;
+    runtime
+        .controller
+        .active_profile_state
+        .record_kept_candidate(
+            KeptCandidateState::new(
+                ExperimentId::new("kept-on-stop"),
+                candidate,
+                window.clone(),
+                window,
+                RollbackToken::NiceRestore {
+                    records: Vec::new(),
+                },
+                1,
+                "kept",
+            ),
+            crate::autotune::comparison::ExperimentResult::Improved {
+                improvement_percent: 50.0,
+            },
+        )
+        .unwrap();
+    assert!(runtime.has_kept_actions());
+
+    finish_autotune_controller_session(&mut runtime, Ok("stop requested".to_owned())).unwrap();
+
+    assert!(!runtime.has_kept_actions());
+}

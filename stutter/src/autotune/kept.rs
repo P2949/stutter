@@ -122,6 +122,11 @@ impl KeptActionSet {
             .find(|kept| candidate.conflicts_with(&kept.candidate))
     }
 
+    /// Forget a kept action once its rollback succeeded.
+    pub fn remove(&mut self, group: ActionConflictGroup) -> Option<KeptCandidateState> {
+        self.actions.remove(&group)
+    }
+
     pub fn insert_if_compatible(&mut self, kept: KeptCandidateState) -> anyhow::Result<()> {
         let group = kept.candidate.conflict_group();
         if let Some(existing) = self.actions.get(&group) {

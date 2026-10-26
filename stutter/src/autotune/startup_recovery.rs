@@ -167,7 +167,18 @@ pub fn recover_controller_journal_on_startup(
     recover_controller_journal_with_executor(config, &mut executor)
 }
 
+/// Recover every durable token: kept actions from the ledger first, then the experiment in flight
+/// from the controller journal. A ledger entry that cannot be restored stays on disk.
 pub fn recover_controller_journal_with_executor<E: StartupRecoveryRollbackExecutor + ?Sized>(
+    config: StartupRecoveryConfig,
+    executor: &mut E,
+) -> anyhow::Result<StartupRecoveryOutcome> {
+    let kept = ledger::recover_kept_ledger(&config, executor)?;
+    let journal = recover_journal_record(config, executor)?;
+    Ok(ledger::combine(kept, journal))
+}
+
+fn recover_journal_record<E: StartupRecoveryRollbackExecutor + ?Sized>(
     config: StartupRecoveryConfig,
     executor: &mut E,
 ) -> anyhow::Result<StartupRecoveryOutcome> {
@@ -199,6 +210,7 @@ pub fn recover_controller_journal_with_executor<E: StartupRecoveryRollbackExecut
                     experiment_id,
                     action_id,
                     token,
+                    RecoverySource::Journal,
                 );
             }
             let reason =
@@ -238,6 +250,7 @@ pub fn recover_controller_journal_with_executor<E: StartupRecoveryRollbackExecut
                     experiment_id,
                     action_id,
                     rollback_token,
+                    RecoverySource::Journal,
                 )
             } else {
                 let reason = format!(
@@ -284,12 +297,19 @@ fn journal_experiment_action(record: &ControllerJournalRecord) -> (ExperimentId,
     (experiment_id, action_id)
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RecoverySource {
+    Journal,
+    Ledger,
+}
+
 fn recover_applied_journal_record<E: StartupRecoveryRollbackExecutor + ?Sized>(
     config: StartupRecoveryConfig,
     executor: &mut E,
     experiment_id: ExperimentId,
     action_id: ActionId,
     rollback_token: RollbackToken,
+    source: RecoverySource,
 ) -> anyhow::Result<StartupRecoveryOutcome> {
     let manual_restore_command = manual_restore_command_for_token(&rollback_token);
     let manual_restore_command = if manual_restore_command.trim().is_empty() {
@@ -337,12 +357,22 @@ fn recover_applied_journal_record<E: StartupRecoveryRollbackExecutor + ?Sized>(
             .and_then(|()| executor.rollback(&rollback_token));
     match rollback_result {
         Ok(summary) => {
-            write_controller_journal_clean(&config.journal_path).with_context(|| {
-                format!(
-                    "failed to clear controller journal after crash-recovery rollback for action_id={}",
-                    action_id
-                )
-            })?;
+            // A ledger entry only clears the journal when the journal names the same token.
+            let journal_names_token = read_controller_journal(&config.journal_path)
+                .is_ok_and(|record| record.rollback_token() == Some(&rollback_token));
+            if source == RecoverySource::Journal || journal_names_token {
+                write_controller_journal_clean(&config.journal_path).with_context(|| {
+                    format!(
+                        "failed to clear controller journal after crash-recovery rollback for action_id={}",
+                        action_id
+                    )
+                })?;
+            }
+            crate::autotune::kept_ledger::retire_kept(
+                &crate::autotune::kept_ledger::kept_ledger_path(&config.journal_path),
+                &experiment_id,
+            )
+            .with_context(|| "failed to retire the kept-action ledger entry".to_owned())?;
 
             write_startup_recovery_audit_event(
                 &config.audit_path,
@@ -598,6 +628,9 @@ fn candidate_name_from_action_id(action_id: &str) -> Option<String> {
         .filter(|candidate| !candidate.trim().is_empty())
 }
 
+mod ledger;
+#[cfg(test)]
+mod ledger_tests;
 mod privileged;
 
 #[cfg(test)]

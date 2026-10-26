@@ -10,6 +10,7 @@ pub(crate) mod daemon_state;
 pub(crate) mod decision_view;
 pub(crate) mod emission;
 pub(crate) mod history;
+mod kept_release;
 mod lifecycle;
 mod phase;
 mod plan_output;
