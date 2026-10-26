@@ -183,6 +183,61 @@
       "source_commit": "a1592e7c6bac90a9b71221de82819f14bdcd9a3b",
       "status": "PASS",
       "suite": "live_suspend_resume"
+    },
+    {
+      "capture_id": "live_affinity-a5091048-1793001985702",
+      "covers": {
+        "providers": [
+          "cgroup_placement"
+        ]
+      },
+      "evidence_kind": "controlled_real",
+      "manifest_sha256": "c8fd186e12ce4900bbc554b4598d3e108caea9b40dba4c25bd776ee672ebf109",
+      "source_commit": "a5091048f0390242be39bdc8156a05f2167bb2d2",
+      "status": "PASS",
+      "suite": "live_affinity"
+    },
+    {
+      "capture_id": "live_affinity_benefit-a5091048-1793004791026",
+      "covers": {
+        "objectives": [
+          "GameRunnableLatency"
+        ],
+        "providers": [
+          "cgroup_placement"
+        ]
+      },
+      "evidence_kind": "controlled_real",
+      "manifest_sha256": "bbe36328832587a3c5c82091bf6d4aa31e53d62e5a128de0112f2ba3831c6c9e",
+      "source_commit": "a5091048f0390242be39bdc8156a05f2167bb2d2",
+      "status": "PASS",
+      "suite": "live_affinity_benefit"
+    },
+    {
+      "capture_id": "live_recovery-a5091048-1793002022484",
+      "covers": {
+        "providers": [
+          "cgroup_placement"
+        ]
+      },
+      "evidence_kind": "controlled_real",
+      "manifest_sha256": "02e5e481ebe2f8dcbc6654480dfb1dc78cb051462763d09cbe90ae149b81ea42",
+      "source_commit": "a5091048f0390242be39bdc8156a05f2167bb2d2",
+      "status": "PASS",
+      "suite": "live_recovery"
+    },
+    {
+      "capture_id": "live_suspend_resume-a5091048-1793002047770",
+      "covers": {
+        "providers": [
+          "cgroup_placement"
+        ]
+      },
+      "evidence_kind": "controlled_real",
+      "manifest_sha256": "2ffc2b6c9d30a1f9c6030f2c4bdeb71b94fa884d5178f8402ff86c4c53cf3974",
+      "source_commit": "a5091048f0390242be39bdc8156a05f2167bb2d2",
+      "status": "PASS",
+      "suite": "live_suspend_resume"
     }
   ],
   "note": "Index of portable evidence bundles verified with `xtask evidence-verify`. Bundles are retained by the operator; entries pin them by manifest digest. Only PASS entries count toward coverage.",

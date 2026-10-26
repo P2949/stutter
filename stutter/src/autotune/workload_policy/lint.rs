@@ -166,8 +166,10 @@ fn medium_risk_system_family_allowed(family: &str, policy: &DaemonPolicy) -> boo
     }
 }
 
+/// `cgroup_placement` is in the default autonomous table because it graduated (medium risk); the daemon
+/// risk gate still refuses it in apply-low-risk, so listing it there is inert, not unsafe.
 fn medium_or_high_risk_family(family: &str) -> bool {
-    !matches!(family, "cpu_affinity_profile")
+    !matches!(family, "cpu_affinity_profile" | "cgroup_placement")
 }
 
 fn family_supports_objective(family: &str, objective: ObjectiveKind) -> bool {

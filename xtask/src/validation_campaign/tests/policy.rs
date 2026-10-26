@@ -46,7 +46,7 @@ fn tiers_of(source: &str, id: &str) -> (String, String) {
 }
 
 #[test]
-fn the_policy_promotes_the_core_capabilities_and_the_graduated_cpu_affinity_and_keeps_the_rest_conservative()
+fn the_policy_promotes_the_core_capabilities_and_the_graduated_cpu_affinity_and_cgroup_placement_and_keeps_the_rest_conservative()
  {
     let (supported, experimental) = policy();
     let out = apply_policy(SOURCE, &supported, &experimental).unwrap();
@@ -58,6 +58,7 @@ fn the_policy_promotes_the_core_capabilities_and_the_graduated_cpu_affinity_and_
         "audit",
         "completions_and_man",
         "cpu_affinity_experiment",
+        "cgroup_placement_experiment",
     ] {
         assert_eq!(
             tiers_of(&out, id),
@@ -73,7 +74,6 @@ fn the_policy_promotes_the_core_capabilities_and_the_graduated_cpu_affinity_and_
         "uclamp_experiment",
         "nice_experiment",
         "ioprio_experiment",
-        "cgroup_placement_experiment",
         "cpu_power_epp",
         "cpu_power_governor",
         "gpu_power_profile",

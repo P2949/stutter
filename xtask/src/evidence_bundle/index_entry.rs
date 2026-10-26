@@ -6,14 +6,26 @@ use serde_json::{Value, json};
 
 use super::{read_json, sha256::sha256_hex, string_field, verify_bundle};
 
+/// The mutation provider a bundle exercised: the benefit aggregate names its operation, the other
+/// suites the harness mutation. Bundles naming neither predate the generic harness (affinity).
+fn provider(result: &Value) -> &'static str {
+    match result["operation"].as_str().or(result["mutation"].as_str()) {
+        Some("uclamp") => "uclamp",
+        Some("nice") => "nice",
+        Some("cgroup" | "cgroup_placement") => "cgroup_placement",
+        Some("cpu_power_epp" | "cpu_power") => "cpu_power",
+        _ => "cpu_affinity_profile",
+    }
+}
+
 /// What a PASS of each suite demonstrates for coverage purposes.
 fn covers(suite: &str, result: &Value) -> Value {
     match suite {
         "live_affinity" | "live_recovery" | "live_suspend_resume" => {
-            json!({"providers": ["cpu_affinity_profile"]})
+            json!({"providers": [provider(result)]})
         }
         "live_affinity_benefit" => json!({
-            "providers": ["cpu_affinity_profile"],
+            "providers": [provider(result)],
             "objectives": ["GameRunnableLatency"],
         }),
         "live_game_runnable" => json!({"objectives": ["GameRunnableLatency"]}),
@@ -54,4 +66,30 @@ pub fn index_entry(bundle: &Path) -> anyhow::Result<()> {
         serde_json::to_string_pretty(&verified_index_entry(bundle)?)?
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_bundle_covers_the_provider_it_exercised() {
+        for (result, provider) in [
+            (json!({"mutation": "cgroup"}), "cgroup_placement"),
+            (json!({"operation": "cgroup_placement"}), "cgroup_placement"),
+            (json!({"mutation": "nice"}), "nice"),
+            (
+                json!({"operation": "cpu_affinity_profile"}),
+                "cpu_affinity_profile",
+            ),
+            // Bundles captured before the generic harness name no mutation: affinity.
+            (json!({}), "cpu_affinity_profile"),
+        ] {
+            assert_eq!(
+                covers("live_recovery", &result),
+                json!({"providers": [provider]}),
+                "{result}"
+            );
+        }
+    }
 }

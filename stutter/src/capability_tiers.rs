@@ -52,6 +52,8 @@ const AFFINITY: &[&str] = &[
     "live_affinity_benefit",
 ];
 
+const CGROUP_PLACEMENT: &[&str] = AFFINITY;
+
 pub const CAPABILITIES: [Capability; 28] = [
     obs(
         "doctor",
@@ -166,14 +168,14 @@ pub const CAPABILITIES: [Capability; 28] = [
     },
     Capability {
         id: "cgroup_placement_experiment",
-        title: "cgroup placement",
+        title: "Autonomous cgroup placement of a game under scheduler pressure",
         class: CapabilityClass::Mutating,
-        tier: CapabilityTier::Experimental,
-        target_tier: CapabilityTier::Experimental,
+        tier: CapabilityTier::Supported,
+        target_tier: CapabilityTier::Supported,
         commands: &["autotune"],
         providers: &["cgroup_placement"],
-        required_evidence: &[],
-        limitations: "Medium-risk; evaluated by its own graduation campaign and does not inherit CPU-affinity maturity.",
+        required_evidence: CGROUP_PLACEMENT,
+        limitations: "Supported autonomous apply only for a stable, explicitly identified game under scheduler pressure, moved into the administrator-configured game cgroup, judged by its own runnable latency (GameRunnableLatency); every other workload, pressure or objective stays suggest-only or manual. Medium-risk; evaluated by its own graduation campaign and does not inherit CPU-affinity maturity.",
     },
     Capability {
         id: "cpu_power_epp",
@@ -434,7 +436,7 @@ mod tests {
     fn providers_do_not_inherit_cpu_affinity_maturity() {
         for capability in capability_registry()
             .iter()
-            .filter(|c| c.id != "cpu_affinity_experiment")
+            .filter(|c| !["cpu_affinity_experiment", "cgroup_placement_experiment"].contains(&c.id))
         {
             assert!(!capability.providers.contains(&"cpu_affinity_profile"));
             if !capability.providers.is_empty() {
@@ -483,7 +485,7 @@ mod tests {
         // Which non-mutating capabilities may be Supported is decided by evidence
         // (`xtask capability-check`); mutation never graduates implicitly: each mutating
         // capability named here completed a graduation campaign.
-        const GRADUATED: &[&str] = &["cpu_affinity_experiment"];
+        const GRADUATED: &[&str] = &["cpu_affinity_experiment", "cgroup_placement_experiment"];
         assert!(capability_registry().iter().all(|capability| {
             capability.tier != CapabilityTier::Supported
                 || capability.class == CapabilityClass::NonMutating
