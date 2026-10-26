@@ -80,6 +80,14 @@ impl ActionEffectScope {
         matches!(self, Self::LocalProcess | Self::LocalProcessTree)
     }
 
+    /// Scopes whose effect is a machine-wide resource rather than the target's own tasks.
+    pub(crate) fn is_system_wide_resource(self) -> bool {
+        matches!(
+            self,
+            Self::Irq | Self::CpuPower | Self::GpuPower | Self::VmKnob | Self::SystemWide
+        )
+    }
+
     pub(crate) fn is_explicit_target_scope(self) -> bool {
         matches!(
             self,

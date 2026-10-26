@@ -472,7 +472,7 @@ fn system_wide_allowlist_denial(
 ) -> Option<String> {
     let allowlist = &policy.system_wide_allowlist;
 
-    match candidate {
+    let resource_denial = match candidate {
         CandidateAction::CpuPower { plan } => {
             let policies = evidence_token_values(&plan.evidence, "policy=");
             if policies.is_empty() {
@@ -527,7 +527,18 @@ fn system_wide_allowlist_denial(
                 )
             }),
         _ => None,
-    }
+    };
+    // A resource that is allowlisted still needs its exact operation allowlisted.
+    resource_denial.or_else(|| {
+        (candidate.effect_scope().is_system_wide_resource()
+            && !allowlist.allows_operation(candidate.operation_kind().as_str()))
+        .then(|| {
+            format!(
+                "operation {} is not on the system-wide operation allowlist",
+                candidate.operation_kind().as_str()
+            )
+        })
+    })
 }
 
 fn evidence_token_values(evidence: &[CandidateEvidence], prefix: &str) -> Vec<String> {

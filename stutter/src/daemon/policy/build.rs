@@ -33,10 +33,14 @@ pub fn build_daemon_policy(input: DaemonPolicyBuildInput<'_>) -> DaemonPolicy {
         config.mode == DaemonMode::ApplyMediumRisk && config.autotune.allow_medium_risk_apply;
     let mut allow_system_wide_suggestions =
         config.mode != DaemonMode::Observe && config.safety.allow_system_wide_suggestions;
-    let mut allow_system_wide_apply = HIGH_RISK_APPLY_IMPLEMENTED
-        && config.mode == DaemonMode::ApplyHighRisk
-        && config.safety.allow_high_risk
-        && config.safety.allow_system_wide_apply;
+    // System-wide effect scope is its own permission: a reversible medium-risk operation needs
+    // `allow_system_wide_apply` and an operation allowlist, never `allow_high_risk`, and high-risk
+    // apply itself stays unimplemented.
+    let mut allow_system_wide_apply = config.safety.allow_system_wide_apply
+        && (config.mode == DaemonMode::ApplyMediumRisk
+            || (HIGH_RISK_APPLY_IMPLEMENTED
+                && config.mode == DaemonMode::ApplyHighRisk
+                && config.safety.allow_high_risk));
 
     if let Some(context) = remote_context {
         allow_system_wide_suggestions &= context.limits.allow_system_wide_suggestions;
