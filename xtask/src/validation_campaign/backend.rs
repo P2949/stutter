@@ -47,6 +47,75 @@ pub trait SuiteBackend {
 
 pub struct DirectBackend;
 
+/// Fixed script (no caller text is interpolated into it): optionally delegates a cgroup subtree to
+/// the campaign user the way the runner does, then drops to that user with only the capabilities
+/// the runner grants a suite and runs the unchanged suite binary.
+const DELEGATE_AND_DROP: &str = r#"
+set -eu
+if [ "$STUTTER_DELEGATE_CGROUP" = "true" ]; then
+  name="stutter-validation-$(printf '%s' "$STUTTER_CAMPAIGN" | tr -c 'A-Za-z0-9-' '-')"
+  root="/sys/fs/cgroup/$name"
+  echo "+cpu +cpuset" > /sys/fs/cgroup/cgroup.subtree_control 2>/dev/null || true
+  mkdir -p "$root/suite"
+  echo "+cpu +cpuset" > "$root/cgroup.subtree_control"
+  chown "$STUTTER_OWNER" "$root" "$root/suite"
+  for f in "$root"/cgroup.procs "$root"/cgroup.threads "$root"/cgroup.subtree_control "$root"/cpuset.* "$root"/cpu.* "$root"/suite/cgroup.procs "$root"/suite/cgroup.threads; do
+    [ -f "$f" ] && chown "$STUTTER_OWNER" "$f" || true
+  done
+  echo $$ > "$root/suite/cgroup.procs"
+fi
+uid="${STUTTER_OWNER%%:*}"; gid="${STUTTER_OWNER##*:}"
+set +e
+setpriv --reuid "$uid" --regid "$gid" --init-groups --inh-caps=+sys_resource,+sys_nice --ambient-caps=+sys_resource,+sys_nice -- "$@"
+status=$?
+if [ "$STUTTER_DELEGATE_CGROUP" = "true" ]; then
+  rmdir "$root/target" "$root/suite" "$root" 2>/dev/null || true
+fi
+exit $status
+"#;
+
+impl DirectBackend {
+    /// A mutation that lowers a task's niceness again needs `CAP_SYS_RESOURCE` in the process that
+    /// spawns the disposable workload, and one that moves tasks between cgroups needs a delegated
+    /// subtree (the runner provides both to every suite it launches). A direct run has no runner,
+    /// so it asks non-interactive sudo to prepare exactly that and start the unchanged suite as
+    /// the same user, never as root and never with a password prompt.
+    fn command(inv: &SuiteInvocation<'_>, args: &[String]) -> Command {
+        if !matches!(inv.mutation, Some("nice" | "cgroup")) {
+            let mut command = Command::new(inv.xtask);
+            command.args(args);
+            return command;
+        }
+        let owner = std::fs::metadata("/proc/self")
+            .map(|meta| std::os::unix::fs::MetadataExt::uid(&meta))
+            .unwrap_or(0);
+        let group = std::fs::metadata("/proc/self")
+            .map(|meta| std::os::unix::fs::MetadataExt::gid(&meta))
+            .unwrap_or(0);
+        let mut command = Command::new("sudo");
+        command
+            .args(["-n", "env"])
+            .arg(format!(
+                "PATH={}",
+                std::env::var("PATH").unwrap_or_default()
+            ))
+            .arg(format!(
+                "HOME={}",
+                std::env::var("HOME").unwrap_or_default()
+            ))
+            .arg(format!(
+                "STUTTER_DELEGATE_CGROUP={}",
+                inv.mutation == Some("cgroup")
+            ))
+            .arg(format!("STUTTER_CAMPAIGN={}", inv.campaign_id))
+            .arg(format!("STUTTER_OWNER={owner}:{group}"))
+            .args(["sh", "-c", DELEGATE_AND_DROP, "stutter-direct-suite"])
+            .arg(inv.xtask)
+            .args(args);
+        command
+    }
+}
+
 impl SuiteBackend for DirectBackend {
     fn execute(&self, inv: &SuiteInvocation<'_>) -> Result<i32, BackendError> {
         let failed = |error: std::io::Error| BackendError::Failed(error.to_string());
@@ -96,8 +165,7 @@ impl SuiteBackend for DirectBackend {
             fs::create_dir_all(parent).map_err(failed)?;
         }
         let log = fs::File::create(inv.log).map_err(failed)?;
-        let status = Command::new(inv.xtask)
-            .args(&args)
+        let status = Self::command(inv, &args)
             .current_dir(inv.cwd)
             .stdout(log.try_clone().map_err(failed)?)
             .stderr(log)
