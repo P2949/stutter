@@ -25,7 +25,6 @@ use crate::{
         graph::{Graph, SourceBinding, TaskKind, TaskSpec, core_validation_tasks},
         model::{Boundary, CampaignMode, CampaignState, FailureClass, TaskStatus},
         release::{freeze::FreezeRcRunner, offline::RcOfflineRunner, package::*, tag::TagRunner},
-        repo_pr::WaitPolicy,
         repository::Binaries,
         shell::{Shell, ShellOutput},
         state::{CampaignDir, write_atomic},
@@ -33,8 +32,6 @@ use crate::{
     },
 };
 
-const GREEN_CI: &str =
-    r#"{"check_runs":[{"name":"build","status":"completed","conclusion":"success"}]}"#;
 const BPF: &[u8] = b"\x7fELF-object";
 
 fn commit(c: char) -> String {
@@ -54,7 +51,8 @@ struct World {
     verifies: RefCell<Vec<(String, Vec<String>)>>,
     validated: RefCell<Vec<String>>,
     tagged: RefCell<Vec<String>>,
-    pushed: RefCell<Vec<String>>,
+    /// Every pull, push, fetch or ls-remote: there must be none.
+    remote_touched: RefCell<Vec<String>>,
     captures: Cell<u64>,
 }
 
@@ -83,10 +81,10 @@ impl Machine {
     fn git(&self, args: &[&str]) -> ShellOutput {
         let world = &self.0;
         match args {
-            ["checkout", _] | ["pull", _] | ["push", "origin", ..] => {
-                if args[0] == "push" {
-                    world.pushed.borrow_mut().push(args[2].to_owned());
-                }
+            ["checkout", _] => done(0, "", ""),
+            // Local clean `main` is authoritative and nothing is published by verification.
+            ["pull", ..] | ["push", ..] | ["fetch", ..] | ["ls-remote", ..] => {
+                world.remote_touched.borrow_mut().push(args.join(" "));
                 done(0, "", "")
             }
             ["status", _] => done(0, "", ""),
@@ -94,10 +92,6 @@ impl Machine {
             ["rev-parse", "-q", "--verify", _] => match &*world.existing_tag.borrow() {
                 Some(commit) => done(0, &format!("{commit}\n"), ""),
                 None => done(1, "", ""),
-            },
-            ["ls-remote", ..] => match &*world.existing_tag.borrow() {
-                Some(commit) => done(0, &format!("{commit}\trefs/tags/v0.1.0\n"), ""),
-                None => done(0, "", ""),
             },
             ["tag", "-a", _, commit, ..] => {
                 world.tagged.borrow_mut().push((*commit).to_owned());
@@ -199,9 +193,11 @@ impl Shell for Machine {
         if program == "git" {
             return self.git(args);
         }
-        if program == "gh" {
-            return done(0, GREEN_CI, "");
-        }
+        // Verification never reaches for a hosted service: a `gh` call is a defect.
+        assert_ne!(
+            program, "gh",
+            "a hosted-service call during local verification"
+        );
         if program == "tar" {
             let install = PathBuf::from(arg_after(args, "-C").unwrap());
             fs::create_dir_all(install.join("lib/stutter")).unwrap();
@@ -320,13 +316,6 @@ impl TaskRunner for Pass {
     }
 }
 
-fn wait() -> WaitPolicy {
-    WaitPolicy {
-        poll: Duration::ZERO,
-        max_polls: 2,
-    }
-}
-
 fn shell(world: &Rc<World>) -> Box<dyn Shell> {
     Box::new(Machine(Rc::clone(world)))
 }
@@ -395,7 +384,6 @@ fn executor(world: &Rc<World>) -> Executor {
         TaskKind::RcOffline,
         Box::new(RcOfflineRunner {
             shell: shell(world),
-            wait: wait(),
         }),
     );
     runners.insert(
@@ -420,7 +408,6 @@ fn executor(world: &Rc<World>) -> Executor {
         TaskKind::Tag,
         Box::new(TagRunner {
             shell: shell(world),
-            wait: wait(),
         }),
     );
     let check_world = Rc::clone(world);
@@ -558,9 +545,13 @@ fn three_candidates_two_late_defects_one_tag_on_the_last() {
     let problems = verify_state(&dir, &state, &executor.graph, &executor.manifest);
     assert!(problems.is_empty(), "{problems:?}");
 
-    // One annotated tag, on the final candidate only, pushed once.
+    // One annotated tag, on the final candidate only, created locally and never pushed.
     assert_eq!(*world.tagged.borrow(), vec![rc3]);
-    assert_eq!(*world.pushed.borrow(), vec!["v0.1.0".to_owned()]);
+    assert!(
+        world.remote_touched.borrow().is_empty(),
+        "{:?}",
+        world.remote_touched
+    );
     assert_eq!(state.tasks["tag"].status, TaskStatus::Passed);
 }
 
@@ -580,5 +571,5 @@ fn a_conflicting_existing_tag_is_a_hard_failure_that_never_moves_it() {
     assert_ne!(state.mode, CampaignMode::Complete);
     assert_eq!(state.tasks["tag"].status, TaskStatus::Failed);
     assert!(world.tagged.borrow().is_empty());
-    assert!(world.pushed.borrow().is_empty());
+    assert!(world.remote_touched.borrow().is_empty());
 }

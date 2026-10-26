@@ -129,14 +129,13 @@ pub struct ToolIdentity {
 }
 
 /// The tools the campaign needs, with the arguments that print their version.
-pub const RUNTIME_TOOLS: [(&str, &[&str]); 8] = [
+pub const RUNTIME_TOOLS: [(&str, &[&str]); 7] = [
     ("vkcube", &["--help"]),
     ("vkmark", &["--help"]),
     ("mangohud", &["--version"]),
     ("fio", &["--version"]),
     ("stress-ng", &["--version"]),
     ("ping", &["-V"]),
-    ("gh", &["--version"]),
     ("taskset", &["--version"]),
 ];
 

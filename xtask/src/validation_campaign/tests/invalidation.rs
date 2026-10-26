@@ -103,11 +103,9 @@ fn a_full_run_respects_the_dag_and_completes() {
     let report = status::build(&state, &executor.graph, &manifest());
     assert_eq!(report.overall, "complete");
     assert!(
-        report
-            .repository_actions
-            .iter()
-            .filter(|a| a.kind == "close_issue")
-            .all(|a| a.ready)
+        report.gates.values().all(|gate| gate["ready"] == true),
+        "every named gate is ready: {:?}",
+        report.gates
     );
     assert_eq!(state.release_candidate.as_deref(), Some(rc().as_str()));
 }

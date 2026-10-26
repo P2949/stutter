@@ -13,8 +13,8 @@ use super::{
     evidence::reverify_task,
     executor::{RunContext, RunnerOutcome, TaskRunner},
     graph::TaskSpec,
-    pr_task::PrTools,
-    repo_pr::Landed,
+    landing::Landed,
+    landing_task::LandingTools,
     verify::produces_bundles,
 };
 
@@ -26,7 +26,7 @@ pub const LEDGER: &str = "docs/CORE_VALIDATION_STATUS.md";
 pub type EntrySource = dyn Fn(&RunContext<'_>) -> Result<Vec<Value>, String>;
 
 pub struct IntegrationRunner {
-    pub tools: PrTools,
+    pub tools: LandingTools,
     pub entries: Box<EntrySource>,
 }
 
@@ -209,10 +209,6 @@ impl TaskRunner for IntegrationRunner {
                 };
             }
         };
-        let body = format!(
-            "Evidence-integration of campaign `{}` (evidence base `{}`): verified index entries, sanitized corpus fixtures and the status ledger. No raw recordings are committed.",
-            context.state.campaign_id, context.state.evidence_base
-        );
         let landed = self.tools.land(
             context,
             spec,
@@ -221,7 +217,6 @@ impl TaskRunner for IntegrationRunner {
                 "docs(evidence): integrate campaign {} evidence",
                 context.state.campaign_id
             ),
-            &body,
             &|repository| apply(context, &entries, repository),
         );
         match landed {

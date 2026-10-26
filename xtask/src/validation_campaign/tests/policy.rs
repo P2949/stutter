@@ -6,13 +6,12 @@ use super::{Scratch, fresh, manifest};
 use crate::validation_campaign::{
     executor::{RunContext, RunnerOutcome, TaskRunner},
     graph::Graph,
+    landing_task::LandingTools,
     model::{FailureClass, TaskStatus},
     policy::{
         CapabilityPolicyRunner, REGISTRY, apply_policy, calibration_doc, policy_section,
         replace_marked, score_doc, unmet_gates,
     },
-    pr_task::PrTools,
-    repo_pr::WaitPolicy,
     repository::Binaries,
     shell::{Shell, ShellOutput},
 };
@@ -144,15 +143,12 @@ struct Landing;
 impl Shell for Landing {
     fn run(&self, program: &str, args: &[&str], _: &Path) -> ShellOutput {
         let line = format!("{program} {}", args.join(" "));
+        // No task branch exists yet, and the applied change leaves something staged.
         let code = i32::from(
-            line.starts_with("gh pr view campaign")
+            line.starts_with("git rev-parse --verify --quiet")
                 || line.starts_with("git diff --cached --quiet"),
         );
-        let out = if line.contains("statusCheckRollup") {
-            r#"{"statusCheckRollup":[{"name":"b","status":"COMPLETED","conclusion":"SUCCESS"}]}"#
-        } else if line.starts_with("gh pr create") {
-            "https://example.test/pull/2\n"
-        } else if line.starts_with("git status --porcelain") {
+        let out = if line.starts_with("git status --porcelain") {
             ""
         } else {
             "cafe\n"
@@ -200,12 +196,8 @@ fn run_policy(satisfy: bool) -> (RunnerOutcome, Scratch) {
         updates: &updates,
     };
     let runner = CapabilityPolicyRunner {
-        tools: PrTools {
+        tools: LandingTools {
             shell: Box::new(Landing),
-            wait: WaitPolicy {
-                poll: Duration::ZERO,
-                max_polls: 2,
-            },
             gates: Vec::new(),
         },
     };
@@ -219,7 +211,7 @@ fn run_policy(satisfy: bool) -> (RunnerOutcome, Scratch) {
 }
 
 #[test]
-fn tiers_do_not_change_until_every_required_issue_gate_is_satisfied() {
+fn tiers_do_not_change_until_every_required_validation_gate_is_satisfied() {
     let (outcome, scratch) = run_policy(false);
     let RunnerOutcome::Blocked(block) = outcome else {
         panic!("must block")
@@ -244,11 +236,21 @@ fn tiers_do_not_change_until_every_required_issue_gate_is_satisfied() {
         binaries: &binaries,
         updates: &updates,
     };
-    assert_eq!(unmet_gates(&context), vec![27, 30, 31, 32, 33, 38]);
+    assert_eq!(
+        unmet_gates(&context),
+        [
+            "observation",
+            "kernel-compatibility",
+            "profiler-overhead",
+            "diagnosis-corpus",
+            "diagnosis-calibration",
+            "score-evaluation",
+        ]
+    );
 }
 
 #[test]
-fn a_satisfied_campaign_applies_the_registry_docs_and_ledger_in_one_pull_request() {
+fn a_satisfied_campaign_applies_the_registry_docs_and_ledger_in_one_local_landing() {
     let (outcome, scratch) = run_policy(true);
     assert!(
         matches!(outcome, RunnerOutcome::Passed { .. }),

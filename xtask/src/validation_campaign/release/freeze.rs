@@ -1,4 +1,4 @@
-//! `freeze-rc`: pick the exact release candidate (clean, up-to-date `main`), rebuild the binaries
+//! `freeze-rc`: pick the exact release candidate (clean local `main`), rebuild the binaries
 //! at it, record their digests separately from the evidence-base ones, re-pin the privileged
 //! runner to them and ask the controller to restart from the fresh build.
 use std::{fs, path::Path};
@@ -53,15 +53,14 @@ impl TaskRunner for FreezeRcRunner {
     fn run(&self, context: &RunContext<'_>, _spec: &TaskSpec, _attempt: u32) -> RunnerOutcome {
         let repo = context.repository;
         let git = |args: &[&str]| self.shell.run("git", args, repo);
-        for args in [&["checkout", "main"][..], &["pull", "--ff-only"][..]] {
-            let out = git(args);
-            if !out.ok() {
-                return failed(
-                    FailureClass::Retryable,
-                    "sync",
-                    format!("git {} failed: {}", args.join(" "), out.stderr.trim()),
-                );
-            }
+        // Local clean `main` is authoritative: there is no remote to pull from.
+        let out = git(&["checkout", "main"]);
+        if !out.ok() {
+            return failed(
+                FailureClass::Retryable,
+                "sync",
+                format!("git checkout main failed: {}", out.stderr.trim()),
+            );
         }
         if !git(&["status", "--porcelain"]).stdout.trim().is_empty() {
             return blocked(

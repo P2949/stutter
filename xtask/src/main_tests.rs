@@ -1,6 +1,6 @@
 use clap::CommandFactory;
 
-use super::{CI_COMMANDS, Cli, SMOKE_COMMANDS, VALIDATION_COMMANDS};
+use super::{Cli, SMOKE_COMMANDS, VALIDATION_COMMANDS};
 use crate::{
     dependency_hygiene::{
         APPROVED_DUPLICATE_PACKAGES, DEPENDENCY_HYGIENE_COMMANDS, DEPENDENCY_HYGIENE_WORKFLOW,
@@ -30,6 +30,8 @@ fn expected_subcommands_are_registered() {
             "calibrate",
             "capability-check",
             "ci",
+            "ci-all",
+            "ci-live",
             "clippy",
             "dependency-hygiene",
             "diagnosis-study",
@@ -49,6 +51,7 @@ fn expected_subcommands_are_registered() {
             "live-acceptance",
             "live-burst",
             "live-workload",
+            "local-ci-policy",
             "local-install-smoke",
             "maturity-report",
             "mutation-campaign",
@@ -60,6 +63,7 @@ fn expected_subcommands_are_registered() {
             "privileged-ebpf-smoke",
             "recovery-controller",
             "refresh-tune-recommendation",
+            "release-check",
             "release-package",
             "release-publish",
             "release-verify",
@@ -68,26 +72,11 @@ fn expected_subcommands_are_registered() {
             "score-evaluate",
             "score-matrix",
             "service-smoke",
+            "setup-local-ci",
             "smoke",
             "validate",
             "validation-campaign",
-        ]
-    );
-}
-
-#[test]
-fn ci_command_order_matches_local_validation_flow() {
-    assert_eq!(
-        command_texts(CI_COMMANDS),
-        vec![
-            "cargo fmt --check",
-            "cargo run -p xtask -- no-allow-attrs",
-            "cargo build",
-            "cargo clippy --all-targets -- -D warnings",
-            "cargo test",
-            "bash scripts/smoke/offline_recommendation.sh",
-            "bash scripts/smoke/advisor_offline.sh",
-            "cargo test -p stutter architecture_tests",
+            "verify-fast",
         ]
     );
 }

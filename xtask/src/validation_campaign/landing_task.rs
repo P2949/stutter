@@ -1,28 +1,26 @@
-//! Shared plumbing for tasks that change the repository through a pull request: apply the change
-//! on a campaign branch, run the offline gates there, land it, and map every failure to the
-//! campaign's failure classes.
+//! Shared plumbing for tasks that change the repository: apply the change on a campaign branch,
+//! run the offline gates there, land it locally, and map every failure to the campaign's failure
+//! classes.
 use std::path::Path;
 
 use super::{
     executor::{RunContext, RunnerOutcome},
     graph::TaskSpec,
+    landing::{LandError, Landed, LocalChange, land},
     model::{BlockReason, FailureClass},
-    repo_pr::{Landed, PrChange, PrError, WaitPolicy, land},
     runners::{OFFLINE_GATES, run_gates},
     shell::{Shell, SystemShell},
 };
 
-pub struct PrTools {
+pub struct LandingTools {
     pub shell: Box<dyn Shell>,
-    pub wait: WaitPolicy,
     pub gates: Vec<(String, Vec<String>)>,
 }
 
-impl PrTools {
+impl LandingTools {
     pub fn system() -> Self {
         Self {
             shell: Box::new(SystemShell),
-            wait: WaitPolicy::default(),
             gates: OFFLINE_GATES
                 .iter()
                 .map(|(name, argv)| {
@@ -46,46 +44,48 @@ impl PrTools {
         context: &RunContext<'_>,
         spec: &TaskSpec,
         attempt: u32,
-        title: &str,
-        body: &str,
+        message: &str,
         apply: &dyn Fn(&Path) -> Result<(), String>,
     ) -> Result<Landed, RunnerOutcome> {
         let branch = Self::branch(context, spec);
         let attempt_dir = context.dir.attempt_dir(spec.id, attempt);
         let artifacts = Some(context.dir.relative(&attempt_dir));
-        let change = PrChange {
+        let change = LocalChange {
             branch: &branch,
-            title,
-            body,
-            commit_message: title,
+            commit_message: message,
         };
         let repository = context.repository;
-        let gated = || {
-            apply(repository)?;
+        let apply_change = || apply(repository);
+        let verify = || {
             run_gates(&self.gates, repository, &attempt_dir)
                 .map_err(|failure| format!("{}: {}", failure.stage, failure.summary))
         };
-        land(self.shell.as_ref(), repository, &change, &gated, &self.wait).map_err(|error| {
-            match error {
-                PrError::Blocked(detail) => RunnerOutcome::Blocked(BlockReason {
-                    class: FailureClass::BlockedResource,
-                    detail,
-                }),
-                PrError::Failed {
-                    stage,
-                    detail,
-                    retryable,
-                } => RunnerOutcome::Failed {
-                    class: if retryable {
-                        FailureClass::Retryable
-                    } else {
-                        FailureClass::SoftwareDefect
-                    },
-                    stage,
-                    summary: detail,
-                    artifacts,
+        land(
+            self.shell.as_ref(),
+            repository,
+            &change,
+            &apply_change,
+            &verify,
+        )
+        .map_err(|error| match error {
+            LandError::Blocked(detail) => RunnerOutcome::Blocked(BlockReason {
+                class: FailureClass::BlockedResource,
+                detail,
+            }),
+            LandError::Failed {
+                stage,
+                detail,
+                retryable,
+            } => RunnerOutcome::Failed {
+                class: if retryable {
+                    FailureClass::Retryable
+                } else {
+                    FailureClass::SoftwareDefect
                 },
-            }
+                stage,
+                summary: detail,
+                artifacts,
+            },
         })
     }
 }

@@ -5,13 +5,9 @@ use serde::Serialize;
 use serde_json::{Value, json};
 
 use super::{
-    graph::{Graph, issue_gates},
+    graph::{Graph, validation_gates},
     manifest::CampaignManifest,
-    model::{
-        AttemptOutcome, CampaignMode, CampaignPhase, CampaignState, FailureClass, RepositoryAction,
-        TaskStatus,
-    },
-    repository::repository_actions,
+    model::{AttemptOutcome, CampaignMode, CampaignPhase, CampaignState, FailureClass, TaskStatus},
 };
 
 #[derive(Debug, Serialize)]
@@ -54,10 +50,10 @@ pub struct StatusReport {
     pub blocked: Vec<BlockedTask>,
     pub kernel_progress: KernelProgress,
     pub corpus: Value,
-    pub issues: BTreeMap<String, Value>,
+    /// Read-only readiness of each named validation gate.
+    pub gates: BTreeMap<String, Value>,
     pub policy: Value,
     pub release: Value,
-    pub repository_actions: Vec<RepositoryAction>,
 }
 
 /// Observed distinct kernel releases are frozen into state as a comma-separated list by the
@@ -159,7 +155,7 @@ pub fn build(state: &CampaignState, graph: &Graph, manifest: &CampaignManifest) 
         .filter(|spec| !state.effective_status(spec).satisfies_dependents())
         .map(|spec| spec.phase)
         .min();
-    let issues = issue_gates()
+    let gates = validation_gates()
         .into_iter()
         .map(|gate| {
             let tasks = gate
@@ -174,7 +170,7 @@ pub fn build(state: &CampaignState, graph: &Graph, manifest: &CampaignManifest) 
                 .collect::<BTreeMap<_, _>>();
             let ready = tasks.values().all(|status| status == "Passed");
             (
-                gate.issue.to_string(),
+                gate.name.clone(),
                 json!({"title": gate.title, "ready": ready, "tasks": tasks}),
             )
         })
@@ -201,7 +197,7 @@ pub fn build(state: &CampaignState, graph: &Graph, manifest: &CampaignManifest) 
             .get("corpus.summary")
             .and_then(|text| serde_json::from_str(text).ok())
             .unwrap_or_else(|| json!({})),
-        issues,
+        gates,
         policy: json!({"decisions": state.decisions}),
         release: json!({
             "version": manifest.release.version,
@@ -209,7 +205,6 @@ pub fn build(state: &CampaignState, graph: &Graph, manifest: &CampaignManifest) 
             "auto_tag": manifest.release.auto_tag,
             "candidate": state.release_candidate,
         }),
-        repository_actions: repository_actions(state, graph),
     }
 }
 
@@ -239,8 +234,15 @@ pub fn render_human(report: &StatusReport) -> String {
         report.kernel_progress.observed.len(),
         report.kernel_progress.required
     ));
-    for action in report.repository_actions.iter().filter(|a| a.ready) {
-        text.push_str(&format!("ACTION {} {:?}\n", action.kind, action.issue));
+    for (name, gate) in &report.gates {
+        text.push_str(&format!(
+            "gate {name}: {}\n",
+            if gate["ready"] == true {
+                "ready"
+            } else {
+                "waiting"
+            }
+        ));
     }
     text
 }

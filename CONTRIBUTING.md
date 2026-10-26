@@ -50,7 +50,7 @@ not be visible inside the Stutter Nix shell.
    RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo fmt --all
    ```
 
-2. Run the non-root CI gate before committing:
+2. Run the non-root CI gate before pushing (`xtask setup-local-ci` installs it as a hook):
 
    ```sh
    RUSTUP_TOOLCHAIN=nightly-2026-06-06 cargo run -p xtask -- ci
@@ -105,18 +105,16 @@ Run this before merging loader-sensitive changes. It intentionally stays outside
 
 ## What the gates run
 
-`cargo run -p xtask -- ci` runs:
+Verification is repository-owned and local-only; see [docs/LOCAL_VERIFICATION.md](docs/LOCAL_VERIFICATION.md).
+Hosted CI and GitHub-runner-dependent verification must not be reintroduced.
 
-```text
-cargo fmt --check
-cargo run -p xtask -- no-allow-attrs
-cargo build
-cargo clippy --all-targets -- -D warnings
-cargo test
-bash scripts/smoke/offline_recommendation.sh
-bash scripts/smoke/advisor_offline.sh
-cargo test -p stutter architecture_tests
-```
+- `cargo run -p xtask -- verify-fast` (the pre-commit hook): policy, fmt, lint contracts, diff check.
+- `cargo run -p xtask -- ci` (the pre-push hook): the full deterministic non-root CI in named stages;
+  `--stage NAME` reruns one.
+- `cargo run -p xtask -- ci-live`: the live smokes with non-interactive privilege.
+- `cargo run -p xtask -- release-check`: local release packaging and verification.
+- `cargo run -p xtask -- ci-all`: all of the above.
+- `cargo run -p xtask -- setup-local-ci`: install the hooks for this checkout.
 
 `cargo run -p xtask -- validate` runs the same checks and explicitly builds
 Stutter again. Its Aya build script compiles the eBPF crate for
@@ -133,11 +131,6 @@ explicit native target so the privilege runner cannot affect build scripts.
 
 ## CI mapping
 
-The GitHub workflow in `.github/workflows/ci.yml` mirrors the same policy in separate jobs:
-
-- dependency hygiene and non-root build/smoke checks;
-- daemon, action-runner, watchdog, soak, service, release, acceptance, and architecture safety gates;
-- artifact-contract and validation-corpus fixture gates;
-- optional live smoke tests on manual workflow dispatch.
-
-Keep `xtask`, smoke scripts, and the workflow in sync when adding a required validation step.
+There is no hosted CI. `xtask ci` is the single list of required checks (`xtask/src/local_ci.rs`);
+`xtask local-ci-policy` rejects hosted-CI configuration. Keep `xtask`, the smoke scripts and
+[docs/LOCAL_VERIFICATION.md](docs/LOCAL_VERIFICATION.md) in sync when adding a required step.

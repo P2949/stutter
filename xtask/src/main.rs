@@ -16,6 +16,8 @@ pub mod fixture_coverage;
 pub mod fixtures;
 pub mod kernel_matrix;
 mod live_acceptance;
+pub mod local_ci;
+pub mod local_ci_policy;
 pub mod maturity_report;
 pub mod mutation_campaign;
 pub mod no_allow_attrs;
@@ -191,8 +193,52 @@ pub enum XtaskCommand {
         #[arg(long)]
         target_root_pid: Option<u32>,
     },
-    #[command(about = "Run the non-root CI workflow used by local development")]
-    Ci,
+    #[command(
+        about = "The full deterministic, non-root local CI (every stage; --stage reruns one)"
+    )]
+    Ci {
+        #[arg(long)]
+        stage: Option<String>,
+        /// Print the stage names, one per line, and exit.
+        #[arg(long, conflicts_with = "stage")]
+        list: bool,
+    },
+    #[command(
+        name = "verify-fast",
+        about = "Cheap local admission gate: policy, fmt, lint contracts, diff check"
+    )]
+    VerifyFast,
+    #[command(
+        name = "ci-live",
+        about = "The live smokes (privileged eBPF, tree churn, minimal recording) with non-interactive privilege"
+    )]
+    CiLive,
+    #[command(name = "ci-all", about = "ci, then ci-live, then release-check")]
+    CiAll {
+        #[arg(long, default_value = "target/release-check")]
+        out: PathBuf,
+    },
+    #[command(
+        name = "release-check",
+        about = "Build, package and verify the release locally"
+    )]
+    ReleaseCheck {
+        #[arg(long, default_value = "target/release-check")]
+        out: PathBuf,
+        /// Fail unless this tag is `v` plus the crate version.
+        #[arg(long)]
+        expected_tag: Option<String>,
+    },
+    #[command(
+        name = "local-ci-policy",
+        about = "Fail if hosted CI architecture or the hosted-runner protocol is present"
+    )]
+    LocalCiPolicy,
+    #[command(
+        name = "setup-local-ci",
+        about = "Point this checkout's git hooks at the repository's .githooks"
+    )]
+    SetupLocalCi,
     #[command(about = "Check Rust formatting")]
     Fmt,
     #[command(about = "Run clippy with repository warning policy")]
@@ -306,41 +352,6 @@ pub enum XtaskCommand {
     #[command(name = "maturity-report", about = "Print maturity progress report")]
     MaturityReport,
 }
-
-pub const CI_COMMANDS: &[CommandSpec] = &[
-    CommandSpec {
-        program: "cargo",
-        args: &["fmt", "--check"],
-    },
-    CommandSpec {
-        program: "cargo",
-        args: &["run", "-p", "xtask", "--", "no-allow-attrs"],
-    },
-    CommandSpec {
-        program: "cargo",
-        args: &["build"],
-    },
-    CommandSpec {
-        program: "cargo",
-        args: &["clippy", "--all-targets", "--", "-D", "warnings"],
-    },
-    CommandSpec {
-        program: "cargo",
-        args: &["test"],
-    },
-    CommandSpec {
-        program: "bash",
-        args: &["scripts/smoke/offline_recommendation.sh"],
-    },
-    CommandSpec {
-        program: "bash",
-        args: &["scripts/smoke/advisor_offline.sh"],
-    },
-    CommandSpec {
-        program: "cargo",
-        args: &["test", "-p", "stutter", "architecture_tests"],
-    },
-];
 
 pub const VALIDATION_COMMANDS: &[CommandSpec] = &[
     CommandSpec {
@@ -460,7 +471,22 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
             markers,
             target_root_pid,
         } => fixed_work::run(&identity, &markers, target_root_pid),
-        XtaskCommand::Ci => run_command_specs(&root, CI_COMMANDS),
+        XtaskCommand::Ci { stage, list } => {
+            if list {
+                local_ci::list_stages();
+                Ok(())
+            } else {
+                local_ci::ci(&root, stage.as_deref())
+            }
+        }
+        XtaskCommand::VerifyFast => local_ci::verify_fast(&root),
+        XtaskCommand::CiLive => local_ci::ci_live(&root),
+        XtaskCommand::CiAll { out } => local_ci::ci_all(&root, &out),
+        XtaskCommand::ReleaseCheck { out, expected_tag } => {
+            local_ci::release_check(&root, &out, expected_tag.as_deref())
+        }
+        XtaskCommand::LocalCiPolicy => local_ci_policy::run(&root),
+        XtaskCommand::SetupLocalCi => local_ci::setup(&root),
         XtaskCommand::Fmt => run_cargo(&root, &["fmt", "--check"]),
         XtaskCommand::Clippy => {
             run_cargo(&root, &["clippy", "--all-targets", "--", "-D", "warnings"])

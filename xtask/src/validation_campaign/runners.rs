@@ -183,37 +183,9 @@ fn failed_publication(
 
 /// The offline gates every campaign starts from (the implementation acceptance gate).
 pub const OFFLINE_GATES: &[(&str, &[&str])] = &[
-    ("fmt", &["cargo", "fmt", "--all", "--check"]),
-    (
-        "no-allow-attrs",
-        &["cargo", "run", "-q", "-p", "xtask", "--", "no-allow-attrs"],
-    ),
-    (
-        "dependency-hygiene",
-        &[
-            "cargo",
-            "run",
-            "-q",
-            "-p",
-            "xtask",
-            "--",
-            "dependency-hygiene",
-        ],
-    ),
-    ("build-gate", &["scripts/smoke/build.sh"]),
-    (
-        "objective-docs",
-        &[
-            "cargo",
-            "run",
-            "-q",
-            "-p",
-            "xtask",
-            "--",
-            "objective-docs",
-            "--check",
-        ],
-    ),
+    // The single canonical local CI (`xtask/src/local_ci.rs`), then the evidence-fixture contracts
+    // and the whitespace check it does not cover.
+    ("ci", &["cargo", "run", "-q", "-p", "xtask", "--", "ci"]),
     (
         "fixture-check",
         &["cargo", "run", "-q", "-p", "xtask", "--", "fixture-check"],
@@ -230,25 +202,6 @@ pub const OFFLINE_GATES: &[(&str, &[&str])] = &[
             "fixture-coverage",
         ],
     ),
-    (
-        "capability-check",
-        &[
-            "cargo",
-            "run",
-            "-q",
-            "-p",
-            "xtask",
-            "--",
-            "capability-check",
-        ],
-    ),
-    ("autotune-safety", &["scripts/check-autotune-safety.sh"]),
-    (
-        "offline-recommendation",
-        &["scripts/smoke/offline_recommendation.sh"],
-    ),
-    ("advisor-offline", &["scripts/smoke/advisor_offline.sh"]),
-    ("xtask-tests", &["cargo", "test", "-p", "xtask"]),
     ("diff-check", &["git", "diff", "--check"]),
 ];
 
@@ -401,20 +354,20 @@ pub fn default_runners() -> BTreeMap<TaskKind, Box<dyn TaskRunner>> {
     runners.insert(
         TaskKind::EvidenceIntegration,
         Box::new(super::integration::IntegrationRunner {
-            tools: super::pr_task::PrTools::system(),
+            tools: super::landing_task::LandingTools::system(),
             entries: Box::new(super::integration::verified_entries),
         }),
     );
     runners.insert(
         TaskKind::CapabilityPolicy,
         Box::new(super::policy::CapabilityPolicyRunner {
-            tools: super::pr_task::PrTools::system(),
+            tools: super::landing_task::LandingTools::system(),
         }),
     );
     runners.insert(
         TaskKind::ReleaseDocs,
         Box::new(super::policy::ReleaseDocsRunner {
-            tools: super::pr_task::PrTools::system(),
+            tools: super::landing_task::LandingTools::system(),
         }),
     );
     runners.insert(
@@ -434,7 +387,6 @@ pub fn default_runners() -> BTreeMap<TaskKind, Box<dyn TaskRunner>> {
         TaskKind::RcOffline,
         Box::new(super::release::offline::RcOfflineRunner {
             shell: Box::new(super::shell::SystemShell),
-            wait: super::repo_pr::WaitPolicy::default(),
         }),
     );
     runners.insert(
@@ -469,7 +421,6 @@ pub fn default_runners() -> BTreeMap<TaskKind, Box<dyn TaskRunner>> {
         TaskKind::Tag,
         Box::new(super::release::tag::TagRunner {
             shell: Box::new(super::shell::SystemShell),
-            wait: super::repo_pr::WaitPolicy::default(),
         }),
     );
     runners

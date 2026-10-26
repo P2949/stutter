@@ -1,7 +1,5 @@
 # stutter
 
-[![CI](https://github.com/P2949/stutter/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/P2949/stutter/actions/workflows/ci.yml?query=branch%3Amain)
-
 `stutter` is an experimental open-source Linux scheduler runnable-latency
 profiler and evidence-based tuning toolkit built with Rust + Aya eBPF.
 

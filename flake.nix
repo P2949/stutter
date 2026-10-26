@@ -38,7 +38,17 @@
       };
     in
     {
-      devShells.${system}.default = pkgs.mkShell {
+      # Only publication needs the GitHub client; verification never does (`nix develop .#publish`
+      # for `xtask release-publish`).
+      devShells.${system} = {
+      publish = pkgs.mkShell {
+        packages = [
+          pkgs.git
+          pkgs.gh
+        ];
+      };
+
+      default = pkgs.mkShell {
         packages = [
           rustToolchain
 
@@ -61,7 +71,7 @@
 
           # Deterministic workload tools for the validation campaign (never downloaded at
           # collection time): frame workload, frame logging, storage and CPU stress, network
-          # reachability probe, repository automation.
+          # reachability probe. No hosted-service client: verification is local-only.
           pkgs.vkmark
           pkgs.vulkan-tools
           pkgs.mangohud
@@ -69,7 +79,6 @@
           pkgs.stress-ng
           pkgs.iputils
           pkgs.util-linux
-          pkgs.gh
         ];
 
         shellHook = ''
@@ -96,6 +105,7 @@
           echo "bpf-linker:  $(bpf-linker --version 2>/dev/null || true)"
           echo "cargo-deny:  $(cargo deny --version 2>/dev/null || true)"
         '';
+      };
       };
     };
 }

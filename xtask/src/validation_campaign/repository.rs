@@ -10,8 +10,8 @@ use std::{
 use anyhow::{Context, ensure};
 
 use super::{
-    graph::{Graph, SourceBinding, TaskSpec, issue_gates},
-    model::{CampaignMode, CampaignState, RepositoryAction},
+    graph::{SourceBinding, TaskSpec},
+    model::CampaignState,
 };
 use crate::evidence_bundle::sha256::sha256_hex;
 
@@ -136,50 +136,6 @@ pub fn check_source(
         check_binary_revision(&binaries.stutter, commit)
     };
     check().map_err(|error| format!("{error:#}"))
-}
-
-/// Repository actions the agent should perform with its own authenticated `gh`: no API
-/// credentials live in the campaign. An issue is ready only when every gate task truly passed.
-pub fn repository_actions(state: &CampaignState, graph: &Graph) -> Vec<RepositoryAction> {
-    let passed = |id: &str| {
-        graph
-            .get(id)
-            .is_some_and(|spec| state.effective_status(spec).satisfies_dependents())
-    };
-    let mut actions = issue_gates()
-        .into_iter()
-        .map(|gate| {
-            let missing = gate
-                .tasks
-                .iter()
-                .filter(|task| !passed(task))
-                .cloned()
-                .collect::<Vec<_>>();
-            let ready = missing.is_empty();
-            RepositoryAction {
-                kind: "close_issue".to_owned(),
-                issue: Some(gate.issue),
-                ready,
-                evidence_summary: if ready {
-                    format!(
-                        "{}: all gate tasks passed ({})",
-                        gate.title,
-                        gate.tasks.join(", ")
-                    )
-                } else {
-                    format!("{}: waiting on {}", gate.title, missing.join(", "))
-                },
-            }
-        })
-        .collect::<Vec<_>>();
-    actions.push(RepositoryAction {
-        kind: "push_tag".to_owned(),
-        issue: None,
-        ready: state.mode == CampaignMode::ReleaseCandidate && passed("tag"),
-        evidence_summary: "the tag task passed; push the annotated tag at the release candidate"
-            .to_owned(),
-    });
-    actions
 }
 
 /// Identity of a file as the filesystem reports it; any rewrite changes at least one field.

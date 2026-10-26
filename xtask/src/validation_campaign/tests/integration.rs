@@ -9,8 +9,7 @@ use crate::validation_campaign::{
     integration::{
         FIXTURES, INDEX, IntegrationRunner, LEDGER, copy_fixtures, ledger_entry, merge_index,
     },
-    pr_task::PrTools,
-    repo_pr::WaitPolicy,
+    landing_task::LandingTools,
     repository::Binaries,
     shell::{Shell, ShellOutput},
 };
@@ -96,25 +95,14 @@ impl Shell for Merging {
             stdout: s.to_owned(),
             stderr: String::new(),
         };
-        if line.starts_with("gh pr view campaign") {
+        // No task branch exists yet, and the applied change leaves something staged.
+        if line.starts_with("git rev-parse --verify --quiet")
+            || line.starts_with("git diff --cached --quiet")
+        {
             return ShellOutput {
                 code: 1,
                 ..ShellOutput::default()
             };
-        }
-        if line.starts_with("git diff --cached --quiet") {
-            return ShellOutput {
-                code: 1,
-                ..ShellOutput::default()
-            };
-        }
-        if line.contains("statusCheckRollup") {
-            return ok(
-                r#"{"statusCheckRollup":[{"name":"build","status":"COMPLETED","conclusion":"SUCCESS"}]}"#,
-            );
-        }
-        if line.starts_with("gh pr create") {
-            return ok("https://example.test/pull/1\n");
         }
         ok(if line.starts_with("git status --porcelain") {
             ""
@@ -126,7 +114,7 @@ impl Shell for Merging {
 }
 
 #[test]
-fn integration_writes_index_fixtures_and_ledger_then_lands_one_pull_request() {
+fn integration_writes_index_fixtures_and_ledger_then_lands_it_locally() {
     let scratch = Scratch::new("integration-run");
     let (dir, state, _) = fresh(&scratch);
     let repo = scratch.path();
@@ -157,12 +145,8 @@ fn integration_writes_index_fixtures_and_ledger_then_lands_one_pull_request() {
         calls: RefCell::default(),
     };
     let runner = IntegrationRunner {
-        tools: PrTools {
+        tools: LandingTools {
             shell: Box::new(shell),
-            wait: WaitPolicy {
-                poll: Duration::ZERO,
-                max_polls: 2,
-            },
             gates: Vec::new(),
         },
         entries: Box::new(|_| Ok(vec![entry("live_observation", "o-1")])),
@@ -205,11 +189,10 @@ fn a_bundle_that_no_longer_verifies_fails_integration_as_a_software_defect() {
         updates: &updates,
     };
     let runner = IntegrationRunner {
-        tools: PrTools {
+        tools: LandingTools {
             shell: Box::new(Merging {
                 calls: RefCell::default(),
             }),
-            wait: WaitPolicy::default(),
             gates: Vec::new(),
         },
         entries: Box::new(|_| {
