@@ -205,7 +205,12 @@ fn landing_never_touches_a_remote_or_a_hosted_cli() {
     // The primitive only ever runs git on the local repository; this repository has no remote at
     // all, so any push, pull or fetch would have failed the tests above.
     let (_scratch, path) = repo("landing-no-remote");
-    assert!(git(&path, &["remote"]).is_empty());
+    // The repository's own configuration names no remote (an ambient GIT_CONFIG_* may add one to
+    // `git remote`; the repository itself must not have one).
+    assert!(
+        !git(&path, &["config", "--local", "--list"]).contains("remote."),
+        "the test repository must have no remote"
+    );
     let landed = land(&SystemShell, &path, &change(), &write_file(&path), &|| {
         Ok(())
     })
