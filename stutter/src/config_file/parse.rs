@@ -16,12 +16,15 @@ pub fn load_user_config() -> Result<Option<UserConfigFile>> {
     let Some(path) = resolve_user_config_path() else {
         return Ok(None);
     };
-
     if !path.exists() {
         return Ok(None);
     }
+    load_user_config_at(&path).map(Some)
+}
 
-    let contents = std::fs::read_to_string(&path)
+/// Load the config file at an explicit path (an explicit `--config` must exist).
+pub fn load_user_config_at(path: &std::path::Path) -> Result<UserConfigFile> {
+    let contents = std::fs::read_to_string(path)
         .with_context(|| format!("failed to read config file {}", path.display()))?;
 
     let parsed = parse_user_config_toml_versioned(&contents)
@@ -40,7 +43,7 @@ pub fn load_user_config() -> Result<Option<UserConfigFile>> {
         );
     }
 
-    Ok(Some(parsed.file))
+    Ok(parsed.file)
 }
 
 pub fn parse_focus_source_value(value: &str) -> std::result::Result<FocusSource, ConfigError> {
