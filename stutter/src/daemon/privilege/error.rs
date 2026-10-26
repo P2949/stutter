@@ -25,6 +25,11 @@ pub enum PrivilegedWorkerError {
     #[error("candidate_plan_operation_mismatch: candidate operation changed")]
     CandidatePlanOperationMismatch,
 
+    #[error(
+        "system_wide_operation_not_allowlisted: operation {operation} is not on the system-wide operation allowlist"
+    )]
+    SystemWideOperationNotAllowlisted { operation: String },
+
     #[error("candidate_plan_missing_evidence: candidate plan has no evidence")]
     CandidatePlanMissingEvidence,
 
@@ -126,6 +131,9 @@ impl PrivilegedWorkerError {
             Self::CandidatePlanObjectiveMismatch => "candidate_plan_objective_mismatch",
             Self::CandidatePlanOperationMismatch => "candidate_plan_operation_mismatch",
             Self::CandidatePlanMissingEvidence => "candidate_plan_missing_evidence",
+            Self::SystemWideOperationNotAllowlisted { .. } => {
+                "system_wide_operation_not_allowlisted"
+            }
             Self::UnsupportedSchema { .. } => "privileged_worker_unsupported_schema",
             Self::UnsupportedCandidatePlanSchema { .. } => {
                 "privileged_worker_unsupported_candidate_plan_schema"

@@ -62,6 +62,10 @@ pub(super) struct DaemonPolicyFixture {
     #[serde(default)]
     pub(super) allow_gpu_power_in_autotune: bool,
     #[serde(default)]
+    pub(super) allow_system_wide_apply: bool,
+    #[serde(default)]
+    pub(super) system_wide_operations: Vec<String>,
+    #[serde(default)]
     pub(super) vm_knobs: Vec<String>,
     #[serde(default)]
     pub(super) allow_vm_knobs_in_autotune: bool,
@@ -104,6 +108,9 @@ pub(super) fn build_fixture_policy(
     config.safety.system_wide_allowlist.irq_devices = fixture.irq_devices.iter().cloned().collect();
     config.safety.system_wide_allowlist.gpu_cards = fixture.gpu_cards.iter().cloned().collect();
     config.safety.system_wide_allowlist.vm_knobs = fixture.vm_knobs.iter().cloned().collect();
+    config.safety.allow_system_wide_apply = fixture.allow_system_wide_apply;
+    config.safety.system_wide_allowlist.operations =
+        fixture.system_wide_operations.iter().cloned().collect();
     config.autotune.allow_gpu_power_in_autotune = fixture.allow_gpu_power_in_autotune;
     config.autotune.allow_vm_knobs_in_autotune = fixture.allow_vm_knobs_in_autotune;
 

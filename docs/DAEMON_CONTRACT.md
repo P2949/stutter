@@ -40,7 +40,7 @@ A daemon action may be treated as "free performance" only when all of these inva
 - no CPU governor/EPP suggestion while a battery is discharging unless `autotune.allow_cpu_power_on_battery = true` is explicitly configured; provider-side thermal headroom is also required.
 - no VM knob autonomous apply; VM candidates stay high-risk/manual-only and require direct swap or dirty-writeback evidence before they are suggested.
 
-`DaemonPolicy::check_action` enforces the policy-side parts of this contract by rejecting system-wide suggestions without explicit suggestion permission, low-confidence apply actions, missing rollback, unavailable rollback, persistent effects without explicit permission, system-wide apply without explicit `allow_system_wide_apply`, and effect scopes outside the selected mode.
+`DaemonPolicy::check_action` enforces the policy-side parts of this contract by rejecting system-wide suggestions without explicit suggestion permission, low-confidence apply actions, missing rollback, unavailable rollback, persistent effects without explicit permission, system-wide apply without explicit `allow_system_wide_apply` (a reversible medium-risk system-wide operation additionally needs its exact operation on the `system_wide_allowlist.operations` list; the permission never implies `allow_high_risk`), and effect scopes outside the selected mode.
 
 ## Default allowed touch points
 

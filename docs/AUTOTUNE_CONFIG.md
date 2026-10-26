@@ -209,9 +209,12 @@ gpu_cards = ["card0"]
 gpu_pci_ids = ["1002:*"]
 irq_devices = ["amdgpu", "xhci_hcd"]
 vm_knobs = ["proc/sys/vm/swappiness"]
+operations = ["cpu_power_epp"]
 ```
 
 Candidates outside these lists are denied with `system_wide_target_not_allowlisted` and are not dry-run or applied.
+
+A reversible, medium-risk system-wide operation is applied only when **all** of these hold: the daemon mode is `apply-medium-risk` with its explicit unlock, `daemon_allow_system_wide_apply = true`, the exact operation (`MutationOperationKind` name such as `cpu_power_epp`) is listed in `operations`, and its target is allowlisted. The permission is independent of `allow_high_risk`: it never enables high-risk apply, which remains unimplemented. A remote caller's limits can only narrow it.
 
 ## Workload Policy Rules
 

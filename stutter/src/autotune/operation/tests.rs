@@ -262,6 +262,7 @@ fn only_operations_with_a_prepared_transaction_can_be_registered() {
                     | MutationOperationKind::Uclamp
                     | MutationOperationKind::Nice
                     | MutationOperationKind::CgroupPlacement
+                    | MutationOperationKind::CpuPowerEpp
             ),
             "{operation:?}"
         );

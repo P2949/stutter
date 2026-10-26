@@ -585,6 +585,7 @@ fn manual_restore_command_supports_every_rollback_token_kind() {
             records: vec![CpuPowerRestoreRecord {
                 path: PathBuf::from("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor"),
                 original_value: "schedutil\n".to_owned(),
+                identity: None,
             }],
         },
         RollbackToken::VmKnobRestore {

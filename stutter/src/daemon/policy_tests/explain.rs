@@ -169,7 +169,9 @@ fn build_daemon_policy_is_deterministic_for_same_config() {
     assert_eq!(first.mode, DaemonMode::ApplyMediumRisk);
     assert_eq!(first.max_safety_class, SafetyClass::ReversibleMediumRisk);
     assert!(first.allow_system_wide_suggestions);
-    assert!(!first.allow_system_wide_apply);
+    // System-wide scope is its own permission and never implies high-risk apply.
+    assert!(first.allow_system_wide_apply);
+    assert!(!first.allow_high_risk);
     assert!(first.allow_persistent_effects);
     assert!(first.denied_action_families.contains("gpu-power"));
 }
@@ -217,4 +219,56 @@ fn denied_action_families_gate_apply_actions() {
     let rejection = policy.check_action(PolicyIntent::Apply, &desc).unwrap_err();
 
     assert_eq!(rejection.reason_code(), "action_family_denied");
+}
+
+fn medium_risk_policy(allow_system_wide_apply: bool) -> DaemonPolicy {
+    let mut config = crate::daemon::config::DaemonConfig {
+        mode: DaemonMode::ApplyMediumRisk,
+        source: ActionSource::Test,
+        ..crate::daemon::config::DaemonConfig::default()
+    };
+    config.autotune.allow_medium_risk_apply = true;
+    config.safety.allow_system_wide_apply = allow_system_wide_apply;
+    build_daemon_policy(DaemonPolicyBuildInput {
+        config: &config,
+        remote_context: None,
+    })
+}
+
+#[test]
+fn a_reversible_system_wide_operation_needs_the_scope_permission_but_never_high_risk() {
+    let mut desc = descriptor_with(
+        SafetyClass::ReversibleMediumRisk,
+        ActionEffectScope::CpuPower,
+        RollbackRequirement::RequiredBeforeApply,
+    );
+    desc.touches_system_wide_state = true;
+    let blocked = medium_risk_policy(false);
+    assert!(matches!(
+        blocked.explain_action(PolicyIntent::Apply, &desc).decision,
+        PolicyDecisionKind::Rejected {
+            rejection: PolicyRejection::SystemWideActionBlocked
+        }
+    ));
+    let allowed = medium_risk_policy(true);
+    assert!(allowed.allow_system_wide_apply);
+    assert!(!allowed.allow_high_risk);
+    assert!(
+        !allowed
+            .explain_action(PolicyIntent::Apply, &desc)
+            .evaluated_rules
+            .iter()
+            .any(|rule| rule.rule == "system_wide_apply_permission" && !rule.passed)
+    );
+    // The permission does not widen the risk ceiling: a high-risk action is still refused.
+    let mut high = descriptor_with(
+        SafetyClass::HighRisk,
+        ActionEffectScope::CpuPower,
+        RollbackRequirement::RequiredBeforeApply,
+    );
+    high.touches_system_wide_state = true;
+    assert!(matches!(
+        allowed.explain_action(PolicyIntent::Apply, &high).decision,
+        PolicyDecisionKind::Rejected { .. }
+    ));
 }

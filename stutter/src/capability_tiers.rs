@@ -52,7 +52,7 @@ const AFFINITY: &[&str] = &[
     "live_affinity_benefit",
 ];
 
-pub const CAPABILITIES: [Capability; 20] = [
+pub const CAPABILITIES: [Capability; 28] = [
     obs(
         "doctor",
         "Local preflight checks",
@@ -176,15 +176,103 @@ pub const CAPABILITIES: [Capability; 20] = [
         limitations: "Medium-risk; evaluated by its own graduation campaign and does not inherit CPU-affinity maturity.",
     },
     Capability {
-        id: "system_wide_tuning",
-        title: "IRQ affinity, CPU/GPU power and VM settings",
+        id: "cpu_power_epp",
+        title: "CPU energy-performance preference (EPP)",
         class: CapabilityClass::Mutating,
         tier: CapabilityTier::Experimental,
         target_tier: CapabilityTier::Experimental,
         commands: &["autotune"],
-        providers: &["irq_affinity", "cpu_power", "gpu_power", "vm_knob"],
+        providers: &["cpu_power"],
         required_evidence: &[],
-        limitations: "System-wide effects; manual/privileged only; not part of the first supported release.",
+        limitations: "System-wide effect. Reversible per-policy sysfs write; first system-wide candidate for autonomy. Does not inherit another operation's maturity.",
+    },
+    Capability {
+        id: "cpu_power_governor",
+        title: "CPU scaling governor",
+        class: CapabilityClass::Mutating,
+        tier: CapabilityTier::Experimental,
+        target_tier: CapabilityTier::Experimental,
+        commands: &["autotune"],
+        providers: &["cpu_power"],
+        required_evidence: &[],
+        limitations: "System-wide effect. Governor mutation is manual / high-risk and never autonomous. Does not inherit another operation's maturity.",
+    },
+    Capability {
+        id: "gpu_power_profile",
+        title: "GPU power profile mode",
+        class: CapabilityClass::Mutating,
+        tier: CapabilityTier::Experimental,
+        target_tier: CapabilityTier::Experimental,
+        commands: &["autotune"],
+        providers: &["gpu_power"],
+        required_evidence: &[],
+        limitations: "System-wide effect. Profile-only (pp_power_profile_mode); no forced performance level. Does not inherit another operation's maturity.",
+    },
+    Capability {
+        id: "gpu_force_performance",
+        title: "GPU forced performance level (DPM)",
+        class: CapabilityClass::Mutating,
+        tier: CapabilityTier::Experimental,
+        target_tier: CapabilityTier::Experimental,
+        commands: &["autotune"],
+        providers: &["gpu_power"],
+        required_evidence: &[],
+        limitations: "System-wide effect. Forced DPM is manual / high-risk and never autonomous. Does not inherit another operation's maturity.",
+    },
+    Capability {
+        id: "vm_swappiness",
+        title: "vm.swappiness",
+        class: CapabilityClass::Mutating,
+        tier: CapabilityTier::Experimental,
+        target_tier: CapabilityTier::Experimental,
+        commands: &["autotune"],
+        providers: &["vm_knob"],
+        required_evidence: &[],
+        limitations: "System-wide effect. Boot-aware recovery required; evaluated by its own campaign. Does not inherit another operation's maturity.",
+    },
+    Capability {
+        id: "vm_dirty_background_ratio",
+        title: "vm.dirty_background_ratio",
+        class: CapabilityClass::Mutating,
+        tier: CapabilityTier::Experimental,
+        target_tier: CapabilityTier::Experimental,
+        commands: &["autotune"],
+        providers: &["vm_knob"],
+        required_evidence: &[],
+        limitations: "System-wide effect. Dirty-ratio knobs are manual / high-risk and never autonomous. Does not inherit another operation's maturity.",
+    },
+    Capability {
+        id: "vm_dirty_ratio",
+        title: "vm.dirty_ratio",
+        class: CapabilityClass::Mutating,
+        tier: CapabilityTier::Experimental,
+        target_tier: CapabilityTier::Experimental,
+        commands: &["autotune"],
+        providers: &["vm_knob"],
+        required_evidence: &[],
+        limitations: "System-wide effect. Dirty-ratio knobs are manual / high-risk and never autonomous. Does not inherit another operation's maturity.",
+    },
+    Capability {
+        id: "irq_affinity_known_device",
+        title: "IRQ affinity of a known device",
+        class: CapabilityClass::Mutating,
+        tier: CapabilityTier::Experimental,
+        target_tier: CapabilityTier::Experimental,
+        commands: &["autotune"],
+        providers: &["irq_affinity"],
+        required_evidence: &[],
+        limitations: "System-wide effect. Needs a stable device identity and its own target-impact campaign. Does not inherit another operation's maturity.",
+    },
+    Capability {
+        id: "irq_affinity_storage_or_unknown",
+        title: "IRQ affinity of storage or unknown devices",
+        class: CapabilityClass::Mutating,
+        tier: CapabilityTier::Experimental,
+        target_tier: CapabilityTier::Experimental,
+        commands: &["autotune"],
+        providers: &["irq_affinity"],
+        required_evidence: &[],
+        limitations: "System-wide effect. Storage and unknown IRQs are manual / high-risk and never autonomous. Does not inherit another operation's maturity.",
     },
     Capability {
         id: "always_on_autotune",
@@ -308,13 +396,26 @@ mod tests {
     }
 
     #[test]
-    fn every_mutation_provider_is_governed_by_exactly_one_capability() {
+    fn every_mutation_provider_is_governed_and_every_operation_has_exactly_one_capability() {
         for kind in MUTATION_PROVIDER_KINDS {
             let owners = capability_registry()
                 .iter()
                 .filter(|capability| capability.providers.contains(&kind))
                 .count();
-            assert_eq!(owners, 1, "provider {kind} must have exactly one owner");
+            assert!(owners >= 1, "provider {kind} must be governed");
+        }
+        // Authority is per operation: each operation names one capability, and no two operations
+        // share one, so one operation's maturity can never authorise another.
+        let mut owners = BTreeSet::new();
+        for operation in crate::autotune::operation::MutationOperationKind::ALL {
+            let Some(id) = operation.capability_id() else {
+                continue;
+            };
+            assert!(
+                capability_registry().iter().any(|c| c.id == id),
+                "{operation:?} names unknown capability {id}"
+            );
+            assert!(owners.insert(id), "{id} governs more than one operation");
         }
         for capability in capability_registry() {
             for provider in capability.providers {

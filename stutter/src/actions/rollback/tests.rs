@@ -320,6 +320,7 @@ fn default_rollback_registry_has_handler_for_every_reversible_token_kind() {
                 records: vec![crate::actions::CpuPowerRestoreRecord {
                     path: PathBuf::from("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor"),
                     original_value: "powersave".to_owned(),
+                    identity: None,
                 }],
             },
         ),

@@ -398,23 +398,14 @@ pub(super) fn restore_cgroup_cpuset_record_at(
 pub(super) fn restore_cpu_power_records(
     records: &[CpuPowerRestoreRecord],
 ) -> anyhow::Result<RollbackRestoreSummary> {
-    let mut restored = 0usize;
-
-    for record in records {
-        write_sysfs_value(&record.path, &record.original_value).with_context(|| {
-            format!(
-                "failed to restore CPU power sysfs value {} to {:?}",
-                record.path.display(),
-                record.original_value
-            )
-        })?;
-        restored += 1;
-    }
-
-    Ok(RollbackRestoreSummary::success(
-        "cpu-power-restore",
-        restored,
-    ))
+    // A record that carries a cpufreq identity is only replayed onto the resource it names.
+    let outcome = crate::actions::cpu_power::rollback_verified(records, false)
+        .context("failed to restore CPU power sysfs values")?;
+    let mut summary = RollbackRestoreSummary::success("cpu-power-restore", outcome.restored);
+    summary.skipped_items += outcome.skipped_identity_mismatch;
+    summary.skipped_identity_mismatch += outcome.skipped_identity_mismatch;
+    summary.messages.extend(outcome.messages);
+    Ok(summary)
 }
 
 pub(super) fn restore_vm_knob_records(

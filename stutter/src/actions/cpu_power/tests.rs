@@ -397,18 +397,22 @@ fn rollback_restores_all_values_and_verifies() {
             CpuPowerRestoreRecord {
                 path: cpufreq0.join("scaling_governor"),
                 original_value: "schedutil".to_owned(),
+                identity: None,
             },
             CpuPowerRestoreRecord {
                 path: cpufreq0.join("energy_performance_preference"),
                 original_value: "balance_performance".to_owned(),
+                identity: None,
             },
             CpuPowerRestoreRecord {
                 path: cpufreq1.join("scaling_governor"),
                 original_value: "schedutil".to_owned(),
+                identity: None,
             },
             CpuPowerRestoreRecord {
                 path: cpufreq1.join("energy_performance_preference"),
                 original_value: "balance_performance".to_owned(),
+                identity: None,
             },
         ],
     };
@@ -451,12 +455,14 @@ fn cpu_power_restore_token_reports_affected_records_and_no_restore_path() {
             CpuPowerRestoreRecord {
                 path: PathBuf::from("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor"),
                 original_value: "schedutil".to_owned(),
+                identity: None,
             },
             CpuPowerRestoreRecord {
                 path: PathBuf::from(
                     "/sys/devices/system/cpu/cpu0/cpufreq/energy_performance_preference",
                 ),
                 original_value: "balance_performance".to_owned(),
+                identity: None,
             },
         ],
     };
@@ -476,6 +482,7 @@ fn apply_with_policy_for_test(
         records.push(CpuPowerRestoreRecord {
             path: target.path.clone(),
             original_value: target.original_value.clone(),
+            identity: None,
         });
 
         if target.original_value == target.requested_value {
@@ -497,3 +504,5 @@ fn apply_with_policy_for_test(
 
     Ok(RollbackToken::CpuPowerRestore { records })
 }
+
+mod prepared_tests;
