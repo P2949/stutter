@@ -95,7 +95,7 @@ pub mod autotune {
         crash_acceptance::{
             RecoveryCheckpoint, RecoveryControllerInput, SuspendResumeControllerInput,
             hold_recovery_controller, hold_suspend_resume_controller,
-            recover_acceptance_controller,
+            prepare_nice_validation_process, recover_acceptance_controller,
         },
         objective::{
             DEFAULT_MAX_REGRESSION_PERCENT, DEFAULT_MIN_IMPROVEMENT_PERCENT,

@@ -34,6 +34,9 @@ pub(super) fn run(
     mutation: AcceptanceMutation,
     options: &SuspendOptions,
 ) -> anyhow::Result<()> {
+    if mutation == AcceptanceMutation::Nice {
+        stutter::api::autotune::prepare_nice_validation_process()?;
+    }
     ensure!(
         cfg!(target_os = "linux"),
         "suspend acceptance requires Linux"

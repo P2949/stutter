@@ -7,6 +7,10 @@ pub(super) fn run(
     mutation: stutter::api::autotune::AcceptanceMutation,
 ) -> anyhow::Result<()> {
     use stutter::api::autotune::AcceptanceMutation;
+    if mutation == AcceptanceMutation::Nice {
+        // Children inherit the raised limit, so the disposable tree can be un-demoted.
+        stutter::api::autotune::prepare_nice_validation_process()?;
+    }
     ensure!(
         cfg!(target_os = "linux"),
         "affinity acceptance requires Linux"

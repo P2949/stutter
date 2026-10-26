@@ -70,6 +70,9 @@ pub(super) fn run(
     binary: &Path,
     mutation: AcceptanceMutation,
 ) -> anyhow::Result<()> {
+    if mutation == AcceptanceMutation::Nice {
+        stutter::api::autotune::prepare_nice_validation_process()?;
+    }
     ensure!(
         cfg!(target_os = "linux"),
         "recovery acceptance requires Linux"
