@@ -58,6 +58,7 @@ fn builder_scopes_runnable_histograms_to_the_selected_process_tree() {
             sys_root: &sys_root,
             activity_level: ActivityLevel::Active,
             offenders: Vec::new(),
+            extra_config_tids: Vec::new(),
         })
         .observation;
         let signals = observation.objective_signals;
@@ -92,6 +93,7 @@ fn builder_scopes_runnable_histograms_to_the_selected_process_tree() {
         sys_root: &sys_root,
         activity_level: ActivityLevel::Active,
         offenders: Vec::new(),
+        extra_config_tids: Vec::new(),
     })
     .observation;
     assert!(observation.scored_samples > 0);

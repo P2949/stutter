@@ -111,6 +111,8 @@ pub struct ValidationRun {
     /// Medium-risk mutation goes through the production privileged-service path; a campaign
     /// whose disposable target the controller's own user owns runs that service in-process.
     pub in_process_privileged: bool,
+    /// Only background processes descending from this one are offender candidates.
+    pub offender_scope_parent: Option<u32>,
 }
 
 /// Blocking form for harnesses that own no async runtime.
@@ -200,6 +202,7 @@ pub async fn autotune_command_with(
             crate::syscall::raise_nice_rlimit_for_validation()?;
         }
         runtime_config.validation_override = Some(run.grant);
+        runtime_config.offender_scope_parent = run.offender_scope_parent;
         runtime_config.history_log = Some(run.history_log);
         runtime_config.controller_journal_path = Some(run.controller_journal_path);
         runtime_config

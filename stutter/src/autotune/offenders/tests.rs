@@ -38,7 +38,14 @@ fn run_rounds(
         for (pid, comm) in pids {
             fake_process(root, *pid, comm, ticks_per_round * u64::from(round), 7, 0);
         }
-        last = sampler.sample_at(at(u64::from(round)), root, 100, owner(), &BTreeSet::new());
+        last = sampler.sample_at(
+            at(u64::from(round)),
+            root,
+            100,
+            owner(),
+            &BTreeSet::new(),
+            None,
+        );
     }
     last
 }
@@ -78,7 +85,14 @@ fn kernel_threads_excluded_pids_and_replaced_processes_are_not_reported() {
         fake_process(root.path(), 601, "focused", 30 * round, 7, 0);
         // The same pid is reused by a different process (new start time) every round.
         fake_process(root.path(), 602, "recycled", 30 * round, 7 + round, 0);
-        let seen = sampler.sample_at(at(round), root.path(), 100, owner(), &BTreeSet::from([601]));
+        let seen = sampler.sample_at(
+            at(round),
+            root.path(),
+            100,
+            owner(),
+            &BTreeSet::from([601]),
+            None,
+        );
         assert!(seen.is_empty(), "round {round}: {seen:?}");
     }
 }
@@ -92,7 +106,7 @@ fn another_users_process_and_protected_infrastructure_are_left_alone() {
     for round in 0..=6u64 {
         fake_process(root.path(), 700, "pipewire", 30 * round, 7, 0);
         fake_process(root.path(), 701, "hog", 30 * round, 7, 0);
-        last = sampler.sample_at(at(round), root.path(), 100, foreign, &BTreeSet::new());
+        last = sampler.sample_at(at(round), root.path(), 100, foreign, &BTreeSet::new(), None);
     }
     assert!(
         last.is_empty(),
@@ -102,10 +116,30 @@ fn another_users_process_and_protected_infrastructure_are_left_alone() {
     let mut last = Vec::new();
     for round in 0..=6u64 {
         fake_process(root.path(), 700, "pipewire", 30 * round, 7, 0);
-        last = sampler.sample_at(at(round), root.path(), 100, owner(), &BTreeSet::new());
+        last = sampler.sample_at(at(round), root.path(), 100, owner(), &BTreeSet::new(), None);
     }
     assert!(
         last.is_empty(),
         "audio infrastructure is protected: {last:?}"
     );
+}
+
+#[test]
+fn a_validation_scope_reports_only_descendants_of_its_harness() {
+    let root = crate::test_support::TestRoot::new("offenders-scope");
+    let mut sampler = OffenderSampler::default();
+    let mut last = Vec::new();
+    for round in 0..=6u64 {
+        // fake_process gives every process parent 1; 4242 is the harness that started none of them.
+        fake_process(root.path(), 800, "hog", 30 * round, 7, 0);
+        last = sampler.sample_at(
+            at(round),
+            root.path(),
+            100,
+            owner(),
+            &BTreeSet::new(),
+            Some(4242),
+        );
+    }
+    assert!(last.is_empty(), "{last:?}");
 }

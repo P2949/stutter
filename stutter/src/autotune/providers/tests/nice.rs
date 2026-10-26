@@ -58,6 +58,7 @@ fn offender(pid: u32, nice: i32) -> crate::autotune::offenders::OffenderProcess 
         nice,
         cpu_percent: 96.0,
         sustained_samples: 4,
+        task_nice: [(pid, nice), (pid + 1, nice)].into_iter().collect(),
         tasks: vec![
             crate::actions::TaskIdentity {
                 tid: pid.into(),

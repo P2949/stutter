@@ -41,6 +41,8 @@ pub struct AutotuneRuntimeConfig {
     /// Granted only by a validation campaign for its exact operation and objective; the product
     /// leaves it unset, so normal autonomous apply stays behind the support registry.
     pub validation_override: Option<crate::autotune::autonomous_support::ValidationOverride>,
+    /// A validation run only considers background contention started by this process.
+    pub offender_scope_parent: Option<u32>,
 }
 
 fn resolve_workload_policy_config(
@@ -177,6 +179,7 @@ impl AutotuneRuntimeConfig {
             simulated_candidates: Vec::new(),
             simulate_action_effects: false,
             validation_override: None,
+            offender_scope_parent: None,
         }
     }
 

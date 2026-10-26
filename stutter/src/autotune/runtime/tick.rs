@@ -365,6 +365,7 @@ impl AutotuneRuntime {
                 crate::syscall::clock_ticks_per_second(),
                 owner,
                 &exclude,
+                self.config.offender_scope_parent,
             ),
             Err(_) => Vec::new(),
         }
@@ -374,11 +375,21 @@ impl AutotuneRuntime {
         let explicit_focus = self.explicit_target_focus();
         let focus = self.latest_focus.as_ref().or(explicit_focus.as_ref());
         let offenders = self.sample_offenders(focus);
+        let extra_config_tids =
+            self.live_experiments
+                .current_experiment()
+                .map_or_else(Vec::new, |experiment| match &experiment.rollback {
+                    crate::actions::RollbackToken::NiceRestore { records } => {
+                        records.iter().map(|record| record.tid()).collect()
+                    }
+                    _ => Vec::new(),
+                });
         AutotuneObservationBuilder::build(AutotuneObservationBuilderInput {
             window: &self.controller.window,
             online_data_quality_policy: &self.config.online_data_quality_policy,
             focus,
             offenders,
+            extra_config_tids,
             // Preserve the distinction between a configured process-tree root
             // and a focus-derived root, so focus group helpers stay in scope.
             root_pid: self.config.tree_pid().or(self
