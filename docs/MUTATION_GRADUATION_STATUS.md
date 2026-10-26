@@ -89,3 +89,25 @@ pin them by manifest digest.
   CPU wake queue.
 - Consequence: per the roadmap, `cpu_power_epp` remains Experimental and M7 is not complete on this
   hardware; governor mutation is not used as a fallback.
+
+## M8 dispositions (evaluated against the roadmap's prerequisites)
+
+None of the three operations can pass its own prerequisite on this host; each stays Experimental and
+none is promoted to make the matrix look complete.
+
+- **gpu_power_profile - DeferredEvidence.** Only `pp_power_profile_mode` could ever be considered, and
+  its primary objective is `GameFramePacing`, which is itself Experimental (no Validating objective,
+  no frame-pacing graduation evidence). The host GPU (AMD, `pp_power_profile_mode` present) is
+  addressable only as `cardN`; a stable PCI/render-node bound recovery token would have to be built
+  and qualified before any campaign, and without a Validating objective there is nothing for the
+  campaign to decide with. Forced DPM stays HighRisk/manual.
+- **vm_swappiness - DeferredEvidence.** The campaign needs real memory/swap pressure and a Supported
+  direct workload objective. The only Supported objective measures CPU wake latency, which
+  `vm.swappiness` does not influence, and `CompileThroughputWithForegroundProtection` is only
+  Validating. The runtime-sysctl token also needs a boot-aware retirement rule that no consumer yet
+  needs. Dirty-ratio knobs stay HighRisk/manual.
+- **irq_known_device - DeferredEvidence.** The post-v0.1 IRQ study stays invalid (`INVALID`: no
+  frame effect could be produced) and is not used. A new target-impact experiment needs controllable
+  interrupt traffic on a known non-storage device class; this host has no peer to generate network
+  or USB traffic against, so the effect on the target cannot be demonstrated. Storage and unknown
+  IRQs stay HighRisk/manual.
