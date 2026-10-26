@@ -86,8 +86,16 @@ impl AutotuneObservationBuilder {
             sampled_at_unix_nanos: crate::audit::unix_nanos_now(),
         });
         let capabilities = system_context.capabilities.clone();
+        let offenders = input.offenders;
         let topology_signature = system_context.inventory.inventory_hash.clone();
-        let active_config_snapshot = system_context.active_config.clone();
+        let mut active_config_snapshot = system_context.active_config.clone();
+        // Offenders are outside the target tree, so the collector never read their niceness.
+        for offender in &offenders {
+            active_config_snapshot
+                .nice
+                .per_tid
+                .extend(offender.task_nice.iter().map(|(tid, nice)| (*tid, *nice)));
+        }
         let target_root_pid = input.root_pid.or_else(|| focus_roots.first().copied());
         let workload_identity = workload_identity_from_runtime_context(
             input.proc_root,
@@ -160,8 +168,7 @@ impl AutotuneObservationBuilder {
             workload_identity,
             active_tasks,
             protected_tasks,
-            background_offenders: input
-                .offenders
+            background_offenders: offenders
                 .into_iter()
                 .filter(|offender| !runnable_members.contains(&offender.pid.as_u32()))
                 .collect(),

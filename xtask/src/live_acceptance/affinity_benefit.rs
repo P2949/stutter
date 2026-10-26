@@ -200,6 +200,8 @@ pub(super) fn run_controller(
             session_seconds: window_seconds * 3 + 60,
             in_process_privileged: mutation.mode()
                 == stutter::api::daemon::DaemonMode::ApplyMediumRisk,
+            // The contention this pair started is the pair process's own children.
+            offender_scope_parent: Some(std::os::unix::process::parent_id()),
         }),
     )
 }

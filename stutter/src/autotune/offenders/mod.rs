@@ -44,6 +44,10 @@ pub struct OffenderProcess {
     pub sustained_samples: u32,
     /// Every task of the process with its own start time, read at sampling time.
     pub tasks: Vec<TaskIdentity>,
+    /// The niceness each task had when it was sampled (the active configuration the apply
+    /// preflight compares against).
+    #[serde(default)]
+    pub task_nice: BTreeMap<u32, i32>,
 }
 
 #[derive(Clone, Debug)]
@@ -93,6 +97,7 @@ impl OffenderSampler {
         clock_ticks_per_second: u64,
         owner_uid: u32,
         exclude: &BTreeSet<u32>,
+        only_descendants_of: Option<u32>,
     ) -> Vec<OffenderProcess> {
         self.sample_at(
             std::time::Instant::now(),
@@ -100,6 +105,7 @@ impl OffenderSampler {
             clock_ticks_per_second,
             owner_uid,
             exclude,
+            only_descendants_of,
         )
     }
 
@@ -110,6 +116,7 @@ impl OffenderSampler {
         clock_ticks_per_second: u64,
         owner_uid: u32,
         exclude: &BTreeSet<u32>,
+        only_descendants_of: Option<u32>,
     ) -> Vec<OffenderProcess> {
         let elapsed = self.last_sample.map(|at| now.duration_since(at));
         let usable_interval = elapsed.filter(|elapsed| *elapsed >= MIN_SAMPLE_INTERVAL);
@@ -147,6 +154,8 @@ impl OffenderSampler {
                     if percent >= OFFENDER_MIN_CPU_PERCENT {
                         let hot = before.hot_samples.saturating_add(1);
                         if hot >= OFFENDER_MIN_SUSTAINED_SAMPLES
+                            && only_descendants_of
+                                .is_none_or(|ancestor| descends_from(proc_root, pid, ancestor))
                             && let Some(process) =
                                 describe(proc_root, pid, &stat, percent, hot, owner_uid)
                         {
@@ -215,9 +224,11 @@ fn describe(
         return None;
     }
     let mut tasks = Vec::new();
+    let mut task_nice = BTreeMap::new();
     for entry in fs::read_dir(process_dir.join("task")).ok()?.flatten() {
         let tid = entry.file_name().to_str()?.parse::<u32>().ok()?;
         let task = parse_stat(&fs::read_to_string(entry.path().join("stat")).ok()?)?;
+        task_nice.insert(tid, task.nice);
         tasks.push(TaskIdentity {
             tid: tid.into(),
             process_pid: Some(pid.into()),
@@ -237,7 +248,37 @@ fn describe(
         cpu_percent,
         sustained_samples,
         tasks,
+        task_nice,
     })
+}
+
+/// Whether `ancestor` is on the parent chain of `pid` (a validation run only ever considers the
+/// contention its own harness started, never the user's real work).
+fn descends_from(proc_root: &Path, pid: u32, ancestor: u32) -> bool {
+    let mut current = pid;
+    for _ in 0..64 {
+        let Some(parent) = fs::read_to_string(proc_root.join(current.to_string()).join("stat"))
+            .ok()
+            .and_then(|stat| {
+                stat.rsplit_once(')')?
+                    .1
+                    .split_whitespace()
+                    .nth(1)?
+                    .parse::<u32>()
+                    .ok()
+            })
+        else {
+            return false;
+        };
+        if parent == ancestor {
+            return true;
+        }
+        if parent <= 1 {
+            return false;
+        }
+        current = parent;
+    }
+    false
 }
 
 #[cfg(test)]

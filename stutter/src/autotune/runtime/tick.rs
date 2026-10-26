@@ -365,6 +365,7 @@ impl AutotuneRuntime {
                 crate::syscall::clock_ticks_per_second(),
                 owner,
                 &exclude,
+                self.config.offender_scope_parent,
             ),
             Err(_) => Vec::new(),
         }
