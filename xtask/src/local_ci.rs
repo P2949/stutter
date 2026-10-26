@@ -405,12 +405,17 @@ pub fn release_check(
     let staging = Staging::create(&destination)?;
     let staging_text = staging.path().to_string_lossy().into_owned();
     let object_text = object.to_string_lossy().into_owned();
-    let executable = std::env::current_exe()?;
-    let executable = executable.to_string_lossy().into_owned();
+    // Through cargo, not `current_exe`: an earlier stage of `ci-all` rebuilds this very binary,
+    // after which the running file is a deleted inode and cannot be executed by path.
     run_process(
         root,
-        &executable,
+        "cargo",
         &[
+            "run",
+            "-q",
+            "-p",
+            "xtask",
+            "--",
             "release-package",
             "--binary",
             "target/release/stutter",
@@ -420,7 +425,19 @@ pub fn release_check(
             &staging_text,
         ],
     )?;
-    run_process(root, &executable, &["release-verify", &staging_text])?;
+    run_process(
+        root,
+        "cargo",
+        &[
+            "run",
+            "-q",
+            "-p",
+            "xtask",
+            "--",
+            "release-verify",
+            &staging_text,
+        ],
+    )?;
     staging.install(&destination)?;
     println!("release-check: PASS ({})", destination.path().display());
     Ok(())
