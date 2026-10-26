@@ -301,3 +301,25 @@ fn command_texts(commands: &[crate::workflow::CommandSpec]) -> Vec<String> {
         .map(|command| format_command(command.program, command.args))
         .collect::<Vec<_>>()
 }
+
+#[test]
+fn release_outputs_are_managed_unless_the_caller_names_one() {
+    use clap::Parser;
+
+    use super::XtaskCommand;
+
+    let out = |arguments: &[&str]| match Cli::parse_from(arguments).command {
+        XtaskCommand::ReleaseCheck { out, .. } | XtaskCommand::CiAll { out } => out,
+        other => panic!("unexpected command {other:?}"),
+    };
+    assert_eq!(out(&["xtask", "release-check"]), None);
+    assert_eq!(out(&["xtask", "ci-all"]), None);
+    assert_eq!(
+        out(&["xtask", "release-check", "--out", "dist/x"]),
+        Some("dist/x".into())
+    );
+    assert_eq!(
+        out(&["xtask", "ci-all", "--out", "dist/y"]),
+        Some("dist/y".into())
+    );
+}

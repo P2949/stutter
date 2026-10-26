@@ -13,6 +13,7 @@ use anyhow::{Context, bail, ensure};
 
 use crate::{
     process::{run_process, rustup_toolchain},
+    release_output::{Destination, Staging},
     workflow::CommandSpec,
 };
 
@@ -382,7 +383,16 @@ fn find_ebpf_object(root: &Path) -> anyhow::Result<PathBuf> {
 }
 
 /// Build, package and verify the release locally (the release workflow's whole job).
-pub fn release_check(root: &Path, out: &Path, expected_tag: Option<&str>) -> anyhow::Result<()> {
+///
+/// The package is built and verified in a staging directory beside the destination and installed
+/// only once it verified, so a failed rerun leaves the previous verified result in place.
+pub fn release_check(
+    root: &Path,
+    out: Option<&Path>,
+    expected_tag: Option<&str>,
+) -> anyhow::Result<()> {
+    let destination = Destination::resolve(root, out);
+    destination.preflight()?;
     run_process(root, "cargo", &["build", "-p", "stutter", "--release"])?;
     if let Some(tag) = expected_tag {
         let version = stutter_version(root)?;
@@ -392,29 +402,48 @@ pub fn release_check(root: &Path, out: &Path, expected_tag: Option<&str>) -> any
         );
     }
     let object = find_ebpf_object(root)?;
-    let out_text = out.to_string_lossy().into_owned();
+    let staging = Staging::create(&destination)?;
+    let staging_text = staging.path().to_string_lossy().into_owned();
     let object_text = object.to_string_lossy().into_owned();
-    let executable = std::env::current_exe()?;
-    let executable = executable.to_string_lossy().into_owned();
+    // Through cargo, not `current_exe`: an earlier stage of `ci-all` rebuilds this very binary,
+    // after which the running file is a deleted inode and cannot be executed by path.
     run_process(
         root,
-        &executable,
+        "cargo",
         &[
+            "run",
+            "-q",
+            "-p",
+            "xtask",
+            "--",
             "release-package",
             "--binary",
             "target/release/stutter",
             "--bpf-object",
             &object_text,
             "--out",
-            &out_text,
+            &staging_text,
         ],
     )?;
-    run_process(root, &executable, &["release-verify", &out_text])?;
-    println!("release-check: PASS ({})", out.display());
+    run_process(
+        root,
+        "cargo",
+        &[
+            "run",
+            "-q",
+            "-p",
+            "xtask",
+            "--",
+            "release-verify",
+            &staging_text,
+        ],
+    )?;
+    staging.install(&destination)?;
+    println!("release-check: PASS ({})", destination.path().display());
     Ok(())
 }
 
-pub fn ci_all(root: &Path, out: &Path) -> anyhow::Result<()> {
+pub fn ci_all(root: &Path, out: Option<&Path>) -> anyhow::Result<()> {
     ci(root, None)?;
     ci_live(root)?;
     release_check(root, out, None)?;
