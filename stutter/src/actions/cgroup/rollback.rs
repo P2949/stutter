@@ -13,7 +13,10 @@ use crate::actions::{
     verify_task_identity,
 };
 
-pub(crate) struct CgroupRollbackHandler;
+pub(crate) struct CgroupRollbackHandler {
+    /// Startup recovery never restores a record whose task or cgroup identity cannot be verified.
+    pub(crate) require_verified_identity: bool,
+}
 
 impl RollbackHandler for CgroupRollbackHandler {
     fn id(&self) -> &'static str {
@@ -102,6 +105,13 @@ impl CgroupRollbackHandler {
                     messages.push(msg);
                     continue;
                 }
+                RestoreIdentityStatus::UnknownLegacy if self.require_verified_identity => {
+                    skipped_identity_mismatch += 1;
+                    messages.push(format!(
+                        "cgroup restore refused unverifiable task identity for tid={tid}"
+                    ));
+                    continue;
+                }
                 RestoreIdentityStatus::UnknownLegacy => {
                     legacy_unverified += 1;
                     log::warn!(
@@ -119,6 +129,18 @@ impl CgroupRollbackHandler {
                         record.original_cgroup.display()
                     )
                 })?;
+            let expected_id = record.original_cgroup_id;
+            let current_id = super::prepared::cgroup_id(&original_cgroup).ok();
+            if (self.require_verified_identity && expected_id.is_none())
+                || expected_id.is_some_and(|expected| current_id != Some(expected))
+            {
+                skipped_identity_mismatch += 1;
+                messages.push(format!(
+                    "cgroup restore refused: original cgroup {} is not the cgroup tid={tid} left",
+                    record.original_cgroup.display()
+                ));
+                continue;
+            }
             let cgroup_procs = original_cgroup.join("cgroup.procs");
             match write_trimmed(&cgroup_procs, &tid.to_string()) {
                 Ok(()) => {
