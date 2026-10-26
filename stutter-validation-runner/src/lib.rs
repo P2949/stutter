@@ -6,6 +6,7 @@ pub mod boot;
 pub mod cli;
 pub mod client;
 pub mod credentials;
+pub mod delegation;
 pub mod install;
 pub mod model;
 pub mod process;

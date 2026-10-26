@@ -312,6 +312,7 @@ impl SystemExecutor {
         label: &str,
         capabilities: crate::credentials::CapabilitySet,
         timeout: Duration,
+        delegated_leaf: Option<&Path>,
     ) -> Result<Value, Denial> {
         self.prepare_dir(auth, &plan.attempt_dir)?;
         let logs = plan.attempt_dir.join("logs");
@@ -333,6 +334,15 @@ impl SystemExecutor {
         let mut child = command
             .spawn()
             .map_err(|error| failure(format!("could not start {label}: {error}")))?;
+        if let Some(leaf) = delegated_leaf
+            && let Err(error) = crate::delegation::attach(leaf, child.id())
+        {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(failure(format!(
+                "could not attach {label} to its delegated cgroup: {error}"
+            )));
+        }
         let started = Instant::now();
         let status = loop {
             if let Some(status) = child
@@ -427,7 +437,10 @@ impl ActionExecutor for SystemExecutor {
     }
 
     fn live_suite(&self, auth: &Authorization, envelope: &Envelope) -> Result<Value, Denial> {
-        let Request::ExecuteLiveSuite { suite, .. } = &envelope.body else {
+        let Request::ExecuteLiveSuite {
+            suite, mutation, ..
+        } = &envelope.body
+        else {
             return Err((
                 ErrorCode::InvalidArgument,
                 "not a live-suite request".to_owned(),
@@ -436,13 +449,30 @@ impl ActionExecutor for SystemExecutor {
         let plan = plan_live_suite(auth, envelope)?;
         verify_pinned(&xtask_path(auth), &auth.xtask_sha256)?;
         verify_pinned(&stutter_path(auth), &auth.stutter_sha256)?;
-        self.run_planned(
+        let leaf = if mutation.is_some_and(|m| m.needs_delegated_cgroup()) {
+            let owner = self
+                .drop_to_owner
+                .then_some((auth.owner_uid, auth.owner_gid));
+            Some(
+                crate::delegation::prepare(Path::new("/sys/fs/cgroup"), &auth.campaign_id, owner)
+                    .map_err(|e| failure(format!("could not delegate a cgroup subtree: {e}")))?,
+            )
+        } else {
+            None
+        };
+        let capabilities = profiling_capabilities(suite.needs_scheduler_priority());
+        let result = self.run_planned(
             auth,
             &plan,
             suite.xtask_name(),
-            profiling_capabilities(suite.needs_scheduler_priority()),
+            capabilities,
             SUITE_TIMEOUT,
-        )
+            leaf.as_deref(),
+        );
+        if leaf.is_some() {
+            let _ = crate::delegation::remove(Path::new("/sys/fs/cgroup"), &auth.campaign_id);
+        }
+        result
     }
 
     fn recording(&self, auth: &Authorization, envelope: &Envelope) -> Result<Value, Denial> {
@@ -482,6 +512,7 @@ impl ActionExecutor for SystemExecutor {
             "record",
             profiling_capabilities(false),
             Duration::from_secs(*seconds + 120),
+            None,
         )
     }
 
@@ -499,6 +530,7 @@ impl ActionExecutor for SystemExecutor {
             "overhead-workload",
             profiling_capabilities(false),
             SUITE_TIMEOUT,
+            None,
         )
     }
 

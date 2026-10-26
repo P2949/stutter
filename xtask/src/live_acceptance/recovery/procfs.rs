@@ -32,6 +32,15 @@ fn read_property(mutation: AcceptanceMutation, pid: u32, tid: u32) -> anyhow::Re
                 .trim()
                 .to_owned())
         }
+        AcceptanceMutation::Cgroup => {
+            let text = fs::read_to_string(format!("/proc/{pid}/task/{tid}/cgroup"))?;
+            Ok(text
+                .lines()
+                .find_map(|line| line.strip_prefix("0::"))
+                .context("cgroup v2 path missing")?
+                .trim()
+                .to_owned())
+        }
         AcceptanceMutation::Nice => {
             let stat = fs::read_to_string(format!("/proc/{pid}/task/{tid}/stat"))?;
             Ok(stat
@@ -64,6 +73,13 @@ pub(super) fn applied_value(
 ) -> anyhow::Result<String> {
     Ok(match mutation {
         AcceptanceMutation::Affinity | AcceptanceMutation::Nice => desired.to_string(),
+        // The tree moves into the `target` sibling of the leaf it started in.
+        AcceptanceMutation::Cgroup => std::path::Path::new(original)
+            .parent()
+            .context("the tree does not run in a delegated cgroup subtree")?
+            .join("target")
+            .to_string_lossy()
+            .into_owned(),
         AcceptanceMutation::Uclamp => {
             let (_, max) = original.split_once('/').context("uclamp value malformed")?;
             format!("{desired}/{max}")
@@ -175,7 +191,40 @@ pub(super) fn verify_saved(
         ),
         AcceptanceMutation::Uclamp => verify_saved_uclamp(before, token),
         AcceptanceMutation::Nice => verify_saved_nice(before, token),
+        AcceptanceMutation::Cgroup => verify_saved_cgroup(before, token),
     }
+}
+
+fn verify_saved_cgroup(before: &Snapshot, token: &Value) -> anyhow::Result<()> {
+    ensure!(
+        token["kind"] == "CgroupRestore",
+        "cgroup token kind differs"
+    );
+    let records = token["records"]
+        .as_array()
+        .context("cgroup token records missing")?;
+    ensure!(records.len() == before.len(), "token task count differs");
+    let mut seen = BTreeSet::new();
+    for record in records {
+        let identity = &record["identity"];
+        let tid = record["tid"]
+            .as_u64()
+            .and_then(|tid| u32::try_from(tid).ok())
+            .context("token TID invalid")?;
+        let task = before.get(&tid).context("token includes unexpected task")?;
+        ensure!(seen.insert(tid), "duplicate token task");
+        ensure!(
+            identity["process_pid"].as_u64() == Some(u64::from(task.pid))
+                && identity["starttime_ticks"].as_u64() == Some(task.task_ticks),
+            "token identity differs for {tid}"
+        );
+        ensure!(
+            record["original_cgroup"].as_str() == Some(task.mask.as_str())
+                && record["original_cgroup_id"].as_u64().is_some(),
+            "token original cgroup or its identity differs for {tid}"
+        );
+    }
+    Ok(())
 }
 
 fn verify_saved_nice(before: &Snapshot, token: &Value) -> anyhow::Result<()> {

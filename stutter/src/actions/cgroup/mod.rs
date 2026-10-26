@@ -16,6 +16,7 @@ use crate::actions::{
     verify_task_identity,
 };
 
+mod acceptance;
 mod fs_io;
 mod model;
 mod prepared;
@@ -26,6 +27,7 @@ mod validation;
 #[cfg(test)]
 mod tests;
 
+pub use acceptance::verify_cgroup_lifecycle;
 pub(crate) use fs_io::resolve_cgroup_fs_path as cgroup_fs_path;
 use fs_io::*;
 use model::CgroupTargetSnapshot;

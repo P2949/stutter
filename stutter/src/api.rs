@@ -38,7 +38,8 @@ pub mod actions {
         RollbackTokenKindError, SafetyClass, ScopeLimitExceeded, TaskIdentity, TuningAction,
         UclampRestoreRecord, VmKnobAction, VmKnobChange, VmKnobMode, VmKnobPolicy,
         VmKnobRestoreRecord, acceptance::verify_cpu_affinity_lifecycle,
-        nice::verify_nice_lifecycle, uclamp::verify_uclamp_lifecycle,
+        cgroup::verify_cgroup_lifecycle, nice::verify_nice_lifecycle,
+        uclamp::verify_uclamp_lifecycle,
     };
 }
 

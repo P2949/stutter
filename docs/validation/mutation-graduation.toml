@@ -158,3 +158,49 @@ regression = "affinity-colocated"
 min_improvement_percent = [10.0, 12.5, 15.0, 20.0, 25.0, 30.0, 40.0]
 max_regression_percent = [5.0, 7.5, 10.0, 15.0]
 min_samples = [1000]
+
+[operation.cgroup_placement]
+operation = "cgroup_placement"
+objective = "game_runnable_latency"
+capability = "cgroup_placement_experiment"
+workload = "game"
+pressure = "scheduler"
+effect_scope = "cgroup"
+# The fault matrix, mechanical lifecycle and benefit pair drive the cgroup mutation. The runner
+# delegates a cgroup subtree (cpu and cpuset controllers) to the campaign user and runs these
+# suites inside it, so the suite may create the administrator's game cgroup and move its own
+# disposable tasks without any privileged process of its own.
+mutation = "cgroup"
+privileged_worker = false
+stages = [
+  "preflight",
+  "mechanical",
+  "fault_matrix",
+  "suspend_resume",
+  "benefit_calibration",
+  "benefit_holdout",
+  "evidence_integrate",
+  "tier_decision",
+]
+skip = [
+  { stage = "kernel_matrix", reason = "cgroup v2 task migration and cpuset are core kernel interfaces present on every supported kernel; the core kernel matrix already covers the recorder on each of them" },
+]
+
+[operation.cgroup_placement.suites]
+mechanical = "affinity"
+fault_matrix = "recovery"
+suspend_resume = "suspend-resume"
+
+[operation.cgroup_placement.scenarios]
+# Pre-registered hypothesis: placing the game into the administrator-configured game cgroup, whose
+# cpuset is a CPU free of contention, shortens the game's runnable wait. The scenarios are the
+# affinity ones: contention on the game's CPU, equal contention on both, and heavier contention on
+# the game cgroup's CPU (placement hurts).
+beneficial = "affinity-contended"
+neutral = "affinity-quiet"
+regression = "affinity-colocated"
+
+[operation.cgroup_placement.thresholds]
+min_improvement_percent = [10.0, 12.5, 15.0, 20.0, 25.0, 30.0, 40.0]
+max_regression_percent = [5.0, 7.5, 10.0, 15.0]
+min_samples = [1000]

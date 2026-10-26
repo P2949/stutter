@@ -113,6 +113,7 @@ impl BenefitHarness for RunnerHarness {
                 Some("affinity") => Some(Mutation::Affinity),
                 Some("uclamp") => Some(Mutation::Uclamp),
                 Some("nice") => Some(Mutation::Nice),
+                Some("cgroup") => Some(Mutation::Cgroup),
                 Some(other) => {
                     return Err(HarnessError::Defect(format!("unknown mutation {other}")));
                 }

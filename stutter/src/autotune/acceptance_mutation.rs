@@ -7,11 +7,12 @@ use anyhow::Context;
 
 use super::planning::{
     candidate::{CandidateAction, CandidateEvidence},
-    executable_plan::{NiceActionPlan, UclampActionPlan},
+    executable_plan::{CgroupPlacementActionPlan, NiceActionPlan, UclampActionPlan},
 };
 use crate::{
     actions::{
         SafetyClass, TaskIdentity, TuningAction,
+        cgroup::{CgroupPlacementAction, CgroupPlacementTarget},
         cpu_affinity::CpuAffinityProfileAction,
         nice::{NiceAction, NicePolicy},
         runner::ActionRunPolicy,
@@ -25,16 +26,18 @@ pub enum AcceptanceMutation {
     Affinity,
     Uclamp,
     Nice,
+    Cgroup,
 }
 
 impl AcceptanceMutation {
-    pub const ALL: [Self; 3] = [Self::Affinity, Self::Uclamp, Self::Nice];
+    pub const ALL: [Self; 4] = [Self::Affinity, Self::Uclamp, Self::Nice, Self::Cgroup];
 
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Affinity => "affinity",
             Self::Uclamp => "uclamp",
             Self::Nice => "nice",
+            Self::Cgroup => "cgroup",
         }
     }
 
@@ -44,20 +47,23 @@ impl AcceptanceMutation {
             Self::Affinity => "sched_setaffinity",
             Self::Uclamp => "sched_setattr",
             Self::Nice => "setpriority",
+            // Moving a task is a write of its id to the destination cgroup's `cgroup.procs`; the
+            // tracer filters on that path.
+            Self::Cgroup => "write",
         }
     }
 
     pub fn mode(self) -> DaemonMode {
         match self {
             Self::Affinity => DaemonMode::ApplyLowRisk,
-            Self::Uclamp | Self::Nice => DaemonMode::ApplyMediumRisk,
+            Self::Uclamp | Self::Nice | Self::Cgroup => DaemonMode::ApplyMediumRisk,
         }
     }
 
     pub fn safety_class(self) -> SafetyClass {
         match self {
             Self::Affinity => SafetyClass::ReversibleLowRisk,
-            Self::Uclamp | Self::Nice => SafetyClass::ReversibleMediumRisk,
+            Self::Uclamp | Self::Nice | Self::Cgroup => SafetyClass::ReversibleMediumRisk,
         }
     }
 
@@ -67,6 +73,8 @@ impl AcceptanceMutation {
             Self::Affinity => 0,
             Self::Uclamp => 256,
             Self::Nice => 10,
+            // The cgroup is chosen by the harness, not by a number.
+            Self::Cgroup => 0,
         }
     }
 
@@ -75,6 +83,7 @@ impl AcceptanceMutation {
             Self::Affinity => "crash-acceptance-affinity",
             Self::Uclamp => "crash-acceptance-uclamp",
             Self::Nice => "crash-acceptance-nice",
+            Self::Cgroup => "crash-acceptance-cgroup",
         }
     }
 }
@@ -127,6 +136,7 @@ impl AcceptanceTarget {
             }),
             AcceptanceMutation::Uclamp => Box::new(self.uclamp_action(tree_pid)),
             AcceptanceMutation::Nice => Box::new(self.nice_action(tree_pid)),
+            AcceptanceMutation::Cgroup => Box::new(self.cgroup_action(tree_pid)?),
         })
     }
 
@@ -138,6 +148,41 @@ impl AcceptanceTarget {
         .values()
         .map(TaskIdentity::from_task_info)
         .collect()
+    }
+
+    /// Moves the owned tree into a sibling `target` of the leaf it runs in. The runner delegated the
+    /// parent subtree to this user, so the harness may create the target and the user may move
+    /// tasks between the two.
+    fn cgroup_action(self, tree_pid: u32) -> anyhow::Result<CgroupPlacementAction> {
+        let cgroup_root = std::path::PathBuf::from("/sys/fs/cgroup");
+        let current = std::fs::read_to_string(format!("/proc/{tree_pid}/cgroup"))?;
+        let original = current
+            .lines()
+            .find_map(|line| line.strip_prefix("0::"))
+            .context("the tree has no cgroup v2 path")?
+            .trim()
+            .to_owned();
+        let parent = std::path::Path::new(&original)
+            .parent()
+            .filter(|parent| parent.components().count() > 1)
+            .context("the tree does not run in a delegated cgroup subtree")?
+            .to_path_buf();
+        let target = parent.join("target");
+        std::fs::create_dir_all(cgroup_root.join(target.strip_prefix("/")?))
+            .context("cannot create the target cgroup inside the delegated subtree")?;
+        Ok(CgroupPlacementAction {
+            cgroup_root,
+            target_cgroup: target,
+            targets: Self::tree_targets(tree_pid)
+                .into_iter()
+                .map(|identity| CgroupPlacementTarget {
+                    identity,
+                    class: crate::process_tree::TaskClass::Game,
+                })
+                .collect(),
+            cpuset_cpus: None,
+            cpuset_mems: None,
+        })
     }
 
     fn nice_action(self, tree_pid: u32) -> NiceAction {
@@ -175,6 +220,19 @@ impl AcceptanceTarget {
                 tree_pid,
                 objective,
             ),
+            AcceptanceMutation::Cgroup => CandidateAction::CgroupPlacement {
+                plan: CgroupPlacementActionPlan {
+                    name: self.mutation.candidate_name().to_owned(),
+                    action: self.cgroup_action(tree_pid)?,
+                    target_root_pid: Some(tree_pid),
+                    evidence: vec![CandidateEvidence::new(
+                        "situation",
+                        "GameCpuSchedulerPressure",
+                        1.0,
+                    )],
+                    objective,
+                },
+            },
             AcceptanceMutation::Nice => CandidateAction::Nice {
                 plan: NiceActionPlan {
                     name: self.mutation.candidate_name().to_owned(),
@@ -230,7 +288,7 @@ mod tests {
                 mutation
             );
         }
-        assert!("cgroup".parse::<AcceptanceMutation>().is_err());
+        assert!("cpu_power".parse::<AcceptanceMutation>().is_err());
     }
 
     #[test]
