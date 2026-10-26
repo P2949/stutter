@@ -196,10 +196,42 @@ impl AutotuneRuntime {
         };
         let mut observation = self.last_observation.clone();
         observation.now_unix_nanos = now_unix_nanos;
+        // The last observation predates this revert: a workload that has exited since (the usual
+        // reason a session stops) has no tasks left to verify the rollback against.
+        if self
+            .config
+            .tree_pid()
+            .is_some_and(|pid| !process_is_live(pid))
+        {
+            observation.target_present = false;
+        }
         let decision = AutotuneDecision::Revert {
             experiment_id,
             reason: reason.to_owned(),
         };
         self.apply_decision_side_effects(&observation, &decision, reason)
+    }
+}
+
+/// Whether `pid` is a running process (a zombie is not).
+fn process_is_live(pid: u32) -> bool {
+    std::fs::read_to_string(format!("/proc/{pid}/stat"))
+        .ok()
+        .and_then(|stat| {
+            stat.rsplit_once(')')
+                .map(|(_, rest)| rest.trim_start().chars().next())
+        })
+        .flatten()
+        .is_some_and(|state| state != 'Z' && state != 'X')
+}
+
+#[cfg(test)]
+mod liveness_tests {
+    use super::process_is_live;
+
+    #[test]
+    fn a_running_process_is_live_and_a_missing_one_is_not() {
+        assert!(process_is_live(std::process::id()));
+        assert!(!process_is_live(u32::MAX - 1));
     }
 }

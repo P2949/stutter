@@ -1,6 +1,6 @@
 use std::{collections::VecDeque, time::Duration};
 
-use super::*;
+use super::{kept_release::candidate_memory_path_for, *};
 
 impl OnlineAutotuneController {
     pub fn new(daemon_policy: DaemonPolicy, window_seconds: u64) -> Self {
@@ -19,11 +19,9 @@ impl AutotuneRuntime {
         let window_seconds = config.window_seconds;
         let mut controller = OnlineAutotuneController::new(daemon_policy, window_seconds);
         controller.state.validation_override = config.validation_override.clone();
-        if let Some(journal) = &config.controller_journal_path {
+        if let Some(path) = candidate_memory_path_for(&config) {
             controller.state.candidate_memory =
-                crate::autotune::candidate_memory::CandidateMemory::load(
-                    &crate::autotune::candidate_memory::persistence::candidate_memory_path(journal),
-                );
+                crate::autotune::candidate_memory::CandidateMemory::load(&path);
         }
 
         Self {

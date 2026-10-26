@@ -351,3 +351,19 @@ fn live_experiment_journal_record_carries_phase_metadata_and_rollback() {
     assert!(record.rollback_token().is_some());
     assert!(record.may_have_mutated_system());
 }
+
+#[test]
+fn a_workload_that_is_gone_has_no_tasks_left_to_verify_a_rollback_against() {
+    use super::super::rollback::rollback_verification_for_experiment;
+    let experiment = nice_live_experiment_with_baseline_config();
+    let mut gone = observation(1_000, 400);
+    gone.target_present = false;
+    assert!(rollback_verification_for_experiment(&experiment, None, &gone).is_none());
+    let mut alive = observation(1_000, 400);
+    alive.target_present = true;
+    let verification = rollback_verification_for_experiment(&experiment, None, &alive).unwrap();
+    assert!(
+        !verification.verified,
+        "a live workload still needs its rollback verified"
+    );
+}
