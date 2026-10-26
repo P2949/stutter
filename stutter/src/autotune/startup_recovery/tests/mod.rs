@@ -72,6 +72,7 @@ fn config_for_dir(dir: &Path, rollback_on_crash_recovery: bool) -> StartupRecove
         audit_path: dir.join("audit.jsonl"),
         history_path: dir.join("history.jsonl"),
         state_snapshot_path: dir.join("daemon_state.json"),
+        privileged_worker_socket: None,
     }
 }
 

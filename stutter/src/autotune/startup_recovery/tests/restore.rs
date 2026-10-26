@@ -519,7 +519,7 @@ fn real_startup_recovery_executor_refuses_unproven_sysfs_tokens() {
         path: path.clone(),
         original_value: "powersave\n".to_owned(),
     };
-    let mut executor = RealStartupRecoveryRollbackExecutor;
+    let mut executor = RealStartupRecoveryRollbackExecutor::default();
 
     assert!(executor.rollback(&token).is_err());
     assert_eq!(fs::read_to_string(&path).unwrap(), "performance\n");

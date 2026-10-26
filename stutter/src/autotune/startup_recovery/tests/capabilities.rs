@@ -64,7 +64,7 @@ fn startup_registry_has_only_explicitly_authorized_providers_and_no_manual_fallb
         assert_eq!(supported, automatic, "{}", token.kind());
         if !automatic {
             assert!(
-                RealStartupRecoveryRollbackExecutor
+                RealStartupRecoveryRollbackExecutor::default()
                     .rollback(&token)
                     .is_err()
             );
@@ -142,4 +142,25 @@ fn explicit_manual_sysfs_restore_remains_separate_from_startup_authorization() {
     let summary = crate::autotune::emergency_restore::restore_rollback_token(&token).unwrap();
     assert_eq!(summary.restored_items, 1);
     assert_eq!(fs::read_to_string(path).unwrap(), "powersave");
+}
+
+#[test]
+fn a_nice_token_is_restored_through_the_privileged_worker_and_never_in_process_when_one_is_named() {
+    use crate::autotune::startup_recovery::StartupRecoveryRollbackExecutor;
+    let token = RollbackToken::NiceRestore { records: vec![] };
+    assert!(privileged::needs_privileged_restore(&token));
+    assert!(!privileged::needs_privileged_restore(
+        &RollbackToken::UclampRestore { records: vec![] }
+    ));
+    // With a worker named, the restore goes there; an unreachable worker is a failure that keeps
+    // the token (it must not fall back to an in-process restore the user cannot perform).
+    let root = crate::test_support::TestRoot::new("nice-privileged-route");
+    let mut executor = RealStartupRecoveryRollbackExecutor {
+        privileged_worker_socket: Some(root.join("missing.sock")),
+    };
+    let error = executor.rollback(&token).unwrap_err();
+    assert!(
+        format!("{error:#}").contains("privileged worker"),
+        "{error:#}"
+    );
 }

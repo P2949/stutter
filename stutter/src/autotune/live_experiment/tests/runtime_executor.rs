@@ -134,6 +134,7 @@ fn real_runtime_manager_applies_with_isolated_journal_and_startup_restores() {
             audit_path: input.audit_path.unwrap(),
             history_path: root.join("history.jsonl"),
             state_snapshot_path: root.join("daemon-state.json"),
+            privileged_worker_socket: None,
         },
     )
     .unwrap();

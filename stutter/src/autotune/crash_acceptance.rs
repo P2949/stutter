@@ -595,6 +595,7 @@ pub fn recover_acceptance_controller(out: &Path, expected_tasks: usize) -> anyho
         audit_path: out.join("actions.jsonl"),
         history_path: out.join("history.jsonl"),
         state_snapshot_path: out.join("daemon-state.json"),
+        privileged_worker_socket: None,
     })?;
     let restored = match outcome {
         StartupRecoveryOutcome::Clean if expected_tasks == 0 => 0,
