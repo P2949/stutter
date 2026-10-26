@@ -17,7 +17,9 @@ steps=(
   "nix flake check|nix flake check --no-build"
   "verify-fast|cargo run -q -p xtask -- verify-fast"
 )
-stages="$(cd "$work/src" && nix develop --command cargo run -q -p xtask -- ci --list)" || { echo "cannot list the CI stages"; exit 2; }
+# The shell prints a banner before the command's own output: keep only stage names.
+stages="$(cd "$work/src" && nix develop --command cargo run -q -p xtask -- ci --list | grep -E '^[a-z][a-z-]*$')" || { echo "cannot list the CI stages"; exit 2; }
+[ -n "$stages" ] || { echo "the CI lists no stages"; exit 2; }
 for stage in $stages; do
   steps+=("ci $stage|cargo run -q -p xtask -- ci --stage $stage")
 done
