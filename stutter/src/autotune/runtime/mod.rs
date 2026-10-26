@@ -94,6 +94,8 @@ pub struct AutotuneRuntime {
     last_dry_run_plan_files: Vec<AutotuneDryRunPlanFileSummary>,
     pending_history_context: Option<RuntimeHistoryContext>,
     lifecycle: lifecycle::RuntimeLifecycle,
+    /// Reads sustained background CPU consumers while a game is the focused workload.
+    offender_sampler: std::sync::Mutex<crate::autotune::offenders::OffenderSampler>,
 }
 
 #[cfg(test)]

@@ -156,6 +156,9 @@ pub struct AutotuneObservation {
     pub workload_identity: Option<WorkloadIdentity>,
     pub active_tasks: Vec<ActiveTaskSnapshot>,
     pub protected_tasks: Vec<ProtectedTask>,
+    /// Sustained background CPU consumers of the target's owner that compete with the workload.
+    #[serde(default)]
+    pub background_offenders: Vec<crate::autotune::offenders::OffenderProcess>,
     pub active_config_snapshot: Option<ActiveConfigSnapshot>,
     pub system_context: Option<SystemContextSnapshot>,
 
@@ -194,6 +197,7 @@ impl Default for AutotuneObservation {
             workload_identity: None,
             active_tasks: Vec::new(),
             protected_tasks: Vec::new(),
+            background_offenders: Vec::new(),
             active_config_snapshot: None,
             system_context: None,
             frame_count: 0,

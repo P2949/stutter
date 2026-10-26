@@ -40,12 +40,22 @@ impl Scenario {
     /// Scheduler contention on (`c0`, `c1`): a SCHED_FIFO contender holding the CPU for the given
     /// milliseconds of every 20, so the target's wakeups wait up to that long. Ordinary hogs do
     /// not delay a sleeper under EEVDF and would measure nothing.
-    pub(super) fn contention(self) -> (game_runnable::Contention, game_runnable::Contention) {
-        use game_runnable::Contention::Burst;
-        match self {
-            Self::Beneficial => (Burst(8), Burst(0)),
-            Self::Neutral => (Burst(8), Burst(8)),
-            Self::Regression => (Burst(2), Burst(10)),
+    pub(super) fn contention(
+        self,
+        mutation: AcceptanceMutation,
+    ) -> (game_runnable::Contention, game_runnable::Contention) {
+        use game_runnable::Contention::{Burst, Hogs};
+        match (mutation, self) {
+            // A priority change can only help against contention that shares the CPU by weight:
+            // ordinary hogs on the target's CPU. Neutral puts the same hogs where they cannot
+            // contend with the target; regression is contention no priority change can touch (a
+            // SCHED_FIFO burst), so a keep there would be a false keep.
+            (AcceptanceMutation::Nice, Self::Beneficial) => (Hogs(3), Burst(0)),
+            (AcceptanceMutation::Nice, Self::Neutral) => (Burst(0), Hogs(3)),
+            (AcceptanceMutation::Nice, Self::Regression) => (Burst(8), Hogs(3)),
+            (_, Self::Beneficial) => (Burst(8), Burst(0)),
+            (_, Self::Neutral) => (Burst(8), Burst(8)),
+            (_, Self::Regression) => (Burst(2), Burst(10)),
         }
     }
 }
@@ -170,6 +180,7 @@ pub(super) fn run_controller(
         operation: match mutation {
             AcceptanceMutation::Affinity => MutationOperationKind::CpuAffinityProfile,
             AcceptanceMutation::Uclamp => MutationOperationKind::Uclamp,
+            AcceptanceMutation::Nice => MutationOperationKind::Nice,
         },
         objective: ObjectiveKind::GameRunnableLatency,
         campaign_id: "affinity-benefit".to_owned(),
@@ -194,8 +205,27 @@ pub(super) fn run_controller(
 }
 
 /// Whether the controller's mutation is physically visible on any task of `pid`.
-fn mutation_observed(mutation: AcceptanceMutation, pid: u32, destination: &str) -> bool {
+fn mutation_observed(
+    mutation: AcceptanceMutation,
+    pid: u32,
+    destination: &str,
+    contenders: &[u32],
+) -> bool {
     match mutation {
+        // The demoted processes are the contenders, not the target.
+        AcceptanceMutation::Nice => contenders.iter().any(|contender| {
+            fs::read_to_string(format!("/proc/{contender}/stat"))
+                .ok()
+                .and_then(|stat| {
+                    stat.rsplit_once(')')?
+                        .1
+                        .split_whitespace()
+                        .nth(16)?
+                        .parse::<i32>()
+                        .ok()
+                })
+                .is_some_and(|nice| nice >= 10)
+        }),
         AcceptanceMutation::Affinity => task_affinities(pid).iter().any(|a| a == destination),
         AcceptanceMutation::Uclamp => fs::read_dir(format!("/proc/{pid}/task"))
             .into_iter()
@@ -277,7 +307,7 @@ pub(super) fn run(root: &Path, out: &Path, binary: &Path, spec: &Spec) -> anyhow
         });
         let profiles = profiles.transpose()?;
         let total = (spec.seconds * 3 + 120).min(600);
-        let (contention0, contention1) = spec.scenario.contention();
+        let (contention0, contention1) = spec.scenario.contention(spec.mutation);
         let mut contenders = game_runnable::spawn_contenders(c0, total, &out, contention0)?;
         contenders.extend(game_runnable::spawn_contenders(
             c1,
@@ -285,6 +315,7 @@ pub(super) fn run(root: &Path, out: &Path, binary: &Path, spec: &Spec) -> anyhow
             &out,
             contention1,
         )?);
+        let contender_pids: Vec<u32> = contenders.iter().map(|child| child.0.id()).collect();
         let ready = out.join("workload-ready.json");
         let mut target = OwnedChild(
             Command::new("taskset")
@@ -348,7 +379,8 @@ pub(super) fn run(root: &Path, out: &Path, binary: &Path, spec: &Spec) -> anyhow
                 target.0.try_wait()?.is_none(),
                 "the target exited during the experiment"
             );
-            placement_observed |= mutation_observed(spec.mutation, pid, &destination);
+            placement_observed |=
+                mutation_observed(spec.mutation, pid, &destination, &contender_pids);
             if let Some(found) = experiment_from_history(&history) {
                 event = Some(found);
                 break;

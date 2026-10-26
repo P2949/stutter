@@ -329,6 +329,15 @@ pub(crate) fn prepare_owned_controller(
                 ensure!(min != value, "no observable uclamp change");
             }
         }
+        AcceptanceMutation::Nice => {
+            for task in snapshot.tasks.values() {
+                let current = crate::actions::nice::read_current_nice(task.task_id().as_u32())?;
+                ensure!(
+                    current < i32::try_from(value)?,
+                    "no observable nice change (current {current}, requested {value})"
+                );
+            }
+        }
     }
     publish_acceptance_handshake(
         out,

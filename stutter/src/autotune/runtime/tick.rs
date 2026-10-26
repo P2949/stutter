@@ -335,12 +335,50 @@ impl AutotuneRuntime {
         })
     }
 
+    /// Background CPU consumers of the target's owner, sampled only while a game is the focused
+    /// workload (the only workload whose protection an offender can matter for today).
+    fn sample_offenders(
+        &self,
+        focus: Option<&AutotuneObservationFocus>,
+    ) -> Vec<crate::autotune::offenders::OffenderProcess> {
+        use std::os::unix::fs::MetadataExt;
+        if focus.is_none_or(|focus| focus.kind != crate::focus::FocusGroupKind::Game) {
+            return Vec::new();
+        }
+        let Some(root) = self.config.tree_pid().or(self.target_state.root_pid) else {
+            return Vec::new();
+        };
+        let proc_root = Path::new("/proc");
+        let Ok(owner) = std::fs::metadata(proc_root.join(root.to_string())).map(|m| m.uid()) else {
+            return Vec::new();
+        };
+        let exclude: std::collections::BTreeSet<u32> = self
+            .target_state
+            .active_tasks
+            .values()
+            .map(|task| task.process_id().as_u32())
+            .chain([root, std::process::id()])
+            .collect();
+        match self.offender_sampler.lock() {
+            Ok(mut sampler) => sampler.sample(
+                proc_root,
+                crate::syscall::clock_ticks_per_second(),
+                owner,
+                &exclude,
+            ),
+            Err(_) => Vec::new(),
+        }
+    }
+
     pub(super) fn build_observation(&self) -> AutotuneObservation {
         let explicit_focus = self.explicit_target_focus();
+        let focus = self.latest_focus.as_ref().or(explicit_focus.as_ref());
+        let offenders = self.sample_offenders(focus);
         AutotuneObservationBuilder::build(AutotuneObservationBuilderInput {
             window: &self.controller.window,
             online_data_quality_policy: &self.config.online_data_quality_policy,
-            focus: self.latest_focus.as_ref().or(explicit_focus.as_ref()),
+            focus,
+            offenders,
             // Preserve the distinction between a configured process-tree root
             // and a focus-derived root, so focus group helpers stay in scope.
             root_pid: self.config.tree_pid().or(self

@@ -52,6 +52,29 @@ fn nice_candidate(target: TaskIdentity) -> CandidateAction {
     }
 }
 
+/// An operation that has no prepared-before-mutation transaction yet.
+fn unprepared_candidate(target: TaskIdentity) -> CandidateAction {
+    CandidateAction::IoPrio {
+        plan: crate::autotune::planning::executable_plan::IoPrioActionPlan {
+            name: format!("ioprio-{}", target.tid),
+            action: crate::actions::ioprio::IoPrioAction {
+                targets: vec![target],
+                ioprio: crate::actions::ioprio::IoPrioValue::idle(),
+                policy: crate::actions::ioprio::IoPrioPolicy::default(),
+            },
+            target_root_pid: Some(100),
+            evidence: vec![
+                crate::autotune::planning::candidate::CandidateEvidence::new(
+                    "test",
+                    "unprepared operation",
+                    1.0,
+                ),
+            ],
+            objective: ObjectiveKind::DesktopInteractivity,
+        },
+    }
+}
+
 fn nice_apply_request(candidate: CandidateAction) -> CandidateApplyRequest {
     CandidateApplyRequest {
         plan: CandidatePlanRequest::from_candidate(candidate, crate::audit::unix_nanos_now()),

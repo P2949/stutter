@@ -306,7 +306,7 @@ fn a_commit_without_a_prepare_is_refused() {
 fn an_operation_without_a_prepared_transaction_is_refused_before_it_can_mutate() {
     let pid = std::process::id();
     let ticks = crate::process_tree::process_starttime_at(Path::new("/proc"), pid).unwrap();
-    let candidate = nice_candidate(TaskIdentity {
+    let candidate = unprepared_candidate(TaskIdentity {
         tid: pid.into(),
         process_pid: Some(pid.into()),
         comm: std::fs::read_to_string(format!("/proc/{pid}/comm"))
@@ -317,7 +317,6 @@ fn an_operation_without_a_prepared_transaction_is_refused_before_it_can_mutate()
     let executor =
         crate::autotune::apply::executor_for_candidate_preview(candidate.clone()).unwrap();
     assert!(!executor.prepared_before_mutation());
-    let nice_before = process_nice();
     let reached = AtomicUsize::new(0);
     let error = InProcessPrivilegedActionService::default()
         .apply_candidate_prepared(nice_apply_request(candidate), &mut |_| {
@@ -330,7 +329,6 @@ fn an_operation_without_a_prepared_transaction_is_refused_before_it_can_mutate()
         "{error:#}"
     );
     assert_eq!(reached.load(Ordering::SeqCst), 0);
-    assert_eq!(process_nice(), nice_before);
 }
 
 /// The process's nice value, read from `/proc` (no syscall wrappers needed).

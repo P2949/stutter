@@ -113,6 +113,7 @@ fn runner_mutation(name: &str) -> Result<stutter_validation_runner::model::Mutat
     match name {
         "affinity" => Ok(Mutation::Affinity),
         "uclamp" => Ok(Mutation::Uclamp),
+        "nice" => Ok(Mutation::Nice),
         other => Err(BackendError::Failed(format!(
             "the runner does not know the mutation {other}"
         ))),

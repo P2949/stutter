@@ -5,7 +5,9 @@ use crate::actions::rollback::recovery::{AutomaticRecoveryCapability, recovery_d
 fn automatically_recoverable(token: &RollbackToken) -> bool {
     matches!(
         token,
-        RollbackToken::CpuAffinityRestoreFile { .. } | RollbackToken::UclampRestore { .. }
+        RollbackToken::CpuAffinityRestoreFile { .. }
+            | RollbackToken::UclampRestore { .. }
+            | RollbackToken::NiceRestore { .. }
     )
 }
 
@@ -36,7 +38,7 @@ fn token_inventory() -> Vec<RollbackToken> {
 #[test]
 fn startup_registry_has_only_explicitly_authorized_providers_and_no_manual_fallback() {
     let registry = crate::autotune::emergency_restore::startup_rollback_registry();
-    assert_eq!(registry.handlers().len(), 2);
+    assert_eq!(registry.handlers().len(), 3);
     let mut kinds = std::collections::BTreeSet::new();
     for token in token_inventory() {
         let descriptor = recovery_descriptor(&token);

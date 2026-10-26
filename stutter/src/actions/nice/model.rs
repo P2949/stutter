@@ -4,9 +4,8 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
 use crate::actions::{
-    ActionBoundaryError, ActionId, ActionState, ActionWarning, ApplyResult, NiceRestoreRecord,
-    RestoreIdentityStatus, RollbackToken, SafetyClass, TaskIdentity, TaskRestoreIdentity,
-    TuningAction,
+    ActionBoundaryError, ActionId, ActionState, ActionWarning, ApplyResult, RestoreIdentityStatus,
+    RollbackToken, SafetyClass, TaskIdentity, TuningAction,
     restore_write::{RestoreSummary, RestoreWriteError, classify_restore_write_error},
     rollback::{
         RollbackCandidate, RollbackHandler, RollbackPreview, RollbackResult, token_dry_run_preview,
@@ -41,7 +40,10 @@ pub struct NiceAction {
     pub policy: NicePolicy,
 }
 
-pub(crate) struct NiceRollbackHandler;
+pub(crate) struct NiceRollbackHandler {
+    /// Startup recovery never restores a record whose task identity cannot be verified.
+    pub(crate) require_verified_identity: bool,
+}
 
 impl RollbackHandler for NiceRollbackHandler {
     fn id(&self) -> &'static str {
@@ -108,6 +110,13 @@ impl RollbackHandler for NiceRollbackHandler {
                     let msg = format!("nice restore identity mismatch for tid={}: {}", tid, reason);
                     log::warn!("{}", msg);
                     messages.push(msg);
+                    continue;
+                }
+                RestoreIdentityStatus::UnknownLegacy if self.require_verified_identity => {
+                    skipped_identity_mismatch += 1;
+                    messages.push(format!(
+                        "nice restore refused unverifiable identity for tid={tid}"
+                    ));
                     continue;
                 }
                 RestoreIdentityStatus::UnknownLegacy => {
@@ -295,39 +304,19 @@ impl TuningAction for NiceAction {
     }
 
     fn apply(&self) -> ApplyResult {
-        (|| {
-            let snapshots = self.collect_target_snapshots_at(Path::new("/proc"), &self.policy)?;
-            let filtered_snapshots: Vec<_> = snapshots
-                .into_iter()
-                .filter(|(snapshot, _)| snapshot.current_nice != self.nice)
-                .collect();
+        let plan = self.plan_records(Path::new("/proc"), false)?;
+        self.apply_plan(plan)
+    }
 
-            let records = filtered_snapshots
-                .into_iter()
-                .map(|(snapshot, _)| {
-                    let identity = TaskRestoreIdentity::observed(
-                        snapshot.tid,
-                        snapshot.process_pid,
-                        snapshot.comm.clone(),
-                        snapshot.starttime_ticks,
-                        snapshot.exe.clone(),
-                    );
+    fn prepared_before_mutation(&self) -> bool {
+        true
+    }
 
-                    NiceRestoreRecord::new(identity, snapshot.current_nice)
-                })
-                .collect::<Vec<_>>();
-
-            let tx = crate::actions::transaction::ApplyTransaction::new();
-            tx.apply_planned_loop(
-                records,
-                |record| {
-                    set_task_nice(record.tid(), self.nice).map_err(|e| {
-                        e.context(format!("failed to set nice for tid={}", record.tid()))
-                    })
-                },
-                |records| RollbackToken::NiceRestore { records },
-            )
-        })()
+    fn apply_with_prepared_rollback(
+        &self,
+        before_mutation: &mut dyn FnMut(&RollbackToken) -> anyhow::Result<()>,
+    ) -> ApplyResult {
+        self.apply_prepared_at(Path::new("/proc"), before_mutation)
     }
 
     fn verify(&self) -> anyhow::Result<ActionState> {

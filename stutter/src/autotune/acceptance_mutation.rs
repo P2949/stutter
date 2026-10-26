@@ -7,12 +7,13 @@ use anyhow::Context;
 
 use super::planning::{
     candidate::{CandidateAction, CandidateEvidence},
-    executable_plan::UclampActionPlan,
+    executable_plan::{NiceActionPlan, UclampActionPlan},
 };
 use crate::{
     actions::{
         SafetyClass, TaskIdentity, TuningAction,
         cpu_affinity::CpuAffinityProfileAction,
+        nice::{NiceAction, NicePolicy},
         runner::ActionRunPolicy,
         uclamp::{UclampAction, UclampValues},
     },
@@ -23,15 +24,17 @@ use crate::{
 pub enum AcceptanceMutation {
     Affinity,
     Uclamp,
+    Nice,
 }
 
 impl AcceptanceMutation {
-    pub const ALL: [Self; 2] = [Self::Affinity, Self::Uclamp];
+    pub const ALL: [Self; 3] = [Self::Affinity, Self::Uclamp, Self::Nice];
 
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Affinity => "affinity",
             Self::Uclamp => "uclamp",
+            Self::Nice => "nice",
         }
     }
 
@@ -40,28 +43,30 @@ impl AcceptanceMutation {
         match self {
             Self::Affinity => "sched_setaffinity",
             Self::Uclamp => "sched_setattr",
+            Self::Nice => "setpriority",
         }
     }
 
     pub fn mode(self) -> DaemonMode {
         match self {
             Self::Affinity => DaemonMode::ApplyLowRisk,
-            Self::Uclamp => DaemonMode::ApplyMediumRisk,
+            Self::Uclamp | Self::Nice => DaemonMode::ApplyMediumRisk,
         }
     }
 
     pub fn safety_class(self) -> SafetyClass {
         match self {
             Self::Affinity => SafetyClass::ReversibleLowRisk,
-            Self::Uclamp => SafetyClass::ReversibleMediumRisk,
+            Self::Uclamp | Self::Nice => SafetyClass::ReversibleMediumRisk,
         }
     }
 
-    /// The default value the mutation applies: a CPU number or a `uclamp.min`.
+    /// The default value the mutation applies: a CPU number, a `uclamp.min` or a niceness.
     pub fn default_value(self) -> u32 {
         match self {
             Self::Affinity => 0,
             Self::Uclamp => 256,
+            Self::Nice => 10,
         }
     }
 
@@ -69,6 +74,7 @@ impl AcceptanceMutation {
         match self {
             Self::Affinity => "crash-acceptance-affinity",
             Self::Uclamp => "crash-acceptance-uclamp",
+            Self::Nice => "crash-acceptance-nice",
         }
     }
 }
@@ -120,7 +126,26 @@ impl AcceptanceTarget {
                 profile: affinity_profile(self.value)?,
             }),
             AcceptanceMutation::Uclamp => Box::new(self.uclamp_action(tree_pid)),
+            AcceptanceMutation::Nice => Box::new(self.nice_action(tree_pid)),
         })
+    }
+
+    fn tree_targets(tree_pid: u32) -> Vec<TaskIdentity> {
+        crate::process_tree::target_snapshot(
+            crate::process_tree::TargetSnapshotInput::default().tree_pids(&[tree_pid]),
+        )
+        .tasks
+        .values()
+        .map(TaskIdentity::from_task_info)
+        .collect()
+    }
+
+    fn nice_action(self, tree_pid: u32) -> NiceAction {
+        NiceAction {
+            targets: Self::tree_targets(tree_pid),
+            nice: i32::try_from(self.value).unwrap_or(10),
+            policy: NicePolicy::default(),
+        }
     }
 
     fn uclamp_action(self, tree_pid: u32) -> UclampAction {
@@ -150,6 +175,19 @@ impl AcceptanceTarget {
                 tree_pid,
                 objective,
             ),
+            AcceptanceMutation::Nice => CandidateAction::Nice {
+                plan: NiceActionPlan {
+                    name: self.mutation.candidate_name().to_owned(),
+                    action: self.nice_action(tree_pid),
+                    target_root_pid: Some(tree_pid),
+                    evidence: vec![CandidateEvidence::new(
+                        "situation",
+                        "GameCpuSchedulerPressure",
+                        1.0,
+                    )],
+                    objective,
+                },
+            },
             AcceptanceMutation::Uclamp => CandidateAction::Uclamp {
                 plan: UclampActionPlan {
                     name: self.mutation.candidate_name().to_owned(),
@@ -192,7 +230,7 @@ mod tests {
                 mutation
             );
         }
-        assert!("nice".parse::<AcceptanceMutation>().is_err());
+        assert!("cgroup".parse::<AcceptanceMutation>().is_err());
     }
 
     #[test]

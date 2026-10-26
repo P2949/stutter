@@ -15,8 +15,87 @@ use crate::{
     },
 };
 
+/// The niceness a demoted background offender receives.
+pub const OFFENDER_DEMOTED_NICE: i32 = 10;
+/// At most this many tasks of offenders are demoted by one candidate.
+const MAX_OFFENDER_TASKS: usize = 64;
+
 #[derive(Default)]
 pub struct NiceProvider;
+
+impl NiceProvider {
+    /// Under scheduler pressure on a game, lowers the priority of sustained background CPU
+    /// consumers of the same user. The identity of every task comes from the observation, so the
+    /// action's targets are exactly the tasks that were measured competing.
+    fn propose_offender_demotion(
+        &self,
+        input: &CandidateProviderInput<'_>,
+        root_pid: u32,
+    ) -> Vec<CandidateProposal> {
+        let offenders: Vec<_> = input
+            .observation
+            .background_offenders
+            .iter()
+            .filter(|offender| offender.nice < OFFENDER_DEMOTED_NICE)
+            .collect();
+        if offenders.is_empty() {
+            return Vec::new();
+        }
+        let targets: Vec<_> = offenders
+            .iter()
+            .flat_map(|offender| offender.tasks.iter().cloned())
+            .take(MAX_OFFENDER_TASKS)
+            .collect();
+        let pids = offenders
+            .iter()
+            .map(|offender| offender.pid.to_string())
+            .collect::<Vec<_>>()
+            .join("+");
+        let mut evidence = vec![CandidateEvidence::new(
+            "situation",
+            format!("{:?}", input.observation.primary_situation),
+            input.observation.situation.confidence,
+        )];
+        evidence.extend(offenders.iter().map(|offender| {
+            CandidateEvidence::new(
+                "background_cpu_offender",
+                format!(
+                    "pid={} comm={} cpu={:.0}% sustained_samples={} nice={}",
+                    offender.pid,
+                    offender.comm,
+                    offender.cpu_percent,
+                    offender.sustained_samples,
+                    offender.nice
+                ),
+                1.0,
+            )
+        }));
+        let candidate = CandidateAction::Nice {
+            plan: NiceActionPlan {
+                name: format!("nice-offenders-{pids}-to-{OFFENDER_DEMOTED_NICE}"),
+                action: NiceAction {
+                    targets,
+                    nice: OFFENDER_DEMOTED_NICE,
+                    policy: NicePolicy {
+                        allow_nice_changes: true,
+                        min_nice: -1,
+                        max_nice: 19,
+                    },
+                },
+                target_root_pid: Some(root_pid),
+                evidence,
+                objective: ObjectiveKind::GameRunnableLatency,
+            },
+        };
+        vec![CandidateProposal {
+            candidate,
+            provider: self.family(),
+            confidence: input.observation.situation.confidence,
+            deny_reasons: Vec::new(),
+            rank_hint: 30,
+        }]
+    }
+}
 
 impl CandidateProvider for NiceProvider {
     fn family(&self) -> &'static str {
@@ -29,6 +108,10 @@ impl CandidateProvider for NiceProvider {
         };
         if !mutation_allowed_for_pid(root_pid, self.family(), input.observation).is_allowed() {
             return Vec::new();
+        }
+
+        if input.observation.primary_situation == SituationKind::GameCpuSchedulerPressure {
+            return self.propose_offender_demotion(input, root_pid);
         }
 
         let (nice, objective, _reason) = match input.observation.primary_situation {

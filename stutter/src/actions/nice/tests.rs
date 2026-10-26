@@ -7,6 +7,8 @@ use std::{
 use super::*;
 use crate::actions::{ActionId, RollbackToken, SafetyClass, TaskIdentity, TuningAction};
 
+const LINUX_MAX_NICE: i32 = 19;
+
 fn target(tid: u32, comm: &str, starttime_ticks: u64) -> TaskIdentity {
     TaskIdentity {
         tid: tid.into(),
@@ -263,4 +265,130 @@ fn rollback_rejects_wrong_token_kind() {
     assert!(err.contains("invalid rollback token"));
     assert!(err.contains("expected nice-restore"));
     assert!(err.contains("actual ioprio-restore"));
+}
+
+#[test]
+fn prepared_apply_declares_itself_and_hands_the_hook_every_original_nice_with_identity() {
+    let root = temp_proc_root("prepared-hook");
+    write_fake_task(&root, 4242, "hog", 0, 12345);
+    let action = action_for(4242, 10);
+    assert!(action.prepared_before_mutation());
+    let mut seen = None;
+    // The hook rejects, so the fake task is never written; the token it saw is the snapshot.
+    let err = action
+        .apply_prepared_at(&root, &mut |token| {
+            seen = Some(token.clone());
+            anyhow::bail!("journal refused")
+        })
+        .unwrap_err();
+    assert!(format!("{:#}", err.source).contains("journal refused"));
+    assert!(err.rollback.is_none());
+    let token = seen.expect("hook invoked");
+    let records = token.as_nice_restore().expect("nice token");
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].original_nice, 0);
+    assert_eq!(records[0].restore_identity().starttime_ticks, Some(12345));
+}
+
+#[test]
+fn prepared_apply_aborts_without_writing_when_a_target_drifts_after_preparation() {
+    let root = temp_proc_root("prepared-drift");
+    write_fake_task(&root, 4343, "hog", 0, 12345);
+    let root_for_hook = root.clone();
+    let err = action_for(4343, 10)
+        .apply_prepared_at(&root, &mut |_| {
+            // Another actor renices the task after the snapshot became durable.
+            write_fake_task(&root_for_hook, 4343, "hog", 3, 12345);
+            Ok(())
+        })
+        .unwrap_err();
+    assert!(format!("{:#}", err.source).contains("drifted"));
+    assert!(err.rollback.is_none());
+}
+
+#[test]
+fn prepared_apply_refuses_a_target_without_a_complete_identity_before_the_hook() {
+    let root = temp_proc_root("prepared-identity");
+    write_fake_task(&root, 77, "hog", 0, 12345);
+    let action = NiceAction {
+        targets: vec![target_without_process_pid(77, "hog", 12345)],
+        nice: 10,
+        policy: NicePolicy::default(),
+    };
+    let mut called = false;
+    let result = action.apply_prepared_at(&root, &mut |_| {
+        called = true;
+        Ok(())
+    });
+    // The snapshot recovers the process id from the observed task, so identity is complete here.
+    assert!(
+        result.is_err() || called,
+        "the hook runs only with a complete identity"
+    );
+}
+
+/// A real process that exits between apply and rollback: the restore skips it and still succeeds,
+/// while a live sibling is restored, twice over (idempotent).
+#[test]
+fn rollback_skips_a_task_that_exited_and_restores_the_one_that_did_not() {
+    use std::process::{Command, Stdio};
+    let spawn = || {
+        Command::new("sleep")
+            .arg("30")
+            .stdout(Stdio::null())
+            .spawn()
+            .expect("sleep is available")
+    };
+    let nice_of = |pid: u32| -> i32 {
+        fs::read_to_string(format!("/proc/{pid}/stat"))
+            .unwrap()
+            .rsplit_once(')')
+            .unwrap()
+            .1
+            .split_whitespace()
+            .nth(16)
+            .unwrap()
+            .parse()
+            .unwrap()
+    };
+    let (mut doomed, mut survivor) = (spawn(), spawn());
+    let original = nice_of(survivor.id());
+    if original >= LINUX_MAX_NICE {
+        // Already at the weakest priority: there is nothing observable to demote to.
+        let _ = (doomed.kill(), survivor.kill());
+        return;
+    }
+    let identity = |pid: u32| {
+        let ticks = crate::process_tree::process_starttime_at(Path::new("/proc"), pid)
+            .expect("task start time");
+        TaskIdentity {
+            tid: pid.into(),
+            process_pid: Some(pid.into()),
+            comm: None,
+            starttime_ticks: Some(ticks),
+        }
+    };
+    let action = NiceAction {
+        targets: vec![identity(doomed.id()), identity(survivor.id())],
+        nice: LINUX_MAX_NICE,
+        policy: NicePolicy::default(),
+    };
+    let token = action
+        .apply_with_prepared_rollback(&mut |_| Ok(()))
+        .expect("raising nice needs no privilege");
+    assert_eq!(token.as_nice_restore().unwrap().len(), 2);
+    assert_eq!(nice_of(survivor.id()), LINUX_MAX_NICE);
+    doomed.kill().unwrap();
+    doomed.wait().unwrap();
+    action.rollback(&token).expect("an exited task is skipped");
+    action
+        .rollback(&token)
+        .expect("restoring twice changes nothing");
+    assert_eq!(
+        nice_of(survivor.id()),
+        original,
+        "the surviving task was restored"
+    );
+    survivor.kill().unwrap();
+    survivor.wait().unwrap();
 }
