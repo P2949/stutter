@@ -120,6 +120,7 @@ mod tests {
             audit_path: recovery_audit_path,
             history_path,
             state_snapshot_path,
+            privileged_worker_socket: None,
         };
         let mut recovery_executor = RecoveryExecutor {
             calls: 0,

@@ -35,6 +35,8 @@ pub struct StartupRecoveryConfig {
     pub audit_path: PathBuf,
     pub history_path: PathBuf,
     pub state_snapshot_path: PathBuf,
+    /// The privileged worker that restores tokens an ordinary user cannot (nice).
+    pub privileged_worker_socket: Option<PathBuf>,
 }
 
 impl Default for StartupRecoveryConfig {
@@ -45,6 +47,7 @@ impl Default for StartupRecoveryConfig {
             audit_path: crate::audit::default_audit_log_path(),
             history_path: default_autotune_history_path(),
             state_snapshot_path: default_daemon_state_snapshot_path(),
+            privileged_worker_socket: None,
         }
     }
 }
@@ -93,7 +96,9 @@ pub trait StartupRecoveryRollbackExecutor {
 }
 
 #[derive(Default)]
-pub struct RealStartupRecoveryRollbackExecutor;
+pub struct RealStartupRecoveryRollbackExecutor {
+    pub privileged_worker_socket: Option<PathBuf>,
+}
 
 impl StartupRecoveryRollbackExecutor for RealStartupRecoveryRollbackExecutor {
     fn rollback(
@@ -101,6 +106,18 @@ impl StartupRecoveryRollbackExecutor for RealStartupRecoveryRollbackExecutor {
         token: &RollbackToken,
     ) -> anyhow::Result<StartupRecoveryRollbackSummary> {
         crate::actions::rollback::recovery::require_automatic_recovery(token)?;
+        if privileged::needs_privileged_restore(token)
+            && let Some(socket) = &self.privileged_worker_socket
+        {
+            let restored = privileged::restore_through_worker(socket, token)?;
+            return Ok(StartupRecoveryRollbackSummary {
+                affected_tasks: restored,
+                message: format!(
+                    "rollback_kind={} restored_items={restored} through the privileged worker",
+                    rollback_token_kind(token)
+                ),
+            });
+        }
         let result = crate::autotune::emergency_restore::startup_rollback_registry()
             .restore_token(token)
             .with_context(|| {
@@ -144,7 +161,9 @@ fn startup_recovery_summary_from_rollback_result(
 pub fn recover_controller_journal_on_startup(
     config: StartupRecoveryConfig,
 ) -> anyhow::Result<StartupRecoveryOutcome> {
-    let mut executor = RealStartupRecoveryRollbackExecutor;
+    let mut executor = RealStartupRecoveryRollbackExecutor {
+        privileged_worker_socket: config.privileged_worker_socket.clone(),
+    };
     recover_controller_journal_with_executor(config, &mut executor)
 }
 
@@ -578,6 +597,8 @@ fn candidate_name_from_action_id(action_id: &str) -> Option<String> {
         .map(|(_, candidate)| candidate.to_owned())
         .filter(|candidate| !candidate.trim().is_empty())
 }
+
+mod privileged;
 
 #[cfg(test)]
 mod tests;

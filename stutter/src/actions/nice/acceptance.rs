@@ -43,6 +43,8 @@ pub fn verify_nice_lifecycle(
     nice: i32,
     audit_path: &Path,
 ) -> anyhow::Result<Value> {
+    // The lifecycle un-demotes the tasks it demoted; see `raise_nice_rlimit_for_validation`.
+    crate::syscall::raise_nice_rlimit_for_validation()?;
     let source = crate::daemon_policy::ActionSource::Cli;
     let mut apply_policy = ActionRunPolicy::apply_medium_risk(source, false);
     // The explicit medium-risk unlock the validation harness is granted.

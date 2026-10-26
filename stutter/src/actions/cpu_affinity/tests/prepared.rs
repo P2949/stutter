@@ -176,6 +176,7 @@ fn real_journal_token_precedes_affinity_mutation_through_boxed_runner() {
             audit_path: audit,
             history_path: root.join("history.jsonl"),
             state_snapshot_path: root.join("daemon_state.json"),
+            privileged_worker_socket: None,
         },
     )
     .unwrap();

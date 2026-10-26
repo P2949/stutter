@@ -195,6 +195,10 @@ pub async fn autotune_command_with(
 
     let mut runtime_config = runtime_config_for_command(&input, mode, profile_list)?;
     if let Some(run) = validation {
+        if run.grant.operation == crate::autotune::operation::MutationOperationKind::Nice {
+            // The controller restores demoted tasks on shutdown; see `raise_nice_rlimit_for_validation`.
+            crate::syscall::raise_nice_rlimit_for_validation()?;
+        }
         runtime_config.validation_override = Some(run.grant);
         runtime_config.history_log = Some(run.history_log);
         runtime_config.controller_journal_path = Some(run.controller_journal_path);

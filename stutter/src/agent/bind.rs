@@ -19,6 +19,11 @@ pub async fn run_agent(config: AgentConfig) -> anyhow::Result<()> {
         crate::autotune::startup_recovery::recover_controller_journal_on_startup(
             crate::autotune::startup_recovery::StartupRecoveryConfig {
                 rollback_on_crash_recovery: config.rollback_on_crash_recovery,
+                // A worker that is already listening restores what the controller cannot.
+                privileged_worker_socket:
+                    crate::daemon::privilege::default_privileged_worker_socket_path()
+                        .ok()
+                        .filter(|path| path.exists()),
                 ..crate::autotune::startup_recovery::StartupRecoveryConfig::default()
             },
         )?;
