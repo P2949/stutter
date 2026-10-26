@@ -120,7 +120,17 @@ impl CgroupPlacementAction {
                 .with_context(|| format!("failed to write {}", target_abs.display()))
                 .map_err(failed)?;
         }
+        // `cgroup.procs` is process-granular: writing any thread id moves its whole thread group,
+        // so one write per process is the whole mutation and a second one would be a no-op.
+        let mut moved = std::collections::BTreeSet::new();
         for record in &plan.records {
+            let process = record
+                .restore_identity()
+                .process_pid
+                .map_or(record.tid(), |pid| pid.as_u32());
+            if !moved.insert(process) {
+                continue;
+            }
             writer
                 .write_trimmed(&target_abs.join("cgroup.procs"), &record.tid().to_string())
                 .with_context(|| {

@@ -53,6 +53,15 @@ impl AcceptanceMutation {
         }
     }
 
+    /// How many writes one apply of the owned tree performs (a cgroup move is one write per
+    /// process, the three processes of the tree; every other mutation writes once per task).
+    pub fn apply_writes(self) -> usize {
+        match self {
+            Self::Cgroup => 3,
+            _ => 5,
+        }
+    }
+
     pub fn mode(self) -> DaemonMode {
         match self {
             Self::Affinity => DaemonMode::ApplyLowRisk,

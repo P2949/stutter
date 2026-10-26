@@ -134,15 +134,6 @@ pub(crate) fn evaluate_proposal_static(
     let workload_policy = input
         .workload_policy
         .rule_for(input.observation.primary_situation);
-    if !workload_policy.allows_candidate(&proposal.candidate) {
-        deny_reasons.push(CandidateDenyReason::WorkloadPolicyBlocked);
-        deny_messages.push(format!(
-            "workload policy for {:?} does not allow action family {}",
-            input.observation.primary_situation,
-            proposal.candidate.action_kind()
-        ));
-    }
-
     let validated_by_campaign = input
         .controller_state
         .validation_override
@@ -154,6 +145,15 @@ pub(crate) fn evaluate_proposal_static(
                 input.daemon_policy.source,
             )
         });
+    if !validated_by_campaign && !workload_policy.allows_candidate(&proposal.candidate) {
+        deny_reasons.push(CandidateDenyReason::WorkloadPolicyBlocked);
+        deny_messages.push(format!(
+            "workload policy for {:?} does not allow action family {}",
+            input.observation.primary_situation,
+            proposal.candidate.action_kind()
+        ));
+    }
+
     if mode_requires_autonomous_workload_family(input.daemon_policy.mode)
         && !validated_by_campaign
         && !workload_policy.allows_autonomous_candidate(&proposal.candidate)

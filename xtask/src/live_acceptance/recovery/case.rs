@@ -91,8 +91,10 @@ pub(super) fn start_actor(
             .args(["-f", "--seccomp-bpf", "-yy", "-o"])
             .arg(out.join("syscalls.log"));
         if target.mutation == AcceptanceMutation::Cgroup {
-            // Only the writes that move a task are traced: the destination's `cgroup.procs`.
+            // Only the writes that move a task are traced: the destination's `cgroup.procs` for
+            // the apply and the origin's for the restore.
             command.arg("-P").arg(cgroup_procs_of_target(root)?);
+            command.arg("-P").arg(cgroup_procs_of_origin(root)?);
         }
         command
             .arg("-e")
@@ -162,6 +164,29 @@ pub(super) fn archive(out: &Path, source: &Path, name: &str) -> anyhow::Result<(
     file.sync_all()?;
     Ok(())
 }
+/// How many tasks the first unit of work changes. Most mutations act on one task per write; a
+/// cgroup move is process-granular, so the first write moves every thread of the first process.
+fn first_unit_effect(mutation: AcceptanceMutation, before: &procfs::Snapshot) -> usize {
+    match (mutation, before.values().next()) {
+        (AcceptanceMutation::Cgroup, Some(first)) => {
+            before.values().filter(|task| task.pid == first.pid).count()
+        }
+        _ => 1,
+    }
+}
+
+/// `cgroup.procs` of the cgroup the tree started in (where a restore writes).
+fn cgroup_procs_of_origin(root: u32) -> anyhow::Result<PathBuf> {
+    let text = fs::read_to_string(format!("/proc/{root}/cgroup"))?;
+    let original = text
+        .lines()
+        .find_map(|line| line.strip_prefix("0::"))
+        .context("cgroup v2 path missing")?;
+    Ok(Path::new("/sys/fs/cgroup")
+        .join(Path::new(original.trim()).strip_prefix("/")?)
+        .join("cgroup.procs"))
+}
+
 /// `cgroup.procs` of the `target` sibling of the cgroup the tree runs in.
 fn cgroup_procs_of_target(root: u32) -> anyhow::Result<PathBuf> {
     let text = fs::read_to_string(format!("/proc/{root}/cgroup"))?;
@@ -290,7 +315,11 @@ pub(super) fn run(
                 }
                 let current = procfs::snapshot(mutation, root, root_ticks)?;
                 let count = procfs::changed(mutation, &before, &current, desired)?;
-                let target = if interrupted { 4 } else { 1 };
+                let target = if interrupted {
+                    before.len() - first_unit_effect(mutation, &before)
+                } else {
+                    first_unit_effect(mutation, &before)
+                };
                 if count == target {
                     break current;
                 }
@@ -331,8 +360,10 @@ pub(super) fn run(
         let changed = procfs::changed(mutation, &before, &at_checkpoint, desired)?;
         let expected_changed = match checkpoint {
             RecoveryCheckpoint::BeforeApply | RecoveryCheckpoint::AfterPreparation => 0,
-            RecoveryCheckpoint::MidApply => 1,
-            RecoveryCheckpoint::InterruptedRollback => 4,
+            RecoveryCheckpoint::MidApply => first_unit_effect(mutation, &before),
+            RecoveryCheckpoint::InterruptedRollback => {
+                before.len() - first_unit_effect(mutation, &before)
+            }
             _ => 5,
         };
         ensure!(

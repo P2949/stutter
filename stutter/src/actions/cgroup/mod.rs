@@ -242,6 +242,7 @@ impl CgroupPlacementAction {
 
         let mut failures = Vec::new();
         let mut summary = RestoreSummary::default();
+        let mut restored_processes = std::collections::BTreeSet::new();
 
         for record in records {
             let identity = record.restore_identity();
@@ -293,6 +294,12 @@ impl CgroupPlacementAction {
                 continue;
             }
             let procs = original_abs.join("cgroup.procs");
+            let process = identity.process_pid.map_or(tid, |pid| pid.as_u32());
+            if restored_processes.contains(&(process, record.original_cgroup.clone())) {
+                // The process (every thread) already went back with an earlier record.
+                summary.record_restored();
+                continue;
+            }
 
             if let Err(err) = write_trimmed(&procs, &tid.to_string()) {
                 match classify_restore_write_error(proc_root, tid, err) {
@@ -316,6 +323,7 @@ impl CgroupPlacementAction {
                     }
                 }
             } else {
+                restored_processes.insert((process, record.original_cgroup.clone()));
                 summary.record_restored();
             }
         }
