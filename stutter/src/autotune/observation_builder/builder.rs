@@ -43,6 +43,9 @@ pub struct AutotuneObservationBuilderInput<'a> {
     /// Sustained background CPU consumers measured by the runtime; members of the target are
     /// removed here, where the target's process set is known.
     pub offenders: Vec<crate::autotune::offenders::OffenderProcess>,
+    /// Tasks outside the target whose active configuration must still be read (the tasks an
+    /// active experiment changed), so its live state stays verifiable.
+    pub extra_config_tids: Vec<u32>,
 }
 
 #[derive(Clone, Debug)]
@@ -78,10 +81,22 @@ impl AutotuneObservationBuilder {
         let active_tasks =
             active_task_snapshots_from_active_tasks(input.proc_root, input.active_tasks);
         let protected_tasks = protected_tasks_from_active_tasks(input.active_tasks);
+        let mut config_tasks = active_tasks.clone();
+        config_tasks.extend(input.extra_config_tids.iter().map(|tid| {
+            crate::autotune::observation::ActiveTaskSnapshot {
+                tid: (*tid).into(),
+                process_pid: (*tid).into(),
+                comm: String::new(),
+                class: crate::process_tree::TaskClass::Unknown,
+                process_starttime_ticks: None,
+                task_starttime_ticks: None,
+                cgroup_path: None,
+            }
+        }));
         let system_context = collect_system_context(SystemContextSnapshotInput {
             proc_root: input.proc_root,
             sys_root: input.sys_root,
-            active_tasks: &active_tasks,
+            active_tasks: &config_tasks,
             health: system_health,
             sampled_at_unix_nanos: crate::audit::unix_nanos_now(),
         });

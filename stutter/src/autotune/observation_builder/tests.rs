@@ -73,6 +73,7 @@ fn builder_extracts_focus_target_tasks_workload_identity_and_system_context() {
         sys_root: &sys_root,
         activity_level: ActivityLevel::Active,
         offenders: Vec::new(),
+        extra_config_tids: Vec::new(),
     });
     let observation = output.observation;
 
@@ -141,6 +142,7 @@ fn builder_uses_configured_online_data_quality_policy() {
         sys_root: &sys_root,
         activity_level: ActivityLevel::Active,
         offenders: Vec::new(),
+        extra_config_tids: Vec::new(),
     });
     let observation = output.observation;
 
@@ -203,6 +205,7 @@ fn observation_from_game_window_with_high_cpu_latency() {
         sys_root: &sys_root,
         activity_level: ActivityLevel::Active,
         offenders: Vec::new(),
+        extra_config_tids: Vec::new(),
     })
     .observation;
 
@@ -255,6 +258,7 @@ fn observation_preserves_irq_signals() {
         sys_root: &sys_root,
         activity_level: ActivityLevel::Active,
         offenders: Vec::new(),
+        extra_config_tids: Vec::new(),
     })
     .observation;
 
@@ -295,6 +299,7 @@ fn observation_builder_focus_falls_back_to_unknown_when_confidence_below_thresho
         sys_root: &sys_root,
         activity_level: ActivityLevel::Active,
         offenders: Vec::new(),
+        extra_config_tids: Vec::new(),
     })
     .observation;
 
@@ -330,6 +335,7 @@ fn observation_builder_protected_tasks_exclude_compositor() {
         sys_root: &sys_root,
         activity_level: ActivityLevel::Active,
         offenders: Vec::new(),
+        extra_config_tids: Vec::new(),
     })
     .observation;
 
@@ -372,6 +378,7 @@ fn observation_builder_resolves_focused_gpu_from_target_fd() {
         sys_root: &sys_root,
         activity_level: ActivityLevel::Active,
         offenders: Vec::new(),
+        extra_config_tids: Vec::new(),
     })
     .observation;
 
