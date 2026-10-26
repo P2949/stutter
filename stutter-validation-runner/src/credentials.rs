@@ -59,10 +59,28 @@ pub fn restrict_child(
     identity: Option<Identity>,
     capabilities: CapabilitySet,
 ) {
-    // SAFETY: the closure only performs raw syscalls through `sys` (async-signal-safe, no
-    // allocation, no locks), which is what `pre_exec` requires after fork.
+    restrict_child_in_cgroup(command, identity, capabilities, None);
+}
+
+/// Like [`restrict_child`], and first (while still privileged, before anything runs in the child)
+/// moves the child into the cgroup whose `cgroup.procs` file is `attach`. The child therefore never
+/// observes any other cgroup, so a suite that derives its delegated subtree from
+/// `/proc/self/cgroup` cannot race the move.
+pub fn restrict_child_in_cgroup(
+    command: &mut Command,
+    identity: Option<Identity>,
+    capabilities: CapabilitySet,
+    attach: Option<std::ffi::CString>,
+) {
+    // SAFETY: the closure only performs raw syscalls (async-signal-safe, no allocation, no locks;
+    // the path was built before the fork), which is what `pre_exec` requires after fork.
     unsafe {
-        command.pre_exec(move || apply_to_current_process(identity, capabilities));
+        command.pre_exec(move || {
+            if let Some(path) = &attach {
+                sys::join_cgroup(path)?;
+            }
+            apply_to_current_process(identity, capabilities)
+        });
     }
 }
 
