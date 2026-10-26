@@ -199,7 +199,11 @@ fn verify_saved_nice(before: &Snapshot, token: &Value) -> anyhow::Result<()> {
             "token identity differs for {tid}"
         );
         ensure!(
-            record["original_nice"].to_string() == task.mask,
+            record["original_nice"]
+                .as_i64()
+                .map(|nice| nice.to_string())
+                .as_deref()
+                == Some(task.mask.as_str()),
             "token original value differs for {tid}"
         );
     }

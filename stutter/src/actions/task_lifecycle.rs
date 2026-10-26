@@ -33,10 +33,12 @@ pub(crate) struct LifecycleSpec<'a, A> {
     pub check_token: &'a dyn Fn(&RollbackToken, &Originals) -> anyhow::Result<()>,
 }
 
+type StateFn<'a> = dyn Fn(&str) -> anyhow::Result<String> + 'a;
+
 fn readback(
     spec_read: &dyn Fn(u32) -> anyhow::Result<String>,
     original: &Originals,
-    expected: Option<&dyn Fn(&str) -> anyhow::Result<String>>,
+    expected: Option<&StateFn<'_>>,
 ) -> anyhow::Result<()> {
     for (tid, (ticks, before)) in original {
         ensure!(

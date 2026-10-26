@@ -331,15 +331,6 @@ fn an_operation_without_a_prepared_transaction_is_refused_before_it_can_mutate()
     assert_eq!(reached.load(Ordering::SeqCst), 0);
 }
 
-/// The process's nice value, read from `/proc` (no syscall wrappers needed).
-fn process_nice() -> String {
-    std::fs::read_to_string("/proc/self/stat")
-        .unwrap()
-        .rsplit_once(')')
-        .and_then(|(_, rest)| rest.split_whitespace().nth(16).map(str::to_owned))
-        .unwrap()
-}
-
 /// A scripted worker for failure cases a real worker cannot reproduce on demand: it accepts one
 /// connection, reads the request and then follows `script`.
 fn scripted_worker(
