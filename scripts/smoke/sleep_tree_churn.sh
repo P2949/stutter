@@ -19,7 +19,7 @@ bash -c '
     end=$(( $(date +%s) + 10 ))
     while [ $(date +%s) -lt $end ]; do
         # Spawn short-lived children
-        /usr/bin/true &
+        true &
         sleep 0.1
     done
 ' &

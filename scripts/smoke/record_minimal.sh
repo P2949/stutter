@@ -15,7 +15,7 @@ write_basic_metadata "${OUT_BASE}"
 
 # Start a small background churn process
 echo "Starting background churn process..."
-bash -c 'while true; do /usr/bin/true; sleep 0.1; done' &
+bash -c 'while true; do true; sleep 0.1; done' &
 CHURN_PID=$!
 
 # Cleanup on exit
