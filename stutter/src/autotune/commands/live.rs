@@ -223,6 +223,13 @@ pub async fn autotune_command_with(
             .unsafe_in_process_privileged_worker = run.in_process_privileged;
     }
 
+    if matches!(mode, DaemonMode::ApplyLowRisk | DaemonMode::ApplyMediumRisk) {
+        // Restore what a crashed controller left applied before planning anything new.
+        crate::autotune::startup_recovery::recover_before_start(
+            crate::autotune::startup_recovery::startup_recovery_config_for_runtime(&runtime_config),
+        )?;
+    }
+
     let duration = if matches!(mode, DaemonMode::ApplyLowRisk | DaemonMode::ApplyMediumRisk) {
         None
     } else {

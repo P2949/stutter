@@ -15,78 +15,18 @@ pub async fn run_agent(config: AgentConfig) -> anyhow::Result<()> {
         std::fs::create_dir_all(&config.runs_dir)?;
     }
 
-    let startup_recovery =
-        crate::autotune::startup_recovery::recover_controller_journal_on_startup(
-            crate::autotune::startup_recovery::StartupRecoveryConfig {
-                rollback_on_crash_recovery: config.rollback_on_crash_recovery,
-                // A worker that is already listening restores what the controller cannot.
-                privileged_worker_socket:
-                    crate::daemon::privilege::default_privileged_worker_socket_path()
-                        .ok()
-                        .filter(|path| path.exists()),
-                ..crate::autotune::startup_recovery::StartupRecoveryConfig::default()
-            },
-        )?;
-
+    let startup_recovery = crate::autotune::startup_recovery::recover_before_start(
+        crate::autotune::startup_recovery::StartupRecoveryConfig {
+            rollback_on_crash_recovery: config.rollback_on_crash_recovery,
+            // A worker that is already listening restores what the controller cannot.
+            privileged_worker_socket:
+                crate::daemon::privilege::default_privileged_worker_socket_path()
+                    .ok()
+                    .filter(|path| path.exists()),
+            ..crate::autotune::startup_recovery::StartupRecoveryConfig::default()
+        },
+    )?;
     let initial_daemon_state = daemon_state_from_startup_recovery(&startup_recovery);
-
-    match startup_recovery {
-        crate::autotune::startup_recovery::StartupRecoveryOutcome::Recovered {
-            experiment_id,
-            action_id,
-            affected_tasks,
-            manual_restore_command,
-        } => {
-            log::info!(
-                "autotune startup recovery: rolled back interrupted action experiment_id={} action_id={} affected_tasks={} manual_restore_command=\"{}\"",
-                experiment_id,
-                action_id,
-                affected_tasks,
-                manual_restore_command
-            );
-        }
-        crate::autotune::startup_recovery::StartupRecoveryOutcome::Faulted {
-            experiment_id,
-            action_id,
-            manual_restore_command,
-            reason,
-        } => {
-            log::error!(
-                "autotune startup recovery faulted: experiment_id={} action_id={} reason={}",
-                experiment_id,
-                action_id,
-                reason
-            );
-            log::error!("manual restore command: {}", manual_restore_command);
-            anyhow::bail!(
-                "autotune startup recovery failed; controller is Faulted; manual restore command: {}",
-                manual_restore_command
-            );
-        }
-        crate::autotune::startup_recovery::StartupRecoveryOutcome::RollbackDisabled {
-            experiment_id,
-            action_id,
-            manual_restore_command,
-        } => {
-            log::warn!(
-                "autotune startup recovery: rollback_on_crash_recovery=false; leaving applied journal in place experiment_id={} action_id={} manual_restore_command=\"{}\"",
-                experiment_id,
-                action_id,
-                manual_restore_command
-            );
-        }
-        crate::autotune::startup_recovery::StartupRecoveryOutcome::ApplyingWithoutRollback {
-            experiment_id,
-            action_id,
-        } => {
-            log::warn!(
-                "autotune startup recovery: found applying journal without rollback token experiment_id={} action_id={}; no automatic rollback attempted",
-                experiment_id,
-                action_id
-            );
-        }
-        crate::autotune::startup_recovery::StartupRecoveryOutcome::Clean => {}
-    }
 
     if config.unix_socket.is_none() && !is_local_bind(&config.bind) {
         if config.bearer_token.is_none()
