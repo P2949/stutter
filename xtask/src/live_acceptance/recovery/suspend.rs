@@ -183,18 +183,21 @@ fn case(
         let mut words = options.suspend_command.split_whitespace();
         let program = words.next().context("empty suspend command")?;
         let words = words.map(str::to_owned).collect::<Vec<_>>();
-        command(
-            Path::new(program),
-            &words,
-            out,
-            "suspend",
-            Duration::from_secs(options.resume_timeout_seconds),
-        )
-        .map_err(|error| {
-            blocked(format!(
-                "suspend command failed or never resumed: {error:#}"
-            ))
-        })?;
+        let timeout = Duration::from_secs(options.resume_timeout_seconds);
+        command(Path::new(program), &words, out, "suspend", timeout)
+            // A suite that runs outside the user's login session (a delegated cgroup subtree)
+            // is refused interactive authorisation; non-interactive sudo is the same fallback the
+            // RTC alarm uses, never a password prompt.
+            .or_else(|_| {
+                let mut sudo = vec!["-n".to_owned(), program.to_owned()];
+                sudo.extend(words.clone());
+                command(Path::new("sudo"), &sudo, out, "suspend-sudo", timeout)
+            })
+            .map_err(|error| {
+                blocked(format!(
+                    "suspend command failed or never resumed: {error:#}"
+                ))
+            })?;
         let handled = wait_file(&out.join("resume-handled.json"), &mut controller, 120)?;
         let status = controller.0.wait()?;
         ensure!(status.success(), "controller exited with {status}");
