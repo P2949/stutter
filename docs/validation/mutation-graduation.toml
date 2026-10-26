@@ -146,10 +146,10 @@ suspend_resume = "suspend-resume"
 
 [operation.nice.scenarios]
 # Pre-registered hypothesis: demoting the sustained background CPU hogs that share the game's CPU
-# shortens the game's runnable wait. Beneficial: three ordinary hogs on the game's CPU. Neutral:
-# the same hogs on another CPU, where they are still visible offenders but cannot contend with the
-# game. Regression: contention no priority change can touch (a SCHED_FIFO burst on the game's CPU,
-# hogs elsewhere), so any keep there is a false keep.
+# shortens the game's runnable wait. Beneficial: three ordinary hogs on the game's CPU. Neutral and
+# regression: the hogs stay visible offenders on the other CPU while the game's contention is a
+# SCHED_FIFO burst (8 ms and 2 ms of every 20) that no priority change can touch, so any keep there
+# is a false keep.
 beneficial = "affinity-contended"
 neutral = "affinity-quiet"
 regression = "affinity-colocated"
