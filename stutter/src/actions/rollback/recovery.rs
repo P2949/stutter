@@ -44,8 +44,8 @@ pub(crate) fn recovery_descriptor(token: &RollbackToken) -> RollbackRecoveryDesc
             "automatic IRQ resource identity and crash recovery unqualified",
         ),
         RollbackToken::CpuPowerRestore { .. } => (
-            ManualOnly,
-            "automatic CPU-power resource identity and crash recovery unqualified",
+            VerifiedAutomatic,
+            "the cpufreq policy, its related CPU set, driver, controlled attribute, legal values and boot are rediscovered and compared before any write; a record without that identity, from another boot, or whose original value is no longer legal is never replayed",
         ),
         RollbackToken::GpuPowerRestore { .. } => (
             ManualOnly,

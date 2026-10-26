@@ -118,6 +118,11 @@ mod tests {
             .system_wide_allowlist
             .irq_devices
             .insert("test-device".to_owned());
+        config
+            .safety
+            .system_wide_allowlist
+            .operations
+            .insert(candidate.operation_kind().as_str().to_owned());
         config.autotune.high_risk_dry_run = true;
         let policy = build_daemon_policy(DaemonPolicyBuildInput {
             config: &config,
@@ -509,6 +514,11 @@ mod tests {
             .system_wide_allowlist
             .gpu_cards
             .insert("card0".to_owned());
+        config
+            .safety
+            .system_wide_allowlist
+            .operations
+            .insert(candidate.operation_kind().as_str().to_owned());
         config.autotune.high_risk_dry_run = true;
         let policy = build_daemon_policy(DaemonPolicyBuildInput {
             config: &config,

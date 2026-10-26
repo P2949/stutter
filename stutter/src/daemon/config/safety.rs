@@ -60,9 +60,17 @@ pub struct DaemonSystemWideAllowlistConfig {
     pub gpu_pci_ids: BTreeSet<String>,
     pub irq_devices: BTreeSet<String>,
     pub vm_knobs: BTreeSet<String>,
+    /// The exact system-wide operations (`MutationOperationKind::as_str`) that may be applied at
+    /// medium risk. Empty means none: a scope permission alone never authorises an operation.
+    #[serde(default)]
+    pub operations: BTreeSet<String>,
 }
 
 impl DaemonSystemWideAllowlistConfig {
+    pub fn allows_operation(&self, operation: &str) -> bool {
+        self.operations.contains(operation)
+    }
+
     pub fn allows_gpu(&self, card: &str, pci_id: Option<&str>) -> bool {
         self.gpu_cards.contains(card)
             || pci_id.is_some_and(|pci_id| {

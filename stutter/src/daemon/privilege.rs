@@ -153,6 +153,22 @@ fn validate_candidate_plan_request(
         return Err(PrivilegedWorkerError::CandidatePlanMissingEvidence.into());
     }
 
+    if request
+        .plan
+        .descriptor
+        .effect_scope
+        .is_system_wide_resource()
+        && !request
+            .policy
+            .system_wide_allowlist
+            .allows_operation(request.plan.operation.as_str())
+    {
+        return Err(PrivilegedWorkerError::SystemWideOperationNotAllowlisted {
+            operation: request.plan.operation.as_str().to_owned(),
+        }
+        .into());
+    }
+
     request
         .policy
         .check_action_with_context(intent, &request.plan.descriptor, &request.context)?;

@@ -86,15 +86,15 @@ impl MutationOperationKind {
             Self::Nice => Some("nice_experiment"),
             Self::IoPrio => Some("ioprio_experiment"),
             Self::CgroupPlacement => Some("cgroup_placement_experiment"),
-            Self::CpuPowerEpp
-            | Self::CpuPowerGovernor
-            | Self::GpuPowerProfile
-            | Self::GpuForcePerformance
-            | Self::VmSwappiness
-            | Self::VmDirtyBackgroundRatio
-            | Self::VmDirtyRatio
-            | Self::IrqKnownDevice
-            | Self::IrqStorageOrUnknown => Some("system_wide_tuning"),
+            Self::CpuPowerEpp => Some("cpu_power_epp"),
+            Self::CpuPowerGovernor => Some("cpu_power_governor"),
+            Self::GpuPowerProfile => Some("gpu_power_profile"),
+            Self::GpuForcePerformance => Some("gpu_force_performance"),
+            Self::VmSwappiness => Some("vm_swappiness"),
+            Self::VmDirtyBackgroundRatio => Some("vm_dirty_background_ratio"),
+            Self::VmDirtyRatio => Some("vm_dirty_ratio"),
+            Self::IrqKnownDevice => Some("irq_affinity_known_device"),
+            Self::IrqStorageOrUnknown => Some("irq_affinity_storage_or_unknown"),
             Self::Unclassified => None,
         }
     }
@@ -105,7 +105,11 @@ impl MutationOperationKind {
     pub const fn prepared_transaction_implemented(self) -> bool {
         matches!(
             self,
-            Self::CpuAffinityProfile | Self::Uclamp | Self::Nice | Self::CgroupPlacement
+            Self::CpuAffinityProfile
+                | Self::Uclamp
+                | Self::Nice
+                | Self::CgroupPlacement
+                | Self::CpuPowerEpp
         )
     }
 

@@ -11,11 +11,12 @@ pub(super) fn medium_risk_system_scope_allowed(
         return false;
     }
 
+    if !policy.allow_system_wide_apply {
+        return false;
+    }
     match descriptor.effect_scope {
-        ActionEffectScope::Irq => true,
-        ActionEffectScope::CpuPower | ActionEffectScope::GpuPower => {
-            policy.allow_gpu_power_in_autotune
-        }
+        ActionEffectScope::Irq | ActionEffectScope::CpuPower => true,
+        ActionEffectScope::GpuPower => policy.allow_gpu_power_in_autotune,
         ActionEffectScope::VmKnob => policy.allow_vm_knobs_in_autotune,
         _ => false,
     }

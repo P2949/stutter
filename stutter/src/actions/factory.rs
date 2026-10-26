@@ -365,6 +365,18 @@ impl TuningAction for PolicyBackedCpuPowerAction {
             .map_err(Into::into)
     }
 
+    fn prepared_before_mutation(&self) -> bool {
+        true
+    }
+
+    fn apply_with_prepared_rollback(
+        &self,
+        before_mutation: &mut dyn FnMut(&RollbackToken) -> anyhow::Result<()>,
+    ) -> crate::actions::ApplyResult {
+        self.action
+            .apply_prepared_with_policy(&self.policy, before_mutation)
+    }
+
     fn verify(&self) -> anyhow::Result<ActionState> {
         self.action.verify_with_policy(&self.policy)
     }
