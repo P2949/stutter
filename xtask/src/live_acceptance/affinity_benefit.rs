@@ -292,6 +292,10 @@ fn population(signals: &Value) -> Option<Value> {
 
 pub(super) fn run(root: &Path, out: &Path, binary: &Path, spec: &Spec) -> anyhow::Result<()> {
     ensure!(cfg!(target_os = "linux"), "the benefit pair requires Linux");
+    if spec.mutation == AcceptanceMutation::Nice {
+        // The contention processes inherit the limit, so the controller can un-demote them.
+        stutter::api::autotune::prepare_nice_validation_process()?;
+    }
     fs::create_dir(out).context("pair output must be a new directory with an existing parent")?;
     let out = fs::canonicalize(out)?;
     let binary = root.join(binary);

@@ -105,6 +105,10 @@ impl std::str::FromStr for RecoveryCheckpoint {
 /// The throwaway acceptance controllers run as the campaign user, whose `RLIMIT_NICE` forbids
 /// un-demoting a task. The runner gives suites `CAP_SYS_RESOURCE`, which lets the controller lift
 /// its own limit; production restores through the privileged worker instead.
+pub fn prepare_nice_validation_process() -> anyhow::Result<()> {
+    grant_nice_restore()
+}
+
 fn grant_nice_restore() -> anyhow::Result<()> {
     crate::syscall::raise_nice_rlimit_for_validation()
         .context("cannot lift RLIMIT_NICE (needs CAP_SYS_RESOURCE)")

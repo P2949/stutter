@@ -147,9 +147,11 @@ fn timespec_to_ns(timespec: libc::timespec) -> Option<u64> {
     seconds.checked_mul(1_000_000_000)?.checked_add(nanos)
 }
 
-/// Lets this process restore a lower niceness than it currently has. An ordinary user's
-/// `RLIMIT_NICE` is 0, so un-demoting a task needs either a privileged worker (production) or this
-/// call with `CAP_SYS_RESOURCE` (a validation harness's throwaway controller only).
+/// Lets this process and every process it starts restore a lower niceness than they currently
+/// have. The kernel checks the *target* task's `RLIMIT_NICE` (0 for an ordinary user), so a
+/// validation harness raises its own limit with `CAP_SYS_RESOURCE` before it spawns the disposable
+/// workload and contention it will later un-demote. Production restores through the privileged
+/// worker instead.
 pub fn raise_nice_rlimit_for_validation() -> io::Result<()> {
     let limit = libc::rlimit {
         rlim_cur: 40,
