@@ -3,7 +3,7 @@
 //! minimal capability set before `exec`.
 use std::{
     fs,
-    os::unix::{fs::PermissionsExt, process::CommandExt},
+    os::unix::{ffi::OsStringExt, fs::PermissionsExt, process::CommandExt},
     path::{Path, PathBuf},
     process::{Command, Stdio},
     time::{Duration, Instant},
@@ -14,9 +14,7 @@ use stutter_core::hash::sha256_hex;
 
 use crate::{
     authorization::Denial,
-    credentials::{
-        CapabilitySet, Identity, drop_all_privileges, profiling_capabilities, restrict_child,
-    },
+    credentials::{CapabilitySet, Identity, drop_all_privileges, profiling_capabilities},
     model::{Authorization, Envelope, ErrorCode, Request},
     sys,
 };
@@ -330,19 +328,21 @@ impl SystemExecutor {
                     .map_err(|error| failure(error.to_string()))?,
             )
             .stderr(log);
-        restrict_child(&mut command, self.identity(auth), capabilities);
+        let attach = delegated_leaf
+            .map(|leaf| {
+                std::ffi::CString::new(leaf.join("cgroup.procs").into_os_string().into_vec())
+                    .map_err(|_| failure("the delegated cgroup path contains a NUL byte"))
+            })
+            .transpose()?;
+        crate::credentials::restrict_child_in_cgroup(
+            &mut command,
+            self.identity(auth),
+            capabilities,
+            attach,
+        );
         let mut child = command
             .spawn()
             .map_err(|error| failure(format!("could not start {label}: {error}")))?;
-        if let Some(leaf) = delegated_leaf
-            && let Err(error) = crate::delegation::attach(leaf, child.id())
-        {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(failure(format!(
-                "could not attach {label} to its delegated cgroup: {error}"
-            )));
-        }
         let started = Instant::now();
         let status = loop {
             if let Some(status) = child
