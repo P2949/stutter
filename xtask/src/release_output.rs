@@ -10,13 +10,12 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use anyhow::{Context, bail, ensure};
+use anyhow::{Context, ensure};
 
 /// The xtask-managed output, relative to the repository root.
 pub const MANAGED_OUTPUT: &str = "target/release-check";
 
 const STAGING_MARKER: &str = ".staging-";
-const BACKUP_MARKER: &str = ".previous-";
 
 /// Who owns the destination.
 #[derive(Debug, Eq, PartialEq)]
@@ -76,6 +75,38 @@ fn sibling(destination: &Path, marker: &str) -> anyhow::Result<PathBuf> {
         name.to_string_lossy(),
         unique_suffix()
     )))
+}
+
+/// Atomically swap two existing paths, so neither is ever absent.
+#[cfg(target_os = "linux")]
+fn exchange_paths(left: &Path, right: &Path) -> anyhow::Result<()> {
+    use std::{ffi::CString, os::unix::ffi::OsStrExt};
+
+    let c_path = |path: &Path| {
+        CString::new(path.as_os_str().as_bytes())
+            .with_context(|| format!("{} contains a NUL byte", path.display()))
+    };
+    let (left_c, right_c) = (c_path(left)?, c_path(right)?);
+    // SAFETY: both pointers are valid NUL-terminated strings that outlive the call.
+    let status = unsafe {
+        libc::renameat2(
+            libc::AT_FDCWD,
+            left_c.as_ptr(),
+            libc::AT_FDCWD,
+            right_c.as_ptr(),
+            libc::RENAME_EXCHANGE,
+        )
+    };
+    if status == -1 {
+        return Err(std::io::Error::last_os_error())
+            .with_context(|| format!("exchange {} and {}", left.display(), right.display()));
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn exchange_paths(_left: &Path, _right: &Path) -> anyhow::Result<()> {
+    anyhow::bail!("atomic path exchange (renameat2 RENAME_EXCHANGE) requires Linux")
 }
 
 /// Staging directories left by a process that no longer exists (a killed run).
@@ -138,23 +169,15 @@ impl Staging {
                     return fs::rename(&self.path, final_path)
                         .with_context(|| format!("install {}", final_path.display()));
                 }
-                let backup = sibling(final_path, BACKUP_MARKER)?;
-                fs::rename(final_path, &backup)
-                    .with_context(|| format!("set aside {}", final_path.display()))?;
-                if let Err(error) = fs::rename(&self.path, final_path) {
-                    if let Err(restore) = fs::rename(&backup, final_path) {
-                        bail!(
-                            "install failed ({error}) and the previous result could not be restored \
-                             from {} ({restore})",
-                            backup.display()
-                        );
-                    }
-                    return Err(error).with_context(|| format!("install {}", final_path.display()));
-                }
-                if let Err(error) = fs::remove_dir_all(&backup) {
+                // One atomic step: the destination always names a complete package, old or new.
+                exchange_paths(&self.path, final_path).with_context(|| {
+                    format!("replace {} with the verified package", final_path.display())
+                })?;
+                // The staging path now holds the superseded package; Drop retries a failed removal.
+                if let Err(error) = fs::remove_dir_all(&self.path) {
                     eprintln!(
                         "release-check: could not remove the superseded result {}: {error}",
-                        backup.display()
+                        self.path.display()
                     );
                 }
                 Ok(())
@@ -243,20 +266,44 @@ mod tests {
         assert_eq!(
             entries(&root.join("target")),
             ["release-check"],
-            "neither the staging directory nor the backup remains"
+            "no staging directory or .previous-* backup remains"
         );
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
-    fn a_failed_managed_install_restores_the_previous_output() {
-        let root = scratch("restore");
+    fn exchanging_two_directories_swaps_their_contents() {
+        let root = scratch("exchange");
+        let (left, right) = (root.join("left"), root.join("right"));
+        package(&left, "left");
+        package(&right, "right");
+        exchange_paths(&left, &right).unwrap();
+        assert_eq!(marker(&left), "right");
+        assert_eq!(marker(&right), "left");
+    }
+
+    #[test]
+    fn a_failed_exchange_fails_closed_and_keeps_the_old_output() {
+        let root = scratch("exchange-fails");
         let destination = Destination::resolve(&root, None);
         package(destination.path(), "old");
         let staging = Staging::create(&destination).unwrap();
-        // Nothing was staged, so moving it into place fails after the old result was set aside.
+        // Nothing was staged, so the exchange cannot happen and nothing may be replaced.
         assert!(staging.install(&destination).is_err());
         assert_eq!(marker(destination.path()), "old");
         assert_eq!(entries(&root.join("target")), ["release-check"]);
+    }
+
+    #[test]
+    fn staging_holding_the_superseded_package_after_a_crash_is_swept() {
+        let root = scratch("post-exchange");
+        let destination = Destination::resolve(&root, None);
+        package(destination.path(), "new");
+        let target = root.join("target");
+        package(&target.join("release-check.staging-4294967295-1"), "old");
+        drop(Staging::create(&destination).unwrap());
+        assert_eq!(marker(destination.path()), "new");
+        assert_eq!(entries(&target), ["release-check"]);
     }
 
     #[test]
