@@ -49,6 +49,10 @@ denied_actions = [
 ]
 ```
 
+## Where the live session reads it
+
+`stutter autotune` applies the user config file (`--config PATH`, else `STUTTER_CONFIG`, else `~/.config/stutter/config.toml`) to its daemon policy before the command-line flags: `daemon_game_cgroup` and the other cgroup targets, `daemon_enabled_action_families` / `daemon_denied_action_families`, workload policy rules, and the `[autotune]` worker keys (`manage_privileged_worker`, `privileged_worker_socket`, `privileged_worker_restart_limit`). A flag given on the command line wins. The candidate window of an apply session is `--duration-seconds` (30 s when omitted). A live apply session restores what a crashed controller left applied (the kept-action ledger and the journal) before it plans anything, and refuses to start if a token cannot be restored.
+
 ## Mode
 
 `mode` controls how far the controller may go.

@@ -72,6 +72,16 @@ fn runtime_config_for_command(
         input.watch_process.clone(),
     );
 
+    // The user's config file configures the daemon policy (cgroup targets, worker socket, workload
+    // policy); flags given on the command line still win over it.
+    let user_config = match input.config.as_deref() {
+        Some(path) => Some(crate::config_file::load_user_config_at(path)?),
+        None => crate::config_file::load_user_config()?,
+    };
+    crate::config_file::apply_daemon_user_config_overrides(
+        &mut daemon_config,
+        user_config.as_ref(),
+    );
     if game_cgroup.is_some() {
         daemon_config.safety.cgroup_targets.game_cgroup = game_cgroup;
     }
@@ -290,6 +300,50 @@ mod tests {
         assert!(
             !source.contains("println!("),
             "autotune/mod.rs must not contain command rendering or printing"
+        );
+    }
+
+    #[test]
+    fn the_users_config_file_configures_the_live_session_s_daemon_policy() {
+        let dir = std::env::temp_dir().join(format!(
+            "stutter-live-config-{}-{}",
+            std::process::id(),
+            crate::audit::unix_nanos_now()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        std::fs::write(
+            &path,
+            "daemon_game_cgroup = \"/soak/target\"\ndaemon_denied_action_families = [\"cpu_affinity_profile\"]\n\n[autotune]\nmanage_privileged_worker = false\nprivileged_worker_socket = \"/run/stutter/worker.sock\"\n",
+        )
+        .unwrap();
+        let mut input = base_autotune_input(DaemonMode::ApplyMediumRisk);
+        input.config = Some(path);
+        input.allow_medium_risk = true;
+
+        let config =
+            runtime_config_for_command(&input, DaemonMode::ApplyMediumRisk, Vec::new(), None)
+                .unwrap();
+
+        let daemon = &config.daemon_config;
+        assert_eq!(
+            daemon.safety.cgroup_targets.game_cgroup,
+            Some(PathBuf::from("/soak/target"))
+        );
+        assert!(
+            daemon
+                .safety
+                .denied_action_families
+                .contains("cpu_affinity_profile")
+        );
+        assert!(!daemon.autotune.manage_privileged_worker);
+        assert_eq!(
+            daemon.autotune.privileged_worker_socket,
+            Some(PathBuf::from("/run/stutter/worker.sock"))
+        );
+        assert!(
+            daemon.autotune.allow_medium_risk_apply,
+            "the flag still unlocks it"
         );
     }
 
