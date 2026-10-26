@@ -199,6 +199,9 @@ pub enum XtaskCommand {
     Ci {
         #[arg(long)]
         stage: Option<String>,
+        /// Print the stage names, one per line, and exit.
+        #[arg(long, conflicts_with = "stage")]
+        list: bool,
     },
     #[command(
         name = "verify-fast",
@@ -468,7 +471,14 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
             markers,
             target_root_pid,
         } => fixed_work::run(&identity, &markers, target_root_pid),
-        XtaskCommand::Ci { stage } => local_ci::ci(&root, stage.as_deref()),
+        XtaskCommand::Ci { stage, list } => {
+            if list {
+                local_ci::list_stages();
+                Ok(())
+            } else {
+                local_ci::ci(&root, stage.as_deref())
+            }
+        }
         XtaskCommand::VerifyFast => local_ci::verify_fast(&root),
         XtaskCommand::CiLive => local_ci::ci_live(&root),
         XtaskCommand::CiAll { out } => local_ci::ci_all(&root, &out),

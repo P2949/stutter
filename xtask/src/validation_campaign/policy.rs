@@ -8,10 +8,10 @@ use serde_json::Value;
 
 use super::{
     executor::{RunContext, RunnerOutcome, TaskRunner},
-    graph::{TaskSpec, issue_gates},
+    graph::{TaskSpec, validation_gates},
     integration::LEDGER,
+    landing_task::LandingTools,
     model::{BlockReason, FailureClass},
-    pr_task::PrTools,
 };
 
 pub const REGISTRY: &str = "stutter/src/capability_tiers.rs";
@@ -20,7 +20,14 @@ const START: &str = "<!-- campaign-policy:start -->";
 const END: &str = "<!-- campaign-policy:end -->";
 
 /// Issue gates that must be ready before any tier changes (the old human review gate).
-pub const REQUIRED_ISSUES: [u32; 6] = [27, 30, 31, 32, 33, 38];
+pub const REQUIRED_GATES: [&str; 6] = [
+    "observation",
+    "kernel-compatibility",
+    "diagnosis-corpus",
+    "diagnosis-calibration",
+    "score-evaluation",
+    "profiler-overhead",
+];
 
 /// Byte range of the definition of capability `id` in the registry source.
 fn definition(source: &str, id: &str) -> Option<(usize, usize, bool)> {
@@ -158,7 +165,7 @@ pub fn replace_marked(doc: &str, section: &str) -> String {
 }
 
 pub struct CapabilityPolicyRunner {
-    pub tools: PrTools,
+    pub tools: LandingTools,
 }
 
 fn blocked(detail: String) -> RunnerOutcome {
@@ -168,14 +175,17 @@ fn blocked(detail: String) -> RunnerOutcome {
     })
 }
 
-/// Issue gates in `REQUIRED_ISSUES` that are not yet satisfied, in ascending order.
-pub fn unmet_gates(context: &RunContext<'_>) -> Vec<u32> {
+/// Gates in `REQUIRED_GATES` that are not yet satisfied, in their fixed order.
+pub fn unmet_gates(context: &RunContext<'_>) -> Vec<String> {
     let Ok(graph) = super::graph::Graph::core() else {
-        return REQUIRED_ISSUES.to_vec();
+        return REQUIRED_GATES
+            .iter()
+            .map(|gate| (*gate).to_owned())
+            .collect();
     };
-    let mut unmet: Vec<u32> = issue_gates()
+    validation_gates()
         .into_iter()
-        .filter(|gate| REQUIRED_ISSUES.contains(&gate.issue))
+        .filter(|gate| REQUIRED_GATES.contains(&gate.name.as_str()))
         .filter(|gate| {
             gate.tasks.iter().any(|task| {
                 graph
@@ -183,10 +193,8 @@ pub fn unmet_gates(context: &RunContext<'_>) -> Vec<u32> {
                     .is_none_or(|spec| !context.state.effective_status(spec).satisfies_dependents())
             })
         })
-        .map(|gate| gate.issue)
-        .collect();
-    unmet.sort_unstable();
-    unmet
+        .map(|gate| gate.name)
+        .collect()
 }
 
 fn edit(
@@ -208,7 +216,7 @@ impl TaskRunner for CapabilityPolicyRunner {
         let unmet = unmet_gates(context);
         if !unmet.is_empty() {
             return blocked(format!(
-                "capability tiers cannot change until the evidence for issues {unmet:?} verifies"
+                "capability tiers cannot change until the evidence for the {unmet:?} gates verifies"
             ));
         }
         let policy = &context.manifest.policy.capabilities;
@@ -241,8 +249,10 @@ impl TaskRunner for CapabilityPolicyRunner {
             context,
             spec,
             attempt,
-            &format!("feat(capabilities): apply the v0.1.0 tier policy (campaign {})", context.state.campaign_id),
-            "Applies the manifest's fixed capability policy after the evidence gates verified. No threshold or weight changes.",
+            &format!(
+                "feat(capabilities): apply the v0.1.0 tier policy (campaign {})",
+                context.state.campaign_id
+            ),
             &apply,
         );
         match landed {
@@ -301,7 +311,7 @@ pub fn score_doc(review: &Value, campaign: &str) -> String {
 }
 
 pub struct ReleaseDocsRunner {
-    pub tools: PrTools,
+    pub tools: LandingTools,
 }
 
 impl TaskRunner for ReleaseDocsRunner {
@@ -340,7 +350,6 @@ impl TaskRunner for ReleaseDocsRunner {
             &format!(
                 "docs(validation): record campaign {campaign} calibration and score decisions"
             ),
-            "Documents the deterministic retain decisions and every recorded limitation.",
             &apply,
         ) {
             Ok(_) => RunnerOutcome::passed(),

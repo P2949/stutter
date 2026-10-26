@@ -6,14 +6,11 @@ use crate::validation_campaign::{
     graph::Graph,
     model::{BlockReason, FailureClass},
     release::{
-        ci_must_be_green,
         freeze::FreezeRcRunner,
-        normalized_check_runs,
         offline::RcOfflineRunner,
         package::{find_ebpf_object, is_candidate_bundle, observation_recording},
-        tag::create_tag,
+        tag::{acceptance_receipt_problem, create_tag},
     },
-    repo_pr::WaitPolicy,
     repository::{Binaries, reports_revision},
     shell::{Shell, ShellOutput},
 };
@@ -25,7 +22,7 @@ type RunHook = Box<dyn Fn(&str)>;
 /// Answers by command prefix (first match) and records every command.
 struct Machine {
     answers: Vec<(&'static str, ShellOutput)>,
-    calls: RefCell<Vec<String>>,
+    calls: std::rc::Rc<RefCell<Vec<String>>>,
     on_run: Option<RunHook>,
 }
 
@@ -41,9 +38,12 @@ impl Machine {
     fn new(answers: Vec<(&'static str, ShellOutput)>) -> Self {
         Self {
             answers,
-            calls: RefCell::default(),
+            calls: Default::default(),
             on_run: None,
         }
+    }
+    fn calls_handle(&self) -> std::rc::Rc<RefCell<Vec<String>>> {
+        std::rc::Rc::clone(&self.calls)
     }
     fn did(&self, needle: &str) -> bool {
         self.calls.borrow().iter().any(|c| c.contains(needle))
@@ -65,56 +65,6 @@ impl Shell for Machine {
     fn sleep(&self, _: Duration) {}
 }
 
-fn wait() -> WaitPolicy {
-    WaitPolicy {
-        poll: Duration::ZERO,
-        max_polls: 3,
-    }
-}
-
-const GREEN_CI: &str = r#"{"check_runs":[{"name":"build","status":"completed","conclusion":"success"},{"name":"live smoke tests","status":"completed","conclusion":"skipped"}]}"#;
-
-#[test]
-fn exact_commit_ci_is_normalized_and_only_conclusive_success_passes() {
-    assert_eq!(normalized_check_runs(GREEN_CI)[0]["conclusion"], "SUCCESS");
-    let machine = Machine::new(vec![("gh api", out(0, GREEN_CI))]);
-    assert!(ci_must_be_green(&machine, Path::new("."), RC, &wait()).is_ok());
-    for (body, expect_failed) in [
-        (
-            r#"{"check_runs":[{"name":"build","status":"completed","conclusion":"failure"}]}"#,
-            true,
-        ),
-        (
-            r#"{"check_runs":[{"name":"build","status":"completed","conclusion":"cancelled"}]}"#,
-            true,
-        ),
-        (
-            r#"{"check_runs":[{"name":"build","status":"in_progress","conclusion":null}]}"#,
-            false,
-        ),
-        (r#"{"check_runs":[]}"#, false),
-    ] {
-        let machine = Machine::new(vec![("gh api", out(0, body))]);
-        let outcome = ci_must_be_green(&machine, Path::new("."), RC, &wait()).unwrap_err();
-        assert_eq!(
-            matches!(
-                outcome,
-                RunnerOutcome::Failed {
-                    class: FailureClass::SoftwareDefect,
-                    ..
-                }
-            ),
-            expect_failed,
-            "{body}"
-        );
-    }
-    let unreadable = Machine::new(vec![("gh api", out(1, ""))]);
-    assert!(matches!(
-        ci_must_be_green(&unreadable, Path::new("."), RC, &wait()),
-        Err(RunnerOutcome::Blocked(_))
-    ));
-}
-
 fn tag_release() -> crate::validation_campaign::manifest::ReleaseSection {
     manifest().release
 }
@@ -123,24 +73,34 @@ fn tag_machine(extra: Vec<(&'static str, ShellOutput)>) -> Machine {
     let mut answers = vec![
         ("git rev-parse HEAD", out(0, &format!("{RC}\n"))),
         ("git status --porcelain", out(0, "")),
-        ("gh api", out(0, GREEN_CI)),
     ];
     answers.splice(0..0, extra);
     Machine::new(answers)
 }
 
+/// Nothing about verification or tagging may reach a remote or a hosted service.
+fn assert_local_only(machine: &Machine) {
+    for forbidden in [
+        "gh ",
+        "git push",
+        "ls-remote",
+        "git pull",
+        "git fetch",
+        "origin",
+    ] {
+        assert!(!machine.did(forbidden), "ran `{forbidden}`");
+    }
+}
+
 #[test]
-fn a_fresh_tag_is_created_annotated_on_the_candidate_and_pushed() {
-    let machine = tag_machine(vec![
-        ("git rev-parse -q --verify", out(1, "")),
-        ("git ls-remote", out(0, "")),
-    ]);
+fn a_fresh_tag_is_created_annotated_on_the_candidate_and_stays_local() {
+    let machine = tag_machine(vec![("git rev-parse -q --verify", out(1, ""))]);
     assert!(matches!(
-        create_tag(&machine, Path::new("."), &tag_release(), RC, &wait()),
+        create_tag(&machine, Path::new("."), &tag_release(), RC),
         RunnerOutcome::Passed { .. }
     ));
     assert!(machine.did(&format!("git tag -a v0.1.0 {RC} -m Stutter v0.1.0")));
-    assert!(machine.did("git push origin v0.1.0"));
+    assert_local_only(&machine);
     assert!(!machine.did("--force") && !machine.did("tag -d") && !machine.did("tag -f"));
 }
 
@@ -151,70 +111,111 @@ fn an_existing_tag_elsewhere_is_never_moved_and_one_on_the_candidate_is_idempote
         out(0, "ffffffffffffffffffffffffffffffffffffffff\n"),
     )]);
     let RunnerOutcome::Failed { summary, class, .. } =
-        create_tag(&elsewhere, Path::new("."), &tag_release(), RC, &wait())
+        create_tag(&elsewhere, Path::new("."), &tag_release(), RC)
     else {
         panic!("must fail")
     };
     assert!(
         summary.contains("FAILURE_REQUIRES_REVIEW") && class == FailureClass::ValidationFailure
     );
-    assert!(!elsewhere.did("git tag -a") && !elsewhere.did("git push"));
-    let on_origin = tag_machine(vec![
-        ("git rev-parse -q --verify", out(1, "")),
-        ("git ls-remote", out(0, "abc\trefs/tags/v0.1.0\n")),
-    ]);
+    assert!(!elsewhere.did("git tag -a"));
+    assert_local_only(&elsewhere);
+    let complete = tag_machine(vec![(
+        "git rev-parse -q --verify",
+        out(0, &format!("{RC}\n")),
+    )]);
     assert!(matches!(
-        create_tag(&on_origin, Path::new("."), &tag_release(), RC, &wait()),
-        RunnerOutcome::Failed { .. }
-    ));
-    // Created locally by an interrupted attempt: only the push is repeated.
-    let local_only = tag_machine(vec![
-        ("git rev-parse -q --verify", out(0, &format!("{RC}\n"))),
-        ("git ls-remote", out(0, "")),
-    ]);
-    assert!(matches!(
-        create_tag(&local_only, Path::new("."), &tag_release(), RC, &wait()),
+        create_tag(&complete, Path::new("."), &tag_release(), RC),
         RunnerOutcome::Passed { .. }
     ));
-    assert!(local_only.did("git push origin v0.1.0") && !local_only.did("git tag -a"));
-    let complete = tag_machine(vec![
-        ("git rev-parse -q --verify", out(0, &format!("{RC}\n"))),
-        ("git ls-remote", out(0, "abc\trefs/tags/v0.1.0\n")),
-    ]);
-    assert!(matches!(
-        create_tag(&complete, Path::new("."), &tag_release(), RC, &wait()),
-        RunnerOutcome::Passed { .. }
-    ));
-    assert!(!complete.did("git push"));
+    assert!(!complete.did("git tag -a"));
+    assert_local_only(&complete);
 }
 
 #[test]
-fn tagging_requires_the_exact_candidate_a_clean_tree_and_green_ci() {
+fn tagging_requires_the_exact_candidate_and_a_clean_tree() {
     let moved = Machine::new(vec![(
         "git rev-parse HEAD",
         out(0, "ffffffffffffffffffffffffffffffffffffffff\n"),
     )]);
     assert!(
-        matches!(create_tag(&moved, Path::new("."), &tag_release(), RC, &wait()), RunnerOutcome::Failed { stage, .. } if stage == "head")
+        matches!(create_tag(&moved, Path::new("."), &tag_release(), RC), RunnerOutcome::Failed { stage, .. } if stage == "head")
     );
     let dirty = Machine::new(vec![
         ("git rev-parse HEAD", out(0, &format!("{RC}\n"))),
         ("git status --porcelain", out(0, " M x\n")),
     ]);
     assert!(
-        matches!(create_tag(&dirty, Path::new("."), &tag_release(), RC, &wait()), RunnerOutcome::Failed { stage, .. } if stage == "clean")
+        matches!(create_tag(&dirty, Path::new("."), &tag_release(), RC), RunnerOutcome::Failed { stage, .. } if stage == "clean")
     );
-    let red = tag_machine(vec![(
-        "gh api",
-        out(
-            0,
-            r#"{"check_runs":[{"name":"b","status":"completed","conclusion":"failure"}]}"#,
+    assert!(!dirty.did("git tag"));
+}
+
+struct ReceiptCheck;
+
+impl TaskRunner for ReceiptCheck {
+    fn run(
+        &self,
+        context: &RunContext<'_>,
+        _: &crate::validation_campaign::graph::TaskSpec,
+        _: u32,
+    ) -> RunnerOutcome {
+        match acceptance_receipt_problem(context, RC) {
+            Ok(()) => RunnerOutcome::passed(),
+            Err(problem) => RunnerOutcome::Failed {
+                class: FailureClass::SoftwareDefect,
+                stage: "acceptance".to_owned(),
+                summary: problem,
+                artifacts: None,
+            },
+        }
+    }
+}
+
+#[test]
+fn the_tag_needs_the_local_exact_candidate_acceptance_receipt() {
+    for (name, receipt, passes) in [
+        ("missing", None, false),
+        (
+            "failing",
+            Some(format!(
+                r#"{{"status":"FAIL","commit":"{RC}","fresh_checkout":true}}"#
+            )),
+            false,
         ),
-    )]);
-    assert!(
-        matches!(create_tag(&red, Path::new("."), &tag_release(), RC, &wait()), RunnerOutcome::Failed { stage, .. } if stage == "ci")
-    );
-    assert!(!red.did("git tag"));
+        (
+            "other-commit",
+            Some(r#"{"status":"PASS","commit":"ffff","fresh_checkout":true}"#.to_owned()),
+            false,
+        ),
+        (
+            "not-fresh",
+            Some(format!(
+                r#"{{"status":"PASS","commit":"{RC}","fresh_checkout":false}}"#
+            )),
+            false,
+        ),
+        (
+            "good",
+            Some(format!(
+                r#"{{"status":"PASS","commit":"{RC}","fresh_checkout":true}}"#
+            )),
+            true,
+        ),
+    ] {
+        let scratch = Scratch::new(&format!("receipt-{name}"));
+        let (dir, ..) = fresh(&scratch);
+        if let Some(receipt) = &receipt {
+            fs::create_dir_all(dir.0.join("release")).unwrap();
+            fs::write(dir.0.join("release/offline-acceptance.json"), receipt).unwrap();
+        }
+        let (outcome, _) = context_run(&scratch, "tag", &ReceiptCheck, |_| {});
+        assert_eq!(
+            matches!(outcome, RunnerOutcome::Passed { .. }),
+            passes,
+            "{name}"
+        );
+    }
 }
 
 fn context_run(
@@ -266,9 +267,10 @@ fn freezing_records_the_candidate_its_own_binary_digests_and_asks_for_a_restart(
             machine.answers,
         ]
         .concat(),
-        calls: RefCell::default(),
+        calls: Default::default(),
         on_run: None,
     };
+    let calls = machine.calls_handle();
     let repinned = std::rc::Rc::new(RefCell::new(Vec::new()));
     let seen = std::rc::Rc::clone(&repinned);
     let runner = FreezeRcRunner {
@@ -294,6 +296,11 @@ fn freezing_records_the_candidate_its_own_binary_digests_and_asks_for_a_restart(
         repinned.borrow().len(),
         1,
         "the runner is re-pinned to the new digests exactly once"
+    );
+    assert!(
+        !calls.borrow().iter().any(|c| c.contains("pull")),
+        "{:?}",
+        calls.borrow()
     );
 }
 
@@ -345,11 +352,11 @@ fn a_dirty_main_a_wrong_revision_or_a_refused_repin_never_freezes_a_candidate() 
 }
 
 #[test]
-fn offline_acceptance_needs_a_pass_receipt_for_the_exact_candidate_and_green_ci() {
+fn offline_acceptance_needs_a_pass_receipt_for_the_exact_candidate_and_asks_no_hosted_service() {
     let scratch = Scratch::new("rc-offline");
     let (dir, ..) = fresh(&scratch);
     let receipt = dir.0.join("release/offline-acceptance.json");
-    let mut machine = Machine::new(vec![("gh api", out(0, GREEN_CI))]);
+    let mut machine = Machine::new(vec![]);
     let path = receipt.clone();
     machine.on_run = Some(Box::new(move |line| {
         if line.starts_with("scripts/release/offline-acceptance.sh") {
@@ -362,7 +369,6 @@ fn offline_acceptance_needs_a_pass_receipt_for_the_exact_candidate_and_green_ci(
     }));
     let runner = RcOfflineRunner {
         shell: Box::new(machine),
-        wait: wait(),
     };
     let (outcome, _) = context_run(&scratch, "rc-offline", &runner, |state| {
         state.release_candidate = Some(RC.to_owned())
@@ -383,7 +389,6 @@ fn offline_acceptance_needs_a_pass_receipt_for_the_exact_candidate_and_green_ci(
     }));
     let runner = RcOfflineRunner {
         shell: Box::new(failing),
-        wait: wait(),
     };
     let (outcome, _) = context_run(&scratch, "rc-offline", &runner, |state| {
         state.release_candidate = Some(RC.to_owned())
@@ -400,7 +405,6 @@ fn offline_acceptance_needs_a_pass_receipt_for_the_exact_candidate_and_green_ci(
         "rc-offline",
         &RcOfflineRunner {
             shell: Box::new(Machine::new(vec![])),
-            wait: wait(),
         },
         |_| {},
     );

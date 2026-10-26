@@ -84,7 +84,7 @@ fn tools_are_identified_by_version_and_digest_and_missing_ones_are_all_reported(
             .any(|p| p.contains("not a known campaign tool"))
     );
     assert!(preflight_tools(&host, &["vkmark", "mangohud"]).is_ok());
-    assert_eq!(RUNTIME_TOOLS.len(), 8);
+    assert_eq!(RUNTIME_TOOLS.len(), 7);
 }
 
 #[test]

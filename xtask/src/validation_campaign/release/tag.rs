@@ -1,24 +1,31 @@
-//! `tag`: the last task. It re-checks everything the policy demands, then creates the annotated
-//! tag on the exact release candidate. An existing tag on another commit is a hard failure that
-//! needs a human; a tag already on the candidate is success (idempotent). Nothing here moves,
-//! deletes or force-pushes a tag.
-use super::{blocked, ci_must_be_green, failed};
+//! `tag`: the last task. It re-checks everything the policy demands (strict campaign verification,
+//! the named gates, the local exact-RC acceptance receipt), then creates the annotated tag on the
+//! exact release candidate, locally. An existing tag on another commit is a hard failure that needs
+//! a human; a tag already on the candidate is success (idempotent). Nothing here moves or deletes a
+//! tag, and nothing pushes one.
+use super::{blocked, failed, release_dir};
 use crate::validation_campaign::{
     executor::{RunContext, RunnerOutcome, TaskRunner},
-    graph::{Graph, TaskSpec, issue_gates},
+    graph::{Graph, TaskSpec, validation_gates},
     model::FailureClass,
-    repo_pr::WaitPolicy,
     shell::Shell,
     verify::verify_state,
 };
 
 pub struct TagRunner {
     pub shell: Box<dyn Shell>,
-    pub wait: WaitPolicy,
 }
 
-/// Issues whose gates must be satisfied before the tag.
-pub const TAG_ISSUES: [u32; 7] = [27, 30, 31, 32, 33, 35, 38];
+/// Gates that must be satisfied before the tag (every one but the release itself).
+pub const TAG_GATES: [&str; 7] = [
+    "observation",
+    "kernel-compatibility",
+    "diagnosis-corpus",
+    "diagnosis-calibration",
+    "score-evaluation",
+    "capability-policy",
+    "profiler-overhead",
+];
 
 impl TaskRunner for TagRunner {
     fn run(&self, context: &RunContext<'_>, _spec: &TaskSpec, _attempt: u32) -> RunnerOutcome {
@@ -50,9 +57,9 @@ impl TaskRunner for TagRunner {
                 format!("strict verification fails: {}", problems.join("; ")),
             );
         }
-        let open: Vec<u32> = issue_gates()
+        let open: Vec<String> = validation_gates()
             .into_iter()
-            .filter(|gate| TAG_ISSUES.contains(&gate.issue))
+            .filter(|gate| TAG_GATES.contains(&gate.name.as_str()))
             .filter(|gate| {
                 gate.tasks
                     .iter()
@@ -63,33 +70,48 @@ impl TaskRunner for TagRunner {
                         })
                     })
             })
-            .map(|gate| gate.issue)
+            .map(|gate| gate.name)
             .collect();
         if !open.is_empty() {
             return failed(
                 FailureClass::SoftwareDefect,
                 "gates",
-                format!("issue gates {open:?} are not satisfied"),
+                format!("validation gates {open:?} are not satisfied"),
             );
         }
-        create_tag(
-            self.shell.as_ref(),
-            context.repository,
-            release,
-            &commit,
-            &self.wait,
-        )
+        if let Err(problem) = acceptance_receipt_problem(context, &commit) {
+            return failed(FailureClass::SoftwareDefect, "acceptance", problem);
+        }
+        create_tag(self.shell.as_ref(), context.repository, release, &commit)
     }
 }
 
-/// Everything after the campaign-state checks: the repository must be exactly the candidate,
-/// CI must be green, and the tag is created only if it does not exist yet.
+/// The exact-RC acceptance receipt of this candidate must exist and be a fresh-checkout PASS.
+pub fn acceptance_receipt_problem(context: &RunContext<'_>, commit: &str) -> Result<(), String> {
+    let dir = release_dir(&context.dir.0).map_err(|e| e.to_string())?;
+    let text = std::fs::read(dir.join("offline-acceptance.json"))
+        .map_err(|e| format!("no exact-RC acceptance receipt: {e}"))?;
+    let receipt: serde_json::Value = serde_json::from_slice(&text)
+        .map_err(|e| format!("the acceptance receipt is unreadable: {e}"))?;
+    if receipt["status"] != "PASS"
+        || receipt["commit"] != commit
+        || receipt["fresh_checkout"] != true
+    {
+        return Err(format!(
+            "the acceptance receipt is not a fresh-checkout PASS of {commit}"
+        ));
+    }
+    Ok(())
+}
+
+/// Everything after the campaign-state checks: the repository must be exactly the candidate and
+/// the annotated tag is created locally, only if it does not exist yet. Nothing here talks to a
+/// remote or moves an existing tag; publishing a valid local tag is outside verification.
 pub fn create_tag(
     shell: &dyn Shell,
     repo: &std::path::Path,
     release: &crate::validation_campaign::manifest::ReleaseSection,
     commit: &str,
-    wait: &WaitPolicy,
 ) -> RunnerOutcome {
     let git = |args: &[&str]| shell.run("git", args, repo);
 
@@ -107,9 +129,6 @@ pub fn create_tag(
             "the working tree is dirty",
         );
     }
-    if let Err(outcome) = ci_must_be_green(shell, repo, commit, wait) {
-        return outcome;
-    }
     let tag = release.tag.as_str();
     let existing = git(&[
         "rev-parse",
@@ -119,18 +138,6 @@ pub fn create_tag(
     ]);
     if existing.ok() {
         return if existing.stdout.trim() == commit {
-            // Created by an earlier, interrupted attempt: make sure origin has it too.
-            let remote = git(&["ls-remote", "--tags", "origin", &format!("refs/tags/{tag}")]);
-            if remote.ok() && remote.stdout.trim().is_empty() {
-                let pushed = git(&["push", "origin", tag]);
-                if !pushed.ok() {
-                    return failed(
-                        FailureClass::Retryable,
-                        "push",
-                        pushed.stderr.trim().to_owned(),
-                    );
-                }
-            }
             RunnerOutcome::passed()
         } else {
             failed(
@@ -142,14 +149,6 @@ pub fn create_tag(
                 ),
             )
         };
-    }
-    let remote = git(&["ls-remote", "--tags", "origin", &format!("refs/tags/{tag}")]);
-    if remote.ok() && !remote.stdout.trim().is_empty() {
-        return failed(
-            FailureClass::ValidationFailure,
-            "tag-exists",
-            format!("FAILURE_REQUIRES_REVIEW: {tag} already exists on origin; it is never moved"),
-        );
     }
     let created = git(&[
         "tag",
@@ -164,14 +163,6 @@ pub fn create_tag(
             FailureClass::Retryable,
             "tag",
             created.stderr.trim().to_owned(),
-        );
-    }
-    let pushed = git(&["push", "origin", tag]);
-    if !pushed.ok() {
-        return failed(
-            FailureClass::Retryable,
-            "push",
-            pushed.stderr.trim().to_owned(),
         );
     }
     RunnerOutcome::passed()

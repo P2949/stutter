@@ -122,7 +122,7 @@ const CAMPAIGN: &[CommandSpec] = &[
             "-p",
             "xtask",
             "--",
-            "validation_campaign::tests::repo_pr",
+            "validation_campaign::tests::landing",
             "validation_campaign::tests::integration",
             "validation_campaign::tests::policy",
             "validation_campaign::tests::policy_tasks",
@@ -246,6 +246,12 @@ pub fn verify_fast(root: &Path) -> anyhow::Result<()> {
     }
     println!("verify-fast: PASS");
     Ok(())
+}
+
+pub fn list_stages() {
+    for stage in CI_STAGES {
+        println!("{}", stage.name);
+    }
 }
 
 /// The full deterministic, non-root CI; `only` reruns one named stage.
@@ -465,6 +471,9 @@ mod tests {
             "cargo test -p stutter-validation-runner",
             "cargo test -p xtask validation_campaign::tests::kernels",
             "cargo test -p xtask -- validation_campaign::tests::scenarios validation_campaign::tests::capture_exec validation_campaign::tests::corpus validation_campaign::tests::frame_score validation_campaign::tests::overhead_real validation_campaign::tests::workloads",
+            // The retired workflow's `repo_pr` tests are the `landing` tests now: the pull-request
+            // flow was replaced by local landing.
+            "cargo test -p xtask -- validation_campaign::tests::landing validation_campaign::tests::integration validation_campaign::tests::policy validation_campaign::tests::policy_tasks validation_campaign::tests::release",
             "cargo test -p xtask -- diagnosis_calibration capability_check",
             "bash scripts/check-autotune-safety.sh",
             "cargo test -p stutter --lib startup_recovery",

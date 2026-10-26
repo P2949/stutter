@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use crate::validation_campaign::{
-    graph::{Graph, SourceBinding, TaskKind, TaskSpec, core_validation_tasks, issue_gates},
+    graph::{Graph, SourceBinding, TaskKind, TaskSpec, core_validation_tasks, validation_gates},
     model::CampaignPhase,
     runners::default_runners,
 };
@@ -70,26 +70,45 @@ fn release_depends_on_everything_that_must_precede_it() {
 }
 
 #[test]
-fn issue_gates_name_real_tasks_and_cover_all_eight_issues() {
+fn validation_gates_name_real_tasks_and_cover_every_area() {
     let graph = Graph::core().unwrap();
-    let gates = issue_gates();
+    let gates = validation_gates();
     assert_eq!(
-        gates.iter().map(|g| g.issue).collect::<BTreeSet<_>>(),
-        BTreeSet::from([27, 30, 31, 32, 33, 35, 36, 38])
+        gates
+            .iter()
+            .map(|g| g.name.as_str())
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from([
+            "observation",
+            "kernel-compatibility",
+            "profiler-overhead",
+            "diagnosis-corpus",
+            "diagnosis-calibration",
+            "score-evaluation",
+            "capability-policy",
+            "release-readiness",
+        ])
     );
     for gate in &gates {
         for task in &gate.tasks {
             assert!(
                 graph.get(task).is_some(),
-                "#{} names unknown task {task}",
-                gate.issue
+                "{} names unknown task {task}",
+                gate.name
             );
         }
     }
-    let by_issue = |n: u32| gates.iter().find(|g| g.issue == n).unwrap();
-    assert_eq!(by_issue(27).tasks, ["live-observation", "game-runnable"]);
-    assert!(by_issue(38).tasks.contains(&"overhead-real".to_owned()));
-    let release = by_issue(36);
+    let by_name = |name: &str| gates.iter().find(|g| g.name == name).unwrap();
+    assert_eq!(
+        by_name("observation").tasks,
+        ["live-observation", "game-runnable"]
+    );
+    assert!(
+        by_name("profiler-overhead")
+            .tasks
+            .contains(&"overhead-real".to_owned())
+    );
+    let release = by_name("release-readiness");
     for task in [
         "tag",
         "release-verify",

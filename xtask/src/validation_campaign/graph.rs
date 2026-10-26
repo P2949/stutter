@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{bail, ensure};
 
-use super::model::{CampaignPhase, IssueGate};
+use super::model::{CampaignPhase, ValidationGate};
 
 /// What executes a task; the executor dispatches runners on this.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -267,10 +267,11 @@ pub fn core_validation_tasks() -> Vec<TaskSpec> {
     ]
 }
 
-/// The eight open Core Validation issues and the task gates that close them.
-pub fn issue_gates() -> Vec<IssueGate> {
-    let gate = |issue: u32, title: &str, tasks: &[&str]| IssueGate {
-        issue,
+/// The named validation gates: the task sets whose success makes each area of the validation
+/// verified. Nothing here refers to a hosting service.
+pub fn validation_gates() -> Vec<ValidationGate> {
+    let gate = |name: &str, title: &str, tasks: &[&str]| ValidationGate {
+        name: name.to_owned(),
         title: title.to_owned(),
         tasks: tasks.iter().map(|task| (*task).to_owned()).collect(),
     };
@@ -286,29 +287,45 @@ pub fn issue_gates() -> Vec<IssueGate> {
     release.extend(RC_LIVE);
     vec![
         gate(
-            27,
+            "observation",
             "live observation and game-runnable evidence",
             &["live-observation", "game-runnable"],
         ),
         gate(
-            30,
+            "kernel-compatibility",
             "kernel compatibility on distinct real kernels",
             &["kernel-matrix"],
         ),
         gate(
-            38,
+            "profiler-overhead",
             "profiler overhead, controlled and real workload",
             &["overhead-controlled", "overhead-real"],
         ),
-        gate(31, "provenance-backed diagnosis corpus", &["corpus"]),
-        gate(32, "diagnosis calibration", &["diagnosis-calibration"]),
         gate(
-            33,
+            "diagnosis-corpus",
+            "provenance-backed diagnosis corpus",
+            &["corpus"],
+        ),
+        gate(
+            "diagnosis-calibration",
+            "diagnosis calibration",
+            &["diagnosis-calibration"],
+        ),
+        gate(
+            "score-evaluation",
             "StutterScore evaluation",
             &["score-runnable", "frame-score", "score-review"],
         ),
-        gate(35, "capability tiers", &["capability-policy"]),
-        gate(36, "exact-RC acceptance and v0.1.0 release", &release),
+        gate(
+            "capability-policy",
+            "capability tiers",
+            &["capability-policy"],
+        ),
+        gate(
+            "release-readiness",
+            "exact-RC acceptance and v0.1.0 release",
+            &release,
+        ),
     ]
 }
 

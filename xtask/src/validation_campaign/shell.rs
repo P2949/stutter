@@ -1,4 +1,4 @@
-//! Process execution behind a seam, so every repository/GitHub/release step is tested against a
+//! Process execution behind a seam, so every repository and release step is tested against a
 //! scripted machine and the real implementation is a thin wrapper over `std::process`.
 use std::{path::Path, process::Command, time::Duration};
 

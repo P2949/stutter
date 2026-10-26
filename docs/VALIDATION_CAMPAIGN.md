@@ -31,7 +31,7 @@ State lives in `.llm-runs/validation/<campaign-id>/` (ignored by Git): `campaign
 verified entries) and `release/`. Every write is temp file, `sync_all`, rename, parent
 directory sync. Attempts are append-only: a retry adds a record and never erases a failure.
 
-## Task graph and issue gates
+## Task graph and validation gates
 
 The DAG is encoded in `validation_campaign/graph.rs`:
 
@@ -44,12 +44,12 @@ offline-ready -> live-observation, game-runnable, overhead-controlled, overhead-
               -> release-package -> release-verify, install-smoke -> tag
 ```
 
-Issue gates: #27 observation + game-runnable; #30 kernel matrix; #38 controlled and real
-overhead; #31 corpus; #32 calibration; #33 runnable + frame score + review; #35 capability
-policy; #36 the exact-RC release path through `tag`. `status --json` emits `repository_actions`
-(`close_issue`, `push_tag`) that the agent performs with its own authenticated `gh`; the
-campaign holds no GitHub credentials, and an issue is `ready` only when every gate task truly
-passed.
+Validation gates (host-independent names, defined in `graph.rs`): `observation` (live observation
++ game-runnable), `kernel-compatibility` (kernel matrix), `profiler-overhead` (controlled and real
+overhead), `diagnosis-corpus`, `diagnosis-calibration`, `score-evaluation` (runnable + frame score +
+review), `capability-policy`, and `release-readiness` (the exact-RC path through `tag`).
+`status --json` reports each gate's read-only readiness (`gates`); nothing in the campaign creates,
+closes or comments on a public issue, and a gate is `ready` only when every gate task truly passed.
 
 ## Integrity and invalidation
 
@@ -59,8 +59,8 @@ frozen release candidate for exact-RC tasks), the tree is clean, the manifest, `
 failure sets the campaign to `Invalidated`, marks only the affected binding's tasks (and their
 dependents) `Invalidated`, and keeps their evidence as history. A `Passed` result counts only
 while its fingerprint matches the current one. A moved `main` after collection (evidence
-integration, policy PRs) is expected and does not invalidate completed work; a defect found
-during collection is fixed through a PR and a successor campaign is initialized at the new
+integration, policy landings) is expected and does not invalidate completed work; a defect found
+during collection is fixed on a local branch landed through the local gate and a successor campaign is initialized at the new
 `main`.
 
 ## Failure classes
@@ -86,7 +86,7 @@ whole mutable `xtask` as root or by handing the agent `sudo sh`. Two trust domai
 
 | domain | components |
 | --- | --- |
-| normal campaign domain | `xtask validation-campaign`, the agent, repository code, workloads, Git/GitHub |
+| normal campaign domain | `xtask validation-campaign`, the agent, repository code, workloads, Git |
 | privileged validation domain | `stutter-validation-runner` (root service), root-owned authorization, capability delegation, boot control |
 
 `stutter-validation-runner` is a workspace crate built by the ordinary gate. It is **not** part
@@ -201,8 +201,7 @@ user's own, unreplaced process) and `ExecuteWorkloadOverhead` (a registered work
 command line the runner builds; the campaign supplies only a cycle count). Only the `corpus`
 and `frame-score` tasks may record or run the burst, only `overhead-real` may run the workload.
 
-**Tools** come from the pinned Nix shell (`vkmark`, `mangohud`, `fio`, `stress-ng`, `iputils`,
-`gh`). A missing tool, display, GPU, or controllable NIC interrupt is `BlockedResource` with the
+**Tools** come from the pinned Nix shell (`vkmark`, `mangohud`, `fio`, `stress-ng`, `iputils`). A missing tool, display, GPU, or controllable NIC interrupt is `BlockedResource` with the
 exact missing capability; nothing is substituted.
 
 **Real-workload overhead.** `overhead-real` rebuilds a Stutter package a frozen number of times
@@ -220,11 +219,14 @@ for the policy phase, never rewritten.
 re-verifies each published bundle from disk, derives the index entries from the verified bundles
 (never by hand), merges them into `docs/evidence/index.json` (deduplicated by capture id),
 copies the sanitized corpus fixtures into `stutter/tests/fixtures/runs`, appends a ledger entry,
-runs the offline gates on the branch and lands one pull request: branch `campaign/<id>/<task>`,
-push, PR, wait for every required check, merge, return to a clean `main`. An interrupted flow
-resumes from the branch's PR; red, pending, skipped, cancelled or neutral required checks never
-merge. The hardware-only `live smoke tests` job is the one check GitHub cannot run and is ignored.
-`gh auth status` must succeed or the task is `BlockedResource`.
+lands the change **locally and transactionally**: it requires a clean local `main`, records its HEAD
+as the base, creates (or resumes) the task branch `campaign/<id>/<task>`, applies and commits the
+change, runs the canonical local CI gate (`xtask ci`, plus the fixture contracts) on that branch,
+checks that local `main` still equals the recorded base, fast-forwards `main` onto the branch and
+deletes the branch. A change that does not verify never reaches `main` (the branch is kept for
+inspection); a `main` that moved meanwhile is a retryable failure and the change is regenerated
+on the new base. Nothing is pushed, no pull request is opened and no hosted check is polled:
+there is no `gh` and no remote in the campaign.
 
 **Calibration and score policy** are deterministic. With every evidence floor met the current
 diagnosis thresholds and StutterScore weights are retained; weak behavior at the current
@@ -233,20 +235,21 @@ non-monotonic score series are recorded as limitations. An insufficient floor st
 (`BlockedResource`); nothing is optimized against one corpus. A non-monotonic controlled
 series is an `INCONCLUSIVE` bundle at the `evaluation` stage and is kept as an observation.
 
-**Capability policy.** After issue gates #27 #30 #31 #32 #33 #38 are satisfied the manifest's fixed
-policy is applied to `stutter/src/capability_tiers.rs` and `docs/CAPABILITIES.md` in a pull
-request: `doctor`, `record`, `bench`, `report`, `audit` and `completions_and_man` become
+**Capability policy.** After the `observation`, `kernel-compatibility`, `diagnosis-corpus`,
+`diagnosis-calibration`, `score-evaluation` and `profiler-overhead` gates are satisfied the
+manifest's fixed policy is applied to `stutter/src/capability_tiers.rs` and
+`docs/CAPABILITIES.md` through the local landing: `doctor`, `record`, `bench`, `report`, `audit` and `completions_and_man` become
 Supported; diagnosis, advisor, tune evaluation and every mutating capability stay Experimental;
 `privileged_worker` and `fake_action_provider` stay Internal. The registry change is a pure text
 transformation checked against the real registry in tests; `capability-check` and the unit tests
-gate the pull request. Mutating capabilities never become Supported in this release.
+gate the landing. Mutating capabilities never become Supported in this release.
 
-**Release candidate.** `freeze-rc` syncs `main`, requires it clean, rebuilds the binaries, records
+**Release candidate.** `freeze-rc` takes the local `main` (there is no pull), requires it clean, rebuilds the binaries, records
 their digests *separately* from the evidence-base digests (collection results stay current),
 re-pins the privileged runner to them and makes `continue` re-execute itself from the fresh build.
 From then on any repository change invalidates only the exact-RC tasks. `rc-offline` runs
-`scripts/release/offline-acceptance.sh` against the candidate and requires the candidate's own
-GitHub CI to be green. The four exact-RC live suites publish bundles outside the repository.
+`scripts/release/offline-acceptance.sh` in a fresh local clone of the candidate, which runs the
+canonical local CI and writes a local receipt. The four exact-RC live suites publish bundles outside the repository.
 `release-package` and `release-verify --require-acceptance` drive the existing implementation.
 `install-smoke` unpacks the packaged tarball and runs the packaged binary: version equals the
 manifest and the candidate revision, `capabilities` equals the policy, `doctor` runs to a
@@ -255,10 +258,12 @@ observation recording; the packaged eBPF object is the manifest's ELF object. Re
 the packaged binary needs privilege that the runner only grants to the pinned build, so that step
 is the candidate's `rc-live-observation` suite.
 
-**Tag.** Only after strict verification, every release issue gate, `HEAD == RC`, a clean tree and
-green exact-RC CI. The annotated tag `v0.1.0` is created on the candidate and pushed. A tag that
-already exists on another commit is `FAILURE_REQUIRES_REVIEW` and is never moved, deleted or
-force-pushed; a tag already on the candidate is success.
+**Tag.** Only after strict verification, every named gate, the exact-RC acceptance receipt (a
+fresh-checkout PASS of this very candidate), `HEAD == RC` and a clean tree. The annotated tag
+`v0.1.0` is created locally on the candidate. A tag that already exists on another commit is
+`FAILURE_REQUIRES_REVIEW` and is never moved or deleted; a tag already on the candidate is success.
+Pushing or publishing a valid local tag is outside verification (`release-publish` is an optional
+adapter, run from `nix develop .#publish`).
 
 ## Host layouts (NixOS and similar)
 

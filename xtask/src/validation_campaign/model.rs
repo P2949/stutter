@@ -144,18 +144,11 @@ pub struct CampaignDecision {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct IssueGate {
-    pub issue: u32,
+pub struct ValidationGate {
+    /// Host-independent identity of the gate (for status, strict verification and tag readiness).
+    pub name: String,
     pub title: String,
     pub tasks: Vec<String>,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct RepositoryAction {
-    pub kind: String,
-    pub issue: Option<u32>,
-    pub ready: bool,
-    pub evidence_summary: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

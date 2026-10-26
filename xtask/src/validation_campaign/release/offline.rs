@@ -1,21 +1,20 @@
-//! `rc-offline`: the existing fresh-checkout acceptance script against the exact candidate, plus
-//! the candidate's own GitHub CI. The receipt is retained outside the repository.
+//! `rc-offline`: the fresh-checkout acceptance script against the exact candidate, running the
+//! canonical local CI in a clone of the local repository. The receipt is retained outside the
+//! repository; nothing here consults a hosted service.
 use std::fs;
 
 use serde_json::Value;
 
-use super::{blocked, ci_must_be_green, failed, release_dir};
+use super::{blocked, failed, release_dir};
 use crate::validation_campaign::{
     executor::{RunContext, RunnerOutcome, TaskRunner},
     graph::TaskSpec,
     model::FailureClass,
-    repo_pr::WaitPolicy,
     shell::Shell,
 };
 
 pub struct RcOfflineRunner {
     pub shell: Box<dyn Shell>,
-    pub wait: WaitPolicy,
 }
 
 impl TaskRunner for RcOfflineRunner {
@@ -86,11 +85,6 @@ impl TaskRunner for RcOfflineRunner {
                         .join(" | ")
                 ),
             );
-        }
-        if let Err(outcome) =
-            ci_must_be_green(self.shell.as_ref(), context.repository, &commit, &self.wait)
-        {
-            return outcome;
         }
         RunnerOutcome::Passed {
             artifacts: Some(context.dir.relative(&dir)),
