@@ -44,3 +44,48 @@ pin them by manifest digest.
   campaign is allowed to use cannot show a benefit; the holdout was never spent.
 - Consequence: `Uclamp` stays Experimental, has no registry contract, and its prepared transaction
   and verified recovery remain in place for a future objective that measures what it changes.
+
+## nice - DeferredEvidence (M6)
+
+- Campaign `mut-nice-a60588a-1792988880352`, source `a60588a9`. Scope tested: a stable game under
+  scheduler pressure; the provider demotes (nice +10) the sustained same-user CPU hogs measured
+  competing with it (`autotune/offenders`), judged by `GameRunnableLatency`.
+- Passed: preflight, mechanical apply/verify/rollback, all 11 fault-matrix checkpoint classes, real
+  suspend/resume. Restoring a demotion needs privilege (`RLIMIT_NICE` is 0 for an ordinary user), so
+  startup recovery of nice tokens goes through the privileged worker and the validation controllers
+  raise their own limit with `CAP_SYS_RESOURCE`.
+- Failed (ValidationFailure): benefit calibration, 30 pairs per scenario, no threshold set kept the
+  beneficial pairs without a false keep; in the beneficial pairs the demotion made the game's p99
+  runnable wait no better and usually worse (a woken task waits for the running hog's slice
+  regardless of the hog's weight under EEVDF).
+- The other nice scopes (compile/background demotion judged by `DesktopInteractivity`, browser
+  negative nice) stay Experimental: their protected-workload objectives are not Supported.
+
+## ioprio - DeferredEvidence (M6, evaluated without a campaign)
+
+- The current provider applies `idle` I/O priority to the selected important tree, which is not a
+  defensible optimisation. The plan's redesign needs the offending I/O actor, a protected-target
+  outcome and a mechanism check.
+- The existing block-I/O telemetry (`block_io_overlap_count`, `block_io_worst_latency_ns`) is an
+  overlap *correlation* and carries no per-process offender identity, and the only Supported
+  objective, `GameRunnableLatency`, measures CPU wake latency, which an I/O priority cannot change;
+  `IoLatency` is Experimental and describes the subsystem, not the protected outcome. No new probe
+  was added because the missing signal is an objective, not an actor.
+- Consequence: `IoPrio` stays Experimental; no campaign was run because its preflight (a Supported
+  or Validating objective the operation can influence) cannot pass.
+
+## cpu_power_epp - not Supported (M7, evaluated)
+
+- Prepared transaction, cpufreq resource identity (policy, related CPUs, driver, attribute, legal
+  values, boot), verified startup recovery, the EPP-only provider semantics and the per-operation
+  system-wide policy are implemented and pass the 11-checkpoint fault matrix against a faithful
+  per-task cpufreq fixture.
+- Benefit study (this host, Intel i5-10600K, intel_pstate active, desktop with no power-supply
+  limits): a fixed 12-thread and 3-thread SHA-256 workload, counterbalanced `balance_performance` and
+  `performance`, 5 repetitions each. 12 threads: 4205/4228/4205/4213/4212 ms vs
+  4183/4198/4203/4195/4200 ms (about 0.3 percent); 3 threads: no difference beyond noise. The Supported
+  objectives are a 12.5 percent runnable-latency criterion and a 10 percent compile-throughput
+  criterion; neither can be met by a 0.3 percent effect, and a frequency preference cannot shorten a
+  CPU wake queue.
+- Consequence: per the roadmap, `cpu_power_epp` remains Experimental and M7 is not complete on this
+  hardware; governor mutation is not used as a fallback.
