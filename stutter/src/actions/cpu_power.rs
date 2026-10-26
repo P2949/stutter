@@ -18,7 +18,7 @@ use crate::actions::{
 
 mod prepared;
 
-pub(crate) use prepared::{boot_id, rollback_verified};
+pub(crate) use prepared::rollback_verified;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BatteryPolicy {

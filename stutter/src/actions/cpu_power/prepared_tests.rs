@@ -44,7 +44,7 @@ fn the_hook_sees_the_original_value_with_its_cpufreq_identity_before_any_write()
                 "balance_performance"
             );
             seen = Some(token.clone());
-            anyhow::bail!("journal refused")
+            Err(anyhow::anyhow!("journal refused"))
         })
         .unwrap_err();
     assert!(format!("{:#}", err.source).contains("journal refused"));
@@ -156,7 +156,7 @@ fn a_record_without_a_cpufreq_identity_is_never_replayed_automatically() {
         original_value: "power".to_owned(),
         identity: None,
     };
-    let outcome = rollback_verified(&[record.clone()], true).unwrap();
+    let outcome = rollback_verified(std::slice::from_ref(&record), true).unwrap();
     assert_eq!(
         (outcome.restored, outcome.skipped_identity_mismatch),
         (0, 1)
