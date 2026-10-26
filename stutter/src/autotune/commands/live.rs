@@ -330,7 +330,7 @@ mod tests {
                 input.dry_run_all_safe,
             )
             .unwrap();
-            runtime_config_for_command(&input, mode, Vec::new()).unwrap();
+            runtime_config_for_command(&input, mode, Vec::new(), None).unwrap();
         }
     }
 
@@ -342,7 +342,7 @@ mod tests {
         input.min_focus_confidence = 0.88;
 
         let config =
-            runtime_config_for_command(&input, DaemonMode::ApplyLowRisk, Vec::new()).unwrap();
+            runtime_config_for_command(&input, DaemonMode::ApplyLowRisk, Vec::new(), None).unwrap();
 
         assert_eq!(config.daemon_config.mode, DaemonMode::ApplyLowRisk);
         assert_eq!(config.daemon_config.target.tree_pids, vec![4444]);
