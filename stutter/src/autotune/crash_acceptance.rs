@@ -344,6 +344,10 @@ pub(crate) fn prepare_owned_controller(
                 ensure!(min != value, "no observable uclamp change");
             }
         }
+        AcceptanceMutation::Cgroup => {
+            // Construct the action now: it creates the target cgroup and proves the delegation.
+            AcceptanceTarget { mutation, value }.action(tree_pid, None)?;
+        }
         AcceptanceMutation::Nice => {
             for task in snapshot.tasks.values() {
                 let current = crate::actions::nice::read_current_nice(task.task_id().as_u32())?;

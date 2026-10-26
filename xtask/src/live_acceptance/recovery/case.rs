@@ -89,7 +89,12 @@ pub(super) fn start_actor(
         let mut command = Command::new("strace");
         command
             .args(["-f", "--seccomp-bpf", "-yy", "-o"])
-            .arg(out.join("syscalls.log"))
+            .arg(out.join("syscalls.log"));
+        if target.mutation == AcceptanceMutation::Cgroup {
+            // Only the writes that move a task are traced: the destination's `cgroup.procs`.
+            command.arg("-P").arg(cgroup_procs_of_target(root)?);
+        }
+        command
             .arg("-e")
             .arg(format!("trace={}", target.mutation.syscall()))
             .arg("-e")
@@ -157,6 +162,21 @@ pub(super) fn archive(out: &Path, source: &Path, name: &str) -> anyhow::Result<(
     file.sync_all()?;
     Ok(())
 }
+/// `cgroup.procs` of the `target` sibling of the cgroup the tree runs in.
+fn cgroup_procs_of_target(root: u32) -> anyhow::Result<PathBuf> {
+    let text = fs::read_to_string(format!("/proc/{root}/cgroup"))?;
+    let original = text
+        .lines()
+        .find_map(|line| line.strip_prefix("0::"))
+        .context("cgroup v2 path missing")?;
+    let parent = Path::new(original.trim())
+        .parent()
+        .context("the tree does not run in a delegated cgroup subtree")?;
+    Ok(Path::new("/sys/fs/cgroup")
+        .join(parent.strip_prefix("/")?)
+        .join("target/cgroup.procs"))
+}
+
 /// How many tasks the durable token covers, in the token's own vocabulary.
 pub(super) fn token_tasks(token: &Value) -> Option<u64> {
     token["affected_tasks"].as_u64().or_else(|| {

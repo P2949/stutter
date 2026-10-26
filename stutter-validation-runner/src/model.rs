@@ -108,14 +108,21 @@ pub enum Mutation {
     Affinity,
     Uclamp,
     Nice,
+    Cgroup,
 }
 
 impl Mutation {
+    /// Whether the suite runs inside a cgroup subtree delegated to the campaign user.
+    pub const fn needs_delegated_cgroup(self) -> bool {
+        matches!(self, Self::Cgroup)
+    }
+
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Affinity => "affinity",
             Self::Uclamp => "uclamp",
             Self::Nice => "nice",
+            Self::Cgroup => "cgroup",
         }
     }
 }

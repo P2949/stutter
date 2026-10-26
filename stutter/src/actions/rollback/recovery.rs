@@ -36,8 +36,8 @@ pub(crate) fn recovery_descriptor(token: &RollbackToken) -> RollbackRecoveryDesc
             "complete process/task IDs and task start times from the prepared snapshot; each task re-verified immediately before its write; exited or replaced tasks skipped; legacy records without a start time are never restored automatically",
         ),
         RollbackToken::CgroupRestore { .. } => (
-            ManualOnly,
-            "automatic task/cgroup resource identity and crash recovery unqualified",
+            VerifiedAutomatic,
+            "complete process/task IDs and task start times plus the inode of every original cgroup, from the prepared snapshot; each task re-verified immediately before its write; exited or replaced tasks and recreated cgroups skipped; legacy records are never restored automatically",
         ),
         RollbackToken::IrqAffinityRestore { .. } => (
             ManualOnly,

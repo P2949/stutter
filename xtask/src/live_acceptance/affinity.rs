@@ -27,7 +27,9 @@ pub(super) fn run(
         )?;
         let value = match mutation {
             AcceptanceMutation::Affinity => allowed_cpu()?,
-            AcceptanceMutation::Uclamp | AcceptanceMutation::Nice => mutation.default_value(),
+            AcceptanceMutation::Uclamp | AcceptanceMutation::Nice | AcceptanceMutation::Cgroup => {
+                mutation.default_value()
+            }
         };
         let ready = out.join("workload-ready.json");
         let mut child = OwnedChild(
@@ -72,6 +74,11 @@ pub(super) fn run(
                 pid,
                 ticks,
                 value,
+                &out.join("actions.jsonl"),
+            )?,
+            AcceptanceMutation::Cgroup => stutter::api::actions::verify_cgroup_lifecycle(
+                pid,
+                ticks,
                 &out.join("actions.jsonl"),
             )?,
             AcceptanceMutation::Nice => stutter::api::actions::verify_nice_lifecycle(

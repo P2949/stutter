@@ -261,6 +261,7 @@ fn only_operations_with_a_prepared_transaction_can_be_registered() {
                 MutationOperationKind::CpuAffinityProfile
                     | MutationOperationKind::Uclamp
                     | MutationOperationKind::Nice
+                    | MutationOperationKind::CgroupPlacement
             ),
             "{operation:?}"
         );

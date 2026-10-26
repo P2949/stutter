@@ -16,8 +16,10 @@ use crate::actions::{
     verify_task_identity,
 };
 
+mod acceptance;
 mod fs_io;
 mod model;
+mod prepared;
 mod procfs;
 mod rollback;
 mod validation;
@@ -25,10 +27,12 @@ mod validation;
 #[cfg(test)]
 mod tests;
 
+pub use acceptance::verify_cgroup_lifecycle;
 pub(crate) use fs_io::resolve_cgroup_fs_path as cgroup_fs_path;
 use fs_io::*;
 use model::CgroupTargetSnapshot;
 pub use model::{CgroupPlacementAction, CgroupPlacementPolicy, CgroupPlacementTarget};
+pub(crate) use prepared::cgroup_id;
 use procfs::*;
 pub(crate) use rollback::CgroupRollbackHandler;
 use rollback::*;
@@ -278,6 +282,16 @@ impl CgroupPlacementAction {
                         record.original_cgroup.display()
                     )
                 })?;
+            if let Some(expected) = record.original_cgroup_id
+                && cgroup_id(&original_abs).ok() != Some(expected)
+            {
+                summary.record_identity_mismatch();
+                log::warn!(
+                    "cgroup_rollback_skip_cgroup_identity_mismatch tid={tid} original_cgroup={}",
+                    record.original_cgroup.display()
+                );
+                continue;
+            }
             let procs = original_abs.join("cgroup.procs");
 
             if let Err(err) = write_trimmed(&procs, &tid.to_string()) {
@@ -467,6 +481,21 @@ impl TuningAction for CgroupPlacementAction {
 
     fn apply(&self) -> ApplyResult {
         self.apply_at(Path::new("/proc"), &CgroupPlacementPolicy::default())
+    }
+
+    fn prepared_before_mutation(&self) -> bool {
+        true
+    }
+
+    fn apply_with_prepared_rollback(
+        &self,
+        before_mutation: &mut dyn FnMut(&RollbackToken) -> anyhow::Result<()>,
+    ) -> ApplyResult {
+        self.apply_prepared_at(
+            Path::new("/proc"),
+            &CgroupPlacementPolicy::default(),
+            before_mutation,
+        )
     }
 
     fn verify(&self) -> anyhow::Result<ActionState> {

@@ -422,9 +422,11 @@ fn rollback_token_handler_restores_namespace_absolute_cgroup_path_under_root() {
         cpuset: None,
     };
 
-    let result = CgroupRollbackHandler
-        .restore_token_at(&proc_root, &cgroup_root, &token)
-        .unwrap();
+    let result = CgroupRollbackHandler {
+        require_verified_identity: false,
+    }
+    .restore_token_at(&proc_root, &cgroup_root, &token)
+    .unwrap();
 
     assert_eq!(result.restored, 1);
     assert_eq!(

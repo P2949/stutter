@@ -339,6 +339,10 @@ pub struct CgroupRestoreRecord {
     pub original_cgroup: PathBuf,
     #[serde(default)]
     pub identity: Option<TaskRestoreIdentity>,
+    /// The inode of the original cgroup when the placement was prepared. A cgroup destroyed and
+    /// recreated at the same path has another inode, and a task is never restored into it.
+    #[serde(default)]
+    pub original_cgroup_id: Option<u64>,
 }
 
 impl CgroupRestoreRecord {
@@ -347,7 +351,13 @@ impl CgroupRestoreRecord {
             tid: identity.tid,
             original_cgroup,
             identity: Some(identity),
+            original_cgroup_id: None,
         }
+    }
+
+    pub fn with_cgroup_id(mut self, id: u64) -> Self {
+        self.original_cgroup_id = Some(id);
+        self
     }
 
     pub fn tid(&self) -> u32 {

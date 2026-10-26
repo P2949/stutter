@@ -63,6 +63,7 @@ fn runtime_config_for_command(
     input: &AutotuneCommandInput,
     mode: DaemonMode,
     profiles: Vec<crate::profiles::Profile>,
+    game_cgroup: Option<PathBuf>,
 ) -> anyhow::Result<runtime::AutotuneRuntimeConfig> {
     let mut daemon_config = runtime::daemon_config_for_runtime_mode(
         mode,
@@ -71,6 +72,9 @@ fn runtime_config_for_command(
         input.watch_process.clone(),
     );
 
+    if game_cgroup.is_some() {
+        daemon_config.safety.cgroup_targets.game_cgroup = game_cgroup;
+    }
     daemon_config.safety.min_confidence = input.min_focus_confidence;
     daemon_config.autotune.washout_seconds = input.washout_seconds;
     daemon_config.safety.allow_system_wide_suggestions = input.allow_system_wide_suggestions;
@@ -113,6 +117,9 @@ pub struct ValidationRun {
     pub in_process_privileged: bool,
     /// Only background processes descending from this one are offender candidates.
     pub offender_scope_parent: Option<u32>,
+    /// The administrator-configured game cgroup (relative to the cgroup root) the cgroup
+    /// provider may place the game into during this run.
+    pub game_cgroup: Option<PathBuf>,
 }
 
 /// Blocking form for harnesses that own no async runtime.
@@ -195,7 +202,12 @@ pub async fn autotune_command_with(
         .map(|loaded| loaded.profiles.clone())
         .unwrap_or_default();
 
-    let mut runtime_config = runtime_config_for_command(&input, mode, profile_list)?;
+    let mut runtime_config = runtime_config_for_command(
+        &input,
+        mode,
+        profile_list,
+        validation.as_ref().and_then(|run| run.game_cgroup.clone()),
+    )?;
     if let Some(run) = validation {
         if run.grant.operation == crate::autotune::operation::MutationOperationKind::Nice {
             // The controller restores demoted tasks on shutdown; see `raise_nice_rlimit_for_validation`.
@@ -318,7 +330,7 @@ mod tests {
                 input.dry_run_all_safe,
             )
             .unwrap();
-            runtime_config_for_command(&input, mode, Vec::new()).unwrap();
+            runtime_config_for_command(&input, mode, Vec::new(), None).unwrap();
         }
     }
 
@@ -330,7 +342,7 @@ mod tests {
         input.min_focus_confidence = 0.88;
 
         let config =
-            runtime_config_for_command(&input, DaemonMode::ApplyLowRisk, Vec::new()).unwrap();
+            runtime_config_for_command(&input, DaemonMode::ApplyLowRisk, Vec::new(), None).unwrap();
 
         assert_eq!(config.daemon_config.mode, DaemonMode::ApplyLowRisk);
         assert_eq!(config.daemon_config.target.tree_pids, vec![4444]);

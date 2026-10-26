@@ -181,6 +181,7 @@ pub(super) fn run_controller(
             AcceptanceMutation::Affinity => MutationOperationKind::CpuAffinityProfile,
             AcceptanceMutation::Uclamp => MutationOperationKind::Uclamp,
             AcceptanceMutation::Nice => MutationOperationKind::Nice,
+            AcceptanceMutation::Cgroup => MutationOperationKind::CgroupPlacement,
         },
         objective: ObjectiveKind::GameRunnableLatency,
         campaign_id: "affinity-benefit".to_owned(),
@@ -202,8 +203,39 @@ pub(super) fn run_controller(
                 == stutter::api::daemon::DaemonMode::ApplyMediumRisk,
             // The contention this pair started is the pair process's own children.
             offender_scope_parent: Some(std::os::unix::process::parent_id()),
+            game_cgroup: (mutation == AcceptanceMutation::Cgroup)
+                .then(|| delegated_target().ok())
+                .flatten(),
         }),
     )
+}
+
+/// The `target` sibling of the leaf this process runs in, relative to the cgroup root.
+fn delegated_target() -> anyhow::Result<PathBuf> {
+    let text = fs::read_to_string("/proc/self/cgroup")?;
+    let own = text
+        .lines()
+        .find_map(|line| line.strip_prefix("0::"))
+        .context("cgroup v2 path missing")?;
+    let parent = Path::new(own.trim())
+        .parent()
+        .filter(|parent| parent.components().count() > 1)
+        .context("this process does not run in a delegated cgroup subtree")?;
+    Ok(parent.join("target"))
+}
+
+/// Creates the administrator's "game cgroup": a sibling of the leaf with its own CPU: the quiet
+/// one. Moving the game there is the placement the provider proposes.
+fn prepare_game_cgroup(quiet_cpu: u32) -> anyhow::Result<()> {
+    let dir = Path::new("/sys/fs/cgroup").join(delegated_target()?.strip_prefix("/")?);
+    fs::create_dir_all(&dir)?;
+    let parent = dir.parent().context("target has no parent")?;
+    fs::write(
+        dir.join("cpuset.mems"),
+        fs::read_to_string(parent.join("cpuset.mems.effective"))?,
+    )?;
+    fs::write(dir.join("cpuset.cpus"), quiet_cpu.to_string())?;
+    Ok(())
 }
 
 /// Whether the controller's mutation is physically visible on any task of `pid`.
@@ -214,6 +246,14 @@ fn mutation_observed(
     contenders: &[u32],
 ) -> bool {
     match mutation {
+        AcceptanceMutation::Cgroup => fs::read_dir(format!("/proc/{pid}/task"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .any(|entry| {
+                fs::read_to_string(entry.path().join("cgroup"))
+                    .is_ok_and(|text| text.trim_end().ends_with("/target"))
+            }),
         // The demoted processes are the contenders, not the target.
         AcceptanceMutation::Nice => contenders.iter().any(|contender| {
             fs::read_to_string(format!("/proc/{contender}/stat"))
@@ -307,6 +347,9 @@ pub(super) fn run(root: &Path, out: &Path, binary: &Path, spec: &Spec) -> anyhow
             Order::CandidateFirst => (b, a),
         };
         let game = game_runnable::install_game_binary(&out)?;
+        if spec.mutation == AcceptanceMutation::Cgroup {
+            prepare_game_cgroup(c1)?;
+        }
         let profiles = (spec.mutation == AcceptanceMutation::Affinity).then(|| {
             let path = out.join("profiles.toml");
             fs::write(&path, profile_toml(c1)).map(|()| path)
