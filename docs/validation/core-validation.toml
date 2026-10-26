@@ -45,6 +45,7 @@ supported = [
     "audit",
     "completions_and_man",
     "cpu_affinity_experiment",
+    "cgroup_placement_experiment",
 ]
 experimental = [
     "diagnose",
@@ -54,7 +55,6 @@ experimental = [
     "uclamp_experiment",
     "nice_experiment",
     "ioprio_experiment",
-    "cgroup_placement_experiment",
     "cpu_power_epp",
     "cpu_power_governor",
     "gpu_power_profile",

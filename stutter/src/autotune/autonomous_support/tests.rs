@@ -41,10 +41,11 @@ fn affinity() -> AutonomousGateInput<'static> {
 
 #[test]
 fn only_the_graduated_tuple_is_autonomous() {
-    assert_eq!(AUTONOMOUS_CONTRACTS.len(), 1);
+    assert_eq!(AUTONOMOUS_CONTRACTS.len(), 2);
     for operation in MutationOperationKind::ALL {
         for objective in ObjectiveKind::ALL {
             let allowed = autonomous_apply_gate(&input(operation, objective)).is_ok();
+            // `input` carries a local-process-tree scope, which only affinity is graduated for.
             assert_eq!(
                 allowed,
                 operation == MutationOperationKind::CpuAffinityProfile
@@ -277,4 +278,38 @@ fn a_campaign_holding_the_run_excludes_every_other_operation_even_a_supported_on
         autonomous_apply_gate(&during),
         Err(AutonomousDenial::OutsideValidationScope)
     );
+}
+
+#[test]
+fn cgroup_placement_is_autonomous_only_in_its_own_graduated_tuple() {
+    let mut cgroup = input(
+        MutationOperationKind::CgroupPlacement,
+        ObjectiveKind::GameRunnableLatency,
+    );
+    // The affinity scope does not carry over to the cgroup operation.
+    assert_eq!(
+        autonomous_apply_gate(&cgroup),
+        Err(AutonomousDenial::NotInSupportRegistry)
+    );
+    cgroup.effect_scope = ActionEffectScope::Cgroup;
+    assert_eq!(autonomous_apply_gate(&cgroup), Ok(()));
+
+    for other in [
+        SituationKind::GameFocused,
+        SituationKind::GameGpuBound,
+        SituationKind::CompileCpuBound,
+        SituationKind::BrowserCpuPressure,
+        SituationKind::CpuPressure,
+    ] {
+        let mut gated = cgroup;
+        gated.situation = other;
+        assert_eq!(
+            autonomous_apply_gate(&gated),
+            Err(AutonomousDenial::NotInSupportRegistry),
+            "{other:?}"
+        );
+    }
+    let mut other_objective = cgroup;
+    other_objective.objective = ObjectiveKind::StutterScore;
+    assert!(autonomous_apply_gate(&other_objective).is_err());
 }

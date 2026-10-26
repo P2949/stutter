@@ -19,26 +19,28 @@ and lists the remaining graduation gaps.
 
 Mutation providers do not inherit each other's maturity: a registry test requires every
 entry of `MUTATION_PROVIDER_KINDS` to be governed by exactly one capability, and
-providers other than `cpu_affinity_profile` cannot target `Supported` in the first
-release (`nice`, `ioprio`, `uclamp`, `cgroup placement`, IRQ affinity, CPU/GPU power and
+providers other than the graduated `cpu_affinity_profile` and `cgroup_placement` cannot target `Supported` in the first
+release (`nice`, `ioprio`, `uclamp`, IRQ affinity, CPU/GPU power and
 VM settings stay Experimental). CPU affinity is the first operation to graduate
 (`xtask mutation-campaign`, see [MUTATION_CAMPAIGN.md](MUTATION_CAMPAIGN.md)): its observation,
 affinity, recovery, suspend/resume and matched-pair benefit evidence is indexed at the campaign
 commit, and `GameRunnableLatency` is the `Supported` objective that decides its keep/revert.
+Cgroup placement is the second (campaign `mut-cgroup-placement-a509104-1793001876163`, see [MUTATION_GRADUATION_STATUS.md](MUTATION_GRADUATION_STATUS.md)); it does not inherit affinity's grant.
 
 ## Autonomous support matrix
 
 A tier does not by itself authorise autonomous apply. Normal autonomous apply requires the
 objective to be `Supported`, the operation's capability to be `Supported`, and an exact contract in
 `stutter/src/autotune/autonomous_support/` (operation, workload, pressure, objective, effect scope,
-prerequisites). Today the registry holds one contract:
+prerequisites). Today the registry holds two contracts:
 
 | Operation | Workload | Pressure | Objective | Scope |
 | --- | --- | --- | --- | --- |
 | CPU-affinity profile | stable, explicitly identified game | scheduler | `GameRunnableLatency` | local process tree |
+| cgroup placement | stable, explicitly identified game, into the administrator-configured game cgroup | scheduler | `GameRunnableLatency` | cgroup |
 
 Everything outside the matrix is suggest-only, benchmark-only, manual or rejected: other
-affinity contexts, `uclamp_experiment`, `nice_experiment`, `ioprio_experiment`, `cgroup_placement_experiment`, every system-wide operation capability and always-on autotune
+affinity contexts, `uclamp_experiment`, `nice_experiment`, `ioprio_experiment`, every system-wide operation capability and always-on autotune
 stay Experimental.
 
 Mutating capabilities require at least `live_recovery` and `live_suspend_resume`
@@ -50,9 +52,9 @@ with the evidence-index entries that justify it.
 
 The validation campaign applies one fixed, conservative policy once live observation, game-runnable, kernel, overhead, corpus, calibration and score evidence all verify:
 
-- **Supported:** `doctor`, `record`, `bench`, `report`, `audit`, `completions_and_man`, `cpu_affinity_experiment`
-- **Experimental:** `diagnose`, `advisor`, `tune_evaluation`, `restore`, `uclamp_experiment`, `nice_experiment`, `ioprio_experiment`, `cgroup_placement_experiment`, `cpu_power_epp`, `cpu_power_governor`, `gpu_power_profile`, `gpu_force_performance`, `vm_swappiness`, `vm_dirty_background_ratio`, `vm_dirty_ratio`, `irq_affinity_known_device`, `irq_affinity_storage_or_unknown`, `always_on_autotune`, `remote_agent_mutation`
+- **Supported:** `doctor`, `record`, `bench`, `report`, `audit`, `completions_and_man`, `cpu_affinity_experiment`, `cgroup_placement_experiment`
+- **Experimental:** `diagnose`, `advisor`, `tune_evaluation`, `restore`, `uclamp_experiment`, `nice_experiment`, `ioprio_experiment`, `cpu_power_epp`, `cpu_power_governor`, `gpu_power_profile`, `gpu_force_performance`, `vm_swappiness`, `vm_dirty_background_ratio`, `vm_dirty_ratio`, `irq_affinity_known_device`, `irq_affinity_storage_or_unknown`, `always_on_autotune`, `remote_agent_mutation`
 - **Internal:** `privileged_worker`, `fake_action_provider`
 
-Diagnosis stays Experimental even after calibration. CPU affinity is Supported only for its graduated scheduler-pressure tuple (see the autonomous support matrix above); no other mutating capability is promoted.
+Diagnosis stays Experimental even after calibration. CPU affinity and cgroup placement are Supported only for their graduated scheduler-pressure tuples (see the autonomous support matrix above); no other mutating capability is promoted.
 <!-- campaign-policy:end -->

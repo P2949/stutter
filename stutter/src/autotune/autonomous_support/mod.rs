@@ -47,6 +47,21 @@ pub const AUTONOMOUS_CONTRACTS: &[AutonomousContract] = &[
             "prepared_rollback_token_durable_before_first_write",
         ],
     },
+    // M6: cgroup placement of a game under scheduler pressure, into the administrator-configured
+    // game cgroup, judged by the target's own runnable latency. It does not inherit affinity's grant.
+    AutonomousContract {
+        operation: MutationOperationKind::CgroupPlacement,
+        workload: WorkloadKind::Game,
+        pressure: PressureKind::Scheduler,
+        objective: ObjectiveKind::GameRunnableLatency,
+        effect_scope: ActionEffectScope::Cgroup,
+        prerequisites: &[
+            "administrator_configured_game_cgroup_target",
+            "explicit_or_stable_game_target",
+            "baseline_runnable_population_of_at_least_1000_samples",
+            "prepared_rollback_token_durable_before_first_write",
+        ],
+    },
 ];
 
 /// Authorises exactly one operation and objective for one validation campaign. It never

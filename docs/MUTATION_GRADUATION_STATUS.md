@@ -31,6 +31,34 @@ pin them by manifest digest.
   `SCHED_FIFO` burst on a disposable game-like process, not a real game; focus inference is not
   exercised (the target is explicit). Promotion widens nothing beyond this tuple.
 
+## cgroup_placement - Supported (M6)
+
+- Campaign `mut-cgroup-placement-a509104-1793001876163`, source `a5091048`, every stage passed.
+- Scope: a stable, explicitly identified game under scheduler pressure, moved into the
+  administrator-configured game cgroup (a cpuset on a CPU free of the contention), judged by
+  `GameRunnableLatency`; cgroup scope. It does not inherit the CPU-affinity grant: it has its own
+  registry contract and its own capability.
+- Stages: preflight, mechanical apply/verify/rollback, fault matrix (all 11 checkpoint classes),
+  real suspend/resume with an RTC wake, 15 matched pairs per scenario (beneficial, neutral,
+  regression), calibration, one holdout evaluation, evidence integration. The kernel matrix is
+  skipped by an explicit, reasoned manifest entry (cgroup v2 migration and cpuset are core kernel
+  interfaces).
+- Thresholds: product defaults (12.5 % / 7.5 % / 1000 samples) kept; no threshold changed.
+- Calibration part: 9 beneficial pairs all kept, 11 neutral and 7 regression pairs with 0 false
+  keeps, 7 of 7 regressions reverted.
+- Holdout (evaluated once, after freezing): 6 of 6 beneficial pairs kept (rate 1.0), 4 neutral and 8
+  regression pairs with 0 false keeps, 8 of 8 regressions reverted.
+- Bundles: `live_affinity-a5091048-1793001985702`, `live_recovery-a5091048-1793002022484`,
+  `live_suspend_resume-a5091048-1793002047770`, `live_affinity_benefit-a5091048-1793004791026`
+  (suite names are shared with the affinity harness; the index entries cover provider
+  `cgroup_placement`).
+- Findings that shaped the harness: `cgroup.procs` is process-granular; delegation needs a
+  runner-created subtree the suite joins before exec; interactive suspend is denied outside the login
+  session, so the suite falls back to non-interactive `sudo`.
+- Limitations: the contention is a controlled `SCHED_FIFO` burst on a disposable game-like process,
+  not a real game; the cgroup target is administrator-configured, never inferred; focus inference is
+  not exercised. Promotion widens nothing beyond this tuple.
+
 ## uclamp - DeferredEvidence (M6)
 
 - Campaign `mut-uclamp-afdf763-1792973347207`, source `afdf7637`. Scope tested: a stable game under

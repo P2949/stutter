@@ -64,6 +64,7 @@ fn default_rule_for_situation(situation: SituationKind) -> WorkloadPolicyRule {
             situation,
             [
                 "cpu_affinity_profile",
+                "cgroup_placement",
                 "uclamp",
                 "gpu_power",
                 "irq_affinity",
@@ -80,7 +81,7 @@ fn default_rule_for_situation(situation: SituationKind) -> WorkloadPolicyRule {
                 IrqOverlapReduction,
                 ThermalRecovery,
             ],
-            ["cpu_affinity_profile"],
+            ["cpu_affinity_profile", "cgroup_placement"],
         ),
         BrowserFocused | BrowserCpuPressure | BrowserGpuVideo | BrowserIoPressure => rule(
             situation,
