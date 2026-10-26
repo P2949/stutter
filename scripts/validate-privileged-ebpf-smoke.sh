@@ -9,12 +9,17 @@ if [ "$(id -u)" -eq 0 ]; then
   exit 1
 fi
 
-if command -v doas >/dev/null 2>&1; then
-  privilege_command="doas"
-elif command -v sudo >/dev/null 2>&1; then
-  privilege_command="sudo"
-else
-  echo "error: privileged eBPF validation requires either doas or sudo on PATH" >&2
+# Pick a privilege command that works without a prompt: probe each candidate non-interactively
+# (sudo before doas) so a doas that merely exists cannot shadow a working sudo, and
+# never fall back to a password prompt.
+privilege_command=""
+if command -v sudo >/dev/null 2>&1 && sudo -n true </dev/null >/dev/null 2>&1; then
+  privilege_command="sudo -n"
+elif command -v doas >/dev/null 2>&1 && doas -n true </dev/null >/dev/null 2>&1; then
+  privilege_command="doas -n"
+fi
+if [ -z "$privilege_command" ]; then
+  echo "error: privileged eBPF validation needs non-interactive privilege (sudo -n or doas -n); neither works here and no password prompt is attempted" >&2
   exit 1
 fi
 

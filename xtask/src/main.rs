@@ -26,6 +26,7 @@ pub mod ops_checks;
 pub mod preflight;
 pub mod process;
 pub mod refresh_tune_recommendation;
+pub mod release_output;
 pub mod release_package;
 pub mod score_evaluation;
 pub mod score_matrix;
@@ -215,16 +216,19 @@ pub enum XtaskCommand {
     CiLive,
     #[command(name = "ci-all", about = "ci, then ci-live, then release-check")]
     CiAll {
-        #[arg(long, default_value = "target/release-check")]
-        out: PathBuf,
+        /// Caller-owned release output; it must not exist. Default: the managed target/release-check.
+        #[arg(long)]
+        out: Option<PathBuf>,
     },
     #[command(
         name = "release-check",
         about = "Build, package and verify the release locally"
     )]
     ReleaseCheck {
-        #[arg(long, default_value = "target/release-check")]
-        out: PathBuf,
+        /// Caller-owned output; it must not exist. Default: the managed target/release-check,
+        /// which a rerun replaces only after the new package verified.
+        #[arg(long)]
+        out: Option<PathBuf>,
         /// Fail unless this tag is `v` plus the crate version.
         #[arg(long)]
         expected_tag: Option<String>,
@@ -481,9 +485,9 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
         }
         XtaskCommand::VerifyFast => local_ci::verify_fast(&root),
         XtaskCommand::CiLive => local_ci::ci_live(&root),
-        XtaskCommand::CiAll { out } => local_ci::ci_all(&root, &out),
+        XtaskCommand::CiAll { out } => local_ci::ci_all(&root, out.as_deref()),
         XtaskCommand::ReleaseCheck { out, expected_tag } => {
-            local_ci::release_check(&root, &out, expected_tag.as_deref())
+            local_ci::release_check(&root, out.as_deref(), expected_tag.as_deref())
         }
         XtaskCommand::LocalCiPolicy => local_ci_policy::run(&root),
         XtaskCommand::SetupLocalCi => local_ci::setup(&root),
