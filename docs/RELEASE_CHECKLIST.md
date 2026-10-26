@@ -55,9 +55,11 @@ These flags should only be passed when the packaging evidence exists.
 
 `cargo run -p xtask -- release-package --binary BIN --bpf-object OBJ --out DIR` builds,
 from a clean committed tree, the artifacts named below; `release-verify DIR`
-recomputes and checks them independently. `.github/workflows/release.yml` runs both as a secondary
-reproducible-build check: a hosted runner has no live acceptance bundles, so it runs
-`release-verify` without `--require-acceptance` and never declares live acceptance.
+recomputes and checks them independently. `cargo run -p xtask -- release-check [--out DIR]
+[--expected-tag vX.Y.Z]` is the local release gate: it builds `stutter --release`, locates the
+required eBPF object, runs both commands and checks the tag against the crate version. It runs
+`release-verify` without `--require-acceptance`, so it never declares live acceptance; that is the
+exact-RC path below. There is no hosted release workflow.
 
 - `stutter-<version>-linux-x86_64.tar.gz`: the layout in `packaging/tarball/MANIFEST.txt`,
   reproducible (sorted names, fixed owner, commit-time mtime).
@@ -105,6 +107,10 @@ no-op, missing assets are uploaded, and an asset whose remote digest differs or 
 another tag is a hard failure; nothing is ever overwritten. A historical package must be
 verified and published with the xtask built from its own tag, because verification compares the
 package with the capability registry compiled into the verifier.
+
+`release-publish` is the one optional GitHub adapter: it is publication, not verification, and
+needs `gh` (`nix develop .#publish`). Nothing in release validity, exact-RC acceptance or tagging
+consults GitHub, and pushing a valid local tag is likewise outside verification.
 
 ## Autonomous campaign path
 
