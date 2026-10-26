@@ -102,6 +102,14 @@ impl std::str::FromStr for RecoveryCheckpoint {
     }
 }
 
+/// The throwaway acceptance controllers run as the campaign user, whose `RLIMIT_NICE` forbids
+/// un-demoting a task. The runner gives suites `CAP_SYS_RESOURCE`, which lets the controller lift
+/// its own limit; production restores through the privileged worker instead.
+fn grant_nice_restore() -> anyhow::Result<()> {
+    crate::syscall::raise_nice_rlimit_for_validation()
+        .context("cannot lift RLIMIT_NICE (needs CAP_SYS_RESOURCE)")
+}
+
 fn parent(pid: u32) -> anyhow::Result<u32> {
     fs::read_to_string(format!("/proc/{pid}/stat"))?
         .rsplit_once(')')
@@ -307,6 +315,9 @@ pub(crate) fn prepare_owned_controller(
                 == 3,
         "expected three disposable processes and five tasks"
     );
+    if mutation == AcceptanceMutation::Nice {
+        grant_nice_restore()?;
+    }
     match mutation {
         AcceptanceMutation::Affinity => {
             let desired = crate::affinity::CpuMask::parse(&value.to_string())?;
@@ -572,6 +583,8 @@ fn hold_manager(
 }
 
 pub fn recover_acceptance_controller(out: &Path, expected_tasks: usize) -> anyhow::Result<Value> {
+    // Recovery of a nice demotion lowers the niceness again; see `grant_nice_restore`.
+    let _ = grant_nice_restore();
     ensure!(
         expected_tasks == 0 || expected_tasks == 5,
         "unexpected recovery scope"

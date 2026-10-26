@@ -146,3 +146,20 @@ fn timespec_to_ns(timespec: libc::timespec) -> Option<u64> {
 
     seconds.checked_mul(1_000_000_000)?.checked_add(nanos)
 }
+
+/// Lets this process restore a lower niceness than it currently has. An ordinary user's
+/// `RLIMIT_NICE` is 0, so un-demoting a task needs either a privileged worker (production) or this
+/// call with `CAP_SYS_RESOURCE` (a validation harness's throwaway controller only).
+pub fn raise_nice_rlimit_for_validation() -> io::Result<()> {
+    let limit = libc::rlimit {
+        rlim_cur: 40,
+        rlim_max: 40,
+    };
+    // SAFETY: `limit` is a valid, initialised rlimit and RLIMIT_NICE a valid resource.
+    let rc = unsafe { libc::setrlimit(libc::RLIMIT_NICE, &limit) };
+    if rc == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
