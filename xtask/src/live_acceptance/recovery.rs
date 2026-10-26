@@ -59,7 +59,7 @@ pub(super) fn run_suspend(
 fn target_for(mutation: AcceptanceMutation) -> anyhow::Result<AcceptanceTarget> {
     let value = match mutation {
         AcceptanceMutation::Affinity => allowed_cpu()?,
-        AcceptanceMutation::Uclamp => mutation.default_value(),
+        AcceptanceMutation::Uclamp | AcceptanceMutation::Nice => mutation.default_value(),
     };
     Ok(AcceptanceTarget { mutation, value })
 }

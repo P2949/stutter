@@ -107,6 +107,7 @@ impl LiveSuite {
 pub enum Mutation {
     Affinity,
     Uclamp,
+    Nice,
 }
 
 impl Mutation {
@@ -114,6 +115,7 @@ impl Mutation {
         match self {
             Self::Affinity => "affinity",
             Self::Uclamp => "uclamp",
+            Self::Nice => "nice",
         }
     }
 }

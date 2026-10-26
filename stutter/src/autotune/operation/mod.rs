@@ -103,7 +103,7 @@ impl MutationOperationKind {
     /// snapshot durable before the first write). A Supported autonomous contract requires it;
     /// each operation flips to `true` when its transaction lands and passes the fault matrix.
     pub const fn prepared_transaction_implemented(self) -> bool {
-        matches!(self, Self::CpuAffinityProfile | Self::Uclamp)
+        matches!(self, Self::CpuAffinityProfile | Self::Uclamp | Self::Nice)
     }
 
     /// Operations that stay manual (HighRisk) for the whole roadmap.

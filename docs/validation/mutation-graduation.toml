@@ -112,3 +112,49 @@ regression = "affinity-colocated"
 min_improvement_percent = [10.0, 12.5, 15.0, 20.0, 25.0, 30.0, 40.0]
 max_regression_percent = [5.0, 7.5, 10.0, 15.0]
 min_samples = [1000]
+
+[operation.nice]
+operation = "nice"
+objective = "game_runnable_latency"
+capability = "nice_experiment"
+workload = "game"
+pressure = "scheduler"
+effect_scope = "local_process_tree"
+# The fault matrix, mechanical lifecycle and benefit pair drive the nice mutation.
+mutation = "nice"
+# Raising the niceness of the user's own processes needs no privilege, so the privileged-service
+# path runs inside the throwaway controller.
+privileged_worker = false
+stages = [
+  "preflight",
+  "mechanical",
+  "fault_matrix",
+  "suspend_resume",
+  "benefit_calibration",
+  "benefit_holdout",
+  "evidence_integrate",
+  "tier_decision",
+]
+skip = [
+  { stage = "kernel_matrix", reason = "setpriority is a core scheduler interface present on every supported kernel; the core kernel matrix already covers the recorder on each of them" },
+]
+
+[operation.nice.suites]
+mechanical = "affinity"
+fault_matrix = "recovery"
+suspend_resume = "suspend-resume"
+
+[operation.nice.scenarios]
+# Pre-registered hypothesis: demoting the sustained background CPU hogs that share the game's CPU
+# shortens the game's runnable wait. Beneficial: three ordinary hogs on the game's CPU. Neutral:
+# the same hogs on another CPU, where they are still visible offenders but cannot contend with the
+# game. Regression: contention no priority change can touch (a SCHED_FIFO burst on the game's CPU,
+# hogs elsewhere), so any keep there is a false keep.
+beneficial = "affinity-contended"
+neutral = "affinity-quiet"
+regression = "affinity-colocated"
+
+[operation.nice.thresholds]
+min_improvement_percent = [10.0, 12.5, 15.0, 20.0, 25.0, 30.0, 40.0]
+max_regression_percent = [5.0, 7.5, 10.0, 15.0]
+min_samples = [1000]

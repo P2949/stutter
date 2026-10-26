@@ -157,6 +157,17 @@ impl PrivilegedActionService for FakePrivilegedService {
         })
     }
 
+    fn apply_candidate_prepared(
+        &self,
+        request: CandidateApplyRequest,
+        before_commit: &mut crate::daemon::privilege::PreparedHook<'_>,
+    ) -> anyhow::Result<crate::daemon::privilege::ApplyResult> {
+        before_commit(&RollbackToken::NiceRestore {
+            records: Vec::new(),
+        })?;
+        self.apply_candidate(request)
+    }
+
     fn rollback(
         &self,
         request: RollbackRequest,

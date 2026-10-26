@@ -40,6 +40,9 @@ pub struct AutotuneObservationBuilderInput<'a> {
     pub proc_root: &'a Path,
     pub sys_root: &'a Path,
     pub activity_level: ActivityLevel,
+    /// Sustained background CPU consumers measured by the runtime; members of the target are
+    /// removed here, where the target's process set is known.
+    pub offenders: Vec<crate::autotune::offenders::OffenderProcess>,
 }
 
 #[derive(Clone, Debug)]
@@ -157,6 +160,11 @@ impl AutotuneObservationBuilder {
             workload_identity,
             active_tasks,
             protected_tasks,
+            background_offenders: input
+                .offenders
+                .into_iter()
+                .filter(|offender| !runnable_members.contains(&offender.pid.as_u32()))
+                .collect(),
             active_config_snapshot: Some(active_config_snapshot),
             system_context: Some(system_context),
             frame_count: window_score.frame_count,

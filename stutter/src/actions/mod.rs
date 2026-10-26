@@ -32,6 +32,7 @@ pub(crate) mod cpu_affinity;
 pub(crate) mod cpu_power;
 pub(crate) mod gpu_power;
 pub(crate) mod nice;
+pub(crate) mod task_lifecycle;
 
 pub(crate) mod ioprio;
 pub(crate) mod irq_affinity;

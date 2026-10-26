@@ -258,7 +258,9 @@ fn only_operations_with_a_prepared_transaction_can_be_registered() {
             operation.prepared_transaction_implemented(),
             matches!(
                 operation,
-                MutationOperationKind::CpuAffinityProfile | MutationOperationKind::Uclamp
+                MutationOperationKind::CpuAffinityProfile
+                    | MutationOperationKind::Uclamp
+                    | MutationOperationKind::Nice
             ),
             "{operation:?}"
         );
