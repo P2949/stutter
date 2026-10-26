@@ -1,7 +1,7 @@
 //! The two repository-changing policy tasks: `capability-policy` applies the fixed `v0.1.0` tier
 //! policy from the committed manifest to the registry and its documentation, and `release-docs`
-//! records the calibration and score decisions. Both land as pull requests through the gated PR
-//! flow; the registry edit is a pure text transformation that is verified before it is written.
+//! records the calibration and score decisions. Both land locally through the gated landing
+//! primitive; the registry edit is a pure text transformation that is verified before it is written.
 use std::{fs, path::Path};
 
 use serde_json::Value;

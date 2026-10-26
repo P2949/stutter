@@ -103,6 +103,13 @@ cargo run -- --version
 
 The version output includes the Cargo package version and the Git revision when the repository metadata is available. Builds from source archives without `.git` report `git unknown`.
 
+## Verification
+
+Verification is repository-owned and local-only: `cargo run -p xtask -- ci` (full deterministic
+CI), `verify-fast`, `ci-live`, `release-check` and `local-ci-policy`, wired into git hooks by
+`xtask setup-local-ci`. Hosted CI and GitHub-runner-dependent verification must not be
+reintroduced; see [docs/LOCAL_VERIFICATION.md](docs/LOCAL_VERIFICATION.md).
+
 ## Install
 
 **Verified release tarball (v0.1.0).** Download `stutter-0.1.0-linux-x86_64.tar.gz`, `SHA256SUMS` and

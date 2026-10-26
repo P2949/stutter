@@ -1,4 +1,4 @@
-# Core Validation campaign parameters. The task DAG and issue gates are encoded in
+# Core Validation campaign parameters. The task DAG and named validation gates are encoded in
 # xtask/src/validation_campaign/graph.rs; this file holds the campaign's tunable parameters.
 # Its SHA-256 is part of every task fingerprint: editing it invalidates source-bound results.
 schema_version = 1

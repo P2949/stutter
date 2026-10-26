@@ -1,4 +1,4 @@
-//! The Core Validation DAG. Dependencies and issue gates are encoded here so the agent never
+//! The Core Validation DAG. Dependencies and the named validation gates are encoded here so the agent never
 //! reconstructs them from prose.
 use std::collections::{BTreeMap, BTreeSet};
 
