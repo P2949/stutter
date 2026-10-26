@@ -2,6 +2,7 @@ mod acceptance;
 mod evidence;
 mod executor;
 mod journal;
+mod kept_rollback;
 mod lifecycle;
 mod manager;
 mod model;

@@ -160,3 +160,39 @@ impl CandidateMemory {
         }
     }
 }
+
+/// Candidate memory sits beside the controller journal so a restart keeps what was already tried.
+pub fn candidate_memory_path(journal_path: &std::path::Path) -> std::path::PathBuf {
+    journal_path.with_file_name("candidate-memory.json")
+}
+
+impl CandidateMemory {
+    /// Memory is advisory: a missing or unreadable file starts empty (a candidate may be tried
+    /// once more), and the reason is logged. It never blocks startup.
+    pub fn load(path: &std::path::Path) -> Self {
+        let bytes = match std::fs::read(path) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Self::default(),
+            Err(error) => {
+                log::warn!("candidate memory unreadable at {}: {error}", path.display());
+                return Self::default();
+            }
+        };
+        serde_json::from_slice(&bytes).unwrap_or_else(|error| {
+            log::warn!("candidate memory corrupt at {}: {error}", path.display());
+            Self::default()
+        })
+    }
+
+    pub fn save(&self, path: &std::path::Path) -> anyhow::Result<()> {
+        use std::io::Write;
+        let temporary = path.with_extension(format!("tmp-{}", std::process::id()));
+        let mut file = std::fs::File::create(&temporary)?;
+        serde_json::to_writer(&mut file, self)?;
+        file.write_all(b"\n")?;
+        file.sync_all()?;
+        drop(file);
+        std::fs::rename(&temporary, path)?;
+        Ok(())
+    }
+}

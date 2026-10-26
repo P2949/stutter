@@ -501,3 +501,33 @@ fn candidate_memory_deserialize_rejects_empty_workload_action_id() {
         "unexpected error: {err}"
     );
 }
+
+#[test]
+fn memory_survives_a_restart_and_a_corrupt_file_starts_empty() {
+    let dir = std::env::temp_dir().join(format!(
+        "stutter-candidate-memory-{}-{}",
+        std::process::id(),
+        crate::audit::unix_nanos_now()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = super::persistence::candidate_memory_path(&dir.join("controller_journal.json"));
+    assert_eq!(path.file_name().unwrap(), "candidate-memory.json");
+    assert_eq!(CandidateMemory::load(&path), CandidateMemory::default());
+
+    let candidate = crate::autotune::planning::candidate::CandidateAction::fake(
+        crate::actions::ActionId::new("remembered".to_owned()),
+        crate::actions::SafetyClass::ReversibleLowRisk,
+    );
+    let mut memory = CandidateMemory::default();
+    memory.record_attempt(
+        &candidate,
+        &CandidateContextHashInput::for_candidate(&candidate),
+        1_000,
+        Some(5_000),
+    );
+    memory.save(&path).unwrap();
+    assert_eq!(CandidateMemory::load(&path), memory);
+
+    std::fs::write(&path, b"{ not json").unwrap();
+    assert_eq!(CandidateMemory::load(&path), CandidateMemory::default());
+}

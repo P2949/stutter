@@ -49,6 +49,7 @@ pub(crate) mod history_replay;
 
 pub(crate) mod autonomous_support;
 pub(crate) mod kept;
+pub(crate) mod kept_ledger;
 pub(crate) mod live_experiment;
 #[cfg(test)]
 pub(crate) mod measurement;
@@ -80,6 +81,8 @@ pub(crate) mod controller;
 pub(crate) mod decision;
 #[cfg(test)]
 pub(crate) mod decision_log;
+#[cfg(test)]
+mod fault_simulation_tests;
 pub(crate) mod objective;
 pub(crate) mod observation;
 pub(crate) mod observation_builder;

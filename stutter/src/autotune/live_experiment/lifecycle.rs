@@ -78,12 +78,15 @@ impl LiveExperimentManager {
                 executor,
             ),
             AutotuneDecision::EnterCooldown { duration, .. } => {
-                runtime_state.controller_state.phase = ControllerPhase::Cooldown;
-                runtime_state.controller_state.cooldown_until_unix_nanos = Some(
-                    observation
-                        .now_unix_nanos
-                        .saturating_add(duration.as_nanos()),
-                );
+                // A cooldown never clears a fault: only recovery or a restart does.
+                let state = &mut *runtime_state.controller_state;
+                if state.phase != ControllerPhase::Faulted {
+                    state.phase = ControllerPhase::Cooldown;
+                }
+                let until = observation
+                    .now_unix_nanos
+                    .saturating_add(duration.as_nanos());
+                state.cooldown_until_unix_nanos = Some(until);
                 Ok(LiveExperimentOutcome::event(
                     LiveExperimentEvent::CooldownEntered,
                 ))
@@ -429,13 +432,7 @@ impl LiveExperimentManager {
 
         match result {
             ExperimentResult::Improved { .. } => {
-                if let Err(err) = write_controller_journal_phase_for_live_experiment(
-                    input,
-                    &experiment,
-                    observation,
-                    ControllerJournalState::Keeping,
-                    "kept_pending_manual_restore",
-                ) {
+                if let Err(err) = Self::commit_keep_durably(input, &experiment, observation) {
                     self.current = Some(experiment);
                     return Err(err);
                 }
@@ -451,6 +448,7 @@ impl LiveExperimentManager {
                 );
 
                 if let Err(err) = active_profile_state.record_kept_candidate(kept, result.clone()) {
+                    Self::retire_kept_durably(input, &experiment.experiment_id);
                     self.current = Some(experiment);
                     return Err(err);
                 }
