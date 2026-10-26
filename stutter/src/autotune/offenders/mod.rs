@@ -24,7 +24,7 @@ use crate::{
 };
 
 /// A process must use at least this share of one CPU...
-pub const OFFENDER_MIN_CPU_PERCENT: f64 = 40.0;
+pub const OFFENDER_MIN_CPU_PERCENT: f64 = 20.0;
 /// ...for this many consecutive samples before it is an offender.
 pub const OFFENDER_MIN_SUSTAINED_SAMPLES: u32 = 3;
 /// At most this many offenders are ever reported.
