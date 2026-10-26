@@ -63,8 +63,11 @@ impl RecoveryCheckpoint {
         let syscall = mutation.syscall();
         match self {
             Self::MidApply => Some(format!("inject={syscall}:delay_exit=10s:when=1")),
-            // Calls 1-5 apply; call 6 restores the first task, then stalls.
-            Self::InterruptedRollback => Some(format!("inject={syscall}:delay_exit=10s:when=6")),
+            // The apply's writes come first; the next one restores the first unit, then stalls.
+            Self::InterruptedRollback => Some(format!(
+                "inject={syscall}:delay_exit=10s:when={}",
+                mutation.apply_writes() + 1
+            )),
             Self::PartialApplyFailure => Some(format!("inject={syscall}:error=EPERM:when=3")),
             _ => None,
         }

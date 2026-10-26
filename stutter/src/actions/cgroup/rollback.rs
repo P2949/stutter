@@ -84,6 +84,7 @@ impl CgroupRollbackHandler {
         let mut legacy_unverified = 0;
         let mut errors = 0;
         let mut messages = Vec::new();
+        let mut restored_processes = std::collections::BTreeSet::new();
 
         for record in records {
             let identity = record.restore_identity();
@@ -142,8 +143,15 @@ impl CgroupRollbackHandler {
                 continue;
             }
             let cgroup_procs = original_cgroup.join("cgroup.procs");
+            let process = identity.process_pid.map_or(tid, |pid| pid.as_u32());
+            if restored_processes.contains(&(process, record.original_cgroup.clone())) {
+                // `cgroup.procs` is process-granular: the whole thread group already went back.
+                restored += 1;
+                continue;
+            }
             match write_trimmed(&cgroup_procs, &tid.to_string()) {
                 Ok(()) => {
+                    restored_processes.insert((process, record.original_cgroup.clone()));
                     restored += 1;
                 }
                 Err(e) => match classify_restore_write_error(proc_root, tid, e) {
