@@ -31,6 +31,7 @@ pub mod release_package;
 pub mod score_evaluation;
 pub mod score_matrix;
 pub mod score_target;
+pub mod soak;
 pub mod validation_campaign;
 pub mod workflow;
 
@@ -147,6 +148,11 @@ pub enum XtaskCommand {
         about = "Drive the StutterScore workload-matrix evidence study (init, status, continue, report)"
     )]
     ScoreMatrix(score_matrix::MatrixArgs),
+    #[command(
+        name = "soak",
+        about = "Drive the real always-on soak of the graduated operations (init, run, status, verify)"
+    )]
+    Soak(soak::SoakArgs),
     #[command(
         name = "kernel-matrix",
         about = "Report observed kernel compatibility from the evidence index"
@@ -435,6 +441,7 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
         XtaskCommand::DiagnosisStudy(args) => diagnosis_study::run(&root, args),
         XtaskCommand::MutationCampaign(args) => mutation_campaign::run(&root, args),
         XtaskCommand::ScoreMatrix(args) => score_matrix::run(&root, args),
+        XtaskCommand::Soak(args) => soak::run(&root, args),
         XtaskCommand::KernelMatrix { require } => kernel_matrix::run(&root, require),
         XtaskCommand::EvidenceIndex(args) => evidence_bundle::index_entry(&args.bundle),
         XtaskCommand::Calibrate {
