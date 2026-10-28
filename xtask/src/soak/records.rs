@@ -31,6 +31,9 @@ pub struct SoakState {
     pub stutter_sha256: String,
     pub xtask_sha256: String,
     pub source_commit: String,
+    /// A trial run on a dirty tree: never publishable evidence.
+    #[serde(default)]
+    pub allow_dirty: bool,
     pub created_unix_ms: u64,
     /// Set by the first `run`; the soak ends at `started + hours` of wall-clock time.
     pub started_unix_ms: Option<u64>,

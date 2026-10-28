@@ -371,3 +371,42 @@ pub(super) fn require_tools() -> anyhow::Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn state(pid: u32) -> Option<char> {
+        fs::read_to_string(format!("/proc/{pid}/stat"))
+            .ok()?
+            .rsplit_once(')')?
+            .1
+            .trim()
+            .chars()
+            .next()
+    }
+
+    /// The long round once left its exited workload unreaped: a zombie still has a `/proc` entry,
+    /// so the controller kept following a dead target and never exited. Only `try_wait`/`wait`
+    /// by the launcher removes it.
+    #[test]
+    fn an_exited_workload_stays_visible_until_its_launcher_reaps_it() {
+        let mut child = OwnedChild(Command::new("true").spawn().unwrap());
+        let pid = child.pid();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while state(pid) != Some('Z') && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(
+            state(pid),
+            Some('Z'),
+            "an exited, unreaped child is a zombie"
+        );
+        assert!(
+            wait_exit(&mut child, Duration::from_secs(5))
+                .unwrap()
+                .is_some()
+        );
+        assert_eq!(state(pid), None, "reaping removes it");
+    }
+}

@@ -7,7 +7,7 @@ use serde::Serialize;
 
 use super::{
     history::{HistoryEvent, audit_events, first_resolutions, read_events},
-    records::{RoundRecord, SoakState, read_rounds, read_state, unix_ms},
+    records::{Profile, RoundRecord, SoakState, read_rounds, read_state, unix_ms},
 };
 
 #[derive(Debug, Default, Serialize)]
@@ -35,17 +35,50 @@ pub struct Check {
 
 #[derive(Debug, Serialize)]
 pub struct Report {
+    pub profile: Profile,
     pub passed: bool,
     pub counts: Counts,
     pub checks: Vec<Check>,
 }
 
-pub const MIN_HOURS: f64 = 24.0;
-pub const MIN_EXPERIMENTS: usize = 20;
-pub const MIN_FOCUS_TRANSITIONS: usize = 10;
-pub const MIN_CONTROLLER_RESTARTS: usize = 2;
-pub const MIN_WORKER_RESTARTS: usize = 2;
-pub const MIN_SUSPENDS: usize = 2;
+/// What a profile must have exercised. Both profiles require both graduated operations, a keep
+/// and a revert, and the same zero-violation checks; only the amount of activity differs. A short
+/// profile never claims the long-run count, so it cannot stand in for the 24 h gate.
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct Minimums {
+    pub hours: f64,
+    pub experiments: usize,
+    pub focus_transitions: usize,
+    pub controller_restarts: usize,
+    pub worker_restarts: usize,
+    pub suspends: usize,
+}
+
+impl Minimums {
+    pub const FULL: Self = Self {
+        hours: 24.0,
+        experiments: 20,
+        focus_transitions: 10,
+        controller_restarts: 2,
+        worker_restarts: 2,
+        suspends: 2,
+    };
+    pub const SMOKE: Self = Self {
+        hours: 0.0,
+        experiments: 0,
+        focus_transitions: 1,
+        controller_restarts: 1,
+        worker_restarts: 1,
+        suspends: 1,
+    };
+
+    pub fn for_profile(profile: Profile) -> Self {
+        match profile {
+            Profile::Full => Self::FULL,
+            Profile::Smoke => Self::SMOKE,
+        }
+    }
+}
 
 /// The graduated operations: the only action kinds an autonomous experiment may apply.
 const SUPPORTED_KINDS: [&str; 2] = ["cpu_affinity_profile", "cgroup_placement"];
@@ -132,65 +165,76 @@ pub fn verify(dir: &Path) -> anyhow::Result<Report> {
     let counts = counts(&state, &rounds, &events);
     let mut checks = Vec::new();
 
+    let want = Minimums::for_profile(state.profile);
     let minimums = [
         (
-            counts.wall_clock_hours >= MIN_HOURS,
+            "minimum_wall_clock",
+            counts.wall_clock_hours >= want.hours,
             format!(
-                "{:.2} h of wall-clock time (>= {MIN_HOURS})",
-                counts.wall_clock_hours
+                "{:.2} h of wall-clock time (>= {})",
+                counts.wall_clock_hours, want.hours
             ),
         ),
         (
-            counts.experiments >= MIN_EXPERIMENTS,
+            "minimum_experiments",
+            counts.experiments >= want.experiments,
             format!(
-                "{} completed keep/revert experiments (>= {MIN_EXPERIMENTS})",
-                counts.experiments
+                "{} completed keep/revert experiments (>= {})",
+                counts.experiments, want.experiments
             ),
         ),
         (
-            counts.focus_transitions >= MIN_FOCUS_TRANSITIONS,
+            "minimum_focus_transitions",
+            counts.focus_transitions >= want.focus_transitions,
             format!(
-                "{} workload/focus transitions (>= {MIN_FOCUS_TRANSITIONS})",
-                counts.focus_transitions
+                "{} workload/focus transitions (>= {})",
+                counts.focus_transitions, want.focus_transitions
             ),
         ),
         (
-            counts.controller_restarts >= MIN_CONTROLLER_RESTARTS,
+            "minimum_controller_restarts",
+            counts.controller_restarts >= want.controller_restarts,
             format!(
-                "{} controller restarts (>= {MIN_CONTROLLER_RESTARTS})",
-                counts.controller_restarts
+                "{} controller restarts (>= {})",
+                counts.controller_restarts, want.controller_restarts
             ),
         ),
         (
-            counts.worker_restarts >= MIN_WORKER_RESTARTS,
+            "minimum_worker_restarts",
+            counts.worker_restarts >= want.worker_restarts,
             format!(
-                "{} privileged-worker restarts (>= {MIN_WORKER_RESTARTS})",
-                counts.worker_restarts
+                "{} privileged-worker restarts (>= {})",
+                counts.worker_restarts, want.worker_restarts
             ),
         ),
         (
-            counts.suspend_resume_cycles >= MIN_SUSPENDS,
+            "minimum_suspend_resume",
+            counts.suspend_resume_cycles >= want.suspends,
             format!(
-                "{} suspend/resume cycles (>= {MIN_SUSPENDS})",
-                counts.suspend_resume_cycles
+                "{} suspend/resume cycles (>= {})",
+                counts.suspend_resume_cycles, want.suspends
             ),
         ),
         (
-            counts.by_operation.len() >= 2,
+            "minimum_operations",
+            SUPPORTED_KINDS
+                .iter()
+                .all(|kind| counts.by_operation.contains_key(*kind)),
             format!(
-                "experiments on {} operations ({:?})",
+                "experiments on {} operations ({:?}); both graduated operations are required",
                 counts.by_operation.len(),
                 counts.by_operation
             ),
         ),
         (
+            "minimum_keep_and_revert",
             counts.kept > 0 && counts.reverted > 0,
             format!("{} kept and {} reverted", counts.kept, counts.reverted),
         ),
     ];
-    for (passed, detail) in minimums {
+    for (name, passed, detail) in minimums {
         checks.push(Check {
-            name: "minimum".to_owned(),
+            name: name.to_owned(),
             passed,
             detail,
         });
@@ -248,6 +292,7 @@ pub fn verify(dir: &Path) -> anyhow::Result<Report> {
 
     let passed = checks.iter().all(|check| check.passed);
     Ok(Report {
+        profile: state.profile,
         passed,
         counts,
         checks,
@@ -419,7 +464,8 @@ fn audit_problems(dir: &Path, rounds: &[RoundRecord], events: &[HistoryEvent]) -
 
 pub fn render(report: &Report) -> String {
     let mut text = format!(
-        "soak {}: {:.2} h, {} rounds ({} clean), {} experiments ({} kept, {} reverted)\n",
+        "{:?} soak {}: {:.2} h, {} rounds ({} clean), {} experiments ({} kept, {} reverted)\n",
+        report.profile,
         if report.passed { "PASSED" } else { "FAILED" },
         report.counts.wall_clock_hours,
         report.counts.rounds,
@@ -588,6 +634,7 @@ mod tests {
             source_commit: String::new(),
             created_unix_ms: 0,
             started_unix_ms: None,
+            allow_dirty: false,
             cpus: None,
             next_round: 0,
             finished: false,
