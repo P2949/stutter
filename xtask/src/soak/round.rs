@@ -265,7 +265,7 @@ impl Ctx<'_> {
 
     fn take_matching(&mut self, matches: impl Fn(&HistoryEvent) -> bool) -> Option<HistoryEvent> {
         self.poll_events();
-        let at = self.pending.iter().position(|event| matches(event))?;
+        let at = self.pending.iter().position(matches)?;
         Some(self.pending.remove(at))
     }
 
@@ -486,8 +486,8 @@ impl Ctx<'_> {
     /// Durable state at rest: the journal names no live token, the ledger is gone and the game
     /// cgroup is empty.
     fn check_quiescent(&mut self, workload_alive: bool) {
-        match fs::read_to_string(self.world.journal_path()) {
-            Ok(text) => {
+        if let Ok(text) = fs::read_to_string(self.world.journal_path()) {
+            {
                 let state = serde_json::from_str::<serde_json::Value>(&text)
                     .ok()
                     .and_then(|v| v["state"].as_str().map(str::to_owned))
@@ -496,7 +496,6 @@ impl Ctx<'_> {
                     self.violation(format!("the controller journal is `{state}` at rest"));
                 }
             }
-            Err(_) => {}
         }
         if self.world.ledger_path().exists() {
             self.violation("the kept-action ledger still holds an entry at rest");
