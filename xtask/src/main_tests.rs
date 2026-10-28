@@ -74,6 +74,7 @@ fn expected_subcommands_are_registered() {
             "service-smoke",
             "setup-local-ci",
             "smoke",
+            "soak",
             "validate",
             "validation-campaign",
             "verify-fast",

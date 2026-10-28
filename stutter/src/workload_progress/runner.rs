@@ -4,15 +4,29 @@ use anyhow::{Context, bail};
 
 use super::{FixedWorkIdentity, ProgressSource, WorkloadPhase, WorkloadProgress};
 
+/// A Git command for `dir` that ignores the repository an enclosing hook or tool exported.
+pub(super) fn git_in(dir: impl AsRef<Path>) -> Command {
+    let mut command = Command::new("git");
+    command.current_dir(dir);
+    for name in [
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_INDEX_FILE",
+        "GIT_COMMON_DIR",
+        "GIT_PREFIX",
+    ] {
+        command.env_remove(name);
+    }
+    command
+}
+
 fn verify_source(identity: &FixedWorkIdentity) -> anyhow::Result<()> {
     let expected = identity.source_tree.strip_prefix("git:").ok_or_else(|| anyhow::anyhow!("command runner requires a clean Git tree identity; digest-based external markers need an external source verifier"))?;
-    let tree = Command::new("git")
+    let tree = git_in(&identity.working_directory)
         .args(["rev-parse", "HEAD^{tree}"])
-        .current_dir(&identity.working_directory)
         .output()?;
-    let status = Command::new("git")
+    let status = git_in(&identity.working_directory)
         .args(["status", "--porcelain", "--untracked-files=normal"])
-        .current_dir(&identity.working_directory)
         .output()?;
     if !tree.status.success()
         || !status.status.success()
