@@ -14,6 +14,7 @@ use serde_json::{Value, json};
 use crate::evidence_bundle::sha256::sha256_hex;
 
 mod acceptance;
+pub(crate) mod install_smoke;
 mod publish;
 mod sbom;
 mod verify;
@@ -21,8 +22,14 @@ mod verify;
 #[cfg(test)]
 mod acceptance_tests;
 
+pub use install_smoke::InstallSmokeArgs;
 pub use publish::{PublishArgs, publish_release};
 pub use verify::verify_release;
+
+/// `xtask release-install-smoke`.
+pub fn install_smoke(args: &InstallSmokeArgs) -> anyhow::Result<()> {
+    install_smoke::run(args)
+}
 
 pub(crate) const RELEASE_SCHEMA_VERSION: u64 = 1;
 pub(crate) const MANIFEST_NAME: &str = "release-manifest.json";

@@ -64,6 +64,7 @@ experimental = [
     "vm_dirty_ratio",
     "irq_affinity_known_device",
     "irq_affinity_storage_or_unknown",
+    "bounded_autotune_controller",
     "always_on_autotune",
     "remote_agent_mutation",
 ]

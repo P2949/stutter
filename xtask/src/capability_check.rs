@@ -126,4 +126,41 @@ mod tests {
             ["live_affinity", "live_overhead"]
         );
     }
+
+    #[test]
+    fn the_bounded_controller_cannot_be_supported_without_the_indexed_soak() {
+        use stutter::api::capabilities::capability_registry;
+        let controller = capability_registry()
+            .iter()
+            .find(|capability| capability.id == "bounded_autotune_controller")
+            .unwrap();
+        let everything_but_the_soak = controller
+            .required_evidence
+            .iter()
+            .filter(|suite| **suite != "live_autotune_soak")
+            .map(|suite| (*suite).to_owned())
+            .collect::<BTreeSet<_>>();
+        // Missing exactly the soak, the capability is an open graduation gap...
+        let (_, gaps) = evaluate(&everything_but_the_soak);
+        if controller.tier != CapabilityTier::Supported {
+            assert!(
+                gaps.iter()
+                    .any(|gap| gap.contains("bounded_autotune_controller")
+                        && gap.contains("live_autotune_soak"))
+            );
+        } else {
+            // ...and a Supported tier without the soak is a violation.
+            let (violations, _) = evaluate(&everything_but_the_soak);
+            assert!(
+                violations
+                    .iter()
+                    .any(|v| v.contains("bounded_autotune_controller"))
+            );
+        }
+        // The smoke suite is not the graduation proof.
+        let only_smoke = BTreeSet::from(["live_autotune_smoke".to_owned()]);
+        assert!(evaluate(&only_smoke).1.iter().any(|gap| {
+            gap.contains("bounded_autotune_controller") && gap.contains("live_autotune_soak")
+        }));
+    }
 }

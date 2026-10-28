@@ -6,14 +6,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use serde_json::Value;
-
 use super::{blocked, failed, release_dir};
 use crate::validation_campaign::{
     executor::{RunContext, RunnerOutcome, TaskRunner},
     graph::TaskSpec,
     model::FailureClass,
-    repository::{file_sha256, reports_revision},
     shell::Shell,
 };
 
@@ -209,140 +206,32 @@ pub fn observation_recording(campaign: &Path) -> Option<PathBuf> {
     walk(&campaign.join("attempts/rc-live-observation"), 6)
 }
 
-fn step(
-    shell: &dyn Shell,
-    binary: &str,
-    args: &[&str],
-    cwd: &Path,
-    what: &str,
-) -> Result<String, String> {
-    let out = shell.run(binary, args, cwd);
-    if out.ok() {
-        Ok(out.stdout)
-    } else {
-        Err(format!(
-            "{what} failed ({}): {}",
-            out.code,
-            out.stderr.lines().last().unwrap_or("")
-        ))
-    }
-}
-
 impl InstallSmokeRunner {
     fn smoke(&self, context: &RunContext<'_>) -> Result<(), String> {
-        let package = context.dir.0.join("release/package");
-        let manifest: Value = fs::read(package.join("release-manifest.json"))
-            .ok()
-            .and_then(|b| serde_json::from_slice(&b).ok())
-            .ok_or("release-manifest.json is missing or unreadable")?;
-        let version = manifest["version"]
-            .as_str()
-            .ok_or("manifest has no version")?;
-        let revision = manifest["git_revision"]
-            .as_str()
-            .ok_or("manifest has no revision")?;
-        if Some(revision) != context.state.release_candidate.as_deref()
-            || version != context.manifest.release.version
+        let recording = observation_recording(&context.dir.0)
+            .ok_or("no exact-RC observation recording to validate")?;
+        let facts = crate::release_package::install_smoke::smoke(
+            self.shell.as_ref(),
+            &context.dir.0.join("release/package"),
+            &recording,
+            &context.dir.0.join("release/install"),
+        )?;
+        if Some(facts.revision.as_str()) != context.state.release_candidate.as_deref()
+            || facts.version != context.manifest.release.version
         {
             return Err(
                 "the package does not certify the frozen release candidate and manifest version"
                     .to_owned(),
             );
         }
-        let install = context.dir.0.join("release/install");
-        let _ = fs::remove_dir_all(&install);
-        fs::create_dir_all(&install).map_err(|e| e.to_string())?;
-        let tarball = format!("stutter-{version}-linux-x86_64.tar.gz");
-        step(
-            self.shell.as_ref(),
-            "tar",
-            &[
-                "--strip-components=1",
-                "-xzf",
-                &package.join(&tarball).to_string_lossy(),
-                "-C",
-                &install.to_string_lossy(),
-            ],
-            &install,
-            "unpacking the tarball",
-        )?;
-        let binary = install.join("bin/stutter");
-        let bin = binary.to_string_lossy().into_owned();
-        let shell = self.shell.as_ref();
-        let reported = step(shell, &bin, &["--version"], &install, "stutter --version")?;
-        if !reported.starts_with(&format!("stutter {version} ("))
-            || !reports_revision(&reported, revision)
-        {
-            return Err(format!(
-                "the packaged binary reports {:?}, expected version {version} at {revision}",
-                reported.trim()
-            ));
-        }
-        let capabilities: Value = serde_json::from_str(&step(
-            shell,
-            &bin,
-            &["capabilities", "--json"],
-            &install,
-            "stutter capabilities",
-        )?)
-        .map_err(|e| format!("capabilities output: {e}"))?;
-        let supported: Vec<String> = capabilities
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter(|c| c["tier"] == "supported")
-            .filter_map(|c| c["id"].as_str().map(str::to_owned))
-            .collect();
         let mut expected = context.manifest.policy.capabilities.supported.clone();
-        let mut actual = supported;
+        let mut actual = facts.supported;
         expected.sort();
         actual.sort();
         if expected != actual {
             return Err(format!(
                 "the packaged binary supports {actual:?}, the policy requires {expected:?}"
             ));
-        }
-        // Doctor must run to a verdict; an unprivileged host may legitimately report failures.
-        let doctor = shell.run(&bin, &["doctor", "--json"], &install);
-        if serde_json::from_str::<Value>(&doctor.stdout).map_or(true, |v| v["overall"].is_null()) {
-            return Err("stutter doctor produced no verdict".to_owned());
-        }
-        for help in [["restore", "--help"], ["audit", "--help"]] {
-            step(
-                shell,
-                &bin,
-                &help,
-                &install,
-                &format!("stutter {}", help[0]),
-            )?;
-        }
-        let recording = observation_recording(&context.dir.0)
-            .ok_or("no exact-RC observation recording to validate")?;
-        let recording = recording.to_string_lossy().into_owned();
-        step(
-            shell,
-            &bin,
-            &["validate", &recording],
-            &install,
-            "stutter validate",
-        )?;
-        let analysis: Value = serde_json::from_str(&step(
-            shell,
-            &bin,
-            &["report", &recording, "--analysis-json"],
-            &install,
-            "stutter report",
-        )?)
-        .map_err(|e| format!("report output: {e}"))?;
-        if analysis.get("cluster_analysis").is_none() {
-            return Err("the report carries no diagnosis analysis".to_owned());
-        }
-        let object = install.join("lib/stutter/stutter.bpf.o");
-        let bytes = fs::read(&object).map_err(|e| format!("packaged eBPF object: {e}"))?;
-        if !bytes.starts_with(b"\x7fELF")
-            || file_sha256(&object).ok().as_deref() != manifest["bpf_object"]["sha256"].as_str()
-        {
-            return Err("the packaged eBPF object is not the manifest's ELF object".to_owned());
         }
         Ok(())
     }

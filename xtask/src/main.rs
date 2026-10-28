@@ -178,6 +178,11 @@ pub enum XtaskCommand {
     )]
     ReleaseVerify(release_package::VerifyArgs),
     #[command(
+        name = "release-install-smoke",
+        about = "Unpack a release package and smoke-test the installed binary on the exact-RC recording"
+    )]
+    ReleaseInstallSmoke(release_package::InstallSmokeArgs),
+    #[command(
         name = "release-publish",
         about = "Verify a release and publish it to GitHub idempotently"
     )]
@@ -437,6 +442,7 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
         } => live_acceptance::workload(seconds, &ready, descendants),
         XtaskCommand::ReleasePackage(args) => release_package::package_release(&root, &args),
         XtaskCommand::ReleaseVerify(args) => release_package::verify_release(&args),
+        XtaskCommand::ReleaseInstallSmoke(args) => release_package::install_smoke(&args),
         XtaskCommand::ReleasePublish(args) => release_package::publish_release(&root, &args),
         XtaskCommand::ValidationCampaign(args) => validation_campaign::run(&root, args),
         XtaskCommand::DiagnosisStudy(args) => diagnosis_study::run(&root, args),

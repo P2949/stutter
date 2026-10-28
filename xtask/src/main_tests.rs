@@ -64,6 +64,7 @@ fn expected_subcommands_are_registered() {
             "recovery-controller",
             "refresh-tune-recommendation",
             "release-check",
+            "release-install-smoke",
             "release-package",
             "release-publish",
             "release-verify",

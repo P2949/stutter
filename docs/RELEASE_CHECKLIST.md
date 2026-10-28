@@ -83,7 +83,7 @@ registry (a release can never claim more than the registry), and checks the SBOM
 every locked package. On tags, `--require-acceptance` additionally requires, via repeatable
 `--acceptance-bundle BUNDLE`, exported evidence bundles that are verified on the spot (manifest,
 content and privacy), are `PASS`, and whose `source_commit` equals the release commit, covering
-every live suite required by every Supported capability. It refuses a release with no
+every release suite (`required_release_evidence`) of every Supported capability. It refuses a release with no
 Supported capability, any bundle that fails verification (in any order), a bundle for another
 commit, a missing required suite and a capture supplied twice. The committed
 `docs/evidence/index.json` is the historical catalogue and never satisfies this gate: evidence
@@ -118,3 +118,11 @@ consults GitHub, and pushing a valid local tag is likewise outside verification.
 offline and live acceptance, packaging, verification, installation smoke, tag) without
 interactive confirmation; see `docs/VALIDATION_CAMPAIGN.md`. The manual commands in this file
 remain the reference for what each step runs.
+
+## Installed-package smoke
+
+`cargo run -p xtask -- release-install-smoke --package DIR --recording RECORDING [--expect-commit SHA]`
+unpacks the packaged tarball and exercises the installed binary on the exact-RC observation
+recording. The expected version, git revision, Supported capability list and eBPF digest come from
+the package's own `release-manifest.json`, not from a validation-campaign manifest. The Core
+Validation campaign's install-smoke task runs the same implementation.

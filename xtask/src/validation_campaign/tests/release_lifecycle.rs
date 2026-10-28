@@ -109,6 +109,7 @@ impl Machine {
                 fs::create_dir_all(&out).unwrap();
                 let head = world.head.borrow().clone();
                 let manifest = json!({"version":"0.1.0","git_revision":head,
+                    "supported_capabilities": manifest().policy.capabilities.supported,
                     "bpf_object":{"sha256":sha256_hex(BPF)}});
                 fs::write(out.join("release-manifest.json"), manifest.to_string()).unwrap();
                 fs::write(out.join("stutter-0.1.0-linux-x86_64.tar.gz"), b"tarball").unwrap();
