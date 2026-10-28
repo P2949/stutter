@@ -18,6 +18,7 @@ fn supported(required_evidence: &'static [&'static str]) -> Capability {
         commands: &[],
         providers: &[],
         required_evidence,
+        required_release_evidence: required_evidence,
         limitations: "test",
     }
 }

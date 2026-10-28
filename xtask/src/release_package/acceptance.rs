@@ -10,7 +10,8 @@ use stutter::api::capabilities::{Capability, CapabilityTier};
 use crate::evidence_bundle::verified_index_entry;
 
 /// Fails closed unless every supplied bundle verifies as a PASS for exactly `commit` and
-/// together they cover every suite required by every Supported capability. Any bad bundle
+/// together they cover every release suite (`required_release_evidence`) of every Supported
+/// capability; historical graduation evidence (`required_evidence`) is never re-demanded here. Any bad bundle
 /// is an error regardless of order; several distinct captures of one suite are allowed, the
 /// same capture twice is not. Returns the accepted suites.
 pub(super) fn check_acceptance(
@@ -58,7 +59,7 @@ pub(super) fn check_acceptance(
         passing.insert(suite.to_owned());
     }
     for capability in supported {
-        for suite in capability.required_evidence {
+        for suite in capability.required_release_evidence {
             ensure!(
                 passing.contains(*suite),
                 "{} requires {suite} PASS evidence for exactly {commit}",
