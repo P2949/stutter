@@ -2,6 +2,8 @@
 # The full deterministic CI before anything leaves the machine; the logic lives in xtask.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
+# Git exports the repository it is operating on; nothing the gate runs may inherit it (fixtures make their own).
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_PREFIX
 if [ -n "${IN_NIX_SHELL:-}" ]; then
   exec cargo run -q -p xtask -- ci
 fi
