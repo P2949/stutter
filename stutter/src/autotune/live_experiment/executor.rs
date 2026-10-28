@@ -65,7 +65,8 @@ impl LiveExperimentActionExecutor for RuntimeLiveExperimentActionExecutor {
                 // Prepare -> journal Applying(token) durably -> commit. The worker performs no write
                 // to the target until this journal write has succeeded.
                 let journal_path = super::journal::controller_journal_path(input);
-                service.apply_candidate_prepared(request, &mut |token| {
+                let journaled = std::cell::RefCell::new(None);
+                let applied = service.apply_candidate_prepared(request, &mut |token| {
                     crate::autotune::controller_journal::write_controller_journal_phase_with_metadata(
                         &journal_path,
                         crate::autotune::controller_journal::ControllerJournalState::Applying,
@@ -80,8 +81,22 @@ impl LiveExperimentActionExecutor for RuntimeLiveExperimentActionExecutor {
                             "rollback_prepared_before_mutation",
                         ),
                     )
-                    .map(|_| ())
-                })
+                    .map(|_| ())?;
+                    *journaled.borrow_mut() = Some(token.clone());
+                    Ok(())
+                });
+                match applied {
+                    Ok(applied) => Ok(applied),
+                    Err(error) => Err(settle_failed_prepared_apply(
+                        service,
+                        input,
+                        candidate,
+                        observation,
+                        &journal_path,
+                        journaled.into_inner(),
+                        error,
+                    )),
+                }
             } else {
                 service.apply_candidate(request)
             }
@@ -161,5 +176,48 @@ impl LiveExperimentActionExecutor for RuntimeLiveExperimentActionExecutor {
         }
 
         Ok(collect_post_rollback_active_config(observation))
+    }
+}
+
+/// A prepared apply that fails must not leave the controller journal at `applying`: that state
+/// means a token is outstanding. Without a journalled token the worker never mutated anything
+/// (it writes only after the commit that follows the journal), so the stale pending entry is
+/// cleared. With one, the commit failed or its answer was lost: the token is rolled back through
+/// the worker and only then is the journal cleared; if that rollback fails the token stays
+/// journalled for startup recovery, which is the safe direction.
+fn settle_failed_prepared_apply(
+    service: &dyn crate::daemon::privilege::PrivilegedActionService,
+    input: &LiveExperimentManagerInput<'_>,
+    candidate: &CandidateAction,
+    observation: &AutotuneObservation,
+    journal_path: &std::path::Path,
+    token: Option<RollbackToken>,
+    error: anyhow::Error,
+) -> anyhow::Error {
+    let clear = |what: &str| -> anyhow::Result<()> {
+        crate::autotune::controller_journal::write_controller_journal_clean(journal_path)
+            .map(|_| ())
+            .with_context(|| format!("failed to clear the controller journal {what}"))
+    };
+    let Some(token) = token else {
+        return match clear("after a prepare that never reached the commit") {
+            Ok(()) => error,
+            Err(clear_error) => error.context(format!("{clear_error:#}")),
+        };
+    };
+    let rollback = service.rollback(RollbackRequest {
+        candidate: candidate.clone(),
+        token,
+        policy: input.daemon_policy.clone(),
+        context: policy_context_for_runtime_apply(observation),
+    });
+    match rollback {
+        Ok(_) => match clear("after rolling back a failed apply") {
+            Ok(()) => error.context("the failed apply was rolled back and the journal cleared"),
+            Err(clear_error) => error.context(format!("{clear_error:#}")),
+        },
+        Err(rollback_error) => error.context(format!(
+            "rolling back the failed apply also failed ({rollback_error:#}); the journal keeps the token for startup recovery"
+        )),
     }
 }
