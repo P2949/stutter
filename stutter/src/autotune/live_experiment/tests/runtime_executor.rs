@@ -206,3 +206,136 @@ fn runtime_executor_requires_privileged_service_for_medium_risk_apply() {
 
     assert!(err.contains("privileged_worker_required"));
 }
+
+/// A privileged service whose prepared apply fails where a test says: before the journal hook
+/// (the worker refused), or after it (the commit failed or its answer was lost).
+#[derive(Debug, Default)]
+struct FailingCommitService {
+    refuse_before_hook: bool,
+    fail_rollback: bool,
+    rollbacks: std::sync::Mutex<usize>,
+}
+
+impl PrivilegedActionService for FailingCommitService {
+    fn dry_run_candidate(
+        &self,
+        request: CandidateApplyRequest,
+    ) -> anyhow::Result<crate::autotune::planning::dry_run::CandidateDryRunRecord> {
+        FakePrivilegedService::default().dry_run_candidate(request)
+    }
+
+    fn apply_candidate(
+        &self,
+        _request: CandidateApplyRequest,
+    ) -> anyhow::Result<crate::daemon::privilege::ApplyResult> {
+        anyhow::bail!("unused")
+    }
+
+    fn apply_candidate_prepared(
+        &self,
+        _request: CandidateApplyRequest,
+        before_commit: &mut crate::daemon::privilege::PreparedHook<'_>,
+    ) -> anyhow::Result<crate::daemon::privilege::ApplyResult> {
+        if self.refuse_before_hook {
+            anyhow::bail!("privileged_worker_request_failed: the worker refused the prepare");
+        }
+        before_commit(&RollbackToken::NiceRestore {
+            records: Vec::new(),
+        })?;
+        anyhow::bail!("privileged_worker_request_failed: apply failed: failed to preflight target")
+    }
+
+    fn rollback(
+        &self,
+        request: RollbackRequest,
+    ) -> anyhow::Result<crate::daemon::privilege::RollbackResult> {
+        *self.rollbacks.lock().unwrap() += 1;
+        if self.fail_rollback {
+            anyhow::bail!("the worker is gone");
+        }
+        Ok(crate::daemon::privilege::RollbackResult {
+            affected_tasks: request.token.affected_tasks(),
+        })
+    }
+}
+
+fn failed_prepared_apply(
+    service: &FailingCommitService,
+) -> (
+    anyhow::Error,
+    crate::autotune::controller_journal::ControllerJournalRecord,
+) {
+    let root = crate::test_support::TestRoot::new("failed-prepared-apply");
+    let journal_path = root.join("controller.json");
+    let input = medium_input(journal_path.clone(), Some(service));
+    let candidate = medium_risk_candidate();
+    // The lifecycle writes this pending entry before the executor runs.
+    crate::autotune::controller_journal::write_controller_journal_applying_with_metadata(
+        &journal_path,
+        ExperimentId::try_new("failed-prepared").unwrap(),
+        candidate.action_id(),
+        super::super::journal::controller_journal_metadata_for_candidate(
+            &input,
+            &candidate,
+            &observation(1_000, 1_000_000_000),
+            None,
+            "pending_apply",
+        ),
+    )
+    .unwrap();
+    let error = RuntimeLiveExperimentActionExecutor
+        .apply_candidate(
+            &input,
+            &candidate,
+            "failed-prepared",
+            &observation(1_000, 1_000_000_000),
+        )
+        .unwrap_err();
+    let journal =
+        crate::autotune::controller_journal::read_controller_journal(&journal_path).unwrap();
+    (error, journal)
+}
+
+#[test]
+fn a_commit_that_fails_after_the_journal_is_rolled_back_and_the_journal_cleared() {
+    let service = FailingCommitService::default();
+    let (error, journal) = failed_prepared_apply(&service);
+    assert!(
+        format!("{error:#}").contains("rolled back and the journal cleared"),
+        "{error:#}"
+    );
+    assert_eq!(*service.rollbacks.lock().unwrap(), 1);
+    assert!(
+        journal.is_clean(),
+        "the journal must not stay `applying`: {journal:?}"
+    );
+}
+
+#[test]
+fn a_prepare_the_worker_refused_leaves_no_applying_journal_and_no_rollback() {
+    let service = FailingCommitService {
+        refuse_before_hook: true,
+        ..Default::default()
+    };
+    let (_, journal) = failed_prepared_apply(&service);
+    assert_eq!(*service.rollbacks.lock().unwrap(), 0);
+    assert!(journal.is_clean(), "{journal:?}");
+}
+
+#[test]
+fn a_failed_rollback_keeps_the_token_journalled_for_startup_recovery() {
+    let service = FailingCommitService {
+        fail_rollback: true,
+        ..Default::default()
+    };
+    let (error, journal) = failed_prepared_apply(&service);
+    assert!(
+        format!("{error:#}").contains("journal keeps the token"),
+        "{error:#}"
+    );
+    assert_eq!(
+        journal.state(),
+        crate::autotune::controller_journal::ControllerJournalState::Applying
+    );
+    assert!(journal.rollback_token().is_some());
+}
