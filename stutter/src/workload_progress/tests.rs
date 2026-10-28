@@ -260,7 +260,6 @@ fn optional_fixed_work_artifacts_round_trip_without_changing_old_recordings() {
 
 #[test]
 fn command_runner_emits_completion_only_for_successful_unchanged_work() {
-    use std::process::Command;
     for (command, expected_phase) in [
         ("test -f source.txt", WorkloadPhase::Complete),
         ("exit 7", WorkloadPhase::Failed),
