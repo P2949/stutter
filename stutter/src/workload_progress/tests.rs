@@ -285,17 +285,15 @@ fn command_runner_emits_completion_only_for_successful_unchanged_work() {
             ],
         ] {
             assert!(
-                Command::new("git")
+                super::runner::git_in(root.path())
                     .args(args)
-                    .current_dir(root.path())
                     .status()
                     .unwrap()
                     .success()
             );
         }
-        let tree = Command::new("git")
+        let tree = super::runner::git_in(root.path())
             .args(["rev-parse", "HEAD^{tree}"])
-            .current_dir(root.path())
             .output()
             .unwrap();
         let mut identity = markers(1, "unused").start.identity;
