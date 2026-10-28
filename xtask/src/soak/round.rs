@@ -219,20 +219,31 @@ impl Ctx<'_> {
             }
             Kind::Long => {
                 let deadline = Instant::now() + Duration::from_secs(self.timing.long_round_s);
+                let mut reaped = false;
                 while Instant::now() < deadline && !STOP.load(Ordering::SeqCst) {
                     if controller.child.0.try_wait()?.is_some() {
+                        break;
+                    }
+                    // The workload ends on its own at the end of the round; this process is its
+                    // launcher and must reap it, or the zombie still looks alive to the controller.
+                    if game.child.0.try_wait()?.is_some() {
+                        reaped = true;
                         break;
                     }
                     self.poll_events();
                     std::thread::sleep(Duration::from_millis(500));
                 }
-                let status = wait_exit(&mut controller.child, Duration::from_secs(45))?;
+                if !reaped {
+                    return self.end_workload(&mut game, controller, "workload_exit");
+                }
+                self.event("game_exit", "the workload ran its course");
+                let status = wait_exit(&mut controller.child, Duration::from_secs(60))?;
                 self.end_session(
                     controller,
                     if status.is_some() {
                         "workload_exit"
                     } else {
-                        "stuck"
+                        "stuck_after_workload_exit"
                     },
                 );
                 Ok(())

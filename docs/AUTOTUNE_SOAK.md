@@ -52,3 +52,28 @@ target/debug/xtask soak verify --dir .llm-runs/soak/<id>
 
 `--profile smoke --minutes 60 --allow-dirty` runs the same events on short windows to check the soak
 itself. A soak is bound to the binaries it was initialised with; rebuilding invalidates it.
+
+## Profiles and evidence
+
+Verification is profile-aware. The **full** profile requires the minimums above. The **smoke**
+profile (a short, exact-source production-controller acceptance) requires both graduated
+operations, a keep and a revert, at least one controller restart, one privileged-worker restart,
+one suspend/resume cycle and one workload/focus transition. Both profiles apply exactly the same
+zero-violation checks (`rounds_clean`, `final_state`, `support_matrix`, `conflicts_and_cooldowns`,
+`faults_audited`); a short run never claims the 24 h gate.
+
+A PASSED, finished soak started from a clean tree writes `<soak>/evidence-raw` (`environment.json`,
+`result.json`, `verify.json`, `report.txt` and compact round, controller-history and audit/fault
+summaries - never the isolated `HOME`). It is published with the canonical exporter:
+
+```text
+xtask evidence-export --raw <soak>/evidence-raw --out <bundle>
+xtask evidence-verify <bundle>
+xtask evidence-index <bundle>
+```
+
+The suites are `live_autotune_smoke` and `live_autotune_soak`; both cover exactly
+`cpu_affinity_profile` and `cgroup_placement`. A soak started with `--allow-dirty`, or not yet
+finished, produces no evidence, and verifying with a different xtask than `soak init` bound is
+refused. The provenance (source commit, binary and harness digests, kernel, CPU) is the shared
+`evidence_metadata` record that live acceptance also uses.

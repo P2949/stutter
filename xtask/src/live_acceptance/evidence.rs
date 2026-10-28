@@ -41,40 +41,14 @@ impl LiveAcceptanceSuite {
     }
 }
 
-pub(super) fn unix_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |elapsed| {
-            u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
-        })
-}
-
 /// Writes `result.json` with the suite identity injected, refusing to publish a
 /// result whose suite differs from the already-written `environment.json`.
 pub(super) fn write_result(
     out: &Path,
     suite: LiveAcceptanceSuite,
-    mut result: Value,
+    result: Value,
 ) -> anyhow::Result<()> {
-    result["suite"] = json!(suite.as_str());
-    result["finished_unix_ms"] = json!(unix_ms());
-    if let Ok(bytes) = fs::read(out.join("environment.json")) {
-        let environment: Value = serde_json::from_slice(&bytes)?;
-        result["capture_id"] = environment["capture_id"].clone();
-        result["captured_unix_ms"] = environment["captured_unix_ms"].clone();
-        ensure!(
-            environment["evidence_kind"] == result["evidence_kind"],
-            "environment.json evidence_kind differs from the result"
-        );
-        ensure!(
-            environment["suite"] == result["suite"],
-            "environment.json suite {} differs from result suite {}",
-            environment["suite"],
-            result["suite"]
-        );
-    }
-    fs::write(out.join("result.json"), serde_json::to_vec_pretty(&result)?)?;
-    Ok(())
+    crate::evidence_metadata::write_result(out, suite.as_str(), result)
 }
 
 pub(super) fn metadata(
@@ -94,80 +68,16 @@ pub(super) fn metadata_with_kind(
     suite: LiveAcceptanceSuite,
     evidence_kind: &str,
 ) -> anyhow::Result<()> {
-    let capture = |program: &str, argv: &[&str]| -> anyhow::Result<String> {
-        let output = Command::new(program)
-            .args(argv)
-            .current_dir(root)
-            .output()?;
-        ensure!(output.status.success(), "metadata command {program} failed");
-        Ok(String::from_utf8(output.stdout)?.trim().to_owned())
-    };
-    let captured_unix_ms = unix_ms();
-    let dirty = !capture("git", &["status", "--porcelain"])?.is_empty();
-    let commit = capture("git", &["rev-parse", "HEAD"])?;
-    let short = capture("git", &["rev-parse", "--short", "HEAD"])?;
-    let version = Command::new(binary).arg("--version").output()?;
-    ensure!(version.status.success(), "binary version command failed");
-    let version = String::from_utf8(version.stdout)?.trim().to_owned();
-    let source_matches_binary =
-        crate::validation_campaign::repository::reports_revision(&version, &commit);
-    let linked_library_version = stutter::api::build_version();
-    let source_matches_harness = version == format!("stutter {linked_library_version}");
-    let harness = std::env::current_exe()?;
-    let harness_hash = Command::new("sha256sum").arg("--").arg(harness).output()?;
-    ensure!(harness_hash.status.success(), "harness hash failed");
-    let harness_hash = String::from_utf8(harness_hash.stdout)?
-        .split_whitespace()
-        .next()
-        .context("harness digest missing")?
-        .to_owned();
-    let mut binary_hash_args = vec!["--".to_owned()];
-    binary_hash_args.push(binary.to_string_lossy().into_owned());
-    // Keep the digest only: absolute checkout and user paths are not provenance.
-    let digest = Command::new("sha256sum").args(binary_hash_args).output()?;
-    ensure!(digest.status.success(), "binary hash failed");
-    let digest = String::from_utf8(digest.stdout)?
-        .split_whitespace()
-        .next()
-        .context("missing digest")?
-        .to_owned();
-    let os = fs::read_to_string("/etc/os-release")?
-        .lines()
-        .filter(|line| line.starts_with("ID=") || line.starts_with("VERSION_ID="))
-        .collect::<Vec<_>>()
-        .join("\n");
-    let cpu_model = fs::read_to_string("/proc/cpuinfo")?
-        .lines()
-        .find_map(|line| {
-            line.strip_prefix("model name").and_then(|tail| {
-                tail.split_once(':')
-                    .map(|(_, value)| value.trim().to_owned())
-            })
-        });
-    let metadata = json!({"schema_version":1,"commit":commit,"binary_version":version,"source_matches_binary":source_matches_binary,
-        "source_dirty":dirty,"binary_sha256":digest,"kernel_release":fs::read_to_string("/proc/sys/kernel/osrelease")?.trim(),
-        "proc_version":fs::read_to_string("/proc/version")?.trim(),"distribution":os,"cpu_model":cpu_model,
-        "cpu_online":fs::read_to_string("/sys/devices/system/cpu/online")?.trim(),
-        "rust":capture("rustc", &["-Vv"] )?,"cargo_lock_sha256":capture("sha256sum", &["Cargo.lock"] )?.split_whitespace().next(),
-        "evidence_kind":evidence_kind,"suite":suite.as_str(),"linked_library_version":linked_library_version,"source_matches_harness":source_matches_harness,"harness_sha256":harness_hash,
-        "captured_unix_ms":captured_unix_ms,"capture_id":format!("{}-{short}-{captured_unix_ms}",suite.as_str()),
-        "gpu_relevant":false,
-        "artifact_schema":{"evidence_result":1,"session":stutter::api::recorder::SESSION_SCHEMA_VERSION.get(),
-            "controller_journal":stutter::api::autotune::controller_journal::CONTROLLER_JOURNAL_SCHEMA_VERSION,"restore_state":1}});
-    fs::write(
-        out.join("environment.json"),
-        serde_json::to_vec_pretty(&metadata)?,
+    use crate::evidence_metadata as shared;
+    let environment = shared::capture(
+        root,
+        binary,
+        suite.as_str(),
+        evidence_kind,
+        shared::Source::Checkout,
     )?;
-    ensure!(!dirty, "acceptance requires a clean committed source tree");
-    ensure!(
-        source_matches_binary,
-        "binary revision differs from source; rebuild stutter before acceptance"
-    );
-    ensure!(
-        source_matches_harness,
-        "xtask linked library differs from source/CLI; rebuild both binaries"
-    );
-    Ok(())
+    shared::write_environment(out, &environment)?;
+    shared::require_clean(&environment)
 }
 
 pub(super) fn recording_dir(root: &Path) -> anyhow::Result<PathBuf> {

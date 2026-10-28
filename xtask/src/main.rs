@@ -11,6 +11,7 @@ pub mod diagnosis_study;
 pub mod ebpf_manifest;
 pub mod ebpf_smoke;
 pub mod evidence_bundle;
+mod evidence_metadata;
 pub mod fixed_work;
 pub mod fixture_coverage;
 pub mod fixtures;

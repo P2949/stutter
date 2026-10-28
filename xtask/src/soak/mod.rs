@@ -5,6 +5,7 @@
 //! and reverted experiments and injected faults (controller crash and stop, worker death, workload
 //! death, suspend/resume), for a wall-clock budget. Everything it concludes is read back from what
 //! the controller itself wrote. Durable state lets it resume after a crash or a reboot.
+mod evidence;
 mod history;
 mod plan;
 mod records;
@@ -114,6 +115,10 @@ pub fn run(root: &Path, args: SoakArgs) -> anyhow::Result<()> {
             fs::write(dir.join("report.txt"), &text)?;
             print!("{text}");
             ensure!(report.passed, "the soak did not meet its acceptance list");
+            match evidence::write_raw(root, &dir, &report)? {
+                Some(raw) => println!("evidence_raw={}", raw.display()),
+                None => println!("no portable evidence: this soak is not publishable (see above)"),
+            }
             Ok(())
         }
     }
@@ -206,6 +211,7 @@ fn init(
         stutter_sha256: sha256(&stutter)?,
         xtask_sha256: sha256(&std::env::current_exe()?)?,
         source_commit: commit,
+        allow_dirty,
         created_unix_ms: unix_ms(),
         started_unix_ms: None,
         cpus: Some(pick_cpus()?),
