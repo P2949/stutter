@@ -2,10 +2,7 @@ use std::{fs, path::PathBuf, time::Duration};
 
 use anyhow::Context;
 use log::{debug, info, warn};
-use tokio::{
-    signal,
-    time::{Instant, MissedTickBehavior, interval},
-};
+use tokio::time::{Instant, MissedTickBehavior, interval};
 
 use super::{
     PROFILE_WATCH_VERIFY_MS,
@@ -211,9 +208,10 @@ pub async fn apply_profile_command(input: ApplyProfileCommandInput) -> anyhow::R
     let verify_interval = Duration::from_millis(PROFILE_WATCH_VERIFY_MS);
     let mut next_verify = Instant::now() + verify_interval;
 
+    let mut interrupt = crate::interrupt::InterruptWatch::new()?;
     loop {
         tokio::select! {
-            _ = signal::ctrl_c() => {
+            _ = interrupt.interrupted() => {
                 if keep_applied {
                     println!("stopped profile watch; restore with: stutter restore");
                 } else {

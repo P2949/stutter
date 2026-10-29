@@ -128,6 +128,9 @@ impl MonitorSession {
             }
         }
 
+        // Created once: a per-iteration `ctrl_c()` misses an interrupt that lands while a tick
+        // handler is running (see `crate::interrupt`).
+        let mut interrupt = crate::interrupt::InterruptWatch::new()?;
         loop {
             tokio::select! {
                 _ = optional_tick(workload_progress_tick.as_mut()) => {
@@ -147,7 +150,7 @@ impl MonitorSession {
                 Some(frame) = frame_rx.recv() => {
                     self.handle_frame_tick(FrameTickContext { frame }).await?;
                 }
-                _ = tokio::signal::ctrl_c() => {
+                _ = interrupt.interrupted() => {
                     return Ok(self.handle_ctrl_c_stop());
                 }
                 reason = &mut max_duration_future => {

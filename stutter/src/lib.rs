@@ -12,6 +12,7 @@ pub(crate) mod daemon_policy;
 pub(crate) mod error;
 pub(crate) mod events;
 pub(crate) mod focus;
+pub(crate) mod interrupt;
 pub(crate) mod presets;
 pub(crate) mod probe_activation;
 pub(crate) mod probe_registry;

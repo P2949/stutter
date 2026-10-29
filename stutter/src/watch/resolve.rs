@@ -2,10 +2,7 @@ use std::{path::Path, time::Duration};
 
 use futures_util::future;
 use log::info;
-use tokio::{
-    signal,
-    time::{MissedTickBehavior, interval, sleep},
-};
+use tokio::time::{MissedTickBehavior, interval, sleep};
 
 use super::{
     WatchProcessConfig, process_match::find_process_match_by_pattern_at_with_cache,
@@ -70,9 +67,10 @@ pub(super) async fn wait_for_watch_process(
     };
     tokio::pin!(timeout_future);
 
+    let mut interrupt = crate::interrupt::InterruptWatch::new()?;
     loop {
         tokio::select! {
-            _ = signal::ctrl_c() => {
+            _ = interrupt.interrupted() => {
                 return Ok(None);
             }
             _ = &mut timeout_future => {
