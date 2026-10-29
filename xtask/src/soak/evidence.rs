@@ -362,7 +362,7 @@ mod tests {
 
     #[test]
     fn the_coverage_floor_is_only_waited_for_by_the_full_profile() {
-        use crate::soak::verify::coverage_reached;
+        use crate::soak::coverage::coverage_reached;
         assert!(coverage_reached(&soak_dir(Profile::Smoke, None).0).unwrap());
         // Three rounds are nowhere near six clean cycles.
         assert!(!coverage_reached(&soak_dir(Profile::Full, None).0).unwrap());

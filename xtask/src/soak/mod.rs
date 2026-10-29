@@ -5,6 +5,7 @@
 //! and reverted experiments and injected faults (controller crash and stop, worker death, workload
 //! death, suspend/resume), for a wall-clock budget. Everything it concludes is read back from what
 //! the controller itself wrote. Durable state lets it resume after a crash or a reboot.
+mod coverage;
 mod evidence;
 mod history;
 mod plan;
@@ -336,7 +337,7 @@ fn run_soak(root: &Path, dir: &Path) -> anyhow::Result<()> {
     while !round::STOP.load(Ordering::SeqCst) {
         // Done when the minimum dwell is over and the coverage floor is met, or the cap is hit.
         let now = unix_ms();
-        if now >= deadline && (now >= cap || verify::coverage_reached(&dir)?) {
+        if now >= deadline && (now >= cap || coverage::coverage_reached(&dir)?) {
             complete = true;
             break;
         }
