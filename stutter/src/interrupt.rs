@@ -30,13 +30,21 @@ mod tests {
 
     use super::InterruptWatch;
 
+    /// SIGINT to this process, from outside it (the handler the watch installed consumes it).
+    fn interrupt_self() {
+        let status = std::process::Command::new("sh")
+            .args(["-c", &format!("kill -INT {}", std::process::id())])
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+
     /// One test, run in order: both halves raise SIGINT in this process, and every live listener
     /// would see either of them.
     #[tokio::test]
     async fn an_interrupt_that_arrives_while_the_caller_is_busy_is_not_lost() {
         let mut watch = InterruptWatch::new().unwrap();
-        // SAFETY: raise(3) has no memory effects; the handler installed above consumes the signal.
-        assert_eq!(unsafe { libc::raise(libc::SIGINT) }, 0);
+        interrupt_self();
         // Nothing is waiting on the watch while the caller is busy elsewhere...
         tokio::time::sleep(Duration::from_millis(50)).await;
         // ...and the next wait still sees the interrupt.
@@ -52,7 +60,7 @@ mod tests {
 
         // The pattern `ctrl_c()` had inside a loop: a listener created after the interrupt
         // misses it, which is how a controller ran on after Ctrl-C.
-        assert_eq!(unsafe { libc::raise(libc::SIGINT) }, 0);
+        interrupt_self();
         tokio::time::sleep(Duration::from_millis(50)).await;
         let late = tokio::time::timeout(Duration::from_millis(200), tokio::signal::ctrl_c()).await;
         assert!(late.is_err(), "a per-iteration ctrl_c() loses it");
