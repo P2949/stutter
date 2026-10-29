@@ -129,6 +129,21 @@ const CYCLE: [Round; 16] = [
     round(Plain, Neutral, Affinity),
 ];
 
+/// Rounds in one schedule cycle: the unit of the full profile's clean-cycle coverage.
+pub const CYCLE_LEN: usize = CYCLE.len();
+
+/// The schedule kinds that inject a fault or run long; each has its own coverage floor. A
+/// `plain` round injects nothing and is not listed.
+pub const DANGEROUS_KINDS: [&str; 7] = [
+    "controller_crash",
+    "controller_stop",
+    "worker_kill",
+    "suspend",
+    "workload_kill",
+    "focus_swap",
+    "long",
+];
+
 pub fn round_for(index: u32) -> Round {
     CYCLE[(index as usize) % CYCLE.len()]
 }
@@ -196,6 +211,28 @@ mod tests {
         assert!(count(|r| r.operations == Cgroup) >= 5);
         assert!(count(|r| r.operations == Affinity) >= 5);
         assert!(count(|r| r.operations == Both) >= 3);
+    }
+
+    #[test]
+    fn the_dangerous_kinds_are_exactly_the_non_plain_kinds_of_the_schedule() {
+        let mut scheduled: Vec<&str> = CYCLE
+            .iter()
+            .map(|round| round.kind.name())
+            .filter(|name| *name != "plain")
+            .collect();
+        scheduled.sort_unstable();
+        scheduled.dedup();
+        let mut listed = DANGEROUS_KINDS.to_vec();
+        listed.sort_unstable();
+        assert_eq!(scheduled, listed);
+        assert_eq!(CYCLE_LEN, 16);
+        // Six cycles give every dangerous kind its floor of six.
+        for kind in DANGEROUS_KINDS {
+            assert!(
+                CYCLE.iter().any(|round| round.kind.name() == kind),
+                "{kind}"
+            );
+        }
     }
 
     #[test]

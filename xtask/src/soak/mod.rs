@@ -10,6 +10,7 @@ mod history;
 mod plan;
 mod records;
 mod round;
+mod stress;
 mod verify;
 mod world;
 
@@ -60,8 +61,9 @@ pub enum SoakCommand {
     Init {
         #[arg(long)]
         dir: PathBuf,
-        /// Wall-clock budget in minutes (the real soak is 1440).
-        #[arg(long, default_value_t = 1440)]
+        /// Minimum dwell in minutes: 480 for the full qualification (which keeps running up to a
+        /// 10 h cap until its coverage floor is met), 60 for the smoke.
+        #[arg(long, default_value_t = 480)]
         minutes: u64,
         #[arg(long, value_enum, default_value_t = Profile::Full)]
         profile: Profile,
@@ -85,6 +87,14 @@ pub enum SoakCommand {
         #[arg(long)]
         dir: PathBuf,
     },
+    /// Regression gate: interrupt the production controller with SIGINT in the middle of a
+    /// cgroup-placement experiment, over and over, each time with fresh isolated state.
+    ControllerStopStress {
+        #[arg(long, default_value_t = 12)]
+        iterations: u32,
+        #[arg(long, default_value = "target/debug/stutter")]
+        stutter_bin: PathBuf,
+    },
 }
 
 pub fn run(root: &Path, args: SoakArgs) -> anyhow::Result<()> {
@@ -104,6 +114,10 @@ pub fn run(root: &Path, args: SoakArgs) -> anyhow::Result<()> {
             allow_dirty,
         ),
         SoakCommand::Run { dir } => run_soak(root, &dir),
+        SoakCommand::ControllerStopStress {
+            iterations,
+            stutter_bin,
+        } => stress::controller_stop_stress(root, iterations, &stutter_bin),
         SoakCommand::Status { dir } => {
             println!("{}", verify::status_line(&dir)?);
             Ok(())
@@ -236,7 +250,7 @@ fn delegated() -> bool {
 
 /// Re-run this command inside the delegated cgroup subtree, as the same user with the
 /// capabilities a soak needs (never as root, never with a password prompt).
-fn reexec_delegated(root: &Path, dir: &Path) -> anyhow::Result<()> {
+fn reexec_delegated(root: &Path, args: &[std::ffi::OsString]) -> anyhow::Result<()> {
     let meta = fs::metadata("/proc/self")?;
     let owner = format!(
         "{}:{}",
@@ -248,8 +262,7 @@ fn reexec_delegated(root: &Path, dir: &Path) -> anyhow::Result<()> {
         .arg(format!("STUTTER_OWNER={owner}"))
         .args(["sh", "-c", DELEGATE_AND_RUN, "stutter-soak"])
         .arg(std::env::current_exe()?)
-        .args(["soak", "run", "--dir"])
-        .arg(fs::canonicalize(dir)?)
+        .args(args)
         .current_dir(root)
         .status()
         .context("sudo -n is required to delegate the cgroup subtree")?;
@@ -261,6 +274,25 @@ extern "C" fn on_signal(_: i32) {
     round::STOP.store(true, Ordering::SeqCst);
 }
 
+fn install_signal_handlers() {
+    // SAFETY: the handlers only store to an atomic.
+    unsafe {
+        libc::signal(libc::SIGINT, on_signal as *const () as libc::sighandler_t);
+        libc::signal(libc::SIGTERM, on_signal as *const () as libc::sighandler_t);
+    }
+}
+
+/// The longest a run may go on: the minimum dwell, plus for the full qualification two hours in
+/// which to reach its coverage floor (a 480 minute dwell is capped at 10 h). Past it the run
+/// finishes and `verify` decides; coverage is never manufactured.
+fn max_runtime_ms(profile: Profile, hours: f64) -> u64 {
+    let extension = match profile {
+        Profile::Full => 2.0,
+        Profile::Smoke => 0.0,
+    };
+    ((hours + extension) * 3_600_000.0) as u64
+}
+
 fn run_soak(root: &Path, dir: &Path) -> anyhow::Result<()> {
     let mut state = read_state(dir)?;
     ensure!(!state.finished, "this soak is finished; run `soak verify`");
@@ -270,14 +302,18 @@ fn run_soak(root: &Path, dir: &Path) -> anyhow::Result<()> {
         "the binaries changed since `soak init`: a soak is bound to the binaries it started with"
     );
     if !delegated() {
-        return reexec_delegated(root, dir);
+        return reexec_delegated(
+            root,
+            &[
+                "soak".into(),
+                "run".into(),
+                "--dir".into(),
+                fs::canonicalize(dir)?.into_os_string(),
+            ],
+        );
     }
     world::require_tools()?;
-    // SAFETY: the handlers only store to an atomic.
-    unsafe {
-        libc::signal(libc::SIGINT, on_signal as *const () as libc::sighandler_t);
-        libc::signal(libc::SIGTERM, on_signal as *const () as libc::sighandler_t);
-    }
+    install_signal_handlers();
     let dir = fs::canonicalize(dir)?;
     let cpus = state.cpus.context("the soak has no CPUs")?;
     let mut world = world::World::new(root, &dir, &state.stutter_bin, cpus)?;
@@ -285,6 +321,7 @@ fn run_soak(root: &Path, dir: &Path) -> anyhow::Result<()> {
     let started = *state.started_unix_ms.get_or_insert_with(unix_ms);
     write_state(&dir, &state)?;
     let deadline = started + (state.hours * 3_600_000.0) as u64;
+    let cap = started + max_runtime_ms(state.profile, state.hours);
     let timing = plan::timing(state.profile);
     let mut last_start = last_starts(&world);
     let mut failures = 0_u32;
@@ -294,7 +331,15 @@ fn run_soak(root: &Path, dir: &Path) -> anyhow::Result<()> {
         state.next_round,
         deadline.saturating_sub(unix_ms()) as f64 / 3_600_000.0
     );
-    while unix_ms() < deadline && !round::STOP.load(Ordering::SeqCst) {
+    let mut complete = false;
+    let mut stopped_early = false;
+    while !round::STOP.load(Ordering::SeqCst) {
+        // Done when the minimum dwell is over and the coverage floor is met, or the cap is hit.
+        let now = unix_ms();
+        if now >= deadline && (now >= cap || verify::coverage_reached(&dir)?) {
+            complete = true;
+            break;
+        }
         let index = state.next_round;
         let round = plan::round_for(index);
         wait_for_spacing(&round, &last_start);
@@ -336,12 +381,28 @@ fn run_soak(root: &Path, dir: &Path) -> anyhow::Result<()> {
         );
         state.next_round += 1;
         write_state(&dir, &state)?;
+        // A violating round makes a full qualification impossible: stop once it is durably
+        // recorded instead of spending the remaining hours.
+        if state.profile == Profile::Full
+            && (record.outcome != "ok" || !record.violations.is_empty())
+        {
+            stopped_early = true;
+            break;
+        }
     }
     world.kill_worker();
-    if unix_ms() >= deadline {
+    if complete || stopped_early {
         state.finished = true;
         write_state(&dir, &state)?;
         cleanup_cgroup();
+        if stopped_early {
+            println!(
+                "soak {} stopped early: a round violated the acceptance list; \
+                 run `xtask soak verify --dir {}`",
+                state.id,
+                dir.display()
+            );
+        }
         println!(
             "soak {} finished; run `xtask soak verify --dir {}`",
             state.id,
@@ -410,5 +471,17 @@ fn cleanup_cgroup() {
             .args(["-n", "rmdir"])
             .arg(Path::new("/sys/fs/cgroup/stutter-soak").join(dir))
             .status();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_full_qualification_may_run_two_hours_past_its_dwell_and_a_smoke_not_at_all() {
+        let hour = 3_600_000;
+        assert_eq!(max_runtime_ms(Profile::Full, 8.0), 10 * hour);
+        assert_eq!(max_runtime_ms(Profile::Smoke, 1.0), hour);
     }
 }

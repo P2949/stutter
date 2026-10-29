@@ -8,7 +8,9 @@ use serde_json::{Value, json};
 
 /// Short-run production-controller acceptance of the graduated operations.
 pub(crate) const SUITE_AUTOTUNE_SMOKE: &str = "live_autotune_smoke";
-/// The full (>= 24 h) production-controller soak that graduates the bounded controller.
+/// The coverage-qualified real-system bounded-controller soak (minimum 8 h dwell, complete
+/// deterministic cycles, repeated coverage of every fault kind, zero violations) that graduates
+/// the bounded controller.
 pub(crate) const SUITE_AUTOTUNE_SOAK: &str = "live_autotune_soak";
 
 pub(crate) fn unix_ms() -> u64 {

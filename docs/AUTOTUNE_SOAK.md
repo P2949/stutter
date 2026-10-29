@@ -34,18 +34,33 @@ The same operation is never started again inside the controller's own candidate-
 
 ## Acceptance
 
-`xtask soak verify` checks the minimums (24 h of wall-clock time, 20 completed keep/revert
-experiments, 10 workload/focus transitions, 2 controller restarts, 2 privileged-worker restarts,
-2 suspend/resume cycles, both operations exercised, kept and reverted outcomes) and the
-zero-violation list: no unrecovered token or stale kept action at rest, nothing applied outside the
-support matrix, no conflicting kept group, no cooldown or same-action spacing violation, and every
-injected fault followed by its audit and history evidence.
+The full profile is a **coverage-qualified** real-system soak, not a duration. `xtask soak verify`
+requires all of:
+
+- at least 8 h of wall-clock time (the minimum dwell);
+- at least 96 clean rounds and at least 6 complete clean 16-round schedule cycles (a cycle counts
+  only when all 16 of its rounds are present and clean; a failed or interrupted round breaks it);
+- at least 6 clean executions of each dangerous round kind: `controller_crash`, `controller_stop`,
+  `worker_kill`, `suspend`, `workload_kill`, `focus_swap`, `long`;
+- for each graduated operation (`cpu_affinity_profile`, `cgroup_placement`): at least 12 resolved
+  experiments, 3 kept and 3 reverted;
+- the earlier sanity minima: 20 resolved experiments, 10 workload/focus transitions, 2 controller
+  restarts, 2 privileged-worker restarts, 2 suspend/resume cycles;
+- the zero-violation list: no unrecovered token or stale kept action at rest, nothing applied
+  outside the support matrix, no conflicting kept group, no cooldown or same-action spacing
+  violation, and every injected fault followed by its audit and history evidence.
+
+The configured duration is the **minimum dwell**. The run finishes when the dwell is over and the
+coverage floor is met; if it is not met at the dwell it keeps running rounds, up to a cap of the
+dwell plus two hours (10 h for the 480 minute default), and then finishes and `verify` fails. A
+round that violates the list stops a full run early, once it is durably recorded: the
+qualification is already impossible.
 
 ## Running it
 
 ```text
 cargo build -p stutter -p xtask
-target/debug/xtask soak init --dir .llm-runs/soak/<id> --minutes 1440          # binds the binaries and commit
+target/debug/xtask soak init --dir .llm-runs/soak/<id> --minutes 480           # binds the binaries and commit
 target/debug/xtask soak run --dir .llm-runs/soak/<id>                          # resumable; Ctrl-C pauses
 target/debug/xtask soak verify --dir .llm-runs/soak/<id>
 ```
@@ -55,12 +70,17 @@ itself. A soak is bound to the binaries it was initialised with; rebuilding inva
 
 ## Profiles and evidence
 
-Verification is profile-aware. The **full** profile requires the minimums above. The **smoke**
+Verification is profile-aware. The **full** profile requires everything listed under Acceptance. The **smoke**
 profile (a short, exact-source production-controller acceptance) requires both graduated
 operations, a keep and a revert, at least one controller restart, one privileged-worker restart,
 one suspend/resume cycle and one workload/focus transition. Both profiles apply exactly the same
 zero-violation checks (`rounds_clean`, `final_state`, `support_matrix`, `conflicts_and_cooldowns`,
-`faults_audited`); a short run never claims the 24 h gate.
+`faults_audited`); a short run never claims the full qualification.
+
+`xtask soak controller-stop-stress --iterations 12` is a separate regression gate that `ci-live`
+runs: it interrupts the production controller with SIGINT in the middle of an applied
+cgroup-placement experiment, each time from fresh isolated state, and requires a normal exit, the
+placement restored, a clean journal and an empty kept-action ledger.
 
 A PASSED, finished soak started from a clean tree writes `<soak>/evidence-raw` (`environment.json`,
 `result.json`, `verify.json`, `report.txt` and compact round, controller-history and audit/fault
