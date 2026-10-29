@@ -27,11 +27,14 @@ pub(super) fn suite_for(profile: Profile) -> &'static str {
 
 fn scope(profile: Profile, hours: f64) -> String {
     let kind = match profile {
-        Profile::Full => "full soak",
+        Profile::Full => {
+            "coverage-qualified real-system bounded-controller soak (minimum dwell, complete \
+             deterministic cycles, explicit repeated fault coverage, zero violations)"
+        }
         Profile::Smoke => "short production-controller acceptance",
     };
     format!(
-        "{kind} ({hours:.2} h budget) of the production `stutter autotune --mode apply-medium-risk` \
+        "{kind} ({hours:.2} h minimum dwell) of the production `stutter autotune --mode apply-medium-risk` \
          controller and the production privileged worker as separate processes, on disposable \
          game-like workloads, with no validation override: every apply passed through the \
          autonomous support registry. Both graduated operations (cpu_affinity_profile, \
@@ -338,15 +341,31 @@ mod tests {
     }
 
     #[test]
-    fn smoke_does_not_need_24_hours_and_full_still_does() {
+    fn smoke_has_no_coverage_floor_and_full_requires_its_qualification() {
         let smoke = verify(&soak_dir(Profile::Smoke, None).0).unwrap();
         assert!(smoke.passed, "{:?}", names(&smoke, false));
         let full_dir = soak_dir(Profile::Full, None);
         let full = verify(&full_dir.0).unwrap();
         assert!(!full.passed);
         let failed = names(&full, false);
-        assert!(failed.contains(&"minimum_wall_clock"), "{failed:?}");
-        assert!(failed.contains(&"minimum_experiments"), "{failed:?}");
+        for needed in [
+            "minimum_wall_clock",
+            "minimum_experiments",
+            "minimum_clean_rounds",
+            "minimum_clean_cycles",
+            "minimum_round_kind_controller_crash",
+            "minimum_operation_cgroup_placement",
+        ] {
+            assert!(failed.contains(&needed), "{needed}: {failed:?}");
+        }
+    }
+
+    #[test]
+    fn the_coverage_floor_is_only_waited_for_by_the_full_profile() {
+        use crate::soak::coverage::coverage_reached;
+        assert!(coverage_reached(&soak_dir(Profile::Smoke, None).0).unwrap());
+        // Three rounds are nowhere near six clean cycles.
+        assert!(!coverage_reached(&soak_dir(Profile::Full, None).0).unwrap());
     }
 
     #[test]

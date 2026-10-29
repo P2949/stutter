@@ -22,8 +22,9 @@ historical proof that justified graduating it and is what `capability-check` ver
 index. *Required release evidence* (`required_release_evidence`) is what a release candidate must
 bring fresh, exact-commit bundles for (`release-verify --require-acceptance`); it never re-demands
 a proof too long to repeat per candidate. The bounded autonomous controller
-(`bounded_autotune_controller`) graduates on the 24 h `live_autotune_soak` and ships on the short
-`live_autotune_smoke`; its limitations are exactly the entries of `AUTONOMOUS_CONTRACTS`. The
+(`bounded_autotune_controller`) graduates on the coverage-qualified `live_autotune_soak` (a minimum
+8 h dwell, at least 6 complete clean schedule cycles, repeated clean coverage of every fault kind,
+zero violations) and ships on the short `live_autotune_smoke`; its limitations are exactly the entries of `AUTONOMOUS_CONTRACTS`. The
 daemon/service integration (`always_on_autotune`) is a separate capability and stays Experimental:
 the packaged service runs `apply-low-risk`, which the soak does not exercise.
 

@@ -39,8 +39,8 @@ pub struct Capability {
     /// (historical graduation proof, checked against `docs/evidence/index.json`).
     pub required_evidence: &'static [&'static str],
     /// Suites a release candidate must bring fresh, exact-commit bundles for (shipped-code
-    /// proof). Graduation evidence that is too long to repeat per candidate, such as the 24 h
-    /// soak, is replaced here by its short counterpart.
+    /// proof). Graduation evidence that is too long to repeat per candidate, such as the
+    /// coverage-qualified soak, is replaced here by its short counterpart.
     pub required_release_evidence: &'static [&'static str],
     pub limitations: &'static str,
 }
@@ -64,7 +64,7 @@ const CGROUP_PLACEMENT: &[&str] = AFFINITY;
 /// graduated operations through the normal support registry.
 const MUTATION_RELEASE: &[&str] = &["live_observation", "live_autotune_smoke"];
 /// Historical graduation proof of the bounded controller: the recovery suites every mutating
-/// capability needs, and the full 24 h production-controller soak.
+/// capability needs, and the coverage-qualified production-controller soak.
 const BOUNDED_CONTROLLER: &[&str] = &["live_recovery", "live_suspend_resume", "live_autotune_soak"];
 
 pub const CAPABILITIES: [Capability; 29] = [
@@ -566,7 +566,7 @@ mod tests {
         // It governs no operation: it authorises nothing the autonomous registry does not.
         assert!(controller.providers.is_empty());
         assert!(controller.limitations.contains("AUTONOMOUS_CONTRACTS"));
-        // A release never re-demands the 24 h soak.
+        // A release never re-demands the long qualification soak.
         assert!(capability_registry().iter().all(|capability| {
             !capability
                 .required_release_evidence

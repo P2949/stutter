@@ -347,6 +347,26 @@ pub fn ci_live(root: &Path) -> anyhow::Result<()> {
     )?;
     run_live_script(root, "scripts/smoke/sleep_tree_churn.sh")?;
     run_live_script(root, "scripts/smoke/record_minimal.sh")?;
+    // The real-controller shutdown gate (#178): SIGINT in the middle of an applied experiment.
+    // The stress delegates its cgroup subtree with non-interactive sudo and drops back to this
+    // user; the controller and cargo never run as root.
+    run_process(
+        root,
+        "cargo",
+        &[
+            "run",
+            "-q",
+            "-p",
+            "xtask",
+            "--",
+            "soak",
+            "controller-stop-stress",
+            "--iterations",
+            "12",
+            "--stutter-bin",
+            "target/debug/stutter",
+        ],
+    )?;
     println!("ci-live: PASS");
     Ok(())
 }
