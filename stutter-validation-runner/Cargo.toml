@@ -1,6 +1,6 @@
 [package]
 name = "stutter-validation-runner"
-version = "0.1.0"
+version = "0.2.0"
 edition.workspace = true
 description = "Validation-only privileged runner for the Stutter Core Validation campaign (not a product component)."
 license.workspace = true

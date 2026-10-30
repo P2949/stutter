@@ -1,6 +1,6 @@
 # Maintainer: stutter developers
 pkgname=stutter-git
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
 pkgdesc="Linux scheduler latency profiler and tuning-validation prototype"
 arch=('x86_64')

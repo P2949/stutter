@@ -1,6 +1,6 @@
 [package]
 name = "stutter-ebpf"
-version = "0.1.0"
+version = "0.2.0"
 edition.workspace = true
 description = "eBPF tracepoint programs for stutter scheduler and system telemetry."
 license = "MIT OR GPL-2.0-only"
