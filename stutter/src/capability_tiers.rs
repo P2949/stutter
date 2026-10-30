@@ -308,7 +308,7 @@ pub const CAPABILITIES: [Capability; 29] = [
         id: "bounded_autotune_controller",
         title: "Bounded autonomous autotune controller",
         class: CapabilityClass::Mutating,
-        tier: CapabilityTier::Experimental,
+        tier: CapabilityTier::Supported,
         target_tier: CapabilityTier::Supported,
         commands: &["autotune", "autotune-status"],
         providers: &[],
@@ -531,8 +531,13 @@ mod tests {
         // Which non-mutating capabilities may be Supported is decided by evidence
         // (`xtask capability-check`); mutation never graduates implicitly: each mutating
         // capability named here completed a graduation campaign.
-        const GRADUATED: &[&str] = &["cpu_affinity_experiment", "cgroup_placement_experiment"];
-        // `bounded_autotune_controller` joins this list only with its indexed soak evidence.
+        // The bounded controller joined with its indexed `live_autotune_soak` evidence; it
+        // authorises nothing beyond the autonomous support registry.
+        const GRADUATED: &[&str] = &[
+            "cpu_affinity_experiment",
+            "cgroup_placement_experiment",
+            "bounded_autotune_controller",
+        ];
         assert!(capability_registry().iter().all(|capability| {
             capability.tier != CapabilityTier::Supported
                 || capability.class == CapabilityClass::NonMutating

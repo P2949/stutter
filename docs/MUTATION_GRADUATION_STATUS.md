@@ -139,3 +139,31 @@ none is promoted to make the matrix look complete.
   interrupt traffic on a known non-storage device class; this host has no peer to generate network
   or USB traffic against, so the effect on the target cannot be demonstrated. Storage and unknown
   IRQs stay HighRisk/manual.
+
+## M9 bounded autonomous controller - Supported
+
+- Capability `bounded_autotune_controller`, graduated by the `live_autotune_soak` bundle
+  `live_autotune_soak-93c9bc59-1793329436496` (indexed in [`evidence/index.json`](evidence/index.json),
+  manifest digest `184dae38...698e`, source commit `93c9bc59`, evidence kind `controlled_real`).
+- Scope: it authorises exactly `AUTONOMOUS_CONTRACTS` (CPU-affinity profile and cgroup placement,
+  each for a stable, explicitly identified game under scheduler pressure, judged by
+  `GameRunnableLatency`) and nothing else: no third operation, no system-wide operation, not the
+  daemon/service integration (`always_on_autotune` stays Experimental).
+- Qualification (the coverage-driven contract, see [AUTOTUNE_SOAK.md](AUTOTUNE_SOAK.md)): 8.03 h of
+  wall-clock time, 113 of 113 rounds clean, 7 complete clean 16-round cycles (6 required), 92 resolved
+  experiments (50 kept, 42 reverted), 21 controller restarts, 14 privileged-worker restarts, 14
+  suspend/resume cycles, 240 workload/focus transitions. Every dangerous round kind ran clean at least
+  6 times (controller crash 14, controller stop 7, worker kill 14, suspend 14, workload kill 7, focus
+  swap 7, long 7); `cpu_affinity_profile` resolved 50 (29 kept, 21 reverted) and `cgroup_placement`
+  42 (21 kept, 21 reverted). All five zero-violation checks passed: `rounds_clean`, `final_state`,
+  `support_matrix`, `conflicts_and_cooldowns`, `faults_audited`.
+- Companion gates at the same source: the full local `ci` and `ci-live` (including the real-controller
+  SIGINT stress, 12 of 12 iterations), a 10,000-seed deterministic fault sweep (about 700,000 seeded
+  state-machine events, passed in 3596 s), and a clean 60 minute formal smoke (17 of 17 rounds).
+- Earlier runs found two real defects, kept as supporting evidence only and never combined with the
+  qualification: a prepared-apply/workload-exit race that left the journal at `applying` (fixed in
+  #177) and a lost SIGINT in the monitor select loop (fixed in #178; 199 of 200 rounds clean over
+  14.1 h before the failing `controller_stop` round).
+- Limitations: disposable game-like workloads, not real games; focus inference is not exercised
+  (targets are explicit); the soak drives `stutter autotune --mode apply-medium-risk`, not the packaged
+  service, which runs `apply-low-risk`. Promotion widens nothing beyond the two contracts.
