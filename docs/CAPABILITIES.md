@@ -63,8 +63,8 @@ with the evidence-index entries that justify it.
 
 The validation campaign applies one fixed, conservative policy once live observation, game-runnable, kernel, overhead, corpus, calibration and score evidence all verify:
 
-- **Supported:** `doctor`, `record`, `bench`, `report`, `audit`, `completions_and_man`, `cpu_affinity_experiment`, `cgroup_placement_experiment`
-- **Experimental:** `diagnose`, `advisor`, `tune_evaluation`, `restore`, `uclamp_experiment`, `nice_experiment`, `ioprio_experiment`, `cpu_power_epp`, `cpu_power_governor`, `gpu_power_profile`, `gpu_force_performance`, `vm_swappiness`, `vm_dirty_background_ratio`, `vm_dirty_ratio`, `irq_affinity_known_device`, `irq_affinity_storage_or_unknown`, `bounded_autotune_controller`, `always_on_autotune`, `remote_agent_mutation`
+- **Supported:** `doctor`, `record`, `bench`, `report`, `audit`, `completions_and_man`, `cpu_affinity_experiment`, `cgroup_placement_experiment`, `bounded_autotune_controller`
+- **Experimental:** `diagnose`, `advisor`, `tune_evaluation`, `restore`, `uclamp_experiment`, `nice_experiment`, `ioprio_experiment`, `cpu_power_epp`, `cpu_power_governor`, `gpu_power_profile`, `gpu_force_performance`, `vm_swappiness`, `vm_dirty_background_ratio`, `vm_dirty_ratio`, `irq_affinity_known_device`, `irq_affinity_storage_or_unknown`, `always_on_autotune`, `remote_agent_mutation`
 - **Internal:** `privileged_worker`, `fake_action_provider`
 
 Diagnosis stays Experimental even after calibration. CPU affinity and cgroup placement are Supported only for their graduated scheduler-pressure tuples (see the autonomous support matrix above); no other mutating capability is promoted.

@@ -238,6 +238,20 @@
       "source_commit": "a5091048f0390242be39bdc8156a05f2167bb2d2",
       "status": "PASS",
       "suite": "live_suspend_resume"
+    },
+    {
+      "capture_id": "live_autotune_soak-93c9bc59-1793329436496",
+      "covers": {
+        "providers": [
+          "cpu_affinity_profile",
+          "cgroup_placement"
+        ]
+      },
+      "evidence_kind": "controlled_real",
+      "manifest_sha256": "184dae3839396c0983b2c4677ec37aebc1bda08963d7c807311e5cca2611698e",
+      "source_commit": "93c9bc5960378d7f5703ef42cfbe36e1ede21f36",
+      "status": "PASS",
+      "suite": "live_autotune_soak"
     }
   ],
   "note": "Index of portable evidence bundles verified with `xtask evidence-verify`. Bundles are retained by the operator; entries pin them by manifest digest. Only PASS entries count toward coverage.",

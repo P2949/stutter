@@ -46,6 +46,7 @@ supported = [
     "completions_and_man",
     "cpu_affinity_experiment",
     "cgroup_placement_experiment",
+    "bounded_autotune_controller",
 ]
 experimental = [
     "diagnose",
@@ -64,7 +65,6 @@ experimental = [
     "vm_dirty_ratio",
     "irq_affinity_known_device",
     "irq_affinity_storage_or_unknown",
-    "bounded_autotune_controller",
     "always_on_autotune",
     "remote_agent_mutation",
 ]

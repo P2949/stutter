@@ -97,3 +97,13 @@ The suites are `live_autotune_smoke` and `live_autotune_soak`; both cover exactl
 finished, produces no evidence, and verifying with a different xtask than `soak init` bound is
 refused. The provenance (source commit, binary and harness digests, kernel, CPU) is the shared
 `evidence_metadata` record that live acceptance also uses.
+
+## Result (M9)
+
+The qualification of the bounded controller passed at source commit `93c9bc59`: 8.03 h, 113 of
+113 rounds clean, 7 complete clean cycles, every dangerous round kind at least 6 clean times, and
+both graduated operations repeatedly kept and reverted, with all five zero-violation checks. Its
+`live_autotune_soak` bundle is indexed in `docs/evidence/index.json`; the full numbers are in
+[MUTATION_GRADUATION_STATUS.md](MUTATION_GRADUATION_STATUS.md). Earlier soaks that found the
+prepared-apply race and the lost SIGINT were stopped, fixed and replaced, and none of their rounds
+or hours count toward it: evidence from different source commits is never combined.

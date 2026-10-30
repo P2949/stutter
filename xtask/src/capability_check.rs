@@ -140,27 +140,35 @@ mod tests {
             .filter(|suite| **suite != "live_autotune_soak")
             .map(|suite| (*suite).to_owned())
             .collect::<BTreeSet<_>>();
-        // Missing exactly the soak, the capability is an open graduation gap...
-        let (_, gaps) = evaluate(&everything_but_the_soak);
-        if controller.tier != CapabilityTier::Supported {
-            assert!(
-                gaps.iter()
-                    .any(|gap| gap.contains("bounded_autotune_controller")
-                        && gap.contains("live_autotune_soak"))
-            );
-        } else {
-            // ...and a Supported tier without the soak is a violation.
-            let (violations, _) = evaluate(&everything_but_the_soak);
-            assert!(
-                violations
-                    .iter()
-                    .any(|v| v.contains("bounded_autotune_controller"))
-            );
-        }
-        // The smoke suite is not the graduation proof.
+        // The controller is Supported, so missing exactly the soak is a tier violation naming it...
+        assert_eq!(controller.tier, CapabilityTier::Supported);
+        let (violations, _) = evaluate(&everything_but_the_soak);
+        assert!(
+            violations
+                .iter()
+                .any(|v| v.contains("bounded_autotune_controller")
+                    && v.contains("live_autotune_soak")),
+            "{violations:?}"
+        );
+        // ...the smoke suite is not the graduation proof...
         let only_smoke = BTreeSet::from(["live_autotune_smoke".to_owned()]);
-        assert!(evaluate(&only_smoke).1.iter().any(|gap| {
-            gap.contains("bounded_autotune_controller") && gap.contains("live_autotune_soak")
-        }));
+        assert!(
+            evaluate(&only_smoke)
+                .0
+                .iter()
+                .any(|v| v.contains("bounded_autotune_controller"))
+        );
+        // ...and with every required suite indexed, including the soak, there is no violation.
+        let complete = controller
+            .required_evidence
+            .iter()
+            .map(|suite| (*suite).to_owned())
+            .collect::<BTreeSet<_>>();
+        assert!(
+            !evaluate(&complete)
+                .0
+                .iter()
+                .any(|v| v.contains("bounded_autotune_controller"))
+        );
     }
 }
