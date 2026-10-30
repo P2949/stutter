@@ -112,11 +112,15 @@ reintroduced; see [docs/LOCAL_VERIFICATION.md](docs/LOCAL_VERIFICATION.md).
 
 ## Install
 
-**Verified release tarball (v0.1.0).** Download `stutter-0.1.0-linux-x86_64.tar.gz`, `SHA256SUMS` and
-`SUPPORT.md` from the [GitHub Release](https://github.com/P2949/stutter/releases/tag/v0.1.0), check
-them with `sha256sum -c SHA256SUMS`, and read `SUPPORT.md` first: only `doctor`, `record`, `bench`,
-`report`, `audit` and `completions_and_man` are Supported; everything else is Experimental. The
-tarball is an unprivileged layout, not a distribution package.
+**Verified release tarball (v0.2.0).** Download `stutter-0.2.0-linux-x86_64.tar.gz`, `SHA256SUMS` and
+`SUPPORT.md` from the [GitHub Release](https://github.com/P2949/stutter/releases/tag/v0.2.0), check
+them with `sha256sum -c SHA256SUMS`, and read `SUPPORT.md` first. Supported: `doctor`, `record`,
+`bench`, `report`, `audit`, `completions_and_man`, and the bounded autonomous controller with its two
+contracts (`cpu_affinity_experiment`, `cgroup_placement_experiment`, `bounded_autotune_controller`):
+CPU-affinity and cgroup-placement tuning of a stable, explicitly identified game under scheduler
+pressure, judged by its own runnable latency. Everything else is Experimental, including the
+always-on daemon/service integration and every system-wide mutation. The tarball is an unprivileged
+layout, not a distribution package. Release notes: [docs/releases/v0.2.0.md](docs/releases/v0.2.0.md).
 
 **From source**, for a local technical-user install:
 

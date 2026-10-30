@@ -13,7 +13,7 @@ members = [
 default-members = ["stutter", "stutter-common", "stutter-config", "stutter-core", "stutter-report", "stutter-validation-runner"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Pedro Goraieb"]
 license = "MIT OR Apache-2.0"
 edition = "2024"

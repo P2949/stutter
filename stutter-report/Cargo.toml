@@ -1,6 +1,6 @@
 [package]
 name = "stutter-report"
-version = "0.1.0"
+version = "0.2.0"
 edition.workspace = true
 description = "Report parsing, analysis, and rendering helpers for stutter artifacts."
 license.workspace = true

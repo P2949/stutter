@@ -2644,7 +2644,7 @@ dependencies = [
 
 [[package]]
 name = "stutter"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -2689,14 +2689,14 @@ dependencies = [
 
 [[package]]
 name = "stutter-common"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aya",
 ]
 
 [[package]]
 name = "stutter-config"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "serde",
@@ -2706,7 +2706,7 @@ dependencies = [
 
 [[package]]
 name = "stutter-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "thiserror 2.0.18",
@@ -2714,7 +2714,7 @@ dependencies = [
 
 [[package]]
 name = "stutter-ebpf"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aya-ebpf",
  "aya-log-ebpf",
@@ -2724,7 +2724,7 @@ dependencies = [
 
 [[package]]
 name = "stutter-report"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2735,7 +2735,7 @@ dependencies = [
 
 [[package]]
 name = "stutter-validation-runner"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -3823,7 +3823,7 @@ checksum = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4"
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "cargo_metadata",
