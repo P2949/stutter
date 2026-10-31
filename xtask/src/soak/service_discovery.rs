@@ -216,14 +216,16 @@ pub(crate) fn run(state: &State, dir: &Path) -> anyhow::Result<Value> {
             cases.push(json!({"scenario":"rapid_focus_oscillation","pid":game.child.pid(),"starttime_ticks":game.ticks,"observations":probe.quiet(&mut controller, 1, Some(game.child.pid()))?}));
             stop_game(&mut game)?;
         }
-        let mut replacement = world.spawn_game(dir, "replacement-game", 300)?;
+        let mut replacement = world.spawn_game(dir, "replacement-game", 590)?;
         ensure!(
             replacement.child.pid() != first.child.pid() || replacement.ticks != first.ticks,
             "replacement reused an identical process identity"
         );
         probe.wait(&mut controller, 30, |row| focus_matches(row, &replacement))?;
-        let _pressure = world.spawn_burst(cpus.0, 8, 240)?;
-        probe.wait(&mut controller, 180, |row| {
+        // An experiment cut short by the two-game phase leaves its action in the controller's
+        // five-minute candidate cooldown; the replacement may only start once that has passed.
+        let _pressure = world.spawn_burst(cpus.0, 8, 590)?;
+        probe.wait(&mut controller, 420, |row| {
             row["decision"]["decision"] == "candidate_applied" && focus_matches(row, &replacement)
         })?;
         probe.wait(&mut controller, 150, |row| {
