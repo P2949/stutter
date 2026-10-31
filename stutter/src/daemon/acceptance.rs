@@ -478,6 +478,7 @@ impl ServiceAcceptanceProbe {
         mode: ServiceMode,
     ) -> ServiceCommandRequest {
         ServiceCommandRequest {
+            controller_user: None,
             action,
             manager,
             mode,

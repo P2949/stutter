@@ -15,6 +15,8 @@ pub(super) enum ServiceCommand {
 
 #[derive(Args, Debug, Clone)]
 pub(super) struct ServiceInstallArgs {
+    #[arg(long = "controller-user", value_name = "USER")]
+    pub(super) controller_user: Option<String>,
     #[arg(long = "mode", default_value = "system-observe")]
     pub(super) mode: String,
 
@@ -57,6 +59,8 @@ pub(super) struct ServiceInstallArgs {
 
 #[derive(Args, Debug, Clone)]
 pub(super) struct ServiceUninstallArgs {
+    #[arg(long = "controller-user", value_name = "USER")]
+    pub(super) controller_user: Option<String>,
     #[arg(long = "mode", default_value = "system-observe")]
     pub(super) mode: String,
 
@@ -99,6 +103,8 @@ pub(super) struct ServiceUninstallArgs {
 
 #[derive(Args, Debug, Clone)]
 pub(super) struct ServiceDoctorArgs {
+    #[arg(long = "controller-user", value_name = "USER")]
+    pub(super) controller_user: Option<String>,
     #[arg(long = "mode", default_value = "system-observe")]
     pub(super) mode: String,
 
@@ -137,6 +143,7 @@ pub(super) struct ServiceDoctorArgs {
 }
 
 pub(super) struct ServiceCommandRequestInput {
+    pub controller_user: Option<String>,
     pub action: ServiceAction,
     pub manager: String,
     pub mode: String,
@@ -152,6 +159,7 @@ pub(super) fn build_service_command_request(
     input: ServiceCommandRequestInput,
 ) -> anyhow::Result<ServiceCommandRequest> {
     Ok(ServiceCommandRequest {
+        controller_user: input.controller_user,
         action: input.action,
         manager: input.manager.parse::<ServiceManager>()?,
         mode: input.mode.parse::<ServiceMode>()?,

@@ -24,6 +24,8 @@ pub const KEPT_LEDGER_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct KeptLedgerEntry {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub boot_id: Option<String>,
     pub experiment_id: ExperimentId,
     pub action_id: ActionId,
     pub candidate: String,
@@ -90,6 +92,13 @@ fn write_kept_ledger(path: &Path, ledger: &KeptLedger) -> anyhow::Result<()> {
 
 /// Record a kept action. Idempotent per experiment: a repeat replaces the earlier entry.
 pub fn record_kept(path: &Path, entry: KeptLedgerEntry) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        entry
+            .boot_id
+            .as_deref()
+            .is_some_and(stutter_core::boot::valid_boot_id),
+        "kept action requires a valid boot identity"
+    );
     let mut ledger = read_kept_ledger(path)?;
     ledger
         .entries
@@ -128,6 +137,7 @@ mod tests {
 
     fn entry(name: &str) -> KeptLedgerEntry {
         KeptLedgerEntry {
+            boot_id: stutter_core::boot::current_boot_id().ok(),
             experiment_id: ExperimentId::new(name),
             action_id: ActionId::new(format!("action-{name}")),
             candidate: name.to_owned(),

@@ -46,8 +46,9 @@ impl LiveExperimentActionExecutor for RuntimeLiveExperimentActionExecutor {
         experiment_id: &str,
         observation: &AutotuneObservation,
     ) -> anyhow::Result<RollbackToken> {
-        if input.mode == DaemonMode::ApplyMediumRisk
-            && candidate.safety_class() > SafetyClass::ReversibleLowRisk
+        if input.worker_only_mutation
+            || (input.mode == DaemonMode::ApplyMediumRisk
+                && candidate.safety_class() > SafetyClass::ReversibleLowRisk)
         {
             let service = input
                 .privileged_action_service
@@ -156,8 +157,9 @@ impl LiveExperimentActionExecutor for RuntimeLiveExperimentActionExecutor {
         experiment: &LiveExperiment,
         observation: &AutotuneObservation,
     ) -> anyhow::Result<Option<ActiveConfigSnapshot>> {
-        if experiment.mode == DaemonMode::ApplyMediumRisk
-            && experiment.safety_class > SafetyClass::ReversibleLowRisk
+        if input.worker_only_mutation
+            || (experiment.mode == DaemonMode::ApplyMediumRisk
+                && experiment.safety_class > SafetyClass::ReversibleLowRisk)
         {
             let service = input
                 .privileged_action_service

@@ -549,6 +549,7 @@ fn hold_manager(
         controller_policy: ControllerPolicy::from_daemon_policy(&daemon_policy),
         daemon_policy,
         simulate_action_effects: false,
+        worker_only_mutation: false,
         washout: WashoutWindowConfig::default(),
         candidate_window_seconds: 3_600,
         manual_restore_command: "stutter daemon emergency-restore",
@@ -617,6 +618,7 @@ pub fn recover_acceptance_controller(out: &Path, expected_tasks: usize) -> anyho
         history_path: out.join("history.jsonl"),
         state_snapshot_path: out.join("daemon-state.json"),
         privileged_worker_socket: None,
+        worker_only_mutation: false,
     })?;
     let restored = match outcome {
         StartupRecoveryOutcome::Clean if expected_tasks == 0 => 0,

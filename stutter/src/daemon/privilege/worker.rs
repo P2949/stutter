@@ -1,6 +1,11 @@
 //! Privileged worker process, socket lifecycle, and request execution.
 
-use super::*;
+use std::os::unix::fs::MetadataExt;
+
+use super::{
+    exchange::{CommitExchange, commit_timeout},
+    *,
+};
 
 #[derive(Debug)]
 pub struct PrivilegedWorkerHandle {
@@ -239,6 +244,14 @@ pub fn run_privileged_worker_with_service(
     socket_path: &Path,
     service: &dyn PrivilegedActionService,
 ) -> anyhow::Result<()> {
+    run_worker(socket_path, service, None)
+}
+
+pub(super) fn run_worker(
+    socket_path: &Path,
+    service: &dyn PrivilegedActionService,
+    service_security: Option<(u32, crate::daemon_policy::DaemonPolicy)>,
+) -> anyhow::Result<()> {
     prepare_privileged_worker_socket_path(socket_path)?;
     let listener = UnixListener::bind(socket_path).with_context(|| {
         format!(
@@ -253,6 +266,11 @@ pub fn run_privileged_worker_with_service(
         )
     })?;
 
+    if let Some((uid, _)) = &service_security {
+        std::os::unix::fs::chown(socket_path, Some(*uid), None)
+            .context("set private service socket owner")?;
+    }
+
     log::info!(
         "privileged_worker_listening socket={} auth=filesystem_permissions mode=0600",
         socket_path.display()
@@ -265,7 +283,29 @@ pub fn run_privileged_worker_with_service(
                 socket_path.display()
             )
         })?;
-        match handle_privileged_worker_connection(stream, service) {
+        let peer = match super::peer::peer_credentials(&stream) {
+            Ok(peer) => peer,
+            Err(error) => {
+                log::warn!("privileged_worker_peer_credentials_failed error={error}");
+                continue;
+            }
+        };
+        let owner = service_security
+            .as_ref()
+            .map(|(uid, _)| *uid)
+            .unwrap_or(fs::metadata(socket_path)?.uid());
+        if peer.uid != owner {
+            log::warn!(
+                "privileged_worker_peer_denied uid={} expected_uid={owner}",
+                peer.uid
+            );
+            continue;
+        }
+        match handle_privileged_worker_connection(
+            stream,
+            service,
+            service_security.as_ref().map(|(_, policy)| policy),
+        ) {
             Ok(true) => break Ok(()),
             Ok(false) => {}
             Err(err) => {
@@ -321,8 +361,9 @@ fn prepare_privileged_worker_socket_path(path: &Path) -> anyhow::Result<()> {
 fn handle_privileged_worker_connection(
     mut stream: UnixStream,
     service: &dyn PrivilegedActionService,
+    service_policy: Option<&crate::daemon_policy::DaemonPolicy>,
 ) -> anyhow::Result<bool> {
-    let request = match read_privileged_worker_request(&stream) {
+    let mut request = match read_privileged_worker_request(&stream) {
         Ok(request) => request,
         Err(err) => {
             let response = PrivilegedWorkerResponse::from_error(err);
@@ -332,6 +373,22 @@ fn handle_privileged_worker_connection(
             return Ok(false);
         }
     };
+    if service_policy.is_some()
+        && let Err(error) = super::bounded::validate_request(&request)
+    {
+        serde_json::to_writer(&mut stream, &PrivilegedWorkerResponse::from_error(error))?;
+        stream.write_all(b"\n")?;
+        stream.flush()?;
+        return Ok(false);
+    }
+    if let Some(service_policy) = service_policy {
+        match &mut request {
+            PrivilegedWorkerRequest::DryRun { policy, .. }
+            | PrivilegedWorkerRequest::ApplyPrepared { policy, .. }
+            | PrivilegedWorkerRequest::Rollback { policy, .. } => *policy = service_policy.clone(),
+            _ => (), // The closed request validator has already rejected unprepared applies.
+        }
+    }
     let shutdown = matches!(request, PrivilegedWorkerRequest::Shutdown);
     let response = if matches!(request, PrivilegedWorkerRequest::ApplyPrepared { .. }) {
         let audit_sink = PrivilegeAuditSink::default();
@@ -579,92 +636,6 @@ fn execute_privileged_worker_request_inner(
     );
 
     response
-}
-
-static COMMIT_TIMEOUT_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(15_000);
-
-fn commit_timeout() -> Duration {
-    Duration::from_millis(COMMIT_TIMEOUT_MS.load(std::sync::atomic::Ordering::Relaxed))
-}
-
-/// How long a prepared apply waits for the controller's commit; tests shorten it.
-#[cfg(test)]
-pub(crate) fn set_commit_timeout_for_tests(timeout: Duration) {
-    COMMIT_TIMEOUT_MS.store(
-        u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX),
-        std::sync::atomic::Ordering::Relaxed,
-    );
-}
-
-/// One two-phase exchange on a connection: send `Prepared`, then wait for exactly one
-/// `CommitPrepared`. Anything else (abort, wrong digest, silence, a closed connection) aborts the
-/// apply before the first mutable write.
-struct CommitExchange<'a> {
-    stream: &'a UnixStream,
-    timeout: Duration,
-}
-
-impl<'a> CommitExchange<'a> {
-    fn new(stream: &'a UnixStream, timeout: Duration) -> Self {
-        Self { stream, timeout }
-    }
-
-    fn prepare_and_wait(&mut self, token: &RollbackToken) -> anyhow::Result<()> {
-        let digest = rollback_snapshot_digest(token);
-        let mut writer = self.stream;
-        let prepared = PrivilegedWorkerResponse::Prepared {
-            rollback: token.clone(),
-            snapshot_digest: digest.clone(),
-        };
-        serde_json::to_writer(&mut writer, &prepared)?;
-        writer.write_all(b"\n")?;
-        writer.flush()?;
-        self.stream.set_read_timeout(Some(self.timeout))?;
-        let mut reader = BufReader::new(self.stream.try_clone()?);
-        let mut line = String::new();
-        let read = reader.read_line(&mut line);
-        match read {
-            Ok(0) => Err(PrivilegedWorkerError::CommitRejected {
-                reason: "the controller closed the connection after the prepare".to_owned(),
-            }
-            .into()),
-            Ok(_) => match serde_json::from_str::<PrivilegedWorkerRequest>(&line) {
-                Ok(PrivilegedWorkerRequest::CommitPrepared {
-                    commit: true,
-                    snapshot_digest,
-                }) if snapshot_digest == digest => Ok(()),
-                Ok(PrivilegedWorkerRequest::CommitPrepared { commit: true, .. }) => {
-                    Err(PrivilegedWorkerError::CommitRejected {
-                        reason: "the commit names a different snapshot than the one prepared"
-                            .to_owned(),
-                    }
-                    .into())
-                }
-                Ok(PrivilegedWorkerRequest::CommitPrepared { commit: false, .. }) => {
-                    Err(PrivilegedWorkerError::CommitRejected {
-                        reason: "the controller aborted the prepared apply".to_owned(),
-                    }
-                    .into())
-                }
-                _ => Err(PrivilegedWorkerError::CommitRejected {
-                    reason: "the answer to the prepare was not a commit".to_owned(),
-                }
-                .into()),
-            },
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
-                ) =>
-            {
-                Err(PrivilegedWorkerError::CommitExpired {
-                    timeout_ms: self.timeout.as_millis(),
-                }
-                .into())
-            }
-            Err(error) => Err(error.into()),
-        }
-    }
 }
 
 fn record_worker_boundary_audit(

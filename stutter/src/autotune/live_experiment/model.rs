@@ -42,6 +42,7 @@ pub struct LiveExperimentManagerInput<'a> {
     pub daemon_policy: DaemonPolicy,
     pub controller_policy: ControllerPolicy,
     pub simulate_action_effects: bool,
+    pub worker_only_mutation: bool,
     pub washout: WashoutWindowConfig,
     pub candidate_window_seconds: u64,
     pub manual_restore_command: &'static str,

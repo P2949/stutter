@@ -1,3 +1,4 @@
+mod bounded;
 pub mod command;
 pub mod model;
 #[cfg(test)]

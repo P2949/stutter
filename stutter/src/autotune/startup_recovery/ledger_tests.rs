@@ -34,6 +34,7 @@ fn token(name: &str) -> RollbackToken {
 
 fn entry(name: &str) -> KeptLedgerEntry {
     KeptLedgerEntry {
+        boot_id: stutter_core::boot::current_boot_id().ok(),
         experiment_id: ExperimentId::new(format!("experiment-{name}")),
         action_id: ActionId::new(format!("cpu-affinity-profile:{name}")),
         candidate: name.to_owned(),
@@ -58,6 +59,7 @@ fn config(name: &str) -> StartupRecoveryConfig {
         history_path: dir.join("history.jsonl"),
         state_snapshot_path: dir.join("daemon-state.json"),
         privileged_worker_socket: None,
+        worker_only_mutation: false,
     }
 }
 
@@ -116,4 +118,73 @@ fn the_journal_and_the_ledger_naming_one_token_restore_it_once() {
             .unwrap()
             .is_clean()
     );
+}
+
+#[test]
+fn earlier_boot_task_ledger_is_retired_without_calling_the_executor() {
+    let config = config("boot-superseded");
+    let mut old = entry("old-boot");
+    old.boot_id = Some("00000000-0000-0000-0000-000000000000".into());
+    record_kept(&kept_ledger_path(&config.journal_path), old).unwrap();
+    let mut executor = CountingExecutor::default();
+    let outcome = recover_controller_journal_with_executor(config.clone(), &mut executor).unwrap();
+    assert!(matches!(
+        outcome,
+        StartupRecoveryOutcome::Recovered {
+            affected_tasks: 0,
+            ..
+        }
+    ));
+    assert!(executor.restored.borrow().is_empty());
+    assert!(
+        read_kept_ledger(&kept_ledger_path(&config.journal_path))
+            .unwrap()
+            .entries
+            .is_empty()
+    );
+    assert!(
+        std::fs::read_to_string(config.audit_path)
+            .unwrap()
+            .contains("boot_superseded")
+    );
+}
+
+#[test]
+fn earlier_boot_journal_is_retired_and_missing_boot_identity_faults() {
+    let config = config("journal-boot-policy");
+    let mut record = crate::autotune::controller_journal::ControllerJournalRecord::applied(
+        ExperimentId::new("boot-test"),
+        ActionId::new("cpu-affinity-profile:boot-test"),
+        token("boot-test"),
+    );
+    record.boot_id = Some("00000000-0000-0000-0000-000000000000".into());
+    crate::autotune::controller_journal::write_controller_journal_record(
+        &config.journal_path,
+        &record,
+    )
+    .unwrap();
+    let mut executor = CountingExecutor::default();
+    let outcome = recover_controller_journal_with_executor(config.clone(), &mut executor).unwrap();
+    assert!(matches!(
+        outcome,
+        StartupRecoveryOutcome::Recovered {
+            affected_tasks: 0,
+            ..
+        }
+    ));
+    assert!(executor.restored.borrow().is_empty());
+    assert!(
+        read_controller_journal(&config.journal_path)
+            .unwrap()
+            .is_clean()
+    );
+    // Legacy JSON bypasses the new-write validation, exercising the migration fail-closed path.
+    record.boot_id = None;
+    std::fs::write(&config.journal_path, serde_json::to_vec(&record).unwrap()).unwrap();
+    assert!(
+        recover_controller_journal_with_executor(config, &mut executor)
+            .unwrap()
+            .is_faulted()
+    );
+    assert!(executor.restored.borrow().is_empty());
 }

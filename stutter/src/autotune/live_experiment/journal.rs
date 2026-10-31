@@ -91,7 +91,7 @@ pub(super) fn controller_journal_path(input: &LiveExperimentManagerInput<'_>) ->
         .unwrap_or_else(default_controller_journal_path)
 }
 
-pub(super) fn reserve_experiment_restore_path(journal_path: &Path) -> anyhow::Result<PathBuf> {
+pub(crate) fn reserve_experiment_restore_path(journal_path: &Path) -> anyhow::Result<PathBuf> {
     let parent = journal_path.parent().unwrap_or_else(|| Path::new("."));
     let experiments = parent.join("experiments");
     std::fs::create_dir_all(&experiments)?;

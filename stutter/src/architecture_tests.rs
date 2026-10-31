@@ -60,6 +60,7 @@ const WORKSPACE_SOURCE_ROOTS: &[&str] = &[
     "stutter-core/src",
     "stutter-report/src",
     "xtask/src",
+    "shared",
 ];
 
 fn workspace_root() -> PathBuf {

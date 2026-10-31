@@ -50,6 +50,7 @@ pub(super) fn parse_privileged_worker_command(
         None => crate::daemon::privilege::default_privileged_worker_socket_path()?,
     };
     Ok(AppCommand::PrivilegedWorker(PrivilegedWorkerCommandInput {
+        controller_user: args.controller_user,
         socket,
     }))
 }

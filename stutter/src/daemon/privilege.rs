@@ -32,22 +32,30 @@ use crate::{
 
 mod allowlist;
 mod audit;
+mod bounded;
 mod error;
+mod exchange;
 mod in_process;
 mod model;
+#[path = "../../../shared/linux_peer/ffi.rs"]
+mod peer;
 mod revalidate;
+mod service_tokens;
 mod socket;
 mod worker;
 pub use allowlist::PrivilegeCommandAllowlist;
 pub(crate) use audit::{CandidateBoundaryAuditInput, PrivilegeBoundaryAuditInput};
 pub use audit::{PrivilegeAuditSink, privileged_operation_audit_event};
+pub(crate) use bounded::controller_uid;
+pub use bounded::run_privileged_service_worker;
 pub(crate) use error::PrivilegedWorkerError;
+#[cfg(test)]
+pub(crate) use exchange::set_commit_timeout_for_tests;
 pub use in_process::InProcessPrivilegedActionService;
 pub use model::*;
 pub(crate) use revalidate::revalidate_candidate_targets;
 pub use socket::UnixSocketPrivilegedActionService;
-#[cfg(test)]
-pub(crate) use worker::set_commit_timeout_for_tests;
+pub(crate) use worker::wait_for_privileged_worker_socket_with_timing;
 pub use worker::{
     PrivilegedWorkerHandle, default_privileged_worker_socket_path, run_privileged_worker,
     run_privileged_worker_with_service,
@@ -55,7 +63,6 @@ pub use worker::{
 #[cfg(test)]
 pub(crate) use worker::{
     execute_privileged_worker_request, execute_privileged_worker_request_with_audit_sink,
-    wait_for_privileged_worker_socket_with_timing,
 };
 
 /// The commit barrier of a two-phase apply.

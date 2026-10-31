@@ -52,6 +52,8 @@ impl ControllerJournalState {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ControllerJournalRecord {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub boot_id: Option<String>,
     pub schema_version: u32,
     pub state: ControllerJournalState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -162,6 +164,7 @@ impl ControllerJournalRecord {
 
     pub fn clean() -> Self {
         Self {
+            boot_id: stutter_core::boot::current_boot_id().ok(),
             schema_version: CONTROLLER_JOURNAL_SCHEMA_VERSION,
             state: ControllerJournalState::Clean,
             experiment_id: None,
@@ -187,6 +190,7 @@ impl ControllerJournalRecord {
         rollback_token: Option<RollbackToken>,
     ) -> Self {
         Self {
+            boot_id: stutter_core::boot::current_boot_id().ok(),
             schema_version: CONTROLLER_JOURNAL_SCHEMA_VERSION,
             state,
             experiment_id: Some(experiment_id),
@@ -361,6 +365,13 @@ pub fn write_controller_journal_record(
     path: &Path,
     record: &ControllerJournalRecord,
 ) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        record
+            .boot_id
+            .as_deref()
+            .is_some_and(stutter_core::boot::valid_boot_id),
+        "controller journal requires a valid boot identity before mutation"
+    );
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).with_context(|| {
             format!(

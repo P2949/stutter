@@ -108,3 +108,17 @@ New system-changing code must follow these rules:
 - every new apply path must call `DaemonPolicy::check_action` before mutation;
 - no new direct mutation helper may be public without a policy parameter;
 - docs and CLI help must not claim a mode can apply actions before the policy gate and runtime path both support it.
+
+## Bounded service boundary (Experimental)
+
+The `system-bounded-autotune` service runs as the monitored desktop user with heuristic focus.
+`STUTTER_SERVICE_WORKER_SOCKET` explicitly selects worker-only mutation, including CPU affinity,
+normal revert, kept-action release, startup recovery and the stop hook. An unavailable worker
+must fault recovery/apply rather than fall back to in-process mutation. The worker accepts only
+prepared service applies whose operation/objective/scope appear in `AUTONOMOUS_CONTRACTS`, and
+applies its root-owned configured policy instead of trusting client policy.
+
+Controller journals and kept entries carry Linux boot identity. Task-scoped entries from another
+boot retire without touching PIDs/TIDs, with `boot_superseded` audit evidence. Missing or malformed
+task boot identity fails closed. CPU EPP retains its own typed boot-aware resource identity;
+manual-only resource tokens do not acquire automatic recovery from this metadata.

@@ -72,12 +72,13 @@ rg -n "unsafe\s*(\{|fn|impl)" stutter/src --glob '*.rs'
 ## Validation runner (outside the main `stutter` crate)
 
 The validation-only `stutter-validation-runner` crate keeps all `unsafe` in one module,
-`stutter-validation-runner/src/sys.rs`, plus two `pre_exec` hooks that call only that module.
+`stutter-validation-runner/src/sys.rs` and the shared peer helper, plus two `pre_exec` hooks that call only that module.
 Every block carries a `// SAFETY:` comment. The crate is validation infrastructure and is never
 part of the product package.
 
 | File | Purpose |
 | --- | --- |
-| `stutter-validation-runner/src/sys.rs` | `SO_PEERCRED`, `prctl` (no_new_privs, ambient/keep/bounding capabilities), `capget`/`capset`, `setgroups`/`setresuid`/`setresgid`, `sched_setaffinity`, `sched_setscheduler`, `geteuid`. |
+| `shared/linux_peer/ffi.rs` | `SO_PEERCRED`, shared by the product worker and validation runner. Validates kernel response size and positive PID; socket descriptor and output buffer remain valid for the call. |
+| `stutter-validation-runner/src/sys.rs` | `prctl` (no_new_privs, ambient/keep/bounding capabilities), `capget`/`capset`, `setgroups`/`setresuid`/`setresgid`, `sched_setaffinity`, `sched_setscheduler`, `geteuid`. |
 | `stutter-validation-runner/src/credentials.rs` | one `pre_exec` closure applying the syscall sequence above between `fork` and `exec`. |
 | `stutter-validation-runner/src/process.rs` | one `pre_exec` closure pinning a CPU and taking SCHED_FIFO for a controlled contender. |

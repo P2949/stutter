@@ -121,6 +121,7 @@ mod tests {
             history_path,
             state_snapshot_path,
             privileged_worker_socket: None,
+            worker_only_mutation: false,
         };
         let mut recovery_executor = RecoveryExecutor {
             calls: 0,

@@ -14,9 +14,10 @@ use crate::{
     profiles::Profile,
 };
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CpuAffinityProfilePlan {
     pub profile_name: String,
+    #[serde(with = "profile_wire")]
     pub profile: Profile,
     pub tree_pid: u32,
     pub objective: ObjectiveKind,
@@ -25,6 +26,7 @@ pub struct CpuAffinityProfilePlan {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CandidateExecutablePlan {
+    CpuAffinityProfile { plan: CpuAffinityProfilePlan },
     Nice { plan: NiceActionPlan },
     IoPrio { plan: IoPrioActionPlan },
     Uclamp { plan: UclampActionPlan },
@@ -69,6 +71,7 @@ impl CandidateExecutablePlan {
 
     pub fn into_candidate(self) -> CandidateAction {
         match self {
+            Self::CpuAffinityProfile { plan } => CandidateAction::CpuAffinityProfile { plan },
             Self::Nice { plan } => CandidateAction::Nice { plan },
             Self::IoPrio { plan } => CandidateAction::IoPrio { plan },
             Self::Uclamp { plan } => CandidateAction::Uclamp { plan },
@@ -78,6 +81,27 @@ impl CandidateExecutablePlan {
             Self::GpuPower { plan } => CandidateAction::GpuPower { plan },
             Self::VmKnob { plan } => CandidateAction::VmKnob { plan },
         }
+    }
+}
+
+// Reuse the product profile grammar; compiled regexes are rebuilt and validated on decode.
+mod profile_wire {
+    use serde::{Deserialize, Deserializer, Serializer, de::Error};
+
+    use super::Profile;
+    pub fn serialize<S: Serializer>(profile: &Profile, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&crate::profiles::render_profiles_toml(
+            std::slice::from_ref(profile),
+        ))
+    }
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Profile, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        let mut profiles =
+            crate::profiles::parse::parse_profiles(&value).map_err(D::Error::custom)?;
+        if profiles.len() != 1 {
+            return Err(D::Error::custom("expected exactly one affinity profile"));
+        }
+        Ok(profiles.remove(0))
     }
 }
 

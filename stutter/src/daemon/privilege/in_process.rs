@@ -273,7 +273,11 @@ impl InProcessPrivilegedActionService {
         let apply_candidate =
             try_promote_to_apply_candidate(request.plan.candidate, ApplyEligibility::approved())
                 .map_err(|eligibility| anyhow::anyhow!(eligibility.denial_message()))?;
-        let executor = executor_for_apply_candidate(apply_candidate)?;
+        let executor = if prepared.is_some() {
+            crate::autotune::apply::executor_for_prepared_worker_candidate(apply_candidate)?
+        } else {
+            executor_for_apply_candidate(apply_candidate)?
+        };
         let executor_descriptor = executor.descriptor();
         debug_assert_eq!(executor_descriptor.action_kind, descriptor.action_kind);
         debug_assert_eq!(executor.safety_class(), descriptor.safety_class);

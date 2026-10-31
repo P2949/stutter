@@ -8,6 +8,18 @@ use super::PrivilegedWorkerResponse;
 
 #[derive(Debug, Error)]
 pub enum PrivilegedWorkerError {
+    #[error(
+        "service_token_already_outstanding: the previous identical transaction must be restored before another prepare"
+    )]
+    ServiceTokenAlreadyOutstanding,
+    #[error(
+        "service_rollback_token_not_issued: rollback data does not match a worker-issued durable token"
+    )]
+    ServiceRollbackTokenNotIssued,
+    #[error(
+        "bounded_service_requires_prepared_transaction: service applies must use prepare and digest-bound commit"
+    )]
+    BoundedServiceRequiresPrepared,
     #[error("stale_candidate_plan: stale candidate plan: age {age_ns}ns exceeded max {max_ns}ns")]
     StaleCandidatePlan { age_ns: u128, max_ns: u128 },
 
@@ -125,6 +137,9 @@ pub enum PrivilegedWorkerError {
 impl PrivilegedWorkerError {
     pub const fn reason_code(&self) -> &'static str {
         match self {
+            Self::ServiceTokenAlreadyOutstanding => "service_token_already_outstanding",
+            Self::ServiceRollbackTokenNotIssued => "service_rollback_token_not_issued",
+            Self::BoundedServiceRequiresPrepared => "bounded_service_requires_prepared_transaction",
             Self::StaleCandidatePlan { .. } => "stale_candidate_plan",
             Self::InvalidActionDescriptor { .. } => "privileged_worker_invalid_action_descriptor",
             Self::CandidatePlanDescriptorMismatch => "candidate_plan_descriptor_mismatch",

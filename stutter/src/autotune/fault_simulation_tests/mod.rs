@@ -195,6 +195,7 @@ impl Sim {
             daemon_policy: self.daemon_policy.clone(),
             controller_policy: self.policy.clone(),
             simulate_action_effects: false,
+            worker_only_mutation: false,
             washout: WashoutWindowConfig::default(),
             candidate_window_seconds: 30,
             manual_restore_command: "stutter daemon emergency-restore",
@@ -439,6 +440,7 @@ impl Sim {
             history_path: self.dir.join("history.jsonl"),
             state_snapshot_path: self.dir.join("daemon-state.json"),
             privileged_worker_socket: None,
+            worker_only_mutation: false,
         };
         let before = self.host.borrow().mutations;
         let mut executor = SimRecoveryExecutor {

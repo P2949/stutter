@@ -1,0 +1,15 @@
+#!/sbin/openrc-run
+# Experimental; configure stutter_controller_user in /etc/conf.d for both components.
+name="Stutter bounded mutation worker"
+command="@BINARY@"
+command_background=yes
+pidfile="/run/stutter-privileged-worker.pid"
+command_args="privileged-worker --controller-user ${stutter_controller_user} --socket /run/stutter-worker-${stutter_controller_user}/worker.sock"
+export STUTTER_SERVICE_CONFIG="@CONFIG_DIR@/autotune-bounded-${stutter_controller_user}.toml"
+export HOME="/var/lib/stutter/worker-${stutter_controller_user}"
+depend() { need localmount; }
+start_pre() {
+    [ -n "${stutter_controller_user}" ] && [ "$(id -u -- "${stutter_controller_user}")" -gt 0 ] || return 64
+    checkpath --directory --mode 0711 --owner root "/run/stutter-worker-${stutter_controller_user}"
+    checkpath --directory --mode 0700 --owner root "${HOME}"
+}

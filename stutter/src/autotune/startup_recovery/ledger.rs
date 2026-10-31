@@ -22,6 +22,7 @@ pub(super) fn recover_kept_ledger<E: StartupRecoveryRollbackExecutor + ?Sized>(
                 entry.action_id,
                 entry.rollback_token,
                 RecoverySource::Ledger,
+                entry.boot_id.as_deref(),
             )
         })
         .collect()

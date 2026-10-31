@@ -55,6 +55,7 @@ impl LiveExperimentManager {
         record_kept(
             &kept_ledger_path(&controller_journal_path(input)),
             KeptLedgerEntry {
+                boot_id: stutter_core::boot::current_boot_id().ok(),
                 experiment_id: experiment.experiment_id.clone(),
                 action_id: experiment.action_id(),
                 candidate: experiment.candidate.profile_name().to_owned(),

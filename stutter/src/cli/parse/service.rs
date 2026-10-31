@@ -10,6 +10,7 @@ pub(super) fn parse_service_command(args: ServiceArgs) -> anyhow::Result<AppComm
     match args.command {
         ServiceCommand::Install(args) => Ok(AppCommand::Service(ServiceCommandInput {
             request: build_service_command_request(ServiceCommandRequestInput {
+                controller_user: args.controller_user,
                 action: ServiceAction::Install,
                 manager: args.manager,
                 mode: args.mode,
@@ -24,6 +25,7 @@ pub(super) fn parse_service_command(args: ServiceArgs) -> anyhow::Result<AppComm
         })),
         ServiceCommand::Uninstall(args) => Ok(AppCommand::Service(ServiceCommandInput {
             request: build_service_command_request(ServiceCommandRequestInput {
+                controller_user: args.controller_user,
                 action: ServiceAction::Uninstall,
                 manager: args.manager,
                 mode: args.mode,
@@ -38,6 +40,7 @@ pub(super) fn parse_service_command(args: ServiceArgs) -> anyhow::Result<AppComm
         })),
         ServiceCommand::Doctor(args) => Ok(AppCommand::Service(ServiceCommandInput {
             request: build_service_command_request(ServiceCommandRequestInput {
+                controller_user: args.controller_user,
                 action: ServiceAction::Doctor,
                 manager: args.manager,
                 mode: args.mode,

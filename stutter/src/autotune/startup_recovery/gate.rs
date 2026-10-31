@@ -7,6 +7,20 @@ use crate::autotune::runtime::AutotuneRuntimeConfig;
 pub fn recover_before_start(
     config: StartupRecoveryConfig,
 ) -> anyhow::Result<StartupRecoveryOutcome> {
+    if config.worker_only_mutation {
+        let socket = config.privileged_worker_socket.as_deref().ok_or_else(|| {
+            anyhow::anyhow!("worker-only recovery requires an external worker socket")
+        })?;
+        crate::daemon::privilege::wait_for_privileged_worker_socket_with_timing(
+            socket,
+            std::time::Duration::from_millis(
+                crate::daemon::config::DEFAULT_PRIVILEGED_WORKER_SOCKET_READY_TIMEOUT_MS,
+            ),
+            std::time::Duration::from_millis(
+                crate::daemon::config::DEFAULT_PRIVILEGED_WORKER_SOCKET_READY_RETRY_MS,
+            ),
+        )?;
+    }
     let outcome = recover_controller_journal_on_startup(config)?;
     match &outcome {
         StartupRecoveryOutcome::Recovered {
@@ -57,6 +71,7 @@ pub fn startup_recovery_config_for_runtime(
     let autotune = &config.daemon_config.autotune;
     StartupRecoveryConfig {
         rollback_on_crash_recovery: autotune.rollback_on_crash_recovery,
+        worker_only_mutation: autotune.worker_only_mutation,
         journal_path: config
             .controller_journal_path
             .clone()
@@ -67,7 +82,7 @@ pub fn startup_recovery_config_for_runtime(
             .privileged_worker_socket
             .clone()
             .or_else(|| crate::daemon::privilege::default_privileged_worker_socket_path().ok())
-            .filter(|path| path.exists()),
+            .filter(|path| autotune.worker_only_mutation || path.exists()),
         ..defaults
     }
 }

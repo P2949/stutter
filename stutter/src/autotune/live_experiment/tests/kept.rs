@@ -22,6 +22,7 @@ fn kept_state(name: &str) -> KeptCandidateState {
 
 fn ledger_entry(kept: &KeptCandidateState) -> KeptLedgerEntry {
     KeptLedgerEntry {
+        boot_id: stutter_core::boot::current_boot_id().ok(),
         experiment_id: kept.experiment_id.clone(),
         action_id: kept.candidate.action_id(),
         candidate: kept.candidate.profile_name().to_owned(),

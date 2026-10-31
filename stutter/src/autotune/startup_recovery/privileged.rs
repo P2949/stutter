@@ -55,6 +55,16 @@ fn candidate_for(token: &RollbackToken) -> anyhow::Result<CandidateAction> {
         starttime_ticks: identity.starttime_ticks,
     };
     match token {
+        RollbackToken::CpuAffinityRestoreFile { .. } => {
+            Ok(CandidateAction::cpu_affinity_profile_for(
+                crate::profiles::Profile {
+                    name: "startup-recovery-affinity".to_owned(),
+                    rules: Vec::new(),
+                },
+                std::process::id(),
+                ObjectiveKind::GameRunnableLatency,
+            ))
+        }
         RollbackToken::NiceRestore { records } => {
             anyhow::ensure!(
                 records.iter().all(|r| complete(&r.restore_identity())),

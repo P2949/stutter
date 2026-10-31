@@ -8,6 +8,11 @@ use crate::{
 
 pub fn run_service_command(input: ServiceCommandInput) -> anyhow::Result<()> {
     let plan = build_service_plan(input.request);
+    if plan.mode == crate::service::ServiceMode::SystemBoundedAutotune
+        && plan.action == ServiceAction::Doctor
+    {
+        execute_service_plan(&plan)?;
+    }
 
     match plan.action {
         ServiceAction::Doctor => {
@@ -99,6 +104,7 @@ mod tests {
 
     fn plan() -> ServicePlan {
         build_service_plan(ServiceCommandRequest {
+            controller_user: None,
             action: ServiceAction::Install,
             manager: ServiceManager::SystemdSystem,
             mode: ServiceMode::SystemObserve,

@@ -159,6 +159,7 @@ fn a_nice_token_is_restored_through_the_privileged_worker_and_never_in_process_w
     let root = crate::test_support::TestRoot::new("nice-privileged-route");
     let mut executor = RealStartupRecoveryRollbackExecutor {
         privileged_worker_socket: Some(root.join("missing.sock")),
+        worker_only_mutation: false,
     };
     let error = executor.rollback(&token).unwrap_err();
     assert!(

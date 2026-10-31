@@ -334,9 +334,9 @@ impl LiveExperimentManager {
         let journal_path = controller_journal_path(input);
         // The privileged service still uses its historical protocol. Low-risk
         // actions own these transitions inside the audited action boundary.
-        let deferred_privileged_journal = input.mode
-            == crate::daemon_policy::DaemonMode::ApplyMediumRisk
-            && candidate.safety_class() > crate::actions::SafetyClass::ReversibleLowRisk;
+        let deferred_privileged_journal = input.worker_only_mutation
+            || input.mode == crate::daemon_policy::DaemonMode::ApplyMediumRisk
+                && candidate.safety_class() > crate::actions::SafetyClass::ReversibleLowRisk;
         if deferred_privileged_journal {
             write_controller_journal_applying_with_metadata(
                 &journal_path,

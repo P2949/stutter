@@ -143,6 +143,28 @@ pub fn executor_for_apply_candidate(
     build_executor_for_candidate(candidate)
 }
 
+/// The worker chooses a fresh private snapshot path for every prepared affinity transaction.
+/// This keeps a commit digest tied to one immutable restore file rather than a reused filename.
+pub(crate) fn executor_for_prepared_worker_candidate(
+    apply_candidate: ApplyCandidate,
+) -> anyhow::Result<Box<dyn CandidateActionExecutor>> {
+    let candidate = apply_candidate.into_candidate();
+    if matches!(&candidate, CandidateAction::CpuAffinityProfile { .. }) {
+        let (_, mut action) =
+            crate::autotune::apply_low_risk::action_from_candidate(candidate.clone())?;
+        action.restore_path = Some(
+            crate::autotune::live_experiment::reserve_experiment_restore_path(
+                &crate::profile_restore::default_restore_path(),
+            )?,
+        );
+        return Ok(Box::new(BoxedActionExecutor::new(
+            &candidate,
+            Box::new(action),
+        )));
+    }
+    build_executor_for_candidate(candidate)
+}
+
 pub fn executor_for_candidate_preview(
     candidate: CandidateAction,
 ) -> anyhow::Result<Box<dyn CandidateActionExecutor>> {

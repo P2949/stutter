@@ -13,6 +13,7 @@ fn start_candidate_applies_action_writes_journal_registers_rollback_and_clears_w
         controller_policy: ControllerPolicy::from_daemon_policy(&daemon_policy),
         daemon_policy,
         simulate_action_effects: false,
+        worker_only_mutation: false,
         washout: WashoutWindowConfig::default(),
         candidate_window_seconds: 30,
         manual_restore_command: "stutter daemon emergency-restore",

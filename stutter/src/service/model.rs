@@ -97,6 +97,7 @@ pub enum ServiceMode {
     UserObserve,
     SystemObserve,
     SystemLowRisk,
+    SystemBoundedAutotune,
 }
 
 impl ServiceMode {
@@ -106,11 +107,14 @@ impl ServiceMode {
             Self::UserObserve => "user-observe",
             Self::SystemObserve => "system-observe",
             Self::SystemLowRisk => "system-low-risk",
+            Self::SystemBoundedAutotune => "system-bounded-autotune",
         }
     }
 
     pub fn unit_name(self, manager: ServiceManager) -> &'static str {
         match (self, manager) {
+            (Self::SystemBoundedAutotune, ServiceManager::OpenRc) => "stutter-autotune-bounded",
+            (Self::SystemBoundedAutotune, _) => "stutter-autotune-bounded@.service",
             (Self::Agent, ServiceManager::OpenRc) => "stutter-agent",
             (Self::SystemObserve | Self::UserObserve, ServiceManager::OpenRc) => {
                 "stutter-autotune-observe"
@@ -135,6 +139,12 @@ impl ServiceMode {
 
     pub fn packaged_unit_template(self, manager: ServiceManager) -> &'static str {
         match (self, manager) {
+            (Self::SystemBoundedAutotune, ServiceManager::OpenRc) => {
+                include_str!("../../../packaging/openrc/stutter-autotune-bounded")
+            }
+            (Self::SystemBoundedAutotune, _) => {
+                include_str!("../../../packaging/systemd/stutter-autotune-bounded@.service")
+            }
             (Self::Agent, ServiceManager::OpenRc) => OPENRC_AGENT_UNIT,
             (Self::SystemObserve | Self::UserObserve, ServiceManager::OpenRc) => {
                 OPENRC_AUTOTUNE_OBSERVE_UNIT
@@ -165,6 +175,7 @@ impl FromStr for ServiceMode {
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value.trim() {
+            "system-bounded-autotune" => Ok(Self::SystemBoundedAutotune),
             "agent" => Ok(Self::Agent),
             "user-observe" => Ok(Self::UserObserve),
             "system-observe" | "observe" => Ok(Self::SystemObserve),
@@ -178,6 +189,7 @@ impl FromStr for ServiceMode {
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 pub struct ServiceCommandRequest {
+    pub controller_user: Option<String>,
     pub action: ServiceAction,
     pub manager: ServiceManager,
     pub mode: ServiceMode,
@@ -191,6 +203,7 @@ pub struct ServiceCommandRequest {
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 pub struct ServicePlan {
+    pub controller_user: Option<String>,
     pub action: ServiceAction,
     pub manager: ServiceManager,
     pub mode: ServiceMode,

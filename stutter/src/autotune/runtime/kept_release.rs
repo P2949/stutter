@@ -20,6 +20,7 @@ impl AutotuneRuntime {
             daemon_policy: self.config.daemon_policy.clone(),
             controller_policy: self.controller.policy.clone(),
             simulate_action_effects: self.config.simulate_action_effects,
+            worker_only_mutation: self.config.daemon_config.autotune.worker_only_mutation,
             washout: self.config.washout.clone(),
             candidate_window_seconds: self.config.candidate_window_seconds,
             manual_restore_command: DAEMON_EMERGENCY_RESTORE_COMMAND,

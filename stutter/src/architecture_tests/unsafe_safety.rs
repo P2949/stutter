@@ -28,6 +28,7 @@ fn scanned_roots() -> Vec<PathBuf> {
         "stutter-core/src",
         "stutter-report/src",
         "xtask/src",
+        "shared",
     ]
     .into_iter()
     .map(|path| root.join(path))
@@ -332,6 +333,7 @@ fn all_non_ebpf_unsafe_has_local_safety_documentation() {
 fn production_unsafe_stays_inside_wrapper_modules() {
     let mut files = Vec::new();
     collect_rust_files(workspace_root().join("stutter/src"), &mut files);
+    collect_rust_files(workspace_root().join("shared"), &mut files);
     files.sort();
 
     let violations = files

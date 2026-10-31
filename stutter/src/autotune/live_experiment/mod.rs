@@ -2,6 +2,7 @@ mod acceptance;
 mod evidence;
 mod executor;
 mod journal;
+pub(crate) use journal::reserve_experiment_restore_path;
 mod kept_rollback;
 mod lifecycle;
 mod manager;

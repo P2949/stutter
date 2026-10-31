@@ -54,11 +54,53 @@ pub fn build_service_plan(request: ServiceCommandRequest) -> ServicePlan {
         }
     }
 
+    if request.mode == ServiceMode::SystemBoundedAutotune {
+        steps.retain(|step| {
+            !matches!(
+                step.description.as_str(),
+                "create persistent daemon state directory" | "create daemon log directory"
+            )
+        });
+        let worker_name = if request.manager == ServiceManager::OpenRc {
+            "stutter-privileged-worker"
+        } else {
+            "stutter-privileged-worker@.service"
+        };
+        steps.push(ServicePlanStep {
+            action: if request.action == ServiceAction::Uninstall {
+                "remove_unit"
+            } else {
+                "copy_unit"
+            },
+            path: unit_target.with_file_name(worker_name),
+            description:
+                "install/remove the embedded bounded privileged worker alongside the controller"
+                    .to_owned(),
+        });
+        if request.action != ServiceAction::Uninstall {
+            steps.push(ServicePlanStep {
+                action: "create_config_if_absent",
+                path: request.config_dir.join(format!("autotune-bounded-{}.toml", request.controller_user.as_deref().unwrap_or("USER"))),
+                description: "create worker-only configuration; preserve administrator changes on repeat installation".to_owned(),
+            });
+        }
+    }
+
     if request.mode == ServiceMode::UserObserve && request.manager != ServiceManager::SystemdUser {
         warnings.push(
             "user-observe is intended for systemd-user; this plan installs the observe unit with the requested manager"
                 .to_owned(),
         );
+    }
+    if request.mode == ServiceMode::SystemBoundedAutotune {
+        warnings.push("bounded service is Experimental until its packaged-service campaign passes; OpenRC remains unqualified".to_owned());
+        if let Some(user) = &request.controller_user {
+            let instance = unit_name.replace("@.service", &format!("@{user}.service"));
+            hints = vec![
+                request.manager.reload_hint().to_owned(),
+                enable_hint(request.manager, &instance),
+            ];
+        }
     }
     if request.mode == ServiceMode::SystemLowRisk {
         warnings.push(
@@ -68,6 +110,7 @@ pub fn build_service_plan(request: ServiceCommandRequest) -> ServicePlan {
     }
 
     ServicePlan {
+        controller_user: request.controller_user,
         action: request.action,
         manager: request.manager,
         mode: request.mode,
@@ -86,6 +129,9 @@ pub fn build_service_plan(request: ServiceCommandRequest) -> ServicePlan {
 }
 
 pub fn execute_service_plan(plan: &ServicePlan) -> anyhow::Result<()> {
+    if plan.mode == ServiceMode::SystemBoundedAutotune {
+        return super::bounded::execute(plan);
+    }
     if plan.dry_run || plan.action == ServiceAction::Doctor {
         return Ok(());
     }

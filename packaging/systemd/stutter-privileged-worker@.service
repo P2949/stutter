@@ -1,0 +1,23 @@
+[Unit]
+Description=Stutter bounded mutation worker for %i
+Before=stutter-autotune-bounded@%i.service
+
+[Service]
+Type=simple
+User=root
+Environment=STUTTER_SERVICE_CONFIG=@CONFIG_DIR@/autotune-bounded-%i.toml
+Environment=HOME=/var/lib/stutter/worker-%i
+ExecStart=@BINARY@ privileged-worker --socket /run/stutter-worker-%i/worker.sock --controller-user %i
+Restart=on-failure
+RestartSec=1
+StateDirectory=stutter/worker-%i
+StateDirectoryMode=0700
+RuntimeDirectory=stutter-worker-%i
+RuntimeDirectoryMode=0711
+UMask=0077
+NoNewPrivileges=true
+ProtectHome=read-only
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

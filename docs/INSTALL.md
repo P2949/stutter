@@ -339,3 +339,30 @@ The helpers must output a single JSON object with the foreground identity fields
 ```
 
 Window titles are still redacted unless foreground title capture is explicitly enabled. `stutter` intentionally does not use GNOME Shell `Eval`, KWin script injection, or a generic Wayland foreground scrape.
+
+## Bounded desktop-user service (Experimental)
+
+`service install --mode system-bounded-autotune --controller-user USER` installs the embedded
+controller and privileged-worker templates and creates `/etc/stutter/autotune-bounded-USER.toml`
+if absent. Use an absolute, installed `--binary` path. The binary and its ancestor directories
+must be root-owned and not writable by group or others, so a root worker cannot execute a
+desktop-user-writable build artifact. The selected account must exist and must
+not be root. `--manager systemd-user` is rejected; this is a system service for a monitored
+desktop user. A repeat install preserves administrator configuration.
+
+The systemd instance is `stutter-autotune-bounded@USER.service`, which requires
+`stutter-privileged-worker@USER.service`. The controller uses heuristic auto-focus, four observation
+capabilities, no mutation capabilities and `NoNewPrivileges=true`. All applies and restores use
+the worker's private UID-owned socket and the existing prepared transaction protocol. The worker
+loads its policy from root-owned configuration; client policy cannot broaden it. Administrators
+must configure the permitted game cgroup before cgroup placement can be eligible.
+
+Persist both `/var/lib/stutter/autotune-USER` (controller journal/kept ledger) and
+`/var/lib/stutter/worker-USER` (root-owned rollback snapshots) on ephemeral-root systems. Runtime
+sockets are recreated. Stopping the controller runs worker-mediated emergency recovery before
+the worker is stopped. Uninstall removes templates and preserves state/configuration.
+
+This mode has not yet passed its packaged-service graduation campaign and does not promote
+`always_on_autotune`. OpenRC templates remain Experimental and have no real OpenRC qualification;
+configure the same `stutter_controller_user` in both OpenRC service configuration files. Hybrid
+or compositor foreground access is outside the initial service contract.

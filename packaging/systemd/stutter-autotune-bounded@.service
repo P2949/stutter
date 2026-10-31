@@ -1,0 +1,30 @@
+[Unit]
+Description=Stutter bounded autotune controller for %i (qualification required)
+Requires=stutter-privileged-worker@%i.service
+After=stutter-privileged-worker@%i.service
+
+[Service]
+Type=simple
+User=%i
+Environment=HOME=/var/lib/stutter/autotune-%i
+Environment=STUTTER_SERVICE_WORKER_SOCKET=/run/stutter-worker-%i/worker.sock
+ExecStart=@BINARY@ autotune --config @CONFIG_DIR@/autotune-bounded-%i.toml --mode apply-medium-risk --allow-medium-risk --auto-focus --focus-source heuristic --preset diagnosis
+ExecStopPost=@BINARY@ daemon emergency-restore
+Restart=on-failure
+RestartSec=5
+StateDirectory=stutter/autotune-%i
+StateDirectoryMode=0700
+RuntimeDirectory=stutter-autotune-%i
+RuntimeDirectoryMode=0700
+LogsDirectory=stutter-autotune-%i
+LogsDirectoryMode=0700
+CapabilityBoundingSet=CAP_BPF CAP_PERFMON CAP_SYS_RESOURCE CAP_DAC_READ_SEARCH
+AmbientCapabilities=CAP_BPF CAP_PERFMON CAP_SYS_RESOURCE CAP_DAC_READ_SEARCH
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

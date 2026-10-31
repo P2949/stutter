@@ -1,10 +1,7 @@
 //! The only module with `unsafe`: thin, checked wrappers over Linux syscalls. Every function
 //! is async-signal-safe (plain syscalls, no allocation) so they can run between `fork` and
 //! `exec` in a `pre_exec` hook.
-use std::{
-    io,
-    os::{fd::AsRawFd, unix::net::UnixStream},
-};
+use std::io;
 
 const CAPABILITY_VERSION_3: u32 = 0x2008_0522;
 
@@ -38,39 +35,9 @@ fn check(result: libc::c_long) -> io::Result<libc::c_long> {
     }
 }
 
-/// Peer identity of a connected Unix socket, as reported by the kernel (`SO_PEERCRED`).
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct PeerCredentials {
-    pub pid: u32,
-    pub uid: u32,
-    pub gid: u32,
-}
-
-pub fn peer_credentials(stream: &UnixStream) -> io::Result<PeerCredentials> {
-    let mut credentials = libc::ucred {
-        pid: 0,
-        uid: 0,
-        gid: 0,
-    };
-    let mut length = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
-    // SAFETY: `credentials` and `length` are valid for writes of the sizes passed, the fd is
-    // owned by `stream` for the duration of the call, and SO_PEERCRED only fills a `ucred`.
-    let result = unsafe {
-        libc::getsockopt(
-            stream.as_raw_fd(),
-            libc::SOL_SOCKET,
-            libc::SO_PEERCRED,
-            std::ptr::addr_of_mut!(credentials).cast(),
-            &mut length,
-        )
-    };
-    check(libc::c_long::from(result))?;
-    Ok(PeerCredentials {
-        pid: credentials.pid as u32,
-        uid: credentials.uid,
-        gid: credentials.gid,
-    })
-}
+#[path = "../../shared/linux_peer/ffi.rs"]
+mod peer;
+pub use peer::{PeerCredentials, peer_credentials};
 
 pub fn set_no_new_privs() -> io::Result<()> {
     // SAFETY: prctl(PR_SET_NO_NEW_PRIVS, 1) takes no pointers.

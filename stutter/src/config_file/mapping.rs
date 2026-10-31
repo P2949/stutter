@@ -189,6 +189,13 @@ pub fn apply_daemon_user_config_overrides(
     {
         daemon_config.autotune.unsafe_in_process_privileged_worker = unsafe_in_process;
     }
+    if let Some(worker_only) = user_config
+        .autotune
+        .as_ref()
+        .and_then(|autotune| autotune.worker_only_mutation)
+    {
+        daemon_config.autotune.worker_only_mutation = worker_only;
+    }
     if let Some(manage_worker) = user_config
         .autotune
         .as_ref()

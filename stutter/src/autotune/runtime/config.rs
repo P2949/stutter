@@ -97,6 +97,19 @@ pub(crate) fn validate_runtime_config(
             message: "--dry-run-all-safe requires suggest mode".to_owned(),
         });
     }
+    if config.daemon_config.autotune.worker_only_mutation {
+        let autotune = &config.daemon_config.autotune;
+        if config.mode() != DaemonMode::ApplyMediumRisk
+            || config.simulate_action_effects
+            || autotune.unsafe_in_process_privileged_worker
+            || autotune.manage_privileged_worker
+            || autotune.privileged_worker_socket.is_none()
+        {
+            return Err(AutotuneRuntimeError::InvalidMode {
+                message: "worker-only mutation requires apply-medium-risk and an explicit external worker socket; simulation and in-process/managed workers are forbidden".to_owned(),
+            });
+        }
+    }
     Ok(())
 }
 

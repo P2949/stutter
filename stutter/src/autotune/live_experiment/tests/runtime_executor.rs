@@ -135,6 +135,7 @@ fn real_runtime_manager_applies_with_isolated_journal_and_startup_restores() {
             history_path: root.join("history.jsonl"),
             state_snapshot_path: root.join("daemon-state.json"),
             privileged_worker_socket: None,
+            worker_only_mutation: false,
         },
     )
     .unwrap();
@@ -338,4 +339,59 @@ fn a_failed_rollback_keeps_the_token_journalled_for_startup_recovery() {
         crate::autotune::controller_journal::ControllerJournalState::Applying
     );
     assert!(journal.rollback_token().is_some());
+}
+
+#[test]
+fn worker_only_low_risk_apply_never_falls_back_to_direct_execution() {
+    let root = crate::test_support::TestRoot::new("worker-only-low-risk");
+    let service = FakePrivilegedService::default();
+    let mut input = medium_input(root.join("controller.json"), Some(&service));
+    input.worker_only_mutation = true;
+    // A real affinity candidate targeting an intentionally nonexistent process. A direct path
+    // would fail at /proc; the injected worker must instead own both apply and rollback.
+    let candidate = CandidateAction::cpu_affinity_profile_for(
+        crate::profiles::Profile {
+            name: "worker-only".into(),
+            rules: vec![],
+        },
+        u32::MAX,
+        crate::autotune::objective::ObjectiveKind::GameRunnableLatency,
+    );
+    let observation = observation(1_000, 1_000_000_000);
+    let mut executor = RuntimeLiveExperimentActionExecutor;
+    let token = executor
+        .apply_candidate(&input, &candidate, "worker-only", &observation)
+        .unwrap();
+    assert_eq!(service.apply_calls(), 1);
+    assert_eq!(
+        crate::autotune::controller_journal::read_controller_journal(&root.join("controller.json"))
+            .unwrap()
+            .rollback_token(),
+        Some(&token)
+    );
+    input.privileged_action_service = None;
+    let error = executor
+        .apply_candidate(&input, &candidate, "worker-missing", &observation)
+        .unwrap_err();
+    assert!(format!("{error:#}").contains("privileged_worker_required"));
+}
+
+#[test]
+fn worker_only_low_risk_rollback_requires_the_worker() {
+    let root = crate::test_support::TestRoot::new("worker-only-rollback");
+    let service = FakePrivilegedService::default();
+    let mut input = medium_input(root.join("controller.json"), Some(&service));
+    input.worker_only_mutation = true;
+    let experiment = live_experiment();
+    let observation = observation(1_000, 1_000_000_000);
+    RuntimeLiveExperimentActionExecutor
+        .rollback_candidate(&input, &experiment, &observation)
+        .unwrap();
+    assert_eq!(*service.rollback_calls.lock().unwrap(), 1);
+    input.privileged_action_service = None;
+    assert!(
+        RuntimeLiveExperimentActionExecutor
+            .rollback_candidate(&input, &experiment, &observation)
+            .is_err()
+    );
 }

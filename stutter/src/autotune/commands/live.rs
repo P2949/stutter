@@ -96,6 +96,14 @@ fn runtime_config_for_command(
         daemon_config.autotune.candidate_window_seconds = input.duration_seconds.unwrap_or(30);
     }
 
+    // Installed service components select the worker boundary explicitly. Configuration cannot
+    // turn the service into an in-process mutator or spawn an unprivileged replacement worker.
+    if let Some(socket) = std::env::var_os("STUTTER_SERVICE_WORKER_SOCKET") {
+        daemon_config.autotune.worker_only_mutation = true;
+        daemon_config.autotune.manage_privileged_worker = false;
+        daemon_config.autotune.unsafe_in_process_privileged_worker = false;
+        daemon_config.autotune.privileged_worker_socket = Some(socket.into());
+    }
     let config = runtime::AutotuneRuntimeConfig::from_daemon_config(
         daemon_config,
         input.decision_log.clone(),
@@ -243,6 +251,7 @@ pub async fn autotune_command_with(
             .unsafe_in_process_privileged_worker = run.in_process_privileged;
     }
 
+    runtime::validate_runtime_config(&runtime_config)?;
     if matches!(mode, DaemonMode::ApplyLowRisk | DaemonMode::ApplyMediumRisk) {
         // Restore what a crashed controller left applied before planning anything new.
         crate::autotune::startup_recovery::recover_before_start(

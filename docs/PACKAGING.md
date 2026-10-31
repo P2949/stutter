@@ -213,3 +213,23 @@ The campaign unpacks the release tarball into a fresh directory and runs the pac
 `bin/stutter` (`--version`, `capabilities --json`, `doctor --json`, `restore --help`,
 `audit --help`, `validate` and `report --analysis-json` on the candidate's own observation
 recording) and checks `lib/stutter/stutter.bpf.o` against the release manifest.
+
+## Bounded autotune components
+
+The Experimental `system-bounded-autotune` installer embeds and installs both product components:
+`stutter-autotune-bounded@.service` and `stutter-privileged-worker@.service` on systemd, or their
+OpenRC equivalents. The supplied binary and configuration directory are rendered into the units;
+the desktop user is selected by the systemd instance or OpenRC configuration. The worker validates
+the account, owns its runtime directory, and transfers only its mode-0600 socket to the controller
+UID. It checks kernel peer credentials on every connection. Configuration and its ancestors must
+be root-owned and not writable by group or others. The unit is not a second operation registry.
+
+Service qualification must exercise these exact embedded templates. Neither template availability
+nor source tests count as service graduation. OpenRC remains unqualified until a real campaign
+passes on OpenRC. See [installation](INSTALL.md#bounded-desktop-user-service-experimental).
+
+The OpenRC controller uses the upstream [`capabilities` and `no_new_privs` service variables](https://github.com/OpenRC/openrc/blob/master/man/openrc-run.8)
+with the [`cap_iab` syntax documented by OpenRC](https://github.com/OpenRC/openrc/blob/master/service-script-guide.md)
+to request the four observation capabilities while changing to the desktop user. Its restore
+hook preserves the service HOME and worker socket when changing user. These are template
+properties; real OpenRC service behavior remains unqualified.

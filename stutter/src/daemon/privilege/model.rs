@@ -232,9 +232,16 @@ pub struct PrivilegedWorkerCandidatePlan {
 
 impl PrivilegedWorkerCandidatePlan {
     pub fn from_plan_request(request: &CandidatePlanRequest) -> Self {
+        let mut plan_file = CandidatePlanFile::from_candidate(&request.candidate, None);
+        // Preserve the public apply-profile CLI contract while carrying affinity over the same
+        // generic prepared worker protocol as every other service operation.
+        if let CandidateAction::CpuAffinityProfile { plan } = &request.candidate {
+            plan_file.executable = Some(crate::autotune::planning::executable_plan::CandidateExecutablePlan::CpuAffinityProfile { plan: plan.clone() });
+            plan_file.manual_only_reason = None;
+        }
         Self {
             schema_version: PRIVILEGED_WORKER_IPC_SCHEMA_VERSION,
-            plan_file: CandidatePlanFile::from_candidate(&request.candidate, None),
+            plan_file,
             descriptor: request.descriptor.clone(),
             objective: request.objective,
             operation: request.operation,

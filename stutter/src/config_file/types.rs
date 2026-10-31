@@ -89,6 +89,7 @@ pub struct AutotuneConfigFile {
     pub privileged_worker_socket: Option<PathBuf>,
     pub unsafe_in_process_privileged_worker: Option<bool>,
     pub manage_privileged_worker: Option<bool>,
+    pub worker_only_mutation: Option<bool>,
     pub privileged_worker_restart_limit: Option<u32>,
     pub privileged_worker_socket_ready_timeout_ms: Option<u64>,
     pub privileged_worker_socket_ready_retry_ms: Option<u64>,

@@ -93,3 +93,29 @@ fn dry_run_all_safe_runtime_config_requires_suggest_mode() {
 
     assert!(err.contains("--dry-run-all-safe requires suggest mode"));
 }
+
+#[test]
+fn worker_only_service_refuses_in_process_managed_missing_socket_and_wrong_mode() {
+    let mut config = AutotuneRuntimeConfig::apply_low_risk(None, None, None);
+    config.daemon_config.autotune.worker_only_mutation = true;
+    assert!(validate_runtime_config(&config).is_err());
+    config.daemon_config.mode = DaemonMode::ApplyMediumRisk;
+    config.daemon_config.autotune.manage_privileged_worker = false;
+    config.daemon_config.autotune.privileged_worker_socket =
+        Some("/run/private-worker.sock".into());
+    assert!(validate_runtime_config(&config).is_ok());
+    config
+        .daemon_config
+        .autotune
+        .unsafe_in_process_privileged_worker = true;
+    assert!(validate_runtime_config(&config).is_err());
+    config
+        .daemon_config
+        .autotune
+        .unsafe_in_process_privileged_worker = false;
+    config.daemon_config.autotune.manage_privileged_worker = true;
+    assert!(validate_runtime_config(&config).is_err());
+    config.daemon_config.autotune.manage_privileged_worker = false;
+    config.daemon_config.autotune.privileged_worker_socket = None;
+    assert!(validate_runtime_config(&config).is_err());
+}

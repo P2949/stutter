@@ -29,6 +29,22 @@ impl DaemonRestoreCommandOutcome {
 pub fn run_restore_command(
     input: crate::commands::input::DaemonRestoreCommandInput,
 ) -> anyhow::Result<()> {
+    // The bounded service owns only worker-created autotune tokens. Its stop hook must use
+    // the same worker boundary as startup and normal rollback, including the kept ledger.
+    if let Some(socket) = std::env::var_os("STUTTER_SERVICE_WORKER_SOCKET") {
+        anyhow::ensure!(
+            !input.dry_run,
+            "bounded service restore does not support dry-run"
+        );
+        crate::autotune::startup_recovery::recover_before_start(
+            crate::autotune::startup_recovery::StartupRecoveryConfig {
+                privileged_worker_socket: Some(socket.into()),
+                worker_only_mutation: true,
+                ..Default::default()
+            },
+        )?;
+        return Ok(());
+    }
     let outcome = run_restore_command_with_profile_paths(
         input,
         None,

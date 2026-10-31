@@ -37,6 +37,7 @@ pub struct StartupRecoveryConfig {
     pub state_snapshot_path: PathBuf,
     /// The privileged worker that restores tokens an ordinary user cannot (nice).
     pub privileged_worker_socket: Option<PathBuf>,
+    pub worker_only_mutation: bool,
 }
 
 impl Default for StartupRecoveryConfig {
@@ -48,6 +49,7 @@ impl Default for StartupRecoveryConfig {
             history_path: default_autotune_history_path(),
             state_snapshot_path: default_daemon_state_snapshot_path(),
             privileged_worker_socket: None,
+            worker_only_mutation: false,
         }
     }
 }
@@ -98,6 +100,7 @@ pub trait StartupRecoveryRollbackExecutor {
 #[derive(Default)]
 pub struct RealStartupRecoveryRollbackExecutor {
     pub privileged_worker_socket: Option<PathBuf>,
+    pub worker_only_mutation: bool,
 }
 
 impl StartupRecoveryRollbackExecutor for RealStartupRecoveryRollbackExecutor {
@@ -106,9 +109,14 @@ impl StartupRecoveryRollbackExecutor for RealStartupRecoveryRollbackExecutor {
         token: &RollbackToken,
     ) -> anyhow::Result<StartupRecoveryRollbackSummary> {
         crate::actions::rollback::recovery::require_automatic_recovery(token)?;
-        if privileged::needs_privileged_restore(token)
-            && let Some(socket) = &self.privileged_worker_socket
+        if self.worker_only_mutation
+            || privileged::needs_privileged_restore(token)
+                && self.privileged_worker_socket.is_some()
         {
+            let socket = self
+                .privileged_worker_socket
+                .as_ref()
+                .context("worker-only recovery requires a worker socket")?;
             let restored = privileged::restore_through_worker(socket, token)?;
             return Ok(StartupRecoveryRollbackSummary {
                 affected_tasks: restored,
@@ -179,6 +187,7 @@ pub fn recover_controller_journal_on_startup(
 ) -> anyhow::Result<StartupRecoveryOutcome> {
     let mut executor = RealStartupRecoveryRollbackExecutor {
         privileged_worker_socket: config.privileged_worker_socket.clone(),
+        worker_only_mutation: config.worker_only_mutation,
     };
     recover_controller_journal_with_executor(config, &mut executor)
 }
@@ -227,6 +236,7 @@ fn recover_journal_record<E: StartupRecoveryRollbackExecutor + ?Sized>(
                     action_id,
                     token,
                     RecoverySource::Journal,
+                    record.boot_id.as_deref(),
                 );
             }
             let reason =
@@ -267,6 +277,7 @@ fn recover_journal_record<E: StartupRecoveryRollbackExecutor + ?Sized>(
                     action_id,
                     rollback_token,
                     RecoverySource::Journal,
+                    record.boot_id.as_deref(),
                 )
             } else {
                 let reason = format!(
@@ -326,6 +337,7 @@ fn recover_applied_journal_record<E: StartupRecoveryRollbackExecutor + ?Sized>(
     action_id: ActionId,
     rollback_token: RollbackToken,
     source: RecoverySource,
+    boot_id: Option<&str>,
 ) -> anyhow::Result<StartupRecoveryOutcome> {
     let manual_restore_command = manual_restore_command_for_token(&rollback_token);
     let manual_restore_command = if manual_restore_command.trim().is_empty() {
@@ -369,8 +381,19 @@ fn recover_applied_journal_record<E: StartupRecoveryRollbackExecutor + ?Sized>(
     // Gate before dispatch, including custom executors. A manual registry entry
     // must never implicitly authorize automatic startup mutation.
     let rollback_result =
-        crate::actions::rollback::recovery::require_automatic_recovery(&rollback_token)
-            .and_then(|()| executor.rollback(&rollback_token));
+        crate::actions::rollback::recovery::require_automatic_recovery(&rollback_token).and_then(
+            |()| {
+                match boot::task_boot_superseded(&rollback_token, boot_id)? {
+        true => Ok(StartupRecoveryRollbackSummary {
+            affected_tasks: 0,
+            message:
+                "boot_superseded: task-scoped rollback retired without touching reused PIDs/TIDs"
+                    .to_owned(),
+        }),
+        false => executor.rollback(&rollback_token),
+    }
+            },
+        );
     match rollback_result {
         Ok(summary) => {
             // A ledger entry only clears the journal when the journal names the same token.
@@ -654,3 +677,5 @@ mod privileged;
 
 #[cfg(test)]
 mod tests;
+
+mod boot;

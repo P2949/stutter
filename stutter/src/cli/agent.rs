@@ -115,6 +115,9 @@ pub(super) struct AgentArgs {
 
 #[derive(Args, Debug, Clone)]
 pub(super) struct PrivilegedWorkerArgs {
+    /// Expected non-root controller account; enables the bounded service worker.
+    #[arg(long = "controller-user")]
+    pub(super) controller_user: Option<String>,
     #[arg(
         long = "socket",
         value_name = "PATH",

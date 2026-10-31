@@ -198,6 +198,7 @@ mod tests {
                 "stutter-core/src",
                 "stutter-report/src",
                 "xtask/src",
+                "shared",
             ]
         );
 

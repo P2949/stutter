@@ -37,6 +37,9 @@ pub struct DaemonAutotuneConfig {
     pub allow_gpu_power_in_autotune: bool,
     #[serde(default)]
     pub allow_vm_knobs_in_autotune: bool,
+    /// All apply and rollback paths must cross the worker in a bounded service.
+    #[serde(default)]
+    pub worker_only_mutation: bool,
     pub privileged_worker_socket: Option<PathBuf>,
     pub unsafe_in_process_privileged_worker: bool,
     #[serde(default = "default_manage_privileged_worker")]
@@ -67,6 +70,7 @@ impl Default for DaemonAutotuneConfig {
             allow_cpu_power_on_battery: false,
             allow_gpu_power_in_autotune: false,
             allow_vm_knobs_in_autotune: false,
+            worker_only_mutation: false,
             privileged_worker_socket: None,
             unsafe_in_process_privileged_worker: false,
             manage_privileged_worker: default_manage_privileged_worker(),
