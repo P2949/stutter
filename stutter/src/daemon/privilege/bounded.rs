@@ -3,7 +3,8 @@ use std::os::unix::fs::MetadataExt;
 
 use super::*;
 
-/// Resolve the explicitly monitored desktop account through the host's NSS database.
+/// Resolve the explicitly monitored desktop account from the local passwd database. No program is
+/// run: a systemd unit has no dependable `PATH`, and an unknown account is refused (fail closed).
 /// A service instance must never select root or interpret an account as command options.
 pub(crate) fn controller_uid(user: &str) -> anyhow::Result<u32> {
     anyhow::ensure!(
@@ -13,14 +14,23 @@ pub(crate) fn controller_uid(user: &str) -> anyhow::Result<u32> {
                 .all(|c| c.is_ascii_alphanumeric() || b"_-".contains(&c)),
         "invalid controller user"
     );
-    let output = Command::new("id").args(["-u", "--", user]).output()?;
-    anyhow::ensure!(output.status.success(), "unknown controller user {user:?}");
-    let uid: u32 = std::str::from_utf8(&output.stdout)?.trim().parse()?;
+    let uid = uid_in_passwd(&fs::read_to_string("/etc/passwd")?, user)
+        .with_context(|| format!("unknown controller user {user:?}"))?;
     anyhow::ensure!(
         uid != 0,
         "bounded controller must run as a non-root desktop user"
     );
     Ok(uid)
+}
+
+fn uid_in_passwd(passwd: &str, user: &str) -> Option<u32> {
+    passwd.lines().find_map(|line| {
+        let mut fields = line.split(':');
+        if fields.next()? != user {
+            return None;
+        }
+        fields.nth(1)?.parse().ok()
+    })
 }
 
 pub fn run_privileged_service_worker(
@@ -196,5 +206,13 @@ mod tests {
         );
         assert!(controller_uid("root").is_err());
         assert!(controller_uid("--help").is_err());
+    }
+
+    #[test]
+    fn the_controller_uid_comes_from_the_passwd_database_without_a_program() {
+        let passwd = "root:x:0:0::/root:/bin/sh\nalice:x:1000:100::/home/alice:/bin/sh\nbad:x:nan:1::/:/bin/sh\n";
+        assert_eq!(uid_in_passwd(passwd, "alice"), Some(1000));
+        assert_eq!(uid_in_passwd(passwd, "alic"), None);
+        assert_eq!(uid_in_passwd(passwd, "bad"), None);
     }
 }
