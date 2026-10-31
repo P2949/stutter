@@ -306,6 +306,7 @@ pub enum ServiceSignal {
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum BoundedServiceAction {
     InstallPinned,
+    UninstallPinned,
     Start,
     Stop,
     Restart,
@@ -314,7 +315,26 @@ pub enum BoundedServiceAction {
         signal: ServiceSignal,
     },
     RestartWorker,
+    /// One bounded suspend with a fixed RTC wake; no caller-selected command or duration.
+    SuspendResume,
+    PrepareFixture {
+        source_cpu: u32,
+        destination_cpu: u32,
+        operations: ServiceOperations,
+    },
+    AttachFixture {
+        pid: u32,
+        starttime_ticks: u64,
+    },
     Query,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ServiceOperations {
+    Affinity,
+    Cgroup,
+    Both,
 }
 
 /// Every request carries the identity it claims; none of it is trusted over the socket's

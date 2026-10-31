@@ -414,6 +414,7 @@ mod tests {
 
     fn measuring_event() -> AutotuneHistoryEvent {
         AutotuneHistoryEvent {
+            focus: None,
             schema_version: 1,
             unix_nanos: 118_000_000_000,
             controller_id: "controller-1".to_owned(),

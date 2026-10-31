@@ -140,6 +140,7 @@ impl AutotuneRuntime {
             history = history.with_scores(None, Some(score));
         }
 
+        history.focus = self.service_history_focus();
         append_autotune_history_event(&path, &history)?;
 
         self.append_followup_history_events(
@@ -234,7 +235,7 @@ impl AutotuneRuntime {
         &self,
         input: LifecycleHistoryEventInput<'_>,
     ) -> AutotuneHistoryEvent {
-        AutotuneHistoryEvent::new(AutotuneHistoryEventInput {
+        let mut event = AutotuneHistoryEvent::new(AutotuneHistoryEventInput {
             controller_id: self.config.controller_id.clone(),
             phase: history_phase(input.phase),
             mode: history_mode(input.context.mode),
@@ -272,6 +273,21 @@ impl AutotuneRuntime {
             input.context.score_after.clone(),
         )
         .with_objective_evidence(input.context.objective_evidence.clone())
-        .with_rollback_performed(input.rollback_performed)
+        .with_rollback_performed(input.rollback_performed);
+        event.focus = self.service_history_focus();
+        event
+    }
+
+    fn service_history_focus(&self) -> Option<crate::autotune::history::FocusQualification> {
+        if !self.config.daemon_config.autotune.worker_only_mutation {
+            return None;
+        }
+        self.latest_focus
+            .as_ref()
+            .map(|focus| crate::autotune::history::FocusQualification {
+                kind: focus.kind,
+                confidence: focus.confidence,
+                root_starttimes: focus.root_starttimes.clone(),
+            })
     }
 }

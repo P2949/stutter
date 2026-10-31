@@ -59,6 +59,7 @@ pub(super) fn target() -> TargetIdentity {
 
 pub(super) fn kept_event() -> AutotuneHistoryEvent {
     AutotuneHistoryEvent {
+        focus: None,
         schema_version: 1,
         unix_nanos: 1,
         controller_id: "controller-1".to_owned(),

@@ -1,0 +1,14 @@
+schema_version = 1
+manager = "systemd"
+focus_source = "heuristic"
+controller_mode = "apply-medium-risk"
+minimum_focus_confidence = 0.85
+
+[coverage]
+minimum_dwell_seconds = 28800
+maximum_dwell_seconds = 36000
+minimum_clean_cycles = 6
+minimum_dangerous_event_repetitions = 6
+minimum_real_reboots = 2
+minimum_keeps_per_operation = 3
+minimum_reverts_per_operation = 3

@@ -8,6 +8,7 @@ use super::*;
 pub(super) struct ServiceActionService {
     inner: InProcessPrivilegedActionService,
     ledger: PathBuf,
+    targets: super::service_targets::ServiceTargets,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -20,10 +21,11 @@ struct IssuedToken {
 }
 
 impl ServiceActionService {
-    pub(super) fn new(home: &Path) -> Self {
+    pub(super) fn new(home: &Path, uid: u32, cgroup: Option<PathBuf>) -> Self {
         Self {
             inner: InProcessPrivilegedActionService::default(),
             ledger: home.join("issued-tokens.json"),
+            targets: super::service_targets::ServiceTargets::new(uid, cgroup),
         }
     }
 
@@ -110,6 +112,8 @@ impl PrivilegedActionService for ServiceActionService {
         &self,
         request: CandidateApplyRequest,
     ) -> anyhow::Result<crate::autotune::planning::dry_run::CandidateDryRunRecord> {
+        super::service_targets::ServiceTargets::policy(&request.plan.candidate, &request.policy)?;
+        self.targets.candidate(&request.plan.candidate)?;
         self.inner.dry_run_candidate(request)
     }
     fn apply_candidate(&self, _: CandidateApplyRequest) -> anyhow::Result<ApplyResult> {
@@ -121,11 +125,15 @@ impl PrivilegedActionService for ServiceActionService {
         prepared: &mut PreparedHook<'_>,
     ) -> anyhow::Result<ApplyResult> {
         let plan = request.plan.clone();
+        super::service_targets::ServiceTargets::policy(&plan.candidate, &request.policy)?;
+        self.targets.candidate(&plan.candidate)?;
         self.inner.apply_candidate_prepared(request, &mut |token| {
             // Root's token and boot identity are durable before the controller gets a prepare
             // answer and before the first mutable write. A crash retains the authority to restore.
+            self.targets.prepared(&plan.candidate, token)?;
             self.record(token, &plan)?;
-            prepared(token)
+            prepared(token)?;
+            self.targets.prepared(&plan.candidate, token)
         })
     }
     fn rollback(&self, mut request: RollbackRequest) -> anyhow::Result<RollbackResult> {
@@ -210,7 +218,7 @@ mod tests {
     #[test]
     fn fabricated_token_is_refused_and_issued_restore_is_idempotent() {
         let root = crate::test_support::TestRoot::new("issued-service-token");
-        let service = ServiceActionService::new(&root.join("state"));
+        let service = ServiceActionService::new(&root.join("state"), 1000, None);
         let token = RollbackToken::CpuAffinityRestoreFile {
             path: root.join("restored-and-unlinked.json"),
             affected_tasks: 1,
@@ -237,5 +245,37 @@ mod tests {
             affected_tasks: 1,
         };
         assert!(service.rollback(request(forged)).is_err());
+    }
+
+    #[test]
+    fn another_accounts_target_is_rejected_before_snapshot_or_commit() {
+        use std::os::unix::fs::MetadataExt;
+        let root = crate::test_support::TestRoot::new("service-target-denied-before-prepare");
+        let actual_uid = fs::metadata("/proc/self").unwrap().uid();
+        let service = ServiceActionService::new(root.path(), actual_uid + 1, None);
+        let candidate = request(RollbackToken::CpuAffinityRestoreFile {
+            path: root.join("never-created.json"),
+            affected_tasks: 0,
+        })
+        .candidate;
+        let error = service
+            .apply_candidate_prepared(
+                CandidateApplyRequest {
+                    plan: CandidatePlanRequest::from_candidate(
+                        candidate,
+                        crate::audit::unix_nanos_now(),
+                    ),
+                    policy: crate::daemon_policy::DaemonPolicy::apply_medium_risk(
+                        crate::daemon_policy::ActionSource::Test,
+                    ),
+                    context: Default::default(),
+                    max_plan_age_nanos: 1_000_000_000,
+                },
+                &mut |_| panic!("a denied target must never reach the commit barrier"),
+            )
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("bounded_service_target_uid_denied"));
+        assert!(!service.ledger.exists());
+        assert!(!root.join("never-created.json").exists());
     }
 }

@@ -212,7 +212,12 @@ fn allowed_cpu() -> anyhow::Result<u32> {
         .context("no allowed CPU for disposable workload")
 }
 
-pub fn workload(seconds: u64, ready: &Path, descendants: bool) -> anyhow::Result<()> {
+pub fn workload(
+    seconds: u64,
+    ready: &Path,
+    descendants: bool,
+    interactive_root: bool,
+) -> anyhow::Result<()> {
     ensure!(
         (3..=600).contains(&seconds),
         "workload duration outside bound"
@@ -285,6 +290,13 @@ pub fn workload(seconds: u64, ready: &Path, descendants: bool) -> anyhow::Result
     )?;
     file.sync_all()?;
     fs::rename(temporary, ready)?;
+    // A real event-loop-style root, used by service discovery. Its own wakeups are visible to
+    // the production process scanner; no confidence or class is injected into the controller.
+    if interactive_root {
+        while Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
     let busy_iterations = busy
         .join()
         .map_err(|_| anyhow::anyhow!("busy workload panicked"))?;

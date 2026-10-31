@@ -2,7 +2,11 @@ pub fn run_privileged_worker_command(
     input: crate::commands::input::PrivilegedWorkerCommandInput,
 ) -> anyhow::Result<()> {
     match input.controller_user {
-        Some(user) => crate::daemon::privilege::run_privileged_service_worker(&input.socket, &user),
+        Some(user) => crate::daemon::privilege::run_privileged_service_worker(
+            &input.socket,
+            &user,
+            input.recover_only,
+        ),
         None => crate::daemon::privilege::run_privileged_worker(&input.socket),
     }
 }

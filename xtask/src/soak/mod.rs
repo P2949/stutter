@@ -5,12 +5,16 @@
 //! and reverted experiments and injected faults (controller crash and stop, worker death, workload
 //! death, suspend/resume), for a wall-clock budget. Everything it concludes is read back from what
 //! the controller itself wrote. Durable state lets it resume after a crash or a reboot.
+mod actors;
 mod coverage;
 mod evidence;
 mod history;
 mod plan;
 mod records;
 mod round;
+pub(crate) mod service;
+pub(crate) mod service_discovery;
+mod service_idle;
 mod stress;
 mod verify;
 mod world;
@@ -391,7 +395,7 @@ fn run_soak(root: &Path, dir: &Path) -> anyhow::Result<()> {
             break;
         }
     }
-    world.kill_worker();
+    world.kill_worker()?;
     if complete || stopped_early {
         state.finished = true;
         write_state(&dir, &state)?;

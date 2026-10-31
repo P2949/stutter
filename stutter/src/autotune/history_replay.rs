@@ -268,6 +268,7 @@ mod tests {
         reason: &str,
     ) -> AutotuneHistoryEvent {
         AutotuneHistoryEvent {
+            focus: None,
             schema_version: 1,
             unix_nanos: unix_seconds as u128 * 1_000_000_000,
             controller_id: "controller-1".to_owned(),

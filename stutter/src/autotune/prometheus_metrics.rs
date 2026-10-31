@@ -396,6 +396,7 @@ mod tests {
         rollback_performed: bool,
     ) -> AutotuneHistoryEvent {
         AutotuneHistoryEvent {
+            focus: None,
             schema_version: 1,
             unix_nanos,
             controller_id: "controller-1".to_owned(),

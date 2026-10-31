@@ -79,6 +79,13 @@ pub struct AutotuneDecisionSummary {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct FocusQualification {
+    pub kind: crate::focus::FocusGroupKind,
+    pub confidence: f32,
+    pub root_starttimes: std::collections::BTreeMap<u32, u64>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct AutotuneHistoryEvent {
     pub schema_version: u32,
     pub unix_nanos: u128,
@@ -86,6 +93,8 @@ pub struct AutotuneHistoryEvent {
     pub phase: ControllerPhase,
     pub mode: AutotuneMode,
     pub target: Option<TargetIdentity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub focus: Option<FocusQualification>,
     pub situation: SituationKind,
     pub observation_summary: ObservationSummary,
     pub decision: AutotuneDecisionSummary,
@@ -122,6 +131,7 @@ impl AutotuneHistoryEvent {
             phase: input.phase,
             mode: input.mode,
             target: input.target,
+            focus: None,
             situation: input.situation,
             observation_summary: input.observation_summary,
             decision: input.decision,

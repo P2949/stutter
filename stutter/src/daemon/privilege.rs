@@ -40,6 +40,7 @@ mod model;
 #[path = "../../../shared/linux_peer/ffi.rs"]
 mod peer;
 mod revalidate;
+mod service_targets;
 mod service_tokens;
 mod socket;
 mod worker;

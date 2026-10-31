@@ -14,7 +14,7 @@ use super::{
     history::{HistoryEvent, Tail, audit_events},
     plan::{Kind, Operations, Round, Timing},
     records::{EventRecord, RoundRecord, SessionRecord, unix_ms},
-    world::{Controller, Game, World, signal, wait_exit},
+    world::{Controller, Game, World, signal, wait_controller, wait_exit},
 };
 
 /// Set by SIGINT/SIGTERM on the soak process: finish nothing new, record the round as interrupted.
@@ -99,6 +99,7 @@ impl Ctx<'_> {
     }
 
     fn execute(&mut self) -> anyhow::Result<()> {
+        self.world.prepare_round(self.round.operations)?;
         if self.world.ensure_worker()? {
             self.event("worker_start", "privileged worker started");
         }
@@ -120,6 +121,12 @@ impl Ctx<'_> {
         let game = self.world.spawn_game(&self.dir, "game-1", game_seconds)?;
         self.event("game_start", format!("pid {}", game.child.pid()));
         let outcome = self.drive(game);
+        if let Some(service) = &self.world.service
+            && let Err(error) =
+                service.action(stutter_validation_runner::model::BoundedServiceAction::Stop)
+        {
+            self.violation(format!("service round cleanup failed: {error:#}"));
+        }
         // Whatever happened, leave nothing of this round running or applied.
         self.settle();
         outcome
@@ -161,14 +168,14 @@ impl Ctx<'_> {
             }
             Kind::WorkerKill => {
                 self.applied(&mut controller)?;
-                self.world.kill_worker();
+                self.world.kill_worker()?;
                 self.event("worker_kill", "kill -9 of the privileged worker");
                 std::thread::sleep(Duration::from_secs(3));
                 if self.world.ensure_worker()? {
                     self.event("worker_start", "privileged worker restarted");
                 }
                 if self.resolution(&mut controller)?.is_none()
-                    && controller.child.0.try_wait()?.is_some()
+                    && controller.child.try_wait()?.is_some()
                 {
                     // The controller faulted with the worker; the supervisor starts another.
                     self.end_session(controller, "faulted_with_worker");
@@ -191,7 +198,10 @@ impl Ctx<'_> {
                 signal(game.child.pid(), 9);
                 self.event("game_killed", "kill -9 of the workload mid-experiment");
                 let _ = wait_exit(&mut game.child, Duration::from_secs(10));
-                let status = wait_exit(&mut controller.child, Duration::from_secs(60))?;
+                if self.world.service.is_some() {
+                    return self.finish_service_workload(controller, "workload_killed");
+                }
+                let status = wait_controller(&mut controller.child, Duration::from_secs(60))?;
                 self.end_session(
                     controller,
                     if status.is_some() {
@@ -204,6 +214,27 @@ impl Ctx<'_> {
             }
             Kind::FocusSwap => {
                 self.experiment(&mut controller, &game)?;
+                if self.world.service.is_some() {
+                    signal(game.child.pid(), SIGTERM);
+                    let _ = wait_exit(&mut game.child, Duration::from_secs(10));
+                    self.event(
+                        "game_exit",
+                        "first target left while the same service stays alive",
+                    );
+                    self.service_idle(&mut controller)?;
+                    let mut second = self.world.spawn_game(
+                        &self.dir,
+                        "game-2",
+                        self.timing.resolve_timeout_s * 2 + 60,
+                    )?;
+                    self.event("game_start", format!("pid {}", second.child.pid()));
+                    self.event(
+                        "same_controller_focus_swap",
+                        format!("pid {}", controller.child.pid()),
+                    );
+                    self.experiment(&mut controller, &second)?;
+                    return self.end_workload(&mut second, controller, "workload_exit");
+                }
                 self.end_workload(&mut game, controller, "workload_exit")?;
                 let second = self.world.spawn_game(
                     &self.dir,
@@ -221,7 +252,7 @@ impl Ctx<'_> {
                 let deadline = Instant::now() + Duration::from_secs(self.timing.long_round_s);
                 let mut reaped = false;
                 while Instant::now() < deadline && !STOP.load(Ordering::SeqCst) {
-                    if controller.child.0.try_wait()?.is_some() {
+                    if controller.child.try_wait()?.is_some() {
                         break;
                     }
                     // The workload ends on its own at the end of the round; this process is its
@@ -237,7 +268,10 @@ impl Ctx<'_> {
                     return self.end_workload(&mut game, controller, "workload_exit");
                 }
                 self.event("game_exit", "the workload ran its course");
-                let status = wait_exit(&mut controller.child, Duration::from_secs(60))?;
+                if self.world.service.is_some() {
+                    return self.finish_service_workload(controller, "workload_exit");
+                }
+                let status = wait_controller(&mut controller.child, Duration::from_secs(60))?;
                 self.end_session(
                     controller,
                     if status.is_some() {
@@ -293,7 +327,7 @@ impl Ctx<'_> {
             if let Some(event) = self.take_matching(&matches) {
                 return Ok(Some(event));
             }
-            if controller.child.0.try_wait()?.is_some() || Instant::now() >= deadline {
+            if controller.child.try_wait()?.is_some() || Instant::now() >= deadline {
                 return Ok(self.take_matching(&matches));
             }
             std::thread::sleep(Duration::from_millis(200));
@@ -371,7 +405,9 @@ impl Ctx<'_> {
     }
 
     fn kill_controller(&mut self, controller: &mut Controller) {
-        signal(controller.child.pid(), 9);
+        if let Err(error) = controller.child.signal(9) {
+            self.violation(format!("controller kill failed: {error:#}"));
+        }
         self.event(
             "controller_kill9",
             "kill -9 of the controller mid-experiment",
@@ -379,7 +415,9 @@ impl Ctx<'_> {
     }
 
     fn stop_controller(&mut self, controller: &mut Controller) {
-        signal(controller.child.pid(), SIGINT);
+        if let Err(error) = controller.child.signal(SIGINT) {
+            self.violation(format!("controller stop failed: {error:#}"));
+        }
         self.event(
             "controller_sigint",
             "SIGINT of the controller mid-experiment",
@@ -388,15 +426,16 @@ impl Ctx<'_> {
 
     /// Record how a controller session ended (waiting for it to be gone first).
     fn end_session(&mut self, mut controller: Controller, ended_by: &str) {
-        let status = wait_exit(&mut controller.child, Duration::from_secs(45))
+        let status = wait_controller(&mut controller.child, Duration::from_secs(45))
             .ok()
             .flatten();
         if status.is_none() {
-            signal(controller.child.pid(), 9);
+            if let Err(error) = controller.child.signal(9) {
+                self.violation(format!("controller cleanup failed: {error:#}"));
+            }
             self.violation(format!("controller session {ended_by} did not exit in 45s"));
-            let _ = wait_exit(&mut controller.child, Duration::from_secs(10));
+            let _ = wait_controller(&mut controller.child, Duration::from_secs(10));
         }
-        use std::os::unix::process::ExitStatusExt;
         self.record.sessions.push(SessionRecord {
             start_unix_ms: controller.started_unix_ms,
             end_unix_ms: unix_ms(),
@@ -418,7 +457,10 @@ impl Ctx<'_> {
         // A launcher reaps its game; until this process does, the exited game is a zombie and
         // still looks alive to the controller.
         let _ = wait_exit(&mut game.child, Duration::from_secs(10));
-        let status = wait_exit(&mut controller.child, Duration::from_secs(60))?;
+        if self.world.service.is_some() {
+            return self.finish_service_workload(controller, ended_by);
+        }
+        let status = wait_controller(&mut controller.child, Duration::from_secs(60))?;
         let how = if status.is_some() {
             ended_by
         } else {
@@ -453,7 +495,53 @@ impl Ctx<'_> {
         }
     }
 
+    fn service_idle(&mut self, controller: &mut Controller) -> anyhow::Result<()> {
+        let report = super::service_idle::wait(self.world, controller)?;
+        fs::write(
+            self.dir.join(format!("idle-runtime-{}.json", unix_ms())),
+            serde_json::to_vec_pretty(&report)?,
+        )?;
+        self.event(
+            "service_idle_after_exit",
+            "same controller stayed alive; controller and root token ledgers settled",
+        );
+        Ok(())
+    }
+
+    fn finish_service_workload(
+        &mut self,
+        mut controller: Controller,
+        ended_by: &str,
+    ) -> anyhow::Result<()> {
+        self.service_idle(&mut controller)?;
+        self.world
+            .service
+            .as_ref()
+            .context("service binding missing")?
+            .action(stutter_validation_runner::model::BoundedServiceAction::Stop)?;
+        self.event(
+            "service_stop",
+            "deliberate round cleanup after verified live idle state",
+        );
+        self.end_session(controller, ended_by);
+        Ok(())
+    }
+
     fn suspend(&mut self) -> anyhow::Result<()> {
+        if let Some(service) = self.world.service.clone() {
+            self.event("suspend", "typed fixed service suspend with a 30s RTC wake");
+            let report = service
+                .action(stutter_validation_runner::model::BoundedServiceAction::SuspendResume)?;
+            fs::write(
+                self.dir.join("suspend-runtime.json"),
+                serde_json::to_vec_pretty(&report)?,
+            )?;
+            self.event(
+                "resume",
+                "kernel suspend success counter incremented in root receipt",
+            );
+            return Ok(());
+        }
         let stats = || {
             fs::read_to_string("/sys/power/suspend_stats/success")
                 .ok()

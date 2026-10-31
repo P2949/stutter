@@ -115,6 +115,9 @@ pub(super) struct AgentArgs {
 
 #[derive(Args, Debug, Clone)]
 pub(super) struct PrivilegedWorkerArgs {
+    /// Settle the bounded worker ledger without listening (service stop/restart hook).
+    #[arg(long, requires = "controller_user")]
+    pub(super) recover_only: bool,
     /// Expected non-root controller account; enables the bounded service worker.
     #[arg(long = "controller-user")]
     pub(super) controller_user: Option<String>,

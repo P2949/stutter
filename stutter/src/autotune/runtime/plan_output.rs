@@ -79,7 +79,7 @@ impl AutotuneRuntime {
             });
             return Ok(None);
         }
-        let result = planner.plan(PlannerInput {
+        let input = PlannerInput {
             observation: &observation,
             daemon_policy: &self.config.daemon_policy,
             capabilities: &observation.capabilities,
@@ -88,7 +88,23 @@ impl AutotuneRuntime {
             active_profile_state: Some(&self.controller.active_profile_state),
             workload_policy: &self.config.workload_policy,
             profiles: &self.config.profiles,
-        });
+        };
+        let result = if self.config.daemon_config.autotune.worker_only_mutation {
+            let service = super::tick::resolve_privileged_action_service(&self.config)?;
+            let service = service.as_service().ok_or_else(|| {
+                anyhow::anyhow!("worker-only planning requires the privileged worker")
+            })?;
+            planner.plan_with_dry_runner(
+                input,
+                &mut crate::autotune::planning::dry_run::WorkerCandidateDryRunner {
+                    service,
+                    policy: &self.config.daemon_policy,
+                    now_unix_nanos: observation.now_unix_nanos,
+                },
+            )
+        } else {
+            planner.plan(input)
+        };
         let selected = result.selected.clone();
         if self.config.dry_run_all_safe {
             self.prepare_runtime_phase_for_dry_run()?;

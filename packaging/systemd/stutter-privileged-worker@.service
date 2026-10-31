@@ -8,6 +8,7 @@ User=root
 Environment=STUTTER_SERVICE_CONFIG=@CONFIG_DIR@/autotune-bounded-%i.toml
 Environment=HOME=/var/lib/stutter/worker-%i
 ExecStart=@BINARY@ privileged-worker --socket /run/stutter-worker-%i/worker.sock --controller-user %i
+ExecStopPost=@BINARY@ privileged-worker --socket /run/stutter-worker-%i/worker.sock --controller-user %i --recover-only
 Restart=on-failure
 RestartSec=1
 StateDirectory=stutter/worker-%i

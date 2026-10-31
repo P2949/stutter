@@ -87,7 +87,7 @@ pub(super) fn controller_stop_stress(
         super::clear_leftovers();
         let (record, _) =
             round::run_round(&mut world, &dir, index, spec, plan::timing(Profile::Smoke));
-        world.kill_worker();
+        world.kill_worker()?;
         let problems = iteration_problems(&record);
         println!(
             "iteration {index}: {}",

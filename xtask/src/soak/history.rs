@@ -91,6 +91,20 @@ impl Tail {
 
     /// New complete lines since the last poll, as events.
     pub fn poll(&mut self) -> Vec<HistoryEvent> {
+        self.poll_lines()
+            .iter()
+            .filter_map(|line| parse_history_line(line))
+            .collect()
+    }
+
+    pub(super) fn poll_records(&mut self) -> Vec<Value> {
+        self.poll_lines()
+            .iter()
+            .filter_map(|line| serde_json::from_str(line).ok())
+            .collect()
+    }
+
+    fn poll_lines(&mut self) -> Vec<String> {
         let Ok(mut file) = fs::File::open(&self.path) else {
             return Vec::new();
         };
@@ -115,7 +129,7 @@ impl Tail {
         self.offset += complete as u64;
         String::from_utf8_lossy(&bytes[..complete])
             .lines()
-            .filter_map(parse_history_line)
+            .map(str::to_owned)
             .collect()
     }
 }

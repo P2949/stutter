@@ -45,6 +45,51 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Append a source-bound attempt without replacing retained evidence. Campaign controllers share
+/// this transition, while owning their own stage order and final qualification rules.
+pub fn append_task_attempt(
+    dir: &CampaignDir,
+    entry: &mut TaskState,
+    attempt: TaskAttempt,
+) -> anyhow::Result<()> {
+    ensure!(
+        attempt.number as usize == entry.attempts.len() + 1,
+        "attempt numbers are sequential; expected {}",
+        entry.attempts.len() + 1
+    );
+    // Immutable per-attempt record first, so campaign.json can always be rebuilt from it.
+    let attempt_path = dir
+        .attempt_dir(&entry.id, attempt.number)
+        .join("attempt.json");
+    let bytes = serde_json::to_vec_pretty(&attempt)?;
+    if attempt_path.exists() {
+        ensure!(
+            fs::read(&attempt_path)? == bytes,
+            "retained attempt differs; refusing to overwrite evidence"
+        );
+    } else {
+        write_atomic(&attempt_path, &bytes)?;
+    }
+    match &attempt.outcome {
+        AttemptOutcome::Passed => {
+            entry.status = TaskStatus::Passed;
+            entry.fingerprint = Some(attempt.fingerprint.clone());
+            entry.block = None;
+        }
+        AttemptOutcome::Failed { .. } => entry.status = TaskStatus::Failed,
+        AttemptOutcome::Blocked(reason) => {
+            entry.status = match reason.class {
+                super::model::FailureClass::BlockedPrivilege => TaskStatus::BlockedPrivilege,
+                _ => TaskStatus::BlockedResource,
+            };
+            entry.block = Some(reason.clone());
+        }
+        AttemptOutcome::WaitingForReboot => entry.status = TaskStatus::WaitingForReboot,
+    }
+    entry.attempts.push(attempt);
+    Ok(())
+}
+
 /// Layout of one campaign instance under `.llm-runs/validation/<campaign-id>/`.
 #[derive(Clone, Debug)]
 pub struct CampaignDir(pub PathBuf);
@@ -278,34 +323,7 @@ impl CampaignState {
             .tasks
             .get_mut(task)
             .with_context(|| format!("unknown task {task}"))?;
-        ensure!(
-            attempt.number as usize == entry.attempts.len() + 1,
-            "attempt numbers are sequential; expected {}",
-            entry.attempts.len() + 1
-        );
-        // Immutable per-attempt record first, so campaign.json can always be rebuilt from it.
-        write_atomic(
-            &dir.attempt_dir(task, attempt.number).join("attempt.json"),
-            &serde_json::to_vec_pretty(&attempt)?,
-        )?;
-        match &attempt.outcome {
-            AttemptOutcome::Passed => {
-                entry.status = TaskStatus::Passed;
-                entry.fingerprint = Some(attempt.fingerprint.clone());
-                entry.block = None;
-            }
-            AttemptOutcome::Failed { .. } => entry.status = TaskStatus::Failed,
-            AttemptOutcome::Blocked(reason) => {
-                entry.status = match reason.class {
-                    super::model::FailureClass::BlockedPrivilege => TaskStatus::BlockedPrivilege,
-                    _ => TaskStatus::BlockedResource,
-                };
-                entry.block = Some(reason.clone());
-            }
-            AttemptOutcome::WaitingForReboot => entry.status = TaskStatus::WaitingForReboot,
-        }
-        entry.attempts.push(attempt);
-        Ok(())
+        append_task_attempt(dir, entry, attempt)
     }
 
     /// Source changed: the campaign stops. Tasks bound to the failed commit and everything that

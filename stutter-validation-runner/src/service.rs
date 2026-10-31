@@ -20,6 +20,9 @@ use crate::{
     process::{stutter_path, verify_pinned},
 };
 
+mod fixture;
+mod ownership;
+
 const ROOT_PATH: &str = "/run/current-system/sw/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 fn failure(message: impl Into<String>) -> Denial {
     (ErrorCode::ExecutionFailed, message.into())
@@ -142,13 +145,29 @@ pub fn execute(auth: &Authorization, action: BoundedServiceAction) -> Result<Val
             "not a service campaign".to_owned(),
         ));
     }
-    verify_pinned(&stutter_path(auth), &auth.stutter_sha256)?;
     let passwd = fs::read_to_string("/etc/passwd").map_err(|error| failure(error.to_string()))?;
     let user = account_name(&passwd, auth.owner_uid, auth.owner_gid)?;
     let controller = unit_name(&user, ServiceComponent::Controller)?;
     let worker = unit_name(&user, ServiceComponent::Worker)?;
+    let mut action_evidence = Value::Null;
+    if !matches!(
+        action,
+        BoundedServiceAction::InstallPinned | BoundedServiceAction::Query
+    ) {
+        ownership::verify(auth, &user)?;
+    }
     match action {
         BoundedServiceAction::InstallPinned => {
+            verify_pinned(&stutter_path(auth), &auth.stutter_sha256)?;
+            if fixture::config_path(&user).exists()
+                || fixture::config_path(&user)
+                    .with_extension("profiles.toml")
+                    .exists()
+            {
+                return Err(failure(
+                    "existing bounded service configuration belongs to the administrator",
+                ));
+            }
             // Never replace an existing service owned by another campaign or administrator.
             for unit in [&controller, &worker] {
                 let loaded = systemctl(&["show", "--property=LoadState", "--value", unit])?;
@@ -182,6 +201,22 @@ pub fn execute(auth: &Authorization, action: BoundedServiceAction) -> Result<Val
                 )));
             }
             systemctl(&["daemon-reload"])?;
+            ownership::record(auth, &user)?;
+        }
+        BoundedServiceAction::UninstallPinned => {
+            systemctl(&["stop", &controller])?;
+            systemctl(&["stop", &worker])?;
+            let tokens = worker_tokens(&user);
+            if tokens["readable"] != true || tokens["outstanding"] != 0 {
+                return Err(failure(
+                    "preserve installed service until its root-issued tokens are settled",
+                ));
+            }
+            // Keep persistent product state, root code and the ownership receipt for audit.
+            for path in ownership::paths(&user) {
+                fs::remove_file(path).map_err(|error| failure(error.to_string()))?;
+            }
+            systemctl(&["daemon-reload"])?;
         }
         BoundedServiceAction::Start => {
             systemctl(&["start", &controller])?;
@@ -206,10 +241,110 @@ pub fn execute(auth: &Authorization, action: BoundedServiceAction) -> Result<Val
             systemctl(&["kill", "--kill-whom=main", signal, &unit])?;
         }
         BoundedServiceAction::Query => (),
+        BoundedServiceAction::SuspendResume => {
+            let successes = || -> Result<u64, Denial> {
+                fs::read_to_string("/sys/power/suspend_stats/success")
+                    .map_err(|error| failure(error.to_string()))?
+                    .trim()
+                    .parse()
+                    .map_err(|error: std::num::ParseIntError| failure(error.to_string()))
+            };
+            let before = successes()?;
+            let output = Command::new("rtcwake")
+                .args(["-m", "mem", "-s", "30"])
+                .env("PATH", ROOT_PATH)
+                .output()
+                .map_err(|error| failure(error.to_string()))?;
+            let after = successes()?;
+            if !output.status.success() || after <= before {
+                return Err(failure(
+                    "fixed suspend/resume did not increment the kernel success counter",
+                ));
+            }
+            action_evidence = json!({"suspend_success_before":before,"suspend_success_after":after,"rtc_wake_seconds":30});
+        }
+        BoundedServiceAction::PrepareFixture {
+            source_cpu,
+            destination_cpu,
+            operations,
+        } => {
+            fixture::prepare(auth, &user, source_cpu, destination_cpu, operations)?;
+        }
+        BoundedServiceAction::AttachFixture {
+            pid,
+            starttime_ticks,
+        } => {
+            fixture::attach(auth, &user, pid, starttime_ticks)?;
+        }
     }
-    let properties = "--property=ActiveState,SubState,MainPID,User,NoNewPrivileges,AmbientCapabilities,CapabilityBoundingSet,FragmentPath,ExecStart,ExecMainStartTimestampMonotonic";
-    Ok(json!({"controller_unit": controller, "worker_unit": worker,
-        "controller": systemctl(&["show", properties, &controller])?, "worker": systemctl(&["show", properties, &worker])?}))
+    let properties = "--property=ActiveState,SubState,MainPID,User,NoNewPrivileges,AmbientCapabilities,CapabilityBoundingSet,FragmentPath,ExecStart,ExecMainStartTimestampMonotonic,ExecMainStatus,ExecMainCode,Result,NRestarts,ControlGroup";
+    let controller_state = systemctl(&["show", properties, &controller])?;
+    let worker_state = systemctl(&["show", properties, &worker])?;
+    let socket = Path::new("/run").join(format!("stutter-worker-{user}/worker.sock"));
+    let socket_metadata = fs::symlink_metadata(&socket).ok().map(|metadata| {
+        use std::os::unix::fs::FileTypeExt;
+        json!({"uid": metadata.uid(), "mode": metadata.mode() & 0o777, "is_socket": metadata.file_type().is_socket()})
+    });
+    let tokens = worker_tokens(&user);
+    Ok(
+        json!({"controller_unit": controller, "worker_unit": worker, "action_evidence":action_evidence,
+        "controller_process": process_snapshot(&controller_state), "worker_process": process_snapshot(&worker_state),
+        "controller": controller_state, "worker": worker_state, "socket": socket_metadata,
+        "worker_tokens": tokens, "boot_id": stutter_core::boot::current_boot_id().map_err(|error| failure(error.to_string()))?}),
+    )
+}
+
+fn worker_tokens(user: &str) -> Value {
+    let ledger = Path::new("/var/lib/stutter").join(format!("worker-{user}/issued-tokens.json"));
+    match fs::read(&ledger) {
+        Ok(bytes) => match serde_json::from_slice::<Value>(&bytes) {
+            Ok(Value::Array(entries)) => {
+                json!({"readable": true, "outstanding": entries.iter().filter(|entry| entry["restored"] != true).count()})
+            }
+            _ => json!({"readable": false, "error": "worker ledger is malformed"}),
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            json!({"readable": true, "outstanding": 0})
+        }
+        Err(error) => json!({"readable": false, "error": error.to_string()}),
+    }
+}
+
+fn process_snapshot(properties: &str) -> Value {
+    let pid = properties
+        .lines()
+        .find_map(|line| line.strip_prefix("MainPID="))
+        .and_then(|pid| pid.parse::<u32>().ok())
+        .filter(|pid| *pid > 0);
+    let Some(pid) = pid else {
+        return Value::Null;
+    };
+    let proc = Path::new("/proc").join(pid.to_string());
+    let ticks = || {
+        fs::read_to_string(proc.join("stat")).ok().and_then(|stat| {
+            stat.rsplit_once(") ")
+                .and_then(|(_, fields)| fields.split_whitespace().nth(19))
+                .and_then(|field| field.parse::<u64>().ok())
+        })
+    };
+    let before = ticks();
+    let status = fs::read_to_string(proc.join("status")).ok();
+    let binary = fs::read(proc.join("exe"))
+        .ok()
+        .map(|bytes| sha256_hex(&bytes));
+    let after = ticks();
+    let fields: std::collections::BTreeMap<_, _> = status
+        .as_deref()
+        .unwrap_or("")
+        .lines()
+        .filter_map(|line| {
+            let (key, value) = line.split_once(':')?;
+            ["Uid", "Gid", "CapEff", "CapBnd", "CapAmb", "NoNewPrivs"]
+                .contains(&key)
+                .then(|| (key.to_owned(), value.trim().to_owned()))
+        })
+        .collect();
+    json!({"pid": pid, "starttime_ticks": before, "consistent": before.is_some() && before == after, "binary_sha256": binary, "status": fields})
 }
 
 #[cfg(test)]

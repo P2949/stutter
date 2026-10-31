@@ -13,3 +13,7 @@ start_pre() {
     checkpath --directory --mode 0711 --owner root "/run/stutter-worker-${stutter_controller_user}"
     checkpath --directory --mode 0700 --owner root "${HOME}"
 }
+
+stop_post() {
+    "${command}" privileged-worker --socket "/run/stutter-worker-${stutter_controller_user}/worker.sock" --controller-user "${stutter_controller_user}" --recover-only
+}

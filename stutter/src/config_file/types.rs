@@ -82,6 +82,10 @@ pub struct UserConfigFile {
 
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct AutotuneConfigFile {
+    pub profiles: Option<PathBuf>,
+    /// Optional root-worker restriction. It only withholds mutation outside this cgroup;
+    /// it does not grant operations or bypass autonomous eligibility.
+    pub validation_workload_cgroup: Option<PathBuf>,
     pub allow_medium_risk_apply: Option<bool>,
     pub allow_cpu_power_on_battery: Option<bool>,
     pub allow_gpu_power_in_autotune: Option<bool>,

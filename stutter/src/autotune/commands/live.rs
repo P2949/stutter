@@ -177,9 +177,18 @@ pub fn autotune_command_blocking(
 
 /// The live controller with optional validation-campaign settings.
 pub async fn autotune_command_with(
-    input: AutotuneCommandInput,
+    mut input: AutotuneCommandInput,
     validation: Option<ValidationRun>,
 ) -> anyhow::Result<()> {
+    if input.profiles.is_none() {
+        let config = match input.config.as_deref() {
+            Some(path) => Some(crate::config_file::load_user_config_at(path)?),
+            None => crate::config_file::load_user_config()?,
+        };
+        input.profiles = config
+            .and_then(|config| config.autotune)
+            .and_then(|config| config.profiles);
+    }
     let mode = input.mode;
     ensure_supported_live_autotune_mode(mode, input.allow_medium_risk, input.dry_run_all_safe)?;
 

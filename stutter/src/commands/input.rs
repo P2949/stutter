@@ -263,6 +263,7 @@ pub struct AutotuneStatusCommandInput {
 
 #[derive(Debug)]
 pub struct PrivilegedWorkerCommandInput {
+    pub recover_only: bool,
     pub controller_user: Option<String>,
     pub socket: PathBuf,
 }

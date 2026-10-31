@@ -48,10 +48,13 @@ pub(super) struct World {
     /// Short: unix socket paths are limited to about 100 bytes.
     pub(super) socket: PathBuf,
     pub(super) worker: Option<OwnedChild>,
+    pub(super) service: Option<super::service::Binding>,
 }
 
+pub(super) use super::actors::{Contention, ControllerProcess, wait_controller};
+
 pub(super) struct Controller {
-    pub(super) child: OwnedChild,
+    pub(super) child: ControllerProcess,
     pub(super) started_unix_ms: u64,
 }
 
@@ -86,11 +89,31 @@ impl World {
             cpus,
             socket,
             worker: None,
+            service: None,
         })
     }
 
+    pub(super) fn prepare_round(&self, operations: Operations) -> anyhow::Result<()> {
+        if let Some(service) = &self.service {
+            service.prepare(self.cpus, operations)?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn bind_service(&mut self, binding: super::service::Binding) -> anyhow::Result<()> {
+        // An active game-scope-labelled root supplies a strong runtime identity. A plain
+        // Steam-path-only process is separately tested as a low-confidence negative case.
+        self.game = self.game.with_file_name("gamescope");
+        fs::copy(&self.xtask, &self.game)?;
+        self.service = Some(binding);
+        Ok(())
+    }
+
     pub(super) fn state_dir(&self) -> PathBuf {
-        self.dir.join("home/.local/state/stutter")
+        self.service
+            .as_ref()
+            .map_or_else(|| self.dir.join("home"), super::service::Binding::home)
+            .join(".local/state/stutter")
     }
 
     pub(super) fn autotune_dir(&self) -> PathBuf {
@@ -116,6 +139,14 @@ impl World {
     /// The administrator's game cgroup: a sibling of the leaf this process runs in, with its own
     /// CPU (the quiet one).
     pub(super) fn game_cgroup(&self) -> anyhow::Result<PathBuf> {
+        if let Some(service) = &self.service {
+            return Ok(Path::new("/")
+                .join(format!(
+                    "stutter-validation-{}",
+                    service.campaign.campaign_id
+                ))
+                .join("target"));
+        }
         let text = fs::read_to_string("/proc/self/cgroup")?;
         let own = text
             .lines()
@@ -129,6 +160,9 @@ impl World {
     }
 
     pub(super) fn prepare_game_cgroup(&self) -> anyhow::Result<()> {
+        if self.service.is_some() {
+            return Ok(());
+        }
         let relative = self.game_cgroup()?;
         let dir = Path::new("/sys/fs/cgroup").join(relative.strip_prefix("/")?);
         fs::create_dir_all(&dir)?;
@@ -157,6 +191,17 @@ impl World {
     }
 
     pub(super) fn ensure_worker(&mut self) -> anyhow::Result<bool> {
+        if let Some(service) = &self.service {
+            let report =
+                service.action(stutter_validation_runner::model::BoundedServiceAction::Query)?;
+            if report["worker_process"].is_null() {
+                service.action(
+                    stutter_validation_runner::model::BoundedServiceAction::RestartWorker,
+                )?;
+                return Ok(true);
+            }
+            return Ok(false);
+        }
         if let Some(worker) = self.worker.as_mut()
             && worker.0.try_wait()?.is_none()
             && self.socket.exists()
@@ -186,21 +231,33 @@ impl World {
         Ok(true)
     }
 
-    pub(super) fn kill_worker(&mut self) {
+    pub(super) fn kill_worker(&mut self) -> anyhow::Result<()> {
+        if let Some(service) = &self.service {
+            use stutter_validation_runner::model::{
+                BoundedServiceAction, ServiceComponent, ServiceSignal,
+            };
+            service.action(BoundedServiceAction::Signal {
+                component: ServiceComponent::Worker,
+                signal: ServiceSignal::Kill,
+            })?;
+        }
         self.worker = None;
+        Ok(())
     }
 
     pub(super) fn spawn_game(&self, dir: &Path, name: &str, seconds: u64) -> anyhow::Result<Game> {
         let ready = dir.join(format!("{name}.ready"));
-        let child = Command::new("taskset")
+        let mut command = Command::new("taskset");
+        command
             .args(["-c", &self.cpus.0.to_string()])
-            .arg(&self.game)
-            .args([
-                "live-workload",
-                "--seconds",
-                &seconds.to_string(),
-                "--ready",
-            ])
+            .arg(&self.game);
+        if self.service.is_some() {
+            command.args(["live-workload", "--interactive-root"]);
+        } else {
+            command.arg("live-workload");
+        }
+        let child = command
+            .args(["--seconds", &seconds.to_string(), "--ready"])
             .arg(&ready)
             .current_dir(&self.root)
             .stdout(Stdio::null())
@@ -219,6 +276,9 @@ impl World {
             std::thread::sleep(Duration::from_millis(20));
         }
         let ticks = start_ticks(game.pid())?;
+        if let Some(service) = &self.service {
+            service.attach(game.pid(), ticks)?;
+        }
         Ok(Game { child: game, ticks })
     }
 
@@ -228,9 +288,14 @@ impl World {
         cpu: u32,
         burst_ms: u64,
         seconds: u64,
-    ) -> anyhow::Result<Option<OwnedChild>> {
+    ) -> anyhow::Result<Option<Contention>> {
         if burst_ms == 0 {
             return Ok(None);
+        }
+        if let Some(service) = &self.service {
+            return Ok(Some(Contention::Service {
+                _guard: service.burst(cpu, burst_ms, seconds)?,
+            }));
         }
         let child = Command::new("chrt")
             .args(["-f", "50", "taskset", "-c", &cpu.to_string()])
@@ -248,7 +313,9 @@ impl World {
             .stderr(Stdio::null())
             .spawn()
             .context("start the contention")?;
-        Ok(Some(OwnedChild(child)))
+        Ok(Some(Contention::Direct {
+            _guard: OwnedChild(child),
+        }))
     }
 
     /// The round's config: the administrator's game cgroup, the families the controller may
@@ -297,6 +364,12 @@ impl World {
         operations: Operations,
         timing: Timing,
     ) -> anyhow::Result<Controller> {
+        if let Some(service) = &self.service {
+            return Ok(Controller {
+                child: ControllerProcess::Service(Box::new(service.start()?)),
+                started_unix_ms: super::records::unix_ms(),
+            });
+        }
         let config = self.write_config(dir, operations)?;
         let mut command = Command::new(&self.stutter);
         command
@@ -323,7 +396,7 @@ impl World {
             .spawn()
             .context("start the controller")?;
         Ok(Controller {
-            child: OwnedChild(child),
+            child: ControllerProcess::Direct(OwnedChild(child)),
             started_unix_ms: super::records::unix_ms(),
         })
     }

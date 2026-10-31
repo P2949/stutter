@@ -138,7 +138,7 @@ fn revalidate_task_identity(
     Ok(())
 }
 
-fn candidate_task_identities(candidate: &CandidateAction) -> Vec<TaskIdentity> {
+pub(super) fn candidate_task_identities(candidate: &CandidateAction) -> Vec<TaskIdentity> {
     match candidate {
         CandidateAction::Nice { plan } => plan.action.targets.clone(),
         CandidateAction::IoPrio { plan } => plan.action.targets.clone(),

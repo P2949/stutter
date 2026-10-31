@@ -23,7 +23,11 @@ pub(crate) fn controller_uid(user: &str) -> anyhow::Result<u32> {
     Ok(uid)
 }
 
-pub fn run_privileged_service_worker(socket_path: &Path, user: &str) -> anyhow::Result<()> {
+pub fn run_privileged_service_worker(
+    socket_path: &Path,
+    user: &str,
+    recover_only: bool,
+) -> anyhow::Result<()> {
     let uid = controller_uid(user)?;
     let config_path = std::env::var_os("STUTTER_SERVICE_CONFIG")
         .map(PathBuf::from)
@@ -55,8 +59,16 @@ pub fn run_privileged_service_worker(socket_path: &Path, user: &str) -> anyhow::
         &std::env::var_os("HOME")
             .map(PathBuf::from)
             .context("service worker requires its private state HOME")?,
+        uid,
+        user_config
+            .autotune
+            .as_ref()
+            .and_then(|config| config.validation_workload_cgroup.clone()),
     );
     service.recover_issued(&policy)?;
+    if recover_only {
+        return Ok(());
+    }
     super::worker::run_worker(socket_path, &service, Some((uid, policy)))
 }
 

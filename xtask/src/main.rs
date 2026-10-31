@@ -32,6 +32,7 @@ pub mod release_package;
 pub mod score_evaluation;
 pub mod score_matrix;
 pub mod score_target;
+pub mod service_campaign;
 pub mod soak;
 pub mod validation_campaign;
 pub mod workflow;
@@ -79,6 +80,8 @@ pub enum XtaskCommand {
     },
     #[command(hide = true)]
     LiveWorkload {
+        #[arg(long)]
+        interactive_root: bool,
         #[arg(long)]
         descendants: bool,
         #[arg(long)]
@@ -144,6 +147,8 @@ pub enum XtaskCommand {
     DiagnosisStudy(diagnosis_study::StudyArgs),
     /// Generic mutation-graduation campaign (init/status/continue/verify/report/cancel).
     MutationCampaign(mutation_campaign::MutationArgs),
+    /// Qualify the pinned bounded systemd service with resumable local evidence.
+    ServiceCampaign(service_campaign::Args),
     #[command(
         name = "score-matrix",
         about = "Drive the StutterScore workload-matrix evidence study (init, status, continue, report)"
@@ -436,10 +441,11 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
             seconds,
         } => live_acceptance::burst(burst_ms, period_ms, seconds),
         XtaskCommand::LiveWorkload {
+            interactive_root,
             seconds,
             ready,
             descendants,
-        } => live_acceptance::workload(seconds, &ready, descendants),
+        } => live_acceptance::workload(seconds, &ready, descendants, interactive_root),
         XtaskCommand::ReleasePackage(args) => release_package::package_release(&root, &args),
         XtaskCommand::ReleaseVerify(args) => release_package::verify_release(&args),
         XtaskCommand::ReleaseInstallSmoke(args) => release_package::install_smoke(&args),
@@ -447,6 +453,7 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
         XtaskCommand::ValidationCampaign(args) => validation_campaign::run(&root, args),
         XtaskCommand::DiagnosisStudy(args) => diagnosis_study::run(&root, args),
         XtaskCommand::MutationCampaign(args) => mutation_campaign::run(&root, args),
+        XtaskCommand::ServiceCampaign(args) => service_campaign::run(&root, args),
         XtaskCommand::ScoreMatrix(args) => score_matrix::run(&root, args),
         XtaskCommand::Soak(args) => soak::run(&root, args),
         XtaskCommand::KernelMatrix { require } => kernel_matrix::run(&root, require),
