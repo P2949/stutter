@@ -184,6 +184,12 @@ pub(crate) fn run(state: &State, dir: &Path) -> anyhow::Result<Value> {
         probe.wait(&mut controller, 30, |row| focus_matches(row, &first))?;
         cases.push(json!({"scenario":"single_game_stabilizes","pid":first.child.pid(),"starttime_ticks":first.ticks}));
         let mut second = world.spawn_game(dir, "second-game", 60)?;
+        let groups =
+            json!({"first":live_group(first.child.pid()),"second":live_group(second.child.pid())});
+        fs::write(
+            dir.join("two-game-groups.json"),
+            serde_json::to_vec_pretty(&groups)?,
+        )?;
         probe.wait(&mut controller, 15, |row| {
             row["target"].is_null()
                 && row["reason"]
