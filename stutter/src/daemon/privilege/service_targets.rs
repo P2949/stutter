@@ -6,7 +6,10 @@ use std::{
 
 use anyhow::{Context, ensure};
 
-use crate::{actions::RollbackToken, autotune::planning::candidate::CandidateAction};
+use crate::{
+    actions::RollbackToken, autotune::planning::candidate::CandidateAction,
+    daemon::privilege::error::PrivilegedWorkerError,
+};
 
 #[derive(Debug)]
 pub(super) struct ServiceTargets {
@@ -76,7 +79,11 @@ impl ServiceTargets {
                 }
             }
             // Other operation families require their own registry-qualified resource boundary.
-            _ => anyhow::bail!("bounded_service_target_boundary_unimplemented"),
+            _ => {
+                return Err(
+                    PrivilegedWorkerError::BoundedServiceTargetBoundaryUnimplemented.into(),
+                );
+            }
         }
         Ok(())
     }

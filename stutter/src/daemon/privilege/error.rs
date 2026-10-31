@@ -132,6 +132,11 @@ pub enum PrivilegedWorkerError {
         "privileged_commit_expired: no commit frame arrived within {timeout_ms} ms of the prepare"
     )]
     CommitExpired { timeout_ms: u128 },
+
+    #[error(
+        "bounded_service_target_boundary_unimplemented: this operation family has no registry-qualified service resource boundary"
+    )]
+    BoundedServiceTargetBoundaryUnimplemented,
 }
 
 impl PrivilegedWorkerError {
@@ -140,6 +145,9 @@ impl PrivilegedWorkerError {
             Self::ServiceTokenAlreadyOutstanding => "service_token_already_outstanding",
             Self::ServiceRollbackTokenNotIssued => "service_rollback_token_not_issued",
             Self::BoundedServiceRequiresPrepared => "bounded_service_requires_prepared_transaction",
+            Self::BoundedServiceTargetBoundaryUnimplemented => {
+                "bounded_service_target_boundary_unimplemented"
+            }
             Self::StaleCandidatePlan { .. } => "stale_candidate_plan",
             Self::InvalidActionDescriptor { .. } => "privileged_worker_invalid_action_descriptor",
             Self::CandidatePlanDescriptorMismatch => "candidate_plan_descriptor_mismatch",
