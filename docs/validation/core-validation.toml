@@ -4,6 +4,7 @@
 schema_version = 1
 name = "core-validation"
 
+# Historical release identity of the original Core Validation campaign.
 [release]
 version = "0.1.0"
 tag = "v0.1.0"
@@ -36,6 +37,8 @@ default_attempts = 2
 # Only tasks the graph marks optional may be listed; none are today.
 skip_tasks = []
 
+# Current conservative repository capability policy, consumed by CapabilityPolicyRunner.
+# Later evidence-backed graduations remain in this policy, independent of [release].
 [policy.capabilities]
 supported = [
     "doctor",

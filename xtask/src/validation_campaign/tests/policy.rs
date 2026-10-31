@@ -114,7 +114,7 @@ fn the_documentation_block_is_replaced_in_place_never_duplicated() {
     let once = replace_marked("# Doc\n\ntext\n", &section);
     let twice = replace_marked(&once, &section);
     assert_eq!(once, twice);
-    assert_eq!(twice.matches("v0.1.0 tier policy").count(), 1);
+    assert_eq!(twice.matches("Current capability tier policy").count(), 1);
     let changed = replace_marked(&once, &policy_section(&ids(&["z"]), &[], &[]));
     assert!(changed.contains("`z`") && !changed.contains("`a`"));
 }
@@ -262,7 +262,7 @@ fn a_satisfied_campaign_applies_the_registry_docs_and_ledger_in_one_local_landin
     assert!(
         fs::read_to_string(scratch.path().join("docs/CAPABILITIES.md"))
             .unwrap()
-            .contains("v0.1.0 tier policy")
+            .contains("Current capability tier policy")
     );
     assert!(
         fs::read_to_string(scratch.path().join("docs/CORE_VALIDATION_STATUS.md"))

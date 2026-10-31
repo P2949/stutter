@@ -89,8 +89,8 @@ commit, a missing required suite and a capture supplied twice. The committed
 `docs/evidence/index.json` is the historical catalogue and never satisfies this gate: evidence
 for commit X cannot be committed into X, so the bundles stay outside the release commit.
 
-Tag `v0.1.0` only on the exact commit that passed fresh-checkout and real-system
-acceptance; do not validate one commit and tag another.
+Tag the intended release version only on the exact commit that passed the required
+exact-release acceptance; do not validate one commit and tag another.
 
 ## Publication (authoritative sequence)
 

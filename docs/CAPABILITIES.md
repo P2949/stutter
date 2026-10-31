@@ -59,9 +59,9 @@ Mutating capabilities require at least `live_recovery` and `live_suspend_resume`
 with the evidence-index entries that justify it.
 
 <!-- campaign-policy:start -->
-## v0.1.0 tier policy
+## Current capability tier policy
 
-The validation campaign applies one fixed, conservative policy once live observation, game-runnable, kernel, overhead, corpus, calibration and score evidence all verify:
+Core Validation established the baseline. This block records the repository's current conservative capability tier policy. Later Supported capabilities require their own evidence-backed graduation:
 
 - **Supported:** `doctor`, `record`, `bench`, `report`, `audit`, `completions_and_man`, `cpu_affinity_experiment`, `cgroup_placement_experiment`, `bounded_autotune_controller`
 - **Experimental:** `diagnose`, `advisor`, `tune_evaluation`, `restore`, `uclamp_experiment`, `nice_experiment`, `ioprio_experiment`, `cpu_power_epp`, `cpu_power_governor`, `gpu_power_profile`, `gpu_force_performance`, `vm_swappiness`, `vm_dirty_background_ratio`, `vm_dirty_ratio`, `irq_affinity_known_device`, `irq_affinity_storage_or_unknown`, `always_on_autotune`, `remote_agent_mutation`
