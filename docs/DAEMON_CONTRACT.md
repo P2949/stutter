@@ -26,7 +26,7 @@ Suggestion output must include:
 - `rollback=stutter restore`;
 - a dry-run command.
 
-A manual apply command may be printed only when a `DaemonPolicy` for `ActionSource::Cli` would allow the candidate descriptor. High-risk candidates must not print direct manual apply commands until high-risk CLI unlock and documentation exist. CPU-affinity-profile suggestions may use `stutter apply-profile ...`; generic candidate suggestions must use stable candidate plan files under `$HOME/.local/state/stutter/autotune/candidate_plans/<action_kind>-<candidate_name>.json` and expose `stutter autotune apply-candidate --candidate-json <file> --dry-run`. IRQ, CPU-power, GPU-power, and VM-knob candidates are dry-run/manual-investigation only until high-risk manual apply is explicitly supported.
+A manual apply command may be printed only when a `DaemonPolicy` for `ActionSource::Cli` would allow the candidate descriptor. High-risk candidates must not print direct manual apply commands until high-risk CLI unlock and documentation exist. CPU-affinity-profile suggestions may use `stutter apply-profile ...`; generic candidate suggestions must use stable candidate plan files under `$HOME/.local/state/stutter/autotune/candidate_plans/<action_kind>-<candidate_name>.json` and expose `stutter autotune apply-candidate --candidate-json <file> --dry-run`. System-wide candidates remain subject to their individual operation contracts. `vm.swappiness` is reversible medium-risk, Experimental/DeferredEvidence, and is not authorized for autonomous apply. Dirty-ratio knobs remain HighRisk/manual-only; high-risk manual apply is not implemented.
 
 ## Free performance invariants
 
@@ -38,7 +38,7 @@ A daemon action may be treated as "free performance" only when all of these inva
 - no action when confidence is low;
 - no system-wide mutation by default (suggestions allowed with `allow_system_wide_suggestions`, apply requires `allow_system_wide_apply`).
 - no CPU governor/EPP suggestion while a battery is discharging unless `autotune.allow_cpu_power_on_battery = true` is explicitly configured; provider-side thermal headroom is also required.
-- no VM knob autonomous apply; VM candidates stay high-risk/manual-only and require direct swap or dirty-writeback evidence before they are suggested.
+- no VM knob autonomous apply: `vm.swappiness` is reversible medium-risk and Experimental/DeferredEvidence; dirty-ratio knobs remain HighRisk/manual-only. Suggestions require direct swap or dirty-writeback evidence as appropriate.
 
 `DaemonPolicy::check_action` enforces the policy-side parts of this contract by rejecting system-wide suggestions without explicit suggestion permission, low-confidence apply actions, missing rollback, unavailable rollback, persistent effects without explicit permission, system-wide apply without explicit `allow_system_wide_apply` (a reversible medium-risk system-wide operation additionally needs its exact operation on the `system_wide_allowlist.operations` list; the permission never implies `allow_high_risk`), and effect scopes outside the selected mode.
 

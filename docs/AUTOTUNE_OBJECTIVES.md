@@ -6,7 +6,9 @@ Generated from `ObjectiveKind::descriptor()`. Regenerate with
 Signal quality below describes the declared primary contract. Actual observation
 quality can be lower or missing. Autonomous eligibility remains subject to the
 separate experimental action, policy and safety gates; it does not enable mode
-or grant permission. No objective has graduated to Supported.
+or grant permission.
+
+Supported objectives: `GameRunnableLatency`.
 
 | Objective | Primary metric | Quality | Required signals | Fallback | Guardrails | Autonomous eligible | Maturity |
 | --- | --- | --- | --- | --- | --- | --- | --- |

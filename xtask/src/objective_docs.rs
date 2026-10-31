@@ -1,12 +1,26 @@
 use std::path::Path;
 
 use anyhow::{Context, bail};
-use stutter::api::autotune::ObjectiveKind;
+use stutter::api::autotune::{ObjectiveKind, ObjectiveMaturity};
 
 pub fn render() -> String {
     let mut result = String::from(
-        "# Auto-tune Objectives\n\nGenerated from `ObjectiveKind::descriptor()`. Regenerate with\n`cargo run -p xtask -- objective-docs --write`; CI uses `--check`.\n\nSignal quality below describes the declared primary contract. Actual observation\nquality can be lower or missing. Autonomous eligibility remains subject to the\nseparate experimental action, policy and safety gates; it does not enable mode\nor grant permission. No objective has graduated to Supported.\n\n| Objective | Primary metric | Quality | Required signals | Fallback | Guardrails | Autonomous eligible | Maturity |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n",
+        "# Auto-tune Objectives\n\nGenerated from `ObjectiveKind::descriptor()`. Regenerate with\n`cargo run -p xtask -- objective-docs --write`; CI uses `--check`.\n\nSignal quality below describes the declared primary contract. Actual observation\nquality can be lower or missing. Autonomous eligibility remains subject to the\nseparate experimental action, policy and safety gates; it does not enable mode\nor grant permission.\n\n",
     );
+    let supported = ObjectiveKind::ALL
+        .into_iter()
+        .filter(|kind| kind.descriptor().maturity == ObjectiveMaturity::Supported)
+        .map(|kind| format!("`{kind:?}`"))
+        .collect::<Vec<_>>();
+    if supported.is_empty() {
+        result.push_str("No objective has graduated to Supported.\n\n");
+    } else {
+        result.push_str(&format!(
+            "Supported objectives: {}.\n\n",
+            supported.join(", ")
+        ));
+    }
+    result.push_str("| Objective | Primary metric | Quality | Required signals | Fallback | Guardrails | Autonomous eligible | Maturity |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n");
     for kind in ObjectiveKind::ALL {
         let d = kind.descriptor();
         result.push_str(&format!(
