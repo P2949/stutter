@@ -4,7 +4,8 @@
 
 ## Project status
 
-Current state: **v0.2.0 in preparation**. Core Validation is complete and `v0.1.0` is released
+Current state: **v0.2.0 is released**
+([releases/v0.2.0.md](releases/v0.2.0.md)). Core Validation is complete and `v0.1.0` is released
 ([releases/v0.1.0.md](releases/v0.1.0.md)); the staged plan is in
 [CORE_VALIDATION_PLAN.md](CORE_VALIDATION_PLAN.md) and the historical ledger in
 [CORE_VALIDATION_STATUS.md](CORE_VALIDATION_STATUS.md). The Post-v0.1 Evidence Hardening phase

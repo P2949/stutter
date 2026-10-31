@@ -36,7 +36,7 @@ pub(super) fn support_text(version: &str, commit: &str, capabilities: &[Capabili
         }
         text.push('\n');
     }
-    text.push_str("A capability is Supported only when its required live evidence is verified for this exact revision.\n");
+    text.push_str("Supported capabilities are backed by their required graduation evidence. A release is accepted only when each Supported capability's required release evidence verifies for this exact revision.\n");
     text
 }
 

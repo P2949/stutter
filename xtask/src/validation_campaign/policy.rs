@@ -145,7 +145,7 @@ pub fn policy_section(
             .join(", ")
     };
     format!(
-        "{START}\n## v0.1.0 tier policy\n\nThe validation campaign applies one fixed, conservative policy once live observation, game-runnable, kernel, overhead, corpus, calibration and score evidence all verify:\n\n- **Supported:** {}\n- **Experimental:** {}\n- **Internal:** {}\n\nDiagnosis stays Experimental even after calibration. CPU affinity and cgroup placement are Supported only for their graduated scheduler-pressure tuples (see the autonomous support matrix above); no other mutating capability is promoted.\n{END}\n",
+        "{START}\n## Current capability tier policy\n\nCore Validation established the baseline. This block records the repository's current conservative capability tier policy. Later Supported capabilities require their own evidence-backed graduation:\n\n- **Supported:** {}\n- **Experimental:** {}\n- **Internal:** {}\n\nDiagnosis stays Experimental even after calibration. CPU affinity and cgroup placement are Supported only for their graduated scheduler-pressure tuples (see the autonomous support matrix above); no other mutating capability is promoted.\n{END}\n",
         list(supported),
         list(experimental),
         list(internal)
@@ -239,7 +239,7 @@ impl TaskRunner for CapabilityPolicyRunner {
                     return Ok(ledger.to_owned());
                 }
                 Ok(format!(
-                    "{}\n\n{heading}\n\nApplied the fixed v0.1.0 tier policy: Supported {}; every other capability keeps its tier. Calibration and score decisions retained the current thresholds and weights.\n",
+                    "{}\n\n{heading}\n\nApplied the current conservative capability tier policy: Supported {}; every other capability keeps its tier. Calibration and score decisions retained the current thresholds and weights.\n",
                     ledger.trim_end(),
                     policy.supported.join(", ")
                 ))
@@ -250,7 +250,7 @@ impl TaskRunner for CapabilityPolicyRunner {
             spec,
             attempt,
             &format!(
-                "feat(capabilities): apply the v0.1.0 tier policy (campaign {})",
+                "feat(capabilities): apply the current capability tier policy (campaign {})",
                 context.state.campaign_id
             ),
             &apply,
