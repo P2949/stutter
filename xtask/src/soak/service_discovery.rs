@@ -99,7 +99,6 @@ fn stop_game(game: &mut Game) -> anyhow::Result<()> {
 
 fn focus_matches(row: &Value, game: &Game) -> bool {
     row["target"]["root_pid"] == game.child.pid()
-        && row["target"]["process_starttime_ticks"] == game.ticks
         && row["focus"]["confidence"]
             .as_f64()
             .is_some_and(|value| value >= 0.85)
