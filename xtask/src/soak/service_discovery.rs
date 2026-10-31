@@ -183,7 +183,17 @@ pub(crate) fn run(state: &State, dir: &Path) -> anyhow::Result<Value> {
         let mut first = world.spawn_game(dir, "first-game", 180)?;
         probe.wait(&mut controller, 30, |row| focus_matches(row, &first))?;
         cases.push(json!({"scenario":"single_game_stabilizes","pid":first.child.pid(),"starttime_ticks":first.ticks}));
+        let second_binary = dir
+            .join("second-game-install/steamapps/common/SecondAcceptanceGame/SecondAcceptanceGame");
+        fs::create_dir_all(
+            second_binary
+                .parent()
+                .context("second game parent missing")?,
+        )?;
+        fs::copy(&world.xtask, &second_binary)?;
+        let first_binary = std::mem::replace(&mut world.game, second_binary);
         let mut second = world.spawn_game(dir, "second-game", 60)?;
+        world.game = first_binary;
         let groups =
             json!({"first":live_group(first.child.pid()),"second":live_group(second.child.pid())});
         fs::write(
