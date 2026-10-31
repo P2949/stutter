@@ -9,7 +9,7 @@ Type=simple
 User=%i
 Environment=HOME=/var/lib/stutter/autotune-%i
 Environment=STUTTER_SERVICE_WORKER_SOCKET=/run/stutter-worker-%i/worker.sock
-ExecStart=@BINARY@ autotune --config @CONFIG_DIR@/autotune-bounded-%i.toml --mode apply-medium-risk --allow-medium-risk --auto-focus --focus-source heuristic --preset diagnosis
+ExecStart=@BINARY@ autotune --config @CONFIG_DIR@/autotune-bounded-%i.toml --mode apply-medium-risk --allow-medium-risk --auto-focus --focus-source heuristic --preset lightweight
 ExecStopPost=@BINARY@ daemon emergency-restore
 Restart=on-failure
 RestartSec=5
