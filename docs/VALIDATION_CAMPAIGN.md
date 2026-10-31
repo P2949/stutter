@@ -314,3 +314,17 @@ host with a single kernel stops without any reboot.
 The offline gates build into `.llm-runs/gate-target` (`CARGO_TARGET_DIR`), never `target/`: they
 use other feature sets, and cargo does not reliably re-link `target/debug/stutter` afterwards, while
 the campaign pins the canonical build's digest. The gate cache persists across campaigns.
+
+## Bounded-service runner actions
+
+The `service_graduation` controller kind uses `.llm-runs/service-validation/` and the closed
+`BoundedService` action family. Its typed operations install the pinned product templates under
+`/run/systemd/system`, start/stop/restart the fixed desktop-user instance, send one of SIGTERM,
+SIGINT or SIGKILL to a fixed controller/worker component, restart the worker, or query state.
+No request names an executable, unit, shell expression or arbitrary systemctl argument.
+
+The runner copies verified binary bytes into a protected root-owned executable directory before
+installing a root worker; a writable checkout is never the executable named by that root unit.
+Installation refuses an existing bounded service instead of overwriting another owner. The
+controller name comes from the authorized UID/GID, and actions require an exact stage grant plus
+the service controller kind. These controls provide campaign mechanics, not graduation evidence.

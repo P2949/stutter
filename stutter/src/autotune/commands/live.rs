@@ -59,6 +59,30 @@ fn ensure_supported_live_autotune_mode(
     }
 }
 
+fn validate_live_target_selection(
+    input: &AutotuneCommandInput,
+    bounded_service: bool,
+) -> anyhow::Result<()> {
+    let mode = input.mode;
+    if !mode.supports_apply() {
+        return Ok(());
+    }
+    let qualified_auto = bounded_service
+        && mode == DaemonMode::ApplyMediumRisk
+        && input.auto_focus
+        && input.focus_source == crate::config::FocusSource::Heuristic
+        && !input.foreground_window;
+    if input.auto_focus && !qualified_auto {
+        anyhow::bail!(
+            "{mode} does not support --auto-focus yet; pass --tree-pid or --watch-process"
+        );
+    }
+    if input.tree_pid.is_none() && input.watch_process.is_none() && !qualified_auto {
+        anyhow::bail!("{mode} requires --tree-pid or --watch-process");
+    }
+    Ok(())
+}
+
 fn runtime_config_for_command(
     input: &AutotuneCommandInput,
     mode: DaemonMode,
@@ -159,17 +183,10 @@ pub async fn autotune_command_with(
     let mode = input.mode;
     ensure_supported_live_autotune_mode(mode, input.allow_medium_risk, input.dry_run_all_safe)?;
 
-    if matches!(mode, DaemonMode::ApplyLowRisk | DaemonMode::ApplyMediumRisk) {
-        if input.auto_focus {
-            anyhow::bail!(
-                "{mode} does not support --auto-focus yet; pass --tree-pid or --watch-process"
-            );
-        }
-
-        if input.tree_pid.is_none() && input.watch_process.is_none() {
-            anyhow::bail!("{mode} requires --tree-pid or --watch-process");
-        }
-    }
+    validate_live_target_selection(
+        &input,
+        std::env::var_os("STUTTER_SERVICE_WORKER_SOCKET").is_some(),
+    )?;
 
     if mode == DaemonMode::Suggest
         && let (Some(profiles_path), Some(tree_pid)) = (input.profiles.as_deref(), input.tree_pid)
@@ -530,5 +547,19 @@ mod tests {
             err,
             "apply-low-risk does not support --auto-focus yet; pass --tree-pid or --watch-process"
         );
+    }
+    #[test]
+    fn only_the_bounded_heuristic_worker_service_accepts_autonomous_discovery() {
+        let mut input = base_autotune_input(DaemonMode::ApplyMediumRisk);
+        input.tree_pid = None;
+        input.auto_focus = true;
+        input.focus_source = crate::config::FocusSource::Heuristic;
+        assert!(validate_live_target_selection(&input, true).is_ok());
+        assert!(validate_live_target_selection(&input, false).is_err());
+        input.focus_source = crate::config::FocusSource::Hybrid;
+        assert!(validate_live_target_selection(&input, true).is_err());
+        input.focus_source = crate::config::FocusSource::Heuristic;
+        input.mode = DaemonMode::ApplyLowRisk;
+        assert!(validate_live_target_selection(&input, true).is_err());
     }
 }

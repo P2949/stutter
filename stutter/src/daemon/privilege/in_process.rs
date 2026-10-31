@@ -270,6 +270,7 @@ impl InProcessPrivilegedActionService {
             mutation: Some(request.plan.operation),
             affected_tasks: 0,
         });
+        let original_candidate = request.plan.candidate.clone();
         let apply_candidate =
             try_promote_to_apply_candidate(request.plan.candidate, ApplyEligibility::approved())
                 .map_err(|eligibility| anyhow::anyhow!(eligibility.denial_message()))?;
@@ -305,7 +306,9 @@ impl InProcessPrivilegedActionService {
                 }
                 executor.apply_with_prepared_hook(run_policy, &mut |token| {
                     barrier_reached.set(true);
-                    prepared(token)
+                    revalidate_candidate_targets(&original_candidate, &self.proc_root)?;
+                    prepared(token)?;
+                    revalidate_candidate_targets(&original_candidate, &self.proc_root)
                 })
             }
             None => executor.apply_with_audit(run_policy),

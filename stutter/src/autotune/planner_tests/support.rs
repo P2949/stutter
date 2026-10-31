@@ -235,6 +235,7 @@ pub(crate) fn cpu_affinity_candidate_for(
 pub(crate) fn cgroup_candidate(target_cgroup: &str) -> CandidateAction {
     CandidateAction::CgroupPlacement {
         plan: CgroupPlacementActionPlan {
+            target_root_starttime_ticks: None,
             name: format!("cgroup-to-{target_cgroup}"),
             action: CgroupPlacementAction {
                 cgroup_root: std::path::PathBuf::from("/sys/fs/cgroup"),

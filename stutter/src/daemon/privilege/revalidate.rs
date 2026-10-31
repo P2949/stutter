@@ -143,17 +143,30 @@ fn candidate_task_identities(candidate: &CandidateAction) -> Vec<TaskIdentity> {
         CandidateAction::Nice { plan } => plan.action.targets.clone(),
         CandidateAction::IoPrio { plan } => plan.action.targets.clone(),
         CandidateAction::Uclamp { plan } => plan.action.targets.clone(),
-        CandidateAction::CgroupPlacement { plan } => plan
-            .action
-            .targets
-            .iter()
-            .map(|target| target.identity.clone())
-            .collect(),
+        CandidateAction::CgroupPlacement { plan } => {
+            let mut targets: Vec<_> = plan
+                .action
+                .targets
+                .iter()
+                .map(|target| target.identity.clone())
+                .collect();
+            if let (Some(pid), Some(ticks)) =
+                (plan.target_root_pid, plan.target_root_starttime_ticks)
+            {
+                targets.push(TaskIdentity {
+                    tid: pid.into(),
+                    process_pid: Some(pid.into()),
+                    comm: None,
+                    starttime_ticks: Some(ticks),
+                });
+            }
+            targets
+        }
         CandidateAction::CpuAffinityProfile { plan } => vec![TaskIdentity {
             tid: (plan.tree_pid).into(),
             process_pid: Some((plan.tree_pid).into()),
             comm: None,
-            starttime_ticks: None,
+            starttime_ticks: plan.tree_starttime_ticks,
         }],
         _ => Vec::new(),
     }

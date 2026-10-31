@@ -307,6 +307,12 @@ impl SessionTargetPlan {
             };
 
             let mut resolver = FocusResolver::new(policy);
+            if std::env::var_os("STUTTER_SERVICE_WORKER_SOCKET").is_some() {
+                resolver = resolver.bounded_autotune(
+                    crate::daemon::config::DaemonCandidateConfidenceConfig::default()
+                        .min_apply_medium_risk_confidence,
+                );
+            }
             match resolver.sample(Path::new("/proc"), 0, None, FocusSource::Heuristic) {
                 FocusDecision::Switch { new, .. } | FocusDecision::Keep { focus: new } => {
                     tree_pids = new.group.root_pids.clone();

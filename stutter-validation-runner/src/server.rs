@@ -153,6 +153,10 @@ impl Server {
         let from_denial =
             |(code, message): (ErrorCode, String)| Response::failed(id, code, message);
         match &envelope.body {
+            Request::BoundedService { action } => self
+                .executor
+                .bounded_service(&self.authorization, *action)
+                .map_or_else(from_denial, |data| Response::ok(id, None, data)),
             Request::ExecuteLiveSuite { .. } => self
                 .executor
                 .live_suite(&self.authorization, envelope)

@@ -135,7 +135,19 @@ impl AutotuneRuntime {
             MonitorEvent::LiveDiagnosis { entry } => {
                 self.push_diagnosis(*entry);
             }
+            MonitorEvent::FocusRefreshed {
+                confidence,
+                situation,
+                reasons,
+            } => {
+                if let Some(focus) = &mut self.latest_focus {
+                    focus.confidence = confidence;
+                    focus.situation = situation;
+                    focus.reasons = reasons;
+                }
+            }
             MonitorEvent::FocusChanged {
+                root_starttimes,
                 new_kind,
                 root_pids,
                 member_pids,
@@ -154,6 +166,7 @@ impl AutotuneRuntime {
                 self.latest_focus = Some(AutotuneObservationFocus {
                     kind: new_kind,
                     root_pids: root_pids.clone(),
+                    root_starttimes,
                     member_pids,
                     confidence,
                     situation,
@@ -333,6 +346,7 @@ impl AutotuneRuntime {
         Some(AutotuneObservationFocus {
             kind: crate::focus::FocusGroupKind::Game,
             root_pids: vec![root],
+            root_starttimes: Default::default(),
             member_pids: members,
             confidence: 1.0,
             situation: crate::autotune::situation::SituationKind::GameFocused,

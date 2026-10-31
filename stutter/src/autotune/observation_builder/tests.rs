@@ -43,6 +43,7 @@ fn builder_extracts_focus_target_tasks_workload_identity_and_system_context() {
     let focus = AutotuneObservationFocus {
         kind: FocusGroupKind::Desktop,
         root_pids: vec![1234],
+        root_starttimes: Default::default(),
         member_pids: vec![1234, 1235],
         confidence: 0.95,
         situation: SituationKind::IoPressure,
@@ -175,6 +176,7 @@ fn observation_from_game_window_with_high_cpu_latency() {
     let focus = AutotuneObservationFocus {
         kind: FocusGroupKind::Game,
         root_pids: vec![4_242],
+        root_starttimes: Default::default(),
         member_pids: vec![4_242],
         confidence: crate::autotune::DEFAULT_MIN_FOCUS_CONFIDENCE,
         situation: SituationKind::GameCpuSchedulerPressure,
@@ -448,4 +450,53 @@ fn task_info(
         sched_policy: None,
         from_cgroup: true,
     }
+}
+
+#[test]
+fn qualified_focus_identity_cannot_turn_into_a_reused_pid_observation() {
+    let (_root, proc_root, sys_root) = temp_proc_sys_roots("focus-replaced-observation");
+    let window = RollingWindow::new(Duration::from_secs(30));
+    let focus = AutotuneObservationFocus {
+        kind: FocusGroupKind::Game,
+        root_pids: vec![1234],
+        root_starttimes: BTreeMap::from([(1234, 10)]),
+        member_pids: vec![1234],
+        confidence: 0.95,
+        situation: SituationKind::GameFocused,
+        reasons: vec![],
+    };
+    let active_tasks = BTreeMap::from([(
+        1234.into(),
+        task_info(1234, 1234, "Game.exe", TaskClass::Game, Some(11)),
+    )]);
+    let build = |focus| {
+        AutotuneObservationBuilder::build(AutotuneObservationBuilderInput {
+            window: &window,
+            online_data_quality_policy: &OnlineDataQualityPolicy::default(),
+            focus: Some(focus),
+            root_pid: None,
+            active_target_count: 1,
+            active_tasks: &active_tasks,
+            recent_diagnoses: vec![],
+            drop_counters: Default::default(),
+            proc_root: &proc_root,
+            sys_root: &sys_root,
+            activity_level: ActivityLevel::Active,
+            offenders: vec![],
+            extra_config_tids: vec![],
+        })
+        .observation
+    };
+    let replaced = build(&focus);
+    assert!(replaced.workload_identity.is_none());
+    assert_eq!(replaced.focus_confidence, 0.0);
+    assert!(
+        replaced
+            .focus_reasons
+            .iter()
+            .any(|reason| reason.contains("identity_changed"))
+    );
+    let mut refreshed = focus.clone();
+    refreshed.root_starttimes.insert(1234, 11);
+    assert!(build(&refreshed).workload_identity.is_some());
 }

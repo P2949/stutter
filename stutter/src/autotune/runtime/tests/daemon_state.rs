@@ -57,6 +57,7 @@ fn daemon_state_snapshot_serializes_live_runtime_state() {
     runtime.latest_focus = Some(AutotuneObservationFocus {
         kind: FocusGroupKind::Game,
         root_pids: vec![1234],
+        root_starttimes: Default::default(),
         member_pids: vec![1234, 1235],
         confidence: 0.95,
         situation: SituationKind::GameCpuSchedulerPressure,

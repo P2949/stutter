@@ -135,6 +135,7 @@ impl CandidateAction {
                 profile_name: profile.name.clone(),
                 profile,
                 tree_pid,
+                tree_starttime_ticks: crate::watch::process_root_starttime(tree_pid),
                 objective,
             },
         }

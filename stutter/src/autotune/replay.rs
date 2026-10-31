@@ -111,7 +111,7 @@ impl ReplayPolicyEngine for ObserveOnlyReplayPolicy {
             }
             MonitorEvent::LiveDiagnosis { .. } => {}
             MonitorEvent::WorkloadProgress { .. } => {}
-            MonitorEvent::FocusChanged { .. } => {}
+            MonitorEvent::FocusRefreshed { .. } | MonitorEvent::FocusChanged { .. } => {}
             MonitorEvent::FocusCleared { .. } => {}
             MonitorEvent::DataQualityWarning { message } => {
                 self.report.data_quality_warnings += 1;

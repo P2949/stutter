@@ -175,6 +175,16 @@ pub fn plan_scheduler_burst(
 
 /// Executes typed actions. A trait so the server can be tested without root or real suites.
 pub trait ActionExecutor: Send + Sync {
+    fn bounded_service(
+        &self,
+        _auth: &Authorization,
+        _action: crate::model::BoundedServiceAction,
+    ) -> Result<Value, Denial> {
+        Err((
+            ErrorCode::Unsupported,
+            "bounded service actions are not available".to_owned(),
+        ))
+    }
     fn live_suite(&self, auth: &Authorization, envelope: &Envelope) -> Result<Value, Denial>;
     fn scheduler_burst(&self, auth: &Authorization, envelope: &Envelope) -> Result<Value, Denial>;
     /// Recording of a campaign-owned target; unsupported unless an executor provides it.
@@ -369,6 +379,13 @@ impl SystemExecutor {
 }
 
 impl ActionExecutor for SystemExecutor {
+    fn bounded_service(
+        &self,
+        auth: &Authorization,
+        action: crate::model::BoundedServiceAction,
+    ) -> Result<Value, Denial> {
+        crate::service::execute(auth, action)
+    }
     fn start_privileged_worker(&self, auth: &Authorization) -> Result<Value, Denial> {
         let mut slot = self
             .worker

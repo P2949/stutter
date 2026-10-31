@@ -13,6 +13,7 @@ pub mod process;
 pub mod protocol;
 pub mod resume;
 pub mod server;
+pub mod service;
 pub mod state;
 pub mod sys;
 

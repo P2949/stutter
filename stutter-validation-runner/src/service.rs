@@ -1,0 +1,236 @@
+//! Root execution of a closed set of actions on the pinned bounded Stutter service.
+//! Unit names, binary destinations, commands and signals are derived here, never from wire text.
+use std::{
+    fs,
+    io::Write,
+    os::unix::fs::{MetadataExt, PermissionsExt},
+    path::{Path, PathBuf},
+    process::Command,
+};
+
+use serde_json::{Value, json};
+use stutter_core::hash::sha256_hex;
+
+use crate::{
+    authorization::{Denial, is_safe_identifier},
+    model::{
+        Authorization, BoundedServiceAction, ControllerKind, ErrorCode, ServiceComponent,
+        ServiceSignal,
+    },
+    process::{stutter_path, verify_pinned},
+};
+
+const ROOT_PATH: &str = "/run/current-system/sw/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+fn failure(message: impl Into<String>) -> Denial {
+    (ErrorCode::ExecutionFailed, message.into())
+}
+
+pub fn account_name(passwd: &str, uid: u32, gid: u32) -> Result<String, Denial> {
+    let matches: Vec<_> = passwd
+        .lines()
+        .filter_map(|line| {
+            let fields: Vec<_> = line.split(':').collect();
+            (fields.len() >= 7
+                && fields[2].parse::<u32>().ok() == Some(uid)
+                && fields[3].parse::<u32>().ok() == Some(gid))
+            .then(|| fields[0])
+        })
+        .collect();
+    if uid == 0 || matches.len() != 1 || !is_safe_identifier(matches[0]) {
+        return Err(failure(
+            "campaign owner must resolve to one non-root local desktop account",
+        ));
+    }
+    Ok(matches[0].to_owned())
+}
+
+pub fn unit_name(user: &str, component: ServiceComponent) -> Result<String, Denial> {
+    if !is_safe_identifier(user) {
+        return Err(failure("unsafe desktop account name"));
+    }
+    Ok(format!(
+        "{}@{user}.service",
+        match component {
+            ServiceComponent::Controller => "stutter-autotune-bounded",
+            ServiceComponent::Worker => "stutter-privileged-worker",
+        }
+    ))
+}
+
+fn systemctl(args: &[&str]) -> Result<String, Denial> {
+    let output = Command::new("systemctl")
+        .args(args)
+        .env("PATH", ROOT_PATH)
+        .output()
+        .map_err(|error| failure(error.to_string()))?;
+    if !output.status.success() {
+        return Err(failure(format!(
+            "fixed service systemctl action failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        )));
+    }
+    String::from_utf8(output.stdout).map_err(|error| failure(error.to_string()))
+}
+
+fn protected_directory(path: &Path) -> Result<(), Denial> {
+    for ancestor in path.ancestors() {
+        let metadata = fs::metadata(ancestor).map_err(|error| failure(error.to_string()))?;
+        if metadata.uid() != 0 || metadata.mode() & 0o022 != 0 {
+            return Err(failure(
+                "service binary directory must be root-owned and protected",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn pin_binary(auth: &Authorization) -> Result<PathBuf, Denial> {
+    // Read and hash the exact bytes once; a writable checkout cannot race verification and copy.
+    let bytes = fs::read(stutter_path(auth)).map_err(|error| failure(error.to_string()))?;
+    if sha256_hex(&bytes) != auth.stutter_sha256 {
+        return Err(failure(
+            "service source binary differs from root authorization",
+        ));
+    }
+    let dir = Path::new("/var/lib/stutter")
+        .join(format!("service-bin-{}", auth.owner_uid))
+        .join(&auth.campaign_id);
+    // Only create children of protected directories, and make these code-only directories
+    // traversable by the desktop controller even when the runner has a private umask.
+    for path in [
+        PathBuf::from("/var/lib/stutter"),
+        dir.parent()
+            .ok_or_else(|| failure("missing service binary parent"))?
+            .to_owned(),
+        dir.clone(),
+    ] {
+        if !path.exists() {
+            protected_directory(
+                path.parent()
+                    .ok_or_else(|| failure("missing protected parent"))?,
+            )?;
+            fs::create_dir(&path).map_err(|error| failure(error.to_string()))?;
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o755))
+                .map_err(|error| failure(error.to_string()))?;
+        }
+        protected_directory(&path)?;
+    }
+    let binary = dir.join("stutter");
+    let temporary = dir.join(format!("stutter.tmp-{}", std::process::id()));
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary)
+        .map_err(|error| failure(error.to_string()))?;
+    file.write_all(&bytes)
+        .and_then(|()| file.sync_all())
+        .map_err(|error| failure(error.to_string()))?;
+    fs::set_permissions(&temporary, fs::Permissions::from_mode(0o555))
+        .map_err(|error| failure(error.to_string()))?;
+    fs::rename(&temporary, &binary).map_err(|error| failure(error.to_string()))?;
+    fs::File::open(&dir)
+        .and_then(|file| file.sync_all())
+        .map_err(|error| failure(error.to_string()))?;
+    Ok(binary)
+}
+
+/// Called only after peer/grant checks. It also checks the controller kind defensively.
+pub fn execute(auth: &Authorization, action: BoundedServiceAction) -> Result<Value, Denial> {
+    if auth.controller != ControllerKind::ServiceGraduation {
+        return Err((
+            ErrorCode::ActionNotPermitted,
+            "not a service campaign".to_owned(),
+        ));
+    }
+    verify_pinned(&stutter_path(auth), &auth.stutter_sha256)?;
+    let passwd = fs::read_to_string("/etc/passwd").map_err(|error| failure(error.to_string()))?;
+    let user = account_name(&passwd, auth.owner_uid, auth.owner_gid)?;
+    let controller = unit_name(&user, ServiceComponent::Controller)?;
+    let worker = unit_name(&user, ServiceComponent::Worker)?;
+    match action {
+        BoundedServiceAction::InstallPinned => {
+            // Never replace an existing service owned by another campaign or administrator.
+            for unit in [&controller, &worker] {
+                let loaded = systemctl(&["show", "--property=LoadState", "--value", unit])?;
+                if loaded.trim() != "not-found" {
+                    return Err(failure(
+                        "bounded service already exists; preserve it instead of overwriting",
+                    ));
+                }
+            }
+            let binary = pin_binary(auth)?;
+            let output = Command::new(&binary)
+                .args([
+                    "service",
+                    "install",
+                    "--mode",
+                    "system-bounded-autotune",
+                    "--controller-user",
+                    &user,
+                    "--unit-dir",
+                    "/run/systemd/system",
+                    "--binary",
+                ])
+                .arg(&binary)
+                .env("PATH", ROOT_PATH)
+                .output()
+                .map_err(|error| failure(error.to_string()))?;
+            if !output.status.success() {
+                return Err(failure(format!(
+                    "pinned service install failed: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                )));
+            }
+            systemctl(&["daemon-reload"])?;
+        }
+        BoundedServiceAction::Start => {
+            systemctl(&["start", &controller])?;
+        }
+        BoundedServiceAction::Stop => {
+            systemctl(&["stop", &controller])?;
+            systemctl(&["stop", &worker])?;
+        }
+        BoundedServiceAction::Restart => {
+            systemctl(&["restart", &controller])?;
+        }
+        BoundedServiceAction::RestartWorker => {
+            systemctl(&["restart", &worker])?;
+        }
+        BoundedServiceAction::Signal { component, signal } => {
+            let unit = unit_name(&user, component)?;
+            let signal = match signal {
+                ServiceSignal::Term => "--signal=SIGTERM",
+                ServiceSignal::Int => "--signal=SIGINT",
+                ServiceSignal::Kill => "--signal=SIGKILL",
+            };
+            systemctl(&["kill", "--kill-whom=main", signal, &unit])?;
+        }
+        BoundedServiceAction::Query => (),
+    }
+    let properties = "--property=ActiveState,SubState,MainPID,User,NoNewPrivileges,AmbientCapabilities,CapabilityBoundingSet,FragmentPath,ExecStart,ExecMainStartTimestampMonotonic";
+    Ok(json!({"controller_unit": controller, "worker_unit": worker,
+        "controller": systemctl(&["show", properties, &controller])?, "worker": systemctl(&["show", properties, &worker])?}))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn service_targets_come_only_from_the_authorized_non_root_account() {
+        let passwd = "root:x:0:0::/root:/bin/sh\ndesktop:x:1000:100::/home/desktop:/bin/sh\n";
+        assert_eq!(account_name(passwd, 1000, 100).unwrap(), "desktop");
+        assert!(account_name(passwd, 0, 0).is_err());
+        assert!(account_name(passwd, 1000, 101).is_err());
+        assert_eq!(
+            unit_name("desktop", ServiceComponent::Controller).unwrap(),
+            "stutter-autotune-bounded@desktop.service"
+        );
+        assert!(unit_name("../other", ServiceComponent::Worker).is_err());
+        assert!(
+            serde_json::from_str::<BoundedServiceAction>(
+                r#"{"signal":{"component":"controller","signal":"kill","unit":"sshd.service"}}"#
+            )
+            .is_err()
+        );
+    }
+}

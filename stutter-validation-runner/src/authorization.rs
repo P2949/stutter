@@ -176,6 +176,14 @@ impl Authorization {
     fn check_arguments(&self, request: &Request, online_cpus: u32) -> Result<(), Denial> {
         let invalid = |message: &str| Err(deny(ErrorCode::InvalidArgument, message));
         match request {
+            Request::BoundedService { .. } => {
+                if self.controller != crate::model::ControllerKind::ServiceGraduation {
+                    return invalid(
+                        "product service actions require a service-graduation campaign",
+                    );
+                }
+                Ok(())
+            }
             Request::ExecuteLiveSuite {
                 suite,
                 attempt,

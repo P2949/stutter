@@ -11,6 +11,7 @@ fn runtime_preserves_selected_focus_membership_and_configured_root_precedence() 
                 elapsed_ms: 0,
                 old_kind: None,
                 new_kind: FocusGroupKind::Game,
+                root_starttimes: Default::default(),
                 root_pids: vec![99],
                 member_pids: vec![42, 99],
                 confidence: 0.95,

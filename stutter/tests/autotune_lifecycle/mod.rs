@@ -416,6 +416,7 @@ async fn medium_risk_socket_lifecycle(include_histogram: bool) -> anyhow::Result
         removed_targets: Vec::new(),
     })?;
     runtime.on_event(MonitorEvent::FocusChanged {
+        root_starttimes: Default::default(),
         elapsed_ms: 0,
         old_kind: None,
         new_kind: FocusGroupKind::Game,

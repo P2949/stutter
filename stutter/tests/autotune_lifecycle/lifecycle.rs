@@ -29,6 +29,7 @@ async fn apply_low_risk_fake_candidate_lifecycle_keeps_and_cleans_journal() -> a
         removed_targets: Vec::new(),
     })?;
     runtime.on_event(MonitorEvent::FocusChanged {
+        root_starttimes: Default::default(),
         elapsed_ms: 0,
         old_kind: None,
         new_kind: FocusGroupKind::Game,

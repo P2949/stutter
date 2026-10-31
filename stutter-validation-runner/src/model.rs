@@ -14,6 +14,7 @@ pub const SCHEMA_VERSION: u32 = 2;
 pub enum ControllerKind {
     CoreValidation,
     MutationGraduation,
+    ServiceGraduation,
 }
 
 impl ControllerKind {
@@ -22,6 +23,7 @@ impl ControllerKind {
         match self {
             Self::CoreValidation => ".llm-runs/validation",
             Self::MutationGraduation => ".llm-runs/mutation-validation",
+            Self::ServiceGraduation => ".llm-runs/service-validation",
         }
     }
 
@@ -31,6 +33,7 @@ impl ControllerKind {
         match self {
             Self::CoreValidation => ["validation-campaign", "continue"],
             Self::MutationGraduation => ["mutation-campaign", "continue"],
+            Self::ServiceGraduation => ["service-campaign", "continue"],
         }
     }
 }
@@ -183,6 +186,7 @@ pub enum RecordProbes {
 /// The discriminant of a request, used in authorization grants.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 pub enum RunnerAction {
+    BoundedService,
     Status,
     ExecuteLiveSuite,
     ExecuteSchedulerBurst,
@@ -200,6 +204,9 @@ pub enum RunnerAction {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub enum Request {
+    BoundedService {
+        action: BoundedServiceAction,
+    },
     Status,
     ExecuteLiveSuite {
         suite: LiveSuite,
@@ -255,6 +262,7 @@ pub enum Request {
 impl Request {
     pub fn action(&self) -> RunnerAction {
         match self {
+            Self::BoundedService { .. } => RunnerAction::BoundedService,
             Self::Status => RunnerAction::Status,
             Self::ExecuteLiveSuite { .. } => RunnerAction::ExecuteLiveSuite,
             Self::ExecuteSchedulerBurst { .. } => RunnerAction::ExecuteSchedulerBurst,
@@ -276,6 +284,37 @@ impl Request {
             _ => None,
         }
     }
+}
+
+/// Fixed product-service components. A caller cannot choose a unit name or executable.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ServiceComponent {
+    Controller,
+    Worker,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ServiceSignal {
+    Term,
+    Int,
+    Kill,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum BoundedServiceAction {
+    InstallPinned,
+    Start,
+    Stop,
+    Restart,
+    Signal {
+        component: ServiceComponent,
+        signal: ServiceSignal,
+    },
+    RestartWorker,
+    Query,
 }
 
 /// Every request carries the identity it claims; none of it is trusted over the socket's

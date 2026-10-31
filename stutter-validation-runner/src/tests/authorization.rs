@@ -336,3 +336,52 @@ fn only_the_recovery_lifecycle_and_benefit_suites_take_a_mutation() {
         ErrorCode::InvalidArgument
     );
 }
+
+#[test]
+fn service_actions_require_both_a_service_campaign_and_an_exact_task_grant() {
+    use crate::model::{BoundedServiceAction, ControllerKind};
+    let mut auth = authorization("/repo");
+    let request = envelope(
+        "service-lifecycle",
+        Request::BoundedService {
+            action: BoundedServiceAction::Query,
+        },
+    );
+    assert_eq!(
+        denied(auth.authorize(&peer(me()), &request, 8)),
+        ErrorCode::ActionNotPermitted
+    );
+    auth.grants.insert(grant(
+        "service-lifecycle",
+        RunnerAction::BoundedService,
+        None,
+    ));
+    assert_eq!(
+        denied(auth.authorize(&peer(me()), &request, 8)),
+        ErrorCode::InvalidArgument
+    );
+    auth.controller = ControllerKind::ServiceGraduation;
+    auth.authorize(&peer(me()), &request, 8).unwrap();
+    let other = envelope(
+        "ungranted-task",
+        Request::BoundedService {
+            action: BoundedServiceAction::Start,
+        },
+    );
+    assert_eq!(
+        denied(auth.authorize(&peer(me()), &other, 8)),
+        ErrorCode::TaskNotPermitted
+    );
+    assert_eq!(
+        denied(auth.authorize(&peer(0), &request, 8)),
+        ErrorCode::UnauthorizedPeer
+    );
+    assert_eq!(
+        auth.controller.campaign_root(),
+        ".llm-runs/service-validation"
+    );
+    assert_eq!(
+        auth.controller.resume_subcommand(),
+        ["service-campaign", "continue"]
+    );
+}

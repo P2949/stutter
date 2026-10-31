@@ -20,6 +20,8 @@ pub struct CpuAffinityProfilePlan {
     #[serde(with = "profile_wire")]
     pub profile: Profile,
     pub tree_pid: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tree_starttime_ticks: Option<u64>,
     pub objective: ObjectiveKind,
 }
 
@@ -134,6 +136,8 @@ pub struct UclampActionPlan {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CgroupPlacementActionPlan {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_root_starttime_ticks: Option<u64>,
     pub name: String,
     pub action: CgroupPlacementAction,
     pub target_root_pid: Option<u32>,

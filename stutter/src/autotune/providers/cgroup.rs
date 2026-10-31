@@ -66,6 +66,12 @@ impl CandidateProvider for CgroupProvider {
         };
         let candidate = CandidateAction::CgroupPlacement {
             plan: CgroupPlacementActionPlan {
+                target_root_starttime_ticks: input
+                    .observation
+                    .workload_identity
+                    .as_ref()
+                    .filter(|identity| identity.root_pid == root_pid)
+                    .and_then(|identity| identity.process_starttime_ticks),
                 name: format!(
                     "cgroup-{role}-root-{root_pid}-to-{}",
                     target_cgroup.display()

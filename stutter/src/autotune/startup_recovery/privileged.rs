@@ -100,6 +100,7 @@ fn candidate_for(token: &RollbackToken) -> anyhow::Result<CandidateAction> {
                 .unwrap_or_default();
             Ok(CandidateAction::CgroupPlacement {
                 plan: CgroupPlacementActionPlan {
+                    target_root_starttime_ticks: None,
                     name: "startup-recovery-cgroup".to_owned(),
                     action: CgroupPlacementAction {
                         cgroup_root: std::path::PathBuf::from("/sys/fs/cgroup"),

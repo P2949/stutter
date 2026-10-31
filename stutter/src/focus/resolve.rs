@@ -1,4 +1,5 @@
-use std::path::Path;
+use std::{collections::BTreeMap, path::Path};
+mod qualification;
 
 use serde::{Deserialize, Serialize};
 
@@ -43,6 +44,8 @@ pub struct FocusResolver {
     current: Option<ResolvedFocus>,
     pending: Option<PendingFocus>,
     policy: FocusPolicy,
+    autonomous_qualification: bool,
+    qualified_root_identities: BTreeMap<u32, u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -83,6 +86,8 @@ impl FocusResolver {
             current: None,
             pending: None,
             policy,
+            autonomous_qualification: false,
+            qualified_root_identities: BTreeMap::new(),
         }
     }
 
@@ -99,6 +104,15 @@ impl FocusResolver {
     }
 
     pub fn decide_from_snapshot(&mut self, snapshot: FocusSnapshot) -> FocusDecision {
+        if self.autonomous_qualification
+            && let Some(decision) = self.qualify_autonomous_snapshot(&snapshot)
+        {
+            return decision;
+        }
+        self.decide_qualified_snapshot(snapshot)
+    }
+
+    fn decide_qualified_snapshot(&mut self, snapshot: FocusSnapshot) -> FocusDecision {
         let candidate = self.best_eligible_group(&snapshot);
 
         let Some(candidate) = candidate else {

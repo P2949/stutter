@@ -17,6 +17,8 @@ pub struct FocusEvent {
     pub old_kind: Option<String>,
     pub kind: Option<String>,
     pub root_pids: Vec<Pid>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub root_starttimes: std::collections::BTreeMap<u32, u64>,
     pub member_pids: Vec<Pid>,
     pub confidence: f32,
     pub score: f32,
@@ -376,6 +378,7 @@ mod tests {
             old_kind: Some("Browser".to_owned()),
             kind: Some("Game".to_owned()),
             root_pids: vec![10.into()],
+            root_starttimes: std::collections::BTreeMap::from([(10, 100)]),
             member_pids: vec![10.into(), 11.into()],
             confidence: 0.75,
             score: 0.82,
@@ -390,6 +393,7 @@ mod tests {
         assert!(json.contains("\"old_kind\":\"Browser\""));
         assert!(json.contains("\"kind\":\"Game\""));
         assert!(json.contains("\"root_pids\":[10]"));
+        assert!(json.contains("\"root_starttimes\":{\"10\":100}"));
         assert!(json.contains("\"member_pids\":[10,11]"));
         assert!(json.contains("\"confidence\":0.75"));
         assert!(json.contains("\"score\":0.82"));

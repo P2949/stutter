@@ -27,7 +27,7 @@ pub(crate) fn autotune_monitor_config(
         auto_focus: input.auto_focus,
         focus_source: input.focus_source,
         foreground_window: input.foreground_window
-            || input.auto_focus
+            || (input.auto_focus && input.focus_source != FocusSource::Heuristic)
             || matches!(
                 input.focus_source,
                 FocusSource::Foreground | FocusSource::Hybrid

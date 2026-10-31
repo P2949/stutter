@@ -35,6 +35,7 @@ fn builder_scopes_runnable_histograms_to_the_selected_process_tree() {
     let focus = AutotuneObservationFocus {
         kind: FocusGroupKind::Game,
         root_pids: vec![99],
+        root_starttimes: Default::default(),
         member_pids: vec![99],
         confidence: 0.95,
         situation: SituationKind::GameCpuSchedulerPressure,

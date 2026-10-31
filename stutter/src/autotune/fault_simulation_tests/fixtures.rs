@@ -48,6 +48,7 @@ pub(super) fn affinity() -> CandidateAction {
 pub(super) fn cgroup() -> CandidateAction {
     CandidateAction::CgroupPlacement {
         plan: CgroupPlacementActionPlan {
+            target_root_starttime_ticks: None,
             name: "sim-cgroup".to_owned(),
             action: CgroupPlacementAction {
                 cgroup_root: "/sys/fs/cgroup".into(),

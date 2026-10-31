@@ -155,3 +155,30 @@ fn privileged_worker_plan_rejects_empty_action_id() {
     );
     assert!(err.to_string().contains("ActionId cannot be empty"));
 }
+
+#[test]
+fn affinity_wire_preserves_root_starttime_and_worker_refuses_replacement() {
+    let proc_root = temp_proc_root("affinity-root-replaced");
+    write_expected_task(&proc_root, 100, 100, "Game.exe", 12345);
+    let mut candidate = CandidateAction::cpu_affinity_profile_for(
+        crate::profiles::Profile {
+            name: "identity".into(),
+            rules: vec![],
+        },
+        100,
+        crate::autotune::objective::ObjectiveKind::GameRunnableLatency,
+    );
+    if let CandidateAction::CpuAffinityProfile { plan } = &mut candidate {
+        plan.tree_starttime_ticks = Some(12345);
+    }
+    let request = CandidatePlanRequest::from_candidate(candidate, crate::audit::unix_nanos_now());
+    let wire = PrivilegedWorkerCandidatePlan::from_plan_request(&request);
+    let wire: PrivilegedWorkerCandidatePlan =
+        serde_json::from_slice(&serde_json::to_vec(&wire).unwrap()).unwrap();
+    let candidate = wire.into_plan_request().unwrap().candidate;
+    revalidate_candidate_targets(&candidate, &proc_root).unwrap();
+    write_expected_task(&proc_root, 100, 100, "Game.exe", 12346);
+    let error = revalidate_candidate_targets(&candidate, &proc_root).unwrap_err();
+    assert!(format!("{error:#}").contains("target_revalidation_starttime_mismatch"));
+    fs::remove_dir_all(proc_root).ok();
+}

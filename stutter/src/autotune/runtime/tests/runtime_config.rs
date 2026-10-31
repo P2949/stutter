@@ -209,6 +209,7 @@ fn focus_change_resets_window_and_sets_focus_context() {
             elapsed_ms: 1_000,
             old_kind: None,
             new_kind: FocusGroupKind::Game,
+            root_starttimes: Default::default(),
             root_pids: vec![2222],
             member_pids: vec![2222, 2223],
             confidence: 0.90,

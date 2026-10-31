@@ -93,7 +93,13 @@ pub enum MonitorEvent {
     DataQualityWarning {
         message: String,
     },
+    FocusRefreshed {
+        confidence: f32,
+        situation: crate::autotune::state::SituationKind,
+        reasons: Vec<String>,
+    },
     FocusChanged {
+        root_starttimes: std::collections::BTreeMap<u32, u64>,
         elapsed_ms: u64,
         old_kind: Option<FocusGroupKind>,
         new_kind: FocusGroupKind,
@@ -130,6 +136,7 @@ impl MonitorEvent {
             }
             Self::TargetSnapshot { .. }
             | Self::WorkloadProgress { .. }
+            | Self::FocusRefreshed { .. }
             | Self::FocusChanged { .. }
             | Self::FocusCleared { .. }
             | Self::ForegroundEvent { .. }
@@ -177,6 +184,7 @@ impl MonitorEvent {
             Self::LiveDiagnosis { .. } => "live_diagnosis",
             Self::Exec { .. } => "exec",
             Self::DataQualityWarning { .. } => "data_quality_warning",
+            Self::FocusRefreshed { .. } => "focus_refreshed",
             Self::FocusChanged { .. } => "focus_changed",
             Self::FocusCleared { .. } => "focus_cleared",
             Self::Finished { .. } => "finished",
@@ -206,7 +214,7 @@ impl MonitorEvent {
             Self::DmaBufEvent { event } => Some(event.elapsed_ms),
             Self::LiveDiagnosis { entry } => Some(entry.elapsed_ms),
             Self::Exec { elapsed_ms, .. } => Some(*elapsed_ms),
-            Self::DataQualityWarning { .. } => None,
+            Self::DataQualityWarning { .. } | Self::FocusRefreshed { .. } => None,
             Self::FocusChanged { elapsed_ms, .. } => Some(*elapsed_ms),
             Self::FocusCleared { elapsed_ms, .. } => Some(*elapsed_ms),
             Self::Finished { .. } => None,
@@ -254,6 +262,7 @@ mod tests {
             elapsed_ms: 1234,
             old_kind: Some(FocusGroupKind::Browser),
             new_kind: FocusGroupKind::Game,
+            root_starttimes: Default::default(),
             root_pids: vec![10],
             member_pids: vec![10, 11, 12],
             confidence: 0.75,

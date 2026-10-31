@@ -22,6 +22,7 @@ pub struct AutotuneObservationBuilder;
 pub struct AutotuneObservationFocus {
     pub kind: FocusGroupKind,
     pub root_pids: Vec<u32>,
+    pub root_starttimes: std::collections::BTreeMap<u32, u64>,
     pub member_pids: Vec<u32>,
     pub confidence: f32,
     pub situation: SituationKind,
@@ -60,11 +61,11 @@ impl AutotuneObservationBuilder {
             .score_with_quality_policy(input.online_data_quality_policy);
         let focus = input.focus;
         let focus_kind = focus.map(|focus| focus.kind);
-        let focus_confidence = focus.map(|focus| focus.confidence).unwrap_or(0.0);
+        let mut focus_confidence = focus.map(|focus| focus.confidence).unwrap_or(0.0);
         let focus_roots = focus
             .map(|focus| focus.root_pids.clone())
             .unwrap_or_default();
-        let focus_reasons = focus.map(|focus| focus.reasons.clone()).unwrap_or_default();
+        let mut focus_reasons = focus.map(|focus| focus.reasons.clone()).unwrap_or_default();
         let primary_situation = focus
             .map(|focus| focus.situation)
             .unwrap_or(SituationKind::Unknown);
@@ -112,12 +113,25 @@ impl AutotuneObservationBuilder {
                 .extend(offender.task_nice.iter().map(|(tid, nice)| (*tid, *nice)));
         }
         let target_root_pid = input.root_pid.or_else(|| focus_roots.first().copied());
-        let workload_identity = workload_identity_from_runtime_context(
+        let mut workload_identity = workload_identity_from_runtime_context(
             input.proc_root,
             target_root_pid,
             focus_kind,
             input.active_tasks,
         );
+        if let Some(focus) = focus.filter(|focus| !focus.root_starttimes.is_empty()) {
+            let expected = target_root_pid
+                .and_then(|pid| focus.root_starttimes.get(&pid))
+                .copied();
+            let observed = workload_identity
+                .as_ref()
+                .and_then(|identity| identity.process_starttime_ticks);
+            if expected.is_none() || observed != expected {
+                workload_identity = None;
+                focus_confidence = 0.0;
+                focus_reasons.push("focus_root_identity_changed_before_observation".to_owned());
+            }
+        }
         let runnable_members = runnable_target_processes(
             target_root_pid,
             input.root_pid.is_some(),

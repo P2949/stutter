@@ -122,3 +122,11 @@ Controller journals and kept entries carry Linux boot identity. Task-scoped entr
 boot retire without touching PIDs/TIDs, with `boot_superseded` audit evidence. Missing or malformed
 task boot identity fails closed. CPU EPP retains its own typed boot-aware resource identity;
 manual-only resource tokens do not acquire automatic recovery from this metadata.
+
+Bounded-service auto-focus additionally requires a unique high-confidence game root and repeated
+stable polls. Ambiguity is checked before the output root limit, and process replacement clears
+qualification even when the numeric PID is unchanged. Selected root start times travel with focus
+events into observations; mismatches remove workload identity and deny apply. Affinity and cgroup
+plans carry the expected root start time, revalidated by the worker both before and after the
+prepared commit barrier. Focus confidence refreshes reach the controller without resetting a
+valid measurement window. Other apply entry points retain their explicit-target requirement.

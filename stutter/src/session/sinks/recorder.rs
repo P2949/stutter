@@ -212,6 +212,7 @@ impl MonitorEventSink for RecorderSink {
                 );
             }
             MonitorEvent::FocusChanged {
+                root_starttimes,
                 elapsed_ms,
                 old_kind,
                 new_kind,
@@ -228,6 +229,7 @@ impl MonitorEventSink for RecorderSink {
                     old_kind: old_kind.map(|kind| format!("{kind:?}")),
                     kind: Some(format!("{new_kind:?}")),
                     root_pids: root_pids.iter().copied().map(Pid::new).collect(),
+                    root_starttimes: root_starttimes.clone(),
                     member_pids: member_pids.iter().copied().map(Pid::new).collect(),
                     confidence: *confidence,
                     score: *score,
@@ -253,6 +255,7 @@ impl MonitorEventSink for RecorderSink {
                     old_kind: old_kind.map(|kind| format!("{kind:?}")),
                     kind: None,
                     root_pids: Vec::new(),
+                    root_starttimes: Default::default(),
                     member_pids: Vec::new(),
                     confidence: 0.0,
                     score: 0.0,

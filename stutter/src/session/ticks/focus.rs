@@ -33,6 +33,13 @@ impl MonitorSession {
             elapsed_ms,
             old_kind: old.map(|focus| focus.group.kind),
             new_kind: new.group.kind,
+            root_starttimes: self
+                .handles
+                .target_refresh
+                .focus_resolver
+                .as_ref()
+                .map(|resolver| resolver.qualified_root_starttimes())
+                .unwrap_or_default(),
             root_pids: new.group.root_pids.clone(),
             member_pids: new.group.member_pids.clone(),
             confidence: new.group.confidence,
@@ -105,6 +112,12 @@ impl MonitorSession {
                     .await?;
             }
             FocusDecision::Keep { focus } => {
+                self.dispatch_monitor_event(MonitorEvent::FocusRefreshed {
+                    confidence: focus.group.confidence,
+                    situation: focus.situation,
+                    reasons: focus.group.reasons.clone(),
+                })
+                .await?;
                 self.current_focus = Some(focus);
             }
             FocusDecision::NoTarget { .. } => {}

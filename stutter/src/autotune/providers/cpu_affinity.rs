@@ -39,6 +39,14 @@ impl CandidateProvider for CpuAffinityProvider {
             .into_iter()
             .filter_map(|mut candidate| {
                 route_objective(&mut candidate, input.observation.primary_situation);
+                if let CandidateAction::CpuAffinityProfile { plan } = &mut candidate {
+                    plan.tree_starttime_ticks = input
+                        .observation
+                        .workload_identity
+                        .as_ref()
+                        .filter(|identity| identity.root_pid == tree_pid)
+                        .and_then(|identity| identity.process_starttime_ticks);
+                }
                 let rank_hint =
                     rank_for_candidate(&candidate, input.observation.primary_situation)?;
                 Some(CandidateProposal {

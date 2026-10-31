@@ -330,6 +330,7 @@ impl AcceptanceTarget {
             },
             AcceptanceMutation::Cgroup => CandidateAction::CgroupPlacement {
                 plan: CgroupPlacementActionPlan {
+                    target_root_starttime_ticks: None,
                     name: self.mutation.candidate_name().to_owned(),
                     action: self.cgroup_action(tree_pid)?,
                     target_root_pid: Some(tree_pid),

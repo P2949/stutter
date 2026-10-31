@@ -155,6 +155,7 @@ fn event_for_step(step: FakeDaemonStep, elapsed_ms: u64) -> Option<MonitorEvent>
             elapsed_ms,
             old_kind: None,
             new_kind: FocusGroupKind::Game,
+            root_starttimes: Default::default(),
             root_pids: vec![1234],
             member_pids: vec![1234],
             confidence,

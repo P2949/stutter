@@ -79,6 +79,27 @@ pub(super) fn validate_request(request: &PrivilegedWorkerRequest) -> anyhow::Res
         }
     };
     let candidate = plan.clone().into_plan_request()?.candidate;
+    if !matches!(request, PrivilegedWorkerRequest::Rollback { .. })
+        && let crate::autotune::planning::candidate::CandidateAction::CpuAffinityProfile { plan } =
+            &candidate
+    {
+        anyhow::ensure!(
+            plan.tree_starttime_ticks.is_some_and(|ticks| ticks > 0),
+            PrivilegedWorkerError::CandidatePlanMetadataMismatch
+        );
+    }
+    if !matches!(request, PrivilegedWorkerRequest::Rollback { .. })
+        && let crate::autotune::planning::candidate::CandidateAction::CgroupPlacement { plan } =
+            &candidate
+    {
+        anyhow::ensure!(
+            plan.target_root_pid.is_some()
+                && plan
+                    .target_root_starttime_ticks
+                    .is_some_and(|ticks| ticks > 0),
+            PrivilegedWorkerError::CandidatePlanMetadataMismatch
+        );
+    }
     let descriptor = candidate.descriptor();
     anyhow::ensure!(
         candidate.operation_kind() == plan.operation
