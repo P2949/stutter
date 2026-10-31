@@ -3,7 +3,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::*;
-use crate::focus::FocusGroupKind;
+use crate::{
+    focus::{FocusGroupKind, tree_walk::has_ancestor_in_set},
+    process_tree::TaskClass,
+};
 
 impl FocusResolver {
     pub(crate) fn qualified_root_starttimes(&self) -> BTreeMap<u32, u64> {
@@ -44,7 +47,28 @@ impl FocusResolver {
             .flat_map(|group| group.root_pids.iter().copied())
             .filter(|pid| snapshot.processes.contains_key(pid))
             .collect();
-        if games.len() > 1 {
+        // A Game group names one root and folds every other game-like process of the same
+        // parent into its members, so two independent games started by one launcher are still
+        // one group. Count the independent top-level game processes inside the groups too.
+        let game_class: BTreeSet<u32> = snapshot
+            .groups
+            .iter()
+            .filter(|group| {
+                group.kind == FocusGroupKind::Game && group.confidence >= self.policy.min_confidence
+            })
+            .flat_map(|group| group.member_pids.iter().copied())
+            .filter(|pid| {
+                snapshot
+                    .processes
+                    .get(pid)
+                    .is_some_and(|process| process.classification.class == TaskClass::Game)
+            })
+            .collect();
+        let independent = game_class
+            .iter()
+            .filter(|pid| !has_ancestor_in_set(snapshot, **pid, &game_class))
+            .count();
+        if games.len() > 1 || independent > 1 {
             return Some(self.unqualify(
                 "ambiguous_game_roots: autonomous focus requires one independent game",
             ));
@@ -174,6 +198,41 @@ mod tests {
         missing.processes.get_mut(&10).unwrap().starttime_ticks = None;
         assert!(
             matches!(resolver.decide_from_snapshot(missing), FocusDecision::NoTarget { reason } if reason.contains("focus_identity_missing"))
+        );
+    }
+    fn two_games(child_of_first: bool) -> FocusSnapshot {
+        let mut first = resolver_test_process(10, "Game.exe", TaskClass::Game);
+        first.starttime_ticks = Some(100);
+        let mut second = resolver_test_process(20, "OtherGame.exe", TaskClass::Game);
+        second.starttime_ticks = Some(200);
+        if child_of_first {
+            second.ppid = 10;
+        }
+        resolver_test_snapshot(
+            vec![resolver_test_group(
+                FocusGroupKind::Game,
+                vec![10],
+                vec![10, 20],
+                Some(10),
+                0.95,
+                0.95,
+            )],
+            vec![first, second],
+            1000,
+        )
+    }
+    #[test]
+    fn sibling_games_folded_into_one_group_are_still_ambiguous() {
+        let mut resolver = FocusResolver::new(resolver_test_policy()).bounded_autotune(0.85);
+        assert!(
+            matches!(resolver.decide_from_snapshot(two_games(false)), FocusDecision::NoTarget { reason } if reason.contains("ambiguous_game_roots"))
+        );
+    }
+    #[test]
+    fn a_game_helper_below_the_root_is_not_a_second_game() {
+        let mut resolver = FocusResolver::new(resolver_test_policy()).bounded_autotune(0.85);
+        assert!(
+            !matches!(resolver.decide_from_snapshot(two_games(true)), FocusDecision::NoTarget { reason } if reason.contains("ambiguous_game_roots"))
         );
     }
     #[test]
