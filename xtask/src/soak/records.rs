@@ -18,6 +18,8 @@ pub enum Profile {
     Full,
     /// The same event types on short windows, to shake the soak itself out in about an hour.
     Smoke,
+    /// Actual packaged systemd service, only initialized by its source-bound campaign.
+    Service,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -40,6 +42,8 @@ pub struct SoakState {
     pub cpus: Option<(u32, u32)>,
     pub next_round: u32,
     pub finished: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service: Option<super::service::Binding>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -99,6 +103,10 @@ pub(super) fn read_state(dir: &Path) -> anyhow::Result<SoakState> {
         state.schema_version == SCHEMA_VERSION,
         "unsupported soak schema {}",
         state.schema_version
+    );
+    anyhow::ensure!(
+        (state.profile == Profile::Service) == state.service.is_some(),
+        "service profile and pinned service binding disagree"
     );
     Ok(state)
 }

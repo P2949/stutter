@@ -20,7 +20,9 @@ ProtectSystem=full
 NoNewPrivileges=false
 # Only what the runner fundamentally needs root for: changing uid/gid, delegating the
 # capabilities the profiling suites need, scheduler priority for contention, and boot control.
-CapabilityBoundingSet=CAP_SETUID CAP_SETGID CAP_SETPCAP CAP_BPF CAP_PERFMON CAP_SYS_RESOURCE CAP_SYS_NICE CAP_SYS_BOOT CAP_CHOWN CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH
+# SYS_PTRACE is used only to inspect the fixed service actors and owned pinned fixtures through
+# /proc; a root uid without it cannot read a different uid's executable identity on this host.
+CapabilityBoundingSet=CAP_SETUID CAP_SETGID CAP_SETPCAP CAP_BPF CAP_PERFMON CAP_SYS_RESOURCE CAP_SYS_NICE CAP_SYS_BOOT CAP_SYS_PTRACE CAP_CHOWN CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH
 AmbientCapabilities=
 LockPersonality=true
 RestrictRealtime=false

@@ -16,6 +16,10 @@ fn directory(auth: &Authorization) -> PathBuf {
         .join(&auth.campaign_id)
 }
 
+pub(super) fn binary(auth: &Authorization) -> PathBuf {
+    directory(auth).join("stutter")
+}
+
 pub(super) fn paths(user: &str) -> Vec<PathBuf> {
     let mut files = vec![
         "/run/systemd/system/stutter-autotune-bounded@.service".into(),

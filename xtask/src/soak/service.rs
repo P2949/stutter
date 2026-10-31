@@ -23,6 +23,8 @@ pub(crate) struct Binding {
     pub campaign: State,
     pub stage: Stage,
     pub user: String,
+    #[serde(skip)]
+    pub(super) presence: Option<std::sync::Arc<super::service_presence::Presence>>,
 }
 
 impl Binding {
@@ -37,6 +39,7 @@ impl Binding {
             campaign: campaign.clone(),
             stage,
             user,
+            presence: None,
         })
     }
     pub(super) fn action(&self, action: Action) -> anyhow::Result<Value> {
@@ -75,6 +78,9 @@ impl Binding {
         loop {
             let report = self.action(Action::Query)?;
             if attest(&report, &self.campaign).is_ok() {
+                if let Some(presence) = &self.presence {
+                    presence.observe(&report)?;
+                }
                 return Ok(Process {
                     binding: self.clone(),
                     pid: report["controller_process"]["pid"]
@@ -87,6 +93,14 @@ impl Binding {
                         .as_str()
                         .context("missing boot identity")?
                         .into(),
+                    worker_identity: (
+                        report["worker_process"]["pid"]
+                            .as_u64()
+                            .context("missing worker PID")? as u32,
+                        report["worker_process"]["starttime_ticks"]
+                            .as_u64()
+                            .context("missing worker start ticks")?,
+                    ),
                 });
             }
             ensure!(
@@ -122,6 +136,10 @@ impl Binding {
 
 /// Rich root attestation is performed at service boundaries, not on every sampling poll.
 pub(crate) fn attest(report: &Value, state: &State) -> anyhow::Result<()> {
+    ensure!(
+        report["ownership_verified"] == true,
+        "service unit/configuration ownership is unverified"
+    );
     ensure!(
         report["controller_process"]["consistent"] == true
             && report["worker_process"]["consistent"] == true,
@@ -180,6 +198,10 @@ pub(crate) fn attest(report: &Value, state: &State) -> anyhow::Result<()> {
         report["worker_tokens"]["readable"] == true,
         "root worker ledger unreadable"
     );
+    ensure!(
+        report["worker_tokens"]["recovery_audit"]["readable"] == true,
+        "root worker recovery audit unreadable"
+    );
     Ok(())
 }
 
@@ -188,6 +210,7 @@ pub(super) struct Process {
     pub(super) pid: u32,
     pub(super) ticks: u64,
     boot_id: String,
+    pub(super) worker_identity: (u32, u64),
 }
 impl Process {
     pub(super) fn alive(&self) -> bool {

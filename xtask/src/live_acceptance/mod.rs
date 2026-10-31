@@ -217,12 +217,59 @@ pub fn workload(
     ready: &Path,
     descendants: bool,
     interactive_root: bool,
+    wine_helper: bool,
+    exit_on_stdin_eof: bool,
 ) -> anyhow::Result<()> {
     ensure!(
         (3..=600).contains(&seconds),
         "workload duration outside bound"
     );
     let deadline = Instant::now() + Duration::from_secs(seconds);
+    ensure!(
+        !(wine_helper && exit_on_stdin_eof),
+        "a helper must not recursively launch helpers"
+    );
+    if exit_on_stdin_eof {
+        std::thread::spawn(|| {
+            use std::io::Read;
+            let mut bytes = [0_u8; 1];
+            loop {
+                match std::io::stdin().read(&mut bytes) {
+                    Ok(0) | Err(_) => std::process::exit(0),
+                    Ok(_) => (),
+                }
+            }
+        });
+    }
+    let _helper = if wine_helper {
+        let child_ready = ready.with_extension("wine-helper");
+        let mut child = OwnedChild(
+            Command::new(std::env::current_exe()?.with_file_name("wineserver"))
+                .args([
+                    "live-workload",
+                    "--exit-on-stdin-eof",
+                    "--seconds",
+                    &seconds.to_string(),
+                    "--ready",
+                ])
+                .arg(&child_ready)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()?,
+        );
+        let timeout = Instant::now() + Duration::from_secs(10);
+        while !child_ready.exists() {
+            ensure!(
+                child.0.try_wait()?.is_none() && Instant::now() < timeout,
+                "owned Wine-like helper failed readiness"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        Some(child)
+    } else {
+        None
+    };
     let mut children = Vec::new();
     if descendants {
         for index in 0..2 {

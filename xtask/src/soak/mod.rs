@@ -15,6 +15,8 @@ mod round;
 pub(crate) mod service;
 pub(crate) mod service_discovery;
 mod service_idle;
+mod service_presence;
+pub(crate) mod service_soak;
 mod stress;
 mod verify;
 mod world;
@@ -204,6 +206,10 @@ fn init(
     stutter_bin: &Path,
     allow_dirty: bool,
 ) -> anyhow::Result<()> {
+    ensure!(
+        profile != Profile::Service,
+        "initialize the packaged service profile through service-campaign"
+    );
     ensure!(hours > 0.0, "the soak needs a positive duration");
     ensure!(
         !dir.join("soak.json").exists(),
@@ -236,6 +242,7 @@ fn init(
         cpus: Some(pick_cpus()?),
         next_round: 0,
         finished: false,
+        service: None,
     };
     write_state(dir, &state)?;
     println!(
@@ -292,7 +299,7 @@ fn install_signal_handlers() {
 /// finishes and `verify` decides; coverage is never manufactured.
 fn max_runtime_ms(profile: Profile, hours: f64) -> u64 {
     let extension = match profile {
-        Profile::Full => 2.0,
+        Profile::Full | Profile::Service => 2.0,
         Profile::Smoke => 0.0,
     };
     ((hours + extension) * 3_600_000.0) as u64
@@ -306,6 +313,9 @@ fn run_soak(root: &Path, dir: &Path) -> anyhow::Result<()> {
             && sha256(&std::env::current_exe()?)? == state.xtask_sha256,
         "the binaries changed since `soak init`: a soak is bound to the binaries it started with"
     );
+    if state.profile == Profile::Service {
+        return service_soak::run(root, dir, &mut state);
+    }
     if !delegated() {
         return reexec_delegated(
             root,
@@ -323,12 +333,24 @@ fn run_soak(root: &Path, dir: &Path) -> anyhow::Result<()> {
     let cpus = state.cpus.context("the soak has no CPUs")?;
     let mut world = world::World::new(root, &dir, &state.stutter_bin, cpus)?;
     clear_leftovers();
+    drive_soak(&dir, &mut state, &mut world)
+}
+
+fn drive_soak(dir: &Path, state: &mut SoakState, world: &mut world::World) -> anyhow::Result<()> {
     let started = *state.started_unix_ms.get_or_insert_with(unix_ms);
-    write_state(&dir, &state)?;
+    write_state(dir, state)?;
     let deadline = started + (state.hours * 3_600_000.0) as u64;
-    let cap = started + max_runtime_ms(state.profile, state.hours);
+    let cap = started
+        + if state.profile == Profile::Service {
+            service_soak::manifest(state)?
+                .coverage
+                .maximum_dwell_seconds
+                * 1000
+        } else {
+            max_runtime_ms(state.profile, state.hours)
+        };
     let timing = plan::timing(state.profile);
-    let mut last_start = last_starts(&world);
+    let mut last_start = last_starts(world);
     let mut failures = 0_u32;
     println!(
         "soak {} running: round {}, {:.2} h left",
@@ -341,7 +363,20 @@ fn run_soak(root: &Path, dir: &Path) -> anyhow::Result<()> {
     while !round::STOP.load(Ordering::SeqCst) {
         // Done when the minimum dwell is over and the coverage floor is met, or the cap is hit.
         let now = unix_ms();
-        if now >= deadline && (now >= cap || coverage::coverage_reached(&dir)?) {
+        let dwell_reached = if state.profile == Profile::Service {
+            service_presence::verified_ms(
+                dir,
+                &state
+                    .service
+                    .as_ref()
+                    .context("missing service binding")?
+                    .campaign,
+            )? as f64
+                >= state.hours * 3_600_000.0
+        } else {
+            now >= deadline
+        };
+        if now >= cap || (dwell_reached && coverage::coverage_reached(dir)?) {
             complete = true;
             break;
         }
@@ -351,7 +386,8 @@ fn run_soak(root: &Path, dir: &Path) -> anyhow::Result<()> {
         if round::STOP.load(Ordering::SeqCst) {
             break;
         }
-        let (record, seen) = round::run_round(&mut world, &dir, index, round, timing);
+        let (record, seen) = round::run_round(world, dir, index, round, timing);
+        service_soak::sync(dir, world)?;
         for event in seen
             .iter()
             .filter(|event| event.decision == "candidate_started")
@@ -368,7 +404,7 @@ fn run_soak(root: &Path, dir: &Path) -> anyhow::Result<()> {
             record.outcome,
             record.violations.len()
         );
-        append_round(&dir, &record)?;
+        append_round(dir, &record)?;
         if record.outcome == "interrupted" {
             break;
         }
@@ -385,21 +421,23 @@ fn run_soak(root: &Path, dir: &Path) -> anyhow::Result<()> {
             record.error.unwrap_or_default()
         );
         state.next_round += 1;
-        write_state(&dir, &state)?;
+        write_state(dir, state)?;
         // A violating round makes a full qualification impossible: stop once it is durably
         // recorded instead of spending the remaining hours.
-        if state.profile == Profile::Full
+        if matches!(state.profile, Profile::Full | Profile::Service)
             && (record.outcome != "ok" || !record.violations.is_empty())
         {
             stopped_early = true;
             break;
         }
     }
-    world.kill_worker()?;
+    service_soak::settle(dir, world)?;
     if complete || stopped_early {
         state.finished = true;
-        write_state(&dir, &state)?;
-        cleanup_cgroup();
+        write_state(dir, state)?;
+        if state.profile != Profile::Service {
+            cleanup_cgroup();
+        }
         if stopped_early {
             println!(
                 "soak {} stopped early: a round violated the acceptance list; \

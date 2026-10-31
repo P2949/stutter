@@ -82,7 +82,7 @@ impl EvidenceKind {
 }
 
 pub(crate) const STATUSES: [&str; 4] = ["PASS", "FAIL", "BLOCKED", "INCONCLUSIVE"];
-pub(crate) const KNOWN_SUITES: [&str; 11] = [
+pub(crate) const KNOWN_SUITES: [&str; 12] = [
     "live_observation",
     "live_affinity",
     "live_recovery",
@@ -94,6 +94,7 @@ pub(crate) const KNOWN_SUITES: [&str; 11] = [
     "live_affinity_benefit",
     "live_autotune_smoke",
     "live_autotune_soak",
+    "live_bounded_service",
 ];
 
 /// Environment fields copied to the portable bundle. `proc_version` is excluded on

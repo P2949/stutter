@@ -81,6 +81,10 @@ pub enum XtaskCommand {
     #[command(hide = true)]
     LiveWorkload {
         #[arg(long)]
+        wine_helper: bool,
+        #[arg(long)]
+        exit_on_stdin_eof: bool,
+        #[arg(long)]
         interactive_root: bool,
         #[arg(long)]
         descendants: bool,
@@ -441,11 +445,20 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
             seconds,
         } => live_acceptance::burst(burst_ms, period_ms, seconds),
         XtaskCommand::LiveWorkload {
+            wine_helper,
+            exit_on_stdin_eof,
             interactive_root,
             seconds,
             ready,
             descendants,
-        } => live_acceptance::workload(seconds, &ready, descendants, interactive_root),
+        } => live_acceptance::workload(
+            seconds,
+            &ready,
+            descendants,
+            interactive_root,
+            wine_helper,
+            exit_on_stdin_eof,
+        ),
         XtaskCommand::ReleasePackage(args) => release_package::package_release(&root, &args),
         XtaskCommand::ReleaseVerify(args) => release_package::verify_release(&args),
         XtaskCommand::ReleaseInstallSmoke(args) => release_package::install_smoke(&args),

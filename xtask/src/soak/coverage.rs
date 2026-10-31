@@ -66,7 +66,7 @@ impl Minimums {
 
     pub fn for_profile(profile: Profile) -> Self {
         match profile {
-            Profile::Full => Self::FULL,
+            Profile::Full | Profile::Service => Self::FULL,
             Profile::Smoke => Self::SMOKE,
         }
     }
@@ -115,12 +115,24 @@ pub fn minimum_checks(counts: &Counts, want: &Minimums) -> Vec<Check> {
             detail,
         });
     };
+    let service = counts.verified_service_hours;
+    let measured = service.unwrap_or(counts.wall_clock_hours);
     push(
-        "minimum_wall_clock".to_owned(),
-        counts.wall_clock_hours >= want.hours,
+        if service.is_some() {
+            "minimum_live_service_dwell"
+        } else {
+            "minimum_wall_clock"
+        }
+        .to_owned(),
+        measured >= want.hours,
         format!(
-            "{:.2} h of wall-clock time (>= {})",
-            counts.wall_clock_hours, want.hours
+            "{measured:.2} h of {} (>= {})",
+            if service.is_some() {
+                "verified live service presence"
+            } else {
+                "wall-clock time"
+            },
+            want.hours
         ),
     );
     push(
@@ -240,7 +252,7 @@ pub fn minimum_checks(counts: &Counts, want: &Minimums) -> Vec<Check> {
 /// but the wall-clock one passes. The short profile has no coverage floor to wait for.
 pub fn coverage_reached(dir: &Path) -> anyhow::Result<bool> {
     let state = read_state(dir)?;
-    if state.profile != Profile::Full {
+    if !matches!(state.profile, Profile::Full | Profile::Service) {
         return Ok(true);
     }
     let rounds = read_rounds(dir)?;
@@ -252,9 +264,14 @@ pub fn coverage_reached(dir: &Path) -> anyhow::Result<bool> {
     };
     let counts = counts(&state, &rounds, &events);
     Ok(
-        minimum_checks(&counts, &Minimums::for_profile(state.profile))
+        minimum_checks(&counts, &super::service_soak::minimums(&state)?)
             .iter()
-            .filter(|check| check.name != "minimum_wall_clock")
+            .filter(|check| {
+                !matches!(
+                    check.name.as_str(),
+                    "minimum_wall_clock" | "minimum_live_service_dwell"
+                )
+            })
             .all(|check| check.passed),
     )
 }
@@ -348,6 +365,7 @@ mod tests {
             cpus: None,
             next_round: 0,
             finished: true,
+            service: None,
         };
         (state, rounds, events)
     }

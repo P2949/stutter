@@ -21,17 +21,26 @@ use crate::evidence_metadata::{self as shared, SUITE_AUTOTUNE_SMOKE, SUITE_AUTOT
 pub(super) fn suite_for(profile: Profile) -> &'static str {
     match profile {
         Profile::Full => SUITE_AUTOTUNE_SOAK,
+        Profile::Service => crate::evidence_metadata::SUITE_BOUNDED_SERVICE,
         Profile::Smoke => SUITE_AUTOTUNE_SMOKE,
     }
 }
 
 fn scope(profile: Profile, hours: f64) -> String {
+    if profile == Profile::Service {
+        return format!(
+            "Actual packaged systemd bounded service with a monitored desktop-account controller, a separate root worker and heuristic auto-focus, on controlled game-like workloads. At least {hours:.2} h of verified live dwell, complete clean cycles and repeated faults; CPU affinity and cgroup placement kept and reverted through the unmodified autonomous registry. No validation override."
+        );
+    }
     let kind = match profile {
         Profile::Full => {
             "coverage-qualified real-system bounded-controller soak (minimum dwell, complete \
              deterministic cycles, explicit repeated fault coverage, zero violations)"
         }
         Profile::Smoke => "short production-controller acceptance",
+        Profile::Service => {
+            "coverage-qualified packaged systemd service soak with verified live dwell"
+        }
     };
     format!(
         "{kind} ({hours:.2} h minimum dwell) of the production `stutter autotune --mode apply-medium-risk` \
@@ -209,7 +218,7 @@ fn write_artifacts(
         "evidence_kind": "controlled_real",
         "profile": state.profile,
         "scope": scope(state.profile, state.hours),
-        "not_claimed": NOT_CLAIMED,
+        "not_claimed": if state.profile == Profile::Service { &NOT_CLAIMED[1..] } else { &NOT_CLAIMED[..] },
         "operations": report.counts.by_operation.keys().collect::<Vec<_>>(),
         "counts": report.counts,
         "cases": report.checks.iter().map(|check| json!({
@@ -255,6 +264,7 @@ mod tests {
             cpus: Some((2, 1)),
             next_round: 0,
             finished: true,
+            service: None,
         }
     }
 

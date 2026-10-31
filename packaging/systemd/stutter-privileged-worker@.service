@@ -1,6 +1,7 @@
 [Unit]
 Description=Stutter bounded mutation worker for %i
 Before=stutter-autotune-bounded@%i.service
+Upholds=stutter-autotune-bounded@%i.service
 
 [Service]
 Type=simple

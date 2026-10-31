@@ -1,6 +1,7 @@
 [Unit]
 Description=Stutter bounded autotune controller for %i (qualification required)
 Requires=stutter-privileged-worker@%i.service
+BindsTo=stutter-privileged-worker@%i.service
 After=stutter-privileged-worker@%i.service
 
 [Service]

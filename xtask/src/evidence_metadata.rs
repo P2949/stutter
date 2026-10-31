@@ -12,6 +12,7 @@ pub(crate) const SUITE_AUTOTUNE_SMOKE: &str = "live_autotune_smoke";
 /// deterministic cycles, repeated coverage of every fault kind, zero violations) that graduates
 /// the bounded controller.
 pub(crate) const SUITE_AUTOTUNE_SOAK: &str = "live_autotune_soak";
+pub(crate) const SUITE_BOUNDED_SERVICE: &str = "live_bounded_service";
 
 pub(crate) fn unix_ms() -> u64 {
     std::time::SystemTime::now()
@@ -166,7 +167,11 @@ mod tests {
 
     #[test]
     fn the_soak_suites_belong_to_the_canonical_vocabulary() {
-        for suite in [SUITE_AUTOTUNE_SMOKE, SUITE_AUTOTUNE_SOAK] {
+        for suite in [
+            SUITE_AUTOTUNE_SMOKE,
+            SUITE_AUTOTUNE_SOAK,
+            SUITE_BOUNDED_SERVICE,
+        ] {
             assert!(crate::evidence_bundle::KNOWN_SUITES.contains(&suite));
         }
     }

@@ -30,7 +30,7 @@ fn covers(suite: &str, result: &Value) -> Value {
         }),
         // The soak verifier itself requires both graduated operations to have run through the
         // production support matrix; it says nothing about any other provider.
-        "live_autotune_smoke" | "live_autotune_soak" => json!({
+        "live_autotune_smoke" | "live_autotune_soak" | "live_bounded_service" => json!({
             "providers": ["cpu_affinity_profile", "cgroup_placement"],
         }),
         "live_game_runnable" => json!({"objectives": ["GameRunnableLatency"]}),

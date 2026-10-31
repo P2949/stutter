@@ -22,7 +22,8 @@ explicit CLI `--profiles` setting takes precedence.
 An interrupted attempt stays in the record. A source or binary change invalidates the
 campaign. Software and validation failures cannot be retried into a passing qualification.
 
-The runner installs the exact embedded templates under `/run/systemd/system`, pins the
+The runner installs the exact embedded templates under `/run/systemd/system`, keeps its
+root-owned qualification configuration under `/run/stutter-bounded-service-validation`, and pins the
 product binary under a protected root-owned directory, and refuses existing administrator
 units or configuration. Later actions verify the unit/configuration ownership receipt and
 reject drop-ins. Typed fixture actions can attach only the campaign user's pinned
@@ -30,7 +31,7 @@ reject drop-ins. Typed fixture actions can attach only the campaign user's pinne
 shell command, unit name or arbitrary systemctl argument.
 
 Live discovery uses real executable identities and the production heuristic resolver. Its
-positive fixture has an active game-scope-labelled event-loop root. A plain Steam-path-only
+positive fixture has an active game-labelled event-loop root and an owned Wine-like helper. A plain Steam-path-only
 root is a separate low-confidence negative case. Browser, compositor, unknown, ambiguous
 and rapidly replaced workloads are also negative cases under actual scheduler pressure.
 The history records the service's qualified confidence and PID/start-time map. No resolver
@@ -38,7 +39,7 @@ snapshot or validation override is injected.
 
 The existing soak driver has direct-child and packaged-service adapters. The service adapter
 attests real UID, capabilities, binary digest, boot identity, socket ownership and root token
-state. Workload exit must leave the same controller alive with no retained action. A focus
+state. The validation runner uses SYS_PTRACE to read the fixed actors and owned fixtures through /proc; that capability is absent from the product controller. Workload exit must leave the same controller alive with no retained action. A focus
 swap uses that same process. Service suspend uses a fixed typed RTC-wake action and checks
 the kernel suspend success counter.
 

@@ -188,6 +188,8 @@ pub fn execute(auth: &Authorization, action: BoundedServiceAction) -> Result<Val
                     &user,
                     "--unit-dir",
                     "/run/systemd/system",
+                    "--config-dir",
+                    "/run/stutter-bounded-service-validation",
                     "--binary",
                 ])
                 .arg(&binary)
@@ -204,8 +206,7 @@ pub fn execute(auth: &Authorization, action: BoundedServiceAction) -> Result<Val
             ownership::record(auth, &user)?;
         }
         BoundedServiceAction::UninstallPinned => {
-            systemctl(&["stop", &controller])?;
-            systemctl(&["stop", &worker])?;
+            systemctl(&["stop", &controller, &worker])?;
             let tokens = worker_tokens(&user);
             if tokens["readable"] != true || tokens["outstanding"] != 0 {
                 return Err(failure(
@@ -222,8 +223,7 @@ pub fn execute(auth: &Authorization, action: BoundedServiceAction) -> Result<Val
             systemctl(&["start", &controller])?;
         }
         BoundedServiceAction::Stop => {
-            systemctl(&["stop", &controller])?;
-            systemctl(&["stop", &worker])?;
+            systemctl(&["stop", &controller, &worker])?;
         }
         BoundedServiceAction::Restart => {
             systemctl(&["restart", &controller])?;
@@ -250,8 +250,26 @@ pub fn execute(auth: &Authorization, action: BoundedServiceAction) -> Result<Val
                     .map_err(|error: std::num::ParseIntError| failure(error.to_string()))
             };
             let before = successes()?;
-            let output = Command::new("rtcwake")
-                .args(["-m", "mem", "-s", "30"])
+            // The service manager executes this one fixed hardware action. The validation
+            // daemon keeps its bounded capability set and read-only /etc namespace.
+            let output = Command::new("systemd-run")
+                .arg(format!(
+                    "--unit=stutter-validation-suspend-{}",
+                    auth.campaign_id
+                ))
+                .args([
+                    "--wait",
+                    "--collect",
+                    "--property=Type=exec",
+                    "--property=RuntimeMaxSec=90",
+                    "--property=TimeoutStopSec=10",
+                    "--",
+                    "/run/current-system/sw/bin/rtcwake",
+                    "-m",
+                    "mem",
+                    "-s",
+                    "30",
+                ])
                 .env("PATH", ROOT_PATH)
                 .output()
                 .map_err(|error| failure(error.to_string()))?;
@@ -286,9 +304,11 @@ pub fn execute(auth: &Authorization, action: BoundedServiceAction) -> Result<Val
         json!({"uid": metadata.uid(), "mode": metadata.mode() & 0o777, "is_socket": metadata.file_type().is_socket()})
     });
     let tokens = worker_tokens(&user);
+    let ownership_verified = ownership::verify(auth, &user).is_ok();
+    let pinned = ownership_verified.then(|| ownership::binary(auth));
     Ok(
-        json!({"controller_unit": controller, "worker_unit": worker, "action_evidence":action_evidence,
-        "controller_process": process_snapshot(&controller_state), "worker_process": process_snapshot(&worker_state),
+        json!({"controller_unit": controller, "worker_unit": worker, "action_evidence":action_evidence, "ownership_verified":ownership_verified,
+        "controller_process": process_snapshot(&controller_state, pinned.as_deref(), &auth.stutter_sha256), "worker_process": process_snapshot(&worker_state, pinned.as_deref(), &auth.stutter_sha256),
         "controller": controller_state, "worker": worker_state, "socket": socket_metadata,
         "worker_tokens": tokens, "boot_id": stutter_core::boot::current_boot_id().map_err(|error| failure(error.to_string()))?}),
     )
@@ -296,7 +316,7 @@ pub fn execute(auth: &Authorization, action: BoundedServiceAction) -> Result<Val
 
 fn worker_tokens(user: &str) -> Value {
     let ledger = Path::new("/var/lib/stutter").join(format!("worker-{user}/issued-tokens.json"));
-    match fs::read(&ledger) {
+    let mut summary = match fs::read(&ledger) {
         Ok(bytes) => match serde_json::from_slice::<Value>(&bytes) {
             Ok(Value::Array(entries)) => {
                 json!({"readable": true, "outstanding": entries.iter().filter(|entry| entry["restored"] != true).count()})
@@ -307,10 +327,30 @@ fn worker_tokens(user: &str) -> Value {
             json!({"readable": true, "outstanding": 0})
         }
         Err(error) => json!({"readable": false, "error": error.to_string()}),
-    }
+    };
+    let audit = ledger.with_file_name("token-recovery-audit.jsonl");
+    summary["recovery_audit"] = match fs::read_to_string(audit) {
+        Ok(text) => {
+            let entries = text
+                .lines()
+                .map(serde_json::from_str::<Value>)
+                .collect::<Result<Vec<_>, _>>();
+            match entries {
+                Ok(entries) => {
+                    json!({"readable":true,"completed":entries.iter().filter(|entry| entry["success"] == true).count()})
+                }
+                Err(_) => json!({"readable":false,"error":"malformed root token recovery audit"}),
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            json!({"readable":true,"completed":0})
+        }
+        Err(error) => json!({"readable":false,"error":error.to_string()}),
+    };
+    summary
 }
 
-fn process_snapshot(properties: &str) -> Value {
+fn process_snapshot(properties: &str, pinned: Option<&Path>, expected_sha256: &str) -> Value {
     let pid = properties
         .lines()
         .find_map(|line| line.strip_prefix("MainPID="))
@@ -329,10 +369,21 @@ fn process_snapshot(properties: &str) -> Value {
     };
     let before = ticks();
     let status = fs::read_to_string(proc.join("status")).ok();
-    let binary = fs::read(proc.join("exe"))
-        .ok()
-        .map(|bytes| sha256_hex(&bytes));
+    let executable_identity = || {
+        fs::metadata(proc.join("exe"))
+            .ok()
+            .map(|metadata| (metadata.dev(), metadata.ino()))
+    };
+    let executable_before = executable_identity();
+    // The ownership verifier hashed the protected installed file. Match the actual /proc
+    // executable to that exact inode, avoiding two more whole-binary hashes per query.
+    let pinned_identity = pinned
+        .and_then(|path| fs::metadata(path).ok())
+        .map(|metadata| (metadata.dev(), metadata.ino()));
+    let binary = (executable_before.is_some() && executable_before == pinned_identity)
+        .then(|| expected_sha256.to_owned());
     let after = ticks();
+    let executable_after = executable_identity();
     let fields: std::collections::BTreeMap<_, _> = status
         .as_deref()
         .unwrap_or("")
@@ -344,7 +395,8 @@ fn process_snapshot(properties: &str) -> Value {
                 .then(|| (key.to_owned(), value.trim().to_owned()))
         })
         .collect();
-    json!({"pid": pid, "starttime_ticks": before, "consistent": before.is_some() && before == after, "binary_sha256": binary, "status": fields})
+    json!({"pid": pid, "starttime_ticks": before, "consistent": before.is_some() && before == after && executable_before.is_some() && executable_before == executable_after,
+        "exe_dev":executable_before.map(|identity| identity.0), "exe_ino":executable_before.map(|identity| identity.1), "binary_sha256": binary, "status": fields})
 }
 
 #[cfg(test)]

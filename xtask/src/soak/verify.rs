@@ -6,7 +6,7 @@ use std::{collections::BTreeMap, fs, path::Path};
 use serde::Serialize;
 
 use super::{
-    coverage::{Minimums, minimum_checks, tally},
+    coverage::{minimum_checks, tally},
     history::{HistoryEvent, audit_events, first_resolutions, read_events},
     records::{Profile, RoundRecord, SoakState, read_rounds, read_state, unix_ms},
 };
@@ -16,6 +16,8 @@ pub struct Counts {
     pub rounds: usize,
     pub rounds_ok: usize,
     pub wall_clock_hours: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verified_service_hours: Option<f64>,
     pub experiments: usize,
     pub kept: usize,
     pub reverted: usize,
@@ -84,6 +86,9 @@ pub fn counts(state: &SoakState, rounds: &[RoundRecord], events: &[HistoryEvent]
     counts.wall_clock_hours = state
         .started_unix_ms
         .map_or(0.0, |start| end.saturating_sub(start) as f64 / 3_600_000.0);
+    if state.profile == Profile::Service {
+        counts.verified_service_hours = Some(0.0);
+    }
     for event in first_resolutions(events) {
         counts.experiments += 1;
         let operation = event.action_kind.clone().unwrap_or_default();
@@ -140,12 +145,27 @@ pub fn verify(dir: &Path) -> anyhow::Result<Report> {
     } else {
         Vec::new()
     };
-    let counts = counts(&state, &rounds, &events);
+    let mut counts = counts(&state, &rounds, &events);
     let mut checks = Vec::new();
+    if state.profile == Profile::Service {
+        let binding = state
+            .service
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("service binding missing"))?;
+        match super::service_presence::verified_ms(dir, &binding.campaign) {
+            Ok(ms) => counts.verified_service_hours = Some(ms as f64 / 3_600_000.0),
+            Err(error) => checks.push(Check {
+                name: "verified_service_presence".into(),
+                passed: false,
+                detail: format!("{error:#}"),
+            }),
+        }
+        checks.extend(super::service_soak::runtime_checks(dir)?);
+    }
 
     checks.extend(minimum_checks(
         &counts,
-        &Minimums::for_profile(state.profile),
+        &super::service_soak::minimums(&state)?,
     ));
 
     let mut rounds_problems = Vec::new();
@@ -194,7 +214,7 @@ pub fn verify(dir: &Path) -> anyhow::Result<Report> {
     check(
         &mut checks,
         "faults_audited",
-        audit_problems(dir, &rounds, &events),
+        audit_problems(dir, &rounds, &events, state.profile),
         "every injected fault left its audit/history evidence",
     );
 
@@ -335,17 +355,30 @@ fn ordering_problems(rounds: &[RoundRecord], events: &[HistoryEvent]) -> Vec<Str
 }
 
 /// Each injected fault must have left the evidence the plan requires.
-fn audit_problems(dir: &Path, rounds: &[RoundRecord], events: &[HistoryEvent]) -> Vec<String> {
+fn audit_problems(
+    dir: &Path,
+    rounds: &[RoundRecord],
+    events: &[HistoryEvent],
+    profile: Profile,
+) -> Vec<String> {
     let mut problems = Vec::new();
     let audit = dir.join("home/.local/state/stutter/audit/actions.jsonl");
     let recoveries = audit_events(&audit, "autotune-startup-recovery");
-    if rounds.iter().any(|round| round.kind == "controller_crash") && recoveries.is_empty() {
+    let emergency = audit_events(&audit, "autotune emergency restore");
+    if rounds.iter().any(|round| round.kind == "controller_crash")
+        && recoveries.is_empty()
+        && !(profile == Profile::Service && !emergency.is_empty())
+    {
         problems.push("controller crashes left no startup-recovery audit event".to_owned());
     }
     for round in rounds {
         let has = |kind: &str| round.events.iter().any(|event| event.kind == kind);
         match round.kind.as_str() {
-            "controller_crash" if round.outcome == "ok" && !has("startup_recovery") => {
+            "controller_crash"
+                if round.outcome == "ok"
+                    && !has("startup_recovery")
+                    && !(profile == Profile::Service && has("service_recovery")) =>
+            {
                 problems.push(format!(
                     "round {}: the crash was not followed by a recorded recovery",
                     round.round
@@ -375,7 +408,10 @@ pub fn render(report: &Report) -> String {
         "{:?} soak {}: {:.2} h, {} rounds ({} clean), {} experiments ({} kept, {} reverted)\n",
         report.profile,
         if report.passed { "PASSED" } else { "FAILED" },
-        report.counts.wall_clock_hours,
+        report
+            .counts
+            .verified_service_hours
+            .unwrap_or(report.counts.wall_clock_hours),
         report.counts.rounds,
         report.counts.rounds_ok,
         report.counts.experiments,
@@ -402,7 +438,12 @@ pub fn status_line(dir: &Path) -> anyhow::Result<String> {
     } else {
         Vec::new()
     };
-    let counts = counts(&state, &rounds, &events);
+    let mut counts = counts(&state, &rounds, &events);
+    if let Some(binding) = &state.service {
+        counts.verified_service_hours = Some(
+            super::service_presence::verified_ms(dir, &binding.campaign)? as f64 / 3_600_000.0,
+        );
+    }
     let remaining = state.started_unix_ms.map_or(f64::NAN, |start| {
         (start as f64 + state.hours * 3_600_000.0 - unix_ms() as f64) / 3_600_000.0
     });
@@ -411,7 +452,9 @@ pub fn status_line(dir: &Path) -> anyhow::Result<String> {
         state.id,
         state.profile,
         state.next_round,
-        counts.wall_clock_hours,
+        counts
+            .verified_service_hours
+            .unwrap_or(counts.wall_clock_hours),
         remaining,
         serde_json::to_string(&counts)?
     ))
@@ -546,6 +589,7 @@ mod tests {
             cpus: None,
             next_round: 0,
             finished: false,
+            service: None,
         };
         let events = [
             event("candidate_kept", "cgroup_placement", 1),

@@ -72,6 +72,7 @@ fn expected_subcommands_are_registered() {
             "schema-check",
             "score-evaluate",
             "score-matrix",
+            "service-campaign",
             "service-smoke",
             "setup-local-ci",
             "smoke",

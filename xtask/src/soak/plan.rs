@@ -161,7 +161,7 @@ pub struct Timing {
 
 pub fn timing(profile: Profile) -> Timing {
     match profile {
-        Profile::Full => Timing {
+        Profile::Full | Profile::Service => Timing {
             candidate_window_s: 30,
             resolve_timeout_s: 240,
             long_round_s: 540,

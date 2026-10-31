@@ -217,12 +217,12 @@ fn runner_ready(socket: &Path, state: &RunnerTarget) -> bool {
 
 fn build_runner(repository: &Path) -> anyhow::Result<PathBuf> {
     let status = Command::new("cargo")
-        .args(["build", "-p", "stutter-validation-runner"])
+        .args(["build", "--release", "-p", "stutter-validation-runner"])
         .current_dir(repository)
         .status()
         .context("run cargo build")?;
     ensure!(status.success(), "building the validation runner failed");
-    let runner = repository.join("target/debug/stutter-validation-runner");
+    let runner = repository.join("target/release/stutter-validation-runner");
     ensure!(runner.is_file(), "{} was not produced", runner.display());
     Ok(runner)
 }

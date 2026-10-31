@@ -39,9 +39,20 @@ impl StageRunner for Production {
                 write_report(dir, stage, attempt, &report)?;
                 Ok(AttemptOutcome::Passed)
             }
+            Stage::Soak => {
+                let output = dir.0.join("service-soak");
+                let report = crate::soak::service_soak::campaign_run(state, &output)?;
+                write_report(dir, stage, attempt, &serde_json::to_value(&report)?)?;
+                Ok(if report.passed {
+                    AttemptOutcome::Passed
+                } else {
+                    AttemptOutcome::Failed { class: crate::validation_campaign::model::FailureClass::ValidationFailure,
+                        stage: stage.id().into(), summary: "packaged service soak did not meet its frozen coverage and dwell requirements".into() }
+                })
+            }
             // These stages cannot pass on a template/source check. Their live implementations
             // must produce the complete focus/fault/soak/reboot/evidence records before promotion.
-            Stage::Recovery | Stage::Reboots | Stage::Soak | Stage::Evidence => {
+            Stage::Recovery | Stage::Reboots | Stage::Evidence => {
                 anyhow::bail!(
                     "service {} requires its complete live evidence runner",
                     stage.id()

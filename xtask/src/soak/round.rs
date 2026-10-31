@@ -17,6 +17,8 @@ use super::{
     world::{Controller, Game, World, signal, wait_controller, wait_exit},
 };
 
+mod service_round;
+
 /// Set by SIGINT/SIGTERM on the soak process: finish nothing new, record the round as interrupted.
 pub(super) static STOP: AtomicBool = AtomicBool::new(false);
 
@@ -121,7 +123,8 @@ impl Ctx<'_> {
         let game = self.world.spawn_game(&self.dir, "game-1", game_seconds)?;
         self.event("game_start", format!("pid {}", game.child.pid()));
         let outcome = self.drive(game);
-        if let Some(service) = &self.world.service
+        if outcome.is_err()
+            && let Some(service) = &self.world.service
             && let Err(error) =
                 service.action(stutter_validation_runner::model::BoundedServiceAction::Stop)
         {
@@ -148,11 +151,19 @@ impl Ctx<'_> {
             }
             Kind::ControllerCrash => {
                 let tried = self.applied(&mut controller)?;
+                let startup_before =
+                    audit_events(&self.world.audit_path(), "autotune-startup-recovery").len();
+                let emergency_before =
+                    audit_events(&self.world.audit_path(), "autotune emergency restore").len();
                 self.kill_controller(&mut controller);
                 self.end_session(controller, "kill9");
                 let mut next =
                     self.start_controller(&game, "controller-2", self.round.operations)?;
-                self.wait_recovery()?;
+                if self.world.service.is_some() {
+                    self.wait_service_recovery(&game, startup_before, emergency_before)?;
+                } else {
+                    self.wait_recovery(startup_before)?;
+                }
                 self.memory_holds(&mut next, tried)?;
                 self.end_workload(&mut game, next, "workload_exit")
             }
@@ -166,25 +177,7 @@ impl Ctx<'_> {
                 self.memory_holds(&mut next, tried)?;
                 self.end_workload(&mut game, next, "workload_exit")
             }
-            Kind::WorkerKill => {
-                self.applied(&mut controller)?;
-                self.world.kill_worker()?;
-                self.event("worker_kill", "kill -9 of the privileged worker");
-                std::thread::sleep(Duration::from_secs(3));
-                if self.world.ensure_worker()? {
-                    self.event("worker_start", "privileged worker restarted");
-                }
-                if self.resolution(&mut controller)?.is_none()
-                    && controller.child.try_wait()?.is_some()
-                {
-                    // The controller faulted with the worker; the supervisor starts another.
-                    self.end_session(controller, "faulted_with_worker");
-                    controller =
-                        self.start_controller(&game, "controller-2", self.round.operations)?;
-                    self.experiment(&mut controller, &game)?;
-                }
-                self.end_workload(&mut game, controller, "workload_exit")
-            }
+            Kind::WorkerKill => self.worker_kill_round(controller, game),
             Kind::Suspend => {
                 self.applied(&mut controller)?;
                 self.suspend()?;
@@ -348,7 +341,7 @@ impl Ctx<'_> {
             }
             None => {
                 self.violation("no experiment started in time");
-                Ok(None)
+                anyhow::bail!("no applied experiment exists for the scheduled perturbation")
             }
         }
     }
@@ -470,8 +463,7 @@ impl Ctx<'_> {
         Ok(())
     }
 
-    fn wait_recovery(&mut self) -> anyhow::Result<()> {
-        let before = audit_events(&self.world.audit_path(), "autotune-startup-recovery").len();
+    fn wait_recovery(&mut self, before: usize) -> anyhow::Result<()> {
         let deadline = Instant::now() + Duration::from_secs(40);
         loop {
             let events = audit_events(&self.world.audit_path(), "autotune-startup-recovery");
@@ -493,38 +485,6 @@ impl Ctx<'_> {
             anyhow::ensure!(!STOP.load(Ordering::SeqCst), "the soak was interrupted");
             std::thread::sleep(Duration::from_millis(250));
         }
-    }
-
-    fn service_idle(&mut self, controller: &mut Controller) -> anyhow::Result<()> {
-        let report = super::service_idle::wait(self.world, controller)?;
-        fs::write(
-            self.dir.join(format!("idle-runtime-{}.json", unix_ms())),
-            serde_json::to_vec_pretty(&report)?,
-        )?;
-        self.event(
-            "service_idle_after_exit",
-            "same controller stayed alive; controller and root token ledgers settled",
-        );
-        Ok(())
-    }
-
-    fn finish_service_workload(
-        &mut self,
-        mut controller: Controller,
-        ended_by: &str,
-    ) -> anyhow::Result<()> {
-        self.service_idle(&mut controller)?;
-        self.world
-            .service
-            .as_ref()
-            .context("service binding missing")?
-            .action(stutter_validation_runner::model::BoundedServiceAction::Stop)?;
-        self.event(
-            "service_stop",
-            "deliberate round cleanup after verified live idle state",
-        );
-        self.end_session(controller, ended_by);
-        Ok(())
     }
 
     fn suspend(&mut self) -> anyhow::Result<()> {

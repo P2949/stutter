@@ -49,6 +49,7 @@ pub(super) struct World {
     pub(super) socket: PathBuf,
     pub(super) worker: Option<OwnedChild>,
     pub(super) service: Option<super::service::Binding>,
+    service_worker: std::cell::Cell<Option<(u32, u64)>>,
 }
 
 pub(super) use super::actors::{Contention, ControllerProcess, wait_controller};
@@ -90,6 +91,7 @@ impl World {
             socket,
             worker: None,
             service: None,
+            service_worker: std::cell::Cell::new(None),
         })
     }
 
@@ -101,10 +103,9 @@ impl World {
     }
 
     pub(super) fn bind_service(&mut self, binding: super::service::Binding) -> anyhow::Result<()> {
-        // An active game-scope-labelled root supplies a strong runtime identity. A plain
-        // Steam-path-only process is separately tested as a low-confidence negative case.
-        self.game = self.game.with_file_name("gamescope");
-        fs::copy(&self.xtask, &self.game)?;
+        // A real owned Wine-like helper supplies independent runtime identity evidence while
+        // the game root and its threads retain the primary GameRunnableLatency task classes.
+        fs::copy(&self.xtask, self.game.with_file_name("wineserver"))?;
         self.service = Some(binding);
         Ok(())
     }
@@ -192,15 +193,30 @@ impl World {
 
     pub(super) fn ensure_worker(&mut self) -> anyhow::Result<bool> {
         if let Some(service) = &self.service {
-            let report =
-                service.action(stutter_validation_runner::model::BoundedServiceAction::Query)?;
+            use stutter_validation_runner::model::BoundedServiceAction as Action;
+            let mut report = service.action(Action::Query)?;
             if report["worker_process"].is_null() {
-                service.action(
-                    stutter_validation_runner::model::BoundedServiceAction::RestartWorker,
-                )?;
-                return Ok(true);
+                report = service.action(Action::RestartWorker)?;
             }
-            return Ok(false);
+            let deadline = Instant::now() + Duration::from_secs(20);
+            loop {
+                if let (Some(pid), Some(ticks)) = (
+                    report["worker_process"]["pid"].as_u64(),
+                    report["worker_process"]["starttime_ticks"].as_u64(),
+                ) && report["worker_process"]["consistent"] == true
+                {
+                    let next = Some((u32::try_from(pid)?, ticks));
+                    let changed = self.service_worker.get() != next;
+                    self.service_worker.set(next);
+                    return Ok(changed);
+                }
+                ensure!(
+                    Instant::now() < deadline,
+                    "service worker never acquired a live identity"
+                );
+                std::thread::sleep(Duration::from_millis(500));
+                report = service.action(Action::Query)?;
+            }
         }
         if let Some(worker) = self.worker.as_mut()
             && worker.0.try_wait()?.is_none()
@@ -246,6 +262,25 @@ impl World {
     }
 
     pub(super) fn spawn_game(&self, dir: &Path, name: &str, seconds: u64) -> anyhow::Result<Game> {
+        self.spawn_fixture(dir, name, seconds, true)
+    }
+
+    pub(super) fn spawn_transient_game(
+        &self,
+        dir: &Path,
+        name: &str,
+        seconds: u64,
+    ) -> anyhow::Result<Game> {
+        self.spawn_fixture(dir, name, seconds, false)
+    }
+
+    fn spawn_fixture(
+        &self,
+        dir: &Path,
+        name: &str,
+        seconds: u64,
+        attach: bool,
+    ) -> anyhow::Result<Game> {
         let ready = dir.join(format!("{name}.ready"));
         let mut command = Command::new("taskset");
         command
@@ -253,6 +288,13 @@ impl World {
             .arg(&self.game);
         if self.service.is_some() {
             command.args(["live-workload", "--interactive-root"]);
+            if self
+                .game
+                .file_name()
+                .is_some_and(|name| name == "StutterAcceptanceGame")
+            {
+                command.arg("--wine-helper");
+            }
         } else {
             command.arg("live-workload");
         }
@@ -276,7 +318,7 @@ impl World {
             std::thread::sleep(Duration::from_millis(20));
         }
         let ticks = start_ticks(game.pid())?;
-        if let Some(service) = &self.service {
+        if attach && let Some(service) = &self.service {
             service.attach(game.pid(), ticks)?;
         }
         Ok(Game { child: game, ticks })
@@ -365,8 +407,10 @@ impl World {
         timing: Timing,
     ) -> anyhow::Result<Controller> {
         if let Some(service) = &self.service {
+            let process = service.start()?;
+            self.service_worker.set(Some(process.worker_identity));
             return Ok(Controller {
-                child: ControllerProcess::Service(Box::new(service.start()?)),
+                child: ControllerProcess::Service(Box::new(process)),
                 started_unix_ms: super::records::unix_ms(),
             });
         }

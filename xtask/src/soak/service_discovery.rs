@@ -197,7 +197,7 @@ pub(crate) fn run(state: &State, dir: &Path) -> anyhow::Result<Value> {
         // Each replacement is a real new process. Numeric-PID reuse has an additional source test
         // with distinct start ticks; this live case proves replacement through the actual service.
         for n in 0..6 {
-            let mut game = world.spawn_game(dir, &format!("oscillating-{n}"), 10)?;
+            let mut game = world.spawn_transient_game(dir, &format!("oscillating-{n}"), 10)?;
             cases.push(json!({"scenario":"rapid_focus_oscillation","pid":game.child.pid(),"starttime_ticks":game.ticks,"observations":probe.quiet(&mut controller, 1, Some(game.child.pid()))?}));
             stop_game(&mut game)?;
         }
