@@ -121,6 +121,7 @@ impl RollbackHandler for CpuPowerRollbackHandler {
             restored: outcome.restored,
             skipped_dead: 0,
             skipped_identity_mismatch: outcome.skipped_identity_mismatch,
+            skipped_externally_changed: 0,
             legacy_unverified: 0,
             errors: 0,
             messages: outcome.messages,

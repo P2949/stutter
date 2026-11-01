@@ -50,6 +50,11 @@ impl CgroupPlacementAction {
         let snapshots = self.collect_target_snapshots_at(proc_root, policy)?;
         let target_abs = self.target_cgroup_abs()?;
         let target_cgroup_id = cgroup_id(&target_abs)?;
+        let applied_cgroup = std::path::Path::new("/").join(
+            target_abs
+                .strip_prefix(&self.cgroup_root)
+                .unwrap_or(&target_abs),
+        );
         let cpuset = self.cpuset_restore_record(&target_abs)?;
         let mut records = Vec::new();
         for (snapshot, _) in snapshots {
@@ -73,7 +78,8 @@ impl CgroupPlacementAction {
             );
             records.push(
                 CgroupRestoreRecord::new(identity, snapshot.original_cgroup)
-                    .with_cgroup_id(cgroup_id(&original_abs)?),
+                    .with_cgroup_id(cgroup_id(&original_abs)?)
+                    .with_applied(applied_cgroup.clone(), target_cgroup_id),
             );
         }
         Ok(CgroupPlan {

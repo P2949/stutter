@@ -49,6 +49,7 @@ impl RollbackHandler for AutotuneRollbackTokenHandler {
             restored: summary.restored_items,
             skipped_dead: summary.skipped_items,
             skipped_identity_mismatch: 0,
+            skipped_externally_changed: 0,
             legacy_unverified: 0,
             errors: 0,
             messages: summary.messages,

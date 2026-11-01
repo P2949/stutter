@@ -143,6 +143,7 @@ impl RollbackHandler for UclampRollbackHandler {
             restored,
             skipped_dead,
             skipped_identity_mismatch,
+            skipped_externally_changed: 0,
             legacy_unverified,
             errors,
             messages,

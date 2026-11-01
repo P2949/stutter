@@ -32,6 +32,7 @@ pub struct RestoreSummary {
     pub restored: usize,
     pub skipped_dead: usize,
     pub skipped_identity_mismatch: usize,
+    pub skipped_externally_changed: usize,
     pub legacy_unverified: usize,
     pub errors: usize,
 }
@@ -82,6 +83,19 @@ fn restore_all_at(
                 errors.push(err.into());
                 continue;
             }
+        }
+
+        // Never write back over a value someone else set after Stutter applied its own.
+        if proc_root == Path::new("/proc")
+            && let Ok(live) = super::syscall::read_allowed_mask(record.tid)
+            && live != record.applied_mask
+        {
+            summary.skipped_externally_changed += 1;
+            log::warn!(
+                "restore_record_externally_changed tid={}; preserving the external affinity",
+                record.tid
+            );
+            continue;
         }
 
         match set_affinity(record.tid, &record.original_mask) {

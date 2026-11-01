@@ -273,6 +273,8 @@ pub struct RollbackResult {
     pub restored: usize,
     pub skipped_dead: usize,
     pub skipped_identity_mismatch: usize,
+    /// Tasks whose live state was no longer what Stutter applied; nothing was written for them.
+    pub skipped_externally_changed: usize,
     pub legacy_unverified: usize,
     pub errors: usize,
     pub messages: Vec<String>,
@@ -322,6 +324,7 @@ pub(crate) fn token_restore_result(
         restored,
         skipped_dead: skipped,
         skipped_identity_mismatch: 0,
+        skipped_externally_changed: 0,
         legacy_unverified: 0,
         errors: 0,
         messages,

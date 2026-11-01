@@ -436,3 +436,49 @@ fn rollback_token_handler_restores_namespace_absolute_cgroup_path_under_root() {
     fs::remove_dir_all(proc_root).ok();
     fs::remove_dir_all(cgroup_root).ok();
 }
+
+#[test]
+fn rollback_preserves_a_task_someone_else_moved_after_stutter() {
+    let proc_root = temp_dir("proc-rollback-external");
+    let cgroup_root = temp_dir("cgroup-rollback-external");
+    write_fake_task(&proc_root, 42, "game", 4200, "/external.slice");
+    write_fake_cgroup(&cgroup_root, "/old.slice");
+    let action = action_for(&cgroup_root, 42);
+    let record = |applied: &str| {
+        CgroupRestoreRecord::new(
+            crate::actions::TaskRestoreIdentity::observed(
+                42,
+                Some(42_u32.into()),
+                Some("game".to_owned()),
+                Some(4200),
+                None,
+            ),
+            PathBuf::from("/old.slice"),
+        )
+        .with_applied(PathBuf::from(applied), 7)
+    };
+
+    // Stutter put it in /stutter/target; it is now in /external.slice: not Stutter's to move.
+    let token = RollbackToken::CgroupRestore {
+        records: vec![record("/stutter/target")],
+        cpuset: None,
+    };
+    action.rollback_at(&proc_root, &token).unwrap();
+    assert_eq!(
+        read_trimmed(&cgroup_root.join("old.slice/cgroup.procs")).unwrap(),
+        ""
+    );
+
+    // Still where Stutter put it: Stutter owns it, so it goes back.
+    let token = RollbackToken::CgroupRestore {
+        records: vec![record("/external.slice")],
+        cpuset: None,
+    };
+    action.rollback_at(&proc_root, &token).unwrap();
+    assert_eq!(
+        read_trimmed(&cgroup_root.join("old.slice/cgroup.procs")).unwrap(),
+        "42"
+    );
+    fs::remove_dir_all(proc_root).ok();
+    fs::remove_dir_all(cgroup_root).ok();
+}

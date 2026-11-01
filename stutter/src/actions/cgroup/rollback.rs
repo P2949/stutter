@@ -81,6 +81,7 @@ impl CgroupRollbackHandler {
         let mut restored = 0;
         let mut skipped_dead = 0;
         let mut skipped_identity_mismatch = 0;
+        let mut skipped_externally_changed = 0;
         let mut legacy_unverified = 0;
         let mut errors = 0;
         let mut messages = Vec::new();
@@ -121,6 +122,21 @@ impl CgroupRollbackHandler {
                     );
                 }
                 RestoreIdentityStatus::SameTask => {}
+            }
+
+            if let Some(applied) = &record.applied_cgroup
+                && let Ok(live) = super::procfs::read_proc_cgroup_path_at(proc_root, tid)
+                && live != *applied
+            {
+                skipped_externally_changed += 1;
+                let msg = format!(
+                    "cgroup restore preserved an external placement for tid={tid}: stutter put it in {} and it is now in {}",
+                    applied.display(),
+                    live.display()
+                );
+                log::warn!("{msg}");
+                messages.push(msg);
+                continue;
             }
 
             let original_cgroup = resolve_cgroup_fs_path(cgroup_root, &record.original_cgroup)
@@ -207,6 +223,7 @@ impl CgroupRollbackHandler {
             restored,
             skipped_dead,
             skipped_identity_mismatch,
+            skipped_externally_changed,
             legacy_unverified,
             errors,
             messages,

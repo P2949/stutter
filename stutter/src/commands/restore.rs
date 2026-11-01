@@ -418,6 +418,7 @@ mod tests {
                 skipped_identity_mismatch: 5,
                 legacy_unverified: 6,
                 errors: 7,
+                ..Default::default()
             },
             ..ProfileRestoreCommandOutcome::default()
         };

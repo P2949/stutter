@@ -45,6 +45,7 @@ pub(crate) fn restore_all_at(
         proc_root,
         state,
         affinity::set_affinity,
+        affinity::read_allowed_mask,
         |tid, nice| {
             crate::actions::nice::set_task_nice(tid.as_u32(), nice).map_err(anyhow_to_io_error)
         },
@@ -55,15 +56,17 @@ pub(crate) fn restore_all_at(
     )
 }
 
-pub(crate) fn restore_all_at_with_ops<FA, FN, FI>(
+pub(crate) fn restore_all_at_with_ops<FA, FM, FN, FI>(
     proc_root: &Path,
     state: &ProfileRestoreState,
     mut set_affinity: FA,
+    mut current_mask: FM,
     mut set_nice: FN,
     mut set_ioprio: FI,
 ) -> (ProfileRestoreSummary, Vec<anyhow::Error>)
 where
     FA: FnMut(Tid, &crate::affinity::CpuMask) -> io::Result<()>,
+    FM: FnMut(Tid) -> io::Result<crate::affinity::CpuMask>,
     FN: FnMut(Tid, i32) -> io::Result<()>,
     FI: FnMut(Tid, i32) -> io::Result<()>,
 {
@@ -99,6 +102,21 @@ where
                 errors.push(err.into());
                 continue;
             }
+        }
+
+        // Only restore a value Stutter still owns. A mask that is no longer the one Stutter
+        // applied belongs to someone else now, and writing the old one back would destroy it.
+        if let Ok(live) = current_mask(record.tid)
+            && live != record.applied_mask
+        {
+            summary.skipped_externally_changed += 1;
+            log::warn!(
+                "profile_restore_affinity_externally_changed tid={} applied={} live={}; preserving the external value",
+                record.tid,
+                record.applied_mask.to_range_string(),
+                live.to_range_string()
+            );
+            continue;
         }
 
         match set_affinity(record.tid, &record.original_mask) {

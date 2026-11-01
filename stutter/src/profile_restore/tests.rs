@@ -55,6 +55,7 @@ fn restore_nice_with_matching_identity() {
         &dir,
         &state,
         |_, _| Ok(()),
+        unknown_mask,
         |tid, nice| {
             restored.push((tid, nice));
             Ok(())
@@ -83,6 +84,7 @@ fn skip_nice_restore_on_tid_reuse() {
         &dir,
         &state,
         |_, _| Ok(()),
+        unknown_mask,
         |tid, nice| {
             restored.push((tid, nice));
             Ok(())
@@ -112,6 +114,7 @@ fn restore_ionice_with_matching_identity() {
         &dir,
         &state,
         |_, _| Ok(()),
+        unknown_mask,
         |_, _| Ok(()),
         |tid, ioprio| {
             restored.push((tid, ioprio));
@@ -174,8 +177,14 @@ fn skip_ionice_restore_on_tid_reuse() {
         ..ProfileRestoreState::default()
     };
 
-    let (summary, errors) =
-        restore_all_at_with_ops(&dir, &state, |_, _| Ok(()), |_, _| Ok(()), |_, _| Ok(()));
+    let (summary, errors) = restore_all_at_with_ops(
+        &dir,
+        &state,
+        |_, _| Ok(()),
+        unknown_mask,
+        |_, _| Ok(()),
+        |_, _| Ok(()),
+    );
 
     assert!(errors.is_empty());
     assert_eq!(summary.ionice, 0);
@@ -257,4 +266,75 @@ fn temp_dir(name: &str) -> PathBuf {
     ));
     fs::create_dir_all(&dir).unwrap();
     dir
+}
+
+/// A task whose live mask cannot be read is restored as before; a readable one must still match.
+fn unknown_mask(_: stutter_core::ids::Tid) -> std::io::Result<crate::affinity::CpuMask> {
+    Err(std::io::Error::from_raw_os_error(libc::ESRCH))
+}
+
+#[test]
+fn an_affinity_changed_by_someone_else_is_preserved_not_overwritten() {
+    use crate::affinity::CpuMask;
+    let dir = std::env::temp_dir().join(format!("stutter-ownership-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("42/task/42")).unwrap();
+    std::fs::write(
+        dir.join("42/stat"),
+        "42 (game) S 1 1 1 0 0 0 0 0 0 0 0 0 0 0 20 0 1 0 100 0 0 0\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("42/task/42/stat"),
+        "42 (game) S 1 1 1 0 0 0 0 0 0 0 0 0 0 0 20 0 1 0 100 0 0 0\n",
+    )
+    .unwrap();
+    let record = |applied: &str| crate::affinity::AffinityRecord {
+        tid: 42_u32.into(),
+        process_pid: Some(42_u32.into()),
+        process_starttime_ticks: Some(100),
+        task_starttime_ticks: Some(100),
+        original_mask: CpuMask::parse("0").unwrap(),
+        applied_mask: CpuMask::parse(applied).unwrap(),
+    };
+    let external = CpuMask::parse("0-1").unwrap();
+    let mut written = Vec::new();
+
+    let state = ProfileRestoreState {
+        affinity_records: vec![record("1")],
+        ..ProfileRestoreState::default()
+    };
+    let (summary, errors) = restore_all_at_with_ops(
+        &dir,
+        &state,
+        |tid, mask| {
+            written.push((tid, mask.clone()));
+            Ok(())
+        },
+        |_| Ok(external.clone()),
+        |_, _| Ok(()),
+        |_, _| Ok(()),
+    );
+    assert!(errors.is_empty());
+    assert!(
+        written.is_empty(),
+        "overwrote an external owner: {written:?}"
+    );
+    assert_eq!(summary.skipped_externally_changed, 1);
+
+    // Still the value Stutter applied: it owns it, so the original comes back.
+    let (summary, _) = restore_all_at_with_ops(
+        &dir,
+        &state,
+        |tid, mask| {
+            written.push((tid, mask.clone()));
+            Ok(())
+        },
+        |_| Ok(CpuMask::parse("1").unwrap()),
+        |_, _| Ok(()),
+        |_, _| Ok(()),
+    );
+    assert_eq!(summary.affinity, 1);
+    assert_eq!(written.len(), 1);
+    let _ = std::fs::remove_dir_all(&dir);
 }

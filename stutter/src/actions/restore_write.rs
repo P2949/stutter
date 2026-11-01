@@ -13,10 +13,16 @@ pub(crate) struct RestoreSummary {
     pub restored: usize,
     pub skipped_missing: usize,
     pub skipped_identity_mismatch: usize,
+    /// Left alone because someone else changed the value after Stutter applied its own.
+    pub skipped_externally_changed: usize,
     pub failed: usize,
 }
 
 impl RestoreSummary {
+    pub fn record_externally_changed(&mut self) {
+        self.skipped_externally_changed += 1;
+    }
+
     pub fn record_restored(&mut self) {
         self.restored += 1;
     }
@@ -146,6 +152,7 @@ mod tests {
                 restored: 1,
                 skipped_missing: 1,
                 skipped_identity_mismatch: 1,
+                skipped_externally_changed: 0,
                 failed: 1,
             }
         );

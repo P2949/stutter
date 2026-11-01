@@ -361,6 +361,12 @@ pub struct CgroupRestoreRecord {
     /// recreated at the same path has another inode, and a task is never restored into it.
     #[serde(default)]
     pub original_cgroup_id: Option<u64>,
+    /// The cgroup Stutter moved the task into and its inode. Restoration happens only while the
+    /// task is still there; a task someone else moved elsewhere is theirs now.
+    #[serde(default)]
+    pub applied_cgroup: Option<PathBuf>,
+    #[serde(default)]
+    pub applied_cgroup_id: Option<u64>,
 }
 
 impl CgroupRestoreRecord {
@@ -370,11 +376,19 @@ impl CgroupRestoreRecord {
             original_cgroup,
             identity: Some(identity),
             original_cgroup_id: None,
+            applied_cgroup: None,
+            applied_cgroup_id: None,
         }
     }
 
     pub fn with_cgroup_id(mut self, id: u64) -> Self {
         self.original_cgroup_id = Some(id);
+        self
+    }
+
+    pub fn with_applied(mut self, cgroup: PathBuf, id: u64) -> Self {
+        self.applied_cgroup = Some(cgroup);
+        self.applied_cgroup_id = Some(id);
         self
     }
 

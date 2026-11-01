@@ -276,6 +276,19 @@ impl CgroupPlacementAction {
                 }
             }
 
+            if let Some(applied) = &record.applied_cgroup
+                && let Ok(live) = procfs::read_proc_cgroup_path_at(proc_root, tid)
+                && live != *applied
+            {
+                summary.record_externally_changed();
+                log::warn!(
+                    "cgroup_rollback_preserved_external_placement tid={tid} applied={} live={}",
+                    applied.display(),
+                    live.display()
+                );
+                continue;
+            }
+
             let original_abs = cgroup_fs_path(&self.cgroup_root, &record.original_cgroup)
                 .with_context(|| {
                     format!(

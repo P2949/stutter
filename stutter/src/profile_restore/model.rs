@@ -53,6 +53,8 @@ pub struct ProfileRestoreSummary {
     pub ionice: usize,
     pub skipped_dead: usize,
     pub skipped_identity_mismatch: usize,
+    /// Tasks whose live value was no longer the one Stutter applied, so nothing was written.
+    pub skipped_externally_changed: usize,
     pub legacy_unverified: usize,
     pub errors: usize,
 }
