@@ -109,6 +109,9 @@ impl AutotuneRuntime {
                     .map(|record| record.samples)
                     .fold(0_u64, u64::saturating_add);
                 self.activity_classifier.push_interval(scored_samples);
+                if drop_counters != self.latest_drop_counters {
+                    crate::metrics::log_drop_counters(&drop_counters);
+                }
                 self.latest_drop_counters = drop_counters;
                 self.controller.window.push_intervals(records);
                 return self.evaluate_and_emit(None);
