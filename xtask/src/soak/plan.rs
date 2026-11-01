@@ -183,7 +183,11 @@ pub fn service_round_for(index: u32) -> Round {
     }
     let cycle = (index as usize) / SERVICE_CYCLE_LEN;
     let kind = SERVICE_OVERLAY[slot - CYCLE.len()];
-    let alternating = if cycle % 2 == 0 { Affinity } else { Cgroup };
+    let alternating = if cycle.is_multiple_of(2) {
+        Affinity
+    } else {
+        Cgroup
+    };
     let operations = match kind {
         Kind::ExternalMutation | Kind::ControllerSigterm => alternating,
         Kind::FailedRestore => Cgroup,

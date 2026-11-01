@@ -448,7 +448,7 @@ fn rollback_preserves_a_task_someone_else_moved_after_stutter() {
         CgroupRestoreRecord::new(
             crate::actions::TaskRestoreIdentity::observed(
                 42,
-                Some(42_u32.into()),
+                Some(42_u32),
                 Some("game".to_owned()),
                 Some(4200),
                 None,
