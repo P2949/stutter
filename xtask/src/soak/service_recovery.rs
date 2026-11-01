@@ -233,20 +233,43 @@ impl Lab<'_> {
             json!({"settled":settled,"idle":idle}),
         );
 
-        // SIGKILL, then a corrupted controller journal: it must fail closed and still restore.
+        // SIGKILL, then a corrupted controller journal. The controller must refuse to guess and
+        // mutate nothing; the root worker's own ledger restores the task; moving the corrupt file
+        // aside is the administrator's recovery and brings the service back.
         let audits = self.recoveries()?;
         let (game, pressure) = self.applied(&mut controller, "corrupt-game")?;
+        let applied_before = self.probe.records.len();
         let before = controller.child.pid();
         self.signal(ServiceComponent::Controller, ServiceSignal::Kill)?;
         self.await_gone(before)?;
         let journal = self.world.journal_path();
         fs::write(&journal, b"{ this journal was corrupted by the acceptance")?;
-        controller = self.controller("recovery-corrupt")?;
+        std::thread::sleep(Duration::from_secs(20));
+        self.probe.poll();
+        ensure!(
+            self.probe.records[applied_before..]
+                .iter()
+                .all(|row| row["decision"]["decision"] != "candidate_applied"),
+            "a controller with a corrupt journal applied an action"
+        );
+        let report = self.query()?;
+        ensure!(
+            report["controller_process"]["consistent"] != true,
+            "a controller kept running on a corrupt journal: {report}"
+        );
+        self.binding.action(Action::RestartWorker)?;
         let settled = self.settled()?;
         ensure!(
             self.recoveries()? > audits,
-            "no new root recovery audit followed the corrupted-journal restart"
+            "the root worker did not recover from its own ledger"
         );
+        let cgroup = fs::read_to_string(format!("/proc/{}/cgroup", game.child.pid()))?;
+        ensure!(
+            !cgroup.trim().ends_with("/target"),
+            "the task was left in the experiment cgroup: {cgroup}"
+        );
+        fs::rename(&journal, journal.with_extension("json.corrupt"))?;
+        controller = self.controller("recovery-corrupt")?;
         let idle = self.release(&mut controller, game, pressure)?;
         self.finish_leg(
             "sigkill_with_corrupt_journal",
