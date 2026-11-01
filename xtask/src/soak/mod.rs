@@ -13,6 +13,7 @@ mod plan;
 mod records;
 mod round;
 pub(crate) mod service;
+pub(super) mod service_cgroup;
 pub(crate) mod service_discovery;
 pub(crate) mod service_evidence;
 mod service_idle;

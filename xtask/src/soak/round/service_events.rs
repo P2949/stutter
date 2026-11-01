@@ -232,8 +232,7 @@ impl Ctx<'_> {
     ) -> anyhow::Result<()> {
         self.applied(&mut controller)?;
         let origin = self.subtree()?.join("suite");
-        fs::remove_dir(&origin)?;
-        fs::create_dir(&origin)?;
+        let parking = super::super::service_cgroup::recreate_origin(&self.subtree()?)?;
         self.event("failed_restore", "the original cgroup was recreated");
         let seen_before = self.seen.len();
         self.term_controller(&mut controller);
@@ -262,6 +261,7 @@ impl Ctx<'_> {
             "game_exit",
             "the workload left, so nothing remains to restore",
         );
+        let _ = fs::remove_dir(&parking);
         let next = self.start_controller(&game, "controller-2", self.round.operations)?;
         self.tokens_settled()?;
         self.finish_service_workload(next, "workload_exit")

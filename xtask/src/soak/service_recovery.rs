@@ -448,8 +448,7 @@ impl Lab<'_> {
         // when the workload is gone is there nothing left to restore.
         let (mut game, pressure) = self.applied(&mut controller, "refused-restore")?;
         let origin = self.subtree().join("suite");
-        fs::remove_dir(&origin)?;
-        fs::create_dir(&origin)?;
+        let parking = super::service_cgroup::recreate_origin(&self.subtree())?;
         let applied_before = self.probe.records.len();
         let before = controller.child.pid();
         self.signal(ServiceComponent::Controller, ServiceSignal::Term)?;
@@ -481,6 +480,7 @@ impl Lab<'_> {
         let unresolved = report["worker_tokens"].clone();
         drop(pressure);
         stop_game(&mut game)?;
+        let _ = fs::remove_dir(&parking);
         self.controller("recovery-refused-2")?;
         let idle = self.settled()?;
         self.finish_leg(
