@@ -181,6 +181,34 @@ impl Lab<'_> {
         super::service_idle::wait(&self.world, controller)
     }
 
+    /// The campaign's delegated cgroup subtree: the desktop user owns it and may create siblings.
+    fn subtree(&self) -> std::path::PathBuf {
+        Path::new("/sys/fs/cgroup").join(format!("stutter-validation-{}", self.state.campaign_id))
+    }
+
+    fn allowed_cpus(pid: u32) -> anyhow::Result<String> {
+        fs::read_to_string(format!("/proc/{pid}/status"))?
+            .lines()
+            .find_map(|line| line.strip_prefix("Cpus_allowed_list:"))
+            .map(|list| list.trim().to_owned())
+            .context("allowed CPU list missing")
+    }
+
+    /// Reconfigure the fixture for one operation family; both service actors are stopped first.
+    fn reconfigure(&mut self, operations: Operations) -> anyhow::Result<()> {
+        self.world.prepare_round(operations)
+    }
+
+    /// Stop and restart the controller from outside while its action is applied, then settle.
+    fn term_and_return(&mut self, controller: &mut Controller, name: &str) -> anyhow::Result<()> {
+        let before = controller.child.pid();
+        self.signal(ServiceComponent::Controller, ServiceSignal::Term)?;
+        self.await_gone(before)?;
+        *controller = self.controller(name)?;
+        self.settled()?;
+        Ok(())
+    }
+
     fn legs(&mut self) -> anyhow::Result<Value> {
         let mut controller = self.controller("recovery-0")?;
         let original = controller.child.pid();
@@ -218,24 +246,32 @@ impl Lab<'_> {
         // SIGTERM lands while a candidate is applied: graceful stop, physical restoration.
         let audits = self.recoveries()?;
         let (game, pressure) = self.applied(&mut controller, "term-game")?;
-        let before = controller.child.pid();
-        self.signal(ServiceComponent::Controller, ServiceSignal::Term)?;
-        self.await_gone(before)?;
-        controller = self.controller("recovery-term")?;
-        let settled = self.settled()?;
+        self.term_and_return(&mut controller, "recovery-term")?;
         ensure!(
             self.recoveries()? > audits,
             "no new root recovery audit followed the SIGTERM"
         );
         let idle = self.release(&mut controller, game, pressure)?;
-        self.finish_leg(
-            "sigterm_while_applied",
-            json!({"settled":settled,"idle":idle}),
-        );
+        self.finish_leg("sigterm_while_applied", json!({"idle":idle}));
 
-        // SIGKILL, then a corrupted controller journal. The controller must refuse to guess and
-        // mutate nothing; the root worker's own ledger restores the task; moving the corrupt file
-        // aside is the administrator's recovery and brings the service back.
+        // A service restart while applied.
+        let audits = self.recoveries()?;
+        let (game, pressure) = self.applied(&mut controller, "restart-game")?;
+        let before = controller.child.pid();
+        self.binding.action(Action::Restart)?;
+        self.await_gone(before)?;
+        controller = self.controller("recovery-restart")?;
+        self.settled()?;
+        ensure!(
+            self.recoveries()? > audits,
+            "no new root recovery audit followed the service restart"
+        );
+        let idle = self.release(&mut controller, game, pressure)?;
+        self.finish_leg("service_restart_while_applied", json!({"idle":idle}));
+
+        // SIGKILL, then a corrupted controller journal. Safety must not depend on anyone
+        // restarting the worker: the controller settles the worker's own ledger before it reads
+        // the journal, then stays failed and applies nothing until the file is repaired.
         let audits = self.recoveries()?;
         let (game, pressure) = self.applied(&mut controller, "corrupt-game")?;
         let applied_before = self.probe.records.len();
@@ -244,7 +280,11 @@ impl Lab<'_> {
         self.await_gone(before)?;
         let journal = self.world.journal_path();
         fs::write(&journal, b"{ this journal was corrupted by the acceptance")?;
-        std::thread::sleep(Duration::from_secs(20));
+        let settled = self.settled()?;
+        ensure!(
+            self.recoveries()? > audits,
+            "the worker did not settle its own ledger for a controller that cannot read its journal"
+        );
         self.probe.poll();
         ensure!(
             self.probe.records[applied_before..]
@@ -256,12 +296,6 @@ impl Lab<'_> {
         ensure!(
             report["controller_process"]["consistent"] != true,
             "a controller kept running on a corrupt journal: {report}"
-        );
-        self.binding.action(Action::RestartWorker)?;
-        let settled = self.settled()?;
-        ensure!(
-            self.recoveries()? > audits,
-            "the root worker did not recover from its own ledger"
         );
         let cgroup = fs::read_to_string(format!("/proc/{}/cgroup", game.child.pid()))?;
         ensure!(
@@ -276,38 +310,96 @@ impl Lab<'_> {
             json!({"settled":settled,"idle":idle}),
         );
 
-        // Someone else changes the affinity of a task the controller already changed.
-        let (game, pressure) = self.applied(&mut controller, "external-game")?;
-        let others = self.cpus.0.to_string();
-        let status = Command::new("taskset")
-            .args(["-a", "-p", "-c", &others])
+        // Someone else sets the affinity to a value that is neither the original (one CPU) nor
+        // the one Stutter applied (the other): it must survive Stutter's rollback.
+        self.reconfigure(Operations::Affinity)?;
+        controller = self.controller("recovery-affinity")?;
+        let (game, pressure) = self.applied(&mut controller, "external-affinity")?;
+        let both = format!("{},{}", self.cpus.0, self.cpus.1);
+        let output = Command::new("taskset")
+            .args(["-a", "-p", "-c", &both])
             .arg(game.child.pid().to_string())
             .output()
             .context("run taskset")?;
+        ensure!(output.status.success(), "the external mutation failed");
+        let external = Self::allowed_cpus(game.child.pid())?;
+        std::thread::sleep(Duration::from_secs(20));
         ensure!(
-            status.status.success(),
-            "the external mutation could not be made"
+            controller.child.try_wait()?.is_none() || self.query().is_ok(),
+            "an external affinity change took the service away"
         );
-        let start = self.probe.records.len();
-        std::thread::sleep(Duration::from_secs(45));
-        self.probe.poll();
-        let rows = self.probe.records[start..].to_vec();
+        let victim = controller.child.pid();
+        if controller.child.try_wait()?.is_none() {
+            self.term_and_return(&mut controller, "recovery-affinity-2")?;
+        } else {
+            self.restored(victim)?;
+            controller = self.controller("recovery-affinity-2")?;
+            self.settled()?;
+        }
+        let after = Self::allowed_cpus(game.child.pid())?;
         ensure!(
-            controller.child.try_wait()?.is_none(),
-            "an external mutation took the always-on controller down"
-        );
-        ensure!(
-            rows.iter()
-                .all(|row| row["decision"]["decision"] != "candidate_applied"),
-            "the controller kept applying while an external mutation was unresolved"
+            after == external,
+            "Stutter overwrote an external affinity: was {external}, now {after}"
         );
         let idle = self.release(&mut controller, game, pressure)?;
         self.finish_leg(
-            "external_mutation",
-            json!({"observations":rows.len(),"idle":idle}),
+            "external_affinity_owner_preserved",
+            json!({"external":external,"after":after,"idle":idle}),
+        );
+
+        // The same for cgroup placement: a sibling cgroup of the campaign's own.
+        self.reconfigure(Operations::Cgroup)?;
+        controller = self.controller("recovery-cgroup")?;
+        let (game, pressure) = self.applied(&mut controller, "external-cgroup")?;
+        let sibling = self.subtree().join("external");
+        fs::create_dir_all(&sibling)?;
+        fs::write(sibling.join("cgroup.procs"), game.child.pid().to_string())?;
+        let placed = fs::read_to_string(format!("/proc/{}/cgroup", game.child.pid()))?;
+        ensure!(
+            placed.trim().ends_with("/external"),
+            "the external placement did not take: {placed}"
+        );
+        std::thread::sleep(Duration::from_secs(20));
+        if controller.child.try_wait()?.is_none() {
+            self.term_and_return(&mut controller, "recovery-cgroup-2")?;
+        } else {
+            self.restored(controller.child.pid())?;
+            controller = self.controller("recovery-cgroup-2")?;
+            self.settled()?;
+        }
+        let after = fs::read_to_string(format!("/proc/{}/cgroup", game.child.pid()))?;
+        ensure!(
+            after.trim().ends_with("/external"),
+            "Stutter moved a task out of an external cgroup: {after}"
+        );
+        let idle = self.release(&mut controller, game, pressure)?;
+        let _ = fs::remove_dir(&sibling);
+        self.finish_leg(
+            "external_cgroup_owner_preserved",
+            json!({"after":after.trim(),"idle":idle}),
+        );
+
+        // A restore that is refused: the cgroup the task came from was destroyed and recreated,
+        // so it is no longer "the cgroup the task left". Nothing is written into the new one.
+        let (game, pressure) = self.applied(&mut controller, "refused-restore")?;
+        let origin = self.subtree().join("suite");
+        fs::remove_dir(&origin)?;
+        fs::create_dir(&origin)?;
+        self.term_and_return(&mut controller, "recovery-refused")?;
+        let procs = fs::read_to_string(origin.join("cgroup.procs"))?;
+        ensure!(
+            procs.trim().is_empty(),
+            "a refused restore still wrote into the recreated cgroup: {procs}"
+        );
+        let idle = self.release(&mut controller, game, pressure)?;
+        self.finish_leg(
+            "refused_restore_settled_without_writing",
+            json!({"idle":idle}),
         );
 
         // Suspend and resume land mid-experiment.
+        self.reconfigure(Operations::Both)?;
+        controller = self.controller("recovery-suspend")?;
         let (game, pressure) = self.applied(&mut controller, "suspend-game")?;
         self.binding.action(Action::SuspendResume)?;
         std::thread::sleep(Duration::from_secs(20));
