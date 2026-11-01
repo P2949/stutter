@@ -1,0 +1,315 @@
+//! Live recovery acceptance through the installed service: every lifecycle and fault event an
+//! administrator or the machine can inflict, with root-token and physical-restoration readback.
+use std::{
+    fs,
+    path::Path,
+    process::Command,
+    time::{Duration, Instant},
+};
+
+use anyhow::{Context, ensure};
+use serde_json::{Value, json};
+use stutter_validation_runner::model::{
+    BoundedServiceAction as Action, ServiceComponent, ServiceSignal,
+};
+
+use super::{
+    history::Tail,
+    plan::{Operations, timing},
+    records::Profile,
+    service::Binding,
+    service_probe::{Probe, focus_matches, stop_game},
+    world::{Controller, Game, World},
+};
+use crate::service_campaign::model::{Stage, State};
+
+struct Lab<'a> {
+    state: &'a State,
+    dir: &'a Path,
+    binding: Binding,
+    world: World,
+    probe: Probe,
+    cpus: (u32, u32),
+    legs: Vec<Value>,
+}
+
+pub(crate) fn run(state: &State, dir: &Path) -> anyhow::Result<Value> {
+    fs::create_dir_all(dir)?;
+    let cpus = super::pick_cpus()?;
+    let binding = Binding::new(state, Stage::Recovery)?;
+    let mut world = World::new(
+        &state.repository,
+        dir,
+        &state.repository.join("target/debug/stutter"),
+        cpus,
+    )?;
+    world.bind_service(binding.clone())?;
+    world.prepare_round(Operations::Both)?;
+    let probe = Probe {
+        tail: Tail::at_end(&world.history_path()),
+        records: vec![],
+        owned: Default::default(),
+    };
+    let mut lab = Lab {
+        state,
+        dir,
+        binding: binding.clone(),
+        world,
+        probe,
+        cpus,
+        legs: Vec::new(),
+    };
+    let result = lab.legs();
+    let stopped = binding.action(Action::Stop);
+    if let Err(error) = &result {
+        fs::write(
+            dir.join("failed-recovery.json"),
+            serde_json::to_vec_pretty(
+                &json!({"error":format!("{error:#}"),"legs":lab.legs,"history":lab.probe.records}),
+            )?,
+        )?;
+    }
+    stopped?;
+    result
+}
+
+impl Lab<'_> {
+    fn query(&self) -> anyhow::Result<Value> {
+        self.binding.action(Action::Query)
+    }
+
+    fn state_of(report: &Value, unit: &str) -> String {
+        report[unit]
+            .as_str()
+            .and_then(|text| {
+                text.lines()
+                    .find_map(|line| line.strip_prefix("ActiveState="))
+            })
+            .unwrap_or("unknown")
+            .to_owned()
+    }
+
+    fn controller(&mut self, name: &str) -> anyhow::Result<Controller> {
+        self.world.spawn_controller(
+            self.dir,
+            name,
+            0,
+            Operations::Both,
+            timing(Profile::Service),
+        )
+    }
+
+    /// A game under pressure whose experiment has been applied, so a fault lands mid-action.
+    fn applied(
+        &mut self,
+        controller: &mut Controller,
+        name: &str,
+    ) -> anyhow::Result<(Game, Option<super::actors::Contention>)> {
+        let game = self.world.spawn_game(self.dir, name, 590)?;
+        self.probe.own(game.child.pid());
+        self.probe
+            .wait(controller, 30, |row| focus_matches(row, &game))?;
+        let pressure = self.world.spawn_burst(self.cpus.0, 8, 590)?;
+        // The candidate cooldown of an earlier leg may still be running.
+        self.probe.wait(controller, 420, |row| {
+            row["decision"]["decision"] == "candidate_applied" && focus_matches(row, &game)
+        })?;
+        Ok((game, pressure))
+    }
+
+    /// Waits until the unit pair is running again with a controller other than `old_pid`.
+    fn restored(&self, old_pid: u32) -> anyhow::Result<Value> {
+        let deadline = Instant::now() + Duration::from_secs(60);
+        loop {
+            let report = self.query()?;
+            if super::service::attest(&report, self.state).is_ok()
+                && report["controller_process"]["pid"] != old_pid
+            {
+                return Ok(report);
+            }
+            ensure!(
+                Instant::now() < deadline,
+                "service pair did not come back with a new controller: {report}"
+            );
+            std::thread::sleep(Duration::from_millis(500));
+        }
+    }
+
+    fn settled(&self) -> anyhow::Result<Value> {
+        let deadline = Instant::now() + Duration::from_secs(60);
+        loop {
+            let report = self.query()?;
+            if report["worker_tokens"]["readable"] == true
+                && report["worker_tokens"]["outstanding"] == 0
+                && !self.world.ledger_path().exists()
+            {
+                return Ok(report);
+            }
+            ensure!(
+                Instant::now() < deadline,
+                "root tokens or the task ledger were not settled: {report}"
+            );
+            std::thread::sleep(Duration::from_millis(500));
+        }
+    }
+
+    fn recoveries(&self) -> anyhow::Result<u64> {
+        self.query()?["worker_tokens"]["recovery_audit"]["completed"]
+            .as_u64()
+            .context("recovery audit count missing")
+    }
+
+    fn signal(&self, component: ServiceComponent, signal: ServiceSignal) -> anyhow::Result<()> {
+        self.binding
+            .action(Action::Signal { component, signal })
+            .map(drop)
+    }
+
+    fn finish_leg(&mut self, name: &str, detail: Value) {
+        self.legs.push(json!({"leg":name,"detail":detail}));
+    }
+
+    /// Release the workload and prove the always-on controller settled on its own.
+    fn release(
+        &mut self,
+        controller: &mut Controller,
+        mut game: Game,
+        pressure: Option<super::actors::Contention>,
+    ) -> anyhow::Result<Value> {
+        drop(pressure);
+        stop_game(&mut game)?;
+        super::service_idle::wait(&self.world, controller)
+    }
+
+    fn legs(&mut self) -> anyhow::Result<Value> {
+        let mut controller = self.controller("recovery-0")?;
+        let original = controller.child.pid();
+
+        // An administrator stops only the controller: it must stay stopped, with the worker up.
+        self.binding.action(Action::StopController)?;
+        std::thread::sleep(Duration::from_secs(15));
+        let report = self.query()?;
+        ensure!(
+            Self::state_of(&report, "controller") == "inactive"
+                && Self::state_of(&report, "worker") == "active",
+            "an administrative controller stop was undone or took the worker down: {report}"
+        );
+        controller = self.controller("recovery-1")?;
+        ensure!(
+            controller.child.pid() != original,
+            "controller was not started again"
+        );
+        self.finish_leg(
+            "administrative_controller_stop",
+            json!({"stayed_stopped_seconds":15}),
+        );
+
+        // The root worker is killed while idle: the pair must return and the ledger be readable.
+        let before = controller.child.pid();
+        self.signal(ServiceComponent::Worker, ServiceSignal::Kill)?;
+        self.restored(before)?;
+        let recovered = self.settled()?;
+        controller = self.controller("recovery-2")?;
+        self.finish_leg(
+            "idle_worker_kill",
+            json!({"report":recovered,"new_controller":controller.child.pid()}),
+        );
+
+        // SIGTERM lands while a candidate is applied: graceful stop, physical restoration.
+        let audits = self.recoveries()?;
+        let (game, pressure) = self.applied(&mut controller, "term-game")?;
+        let before = controller.child.pid();
+        self.signal(ServiceComponent::Controller, ServiceSignal::Term)?;
+        self.await_gone(before)?;
+        controller = self.controller("recovery-term")?;
+        let settled = self.settled()?;
+        ensure!(
+            self.recoveries()? > audits,
+            "no new root recovery audit followed the SIGTERM"
+        );
+        let idle = self.release(&mut controller, game, pressure)?;
+        self.finish_leg(
+            "sigterm_while_applied",
+            json!({"settled":settled,"idle":idle}),
+        );
+
+        // SIGKILL, then a corrupted controller journal: it must fail closed and still restore.
+        let audits = self.recoveries()?;
+        let (game, pressure) = self.applied(&mut controller, "corrupt-game")?;
+        let before = controller.child.pid();
+        self.signal(ServiceComponent::Controller, ServiceSignal::Kill)?;
+        self.await_gone(before)?;
+        let journal = self.world.journal_path();
+        fs::write(&journal, b"{ this journal was corrupted by the acceptance")?;
+        controller = self.controller("recovery-corrupt")?;
+        let settled = self.settled()?;
+        ensure!(
+            self.recoveries()? > audits,
+            "no new root recovery audit followed the corrupted-journal restart"
+        );
+        let idle = self.release(&mut controller, game, pressure)?;
+        self.finish_leg(
+            "sigkill_with_corrupt_journal",
+            json!({"settled":settled,"idle":idle}),
+        );
+
+        // Someone else changes the affinity of a task the controller already changed.
+        let (game, pressure) = self.applied(&mut controller, "external-game")?;
+        let others = self.cpus.0.to_string();
+        let status = Command::new("taskset")
+            .args(["-a", "-p", "-c", &others])
+            .arg(game.child.pid().to_string())
+            .output()
+            .context("run taskset")?;
+        ensure!(
+            status.status.success(),
+            "the external mutation could not be made"
+        );
+        let start = self.probe.records.len();
+        std::thread::sleep(Duration::from_secs(45));
+        self.probe.poll();
+        let rows = self.probe.records[start..].to_vec();
+        ensure!(
+            controller.child.try_wait()?.is_none(),
+            "an external mutation took the always-on controller down"
+        );
+        ensure!(
+            rows.iter()
+                .all(|row| row["decision"]["decision"] != "candidate_applied"),
+            "the controller kept applying while an external mutation was unresolved"
+        );
+        let idle = self.release(&mut controller, game, pressure)?;
+        self.finish_leg(
+            "external_mutation",
+            json!({"observations":rows.len(),"idle":idle}),
+        );
+
+        // Suspend and resume land mid-experiment.
+        let (game, pressure) = self.applied(&mut controller, "suspend-game")?;
+        self.binding.action(Action::SuspendResume)?;
+        std::thread::sleep(Duration::from_secs(20));
+        ensure!(
+            controller.child.try_wait()?.is_none(),
+            "suspend and resume took the always-on controller down"
+        );
+        let idle = self.release(&mut controller, game, pressure)?;
+        self.finish_leg("suspend_resume_while_applied", json!({"idle":idle}));
+
+        let report = self.settled()?;
+        super::service::attest(&report, self.state)?;
+        Ok(json!({"passed":true,"legs":self.legs,"final":report,"history":self.probe.records}))
+    }
+
+    /// The controller process with `pid` has exited (its unit may restart or stay down).
+    fn await_gone(&self, pid: u32) -> anyhow::Result<()> {
+        let deadline = Instant::now() + Duration::from_secs(40);
+        while Path::new(&format!("/proc/{pid}")).exists() {
+            ensure!(
+                Instant::now() < deadline,
+                "controller {pid} did not exit after the signal"
+            );
+            std::thread::sleep(Duration::from_millis(200));
+        }
+        Ok(())
+    }
+}
