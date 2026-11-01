@@ -1,7 +1,6 @@
 [Unit]
 Description=Stutter bounded mutation worker for %i
 Before=stutter-autotune-bounded@%i.service
-Upholds=stutter-autotune-bounded@%i.service
 
 [Service]
 Type=simple
@@ -9,6 +8,7 @@ User=root
 Environment=STUTTER_SERVICE_CONFIG=@CONFIG_DIR@/autotune-bounded-%i.toml
 Environment=HOME=/var/lib/stutter/worker-%i
 ExecStart=@BINARY@ privileged-worker --socket /run/stutter-worker-%i/worker.sock --controller-user %i
+ExecStartPost=-@SYSTEMCTL@ --no-block start stutter-autotune-bounded@%i.service
 ExecStopPost=@BINARY@ privileged-worker --socket /run/stutter-worker-%i/worker.sock --controller-user %i --recover-only
 Restart=on-failure
 RestartSec=1
@@ -18,8 +18,20 @@ RuntimeDirectory=stutter-worker-%i
 RuntimeDirectoryMode=0711
 UMask=0077
 NoNewPrivileges=true
+# Only what the Supported affinity and cgroup-placement operations need: adjusting another
+# account's tasks, reading their identity, and handing the socket to the controller account.
+CapabilityBoundingSet=CAP_SYS_NICE CAP_SYS_PTRACE CAP_CHOWN CAP_DAC_READ_SEARCH
+ProtectSystem=strict
+ReadWritePaths=/sys/fs/cgroup
 ProtectHome=read-only
 PrivateTmp=true
+ProtectKernelModules=true
+ProtectClock=true
+ProtectHostname=true
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+SystemCallArchitectures=native
 
 [Install]
 WantedBy=multi-user.target

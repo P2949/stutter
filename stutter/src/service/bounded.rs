@@ -92,6 +92,7 @@ pub(super) fn execute(plan: &ServicePlan) -> anyhow::Result<()> {
                     .to_str()
                     .context("service binary path must be UTF-8")?,
             )
+            .replace("@SYSTEMCTL@", &systemctl_path())
             .replace(
                 "@CONFIG_DIR@",
                 plan.config_dir
@@ -114,6 +115,19 @@ pub(super) fn execute(plan: &ServicePlan) -> anyhow::Result<()> {
         )?;
     }
     Ok(())
+}
+
+/// The absolute path a unit needs for `systemctl`, which differs between distributions.
+fn systemctl_path() -> String {
+    [
+        "/run/current-system/sw/bin/systemctl",
+        "/usr/bin/systemctl",
+        "/bin/systemctl",
+    ]
+    .into_iter()
+    .find(|path| std::path::Path::new(path).exists())
+    .unwrap_or("/usr/bin/systemctl")
+    .to_owned()
 }
 
 #[cfg(test)]
@@ -150,6 +164,11 @@ mod tests {
         assert!(!controller.contains("CAP_SYS_NICE"));
         assert!(controller.contains("NoNewPrivileges=true"));
         assert!(worker.contains("--controller-user %i"));
+        assert!(!worker.contains("Upholds="));
+        assert!(!worker.contains("@SYSTEMCTL@"));
+        assert!(worker.contains("start stutter-autotune-bounded@%i.service"));
+        assert!(worker.contains("ProtectSystem=strict"));
+        assert!(worker.contains("CapabilityBoundingSet=CAP_SYS_NICE"));
         assert!(!controller.contains("@BINARY@"));
         let config = plan
             .config_dir
