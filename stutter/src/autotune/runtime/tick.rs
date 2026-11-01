@@ -431,7 +431,6 @@ impl AutotuneRuntime {
             active_target_count: self.target_state.active_targets,
             active_tasks: &self.target_state.active_tasks,
             recent_diagnoses: self.recent_diagnoses.iter().cloned().collect(),
-            drop_counters: self.latest_drop_counters.clone(),
             proc_root: Path::new("/proc"),
             sys_root: Path::new("/sys"),
             activity_level: self.activity_classifier.classify(),

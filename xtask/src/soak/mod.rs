@@ -16,6 +16,8 @@ pub(crate) mod service;
 pub(crate) mod service_discovery;
 mod service_idle;
 mod service_presence;
+pub(super) mod service_probe;
+pub(crate) mod service_recovery;
 pub(crate) mod service_soak;
 mod stress;
 mod verify;

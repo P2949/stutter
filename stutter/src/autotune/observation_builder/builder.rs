@@ -11,7 +11,6 @@ use crate::{
         system_context::{SystemContextSnapshotInput, collect_system_context},
     },
     diagnosis::LiveDiagnosisEntry,
-    ebpf_loader::DropCountersSnapshot,
     focus::FocusGroupKind,
     process_tree::TaskMap,
 };
@@ -37,7 +36,6 @@ pub struct AutotuneObservationBuilderInput<'a> {
     pub active_target_count: usize,
     pub active_tasks: &'a TaskMap,
     pub recent_diagnoses: Vec<LiveDiagnosisEntry>,
-    pub drop_counters: DropCountersSnapshot,
     pub proc_root: &'a Path,
     pub sys_root: &'a Path,
     pub activity_level: ActivityLevel,
