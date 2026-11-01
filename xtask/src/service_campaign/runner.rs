@@ -124,3 +124,21 @@ pub fn request(state: &State, stage: Stage, body: Request) -> anyhow::Result<ser
     );
     Ok(response.data.unwrap_or(serde_json::Value::Null))
 }
+
+/// A request the runner grants under the campaign task rather than a stage task (status,
+/// resume acknowledgement, cancel).
+pub fn request_campaign(state: &State, body: Request) -> anyhow::Result<serde_json::Value> {
+    let socket = socket();
+    let response = Client {
+        socket: &socket,
+        campaign_id: &state.campaign_id,
+        manifest_sha256: &state.manifest_sha256,
+    }
+    .send(crate::validation_campaign::bootstrap::CAMPAIGN_TASK, body)?;
+    ensure!(
+        response.status == ResponseStatus::Ok,
+        "typed campaign request refused: {:?}",
+        response.error
+    );
+    Ok(response.data.unwrap_or(serde_json::Value::Null))
+}

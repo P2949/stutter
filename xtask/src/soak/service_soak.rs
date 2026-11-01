@@ -270,12 +270,17 @@ pub(super) fn runtime_checks(dir: &Path) -> anyhow::Result<Vec<super::verify::Ch
             detail: format!("{count} clean audited executions; at least {repetitions} required"),
         });
     }
-    // Reboot receipts are integrated only by the typed reboot stage. Missing receipts cannot
-    // be replaced by the current boot ID or historical direct-controller evidence.
+    // Reboot receipts come only from the typed reboot stage. The current boot ID or historical
+    // direct-controller evidence cannot stand in for them.
+    let required = manifest(&state)?.coverage.minimum_real_reboots as usize;
+    let (good, detail) = match dir.parent() {
+        Some(campaign) => super::service_reboots::verified_receipts(campaign, required),
+        None => (0, "the soak has no campaign directory".to_owned()),
+    };
     checks.push(super::verify::Check {
         name: "service_real_reboots".into(),
-        passed: false,
-        detail: "typed reboot receipt verification is pending".into(),
+        passed: good >= required,
+        detail,
     });
     Ok(checks)
 }

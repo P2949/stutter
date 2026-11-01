@@ -33,10 +33,10 @@ struct Lab<'a> {
     legs: Vec<Value>,
 }
 
-pub(crate) fn run(state: &State, dir: &Path) -> anyhow::Result<Value> {
+fn new_lab<'a>(state: &'a State, dir: &'a Path, stage: Stage) -> anyhow::Result<Lab<'a>> {
     fs::create_dir_all(dir)?;
     let cpus = super::pick_cpus()?;
-    let binding = Binding::new(state, Stage::Recovery)?;
+    let binding = Binding::new(state, stage)?;
     let mut world = World::new(
         &state.repository,
         dir,
@@ -50,15 +50,45 @@ pub(crate) fn run(state: &State, dir: &Path) -> anyhow::Result<Value> {
         records: vec![],
         owned: Default::default(),
     };
-    let mut lab = Lab {
+    Ok(Lab {
         state,
         dir,
-        binding: binding.clone(),
+        binding,
         world,
         probe,
         cpus,
         legs: Vec::new(),
-    };
+    })
+}
+
+/// Brings the service to a state with an applied action and a root-issued token outstanding, then
+/// leaves the workload, contention and service running for the reboot that follows. Nothing here
+/// is cleaned up on purpose: the reboot is the event under test.
+pub(crate) fn applied_before_reboot(state: &State, dir: &Path) -> anyhow::Result<Value> {
+    let mut lab = new_lab(state, dir, Stage::Reboots)?;
+    let mut controller = lab.controller("reboot-pre")?;
+    let (game, pressure) = lab.applied(&mut controller, "reboot-game")?;
+    let report = lab.query()?;
+    anyhow::ensure!(
+        report["worker_tokens"]["outstanding"].as_u64() >= Some(1),
+        "no root-issued token is outstanding to carry across the reboot: {report}"
+    );
+    let receipt = json!({
+        "boot_id": report["boot_id"],
+        "outstanding": report["worker_tokens"]["outstanding"],
+        "recovery_audit_completed": report["worker_tokens"]["recovery_audit"]["completed"],
+        "controller_pid": report["controller_process"]["pid"],
+        "worker_pid": report["worker_process"]["pid"],
+    });
+    std::mem::forget(game);
+    std::mem::forget(pressure);
+    std::mem::forget(controller);
+    Ok(receipt)
+}
+
+pub(crate) fn run(state: &State, dir: &Path) -> anyhow::Result<Value> {
+    let mut lab = new_lab(state, dir, Stage::Recovery)?;
+    let binding = lab.binding.clone();
     let result = lab.legs();
     let stopped = binding.action(Action::Stop);
     if let Err(error) = &result {

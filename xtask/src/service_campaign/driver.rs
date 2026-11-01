@@ -134,6 +134,18 @@ pub trait StageRunner {
         state: &mut State,
         attempt: u32,
     ) -> anyhow::Result<AttemptOutcome>;
+    /// Runs after the attempt and the campaign state are durably persisted and only when the
+    /// attempt is waiting for a reboot. This is where the reboot itself is requested: a reboot
+    /// inside `execute` would erase the machine before anything was recorded.
+    fn after_persist(
+        &self,
+        stage: Stage,
+        state: &State,
+        outcome: &AttemptOutcome,
+    ) -> anyhow::Result<()> {
+        let _ = (stage, state, outcome);
+        Ok(())
+    }
 }
 
 pub fn drive(
@@ -239,6 +251,10 @@ pub fn drive_with(
             attempt,
         )?;
         store::save(dir, &state)?;
+        if outcome == AttemptOutcome::WaitingForReboot {
+            stages.after_persist(stage, &state, &outcome)?;
+            return Ok(());
+        }
         if outcome != AttemptOutcome::Passed {
             return Ok(());
         }

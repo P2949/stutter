@@ -9,6 +9,21 @@ use super::{
 use crate::validation_campaign::{model::AttemptOutcome, state::CampaignDir};
 pub struct Production;
 impl StageRunner for Production {
+    fn after_persist(
+        &self,
+        stage: Stage,
+        state: &State,
+        outcome: &AttemptOutcome,
+    ) -> anyhow::Result<()> {
+        if stage == Stage::Reboots && *outcome == AttemptOutcome::WaitingForReboot {
+            runner::request(state, stage, Request::Reboot)?;
+            // The runner reboots asynchronously; this process must not outrun it.
+            std::thread::sleep(std::time::Duration::from_secs(120));
+            anyhow::bail!("the typed reboot was accepted but the machine did not go down");
+        }
+        Ok(())
+    }
+
     fn execute(
         &self,
         stage: Stage,
@@ -58,7 +73,8 @@ impl StageRunner for Production {
             }
             // These stages cannot pass on a template/source check. Their live implementations
             // must produce the complete reboot and evidence records before promotion.
-            Stage::Reboots | Stage::Evidence => {
+            Stage::Reboots => crate::soak::service_reboots::step(state, dir, attempt),
+            Stage::Evidence => {
                 anyhow::bail!(
                     "service {} requires its complete live evidence runner",
                     stage.id()

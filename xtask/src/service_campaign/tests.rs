@@ -144,3 +144,66 @@ fn an_immutable_attempt_cannot_be_replaced_and_source_change_invalidates_before_
     assert!(runner.calls.borrow().is_empty());
     assert_eq!(store::load(dir).unwrap().mode, Mode::Invalidated);
 }
+
+/// A fake reboot executor: it records what was durable at the moment the reboot was requested.
+struct Rebooting {
+    dir: CampaignDir,
+    seen_at_reboot: RefCell<Option<(TaskStatus, bool)>>,
+}
+impl StageRunner for Rebooting {
+    fn execute(
+        &self,
+        _: Stage,
+        _: &CampaignDir,
+        state: &mut State,
+        _: u32,
+    ) -> anyhow::Result<AttemptOutcome> {
+        state.reboot_pending = true;
+        Ok(AttemptOutcome::WaitingForReboot)
+    }
+    fn after_persist(&self, stage: Stage, _: &State, _: &AttemptOutcome) -> anyhow::Result<()> {
+        // The reboot would erase this process, so everything must be on disk by now.
+        let on_disk = store::load(&self.dir).unwrap();
+        *self.seen_at_reboot.borrow_mut() =
+            Some((on_disk.tasks[stage.id()].status, on_disk.reboot_pending));
+        Ok(())
+    }
+}
+
+#[test]
+fn the_reboot_is_requested_only_after_the_waiting_attempt_and_pending_flag_are_durable() {
+    let scratch = Scratch::new();
+    let dir = &scratch.0;
+    let mut state = state(dir);
+    for stage in [
+        Stage::Preflight,
+        Stage::Install,
+        Stage::Discovery,
+        Stage::Recovery,
+    ] {
+        let mut passed = attempt(&state);
+        passed.fingerprint = fingerprint(&state, stage);
+        append_task_attempt(dir, state.tasks.get_mut(stage.id()).unwrap(), passed).unwrap();
+    }
+    store::save(dir, &state).unwrap();
+    let runner = Rebooting {
+        dir: dir.clone(),
+        seen_at_reboot: RefCell::new(None),
+    };
+    drive_with(dir, &runner, None, &|_| Ok(())).unwrap();
+    assert_eq!(
+        *runner.seen_at_reboot.borrow(),
+        Some((TaskStatus::WaitingForReboot, true))
+    );
+    let after = store::load(dir).unwrap();
+    assert_eq!(after.mode, Mode::Active);
+    assert!(after.reboot_pending);
+    // A resumed campaign re-enters the same stage; a waiting attempt is not a failure.
+    drive_with(dir, &runner, None, &|_| Ok(())).unwrap();
+    assert_eq!(
+        store::load(dir).unwrap().tasks[Stage::Reboots.id()]
+            .attempts
+            .len(),
+        2
+    );
+}
