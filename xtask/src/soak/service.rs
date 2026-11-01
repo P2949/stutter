@@ -197,6 +197,24 @@ pub(crate) fn attest(report: &Value, state: &State) -> anyhow::Result<()> {
         bounded == Some(worker_bound),
         "worker capability bounding set differs from the hardened set: {bounded:x?}"
     );
+    // What the worker can actually exercise, not just what the unit declares.
+    for field in ["CapEff"] {
+        let actual = report["worker_process"]["status"][field]
+            .as_str()
+            .and_then(|value| u64::from_str_radix(value, 16).ok());
+        ensure!(
+            actual == Some(worker_bound),
+            "worker {field} differs from the hardened set: {actual:x?}"
+        );
+    }
+    ensure!(
+        report["worker_process"]["status"]["CapAmb"]
+            .as_str()
+            .and_then(|value| u64::from_str_radix(value, 16).ok())
+            == Some(0)
+            && report["worker_process"]["status"]["NoNewPrivs"] == "1",
+        "worker holds ambient capabilities or can gain privileges"
+    );
     ensure!(
         report["socket"]["uid"] == state.uid
             && report["socket"]["mode"] == 0o600

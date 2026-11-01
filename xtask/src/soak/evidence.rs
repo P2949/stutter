@@ -149,7 +149,7 @@ fn unpublishable(state: &SoakState) -> Option<&'static str> {
 
 /// Writes `<dir>/evidence-raw` for a PASSED, finished, clean-source soak and returns it. Any
 /// earlier evidence-raw is removed first so a failed re-verification never leaves a stale PASS.
-pub(super) fn write_raw(
+pub(crate) fn write_raw(
     root: &Path,
     dir: &Path,
     report: &Report,

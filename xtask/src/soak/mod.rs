@@ -14,6 +14,7 @@ mod records;
 mod round;
 pub(crate) mod service;
 pub(crate) mod service_discovery;
+pub(crate) mod service_evidence;
 mod service_idle;
 mod service_presence;
 pub(super) mod service_probe;

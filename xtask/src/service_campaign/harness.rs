@@ -73,12 +73,22 @@ impl StageRunner for Production {
             }
             // These stages cannot pass on a template/source check. Their live implementations
             // must produce the complete reboot and evidence records before promotion.
-            Stage::Reboots => crate::soak::service_reboots::step(state, dir, attempt),
+            Stage::Reboots => {
+                let outcome = crate::soak::service_reboots::step(state, dir, attempt)?;
+                if outcome == AttemptOutcome::Passed {
+                    write_report(
+                        dir,
+                        stage,
+                        attempt,
+                        &serde_json::json!({"passed": true, "boot_ids": state.boot_ids}),
+                    )?;
+                }
+                Ok(outcome)
+            }
             Stage::Evidence => {
-                anyhow::bail!(
-                    "service {} requires its complete live evidence runner",
-                    stage.id()
-                )
+                let report = crate::soak::service_evidence::run(state, dir, attempt)?;
+                write_report(dir, stage, attempt, &report)?;
+                Ok(AttemptOutcome::Passed)
             }
         }
     }
