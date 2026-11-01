@@ -170,7 +170,15 @@ impl Ctx<'_> {
             "external_mutation",
             format!("external owner now at {external}"),
         );
-        std::thread::sleep(Duration::from_secs(10));
+        let seen_before = self.seen.len();
+        std::thread::sleep(Duration::from_secs(45));
+        self.poll_events();
+        if self.seen[seen_before..]
+            .iter()
+            .any(|event| event.decision == "candidate_applied")
+        {
+            self.violation("the controller applied again while an external owner held the task");
+        }
         self.term_controller(&mut controller);
         self.end_session(controller, "sigterm_after_external_mutation");
         self.tokens_settled()?;
@@ -215,6 +223,8 @@ impl Ctx<'_> {
     }
 
     /// The cgroup the task came from is destroyed and recreated, so restoring into it is refused.
+    /// The live task is still in Stutter's own placement, so the token must stay unresolved until
+    /// the workload is gone; only then is there nothing left to restore.
     pub(super) fn failed_restore_round(
         &mut self,
         mut controller: Controller,
@@ -225,16 +235,35 @@ impl Ctx<'_> {
         fs::remove_dir(&origin)?;
         fs::create_dir(&origin)?;
         self.event("failed_restore", "the original cgroup was recreated");
+        let seen_before = self.seen.len();
         self.term_controller(&mut controller);
         self.end_session(controller, "sigterm_with_unrestorable_origin");
-        self.tokens_settled()?;
+        std::thread::sleep(Duration::from_secs(15));
+        self.poll_events();
+        let report = self.binding()?.action(Action::Query)?;
+        if report["worker_tokens"]["outstanding"].as_u64() < Some(1) {
+            self.violation("a live task in Stutter's placement had its token retired unrestored");
+        }
         if !fs::read_to_string(origin.join("cgroup.procs"))?
             .trim()
             .is_empty()
         {
             self.violation("a refused restore still wrote into the recreated cgroup");
         }
+        if self.seen[seen_before..]
+            .iter()
+            .any(|event| event.decision == "candidate_applied")
+        {
+            self.violation("Stutter applied again while an unresolved token was open");
+        }
+        signal(game.child.pid(), SIGTERM);
+        let _ = wait_exit(&mut game.child, Duration::from_secs(10));
+        self.event(
+            "game_exit",
+            "the workload left, so nothing remains to restore",
+        );
         let next = self.start_controller(&game, "controller-2", self.round.operations)?;
-        self.end_workload(&mut game, next, "workload_exit")
+        self.tokens_settled()?;
+        self.finish_service_workload(next, "workload_exit")
     }
 }

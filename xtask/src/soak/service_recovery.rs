@@ -224,6 +224,39 @@ impl Lab<'_> {
             .context("allowed CPU list missing")
     }
 
+    /// A running controller meets an external owner: it must not apply again while the conflict
+    /// stands. What it chose to do on its own is recorded as evidence.
+    fn observe_owner_conflict(&mut self) -> anyhow::Result<Value> {
+        let start = self.probe.records.len();
+        std::thread::sleep(Duration::from_secs(45));
+        self.probe.poll();
+        let rows = &self.probe.records[start..];
+        ensure!(
+            rows.iter()
+                .all(|row| row["decision"]["decision"] != "candidate_applied"),
+            "the controller applied again while an external owner held the task"
+        );
+        let mut reasons: Vec<String> = rows
+            .iter()
+            .filter(|row| row["decision"]["decision"] != "observed")
+            .map(|row| {
+                format!(
+                    "{}: {}",
+                    row["decision"]["decision"].as_str().unwrap_or("?"),
+                    row["reason"]
+                        .as_str()
+                        .unwrap_or("")
+                        .chars()
+                        .take(120)
+                        .collect::<String>()
+                )
+            })
+            .collect();
+        reasons.sort();
+        reasons.dedup();
+        Ok(json!({"observations":rows.len(),"decisions":reasons}))
+    }
+
     /// Reconfigure the fixture for one operation family; both service actors are stopped first.
     fn reconfigure(&mut self, operations: Operations) -> anyhow::Result<()> {
         self.world.prepare_round(operations)
@@ -353,7 +386,7 @@ impl Lab<'_> {
             .context("run taskset")?;
         ensure!(output.status.success(), "the external mutation failed");
         let external = Self::allowed_cpus(game.child.pid())?;
-        std::thread::sleep(Duration::from_secs(20));
+        let affinity_conflict = self.observe_owner_conflict()?;
         ensure!(
             controller.child.try_wait()?.is_none() || self.query().is_ok(),
             "an external affinity change took the service away"
@@ -374,7 +407,7 @@ impl Lab<'_> {
         let idle = self.release(&mut controller, game, pressure)?;
         self.finish_leg(
             "external_affinity_owner_preserved",
-            json!({"external":external,"after":after,"idle":idle}),
+            json!({"external":external,"after":after,"idle":idle,"autonomous_handling":affinity_conflict}),
         );
 
         // The same for cgroup placement: a sibling cgroup of the campaign's own.
@@ -389,7 +422,7 @@ impl Lab<'_> {
             placed.trim().ends_with("/external"),
             "the external placement did not take: {placed}"
         );
-        std::thread::sleep(Duration::from_secs(20));
+        let cgroup_conflict = self.observe_owner_conflict()?;
         if controller.child.try_wait()?.is_none() {
             self.term_and_return(&mut controller, "recovery-cgroup-2")?;
         } else {
@@ -406,25 +439,53 @@ impl Lab<'_> {
         let _ = fs::remove_dir(&sibling);
         self.finish_leg(
             "external_cgroup_owner_preserved",
-            json!({"after":after.trim(),"idle":idle}),
+            json!({"after":after.trim(),"idle":idle,"autonomous_handling":cgroup_conflict}),
         );
 
-        // A restore that is refused: the cgroup the task came from was destroyed and recreated,
-        // so it is no longer "the cgroup the task left". Nothing is written into the new one.
-        let (game, pressure) = self.applied(&mut controller, "refused-restore")?;
+        // The cgroup the task came from is destroyed and recreated, so it is no longer "the
+        // cgroup the task left". Stutter must not write into the new one, and it must not call
+        // the token settled either: the live task is still in Stutter's own placement. Only
+        // when the workload is gone is there nothing left to restore.
+        let (mut game, pressure) = self.applied(&mut controller, "refused-restore")?;
         let origin = self.subtree().join("suite");
         fs::remove_dir(&origin)?;
         fs::create_dir(&origin)?;
-        self.term_and_return(&mut controller, "recovery-refused")?;
-        let procs = fs::read_to_string(origin.join("cgroup.procs"))?;
+        let applied_before = self.probe.records.len();
+        let before = controller.child.pid();
+        self.signal(ServiceComponent::Controller, ServiceSignal::Term)?;
+        self.await_gone(before)?;
+        std::thread::sleep(Duration::from_secs(15));
+        let report = self.query()?;
         ensure!(
-            procs.trim().is_empty(),
-            "a refused restore still wrote into the recreated cgroup: {procs}"
+            report["worker_tokens"]["outstanding"].as_u64() >= Some(1),
+            "a live task in Stutter's placement had its token retired without being restored: {report}"
         );
-        let idle = self.release(&mut controller, game, pressure)?;
+        ensure!(
+            fs::read_to_string(origin.join("cgroup.procs"))?
+                .trim()
+                .is_empty(),
+            "a refused restore still wrote into the recreated cgroup"
+        );
+        let placed = fs::read_to_string(format!("/proc/{}/cgroup", game.child.pid()))?;
+        ensure!(
+            placed.trim().ends_with("/target"),
+            "the task left Stutter's placement without a restore: {placed}"
+        );
+        self.probe.poll();
+        ensure!(
+            self.probe.records[applied_before..]
+                .iter()
+                .all(|row| row["decision"]["decision"] != "candidate_applied"),
+            "Stutter applied again while an unresolved token was open"
+        );
+        let unresolved = report["worker_tokens"].clone();
+        drop(pressure);
+        stop_game(&mut game)?;
+        self.controller("recovery-refused-2")?;
+        let idle = self.settled()?;
         self.finish_leg(
-            "refused_restore_settled_without_writing",
-            json!({"idle":idle}),
+            "stale_origin_refused_then_retired_when_target_gone",
+            json!({"unresolved_while_alive":unresolved,"retired":idle}),
         );
 
         // Suspend and resume land mid-experiment.

@@ -59,6 +59,7 @@ fn stage_summary(dir: &CampaignDir, state: &State) -> Value {
             "status": format!("{:?}", task.status),
             "attempts": task.attempts.iter().map(|attempt| format!("{:?}", attempt.outcome)).collect::<Vec<_>>(),
         })).collect::<Vec<_>>(),
+        "retained_records": retained_records(dir, state),
         "discovery_cases": names(last_result(dir, state, Stage::Discovery), "cases", "scenario"),
         "recovery_legs": names(last_result(dir, state, Stage::Recovery), "legs", "leg"),
         "real_reboots": reboots,
@@ -105,4 +106,35 @@ pub(crate) fn run(state: &State, dir: &CampaignDir, attempt: u32) -> anyhow::Res
     Ok(
         json!({"passed": true, "bundle": bundle.file_name().and_then(|name| name.to_str()), "index_entry": entry}),
     )
+}
+
+/// Hashes of the immutable per-attempt records and reboot receipts, so the portable bundle names
+/// exactly the files a reviewer can check against the retained campaign.
+fn retained_records(dir: &CampaignDir, state: &State) -> Value {
+    let hash = |path: std::path::PathBuf| -> Value {
+        fs::read(path).map_or(Value::Null, |bytes| {
+            json!(stutter_core::hash::sha256_hex(&bytes))
+        })
+    };
+    let mut records = Vec::new();
+    for (name, task) in &state.tasks {
+        for attempt in &task.attempts {
+            let base = dir.attempt_dir(name, attempt.number);
+            records.push(json!({
+                "stage": name,
+                "attempt": attempt.number,
+                "attempt_json_sha256": hash(base.join("attempt.json")),
+                "result_json_sha256": hash(base.join("result.json")),
+            }));
+        }
+    }
+    for hop in 1..=state.required_reboots {
+        for kind in ["pre", "post"] {
+            records.push(json!({
+                "receipt": format!("reboots/{kind}-{hop}.json"),
+                "sha256": hash(dir.0.join("reboots").join(format!("{kind}-{hop}.json"))),
+            }));
+        }
+    }
+    json!(records)
 }

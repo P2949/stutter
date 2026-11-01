@@ -268,7 +268,15 @@ pub(super) fn runtime_checks(dir: &Path) -> anyhow::Result<Vec<super::verify::Ch
     // direct-controller evidence cannot stand in for them.
     let required = manifest(&state)?.coverage.minimum_real_reboots as usize;
     let (good, detail) = match dir.parent() {
-        Some(campaign) => super::service_reboots::verified_receipts(campaign, required),
+        Some(campaign) => super::service_reboots::verified_receipts(
+            campaign,
+            &state
+                .service
+                .as_ref()
+                .map(|binding| binding.campaign.boot_ids.clone())
+                .unwrap_or_default(),
+            required,
+        ),
         None => (0, "the soak has no campaign directory".to_owned()),
     };
     checks.push(super::verify::Check {
