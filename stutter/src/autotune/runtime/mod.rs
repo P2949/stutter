@@ -85,6 +85,8 @@ pub struct AutotuneRuntime {
     latest_focus: Option<AutotuneObservationFocus>,
     target_state: RuntimeTargetState,
     latest_drop_counters: DropCountersSnapshot,
+    /// The last cumulative BPF snapshot, to turn the next one into a per-interval loss.
+    previous_drop_counters: DropCountersSnapshot,
     recent_diagnoses: VecDeque<LiveDiagnosisEntry>,
     activity_classifier: ActivityClassifier,
     live_experiments: LiveExperimentManager,

@@ -338,6 +338,11 @@ impl RollingWindow {
     ) -> RollingWindowScore {
         score::compute_rolling_window_score(self, quality_policy)
     }
+
+    /// Events the monitor lost while this window was being filled.
+    pub fn drop_total(&self) -> u64 {
+        score::window_drop_total(self)
+    }
 }
 
 impl Default for RollingWindow {

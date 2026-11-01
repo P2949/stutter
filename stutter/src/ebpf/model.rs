@@ -192,6 +192,57 @@ impl DropCountersSnapshot {
     }
 }
 
+impl DropCountersSnapshot {
+    /// Losses since `previous`. The BPF counters are cumulative for the lifetime of the loaded
+    /// program, so a field that went down means the program was reloaded and restarted at zero.
+    pub fn delta_since(&self, previous: &Self) -> Self {
+        let step = |now: u64, before: u64| if now >= before { now - before } else { now };
+        Self {
+            wakeup_data_insert_failed: step(
+                self.wakeup_data_insert_failed,
+                previous.wakeup_data_insert_failed,
+            ),
+            wakeup_data_stale_entries: step(
+                self.wakeup_data_stale_entries,
+                previous.wakeup_data_stale_entries,
+            ),
+            wakeup_data_replaced_entries: step(
+                self.wakeup_data_replaced_entries,
+                previous.wakeup_data_replaced_entries,
+            ),
+            wakeup_data_consumed_read_failed: step(
+                self.wakeup_data_consumed_read_failed,
+                previous.wakeup_data_consumed_read_failed,
+            ),
+            ringbuf_reserve_failed: step(
+                self.ringbuf_reserve_failed,
+                previous.ringbuf_reserve_failed,
+            ),
+            irq_start_times_insert_failed: step(
+                self.irq_start_times_insert_failed,
+                previous.irq_start_times_insert_failed,
+            ),
+            block_start_insert_failed: step(
+                self.block_start_insert_failed,
+                previous.block_start_insert_failed,
+            ),
+            block_fallback_key_collisions: step(
+                self.block_fallback_key_collisions,
+                previous.block_fallback_key_collisions,
+            ),
+            cpu_accounting_untracked: step(
+                self.cpu_accounting_untracked,
+                previous.cpu_accounting_untracked,
+            ),
+            block_zero_keys: step(self.block_zero_keys, previous.block_zero_keys),
+            drm_fence_missing_start: step(
+                self.drm_fence_missing_start,
+                previous.drm_fence_missing_start,
+            ),
+        }
+    }
+}
+
 impl LoadedEbpf {
     pub fn snapshot_drop_counters(&self) -> DropCountersSnapshot {
         DropCountersSnapshot {

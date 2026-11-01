@@ -46,11 +46,7 @@ pub(crate) fn compute_rolling_window_score(
         .collect::<BTreeSet<_>>()
         .len();
 
-    let drop_counter_total = window
-        .intervals()
-        .iter()
-        .map(|record| record.drop_counters.total())
-        .fold(0_u64, u64::saturating_add);
+    let drop_counter_total = window_drop_total(window);
 
     let data_quality = OnlineDataQualityInput {
         scored_intervals: interval_count,
@@ -84,4 +80,16 @@ pub(crate) fn compute_rolling_window_score(
         dropped_invalid_frames: window.dropped_invalid_frame_count(),
         data_quality,
     }
+}
+
+/// Events lost inside the window. Every record of one interval carries that interval's loss, so
+/// the loss counts once per interval rather than once per record.
+pub(crate) fn window_drop_total(window: &RollingWindow) -> u64 {
+    window
+        .intervals()
+        .iter()
+        .map(|record| (record.elapsed_ms, record.drop_counters.total()))
+        .collect::<std::collections::BTreeMap<_, _>>()
+        .values()
+        .fold(0_u64, |total, lost| total.saturating_add(*lost))
 }

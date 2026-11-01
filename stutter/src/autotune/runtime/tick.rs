@@ -109,10 +109,20 @@ impl AutotuneRuntime {
                     .map(|record| record.samples)
                     .fold(0_u64, u64::saturating_add);
                 self.activity_classifier.push_interval(scored_samples);
-                if drop_counters != self.latest_drop_counters {
+                // The snapshot is cumulative; only the loss of this interval belongs to the window.
+                let lost = drop_counters.delta_since(&self.previous_drop_counters);
+                if lost.total() > 0 {
                     crate::metrics::log_drop_counters(&drop_counters);
                 }
-                self.latest_drop_counters = drop_counters;
+                self.previous_drop_counters = drop_counters;
+                let records = records
+                    .into_iter()
+                    .map(|record| crate::metrics::IntervalRecord {
+                        drop_counters: lost.clone(),
+                        ..record
+                    })
+                    .collect::<Vec<_>>();
+                self.latest_drop_counters = lost;
                 self.controller.window.push_intervals(records);
                 return self.evaluate_and_emit(None);
             }

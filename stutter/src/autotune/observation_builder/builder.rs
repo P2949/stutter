@@ -59,6 +59,7 @@ impl AutotuneObservationBuilder {
         let window_score = input
             .window
             .score_with_quality_policy(input.online_data_quality_policy);
+        let window_drops = input.window.drop_total();
         let focus = input.focus;
         let focus_kind = focus.map(|focus| focus.kind);
         let mut focus_confidence = focus.map(|focus| focus.confidence).unwrap_or(0.0);
@@ -71,7 +72,7 @@ impl AutotuneObservationBuilder {
             .unwrap_or(SituationKind::Unknown);
         let system_health = crate::daemon::health::evaluate_system_health(
             crate::daemon::health::SystemHealthInputs {
-                ebpf_dropped_events: input.drop_counters.total(),
+                ebpf_dropped_events: window_drops,
                 ..crate::daemon::health::SystemHealthInputs::default()
             },
             &crate::daemon::health::SystemHealthThresholds {
@@ -206,7 +207,7 @@ impl AutotuneObservationBuilder {
             frame_count: window_score.frame_count,
             frame_p99_ms: window_score.frame_p99_ms,
             frame_max_ms: window_score.frame_max_ms,
-            drop_counter_total: input.drop_counters.total(),
+            drop_counter_total: window_drops,
         };
         observation.refresh_situation_classification();
 
