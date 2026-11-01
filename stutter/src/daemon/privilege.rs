@@ -87,6 +87,15 @@ pub trait PrivilegedActionService: fmt::Debug + Send + Sync {
         Err(PrivilegedWorkerError::PreparedApplyUnsupported.into())
     }
     fn rollback(&self, request: RollbackRequest) -> anyhow::Result<RollbackResult>;
+    /// Settles every token this service itself issued and has not yet restored, taking no
+    /// caller-supplied data. Returns how many were outstanding.
+    fn settle_issued_tokens(
+        &self,
+        policy: &crate::daemon_policy::DaemonPolicy,
+    ) -> anyhow::Result<usize> {
+        let _ = policy;
+        Err(PrivilegedWorkerError::SettleIssuedTokensUnsupported.into())
+    }
 }
 
 fn stable_error_reason_code(message: &str) -> String {

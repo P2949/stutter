@@ -13,6 +13,10 @@ pub enum PrivilegedWorkerError {
     )]
     ServiceTokenAlreadyOutstanding,
     #[error(
+        "settle_issued_tokens_unsupported: only the bounded service worker keeps an issued-token ledger"
+    )]
+    SettleIssuedTokensUnsupported,
+    #[error(
         "service_rollback_token_not_issued: rollback data does not match a worker-issued durable token"
     )]
     ServiceRollbackTokenNotIssued,
@@ -143,6 +147,7 @@ impl PrivilegedWorkerError {
     pub const fn reason_code(&self) -> &'static str {
         match self {
             Self::ServiceTokenAlreadyOutstanding => "service_token_already_outstanding",
+            Self::SettleIssuedTokensUnsupported => "settle_issued_tokens_unsupported",
             Self::ServiceRollbackTokenNotIssued => "service_rollback_token_not_issued",
             Self::BoundedServiceRequiresPrepared => "bounded_service_requires_prepared_transaction",
             Self::BoundedServiceTargetBoundaryUnimplemented => {

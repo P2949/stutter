@@ -20,6 +20,13 @@ pub fn recover_before_start(
                 crate::daemon::config::DEFAULT_PRIVILEGED_WORKER_SOCKET_READY_RETRY_MS,
             ),
         )?;
+        // The root worker's own ledger settles first: a controller journal that cannot be read must
+        // not be the only thing standing between a moved task and its restoration.
+        let settled = crate::daemon::privilege::UnixSocketPrivilegedActionService::new(socket)
+            .settle_issued_tokens()?;
+        if settled > 0 {
+            log::warn!("autotune startup: the worker settled {settled} token(s) it had issued");
+        }
     }
     let outcome = recover_controller_journal_on_startup(config)?;
     match &outcome {

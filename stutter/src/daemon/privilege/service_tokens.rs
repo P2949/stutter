@@ -108,6 +108,18 @@ impl ServiceActionService {
 }
 
 impl PrivilegedActionService for ServiceActionService {
+    fn settle_issued_tokens(
+        &self,
+        policy: &crate::daemon_policy::DaemonPolicy,
+    ) -> anyhow::Result<usize> {
+        let outstanding = self
+            .read()?
+            .iter()
+            .filter(|issued| !issued.restored)
+            .count();
+        self.recover_issued(policy)?;
+        Ok(outstanding)
+    }
     fn dry_run_candidate(
         &self,
         request: CandidateApplyRequest,
@@ -215,6 +227,29 @@ mod tests {
             context: Default::default(),
         }
     }
+    #[test]
+    fn settling_takes_no_input_and_counts_only_its_own_outstanding_tokens() {
+        let root = crate::test_support::TestRoot::new("settle-service-token");
+        let service = ServiceActionService::new(&root.join("state"), 1000, None);
+        let policy = crate::daemon_policy::DaemonPolicy::apply_medium_risk(
+            crate::daemon_policy::ActionSource::Test,
+        );
+        assert_eq!(service.settle_issued_tokens(&policy).unwrap(), 0);
+        let token = RollbackToken::CpuAffinityRestoreFile {
+            path: root.join("restored-and-unlinked.json"),
+            affected_tasks: 1,
+        };
+        let candidate = request(token.clone()).candidate;
+        service
+            .record(
+                &token,
+                &CandidatePlanRequest::from_candidate(candidate, crate::audit::unix_nanos_now()),
+            )
+            .unwrap();
+        assert_eq!(service.settle_issued_tokens(&policy).unwrap(), 1);
+        assert_eq!(service.settle_issued_tokens(&policy).unwrap(), 0);
+    }
+
     #[test]
     fn fabricated_token_is_refused_and_issued_restore_is_idempotent() {
         let root = crate::test_support::TestRoot::new("issued-service-token");

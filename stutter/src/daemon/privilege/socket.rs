@@ -62,6 +62,15 @@ impl UnixSocketPrivilegedActionService {
         })
     }
 
+    /// Asks the bounded worker to settle every token it issued; returns how many were outstanding.
+    pub fn settle_issued_tokens(&self) -> anyhow::Result<usize> {
+        match self.call_worker(PrivilegedWorkerRequest::SettleIssuedTokens)? {
+            PrivilegedWorkerResponse::Settled { outstanding } => Ok(outstanding),
+            response @ PrivilegedWorkerResponse::Error { .. } => Err(response.into_error()),
+            other => Err(unexpected_response_error(other)),
+        }
+    }
+
     pub fn request_shutdown(&self) -> anyhow::Result<()> {
         match self.call_worker(PrivilegedWorkerRequest::Shutdown)? {
             PrivilegedWorkerResponse::Shutdown { .. } => Ok(()),

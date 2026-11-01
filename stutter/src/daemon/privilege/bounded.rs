@@ -92,7 +92,9 @@ pub(super) fn validate_request(request: &PrivilegedWorkerRequest) -> anyhow::Res
         PrivilegedWorkerRequest::Apply { .. } => {
             return Err(PrivilegedWorkerError::BoundedServiceRequiresPrepared.into());
         }
-        PrivilegedWorkerRequest::Shutdown => return Ok(()),
+        PrivilegedWorkerRequest::Shutdown | PrivilegedWorkerRequest::SettleIssuedTokens => {
+            return Ok(());
+        }
         PrivilegedWorkerRequest::CommitPrepared { .. } => {
             return Err(PrivilegedWorkerError::CommitRejected {
                 reason: "commit without prepare".to_owned(),

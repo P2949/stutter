@@ -361,6 +361,9 @@ pub enum PrivilegedWorkerRequest {
         commit: bool,
         snapshot_digest: String,
     },
+    /// Bounded service only: settle every token the worker itself issued. Carries no token, path
+    /// or plan, so it cannot name anything beyond the worker's own durable ledger.
+    SettleIssuedTokens,
     Shutdown,
 }
 
@@ -372,7 +375,7 @@ impl PrivilegedWorkerRequest {
             | Self::ApplyPrepared { .. }
             | Self::CommitPrepared { .. } => PrivilegedOperation::ApplyAction,
             Self::Rollback { .. } => PrivilegedOperation::RollbackAction,
-            Self::Shutdown => PrivilegedOperation::ControlDaemon,
+            Self::Shutdown | Self::SettleIssuedTokens => PrivilegedOperation::ControlDaemon,
         }
     }
 
@@ -384,6 +387,7 @@ impl PrivilegedWorkerRequest {
             Self::CommitPrepared { .. } => "commit_prepared",
             Self::Rollback { .. } => "rollback",
             Self::Shutdown => "shutdown",
+            Self::SettleIssuedTokens => "settle_issued_tokens",
         }
     }
 
@@ -394,7 +398,7 @@ impl PrivilegedWorkerRequest {
                 Some(PolicyIntent::Apply)
             }
             Self::Rollback { .. } => Some(PolicyIntent::Rollback),
-            Self::Shutdown => None,
+            Self::Shutdown | Self::SettleIssuedTokens => None,
         }
     }
 
@@ -404,7 +408,7 @@ impl PrivilegedWorkerRequest {
             | Self::Apply { plan, .. }
             | Self::ApplyPrepared { plan, .. }
             | Self::Rollback { plan, .. } => Some(&plan.descriptor),
-            Self::CommitPrepared { .. } | Self::Shutdown => None,
+            Self::CommitPrepared { .. } | Self::Shutdown | Self::SettleIssuedTokens => None,
         }
     }
 }
@@ -429,6 +433,9 @@ pub enum PrivilegedWorkerResponse {
     },
     Shutdown {
         message: String,
+    },
+    Settled {
+        outstanding: usize,
     },
     Error {
         reason_code: String,

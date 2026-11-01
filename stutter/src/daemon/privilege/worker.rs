@@ -389,6 +389,21 @@ fn handle_privileged_worker_connection(
             _ => (), // The closed request validator has already rejected unprepared applies.
         }
     }
+    if matches!(request, PrivilegedWorkerRequest::SettleIssuedTokens) {
+        let response = match service_policy {
+            Some(policy) => service
+                .settle_issued_tokens(policy)
+                .map(|outstanding| PrivilegedWorkerResponse::Settled { outstanding })
+                .unwrap_or_else(PrivilegedWorkerResponse::from_error),
+            None => PrivilegedWorkerResponse::from_error(
+                PrivilegedWorkerError::SettleIssuedTokensUnsupported.into(),
+            ),
+        };
+        serde_json::to_writer(&mut stream, &response)?;
+        stream.write_all(b"\n")?;
+        stream.flush()?;
+        return Ok(false);
+    }
     let shutdown = matches!(request, PrivilegedWorkerRequest::Shutdown);
     let response = if matches!(request, PrivilegedWorkerRequest::ApplyPrepared { .. }) {
         let audit_sink = PrivilegeAuditSink::default();
@@ -564,6 +579,9 @@ fn execute_privileged_worker_request_inner(
                 })
                 .map(|result| PrivilegedWorkerResponse::Rollback { result })
         }),
+        PrivilegedWorkerRequest::SettleIssuedTokens => {
+            Err(PrivilegedWorkerError::SettleIssuedTokensUnsupported.into())
+        }
         PrivilegedWorkerRequest::Shutdown => Ok(PrivilegedWorkerResponse::Shutdown {
             message: "privileged worker shutdown requested".to_owned(),
         }),
@@ -605,6 +623,13 @@ fn execute_privileged_worker_request_inner(
             "shutdown_completed",
             "privileged worker shutdown completed",
             0,
+        ),
+        PrivilegedWorkerResponse::Settled { outstanding } => (
+            true,
+            "settle_completed",
+            "settle_completed",
+            "privileged worker settled its issued tokens",
+            *outstanding,
         ),
         PrivilegedWorkerResponse::Error {
             reason_code,
