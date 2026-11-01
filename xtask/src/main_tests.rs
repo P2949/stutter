@@ -50,6 +50,7 @@ fn expected_subcommands_are_registered() {
             "kernel-matrix",
             "live-acceptance",
             "live-burst",
+            "live-compile",
             "live-workload",
             "local-ci-policy",
             "local-install-smoke",

@@ -216,7 +216,9 @@ pub fn drive_with(
         let outcome = match stages.execute(stage, dir, &mut state, number) {
             Ok(outcome) => outcome,
             Err(error) => AttemptOutcome::Failed {
-                class: FailureClass::SoftwareDefect,
+                class: error
+                    .downcast_ref::<StageFailure>()
+                    .map_or(FailureClass::SoftwareDefect, |failure| failure.class),
                 stage: stage.id().to_owned(),
                 summary: format!("{error:#}"),
             },
@@ -365,4 +367,45 @@ pub fn write_report(
         &dir.attempt_dir(stage.id(), attempt).join("result.json"),
         &serde_json::to_vec_pretty(report)?,
     )
+}
+
+/// A live stage error that knows what kind of failure it is. Any other error is an invariant
+/// break in the product or harness and so a software defect.
+#[derive(Debug)]
+pub(crate) struct StageFailure {
+    pub class: FailureClass,
+    pub detail: String,
+}
+
+impl std::fmt::Display for StageFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.detail)
+    }
+}
+
+impl std::error::Error for StageFailure {}
+
+impl StageFailure {
+    pub fn error(class: FailureClass, detail: impl Into<String>) -> anyhow::Error {
+        anyhow::Error::new(Self {
+            class,
+            detail: detail.into(),
+        })
+    }
+}
+
+#[cfg(test)]
+mod failure_tests {
+    use super::*;
+
+    #[test]
+    fn a_typed_stage_failure_keeps_its_class_through_anyhow() {
+        let error = StageFailure::error(FailureClass::Retryable, "foreign build");
+        let class = error
+            .downcast_ref::<StageFailure>()
+            .map_or(FailureClass::SoftwareDefect, |failure| failure.class);
+        assert_eq!(class, FailureClass::Retryable);
+        let plain = anyhow::anyhow!("invariant broke");
+        assert!(plain.downcast_ref::<StageFailure>().is_none());
+    }
 }

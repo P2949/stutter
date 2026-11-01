@@ -79,6 +79,15 @@ pub enum XtaskCommand {
         seconds: u64,
     },
     #[command(hide = true)]
+    LiveCompile {
+        #[arg(long)]
+        child: PathBuf,
+        #[arg(long)]
+        jobs: u32,
+        #[arg(long)]
+        seconds: u64,
+    },
+    #[command(hide = true)]
     LiveWorkload {
         #[arg(long)]
         wine_helper: bool,
@@ -444,6 +453,11 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
             period_ms,
             seconds,
         } => live_acceptance::burst(burst_ms, period_ms, seconds),
+        XtaskCommand::LiveCompile {
+            child,
+            jobs,
+            seconds,
+        } => live_acceptance::compile(&child, jobs, seconds),
         XtaskCommand::LiveWorkload {
             wine_helper,
             exit_on_stdin_eof,

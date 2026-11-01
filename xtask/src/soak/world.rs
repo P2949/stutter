@@ -324,6 +324,34 @@ impl World {
         Ok(Game { child: game, ticks })
     }
 
+    /// A controlled build whose parent is called `make` and whose compilers are called `cc1`.
+    pub(super) fn spawn_compile(
+        &self,
+        dir: &Path,
+        name: &str,
+        seconds: u64,
+    ) -> anyhow::Result<OwnedChild> {
+        let install = dir.join(format!("{name}-install"));
+        fs::create_dir_all(&install)?;
+        let (make, cc1) = (install.join("make"), install.join("cc1"));
+        fs::copy(&self.xtask, &make)?;
+        fs::copy(&self.xtask, &cc1)?;
+        let child = Command::new("taskset")
+            .args(["-c", &self.cpus.0.to_string()])
+            .arg(&make)
+            .args(["live-compile", "--jobs", "3", "--seconds"])
+            .arg(seconds.to_string())
+            .arg("--child")
+            .arg(&cc1)
+            .current_dir(&self.root)
+            .stdout(Stdio::null())
+            .stderr(fs::File::create(dir.join(format!("{name}.stderr")))?)
+            .unprivileged()
+            .spawn()
+            .context("start the controlled build")?;
+        Ok(OwnedChild(child))
+    }
+
     /// A SCHED_FIFO contender holding `burst_ms` of every 20 ms of `cpu`; none for 0.
     pub(super) fn spawn_burst(
         &self,

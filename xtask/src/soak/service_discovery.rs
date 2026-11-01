@@ -1,5 +1,6 @@
 //! Live auto-focus acceptance through the installed service, never a fake resolver input.
 use std::{
+    collections::BTreeSet,
     fs,
     path::Path,
     time::{Duration, Instant},
@@ -16,13 +17,33 @@ use super::{
     service::Binding,
     world::{Controller, Game, World, signal, wait_exit},
 };
-use crate::service_campaign::model::{Stage, State};
+use crate::{
+    service_campaign::{
+        driver::StageFailure,
+        model::{Stage, State},
+    },
+    validation_campaign::model::FailureClass,
+};
 
 struct Probe {
     tail: Tail,
     records: Vec<Value>,
+    /// Every process this acceptance started; any other high-confidence focus is foreign.
+    owned: BTreeSet<u32>,
 }
 impl Probe {
+    fn own(&mut self, pid: u32) {
+        self.owned.insert(pid);
+    }
+    /// A workload this acceptance did not start that held the focus since `from`.
+    fn foreign_focus(&self, from: usize) -> Option<String> {
+        self.records[from..].iter().find_map(|row| {
+            let pid = row["target"]["root_pid"].as_u64()? as u32;
+            let confident = row["focus"]["confidence"].as_f64()? >= 0.85;
+            (confident && !self.owned.contains(&pid))
+                .then(|| format!("{} pid {pid}", row["focus"]["kind"]))
+        })
+    }
     fn poll(&mut self) {
         self.records.extend(self.tail.poll_records());
     }
@@ -43,10 +64,17 @@ impl Probe {
             if self.records[start..].iter().any(&matches) {
                 return Ok(());
             }
-            ensure!(
-                Instant::now() < deadline,
-                "live focus/decision condition did not occur within {seconds}s"
-            );
+            if Instant::now() >= deadline {
+                if let Some(foreign) = self.foreign_focus(start) {
+                    return Err(StageFailure::error(
+                        FailureClass::Retryable,
+                        format!(
+                            "an unrelated workload held the focus ({foreign}) while waiting {seconds}s; rerun on a quiet host"
+                        ),
+                    ));
+                }
+                anyhow::bail!("live focus/decision condition did not occur within {seconds}s");
+            }
             std::thread::sleep(Duration::from_millis(200));
         }
     }
@@ -136,6 +164,7 @@ pub(crate) fn run(state: &State, dir: &Path) -> anyhow::Result<Value> {
     let mut probe = Probe {
         tail: Tail::at_end(&world.history_path()),
         records: vec![],
+        owned: BTreeSet::new(),
     };
     let mut controller =
         world.spawn_controller(dir, "discovery", 0, Operations::Both, timing(Profile::Full))?;
@@ -159,6 +188,7 @@ pub(crate) fn run(state: &State, dir: &Path) -> anyhow::Result<Value> {
             fs::copy(&world.xtask, &path)?;
             world.game = path;
             let mut fixture = world.spawn_game(dir, name, 30)?;
+            probe.own(fixture.child.pid());
             let _pressure = world.spawn_burst(cpus.0, 8, 30)?;
             let diagnostic = live_group(fixture.child.pid());
             if name == "low_confidence" {
@@ -181,6 +211,7 @@ pub(crate) fn run(state: &State, dir: &Path) -> anyhow::Result<Value> {
         }
         world.game = game_binary;
         let mut first = world.spawn_game(dir, "first-game", 180)?;
+        probe.own(first.child.pid());
         probe.wait(&mut controller, 30, |row| focus_matches(row, &first))?;
         cases.push(json!({"scenario":"single_game_stabilizes","pid":first.child.pid(),"starttime_ticks":first.ticks}));
         let second_binary = dir
@@ -193,6 +224,7 @@ pub(crate) fn run(state: &State, dir: &Path) -> anyhow::Result<Value> {
         fs::copy(&world.xtask, &second_binary)?;
         let first_binary = std::mem::replace(&mut world.game, second_binary);
         let mut second = world.spawn_game(dir, "second-game", 60)?;
+        probe.own(second.child.pid());
         world.game = first_binary;
         let groups =
             json!({"first":live_group(first.child.pid()),"second":live_group(second.child.pid())});
@@ -213,10 +245,12 @@ pub(crate) fn run(state: &State, dir: &Path) -> anyhow::Result<Value> {
         // with distinct start ticks; this live case proves replacement through the actual service.
         for n in 0..6 {
             let mut game = world.spawn_transient_game(dir, &format!("oscillating-{n}"), 10)?;
+            probe.own(game.child.pid());
             cases.push(json!({"scenario":"rapid_focus_oscillation","pid":game.child.pid(),"starttime_ticks":game.ticks,"observations":probe.quiet(&mut controller, 1, Some(game.child.pid()))?}));
             stop_game(&mut game)?;
         }
         let mut replacement = world.spawn_game(dir, "replacement-game", 590)?;
+        probe.own(replacement.child.pid());
         ensure!(
             replacement.child.pid() != first.child.pid() || replacement.ticks != first.ticks,
             "replacement reused an identical process identity"
@@ -233,6 +267,28 @@ pub(crate) fn run(state: &State, dir: &Path) -> anyhow::Result<Value> {
         })?;
         cases.push(json!({"scenario":"stable_replacement_pressure_supported_keep","pid":replacement.child.pid(),"starttime_ticks":replacement.ticks}));
         stop_game(&mut replacement)?;
+        probe.wait(&mut controller, 40, |row| row["target"].is_null())?;
+        // A higher-scoring workload may legitimately take the focus from a game mid-experiment.
+        // The experiment must be rolled back and released, and the build must never be mutated.
+        let mut contested = world.spawn_game(dir, "contested-game", 590)?;
+        probe.own(contested.child.pid());
+        probe.wait(&mut controller, 30, |row| focus_matches(row, &contested))?;
+        let _pressure = world.spawn_burst(cpus.0, 8, 590)?;
+        probe.wait(&mut controller, 420, |row| {
+            row["decision"]["decision"] == "candidate_applied" && focus_matches(row, &contested)
+        })?;
+        let build = world.spawn_compile(dir, "contested-build", 90)?;
+        probe.own(build.pid());
+        probe.wait(&mut controller, 60, |row| {
+            row["rollback_performed"] == true
+                && row["reason"]
+                    .as_str()
+                    .is_some_and(|reason| reason.contains("focus_winner_changed"))
+        })?;
+        let rows = probe.quiet(&mut controller, 20, None)?;
+        cases.push(json!({"scenario":"compile_supersedes_game_experiment","game_pid":contested.child.pid(),"build_pid":build.pid(),"observations":rows}));
+        stop_game(&mut contested)?;
+        drop(build);
         probe.wait(&mut controller, 40, |row| row["target"].is_null())?;
         ensure!(
             controller.child.pid() == original_pid && controller.child.try_wait()?.is_none(),
