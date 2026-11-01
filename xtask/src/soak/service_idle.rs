@@ -21,12 +21,12 @@ pub(super) fn wait(world: &World, controller: &mut Controller) -> anyhow::Result
             controller.child.try_wait()?.is_none(),
             "always-on controller exited when its workload left"
         );
-        let journal: Option<Value> = fs::read(world.journal_path())
-            .ok()
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok());
-        let clean = journal
-            .as_ref()
-            .is_some_and(|value| matches!(value["state"].as_str(), Some("clean" | "reverted")));
+        // No journal at all is the product's own clean state (a controller that never acted).
+        let clean = match fs::read(world.journal_path()) {
+            Err(error) => error.kind() == std::io::ErrorKind::NotFound,
+            Ok(bytes) => serde_json::from_slice::<Value>(&bytes)
+                .is_ok_and(|value| matches!(value["state"].as_str(), Some("clean" | "reverted"))),
+        };
         if clean && !world.ledger_path().exists() {
             let report = service.action(BoundedServiceAction::Query)?;
             super::service::attest(&report, &service.campaign)?;
