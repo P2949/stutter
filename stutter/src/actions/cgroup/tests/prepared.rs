@@ -88,12 +88,17 @@ fn a_recreated_original_cgroup_is_never_restored_into() {
     }
     write_fake_cgroup(&cgroup_root, "/old.slice");
     let procs = cgroup_root.join("old.slice/cgroup.procs");
-    action.rollback_at(&proc_root, &token).unwrap();
+    // The task is alive and still where Stutter put it, so refusing to write is unresolved.
+    assert!(action.rollback_at(&proc_root, &token).is_err());
     assert_eq!(
         fs::read_to_string(&procs).unwrap(),
         "",
         "nothing was restored into it"
     );
+    // Once the task is gone there is nothing left to restore, and the token can retire.
+    fs::remove_dir_all(proc_root.join("4242")).unwrap();
+    action.rollback_at(&proc_root, &token).unwrap();
+    assert_eq!(fs::read_to_string(&procs).unwrap(), "");
 }
 
 #[test]
@@ -110,10 +115,11 @@ fn the_startup_handler_refuses_records_without_a_cgroup_identity() {
     let result = CgroupRollbackHandler {
         require_verified_identity: true,
     }
-    .restore_token_at(&proc_root, &cgroup_root, &token)
-    .unwrap();
-    assert_eq!(result.restored, 0);
-    assert_eq!(result.skipped_identity_mismatch, 1);
+    .restore_token_at(&proc_root, &cgroup_root, &token);
+    assert!(
+        result.is_err(),
+        "an unverifiable origin of a live task is unresolved"
+    );
     assert_eq!(
         fs::read_to_string(cgroup_root.join("old.slice/cgroup.procs")).unwrap(),
         ""

@@ -443,8 +443,10 @@ fn rollback_preserves_a_task_someone_else_moved_after_stutter() {
     let cgroup_root = temp_dir("cgroup-rollback-external");
     write_fake_task(&proc_root, 42, "game", 4200, "/external.slice");
     write_fake_cgroup(&cgroup_root, "/old.slice");
+    write_fake_cgroup(&cgroup_root, "/external.slice");
     let action = action_for(&cgroup_root, 42);
-    let record = |applied: &str| {
+    let owned_id = cgroup_id(&cgroup_root.join("external.slice")).unwrap();
+    let record = |applied: &str, id: u64| {
         CgroupRestoreRecord::new(
             crate::actions::TaskRestoreIdentity::observed(
                 42,
@@ -455,12 +457,12 @@ fn rollback_preserves_a_task_someone_else_moved_after_stutter() {
             ),
             PathBuf::from("/old.slice"),
         )
-        .with_applied(PathBuf::from(applied), 7)
+        .with_applied(PathBuf::from(applied), id)
     };
 
     // Stutter put it in /stutter/target; it is now in /external.slice: not Stutter's to move.
     let token = RollbackToken::CgroupRestore {
-        records: vec![record("/stutter/target")],
+        records: vec![record("/stutter/target", owned_id)],
         cpuset: None,
     };
     action.rollback_at(&proc_root, &token).unwrap();
@@ -471,7 +473,91 @@ fn rollback_preserves_a_task_someone_else_moved_after_stutter() {
 
     // Still where Stutter put it: Stutter owns it, so it goes back.
     let token = RollbackToken::CgroupRestore {
-        records: vec![record("/external.slice")],
+        records: vec![record("/external.slice", owned_id)],
+        cpuset: None,
+    };
+    action.rollback_at(&proc_root, &token).unwrap();
+    assert_eq!(
+        read_trimmed(&cgroup_root.join("old.slice/cgroup.procs")).unwrap(),
+        "42"
+    );
+    fs::remove_dir_all(proc_root).ok();
+    fs::remove_dir_all(cgroup_root).ok();
+}
+
+#[test]
+fn rollback_never_restores_when_the_live_placement_cannot_be_read() {
+    let proc_root = temp_dir("proc-rollback-unreadable");
+    let cgroup_root = temp_dir("cgroup-rollback-unreadable");
+    // The task is alive (its stat exists) but its cgroup file is unreadable.
+    write_fake_task(&proc_root, 42, "game", 4200, "/stutter/target");
+    fs::remove_file(proc_root.join("42/cgroup")).unwrap();
+    write_fake_cgroup(&cgroup_root, "/old.slice");
+    let action = action_for(&cgroup_root, 42);
+    let token = RollbackToken::CgroupRestore {
+        records: vec![
+            CgroupRestoreRecord::new(
+                crate::actions::TaskRestoreIdentity::observed(
+                    42,
+                    Some(42_u32),
+                    Some("game".to_owned()),
+                    Some(4200),
+                    None,
+                ),
+                PathBuf::from("/old.slice"),
+            )
+            .with_applied(PathBuf::from("/stutter/target"), 1),
+        ],
+        cpuset: None,
+    };
+    assert!(
+        action.rollback_at(&proc_root, &token).is_err(),
+        "unknown ownership must stay unresolved"
+    );
+    assert_eq!(
+        read_trimmed(&cgroup_root.join("old.slice/cgroup.procs")).unwrap(),
+        "",
+        "nothing may be written when ownership is unknown"
+    );
+    fs::remove_dir_all(proc_root).ok();
+    fs::remove_dir_all(cgroup_root).ok();
+}
+
+#[test]
+fn a_cgroup_recreated_at_the_applied_path_is_not_stutters_to_move_from() {
+    let proc_root = temp_dir("proc-rollback-recreated-target");
+    let cgroup_root = temp_dir("cgroup-rollback-recreated-target");
+    write_fake_task(&proc_root, 42, "game", 4200, "/stutter/target");
+    write_fake_cgroup(&cgroup_root, "/old.slice");
+    write_fake_cgroup(&cgroup_root, "/stutter/target");
+    let action = action_for(&cgroup_root, 42);
+    let real = cgroup_id(&cgroup_root.join("stutter/target")).unwrap();
+    let record = |id: u64| {
+        CgroupRestoreRecord::new(
+            crate::actions::TaskRestoreIdentity::observed(
+                42,
+                Some(42_u32),
+                Some("game".to_owned()),
+                Some(4200),
+                None,
+            ),
+            PathBuf::from("/old.slice"),
+        )
+        .with_applied(PathBuf::from("/stutter/target"), id)
+    };
+    // Stutter chose another inode at this path: what sits there now is somebody else's.
+    let token = RollbackToken::CgroupRestore {
+        records: vec![record(real + 1_000_000)],
+        cpuset: None,
+    };
+    action.rollback_at(&proc_root, &token).unwrap();
+    assert_eq!(
+        read_trimmed(&cgroup_root.join("old.slice/cgroup.procs")).unwrap(),
+        ""
+    );
+    // The inode Stutter chose: still its own, so the original comes back.
+    let token = RollbackToken::CgroupRestore {
+        records: vec![record(real)],
         cpuset: None,
     };
     action.rollback_at(&proc_root, &token).unwrap();

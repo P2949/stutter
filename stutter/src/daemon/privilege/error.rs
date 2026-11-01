@@ -17,6 +17,10 @@ pub enum PrivilegedWorkerError {
     )]
     SettleIssuedTokensUnsupported,
     #[error(
+        "service_rollback_unresolved: a live task is still in stutter's state and its ownership or original resource could not be resolved"
+    )]
+    ServiceRollbackUnresolved,
+    #[error(
         "service_rollback_token_not_issued: rollback data does not match a worker-issued durable token"
     )]
     ServiceRollbackTokenNotIssued,
@@ -148,6 +152,7 @@ impl PrivilegedWorkerError {
         match self {
             Self::ServiceTokenAlreadyOutstanding => "service_token_already_outstanding",
             Self::SettleIssuedTokensUnsupported => "settle_issued_tokens_unsupported",
+            Self::ServiceRollbackUnresolved => "service_rollback_unresolved",
             Self::ServiceRollbackTokenNotIssued => "service_rollback_token_not_issued",
             Self::BoundedServiceRequiresPrepared => "bounded_service_requires_prepared_transaction",
             Self::BoundedServiceTargetBoundaryUnimplemented => {

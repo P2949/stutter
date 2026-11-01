@@ -12,6 +12,7 @@ use crate::actions::{
     ActionBoundaryError, ActionId, ActionState, ActionWarning, ApplyResult,
     CgroupCpusetRestoreRecord, CgroupRestoreRecord, PartialApplyError, RestoreIdentityStatus,
     RollbackToken, SafetyClass, TaskRestoreIdentity, TuningAction,
+    disposition::RollbackDisposition,
     restore_write::{RestoreSummary, RestoreWriteError, classify_restore_write_error},
     verify_task_identity,
 };
@@ -19,6 +20,7 @@ use crate::actions::{
 mod acceptance;
 mod fs_io;
 mod model;
+mod ownership;
 mod prepared;
 mod procfs;
 mod rollback;
@@ -257,6 +259,7 @@ impl CgroupPlacementAction {
                 }
                 RestoreIdentityStatus::Missing => {
                     summary.record_missing();
+                    RollbackDisposition::record(|d| d.target_gone += 1);
                     log::info!(
                         "cgroup_rollback_skip_exited_task tid={} original_cgroup={}",
                         tid,
@@ -266,6 +269,7 @@ impl CgroupPlacementAction {
                 }
                 RestoreIdentityStatus::Mismatch { reason } => {
                     summary.record_identity_mismatch();
+                    RollbackDisposition::record(|d| d.identity_superseded += 1);
                     log::warn!(
                         "cgroup_rollback_skip_identity_mismatch tid={} original_cgroup={} reason={}",
                         tid,
@@ -276,17 +280,27 @@ impl CgroupPlacementAction {
                 }
             }
 
-            if let Some(applied) = &record.applied_cgroup
-                && let Ok(live) = procfs::read_proc_cgroup_path_at(proc_root, tid)
-                && live != *applied
-            {
-                summary.record_externally_changed();
-                log::warn!(
-                    "cgroup_rollback_preserved_external_placement tid={tid} applied={} live={}",
-                    applied.display(),
-                    live.display()
-                );
-                continue;
+            match ownership::applied_ownership(proc_root, &self.cgroup_root, record, tid) {
+                ownership::Ownership::Owned => {}
+                ownership::Ownership::Superseded(why) => {
+                    summary.record_externally_changed();
+                    RollbackDisposition::record(|d| d.superseded_externally += 1);
+                    log::warn!("cgroup_rollback_preserved_external_placement {why}");
+                    continue;
+                }
+                ownership::Ownership::Gone => {
+                    summary.record_missing();
+                    RollbackDisposition::record(|d| d.target_gone += 1);
+                    continue;
+                }
+                ownership::Ownership::Unknown(why) => {
+                    summary.record_failure();
+                    RollbackDisposition::record(|d| d.unresolved += 1);
+                    failures.push(format!(
+                        "tid={tid} ownership could not be established: {why}"
+                    ));
+                    continue;
+                }
             }
 
             let original_abs = cgroup_fs_path(&self.cgroup_root, &record.original_cgroup)
@@ -299,11 +313,13 @@ impl CgroupPlacementAction {
             if let Some(expected) = record.original_cgroup_id
                 && cgroup_id(&original_abs).ok() != Some(expected)
             {
-                summary.record_identity_mismatch();
-                log::warn!(
-                    "cgroup_rollback_skip_cgroup_identity_mismatch tid={tid} original_cgroup={}",
+                // Alive and still where Stutter put it: refusing leaves its mutation in place.
+                summary.record_failure();
+                RollbackDisposition::record(|d| d.unresolved += 1);
+                failures.push(format!(
+                    "tid={tid} original_cgroup={} is not the cgroup the task left and the task is still in stutter's placement",
                     record.original_cgroup.display()
-                );
+                ));
                 continue;
             }
             let procs = original_abs.join("cgroup.procs");
@@ -338,6 +354,7 @@ impl CgroupPlacementAction {
             } else {
                 restored_processes.insert((process, record.original_cgroup.clone()));
                 summary.record_restored();
+                RollbackDisposition::record(|d| d.restored += 1);
             }
         }
 

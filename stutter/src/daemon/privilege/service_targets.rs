@@ -75,6 +75,12 @@ impl ServiceTargets {
             }
             RollbackToken::CgroupRestore { records, .. } => {
                 for record in records {
+                    // Automatic recovery restores only what Stutter demonstrably still owns, so a
+                    // token that cannot name the placement it applied is refused up front.
+                    ensure!(
+                        record.applied_cgroup.is_some() && record.applied_cgroup_id.is_some(),
+                        "bounded_service_cgroup_applied_identity_missing"
+                    );
                     self.task(Path::new("/proc"), record.tid())?;
                 }
             }

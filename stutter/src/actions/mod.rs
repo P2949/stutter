@@ -41,6 +41,7 @@ pub(crate) mod vm_knobs;
 
 pub(crate) mod runner;
 
+pub(crate) mod disposition;
 pub(crate) mod error;
 pub(crate) mod factory;
 pub(crate) mod model;

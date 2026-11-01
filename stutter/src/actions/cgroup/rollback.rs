@@ -6,6 +6,7 @@ use super::fs_io::{resolve_cgroup_fs_path, write_trimmed};
 use crate::actions::{
     ActionBoundaryError, CgroupCpusetRestoreRecord, CgroupRestoreRecord, RestoreIdentityStatus,
     RollbackToken,
+    disposition::RollbackDisposition,
     restore_write::{RestoreWriteError, classify_restore_write_error},
     rollback::{
         RollbackCandidate, RollbackHandler, RollbackPreview, RollbackResult, token_dry_run_preview,
@@ -94,11 +95,13 @@ impl CgroupRollbackHandler {
             match status {
                 RestoreIdentityStatus::Missing => {
                     skipped_dead += 1;
+                    RollbackDisposition::record(|d| d.target_gone += 1);
                     log::debug!("cgroup restore skipped: task tid={} is missing/dead", tid);
                     continue;
                 }
                 RestoreIdentityStatus::Mismatch { reason } => {
                     skipped_identity_mismatch += 1;
+                    RollbackDisposition::record(|d| d.identity_superseded += 1);
                     let msg = format!(
                         "cgroup restore identity mismatch for tid={}: {}",
                         tid, reason
@@ -124,19 +127,30 @@ impl CgroupRollbackHandler {
                 RestoreIdentityStatus::SameTask => {}
             }
 
-            if let Some(applied) = &record.applied_cgroup
-                && let Ok(live) = super::procfs::read_proc_cgroup_path_at(proc_root, tid)
-                && live != *applied
-            {
-                skipped_externally_changed += 1;
-                let msg = format!(
-                    "cgroup restore preserved an external placement for tid={tid}: stutter put it in {} and it is now in {}",
-                    applied.display(),
-                    live.display()
-                );
-                log::warn!("{msg}");
-                messages.push(msg);
-                continue;
+            match super::ownership::applied_ownership(proc_root, cgroup_root, record, tid) {
+                super::ownership::Ownership::Owned => {}
+                super::ownership::Ownership::Superseded(why) => {
+                    skipped_externally_changed += 1;
+                    RollbackDisposition::record(|d| d.superseded_externally += 1);
+                    let msg = format!("cgroup restore preserved an external placement: {why}");
+                    log::warn!("{msg}");
+                    messages.push(msg);
+                    continue;
+                }
+                super::ownership::Ownership::Gone => {
+                    skipped_dead += 1;
+                    RollbackDisposition::record(|d| d.target_gone += 1);
+                    continue;
+                }
+                super::ownership::Ownership::Unknown(why) => {
+                    errors += 1;
+                    RollbackDisposition::record(|d| d.unresolved += 1);
+                    let msg =
+                        format!("cgroup restore cannot establish ownership of tid={tid}: {why}");
+                    log::error!("{msg}");
+                    messages.push(msg);
+                    continue;
+                }
             }
 
             let original_cgroup = resolve_cgroup_fs_path(cgroup_root, &record.original_cgroup)
@@ -151,9 +165,12 @@ impl CgroupRollbackHandler {
             if (self.require_verified_identity && expected_id.is_none())
                 || expected_id.is_some_and(|expected| current_id != Some(expected))
             {
-                skipped_identity_mismatch += 1;
+                // The task is alive and still where Stutter put it, so refusing to write leaves
+                // Stutter's own mutation in place: that is unresolved, not restored.
+                errors += 1;
+                RollbackDisposition::record(|d| d.unresolved += 1);
                 messages.push(format!(
-                    "cgroup restore refused: original cgroup {} is not the cgroup tid={tid} left",
+                    "cgroup restore refused: original cgroup {} is not the cgroup tid={tid} left, and the task is still in stutter's placement",
                     record.original_cgroup.display()
                 ));
                 continue;
@@ -169,6 +186,7 @@ impl CgroupRollbackHandler {
                 Ok(()) => {
                     restored_processes.insert((process, record.original_cgroup.clone()));
                     restored += 1;
+                    RollbackDisposition::record(|d| d.restored += 1);
                 }
                 Err(e) => match classify_restore_write_error(proc_root, tid, e) {
                     RestoreWriteError::MissingTask => {

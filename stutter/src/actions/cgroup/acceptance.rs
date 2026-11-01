@@ -45,8 +45,10 @@ fn check_token(token: &RollbackToken, original: &Originals) -> anyhow::Result<()
         ensure!(
             record.restore_identity().starttime_ticks == Some(*ticks)
                 && record.original_cgroup.to_string_lossy() == *before
-                && record.original_cgroup_id.is_some(),
-            "rollback token identity or original cgroup differs"
+                && record.original_cgroup_id.is_some()
+                && record.applied_cgroup.is_some()
+                && record.applied_cgroup_id.is_some(),
+            "rollback token identity, original cgroup or applied placement differs"
         );
     }
     Ok(())

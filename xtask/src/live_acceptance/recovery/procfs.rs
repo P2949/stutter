@@ -278,8 +278,10 @@ fn verify_saved_cgroup(before: &Snapshot, token: &Value) -> anyhow::Result<()> {
         );
         ensure!(
             record["original_cgroup"].as_str() == Some(task.mask.as_str())
-                && record["original_cgroup_id"].as_u64().is_some(),
-            "token original cgroup or its identity differs for {tid}"
+                && record["original_cgroup_id"].as_u64().is_some()
+                && record["applied_cgroup"].as_str().is_some()
+                && record["applied_cgroup_id"].as_u64().is_some(),
+            "token original or applied cgroup identity differs for {tid}"
         );
     }
     Ok(())

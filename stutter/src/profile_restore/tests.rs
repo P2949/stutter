@@ -268,7 +268,7 @@ fn temp_dir(name: &str) -> PathBuf {
     dir
 }
 
-/// A task whose live mask cannot be read is restored as before; a readable one must still match.
+/// A task that exited between identity verification and the ownership read.
 fn unknown_mask(_: stutter_core::ids::Tid) -> std::io::Result<crate::affinity::CpuMask> {
     Err(std::io::Error::from_raw_os_error(libc::ESRCH))
 }
@@ -336,5 +336,48 @@ fn an_affinity_changed_by_someone_else_is_preserved_not_overwritten() {
     );
     assert_eq!(summary.affinity, 1);
     assert_eq!(written.len(), 1);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn an_affinity_whose_owner_cannot_be_established_is_never_written() {
+    use crate::affinity::CpuMask;
+    let dir = std::env::temp_dir().join(format!("stutter-unreadable-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("42/task/42")).unwrap();
+    let stat = "42 (game) S 1 1 1 0 0 0 0 0 0 0 0 0 0 0 20 0 1 0 100 0 0 0\n";
+    std::fs::write(dir.join("42/stat"), stat).unwrap();
+    std::fs::write(dir.join("42/task/42/stat"), stat).unwrap();
+    let state = ProfileRestoreState {
+        affinity_records: vec![crate::affinity::AffinityRecord {
+            tid: 42_u32.into(),
+            process_pid: Some(42_u32.into()),
+            process_starttime_ticks: Some(100),
+            task_starttime_ticks: Some(100),
+            original_mask: CpuMask::parse("0").unwrap(),
+            applied_mask: CpuMask::parse("1").unwrap(),
+        }],
+        ..ProfileRestoreState::default()
+    };
+    let mut written = 0;
+    crate::actions::disposition::RollbackDisposition::reset();
+    let (summary, errors) = restore_all_at_with_ops(
+        &dir,
+        &state,
+        |_, _| {
+            written += 1;
+            Ok(())
+        },
+        |_| Err(std::io::Error::from_raw_os_error(libc::EACCES)),
+        |_, _| Ok(()),
+        |_, _| Ok(()),
+    );
+    assert_eq!(written, 0, "unknown ownership is not permission to write");
+    assert_eq!(errors.len(), 1);
+    assert_eq!(summary.errors, 1);
+    assert_eq!(
+        crate::actions::disposition::RollbackDisposition::take().unresolved,
+        1
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }

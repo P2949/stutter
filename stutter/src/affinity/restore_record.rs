@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use stutter_core::ids::{Pid, Tid};
 
 use super::{CpuMask, syscall::set_affinity};
+use crate::actions::disposition::RollbackDisposition;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AffinityRecord {
@@ -85,21 +86,39 @@ fn restore_all_at(
             }
         }
 
-        // Never write back over a value someone else set after Stutter applied its own.
-        if proc_root == Path::new("/proc")
-            && let Ok(live) = super::syscall::read_allowed_mask(record.tid)
-            && live != record.applied_mask
-        {
-            summary.skipped_externally_changed += 1;
-            log::warn!(
-                "restore_record_externally_changed tid={}; preserving the external affinity",
-                record.tid
-            );
-            continue;
+        // Never write back over a value someone else set after Stutter applied its own, nor over
+        // one whose owner cannot be established.
+        if proc_root == Path::new("/proc") {
+            match super::syscall::read_allowed_mask(record.tid) {
+                Ok(live) if live != record.applied_mask => {
+                    summary.skipped_externally_changed += 1;
+                    RollbackDisposition::record(|d| d.superseded_externally += 1);
+                    log::warn!(
+                        "restore_record_externally_changed tid={}; preserving the external affinity",
+                        record.tid
+                    );
+                    continue;
+                }
+                Ok(_) => {}
+                Err(err) if err.raw_os_error() == Some(libc::ESRCH) => {
+                    summary.skipped_dead += 1;
+                    RollbackDisposition::record(|d| d.target_gone += 1);
+                    continue;
+                }
+                Err(err) => {
+                    summary.errors += 1;
+                    RollbackDisposition::record(|d| d.unresolved += 1);
+                    errors.push(affinity_set_error(record.tid, err));
+                    continue;
+                }
+            }
         }
 
         match set_affinity(record.tid, &record.original_mask) {
-            Ok(()) => summary.restored += 1,
+            Ok(()) => {
+                summary.restored += 1;
+                RollbackDisposition::record(|d| d.restored += 1);
+            }
             Err(err) if err.raw_os_error() == Some(libc::ESRCH) => {
                 summary.skipped_dead += 1;
             }

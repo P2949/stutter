@@ -7,7 +7,10 @@ use super::{
     model::{ProfileRestoreState, ProfileRestoreSummary},
     validate::{restore_priority_identity, restore_record_status},
 };
-use crate::affinity::{self, RestoreRecordStatus};
+use crate::{
+    actions::disposition::RollbackDisposition,
+    affinity::{self, RestoreRecordStatus},
+};
 
 pub fn restore_saved(path: &Path) -> anyhow::Result<ProfileRestoreSummary> {
     restore_saved_with_validation(path, |_| Ok(()))
@@ -91,10 +94,12 @@ where
             }
             Ok(RestoreRecordStatus::Dead) => {
                 summary.skipped_dead += 1;
+                RollbackDisposition::record(|d| d.target_gone += 1);
                 continue;
             }
             Ok(RestoreRecordStatus::IdentityMismatch) => {
                 summary.skipped_identity_mismatch += 1;
+                RollbackDisposition::record(|d| d.identity_superseded += 1);
                 continue;
             }
             Err(err) => {
@@ -105,22 +110,42 @@ where
         }
 
         // Only restore a value Stutter still owns. A mask that is no longer the one Stutter
-        // applied belongs to someone else now, and writing the old one back would destroy it.
-        if let Ok(live) = current_mask(record.tid)
-            && live != record.applied_mask
-        {
-            summary.skipped_externally_changed += 1;
-            log::warn!(
-                "profile_restore_affinity_externally_changed tid={} applied={} live={}; preserving the external value",
-                record.tid,
-                record.applied_mask.to_range_string(),
-                live.to_range_string()
-            );
-            continue;
+        // applied belongs to someone else now, and one that cannot be read is not known to be
+        // Stutter's: neither is permission to write the old value back.
+        match current_mask(record.tid) {
+            Ok(live) if live != record.applied_mask => {
+                summary.skipped_externally_changed += 1;
+                RollbackDisposition::record(|d| d.superseded_externally += 1);
+                log::warn!(
+                    "profile_restore_affinity_externally_changed tid={} applied={} live={}; preserving the external value",
+                    record.tid,
+                    record.applied_mask.to_range_string(),
+                    live.to_range_string()
+                );
+                continue;
+            }
+            Ok(_) => {}
+            Err(err) if err.raw_os_error() == Some(libc::ESRCH) => {
+                summary.skipped_dead += 1;
+                RollbackDisposition::record(|d| d.target_gone += 1);
+                continue;
+            }
+            Err(err) => {
+                summary.errors += 1;
+                RollbackDisposition::record(|d| d.unresolved += 1);
+                errors.push(anyhow::anyhow!(
+                    "cannot establish ownership of the affinity of TID {}: {err}",
+                    record.tid
+                ));
+                continue;
+            }
         }
 
         match set_affinity(record.tid, &record.original_mask) {
-            Ok(()) => summary.affinity += 1,
+            Ok(()) => {
+                summary.affinity += 1;
+                RollbackDisposition::record(|d| d.restored += 1);
+            }
             Err(err) if err.raw_os_error() == Some(libc::ESRCH) => summary.skipped_dead += 1,
             Err(err) => {
                 summary.errors += 1;

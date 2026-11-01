@@ -169,6 +169,7 @@ impl PrivilegedActionService for ServiceActionService {
         request.candidate = issued.plan.clone().into_plan_request()?.candidate;
         // A root-owned snapshot is removed only after a completed physical restore. If the
         // worker died between that unlink and its ledger update, repeating recovery is safe.
+        crate::actions::disposition::RollbackDisposition::reset();
         let already_restored = matches!(&issued.token, RollbackToken::CpuAffinityRestoreFile { path, .. } if !path.exists());
         let result = if already_restored {
             RollbackResult { affected_tasks: 0 }
@@ -189,13 +190,18 @@ impl PrivilegedActionService for ServiceActionService {
         } else {
             self.inner.rollback(request)?
         };
+        let disposition = crate::actions::disposition::RollbackDisposition::take();
+        anyhow::ensure!(
+            disposition.unresolved == 0,
+            PrivilegedWorkerError::ServiceRollbackUnresolved
+        );
         crate::audit::append_audit_event_to_path(
             &self.ledger.with_file_name("token-recovery-audit.jsonl"),
             &privileged_operation_audit_event(
                 PrivilegedOperation::RollbackAction,
                 true,
                 format!(
-                    "worker-issued token settled digest={digest} boot_superseded={} already_restored={already_restored}",
+                    "worker-issued token settled digest={digest} boot_superseded={} already_restored={already_restored} disposition='{disposition}'",
                     issued.boot_id != stutter_core::boot::current_boot_id()?
                 ),
             ),
