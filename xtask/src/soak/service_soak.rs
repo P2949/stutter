@@ -131,6 +131,7 @@ pub(super) fn minimums(state: &SoakState) -> anyhow::Result<super::coverage::Min
     floor.hours = coverage.minimum_dwell_seconds as f64 / 3600.0;
     floor.clean_cycles = coverage.minimum_clean_cycles as usize;
     floor.per_kind = coverage.minimum_dangerous_event_repetitions as usize;
+    floor.service_events = true;
     floor.per_operation_kept = coverage.minimum_keeps_per_operation as usize;
     floor.per_operation_reverted = coverage.minimum_reverts_per_operation as usize;
     Ok(floor)
@@ -250,14 +251,7 @@ pub(super) fn runtime_checks(dir: &Path) -> anyhow::Result<Vec<super::verify::Ch
         .coverage
         .minimum_dangerous_event_repetitions as usize;
     let rounds = super::records::read_rounds(dir)?;
-    for event in [
-        "service_restart",
-        "controller_sigterm",
-        "focus_unqualified",
-        "external_mutation",
-        "corrupt_journal",
-        "failed_restore",
-    ] {
+    for event in super::plan::SERVICE_EVENT_KINDS {
         let count = rounds
             .iter()
             .filter(|round| round.outcome == "ok" && round.violations.is_empty())

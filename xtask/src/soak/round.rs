@@ -17,6 +17,7 @@ use super::{
     world::{Controller, Game, World, signal, wait_controller, wait_exit},
 };
 
+mod service_events;
 mod service_round;
 
 /// Set by SIGINT/SIGTERM on the soak process: finish nothing new, record the round as interrupted.
@@ -178,6 +179,12 @@ impl Ctx<'_> {
                 self.end_workload(&mut game, next, "workload_exit")
             }
             Kind::WorkerKill => self.worker_kill_round(controller, game),
+            Kind::ControllerSigterm => self.controller_sigterm_round(controller, game),
+            Kind::ServiceRestart => self.service_restart_round(controller, game),
+            Kind::FocusUnqualified => self.focus_unqualified_round(controller, game),
+            Kind::ExternalMutation => self.external_mutation_round(controller, game),
+            Kind::CorruptJournal => self.corrupt_journal_round(controller, game),
+            Kind::FailedRestore => self.failed_restore_round(controller, game),
             Kind::Suspend => {
                 self.applied(&mut controller)?;
                 self.suspend()?;

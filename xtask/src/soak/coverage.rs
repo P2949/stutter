@@ -29,6 +29,8 @@ pub struct Minimums {
     pub clean_cycles: usize,
     /// Clean executions of each of `plan::DANGEROUS_KINDS`.
     pub per_kind: usize,
+    /// The service profile also repeats each of `plan::SERVICE_EVENT_KINDS`.
+    pub service_events: bool,
     pub per_operation_resolved: usize,
     pub per_operation_kept: usize,
     pub per_operation_reverted: usize,
@@ -45,6 +47,7 @@ impl Minimums {
         clean_rounds: 96,
         clean_cycles: 6,
         per_kind: 6,
+        service_events: false,
         per_operation_resolved: 12,
         per_operation_kept: 3,
         per_operation_reverted: 3,
@@ -59,6 +62,7 @@ impl Minimums {
         clean_rounds: 0,
         clean_cycles: 0,
         per_kind: 0,
+        service_events: false,
         per_operation_resolved: 0,
         per_operation_kept: 0,
         per_operation_reverted: 0,
@@ -94,7 +98,7 @@ pub fn tally(rounds: &[RoundRecord], counts: &mut Counts) {
                 .or_default() += 1;
         }
     }
-    let length = u32::try_from(super::plan::CYCLE_LEN).unwrap_or(u32::MAX);
+    let length = u32::try_from(counts.cycle_len).unwrap_or(u32::MAX);
     let last = clean.keys().next_back().copied().unwrap_or(0);
     counts.clean_complete_cycles = (0..=last / length)
         .filter(|cycle| {
@@ -207,9 +211,7 @@ pub fn minimum_checks(counts: &Counts, want: &Minimums) -> Vec<Check> {
             counts.clean_complete_cycles >= want.clean_cycles,
             format!(
                 "{} complete clean {}-round cycles (>= {})",
-                counts.clean_complete_cycles,
-                super::plan::CYCLE_LEN,
-                want.clean_cycles
+                counts.clean_complete_cycles, counts.cycle_len, want.clean_cycles
             ),
         );
     }
@@ -220,6 +222,19 @@ pub fn minimum_checks(counts: &Counts, want: &Minimums) -> Vec<Check> {
                 format!("minimum_round_kind_{kind}"),
                 done >= want.per_kind,
                 format!("{done} clean `{kind}` rounds (>= {})", want.per_kind),
+            );
+        }
+    }
+    if want.per_kind > 0 && want.service_events {
+        for kind in super::plan::SERVICE_EVENT_KINDS {
+            let done = counts.clean_rounds_by_kind.get(kind).copied().unwrap_or(0);
+            push(
+                format!("minimum_round_kind_{kind}"),
+                done >= want.per_kind,
+                format!(
+                    "{done} clean `{kind}` service rounds (>= {})",
+                    want.per_kind
+                ),
             );
         }
     }
@@ -505,5 +520,29 @@ mod tests {
                 "minimum_keep_and_revert",
             ]
         );
+    }
+
+    #[test]
+    fn the_service_profile_cannot_finish_without_repeating_its_service_events() {
+        let (state, rounds, events) = full_fixture(6, 9.0);
+        let mut want = Minimums::FULL;
+        want.service_events = true;
+        let failing: Vec<String> = minimum_checks(&counts(&state, &rounds, &events), &want)
+            .into_iter()
+            .filter(|check| !check.passed)
+            .map(|check| check.name)
+            .collect();
+        for event in crate::soak::plan::SERVICE_EVENT_KINDS {
+            assert!(
+                failing.contains(&format!("minimum_round_kind_{event}")),
+                "{event} was not required"
+            );
+        }
+        want.service_events = false;
+        let plain: Vec<String> = minimum_checks(&counts(&state, &rounds, &events), &want)
+            .into_iter()
+            .map(|check| check.name)
+            .collect();
+        assert!(!plain.contains(&"minimum_round_kind_service_restart".to_owned()));
     }
 }

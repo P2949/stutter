@@ -70,6 +70,18 @@ pub enum Kind {
     FocusSwap,
     /// A long-lived workload: several experiments, cooldowns, conflicts and candidate memory.
     Long,
+    /// Service only: `systemctl restart` while a candidate is applied.
+    ServiceRestart,
+    /// Service only: SIGTERM of the controller while a candidate is applied.
+    ControllerSigterm,
+    /// Service only: the only workload is an unqualified game.
+    FocusUnqualified,
+    /// Service only: another owner changes the task Stutter changed.
+    ExternalMutation,
+    /// Service only: the controller journal is corrupted after a crash.
+    CorruptJournal,
+    /// Service only: the cgroup the task came from no longer exists to restore into.
+    FailedRestore,
 }
 
 impl Kind {
@@ -83,6 +95,12 @@ impl Kind {
             Self::WorkloadKill => "workload_kill",
             Self::FocusSwap => "focus_swap",
             Self::Long => "long",
+            Self::ServiceRestart => "service_restart",
+            Self::ControllerSigterm => "controller_sigterm",
+            Self::FocusUnqualified => "focus_unqualified",
+            Self::ExternalMutation => "external_mutation",
+            Self::CorruptJournal => "corrupt_journal",
+            Self::FailedRestore => "failed_restore",
         }
     }
 }
@@ -131,6 +149,48 @@ const CYCLE: [Round; 16] = [
 
 /// Rounds in one schedule cycle: the unit of the full profile's clean-cycle coverage.
 pub const CYCLE_LEN: usize = CYCLE.len();
+
+/// The service-only perturbations. They follow every historical cycle in the service profile and
+/// never change the 16-round schedule the direct-controller soak was qualified with.
+const SERVICE_OVERLAY: [Kind; 6] = [
+    Kind::ServiceRestart,
+    Kind::ControllerSigterm,
+    Kind::FocusUnqualified,
+    Kind::ExternalMutation,
+    Kind::CorruptJournal,
+    Kind::FailedRestore,
+];
+
+/// Rounds in one service cycle: the historical cycle then the service overlay.
+pub const SERVICE_CYCLE_LEN: usize = CYCLE.len() + SERVICE_OVERLAY.len();
+
+/// The event kinds the service profile must repeat, one per overlay round.
+pub const SERVICE_EVENT_KINDS: [&str; 6] = [
+    "service_restart",
+    "controller_sigterm",
+    "focus_unqualified",
+    "external_mutation",
+    "corrupt_journal",
+    "failed_restore",
+];
+
+/// Round `index` of the service profile. Overlay operations alternate by cycle so both graduated
+/// operations meet an external owner and a SIGTERM.
+pub fn service_round_for(index: u32) -> Round {
+    let slot = (index as usize) % SERVICE_CYCLE_LEN;
+    if slot < CYCLE.len() {
+        return CYCLE[slot];
+    }
+    let cycle = (index as usize) / SERVICE_CYCLE_LEN;
+    let kind = SERVICE_OVERLAY[slot - CYCLE.len()];
+    let alternating = if cycle % 2 == 0 { Affinity } else { Cgroup };
+    let operations = match kind {
+        Kind::ExternalMutation | Kind::ControllerSigterm => alternating,
+        Kind::FailedRestore => Cgroup,
+        _ => Both,
+    };
+    round(kind, Beneficial, operations)
+}
 
 /// The schedule kinds that inject a fault or run long; each has its own coverage floor. A
 /// `plain` round injects nothing and is not listed.
@@ -240,5 +300,48 @@ mod tests {
         for round in CYCLE.iter().filter(|round| round.kind == WorkerKill) {
             assert_eq!(round.operations, Cgroup);
         }
+    }
+}
+
+#[cfg(test)]
+mod service_tests {
+    use super::*;
+
+    #[test]
+    fn the_historical_cycle_is_untouched_inside_the_service_cycle() {
+        for index in 0..CYCLE.len() as u32 {
+            assert_eq!(service_round_for(index), round_for(index));
+        }
+    }
+
+    #[test]
+    fn six_service_cycles_repeat_every_service_event_at_least_six_times() {
+        let mut counts = std::collections::BTreeMap::new();
+        for index in 0..(6 * SERVICE_CYCLE_LEN) as u32 {
+            *counts
+                .entry(service_round_for(index).kind.name())
+                .or_insert(0_usize) += 1;
+        }
+        for event in SERVICE_EVENT_KINDS {
+            assert!(counts.get(event).copied().unwrap_or(0) >= 6, "{event}");
+        }
+    }
+
+    #[test]
+    fn external_owners_and_sigterm_meet_both_graduated_operations() {
+        for kind in [Kind::ExternalMutation, Kind::ControllerSigterm] {
+            let operations: std::collections::BTreeSet<_> = (0..(2 * SERVICE_CYCLE_LEN) as u32)
+                .map(service_round_for)
+                .filter(|round| round.kind == kind)
+                .map(|round| round.operations.name())
+                .collect();
+            assert_eq!(operations.len(), 2, "{kind:?}");
+        }
+    }
+
+    #[test]
+    fn every_service_event_name_is_a_service_round_kind() {
+        let names: Vec<_> = SERVICE_OVERLAY.iter().map(|kind| kind.name()).collect();
+        assert_eq!(names, SERVICE_EVENT_KINDS.to_vec());
     }
 }

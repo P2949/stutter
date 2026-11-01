@@ -13,6 +13,8 @@ use super::{
 
 #[derive(Debug, Default, Serialize)]
 pub struct Counts {
+    /// Rounds in one complete schedule cycle of the profile.
+    pub cycle_len: usize,
     pub rounds: usize,
     pub rounds_ok: usize,
     pub wall_clock_hours: f64,
@@ -74,6 +76,11 @@ fn check(checks: &mut Vec<Check>, name: &str, problems: Vec<String>, ok_detail: 
 
 pub fn counts(state: &SoakState, rounds: &[RoundRecord], events: &[HistoryEvent]) -> Counts {
     let mut counts = Counts {
+        cycle_len: if state.profile == Profile::Service {
+            super::plan::SERVICE_CYCLE_LEN
+        } else {
+            super::plan::CYCLE_LEN
+        },
         rounds: rounds.len(),
         rounds_ok: rounds.iter().filter(|round| round.outcome == "ok").count(),
         ..Counts::default()

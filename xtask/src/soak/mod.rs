@@ -384,7 +384,11 @@ fn drive_soak(dir: &Path, state: &mut SoakState, world: &mut world::World) -> an
             break;
         }
         let index = state.next_round;
-        let round = plan::round_for(index);
+        let round = if state.profile == Profile::Service {
+            plan::service_round_for(index)
+        } else {
+            plan::round_for(index)
+        };
         wait_for_spacing(&round, &last_start);
         if round::STOP.load(Ordering::SeqCst) {
             break;
