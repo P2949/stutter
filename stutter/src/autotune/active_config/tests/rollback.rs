@@ -64,3 +64,72 @@ fn rollback_verification_faults_when_verifier_is_unavailable() {
         "rollback_verification_unavailable"
     );
 }
+
+fn cgroup_candidate(tid: u32) -> CandidateAction {
+    use crate::{
+        actions::{
+            TaskIdentity,
+            cgroup::{CgroupPlacementAction, CgroupPlacementTarget},
+        },
+        autotune::{
+            objective::ObjectiveKind, planning::executable_plan::CgroupPlacementActionPlan,
+        },
+        process_tree::TaskClass,
+    };
+    CandidateAction::CgroupPlacement {
+        plan: CgroupPlacementActionPlan {
+            target_root_starttime_ticks: None,
+            name: "exited-target".to_owned(),
+            action: CgroupPlacementAction {
+                cgroup_root: "/sys/fs/cgroup".into(),
+                target_cgroup: "/sys/fs/cgroup/game.slice".into(),
+                targets: vec![CgroupPlacementTarget {
+                    identity: TaskIdentity {
+                        tid: tid.into(),
+                        process_pid: Some(tid.into()),
+                        comm: Some("game".to_owned()),
+                        starttime_ticks: None,
+                    },
+                    class: TaskClass::Game,
+                }],
+                cpuset_cpus: None,
+                cpuset_mems: None,
+            },
+            target_root_pid: Some(tid),
+            evidence: Vec::new(),
+            objective: ObjectiveKind::GameRunnableLatency,
+        },
+    }
+}
+
+fn cgroup_snapshot(tid: u32, path: &str) -> ActiveConfigSnapshot {
+    let mut snapshot = ActiveConfigSnapshot::default();
+    snapshot.cgroup.per_tid.insert(tid, path.to_owned());
+    snapshot
+}
+
+#[test]
+fn a_cgroup_target_that_exited_during_the_action_needs_no_restoration() {
+    // Beyond the kernel's pid_max, so it can never be a live thread.
+    let gone = u32::MAX - 1;
+    let verification = verify_rollback_restored_baseline(
+        &cgroup_candidate(gone),
+        &cgroup_snapshot(gone, "/suite"),
+        &ActiveConfigSnapshot::default(),
+        &[],
+    );
+    assert!(verification.verified, "{verification:?}");
+}
+
+#[test]
+fn a_live_cgroup_target_missing_from_the_snapshot_still_faults() {
+    let alive = std::process::id();
+    let verification = verify_rollback_restored_baseline(
+        &cgroup_candidate(alive),
+        &cgroup_snapshot(alive, "/suite"),
+        &ActiveConfigSnapshot::default(),
+        &[],
+    );
+    assert!(!verification.verified);
+    assert_eq!(verification.reason_code, "rollback_target_missing");
+}

@@ -113,6 +113,10 @@ pub fn verify_rollback_restored_baseline(
             }
 
             for target in &plan.action.targets {
+                // A task that exited while the action was applied has nothing left to restore.
+                if !task_exists(target.identity.tid.as_u32()) {
+                    continue;
+                }
                 if let Some(verification) = compare_required_text(
                     format!("tid={} cgroup", target.identity.tid),
                     baseline
@@ -404,4 +408,9 @@ fn compare_required_text(
 
 fn format_debug_value<T: fmt::Debug>(value: &T) -> String {
     format!("{value:?}")
+}
+
+/// Whether the thread is still alive. Rollback is verified against live state, so liveness is too.
+fn task_exists(tid: u32) -> bool {
+    std::path::Path::new("/proc").join(tid.to_string()).exists()
 }
