@@ -310,6 +310,8 @@ pub enum BoundedServiceAction {
     Start,
     Stop,
     Restart,
+    /// An administrator stopping only the controller; the worker stays and must not revive it.
+    StopController,
     Signal {
         component: ServiceComponent,
         signal: ServiceSignal,

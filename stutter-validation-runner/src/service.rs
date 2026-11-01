@@ -225,6 +225,9 @@ pub fn execute(auth: &Authorization, action: BoundedServiceAction) -> Result<Val
         BoundedServiceAction::Stop => {
             systemctl(&["stop", &controller, &worker])?;
         }
+        BoundedServiceAction::StopController => {
+            systemctl(&["stop", &controller])?;
+        }
         BoundedServiceAction::Restart => {
             systemctl(&["restart", &controller])?;
         }
