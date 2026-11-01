@@ -413,6 +413,9 @@ fn drive_soak(dir: &Path, state: &mut SoakState, world: &mut world::World) -> an
             record.violations.len()
         );
         append_round(dir, &record)?;
+        if state.profile == Profile::Service {
+            service_soak::record_projection(dir, state, index, started)?;
+        }
         if record.outcome == "interrupted" {
             break;
         }

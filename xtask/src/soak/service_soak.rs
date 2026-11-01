@@ -286,3 +286,36 @@ pub(super) fn runtime_checks(dir: &Path) -> anyhow::Result<Vec<super::verify::Ch
     });
     Ok(checks)
 }
+
+/// After every round, what the schedule projects to: informational evidence, never a gate. Six
+/// clean 22-round cycles must fit inside the frozen maximum dwell next to the verified-live
+/// minimum, and this is where an operator (or a later review) can see whether they will.
+pub(super) fn record_projection(
+    dir: &Path,
+    state: &SoakState,
+    index: u32,
+    started_unix_ms: u64,
+) -> anyhow::Result<()> {
+    let manifest = manifest(state)?;
+    let rounds_done = u64::from(index) + 1;
+    let elapsed_s = unix_ms().saturating_sub(started_unix_ms) as f64 / 1000.0;
+    let cycle_len = super::plan::SERVICE_CYCLE_LEN as u64;
+    let per_round_s = elapsed_s / rounds_done as f64;
+    let required_cycles = manifest.coverage.minimum_clean_cycles as f64;
+    let projected_for_cycles_h = per_round_s * cycle_len as f64 * required_cycles / 3600.0;
+    let value = serde_json::json!({
+        "rounds_done": rounds_done,
+        "elapsed_wall_h": elapsed_s / 3600.0,
+        "seconds_per_round": per_round_s,
+        "complete_cycles": rounds_done / cycle_len,
+        "projected_hours_for_required_cycles": projected_for_cycles_h,
+        "minimum_dwell_h": manifest.coverage.minimum_dwell_seconds as f64 / 3600.0,
+        "maximum_dwell_h": manifest.coverage.maximum_dwell_seconds as f64 / 3600.0,
+        "fits_inside_the_cap": projected_for_cycles_h
+            <= manifest.coverage.maximum_dwell_seconds as f64 / 3600.0,
+    });
+    write_atomic(
+        &dir.join("timing-projection.json"),
+        &serde_json::to_vec_pretty(&value)?,
+    )
+}
