@@ -457,7 +457,7 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
             child,
             jobs,
             seconds,
-        } => live_acceptance::compile(&child, jobs, seconds),
+        } => live_acceptance::compile::compile(&child, jobs, seconds),
         XtaskCommand::LiveWorkload {
             wine_helper,
             exit_on_stdin_eof,
