@@ -19,8 +19,9 @@ RuntimeDirectoryMode=0711
 UMask=0077
 NoNewPrivileges=true
 # Only what the Supported affinity and cgroup-placement operations need: adjusting another
-# account's tasks, reading their identity, and handing the socket to the controller account.
-CapabilityBoundingSet=CAP_SYS_NICE CAP_SYS_PTRACE CAP_CHOWN CAP_DAC_READ_SEARCH
+# account's tasks, reading their identity, writing the delegated cgroup files they own, and
+# handing the socket to the controller account.
+CapabilityBoundingSet=CAP_SYS_NICE CAP_SYS_PTRACE CAP_CHOWN CAP_DAC_OVERRIDE
 ProtectSystem=strict
 ReadWritePaths=/sys/fs/cgroup
 ProtectHome=read-only

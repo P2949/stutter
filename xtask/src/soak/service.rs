@@ -188,8 +188,8 @@ pub(crate) fn attest(report: &Value, state: &State) -> anyhow::Result<()> {
             .is_some_and(|ids| ids.split_whitespace().all(|uid| uid == "0")),
         "worker was not root"
     );
-    // CHOWN(0), DAC_READ_SEARCH(2), SYS_PTRACE(19), SYS_NICE(23): the worker's whole bounding set.
-    let worker_bound = (1_u64 << 0) | (1_u64 << 2) | (1_u64 << 19) | (1_u64 << 23);
+    // CHOWN(0), DAC_OVERRIDE(1), SYS_PTRACE(19), SYS_NICE(23): the worker's whole bounding set.
+    let worker_bound = (1_u64 << 0) | (1_u64 << 1) | (1_u64 << 19) | (1_u64 << 23);
     let bounded = report["worker_process"]["status"]["CapBnd"]
         .as_str()
         .and_then(|bound| u64::from_str_radix(bound, 16).ok());
