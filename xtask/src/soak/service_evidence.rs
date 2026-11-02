@@ -95,6 +95,7 @@ pub(crate) fn run(state: &State, dir: &CampaignDir, attempt: u32) -> anyhow::Res
         &raw.join("artifacts/service-stages.json"),
         &serde_json::to_vec_pretty(&stage_summary(dir, state))?,
     )?;
+    copy_small_records(dir, state, &raw)?;
     let bundle = dir.0.join(format!("evidence-bundle-{attempt}"));
     evidence_bundle::export_bundle(&state.repository, &raw, &bundle)?;
     evidence_bundle::verify_bundle(&bundle)?;
@@ -137,4 +138,36 @@ fn retained_records(dir: &CampaignDir, state: &State) -> Value {
         }
     }
     json!(records)
+}
+
+/// The small immutable records themselves (attempt records and reboot receipts), beside their
+/// hashes, so the portable bundle can be read without the retained campaign. Result files can be
+/// large histories, so they are represented by their hashes and the compact stage summary.
+fn copy_small_records(
+    dir: &CampaignDir,
+    state: &State,
+    raw: &std::path::Path,
+) -> anyhow::Result<()> {
+    let out = raw.join("artifacts/service-campaign");
+    for (name, task) in &state.tasks {
+        for attempt in &task.attempts {
+            let from = dir.attempt_dir(name, attempt.number).join("attempt.json");
+            let to = out.join(format!("{name}-attempt-{}.json", attempt.number));
+            write_atomic(
+                &to,
+                &fs::read(&from).with_context(|| from.display().to_string())?,
+            )?;
+        }
+    }
+    for hop in 1..=state.required_reboots {
+        for kind in ["pre", "post"] {
+            let from = dir.0.join("reboots").join(format!("{kind}-{hop}.json"));
+            let to = out.join(format!("reboot-{kind}-{hop}.json"));
+            write_atomic(
+                &to,
+                &fs::read(&from).with_context(|| from.display().to_string())?,
+            )?;
+        }
+    }
+    Ok(())
 }

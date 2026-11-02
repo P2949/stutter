@@ -288,34 +288,54 @@ pub(super) fn runtime_checks(dir: &Path) -> anyhow::Result<Vec<super::verify::Ch
 }
 
 /// After every round, what the schedule projects to: informational evidence, never a gate. Six
-/// clean 22-round cycles must fit inside the frozen maximum dwell next to the verified-live
-/// minimum, and this is where an operator (or a later review) can see whether they will.
+/// clean 22-round cycles and the verified-live dwell are two different requirements; the run needs
+/// whichever takes longer, inside the frozen maximum. Before one full cycle the figure is
+/// preliminary because the service-only rounds have not been seen yet.
 pub(super) fn record_projection(
     dir: &Path,
     state: &SoakState,
     index: u32,
     started_unix_ms: u64,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<bool> {
     let manifest = manifest(state)?;
+    let binding = state.service.as_ref().context("service binding missing")?;
     let rounds_done = u64::from(index) + 1;
-    let elapsed_s = unix_ms().saturating_sub(started_unix_ms) as f64 / 1000.0;
+    let elapsed_ms = unix_ms().saturating_sub(started_unix_ms).max(1);
+    let verified_ms = super::service_presence::verified_ms(dir, &binding.campaign)?;
     let cycle_len = super::plan::SERVICE_CYCLE_LEN as u64;
-    let per_round_s = elapsed_s / rounds_done as f64;
-    let required_cycles = manifest.coverage.minimum_clean_cycles as f64;
-    let projected_for_cycles_h = per_round_s * cycle_len as f64 * required_cycles / 3600.0;
+    let hours = |ms: f64| ms / 3_600_000.0;
+    let duty = verified_ms as f64 / elapsed_ms as f64;
+    let per_round_ms = elapsed_ms as f64 / rounds_done as f64;
+    let for_cycles_h =
+        hours(per_round_ms * cycle_len as f64 * f64::from(manifest.coverage.minimum_clean_cycles));
+    let minimum_dwell_h = manifest.coverage.minimum_dwell_seconds as f64 / 3600.0;
+    let maximum_dwell_h = manifest.coverage.maximum_dwell_seconds as f64 / 3600.0;
+    let for_dwell_h = if duty > 0.0 {
+        minimum_dwell_h / duty
+    } else {
+        f64::INFINITY
+    };
+    let required_h = for_cycles_h.max(for_dwell_h);
     let value = serde_json::json!({
+        "preliminary": rounds_done < cycle_len,
         "rounds_done": rounds_done,
-        "elapsed_wall_h": elapsed_s / 3600.0,
-        "seconds_per_round": per_round_s,
         "complete_cycles": rounds_done / cycle_len,
-        "projected_hours_for_required_cycles": projected_for_cycles_h,
-        "minimum_dwell_h": manifest.coverage.minimum_dwell_seconds as f64 / 3600.0,
-        "maximum_dwell_h": manifest.coverage.maximum_dwell_seconds as f64 / 3600.0,
-        "fits_inside_the_cap": projected_for_cycles_h
-            <= manifest.coverage.maximum_dwell_seconds as f64 / 3600.0,
+        "elapsed_wall_h": hours(elapsed_ms as f64),
+        "verified_live_h": hours(verified_ms as f64),
+        "service_presence_duty_ratio": duty,
+        "seconds_per_round": per_round_ms / 1000.0,
+        "projected_wall_h_for_required_cycles": for_cycles_h,
+        "projected_wall_h_for_verified_dwell": for_dwell_h,
+        "required_projected_wall_h": required_h,
+        "minimum_verified_dwell_h": minimum_dwell_h,
+        "maximum_dwell_h": maximum_dwell_h,
+        "margin_h": maximum_dwell_h - required_h,
+        "fits_inside_the_cap": required_h <= maximum_dwell_h,
     });
     write_atomic(
         &dir.join("timing-projection.json"),
         &serde_json::to_vec_pretty(&value)?,
-    )
+    )?;
+    // Only a full cycle makes the figure meaningful; before that it is preliminary.
+    Ok(rounds_done < cycle_len || required_h <= maximum_dwell_h)
 }

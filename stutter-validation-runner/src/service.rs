@@ -340,7 +340,9 @@ fn worker_tokens(user: &str) -> Value {
                 .collect::<Result<Vec<_>, _>>();
             match entries {
                 Ok(entries) => {
-                    json!({"readable":true,"completed":entries.iter().filter(|entry| entry["success"] == true).count()})
+                    json!({"readable":true,"completed":entries.iter().filter(|entry| entry["success"] == true).count(),
+                        "refused":entries.iter().filter(|entry| entry["success"] == false).count(),
+                        "dispositions":disposition_totals(&entries)})
                 }
                 Err(_) => json!({"readable":false,"error":"malformed root token recovery audit"}),
             }
@@ -422,5 +424,46 @@ mod tests {
             )
             .is_err()
         );
+    }
+}
+
+/// Totals of the per-task rollback dispositions the root worker wrote into its audit
+/// (`disposition='restored=7 superseded_externally=1 ...'`), over successful and refused entries.
+fn disposition_totals(entries: &[Value]) -> Value {
+    let mut totals = std::collections::BTreeMap::<String, u64>::new();
+    for entry in entries {
+        let Some(message) = entry["message"].as_str() else {
+            continue;
+        };
+        let Some(start) = message.find("disposition='") else {
+            continue;
+        };
+        let rest = &message[start + "disposition='".len()..];
+        for pair in rest.split('\'').next().unwrap_or("").split_whitespace() {
+            if let Some((key, value)) = pair.split_once('=')
+                && let Ok(value) = value.parse::<u64>()
+            {
+                *totals.entry(key.to_owned()).or_default() += value;
+            }
+        }
+    }
+    json!(totals)
+}
+
+#[cfg(test)]
+mod disposition_tests {
+    use super::*;
+
+    #[test]
+    fn disposition_totals_sum_across_entries() {
+        let entries = vec![
+            json!({"message":"worker-issued token settled digest=a disposition='restored=7 superseded_externally=1 unresolved=0'"}),
+            json!({"message":"worker-issued token left unresolved digest=b disposition='restored=0 superseded_externally=2 unresolved=3'"}),
+            json!({"message":"worker-issued token voided digest=c"}),
+        ];
+        let totals = disposition_totals(&entries);
+        assert_eq!(totals["restored"], 7);
+        assert_eq!(totals["superseded_externally"], 3);
+        assert_eq!(totals["unresolved"], 3);
     }
 }

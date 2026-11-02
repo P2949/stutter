@@ -414,8 +414,14 @@ fn drive_soak(dir: &Path, state: &mut SoakState, world: &mut world::World) -> an
             record.violations.len()
         );
         append_round(dir, &record)?;
-        if state.profile == Profile::Service {
-            service_soak::record_projection(dir, state, index, started)?;
+        if state.profile == Profile::Service
+            && !service_soak::record_projection(dir, state, index, started)?
+        {
+            // Fail early and loudly rather than burn the maximum dwell on a run that cannot reach
+            // its frozen coverage; the thresholds themselves are never touched.
+            anyhow::bail!(
+                "the service schedule projects past the frozen maximum dwell (see timing-projection.json); stopping instead of spending the cap"
+            );
         }
         if record.outcome == "interrupted" {
             break;

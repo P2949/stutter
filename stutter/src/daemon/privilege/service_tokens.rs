@@ -204,6 +204,27 @@ impl PrivilegedActionService for ServiceActionService {
         let already_restored = matches!(&issued.token, RollbackToken::CpuAffinityRestoreFile { path, .. } if !path.exists());
         let boot_superseded = issued.boot_id != stutter_core::boot::current_boot_id()?;
         let token_kind = issued.token.clone();
+        // Autonomous recovery never infers ownership from missing metadata.
+        if !already_restored
+            && !boot_superseded
+            && let RollbackToken::CgroupRestore { records, .. } = &token_kind
+            && records
+                .iter()
+                .any(|record| record.applied_cgroup.is_none() || record.applied_cgroup_id.is_none())
+        {
+            crate::audit::append_audit_event_to_path(
+                &self.ledger.with_file_name("token-recovery-audit.jsonl"),
+                &privileged_operation_audit_event(
+                    PrivilegedOperation::RollbackAction,
+                    false,
+                    format!(
+                        "worker-issued token refused digest={digest}: a cgroup record lacks the applied placement identity disposition='{}'",
+                        crate::actions::disposition::RollbackDisposition::default()
+                    ),
+                ),
+            )?;
+            return Err(PrivilegedWorkerError::ServiceRollbackUnresolved.into());
+        }
         let outcome: anyhow::Result<RollbackResult> = if already_restored {
             Ok(RollbackResult { affected_tasks: 0 })
         } else if boot_superseded {

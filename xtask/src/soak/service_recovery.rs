@@ -219,37 +219,64 @@ impl Lab<'_> {
             .context("allowed CPU list missing")
     }
 
-    /// A running controller meets an external owner: it must not apply again while the conflict
-    /// stands. What it chose to do on its own is recorded as evidence.
-    fn observe_owner_conflict(&mut self) -> anyhow::Result<Value> {
+    fn superseded_total(&self) -> anyhow::Result<u64> {
+        Ok(
+            self.query()?["worker_tokens"]["recovery_audit"]["dispositions"]
+                ["superseded_externally"]
+                .as_u64()
+                .unwrap_or(0),
+        )
+    }
+
+    /// A running controller meets an external owner and must understand it: it names the
+    /// conflict, never applies again while it stands, and the root ledger ends with the token
+    /// settled as *externally superseded* (not as restored, and not left open).
+    fn observe_owner_conflict(&mut self, superseded_before: u64) -> anyhow::Result<Value> {
         let start = self.probe.records.len();
-        std::thread::sleep(Duration::from_secs(45));
+        let deadline = Instant::now() + Duration::from_secs(90);
+        let detected = loop {
+            self.probe.poll();
+            if let Some(row) = self.probe.records[start..].iter().find(|row| {
+                row["reason"]
+                    .as_str()
+                    .is_some_and(|reason| reason.contains("external_mutation_detected"))
+            }) {
+                break row.clone();
+            }
+            ensure!(
+                Instant::now() < deadline,
+                "the controller never detected the external owner (no external_mutation_detected)"
+            );
+            std::thread::sleep(Duration::from_millis(500));
+        };
+        let settle_by = Instant::now() + Duration::from_secs(60);
+        let report = loop {
+            let report = self.query()?;
+            let superseded =
+                report["worker_tokens"]["recovery_audit"]["dispositions"]["superseded_externally"]
+                    .as_u64()
+                    .unwrap_or(0);
+            if report["worker_tokens"]["outstanding"] == 0 && superseded > superseded_before {
+                break report;
+            }
+            ensure!(
+                Instant::now() < settle_by,
+                "the external takeover was not settled as superseded: {report}"
+            );
+            std::thread::sleep(Duration::from_millis(500));
+        };
         self.probe.poll();
-        let rows = &self.probe.records[start..];
         ensure!(
-            rows.iter()
+            self.probe.records[start..]
+                .iter()
                 .all(|row| row["decision"]["decision"] != "candidate_applied"),
             "the controller applied again while an external owner held the task"
         );
-        let mut reasons: Vec<String> = rows
-            .iter()
-            .filter(|row| row["decision"]["decision"] != "observed")
-            .map(|row| {
-                format!(
-                    "{}: {}",
-                    row["decision"]["decision"].as_str().unwrap_or("?"),
-                    row["reason"]
-                        .as_str()
-                        .unwrap_or("")
-                        .chars()
-                        .take(120)
-                        .collect::<String>()
-                )
-            })
-            .collect();
-        reasons.sort();
-        reasons.dedup();
-        Ok(json!({"observations":rows.len(),"decisions":reasons}))
+        Ok(json!({
+            "detected": detected["reason"],
+            "decision": detected["decision"]["decision"],
+            "dispositions": report["worker_tokens"]["recovery_audit"]["dispositions"],
+        }))
     }
 
     /// Reconfigure the fixture for one operation family; both service actors are stopped first.
@@ -373,6 +400,7 @@ impl Lab<'_> {
         self.reconfigure(Operations::Affinity)?;
         controller = self.controller("recovery-affinity")?;
         let (game, pressure) = self.applied(&mut controller, "external-affinity")?;
+        let superseded_before = self.superseded_total()?;
         let both = format!("{},{}", self.cpus.0, self.cpus.1);
         let output = Command::new("taskset")
             .args(["-a", "-p", "-c", &both])
@@ -381,7 +409,7 @@ impl Lab<'_> {
             .context("run taskset")?;
         ensure!(output.status.success(), "the external mutation failed");
         let external = Self::allowed_cpus(game.child.pid())?;
-        let affinity_conflict = self.observe_owner_conflict()?;
+        let affinity_conflict = self.observe_owner_conflict(superseded_before)?;
         ensure!(
             controller.child.try_wait()?.is_none() || self.query().is_ok(),
             "an external affinity change took the service away"
@@ -409,6 +437,7 @@ impl Lab<'_> {
         self.reconfigure(Operations::Cgroup)?;
         controller = self.controller("recovery-cgroup")?;
         let (game, pressure) = self.applied(&mut controller, "external-cgroup")?;
+        let superseded_before = self.superseded_total()?;
         let sibling = self.subtree().join("external");
         fs::create_dir_all(&sibling)?;
         fs::write(sibling.join("cgroup.procs"), game.child.pid().to_string())?;
@@ -417,7 +446,7 @@ impl Lab<'_> {
             placed.trim().ends_with("/external"),
             "the external placement did not take: {placed}"
         );
-        let cgroup_conflict = self.observe_owner_conflict()?;
+        let cgroup_conflict = self.observe_owner_conflict(superseded_before)?;
         if controller.child.try_wait()?.is_none() {
             self.term_and_return(&mut controller, "recovery-cgroup-2")?;
         } else {

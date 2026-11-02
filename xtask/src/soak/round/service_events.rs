@@ -141,6 +141,10 @@ impl Ctx<'_> {
         mut game: Game,
     ) -> anyhow::Result<()> {
         self.applied(&mut controller)?;
+        let superseded_before = self.binding()?.action(Action::Query)?["worker_tokens"]
+            ["recovery_audit"]["dispositions"]["superseded_externally"]
+            .as_u64()
+            .unwrap_or(0);
         let pid = game.child.pid();
         let cgroup_mode = self.round.operations == Operations::Cgroup;
         let observe = move |pid: u32| -> anyhow::Result<String> {
@@ -170,8 +174,42 @@ impl Ctx<'_> {
             "external_mutation",
             format!("external owner now at {external}"),
         );
+        // The running controller must understand the conflict on its own: name it, never apply
+        // again while it stands, and the root ledger must settle the token as externally
+        // superseded. Only then is shutdown preservation checked separately.
         let seen_before = self.seen.len();
-        std::thread::sleep(Duration::from_secs(45));
+        let detected_by = Instant::now() + Duration::from_secs(90);
+        let mut detected = false;
+        while Instant::now() < detected_by {
+            self.poll_events();
+            if self.seen[seen_before..]
+                .iter()
+                .any(|event| event.reason.contains("external_mutation_detected"))
+            {
+                detected = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(500));
+        }
+        if !detected {
+            self.violation("the controller never detected the external owner");
+        }
+        let settle_by = Instant::now() + Duration::from_secs(60);
+        loop {
+            let report = self.binding()?.action(Action::Query)?;
+            let superseded =
+                report["worker_tokens"]["recovery_audit"]["dispositions"]["superseded_externally"]
+                    .as_u64()
+                    .unwrap_or(0);
+            if report["worker_tokens"]["outstanding"] == 0 && superseded > superseded_before {
+                break;
+            }
+            if Instant::now() >= settle_by {
+                self.violation("the external takeover was not settled as externally superseded");
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(500));
+        }
         self.poll_events();
         if self.seen[seen_before..]
             .iter()
@@ -179,8 +217,10 @@ impl Ctx<'_> {
         {
             self.violation("the controller applied again while an external owner held the task");
         }
-        self.term_controller(&mut controller);
-        self.end_session(controller, "sigterm_after_external_mutation");
+        if controller.child.try_wait()?.is_none() {
+            self.term_controller(&mut controller);
+            self.end_session(controller, "sigterm_after_external_mutation");
+        }
         self.tokens_settled()?;
         let after = observe(pid)?;
         if after != external {
