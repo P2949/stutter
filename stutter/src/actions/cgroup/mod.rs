@@ -303,13 +303,18 @@ impl CgroupPlacementAction {
                 }
             }
 
-            let original_abs = cgroup_fs_path(&self.cgroup_root, &record.original_cgroup)
-                .with_context(|| {
-                    format!(
-                        "failed to resolve original cgroup path {}",
+            let original_abs = match cgroup_fs_path(&self.cgroup_root, &record.original_cgroup) {
+                Ok(path) => path,
+                Err(error) => {
+                    summary.record_failure();
+                    RollbackDisposition::record(|d| d.unresolved += 1);
+                    failures.push(format!(
+                        "tid={tid} failed to resolve original cgroup path {}: {error:#}",
                         record.original_cgroup.display()
-                    )
-                })?;
+                    ));
+                    continue;
+                }
+            };
             if let Some(expected) = record.original_cgroup_id
                 && cgroup_id(&original_abs).ok() != Some(expected)
             {
@@ -343,6 +348,7 @@ impl CgroupPlacementAction {
                     RestoreWriteError::PermissionDenied(err)
                     | RestoreWriteError::InvalidValue(err)
                     | RestoreWriteError::Io(err) => {
+                        RollbackDisposition::record(|d| d.unresolved += 1);
                         summary.record_failure();
                         failures.push(format!(
                             "tid={} original_cgroup={} error={err:#}",

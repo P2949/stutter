@@ -153,13 +153,20 @@ impl CgroupRollbackHandler {
                 }
             }
 
-            let original_cgroup = resolve_cgroup_fs_path(cgroup_root, &record.original_cgroup)
-                .with_context(|| {
-                    format!(
-                        "failed to resolve original cgroup path {}",
+            let original_cgroup = match resolve_cgroup_fs_path(cgroup_root, &record.original_cgroup)
+            {
+                Ok(path) => path,
+                Err(error) => {
+                    // Still in stutter's placement with nowhere safe to go back to: unresolved.
+                    errors += 1;
+                    RollbackDisposition::record(|d| d.unresolved += 1);
+                    messages.push(format!(
+                        "failed to resolve original cgroup path {}: {error:#}",
                         record.original_cgroup.display()
-                    )
-                })?;
+                    ));
+                    continue;
+                }
+            };
             let expected_id = record.original_cgroup_id;
             let current_id = super::prepared::cgroup_id(&original_cgroup).ok();
             if (self.require_verified_identity && expected_id.is_none())
@@ -196,6 +203,7 @@ impl CgroupRollbackHandler {
                     RestoreWriteError::PermissionDenied(e)
                     | RestoreWriteError::InvalidValue(e)
                     | RestoreWriteError::Io(e) => {
+                        RollbackDisposition::record(|d| d.unresolved += 1);
                         errors += 1;
                         let msg = format!(
                             "failed to restore pid={} to cgroup {}: {}",

@@ -148,6 +148,7 @@ where
             }
             Err(err) if err.raw_os_error() == Some(libc::ESRCH) => summary.skipped_dead += 1,
             Err(err) => {
+                RollbackDisposition::record(|d| d.unresolved += 1);
                 summary.errors += 1;
                 errors.push(anyhow::anyhow!(
                     "failed to restore affinity for TID {}: {err}",

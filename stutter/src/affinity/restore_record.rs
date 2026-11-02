@@ -123,6 +123,7 @@ fn restore_all_at(
                 summary.skipped_dead += 1;
             }
             Err(err) => {
+                RollbackDisposition::record(|d| d.unresolved += 1);
                 summary.errors += 1;
                 errors.push(affinity_set_error(record.tid, err));
             }
