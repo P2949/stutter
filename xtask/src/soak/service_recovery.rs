@@ -287,13 +287,50 @@ impl Lab<'_> {
         self.world.prepare_round(operations)
     }
 
-    /// Stop and restart the controller from outside while its action is applied, then settle.
+    /// The root worker settled the token the interrupted controller left, and left nothing
+    /// unresolved. The restarted controller may already hold a token of its own for a new
+    /// experiment on the still-running game, so an empty ledger is not the invariant here; that
+    /// is checked once the game is gone.
+    fn recovered_after(&self, audits: u64, unresolved: u64) -> anyhow::Result<Value> {
+        let deadline = Instant::now() + Duration::from_secs(120);
+        loop {
+            let report = self.query()?;
+            let audit = &report["worker_tokens"]["recovery_audit"];
+            ensure!(
+                audit["dispositions"]["unresolved"].as_u64().unwrap_or(0) == unresolved,
+                "the restart left an unresolved token: {report}"
+            );
+            if report["worker_tokens"]["readable"] == true
+                && audit["completed"].as_u64().unwrap_or(0) > audits
+            {
+                return Ok(report);
+            }
+            ensure!(
+                Instant::now() < deadline,
+                "no root recovery followed the interruption: {report}"
+            );
+            std::thread::sleep(Duration::from_millis(500));
+        }
+    }
+
+    fn unresolved_total(&self) -> anyhow::Result<u64> {
+        Ok(
+            self.query()?["worker_tokens"]["recovery_audit"]["dispositions"]["unresolved"]
+                .as_u64()
+                .unwrap_or(0),
+        )
+    }
+
+    /// Stop and restart the controller from outside while its action is applied, then wait for
+    /// the root recovery of the interrupted token.
     fn term_and_return(&mut self, controller: &mut Controller, name: &str) -> anyhow::Result<()> {
+        let audits = self.recoveries()?;
+        let unresolved = self.unresolved_total()?;
         let before = controller.child.pid();
         self.signal(ServiceComponent::Controller, ServiceSignal::Term)?;
         self.await_gone(before)?;
         *controller = self.controller(name)?;
-        self.settled()?;
+        self.recovered_after(audits, unresolved)?;
         Ok(())
     }
 
@@ -345,11 +382,12 @@ impl Lab<'_> {
         // A service restart while applied.
         let audits = self.recoveries()?;
         let (game, pressure) = self.applied(&mut controller, "restart-game")?;
+        let unresolved = self.unresolved_total()?;
         let before = controller.child.pid();
         self.binding.action(Action::Restart)?;
         self.await_gone(before)?;
         controller = self.controller("recovery-restart")?;
-        self.settled()?;
+        self.recovered_after(audits, unresolved)?;
         ensure!(
             self.recoveries()? > audits,
             "no new root recovery audit followed the service restart"
