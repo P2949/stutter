@@ -96,7 +96,9 @@ impl ServiceTargets {
 
     fn task(&self, proc_root: &Path, tid: u32) -> anyhow::Result<()> {
         let root = proc_root.join(tid.to_string());
-        let status = fs::read_to_string(root.join("status"))?;
+        let status = fs::read_to_string(root.join("status")).with_context(|| {
+            format!("bounded_service_target_unreadable: task {tid} is gone or unreadable")
+        })?;
         let ids = status
             .lines()
             .find_map(|line| line.strip_prefix("Uid:"))
