@@ -16,6 +16,8 @@ pub enum PrivilegedWorkerError {
         "settle_issued_tokens_unsupported: only the bounded service worker keeps an issued-token ledger"
     )]
     SettleIssuedTokensUnsupported,
+    #[error("stale_target_before_mutation: {detail}")]
+    StaleTargetBeforeMutation { detail: String },
     #[error(
         "service_rollback_unresolved: a live task is still in stutter's state and its ownership or original resource could not be resolved"
     )]
@@ -153,6 +155,7 @@ impl PrivilegedWorkerError {
             Self::ServiceTokenAlreadyOutstanding => "service_token_already_outstanding",
             Self::SettleIssuedTokensUnsupported => "settle_issued_tokens_unsupported",
             Self::ServiceRollbackUnresolved => "service_rollback_unresolved",
+            Self::StaleTargetBeforeMutation { .. } => "stale_target_before_mutation",
             Self::ServiceRollbackTokenNotIssued => "service_rollback_token_not_issued",
             Self::BoundedServiceRequiresPrepared => "bounded_service_requires_prepared_transaction",
             Self::BoundedServiceTargetBoundaryUnimplemented => {

@@ -463,6 +463,19 @@ impl PrivilegedWorkerResponse {
             Self::Error {
                 reason_code,
                 message,
+            } if reason_code == "stale_target_before_mutation" => {
+                // The abort is a typed state transition for the controller, not a string.
+                PrivilegedWorkerError::StaleTargetBeforeMutation {
+                    detail: message
+                        .strip_prefix("stale_target_before_mutation: ")
+                        .unwrap_or(&message)
+                        .to_owned(),
+                }
+                .into()
+            }
+            Self::Error {
+                reason_code,
+                message,
             } => anyhow::anyhow!("{reason_code}: {message}"),
             other => anyhow::anyhow!("privileged_worker_unexpected_response: {other:?}"),
         }

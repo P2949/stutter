@@ -46,6 +46,31 @@ impl ServiceActionService {
         Ok(())
     }
 
+    /// The prepared transaction was abandoned before its first mutable write. The token is retired
+    /// as void so no later recovery has anything to restore for it.
+    fn void_unapplied(&self, token: &RollbackToken, why: &anyhow::Error) -> anyhow::Result<()> {
+        let digest = rollback_snapshot_digest(token);
+        let mut tokens = self.read()?;
+        if let Some(issued) = tokens
+            .iter_mut()
+            .find(|issued| rollback_snapshot_digest(&issued.token) == digest && !issued.restored)
+        {
+            issued.restored = true;
+            crate::audit::append_audit_event_to_path(
+                &self.ledger.with_file_name("token-recovery-audit.jsonl"),
+                &privileged_operation_audit_event(
+                    PrivilegedOperation::RollbackAction,
+                    true,
+                    format!(
+                        "worker-issued token voided digest={digest}: the prepared transaction was abandoned before its first mutable write ({why:#})"
+                    ),
+                ),
+            )?;
+            self.write(&tokens)?;
+        }
+        Ok(())
+    }
+
     fn read(&self) -> anyhow::Result<Vec<IssuedToken>> {
         match fs::read(&self.ledger) {
             Ok(bytes) => serde_json::from_slice(&bytes).context("read worker-issued token ledger"),
@@ -144,8 +169,14 @@ impl PrivilegedActionService for ServiceActionService {
             // answer and before the first mutable write. A crash retains the authority to restore.
             self.targets.prepared(&plan.candidate, token)?;
             self.record(token, &plan)?;
-            prepared(token)?;
-            self.targets.prepared(&plan.candidate, token)
+            let barrier =
+                prepared(token).and_then(|()| self.targets.prepared(&plan.candidate, token));
+            if let Err(error) = &barrier {
+                // Nothing was written for this token and nothing will be: it is void, not
+                // outstanding, and the audit says so truthfully.
+                self.void_unapplied(token, error)?;
+            }
+            barrier
         })
     }
     fn rollback(&self, mut request: RollbackRequest) -> anyhow::Result<RollbackResult> {
@@ -318,5 +349,44 @@ mod tests {
         assert!(format!("{error:#}").contains("bounded_service_target_uid_denied"));
         assert!(!service.ledger.exists());
         assert!(!root.join("never-created.json").exists());
+    }
+}
+
+#[cfg(test)]
+mod void_tests {
+    use super::*;
+
+    #[test]
+    fn a_token_abandoned_before_its_first_write_is_void_and_never_outstanding() {
+        let root = crate::test_support::TestRoot::new("void-service-token");
+        let service = ServiceActionService::new(&root.join("state"), 1000, None);
+        let policy = crate::daemon_policy::DaemonPolicy::apply_medium_risk(
+            crate::daemon_policy::ActionSource::Test,
+        );
+        let token = RollbackToken::CpuAffinityRestoreFile {
+            path: root.join("never-written.json"),
+            affected_tasks: 1,
+        };
+        let plan = CandidatePlanRequest::from_candidate(
+            crate::autotune::planning::candidate::CandidateAction::cpu_affinity_profile_for(
+                crate::profiles::Profile {
+                    name: "void".into(),
+                    rules: vec![],
+                },
+                std::process::id(),
+                crate::autotune::objective::ObjectiveKind::GameRunnableLatency,
+            ),
+            crate::audit::unix_nanos_now(),
+        );
+        service.record(&token, &plan).unwrap();
+        assert_eq!(service.settle_issued_tokens(&policy).unwrap(), 1);
+        // A second prepare of the same snapshot after a void is allowed again.
+        service.record(&token, &plan).unwrap();
+        service
+            .void_unapplied(&token, &anyhow::anyhow!("task exited"))
+            .unwrap();
+        assert_eq!(service.settle_issued_tokens(&policy).unwrap(), 0);
+        let audit = fs::read_to_string(root.join("state/token-recovery-audit.jsonl")).unwrap();
+        assert!(audit.contains("voided"));
     }
 }

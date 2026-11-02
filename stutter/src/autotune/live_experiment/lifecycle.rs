@@ -162,6 +162,15 @@ impl LiveExperimentManager {
         ) {
             Ok(token) => token,
             Err(error) => {
+                if let Some(outcome) = super::stale::abandoned_before_mutation(
+                    controller_state,
+                    observation,
+                    &error,
+                    &candidate,
+                    (input.mode, &experiment_id, &baseline_score),
+                ) {
+                    return Ok(outcome);
+                }
                 let failure = error
                     .downcast_ref::<crate::autotune::action_transaction::JournaledActionFailure>();
                 let rollback_completed = failure.is_some_and(|failure| failure.rollback_completed);

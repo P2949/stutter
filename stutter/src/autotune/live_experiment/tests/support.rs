@@ -32,6 +32,8 @@ pub(super) struct FakeLiveExecutor {
     pub(super) apply_calls: usize,
     pub(super) rollback_calls: usize,
     pub(super) fail_apply: bool,
+    /// The apply is abandoned before any write because a target exited.
+    pub(super) stale_abort: bool,
     pub(super) fail_rollback: bool,
     pub(super) verify_failure: Option<bool>,
     pub(super) post_rollback_active_config: Option<ActiveConfigSnapshot>,
@@ -46,6 +48,13 @@ impl LiveExperimentActionExecutor for FakeLiveExecutor {
         observation: &AutotuneObservation,
     ) -> anyhow::Result<RollbackToken> {
         self.apply_calls += 1;
+
+        if self.stale_abort {
+            return Err(
+                anyhow::anyhow!("stale_target_before_mutation: task 7 exited")
+                    .context(super::super::executor::CleanPrecommitAbort),
+            );
+        }
 
         if let Some(fail_rollback) = self.verify_failure {
             let journal = super::super::journal::controller_journal_path(input);

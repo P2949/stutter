@@ -201,8 +201,15 @@ fn settle_failed_prepared_apply(
             .map(|_| ())
             .with_context(|| format!("failed to clear the controller journal {what}"))
     };
+    let stale = error.chain().any(|cause| {
+        matches!(
+            cause.downcast_ref::<crate::daemon::privilege::PrivilegedWorkerError>(),
+            Some(crate::daemon::privilege::PrivilegedWorkerError::StaleTargetBeforeMutation { .. })
+        )
+    });
     let Some(token) = token else {
         return match clear("after a prepare that never reached the commit") {
+            Ok(()) if stale => error.context(CleanPrecommitAbort),
             Ok(()) => error,
             Err(clear_error) => error.context(format!("{clear_error:#}")),
         };
@@ -215,11 +222,26 @@ fn settle_failed_prepared_apply(
     });
     match rollback {
         Ok(_) => match clear("after rolling back a failed apply") {
+            Ok(()) if stale => error
+                .context("the failed apply was rolled back and the journal cleared")
+                .context(CleanPrecommitAbort),
             Ok(()) => error.context("the failed apply was rolled back and the journal cleared"),
             Err(clear_error) => error.context(format!("{clear_error:#}")),
         },
         Err(rollback_error) => error.context(format!(
             "rolling back the failed apply also failed ({rollback_error:#}); the journal keeps the token for startup recovery"
         )),
+    }
+}
+
+/// Attached to an apply error when the candidate was abandoned before its first mutable write
+/// because a target had exited, and the journal and the root token are both clean. The controller
+/// treats it as a stale candidate to re-observe, not as a fault.
+#[derive(Debug)]
+pub(crate) struct CleanPrecommitAbort;
+
+impl std::fmt::Display for CleanPrecommitAbort {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the candidate was abandoned before any write because a target exited")
     }
 }

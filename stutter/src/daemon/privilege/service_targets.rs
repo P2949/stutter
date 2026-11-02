@@ -96,9 +96,7 @@ impl ServiceTargets {
 
     fn task(&self, proc_root: &Path, tid: u32) -> anyhow::Result<()> {
         let root = proc_root.join(tid.to_string());
-        let status = fs::read_to_string(root.join("status")).with_context(|| {
-            format!("bounded_service_target_unreadable: task {tid} is gone or unreadable")
-        })?;
+        let status = read_task_file(&root, "status", tid)?;
         let ids = status
             .lines()
             .find_map(|line| line.strip_prefix("Uid:"))
@@ -120,7 +118,7 @@ impl ServiceTargets {
                         .all(|part| matches!(part, Component::RootDir | Component::Normal(_))),
                 "bounded_service_invalid_workload_cgroup"
             );
-            let membership = fs::read_to_string(root.join("cgroup"))?;
+            let membership = read_task_file(&root, "cgroup", tid)?;
             let relative = membership
                 .lines()
                 .find_map(|line| line.strip_prefix("0::"))
@@ -199,5 +197,46 @@ mod tests {
         fs::write(&status, "Uid:\t1000\t0\t1000\t1000\n").unwrap();
         assert!(boundary.task(root.path(), 42).is_err());
         assert!(ServiceTargets::new(0, None).task(root.path(), 42).is_err());
+    }
+}
+
+/// A task that vanished is process-tree churn, not a fault: nothing has been mutated for it, so
+/// the candidate is stale and is abandoned. A live task that cannot be read is a real error.
+fn read_task_file(root: &Path, name: &str, tid: u32) -> anyhow::Result<String> {
+    match fs::read_to_string(root.join(name)) {
+        Ok(text) => Ok(text),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Err(PrivilegedWorkerError::StaleTargetBeforeMutation {
+                detail: format!("task {tid} exited before its first mutable write"),
+            }
+            .into())
+        }
+        Err(error) => Err(anyhow::Error::new(error).context(format!(
+            "bounded_service_target_unreadable: task {tid} {name}"
+        ))),
+    }
+}
+
+#[cfg(test)]
+mod churn_tests {
+    use super::*;
+
+    #[test]
+    fn a_vanished_task_is_a_stale_target_and_a_foreign_one_is_still_denied() {
+        let root = crate::test_support::TestRoot::new("service-target-churn");
+        let targets = ServiceTargets::new(1000, None);
+        // The task exited: no status file at all.
+        let gone = targets.task(root.path(), 4242).unwrap_err();
+        assert!(matches!(
+            gone.downcast_ref::<PrivilegedWorkerError>(),
+            Some(PrivilegedWorkerError::StaleTargetBeforeMutation { .. })
+        ));
+        // A live task of another account is a hard denial, never a stale target.
+        let alive = root.join("4243");
+        fs::create_dir_all(&alive).unwrap();
+        fs::write(alive.join("status"), "Uid:\t0\t0\t0\t0\n").unwrap();
+        let denied = targets.task(root.path(), 4243).unwrap_err();
+        assert!(denied.downcast_ref::<PrivilegedWorkerError>().is_none());
+        assert!(format!("{denied:#}").contains("bounded_service_target_uid_denied"));
     }
 }

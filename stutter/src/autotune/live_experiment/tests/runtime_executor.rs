@@ -395,3 +395,45 @@ fn worker_only_low_risk_rollback_requires_the_worker() {
             .is_err()
     );
 }
+
+#[test]
+fn a_target_that_exits_before_the_first_write_is_a_stale_candidate_not_a_fault() {
+    let root = crate::test_support::TestRoot::new("stale-target-abort");
+    let journal_path = root.join("controller.json");
+    let mut manager = LiveExperimentManager::new();
+    let mut controller = ControllerRuntimeState::default();
+    let mut profile = ActiveProfileState::default();
+    let mut executor = FakeLiveExecutor {
+        stale_abort: true,
+        ..Default::default()
+    };
+    let outcome = manager
+        .apply_decision_side_effects_with_executor(
+            input(journal_path.clone()),
+            LiveExperimentRuntimeState {
+                controller_state: &mut controller,
+                active_profile_state: &mut profile,
+            },
+            &observation(1_000, 1_000_000_000),
+            &AutotuneDecision::StartExperiment {
+                candidate: low_risk_candidate(),
+                reason: "target churn".into(),
+            },
+            "target churn",
+            &mut executor,
+        )
+        .expect("a stale candidate must not fail the controller");
+    assert_eq!(outcome.event, LiveExperimentEvent::CooldownEntered);
+    assert!(outcome.clear_measurement_window);
+    let context = outcome.history_context.expect("the abort is recorded");
+    assert_eq!(context.rollback_policy, "aborted-before-mutation");
+    assert!(!context.rollback_performed);
+    // Alive and looking again, with nothing applied and nothing outstanding.
+    assert_eq!(controller.phase, ControllerPhase::Observing);
+    assert!(controller.active_experiment.is_none());
+    assert!(
+        manager
+            .daemon_rollback_state("stutter daemon emergency-restore")
+            .is_none()
+    );
+}

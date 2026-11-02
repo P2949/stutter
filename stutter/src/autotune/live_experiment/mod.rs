@@ -9,6 +9,7 @@ mod manager;
 mod model;
 mod rollback;
 mod scoring;
+mod stale;
 #[cfg(test)]
 mod tests;
 
