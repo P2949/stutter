@@ -160,8 +160,11 @@ impl Lab<'_> {
         }
     }
 
+    /// Waits for the root ledger to be empty. A restarted controller may legitimately start the
+    /// other operation on the still-running game, and an experiment takes a measurement window
+    /// and a resolution to finish, so the budget covers one whole experiment.
     fn settled(&self) -> anyhow::Result<Value> {
-        let deadline = Instant::now() + Duration::from_secs(60);
+        let deadline = Instant::now() + Duration::from_secs(180);
         loop {
             let report = self.query()?;
             if report["worker_tokens"]["readable"] == true
