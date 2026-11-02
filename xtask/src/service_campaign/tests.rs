@@ -251,3 +251,31 @@ fn the_campaign_owns_its_binaries_and_a_relinked_cargo_output_changes_nothing() 
     state.stutter_sha256 = "0".repeat(64);
     assert!(super::driver::snapshot_binaries(&state, &binaries).is_err());
 }
+
+#[test]
+fn every_stage_that_drives_contention_is_granted_the_typed_burst() {
+    use stutter_validation_runner::model::RunnerAction;
+    let scratch = Scratch::new();
+    let state = state(&scratch.0);
+    let target = super::runner::target(&state);
+    for stage in [
+        Stage::Discovery,
+        Stage::Recovery,
+        Stage::Reboots,
+        Stage::Soak,
+    ] {
+        assert!(
+            target.grants.iter().any(|grant| grant.task_id == stage.id()
+                && grant.action == RunnerAction::ExecuteSchedulerBurst),
+            "{} needs the typed burst",
+            stage.id()
+        );
+    }
+    // Preflight, Install and Evidence never start contention.
+    for stage in [Stage::Preflight, Stage::Install, Stage::Evidence] {
+        assert!(
+            !target.grants.iter().any(|grant| grant.task_id == stage.id()
+                && grant.action == RunnerAction::ExecuteSchedulerBurst)
+        );
+    }
+}

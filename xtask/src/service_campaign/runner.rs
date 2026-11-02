@@ -31,7 +31,10 @@ pub fn target(state: &State) -> RunnerTarget {
             action: RunnerAction::BoundedService,
             suite: None,
         });
-        if matches!(stage, Stage::Discovery | Stage::Recovery | Stage::Soak) {
+        if matches!(
+            stage,
+            Stage::Discovery | Stage::Recovery | Stage::Reboots | Stage::Soak
+        ) {
             grants.insert(TaskGrant {
                 task_id: stage.id().to_owned(),
                 action: RunnerAction::ExecuteSchedulerBurst,
