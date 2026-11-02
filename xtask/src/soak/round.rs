@@ -156,12 +156,18 @@ impl Ctx<'_> {
                     audit_events(&self.world.audit_path(), "autotune-startup-recovery").len();
                 let emergency_before =
                     audit_events(&self.world.audit_path(), "autotune emergency restore").len();
+                let unresolved_before = self.unresolved_tokens();
                 self.kill_controller(&mut controller);
                 self.end_session(controller, "kill9");
                 let mut next =
                     self.start_controller(&game, "controller-2", self.round.operations)?;
                 if self.world.service.is_some() {
-                    self.wait_service_recovery(&game, startup_before, emergency_before)?;
+                    self.wait_service_recovery(
+                        &game,
+                        startup_before,
+                        emergency_before,
+                        unresolved_before,
+                    )?;
                 } else {
                     self.wait_recovery(startup_before)?;
                 }

@@ -56,11 +56,28 @@ impl Ctx<'_> {
         self.end_workload(&mut game, controller, "workload_exit")
     }
 
+    /// Tokens the root worker has recorded as unresolved so far.
+    pub(super) fn unresolved_tokens(&self) -> u64 {
+        self.world
+            .service
+            .as_ref()
+            .and_then(|binding| {
+                binding
+                    .action(stutter_validation_runner::model::BoundedServiceAction::Query)
+                    .ok()
+            })
+            .and_then(|report| {
+                report["worker_tokens"]["recovery_audit"]["dispositions"]["unresolved"].as_u64()
+            })
+            .unwrap_or(0)
+    }
+
     pub(super) fn wait_service_recovery(
         &mut self,
         game: &Game,
         startup_before: usize,
         emergency_before: usize,
+        unresolved_before: u64,
     ) -> anyhow::Result<()> {
         let deadline = Instant::now() + Duration::from_secs(40);
         loop {
@@ -84,13 +101,15 @@ impl Ctx<'_> {
                     .context("service binding missing")?
                     .action(stutter_validation_runner::model::BoundedServiceAction::Query)?;
                 // The restarted controller may already hold a token for a new experiment; what
-                // matters is that root settled the interrupted one and left nothing unresolved.
+                // matters is that root settled the interrupted one and left nothing new
+                // unresolved (the counter is cumulative over the campaign).
                 anyhow::ensure!(
                     report["worker_tokens"]["readable"] == true
                         && report["worker_tokens"]["recovery_audit"]["dispositions"]["unresolved"]
                             .as_u64()
-                            == Some(0),
-                    "root worker has an unsettled crash token"
+                            == Some(unresolved_before),
+                    "root worker has an unsettled crash token: {}",
+                    report["worker_tokens"]
                 );
                 fs::write(
                     self.dir.join("crash-recovery-runtime.json"),
