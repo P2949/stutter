@@ -440,6 +440,17 @@ fn drive_soak(dir: &Path, state: &mut SoakState, world: &mut world::World) -> an
         );
         state.next_round += 1;
         write_state(dir, state)?;
+        if state.profile == Profile::Service
+            && state
+                .service
+                .as_ref()
+                .is_some_and(|binding| binding.campaign.rehearsal)
+            && state.next_round as usize >= plan::SERVICE_CYCLE_LEN
+        {
+            // A rehearsal measures one complete cycle and stops.
+            complete = true;
+            break;
+        }
         // A violating round makes a full qualification impossible: stop once it is durably
         // recorded instead of spending the remaining hours.
         if matches!(state.profile, Profile::Full | Profile::Service)

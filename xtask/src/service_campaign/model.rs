@@ -67,6 +67,9 @@ pub struct State {
     /// host under the evidence even when the kernel does not, so integrity fails if it moves.
     #[serde(default)]
     pub host_system: String,
+    /// A non-publishable timing rehearsal: one full service cycle, no reboots, never evidence.
+    #[serde(default)]
+    pub rehearsal: bool,
     pub required_reboots: u32,
     pub boot_ids: Vec<String>,
     pub reboot_pending: bool,

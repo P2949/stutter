@@ -58,7 +58,7 @@ impl StageRunner for Production {
                 let output = dir.0.join("service-soak");
                 let report = crate::soak::service_soak::campaign_run(state, &output)?;
                 write_report(dir, stage, attempt, &serde_json::to_value(&report)?)?;
-                Ok(if report.passed {
+                Ok(if report.passed || state.rehearsal {
                     AttemptOutcome::Passed
                 } else {
                     AttemptOutcome::Failed { class: crate::validation_campaign::model::FailureClass::ValidationFailure,
@@ -86,6 +86,7 @@ impl StageRunner for Production {
                 Ok(outcome)
             }
             Stage::Evidence => {
+                anyhow::ensure!(!state.rehearsal, "a timing rehearsal is never evidence");
                 let report = crate::soak::service_evidence::run(state, dir, attempt)?;
                 write_report(dir, stage, attempt, &report)?;
                 Ok(AttemptOutcome::Passed)

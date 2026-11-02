@@ -67,6 +67,8 @@ pub fn init(root: &Path) -> anyhow::Result<()> {
     let binaries = Binaries::for_repository(root)?;
     check_binary_revision(&binaries.stutter, &source)?;
     let manifest = Manifest::load(&root.join(manifest::FILE))?;
+    // Only a person measuring the schedule sets this; the campaign it makes can never be evidence.
+    let rehearsal = std::env::var_os("STUTTER_SERVICE_REHEARSAL").is_some();
     let identity = fs::metadata("/proc/self")?;
     ensure!(
         identity.uid() != 0,
@@ -93,7 +95,12 @@ pub fn init(root: &Path) -> anyhow::Result<()> {
             .trim()
             .to_owned(),
         host_system: runner::system_closure("/run/current-system")?,
-        required_reboots: manifest.coverage.minimum_real_reboots,
+        rehearsal,
+        required_reboots: if rehearsal {
+            0
+        } else {
+            manifest.coverage.minimum_real_reboots
+        },
         boot_ids: vec![stutter_core::boot::current_boot_id()?],
         reboot_pending: false,
         tasks: Stage::ALL
