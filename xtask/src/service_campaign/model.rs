@@ -12,6 +12,8 @@ pub enum Mode {
     Qualified,
     Invalidated,
     Cancelled,
+    /// A timing rehearsal ran its stages; it is never evidence and never becomes Qualified.
+    RehearsalComplete,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]

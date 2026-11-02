@@ -97,28 +97,19 @@ pub fn resume_controller(auth: &Authorization, drop_to_owner: bool) -> Result<u3
     })
 }
 
-/// Resumes every campaign under `state_root` whose runner state says a reboot is in flight.
-/// Corrupt or cancelled campaigns are skipped and reported, never resumed; when a `current`
-/// campaign is named, only that one is considered.
+/// Resumes the one campaign `state_root/current` names, if its runner state says a reboot is in
+/// flight. That symlink is the only selector: nothing is enumerated, so a campaign can never be
+/// reached twice, and a missing, broken or escaping selector resumes nothing. Corrupt or
+/// cancelled campaigns are skipped and reported, never resumed.
 pub fn resume_all(state_root: &Path, drop_to_owner: bool) -> Vec<String> {
     let mut report = Vec::new();
-    let Ok(entries) = fs::read_dir(state_root) else {
-        return report;
+    let dirs = match current_campaign(state_root) {
+        Ok(dir) => vec![dir],
+        Err(why) => {
+            report.push(format!("no campaign selected: {why}"));
+            return report;
+        }
     };
-    let mut dirs = entries
-        .filter_map(Result::ok)
-        .map(|e| e.path())
-        .collect::<Vec<_>>();
-    dirs.sort();
-    // The runner serves, and the host authorizes, exactly one campaign: the one `current` names.
-    // A superseded campaign cannot be cancelled over the socket any more, so it must not be able
-    // to come back after a reboot either.
-    let current = fs::canonicalize(state_root.join("current")).ok();
-    dirs.retain(|dir| {
-        current
-            .as_ref()
-            .is_none_or(|current| fs::canonicalize(dir).ok().as_ref() == Some(current))
-    });
     for dir in dirs
         .into_iter()
         .filter(|dir| dir.join("authorization.json").is_file())
@@ -152,4 +143,15 @@ pub fn resume_all(state_root: &Path, drop_to_owner: bool) -> Vec<String> {
         }
     }
     report
+}
+
+/// The single campaign directory `current` selects: a direct child of the canonical state root.
+fn current_campaign(state_root: &Path) -> Result<PathBuf, String> {
+    let root = fs::canonicalize(state_root).map_err(|e| format!("state root: {e}"))?;
+    let selected = fs::canonicalize(state_root.join("current"))
+        .map_err(|e| format!("current selector unusable: {e}"))?;
+    if selected.parent() != Some(root.as_path()) {
+        return Err("current does not name a campaign directly under the state root".to_owned());
+    }
+    Ok(selected)
 }

@@ -203,3 +203,19 @@ fn a_vanished_or_replaced_target_is_a_typed_pre_write_abort() {
     fs::remove_dir_all(gone_root).ok();
     fs::remove_dir_all(reused_root).ok();
 }
+
+#[test]
+fn an_unreadable_target_is_unknown_not_gone_and_never_a_stale_candidate() {
+    use crate::actions::precommit::AbortedBeforeMutation;
+    let proc_root = temp_proc_root("typed-unreadable");
+    // `/proc/200/task/100/stat` exists but cannot be read as a file: its state is unknown.
+    fs::create_dir_all(proc_root.join("200/task/100/stat")).unwrap();
+    let candidate = nice_candidate(target(200, 100, "worker", 12345));
+    let error = revalidate_candidate_targets(&candidate, &proc_root).unwrap_err();
+    assert!(
+        AbortedBeforeMutation::in_chain(&error).is_none(),
+        "{error:#}"
+    );
+    assert!(format!("{error:#}").contains("target_revalidation_unreadable"));
+    fs::remove_dir_all(proc_root).ok();
+}

@@ -16,7 +16,10 @@ use serde_json::{Value, json};
 
 use crate::{
     boot::BootControl,
-    model::{Authorization, Envelope, ErrorCode, Request, Response, RunnerAction, SCHEMA_VERSION},
+    model::{
+        Authorization, BoundedServiceAction, Envelope, ErrorCode, Request, Response, RunnerAction,
+        SCHEMA_VERSION,
+    },
     process::ActionExecutor,
     protocol::{read_frame, write_frame},
     state::{RunnerState, StateDir, StateError, unix_ms},
@@ -105,7 +108,17 @@ impl Server {
                 return Response::failed(id, ErrorCode::CorruptState, error.to_string());
             }
         };
-        if state.cancelled && !matches!(action, RunnerAction::Status | RunnerAction::CancelCampaign)
+        // A cancelled campaign may still be inspected, cancelled again, and have its installed
+        // service removed; nothing else can start, restart, mutate or reboot.
+        let cleanup_only = matches!(
+            envelope.body,
+            Request::BoundedService {
+                action: BoundedServiceAction::UninstallPinned
+            }
+        );
+        if state.cancelled
+            && !cleanup_only
+            && !matches!(action, RunnerAction::Status | RunnerAction::CancelCampaign)
         {
             return Response::rejected(id, ErrorCode::Cancelled, "the campaign was cancelled");
         }

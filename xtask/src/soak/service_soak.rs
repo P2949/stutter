@@ -127,6 +127,13 @@ pub(super) fn minimums(state: &SoakState) -> anyhow::Result<super::coverage::Min
         return Ok(super::coverage::Minimums::for_profile(state.profile));
     }
     let coverage = manifest(state)?.coverage;
+    if state
+        .service
+        .as_ref()
+        .is_some_and(|binding| binding.campaign.rehearsal)
+    {
+        return Ok(super::coverage::Minimums::rehearsal());
+    }
     let mut floor = super::coverage::Minimums::FULL;
     floor.hours = coverage.minimum_dwell_seconds as f64 / 3600.0;
     floor.clean_cycles = coverage.minimum_clean_cycles as usize;

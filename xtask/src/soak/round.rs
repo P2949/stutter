@@ -222,6 +222,7 @@ impl Ctx<'_> {
                         "first target left while the same service stays alive",
                     );
                     self.service_idle(&mut controller)?;
+                    self.wait_out_same_action_memory(&mut controller)?;
                     let mut second = self.world.spawn_game(
                         &self.dir,
                         "game-2",
@@ -332,6 +333,33 @@ impl Ctx<'_> {
             }
             std::thread::sleep(Duration::from_millis(200));
         }
+    }
+
+    /// The controller will not retry the action it just tried until its candidate memory has
+    /// passed, and after a keep it ranks that same action first on the new focus. A same-controller
+    /// focus swap therefore waits, with the service live and watched, until the new target can be
+    /// offered a real experiment.
+    fn wait_out_same_action_memory(&mut self, controller: &mut Controller) -> anyhow::Result<()> {
+        self.poll_events();
+        let tried = self
+            .seen
+            .iter()
+            .rev()
+            .find(|event| event.decision == "candidate_applied")
+            .map(|event| (event.unix_nanos / 1_000_000) as u64);
+        let Some(tried) = tried else {
+            return Ok(());
+        };
+        let until = tried + super::SAME_OPERATION_SPACING_MS + 5_000;
+        while unix_ms() < until {
+            anyhow::ensure!(!STOP.load(Ordering::SeqCst), "the soak was interrupted");
+            anyhow::ensure!(
+                controller.child.try_wait()?.is_none(),
+                "the controller exited while the swap waited out its candidate memory"
+            );
+            std::thread::sleep(Duration::from_secs(1));
+        }
+        Ok(())
     }
 
     /// Wait for an experiment to start; its action id, when it did.

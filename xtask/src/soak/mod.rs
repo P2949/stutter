@@ -43,7 +43,7 @@ use records::{Profile, SCHEMA_VERSION, SoakState, append_round, read_state, unix
 const DELEGATED: &str = "/stutter-soak/work";
 /// Never start a same-operation experiment before the controller's own candidate memory (300 s)
 /// would allow it: the soak measures the controller, it does not fight its pacing.
-const SAME_OPERATION_SPACING_MS: u64 = 305_000;
+pub(crate) const SAME_OPERATION_SPACING_MS: u64 = 305_000;
 
 const DELEGATE_AND_RUN: &str = r#"
 set -eu

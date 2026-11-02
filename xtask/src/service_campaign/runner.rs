@@ -158,3 +158,35 @@ pub fn request_campaign(state: &State, body: Request) -> anyhow::Result<serde_js
     );
     Ok(response.data.unwrap_or(serde_json::Value::Null))
 }
+
+/// Asks the root runner to cancel this campaign. `Ok(true)` is a durable cancellation;
+/// `Ok(false)` means the runner does not serve this campaign at all, so nothing of it is armed;
+/// anything else is a failure and the campaign must not be called cancelled.
+pub fn cancel_campaign(state: &State) -> anyhow::Result<bool> {
+    use stutter_validation_runner::model::ErrorCode;
+    let socket = socket();
+    if !socket.exists() {
+        // Without a runner a campaign that never installed has nothing armed; one that did must
+        // be cancelled where its resume state lives.
+        anyhow::ensure!(
+            state.tasks[Stage::Install.id()].status
+                != crate::validation_campaign::model::TaskStatus::Passed,
+            "the validation runner socket is absent, so an installed campaign cannot be cancelled"
+        );
+        return Ok(false);
+    }
+    let response = Client {
+        socket: &socket,
+        campaign_id: &state.campaign_id,
+        manifest_sha256: &state.manifest_sha256,
+    }
+    .send(
+        crate::validation_campaign::bootstrap::CAMPAIGN_TASK,
+        Request::CancelCampaign,
+    )?;
+    match (response.status, response.error) {
+        (ResponseStatus::Ok, _) => Ok(true),
+        (_, Some(error)) if error.code == ErrorCode::UnknownCampaign => Ok(false),
+        (_, error) => anyhow::bail!("root cancellation was refused: {error:?}"),
+    }
+}

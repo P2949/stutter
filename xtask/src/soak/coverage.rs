@@ -68,6 +68,26 @@ impl Minimums {
         per_operation_reverted: 0,
     };
 
+    /// One service cycle, measured but never evidence: every round clean and every dangerous and
+    /// service event exercised once, with no dwell, reboot or keep/revert floor.
+    pub const fn rehearsal() -> Self {
+        Self {
+            hours: 0.0,
+            experiments: 1,
+            focus_transitions: 1,
+            controller_restarts: 1,
+            worker_restarts: 1,
+            suspends: 0,
+            clean_rounds: crate::soak::plan::SERVICE_CYCLE_LEN,
+            clean_cycles: 1,
+            per_kind: 1,
+            service_events: true,
+            per_operation_resolved: 1,
+            per_operation_kept: 0,
+            per_operation_reverted: 0,
+        }
+    }
+
     pub fn for_profile(profile: Profile) -> Self {
         match profile {
             Profile::Full | Profile::Service => Self::FULL,

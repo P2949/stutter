@@ -59,10 +59,14 @@ pub(crate) fn unchanged<T: PartialEq>(
         )
         .into()),
         Err(error) => {
-            if let Some(tid) = tids
-                .iter()
-                .find(|tid| !proc_root.join(tid.to_string()).join("stat").is_file())
-            {
+            // Only a missing entry proves the task is gone; an unreadable one is unknown, and
+            // unknown stays the original error.
+            if let Some(tid) = tids.iter().find(|tid| {
+                matches!(
+                    std::fs::metadata(proc_root.join(tid.to_string()).join("stat")),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound
+                )
+            }) {
                 return Err(AbortedBeforeMutation::new(
                     AbortReason::TargetGone,
                     format!("task {tid} exited before the first write of {what}"),

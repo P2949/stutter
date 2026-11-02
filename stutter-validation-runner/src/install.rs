@@ -345,9 +345,9 @@ pub fn execute(plan: &InstallPlan, activate: bool) -> Result<(), String> {
         std::os::unix::fs::chown(&plan.authorization_destination, Some(0), Some(0))
             .map_err(|e| io("chown authorization", e))?;
     }
-    let _ = fs::remove_file(&plan.current_link);
-    std::os::unix::fs::symlink(&plan.campaign_state, &plan.current_link)
-        .map_err(|e| io("link current", e))?;
+    // `current` decides which campaign may wake after a reboot, so it is replaced in one rename:
+    // there is no instant at which it is missing.
+    replace_link(&plan.campaign_state, &plan.current_link).map_err(|e| io("link current", e))?;
     if activate {
         // A host that declares the units owns their definitions: nothing to reload or enable.
         let mut steps = Vec::new();
@@ -404,4 +404,15 @@ pub fn apply_boot_discovery(
     authorization.original_boot_entry = original;
     authorization.allowed_boot_entries = allowed;
     authorization.validate_shape()
+}
+
+/// Points `link` at `target` atomically and durably.
+fn replace_link(target: &Path, link: &Path) -> std::io::Result<()> {
+    let parent = link.parent().unwrap_or(Path::new("."));
+    let temporary = parent.join(format!(".current.tmp-{}", std::process::id()));
+    let _ = fs::remove_file(&temporary);
+    std::os::unix::fs::symlink(target, &temporary)?;
+    fs::File::open(parent)?.sync_all()?;
+    fs::rename(&temporary, link)?;
+    fs::File::open(parent)?.sync_all()
 }

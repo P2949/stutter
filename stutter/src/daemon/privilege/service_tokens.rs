@@ -46,6 +46,29 @@ impl ServiceActionService {
         Ok(())
     }
 
+    /// A transaction that stopped before its first mutable write leaves nothing to restore,
+    /// whichever boundary caught it: the token is void, and the controller learns by type that the
+    /// candidate is stale. Any other outcome passes through untouched.
+    fn settle_precommit_abort(
+        &self,
+        outcome: anyhow::Result<ApplyResult>,
+        recorded: Option<&RollbackToken>,
+    ) -> anyhow::Result<ApplyResult> {
+        let Err(error) = &outcome else {
+            return outcome;
+        };
+        let Some(abort) = crate::actions::precommit::AbortedBeforeMutation::in_chain(error) else {
+            return outcome;
+        };
+        if let Some(token) = recorded {
+            self.void_unapplied(token, error)?;
+        }
+        Err(PrivilegedWorkerError::StaleTargetBeforeMutation {
+            detail: format!("{:?}: {abort}", abort.reason),
+        }
+        .into())
+    }
+
     /// The prepared transaction was abandoned before its first mutable write. The token is retired
     /// as void so no later recovery has anything to restore for it.
     fn void_unapplied(&self, token: &RollbackToken, why: &anyhow::Error) -> anyhow::Result<()> {
@@ -180,22 +203,7 @@ impl PrivilegedActionService for ServiceActionService {
             }
             barrier
         });
-        // A transaction that stopped before its first mutable write leaves nothing to restore,
-        // whichever boundary caught it: the token is void, and the controller learns by type that
-        // the candidate is stale.
-        let Err(error) = &outcome else {
-            return outcome;
-        };
-        let Some(abort) = crate::actions::precommit::AbortedBeforeMutation::in_chain(error) else {
-            return outcome;
-        };
-        if let Some(token) = recorded.borrow().as_ref() {
-            self.void_unapplied(token, error)?;
-        }
-        Err(PrivilegedWorkerError::StaleTargetBeforeMutation {
-            detail: format!("{:?}: {abort}", abort.reason),
-        }
-        .into())
+        self.settle_precommit_abort(outcome, recorded.borrow().as_ref())
     }
     fn rollback(&self, mut request: RollbackRequest) -> anyhow::Result<RollbackResult> {
         let mut tokens = self.read()?;
@@ -621,5 +629,86 @@ mod unresolved_audit_tests {
         // The token is still open: nothing was retired.
         let report = fs::read_to_string(root.join("state/issued-tokens.json")).unwrap();
         assert!(report.contains("\"restored\":false"), "{report}");
+    }
+}
+
+#[cfg(test)]
+mod precommit_abort_tests {
+    use super::*;
+    use crate::actions::precommit::{AbortReason, AbortedBeforeMutation};
+
+    fn recorded_service(
+        name: &str,
+    ) -> (
+        ServiceActionService,
+        RollbackToken,
+        crate::test_support::TestRoot,
+    ) {
+        let root = crate::test_support::TestRoot::new(name);
+        let service = ServiceActionService::new(&root.join("state"), 1000, None);
+        let token = RollbackToken::CpuAffinityRestoreFile {
+            path: root.join("never-written.json"),
+            affected_tasks: 1,
+        };
+        let plan = CandidatePlanRequest::from_candidate(
+            crate::autotune::planning::candidate::CandidateAction::cpu_affinity_profile_for(
+                crate::profiles::Profile {
+                    name: "late".into(),
+                    rules: vec![],
+                },
+                std::process::id(),
+                crate::autotune::objective::ObjectiveKind::GameRunnableLatency,
+            ),
+            crate::audit::unix_nanos_now(),
+        );
+        service.record(&token, &plan).unwrap();
+        (service, token, root)
+    }
+
+    #[test]
+    fn an_abort_after_the_durable_record_voids_the_token_and_reports_a_stale_candidate() {
+        let policy = crate::daemon_policy::DaemonPolicy::apply_medium_risk(
+            crate::daemon_policy::ActionSource::Test,
+        );
+        for reason in [
+            AbortReason::TargetGone,
+            AbortReason::TargetReplaced,
+            AbortReason::PlanDrifted,
+        ] {
+            let (service, token, root) = recorded_service("late-abort");
+            // The root token is outstanding: the executor stopped after the record.
+            let outcome = service.settle_precommit_abort(
+                Err(
+                    anyhow::Error::new(AbortedBeforeMutation::new(reason, "raced"))
+                        .context("executor stopped before its first write"),
+                ),
+                Some(&token),
+            );
+            let error = outcome.unwrap_err();
+            assert!(matches!(
+                error.downcast_ref::<PrivilegedWorkerError>(),
+                Some(PrivilegedWorkerError::StaleTargetBeforeMutation { .. })
+            ));
+            assert_eq!(service.settle_issued_tokens(&policy).unwrap(), 0);
+            let audit = fs::read_to_string(root.join("state/token-recovery-audit.jsonl")).unwrap();
+            assert!(audit.contains("voided"), "{audit}");
+        }
+    }
+
+    #[test]
+    fn any_other_failure_keeps_the_token_outstanding_for_recovery() {
+        let policy = crate::daemon_policy::DaemonPolicy::apply_medium_risk(
+            crate::daemon_policy::ActionSource::Test,
+        );
+        let (service, token, _root) = recorded_service("late-other");
+        let outcome =
+            service.settle_precommit_abort(Err(anyhow::anyhow!("unreadable")), Some(&token));
+        assert!(
+            outcome
+                .unwrap_err()
+                .downcast_ref::<PrivilegedWorkerError>()
+                .is_none()
+        );
+        assert_eq!(service.settle_issued_tokens(&policy).unwrap(), 1);
     }
 }

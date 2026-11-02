@@ -59,6 +59,8 @@ fn campaign(
             ..RunnerState::default()
         })
         .unwrap();
+    // The host selects its one authoritative campaign through this link.
+    std::os::unix::fs::symlink(&auth.campaign_id, state_root.join("current")).unwrap();
     (state_root, repo)
 }
 
@@ -250,15 +252,70 @@ fn a_superseded_campaign_cannot_resume_after_a_reboot() {
     let marker = scratch.path().join("marker");
     let script = format!("#!/bin/sh\necho ran > {}\n", marker.display());
     let (root, _) = campaign(&scratch, &script, true, false);
-    // `current` names some other campaign, so this one's pending resume is stale.
+    // `current` is moved to some other campaign, so this one's pending resume is stale.
     let other = root.join("other-campaign");
     fs::create_dir_all(&other).unwrap();
+    fs::remove_file(root.join("current")).unwrap();
     std::os::unix::fs::symlink(&other, root.join("current")).unwrap();
     let report = resume_all(&root, false);
     assert!(
         report.iter().all(|line| !line.contains("resumed")),
         "{report:?}"
     );
+    std::thread::sleep(Duration::from_millis(200));
+    assert!(!marker.exists());
+}
+
+#[test]
+fn the_selected_campaign_is_resumed_exactly_once() {
+    if crate::sys::effective_uid() == 0 {
+        eprintln!("skipped: the non-root resume path is exercised by the unprivileged run");
+        return;
+    }
+    let scratch = Scratch::new("resume-once");
+    let marker = scratch.path().join("marker");
+    let script = format!("#!/bin/sh\necho ran >> {}\n", marker.display());
+    let (root, _) = campaign(&scratch, &script, true, false);
+    // The campaign directory and `current` are two names for the same campaign.
+    let report = resume_all(&root, false);
+    assert_eq!(
+        report
+            .iter()
+            .filter(|line| line.contains("controller resumed"))
+            .count(),
+        1,
+        "{report:?}"
+    );
+    for _ in 0..100 {
+        if marker.exists() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(fs::read_to_string(&marker).unwrap().lines().count(), 1);
+}
+
+#[test]
+fn a_missing_broken_or_escaping_selector_resumes_nothing() {
+    let scratch = Scratch::new("resume-selector");
+    let marker = scratch.path().join("marker");
+    let script = format!("#!/bin/sh\necho ran > {}\n", marker.display());
+    let (root, _) = campaign(&scratch, &script, true, false);
+    let current = root.join("current");
+    // Missing.
+    fs::remove_file(&current).unwrap();
+    assert!(resume_all(&root, false)[0].contains("no campaign selected"));
+    // Broken.
+    std::os::unix::fs::symlink("does-not-exist", &current).unwrap();
+    assert!(resume_all(&root, false)[0].contains("no campaign selected"));
+    fs::remove_file(&current).unwrap();
+    // Pointing at the state root itself, or outside it.
+    std::os::unix::fs::symlink(".", &current).unwrap();
+    assert!(resume_all(&root, false)[0].contains("no campaign selected"));
+    fs::remove_file(&current).unwrap();
+    std::os::unix::fs::symlink(scratch.path(), &current).unwrap();
+    assert!(resume_all(&root, false)[0].contains("no campaign selected"));
     std::thread::sleep(Duration::from_millis(200));
     assert!(!marker.exists());
 }

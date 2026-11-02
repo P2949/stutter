@@ -199,6 +199,11 @@ pub fn drive_with(
             store::save(dir, &state)?;
             return Ok(());
         };
+        if state.rehearsal && stage == Stage::Evidence {
+            state.mode = Mode::RehearsalComplete;
+            store::save(dir, &state)?;
+            return Ok(());
+        }
         let previous = state.tasks[stage.id()].attempts.last();
         if let Some(previous) = previous {
             if matches!(
@@ -348,7 +353,7 @@ pub fn run(root: &Path, args: Args) -> anyhow::Result<()> {
         Command::Cancel { campaign } => {
             let dir = store::locate(root, campaign)?;
             let mut state = store::load(&dir)?;
-            cancel(&mut state);
+            cancel(&mut state)?;
             store::save(&dir, &state)
         }
         Command::Continue {
@@ -459,11 +464,16 @@ pub(super) fn snapshot_binaries(state: &State, binaries: &Binaries) -> anyhow::R
     Ok(())
 }
 
-/// Removes the campaign's service artifacts (the runner refuses everything but status once it is
-/// cancelled, so this comes first), then disarms the root runner so no reboot can resume it.
-/// A cleanup that fails, such as volatile units a reboot already removed, is reported but can never
-/// keep the resume armed.
-fn cancel(state: &mut State) {
+/// Root cancellation is the commit point: once it is durable no reboot can resume the campaign, so
+/// it must succeed before anything is claimed locally. The runner then still accepts the one
+/// cleanup action, removing the installed service, which is best effort. A campaign the runner no
+/// longer serves has nothing armed (the resume selector names only the current one).
+fn cancel(state: &mut State) -> anyhow::Result<()> {
+    if runner::cancel_campaign(state)? {
+        eprintln!("root runner: campaign cancelled, resume disarmed");
+    } else {
+        eprintln!("root runner does not serve this campaign; nothing of it can resume");
+    }
     if state.tasks[Stage::Install.id()].status == TaskStatus::Passed {
         let uninstall = runner::request(
             state,
@@ -476,11 +486,8 @@ fn cancel(state: &mut State) {
             eprintln!("service artifacts left for inspection: {error:#}");
         }
     }
-    match runner::request_campaign(state, Request::CancelCampaign) {
-        Ok(_) => eprintln!("root runner: campaign cancelled, resume disarmed"),
-        Err(error) => eprintln!("root runner cancel not applied: {error:#}"),
-    }
     state.mode = Mode::Cancelled;
+    Ok(())
 }
 
 #[cfg(test)]

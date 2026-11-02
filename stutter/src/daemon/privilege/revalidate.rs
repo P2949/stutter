@@ -30,6 +30,11 @@ pub enum TargetRevalidationError {
         expected: String,
         actual: Option<String>,
     },
+    /// The task's state could not be established; this is not evidence that it is gone.
+    Unreadable {
+        tid: u32,
+        detail: String,
+    },
 }
 
 impl TargetRevalidationError {
@@ -39,6 +44,7 @@ impl TargetRevalidationError {
             Self::StarttimeMismatch { .. } => "target_revalidation_starttime_mismatch",
             Self::ProcessPidMismatch { .. } => "target_revalidation_process_pid_mismatch",
             Self::CommMismatch { .. } => "target_revalidation_comm_mismatch",
+            Self::Unreadable { .. } => "target_revalidation_unreadable",
         }
     }
 }
@@ -76,6 +82,9 @@ impl fmt::Display for TargetRevalidationError {
                 "{}: tid={tid} expected_comm={expected:?} actual_comm={actual:?}",
                 self.reason_code()
             ),
+            Self::Unreadable { tid, detail } => {
+                write!(f, "{}: tid={tid} {detail}", self.reason_code())
+            }
         }
     }
 }
@@ -98,10 +107,12 @@ pub(crate) fn revalidate_candidate_targets(
         revalidate_task_identity(&target, proc_root).map_err(|err| {
             // Identity checks run before the first write: a vanished or replaced task is a stale
             // candidate, never a fault.
-            let reason = if matches!(err, TargetRevalidationError::MissingTid { .. }) {
-                AbortReason::TargetGone
-            } else {
-                AbortReason::TargetReplaced
+            let reason = match err {
+                TargetRevalidationError::MissingTid { .. } => AbortReason::TargetGone,
+                TargetRevalidationError::Unreadable { .. } => {
+                    return anyhow::Error::new(err);
+                }
+                _ => AbortReason::TargetReplaced,
             };
             anyhow::Error::new(AbortedBeforeMutation::new(reason, err.to_string()))
         })?;
@@ -114,10 +125,15 @@ fn revalidate_task_identity(
     target: &TaskIdentity,
     proc_root: &Path,
 ) -> Result<(), TargetRevalidationError> {
-    let live =
-        read_live_task_identity(proc_root, target).ok_or(TargetRevalidationError::MissingTid {
+    let live = read_live_task_identity(proc_root, target).map_err(|failure| match failure {
+        LiveReadFailure::Gone => TargetRevalidationError::MissingTid {
             tid: target.tid.as_u32(),
-        })?;
+        },
+        LiveReadFailure::Unknown(detail) => TargetRevalidationError::Unreadable {
+            tid: target.tid.as_u32(),
+            detail,
+        },
+    })?;
 
     if let Some(expected_pid) = target.process_pid
         && live.process_pid != Some(expected_pid.as_u32())
@@ -186,49 +202,67 @@ pub(super) fn candidate_task_identities(candidate: &CandidateAction) -> Vec<Task
     }
 }
 
-fn read_live_task_identity(proc_root: &Path, target: &TaskIdentity) -> Option<LiveTaskIdentity> {
+/// Why a task's identity could not be read. Only a missing entry proves the task is gone; any
+/// other failure means its state is unknown, and unknown never takes the stale-candidate path.
+enum LiveReadFailure {
+    Gone,
+    Unknown(String),
+}
+
+fn read_live_task_identity(
+    proc_root: &Path,
+    target: &TaskIdentity,
+) -> Result<LiveTaskIdentity, LiveReadFailure> {
     if let Some(process_pid) = target.process_pid {
         let task_stat = proc_root
             .join(process_pid.to_string())
             .join("task")
             .join(target.tid.to_string())
             .join("stat");
-        if let Some(identity) =
-            read_identity_from_stat(&task_stat, target.tid.as_u32(), Some(process_pid.as_u32()))
-        {
-            return Some(identity);
+        match read_identity_from_stat(&task_stat, target.tid.as_u32(), Some(process_pid.as_u32())) {
+            Ok(identity) => return Ok(identity),
+            Err(LiveReadFailure::Gone) => {}
+            Err(unknown) => return Err(unknown),
         }
-
-        let actual = read_top_level_task_identity(proc_root, target.tid.as_u32());
-        if actual.is_some() {
-            return actual;
-        }
-
-        return None;
     }
-
     read_top_level_task_identity(proc_root, target.tid.as_u32())
 }
 
-fn read_top_level_task_identity(proc_root: &Path, tid: u32) -> Option<LiveTaskIdentity> {
+fn read_top_level_task_identity(
+    proc_root: &Path,
+    tid: u32,
+) -> Result<LiveTaskIdentity, LiveReadFailure> {
     let stat_path = proc_root.join(tid.to_string()).join("stat");
     let mut identity = read_identity_from_stat(&stat_path, tid, None)?;
     identity.process_pid = read_tgid_from_status(&proc_root.join(tid.to_string()).join("status"));
-    Some(identity)
+    Ok(identity)
 }
 
 fn read_identity_from_stat(
     path: &Path,
     expected_tid: u32,
     process_pid: Option<u32>,
-) -> Option<LiveTaskIdentity> {
-    let stat = std::fs::read_to_string(path).ok()?;
-    let (stat_tid, comm) = parse_proc_stat_tid_and_comm(&stat)?;
+) -> Result<LiveTaskIdentity, LiveReadFailure> {
+    let stat = match std::fs::read_to_string(path) {
+        Ok(stat) => stat,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Err(LiveReadFailure::Gone);
+        }
+        Err(error) => {
+            return Err(LiveReadFailure::Unknown(format!(
+                "{}: {error}",
+                path.display()
+            )));
+        }
+    };
+    let unknown = |what: &str| LiveReadFailure::Unknown(format!("{}: {what}", path.display()));
+    let (stat_tid, comm) =
+        parse_proc_stat_tid_and_comm(&stat).ok_or_else(|| unknown("malformed stat"))?;
     if stat_tid != expected_tid {
-        return None;
+        return Err(unknown("stat names a different task"));
     }
 
-    Some(LiveTaskIdentity {
+    Ok(LiveTaskIdentity {
         tid: expected_tid,
         process_pid,
         comm: Some(comm),
