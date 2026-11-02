@@ -109,7 +109,12 @@ pub fn init(root: &Path) -> anyhow::Result<()> {
             .collect(),
     };
     ensure!(
-        runner::target(&state).max_reboots == manifest.coverage.minimum_real_reboots,
+        runner::target(&state).max_reboots
+            == if rehearsal {
+                0
+            } else {
+                manifest.coverage.minimum_real_reboots
+            },
         "root reboot budget and manifest disagree"
     );
     snapshot_binaries(&state, &binaries)?;
