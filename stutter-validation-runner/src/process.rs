@@ -48,15 +48,44 @@ fn campaign_dir(auth: &Authorization) -> PathBuf {
         .join(&auth.campaign_id)
 }
 
-/// Where the pinned binary of this campaign lives. A service-graduation campaign owns copies of its
-/// binaries (`<campaign>/pinned/`): Cargo's `target/debug` is a working directory any build may
-/// relink, so it is never what a qualification executes or installs.
-fn pinned_binary(auth: &Authorization, name: &str) -> PathBuf {
+/// The campaign user's own pinned copies (`<campaign>/pinned/`). They are the *source* the root
+/// snapshot is made from and what the unprivileged resumed controller runs; no privileged launch
+/// executes them, because the user can replace them between a hash check and an exec.
+fn source_binary(auth: &Authorization, name: &str) -> PathBuf {
     if auth.controller == crate::model::ControllerKind::ServiceGraduation {
         campaign_dir(auth).join("pinned").join(name)
     } else {
         Path::new(&auth.repository).join("target/debug").join(name)
     }
+}
+
+/// The root-owned directory of this service campaign's binaries. Every ancestor is root-owned and
+/// not writable by others, so the path cannot be swapped under a verified hash.
+pub fn service_bin_dir(auth: &Authorization) -> PathBuf {
+    auth.service_bin_root
+        .clone()
+        .unwrap_or_else(|| PathBuf::from("/var/lib/stutter"))
+        .join(format!("service-bin-{}", auth.owner_uid))
+        .join(&auth.campaign_id)
+}
+
+/// What privileged launches execute. A service-graduation campaign owns root snapshots of its
+/// binaries; Cargo's `target/debug` is a working directory any build may relink, so it is never
+/// what a qualification executes or installs.
+fn pinned_binary(auth: &Authorization, name: &str) -> PathBuf {
+    if auth.controller == crate::model::ControllerKind::ServiceGraduation {
+        service_bin_dir(auth).join(name)
+    } else {
+        source_binary(auth, name)
+    }
+}
+
+pub fn xtask_source_path(auth: &Authorization) -> PathBuf {
+    source_binary(auth, "xtask")
+}
+
+pub fn stutter_source_path(auth: &Authorization) -> PathBuf {
+    source_binary(auth, "stutter")
 }
 
 pub fn xtask_path(auth: &Authorization) -> PathBuf {

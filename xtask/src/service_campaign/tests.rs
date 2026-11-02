@@ -50,6 +50,7 @@ fn state(dir: &CampaignDir) -> State {
         gid: 100,
         created_unix_ms: 1,
         kernel_release: "scripted-test-kernel".into(),
+        host_system: "/nix/store/test-system".into(),
         required_reboots: 2,
         boot_ids: vec!["test-boot".into()],
         reboot_pending: false,

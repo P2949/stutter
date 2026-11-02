@@ -138,17 +138,14 @@ impl UclampAction {
         before_mutation(&token)?;
         // Anything that moved between preparation and commit means the snapshot no longer
         // describes the host; abort with zero writes rather than restore a stale value.
-        let current = self.plan_records(proc_root, policy, true)?;
-        if !current
-            .iter()
-            .map(|(record, _)| record)
-            .eq(plan.iter().map(|(record, _)| record))
-        {
-            return Err(anyhow::anyhow!(
-                "uclamp target drifted between preparation and commit; nothing was written"
-            )
-            .into());
-        }
+        let records: Vec<_> = plan.iter().map(|(record, _)| record.clone()).collect();
+        let tids: Vec<u32> = records.iter().map(UclampRestoreRecord::tid).collect();
+        let current = self.plan_records(proc_root, policy, true).map(|plan| {
+            plan.into_iter()
+                .map(|(record, _)| record)
+                .collect::<Vec<_>>()
+        });
+        crate::actions::precommit::unchanged(current, &records, "uclamp target", &tids, proc_root)?;
         self.apply_plan(plan)
     }
 

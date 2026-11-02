@@ -109,6 +109,7 @@ pub(super) fn authorization(repository: &str) -> Authorization {
         original_boot_entry: Some("original".to_owned()),
         allowed_boot_entries: vec!["original".to_owned(), "kernel-b".to_owned()],
         created_unix_ms: 1,
+        service_bin_root: None,
     }
 }
 

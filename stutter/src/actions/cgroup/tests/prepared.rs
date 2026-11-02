@@ -125,3 +125,31 @@ fn the_startup_handler_refuses_records_without_a_cgroup_identity() {
         ""
     );
 }
+
+#[test]
+fn every_zero_write_abort_after_the_hook_is_typed_and_writes_nothing() {
+    use crate::actions::precommit::{AbortReason, AbortedBeforeMutation};
+    // Placement drift (a different cgroup) and a vanished task are both clean aborts.
+    for (name, reason, vanish) in [
+        ("prepared-typed-drift", AbortReason::PlanDrifted, false),
+        ("prepared-typed-gone", AbortReason::TargetGone, true),
+    ] {
+        let (proc_root, cgroup_root, action) = setup(name);
+        let procs = cgroup_root.join("stutter/game.slice/cgroup.procs");
+        let churn = proc_root.clone();
+        let err = action
+            .apply_prepared_at(&proc_root, &CgroupPlacementPolicy::default(), &mut |_| {
+                if vanish {
+                    fs::remove_dir_all(churn.join("4242")).unwrap();
+                } else {
+                    write_fake_task(&churn, 4242, "game-thread", 12345, "/stutter/game.slice");
+                }
+                Ok(())
+            })
+            .unwrap_err();
+        let abort = AbortedBeforeMutation::in_chain(&err.source).expect("typed abort");
+        assert_eq!(abort.reason, reason, "{name}");
+        assert!(err.rollback.is_none(), "{name}");
+        assert_eq!(fs::read_to_string(&procs).unwrap(), "", "{name}");
+    }
+}

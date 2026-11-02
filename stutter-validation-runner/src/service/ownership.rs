@@ -11,9 +11,7 @@ struct Receipt {
 }
 
 fn directory(auth: &Authorization) -> PathBuf {
-    Path::new("/var/lib/stutter")
-        .join(format!("service-bin-{}", auth.owner_uid))
-        .join(&auth.campaign_id)
+    crate::process::service_bin_dir(auth)
 }
 
 pub(super) fn binary(auth: &Authorization) -> PathBuf {
@@ -75,6 +73,8 @@ pub(super) fn verify(auth: &Authorization, user: &str) -> Result<(), Denial> {
     }
     protected_directory(&dir.join("stutter"))?;
     verify_pinned(&dir.join("stutter"), &auth.stutter_sha256)?;
+    protected_directory(&dir.join("xtask"))?;
+    verify_pinned(&dir.join("xtask"), &auth.xtask_sha256)?;
     for (path, expected) in receipt.files {
         protected_directory(&path)?;
         verify_pinned(&path, &expected)?;

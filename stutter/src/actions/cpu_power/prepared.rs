@@ -140,17 +140,18 @@ impl CpuPowerAction {
         before_mutation(&token)?;
         // Anything that moved between preparation and commit means the snapshot no longer
         // describes the host; abort with zero writes.
-        let current: Vec<_> = self
-            .plan_records(policy)?
-            .into_iter()
-            .map(|(_, record)| record)
-            .collect();
-        if current != records {
-            return Err(anyhow::anyhow!(
-                "CPU power state drifted between preparation and commit; nothing was written"
-            )
-            .into());
-        }
+        let current = self.plan_records(policy).map(|plan| {
+            plan.into_iter()
+                .map(|(_, record)| record)
+                .collect::<Vec<_>>()
+        });
+        crate::actions::precommit::unchanged(
+            current,
+            &records,
+            "CPU power state",
+            &[],
+            std::path::Path::new("/proc"),
+        )?;
         let failed = |source: anyhow::Error| crate::actions::PartialApplyError {
             source,
             // Restoring what was not yet changed writes the value it already has.

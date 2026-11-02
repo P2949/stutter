@@ -164,11 +164,13 @@ impl PrivilegedActionService for ServiceActionService {
         let plan = request.plan.clone();
         super::service_targets::ServiceTargets::policy(&plan.candidate, &request.policy)?;
         self.targets.candidate(&plan.candidate)?;
-        self.inner.apply_candidate_prepared(request, &mut |token| {
+        let recorded = std::cell::RefCell::new(None::<RollbackToken>);
+        let outcome = self.inner.apply_candidate_prepared(request, &mut |token| {
             // Root's token and boot identity are durable before the controller gets a prepare
             // answer and before the first mutable write. A crash retains the authority to restore.
             self.targets.prepared(&plan.candidate, token)?;
             self.record(token, &plan)?;
+            *recorded.borrow_mut() = Some(token.clone());
             let barrier =
                 prepared(token).and_then(|()| self.targets.prepared(&plan.candidate, token));
             if let Err(error) = &barrier {
@@ -177,7 +179,23 @@ impl PrivilegedActionService for ServiceActionService {
                 self.void_unapplied(token, error)?;
             }
             barrier
-        })
+        });
+        // A transaction that stopped before its first mutable write leaves nothing to restore,
+        // whichever boundary caught it: the token is void, and the controller learns by type that
+        // the candidate is stale.
+        let Err(error) = &outcome else {
+            return outcome;
+        };
+        let Some(abort) = crate::actions::precommit::AbortedBeforeMutation::in_chain(error) else {
+            return outcome;
+        };
+        if let Some(token) = recorded.borrow().as_ref() {
+            self.void_unapplied(token, error)?;
+        }
+        Err(PrivilegedWorkerError::StaleTargetBeforeMutation {
+            detail: format!("{:?}: {abort}", abort.reason),
+        }
+        .into())
     }
     fn rollback(&self, mut request: RollbackRequest) -> anyhow::Result<RollbackResult> {
         let mut tokens = self.read()?;

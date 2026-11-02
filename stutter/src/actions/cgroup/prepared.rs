@@ -101,12 +101,18 @@ impl CgroupPlacementAction {
         before_mutation(&token)?;
         // Anything that moved between preparation and commit means the snapshot no longer
         // describes the host; abort with zero writes rather than restore a stale placement.
-        if self.plan_moves(proc_root, policy)? != plan {
-            return Err(anyhow::anyhow!(
-                "cgroup target drifted between preparation and commit; nothing was written"
-            )
-            .into());
-        }
+        let tids = plan
+            .records
+            .iter()
+            .map(CgroupRestoreRecord::tid)
+            .collect::<Vec<_>>();
+        crate::actions::precommit::unchanged(
+            self.plan_moves(proc_root, policy),
+            &plan,
+            "cgroup target",
+            &tids,
+            proc_root,
+        )?;
         let target_abs = self.target_cgroup_abs()?;
         let mut writer = FsCgroupFileWriter;
         let failed = |source: anyhow::Error| PartialApplyError {

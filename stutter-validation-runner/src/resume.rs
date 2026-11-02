@@ -13,7 +13,7 @@ use crate::{
     authorization::Denial,
     credentials::{Identity, drop_all_privileges},
     model::{Authorization, ErrorCode},
-    process::{verify_pinned, xtask_path},
+    process::{verify_pinned, xtask_source_path},
     state::StateDir,
 };
 
@@ -31,7 +31,7 @@ pub fn plan_resume(auth: &Authorization) -> ResumePlan {
         .join(&auth.campaign_id);
     let [command, subcommand] = auth.controller.resume_subcommand();
     ResumePlan {
-        program: xtask_path(auth),
+        program: xtask_source_path(auth),
         args: vec![
             command.to_owned(),
             subcommand.to_owned(),
@@ -66,7 +66,7 @@ pub fn controller_home(passwd: &str, uid: u32, repository: &Path) -> PathBuf {
 
 /// Starts the controller for one campaign, detached, as the campaign user with no capabilities.
 pub fn resume_controller(auth: &Authorization, drop_to_owner: bool) -> Result<u32, Denial> {
-    verify_pinned(&xtask_path(auth), &auth.xtask_sha256)?;
+    verify_pinned(&xtask_source_path(auth), &auth.xtask_sha256)?;
     let plan = plan_resume(auth);
     let passwd = fs::read_to_string("/etc/passwd").unwrap_or_default();
     let home = controller_home(&passwd, auth.owner_uid, &plan.cwd);
@@ -98,7 +98,8 @@ pub fn resume_controller(auth: &Authorization, drop_to_owner: bool) -> Result<u3
 }
 
 /// Resumes every campaign under `state_root` whose runner state says a reboot is in flight.
-/// Corrupt or cancelled campaigns are skipped and reported, never resumed.
+/// Corrupt or cancelled campaigns are skipped and reported, never resumed; when a `current`
+/// campaign is named, only that one is considered.
 pub fn resume_all(state_root: &Path, drop_to_owner: bool) -> Vec<String> {
     let mut report = Vec::new();
     let Ok(entries) = fs::read_dir(state_root) else {
@@ -109,6 +110,15 @@ pub fn resume_all(state_root: &Path, drop_to_owner: bool) -> Vec<String> {
         .map(|e| e.path())
         .collect::<Vec<_>>();
     dirs.sort();
+    // The runner serves, and the host authorizes, exactly one campaign: the one `current` names.
+    // A superseded campaign cannot be cancelled over the socket any more, so it must not be able
+    // to come back after a reboot either.
+    let current = fs::canonicalize(state_root.join("current")).ok();
+    dirs.retain(|dir| {
+        current
+            .as_ref()
+            .is_none_or(|current| fs::canonicalize(dir).ok().as_ref() == Some(current))
+    });
     for dir in dirs
         .into_iter()
         .filter(|dir| dir.join("authorization.json").is_file())

@@ -64,12 +64,14 @@ impl NiceAction {
         })?;
         // Anything that moved between preparation and commit means the snapshot no longer
         // describes the host; abort with zero writes rather than restore a stale value.
-        if self.plan_records(proc_root, true)? != plan {
-            return Err(anyhow::anyhow!(
-                "nice target drifted between preparation and commit; nothing was written"
-            )
-            .into());
-        }
+        let tids = plan.iter().map(NiceRestoreRecord::tid).collect::<Vec<_>>();
+        crate::actions::precommit::unchanged(
+            self.plan_records(proc_root, true),
+            &plan,
+            "nice target",
+            &tids,
+            proc_root,
+        )?;
         self.apply_plan(plan)
     }
 }

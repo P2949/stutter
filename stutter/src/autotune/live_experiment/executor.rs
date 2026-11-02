@@ -201,12 +201,14 @@ fn settle_failed_prepared_apply(
             .map(|_| ())
             .with_context(|| format!("failed to clear the controller journal {what}"))
     };
-    let stale = error.chain().any(|cause| {
-        matches!(
+    let stale =
+        crate::actions::precommit::AbortedBeforeMutation::in_chain(&error).is_some()
+            || error.chain().any(|cause| {
+                matches!(
             cause.downcast_ref::<crate::daemon::privilege::PrivilegedWorkerError>(),
             Some(crate::daemon::privilege::PrivilegedWorkerError::StaleTargetBeforeMutation { .. })
         )
-    });
+            });
     let Some(token) = token else {
         return match clear("after a prepare that never reached the commit") {
             Ok(()) if stale => error.context(CleanPrecommitAbort),

@@ -241,6 +241,7 @@ fn the_runner_backend_sends_a_typed_request_and_maps_authorization_denials_to_bl
         original_boot_entry: None,
         allowed_boot_entries: vec![],
         created_unix_ms: 1,
+        service_bin_root: None,
     };
     let server = Arc::new(Server::new(
         authorization,

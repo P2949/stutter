@@ -210,19 +210,55 @@ fn live_suite_attempts_live_under_the_controllers_own_campaign_root() {
 }
 
 #[test]
-fn a_service_campaign_resumes_and_installs_from_its_own_pinned_copies() {
+fn a_service_campaign_resumes_from_its_user_copy_and_runs_privileged_code_from_root_snapshots() {
     let mut auth = authorization("/work/stutter");
     auth.controller = crate::model::ControllerKind::ServiceGraduation;
     auth.campaign_id = "service-abc1234-1".to_owned();
     let plan = plan_resume(&auth);
     let pinned =
         std::path::Path::new("/work/stutter/.llm-runs/service-validation/service-abc1234-1/pinned");
-    // Cargo's working output can be relinked by any build; a qualification never runs it.
+    // Resume drops every privilege before it execs, so it runs the user's own pinned copy; Cargo's
+    // working output can be relinked by any build and is never run.
     assert_eq!(plan.program, pinned.join("xtask"));
-    assert_eq!(crate::process::stutter_path(&auth), pinned.join("stutter"));
-    assert_eq!(crate::process::xtask_path(&auth), pinned.join("xtask"));
     assert_ne!(
         plan.program,
         std::path::Path::new("/work/stutter/target/debug/xtask")
     );
+    // Everything a privileged launch executes comes from a root-owned directory the campaign user
+    // cannot write, whatever happens to the user's copies afterwards.
+    let root_copy = std::path::PathBuf::from(format!(
+        "/var/lib/stutter/service-bin-{}/service-abc1234-1",
+        auth.owner_uid
+    ));
+    assert_eq!(
+        crate::process::stutter_path(&auth),
+        root_copy.join("stutter")
+    );
+    assert_eq!(crate::process::xtask_path(&auth), root_copy.join("xtask"));
+    assert!(!crate::process::xtask_path(&auth).starts_with("/work"));
+    // A non-service campaign is unchanged.
+    auth.controller = crate::model::ControllerKind::CoreValidation;
+    assert_eq!(
+        crate::process::xtask_path(&auth),
+        std::path::Path::new("/work/stutter/target/debug/xtask")
+    );
+}
+
+#[test]
+fn a_superseded_campaign_cannot_resume_after_a_reboot() {
+    let scratch = Scratch::new("resume-superseded");
+    let marker = scratch.path().join("marker");
+    let script = format!("#!/bin/sh\necho ran > {}\n", marker.display());
+    let (root, _) = campaign(&scratch, &script, true, false);
+    // `current` names some other campaign, so this one's pending resume is stale.
+    let other = root.join("other-campaign");
+    fs::create_dir_all(&other).unwrap();
+    std::os::unix::fs::symlink(&other, root.join("current")).unwrap();
+    let report = resume_all(&root, false);
+    assert!(
+        report.iter().all(|line| !line.contains("resumed")),
+        "{report:?}"
+    );
+    std::thread::sleep(Duration::from_millis(200));
+    assert!(!marker.exists());
 }

@@ -468,4 +468,8 @@ pub struct Authorization {
     pub original_boot_entry: Option<String>,
     pub allowed_boot_entries: Vec<String>,
     pub created_unix_ms: u64,
+    /// Where root-owned service binaries live (`/var/lib/stutter` when absent). Never serialized: a
+    /// staged authorization cannot choose it.
+    #[serde(skip)]
+    pub service_bin_root: Option<std::path::PathBuf>,
 }

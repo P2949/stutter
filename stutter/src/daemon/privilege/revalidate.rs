@@ -2,7 +2,13 @@
 
 use std::{fmt, path::Path};
 
-use crate::{actions::TaskIdentity, autotune::planning::candidate::CandidateAction};
+use crate::{
+    actions::{
+        TaskIdentity,
+        precommit::{AbortReason, AbortedBeforeMutation},
+    },
+    autotune::planning::candidate::CandidateAction,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TargetRevalidationError {
@@ -89,8 +95,16 @@ pub(crate) fn revalidate_candidate_targets(
     proc_root: &Path,
 ) -> anyhow::Result<()> {
     for target in candidate_task_identities(candidate) {
-        revalidate_task_identity(&target, proc_root)
-            .map_err(|err| anyhow::anyhow!(err.to_string()))?;
+        revalidate_task_identity(&target, proc_root).map_err(|err| {
+            // Identity checks run before the first write: a vanished or replaced task is a stale
+            // candidate, never a fault.
+            let reason = if matches!(err, TargetRevalidationError::MissingTid { .. }) {
+                AbortReason::TargetGone
+            } else {
+                AbortReason::TargetReplaced
+            };
+            anyhow::Error::new(AbortedBeforeMutation::new(reason, err.to_string()))
+        })?;
     }
 
     Ok(())

@@ -182,3 +182,24 @@ fn affinity_wire_preserves_root_starttime_and_worker_refuses_replacement() {
     assert!(format!("{error:#}").contains("target_revalidation_starttime_mismatch"));
     fs::remove_dir_all(proc_root).ok();
 }
+
+#[test]
+fn a_vanished_or_replaced_target_is_a_typed_pre_write_abort() {
+    use crate::actions::precommit::{AbortReason, AbortedBeforeMutation};
+    let gone_root = temp_proc_root("typed-missing");
+    let candidate = nice_candidate(target(200, 100, "worker", 12345));
+    let gone = revalidate_candidate_targets(&candidate, &gone_root).unwrap_err();
+    assert_eq!(
+        AbortedBeforeMutation::in_chain(&gone).unwrap().reason,
+        AbortReason::TargetGone
+    );
+    let reused_root = temp_proc_root("typed-reused");
+    write_expected_task(&reused_root, 100, 200, "worker", 99999);
+    let reused = revalidate_candidate_targets(&candidate, &reused_root).unwrap_err();
+    assert_eq!(
+        AbortedBeforeMutation::in_chain(&reused).unwrap().reason,
+        AbortReason::TargetReplaced
+    );
+    fs::remove_dir_all(gone_root).ok();
+    fs::remove_dir_all(reused_root).ok();
+}

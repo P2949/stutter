@@ -63,6 +63,10 @@ pub struct State {
     pub gid: u32,
     pub created_unix_ms: u64,
     pub kernel_release: String,
+    /// The NixOS system closure the campaign was started on. A `switch` mid-campaign changes the
+    /// host under the evidence even when the kernel does not, so integrity fails if it moves.
+    #[serde(default)]
+    pub host_system: String,
     pub required_reboots: u32,
     pub boot_ids: Vec<String>,
     pub reboot_pending: bool,

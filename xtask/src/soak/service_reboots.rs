@@ -40,7 +40,7 @@ pub(crate) fn step(
     let hop = completed + 1;
     let mut pre =
         super::service_recovery::applied_before_reboot(state, &dir.0.join("reboot-prep"))?;
-    pre["system"] = json!(system_link("/run/current-system")?);
+    pre["system_before"] = json!(runner::system_closure("/run/current-system")?);
     pre["persistence"] = write_canary(&Binding::new(state, Stage::Reboots)?.home(), hop)?;
     write_atomic(
         &receipt_path(dir, "pre", hop),
@@ -70,12 +70,13 @@ fn after_boot(state: &mut State, dir: &CampaignDir) -> anyhow::Result<()> {
         pre["boot_id"] == json!(state.boot_ids.last()),
         "the pre-reboot receipt belongs to another boot"
     );
-    let booted = system_link("/run/booted-system")?;
+    let booted = runner::system_closure("/run/booted-system")?;
+    let running = runner::system_closure("/run/current-system")?;
     ensure!(
-        pre["system"] == json!(booted),
-        "the host booted {booted}, not the system generation the campaign installed against ({}); \
-         the boot loader default entry points elsewhere",
-        pre["system"]
+        pre["system_before"] == json!(booted) && booted == running,
+        "the host booted {booted} (running {running}), not the system generation the campaign \
+         installed against ({}); the boot loader default entry points elsewhere",
+        pre["system_before"]
     );
     let persistence = verify_canary(&pre["persistence"])?;
     let binding = Binding::new(state, Stage::Reboots)?;
@@ -90,6 +91,9 @@ fn after_boot(state: &mut State, dir: &CampaignDir) -> anyhow::Result<()> {
         "hop": hop,
         "boot_id_before": pre["boot_id"],
         "boot_id_after": current,
+        "system_before": pre["system_before"],
+        "booted_system_after": booted,
+        "current_system_after": running,
         "outstanding_before": pre["outstanding"],
         "outstanding_after": report["worker_tokens"]["outstanding"],
         "recovery_audit_before": pre["recovery_audit_completed"],
@@ -111,14 +115,6 @@ fn after_boot(state: &mut State, dir: &CampaignDir) -> anyhow::Result<()> {
     crate::service_campaign::store::save(dir, state)?;
     runner::request_campaign(state, Request::ResumeCampaign)?;
     Ok(())
-}
-
-/// The NixOS system closure a link resolves to, so a reboot into a different generation is caught.
-fn system_link(link: &str) -> anyhow::Result<String> {
-    Ok(fs::canonicalize(link)
-        .with_context(|| format!("resolve {link}"))?
-        .display()
-        .to_string())
 }
 
 /// A file in the controller's persistent state directory, and proof that the directory is its own
@@ -216,6 +212,9 @@ pub(crate) fn verified_receipts(
             && post["boot_id_before"] == json!(before)
             && post["boot_id_after"] == json!(after)
             && post["hop"].as_u64() == Some(hop as u64)
+            && post["system_before"] == pre["system_before"]
+            && post["booted_system_after"] == pre["system_before"]
+            && post["current_system_after"] == pre["system_before"]
             && post["runner"]["reboots_used"].as_u64() == Some(hop as u64)
             && pre["outstanding"].as_u64() >= Some(1)
             && post["outstanding_after"] == 0
@@ -246,7 +245,7 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         fs::write(
             dir.join(format!("pre-{hop}.json")),
-            json!({"boot_id": before, "outstanding": outstanding, "recovery_audit_completed": 3,
+            json!({"boot_id": before, "system_before": "/nix/store/sys", "outstanding": outstanding, "recovery_audit_completed": 3,
                    "persistence": {"sha256": "abc"}})
             .to_string(),
         )
@@ -254,6 +253,8 @@ mod tests {
         fs::write(
             dir.join(format!("post-{hop}.json")),
             json!({"hop": hop, "boot_id_before": before, "boot_id_after": after,
+                   "system_before": "/nix/store/sys", "booted_system_after": "/nix/store/sys",
+                   "current_system_after": "/nix/store/sys",
                    "outstanding_after": 0, "recovery_audit_after": 4,
                    "runner": {"reboots_used": hop},
                    "persistence": {"survived": true, "sha256": "abc"}})
@@ -295,6 +296,13 @@ mod tests {
         let post = root.join("reboots/post-2.json");
         let mut value: Value = serde_json::from_slice(&fs::read(&post).unwrap()).unwrap();
         value["persistence"]["survived"] = json!(false);
+        fs::write(&post, value.to_string()).unwrap();
+        assert_eq!(verified_receipts(&root, &chain, 2).0, 1);
+        // Booting a different system closure than the one installed against proves nothing.
+        receipts(&root, 2, "boot-b", "boot-c", 1);
+        let post = root.join("reboots/post-2.json");
+        let mut value: Value = serde_json::from_slice(&fs::read(&post).unwrap()).unwrap();
+        value["booted_system_after"] = json!("/nix/store/other");
         fs::write(&post, value.to_string()).unwrap();
         assert_eq!(verified_receipts(&root, &chain, 2).0, 1);
         assert_eq!(verified_receipts(&root.join("missing"), &chain, 2).0, 0);

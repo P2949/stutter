@@ -184,6 +184,7 @@ pub fn authorization_for(
         original_boot_entry: None,
         allowed_boot_entries: Vec::new(),
         created_unix_ms: unix_ms(),
+        service_bin_root: None,
     }
 }
 

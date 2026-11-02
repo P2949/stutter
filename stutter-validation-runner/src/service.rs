@@ -17,7 +17,7 @@ use crate::{
         Authorization, BoundedServiceAction, ControllerKind, ErrorCode, ServiceComponent,
         ServiceSignal,
     },
-    process::{stutter_path, verify_pinned},
+    process::{service_bin_dir, stutter_source_path, verify_pinned, xtask_source_path},
 };
 
 mod fixture;
@@ -89,19 +89,17 @@ fn protected_directory(path: &Path) -> Result<(), Denial> {
 
 fn pin_binary(auth: &Authorization) -> Result<PathBuf, Denial> {
     // Read and hash the exact bytes once; a writable checkout cannot race verification and copy.
-    let bytes = fs::read(stutter_path(auth)).map_err(|error| failure(error.to_string()))?;
-    if sha256_hex(&bytes) != auth.stutter_sha256 {
-        return Err(failure(
-            "service source binary differs from root authorization",
-        ));
-    }
-    let dir = Path::new("/var/lib/stutter")
-        .join(format!("service-bin-{}", auth.owner_uid))
-        .join(&auth.campaign_id);
+    let stutter = read_authorized(&stutter_source_path(auth), &auth.stutter_sha256, "stutter")?;
+    let xtask = read_authorized(&xtask_source_path(auth), &auth.xtask_sha256, "xtask")?;
+    let dir = service_bin_dir(auth);
+    let root = auth
+        .service_bin_root
+        .as_deref()
+        .unwrap_or(Path::new("/var/lib/stutter"));
     // Only create children of protected directories, and make these code-only directories
     // traversable by the desktop controller even when the runner has a private umask.
     for path in [
-        PathBuf::from("/var/lib/stutter"),
+        root.to_owned(),
         dir.parent()
             .ok_or_else(|| failure("missing service binary parent"))?
             .to_owned(),
@@ -118,20 +116,37 @@ fn pin_binary(auth: &Authorization) -> Result<PathBuf, Denial> {
         }
         protected_directory(&path)?;
     }
-    let binary = dir.join("stutter");
-    let temporary = dir.join(format!("stutter.tmp-{}", std::process::id()));
+    write_protected(&dir, "xtask", &xtask)?;
+    write_protected(&dir, "stutter", &stutter)
+}
+
+fn read_authorized(path: &Path, expected: &str, what: &str) -> Result<Vec<u8>, Denial> {
+    let bytes = fs::read(path).map_err(|error| failure(error.to_string()))?;
+    if sha256_hex(&bytes) != expected {
+        return Err(failure(format!(
+            "service source {what} differs from root authorization"
+        )));
+    }
+    Ok(bytes)
+}
+
+/// Writes the already-hashed bytes to a root-owned read-only file, atomically and durably.
+fn write_protected(dir: &Path, name: &str, bytes: &[u8]) -> Result<PathBuf, Denial> {
+    let binary = dir.join(name);
+    let temporary = dir.join(format!("{name}.tmp-{}", std::process::id()));
+    let _ = fs::remove_file(&temporary);
     let mut file = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(&temporary)
         .map_err(|error| failure(error.to_string()))?;
-    file.write_all(&bytes)
+    file.write_all(bytes)
         .and_then(|()| file.sync_all())
         .map_err(|error| failure(error.to_string()))?;
     fs::set_permissions(&temporary, fs::Permissions::from_mode(0o555))
         .map_err(|error| failure(error.to_string()))?;
     fs::rename(&temporary, &binary).map_err(|error| failure(error.to_string()))?;
-    fs::File::open(&dir)
+    fs::File::open(dir)
         .and_then(|file| file.sync_all())
         .map_err(|error| failure(error.to_string()))?;
     Ok(binary)
@@ -158,7 +173,6 @@ pub fn execute(auth: &Authorization, action: BoundedServiceAction) -> Result<Val
     }
     match action {
         BoundedServiceAction::InstallPinned => {
-            verify_pinned(&stutter_path(auth), &auth.stutter_sha256)?;
             if fixture::config_path(&user).exists()
                 || fixture::config_path(&user)
                     .with_extension("profiles.toml")
@@ -465,5 +479,45 @@ mod disposition_tests {
         assert_eq!(totals["restored"], 7);
         assert_eq!(totals["superseded_externally"], 3);
         assert_eq!(totals["unresolved"], 3);
+    }
+}
+
+#[cfg(test)]
+mod snapshot_tests {
+    use super::*;
+
+    #[test]
+    fn a_source_that_differs_from_the_authorized_digest_is_never_snapshotted() {
+        let dir = std::env::temp_dir().join(format!("snapshot-source-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("xtask");
+        fs::write(&source, b"authorized bytes").unwrap();
+        let digest = sha256_hex(b"authorized bytes");
+        assert_eq!(
+            read_authorized(&source, &digest, "xtask").unwrap(),
+            b"authorized bytes"
+        );
+        // The user swaps the file after authorization: the snapshot is refused outright.
+        fs::write(&source, b"swapped bytes").unwrap();
+        assert!(read_authorized(&source, &digest, "xtask").is_err());
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn the_snapshot_holds_exactly_the_hashed_bytes_read_only_and_ignores_later_source_edits() {
+        let dir = std::env::temp_dir().join(format!("snapshot-write-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("source");
+        fs::write(&source, b"hashed bytes").unwrap();
+        let bytes = read_authorized(&source, &sha256_hex(b"hashed bytes"), "x").unwrap();
+        let snapshot = write_protected(&dir, "xtask", &bytes).unwrap();
+        // Replacing the user's file afterwards cannot change what the root copy executes.
+        fs::write(&source, b"replacement").unwrap();
+        assert_eq!(fs::read(&snapshot).unwrap(), b"hashed bytes");
+        assert_eq!(
+            fs::metadata(&snapshot).unwrap().permissions().mode() & 0o777,
+            0o555
+        );
+        fs::remove_dir_all(dir).ok();
     }
 }

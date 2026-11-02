@@ -107,7 +107,23 @@ pub fn integrity(root: &Path, state: &State) -> anyhow::Result<()> {
             path.display()
         );
     }
-    check_binary_revision(&state.pinned_stutter(), &state.source_commit)
+    check_binary_revision(&state.pinned_stutter(), &state.source_commit)?;
+    let system = system_closure("/run/current-system")?;
+    ensure!(
+        system == state.host_system,
+        "service campaign host system changed from {} to {system}",
+        state.host_system
+    );
+    Ok(())
+}
+
+/// The NixOS system closure a link resolves to, so a reboot or switch into another one is caught.
+pub fn system_closure(link: &str) -> anyhow::Result<String> {
+    use anyhow::Context as _;
+    Ok(std::fs::canonicalize(link)
+        .with_context(|| format!("resolve {link}"))?
+        .display()
+        .to_string())
 }
 pub fn request(state: &State, stage: Stage, body: Request) -> anyhow::Result<serde_json::Value> {
     let socket = socket();

@@ -92,6 +92,7 @@ pub fn init(root: &Path) -> anyhow::Result<()> {
         kernel_release: fs::read_to_string("/proc/sys/kernel/osrelease")?
             .trim()
             .to_owned(),
+        host_system: runner::system_closure("/run/current-system")?,
         required_reboots: manifest.coverage.minimum_real_reboots,
         boot_ids: vec![stutter_core::boot::current_boot_id()?],
         reboot_pending: false,
@@ -335,16 +336,7 @@ pub fn run(root: &Path, args: Args) -> anyhow::Result<()> {
         Command::Cancel { campaign } => {
             let dir = store::locate(root, campaign)?;
             let mut state = store::load(&dir)?;
-            if state.tasks[Stage::Install.id()].status == TaskStatus::Passed {
-                runner::request(
-                    &state,
-                    Stage::Install,
-                    Request::BoundedService {
-                        action: BoundedServiceAction::UninstallPinned,
-                    },
-                )?;
-            }
-            state.mode = Mode::Cancelled;
+            cancel(&mut state);
             store::save(&dir, &state)
         }
         Command::Continue {
@@ -453,6 +445,30 @@ pub(super) fn snapshot_binaries(state: &State, binaries: &Binaries) -> anyhow::R
     }
     fs::File::open(&dir)?.sync_all()?;
     Ok(())
+}
+
+/// Removes the campaign's service artifacts (the runner refuses everything but status once it is
+/// cancelled, so this comes first), then disarms the root runner so no reboot can resume it.
+/// A cleanup that fails, such as volatile units a reboot already removed, is reported but can never
+/// keep the resume armed.
+fn cancel(state: &mut State) {
+    if state.tasks[Stage::Install.id()].status == TaskStatus::Passed {
+        let uninstall = runner::request(
+            state,
+            Stage::Install,
+            Request::BoundedService {
+                action: BoundedServiceAction::UninstallPinned,
+            },
+        );
+        if let Err(error) = uninstall {
+            eprintln!("service artifacts left for inspection: {error:#}");
+        }
+    }
+    match runner::request_campaign(state, Request::CancelCampaign) {
+        Ok(_) => eprintln!("root runner: campaign cancelled, resume disarmed"),
+        Err(error) => eprintln!("root runner cancel not applied: {error:#}"),
+    }
+    state.mode = Mode::Cancelled;
 }
 
 #[cfg(test)]
