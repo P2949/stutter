@@ -83,9 +83,13 @@ impl Ctx<'_> {
                     .as_ref()
                     .context("service binding missing")?
                     .action(stutter_validation_runner::model::BoundedServiceAction::Query)?;
+                // The restarted controller may already hold a token for a new experiment; what
+                // matters is that root settled the interrupted one and left nothing unresolved.
                 anyhow::ensure!(
                     report["worker_tokens"]["readable"] == true
-                        && report["worker_tokens"]["outstanding"] == 0,
+                        && report["worker_tokens"]["recovery_audit"]["dispositions"]["unresolved"]
+                            .as_u64()
+                            == Some(0),
                     "root worker has an unsettled crash token"
                 );
                 fs::write(
