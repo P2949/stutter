@@ -133,3 +133,24 @@ fn a_live_cgroup_target_missing_from_the_snapshot_still_faults() {
     assert!(!verification.verified);
     assert_eq!(verification.reason_code, "rollback_target_missing");
 }
+
+#[test]
+fn an_unreaped_zombie_is_not_a_live_rollback_target() {
+    use super::super::rollback::task_is_alive;
+    let mut child = std::process::Command::new("sh")
+        .args(["-c", "exit 0"])
+        .spawn()
+        .unwrap();
+    let pid = child.id();
+    // Until it is waited for, the exited child keeps its /proc entry as a zombie.
+    for _ in 0..100 {
+        if !task_is_alive(pid) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(!task_is_alive(pid));
+    child.wait().unwrap();
+    assert!(!task_is_alive(pid));
+    assert!(task_is_alive(std::process::id()));
+}

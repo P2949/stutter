@@ -114,7 +114,7 @@ pub fn verify_rollback_restored_baseline(
 
             for target in &plan.action.targets {
                 // A task that exited while the action was applied has nothing left to restore.
-                if !task_exists(target.identity.tid.as_u32()) {
+                if !task_is_alive(target.identity.tid.as_u32()) {
                     continue;
                 }
                 if let Some(verification) = compare_required_text(
@@ -361,6 +361,11 @@ fn verify_cpu_affinity_rollback(
             ));
         };
         let Some(actual) = post_rollback.affinity.per_tid.get(&tid) else {
+            // A target that exited, or is a zombie nobody has reaped yet, has no affinity to
+            // read and nothing left to restore. Only a live task whose mask vanished is a failure.
+            if !task_is_alive(tid) {
+                continue;
+            }
             return RollbackVerification::mismatch(
                 format!("tid={} cpu_affinity={expected}", task.tid),
                 format!("tid={} cpu_affinity=missing", task.tid),
@@ -410,7 +415,17 @@ fn format_debug_value<T: fmt::Debug>(value: &T) -> String {
     format!("{value:?}")
 }
 
-/// Whether the thread is still alive. Rollback is verified against live state, so liveness is too.
-fn task_exists(tid: u32) -> bool {
-    std::path::Path::new("/proc").join(tid.to_string()).exists()
+/// Whether the task is a live, runnable thread. A zombie still has a `/proc` entry but no state
+/// that rollback could restore or verify.
+pub(super) fn task_is_alive(tid: u32) -> bool {
+    let Ok(stat) = std::fs::read_to_string(
+        std::path::Path::new("/proc")
+            .join(tid.to_string())
+            .join("stat"),
+    ) else {
+        return false;
+    };
+    stat.rsplit_once(") ")
+        .and_then(|(_, rest)| rest.chars().next())
+        .is_some_and(|state| !matches!(state, 'Z' | 'X'))
 }
