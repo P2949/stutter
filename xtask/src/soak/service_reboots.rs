@@ -40,6 +40,7 @@ pub(crate) fn step(
     let hop = completed + 1;
     let mut pre =
         super::service_recovery::applied_before_reboot(state, &dir.0.join("reboot-prep"))?;
+    pre["system"] = json!(system_link("/run/current-system")?);
     pre["persistence"] = write_canary(&Binding::new(state, Stage::Reboots)?.home(), hop)?;
     write_atomic(
         &receipt_path(dir, "pre", hop),
@@ -68,6 +69,13 @@ fn after_boot(state: &mut State, dir: &CampaignDir) -> anyhow::Result<()> {
     ensure!(
         pre["boot_id"] == json!(state.boot_ids.last()),
         "the pre-reboot receipt belongs to another boot"
+    );
+    let booted = system_link("/run/booted-system")?;
+    ensure!(
+        pre["system"] == json!(booted),
+        "the host booted {booted}, not the system generation the campaign installed against ({}); \
+         the boot loader default entry points elsewhere",
+        pre["system"]
     );
     let persistence = verify_canary(&pre["persistence"])?;
     let binding = Binding::new(state, Stage::Reboots)?;
@@ -103,6 +111,14 @@ fn after_boot(state: &mut State, dir: &CampaignDir) -> anyhow::Result<()> {
     crate::service_campaign::store::save(dir, state)?;
     runner::request_campaign(state, Request::ResumeCampaign)?;
     Ok(())
+}
+
+/// The NixOS system closure a link resolves to, so a reboot into a different generation is caught.
+fn system_link(link: &str) -> anyhow::Result<String> {
+    Ok(fs::canonicalize(link)
+        .with_context(|| format!("resolve {link}"))?
+        .display()
+        .to_string())
 }
 
 /// A file in the controller's persistent state directory, and proof that the directory is its own
