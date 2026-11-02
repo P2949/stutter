@@ -32,6 +32,9 @@ impl Probe {
                 .then(|| format!("{} pid {pid}", row["focus"]["kind"]))
         })
     }
+    pub(super) fn mark(&self) -> usize {
+        self.records.len()
+    }
     pub(super) fn poll(&mut self) {
         self.records.extend(self.tail.poll_records());
     }
@@ -41,8 +44,20 @@ impl Probe {
         seconds: u64,
         matches: impl Fn(&Value) -> bool,
     ) -> anyhow::Result<()> {
-        let deadline = Instant::now() + Duration::from_secs(seconds);
         let start = self.records.len();
+        self.wait_from(controller, start, seconds, matches)
+    }
+
+    /// Like `wait`, but also considers the records from index `start` on, which a caller took
+    /// with `mark` before an earlier wait consumed them.
+    pub(super) fn wait_from(
+        &mut self,
+        controller: &mut Controller,
+        start: usize,
+        seconds: u64,
+        matches: impl Fn(&Value) -> bool,
+    ) -> anyhow::Result<()> {
+        let deadline = Instant::now() + Duration::from_secs(seconds);
         loop {
             self.poll();
             ensure!(

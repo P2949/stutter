@@ -132,11 +132,14 @@ impl Lab<'_> {
     ) -> anyhow::Result<(Game, Option<super::actors::Contention>)> {
         let game = self.world.spawn_game(self.dir, name, 590)?;
         self.probe.own(game.child.pid());
+        // The controller may apply in the same poll batch that first shows the focus, so the
+        // application is searched for from before the focus wait.
+        let since = self.probe.mark();
         self.probe
-            .wait(controller, 30, |row| focus_matches(row, &game))?;
+            .wait_from(controller, since, 30, |row| focus_matches(row, &game))?;
         let pressure = self.world.spawn_burst(self.cpus.0, 8, 590)?;
         // The candidate cooldown of an earlier leg may still be running.
-        self.probe.wait(controller, 420, |row| {
+        self.probe.wait_from(controller, since, 420, |row| {
             row["decision"]["decision"] == "candidate_applied" && focus_matches(row, &game)
         })?;
         Ok((game, pressure))
