@@ -208,3 +208,21 @@ fn live_suite_attempts_live_under_the_controllers_own_campaign_root() {
         plan.raw
     );
 }
+
+#[test]
+fn a_service_campaign_resumes_and_installs_from_its_own_pinned_copies() {
+    let mut auth = authorization("/work/stutter");
+    auth.controller = crate::model::ControllerKind::ServiceGraduation;
+    auth.campaign_id = "service-abc1234-1".to_owned();
+    let plan = plan_resume(&auth);
+    let pinned =
+        std::path::Path::new("/work/stutter/.llm-runs/service-validation/service-abc1234-1/pinned");
+    // Cargo's working output can be relinked by any build; a qualification never runs it.
+    assert_eq!(plan.program, pinned.join("xtask"));
+    assert_eq!(crate::process::stutter_path(&auth), pinned.join("stutter"));
+    assert_eq!(crate::process::xtask_path(&auth), pinned.join("xtask"));
+    assert_ne!(
+        plan.program,
+        std::path::Path::new("/work/stutter/target/debug/xtask")
+    );
+}

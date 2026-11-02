@@ -104,6 +104,7 @@ pub fn init(root: &Path) -> anyhow::Result<()> {
         runner::target(&state).max_reboots == manifest.coverage.minimum_real_reboots,
         "root reboot budget and manifest disagree"
     );
+    snapshot_binaries(&state, &binaries)?;
     store::save(&dir, &state)?;
     println!(
         "campaign={}\ncampaign_id={}",
@@ -358,6 +359,19 @@ pub fn run(root: &Path, args: Args) -> anyhow::Result<()> {
                 store::save(&dir, &state)?;
                 return Err(error);
             }
+            // Every stage runs from the campaign's own xtask, so the binary that qualifies is the one
+            // that was pinned and not whatever Cargo last left in `target/debug`.
+            let pinned = state.pinned_xtask();
+            if std::env::current_exe()?.canonicalize()? != pinned.canonicalize()? {
+                use std::os::unix::process::CommandExt;
+                let error = std::process::Command::new(&pinned)
+                    .args(std::env::args_os().skip(1))
+                    .exec();
+                anyhow::bail!(
+                    "could not hand over to the pinned xtask {}: {error}",
+                    pinned.display()
+                );
+            }
             let snapshot = fs::read(dir.manifest_snapshot())?;
             ensure!(
                 stutter_core::hash::sha256_hex(&snapshot) == state.manifest_sha256,
@@ -424,4 +438,35 @@ mod failure_tests {
         let plain = anyhow::anyhow!("invariant broke");
         assert!(plain.downcast_ref::<StageFailure>().is_none());
     }
+}
+
+/// Copies the exact validated executables into the campaign, atomically, read-only and fsynced,
+/// then proves the copies hash to the recorded digests.
+pub(super) fn snapshot_binaries(state: &State, binaries: &Binaries) -> anyhow::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = state.pinned_dir();
+    fs::create_dir_all(&dir)?;
+    for (source, target, expected) in [
+        (
+            &binaries.stutter,
+            state.pinned_stutter(),
+            &state.stutter_sha256,
+        ),
+        (&binaries.xtask, state.pinned_xtask(), &state.xtask_sha256),
+    ] {
+        let temporary = target.with_extension("partial");
+        let _ = fs::remove_file(&temporary);
+        fs::copy(source, &temporary)
+            .with_context(|| format!("snapshot {} into the campaign", source.display()))?;
+        fs::set_permissions(&temporary, fs::Permissions::from_mode(0o555))?;
+        fs::File::open(&temporary)?.sync_all()?;
+        fs::rename(&temporary, &target)?;
+        ensure!(
+            file_sha256(&target)? == *expected,
+            "the campaign snapshot {} does not hash to the validated binary",
+            target.display()
+        );
+    }
+    fs::File::open(&dir)?.sync_all()?;
+    Ok(())
 }

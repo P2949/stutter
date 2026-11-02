@@ -43,7 +43,7 @@ pub(crate) fn init(state: &State, dir: &Path) -> anyhow::Result<()> {
             profile: Profile::Service,
             seed: state.created_unix_ms,
             hours: manifest.coverage.minimum_dwell_seconds as f64 / 3600.0,
-            stutter_bin: state.repository.join("target/debug/stutter"),
+            stutter_bin: state.pinned_stutter(),
             stutter_sha256: state.stutter_sha256.clone(),
             xtask_sha256: state.xtask_sha256.clone(),
             source_commit: state.source_commit.clone(),

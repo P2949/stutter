@@ -207,3 +207,47 @@ fn the_reboot_is_requested_only_after_the_waiting_attempt_and_pending_flag_are_d
         2
     );
 }
+
+#[test]
+fn the_campaign_owns_its_binaries_and_a_relinked_cargo_output_changes_nothing() {
+    use std::os::unix::fs::PermissionsExt;
+    let scratch = Scratch::new();
+    let dir = &scratch.0;
+    let mut state = state(dir);
+    state.campaign_id = "service-pinning-test".into();
+    let source = dir.0.join("cargo-output");
+    fs::create_dir_all(&source).unwrap();
+    let (stutter, xtask) = (source.join("stutter"), source.join("xtask"));
+    fs::write(&stutter, b"stutter build A").unwrap();
+    fs::write(&xtask, b"xtask build A").unwrap();
+    state.stutter_sha256 = stutter_core::hash::sha256_hex(b"stutter build A");
+    state.xtask_sha256 = stutter_core::hash::sha256_hex(b"xtask build A");
+    let binaries = crate::validation_campaign::repository::Binaries {
+        stutter: stutter.clone(),
+        xtask: xtask.clone(),
+    };
+    super::driver::snapshot_binaries(&state, &binaries).unwrap();
+    let pinned = state.pinned_stutter();
+    assert_eq!(fs::read(&pinned).unwrap(), b"stutter build A");
+    assert_eq!(
+        fs::metadata(&pinned).unwrap().permissions().mode() & 0o777,
+        0o555
+    );
+    // A later build relinks the working output: the campaign's bytes stay as they were.
+    fs::write(&stutter, b"stutter build B").unwrap();
+    assert_eq!(fs::read(&pinned).unwrap(), b"stutter build A");
+    assert_eq!(
+        crate::validation_campaign::repository::file_sha256(&pinned).unwrap(),
+        state.stutter_sha256
+    );
+    // Tampering with the pinned copy itself is what the integrity check would see.
+    fs::set_permissions(&pinned, fs::Permissions::from_mode(0o755)).unwrap();
+    fs::write(&pinned, b"tampered").unwrap();
+    assert_ne!(
+        crate::validation_campaign::repository::file_sha256(&pinned).unwrap(),
+        state.stutter_sha256
+    );
+    // Snapshotting a binary that is not the validated one is refused.
+    state.stutter_sha256 = "0".repeat(64);
+    assert!(super::driver::snapshot_binaries(&state, &binaries).is_err());
+}

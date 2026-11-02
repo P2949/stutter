@@ -48,12 +48,23 @@ fn campaign_dir(auth: &Authorization) -> PathBuf {
         .join(&auth.campaign_id)
 }
 
+/// Where the pinned binary of this campaign lives. A service-graduation campaign owns copies of its
+/// binaries (`<campaign>/pinned/`): Cargo's `target/debug` is a working directory any build may
+/// relink, so it is never what a qualification executes or installs.
+fn pinned_binary(auth: &Authorization, name: &str) -> PathBuf {
+    if auth.controller == crate::model::ControllerKind::ServiceGraduation {
+        campaign_dir(auth).join("pinned").join(name)
+    } else {
+        Path::new(&auth.repository).join("target/debug").join(name)
+    }
+}
+
 pub fn xtask_path(auth: &Authorization) -> PathBuf {
-    Path::new(&auth.repository).join("target/debug/xtask")
+    pinned_binary(auth, "xtask")
 }
 
 pub fn stutter_path(auth: &Authorization) -> PathBuf {
-    Path::new(&auth.repository).join("target/debug/stutter")
+    pinned_binary(auth, "stutter")
 }
 
 /// The pinned binary must still hash to the digest recorded at bootstrap.

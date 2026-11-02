@@ -37,12 +37,7 @@ fn new_lab<'a>(state: &'a State, dir: &'a Path, stage: Stage) -> anyhow::Result<
     fs::create_dir_all(dir)?;
     let cpus = super::pick_cpus()?;
     let binding = Binding::new(state, stage)?;
-    let mut world = World::new(
-        &state.repository,
-        dir,
-        &state.repository.join("target/debug/stutter"),
-        cpus,
-    )?;
+    let mut world = World::new(&state.repository, dir, &state.pinned_stutter(), cpus)?;
     world.bind_service(binding.clone())?;
     world.prepare_round(Operations::Both)?;
     let probe = Probe {

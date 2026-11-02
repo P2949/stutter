@@ -16,7 +16,7 @@ use super::{
 };
 use crate::validation_campaign::{
     bootstrap::{CAMPAIGN_TASK, DEFAULT_SOCKET, RunnerTarget},
-    repository::{Binaries, check_binary_revision, file_sha256, git},
+    repository::{check_binary_revision, file_sha256, git},
 };
 pub fn socket() -> PathBuf {
     std::env::var_os(SOCKET_ENV)
@@ -95,8 +95,8 @@ pub fn integrity(root: &Path, state: &State) -> anyhow::Result<()> {
     for (path, expected) in [
         (root.join(manifest::FILE), &state.manifest_sha256),
         (root.join("Cargo.lock"), &state.cargo_lock_sha256),
-        (root.join("target/debug/stutter"), &state.stutter_sha256),
-        (root.join("target/debug/xtask"), &state.xtask_sha256),
+        (state.pinned_stutter(), &state.stutter_sha256),
+        (state.pinned_xtask(), &state.xtask_sha256),
     ] {
         ensure!(
             file_sha256(&path)? == *expected,
@@ -104,10 +104,7 @@ pub fn integrity(root: &Path, state: &State) -> anyhow::Result<()> {
             path.display()
         );
     }
-    check_binary_revision(
-        &Binaries::for_repository(root)?.stutter,
-        &state.source_commit,
-    )
+    check_binary_revision(&state.pinned_stutter(), &state.source_commit)
 }
 pub fn request(state: &State, stage: Stage, body: Request) -> anyhow::Result<serde_json::Value> {
     let socket = socket();

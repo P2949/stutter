@@ -35,12 +35,7 @@ pub(crate) fn run(state: &State, dir: &Path) -> anyhow::Result<Value> {
     fs::create_dir_all(dir)?;
     let cpus = super::pick_cpus()?;
     let binding = Binding::new(state, Stage::Discovery)?;
-    let mut world = World::new(
-        &state.repository,
-        dir,
-        &state.repository.join("target/debug/stutter"),
-        cpus,
-    )?;
+    let mut world = World::new(&state.repository, dir, &state.pinned_stutter(), cpus)?;
     world.bind_service(binding.clone())?;
     world.prepare_round(Operations::Both)?;
     let mut probe = Probe {

@@ -68,3 +68,20 @@ pub struct State {
     pub reboot_pending: bool,
     pub tasks: BTreeMap<String, TaskState>,
 }
+
+impl State {
+    /// The campaign-owned copies of the two binaries it qualifies. Cargo's `target/debug` output
+    /// is a working directory that any build may relink; these bytes never change.
+    pub fn pinned_dir(&self) -> std::path::PathBuf {
+        self.repository
+            .join(super::store::ROOT)
+            .join(&self.campaign_id)
+            .join("pinned")
+    }
+    pub fn pinned_stutter(&self) -> std::path::PathBuf {
+        self.pinned_dir().join("stutter")
+    }
+    pub fn pinned_xtask(&self) -> std::path::PathBuf {
+        self.pinned_dir().join("xtask")
+    }
+}
