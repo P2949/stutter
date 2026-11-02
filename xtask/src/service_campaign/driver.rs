@@ -424,22 +424,6 @@ impl StageFailure {
     }
 }
 
-#[cfg(test)]
-mod failure_tests {
-    use super::*;
-
-    #[test]
-    fn a_typed_stage_failure_keeps_its_class_through_anyhow() {
-        let error = StageFailure::error(FailureClass::Retryable, "foreign build");
-        let class = error
-            .downcast_ref::<StageFailure>()
-            .map_or(FailureClass::SoftwareDefect, |failure| failure.class);
-        assert_eq!(class, FailureClass::Retryable);
-        let plain = anyhow::anyhow!("invariant broke");
-        assert!(plain.downcast_ref::<StageFailure>().is_none());
-    }
-}
-
 /// Copies the exact validated executables into the campaign, atomically, read-only and fsynced,
 /// then proves the copies hash to the recorded digests.
 pub(super) fn snapshot_binaries(state: &State, binaries: &Binaries) -> anyhow::Result<()> {
@@ -469,4 +453,20 @@ pub(super) fn snapshot_binaries(state: &State, binaries: &Binaries) -> anyhow::R
     }
     fs::File::open(&dir)?.sync_all()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod failure_tests {
+    use super::*;
+
+    #[test]
+    fn a_typed_stage_failure_keeps_its_class_through_anyhow() {
+        let error = StageFailure::error(FailureClass::Retryable, "foreign build");
+        let class = error
+            .downcast_ref::<StageFailure>()
+            .map_or(FailureClass::SoftwareDefect, |failure| failure.class);
+        assert_eq!(class, FailureClass::Retryable);
+        let plain = anyhow::anyhow!("invariant broke");
+        assert!(plain.downcast_ref::<StageFailure>().is_none());
+    }
 }
