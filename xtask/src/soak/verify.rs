@@ -296,8 +296,17 @@ fn ordering_problems(rounds: &[RoundRecord], events: &[HistoryEvent]) -> Vec<Str
             )
         })
         .collect();
+    // A service controller outlives its workloads; a kept action is released when its workload
+    // exits.
+    let exits: Vec<u128> = rounds
+        .iter()
+        .flat_map(|round| round.events.iter())
+        .filter(|event| event.kind == "game_exit")
+        .map(|event| u128::from(event.unix_ms) * 1_000_000)
+        .collect();
     for (start, end) in sessions {
         let mut kept: Vec<String> = Vec::new();
+        let mut released_until: u128 = 0;
         let mut last_resolution: Option<(u128, bool)> = None;
         let mut last_start: BTreeMap<String, u128> = BTreeMap::new();
         let in_session = |e: &&HistoryEvent| e.unix_nanos >= start && e.unix_nanos <= end;
@@ -324,6 +333,13 @@ fn ordering_problems(rounds: &[RoundRecord], events: &[HistoryEvent]) -> Vec<Str
             .collect();
         timeline.sort_by_key(|(event, _)| event.unix_nanos);
         for (event, decision) in timeline {
+            if exits
+                .iter()
+                .any(|exit| *exit > released_until && *exit < event.unix_nanos)
+            {
+                kept.clear();
+            }
+            released_until = event.unix_nanos;
             let kind = event.action_kind.clone().unwrap_or_default();
             match decision {
                 "candidate_started" => {

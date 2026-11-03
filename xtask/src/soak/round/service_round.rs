@@ -93,13 +93,18 @@ impl Ctx<'_> {
                     events.iter().all(|(success, _)| *success),
                     "service crash recovery reported a failed restore"
                 );
-                self.check_restored(game);
                 let report = self
                     .world
                     .service
                     .as_ref()
                     .context("service binding missing")?
                     .action(stutter_validation_runner::model::BoundedServiceAction::Query)?;
+                // Once the restarted controller holds a token for a new experiment, the workload
+                // legitimately carries that experiment, so the physical readback only applies while
+                // the ledger is empty. The audit and root disposition checks below always apply.
+                if report["worker_tokens"]["outstanding"] == 0 {
+                    self.check_restored(game);
+                }
                 // The restarted controller may already hold a token for a new experiment; what
                 // matters is that root settled the interrupted one and left nothing new
                 // unresolved (the counter is cumulative over the campaign).
