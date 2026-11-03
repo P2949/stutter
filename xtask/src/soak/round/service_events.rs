@@ -113,6 +113,9 @@ impl Ctx<'_> {
             .join("low-confidence/steamapps/common/WeakGame/WeakGame");
         fs::create_dir_all(weak.parent().context("fixture parent missing")?)?;
         fs::copy(&self.world.xtask, &weak)?;
+        // An experiment on the qualified game may be polled late; only what the controller did
+        // after the unqualified game appeared counts.
+        let focused_at = u128::from(unix_ms()) * 1_000_000;
         let qualified = std::mem::replace(&mut self.world.game, weak);
         let spawned = self.world.spawn_game(&self.dir, "weak-game", 60);
         self.world.game = qualified;
@@ -126,7 +129,7 @@ impl Ctx<'_> {
         }
         if self.seen[seen_before..]
             .iter()
-            .any(|event| event.decision == "candidate_applied")
+            .any(|event| event.decision == "candidate_applied" && event.unix_nanos >= focused_at)
         {
             self.violation("an unqualified focus was mutated");
         }
