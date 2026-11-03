@@ -174,26 +174,62 @@ pub const SERVICE_EVENT_KINDS: [&str; 6] = [
     "failed_restore",
 ];
 
+/// Where each of a service cycle's rounds runs. The candidate memory keeps one graduated
+/// operation from starting again within `SAME_OPERATION_SPACING_MS`, so the order alternates
+/// the operations: a round of one operation overlaps the wait of the other. The set of rounds is
+/// exactly the historical cycle plus the overlay.
+#[derive(Clone, Copy)]
+enum Slot {
+    Historical(usize),
+    Overlay(usize),
+}
+
+const SERVICE_ORDER: [Slot; SERVICE_CYCLE_LEN] = [
+    Slot::Historical(0),
+    Slot::Historical(1),
+    Slot::Historical(4),
+    Slot::Historical(5),
+    Slot::Historical(6),
+    Slot::Historical(8),
+    Slot::Historical(7),
+    Slot::Historical(10),
+    Slot::Historical(11),
+    Slot::Overlay(0),
+    Slot::Historical(2),
+    Slot::Historical(3),
+    Slot::Overlay(1),
+    Slot::Historical(15),
+    Slot::Historical(9),
+    Slot::Overlay(3),
+    Slot::Historical(12),
+    Slot::Overlay(2),
+    Slot::Historical(14),
+    Slot::Overlay(5),
+    Slot::Overlay(4),
+    Slot::Historical(13),
+];
+
 /// Round `index` of the service profile. Overlay operations alternate by cycle so both graduated
 /// operations meet an external owner and a SIGTERM.
 pub fn service_round_for(index: u32) -> Round {
-    let slot = (index as usize) % SERVICE_CYCLE_LEN;
-    if slot < CYCLE.len() {
-        return CYCLE[slot];
-    }
     let cycle = (index as usize) / SERVICE_CYCLE_LEN;
-    let kind = SERVICE_OVERLAY[slot - CYCLE.len()];
-    let alternating = if cycle.is_multiple_of(2) {
-        Affinity
-    } else {
-        Cgroup
-    };
-    let operations = match kind {
-        Kind::ExternalMutation | Kind::ControllerSigterm => alternating,
-        Kind::FailedRestore => Cgroup,
-        _ => Both,
-    };
-    round(kind, Beneficial, operations)
+    match SERVICE_ORDER[(index as usize) % SERVICE_CYCLE_LEN] {
+        Slot::Historical(slot) => CYCLE[slot],
+        Slot::Overlay(slot) => {
+            let kind = SERVICE_OVERLAY[slot];
+            let alternating = if cycle.is_multiple_of(2) {
+                Affinity
+            } else {
+                Cgroup
+            };
+            let operations = match kind {
+                Kind::ExternalMutation | Kind::ControllerSigterm => alternating,
+                Kind::FailedRestore => Cgroup,
+                _ => Both,
+            };
+            round(kind, Beneficial, operations)
+        }
+    }
 }
 
 /// The schedule kinds that inject a fault or run long; each has its own coverage floor. A
@@ -312,10 +348,33 @@ mod service_tests {
     use super::*;
 
     #[test]
-    fn the_historical_cycle_is_untouched_inside_the_service_cycle() {
-        for index in 0..CYCLE.len() as u32 {
-            assert_eq!(service_round_for(index), round_for(index));
+    fn the_service_cycle_holds_every_historical_and_overlay_round_exactly_once() {
+        let mut historical = vec![0_usize; CYCLE.len()];
+        let mut overlay = vec![0_usize; SERVICE_OVERLAY.len()];
+        for slot in SERVICE_ORDER {
+            match slot {
+                Slot::Historical(index) => historical[index] += 1,
+                Slot::Overlay(index) => overlay[index] += 1,
+            }
         }
+        assert!(historical.iter().all(|count| *count == 1));
+        assert!(overlay.iter().all(|count| *count == 1));
+        for index in 0..CYCLE.len() {
+            let wanted = CYCLE[index];
+            assert!(
+                (0..SERVICE_CYCLE_LEN as u32).any(|slot| service_round_for(slot) == wanted),
+                "{wanted:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_service_cycle_begins_with_a_plain_round_and_ends_with_the_long_one() {
+        assert_eq!(service_round_for(0), CYCLE[0]);
+        assert_eq!(
+            service_round_for(SERVICE_CYCLE_LEN as u32 - 1).kind,
+            Kind::Long
+        );
     }
 
     #[test]
