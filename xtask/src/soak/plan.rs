@@ -359,8 +359,7 @@ mod service_tests {
         }
         assert!(historical.iter().all(|count| *count == 1));
         assert!(overlay.iter().all(|count| *count == 1));
-        for index in 0..CYCLE.len() {
-            let wanted = CYCLE[index];
+        for wanted in CYCLE {
             assert!(
                 (0..SERVICE_CYCLE_LEN as u32).any(|slot| service_round_for(slot) == wanted),
                 "{wanted:?}"
