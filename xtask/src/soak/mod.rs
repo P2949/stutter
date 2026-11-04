@@ -402,7 +402,9 @@ fn drive_soak(dir: &Path, state: &mut SoakState, world: &mut world::World) -> an
             .filter(|event| event.decision == "candidate_started")
         {
             if let Some(kind) = &event.action_kind {
-                last_start.insert(kind.clone(), unix_ms());
+                // The candidate memory runs from the experiment's own start, not from the end of
+                // the round that contained it.
+                last_start.insert(kind.clone(), (event.unix_nanos / 1_000_000) as u64);
             }
         }
         println!(
