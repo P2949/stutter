@@ -133,6 +133,11 @@ pub fn request(state: &State, stage: Stage, body: Request) -> anyhow::Result<ser
         manifest_sha256: &state.manifest_sha256,
     }
     .send(stage.id(), body)?;
+    if let Some(error) = &response.error
+        && error.code == stutter_validation_runner::model::ErrorCode::SuspendNotEntered
+    {
+        return Err(anyhow::Error::new(SuspendNotEntered(error.message.clone())));
+    }
     ensure!(
         response.status == ResponseStatus::Ok,
         "typed service action refused: {:?}",
@@ -190,3 +195,16 @@ pub fn cancel_campaign(state: &State) -> anyhow::Result<bool> {
         (_, error) => anyhow::bail!("root cancellation was refused: {error:?}"),
     }
 }
+
+/// The root runner verified that the kernel never entered sleep, so a suspend fault was not
+/// injected. Carried as a type so no caller has to read error text.
+#[derive(Debug)]
+pub struct SuspendNotEntered(pub String);
+
+impl std::fmt::Display for SuspendNotEntered {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "the kernel did not suspend the machine: {}", self.0)
+    }
+}
+
+impl std::error::Error for SuspendNotEntered {}

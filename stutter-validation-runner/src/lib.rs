@@ -15,6 +15,7 @@ pub mod resume;
 pub mod server;
 pub mod service;
 pub mod state;
+mod suspend;
 pub mod sys;
 
 #[cfg(test)]

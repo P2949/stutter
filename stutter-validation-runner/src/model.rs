@@ -365,6 +365,8 @@ pub enum ErrorCode {
     CorruptState,
     Unsupported,
     ExecutionFailed,
+    /// The kernel verifiably never entered sleep: no fault was injected.
+    SuspendNotEntered,
     SchemaMismatch,
     Busy,
     Cancelled,

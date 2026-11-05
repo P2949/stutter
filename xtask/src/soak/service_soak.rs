@@ -344,9 +344,21 @@ pub(super) fn record_projection(
     let cycle_len = super::plan::SERVICE_CYCLE_LEN as u64;
     let hours = |ms: f64| ms / 3_600_000.0;
     let duty = verified_ms as f64 / elapsed_ms as f64;
-    let per_round_ms = elapsed_ms as f64 / rounds_done as f64;
-    let for_cycles_h =
-        hours(per_round_ms * cycle_len as f64 * f64::from(manifest.coverage.minimum_clean_cycles));
+    // Attempts that injected nothing were repeated: their time is already spent and will not
+    // recur at every remaining round, so it is carried as a fixed overhead, not averaged in.
+    let overhead_ms: u64 = super::records::read_rounds(dir)?
+        .iter()
+        .filter(|round| round.outcome == super::round::NOT_ATTEMPTED)
+        .map(|round| round.finished_unix_ms.saturating_sub(round.started_unix_ms))
+        .sum();
+    let total_rounds = cycle_len * u64::from(manifest.coverage.minimum_clean_cycles);
+    let per_round_ms = elapsed_ms.saturating_sub(overhead_ms) as f64 / rounds_done as f64;
+    let for_cycles_h = hours(project_cycles_ms(
+        elapsed_ms,
+        overhead_ms,
+        rounds_done,
+        total_rounds,
+    ));
     let minimum_dwell_h = manifest.coverage.minimum_dwell_seconds as f64 / 3600.0;
     let maximum_dwell_h = manifest.coverage.maximum_dwell_seconds as f64 / 3600.0;
     let for_dwell_h = wall_for_dwell(for_cycles_h, duty, minimum_dwell_h);
@@ -373,6 +385,18 @@ pub(super) fn record_projection(
     )?;
     // Only a full cycle makes the figure meaningful; before that it is preliminary.
     Ok(rounds_done < cycle_len || required_h <= maximum_dwell_h)
+}
+
+/// Wall time to finish `total_rounds` scheduled rounds: the pace of the rounds done so far, with
+/// the time lost to repeated attempts counted once.
+fn project_cycles_ms(
+    elapsed_ms: u64,
+    overhead_ms: u64,
+    rounds_done: u64,
+    total_rounds: u64,
+) -> f64 {
+    let pace = elapsed_ms.saturating_sub(overhead_ms) as f64 / rounds_done.max(1) as f64;
+    pace * total_rounds as f64 + overhead_ms as f64
 }
 
 /// Wall time to a verified dwell of `dwell_h` after the cycles: the cycles earn `duty` of their
@@ -447,7 +471,21 @@ mod floor_tests {
 
 #[cfg(test)]
 mod projection_tests {
-    use super::wall_for_dwell;
+    use super::{project_cycles_ms, wall_for_dwell};
+
+    #[test]
+    fn a_repeated_attempt_is_counted_once_not_at_every_remaining_round() {
+        let (round, total) = (100_000_u64, 132_u64);
+        let clean = project_cycles_ms(22 * round, 0, 22, total);
+        // One refused attempt of 150 s in the first cycle adds 150 s, not 150 s per round.
+        let with_retry = project_cycles_ms(22 * round + 150_000, 150_000, 22, total);
+        assert!((with_retry - clean - 150_000.0).abs() < 1.0);
+        // Many repeated attempts still only add their own time.
+        let many = project_cycles_ms(22 * round + 450_000, 450_000, 22, total);
+        assert!((many - clean - 450_000.0).abs() < 1.0);
+        // No rounds done yet cannot divide by zero.
+        assert!(project_cycles_ms(10, 0, 0, total).is_finite());
+    }
 
     #[test]
     fn the_idle_phase_tops_up_only_the_missing_dwell() {

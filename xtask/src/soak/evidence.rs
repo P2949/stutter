@@ -117,10 +117,28 @@ fn history_summary(dir: &Path) -> anyhow::Result<Value> {
 fn audit_summary(dir: &Path, rounds: &[RoundRecord]) -> Value {
     let audit = dir.join("home/.local/state/stutter/audit/actions.jsonl");
     let recoveries = audit_events(&audit, "autotune-startup-recovery");
+    // A fault is injected only when the attempt did not end `not_attempted`. A suspend is
+    // verified only with its resume event, which the runner records after the kernel's own
+    // success counter advanced.
     let faults = rounds
         .iter()
-        .filter(|round| round.kind != "plain")
-        .map(|round| json!({"round": round.round, "fault": round.kind, "outcome": round.outcome}))
+        .filter(|round| round.kind != "plain" && round.outcome != "not_attempted")
+        .map(|round| {
+            let resumed = round.events.iter().any(|event| event.kind == "resume");
+            json!({
+                "round": round.round,
+                "fault": round.kind,
+                "outcome": round.outcome,
+                "verified_resume": (round.kind == "suspend").then_some(resumed),
+            })
+        })
+        .collect::<Vec<_>>();
+    // Attempts at a scheduled round that injected nothing and were repeated. Kept for the audit,
+    // never counted as coverage.
+    let not_injected = rounds
+        .iter()
+        .filter(|round| round.outcome == "not_attempted")
+        .map(|round| json!({"round": round.round, "fault": round.kind, "reason": round.error}))
         .collect::<Vec<_>>();
     json!({
         "startup_recovery": {
@@ -128,6 +146,7 @@ fn audit_summary(dir: &Path, rounds: &[RoundRecord]) -> Value {
             "failed": recoveries.iter().filter(|(ok, _)| !*ok).count(),
         },
         "injected_faults": faults,
+        "attempts_without_injection": not_injected,
     })
 }
 
@@ -290,6 +309,27 @@ mod tests {
                 .collect(),
             ..RoundRecord::default()
         }
+    }
+
+    #[test]
+    fn a_fault_that_was_never_injected_is_not_reported_as_injected() {
+        let dir = Dir::new("audit-provenance");
+        let mut refused = round(3, "suspend", &["suspend"], "workload_exit");
+        refused.outcome = "not_attempted".to_owned();
+        refused.error = Some("the kernel did not suspend the machine".to_owned());
+        let done = round(3, "suspend", &["suspend", "resume"], "workload_exit");
+        let unverified = round(5, "suspend", &["suspend"], "workload_exit");
+        let summary = super::audit_summary(&dir.0, &[refused, done, unverified]);
+        let injected = summary["injected_faults"].as_array().unwrap();
+        assert_eq!(injected.len(), 2);
+        assert_eq!(injected[0]["verified_resume"], true);
+        assert_eq!(injected[1]["verified_resume"], false);
+        let skipped = summary["attempts_without_injection"].as_array().unwrap();
+        assert_eq!(skipped.len(), 1);
+        assert_eq!(
+            skipped[0]["reason"],
+            "the kernel did not suspend the machine"
+        );
     }
 
     /// A soak directory with the activity of a short run: both operations, a keep and a revert,

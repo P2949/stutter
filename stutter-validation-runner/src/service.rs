@@ -259,14 +259,7 @@ pub fn execute(auth: &Authorization, action: BoundedServiceAction) -> Result<Val
         }
         BoundedServiceAction::Query => (),
         BoundedServiceAction::SuspendResume => {
-            let successes = || -> Result<u64, Denial> {
-                fs::read_to_string("/sys/power/suspend_stats/success")
-                    .map_err(|error| failure(error.to_string()))?
-                    .trim()
-                    .parse()
-                    .map_err(|error: std::num::ParseIntError| failure(error.to_string()))
-            };
-            let before = successes()?;
+            let before = crate::suspend::read_counters().map_err(failure)?;
             // The service manager executes this one fixed hardware action. The validation
             // daemon keeps its bounded capability set and read-only /etc namespace.
             let output = Command::new("systemd-run")
@@ -290,13 +283,26 @@ pub fn execute(auth: &Authorization, action: BoundedServiceAction) -> Result<Val
                 .env("PATH", ROOT_PATH)
                 .output()
                 .map_err(|error| failure(error.to_string()))?;
-            let after = successes()?;
-            if !output.status.success() || after <= before {
-                return Err(failure(
-                    "fixed suspend/resume did not increment the kernel success counter",
-                ));
+            let after = crate::suspend::read_counters().map_err(failure)?;
+            match crate::suspend::classify(before, after, output.status.success()) {
+                crate::suspend::Outcome::Verified => {}
+                crate::suspend::Outcome::NotEntered => {
+                    return Err((
+                        ErrorCode::SuspendNotEntered,
+                        format!(
+                            "the kernel did not enter sleep ({before:?} then {after:?}): {}",
+                            crate::suspend::last_failure()
+                        ),
+                    ));
+                }
+                crate::suspend::Outcome::Ambiguous(why) => {
+                    return Err(failure(format!(
+                        "fixed suspend/resume is ambiguous: {why}; {}",
+                        crate::suspend::last_failure()
+                    )));
+                }
             }
-            action_evidence = json!({"suspend_success_before":before,"suspend_success_after":after,"rtc_wake_seconds":30});
+            action_evidence = json!({"suspend_success_before":before.success,"suspend_success_after":after.success,"suspend_fail_before":before.fail,"suspend_fail_after":after.fail,"rtc_wake_seconds":30});
         }
         BoundedServiceAction::PrepareFixture {
             source_cpu,
