@@ -136,13 +136,35 @@ pub(crate) fn run(state: &State, dir: &Path) -> anyhow::Result<Value> {
         // An experiment cut short by the two-game phase leaves its action in the controller's
         // five-minute candidate cooldown; the replacement may only start once that has passed.
         let _pressure = world.spawn_burst(cpus.0, 8, 590)?;
-        probe.wait(&mut controller, 420, |row| {
-            row["decision"]["decision"] == "candidate_applied" && focus_matches(row, &replacement)
-        })?;
-        probe.wait(&mut controller, 150, |row| {
-            row["decision"]["decision"] == "candidate_kept"
-        })?;
-        cases.push(json!({"scenario":"stable_replacement_pressure_supported_keep","pid":replacement.child.pid(),"starttime_ticks":replacement.ticks}));
+        // The controller keeps only a measured improvement, so an experiment can honestly end
+        // inconclusive and be reverted. The scenario asks for a supported keep, so it allows
+        // two further real experiments after the candidate memory; every attempt is recorded.
+        let mut attempts = 0_u32;
+        loop {
+            attempts += 1;
+            probe.wait(&mut controller, 420, |row| {
+                row["decision"]["decision"] == "candidate_applied"
+                    && focus_matches(row, &replacement)
+            })?;
+            let from = probe.mark();
+            probe.wait_from(&mut controller, from, 150, |row| {
+                matches!(
+                    row["decision"]["decision"].as_str(),
+                    Some("candidate_kept" | "candidate_reverted")
+                )
+            })?;
+            if probe.records[from..]
+                .iter()
+                .any(|row| row["decision"]["decision"] == "candidate_kept")
+            {
+                break;
+            }
+            ensure!(
+                attempts < 3,
+                "the stable replacement under pressure was never kept in {attempts} experiments"
+            );
+        }
+        cases.push(json!({"scenario":"stable_replacement_pressure_supported_keep","pid":replacement.child.pid(),"starttime_ticks":replacement.ticks,"experiments":attempts}));
         stop_game(&mut replacement)?;
         probe.wait(&mut controller, 40, |row| row["target"].is_null())?;
         // A higher-scoring workload may legitimately take the focus from a game mid-experiment.
