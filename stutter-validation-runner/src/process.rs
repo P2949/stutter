@@ -98,12 +98,6 @@ pub fn stutter_path(auth: &Authorization) -> PathBuf {
 
 /// The pinned binary must still hash to the digest recorded at bootstrap.
 pub fn verify_pinned(path: &Path, expected_sha256: &str) -> Result<(), Denial> {
-    let before = crate::verified::state(path);
-    if let Some(before) = &before
-        && crate::verified::matched(path, before, expected_sha256)
-    {
-        return Ok(());
-    }
     let bytes =
         fs::read(path).map_err(|error| failure(format!("read {}: {error}", path.display())))?;
     if sha256_hex(&bytes) != expected_sha256 {
@@ -113,9 +107,6 @@ pub fn verify_pinned(path: &Path, expected_sha256: &str) -> Result<(), Denial> {
                 .and_then(|n| n.to_str())
                 .unwrap_or("binary")
         )));
-    }
-    if let Some(before) = before {
-        crate::verified::remember(path, before, expected_sha256);
     }
     Ok(())
 }

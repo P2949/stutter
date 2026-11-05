@@ -2743,7 +2743,6 @@ dependencies = [
  "serde",
  "serde_json",
  "stutter-core",
- "tempfile",
 ]
 
 [[package]]
