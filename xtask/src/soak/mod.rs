@@ -358,6 +358,7 @@ fn drive_soak(dir: &Path, state: &mut SoakState, world: &mut world::World) -> an
     let timing = plan::timing(state.profile);
     let mut last_start = last_starts(world);
     let mut failures = 0_u32;
+    let mut not_attempted = 0_u32;
     println!(
         "soak {} running: round {}, {:.2} h left",
         state.id,
@@ -465,6 +466,17 @@ fn drive_soak(dir: &Path, state: &mut SoakState, world: &mut world::World) -> an
         if record.outcome == "interrupted" {
             break;
         }
+        if record.outcome == round::NOT_ATTEMPTED {
+            // The fault was never injected, so there is no evidence to count: repeat the round.
+            // Three in a row means the host or harness cannot reach the scenario.
+            not_attempted += 1;
+            anyhow::ensure!(
+                not_attempted < 3,
+                "round {index} could not inject its fault three times in a row"
+            );
+            continue;
+        }
+        not_attempted = 0;
         // A round that could not even run (as opposed to one that found a violation) three times
         // in a row means the harness or the host is broken: stop instead of churning.
         failures = if record.error.is_some() {

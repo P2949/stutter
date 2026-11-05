@@ -288,7 +288,42 @@ pub(super) fn runtime_checks(dir: &Path) -> anyhow::Result<Vec<super::verify::Ch
         passed: good >= required,
         detail,
     });
+    checks.push(runtime_bound_check(dir, &state, &rounds)?);
     Ok(checks)
+}
+
+/// The whole soak, idle dwell included, ran inside the frozen maximum. The span ends at the later
+/// of the last round and the last independently sampled presence interval, so it is not just the
+/// rounds' own duration.
+fn runtime_bound_check(
+    dir: &Path,
+    state: &SoakState,
+    rounds: &[super::records::RoundRecord],
+) -> anyhow::Result<super::verify::Check> {
+    let maximum_ms = manifest(state)?.coverage.maximum_dwell_seconds * 1000;
+    let last_round = rounds
+        .iter()
+        .map(|round| round.finished_unix_ms)
+        .max()
+        .unwrap_or(0);
+    let last_presence = std::fs::read_to_string(dir.join("presence.jsonl"))
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter_map(|row| row["end_unix_ms"].as_u64())
+        .max()
+        .unwrap_or(0);
+    let started = state.started_unix_ms.unwrap_or(0);
+    let span_ms = last_round.max(last_presence).saturating_sub(started);
+    Ok(super::verify::Check {
+        name: "service_soak_within_maximum_runtime".into(),
+        passed: started > 0 && span_ms <= maximum_ms,
+        detail: format!(
+            "the soak spanned {:.2} h from its first round to its last presence sample; at most {:.2} h allowed",
+            span_ms as f64 / 3_600_000.0,
+            maximum_ms as f64 / 3_600_000.0
+        ),
+    })
 }
 
 /// After every round, what the schedule projects to: informational evidence, never a gate. Six

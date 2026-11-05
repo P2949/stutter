@@ -183,7 +183,7 @@ pub fn verify(dir: &Path) -> anyhow::Result<Report> {
                 round.round, round.kind
             ));
         }
-        if round.outcome != "ok" {
+        if round.outcome != "ok" && round.outcome != "not_attempted" {
             rounds_problems.push(format!(
                 "round {} ({}) ended `{}`: {}",
                 round.round,

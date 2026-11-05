@@ -54,12 +54,19 @@ impl Ctx<'_> {
         game: &Game,
         how: &str,
     ) -> anyhow::Result<Controller> {
+        let baseline = match self.crash_baseline() {
+            Ok(baseline) => baseline,
+            Err(error) => {
+                if error.is::<super::service_round::ExperimentAlreadyResolved>() {
+                    let _ = self.finish_service_workload(controller, "experiment_resolved_first");
+                }
+                return Err(error);
+            }
+        };
         let startup_before =
             audit_events(&self.world.audit_path(), "autotune-startup-recovery").len();
         let emergency_before =
             audit_events(&self.world.audit_path(), "autotune emergency restore").len();
-        let unresolved_before = self.unresolved_tokens();
-        let interrupted = self.outstanding_token_ids();
         match how {
             "sigterm" => self.term_controller(&mut controller),
             "restart" => {
@@ -73,8 +80,8 @@ impl Ctx<'_> {
             game,
             startup_before,
             emergency_before,
-            unresolved_before,
-            &interrupted,
+            baseline.unresolved,
+            &baseline.interrupted,
         )?;
         Ok(next)
     }

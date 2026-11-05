@@ -102,6 +102,10 @@ impl Minimums {
 pub fn tally(rounds: &[RoundRecord], counts: &mut Counts) {
     let mut clean: BTreeMap<u32, (bool, &str)> = BTreeMap::new();
     for round in rounds {
+        if round.outcome == "not_attempted" && round.violations.is_empty() {
+            // No fault was injected: this record is neither a clean nor a failed attempt.
+            continue;
+        }
         let ok = round.outcome == "ok" && round.violations.is_empty();
         let entry = clean
             .entry(round.round)
@@ -468,6 +472,27 @@ mod tests {
         let mut retry = rounds[0].clone();
         retry.outcome = "ok".to_owned();
         rounds.push(retry);
+        assert_eq!(counts(&state, &rounds, &events).clean_complete_cycles, 5);
+    }
+
+    #[test]
+    fn a_round_whose_fault_was_never_injected_is_neither_clean_nor_failed() {
+        let (state, mut rounds, events) = full_fixture(6, 8.0);
+        // The attempt that injected nothing is repeated; the repeat is what counts.
+        let mut first = rounds[0].clone();
+        first.outcome = "not_attempted".to_owned();
+        rounds.insert(0, first);
+        assert_eq!(counts(&state, &rounds, &events).clean_complete_cycles, 6);
+        // It repairs nothing: with no clean repeat the index is simply missing.
+        let (state, mut rounds, events) = full_fixture(6, 8.0);
+        rounds[0].outcome = "not_attempted".to_owned();
+        assert_eq!(counts(&state, &rounds, &events).clean_complete_cycles, 5);
+        // A violation recorded by the same attempt still makes the index unclean.
+        let (state, mut rounds, events) = full_fixture(6, 8.0);
+        let mut first = rounds[0].clone();
+        first.outcome = "not_attempted".to_owned();
+        first.violations.push("a stale kept action".to_owned());
+        rounds.insert(0, first);
         assert_eq!(counts(&state, &rounds, &events).clean_complete_cycles, 5);
     }
 

@@ -41,6 +41,9 @@ struct Ctx<'a> {
     resolved: Vec<Option<String>>,
 }
 
+/// A round whose fault was never injected; neither clean nor failed, and repeated.
+pub(super) const NOT_ATTEMPTED: &str = "not_attempted";
+
 pub(super) fn run_round(
     world: &mut World,
     dir: &Path,
@@ -75,8 +78,13 @@ pub(super) fn run_round(
         Ok(()) if ctx.record.violations.is_empty() => ctx.record.outcome = "ok".to_owned(),
         Ok(()) => ctx.record.outcome = "failed".to_owned(),
         Err(error) => {
+            // A fault that was never injected proves nothing; it is repeated, not failed.
+            let not_attempted = error.is::<service_round::ExperimentAlreadyResolved>()
+                && ctx.record.violations.is_empty();
             ctx.record.outcome = if STOP.load(Ordering::SeqCst) {
                 "interrupted"
+            } else if not_attempted {
+                NOT_ATTEMPTED
             } else {
                 "failed"
             }
@@ -159,12 +167,20 @@ impl Ctx<'_> {
             }
             Kind::ControllerCrash => {
                 let tried = self.applied(&mut controller)?;
+                let baseline = match self.crash_baseline() {
+                    Ok(baseline) => baseline,
+                    Err(error) => {
+                        if error.is::<service_round::ExperimentAlreadyResolved>() {
+                            let _ = self
+                                .finish_service_workload(controller, "experiment_resolved_first");
+                        }
+                        return Err(error);
+                    }
+                };
                 let startup_before =
                     audit_events(&self.world.audit_path(), "autotune-startup-recovery").len();
                 let emergency_before =
                     audit_events(&self.world.audit_path(), "autotune emergency restore").len();
-                let unresolved_before = self.unresolved_tokens();
-                let interrupted = self.outstanding_token_ids();
                 self.kill_controller(&mut controller);
                 self.end_session(controller, "kill9");
                 let mut next =
@@ -174,8 +190,8 @@ impl Ctx<'_> {
                         &game,
                         startup_before,
                         emergency_before,
-                        unresolved_before,
-                        &interrupted,
+                        baseline.unresolved,
+                        &baseline.interrupted,
                     )?;
                 } else {
                     self.wait_recovery(startup_before)?;

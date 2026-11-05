@@ -1,6 +1,26 @@
 //! Packaged-service lifecycle checks within the shared round driver.
 use super::*;
 
+/// The root ledger as it stood just before a fault was injected.
+#[derive(Default)]
+pub(super) struct CrashBaseline {
+    pub(super) unresolved: u64,
+    pub(super) interrupted: Vec<String>,
+}
+
+/// The controller resolved its own experiment (a focus loss, say) before the fault could be
+/// injected. No fault was injected, so the round proves nothing either way and is repeated.
+#[derive(Debug)]
+pub(super) struct ExperimentAlreadyResolved;
+
+impl std::fmt::Display for ExperimentAlreadyResolved {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the controller resolved its experiment before the fault was injected")
+    }
+}
+
+impl std::error::Error for ExperimentAlreadyResolved {}
+
 impl Ctx<'_> {
     pub(super) fn worker_kill_round(
         &mut self,
@@ -56,42 +76,44 @@ impl Ctx<'_> {
         self.end_workload(&mut game, controller, "workload_exit")
     }
 
-    /// Tokens the root worker has recorded as unresolved so far.
-    pub(super) fn unresolved_tokens(&self) -> u64 {
-        self.world
-            .service
-            .as_ref()
-            .and_then(|binding| {
-                binding
-                    .action(stutter_validation_runner::model::BoundedServiceAction::Query)
-                    .ok()
-            })
-            .and_then(|report| {
-                report["worker_tokens"]["recovery_audit"]["dispositions"]["unresolved"].as_u64()
-            })
-            .unwrap_or(0)
-    }
-
-    /// The root ledger's unsettled tokens, each told apart by its plan's creation time.
-    pub(super) fn outstanding_token_ids(&self) -> Vec<String> {
-        self.world
-            .service
-            .as_ref()
-            .and_then(|binding| {
-                binding
-                    .action(stutter_validation_runner::model::BoundedServiceAction::Query)
-                    .ok()
-            })
-            .and_then(|report| {
-                report["worker_tokens"]["outstanding_ids"]
-                    .as_array()
-                    .map(|ids| {
-                        ids.iter()
-                            .filter_map(|id| id.as_str().map(str::to_owned))
-                            .collect()
-                    })
-            })
-            .unwrap_or_default()
+    /// What the root ledger holds the instant before a fault is injected into an applied
+    /// experiment: how many tokens root has left unresolved so far, and which tokens are
+    /// outstanding (told apart by their plan's creation time). One query, so no time passes
+    /// between the proof that the experiment is still applied and the fault. A controller that
+    /// already resolved its own experiment (for example a focus loss rolled it back) leaves
+    /// nothing for the fault to interrupt, and the round says so instead of failing.
+    pub(super) fn crash_baseline(&self) -> anyhow::Result<CrashBaseline> {
+        let Some(binding) = &self.world.service else {
+            return Ok(CrashBaseline::default());
+        };
+        let report =
+            binding.action(stutter_validation_runner::model::BoundedServiceAction::Query)?;
+        let tokens = &report["worker_tokens"];
+        anyhow::ensure!(
+            tokens["readable"] == true && tokens["recovery_audit"]["readable"] == true,
+            "the root token ledger or its audit was unreadable before the fault: {tokens}"
+        );
+        let outstanding = tokens["outstanding"].as_u64().unwrap_or(0);
+        if outstanding == 0 {
+            return Err(anyhow::Error::new(ExperimentAlreadyResolved));
+        }
+        let interrupted: Vec<String> = tokens["outstanding_ids"]
+            .as_array()
+            .context("the root report names no outstanding token ids")?
+            .iter()
+            .filter_map(|id| id.as_str().map(str::to_owned))
+            .collect();
+        anyhow::ensure!(
+            interrupted.len() as u64 == outstanding,
+            "the root report named {} of {outstanding} outstanding tokens",
+            interrupted.len()
+        );
+        Ok(CrashBaseline {
+            unresolved: tokens["recovery_audit"]["dispositions"]["unresolved"]
+                .as_u64()
+                .unwrap_or(0),
+            interrupted,
+        })
     }
 
     pub(super) fn wait_service_recovery(
@@ -141,17 +163,22 @@ impl Ctx<'_> {
                 );
                 // The token the interruption left behind is settled by name; a token the restarted
                 // controller issued since is a different one and may still be open.
-                let still_open: Vec<_> = interrupted
+                let ids = |key: &str| -> anyhow::Result<Vec<String>> {
+                    Ok(report["worker_tokens"][key]
+                        .as_array()
+                        .with_context(|| format!("the root report names no {key}"))?
+                        .iter()
+                        .filter_map(|id| id.as_str().map(str::to_owned))
+                        .collect())
+                };
+                let (open, settled) = (ids("outstanding_ids")?, ids("settled_ids")?);
+                let unsettled: Vec<_> = interrupted
                     .iter()
-                    .filter(|id| {
-                        report["worker_tokens"]["outstanding_ids"]
-                            .as_array()
-                            .is_some_and(|open| open.iter().any(|open| open == id.as_str()))
-                    })
+                    .filter(|id| open.contains(id) || !settled.contains(id))
                     .collect();
                 anyhow::ensure!(
-                    still_open.is_empty(),
-                    "the interrupted root token {still_open:?} is still outstanding: {}",
+                    unsettled.is_empty(),
+                    "the interrupted root token {unsettled:?} was not observed settled: {}",
                     report["worker_tokens"]
                 );
                 fs::write(
