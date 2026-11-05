@@ -16,6 +16,7 @@ pub mod server;
 pub mod service;
 pub mod state;
 pub mod sys;
+mod verified;
 
 #[cfg(test)]
 mod tests;

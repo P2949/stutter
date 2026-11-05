@@ -23,3 +23,6 @@ libc = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 stutter-core = { path = "../stutter-core" }
+
+[dev-dependencies]
+tempfile = { workspace = true }
