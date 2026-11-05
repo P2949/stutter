@@ -254,9 +254,7 @@ pub(super) fn runtime_checks(dir: &Path) -> anyhow::Result<Vec<super::verify::Ch
                 .into(),
     }];
     let state = read_state(dir)?;
-    let repetitions = manifest(&state)?
-        .coverage
-        .minimum_dangerous_event_repetitions as usize;
+    let (repetitions, required) = event_and_reboot_floors(&state)?;
     let rounds = super::records::read_rounds(dir)?;
     for event in super::plan::SERVICE_EVENT_KINDS {
         let count = rounds
@@ -273,7 +271,6 @@ pub(super) fn runtime_checks(dir: &Path) -> anyhow::Result<Vec<super::verify::Ch
     }
     // Reboot receipts come only from the typed reboot stage. The current boot ID or historical
     // direct-controller evidence cannot stand in for them.
-    let required = manifest(&state)?.coverage.minimum_real_reboots as usize;
     let (good, detail) = match dir.parent() {
         Some(campaign) => super::service_reboots::verified_receipts(
             campaign,
@@ -317,11 +314,7 @@ pub(super) fn record_projection(
         hours(per_round_ms * cycle_len as f64 * f64::from(manifest.coverage.minimum_clean_cycles));
     let minimum_dwell_h = manifest.coverage.minimum_dwell_seconds as f64 / 3600.0;
     let maximum_dwell_h = manifest.coverage.maximum_dwell_seconds as f64 / 3600.0;
-    let for_dwell_h = if duty > 0.0 {
-        minimum_dwell_h / duty
-    } else {
-        f64::INFINITY
-    };
+    let for_dwell_h = wall_for_dwell(for_cycles_h, duty, minimum_dwell_h);
     let required_h = for_cycles_h.max(for_dwell_h);
     let value = serde_json::json!({
         "preliminary": rounds_done < cycle_len,
@@ -345,4 +338,88 @@ pub(super) fn record_projection(
     )?;
     // Only a full cycle makes the figure meaningful; before that it is preliminary.
     Ok(rounds_done < cycle_len || required_h <= maximum_dwell_h)
+}
+
+/// Wall time to a verified dwell of `dwell_h` after the cycles: the cycles earn `duty` of their
+/// wall time, and the coverage-complete idle phase earns the rest at full presence.
+fn wall_for_dwell(cycles_h: f64, duty: f64, dwell_h: f64) -> f64 {
+    if duty <= 0.0 {
+        return f64::INFINITY;
+    }
+    cycles_h + (dwell_h - duty * cycles_h).max(0.0)
+}
+
+/// What the service runtime checks require of this campaign: clean executions of each service
+/// event and verified real reboots. A rehearsal proves less by its own explicit contract; a
+/// counted campaign must match its frozen manifest exactly, so a counted campaign can never
+/// inherit a rehearsal's weaker gates through a mutated state field.
+fn event_and_reboot_floors(state: &SoakState) -> anyhow::Result<(usize, usize)> {
+    let binding = state.service.as_ref().context("service binding missing")?;
+    let coverage = manifest(state)?.coverage;
+    floors(
+        binding.campaign.rehearsal,
+        binding.campaign.required_reboots,
+        coverage.minimum_dangerous_event_repetitions,
+        coverage.minimum_real_reboots,
+    )
+}
+
+fn floors(
+    rehearsal: bool,
+    required_reboots: u32,
+    manifest_repetitions: u32,
+    manifest_reboots: u32,
+) -> anyhow::Result<(usize, usize)> {
+    if rehearsal {
+        ensure!(
+            required_reboots == 0,
+            "a rehearsal records no real reboots, but requires {required_reboots}"
+        );
+        return Ok((super::coverage::Minimums::rehearsal().per_kind, 0));
+    }
+    ensure!(
+        required_reboots == manifest_reboots,
+        "the campaign requires {required_reboots} reboots but its frozen manifest requires {manifest_reboots}"
+    );
+    Ok((manifest_repetitions as usize, manifest_reboots as usize))
+}
+
+#[cfg(test)]
+mod floor_tests {
+    use super::floors;
+
+    #[test]
+    fn a_rehearsal_needs_one_execution_and_no_reboot() {
+        assert_eq!(floors(true, 0, 6, 2).unwrap(), (1, 0));
+    }
+
+    #[test]
+    fn a_counted_campaign_keeps_the_frozen_manifest_floors() {
+        assert_eq!(floors(false, 2, 6, 2).unwrap(), (6, 2));
+    }
+
+    #[test]
+    fn a_counted_campaign_cannot_inherit_a_rehearsals_weaker_gates() {
+        assert!(floors(false, 0, 6, 2).is_err());
+        assert!(floors(false, 1, 6, 2).is_err());
+    }
+
+    #[test]
+    fn a_rehearsal_that_demands_reboots_is_inconsistent() {
+        assert!(floors(true, 2, 6, 2).is_err());
+    }
+}
+
+#[cfg(test)]
+mod projection_tests {
+    use super::wall_for_dwell;
+
+    #[test]
+    fn the_idle_phase_tops_up_only_the_missing_dwell() {
+        // Cycles of 9 h at 80 % presence earn 7.2 h; the missing 0.8 h is idle presence.
+        assert!((wall_for_dwell(9.0, 0.8, 8.0) - 9.8).abs() < 1e-9);
+        // Cycles that already earn the dwell need no top-up.
+        assert!((wall_for_dwell(9.0, 0.95, 8.0) - 9.0).abs() < 1e-9);
+        assert!(wall_for_dwell(9.0, 0.0, 8.0).is_infinite());
+    }
 }

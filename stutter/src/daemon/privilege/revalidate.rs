@@ -204,6 +204,7 @@ pub(super) fn candidate_task_identities(candidate: &CandidateAction) -> Vec<Task
 
 /// Why a task's identity could not be read. Only a missing entry proves the task is gone; any
 /// other failure means its state is unknown, and unknown never takes the stale-candidate path.
+#[derive(Debug)]
 enum LiveReadFailure {
     Gone,
     Unknown(String),
@@ -234,7 +235,9 @@ fn read_top_level_task_identity(
 ) -> Result<LiveTaskIdentity, LiveReadFailure> {
     let stat_path = proc_root.join(tid.to_string()).join("stat");
     let mut identity = read_identity_from_stat(&stat_path, tid, None)?;
-    identity.process_pid = read_tgid_from_status(&proc_root.join(tid.to_string()).join("status"));
+    identity.process_pid = Some(read_tgid_from_status(
+        &proc_root.join(tid.to_string()).join("status"),
+    )?);
     Ok(identity)
 }
 
@@ -277,10 +280,58 @@ fn parse_proc_stat_tid_and_comm(stat: &str) -> Option<(u32, String)> {
     Some((tid, stat[open + 1..close].to_owned()))
 }
 
-fn read_tgid_from_status(path: &Path) -> Option<u32> {
-    let status = std::fs::read_to_string(path).ok()?;
-    status.lines().find_map(|line| {
-        let value = line.strip_prefix("Tgid:")?;
-        value.trim().parse().ok()
-    })
+/// The task's process id. A task that is gone is `Gone`; a status that cannot be read or does not
+/// name a process is `Unknown`, never mistaken for a different process.
+fn read_tgid_from_status(path: &Path) -> Result<u32, LiveReadFailure> {
+    let status = match std::fs::read_to_string(path) {
+        Ok(status) => status,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Err(LiveReadFailure::Gone);
+        }
+        Err(error) => {
+            return Err(LiveReadFailure::Unknown(format!(
+                "{}: {error}",
+                path.display()
+            )));
+        }
+    };
+    status
+        .lines()
+        .find_map(|line| line.strip_prefix("Tgid:")?.trim().parse().ok())
+        .ok_or_else(|| LiveReadFailure::Unknown(format!("{}: malformed status", path.display())))
+}
+
+#[cfg(test)]
+mod status_tests {
+    use super::*;
+
+    #[test]
+    fn the_process_id_comes_from_the_tgid_line() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("status");
+        std::fs::write(&path, "Name:\tgame\nTgid:\t4242\nPid:\t4243\n").unwrap();
+        assert_eq!(read_tgid_from_status(&path).unwrap(), 4242);
+    }
+
+    #[test]
+    fn a_missing_status_is_a_gone_task_and_a_malformed_one_is_unknown() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("status");
+        assert!(matches!(
+            read_tgid_from_status(&path),
+            Err(LiveReadFailure::Gone)
+        ));
+        std::fs::write(&path, "Name:\tgame\n").unwrap();
+        assert!(matches!(
+            read_tgid_from_status(&path),
+            Err(LiveReadFailure::Unknown(_))
+        ));
+        // A directory cannot be read as a file: an I/O failure, not a different process.
+        let unreadable = dir.path().join("dir");
+        std::fs::create_dir(&unreadable).unwrap();
+        assert!(matches!(
+            read_tgid_from_status(&unreadable),
+            Err(LiveReadFailure::Unknown(_))
+        ));
+    }
 }

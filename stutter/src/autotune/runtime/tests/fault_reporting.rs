@@ -249,3 +249,35 @@ fn reporting_io_failure_preserves_original_error_and_still_saves_fault_snapshot(
     assert!(state.active_rollback.unwrap().token.is_some());
     assert!(root.join("decisions.jsonl").is_file());
 }
+
+/// Faulted is terminal: neither measuring a candidate nor observing a baseline may follow it, so
+/// an evaluation of a faulted runtime fails before it can plan or apply anything, and the runtime
+/// stays Faulted until the documented recovery clears the obligation.
+#[test]
+fn a_faulted_runtime_refuses_every_evaluation_and_stays_faulted() {
+    let root = crate::test_support::TestRoot::new("runtime-faulted-evaluation");
+    let mut config = AutotuneRuntimeConfig::from_daemon_config(
+        daemon_config_for_runtime_mode(
+            DaemonMode::ApplyLowRisk,
+            ActionSource::Test,
+            Some(1234),
+            None,
+        ),
+        Some(root.join("decisions.jsonl")),
+    );
+    config.controller_journal_path = Some(root.join("controller.json"));
+    let mut runtime = AutotuneRuntime::new(config);
+    runtime.fault_runtime_phase("synthetic fault with an experiment in flight");
+    assert_eq!(runtime.runtime_phase(), AutotuneRuntimePhase::Faulted);
+    for _ in 0..2 {
+        assert!(runtime.prepare_runtime_phase_for_evaluation().is_err());
+        assert_eq!(runtime.runtime_phase(), AutotuneRuntimePhase::Faulted);
+    }
+    for next in [
+        AutotuneRuntimePhase::MeasuringCandidate,
+        AutotuneRuntimePhase::ObservingBaseline,
+    ] {
+        assert!(runtime.transition_runtime_phase(next, "test").is_err());
+        assert_eq!(runtime.runtime_phase(), AutotuneRuntimePhase::Faulted);
+    }
+}

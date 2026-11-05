@@ -68,7 +68,8 @@ pub fn init(root: &Path) -> anyhow::Result<()> {
     check_binary_revision(&binaries.stutter, &source)?;
     let manifest = Manifest::load(&root.join(manifest::FILE))?;
     // Only a person measuring the schedule sets this; the campaign it makes can never be evidence.
-    let rehearsal = std::env::var_os("STUTTER_SERVICE_REHEARSAL").is_some();
+    // Exactly `1`; any other value, including `0`, makes a counted campaign.
+    let rehearsal = std::env::var_os("STUTTER_SERVICE_REHEARSAL").is_some_and(|value| value == "1");
     let identity = fs::metadata("/proc/self")?;
     ensure!(
         identity.uid() != 0,

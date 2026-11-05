@@ -59,6 +59,7 @@ impl Ctx<'_> {
         let emergency_before =
             audit_events(&self.world.audit_path(), "autotune emergency restore").len();
         let unresolved_before = self.unresolved_tokens();
+        let interrupted = self.outstanding_token_ids();
         match how {
             "sigterm" => self.term_controller(&mut controller),
             "restart" => {
@@ -68,7 +69,13 @@ impl Ctx<'_> {
         }
         self.end_session(controller, how);
         let next = self.start_controller(game, "controller-2", self.round.operations)?;
-        self.wait_service_recovery(game, startup_before, emergency_before, unresolved_before)?;
+        self.wait_service_recovery(
+            game,
+            startup_before,
+            emergency_before,
+            unresolved_before,
+            &interrupted,
+        )?;
         Ok(next)
     }
 

@@ -72,12 +72,35 @@ impl Ctx<'_> {
             .unwrap_or(0)
     }
 
+    /// The root ledger's unsettled tokens, each told apart by its plan's creation time.
+    pub(super) fn outstanding_token_ids(&self) -> Vec<String> {
+        self.world
+            .service
+            .as_ref()
+            .and_then(|binding| {
+                binding
+                    .action(stutter_validation_runner::model::BoundedServiceAction::Query)
+                    .ok()
+            })
+            .and_then(|report| {
+                report["worker_tokens"]["outstanding_ids"]
+                    .as_array()
+                    .map(|ids| {
+                        ids.iter()
+                            .filter_map(|id| id.as_str().map(str::to_owned))
+                            .collect()
+                    })
+            })
+            .unwrap_or_default()
+    }
+
     pub(super) fn wait_service_recovery(
         &mut self,
         game: &Game,
         startup_before: usize,
         emergency_before: usize,
         unresolved_before: u64,
+        interrupted: &[String],
     ) -> anyhow::Result<()> {
         let deadline = Instant::now() + Duration::from_secs(40);
         loop {
@@ -114,6 +137,21 @@ impl Ctx<'_> {
                             .as_u64()
                             == Some(unresolved_before),
                     "root worker has an unsettled crash token: {}",
+                    report["worker_tokens"]
+                );
+                // The token the interruption left behind is settled by name; a token the restarted
+                // controller issued since is a different one and may still be open.
+                let still_open: Vec<_> = interrupted
+                    .iter()
+                    .filter(|id| {
+                        report["worker_tokens"]["outstanding_ids"]
+                            .as_array()
+                            .is_some_and(|open| open.iter().any(|open| open == id.as_str()))
+                    })
+                    .collect();
+                anyhow::ensure!(
+                    still_open.is_empty(),
+                    "the interrupted root token {still_open:?} is still outstanding: {}",
                     report["worker_tokens"]
                 );
                 fs::write(

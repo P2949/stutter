@@ -336,7 +336,17 @@ fn worker_tokens(user: &str) -> Value {
     let mut summary = match fs::read(&ledger) {
         Ok(bytes) => match serde_json::from_slice::<Value>(&bytes) {
             Ok(Value::Array(entries)) => {
-                json!({"readable": true, "outstanding": entries.iter().filter(|entry| entry["restored"] != true).count()})
+                // A token is told apart from every later one by its plan's creation time.
+                let ids = |settled: bool| -> Vec<&str> {
+                    entries
+                        .iter()
+                        .filter(|entry| (entry["restored"] == true) == settled)
+                        .filter_map(|entry| entry["plan"]["created_unix_nanos"].as_str())
+                        .collect()
+                };
+                json!({"readable": true,
+                    "outstanding": entries.iter().filter(|entry| entry["restored"] != true).count(),
+                    "outstanding_ids": ids(false), "settled_ids": ids(true)})
             }
             _ => json!({"readable": false, "error": "worker ledger is malformed"}),
         },

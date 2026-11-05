@@ -157,6 +157,7 @@ impl Ctx<'_> {
                 let emergency_before =
                     audit_events(&self.world.audit_path(), "autotune emergency restore").len();
                 let unresolved_before = self.unresolved_tokens();
+                let interrupted = self.outstanding_token_ids();
                 self.kill_controller(&mut controller);
                 self.end_session(controller, "kill9");
                 let mut next =
@@ -167,6 +168,7 @@ impl Ctx<'_> {
                         startup_before,
                         emergency_before,
                         unresolved_before,
+                        &interrupted,
                     )?;
                 } else {
                     self.wait_recovery(startup_before)?;

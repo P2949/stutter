@@ -13,6 +13,7 @@ mod plan;
 mod records;
 mod round;
 pub(crate) mod service;
+mod service_budget;
 pub(super) mod service_cgroup;
 pub(crate) mod service_discovery;
 pub(crate) mod service_evidence;
@@ -385,6 +386,25 @@ fn drive_soak(dir: &Path, state: &mut SoakState, world: &mut world::World) -> an
             complete = true;
             break;
         }
+        // Every cycle and event floor is met and only live dwell is missing: more fault rounds
+        // would add nothing, so the real service stays up under observation until it is earned.
+        if state.profile == Profile::Service
+            && !state
+                .service
+                .as_ref()
+                .is_some_and(|binding| binding.campaign.rehearsal)
+            && coverage::coverage_reached(dir)?
+        {
+            service_budget::idle_dwell(
+                dir,
+                state,
+                world,
+                cap.saturating_sub(service_budget::SETTLEMENT_MS),
+                (state.hours * 3_600_000.0) as u64,
+            )?;
+            complete = !round::STOP.load(Ordering::SeqCst);
+            break;
+        }
         let index = state.next_round;
         let round = if state.profile == Profile::Service {
             plan::service_round_for(index)
@@ -393,6 +413,22 @@ fn drive_soak(dir: &Path, state: &mut SoakState, world: &mut world::World) -> an
         };
         wait_for_spacing(&round, &last_start);
         if round::STOP.load(Ordering::SeqCst) {
+            break;
+        }
+        // The cap is a hard wall-time bound: a round that could not finish and settle inside it
+        // is not started, and the verifier then judges the coverage that was reached.
+        if state.profile == Profile::Service
+            && !service_budget::fits(
+                unix_ms(),
+                cap,
+                service_budget::round_reserve_ms(&round, timing),
+            )
+        {
+            println!(
+                "soak {}: no round can finish inside the maximum runtime",
+                state.id
+            );
+            complete = true;
             break;
         }
         let (record, seen) = round::run_round(world, dir, index, round, timing);
@@ -421,9 +457,10 @@ fn drive_soak(dir: &Path, state: &mut SoakState, world: &mut world::World) -> an
         {
             // Fail early and loudly rather than burn the maximum dwell on a run that cannot reach
             // its frozen coverage; the thresholds themselves are never touched.
-            anyhow::bail!(
-                "the service schedule projects past the frozen maximum dwell (see timing-projection.json); stopping instead of spending the cap"
-            );
+            return Err(crate::service_campaign::driver::StageFailure::error(
+                crate::validation_campaign::model::FailureClass::ValidationFailure,
+                "the measured service schedule projects past the frozen maximum dwell (see timing-projection.json); stopping instead of spending the cap",
+            ));
         }
         if record.outcome == "interrupted" {
             break;
@@ -450,6 +487,12 @@ fn drive_soak(dir: &Path, state: &mut SoakState, world: &mut world::World) -> an
             && state.next_round as usize >= plan::SERVICE_CYCLE_LEN
         {
             // A rehearsal measures one complete cycle and stops.
+            service_budget::rehearse_idle_dwell(
+                dir,
+                state,
+                world,
+                cap.saturating_sub(service_budget::SETTLEMENT_MS),
+            )?;
             complete = true;
             break;
         }
@@ -463,6 +506,13 @@ fn drive_soak(dir: &Path, state: &mut SoakState, world: &mut world::World) -> an
         }
     }
     service_soak::settle(dir, world)?;
+    // The bound covers stopping the service too, not only the last round's start.
+    if state.profile == Profile::Service && unix_ms() > cap {
+        return Err(crate::service_campaign::driver::StageFailure::error(
+            crate::validation_campaign::model::FailureClass::ValidationFailure,
+            "the counted soak ran past its frozen maximum runtime",
+        ));
+    }
     if complete || stopped_early {
         state.finished = true;
         write_state(dir, state)?;
