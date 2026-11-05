@@ -88,6 +88,27 @@ impl Minimums {
         }
     }
 
+    /// Targeted service acceptance: every round of the cycle clean, every dangerous and service
+    /// event exercised, and both graduated operations kept and reverted, with no dwell or
+    /// reboot floor. The manifest then sets the cycle, event and keep/revert counts.
+    pub const fn acceptance() -> Self {
+        Self {
+            hours: 0.0,
+            experiments: 2,
+            focus_transitions: 1,
+            controller_restarts: 1,
+            worker_restarts: 1,
+            suspends: 1,
+            clean_rounds: crate::soak::plan::SERVICE_CYCLE_LEN,
+            clean_cycles: 1,
+            per_kind: 1,
+            service_events: true,
+            per_operation_resolved: 2,
+            per_operation_kept: 1,
+            per_operation_reverted: 1,
+        }
+    }
+
     pub fn for_profile(profile: Profile) -> Self {
         match profile {
             Profile::Full | Profile::Service => Self::FULL,
@@ -494,6 +515,18 @@ mod tests {
         first.violations.push("a stale kept action".to_owned());
         rounds.insert(0, first);
         assert_eq!(counts(&state, &rounds, &events).clean_complete_cycles, 5);
+    }
+
+    #[test]
+    fn acceptance_floors_are_event_complete_and_far_below_endurance() {
+        let (acceptance, endurance) = (Minimums::acceptance(), Minimums::FULL);
+        assert_eq!(acceptance.clean_rounds, plan::SERVICE_CYCLE_LEN);
+        assert_eq!(acceptance.hours, 0.0);
+        assert!(acceptance.service_events);
+        assert!(acceptance.per_operation_kept >= 1 && acceptance.per_operation_reverted >= 1);
+        assert!(acceptance.clean_rounds < endurance.clean_rounds);
+        assert!(acceptance.experiments < endurance.experiments);
+        assert!(acceptance.per_operation_resolved < endurance.per_operation_resolved);
     }
 
     #[test]

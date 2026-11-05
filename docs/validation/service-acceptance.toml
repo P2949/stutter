@@ -1,0 +1,21 @@
+# Targeted acceptance of the packaged bounded service: the same scope as service-graduation.toml,
+# but passed on observed, physically verified behavior rather than on elapsed time. It never
+# stands in for the extended endurance contract in service-graduation.toml.
+schema_version = 1
+manager = "systemd"
+focus_source = "heuristic"
+controller_mode = "apply-medium-risk"
+minimum_focus_confidence = 0.85
+
+[coverage]
+# No dwell floor: the run ends when its coverage floors are observed. The maximum is only a
+# global timeout so a stuck scenario cannot hang the campaign.
+minimum_dwell_seconds = 0
+maximum_dwell_seconds = 14400
+# One complete 22-round cycle exercises every dangerous and service event once.
+minimum_clean_cycles = 1
+minimum_dangerous_event_repetitions = 1
+# Reboot persistence is checked once on the production service, not inside this campaign.
+minimum_real_reboots = 0
+minimum_keeps_per_operation = 1
+minimum_reverts_per_operation = 1

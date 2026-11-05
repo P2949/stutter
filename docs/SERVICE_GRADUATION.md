@@ -48,3 +48,22 @@ still being completed. They explicitly refuse qualification until their live run
 required evidence are present. The completion gate remains at least eight hours of verified
 service dwell, six clean schedule cycles, repeated dangerous events and kept/reverted
 outcomes for both supported operations, with no unsupported apply or unrecovered token.
+
+## Targeted acceptance and extended endurance
+
+Two contracts exist for the same packaged service and never stand in for each other.
+
+* **Extended endurance** ([service-graduation.toml](validation/service-graduation.toml)): at least
+  eight hours of verified live dwell, six complete cycles and two real reboots inside the
+  campaign. Its floors are never lowered, and a shorter run never claims to have passed it.
+* **Targeted acceptance** ([service-acceptance.toml](validation/service-acceptance.toml)): started
+  with `STUTTER_SERVICE_ACCEPTANCE=1`, exported as the `live_bounded_service_acceptance` suite.
+  It passes on observed, physically verified behavior: one complete 22-round cycle in which every
+  dangerous and service event runs once, both CPU affinity and cgroup placement are kept and
+  reverted, every root token settles and nothing stays applied. It has no dwell floor and no
+  in-campaign reboot, and a global timeout bounds it. Reboot persistence of the production
+  service is checked separately on that service. A kernel-refused suspend is repeated, never
+  counted, and ambiguous outcomes fail.
+
+Earlier endurance campaigns remain historical supporting evidence with their own commits and
+limitations. They do not satisfy a check of a later exact commit.

@@ -26,6 +26,25 @@ pub(super) fn suite_for(profile: Profile) -> &'static str {
     }
 }
 
+/// The suite a finished soak's evidence is exported under. A targeted-acceptance service campaign
+/// has its own identity, so it can never stand in for the endurance suite.
+pub(super) fn suite_of(state: &SoakState) -> &'static str {
+    if is_acceptance(state) {
+        return crate::evidence_metadata::SUITE_BOUNDED_SERVICE_ACCEPTANCE;
+    }
+    suite_for(state.profile)
+}
+
+fn is_acceptance(state: &SoakState) -> bool {
+    state.profile == Profile::Service
+        && state
+            .service
+            .as_ref()
+            .is_some_and(|binding| binding.campaign.acceptance)
+}
+
+const ACCEPTANCE_SCOPE: &str = "Targeted acceptance of the actual packaged systemd bounded service: a monitored desktop-account controller, a separate root worker and heuristic auto-focus, on controlled game-like workloads. Passed on observed, physically verified behavior: every dangerous and service event once, CPU affinity and cgroup placement each kept and reverted through the unmodified autonomous registry, root tokens settled, nothing applied afterwards. No validation override.";
+
 fn scope(profile: Profile, hours: f64) -> String {
     if profile == Profile::Service {
         return format!(
@@ -50,6 +69,21 @@ fn scope(profile: Profile, hours: f64) -> String {
          cgroup_placement) ran, with kept and reverted experiments and the injected faults of the \
          schedule."
     )
+}
+
+/// What this evidence does not establish. Targeted acceptance additionally disclaims endurance.
+fn not_claimed(state: &SoakState) -> Vec<&'static str> {
+    if is_acceptance(state) {
+        let mut claims = vec![
+            "extended endurance: the eight-hour dwell, six complete cycles and in-campaign reboots of the endurance contract",
+        ];
+        claims.extend_from_slice(&NOT_CLAIMED[1..]);
+        return claims;
+    }
+    if state.profile == Profile::Service {
+        return NOT_CLAIMED[1..].to_vec();
+    }
+    NOT_CLAIMED.to_vec()
 }
 
 const NOT_CLAIMED: [&str; 6] = [
@@ -191,7 +225,7 @@ pub(crate) fn write_raw(
         "the binaries changed since `soak init`: a soak is bound to the binaries it started with, \
          so verify it with the same xtask"
     );
-    let suite = suite_for(state.profile);
+    let suite = suite_of(&state);
     fs::create_dir_all(raw.join("artifacts"))?;
     let environment = shared::capture(
         root,
@@ -217,7 +251,7 @@ fn write_artifacts(
     report: &Report,
     state: &SoakState,
 ) -> anyhow::Result<()> {
-    let suite = suite_for(state.profile);
+    let suite = suite_of(state);
     fs::create_dir_all(raw.join("artifacts"))?;
     let rounds = read_rounds(dir)?;
     write_json(&raw.join("artifacts/rounds.json"), &rounds_summary(&rounds))?;
@@ -236,8 +270,8 @@ fn write_artifacts(
         "status": "PASS",
         "evidence_kind": "controlled_real",
         "profile": state.profile,
-        "scope": scope(state.profile, state.hours),
-        "not_claimed": if state.profile == Profile::Service { &NOT_CLAIMED[1..] } else { &NOT_CLAIMED[..] },
+        "scope": if is_acceptance(state) { ACCEPTANCE_SCOPE.to_owned() } else { scope(state.profile, state.hours) },
+        "not_claimed": not_claimed(state),
         "operations": report.counts.by_operation.keys().collect::<Vec<_>>(),
         "counts": report.counts,
         "cases": report.checks.iter().map(|check| json!({

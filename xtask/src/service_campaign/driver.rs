@@ -9,7 +9,7 @@ use anyhow::{Context, ensure};
 use stutter_validation_runner::model::{BoundedServiceAction, Request};
 
 use super::{
-    manifest::{self, Manifest},
+    manifest::Manifest,
     model::{Mode, Stage, State},
     runner, store,
 };
@@ -66,10 +66,19 @@ pub fn init(root: &Path) -> anyhow::Result<()> {
     let source = git(root, &["rev-parse", "HEAD"])?;
     let binaries = Binaries::for_repository(root)?;
     check_binary_revision(&binaries.stutter, &source)?;
-    let manifest = Manifest::load(&root.join(manifest::FILE))?;
+    // Exactly `1`, like the rehearsal switch; targeted acceptance is its own contract and
+    // suite, chosen when the campaign is created and frozen with it.
+    let acceptance =
+        std::env::var_os("STUTTER_SERVICE_ACCEPTANCE").is_some_and(|value| value == "1");
+    let manifest_file = Manifest::file_for(acceptance);
+    let manifest = Manifest::load_for(&root.join(manifest_file), acceptance)?;
     // Only a person measuring the schedule sets this; the campaign it makes can never be evidence.
     // Exactly `1`; any other value, including `0`, makes a counted campaign.
     let rehearsal = std::env::var_os("STUTTER_SERVICE_REHEARSAL").is_some_and(|value| value == "1");
+    ensure!(
+        !(rehearsal && acceptance),
+        "a campaign is a rehearsal or a targeted acceptance, not both"
+    );
     let identity = fs::metadata("/proc/self")?;
     ensure!(
         identity.uid() != 0,
@@ -78,14 +87,14 @@ pub fn init(root: &Path) -> anyhow::Result<()> {
     let campaign_id = format!("service-{}-{}", &source[..7], unix_ms());
     let dir = CampaignDir(root.join(store::ROOT).join(&campaign_id));
     fs::create_dir_all(&dir.0)?;
-    fs::copy(root.join(manifest::FILE), dir.manifest_snapshot())?;
+    fs::copy(root.join(manifest_file), dir.manifest_snapshot())?;
     let state = State {
         schema_version: 1,
         campaign_id,
         mode: Mode::Active,
         repository: root.to_owned(),
         source_commit: source,
-        manifest_sha256: file_sha256(&root.join(manifest::FILE))?,
+        manifest_sha256: file_sha256(&root.join(manifest_file))?,
         cargo_lock_sha256: file_sha256(&root.join("Cargo.lock"))?,
         stutter_sha256: file_sha256(&binaries.stutter)?,
         xtask_sha256: file_sha256(&binaries.xtask)?,
@@ -97,6 +106,7 @@ pub fn init(root: &Path) -> anyhow::Result<()> {
             .to_owned(),
         host_system: runner::system_closure("/run/current-system")?,
         rehearsal,
+        acceptance,
         required_reboots: if rehearsal {
             0
         } else {

@@ -72,6 +72,10 @@ pub struct State {
     /// A non-publishable timing rehearsal: one full service cycle, no reboots, never evidence.
     #[serde(default)]
     pub rehearsal: bool,
+    /// Targeted acceptance rather than endurance: a separate manifest, suite and stop rule. It
+    /// is real evidence under its own identity and never passes the endurance contract.
+    #[serde(default)]
+    pub acceptance: bool,
     pub required_reboots: u32,
     pub boot_ids: Vec<String>,
     pub reboot_pending: bool,
@@ -79,6 +83,11 @@ pub struct State {
 }
 
 impl State {
+    /// The manifest file this campaign's contract was frozen from.
+    pub fn manifest_file(&self) -> &'static str {
+        super::manifest::Manifest::file_for(self.acceptance)
+    }
+
     /// The campaign-owned copies of the two binaries it qualifies. Cargo's `target/debug` output
     /// is a working directory that any build may relink; these bytes never change.
     pub fn pinned_dir(&self) -> std::path::PathBuf {

@@ -13,7 +13,7 @@ use super::{
 };
 use crate::{
     service_campaign::{
-        manifest::{FILE, Manifest},
+        manifest::Manifest,
         model::{Stage, State},
         runner,
     },
@@ -34,7 +34,10 @@ pub(crate) fn init(state: &State, dir: &Path) -> anyhow::Result<()> {
         return Ok(());
     }
     fs::create_dir_all(dir)?;
-    let manifest = Manifest::load(&state.repository.join(FILE))?;
+    let manifest = Manifest::load_for(
+        &state.repository.join(state.manifest_file()),
+        state.acceptance,
+    )?;
     write_state(
         dir,
         &SoakState {
@@ -109,12 +112,15 @@ pub(super) fn run(root: &Path, dir: &Path, state: &mut SoakState) -> anyhow::Res
 
 pub(super) fn manifest(state: &SoakState) -> anyhow::Result<Manifest> {
     let binding = state.service.as_ref().context("service binding missing")?;
-    let path = binding.campaign.repository.join(FILE);
+    let path = binding
+        .campaign
+        .repository
+        .join(binding.campaign.manifest_file());
     ensure!(
         super::sha256(&path)? == binding.campaign.manifest_sha256,
         "service manifest changed"
     );
-    let manifest = Manifest::load(&path)?;
+    let manifest = Manifest::load_for(&path, binding.campaign.acceptance)?;
     ensure!(
         state.hours == manifest.coverage.minimum_dwell_seconds as f64 / 3600.0,
         "service dwell differs from its frozen manifest"
@@ -134,7 +140,19 @@ pub(super) fn minimums(state: &SoakState) -> anyhow::Result<super::coverage::Min
     {
         return Ok(super::coverage::Minimums::rehearsal());
     }
-    let mut floor = super::coverage::Minimums::FULL;
+    let acceptance = state
+        .service
+        .as_ref()
+        .is_some_and(|binding| binding.campaign.acceptance);
+    let mut floor = if acceptance {
+        super::coverage::Minimums::acceptance()
+    } else {
+        super::coverage::Minimums::FULL
+    };
+    if acceptance {
+        floor.clean_rounds =
+            super::plan::SERVICE_CYCLE_LEN * coverage.minimum_clean_cycles as usize;
+    }
     floor.hours = coverage.minimum_dwell_seconds as f64 / 3600.0;
     floor.clean_cycles = coverage.minimum_clean_cycles as usize;
     floor.per_kind = coverage.minimum_dangerous_event_repetitions as usize;

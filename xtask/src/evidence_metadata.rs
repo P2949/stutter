@@ -13,6 +13,8 @@ pub(crate) const SUITE_AUTOTUNE_SMOKE: &str = "live_autotune_smoke";
 /// the bounded controller.
 pub(crate) const SUITE_AUTOTUNE_SOAK: &str = "live_autotune_soak";
 pub(crate) const SUITE_BOUNDED_SERVICE: &str = "live_bounded_service";
+/// Targeted acceptance of the same service: its own identity, never the endurance suite.
+pub(crate) const SUITE_BOUNDED_SERVICE_ACCEPTANCE: &str = "live_bounded_service_acceptance";
 
 pub(crate) fn unix_ms() -> u64 {
     std::time::SystemTime::now()
@@ -171,6 +173,7 @@ mod tests {
             SUITE_AUTOTUNE_SMOKE,
             SUITE_AUTOTUNE_SOAK,
             SUITE_BOUNDED_SERVICE,
+            SUITE_BOUNDED_SERVICE_ACCEPTANCE,
         ] {
             assert!(crate::evidence_bundle::KNOWN_SUITES.contains(&suite));
         }

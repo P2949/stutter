@@ -10,10 +10,7 @@ use stutter_validation_runner::{
     model::{ControllerKind, Request, ResponseStatus, RunnerAction, TaskGrant},
 };
 
-use super::{
-    manifest,
-    model::{Stage, State},
-};
+use super::model::{Stage, State};
 use crate::validation_campaign::{
     bootstrap::{CAMPAIGN_TASK, DEFAULT_SOCKET, RunnerTarget},
     repository::{check_binary_revision, file_sha256, git},
@@ -96,7 +93,7 @@ pub fn integrity(root: &Path, state: &State) -> anyhow::Result<()> {
         "service campaign source moved"
     );
     for (path, expected) in [
-        (root.join(manifest::FILE), &state.manifest_sha256),
+        (root.join(state.manifest_file()), &state.manifest_sha256),
         (root.join("Cargo.lock"), &state.cargo_lock_sha256),
         (state.pinned_stutter(), &state.stutter_sha256),
         (state.pinned_xtask(), &state.xtask_sha256),
