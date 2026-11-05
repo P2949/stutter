@@ -53,7 +53,7 @@ pub(super) fn run_round(
     timing: Timing,
 ) -> (RoundRecord, Vec<HistoryEvent>) {
     let dir = dir.join(format!("rounds/{index:04}"));
-    attempts::archive_previous_attempt(&dir);
+    let isolated = attempts::archive_previous_attempt(&dir);
     let mut ctx = Ctx {
         tail: Tail::at_end(&world.history_path()),
         pending: Vec::new(),
@@ -72,8 +72,9 @@ pub(super) fn run_round(
         timing,
         round,
     };
-    let result = fs::create_dir_all(&ctx.dir)
-        .map_err(anyhow::Error::from)
+    // A round that cannot be set apart from its earlier attempt must not run on stale artifacts.
+    let result = isolated
+        .and_then(|()| fs::create_dir_all(&ctx.dir).map_err(anyhow::Error::from))
         .and_then(|()| ctx.execute());
     ctx.record.finished_unix_ms = unix_ms();
     match result {
