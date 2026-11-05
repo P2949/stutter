@@ -103,7 +103,11 @@ impl Ctx<'_> {
 
     fn execute(&mut self) -> anyhow::Result<()> {
         self.world.prepare_round(self.round.operations)?;
-        if self.world.ensure_worker()? {
+        // The packaged controller starts with its worker, so a service round attaches the workload
+        // to its fixture cgroup first: the controller must never baseline the workload before the
+        // fixture has placed it.
+        let worker_first = self.world.service.is_none();
+        if worker_first && self.world.ensure_worker()? {
             self.event("worker_start", "privileged worker started");
         }
         self.world.prepare_game_cgroup()?;
@@ -123,6 +127,9 @@ impl Ctx<'_> {
         };
         let game = self.world.spawn_game(&self.dir, "game-1", game_seconds)?;
         self.event("game_start", format!("pid {}", game.child.pid()));
+        if !worker_first && self.world.ensure_worker()? {
+            self.event("worker_start", "privileged worker started");
+        }
         let outcome = self.drive(game);
         if outcome.is_err()
             && let Some(service) = &self.world.service
