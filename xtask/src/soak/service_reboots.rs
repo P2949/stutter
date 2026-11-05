@@ -20,6 +20,10 @@ use crate::{
     },
 };
 
+fn prep_dir(dir: &CampaignDir, hop: usize) -> std::path::PathBuf {
+    dir.0.join(format!("reboot-prep-{hop}"))
+}
+
 fn receipt_path(dir: &CampaignDir, kind: &str, hop: usize) -> std::path::PathBuf {
     dir.0.join("reboots").join(format!("{kind}-{hop}.json"))
 }
@@ -38,8 +42,9 @@ pub(crate) fn step(
         return Ok(AttemptOutcome::Passed);
     }
     let hop = completed + 1;
-    let mut pre =
-        super::service_recovery::applied_before_reboot(state, &dir.0.join("reboot-prep"))?;
+    // Each hop gets its own directory: the workload fixture, its readiness marker and its
+    // read-only helper binary are single-use.
+    let mut pre = super::service_recovery::applied_before_reboot(state, &prep_dir(dir, hop))?;
     pre["system_before"] = json!(runner::system_closure("/run/current-system")?);
     pre["persistence"] = write_canary(&Binding::new(state, Stage::Reboots)?.home(), hop)?;
     write_atomic(
@@ -238,6 +243,13 @@ pub(crate) fn verified_receipts(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn every_hop_prepares_in_its_own_directory() {
+        let dir = CampaignDir(std::path::PathBuf::from("/campaign"));
+        assert_ne!(super::prep_dir(&dir, 1), super::prep_dir(&dir, 2));
+        assert!(super::prep_dir(&dir, 2).ends_with("reboot-prep-2"));
+    }
+
     use super::*;
 
     fn receipts(root: &std::path::Path, hop: usize, before: &str, after: &str, outstanding: u64) {
