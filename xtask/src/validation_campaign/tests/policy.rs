@@ -58,6 +58,7 @@ fn the_policy_promotes_the_core_capabilities_and_the_graduated_cpu_affinity_and_
         "completions_and_man",
         "cpu_affinity_experiment",
         "cgroup_placement_experiment",
+        "always_on_autotune",
     ] {
         assert_eq!(
             tiers_of(&out, id),
@@ -82,7 +83,6 @@ fn the_policy_promotes_the_core_capabilities_and_the_graduated_cpu_affinity_and_
         "vm_dirty_ratio",
         "irq_affinity_known_device",
         "irq_affinity_storage_or_unknown",
-        "always_on_autotune",
         "remote_agent_mutation",
     ] {
         assert_eq!(

@@ -25,8 +25,13 @@ a proof too long to repeat per candidate. The bounded autonomous controller
 (`bounded_autotune_controller`) graduates on the coverage-qualified `live_autotune_soak` (a minimum
 8 h dwell, at least 6 complete clean schedule cycles, repeated clean coverage of every fault kind,
 zero violations) and ships on the short `live_autotune_smoke`; its limitations are exactly the entries of `AUTONOMOUS_CONTRACTS`. The
-daemon/service integration (`always_on_autotune`) is a separate capability and stays Experimental:
-the packaged service runs `apply-low-risk`, which the soak does not exercise.
+packaged bounded service (`always_on_autotune`) is a separate capability. It graduates on targeted
+acceptance, the `live_bounded_service_acceptance` suite (a complete clean cycle in which every dangerous
+and service event runs once, both graduated operations are kept and reverted, and every root token
+settles), plus `live_recovery` and `live_suspend_resume`, and a production boot check. It is Supported
+only as the packaged systemd service (monitored-user controller plus root worker, heuristic focus,
+`apply-medium-risk`) for exactly the two entries of `AUTONOMOUS_CONTRACTS`. Extended endurance (the
+eight-hour `live_bounded_service` contract), OpenRC and every other daemon mode are not claimed.
 
 Mutation providers do not inherit each other's maturity: a registry test requires every
 entry of `MUTATION_PROVIDER_KINDS` to be governed by exactly one capability, and
@@ -63,8 +68,8 @@ with the evidence-index entries that justify it.
 
 Core Validation established the baseline. This block records the repository's current conservative capability tier policy. Later Supported capabilities require their own evidence-backed graduation:
 
-- **Supported:** `doctor`, `record`, `bench`, `report`, `audit`, `completions_and_man`, `cpu_affinity_experiment`, `cgroup_placement_experiment`, `bounded_autotune_controller`
-- **Experimental:** `diagnose`, `advisor`, `tune_evaluation`, `restore`, `uclamp_experiment`, `nice_experiment`, `ioprio_experiment`, `cpu_power_epp`, `cpu_power_governor`, `gpu_power_profile`, `gpu_force_performance`, `vm_swappiness`, `vm_dirty_background_ratio`, `vm_dirty_ratio`, `irq_affinity_known_device`, `irq_affinity_storage_or_unknown`, `always_on_autotune`, `remote_agent_mutation`
+- **Supported:** `doctor`, `record`, `bench`, `report`, `audit`, `completions_and_man`, `cpu_affinity_experiment`, `cgroup_placement_experiment`, `bounded_autotune_controller`, `always_on_autotune`
+- **Experimental:** `diagnose`, `advisor`, `tune_evaluation`, `restore`, `uclamp_experiment`, `nice_experiment`, `ioprio_experiment`, `cpu_power_epp`, `cpu_power_governor`, `gpu_power_profile`, `gpu_force_performance`, `vm_swappiness`, `vm_dirty_background_ratio`, `vm_dirty_ratio`, `irq_affinity_known_device`, `irq_affinity_storage_or_unknown`, `remote_agent_mutation`
 - **Internal:** `privileged_worker`, `fake_action_provider`
 
 Diagnosis stays Experimental even after calibration. CPU affinity and cgroup placement are Supported only for their graduated scheduler-pressure tuples (see the autonomous support matrix above); no other mutating capability is promoted.

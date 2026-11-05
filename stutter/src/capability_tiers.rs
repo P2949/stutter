@@ -66,6 +66,14 @@ const MUTATION_RELEASE: &[&str] = &["live_observation", "live_autotune_smoke"];
 /// Historical graduation proof of the bounded controller: the recovery suites every mutating
 /// capability needs, and the coverage-qualified production-controller soak.
 const BOUNDED_CONTROLLER: &[&str] = &["live_recovery", "live_suspend_resume", "live_autotune_soak"];
+/// The packaged bounded service graduated on targeted acceptance (observed, physically verified
+/// behavior), not on elapsed time; the endurance suite `live_bounded_service` is a separate,
+/// optional contract that this tier does not claim.
+const BOUNDED_SERVICE: &[&str] = &[
+    "live_recovery",
+    "live_suspend_resume",
+    "live_bounded_service_acceptance",
+];
 
 pub const CAPABILITIES: [Capability; 29] = [
     obs(
@@ -320,13 +328,13 @@ pub const CAPABILITIES: [Capability; 29] = [
         id: "always_on_autotune",
         title: "Always-on autotune daemon and service",
         class: CapabilityClass::Mutating,
-        tier: CapabilityTier::Experimental,
-        target_tier: CapabilityTier::Experimental,
+        tier: CapabilityTier::Supported,
+        target_tier: CapabilityTier::Supported,
         commands: &["daemon", "service", "autotune-status"],
         providers: &[],
-        required_evidence: &[],
-        required_release_evidence: &[],
-        limitations: "Long-running mutation; gated by daemon policy; not supported in the first release.",
+        required_evidence: BOUNDED_SERVICE,
+        required_release_evidence: &["live_autotune_smoke"],
+        limitations: "Supported only as the packaged bounded systemd service: a controller running as the monitored desktop account plus a separate root worker (the units under packaging/systemd, installed with `stutter service install --mode system-bounded-autotune` or an equivalent that runs the same units from an immutable root-owned binary), heuristic auto-focus at the qualified confidence floor, apply-medium-risk, and only the two entries of AUTONOMOUS_CONTRACTS (CPU-affinity profile and cgroup placement for a stable game under scheduler pressure). Qualified by targeted acceptance (live_bounded_service_acceptance) and a production boot check on one NixOS host. Not claimed: extended endurance (eight hours, six cycles, in-campaign reboots; live_bounded_service), OpenRC, any other daemon mode, any system-wide or high-risk operation, remote agent mutation, and a per-release packaged-service smoke (releases are checked on the controller smoke).",
     },
     Capability {
         id: "remote_agent_mutation",
@@ -533,10 +541,12 @@ mod tests {
         // capability named here completed a graduation campaign.
         // The bounded controller joined with its indexed `live_autotune_soak` evidence; it
         // authorises nothing beyond the autonomous support registry.
+        // The packaged bounded service joined on targeted acceptance; it adds no operation.
         const GRADUATED: &[&str] = &[
             "cpu_affinity_experiment",
             "cgroup_placement_experiment",
             "bounded_autotune_controller",
+            "always_on_autotune",
         ];
         assert!(capability_registry().iter().all(|capability| {
             capability.tier != CapabilityTier::Supported
@@ -593,9 +603,28 @@ mod tests {
     }
 
     #[test]
-    fn the_daemon_service_and_every_deferred_operation_stay_experimental() {
+    fn the_bounded_service_rests_on_acceptance_and_claims_no_endurance() {
+        let service = capability("always_on_autotune");
+        assert_eq!(service.tier, CapabilityTier::Supported);
+        assert!(
+            service
+                .required_evidence
+                .contains(&"live_bounded_service_acceptance")
+        );
+        for suite in MUTATING_REQUIRED_EVIDENCE {
+            assert!(service.required_evidence.contains(&suite), "{suite}");
+        }
+        // The endurance suite is a different contract and never stands in for acceptance.
+        assert!(!service.required_evidence.contains(&"live_bounded_service"));
+        // It governs no operation: it authorises nothing the autonomous registry does not.
+        assert!(service.providers.is_empty());
+        assert!(service.limitations.contains("AUTONOMOUS_CONTRACTS"));
+        assert!(service.limitations.contains("extended endurance"));
+    }
+
+    #[test]
+    fn every_deferred_operation_and_the_remote_agent_stay_experimental() {
         for id in [
-            "always_on_autotune",
             "remote_agent_mutation",
             "uclamp_experiment",
             "nice_experiment",

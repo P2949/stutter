@@ -42,9 +42,13 @@ runtime; everything absent from it is suggest-only, benchmark-only, manual or re
   SIGINT), which were fixed and invalidated those runs
   ([AUTOTUNE_SOAK.md](AUTOTUNE_SOAK.md)).
 
-**Still Experimental:** the daemon/service integration (`always_on_autotune`; the packaged
-service runs `apply-low-risk`, which the soak does not exercise), every system-wide mutation,
-the deferred process-local operations above, and remote mutation.
+**Supported, bounded service:** the packaged always-on systemd service (`always_on_autotune`),
+graduated on targeted acceptance (`live_bounded_service_acceptance`, indexed in
+[`evidence/index.json`](evidence/index.json)) and a production boot check, for exactly the two
+graduated operations. It does not claim extended endurance or OpenRC.
+
+**Still Experimental:** every system-wide mutation, the deferred process-local operations
+above, and remote mutation.
 
 Earlier results (all Experimental, no weight or threshold changed):
 

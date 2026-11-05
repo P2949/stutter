@@ -362,7 +362,9 @@ Persist both `/var/lib/stutter/autotune-USER` (controller journal/kept ledger) a
 sockets are recreated. Stopping the controller runs worker-mediated emergency recovery before
 the worker is stopped. Uninstall removes templates and preserves state/configuration.
 
-This mode has not yet passed its packaged-service graduation campaign and does not promote
-`always_on_autotune`. OpenRC templates remain Experimental and have no real OpenRC qualification;
+This mode passed targeted acceptance (`live_bounded_service_acceptance`) and a production boot
+check, which is what makes `always_on_autotune` Supported for the packaged systemd service and
+the two graduated operations only; the eight-hour endurance contract is not claimed. OpenRC
+templates remain Experimental and have no real OpenRC qualification;
 configure the same `stutter_controller_user` in both OpenRC service configuration files. Hybrid
 or compositor foreground access is outside the initial service contract.

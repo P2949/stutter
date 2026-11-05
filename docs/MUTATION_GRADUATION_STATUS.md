@@ -148,7 +148,8 @@ none is promoted to make the matrix look complete.
 - Scope: it authorises exactly `AUTONOMOUS_CONTRACTS` (CPU-affinity profile and cgroup placement,
   each for a stable, explicitly identified game under scheduler pressure, judged by
   `GameRunnableLatency`) and nothing else: no third operation, no system-wide operation, not the
-  daemon/service integration (`always_on_autotune` stays Experimental).
+  daemon/service integration beyond the packaged bounded service, which graduated separately as
+  `always_on_autotune` on targeted acceptance (see [SERVICE_GRADUATION.md](SERVICE_GRADUATION.md)).
 - Qualification (the coverage-driven contract, see [AUTOTUNE_SOAK.md](AUTOTUNE_SOAK.md)): 8.03 h of
   wall-clock time, 113 of 113 rounds clean, 7 complete clean 16-round cycles (6 required), 92 resolved
   experiments (50 kept, 42 reverted), 21 controller restarts, 14 privileged-worker restarts, 14

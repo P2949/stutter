@@ -1,7 +1,9 @@
 # Bounded service qualification
 
-The `system-bounded-autotune` installation mode is under qualification. It does not yet
-promote `always_on_autotune`. OpenRC remains unqualified. No packaged-service soak or real
+The `system-bounded-autotune` installation mode passed targeted acceptance (below) and a
+production boot check on one NixOS host, which promotes `always_on_autotune` for the packaged
+systemd service and the two graduated operations only. OpenRC remains unqualified. The
+eight-hour endurance contract has not passed and is not claimed; no endurance or in-campaign
 reboot result is implied by the source tests or the older direct-controller soak.
 
 The systemd controller runs as the monitored desktop account. Its root worker authenticates
@@ -67,3 +69,22 @@ Two contracts exist for the same packaged service and never stand in for each ot
 
 Earlier endurance campaigns remain historical supporting evidence with their own commits and
 limitations. They do not satisfy a check of a later exact commit.
+
+## Qualification record
+
+* **Targeted acceptance:** campaign `service-adef09a-1793911466788`, source `adef09a8`, all seven
+  stages passed and strict verification reported `qualified`. 22 of 22 rounds were clean in one
+  cycle of 1.53 h (11 CPU-affinity and 5 cgroup-placement experiments resolved, every dangerous and
+  service event once, no repeated attempt, every interrupted root token settled by name). The
+  exported bundle is indexed as `live_bounded_service_acceptance-adef09a8-1793919895854`.
+* **Production boot check:** the NixosConf module (opt-in `services.stutterBounded`) renders the
+  units of `packaging/systemd` with an immutable store binary pinned by the SHA-256 of the file.
+  After a real reboot both units were active without the validation runner (controller uid 1000
+  with only `CAP_BPF`, `CAP_PERFMON`, `CAP_SYS_RESOURCE` and `CAP_DAC_READ_SEARCH`, `NoNewPrivileges`;
+  worker root with only `CAP_SYS_NICE`, `CAP_SYS_PTRACE`, `CAP_CHOWN` and `CAP_DAC_OVERRIDE`), both
+  state directories were their own mounts with preserved contents, the root token ledger was intact
+  with nothing outstanding, and a game-like fixture received focus and an experiment applied through
+  the worker and settled.
+* **Earlier endurance attempts** (`service-6079f71`, `service-b791597`, `service-7f687a8`,
+  `service-7ffc4c6`) ended on harness or hardware issues, one of them a kernel-refused suspend, and
+  are retained as historical supporting evidence only.
