@@ -21,6 +21,19 @@ impl std::fmt::Display for ExperimentAlreadyResolved {
 
 impl std::error::Error for ExperimentAlreadyResolved {}
 
+/// The kernel refused to suspend the machine (a device failed to suspend, say), so the fault
+/// was never injected. Same disposition as an experiment that resolved first: repeat the round.
+#[derive(Debug)]
+pub(super) struct SuspendRefused(pub(super) String);
+
+impl std::fmt::Display for SuspendRefused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "the kernel did not suspend the machine: {}", self.0)
+    }
+}
+
+impl std::error::Error for SuspendRefused {}
+
 impl Ctx<'_> {
     pub(super) fn worker_kill_round(
         &mut self,

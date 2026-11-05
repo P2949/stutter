@@ -79,7 +79,8 @@ pub(super) fn run_round(
         Ok(()) => ctx.record.outcome = "failed".to_owned(),
         Err(error) => {
             // A fault that was never injected proves nothing; it is repeated, not failed.
-            let not_attempted = error.is::<service_round::ExperimentAlreadyResolved>()
+            let not_attempted = (error.is::<service_round::ExperimentAlreadyResolved>()
+                || error.is::<service_round::SuspendRefused>())
                 && ctx.record.violations.is_empty();
             ctx.record.outcome = if STOP.load(Ordering::SeqCst) {
                 "interrupted"
@@ -218,7 +219,13 @@ impl Ctx<'_> {
             Kind::FailedRestore => self.failed_restore_round(controller, game),
             Kind::Suspend => {
                 self.applied(&mut controller)?;
-                self.suspend()?;
+                if let Err(error) = self.suspend() {
+                    if error.is::<service_round::SuspendRefused>() {
+                        // The experiment was never interrupted; let it end the ordinary way.
+                        let _ = self.end_workload(&mut game, controller, "suspend_refused");
+                    }
+                    return Err(error);
+                }
                 if self.resolution(&mut controller)?.is_none() {
                     self.violation("no experiment resolution after the machine resumed");
                 }
@@ -556,8 +563,22 @@ impl Ctx<'_> {
     fn suspend(&mut self) -> anyhow::Result<()> {
         if let Some(service) = self.world.service.clone() {
             self.event("suspend", "typed fixed service suspend with a 30s RTC wake");
-            let report = service
-                .action(stutter_validation_runner::model::BoundedServiceAction::SuspendResume)?;
+            let report = match service
+                .action(stutter_validation_runner::model::BoundedServiceAction::SuspendResume)
+            {
+                Ok(report) => report,
+                // The runner's own before/after read of the kernel's success counter says the
+                // machine did not suspend; nothing was injected.
+                Err(error)
+                    if format!("{error:#}")
+                        .contains("did not increment the kernel success counter") =>
+                {
+                    return Err(anyhow::Error::new(service_round::SuspendRefused(format!(
+                        "{error:#}"
+                    ))));
+                }
+                Err(error) => return Err(error),
+            };
             fs::write(
                 self.dir.join("suspend-runtime.json"),
                 serde_json::to_vec_pretty(&report)?,
