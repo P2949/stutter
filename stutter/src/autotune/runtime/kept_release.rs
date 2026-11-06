@@ -66,7 +66,16 @@ impl AutotuneRuntime {
         let Some(path) = candidate_memory_path_for(&self.config) else {
             return;
         };
-        if let Err(error) = self.controller.state.candidate_memory.save(&path) {
+        let mut saved = self
+            .candidate_memory_saved
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Err(error) = self
+            .controller
+            .state
+            .candidate_memory
+            .save_if_changed(&path, &mut saved)
+        {
             log::warn!(
                 "candidate memory not persisted to {}: {error:#}",
                 path.display()

@@ -170,6 +170,7 @@ impl CandidateMemory {
     /// Memory is advisory: a missing or unreadable file starts empty (a candidate may be tried
     /// once more), and the reason is logged. It never blocks startup.
     pub fn load(path: &std::path::Path) -> Self {
+        Self::remove_stale_temporaries(path);
         let bytes = match std::fs::read(path) {
             Ok(bytes) => bytes,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Self::default(),
@@ -185,14 +186,73 @@ impl CandidateMemory {
     }
 
     pub fn save(&self, path: &std::path::Path) -> anyhow::Result<()> {
-        use std::io::Write;
+        let mut bytes = serde_json::to_vec(self)?;
+        bytes.push(b'\n');
+        Self::write_atomically(path, &bytes)
+    }
+
+    /// Writes the memory only when it differs from what this process last wrote (`last_saved`), so a
+    /// controller that evaluates every second does not rewrite an unchanged file every second.
+    /// Returns whether the file was written.
+    pub fn save_if_changed(
+        &self,
+        path: &std::path::Path,
+        last_saved: &mut Option<Vec<u8>>,
+    ) -> anyhow::Result<bool> {
+        let mut bytes = serde_json::to_vec(self)?;
+        bytes.push(b'\n');
+        if last_saved.as_deref() == Some(bytes.as_slice()) && path.exists() {
+            return Ok(false);
+        }
+        Self::write_atomically(path, &bytes)?;
+        *last_saved = Some(bytes);
+        Ok(true)
+    }
+
+    /// One `write` of the whole buffer, a sync and a rename; a failure leaves no temporary file.
+    fn write_atomically(path: &std::path::Path, bytes: &[u8]) -> anyhow::Result<()> {
         let temporary = path.with_extension(format!("tmp-{}", std::process::id()));
-        let mut file = std::fs::File::create(&temporary)?;
-        serde_json::to_writer(&mut file, self)?;
-        file.write_all(b"\n")?;
+        let written = Self::write_temporary(&temporary, bytes)
+            .and_then(|()| std::fs::rename(&temporary, path).map_err(anyhow::Error::from));
+        if written.is_err() {
+            // A failed save must not leave its temporary file behind.
+            let _ = std::fs::remove_file(&temporary);
+        }
+        written
+    }
+
+    fn write_temporary(temporary: &std::path::Path, bytes: &[u8]) -> anyhow::Result<()> {
+        use std::io::Write;
+        let mut file = std::fs::File::create(temporary)?;
+        file.write_all(bytes)?;
         file.sync_all()?;
-        drop(file);
-        std::fs::rename(&temporary, path)?;
         Ok(())
+    }
+
+    /// Removes temporaries left by processes that no longer exist (killed between creating the file and
+    /// renaming it). A temporary whose process is alive may be mid-save and is kept.
+    pub fn remove_stale_temporaries(path: &std::path::Path) {
+        let (Some(directory), Some(name)) =
+            (path.parent(), path.file_stem().and_then(|s| s.to_str()))
+        else {
+            return;
+        };
+        let prefix = format!("{name}.tmp-");
+        let Ok(entries) = std::fs::read_dir(directory) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let file_name = entry.file_name();
+            let Some(pid) = file_name
+                .to_str()
+                .and_then(|n| n.strip_prefix(&prefix))
+                .and_then(|pid| pid.parse::<u32>().ok())
+            else {
+                continue;
+            };
+            if !std::path::Path::new(&format!("/proc/{pid}")).exists() {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
     }
 }

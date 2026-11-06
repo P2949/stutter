@@ -99,6 +99,8 @@ pub struct AutotuneRuntime {
     lifecycle: lifecycle::RuntimeLifecycle,
     /// Reads sustained background CPU consumers while a game is the focused workload.
     offender_sampler: std::sync::Mutex<crate::autotune::offenders::OffenderSampler>,
+    /// The bytes of the candidate memory last written, so an unchanged memory is not rewritten.
+    candidate_memory_saved: std::sync::Mutex<Option<Vec<u8>>>,
 }
 
 #[cfg(test)]

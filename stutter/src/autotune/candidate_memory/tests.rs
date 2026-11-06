@@ -531,3 +531,101 @@ fn memory_survives_a_restart_and_a_corrupt_file_starts_empty() {
     std::fs::write(&path, b"{ not json").unwrap();
     assert_eq!(CandidateMemory::load(&path), CandidateMemory::default());
 }
+
+mod temporary_files {
+    use super::*;
+
+    fn directory(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "stutter-candidate-memory-{name}-{}-{}",
+            std::process::id(),
+            crate::audit::unix_nanos_now()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn loading_removes_temporaries_left_by_dead_processes_and_keeps_a_live_ones() {
+        let dir = directory("stale");
+        let path = dir.join("candidate-memory.json");
+        // A process id that cannot exist (above the kernel's pid limit) and one that does: ours.
+        let dead = dir.join("candidate-memory.tmp-4294967290");
+        let live = dir.join(format!("candidate-memory.tmp-{}", std::process::id()));
+        let unrelated = dir.join("something-else.tmp-4294967290");
+        for file in [&dead, &live, &unrelated] {
+            std::fs::write(file, b"{}").unwrap();
+        }
+        let _ = CandidateMemory::load(&path);
+        assert!(!dead.exists(), "a dead process's temporary file is removed");
+        assert!(live.exists(), "a live process may be mid-save");
+        assert!(
+            unrelated.exists(),
+            "only this file's temporaries are touched"
+        );
+    }
+
+    #[test]
+    fn a_failed_save_leaves_no_temporary_file_and_a_good_save_leaves_none_either() {
+        let dir = directory("failed-save");
+        // The destination is a directory, so the final rename fails after the temporary was written.
+        let blocked = dir.join("candidate-memory.json");
+        std::fs::create_dir_all(&blocked).unwrap();
+        assert!(CandidateMemory::default().save(&blocked).is_err());
+        let leftovers = |dir: &std::path::Path| {
+            std::fs::read_dir(dir)
+                .unwrap()
+                .flatten()
+                .filter(|e| e.file_name().to_string_lossy().contains(".tmp-"))
+                .count()
+        };
+        assert_eq!(leftovers(&dir), 0);
+        let good = directory("good-save").join("candidate-memory.json");
+        CandidateMemory::default().save(&good).unwrap();
+        assert_eq!(leftovers(good.parent().unwrap()), 0);
+    }
+}
+
+mod unchanged_memory_is_not_rewritten {
+    use super::*;
+
+    #[test]
+    fn an_unchanged_memory_is_written_once_and_a_changed_one_again() {
+        let dir = std::env::temp_dir().join(format!(
+            "stutter-candidate-memory-skip-{}-{}",
+            std::process::id(),
+            crate::audit::unix_nanos_now()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("candidate-memory.json");
+        let mut memory = CandidateMemory::default();
+        let mut saved = None;
+        assert!(
+            memory.save_if_changed(&path, &mut saved).unwrap(),
+            "the first save writes"
+        );
+        let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+        for _ in 0..5 {
+            assert!(
+                !memory.save_if_changed(&path, &mut saved).unwrap(),
+                "unchanged memory is skipped"
+            );
+        }
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().modified().unwrap(),
+            modified
+        );
+        // A changed memory is written, and the file loads back to the same memory.
+        let context = context_with_distribution(vec![CandidateClassCount {
+            class: TaskClass::Game,
+            count: 4,
+        }]);
+        memory.record_attempt(&fake_candidate(), &context, 1_000, None);
+        assert!(memory.save_if_changed(&path, &mut saved).unwrap());
+        assert_eq!(CandidateMemory::load(&path).records.len(), 1);
+        // A deleted file is rewritten even though the memory did not change.
+        std::fs::remove_file(&path).unwrap();
+        assert!(memory.save_if_changed(&path, &mut saved).unwrap());
+        assert!(path.exists());
+    }
+}
