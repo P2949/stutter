@@ -131,7 +131,10 @@ none is promoted to make the matrix look complete.
   contract would write, so an autonomous write would be overwritten or would fight the owner. The plan
   forbids fighting an owner; a cooperative LACT backend would be a separate, explicitly designed
   operation, and a stable PCI-bound recovery token would still be needed (the card is addressable only as
-  `cardN`). LACT's GPU ownership is not touched. Forced DPM stays HighRisk/manual.
+  `cardN`). Even with a cooperative backend, graduation would need the GPU profile to move frame p99 by
+  at least the frozen 50 percent threshold, which the plan forbids lowering; a power-profile change is
+  not expected to do that (reasoning only: it was not measured, because measuring it would mean writing
+  state that LACT owns). LACT's GPU ownership is not touched. Forced DPM stays HighRisk/manual.
 - **vm_swappiness - DeferredEvidence.** `CompileThroughputWithForegroundProtection` is now Supported
   (frozen 7.5 percent threshold, `live_compile_objective`), so the objective prerequisite is met. Three
   feasibility pilots of the fixed cold build under cgroup memory pressure (55, 35 and 20 percent of
