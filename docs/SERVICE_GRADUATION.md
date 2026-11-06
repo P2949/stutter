@@ -111,3 +111,27 @@ ledger. It does not exercise every fault (the acceptance suite does), endurance,
 
 The validation runner installs transient units with the same names, so campaigns that install
 their own units cannot run while the production units are enabled; run this smoke instead.
+
+### What the smoke checks now (since `d34ab086`)
+
+Besides the unit, account, capability and immutable-binary checks above, the smoke measures the service as it
+behaves, not only as it is configured:
+
+- **Idle:** the controller's CPU averaged over a window (limit 5 percent of one core), its resident memory (limit
+  256 MB), that it changes nothing (policy activity such as `cooldown_entered` is not a change; only applies,
+  keeps, reverts and restores count), that no stale candidate-memory temporary files exist, and that the history stays
+  bounded.
+- **A workload that exits while a mutation is applied:** the placement was read back as changed before it exited
+  (a resolution alone is not evidence of a physical change), the root ledger settles, and nothing is started on the dead
+  process id.
+- **A controller killed while a mutation is applied:** the placement was read back as changed before the kill, the
+  controller restarts as a *new process* (a different main pid, the old one reaped), the ledger settles and the original
+  placement returns.
+- **The normal workload:** discovered, applied, the placement read back as changed while applied, resolved, tokens
+  settled.
+
+The controller will not apply the same action again for 300 seconds after applying it, whichever workload it was
+applied to, so every applied case starts that cooldown. The smoke computes the remaining cooldown from the history and
+waits it out once per gap, using the first gap for the lifecycle checks; it never clears candidate memory or overrides
+the policy. A full smoke therefore takes about twelve minutes. The result for the installed build is recorded in
+[`validation/production-behavior/`](validation/production-behavior/README.md).

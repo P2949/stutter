@@ -55,6 +55,11 @@ once on an untouched holdout with no false keep
 ([calibration record](validation/compile-throughput-calibration.json)). This graduates the
 objective's measurement on controlled cold builds; it authorises no operation by itself.
 
+**Operational milestone:** the bounded always-on systemd service passed the exact-build smoke on the installed
+build `d34ab086` (35 of 35 checks, idle CPU 1.40 percent of a core, [record](validation/production-behavior/README.md)); this
+is separate from machine-wide mutation, which stays `DeferredEvidence` (no system-wide operation has a measurable
+benefit on this host), with the mixed-scope acceptance `NotApplicable` rather than PASS.
+
 **Supported objective, frame pacing:** `GameFramePacing` graduated on `live_frame_objective` (indexed in
 [`evidence/index.json`](evidence/index.json)). It is direct-only: both windows need a MangoHud-sourced
 frame log with at least 2400 valid frames, and the normalized score can never substitute for missing or

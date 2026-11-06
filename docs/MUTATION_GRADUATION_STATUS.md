@@ -184,3 +184,13 @@ none is promoted to make the matrix look complete.
 - Limitations: disposable game-like workloads, not real games; focus inference is not exercised
   (targets are explicit); the soak drives `stutter autotune --mode apply-medium-risk`, not the packaged
   service, which runs `apply-low-risk`. Promotion widens nothing beyond the two contracts.
+
+## Machine-wide mutation and the mixed-scope acceptance (2026-11-06)
+
+No system-wide operation is Supported on this host: `vm.swappiness` (three pilots, no benefit near the threshold, no natural
+memory pressure), known-NIC IRQ steering (interrupts moved, no wake-latency benefit), CPU EPP (about 0.3 percent), and the
+GPU profile (conflicted LACT ownership, no effect in the completed blocks, an amdgpu reset of undetermined cause under a
+saturating workload) are all `DeferredEvidence`; dirty-ratio knobs, forced DPM and storage/unknown IRQs stay
+HighRisk/manual. Consequently the mixed-scope always-on acceptance (M14) is `NotApplicable`, not a PASS. The operational
+bounded service is a separate milestone and passed its exact-build smoke on `d34ab086`
+([record](validation/production-behavior/README.md)).
