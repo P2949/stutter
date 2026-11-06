@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn systemctl_show_output_is_parsed_into_properties() {
     let text = "ActiveState=active\nSubState=running\nExecStart={ path=/nix/store/abc-stutter ; argv[]=/nix/store/abc-stutter autotune --mode x ; ignore_errors=no }\nUser=\n";
