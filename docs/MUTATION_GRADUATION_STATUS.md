@@ -129,11 +129,13 @@ none is promoted to make the matrix look complete.
   addressable only as `cardN`; a stable PCI/render-node bound recovery token would have to be built
   and qualified before any campaign, and without a Validating objective there is nothing for the
   campaign to decide with. Forced DPM stays HighRisk/manual.
-- **vm_swappiness - DeferredEvidence.** The campaign needs real memory/swap pressure and a Supported
-  direct workload objective. The only Supported objective measures CPU wake latency, which
-  `vm.swappiness` does not influence, and `CompileThroughputWithForegroundProtection` is only
-  Validating. The runtime-sysctl token also needs a boot-aware retirement rule that no consumer yet
-  needs. Dirty-ratio knobs stay HighRisk/manual.
+- **vm_swappiness - DeferredEvidence.** `CompileThroughputWithForegroundProtection` is now Supported
+  (frozen 7.5 percent threshold, `live_compile_objective`), so the objective prerequisite is met. Three
+  feasibility pilots of the fixed cold build under cgroup memory pressure (55, 35 and 20 percent of
+  peak; [record](validation/vm-swappiness-pilot.md)) found the mechanism observable but no
+  completion-time benefit near the threshold (+0.45, -1.96, +1.2 percent for 10 against 60), so no
+  `Sysctl` contract was built. Reopening needs a new preregistered hypothesis (a more swap-bound
+  workload or a slower swap device). Dirty-ratio knobs stay HighRisk/manual.
 - **irq_known_device - DeferredEvidence.** The post-v0.1 IRQ study stays invalid (`INVALID`: no
   frame effect could be produced) and is not used. A new target-impact experiment needs controllable
   interrupt traffic on a known non-storage device class; this host has no peer to generate network
