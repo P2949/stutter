@@ -1,0 +1,17 @@
+b1-p0-w100 fgw=100 bgw=100 rc=0 compile_s=93.2 fg: frames=2400 mean=6.812 p50=6.051 p95=8.974 p99=9.599 p999=11.854 over_slot=0.0000 fg_psi_some_avg10=avg10=0.01
+b1-p1-w400 fgw=400 bgw=100 rc=0 compile_s=94.7 fg: frames=2400 mean=6.207 p50=5.870 p95=8.276 p99=8.944 p999=9.603 over_slot=0.0000 fg_psi_some_avg10=avg10=0.00
+b1-p2-w1000 fgw=1000 bgw=100 rc=0 compile_s=94.3 fg: frames=2400 mean=6.055 p50=5.861 p95=7.780 p99=8.877 p999=9.263 over_slot=0.0000 fg_psi_some_avg10=avg10=0.00
+b1-p3-w100 fgw=100 bgw=100 rc=0 compile_s=93.3 fg: frames=2400 mean=6.867 p50=6.081 p95=8.921 p99=9.911 p999=11.731 over_slot=0.0000 fg_psi_some_avg10=avg10=0.01
+b2-p0-w100 fgw=100 bgw=100 rc=0 compile_s=93.5 fg: frames=2400 mean=6.908 p50=6.233 p95=8.934 p99=9.732 p999=10.857 over_slot=0.0000 fg_psi_some_avg10=avg10=0.01
+b2-p1-w1000 fgw=1000 bgw=100 rc=0 compile_s=97.7 fg: frames=2400 mean=6.086 p50=5.883 p95=7.833 p99=8.852 p999=9.112 over_slot=0.0000 fg_psi_some_avg10=avg10=0.00
+b2-p2-w400 fgw=400 bgw=100 rc=0 compile_s=95.4 fg: frames=2400 mean=6.323 p50=5.966 p95=8.384 p99=9.179 p999=9.662 over_slot=0.0000 fg_psi_some_avg10=avg10=0.00
+b2-p3-w100 fgw=100 bgw=100 rc=0 compile_s=90.9 fg: frames=2400 mean=6.837 p50=6.118 p95=8.950 p99=9.903 p999=10.940 over_slot=0.0000 fg_psi_some_avg10=avg10=0.01
+b3-p0-w100 fgw=100 bgw=100 rc=0 compile_s=95.5 fg: frames=2400 mean=6.920 p50=6.232 p95=9.035 p99=10.002 p999=11.280 over_slot=0.0000 fg_psi_some_avg10=avg10=0.01
+b3-p1-w400 fgw=400 bgw=100 rc=0 compile_s=93.0 fg: frames=2400 mean=6.175 p50=5.873 p95=7.984 p99=8.975 p999=9.301 over_slot=0.0000 fg_psi_some_avg10=avg10=0.00
+b3-p2-w1000 fgw=1000 bgw=100 rc=0 compile_s=91.2 fg: frames=2400 mean=6.005 p50=5.840 p95=6.892 p99=8.843 p999=9.163 over_slot=0.0000 fg_psi_some_avg10=avg10=0.00
+b3-p3-w100 fgw=100 bgw=100 rc=0 compile_s=94.1 fg: frames=2400 mean=6.804 p50=6.033 p95=8.887 p99=9.504 p999=10.899 over_slot=0.0000 fg_psi_some_avg10=avg10=0.01
+b4-p0-w100 fgw=100 bgw=100 rc=0 compile_s=95.7 fg: frames=2400 mean=6.991 p50=6.456 p95=9.086 p99=10.092 p999=11.718 over_slot=0.0008 fg_psi_some_avg10=avg10=0.01
+b4-p1-w1000 fgw=1000 bgw=100 rc=0 compile_s=98.6 fg: frames=2400 mean=6.057 p50=5.877 p95=7.708 p99=8.891 p999=9.160 over_slot=0.0000 fg_psi_some_avg10=avg10=0.00
+b4-p2-w400 fgw=400 bgw=100 rc=0 compile_s=98.9 fg: frames=2400 mean=6.326 p50=5.975 p95=8.349 p99=9.219 p999=10.440 over_slot=0.0000 fg_psi_some_avg10=avg10=0.00
+b4-p3-w100 fgw=100 bgw=100 rc=0 compile_s=97.7 fg: frames=2400 mean=7.072 p50=6.689 p95=9.166 p99=10.340 p999=11.245 over_slot=0.0000 fg_psi_some_avg10=avg10=0.01
+finished
