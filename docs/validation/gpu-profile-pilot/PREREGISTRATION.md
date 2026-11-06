@@ -64,3 +64,25 @@ A merely detectable gain below the 5 percent floor is recorded as no useful effe
 - **A useful repeatable effect:** continue to a cooperative-operation design (stable PCI identity, one
   ownership authority across LACT, GameMode and Stutter, prepared-before-change recovery, an
   independent GPU-workload calibration and untouched holdout). The pilot alone graduates nothing.
+
+## Addendum A: step 0 result and the frozen workload (Daily only; no Gaming data exists yet)
+
+The preregistered candidates, `vkcube` at 1920x1080 and 3840x2160, did not qualify: frame time was the
+same at both sizes (about 0.105 ms), `gpu_busy_percent` averaged 81.8 and 81.9, and board power was
+43 W against the 238 W cap, so the load is submission-bound, not GPU-bound. The candidate set was then
+extended, before any comparison run, to vkmark scenes at 3840x2160 with `--present-mode immediate`
+(vkmark from a one-off `nix shell nixpkgs#vkmark`, nothing installed system-wide). The selection rule is
+unchanged: the largest GPU workload that keeps `gpu_busy_percent` at or above 90 on average.
+
+| step-0 run (Daily) | mean frame (ms) | p99 (ms) | GPU busy % | shader clock | board power |
+|---|---|---|---|---|---|
+| vkcube 1920x1080 | 0.1069 | 0.1568 | 81.8 | 2007 MHz | 43.4 W |
+| vkcube 3840x2160 | 0.1087 | 0.1633 | 81.9 | 2005 MHz | 43.5 W |
+| vkmark shading | 0.0983 | 0.1464 | 85.3 | 2012 MHz | 57.2 W |
+| vkmark texture | 0.1002 | 0.1513 | 89.6 | 1787 MHz | 59.4 W |
+| vkmark effect2d | 0.1776 | 0.2742 | 99.8 | 3264 MHz | 236.6 W |
+| vkmark desktop | 0.1008 | 0.1475 | 89.4 | 2083 MHz | 78.1 W |
+
+Frozen workload: `vkmark -b effect2d:duration=40 -s 3840x2160 -p immediate` under MangoHud. It is the only
+candidate that qualifies, and it runs at the power cap (236.6 W of 238 W), so it exercises the clock and
+power-state behaviour that the firmware workload profile influences. The comparison runs follow.
