@@ -136,8 +136,8 @@ none is promoted to make the matrix look complete.
   vkmark workload (GPU 99.8 percent busy at the 238 W cap): in the three complete blocks mean frame time
   differed by -0.3 to +0.2 percent (control noise) and the shader clock was marginally lower under
   Gaming. The pilot was aborted in block 4 by an amdgpu gfx ring timeout and full GPU reset on a `Daily`
-  run (the host's -150 mV configuration is marginal under a sustained saturating load), so it is not
-  resumed and no cooperative backend was built. This replaces the earlier reasoning-only note. Forced DPM stays HighRisk/manual.
+  run (root cause undetermined: the electrical configuration, driver, firmware, workload or hardware are all
+  possible), so the saturating workload is quarantined, it is not resumed and no cooperative backend was built. This replaces the earlier reasoning-only note. Forced DPM stays HighRisk/manual.
 - **vm_swappiness - DeferredEvidence.** `CompileThroughputWithForegroundProtection` is now Supported
   (frozen 7.5 percent threshold, `live_compile_objective`), so the objective prerequisite is met. Three
   feasibility pilots of the fixed cold build under cgroup memory pressure (55, 35 and 20 percent of

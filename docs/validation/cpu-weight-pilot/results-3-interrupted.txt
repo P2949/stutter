@@ -1,0 +1,1 @@
+b1-p0-ctl cond=ctl rc=0 compile_s=106.4 fg: frames=2395 mean=7.234 p50=6.822 p95=9.582 p99=11.185 p999=24.630 over_slot=0.0038 wake_n=2384 wake_p50=14 wake_p99=1834 wake_p999=5929 fg_psi_some_avg10=avg10=0.00

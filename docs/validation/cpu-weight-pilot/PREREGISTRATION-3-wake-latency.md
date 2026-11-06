@@ -26,3 +26,13 @@ over the same block's control in at least 3 of 4 blocks, the median improvement 
 control-to-control change, and its median compile slowdown is at most 15 percent. Otherwise `DeferredEvidence`.
 A useful effect for either condition only opens the design of a typed, reversible, administrator-subtree
 operation; it graduates nothing.
+
+## Status: withdrawn, not executed (2026-11-06)
+
+The project owner's updated direction closed the cgroup-CPU candidates and asked for no new pilots before the
+production service's own behaviour is verified. This pilot was interrupted after its first control run and is
+withdrawn; it is not evidence for or against any condition. The one captured row
+(`b1-p0-ctl`, control: frame p99 11.185 ms, wake-latency p50 14 us, p99 1834 us, p99.9 5929 us under contention,
+against 46 us p99 for the loop alone) is kept in `results-3-interrupted.txt` as a record only. The rule above was
+never applied, and nothing is concluded from it. A future cgroup-resource study would need its own new
+preregistration on a real workload (see the production-behaviour work).

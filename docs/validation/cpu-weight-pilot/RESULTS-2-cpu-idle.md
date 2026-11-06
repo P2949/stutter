@@ -21,4 +21,4 @@ the others (for example 9.671 ms), so the data stands.
 Both mechanisms land at the same ceiling (about 9 to 10 percent p99, 11 to 13 percent mean frame time). Frame time
 includes the loop's own 6.1 ms of CPU work, so it understates a scheduling effect. The controller's foreground
 objective, `GameRunnableLatency`, keeps a change only at a 12.5 percent wake-to-run latency improvement, so the
-relevant question is the wake-latency effect, which a third pilot measures directly.
+relevant quantity would be the wake-latency effect, which was not measured: a third pilot was preregistered but withdrawn unrun (see PREREGISTRATION-3-wake-latency.md).

@@ -38,10 +38,21 @@ At 09:09:01, during `b4-p0-Daily` (a `Daily` run, so not caused by the Gaming pr
 ([excerpt](kernel-gpu-hang-excerpt.txt)). The GPU was at 48 C, so it was not a thermal fault. The harness aborted on
 the missing frame log as preregistered and restored `Daily`.
 
-The likely cause is the stability margin of the host's GPU configuration (a -150 mV offset at about 3.26 GHz
-and the 238 W cap) under a sustained saturating load. That configuration belongs to the NixosConf GPU
-policy and was not changed. Consequently: no further sustained GPU-saturating workload is run on this
-host, and any later GPU experiment must use a bounded, non-saturating workload or a different clock policy.
+The root cause is **undetermined**. Possible causes include the host's GPU electrical configuration (a -150 mV
+offset at about 3.26 GHz and the 238 W cap, set by the NixosConf LACT policy), the Mesa/RADV driver or the
+vkmark workload itself, the amdgpu driver or the GPU/SMU firmware, or a hardware fault. The low edge
+temperature (48 C) argues against a simple over-temperature explanation but does not exclude any of these, and
+the pilot did not test any of them. It happened on a `Daily` run, so the profile did not cause it.
+
+Identities at the time: kernel 6.18.57; amdgpu in-kernel with SMU firmware 104.80.0 (`smu fw version 0x00685000`),
+DMUB 0x0A005000, VBIOS `113-EXT115437-100`; Mesa 26.1.8 (RADV, Vulkan 1.4.354); NixOS system
+`4vwhhsn8syz5wwfhx23rwli4diij41d3-nixos-system-desktop-26.05.20261025`; workload `vkmark -b effect2d -s 3840x2160
+-p immediate` from `nixpkgs#vkmark`. Read-only follow-up: the driver logged no further amdgpu errors after the
+reset (`power_dpm_force_performance_level` `manual`, profile `Daily`).
+
+Consequently the sustained GPU-saturating vkmark workload is **quarantined** on this host: it is not rerun to settle the
+cause, no LACT electrical setting is changed, and no GPU tuning backend is built. Investigating the configuration is a
+separate task for the host owner.
 
 ## Decision
 
