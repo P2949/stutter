@@ -491,7 +491,9 @@ pub fn run(root: &Path, args: &SmokeArgs) -> anyhow::Result<()> {
     if let Ok((outstanding, entries)) = ledger(&user) {
         settled = Check::new(
             "tokens_settled_after_the_workload",
-            outstanding == 0 && entries >= baseline_entries,
+            // The ledger drops its oldest settled tokens as it records new ones, so its length
+            // can fall; what must hold is that nothing is left outstanding.
+            outstanding == 0,
             format!("{outstanding} outstanding of {entries} entries (was {baseline_entries})"),
         );
     }
