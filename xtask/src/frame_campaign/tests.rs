@@ -8,7 +8,7 @@ fn the_shipped_manifest_parses_and_each_block_yields_all_three_pair_kinds() {
     assert_eq!(spec.objective, "GameFramePacing");
     for block in 0..spec.calibration_blocks {
         let (light, heavy) = block_levels(&spec, block);
-        assert!(light > heavy, "the lighter level has the higher nice value");
+        assert!(light < heavy, "the lighter level has fewer busy loops");
         let runs: Vec<Run> = block_order(block)
             .into_iter()
             .enumerate()
@@ -34,7 +34,7 @@ fn the_shipped_manifest_parses_and_each_block_yields_all_three_pair_kinds() {
 
 #[test]
 fn a_malformed_manifest_is_rejected() {
-    let bad = MANIFEST_TEXT.replace("levels_nice = [19, 10, 5, 0]", "levels_nice = [0, 5]");
+    let bad = MANIFEST_TEXT.replace("levels_hogs = [0, 1, 3]", "levels_hogs = [3, 1]");
     assert!(parse_manifest(&bad).is_err());
     let bad = MANIFEST_TEXT.replace(
         "population_grid = [300, 600, 1200, 2400]",
@@ -66,7 +66,7 @@ fn the_selection_picks_the_smallest_population_and_threshold_that_satisfy_the_ru
                 block,
                 position: position as u32,
                 condition,
-                nice: 0,
+                hogs: 0,
                 valid_frames: 5_000,
                 p99_us: spec.population_grid.iter().map(|&n| (n, value)).collect(),
                 execution_id: format!("{block}-{position}"),
@@ -76,6 +76,6 @@ fn the_selection_picks_the_smallest_population_and_threshold_that_satisfy_the_ru
     let calibration = pairs(&stats_runs(&runs, 300).unwrap());
     let (threshold, _) =
         select_threshold(&calibration, &spec.threshold_grid_percent, &spec.rule()).unwrap();
-    // 2 percent noise times the 2.0 margin is 4 percent, so the smallest grid value (10) is chosen.
-    assert_eq!(threshold, 10.0);
+    // 2 percent noise times the 2.0 margin is 4 percent, so the smallest grid value (25) is chosen.
+    assert_eq!(threshold, 25.0);
 }

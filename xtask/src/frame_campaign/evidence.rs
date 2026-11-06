@@ -50,7 +50,7 @@ pub(crate) fn write(
                 "any mutation's benefit (this graduates the objective's measurement, not an operation)",
                 "GPU-bound or real games, or frame sources other than a MangoHud log",
                 "compositor-level or present-feedback frame timing",
-                "effects smaller than the smallest controlled step (about 20 percent of frame p99)",
+                "effects smaller than the smallest controlled step (frame p99 changes of 3x or more)",
                 "real user sessions",
             ],
             "cases": [

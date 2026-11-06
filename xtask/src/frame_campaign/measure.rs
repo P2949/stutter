@@ -15,10 +15,9 @@ use stutter::api::autotune::frame_log_stats;
 use super::{FrameRun, Spec, block_levels, run_path};
 use crate::objective_campaign::{stats::Condition, write_json};
 
-fn spawn_hog(cpu: u32, nice: i32) -> anyhow::Result<Child> {
-    Command::new("nice")
-        .args(["-n", &nice.to_string(), "taskset", "-c", &cpu.to_string()])
-        .args(["sh", "-c", "while :; do :; done"])
+fn spawn_hog(cpu: u32) -> anyhow::Result<Child> {
+    Command::new("taskset")
+        .args(["-c", &cpu.to_string(), "sh", "-c", "while :; do :; done"])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
@@ -64,14 +63,17 @@ pub(crate) fn execute_run(
     condition: Condition,
 ) -> anyhow::Result<()> {
     let (light, heavy) = block_levels(spec, block);
-    let nice = if condition == Condition::Clean {
+    let hogs = if condition == Condition::Clean {
         light
     } else {
         heavy
     };
     let log_dir = out.join("logs").join(format!("{block:03}-{position}"));
     fs::create_dir_all(&log_dir)?;
-    let mut hog = spawn_hog(spec.cpu, nice)?;
+    let mut hog_children = Vec::new();
+    for _ in 0..hogs {
+        hog_children.push(spawn_hog(spec.cpu)?);
+    }
     let outcome = (|| {
         let mut workload = spawn_workload(spec.cpu, spec.seconds, &log_dir)?;
         // The log is complete once `log_duration` has elapsed; the margin covers startup and flush.
@@ -80,8 +82,10 @@ pub(crate) fn execute_run(
         let _ = workload.wait();
         anyhow::Ok(())
     })();
-    let _ = hog.kill();
-    let _ = hog.wait();
+    for hog in &mut hog_children {
+        let _ = hog.kill();
+        let _ = hog.wait();
+    }
     outcome?;
 
     let log = detailed_log(&log_dir)?;
@@ -119,14 +123,14 @@ pub(crate) fn execute_run(
         block,
         position,
         condition,
-        nice,
+        hogs,
         valid_frames,
         p99_us,
         execution_id: format!("frame-{block:03}-{position}"),
     };
     write_json(&run_path(out, block, position), &to_value(&run)?)?;
     println!(
-        "run {block:03}-{position}: nice {nice}, {valid_frames} frames, p99 {} us at {max_population}",
+        "run {block:03}-{position}: {hogs} hogs, {valid_frames} frames, p99 {} us at {max_population}",
         run.p99_us[&max_population]
     );
     Ok(())

@@ -48,7 +48,7 @@ pub(crate) struct Spec {
     pub objective: String,
     pub cpu: u32,
     pub seconds: u64,
-    pub levels_nice: Vec<i32>,
+    pub levels_hogs: Vec<u32>,
     pub calibration_blocks: u32,
     pub holdout_blocks: u32,
     pub population_grid: Vec<usize>,
@@ -75,7 +75,7 @@ pub(crate) struct FrameRun {
     pub block: u32,
     pub position: u32,
     pub condition: Condition,
-    pub nice: i32,
+    pub hogs: u32,
     pub valid_frames: usize,
     pub p99_us: std::collections::BTreeMap<usize, u64>,
     pub execution_id: String,
@@ -86,8 +86,8 @@ pub(crate) fn parse_manifest(text: &str) -> anyhow::Result<Spec> {
     ensure!(file.schema_version == 1, "unsupported manifest schema");
     let spec = file.frame_pacing;
     ensure!(
-        spec.levels_nice.len() >= 2 && spec.levels_nice.windows(2).all(|w| w[0] > w[1]),
-        "levels_nice must be strictly decreasing (lightest interference first)"
+        spec.levels_hogs.len() >= 2 && spec.levels_hogs.windows(2).all(|w| w[0] < w[1]),
+        "levels_hogs must be strictly increasing (lightest interference first)"
     );
     ensure!(
         spec.calibration_blocks > 0 && spec.holdout_blocks > 0 && spec.seconds >= 5,
@@ -114,10 +114,10 @@ pub(crate) fn parse_manifest(text: &str) -> anyhow::Result<Spec> {
     Ok(spec)
 }
 
-/// The lighter and heavier interference levels compared by a block.
-pub(crate) fn block_levels(spec: &Spec, block: u32) -> (i32, i32) {
-    let pair = (block as usize) % (spec.levels_nice.len() - 1);
-    (spec.levels_nice[pair], spec.levels_nice[pair + 1])
+/// The lighter and heavier interference levels (busy-loop counts) compared by a block.
+pub(crate) fn block_levels(spec: &Spec, block: u32) -> (u32, u32) {
+    let pair = (block as usize) % (spec.levels_hogs.len() - 1);
+    (spec.levels_hogs[pair], spec.levels_hogs[pair + 1])
 }
 
 /// The conditions of a block in run order; the order alternates so neither direction of a

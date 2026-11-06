@@ -1,0 +1,25 @@
+{
+  "populations_considered": [
+    {
+      "neutral_noise_percent": 62.46786632390745,
+      "population": 300,
+      "satisfied": false
+    },
+    {
+      "neutral_noise_percent": 52.45398773006135,
+      "population": 600,
+      "satisfied": false
+    },
+    {
+      "neutral_noise_percent": 32.67148014440433,
+      "population": 1200,
+      "satisfied": false
+    },
+    {
+      "neutral_noise_percent": 64.08163265306122,
+      "population": 2400,
+      "satisfied": false
+    }
+  ],
+  "reason": "no pre-registered population and threshold satisfy the selection rule on calibration"
+}
