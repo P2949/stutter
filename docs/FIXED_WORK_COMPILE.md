@@ -55,8 +55,13 @@ frame, thermal and CPU/GPU power regressions, and rejects an increase in observe
 memory PSI some avg10. Invalid memory evidence is inconclusive; absent optional
 memory evidence is not a measured zero. Foreground protection currently uses the
 existing derived foreground signal; it is not a new direct foreground histogram.
-A symmetric 10% elapsed-time threshold is provisional, not statistical confidence
-or empirically calibrated policy. Smaller differences are inconclusive.
+A symmetric 7.5% elapsed-time threshold decides the result; smaller differences are inconclusive.
+It is the value frozen by the objective campaign (`xtask objective-campaign`): selected on
+calibration pairs by a pre-registered rule before any holdout run existed, then evaluated once on
+an untouched holdout with no false keep ([calibration record](validation/compile-throughput-calibration.json)).
+It is a conservative effect size, not a statistical confidence interval, and the evidence is
+for controlled cold builds of one package on four CPUs; it does not cover the guardrails under
+live load.
 
 ## Artifacts and validation limits
 

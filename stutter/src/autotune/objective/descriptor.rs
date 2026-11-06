@@ -64,7 +64,7 @@ impl ObjectiveKind {
         use ObjectiveFallbackPolicy::{
             None, NormalizedScoreWhenMissingOrUnchanged as ScoreFallback,
         };
-        use ObjectiveMaturity::{Experimental, Supported, Validating};
+        use ObjectiveMaturity::{Experimental, Supported};
         use ObjectiveSignalQuality::{Approximate, Derived, Direct};
         // Exhaustive: new objectives cannot compile without a contract decision.
         let (metric, quality, required, fallback, guards, maturity, limitations): (
@@ -149,8 +149,8 @@ impl ObjectiveKind {
                     "foreground_frame_pacing",
                     "observed_memory_pressure",
                 ],
-                Validating,
-                "Cache/toolchain/environment policy is harness-declared; foreground protection is derived; provisional 10 percent threshold and live acceptance pending.",
+                Supported,
+                "Cache/toolchain/environment policy is harness-declared; foreground protection is derived; the 7.5 percent threshold was calibrated and held out on controlled completed builds (live_compile_objective), which does not cover guardrail behavior under live load.",
             ),
             Self::IoLatency => (
                 "block_io_overlap_count_then_worst_latency_ns",
@@ -215,11 +215,16 @@ mod tests {
             assert!(!descriptor.primary_metric.is_empty());
             assert!(!descriptor.required_signals.is_empty());
             assert!(!descriptor.limitations.is_empty());
-            // An objective is Supported only after a graduation campaign; today that is
-            // GameRunnableLatency alone.
+            // An objective is Supported only after a graduation campaign: GameRunnableLatency
+            // (mutation graduation) and CompileThroughputWithForegroundProtection (the objective
+            // campaign, `live_compile_objective`).
             assert_eq!(
                 descriptor.maturity == ObjectiveMaturity::Supported,
-                kind == ObjectiveKind::GameRunnableLatency,
+                matches!(
+                    kind,
+                    ObjectiveKind::GameRunnableLatency
+                        | ObjectiveKind::CompileThroughputWithForegroundProtection
+                ),
                 "{kind:?}"
             );
             let json = serde_json::to_string(&descriptor).unwrap();

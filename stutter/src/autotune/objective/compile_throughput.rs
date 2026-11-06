@@ -7,9 +7,11 @@ use crate::{
     workload_progress::{FixedWorkMeasurement, WorkloadKind},
 };
 
-// Provisional conservative effect thresholds, pending repeated real-workload
-// calibration. These are not a statistical confidence interval.
-pub const MINIMUM_CHANGE_PERCENT: f64 = 10.0;
+// The effect threshold frozen by the objective campaign: selected on calibration pairs by a
+// pre-registered rule before any holdout run existed, then evaluated once on an untouched holdout
+// (docs/validation/compile-throughput-calibration.json). It is a conservative effect size, not a
+// statistical confidence interval.
+pub const MINIMUM_CHANGE_PERCENT: f64 = 7.5;
 
 // A calibrated value is only ever frozen from the pre-registered grid (7.5 to 20 percent).
 const _: () = assert!(MINIMUM_CHANGE_PERCENT >= 7.5 && MINIMUM_CHANGE_PERCENT <= 20.0);
@@ -184,5 +186,32 @@ mod rule_tests {
             classify_change(100 * second, 85 * second, 20.0),
             CompileChange::Inconclusive(_)
         ));
+    }
+}
+
+#[cfg(test)]
+mod calibration_tests {
+    use super::*;
+
+    /// The shipped threshold is the frozen one: changing either without the other, or without a
+    /// new passing holdout, fails here.
+    #[test]
+    fn the_shipped_threshold_is_the_frozen_calibrated_one() {
+        let record: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../docs/validation/compile-throughput-calibration.json"
+        ))
+        .unwrap();
+        assert_eq!(
+            record["threshold_percent"].as_f64(),
+            Some(MINIMUM_CHANGE_PERCENT)
+        );
+        assert_eq!(record["holdout"]["passed"], true);
+        assert_eq!(record["holdout"]["tally"]["false_keeps"], 0);
+        assert_eq!(record["evidence"]["suite"], "live_compile_objective");
+        assert!(record["threshold_percent"].as_f64().is_some_and(|value| {
+            record["grid_percent"]
+                .as_array()
+                .is_some_and(|grid| grid.iter().any(|entry| entry.as_f64() == Some(value)))
+        }));
     }
 }

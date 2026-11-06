@@ -47,6 +47,14 @@ graduated on targeted acceptance (`live_bounded_service_acceptance`, indexed in
 [`evidence/index.json`](evidence/index.json)) and a production boot check, for exactly the two
 graduated operations. It does not claim extended endurance or OpenRC.
 
+**Supported objective, compile throughput:** `CompileThroughputWithForegroundProtection` graduated
+on the objective campaign (`live_compile_objective`, indexed in
+[`evidence/index.json`](evidence/index.json)): its 7.5 percent elapsed-time threshold was selected on
+calibration pairs by a pre-registered rule, frozen before any holdout run existed, and evaluated
+once on an untouched holdout with no false keep
+([calibration record](validation/compile-throughput-calibration.json)). This graduates the
+objective's measurement on controlled cold builds; it authorises no operation by itself.
+
 **Still Experimental:** every system-wide mutation, the deferred process-local operations
 above, and remote mutation.
 

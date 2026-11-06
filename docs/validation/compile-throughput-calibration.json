@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "objective": "CompileThroughputWithForegroundProtection",
+  "threshold_percent": 7.5,
+  "selection_rule": {
+    "max_false_keeps": 0,
+    "min_beneficial_keep_rate": 0.8,
+    "noise_margin": 2.0
+  },
+  "grid_percent": [
+    7.5,
+    10.0,
+    12.5,
+    15.0,
+    20.0
+  ],
+  "calibration": {
+    "tally": {
+      "beneficial": 10,
+      "beneficial_kept": 10,
+      "false_keeps": 0,
+      "neutral": 10,
+      "regression": 10
+    },
+    "keep_rate": 1.0,
+    "neutral_noise_percent": 1.5359973595286367
+  },
+  "holdout": {
+    "tally": {
+      "beneficial": 5,
+      "beneficial_kept": 5,
+      "false_keeps": 0,
+      "neutral": 5,
+      "regression": 5
+    },
+    "keep_rate": 1.0,
+    "passed": true
+  },
+  "evidence": {
+    "suite": "live_compile_objective",
+    "capture_id": "live_compile_objective-d2d45bdf-1793937879005",
+    "source_commit": "d2d45bdf0c1cd7dad61a2ba839fce7258eb28453",
+    "manifest_sha256": "8f151fdacbd69d0b93cac78e8daa8971b89a003873505046e80090ff84016226"
+  },
+  "note": "Frozen from calibration pairs before any holdout run existed, then evaluated once on the untouched holdout. The controller ships exactly this threshold; a test keeps the two equal."
+}
