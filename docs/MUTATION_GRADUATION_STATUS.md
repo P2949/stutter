@@ -120,7 +120,7 @@ pin them by manifest digest.
 
 ## M8 dispositions (evaluated against the roadmap's prerequisites)
 
-None of the three operations can pass its own prerequisite on this host; each stays Experimental and
+None of the three operations can be graduated on this host (a missing prerequisite, a measured absence of benefit, or conflicted ownership); each stays Experimental and
 none is promoted to make the matrix look complete.
 
 - **gpu_power_profile - DeferredEvidence (conflicted ownership).** `GameFramePacing` is now Supported
