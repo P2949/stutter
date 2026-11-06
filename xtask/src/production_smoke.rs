@@ -341,10 +341,12 @@ impl Drop for Fixture {
     }
 }
 
-fn spawn_fixture(out: &Path, cpu: u32, seconds: u64) -> anyhow::Result<Fixture> {
-    let directory = out.join("steamapps/common/StutterAcceptanceGame");
+/// A distinct `name` is a distinct workload identity: the controller does not retry a recently tried
+/// candidate for the same identity, so each smoke case uses its own.
+fn spawn_fixture(out: &Path, name: &str, cpu: u32, seconds: u64) -> anyhow::Result<Fixture> {
+    let directory = out.join("steamapps/common").join(name);
     fs::create_dir_all(&directory)?;
-    let game = directory.join("StutterAcceptanceGame");
+    let game = directory.join(name);
     let this = std::env::current_exe()?;
     fs::copy(&this, &game).context("install the workload fixture")?;
     fs::copy(&this, directory.join("wineserver")).context("install the workload helper")?;
@@ -439,7 +441,12 @@ pub fn run(root: &Path, args: &SmokeArgs) -> anyhow::Result<()> {
     let mut offset = fs::metadata(&history).map_or(0, |metadata| metadata.len());
     let cpus = std::thread::available_parallelism().map_or(1, |count| count.get());
     ensure!(cpus >= 4, "the fixture needs at least four CPUs");
-    let fixture = spawn_fixture(&args.out, 2, args.resolve_seconds + 60)?;
+    let fixture = spawn_fixture(
+        &args.out,
+        "StutterAcceptanceGame",
+        2,
+        args.resolve_seconds + 60,
+    )?;
     let pid = fixture.child.id();
     let original = allowed_lists(pid);
     let mut outcome = Outcome::default();

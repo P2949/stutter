@@ -157,11 +157,12 @@ pub(super) fn idle(
 /// Starts a fixture and waits until the controller has applied its mutation.
 fn spawn_until_applied(
     out: &Path,
+    name: &str,
     history: &Path,
     seconds: u64,
 ) -> anyhow::Result<(super::Fixture, u32, Vec<String>, u64)> {
     let mut offset = fs::metadata(history).map_or(0, |metadata| metadata.len());
-    let fixture = spawn_fixture(out, 2, seconds + 60)?;
+    let fixture = spawn_fixture(out, name, 2, seconds + 60)?;
     let pid = fixture.child.id();
     let original = allowed_lists(pid);
     let mut outcome = Outcome::default();
@@ -187,7 +188,8 @@ pub(super) fn exit_while_applied(
 ) -> Vec<Check> {
     let case = out.join("exit-while-applied");
     let result = (|| -> anyhow::Result<(bool, usize)> {
-        let (fixture, pid, _, mut offset) = spawn_until_applied(&case, history, seconds)?;
+        let (fixture, pid, _, mut offset) =
+            spawn_until_applied(&case, "StutterAcceptanceGameExit", history, seconds)?;
         drop(fixture);
         let settled = wait_for("the ledger to settle after the exit", 90, || {
             ledger(user).is_ok_and(|(outstanding, _)| outstanding == 0)
@@ -238,7 +240,8 @@ pub(super) fn controller_killed_while_applied(
 ) -> Vec<Check> {
     let case = out.join("controller-killed-while-applied");
     let result = (|| -> anyhow::Result<(bool, bool, Vec<String>, Vec<String>)> {
-        let (fixture, pid, original, _) = spawn_until_applied(&case, history, seconds)?;
+        let (fixture, pid, original, _) =
+            spawn_until_applied(&case, "StutterAcceptanceGameKill", history, seconds)?;
         run_text(
             "sudo",
             &["-n", "systemctl", "kill", "--signal=SIGKILL", controller],
