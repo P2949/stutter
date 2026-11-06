@@ -11,6 +11,32 @@ pub(super) struct ServiceActionService {
     targets: super::service_targets::ServiceTargets,
 }
 
+/// Settled tokens the ledger keeps as tombstones, so that a repeated restore of a recent token
+/// stays an idempotent no-op. Older settled entries are dropped when a token is recorded, which
+/// keeps every rewrite of the ledger bounded; the recovery audit keeps their history. A token that
+/// is still outstanding is never dropped.
+const SETTLED_RETAINED: usize = 512;
+
+/// Drops the oldest settled tokens beyond [`SETTLED_RETAINED`], leaving every outstanding token
+/// and the order of the rest untouched.
+fn compact_settled(tokens: &mut Vec<IssuedToken>) {
+    let mut surplus = tokens
+        .iter()
+        .filter(|issued| issued.restored)
+        .count()
+        .saturating_sub(SETTLED_RETAINED);
+    if surplus == 0 {
+        return;
+    }
+    tokens.retain(|issued| {
+        if issued.restored && surplus > 0 {
+            surplus -= 1;
+            return false;
+        }
+        true
+    });
+}
+
 #[derive(Serialize, Deserialize)]
 struct IssuedToken {
     boot_id: String,
@@ -150,6 +176,7 @@ impl ServiceActionService {
                 restored: false,
             });
         }
+        compact_settled(&mut tokens);
         self.write(&tokens)?;
         Ok(())
     }

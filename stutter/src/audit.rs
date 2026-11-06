@@ -104,7 +104,9 @@ pub fn read_audit_tail(path: &Path, tail: usize) -> anyhow::Result<Vec<AuditEven
     let file = fs::File::open(path)
         .with_context(|| format!("failed to open audit log {}", path.display()))?;
     let reader = std::io::BufReader::new(file);
-    let mut events = Vec::new();
+    // Every line is still validated, but only the requested tail is kept, so memory stays
+    // proportional to the tail and not to the size of the log.
+    let mut events = std::collections::VecDeque::with_capacity(tail.min(1024));
     for line in reader.lines() {
         let line = line?;
         if line.trim().is_empty() {
@@ -115,13 +117,15 @@ pub fn read_audit_tail(path: &Path, tail: usize) -> anyhow::Result<Vec<AuditEven
         event
             .validate_identity_strings()
             .with_context(|| format!("invalid audit event action_id in {}", path.display()))?;
-        events.push(event);
+        if tail == 0 {
+            continue;
+        }
+        if events.len() == tail {
+            events.pop_front();
+        }
+        events.push_back(event);
     }
-    if events.len() > tail {
-        Ok(events.split_off(events.len() - tail))
-    } else {
-        Ok(events)
-    }
+    Ok(events.into())
 }
 
 pub fn audit_command(input: AuditCommandInput) -> anyhow::Result<()> {
@@ -267,6 +271,29 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["two", "three"]
         );
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_zero_or_large_tail_is_exact_and_old_lines_are_still_validated() {
+        let dir = temp_dir("tail-edges");
+        let path = dir.join("actions.jsonl");
+        for message in ["one", "two", "three"] {
+            append_audit_event_to_path(&path, &event(message)).unwrap();
+        }
+        assert!(read_audit_tail(&path, 0).unwrap().is_empty());
+        assert_eq!(read_audit_tail(&path, 1).unwrap()[0].message, "three");
+        assert_eq!(read_audit_tail(&path, 100).unwrap().len(), 3);
+        // A malformed record far outside the requested tail still fails the read.
+        fs::write(
+            &path,
+            format!(
+                "not json\n{}\n",
+                serde_json::to_string(&event("fine")).unwrap()
+            ),
+        )
+        .unwrap();
+        assert!(read_audit_tail(&path, 1).is_err());
         fs::remove_dir_all(dir).ok();
     }
 

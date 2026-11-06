@@ -363,6 +363,9 @@ sockets are recreated. Stopping the controller runs worker-mediated emergency re
 the worker is stopped. Uninstall removes templates and preserves state/configuration.
 The controller's history log is bounded: at 128 MiB the current `history.jsonl` becomes `history.jsonl.1`,
 replacing the previous generation, so the state directory keeps at most about 256 MiB of history.
+The root worker's token ledger keeps at most 512 settled tokens as tombstones (so a repeated restore of
+a recent token stays a no-op) and drops older settled ones when it records a new token; a token that is
+still outstanding is never dropped, and the recovery audit keeps the history of settled ones.
 
 This mode passed targeted acceptance (`live_bounded_service_acceptance`) and a production boot
 check, which is what makes `always_on_autotune` Supported for the packaged systemd service and

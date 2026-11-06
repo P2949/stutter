@@ -384,7 +384,7 @@ pub fn run(root: &Path, args: &SmokeArgs) -> anyhow::Result<()> {
     let mut checks = Vec::new();
 
     checks.push(Check::new(
-        "passwordless_sudo_for_the_root_ledger",
+        "root_ledger_readable_through_sudo",
         run_text("sudo", &["-n", "true"]).is_ok(),
         "the root token ledger can only be read through sudo",
     ));

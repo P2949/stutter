@@ -286,3 +286,83 @@ mod precommit_abort_tests {
         assert_eq!(service.settle_issued_tokens(&policy).unwrap(), 1);
     }
 }
+
+mod compaction_tests {
+    use super::super::*;
+
+    fn issued(index: usize, restored: bool) -> IssuedToken {
+        IssuedToken {
+            boot_id: "boot".into(),
+            token: RollbackToken::CpuAffinityRestoreFile {
+                path: format!("/never/{index}.json").into(),
+                affected_tasks: 1,
+            },
+            plan: PrivilegedWorkerCandidatePlan::from_plan_request(
+                &CandidatePlanRequest::from_candidate(
+                    crate::autotune::planning::candidate::CandidateAction::cpu_affinity_profile_for(
+                        crate::profiles::Profile {
+                            name: format!("p{index}"),
+                            rules: vec![],
+                        },
+                        std::process::id(),
+                        crate::autotune::objective::ObjectiveKind::GameRunnableLatency,
+                    ),
+                    index as u128,
+                ),
+            ),
+            restored,
+        }
+    }
+
+    fn path(token: &IssuedToken) -> String {
+        match &token.token {
+            RollbackToken::CpuAffinityRestoreFile { path, .. } => path.display().to_string(),
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn only_the_oldest_settled_tokens_are_dropped_and_every_outstanding_one_stays() {
+        let total = SETTLED_RETAINED + 40;
+        let mut tokens: Vec<IssuedToken> = (0..total).map(|index| issued(index, true)).collect();
+        // Outstanding tokens among the oldest entries must survive the compaction.
+        for index in [0, 3, total - 1] {
+            tokens[index].restored = false;
+        }
+        compact_settled(&mut tokens);
+        assert_eq!(
+            tokens.iter().filter(|issued| issued.restored).count(),
+            SETTLED_RETAINED
+        );
+        let outstanding: Vec<String> = tokens
+            .iter()
+            .filter(|issued| !issued.restored)
+            .map(path)
+            .collect();
+        assert_eq!(
+            outstanding,
+            [0, 3, total - 1].map(|index| format!("/never/{index}.json"))
+        );
+        // The survivors keep their order, and the newest settled entries are the ones kept.
+        let all: Vec<String> = tokens.iter().map(path).collect();
+        let mut sorted = all.clone();
+        sorted.sort_by_key(|entry| {
+            entry
+                .trim_start_matches("/never/")
+                .trim_end_matches(".json")
+                .parse::<usize>()
+                .unwrap()
+        });
+        assert_eq!(all, sorted);
+        assert_eq!(all.last().unwrap(), &format!("/never/{}.json", total - 1));
+    }
+
+    #[test]
+    fn a_ledger_within_the_limit_is_left_alone() {
+        let mut tokens: Vec<IssuedToken> = (0..SETTLED_RETAINED)
+            .map(|index| issued(index, true))
+            .collect();
+        compact_settled(&mut tokens);
+        assert_eq!(tokens.len(), SETTLED_RETAINED);
+    }
+}
