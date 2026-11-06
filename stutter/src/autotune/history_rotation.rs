@@ -27,8 +27,43 @@ pub(crate) fn previous_generation(path: &Path) -> PathBuf {
     PathBuf::from(name)
 }
 
-/// Sets the history file aside when it has reached `max_bytes`. A missing file is fine, and two
-/// writers racing each other are harmless: the loser finds a small or missing file.
+/// The lock file that serializes every writer of one history log, across threads and processes.
+pub(crate) fn lock_path(path: &Path) -> PathBuf {
+    let mut name = path.as_os_str().to_owned();
+    name.push(".lock");
+    PathBuf::from(name)
+}
+
+/// Runs `body` while holding the exclusive per-history lock. Rotation, the append and the totals
+/// checkpoint all happen inside it, so a stale size check can never rotate a file another writer
+/// just started, and two records can never interleave.
+pub(crate) fn with_history_lock<T>(
+    path: &Path,
+    body: impl FnOnce() -> anyhow::Result<T>,
+) -> anyhow::Result<T> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).with_context(|| {
+            format!(
+                "failed to create autotune history directory {}",
+                parent.display()
+            )
+        })?;
+    }
+    let lock = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(lock_path(path))
+        .with_context(|| format!("failed to open the history lock for {}", path.display()))?;
+    lock.lock()
+        .with_context(|| format!("failed to lock autotune history {}", path.display()))?;
+    let result = body();
+    let _ = lock.unlock();
+    result
+}
+
+/// Sets the history file aside when it has reached `max_bytes`. A missing file is fine. Callers hold
+/// [`with_history_lock`], which is what makes the size check and the rename one atomic step
 pub(crate) fn rotate_if_full(path: &Path, max_bytes: u64) -> anyhow::Result<()> {
     let length = match fs::metadata(path) {
         Ok(metadata) => metadata.len(),

@@ -47,6 +47,10 @@ pub(crate) mod gpu_focus;
 pub(crate) mod history;
 pub(crate) mod history_replay;
 pub(crate) mod history_rotation;
+#[cfg(test)]
+mod history_storage_tests;
+pub(crate) mod history_tail;
+pub(crate) mod history_totals;
 
 pub(crate) mod autonomous_support;
 pub(crate) mod kept;

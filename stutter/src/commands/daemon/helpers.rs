@@ -78,7 +78,7 @@ pub fn load_recent_daemon_decisions(limit: usize) -> Vec<super::status::DaemonRe
     }
 
     let path = crate::autotune::history::default_autotune_history_path();
-    let Ok(events) = crate::autotune::history::read_autotune_history_events(&path) else {
+    let Ok(events) = crate::autotune::history_tail::read_autotune_history_tail(&path, limit) else {
         return Vec::new();
     };
 

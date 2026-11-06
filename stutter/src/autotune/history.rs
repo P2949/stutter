@@ -234,32 +234,35 @@ pub(crate) fn append_autotune_history_event_bounded(
     event: &AutotuneHistoryEvent,
     max_bytes: u64,
 ) -> anyhow::Result<()> {
-    super::history_rotation::rotate_if_full(path, max_bytes)?;
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).with_context(|| {
-            format!(
-                "failed to create autotune history directory {}",
-                parent.display()
-            )
+    // One lock covers the rotation, the append and the totals checkpoint, so concurrent writers
+    // (threads or processes) can neither rotate a file another just started nor interleave records.
+    super::history_rotation::with_history_lock(path, || {
+        super::history_rotation::rotate_if_full(path, max_bytes)?;
+        let mut totals = super::history_totals::HistoryTotals::load(path)
+            .unwrap_or_else(|_| super::history_totals::HistoryTotals::default());
+
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .with_context(|| format!("failed to open autotune history log {}", path.display()))?;
+        // The whole record, newline included, goes out in one write.
+        let mut record = serde_json::to_vec(event).with_context(|| {
+            format!("failed to encode autotune history event {}", path.display())
         })?;
-    }
+        record.push(b'\n');
+        file.write_all(&record).with_context(|| {
+            format!("failed to write autotune history event {}", path.display())
+        })?;
 
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .with_context(|| format!("failed to open autotune history log {}", path.display()))?;
-
-    serde_json::to_writer(&mut file, event)
-        .with_context(|| format!("failed to write autotune history event {}", path.display()))?;
-    file.write_all(b"\n").with_context(|| {
-        format!(
-            "failed to terminate autotune history event {}",
-            path.display()
-        )
-    })?;
-
-    Ok(())
+        totals.fold(event);
+        if let Err(error) = totals.store(path) {
+            // A stale checkpoint would undercount, so drop it; the next reader rebuilds it.
+            let _ = fs::remove_file(super::history_totals::totals_path(path));
+            log::warn!("autotune history totals checkpoint not written: {error:#}");
+        }
+        Ok(())
+    })
 }
 
 pub fn append_autotune_history_event_to_default_path(

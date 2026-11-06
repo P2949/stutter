@@ -11,7 +11,7 @@ pub(crate) async fn autotune_history_handler(
     }
 
     let path = crate::autotune::history::default_autotune_history_path();
-    let events = match crate::autotune::history::read_autotune_history_events(&path) {
+    let events = match crate::autotune::history_tail::read_autotune_history_tail(&path, 5000) {
         Ok(events) => events,
         Err(err) => {
             return (

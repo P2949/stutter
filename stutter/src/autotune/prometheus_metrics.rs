@@ -1,16 +1,10 @@
-use std::{
-    collections::BTreeSet,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 use crate::autotune::{
     controller_journal::{
         ControllerJournalRecord, default_controller_journal_path, read_controller_journal,
     },
-    history::{
-        AutotuneHistoryEvent, AutotuneMode, ControllerPhase, default_autotune_history_path,
-        read_autotune_history_events,
-    },
+    history::{AutotuneHistoryEvent, AutotuneMode, ControllerPhase, default_autotune_history_path},
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -60,7 +54,7 @@ pub fn load_autotune_prometheus_metrics(
         AutotunePrometheusMetrics::empty(history_path.to_path_buf(), journal_path.to_path_buf());
     let mut scrape_errors = Vec::new();
 
-    let history_events = match read_autotune_history_events(history_path) {
+    let history_events = match super::history_tail::read_autotune_history_tail(history_path, 4096) {
         Ok(events) => events,
         Err(err) => {
             scrape_errors.push(format!(
@@ -91,17 +85,15 @@ pub fn load_autotune_prometheus_metrics(
 
     metrics.active_experiment = active_experiment_from_history(&history_events)
         || active_experiment_from_journal(journal_record.as_ref());
-    metrics.rollbacks_total = history_events
-        .iter()
-        .filter(|event| event.rollback_performed)
-        .count()
-        .min(u64::MAX as usize) as u64;
-    metrics.actions_applied_total = count_unique_applied_actions(&history_events);
-    metrics.actions_blocked_total = history_events
-        .iter()
-        .filter(|event| is_blocked_event(event))
-        .count()
-        .min(u64::MAX as usize) as u64;
+    // The `_total` counters come from the durable checkpoint, so rotation never resets them.
+    match super::history_totals::HistoryTotals::load(history_path) {
+        Ok(totals) => {
+            metrics.rollbacks_total = totals.rollbacks_total;
+            metrics.actions_applied_total = totals.actions_applied_total;
+            metrics.actions_blocked_total = totals.actions_blocked_total;
+        }
+        Err(err) => scrape_errors.push(format!("failed to read autotune history totals: {err:#}")),
+    }
     metrics.scrape_error = if scrape_errors.is_empty() {
         None
     } else {
@@ -141,10 +133,10 @@ pub fn render_autotune_prometheus_metrics(metrics: &AutotunePrometheusMetrics) -
             "# HELP stutter_autotune_candidate_score Last candidate autotune diagnostic_raw_score_total. Lower is better.\n",
             "# TYPE stutter_autotune_candidate_score gauge\n",
             "stutter_autotune_candidate_score {candidate_score}\n",
-            "# HELP stutter_autotune_rollbacks_total Total autotune rollback events recorded in autotune history.\n",
+            "# HELP stutter_autotune_rollbacks_total Cumulative autotune rollback events, kept in a durable checkpoint so it does not reset when the history log rotates or the process restarts.\n",
             "# TYPE stutter_autotune_rollbacks_total counter\n",
             "stutter_autotune_rollbacks_total {rollbacks_total}\n",
-            "# HELP stutter_autotune_actions_applied_total Total unique autotune action IDs that reached an applying/start/apply decision in autotune history.\n",
+            "# HELP stutter_autotune_actions_applied_total Cumulative count of distinct autotune action IDs (deduplicated over the last 1024 applications) that reached an applying/start/apply decision. Kept in a durable checkpoint, so it does not reset when the history log rotates or the process restarts.\n",
             "# TYPE stutter_autotune_actions_applied_total counter\n",
             "stutter_autotune_actions_applied_total {actions_applied_total}\n",
             "# HELP stutter_autotune_actions_blocked_total Total autotune decisions blocked by safety, cooldown, focus, data-quality, regression, or missing-candidate gates in autotune history.\n",
@@ -225,25 +217,7 @@ fn active_experiment_from_journal(record: Option<&ControllerJournalRecord>) -> b
     record.is_some_and(ControllerJournalRecord::is_active_experiment_state)
 }
 
-fn count_unique_applied_actions(events: &[AutotuneHistoryEvent]) -> u64 {
-    let mut unique = BTreeSet::<String>::new();
-
-    for event in events {
-        if is_applied_event(event) {
-            unique.insert(
-                event
-                    .action_id
-                    .as_ref()
-                    .map(|action_id| action_id.as_str().to_owned())
-                    .unwrap_or_else(|| format!("event:{}", event.unix_nanos)),
-            );
-        }
-    }
-
-    unique.len().min(u64::MAX as usize) as u64
-}
-
-fn is_applied_event(event: &AutotuneHistoryEvent) -> bool {
+pub(crate) fn is_applied_event(event: &AutotuneHistoryEvent) -> bool {
     let decision = event.decision.decision.to_ascii_lowercase();
 
     matches!(event.phase, ControllerPhase::Applying)
@@ -253,7 +227,7 @@ fn is_applied_event(event: &AutotuneHistoryEvent) -> bool {
         || decision.contains("applied")
 }
 
-fn is_blocked_event(event: &AutotuneHistoryEvent) -> bool {
+pub(crate) fn is_blocked_event(event: &AutotuneHistoryEvent) -> bool {
     let decision = event.decision.decision.to_ascii_lowercase();
     let reason = event.reason.clone().to_ascii_lowercase();
 
