@@ -33,7 +33,8 @@ fn covers(suite: &str, result: &Value) -> Value {
         "live_autotune_smoke"
         | "live_autotune_soak"
         | "live_bounded_service"
-        | "live_bounded_service_acceptance" => json!({
+        | "live_bounded_service_acceptance"
+        | "live_packaged_service_smoke" => json!({
             "providers": ["cpu_affinity_profile", "cgroup_placement"],
         }),
         "live_game_runnable" => json!({"objectives": ["GameRunnableLatency"]}),

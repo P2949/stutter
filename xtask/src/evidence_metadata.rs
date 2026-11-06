@@ -15,6 +15,8 @@ pub(crate) const SUITE_AUTOTUNE_SOAK: &str = "live_autotune_soak";
 pub(crate) const SUITE_BOUNDED_SERVICE: &str = "live_bounded_service";
 /// Targeted acceptance of the same service: its own identity, never the endurance suite.
 pub(crate) const SUITE_BOUNDED_SERVICE_ACCEPTANCE: &str = "live_bounded_service_acceptance";
+/// The short exact-build smoke of the installed production service, run per release candidate.
+pub(crate) const SUITE_PACKAGED_SERVICE_SMOKE: &str = "live_packaged_service_smoke";
 
 pub(crate) fn unix_ms() -> u64 {
     std::time::SystemTime::now()
@@ -174,6 +176,7 @@ mod tests {
             SUITE_AUTOTUNE_SOAK,
             SUITE_BOUNDED_SERVICE,
             SUITE_BOUNDED_SERVICE_ACCEPTANCE,
+            SUITE_PACKAGED_SERVICE_SMOKE,
         ] {
             assert!(crate::evidence_bundle::KNOWN_SUITES.contains(&suite));
         }

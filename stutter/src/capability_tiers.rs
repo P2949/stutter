@@ -333,8 +333,8 @@ pub const CAPABILITIES: [Capability; 29] = [
         commands: &["daemon", "service", "autotune-status"],
         providers: &[],
         required_evidence: BOUNDED_SERVICE,
-        required_release_evidence: &["live_autotune_smoke"],
-        limitations: "Supported only as the packaged bounded systemd service: a controller running as the monitored desktop account plus a separate root worker (the units under packaging/systemd, installed with `stutter service install --mode system-bounded-autotune` or an equivalent that runs the same units from an immutable root-owned binary), heuristic auto-focus at the qualified confidence floor, apply-medium-risk, and only the two entries of AUTONOMOUS_CONTRACTS (CPU-affinity profile and cgroup placement for a stable game under scheduler pressure). Qualified by targeted acceptance (live_bounded_service_acceptance) and a production boot check on one NixOS host. Not claimed: extended endurance (eight hours, six cycles, in-campaign reboots; live_bounded_service), OpenRC, any other daemon mode, any system-wide or high-risk operation, remote agent mutation, and a per-release packaged-service smoke (releases are checked on the controller smoke).",
+        required_release_evidence: &["live_autotune_smoke", "live_packaged_service_smoke"],
+        limitations: "Supported only as the packaged bounded systemd service: a controller running as the monitored desktop account plus a separate root worker (the units under packaging/systemd, installed with `stutter service install --mode system-bounded-autotune` or an equivalent that runs the same units from an immutable root-owned binary), heuristic auto-focus at the qualified confidence floor, apply-medium-risk, and only the two entries of AUTONOMOUS_CONTRACTS (CPU-affinity profile and cgroup placement for a stable game under scheduler pressure). Qualified by targeted acceptance (live_bounded_service_acceptance) and a production boot check on one NixOS host. Not claimed: extended endurance (eight hours, six cycles, in-campaign reboots; live_bounded_service), OpenRC, any other daemon mode, any system-wide or high-risk operation, remote agent mutation; a release candidate must bring a fresh exact-build `live_packaged_service_smoke` of the installed units.",
     },
     Capability {
         id: "remote_agent_mutation",
@@ -620,6 +620,22 @@ mod tests {
         assert!(service.providers.is_empty());
         assert!(service.limitations.contains("AUTONOMOUS_CONTRACTS"));
         assert!(service.limitations.contains("extended endurance"));
+    }
+
+    #[test]
+    fn a_release_of_the_service_needs_its_own_exact_build_smoke() {
+        let service = capability("always_on_autotune");
+        assert!(
+            service
+                .required_release_evidence
+                .contains(&"live_packaged_service_smoke")
+        );
+        // The short smoke is never graduation proof, and graduation never replaces it.
+        assert!(
+            !service
+                .required_evidence
+                .contains(&"live_packaged_service_smoke")
+        );
     }
 
     #[test]

@@ -88,3 +88,26 @@ limitations. They do not satisfy a check of a later exact commit.
 * **Earlier endurance attempts** (`service-6079f71`, `service-b791597`, `service-7f687a8`,
   `service-7ffc4c6`) ended on harness or hardware issues, one of them a kernel-refused suspend, and
   are retained as historical supporting evidence only.
+
+## Per-release smoke of the installed service
+
+A release candidate brings a fresh `live_packaged_service_smoke` bundle for its exact build, so a
+new binary cannot inherit confidence from an older service binary. It runs against the units the
+host already has and never installs or replaces one:
+
+```sh
+cargo run -q -p xtask -- production-smoke --binary-sha256 <sha256 of the build under test> \
+  --out <new raw evidence directory>
+cargo run -q -p xtask -- evidence-export --raw <raw directory> --out <bundle>
+```
+
+It checks that both units are running, declared by the host and executing the pinned immutable
+binary (root-owned and protected, hash equal to the build under test) as the intended accounts
+with exactly the intended capabilities; that a workload fixture is discovered and a prepared
+mutation is applied through the root worker, physically readable, resolved and settled; and that
+a controller restart, a worker stop (which takes the controller with it) and a worker start leave
+a clean service with no root token outstanding. It needs passwordless `sudo` to read the root
+ledger. It does not exercise every fault (the acceptance suite does), endurance, or boot.
+
+The validation runner installs transient units with the same names, so campaigns that install
+their own units cannot run while the production units are enabled; run this smoke instead.

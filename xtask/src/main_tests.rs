@@ -62,6 +62,7 @@ fn expected_subcommands_are_registered() {
             "package-layout-check",
             "preflight",
             "privileged-ebpf-smoke",
+            "production-smoke",
             "recovery-controller",
             "refresh-tune-recommendation",
             "release-check",

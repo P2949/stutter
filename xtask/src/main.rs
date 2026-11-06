@@ -26,6 +26,7 @@ pub mod objective_docs;
 pub mod ops_checks;
 pub mod preflight;
 pub mod process;
+pub mod production_smoke;
 pub mod refresh_tune_recommendation;
 pub mod release_output;
 pub mod release_package;
@@ -122,6 +123,11 @@ pub enum XtaskCommand {
         about = "Fail if a capability is Supported ahead of its evidence"
     )]
     CapabilityCheck,
+    #[command(
+        name = "production-smoke",
+        about = "Short exact-build smoke of the installed production bounded service"
+    )]
+    ProductionSmoke(production_smoke::SmokeArgs),
     #[command(
         name = "score-evaluate",
         about = "Evaluate StutterScore against controlled degradation recordings"
@@ -511,6 +517,7 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
             Ok(())
         }
         XtaskCommand::CapabilityCheck => capability_check::run(&root),
+        XtaskCommand::ProductionSmoke(args) => production_smoke::run(&root, &args),
         XtaskCommand::EvidenceExport(args) => {
             evidence_bundle::export_bundle(&root, &args.raw, &args.out)
         }
