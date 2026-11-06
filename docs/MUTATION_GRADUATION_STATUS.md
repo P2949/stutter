@@ -123,12 +123,15 @@ pin them by manifest digest.
 None of the three operations can pass its own prerequisite on this host; each stays Experimental and
 none is promoted to make the matrix look complete.
 
-- **gpu_power_profile - DeferredEvidence.** Only `pp_power_profile_mode` could ever be considered, and
-  its primary objective is `GameFramePacing`, which is itself Experimental (no Validating objective,
-  no frame-pacing graduation evidence). The host GPU (AMD, `pp_power_profile_mode` present) is
-  addressable only as `cardN`; a stable PCI/render-node bound recovery token would have to be built
-  and qualified before any campaign, and without a Validating objective there is nothing for the
-  campaign to decide with. Forced DPM stays HighRisk/manual.
+- **gpu_power_profile - DeferredEvidence (conflicted ownership).** `GameFramePacing` is now Supported
+  (`live_frame_objective`), so the objective prerequisite is met. The blocker is ownership: on this host
+  `lactd` is active and re-applies its profile every 5 seconds (`apply_settings_timer: 5`); its current
+  profile `Daily` sets `performance_level: manual` and `power_profile_mode_index: 2`, and
+  `pp_power_profile_mode` shows `POWER_SAVING*` (index 2). That is the exact state a Stutter GPU
+  contract would write, so an autonomous write would be overwritten or would fight the owner. The plan
+  forbids fighting an owner; a cooperative LACT backend would be a separate, explicitly designed
+  operation, and a stable PCI-bound recovery token would still be needed (the card is addressable only as
+  `cardN`). LACT's GPU ownership is not touched. Forced DPM stays HighRisk/manual.
 - **vm_swappiness - DeferredEvidence.** `CompileThroughputWithForegroundProtection` is now Supported
   (frozen 7.5 percent threshold, `live_compile_objective`), so the objective prerequisite is met. Three
   feasibility pilots of the fixed cold build under cgroup memory pressure (55, 35 and 20 percent of
