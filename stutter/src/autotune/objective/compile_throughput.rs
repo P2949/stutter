@@ -11,6 +11,9 @@ use crate::{
 // calibration. These are not a statistical confidence interval.
 pub const MINIMUM_CHANGE_PERCENT: f64 = 10.0;
 
+// A calibrated value is only ever frozen from the pre-registered grid (7.5 to 20 percent).
+const _: () = assert!(MINIMUM_CHANGE_PERCENT >= 7.5 && MINIMUM_CHANGE_PERCENT <= 20.0);
+
 /// The elapsed-time verdict between two identical completed builds. The controller applies it with
 /// [`MINIMUM_CHANGE_PERCENT`]; the calibration campaign applies it at each candidate threshold, so
 /// both use exactly one rule. Lower elapsed time is better.
@@ -181,11 +184,5 @@ mod rule_tests {
             classify_change(100 * second, 85 * second, 20.0),
             CompileChange::Inconclusive(_)
         ));
-    }
-
-    #[test]
-    fn the_shipped_threshold_is_the_one_the_campaign_may_freeze() {
-        // A calibrated value is only ever frozen from the pre-registered grid.
-        assert!(MINIMUM_CHANGE_PERCENT > 0.0 && MINIMUM_CHANGE_PERCENT <= 20.0);
     }
 }
