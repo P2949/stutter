@@ -1,6 +1,7 @@
 use super::{
     ObjectiveComparisonInput, ObjectiveSignalQuality, ObjectiveSignals,
     common::reject_if_foreground_regressed,
+    relative_change::{RelativeChange, classify_relative_change},
 };
 use crate::{
     autotune::comparison::ExperimentResult,
@@ -16,30 +17,19 @@ pub const MINIMUM_CHANGE_PERCENT: f64 = 7.5;
 // A calibrated value is only ever frozen from the pre-registered grid (7.5 to 20 percent).
 const _: () = assert!(MINIMUM_CHANGE_PERCENT >= 7.5 && MINIMUM_CHANGE_PERCENT <= 20.0);
 
-/// The elapsed-time verdict between two identical completed builds. The controller applies it with
-/// [`MINIMUM_CHANGE_PERCENT`]; the calibration campaign applies it at each candidate threshold, so
-/// both use exactly one rule. Lower elapsed time is better.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum CompileChange {
-    Improved(f64),
-    Regressed(f64),
-    Inconclusive(f64),
-}
+/// The elapsed-time verdict between two identical completed builds; lower elapsed time is better.
+pub type CompileChange = RelativeChange;
 
 pub fn classify_change(
     baseline_elapsed_ns: u64,
     candidate_elapsed_ns: u64,
     threshold_percent: f64,
 ) -> CompileChange {
-    let baseline = baseline_elapsed_ns as f64;
-    let change_percent = (candidate_elapsed_ns as f64 - baseline) / baseline * 100.0;
-    if change_percent >= threshold_percent {
-        CompileChange::Regressed(change_percent)
-    } else if -change_percent >= threshold_percent {
-        CompileChange::Improved(-change_percent)
-    } else {
-        CompileChange::Inconclusive(change_percent)
-    }
+    classify_relative_change(
+        baseline_elapsed_ns as f64,
+        candidate_elapsed_ns as f64,
+        threshold_percent,
+    )
 }
 
 pub(super) fn measurement(signals: &ObjectiveSignals) -> Result<&FixedWorkMeasurement, String> {

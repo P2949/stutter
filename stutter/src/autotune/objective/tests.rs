@@ -143,12 +143,14 @@ fn historical_compile_progress_deserializes_as_activity_without_direct_throughpu
 #[test]
 fn game_objective_rejects_frame_p99_regression_even_when_total_improves() {
     let baseline = score(1_000, 12.0, 1);
-    let candidate = score(800, 14.0, 1);
+    let candidate = score(800, 16.0, 1);
 
     let mut baseline_signals = ObjectiveSignals::from_window_score(&baseline);
     let mut candidate_signals = ObjectiveSignals::from_window_score(&candidate);
-    baseline_signals.signal_quality.frame_pacing = ObjectiveSignalQuality::Direct;
-    candidate_signals.signal_quality.frame_pacing = ObjectiveSignalQuality::Direct;
+    for signals in [&mut baseline_signals, &mut candidate_signals] {
+        signals.signal_quality.frame_pacing = ObjectiveSignalQuality::Direct;
+        signals.frame_samples = Some(1_000);
+    }
     let result = compare(
         ObjectiveKind::GameFramePacing,
         &baseline,
@@ -593,6 +595,8 @@ fn frame_pacing_is_direct_only_and_never_keeps_on_derived_or_unchanged_evidence(
     // A direct source keeps a real improvement.
     baseline_signals.signal_quality.frame_pacing = ObjectiveSignalQuality::Direct;
     candidate_signals.signal_quality.frame_pacing = ObjectiveSignalQuality::Direct;
+    baseline_signals.frame_samples = Some(1_000);
+    candidate_signals.frame_samples = Some(1_000);
     let direct = compare(
         ObjectiveKind::GameFramePacing,
         &baseline,
@@ -618,4 +622,46 @@ fn frame_pacing_is_direct_only_and_never_keeps_on_derived_or_unchanged_evidence(
         matches!(unchanged, ExperimentResult::Inconclusive { .. }),
         "{unchanged:?}"
     );
+}
+
+#[test]
+fn frame_pacing_needs_a_sufficient_population_and_a_change_that_clears_the_threshold() {
+    let baseline = score(1_000, 12.0, 1);
+    let candidate = score(700, 8.0, 1);
+    let mut baseline_signals = ObjectiveSignals::from_window_score(&baseline);
+    let mut candidate_signals = ObjectiveSignals::from_window_score(&candidate);
+    for signals in [&mut baseline_signals, &mut candidate_signals] {
+        signals.signal_quality.frame_pacing = ObjectiveSignalQuality::Direct;
+        signals.frame_samples = Some(1_000);
+    }
+    let run = |b: &ObjectiveSignals, c: &ObjectiveSignals| {
+        compare(ObjectiveKind::GameFramePacing, &baseline, &candidate, b, c)
+    };
+    assert!(matches!(
+        run(&baseline_signals, &candidate_signals),
+        ExperimentResult::Improved { .. }
+    ));
+    // Too few frames in either window is never a keep.
+    candidate_signals.frame_samples = Some(10);
+    assert!(matches!(
+        run(&baseline_signals, &candidate_signals),
+        ExperimentResult::Inconclusive { reason } if reason.contains("valid frames")
+    ));
+    candidate_signals.frame_samples = Some(1_000);
+    // A change inside the threshold is inconclusive in both directions.
+    candidate_signals.frame_p99_ms = Some(11.0);
+    assert!(matches!(
+        run(&baseline_signals, &candidate_signals),
+        ExperimentResult::Inconclusive { .. }
+    ));
+    candidate_signals.frame_p99_ms = Some(13.0);
+    assert!(matches!(
+        run(&baseline_signals, &candidate_signals),
+        ExperimentResult::Inconclusive { .. }
+    ));
+    candidate_signals.frame_p99_ms = Some(20.0);
+    assert!(matches!(
+        run(&baseline_signals, &candidate_signals),
+        ExperimentResult::Regressed { .. }
+    ));
 }

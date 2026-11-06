@@ -1,10 +1,12 @@
 mod browser_interactivity;
 mod common;
 mod compile_throughput;
+mod relative_change;
 pub use compile_throughput::{
     CompileChange, MINIMUM_CHANGE_PERCENT as COMPILE_MINIMUM_CHANGE_PERCENT,
     classify_change as classify_compile_change,
 };
+pub use relative_change::{RelativeChange, classify_relative_change};
 pub(crate) mod contract;
 pub(crate) mod decision;
 mod descriptor;
@@ -35,7 +37,13 @@ pub fn game_runnable_unavailable_reason(signals: &ObjectiveSignals) -> Option<St
     game_runnable_latency::unavailable_reason(signals)
 }
 mod desktop_interactivity;
+mod frame_log;
+pub use frame_log::{FrameLogStats, frame_log_stats};
 mod game_frame_pacing;
+pub use game_frame_pacing::{
+    MINIMUM_CHANGE_PERCENT as FRAME_MINIMUM_CHANGE_PERCENT,
+    MINIMUM_SAMPLES as FRAME_MINIMUM_SAMPLES,
+};
 mod game_runnable_latency;
 mod io_latency;
 mod irq_overlap;
@@ -165,6 +173,9 @@ pub struct ObjectiveSignals {
     pub mem_stall_spike_count: Option<u64>,
     pub dirty_writeback_events: Option<u64>,
     pub frame_p99_ms: Option<f64>,
+    /// Valid frames behind `frame_p99_ms` in this window, when a frame source supplied them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame_samples: Option<u64>,
     pub foreground_over_5ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runnable_latency_p50_ns: Option<u64>,

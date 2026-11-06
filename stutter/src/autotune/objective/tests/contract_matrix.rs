@@ -35,6 +35,7 @@ fn signals(
                 ..ObjectiveSignals::from_window_score(score)
             };
             signals.signal_quality.frame_pacing = ObjectiveSignalQuality::Direct;
+            signals.frame_samples = Some(1_000);
             signals
         }
         ObjectiveKind::GameRunnableLatency => runnable::runnable(score, value * 1_000_000),

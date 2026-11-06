@@ -233,6 +233,7 @@ pub(crate) fn compute_objective_signals(
         mem_stall_spike_count,
         dirty_writeback_events: has_block_io_events.then_some(dirty_writeback_events),
         frame_p99_ms: Some(window.frame_p99_ms()),
+        frame_samples: Some(window.frames().len() as u64),
         foreground_over_5ms: Some(
             window
                 .intervals()
