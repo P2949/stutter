@@ -217,6 +217,29 @@ impl HistoryTotals {
         Ok(totals)
     }
 
+    /// How much of the current log the checkpoint on disk does not cover yet. Measured against the stored
+    /// checkpoint, not the in-memory one that `load` has already advanced by replaying.
+    pub(crate) fn uncovered_bytes(history: &Path) -> u64 {
+        let length = fs::metadata(history).map_or(0, |meta| meta.len());
+        let stored = fs::read(totals_path(history))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<Self>(&bytes).ok())
+            .and_then(|totals| totals.covered);
+        match (stored, identity(history)) {
+            (Some(covered), Some((dev, ino))) if covered.dev == dev && covered.ino == ino => {
+                length.saturating_sub(covered.offset)
+            }
+            _ => length,
+        }
+    }
+
+    /// A copy of `self` whose covered position is `other`'s, to compare only the counters.
+    pub(crate) fn with_same_position(&self, other: &Self) -> Self {
+        let mut copy = self.clone();
+        copy.covered = other.covered;
+        copy
+    }
+
     /// Points the checkpoint at the end of the current log file. Callers hold the history lock and
     /// have just appended and synced the record.
     pub(crate) fn cover_current(&mut self, history: &Path) {

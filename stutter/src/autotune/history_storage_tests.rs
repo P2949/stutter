@@ -360,3 +360,58 @@ mod fault_injection {
         );
     }
 }
+
+mod routine_observations {
+    use std::fs;
+
+    use super::{event, scratch};
+    use crate::autotune::{
+        history::append_autotune_history_event_bounded,
+        history_append::{CHECKPOINT_SLACK_BYTES, is_routine_observation},
+        history_totals::{HistoryTotals, totals_path},
+    };
+
+    fn observed(id: u128) -> crate::autotune::history::AutotuneHistoryEvent {
+        let mut observed = event(id, false);
+        observed.decision.decision = "observed".to_owned();
+        assert!(is_routine_observation(&observed));
+        observed
+    }
+
+    #[test]
+    fn routine_observations_leave_the_checkpoint_alone_until_enough_log_accumulates_and_stay_exact()
+    {
+        let dir = scratch("routine");
+        let path = dir.join("history.jsonl");
+        // A counted event first, so a checkpoint exists.
+        append_autotune_history_event_bounded(&path, &event(0, true), u64::MAX).unwrap();
+        let checkpoint = fs::read(totals_path(&path)).unwrap();
+        for id in 1..20 {
+            append_autotune_history_event_bounded(&path, &observed(id), u64::MAX).unwrap();
+        }
+        assert_eq!(
+            fs::read(totals_path(&path)).unwrap(),
+            checkpoint,
+            "routine observations do not rewrite the checkpoint"
+        );
+        // The counters are still exact: replay recovers the observations after the checkpoint.
+        let totals = HistoryTotals::load(&path).unwrap();
+        assert_eq!(totals.rollbacks_total, 1);
+        assert!(!totals.gap_detected);
+        // Once enough log is uncovered the checkpoint advances, so replay stays bounded.
+        let mut id = 20;
+        while fs::read(totals_path(&path)).unwrap() == checkpoint {
+            append_autotune_history_event_bounded(&path, &observed(id), u64::MAX).unwrap();
+            id += 1;
+            assert!(id < 5_000, "the checkpoint never advanced");
+            assert!(HistoryTotals::uncovered_bytes(&path) < 2 * CHECKPOINT_SLACK_BYTES);
+        }
+        // It advanced once the uncovered log reached the slack, and replay is bounded again.
+        assert!(fs::metadata(&path).unwrap().len() >= CHECKPOINT_SLACK_BYTES);
+        assert!(HistoryTotals::uncovered_bytes(&path) < CHECKPOINT_SLACK_BYTES);
+        // A counted event is always checkpointed immediately.
+        append_autotune_history_event_bounded(&path, &event(id + 1, true), u64::MAX).unwrap();
+        assert_eq!(HistoryTotals::uncovered_bytes(&path), 0);
+        assert_eq!(HistoryTotals::load(&path).unwrap().rollbacks_total, 2);
+    }
+}

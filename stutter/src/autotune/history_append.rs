@@ -72,12 +72,29 @@ pub(crate) fn append_bounded(
         file.write_all(&record).with_context(|| {
             format!("failed to write autotune history event {}", path.display())
         })?;
-        file.sync_data()?;
+        // A routine observation (one per second while idle) carries no decision worth a flush: losing
+        // one in a power failure costs nothing, and syncing it would put several fsyncs a second on an
+        // idle machine. Every other record is made durable before the checkpoint can refer to it.
+        let routine = is_routine_observation(event);
+        if !routine {
+            file.sync_data()?;
+        }
         drop(file);
-        sync_parent(path)?;
+        if !routine {
+            sync_parent(path)?;
+        }
         hook(Stage::AfterRecordSynced)?;
 
+        let before = totals.clone();
         totals.fold(event);
+        let uncovered = HistoryTotals::uncovered_bytes(path);
+        if routine
+            && totals == before.with_same_position(&totals)
+            && uncovered < CHECKPOINT_SLACK_BYTES
+        {
+            // Nothing the counters track changed and little log is uncovered: replay will recover it.
+            return Ok(());
+        }
         totals.cover_current(path);
         hook(Stage::BeforeCheckpointCommit)?;
         totals.store(path).with_context(|| {
@@ -87,4 +104,13 @@ pub(crate) fn append_bounded(
             )
         })
     })
+}
+
+/// How much log may follow the checkpoint before a routine observation advances it; bounds the replay
+/// every append and every metrics scrape performs.
+pub(crate) const CHECKPOINT_SLACK_BYTES: u64 = 256 * 1024;
+
+/// An `observed` record: the controller looked and decided nothing.
+pub(crate) fn is_routine_observation(event: &AutotuneHistoryEvent) -> bool {
+    event.decision.decision == "observed" && !event.rollback_performed
 }
