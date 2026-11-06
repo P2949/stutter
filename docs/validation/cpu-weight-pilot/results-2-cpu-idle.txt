@@ -1,0 +1,17 @@
+b1-p0-idle0 bg_idle=0 rc=0 compile_s=100.4 fg: frames=2400 mean=7.073 p50=6.636 p95=9.122 p99=10.245 p999=12.634 over_slot=0.0008 fg_psi_some_avg10=avg10=0.00
+b1-p1-idle1 bg_idle=1 rc=0 compile_s=106.6 fg: frames=2400 mean=6.211 p50=5.992 p95=7.409 p99=8.915 p999=10.668 over_slot=0.0000 fg_psi_some_avg10=avg10=0.00
+b1-p2-idle1 bg_idle=1 rc=0 compile_s=101.4 fg: frames=2400 mean=6.143 p50=5.900 p95=7.835 p99=9.128 p999=9.846 over_slot=0.0000 fg_psi_some_avg10=avg10=0.00
+b1-p3-idle0 bg_idle=0 rc=0 compile_s=93.0 fg: frames=2400 mean=6.825 p50=6.036 p95=8.946 p99=9.885 p999=11.095 over_slot=0.0000 fg_psi_some_avg10=avg10=0.01
+b2-p0-idle1 bg_idle=1 rc=0 compile_s=99.6 fg: frames=2400 mean=6.043 p50=5.868 p95=6.898 p99=8.853 p999=9.838 over_slot=0.0000 fg_psi_some_avg10=avg10=0.00
+b2-p1-idle0 bg_idle=0 rc=0 compile_s=91.2 fg: frames=2400 mean=6.697 p50=6.029 p95=8.835 p99=9.300 p999=10.910 over_slot=0.0000 fg_psi_some_avg10=avg10=0.01
+b2-p2-idle0 bg_idle=0 rc=0 compile_s=99.6 fg: frames=2400 mean=6.899 p50=6.209 p95=9.023 p99=9.723 p999=11.361 over_slot=0.0000 fg_psi_some_avg10=avg10=0.00
+b2-p3-idle1 bg_idle=1 rc=0 compile_s=112.4 fg: frames=2400 mean=6.090 p50=5.878 p95=7.142 p99=8.884 p999=9.885 over_slot=0.0000 fg_psi_some_avg10=avg10=0.00
+b3-p0-idle0 bg_idle=0 rc=0 compile_s=97.2 fg: frames=2400 mean=6.947 p50=6.290 p95=9.039 p99=9.594 p999=11.158 over_slot=0.0000 fg_psi_some_avg10=avg10=0.01
+b3-p1-idle1 bg_idle=1 rc=0 compile_s=93.0 fg: frames=2400 mean=5.905 p50=5.813 p95=6.247 p99=8.710 p999=9.473 over_slot=0.0000 fg_psi_some_avg10=avg10=0.00
+b3-p2-idle1 bg_idle=1 rc=0 compile_s=98.1 fg: frames=2400 mean=6.084 p50=5.881 p95=7.834 p99=8.905 p999=9.844 over_slot=0.0000 fg_psi_some_avg10=avg10=0.00
+b3-p3-idle0 bg_idle=0 rc=0 compile_s=88.2 fg: frames=2400 mean=6.814 p50=6.074 p95=8.962 p99=9.671 p999=11.033 over_slot=0.0000 fg_psi_some_avg10=avg10=0.03
+b4-p0-idle1 bg_idle=1 rc=0 compile_s=97.1 fg: frames=2400 mean=5.988 p50=5.844 p95=6.844 p99=8.880 p999=9.973 over_slot=0.0000 fg_psi_some_avg10=avg10=0.00
+b4-p1-idle0 bg_idle=0 rc=0 compile_s=93.2 fg: frames=2400 mean=6.828 p50=6.058 p95=8.915 p99=9.717 p999=10.839 over_slot=0.0000 fg_psi_some_avg10=avg10=0.01
+b4-p2-idle0 bg_idle=0 rc=0 compile_s=94.2 fg: frames=2400 mean=6.838 p50=6.077 p95=8.981 p99=9.999 p999=11.168 over_slot=0.0000 fg_psi_some_avg10=avg10=0.01
+b4-p3-idle1 bg_idle=1 rc=0 compile_s=99.2 fg: frames=2400 mean=6.044 p50=5.890 p95=6.969 p99=8.942 p999=9.850 over_slot=0.0000 fg_psi_some_avg10=avg10=0.00
+finished
