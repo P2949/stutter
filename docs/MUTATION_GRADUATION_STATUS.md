@@ -131,10 +131,13 @@ none is promoted to make the matrix look complete.
   contract would write, so an autonomous write would be overwritten or would fight the owner. The plan
   forbids fighting an owner; a cooperative LACT backend would be a separate, explicitly designed
   operation, and a stable PCI-bound recovery token would still be needed (the card is addressable only as
-  `cardN`). Even with a cooperative backend, graduation would need the GPU profile to move frame p99 by
-  at least the frozen 50 percent threshold, which the plan forbids lowering; a power-profile change is
-  not expected to do that (reasoning only: it was not measured, because measuring it would mean writing
-  state that LACT owns). LACT's GPU ownership is not touched. Forced DPM stays HighRisk/manual.
+  `cardN`). A preregistered pilot ([record](validation/gpu-profile-pilot/RESULTS.md)) then compared the
+  LACT `Daily` and `Gaming` profiles, switched only through `lact cli profile set`, on a GPU-bound
+  vkmark workload (GPU 99.8 percent busy at the 238 W cap): in the three complete blocks mean frame time
+  differed by -0.3 to +0.2 percent (control noise) and the shader clock was marginally lower under
+  Gaming. The pilot was aborted in block 4 by an amdgpu gfx ring timeout and full GPU reset on a `Daily`
+  run (the host's -150 mV configuration is marginal under a sustained saturating load), so it is not
+  resumed and no cooperative backend was built. This replaces the earlier reasoning-only note. Forced DPM stays HighRisk/manual.
 - **vm_swappiness - DeferredEvidence.** `CompileThroughputWithForegroundProtection` is now Supported
   (frozen 7.5 percent threshold, `live_compile_objective`), so the objective prerequisite is met. Three
   feasibility pilots of the fixed cold build under cgroup memory pressure (55, 35 and 20 percent of

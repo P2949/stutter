@@ -1,0 +1,19 @@
+step0-1920x1080 frames=112084 mean=0.1069 p50=0.1037 p95=0.1275 p99=0.1568 p999=0.2131 low1=0.1836 busy=81.8 sclk=2007MHz power=43.4W temp=31.8C
+step0-3840x2160 frames=110185 mean=0.1087 p50=0.1046 p95=0.1310 p99=0.1633 p999=0.2195 low1=0.1903 busy=81.9 sclk=2005MHz power=43.5W temp=33.2C
+step0b-desktop frames=118783 mean=0.1008 p50=0.0972 p95=0.1180 p99=0.1475 p999=0.1987 low1=0.1716 busy=89.4 sclk=2083MHz power=78.1W temp=39.2C
+step0b-effect2d frames=67491 mean=0.1776 p50=0.1752 p95=0.2012 p99=0.2742 p999=0.3620 low1=0.3140 busy=99.8 sclk=3264MHz power=236.6W temp=42.1C
+step0b-shading frames=121863 mean=0.0983 p50=0.0954 p95=0.1121 p99=0.1464 p999=0.1898 low1=0.1712 busy=85.3 sclk=2012MHz power=57.2W temp=34.2C
+step0b-texture frames=119568 mean=0.1002 p50=0.0964 p95=0.1175 p99=0.1513 p999=0.1958 low1=0.1743 busy=89.6 sclk=1787MHz power=59.4W temp=36.1C
+b1-p0-Daily frames=66597 mean=0.1800 p50=0.1752 p95=0.2103 p99=0.2916 p999=0.6763 low1=0.4818 busy=99.0 sclk=3266MHz power=231.7W temp=43.0C
+b1-p1-Daily frames=67447 mean=0.1777 p50=0.1752 p95=0.2007 p99=0.2732 p999=0.3469 low1=0.3114 busy=99.8 sclk=3260MHz power=240.2W temp=43.9C
+b1-p2-Gaming frames=67303 mean=0.1781 p50=0.1756 p95=0.1998 p99=0.2749 p999=0.3548 low1=0.3148 busy=99.9 sclk=3251MHz power=237.7W temp=44.9C
+b1-p3-Daily frames=67404 mean=0.1778 p50=0.1753 p95=0.2005 p99=0.2763 p999=0.3642 low1=0.3131 busy=100.0 sclk=3263MHz power=238.1W temp=45.4C
+b2-p0-Daily frames=67357 mean=0.1780 p50=0.1753 p95=0.1999 p99=0.2781 p999=0.3668 low1=0.3163 busy=99.9 sclk=3260MHz power=236.2W temp=46.0C
+b2-p1-Gaming frames=67194 mean=0.1784 p50=0.1760 p95=0.2007 p99=0.2783 p999=0.3509 low1=0.3120 busy=100.0 sclk=3240MHz power=237.9W temp=46.1C
+b2-p2-Daily frames=67430 mean=0.1778 p50=0.1753 p95=0.2009 p99=0.2762 p999=0.4007 low1=0.3260 busy=100.0 sclk=3259MHz power=237.8W temp=46.7C
+b2-p3-Daily frames=67401 mean=0.1779 p50=0.1755 p95=0.2001 p99=0.2663 p999=0.3454 low1=0.3050 busy=99.8 sclk=3258MHz power=240.2W temp=46.8C
+b3-p0-Daily frames=67365 mean=0.1779 p50=0.1755 p95=0.2007 p99=0.2743 p999=0.3610 low1=0.3140 busy=99.9 sclk=3254MHz power=239.8W temp=46.9C
+b3-p1-Daily frames=67399 mean=0.1779 p50=0.1755 p95=0.1995 p99=0.2773 p999=0.3517 low1=0.3133 busy=100.0 sclk=3259MHz power=235.2W temp=47.1C
+b3-p2-Gaming frames=67588 mean=0.1773 p50=0.1760 p95=0.1882 p99=0.2254 p999=0.3448 low1=0.3091 busy=99.9 sclk=3239MHz power=237.8W temp=47.9C
+b3-p3-Daily frames=67845 mean=0.1767 p50=0.1753 p95=0.1899 p99=0.2587 p999=0.4150 low1=0.3454 busy=100.0 sclk=3259MHz power=237.8W temp=47.8C
+ busy=58.6 sclk=2015MHz power=39.2W temp=28.9C

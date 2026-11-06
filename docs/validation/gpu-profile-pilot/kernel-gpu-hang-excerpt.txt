@@ -1,0 +1,13 @@
+Nov 06 09:09:01 desktop kernel: amdgpu 0000:03:00.0: amdgpu: ring gfx_0.0.0 timeout, signaled seq=39790473, emitted seq=39790475
+Nov 06 09:09:01 desktop kernel: amdgpu 0000:03:00.0: amdgpu:  Process vkmark pid 1581541 thread vkmark pid 1581541
+Nov 06 09:09:01 desktop kernel: amdgpu 0000:03:00.0: amdgpu: Starting gfx_0.0.0 ring reset
+Nov 06 09:09:03 desktop kernel: amdgpu 0000:03:00.0: amdgpu: Ring gfx_0.0.0 reset failed
+Nov 06 09:09:03 desktop kernel: amdgpu 0000:03:00.0: amdgpu: GPU reset begin!. Source:  1
+Nov 06 09:09:05 desktop kernel: amdgpu 0000:03:00.0: amdgpu: MODE1 reset
+Nov 06 09:09:05 desktop kernel: amdgpu 0000:03:00.0: amdgpu: GPU mode1 reset
+Nov 06 09:09:05 desktop kernel: amdgpu 0000:03:00.0: amdgpu: GPU smu mode1 reset
+Nov 06 09:09:06 desktop kernel: amdgpu 0000:03:00.0: amdgpu: GPU reset succeeded, trying to resume
+Nov 06 09:09:06 desktop kernel: amdgpu 0000:03:00.0: amdgpu: VRAM is lost due to GPU reset!
+Nov 06 09:09:07 desktop kernel: amdgpu 0000:03:00.0: amdgpu: ring gfx_0.0.0 uses VM inv eng 0 on hub 0
+Nov 06 09:09:07 desktop kernel: amdgpu 0000:03:00.0: amdgpu: GPU reset(1) succeeded!
+Nov 06 09:09:07 desktop kernel: amdgpu 0000:03:00.0: [drm] device wedged, but recovered through reset

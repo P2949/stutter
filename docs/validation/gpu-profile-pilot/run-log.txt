@@ -1,0 +1,16 @@
+original: profile=Daily mode=2_POWER_SAVING level=manual cap=238000000 temp=36000
+restore timer armed
+b1-p0-Daily profile=Daily profile=Daily mode=2_POWER_SAVING level=manual cap=238000000 temp=44000
+b1-p1-Daily profile=Daily profile=Daily mode=2_POWER_SAVING level=manual cap=238000000 temp=45000
+b1-p2-Gaming profile=Gaming profile=Gaming mode=1_3D_FULL_SCREEN level=manual cap=238000000 temp=46000
+b1-p3-Daily profile=Daily profile=Daily mode=2_POWER_SAVING level=manual cap=238000000 temp=46000
+b2-p0-Daily profile=Daily profile=Daily mode=2_POWER_SAVING level=manual cap=238000000 temp=46000
+b2-p1-Gaming profile=Gaming profile=Gaming mode=1_3D_FULL_SCREEN level=manual cap=238000000 temp=47000
+b2-p2-Daily profile=Daily profile=Daily mode=2_POWER_SAVING level=manual cap=238000000 temp=47000
+b2-p3-Daily profile=Daily profile=Daily mode=2_POWER_SAVING level=manual cap=238000000 temp=47000
+b3-p0-Daily profile=Daily profile=Daily mode=2_POWER_SAVING level=manual cap=238000000 temp=47000
+b3-p1-Daily profile=Daily profile=Daily mode=2_POWER_SAVING level=manual cap=238000000 temp=48000
+b3-p2-Gaming profile=Gaming profile=Gaming mode=1_3D_FULL_SCREEN level=manual cap=238000000 temp=48000
+b3-p3-Daily profile=Daily profile=Daily mode=2_POWER_SAVING level=manual cap=238000000 temp=48000
+ABORT: no frame log for b4-p0-Daily
+restored: profile=Daily mode=2_POWER_SAVING level=manual cap=238000000 temp=43000
