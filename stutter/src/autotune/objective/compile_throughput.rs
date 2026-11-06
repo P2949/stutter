@@ -9,7 +9,33 @@ use crate::{
 
 // Provisional conservative effect thresholds, pending repeated real-workload
 // calibration. These are not a statistical confidence interval.
-const MINIMUM_CHANGE_PERCENT: f64 = 10.0;
+pub const MINIMUM_CHANGE_PERCENT: f64 = 10.0;
+
+/// The elapsed-time verdict between two identical completed builds. The controller applies it with
+/// [`MINIMUM_CHANGE_PERCENT`]; the calibration campaign applies it at each candidate threshold, so
+/// both use exactly one rule. Lower elapsed time is better.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum CompileChange {
+    Improved(f64),
+    Regressed(f64),
+    Inconclusive(f64),
+}
+
+pub fn classify_change(
+    baseline_elapsed_ns: u64,
+    candidate_elapsed_ns: u64,
+    threshold_percent: f64,
+) -> CompileChange {
+    let baseline = baseline_elapsed_ns as f64;
+    let change_percent = (candidate_elapsed_ns as f64 - baseline) / baseline * 100.0;
+    if change_percent >= threshold_percent {
+        CompileChange::Regressed(change_percent)
+    } else if -change_percent >= threshold_percent {
+        CompileChange::Improved(-change_percent)
+    } else {
+        CompileChange::Inconclusive(change_percent)
+    }
+}
 
 pub(super) fn measurement(signals: &ObjectiveSignals) -> Result<&FixedWorkMeasurement, String> {
     let work = signals.compile_fixed_work.as_ref().ok_or_else(|| {
@@ -100,22 +126,22 @@ pub(super) fn compare(
             regression_percent: 0.0,
         };
     }
-    let baseline_ns = baseline.complete.elapsed_ns as f64;
-    let change_percent = (candidate.complete.elapsed_ns as f64 - baseline_ns) / baseline_ns * 100.0;
-    if change_percent >= MINIMUM_CHANGE_PERCENT {
-        ExperimentResult::Regressed {
-            regression_percent: change_percent,
+    match classify_change(
+        baseline.complete.elapsed_ns,
+        candidate.complete.elapsed_ns,
+        MINIMUM_CHANGE_PERCENT,
+    ) {
+        CompileChange::Regressed(regression_percent) => {
+            ExperimentResult::Regressed { regression_percent }
         }
-    } else if -change_percent >= MINIMUM_CHANGE_PERCENT {
-        ExperimentResult::Improved {
-            improvement_percent: -change_percent,
-        }
-    } else {
-        ExperimentResult::Inconclusive {
+        CompileChange::Improved(improvement_percent) => ExperimentResult::Improved {
+            improvement_percent,
+        },
+        CompileChange::Inconclusive(change_percent) => ExperimentResult::Inconclusive {
             reason: format!(
                 "fixed-work completion time change {change_percent:.2}% did not meet conservative {MINIMUM_CHANGE_PERCENT}% threshold"
             ),
-        }
+        },
     }
 }
 
@@ -126,5 +152,40 @@ pub(super) fn memory_pressure_regressed(input: &ObjectiveComparisonInput<'_>) ->
     ) {
         (Some(baseline), Some(candidate)) => candidate > baseline,
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod rule_tests {
+    use super::*;
+
+    #[test]
+    fn the_change_rule_is_symmetric_and_inclusive_at_the_threshold() {
+        let second = 1_000_000_000_u64;
+        // Exactly at the threshold counts, in both directions.
+        assert_eq!(
+            classify_change(100 * second, 90 * second, 10.0),
+            CompileChange::Improved(10.0)
+        );
+        assert_eq!(
+            classify_change(100 * second, 110 * second, 10.0),
+            CompileChange::Regressed(10.0)
+        );
+        // Just inside it is inconclusive, never a keep.
+        assert!(matches!(
+            classify_change(100 * second, 91 * second, 10.0),
+            CompileChange::Inconclusive(_)
+        ));
+        // A larger threshold turns the same gain into an inconclusive result.
+        assert!(matches!(
+            classify_change(100 * second, 85 * second, 20.0),
+            CompileChange::Inconclusive(_)
+        ));
+    }
+
+    #[test]
+    fn the_shipped_threshold_is_the_one_the_campaign_may_freeze() {
+        // A calibrated value is only ever frozen from the pre-registered grid.
+        assert!(MINIMUM_CHANGE_PERCENT > 0.0 && MINIMUM_CHANGE_PERCENT <= 20.0);
     }
 }

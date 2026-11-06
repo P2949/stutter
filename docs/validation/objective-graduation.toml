@@ -1,0 +1,30 @@
+# Objective graduation campaigns: the pre-registered parameters of `xtask objective-campaign`.
+# Editing this file changes its digest and therefore invalidates every source-bound result.
+#
+# A campaign measures completed work under controlled conditions, selects the decision threshold on
+# calibration data only, writes it to disk (frozen) before any holdout run exists, and evaluates the
+# untouched holdout once. The decision rule being calibrated is the controller's own
+# (`classify_compile_change`), not a copy.
+schema_version = 1
+
+[compile_throughput]
+objective = "CompileThroughputWithForegroundProtection"
+# Identical cold builds of one package on a fixed CPU set, interleaved with interference that
+# occupies half of those CPUs. Each block yields one neutral (clean, clean), one beneficial
+# (interference removed) and one regression (interference added) pair; the order alternates.
+package = "xtask"
+cpus = "0-3"
+jobs = 4
+interference_cpus = [0, 1]
+calibration_blocks = 10
+holdout_blocks = 5
+# Candidate thresholds, in percent, pre-registered around the provisional 10 percent.
+threshold_grid_percent = [7.5, 10.0, 12.5, 15.0, 20.0]
+# Selection rule (calibration data only): the smallest candidate that
+#   1. produces no false keep on a neutral or regression pair,
+#   2. is at least `noise_margin` times the largest neutral change seen in calibration, and
+#   3. keeps at least `min_beneficial_keep_rate` of the beneficial pairs.
+noise_margin = 2.0
+min_beneficial_keep_rate = 0.8
+# Holdout acceptance: at most this many false keeps, and the same beneficial keep rate.
+max_false_keeps = 0

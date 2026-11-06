@@ -57,6 +57,7 @@ fn expected_subcommands_are_registered() {
             "maturity-report",
             "mutation-campaign",
             "no-allow-attrs",
+            "objective-campaign",
             "objective-docs",
             "package",
             "package-layout-check",

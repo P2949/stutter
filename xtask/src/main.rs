@@ -22,6 +22,7 @@ pub mod local_ci_policy;
 pub mod maturity_report;
 pub mod mutation_campaign;
 pub mod no_allow_attrs;
+pub mod objective_campaign;
 pub mod objective_docs;
 pub mod ops_checks;
 pub mod preflight;
@@ -123,6 +124,11 @@ pub enum XtaskCommand {
         about = "Fail if a capability is Supported ahead of its evidence"
     )]
     CapabilityCheck,
+    #[command(
+        name = "objective-campaign",
+        about = "Calibrate and graduate an objective's decision rule (compile throughput) on measured pairs"
+    )]
+    ObjectiveCampaign(objective_campaign::CampaignArgs),
     #[command(
         name = "production-smoke",
         about = "Short exact-build smoke of the installed production bounded service"
@@ -518,6 +524,7 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
         }
         XtaskCommand::CapabilityCheck => capability_check::run(&root),
         XtaskCommand::ProductionSmoke(args) => production_smoke::run(&root, &args),
+        XtaskCommand::ObjectiveCampaign(args) => objective_campaign::run(&root, &args),
         XtaskCommand::EvidenceExport(args) => {
             evidence_bundle::export_bundle(&root, &args.raw, &args.out)
         }

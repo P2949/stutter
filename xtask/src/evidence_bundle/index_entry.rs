@@ -38,6 +38,9 @@ fn covers(suite: &str, result: &Value) -> Value {
             "providers": ["cpu_affinity_profile", "cgroup_placement"],
         }),
         "live_game_runnable" => json!({"objectives": ["GameRunnableLatency"]}),
+        "live_compile_objective" => {
+            json!({"objectives": ["CompileThroughputWithForegroundProtection"]})
+        }
         "live_kernel_compat" if result["compatibility"] != "ObservedIncompatible" => {
             json!({"kernel_capabilities": ["scheduler_runnable_latency"]})
         }

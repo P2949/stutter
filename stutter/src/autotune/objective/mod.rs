@@ -1,6 +1,10 @@
 mod browser_interactivity;
 mod common;
 mod compile_throughput;
+pub use compile_throughput::{
+    CompileChange, MINIMUM_CHANGE_PERCENT as COMPILE_MINIMUM_CHANGE_PERCENT,
+    classify_change as classify_compile_change,
+};
 pub(crate) mod contract;
 pub(crate) mod decision;
 mod descriptor;
