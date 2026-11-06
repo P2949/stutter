@@ -45,6 +45,7 @@ pub(crate) mod external_mutation;
 pub(crate) mod generate_profiles;
 pub(crate) mod gpu_focus;
 pub(crate) mod history;
+pub(crate) mod history_append;
 pub(crate) mod history_replay;
 pub(crate) mod history_rotation;
 #[cfg(test)]

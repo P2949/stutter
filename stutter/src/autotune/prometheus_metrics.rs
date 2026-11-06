@@ -17,6 +17,10 @@ pub struct AutotunePrometheusMetrics {
     pub rollbacks_total: u64,
     pub actions_applied_total: u64,
     pub actions_blocked_total: u64,
+    /// The `_total` counters are exact only from this time on (the surviving evidence), when known.
+    pub totals_counted_since_unix_nanos: Option<u128>,
+    /// A stretch of the history could not be accounted for, so the totals undercount by an unknown amount.
+    pub totals_gap_detected: bool,
     pub history_path: PathBuf,
     pub journal_path: PathBuf,
     pub scrape_error: Option<String>,
@@ -33,6 +37,8 @@ impl AutotunePrometheusMetrics {
             rollbacks_total: 0,
             actions_applied_total: 0,
             actions_blocked_total: 0,
+            totals_counted_since_unix_nanos: None,
+            totals_gap_detected: false,
             history_path,
             journal_path,
             scrape_error: None,
@@ -91,6 +97,8 @@ pub fn load_autotune_prometheus_metrics(
             metrics.rollbacks_total = totals.rollbacks_total;
             metrics.actions_applied_total = totals.actions_applied_total;
             metrics.actions_blocked_total = totals.actions_blocked_total;
+            metrics.totals_counted_since_unix_nanos = totals.counted_since_unix_nanos;
+            metrics.totals_gap_detected = totals.gap_detected;
         }
         Err(err) => scrape_errors.push(format!("failed to read autotune history totals: {err:#}")),
     }
@@ -142,6 +150,9 @@ pub fn render_autotune_prometheus_metrics(metrics: &AutotunePrometheusMetrics) -
             "# HELP stutter_autotune_actions_blocked_total Total autotune decisions blocked by safety, cooldown, focus, data-quality, regression, or missing-candidate gates in autotune history.\n",
             "# TYPE stutter_autotune_actions_blocked_total counter\n",
             "stutter_autotune_actions_blocked_total {actions_blocked_total}\n",
+            "# HELP stutter_autotune_history_totals_gap 1 when a stretch of the autotune history could not be accounted for, so the _total counters undercount by an unknown amount; 0 when they are exact from the retained evidence.\n",
+            "# TYPE stutter_autotune_history_totals_gap gauge\n",
+            "stutter_autotune_history_totals_gap {totals_gap}\n",
             "# HELP stutter_autotune_metrics_scrape_error Whether the autotune Prometheus scrape could not fully read history or journal state.\n",
             "# TYPE stutter_autotune_metrics_scrape_error gauge\n",
             "stutter_autotune_metrics_scrape_error{{error=\"{scrape_error}\"}} {scrape_error_value}\n",
@@ -156,6 +167,7 @@ pub fn render_autotune_prometheus_metrics(metrics: &AutotunePrometheusMetrics) -
         rollbacks_total = metrics.rollbacks_total,
         actions_applied_total = metrics.actions_applied_total,
         actions_blocked_total = metrics.actions_blocked_total,
+        totals_gap = u8::from(metrics.totals_gap_detected),
         scrape_error = escape_label_value(scrape_error),
         scrape_error_value = scrape_error_value,
     )
@@ -409,6 +421,8 @@ mod tests {
             rollbacks_total: 1,
             actions_applied_total: 2,
             actions_blocked_total: 3,
+            totals_counted_since_unix_nanos: None,
+            totals_gap_detected: false,
             history_path: PathBuf::from("/tmp/history.jsonl"),
             journal_path: PathBuf::from("/tmp/controller_journal.json"),
             scrape_error: None,

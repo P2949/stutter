@@ -1,6 +1,6 @@
 use std::{
-    fs::{self, OpenOptions},
-    io::{BufRead, Write},
+    fs,
+    io::BufRead,
     path::{Path, PathBuf},
 };
 
@@ -234,35 +234,7 @@ pub(crate) fn append_autotune_history_event_bounded(
     event: &AutotuneHistoryEvent,
     max_bytes: u64,
 ) -> anyhow::Result<()> {
-    // One lock covers the rotation, the append and the totals checkpoint, so concurrent writers
-    // (threads or processes) can neither rotate a file another just started nor interleave records.
-    super::history_rotation::with_history_lock(path, || {
-        super::history_rotation::rotate_if_full(path, max_bytes)?;
-        let mut totals = super::history_totals::HistoryTotals::load(path)
-            .unwrap_or_else(|_| super::history_totals::HistoryTotals::default());
-
-        let mut file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
-            .with_context(|| format!("failed to open autotune history log {}", path.display()))?;
-        // The whole record, newline included, goes out in one write.
-        let mut record = serde_json::to_vec(event).with_context(|| {
-            format!("failed to encode autotune history event {}", path.display())
-        })?;
-        record.push(b'\n');
-        file.write_all(&record).with_context(|| {
-            format!("failed to write autotune history event {}", path.display())
-        })?;
-
-        totals.fold(event);
-        if let Err(error) = totals.store(path) {
-            // A stale checkpoint would undercount, so drop it; the next reader rebuilds it.
-            let _ = fs::remove_file(super::history_totals::totals_path(path));
-            log::warn!("autotune history totals checkpoint not written: {error:#}");
-        }
-        Ok(())
-    })
+    super::history_append::append_bounded(path, event, max_bytes, &mut |_| Ok(()))
 }
 
 pub fn append_autotune_history_event_to_default_path(
@@ -331,6 +303,8 @@ pub fn observation_summary_from_window_score(
 
 #[cfg(test)]
 mod tests {
+    use std::io::Write as _;
+
     use super::*;
     use crate::scorer::StutterScore;
 
