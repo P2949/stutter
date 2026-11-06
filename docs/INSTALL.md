@@ -361,6 +361,8 @@ Persist both `/var/lib/stutter/autotune-USER` (controller journal/kept ledger) a
 `/var/lib/stutter/worker-USER` (root-owned rollback snapshots) on ephemeral-root systems. Runtime
 sockets are recreated. Stopping the controller runs worker-mediated emergency recovery before
 the worker is stopped. Uninstall removes templates and preserves state/configuration.
+The controller's history log is bounded: at 128 MiB the current `history.jsonl` becomes `history.jsonl.1`,
+replacing the previous generation, so the state directory keeps at most about 256 MiB of history.
 
 This mode passed targeted acceptance (`live_bounded_service_acceptance`) and a production boot
 check, which is what makes `always_on_autotune` Supported for the packaged systemd service and

@@ -225,6 +225,16 @@ pub fn append_autotune_history_event(
     path: &Path,
     event: &AutotuneHistoryEvent,
 ) -> anyhow::Result<()> {
+    append_autotune_history_event_bounded(path, event, super::history_rotation::HISTORY_MAX_BYTES)
+}
+
+/// Appends one event, first setting a full history file aside so the log stays bounded.
+pub(crate) fn append_autotune_history_event_bounded(
+    path: &Path,
+    event: &AutotuneHistoryEvent,
+    max_bytes: u64,
+) -> anyhow::Result<()> {
+    super::history_rotation::rotate_if_full(path, max_bytes)?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).with_context(|| {
             format!(
@@ -427,6 +437,38 @@ mod tests {
         let parsed: ObservationSummary = serde_json::from_str(json).unwrap();
 
         assert_eq!(parsed.diagnostic_raw_score_total, 143);
+    }
+
+    #[test]
+    fn the_history_log_is_bounded_and_the_current_file_stays_readable() {
+        let dir = temp_dir("bounded");
+        let path = dir.join("history.jsonl");
+        let after = window_score(850);
+        let event = AutotuneHistoryEvent::new(AutotuneHistoryEventInput {
+            controller_id: "controller-1".to_owned(),
+            phase: ControllerPhase::Cooldown,
+            mode: AutotuneMode::ApplyLowRisk,
+            target: Some(target()),
+            situation: SituationKind::GameCpuSchedulerPressure,
+            observation_summary: observation_summary_from_window_score(true, 31, 0, "High", &after),
+            decision: decision(),
+            reason: "bounded".to_owned(),
+        });
+        let line = serde_json::to_vec(&event).unwrap().len() as u64 + 1;
+        // Room for three records per file.
+        let max = line * 3;
+        for _ in 0..7 {
+            append_autotune_history_event_bounded(&path, &event, max).unwrap();
+        }
+        let previous = super::super::history_rotation::previous_generation(&path);
+        assert!(path.exists() && previous.exists());
+        // Neither generation grows past the limit, so the log is bounded at twice the limit.
+        assert!(fs::metadata(&path).unwrap().len() <= max);
+        assert!(fs::metadata(&previous).unwrap().len() <= max);
+        // The current file is the newest records and still parses completely.
+        let events = read_autotune_history_events(&path).unwrap();
+        assert!(!events.is_empty() && events.len() <= 3);
+        assert_eq!(events[0], event);
     }
 
     #[test]

@@ -46,6 +46,7 @@ pub(crate) mod generate_profiles;
 pub(crate) mod gpu_focus;
 pub(crate) mod history;
 pub(crate) mod history_replay;
+pub(crate) mod history_rotation;
 
 pub(crate) mod autonomous_support;
 pub(crate) mod kept;
