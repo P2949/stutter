@@ -1,0 +1,8 @@
+sw10-b1 swappiness=10 rc=0 elapsed_ms=177631 pswpout=1150822 pswpin=1509733 direct_scan=0 anon_refault=1511608
+sw60-b1 swappiness=60 rc=0 elapsed_ms=170644 pswpout=1216623 pswpin=1680153 direct_scan=0 anon_refault=1682368
+sw60-b2 swappiness=60 rc=0 elapsed_ms=174187 pswpout=1278929 pswpin=1754213 direct_scan=0 anon_refault=1756293
+sw10-b2 swappiness=10 rc=0 elapsed_ms=170204 pswpout=1115598 pswpin=1423907 direct_scan=0 anon_refault=1426025
+sw10-b3 swappiness=10 rc=0 elapsed_ms=175543 pswpout=1108667 pswpin=1455029 direct_scan=0 anon_refault=1456851
+sw60-b3 swappiness=60 rc=0 elapsed_ms=171679 pswpout=1194534 pswpin=1661888 direct_scan=0 anon_refault=1663945
+sw60-b4 swappiness=60 rc=0 elapsed_ms=168103 pswpout=1193276 pswpin=1630834 direct_scan=0 anon_refault=1632741
+sw10-b4 swappiness=10 rc=0 elapsed_ms=169759 pswpout=1132275 pswpin=1479953 direct_scan=0 anon_refault=1481950

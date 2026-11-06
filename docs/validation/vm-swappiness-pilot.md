@@ -41,3 +41,19 @@ lower threshold, which the plan forbids ("never relax thresholds"), and a contra
 keep a change. Decision stays: `VmSwappiness` is `DeferredEvidence`; no `Sysctl` contract is built.
 A workload with a larger swap-sensitive working set, or a slower swap device, is the route to
 reopen it; that needs a new preregistered hypothesis and fresh calibration and holdout data.
+
+## Third pilot: heaviest pressure (MemoryHigh at 20 percent of peak, about 0.9 GB)
+
+Swappiness 10 against 60 only, four interleaved blocks. Raw rows:
+[vm-swappiness-pilot-20-results.txt](vm-swappiness-pilot-20-results.txt). (The "55%" echo line is the same stale label; 20 percent was used.)
+
+| swappiness | mean elapsed (s) | vs 60 |
+|---|---|---|
+| 10 | 173.28 | +1.2 % |
+| 60 | 171.15 | baseline |
+
+Swap traffic fell at 10 (swap-in about 1.47M against 1.68M pages) but completion time did not improve, and
+the direction differed between blocks. Across 55, 35 and 20 percent pressure the effect never
+approaches the frozen 7.5 percent threshold and does not grow with pressure (+0.45, -1.96, +1.2 percent).
+Conclusion: on this host and workload class swappiness is not a lever for completion time. The candidate is
+exhausted; `VmSwappiness` stays `DeferredEvidence`.
