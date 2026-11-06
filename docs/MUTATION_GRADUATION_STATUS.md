@@ -141,7 +141,12 @@ none is promoted to make the matrix look complete.
   peak; [record](validation/vm-swappiness-pilot.md)) found the mechanism observable but no
   completion-time benefit near the threshold (+0.45, -1.96, +1.2 percent for 10 against 60), so no
   `Sysctl` contract was built. Reopening needs a new preregistered hypothesis (a more swap-bound
-  workload or a slower swap device). Dirty-ratio knobs stay HighRisk/manual.
+  workload or a slower swap device). A foreground-memory-latency objective for swappiness was also
+  considered and not built: on this host memory pressure never occurs naturally (PSI memory
+  `some`/`full` avg10, avg60 and avg300 are all 0.00; no OOM kills; 27.3 of 31.2 GB available; 2 GB of
+  the 32 GB swap in use), and 21.3 of the 26.3 million pages swapped out since boot (36 pilot builds, summed from the result files) came from the
+  throttled pilot builds themselves, so there is no workload on which such an objective could fire or a
+  benefit be demonstrated. Dirty-ratio knobs stay HighRisk/manual.
 - **irq_known_device - DeferredEvidence.** The post-v0.1 IRQ study stays invalid (`INVALID`: no
   frame effect could be produced) and is not used. A feasibility pilot on the host's `igc` NIC
   ([record](validation/irq-affinity-pilot.md)) physically moved the queue interrupts off the probe CPU
