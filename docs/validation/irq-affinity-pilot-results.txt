@@ -1,0 +1,9 @@
+n0 mode=notraffic cpu4_nic_irqs=123 rx_mb=0 n=58449 p50=2us p99=263us p999=592us max=4068us
+b1-default mode=default cpu4_nic_irqs=126774 rx_mb=357 n=59512 p50=2us p99=35us p999=128us max=2939us
+b1-steered mode=steered cpu4_nic_irqs=0 rx_mb=357 n=59460 p50=3us p99=36us p999=133us max=2661us
+b2-steered mode=steered cpu4_nic_irqs=0 rx_mb=357 n=59368 p50=3us p99=18us p999=103us max=3712us
+b2-default mode=default cpu4_nic_irqs=87916 rx_mb=357 n=59533 p50=2us p99=18us p999=89us max=3323us
+b3-default mode=default cpu4_nic_irqs=156813 rx_mb=357 n=59517 p50=2us p99=15us p999=99us max=4533us
+b3-steered mode=steered cpu4_nic_irqs=0 rx_mb=357 n=59504 p50=3us p99=18us p999=74us max=3014us
+b4-steered mode=steered cpu4_nic_irqs=0 rx_mb=355 n=59555 p50=3us p99=17us p999=67us max=2993us
+b4-default mode=default cpu4_nic_irqs=76442 rx_mb=356 n=59589 p50=2us p99=16us p999=40us max=3168us

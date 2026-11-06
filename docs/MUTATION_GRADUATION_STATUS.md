@@ -137,10 +137,10 @@ none is promoted to make the matrix look complete.
   `Sysctl` contract was built. Reopening needs a new preregistered hypothesis (a more swap-bound
   workload or a slower swap device). Dirty-ratio knobs stay HighRisk/manual.
 - **irq_known_device - DeferredEvidence.** The post-v0.1 IRQ study stays invalid (`INVALID`: no
-  frame effect could be produced) and is not used. A new target-impact experiment needs controllable
-  interrupt traffic on a known non-storage device class; this host has no peer to generate network
-  or USB traffic against, so the effect on the target cannot be demonstrated. Storage and unknown
-  IRQs stay HighRisk/manual.
+  frame effect could be produced) and is not used. A feasibility pilot on the host's `igc` NIC
+  ([record](validation/irq-affinity-pilot.md)) physically moved the queue interrupts off the probe CPU
+  (76k to 157k per trial down to 0) under real download traffic and found no wake-latency benefit
+  (p99 21 us default against 22 us steered). Storage and unknown IRQs stay HighRisk/manual.
 
 ## M9 bounded autonomous controller - Supported
 
