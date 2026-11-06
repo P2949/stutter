@@ -42,6 +42,9 @@ pub struct SmokeArgs {
     /// How long to wait for the fixture's experiment to resolve.
     #[arg(long, default_value_t = 180)]
     pub resolve_seconds: u64,
+    /// How long the idle controller is observed (CPU, memory, mutations) before the workload starts.
+    #[arg(long, default_value_t = 30)]
+    pub idle_seconds: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -423,10 +426,16 @@ pub fn run(root: &Path, args: &SmokeArgs) -> anyhow::Result<()> {
         format!("{baseline_outstanding} outstanding of {baseline_entries} ledger entries"),
     ));
 
-    // A real workload: discovered, a prepared mutation applied through the worker, and settled.
-    let history = PathBuf::from(format!(
-        "/var/lib/stutter/autotune-{user}/.local/state/stutter/autotune/history.jsonl"
+    // Idle behaviour first: nothing to optimise, so nothing may change and the cost must stay small.
+    let history = matrix::history_path(&user);
+    checks.extend(matrix::idle(
+        &user,
+        &controller,
+        &history,
+        args.idle_seconds,
     ));
+
+    // A real workload: discovered, a prepared mutation applied through the worker, and settled.
     let mut offset = fs::metadata(&history).map_or(0, |metadata| metadata.len());
     let cpus = std::thread::available_parallelism().map_or(1, |count| count.get());
     ensure!(cpus >= 4, "the fixture needs at least four CPUs");
@@ -498,6 +507,22 @@ pub fn run(root: &Path, args: &SmokeArgs) -> anyhow::Result<()> {
         );
     }
     checks.push(settled);
+
+    // Events that must leave the service clean: a workload that exits while a mutation is applied, and
+    // a controller that dies while one is applied.
+    checks.extend(matrix::exit_while_applied(
+        &args.out,
+        &user,
+        &history,
+        args.resolve_seconds,
+    ));
+    checks.extend(matrix::controller_killed_while_applied(
+        &args.out,
+        &user,
+        &controller,
+        &history,
+        args.resolve_seconds,
+    ));
 
     // The lifecycle an administrator relies on.
     let lifecycle = (|| -> anyhow::Result<()> {
@@ -588,5 +613,6 @@ fn write_evidence(root: &Path, args: &SmokeArgs, checks: &[Check]) -> anyhow::Re
     Ok(())
 }
 
+mod matrix;
 #[cfg(test)]
 mod tests;

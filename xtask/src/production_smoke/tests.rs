@@ -112,3 +112,29 @@ fn new_records_returns_complete_lines_and_survives_rotation() {
     assert_eq!(new_records(&path, &mut offset).len(), 1);
     let _ = fs::remove_dir_all(&dir);
 }
+
+mod matrix_helpers {
+    use super::super::matrix::{cpu_percent, stale_temporaries};
+
+    #[test]
+    fn cpu_percent_is_ticks_over_the_clock_rate_and_the_window() {
+        // 100 ticks at 100 Hz is one second of CPU; over a ten second window that is 10 percent.
+        assert!((cpu_percent(100, 100, 10.0) - 10.0).abs() < 1e-9);
+        assert_eq!(cpu_percent(0, 100, 30.0), 0.0);
+    }
+
+    #[test]
+    fn only_temporaries_of_dead_processes_count_as_stale() {
+        let dir = std::env::temp_dir().join(format!("smoke-stale-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("candidate-memory.tmp-4294967290"), b"x").unwrap();
+        std::fs::write(
+            dir.join(format!("candidate-memory.tmp-{}", std::process::id())),
+            b"x",
+        )
+        .unwrap();
+        std::fs::write(dir.join("candidate-memory.json"), b"x").unwrap();
+        assert_eq!(stale_temporaries(&dir), 1);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+}
