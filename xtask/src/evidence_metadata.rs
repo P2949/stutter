@@ -19,6 +19,7 @@ pub(crate) const SUITE_BOUNDED_SERVICE_ACCEPTANCE: &str = "live_bounded_service_
 pub(crate) const SUITE_PACKAGED_SERVICE_SMOKE: &str = "live_packaged_service_smoke";
 /// Calibration and holdout evidence for an objective's decision rule.
 pub(crate) const SUITE_COMPILE_OBJECTIVE: &str = "live_compile_objective";
+pub(crate) const SUITE_FRAME_OBJECTIVE: &str = "live_frame_objective";
 
 pub(crate) fn unix_ms() -> u64 {
     std::time::SystemTime::now()
@@ -180,6 +181,7 @@ mod tests {
             SUITE_BOUNDED_SERVICE_ACCEPTANCE,
             SUITE_PACKAGED_SERVICE_SMOKE,
             SUITE_COMPILE_OBJECTIVE,
+            SUITE_FRAME_OBJECTIVE,
         ] {
             assert!(crate::evidence_bundle::KNOWN_SUITES.contains(&suite));
         }

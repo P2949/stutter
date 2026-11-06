@@ -15,6 +15,7 @@ mod evidence_metadata;
 pub mod fixed_work;
 pub mod fixture_coverage;
 pub mod fixtures;
+pub mod frame_campaign;
 pub mod kernel_matrix;
 mod live_acceptance;
 pub mod local_ci;
@@ -129,6 +130,11 @@ pub enum XtaskCommand {
         about = "Calibrate and graduate an objective's decision rule (compile throughput) on measured pairs"
     )]
     ObjectiveCampaign(objective_campaign::CampaignArgs),
+    #[command(
+        name = "frame-campaign",
+        about = "Calibrate and graduate the frame-pacing decision rule on measured MangoHud frame logs"
+    )]
+    FrameCampaign(frame_campaign::CampaignArgs),
     #[command(
         name = "production-smoke",
         about = "Short exact-build smoke of the installed production bounded service"
@@ -525,6 +531,7 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
         XtaskCommand::CapabilityCheck => capability_check::run(&root),
         XtaskCommand::ProductionSmoke(args) => production_smoke::run(&root, &args),
         XtaskCommand::ObjectiveCampaign(args) => objective_campaign::run(&root, &args),
+        XtaskCommand::FrameCampaign(args) => frame_campaign::run(&root, &args),
         XtaskCommand::EvidenceExport(args) => {
             evidence_bundle::export_bundle(&root, &args.raw, &args.out)
         }

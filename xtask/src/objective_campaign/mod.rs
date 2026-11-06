@@ -4,7 +4,7 @@
 //! pairs choose a threshold, which is written to disk (frozen) before any holdout run exists; the
 //! untouched holdout is then evaluated once and never recomputed. Every run is its own file, so an
 //! interrupted campaign resumes without repeating or reordering what it already measured.
-mod stats;
+pub(crate) mod stats;
 #[cfg(test)]
 mod tests;
 
@@ -117,12 +117,12 @@ fn block_order(block: u32) -> [Condition; 4] {
     }
 }
 
-fn read_json(path: &Path) -> anyhow::Result<Value> {
+pub(crate) fn read_json(path: &Path) -> anyhow::Result<Value> {
     serde_json::from_slice(&fs::read(path).with_context(|| format!("read {}", path.display()))?)
         .with_context(|| format!("parse {}", path.display()))
 }
 
-fn write_json(path: &Path, value: &Value) -> anyhow::Result<()> {
+pub(crate) fn write_json(path: &Path, value: &Value) -> anyhow::Result<()> {
     fs::write(path, serde_json::to_vec_pretty(value)?)?;
     Ok(())
 }

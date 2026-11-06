@@ -41,6 +41,7 @@ fn covers(suite: &str, result: &Value) -> Value {
         "live_compile_objective" => {
             json!({"objectives": ["CompileThroughputWithForegroundProtection"]})
         }
+        "live_frame_objective" => json!({"objectives": ["GameFramePacing"]}),
         "live_kernel_compat" if result["compatibility"] != "ObservedIncompatible" => {
             json!({"kernel_capabilities": ["scheduler_runnable_latency"]})
         }

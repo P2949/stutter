@@ -45,6 +45,7 @@ fn expected_subcommands_are_registered() {
             "fixture-coverage",
             "fixture-update",
             "fmt",
+            "frame-campaign",
             "generate-completions",
             "generate-man",
             "kernel-matrix",

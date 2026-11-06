@@ -1,0 +1,31 @@
+# Frame-pacing graduation campaign: the pre-registered parameters of `xtask frame-campaign`.
+# Editing this file changes its digest and therefore invalidates every source-bound result.
+#
+# The workload is a CPU-bound `vkcube` pinned to one CPU and logged by MangoHud. One busy loop on the
+# same CPU, at a fixed nice value, is the interference; a lower nice value takes more of the CPU and
+# raises the frame p99. Frames are read with the controller's own MangoHud parser and rolling-window
+# p99. The decision rule being calibrated is the controller's own `classify_relative_change`.
+# Calibration chooses the smallest frame population and then the smallest threshold that satisfy the
+# rule; both are written to disk (frozen) before any holdout run exists; the untouched holdout is
+# evaluated once.
+schema_version = 1
+
+[frame_pacing]
+objective = "GameFramePacing"
+cpu = 4
+seconds = 12
+# Interference levels, lightest first (higher nice leaves more CPU to the game). Block `b` compares
+# levels[b % 3] (the lighter one) with levels[b % 3 + 1]; each block yields one neutral (lighter,
+# lighter), one beneficial (heavier removed) and one regression (heavier added) pair.
+levels_nice = [19, 10, 5, 0]
+calibration_blocks = 12
+holdout_blocks = 6
+# Candidate minimum frame populations (frames in the window) and thresholds, in percent.
+population_grid = [300, 600, 1200, 2400]
+threshold_grid_percent = [10.0, 15.0, 20.0, 30.0]
+# Selection rule (calibration data only), applied to the smallest population first: the smallest
+# threshold that produces no false keep, is at least `noise_margin` times the largest neutral change,
+# and keeps at least `min_beneficial_keep_rate` of the beneficial pairs.
+noise_margin = 2.0
+min_beneficial_keep_rate = 0.8
+max_false_keeps = 0
