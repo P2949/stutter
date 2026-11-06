@@ -138,3 +138,45 @@ mod matrix_helpers {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
+
+mod cooldown_and_policy_activity {
+    use std::time::Duration;
+
+    use super::super::matrix::{ACTION_COOLDOWN_SECONDS, cooldown_remaining, is_state_changing};
+
+    const SECOND: u128 = 1_000_000_000;
+
+    #[test]
+    fn policy_activity_is_not_a_state_change_but_an_apply_or_a_restore_is() {
+        for policy in ["observed", "noop", "cooldown_entered", "Noop", ""] {
+            assert!(!is_state_changing(policy), "{policy}");
+        }
+        for change in [
+            "candidate_applied",
+            "candidate_started",
+            "candidate_kept",
+            "candidate_reverted",
+            "restored",
+        ] {
+            assert!(is_state_changing(change), "{change}");
+        }
+    }
+
+    #[test]
+    fn the_remaining_cooldown_counts_down_from_the_last_application_and_never_goes_negative() {
+        let applied = 1_000 * SECOND;
+        assert_eq!(cooldown_remaining(None, applied), Duration::ZERO);
+        assert_eq!(
+            cooldown_remaining(Some(applied), applied),
+            Duration::from_secs(ACTION_COOLDOWN_SECONDS)
+        );
+        assert_eq!(
+            cooldown_remaining(Some(applied), applied + 100 * SECOND),
+            Duration::from_secs(ACTION_COOLDOWN_SECONDS - 100)
+        );
+        assert_eq!(
+            cooldown_remaining(Some(applied), applied + 301 * SECOND),
+            Duration::ZERO
+        );
+    }
+}

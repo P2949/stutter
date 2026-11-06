@@ -430,22 +430,19 @@ pub fn run(root: &Path, args: &SmokeArgs) -> anyhow::Result<()> {
 
     // Idle behaviour first: nothing to optimise, so nothing may change and the cost must stay small.
     let history = matrix::history_path(&user);
-    checks.extend(matrix::idle(
-        &user,
-        &controller,
-        &history,
-        args.idle_seconds,
-    ));
+    checks.extend(matrix::idle(&controller, &history, args.idle_seconds));
 
-    // Events that must leave the service clean: a workload that exits while a mutation is applied, and
-    // a controller that dies while one is applied. Neither reaches a kept outcome, so neither starts the
-    // product's cooldown on the action; they run before the case that does.
+    // Events that must leave the service clean. Every applied case starts the product's 300 second
+    // cooldown on the action, so the remaining cooldown is computed from the history and waited out once
+    // per gap; the first gap is used for the lifecycle checks, which need no new mutation.
     checks.extend(matrix::exit_while_applied(
         &args.out,
         &user,
         &history,
         args.resolve_seconds,
     ));
+    checks.push(matrix::lifecycle(&user, &controller, &worker));
+    matrix::wait_out_cooldown(&history);
     checks.extend(matrix::controller_killed_while_applied(
         &args.out,
         &user,
@@ -453,6 +450,7 @@ pub fn run(root: &Path, args: &SmokeArgs) -> anyhow::Result<()> {
         &history,
         args.resolve_seconds,
     ));
+    matrix::wait_out_cooldown(&history);
 
     // A real workload: discovered, a prepared mutation applied through the worker, and settled.
     let mut offset = fs::metadata(&history).map_or(0, |metadata| metadata.len());
@@ -492,8 +490,10 @@ pub fn run(root: &Path, args: &SmokeArgs) -> anyhow::Result<()> {
     ));
     checks.push(Check::new(
         "the_mutation_was_physically_applied",
-        changed_while_applied || outcome.resolution.is_some(),
-        format!("affinity changed while applied: {changed_while_applied}"),
+        changed_while_applied,
+        format!(
+            "the workload's placement was read back as changed while applied: {changed_while_applied} (a resolution alone is not evidence of a physical change)"
+        ),
     ));
     checks.push(Check::new(
         "the_experiment_resolved",
@@ -532,33 +532,12 @@ pub fn run(root: &Path, args: &SmokeArgs) -> anyhow::Result<()> {
     }
     checks.push(settled);
 
-    // The lifecycle an administrator relies on.
-    let lifecycle = (|| -> anyhow::Result<()> {
-        run_text("sudo", &["-n", "systemctl", "restart", &controller])?;
-        wait_for("the controller to restart", 30, || is_active(&controller))?;
-        run_text("sudo", &["-n", "systemctl", "stop", &worker])?;
-        wait_for("both units to stop", 30, || {
-            is_inactive(&worker) && is_inactive(&controller)
-        })?;
-        ensure!(
-            ledger(&user)?.0 == 0,
-            "stopping the worker left a token outstanding"
-        );
-        run_text("sudo", &["-n", "systemctl", "start", &worker])?;
-        wait_for("both units to start again", 60, || {
-            is_active(&worker) && is_active(&controller)
-        })?;
-        Ok(())
-    })();
     checks.push(Check::new(
-        "restart_stop_and_start_leave_a_clean_service",
-        lifecycle.is_ok(),
-        match &lifecycle {
-            Ok(()) => {
-                "controller restart, worker stop (controller followed), worker start".to_owned()
-            }
-            Err(error) => format!("{error:#}"),
-        },
+        "service_remains_active_with_nothing_outstanding",
+        is_active(&controller)
+            && is_active(&worker)
+            && ledger(&user).is_ok_and(|(outstanding, _)| outstanding == 0),
+        "both units active and no token outstanding after every case",
     ));
 
     write_evidence(root, args, &checks)
