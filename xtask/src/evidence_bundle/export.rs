@@ -87,8 +87,9 @@ pub fn export_bundle(root: &Path, raw: &Path, out: &Path) -> anyhow::Result<()> 
             if relative == "environment.json" {
                 continue;
             }
-            // The disposable workload binary the suite installed is not evidence.
-            if relative.starts_with("steamapps/") {
+            // The disposable workload binaries a suite installed are not evidence, wherever a case put them:
+            // at the top of the output or under a per-case directory.
+            if relative.starts_with("steamapps/") || relative.contains("/steamapps/") {
                 continue;
             }
             let bytes = fs::read(raw.join(&relative))?;

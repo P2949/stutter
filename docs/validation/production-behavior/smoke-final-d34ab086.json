@@ -1,0 +1,180 @@
+{
+  "status": "PASS",
+  "cases": [
+    {
+      "detail": "the root token ledger can only be read through sudo",
+      "name": "root_ledger_readable_through_sudo",
+      "status": "PASS"
+    },
+    {
+      "detail": "active / running",
+      "name": "controller_running",
+      "status": "PASS"
+    },
+    {
+      "detail": "/etc/systemd/system/stutter-autotune-bounded@.service",
+      "name": "controller_declared_by_the_host",
+      "status": "PASS"
+    },
+    {
+      "detail": "runs as p2949, expected p2949",
+      "name": "controller_account",
+      "status": "PASS"
+    },
+    {
+      "detail": "/nix/store/imygqvksvi6arvyjzqc5y9scvsbpsp3z-stutter",
+      "name": "controller_binary_is_immutable",
+      "status": "PASS"
+    },
+    {
+      "detail": "ec9d47bf8495d33cc4884aa71d5521c885c73dc6430dc827f3b171bf0f9bf789 (expected ec9d47bf8495d33cc4884aa71d5521c885c73dc6430dc827f3b171bf0f9bf789)",
+      "name": "controller_binary_is_the_pinned_build",
+      "status": "PASS"
+    },
+    {
+      "detail": "real uid Some(\"1000\"), expected 1000",
+      "name": "controller_process_identity",
+      "status": "PASS"
+    },
+    {
+      "detail": "CapEff 000000c001000004, expected 000000c001000004",
+      "name": "controller_capabilities",
+      "status": "PASS"
+    },
+    {
+      "detail": "NoNewPrivs 1",
+      "name": "controller_no_new_privileges",
+      "status": "PASS"
+    },
+    {
+      "detail": "active / running",
+      "name": "worker_running",
+      "status": "PASS"
+    },
+    {
+      "detail": "/etc/systemd/system/stutter-privileged-worker@.service",
+      "name": "worker_declared_by_the_host",
+      "status": "PASS"
+    },
+    {
+      "detail": "runs as root, expected root",
+      "name": "worker_account",
+      "status": "PASS"
+    },
+    {
+      "detail": "/nix/store/imygqvksvi6arvyjzqc5y9scvsbpsp3z-stutter",
+      "name": "worker_binary_is_immutable",
+      "status": "PASS"
+    },
+    {
+      "detail": "ec9d47bf8495d33cc4884aa71d5521c885c73dc6430dc827f3b171bf0f9bf789 (expected ec9d47bf8495d33cc4884aa71d5521c885c73dc6430dc827f3b171bf0f9bf789)",
+      "name": "worker_binary_is_the_pinned_build",
+      "status": "PASS"
+    },
+    {
+      "detail": "real uid Some(\"0\"), expected 0",
+      "name": "worker_process_identity",
+      "status": "PASS"
+    },
+    {
+      "detail": "CapEff 0000000000880003, expected 0000000000880003",
+      "name": "worker_capabilities",
+      "status": "PASS"
+    },
+    {
+      "detail": "0 outstanding of 513 ledger entries",
+      "name": "nothing_outstanding_before",
+      "status": "PASS"
+    },
+    {
+      "detail": "1.40% of one core over 30s (limit 5%)",
+      "name": "idle_controller_cpu_is_bounded",
+      "status": "PASS"
+    },
+    {
+      "detail": "78440 kB resident (limit 262144 kB)",
+      "name": "idle_controller_memory_is_bounded",
+      "status": "PASS"
+    },
+    {
+      "detail": "0 state-changing decisions among 30 records (policy activity such as cooldown is not counted)",
+      "name": "an_idle_controller_changes_nothing",
+      "status": "PASS"
+    },
+    {
+      "detail": "0 candidate-memory temporaries from dead processes in /var/lib/stutter/autotune-p2949/.local/state/stutter/autotune",
+      "name": "no_stale_temporary_files_in_the_state_directory",
+      "status": "PASS"
+    },
+    {
+      "detail": "85732491 bytes in /var/lib/stutter/autotune-p2949/.local/state/stutter/autotune/history.jsonl (limit 167772160)",
+      "name": "history_stays_bounded",
+      "status": "PASS"
+    },
+    {
+      "detail": "the workload's placement was read back as changed before it exited",
+      "name": "exit_while_applied_had_a_physical_mutation",
+      "status": "PASS"
+    },
+    {
+      "detail": "the root ledger had nothing outstanding after the workload exited",
+      "name": "exit_while_applied_settles_the_token",
+      "status": "PASS"
+    },
+    {
+      "detail": "0 actions started on the exited process id",
+      "name": "no_action_is_started_on_an_exited_workload",
+      "status": "PASS"
+    },
+    {
+      "detail": "controller restart, worker stop (controller followed), worker start",
+      "name": "restart_stop_and_start_leave_a_clean_service",
+      "status": "PASS"
+    },
+    {
+      "detail": "the workload's placement was read back as changed before the kill",
+      "name": "controller_killed_while_applied_had_a_physical_mutation",
+      "status": "PASS"
+    },
+    {
+      "detail": "a different main pid, the old pid reaped, the unit active",
+      "name": "controller_restarts_as_a_new_process_after_a_kill",
+      "status": "PASS"
+    },
+    {
+      "detail": "the root ledger had nothing outstanding",
+      "name": "controller_killed_while_applied_settles_the_token",
+      "status": "PASS"
+    },
+    {
+      "detail": "[\"2\", \"2\", \"2\"] against [\"2\", \"2\", \"2\"]",
+      "name": "controller_killed_while_applied_restores_the_placement",
+      "status": "PASS"
+    },
+    {
+      "detail": "applied=true",
+      "name": "workload_discovered_and_mutated_through_the_worker",
+      "status": "PASS"
+    },
+    {
+      "detail": "the workload's placement was read back as changed while applied: true (a resolution alone is not evidence of a physical change)",
+      "name": "the_mutation_was_physically_applied",
+      "status": "PASS"
+    },
+    {
+      "detail": "Some(\"candidate_kept\")",
+      "name": "the_experiment_resolved",
+      "status": "PASS"
+    },
+    {
+      "detail": "0 outstanding of 513 entries (was 513)",
+      "name": "tokens_settled_after_the_workload",
+      "status": "PASS"
+    },
+    {
+      "detail": "both units active and no token outstanding after every case",
+      "name": "service_remains_active_with_nothing_outstanding",
+      "status": "PASS"
+    }
+  ]
+}

@@ -68,3 +68,29 @@ attempt was interrupted before activation, so the idle figure of `7b24817c` and 
 - **Machine-wide mutation:** `DeferredEvidence`. No system-wide operation has a measurable benefit on this host
   (`vm.swappiness`, IRQ steering, CPU EPP, the GPU profile). The mixed-scope acceptance (M14) is `NotApplicable`
   while no machine-wide tuple exists; it is not a PASS.
+
+## Final result: the installed build `d34ab086` (2026-11-06)
+
+Source `d34ab086fc6c01b4290eb8e09747dc2306e9703d`, release binary SHA-256
+`ec9d47bf8495d33cc4884aa71d5521c885c73dc6430dc827f3b171bf0f9bf789` (Nix store path
+`/nix/store/imygqvksvi6arvyjzqc5y9scvsbpsp3z-stutter`), NixOS system
+`/nix/store/zqczcfibmzcjqczjxhgwc3b83y515zgw-nixos-system-desktop-26.05.20261025.1f607aa`, NixosConf commit
+`c3b2b0a`. The exact-build smoke passed **35 of 35 checks** ([smoke-final-d34ab086.json](smoke-final-d34ab086.json);
+evidence capture `live_packaged_service_smoke-d34ab086-1793968067455`, indexed in
+[`evidence/index.json`](../../evidence/index.json)). It ran on the test-activated closure, which the switch then made
+the boot default without any change; afterwards both units were active, executing the pinned binary, with 0 tokens
+outstanding.
+
+| Check | Old build `d50ef5d4` | `551150dd` | Final `d34ab086` |
+|---|---|---|---|
+| idle controller CPU (limit 5 percent) | FAIL 11.23 % | PASS 4.83 % | PASS **1.40 %** |
+| idle controller resident memory | PASS | PASS 85 MB | PASS 78 MB |
+| stale temporary files | FAIL 67 | PASS 0 | PASS 0 |
+| history bounded | PASS | PASS 74 MB | PASS 86 MB |
+| exit while applied: physical mutation, token settled, nothing started on the dead pid | not exercised | FAIL (cooldown) | PASS |
+| controller SIGKILL while applied: physical mutation, new process, token settled, placement restored | not exercised | PASS (no readback) | PASS |
+| lifecycle restart/stop/start | PASS | PASS | PASS |
+| workload applied, placement read back as changed, experiment kept, tokens settled | PASS | PASS | PASS |
+
+The activation touched only the two Stutter units (a dry-activate guard refuses anything that would restart the
+display manager, login or session units). No reboot and no graphical restart were performed.

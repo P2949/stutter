@@ -266,6 +266,13 @@ fn real_recordings_with_line_delimited_streams_export_and_the_installed_workload
     let raw = raw("live_observation", "nothing");
     fs::write(raw.join("one/interval.json"), "{\"a\":1}\n{\"a\":2}\n").unwrap();
     fs::create_dir_all(raw.join("steamapps/common/Game")).unwrap();
+    // A case that installs its own fixture under a per-case directory is excluded the same way.
+    fs::create_dir_all(raw.join("case/steamapps/common/Other")).unwrap();
+    fs::write(
+        raw.join("case/steamapps/common/Other/Other"),
+        vec![0_u8; (MAX_FILE_BYTES + 1) as usize],
+    )
+    .unwrap();
     // Far above the size limit and not text: exporting it would fail the whole bundle.
     fs::write(
         raw.join("steamapps/common/Game/Game"),
@@ -277,6 +284,7 @@ fn real_recordings_with_line_delimited_streams_export_and_the_installed_workload
     verify_bundle(&bundle).unwrap();
     assert!(bundle.join("artifacts/one/interval.json").is_file());
     assert!(!bundle.join("artifacts/steamapps").exists());
+    assert!(!bundle.join("artifacts/case/steamapps").exists());
     // A genuinely broken stream is still rejected.
     fs::write(
         bundle.join("artifacts/one/interval.json"),
