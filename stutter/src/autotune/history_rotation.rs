@@ -63,23 +63,25 @@ pub(crate) fn with_history_lock<T>(
 }
 
 /// Sets the history file aside when it has reached `max_bytes`. A missing file is fine. Callers hold
-/// [`with_history_lock`], which is what makes the size check and the rename one atomic step
-pub(crate) fn rotate_if_full(path: &Path, max_bytes: u64) -> anyhow::Result<()> {
+/// [`with_history_lock`], which is what makes the size check and the rename one atomic step.
+/// Returns whether the file was set aside, which is the only case where the directory entry changed
+/// and needs a directory sync.
+pub(crate) fn rotate_if_full(path: &Path, max_bytes: u64) -> anyhow::Result<bool> {
     let length = match fs::metadata(path) {
         Ok(metadata) => metadata.len(),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
         Err(error) => {
             return Err(error)
                 .with_context(|| format!("failed to inspect autotune history {}", path.display()));
         }
     };
     if length < max_bytes {
-        return Ok(());
+        return Ok(false);
     }
     match fs::rename(path, previous_generation(path)) {
-        Ok(()) => Ok(()),
+        Ok(()) => Ok(true),
         // Another writer rotated it first.
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(error)
             .with_context(|| format!("failed to rotate autotune history {}", path.display())),
     }

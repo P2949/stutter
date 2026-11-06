@@ -415,3 +415,92 @@ mod routine_observations {
         assert_eq!(HistoryTotals::load(&path).unwrap().rollbacks_total, 2);
     }
 }
+
+mod torn_tail_and_rotation_result {
+    use std::fs;
+
+    use super::{event, scratch};
+    use crate::autotune::{
+        history::append_autotune_history_event_bounded,
+        history_append::{MAX_TORN_RECORD_BYTES, repair_torn_tail},
+        history_rotation::{previous_generation, rotate_if_full},
+        history_totals::HistoryTotals,
+    };
+
+    #[test]
+    fn a_well_formed_log_is_left_untouched_and_a_missing_one_is_fine() {
+        let dir = scratch("repair-ok");
+        let path = dir.join("history.jsonl");
+        repair_torn_tail(&path, MAX_TORN_RECORD_BYTES).unwrap();
+        fs::write(&path, "one\ntwo\n").unwrap();
+        let modified = fs::metadata(&path).unwrap().modified().unwrap();
+        repair_torn_tail(&path, MAX_TORN_RECORD_BYTES).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "one\ntwo\n");
+        assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), modified);
+        fs::write(&path, "").unwrap();
+        repair_torn_tail(&path, MAX_TORN_RECORD_BYTES).unwrap();
+    }
+
+    #[test]
+    fn a_torn_tail_is_cut_back_to_the_last_complete_record_and_nothing_else() {
+        let dir = scratch("repair-torn");
+        let path = dir.join("history.jsonl");
+        fs::write(&path, "complete one\ncomplete two\n{\"torn").unwrap();
+        repair_torn_tail(&path, MAX_TORN_RECORD_BYTES).unwrap();
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "complete one\ncomplete two\n"
+        );
+        // A file that is nothing but one torn record, within the bound, is emptied.
+        fs::write(&path, "{\"only a torn").unwrap();
+        repair_torn_tail(&path, MAX_TORN_RECORD_BYTES).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "");
+    }
+
+    #[test]
+    fn an_unterminated_tail_longer_than_the_bound_is_refused_and_never_cut() {
+        let dir = scratch("repair-long");
+        let path = dir.join("history.jsonl");
+        let content = format!("complete\n{}", "x".repeat(300));
+        fs::write(&path, &content).unwrap();
+        // The bound is smaller than the tail, so the tail cannot be shown to be one torn record.
+        assert!(repair_torn_tail(&path, 100).is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), content);
+        // Within a bound that covers the tail it is cut back to the complete record.
+        repair_torn_tail(&path, 1000).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "complete\n");
+    }
+
+    #[test]
+    fn rotation_reports_whether_it_changed_the_directory_entry() {
+        let dir = scratch("rotation-result");
+        let path = dir.join("history.jsonl");
+        assert!(
+            !rotate_if_full(&path, 10).unwrap(),
+            "a missing file is not rotated"
+        );
+        fs::write(&path, "short").unwrap();
+        assert!(
+            !rotate_if_full(&path, 10).unwrap(),
+            "below the limit is not rotated"
+        );
+        fs::write(&path, "a long enough record").unwrap();
+        assert!(rotate_if_full(&path, 10).unwrap(), "a full file is rotated");
+        assert!(previous_generation(&path).exists() && !path.exists());
+    }
+
+    #[test]
+    fn appending_across_a_rotation_and_a_new_file_keeps_the_checkpoint_on_the_current_file() {
+        let dir = scratch("rotate-and-create");
+        let path = dir.join("history.jsonl");
+        let max_bytes = 3 * 1024;
+        for id in 0..40 {
+            append_autotune_history_event_bounded(&path, &event(id, true), max_bytes).unwrap();
+        }
+        assert!(previous_generation(&path).exists());
+        let totals = HistoryTotals::load(&path).unwrap();
+        assert_eq!(totals.rollbacks_total, 40);
+        assert!(!totals.gap_detected);
+        assert_eq!(HistoryTotals::uncovered_bytes(&path), 0);
+    }
+}
