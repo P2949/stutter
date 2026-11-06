@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "objective": "GameFramePacing",
+  "threshold_percent": 50.0,
+  "minimum_frame_samples": 2400,
+  "selection_rule": {
+    "max_false_keeps": 0,
+    "min_beneficial_keep_rate": 0.8,
+    "noise_margin": 2.0
+  },
+  "grid_percent": [
+    25.0,
+    50.0,
+    75.0
+  ],
+  "population_grid": [
+    300,
+    600,
+    1200,
+    2400
+  ],
+  "populations_that_failed_calibration": [
+    {
+      "neutral_noise_percent": 54.20067210753721,
+      "population": 300,
+      "satisfied": false
+    },
+    {
+      "neutral_noise_percent": 35.13209668353007,
+      "population": 600,
+      "satisfied": false
+    },
+    {
+      "neutral_noise_percent": 31.655574043261232,
+      "population": 1200,
+      "satisfied": false
+    }
+  ],
+  "calibration": {
+    "tally": {
+      "beneficial": 12,
+      "beneficial_kept": 12,
+      "false_keeps": 0,
+      "neutral": 12,
+      "regression": 12
+    },
+    "keep_rate": 1.0,
+    "neutral_noise_percent": 16.81338028169014
+  },
+  "holdout": {
+    "tally": {
+      "beneficial": 6,
+      "beneficial_kept": 6,
+      "false_keeps": 0,
+      "neutral": 6,
+      "regression": 6
+    },
+    "keep_rate": 1.0,
+    "passed": true
+  },
+  "evidence": {
+    "suite": "live_frame_objective",
+    "capture_id": "live_frame_objective-ff7936c5-1793950235831",
+    "source_commit": "ff7936c521e50bd40d826c5f22d61533ab744654",
+    "manifest_sha256": "0421cca683e6c50e4b50f8fb9d19cf8425559695d545c10cdff032911ed42e0c"
+  },
+  "design_history": "Design v1 (a nice-value ladder) failed calibration and its holdout never ran (docs/validation/frame-campaign-v1). Design v2 was chosen after seeing that calibration data; the v2 calibration and holdout are fresh runs.",
+  "scope": "Frame p99 of a CPU-bound, CPU-pinned vkcube logged by MangoHud, under busy-loop interference of 0, 1 and 3 loops. Supports only large frame-p99 effects (3x or more); it does not establish that a smaller effect is real or absent.",
+  "note": "Frozen from calibration pairs before any holdout run existed, then evaluated once on the untouched holdout. The controller ships exactly this threshold and population; a test keeps them equal."
+}

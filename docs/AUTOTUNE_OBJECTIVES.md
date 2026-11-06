@@ -8,12 +8,12 @@ quality can be lower or missing. Autonomous eligibility remains subject to the
 separate experimental action, policy and safety gates; it does not enable mode
 or grant permission.
 
-Supported objectives: `GameRunnableLatency`, `CompileThroughputWithForegroundProtection`.
+Supported objectives: `GameFramePacing`, `GameRunnableLatency`, `CompileThroughputWithForegroundProtection`.
 
 | Objective | Primary metric | Quality | Required signals | Fallback | Guardrails | Autonomous eligible | Maturity |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `StutterScore` | `normalized_score_per_sample` | derived | scored_samples, score_total | None | target_presence, experiment_data_quality, valid_nonzero_scored_samples, thermal_degradation, thermal_throttle_count, cpu_power_limit, gpu_power_limit, frame_p99, over_5ms_rate | true | Experimental |
-| `GameFramePacing` | `frame_p99_ms` | direct | frame_p99_ms_direct | None | target_presence, experiment_data_quality, valid_nonzero_scored_samples, thermal_degradation, thermal_throttle_count, cpu_power_limit, gpu_power_limit, foreground_over_5ms_rate, foreground_frame_pacing, generic_score | true | Experimental |
+| `GameFramePacing` | `frame_p99_ms` | direct | frame_p99_ms_direct | None | target_presence, experiment_data_quality, valid_nonzero_scored_samples, thermal_degradation, thermal_throttle_count, cpu_power_limit, gpu_power_limit, foreground_over_5ms_rate, foreground_frame_pacing, generic_score | true | Supported |
 | `GameRunnableLatency` | `runnable_p99_ns` | direct | complete_target_scheduler_histogram, stable_target_process_identity, at_least_1000_runnable_samples | None | target_presence, experiment_data_quality, valid_nonzero_scored_samples, thermal_degradation, thermal_throttle_count, cpu_power_limit, gpu_power_limit, runnable_over_5ms_rate, frame_p99, foreground_over_5ms_rate, foreground_frame_pacing | true | Supported |
 | `DesktopInteractivity` | `foreground_over_5ms_per_sample` | derived | foreground_latency_or_explicit_score_fallback | NormalizedScoreWhenMissingOrUnchanged | target_presence, experiment_data_quality, valid_nonzero_scored_samples, thermal_degradation, thermal_throttle_count, cpu_power_limit, gpu_power_limit, generic_score | true | Experimental |
 | `BrowserInteractivity` | `foreground_over_5ms_per_sample` | approximate | foreground_latency_or_explicit_score_fallback | NormalizedScoreWhenMissingOrUnchanged | target_presence, experiment_data_quality, valid_nonzero_scored_samples, thermal_degradation, thermal_throttle_count, cpu_power_limit, gpu_power_limit, generic_score | true | Experimental |
@@ -25,7 +25,7 @@ Supported objectives: `GameRunnableLatency`, `CompileThroughputWithForegroundPro
 ## Limitations
 
 - `StutterScore`: Ranking proxy within comparable experiments; weights are not empirically calibrated.
-- `GameFramePacing`: Direct-only: both windows need a trusted direct frame source and the normalized score never substitutes for missing or unchanged frame evidence. No product frame source reports Direct yet, so autonomy cannot keep a frame-pacing change.
+- `GameFramePacing`: Direct-only: both windows need a MangoHud-sourced direct frame log with at least 2400 valid frames, and the normalized score never substitutes for missing or unchanged frame evidence. The 50 percent frame-p99 threshold and 2400-frame population were calibrated and held out on a CPU-bound pinned vkcube (live_frame_objective), which supports only large effects (3x or more) and does not cover real or GPU-bound games. The bounded service supplies no frame log, so autonomy cannot use this objective until one is configured.
 - `GameRunnableLatency`: Merged latency-sensitive target-game histograms; finite buckets (a p99 moves in steps of about 25 percent) and thresholds validated by the CPU-affinity graduation campaign. Supported only for the exact tuples in the autonomous support registry.
 - `DesktopInteractivity`: Existing derived foreground signal; unchanged or missing primary uses score fallback.
 - `BrowserInteractivity`: Uses the existing foreground approximation, without a browser-specific direct primary measurement.

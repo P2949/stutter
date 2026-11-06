@@ -279,6 +279,19 @@
       "source_commit": "d2d45bdf0c1cd7dad61a2ba839fce7258eb28453",
       "status": "PASS",
       "suite": "live_compile_objective"
+    },
+    {
+      "capture_id": "live_frame_objective-ff7936c5-1793950235831",
+      "covers": {
+        "objectives": [
+          "GameFramePacing"
+        ]
+      },
+      "evidence_kind": "controlled_real",
+      "manifest_sha256": "0421cca683e6c50e4b50f8fb9d19cf8425559695d545c10cdff032911ed42e0c",
+      "source_commit": "ff7936c521e50bd40d826c5f22d61533ab744654",
+      "status": "PASS",
+      "suite": "live_frame_objective"
     }
   ],
   "note": "Index of portable evidence bundles verified with `xtask evidence-verify`. Bundles are retained by the operator; entries pin them by manifest digest. Only PASS entries count toward coverage.",

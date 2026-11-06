@@ -55,6 +55,16 @@ once on an untouched holdout with no false keep
 ([calibration record](validation/compile-throughput-calibration.json)). This graduates the
 objective's measurement on controlled cold builds; it authorises no operation by itself.
 
+**Supported objective, frame pacing:** `GameFramePacing` graduated on `live_frame_objective` (indexed in
+[`evidence/index.json`](evidence/index.json)). It is direct-only: both windows need a MangoHud-sourced
+frame log with at least 2400 valid frames, and the normalized score can never substitute for missing or
+unchanged frame evidence. The 50 percent frame-p99 threshold and the 2400-frame population were frozen on
+calibration and held out once ([calibration record](validation/frame-pacing-calibration.json)). A first
+design failed calibration and is kept under [`validation/frame-campaign-v1`](validation/frame-campaign-v1/README.md);
+the graduated design supports only large effects (3x or more) on a pinned CPU-bound vkcube, not real or
+GPU-bound games. The bounded service supplies no frame log, so autonomy cannot use it yet; it authorises
+no operation by itself.
+
 **Still Experimental:** every system-wide mutation, the deferred process-local operations
 above, and remote mutation.
 

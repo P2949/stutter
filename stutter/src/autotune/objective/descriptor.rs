@@ -95,8 +95,8 @@ impl ObjectiveKind {
                     "foreground_frame_pacing",
                     "generic_score",
                 ],
-                Experimental,
-                "Direct-only: both windows need a trusted direct frame source and the normalized score never substitutes for missing or unchanged frame evidence. No product frame source reports Direct yet, so autonomy cannot keep a frame-pacing change.",
+                Supported,
+                "Direct-only: both windows need a MangoHud-sourced direct frame log with at least 2400 valid frames, and the normalized score never substitutes for missing or unchanged frame evidence. The 50 percent frame-p99 threshold and 2400-frame population were calibrated and held out on a CPU-bound pinned vkcube (live_frame_objective), which supports only large effects (3x or more) and does not cover real or GPU-bound games. The bounded service supplies no frame log, so autonomy cannot use this objective until one is configured.",
             ),
             Self::GameRunnableLatency => (
                 "runnable_p99_ns",
@@ -216,14 +216,15 @@ mod tests {
             assert!(!descriptor.required_signals.is_empty());
             assert!(!descriptor.limitations.is_empty());
             // An objective is Supported only after a graduation campaign: GameRunnableLatency
-            // (mutation graduation) and CompileThroughputWithForegroundProtection (the objective
-            // campaign, `live_compile_objective`).
+            // (mutation graduation), CompileThroughputWithForegroundProtection (`live_compile_objective`)
+            // and GameFramePacing (`live_frame_objective`).
             assert_eq!(
                 descriptor.maturity == ObjectiveMaturity::Supported,
                 matches!(
                     kind,
                     ObjectiveKind::GameRunnableLatency
                         | ObjectiveKind::CompileThroughputWithForegroundProtection
+                        | ObjectiveKind::GameFramePacing
                 ),
                 "{kind:?}"
             );
@@ -236,6 +237,7 @@ mod tests {
         for kind in [
             ObjectiveKind::GameRunnableLatency,
             ObjectiveKind::CompileThroughputWithForegroundProtection,
+            ObjectiveKind::GameFramePacing,
         ] {
             assert_eq!(
                 kind.descriptor().fallback_policy,
