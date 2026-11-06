@@ -18,6 +18,9 @@ use super::{
 pub(super) const IDLE_CPU_PERCENT_LIMIT: f64 = 5.0;
 /// ...and this much resident memory.
 pub(super) const IDLE_RSS_KB_LIMIT: u64 = 256 * 1024;
+/// The controller will not repeat the same action for 300 seconds after keeping it, so a case that
+/// starts right after a kept experiment from an earlier run may have to wait that long to be applied.
+pub(super) const ACTION_COOLDOWN_SECONDS: u64 = 300;
 /// The current history file stays within its rotation cap plus one rotation's slack.
 pub(super) const HISTORY_BYTES_LIMIT: u64 = 160 * 1024 * 1024;
 
@@ -162,11 +165,11 @@ fn spawn_until_applied(
     seconds: u64,
 ) -> anyhow::Result<(super::Fixture, u32, Vec<String>, u64)> {
     let mut offset = fs::metadata(history).map_or(0, |metadata| metadata.len());
-    let fixture = spawn_fixture(out, name, 2, seconds + 60)?;
+    let fixture = spawn_fixture(out, name, 2, seconds + ACTION_COOLDOWN_SECONDS + 60)?;
     let pid = fixture.child.id();
     let original = allowed_lists(pid);
     let mut outcome = Outcome::default();
-    let deadline = Instant::now() + Duration::from_secs(seconds);
+    let deadline = Instant::now() + Duration::from_secs(seconds + ACTION_COOLDOWN_SECONDS);
     while Instant::now() < deadline && !outcome.applied {
         fold_outcome(&mut outcome, &new_records(history, &mut offset), pid);
         std::thread::sleep(Duration::from_millis(500));

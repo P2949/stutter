@@ -437,6 +437,23 @@ pub fn run(root: &Path, args: &SmokeArgs) -> anyhow::Result<()> {
         args.idle_seconds,
     ));
 
+    // Events that must leave the service clean: a workload that exits while a mutation is applied, and
+    // a controller that dies while one is applied. Neither reaches a kept outcome, so neither starts the
+    // product's cooldown on the action; they run before the case that does.
+    checks.extend(matrix::exit_while_applied(
+        &args.out,
+        &user,
+        &history,
+        args.resolve_seconds,
+    ));
+    checks.extend(matrix::controller_killed_while_applied(
+        &args.out,
+        &user,
+        &controller,
+        &history,
+        args.resolve_seconds,
+    ));
+
     // A real workload: discovered, a prepared mutation applied through the worker, and settled.
     let mut offset = fs::metadata(&history).map_or(0, |metadata| metadata.len());
     let cpus = std::thread::available_parallelism().map_or(1, |count| count.get());
@@ -514,22 +531,6 @@ pub fn run(root: &Path, args: &SmokeArgs) -> anyhow::Result<()> {
         );
     }
     checks.push(settled);
-
-    // Events that must leave the service clean: a workload that exits while a mutation is applied, and
-    // a controller that dies while one is applied.
-    checks.extend(matrix::exit_while_applied(
-        &args.out,
-        &user,
-        &history,
-        args.resolve_seconds,
-    ));
-    checks.extend(matrix::controller_killed_while_applied(
-        &args.out,
-        &user,
-        &controller,
-        &history,
-        args.resolve_seconds,
-    ));
 
     // The lifecycle an administrator relies on.
     let lifecycle = (|| -> anyhow::Result<()> {
