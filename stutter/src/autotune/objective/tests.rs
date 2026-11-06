@@ -145,8 +145,10 @@ fn game_objective_rejects_frame_p99_regression_even_when_total_improves() {
     let baseline = score(1_000, 12.0, 1);
     let candidate = score(800, 14.0, 1);
 
-    let baseline_signals = ObjectiveSignals::from_window_score(&baseline);
-    let candidate_signals = ObjectiveSignals::from_window_score(&candidate);
+    let mut baseline_signals = ObjectiveSignals::from_window_score(&baseline);
+    let mut candidate_signals = ObjectiveSignals::from_window_score(&candidate);
+    baseline_signals.signal_quality.frame_pacing = ObjectiveSignalQuality::Direct;
+    candidate_signals.signal_quality.frame_pacing = ObjectiveSignalQuality::Direct;
     let result = compare(
         ObjectiveKind::GameFramePacing,
         &baseline,
@@ -566,4 +568,54 @@ fn decision_contract_is_source_bound_and_historical_decisions_remain_readable() 
     let restored: decision::ObjectiveDecision = serde_json::from_value(old).unwrap();
     assert_eq!(restored.objective_contract, None);
     assert_eq!(restored.experiment_result(), decision.experiment_result());
+}
+
+#[test]
+fn frame_pacing_is_direct_only_and_never_keeps_on_derived_or_unchanged_evidence() {
+    let baseline = score(1_000, 12.0, 1);
+    let candidate = score(700, 8.0, 1);
+    let mut baseline_signals = ObjectiveSignals::from_window_score(&baseline);
+    let mut candidate_signals = ObjectiveSignals::from_window_score(&candidate);
+
+    // A clearly better frame p99 from a derived source is not a keep, and the score does not rescue it.
+    let derived = compare(
+        ObjectiveKind::GameFramePacing,
+        &baseline,
+        &candidate,
+        &baseline_signals,
+        &candidate_signals,
+    );
+    assert!(
+        matches!(&derived, ExperimentResult::Inconclusive { reason } if reason.contains("direct frame source")),
+        "{derived:?}"
+    );
+
+    // A direct source keeps a real improvement.
+    baseline_signals.signal_quality.frame_pacing = ObjectiveSignalQuality::Direct;
+    candidate_signals.signal_quality.frame_pacing = ObjectiveSignalQuality::Direct;
+    let direct = compare(
+        ObjectiveKind::GameFramePacing,
+        &baseline,
+        &candidate,
+        &baseline_signals,
+        &candidate_signals,
+    );
+    assert!(
+        matches!(direct, ExperimentResult::Improved { .. }),
+        "{direct:?}"
+    );
+
+    // Unchanged direct frame evidence stays inconclusive even though the normalized score improved.
+    candidate_signals.frame_p99_ms = baseline_signals.frame_p99_ms;
+    let unchanged = compare(
+        ObjectiveKind::GameFramePacing,
+        &baseline,
+        &candidate,
+        &baseline_signals,
+        &candidate_signals,
+    );
+    assert!(
+        matches!(unchanged, ExperimentResult::Inconclusive { .. }),
+        "{unchanged:?}"
+    );
 }

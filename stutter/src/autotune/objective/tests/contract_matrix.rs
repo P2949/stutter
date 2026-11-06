@@ -29,10 +29,14 @@ fn signals(
 ) -> ObjectiveSignals {
     let mut signals = match kind {
         ObjectiveKind::StutterScore => ObjectiveSignals::from_window_score(score),
-        ObjectiveKind::GameFramePacing => ObjectiveSignals {
-            frame_p99_ms: Some(value as f64),
-            ..ObjectiveSignals::from_window_score(score)
-        },
+        ObjectiveKind::GameFramePacing => {
+            let mut signals = ObjectiveSignals {
+                frame_p99_ms: Some(value as f64),
+                ..ObjectiveSignals::from_window_score(score)
+            };
+            signals.signal_quality.frame_pacing = ObjectiveSignalQuality::Direct;
+            signals
+        }
         ObjectiveKind::GameRunnableLatency => runnable::runnable(score, value * 1_000_000),
         ObjectiveKind::DesktopInteractivity | ObjectiveKind::BrowserInteractivity => {
             ObjectiveSignals {
@@ -167,10 +171,10 @@ fn contract_matrix_missing_primary_distinguishes_explicit_fallback_from_no_fallb
         let result = compare(kind, &baseline, &candidate, &missing, &missing);
         let fallback = match kind {
             ObjectiveKind::StutterScore
-            | ObjectiveKind::GameFramePacing
             | ObjectiveKind::DesktopInteractivity
             | ObjectiveKind::BrowserInteractivity => true,
-            ObjectiveKind::GameRunnableLatency
+            ObjectiveKind::GameFramePacing
+            | ObjectiveKind::GameRunnableLatency
             | ObjectiveKind::CompileThroughputWithForegroundProtection
             | ObjectiveKind::IoLatency
             | ObjectiveKind::IrqOverlapReduction

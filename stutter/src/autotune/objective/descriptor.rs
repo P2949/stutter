@@ -87,16 +87,16 @@ impl ObjectiveKind {
             ),
             Self::GameFramePacing => (
                 "frame_p99_ms",
-                Derived,
-                &["frame_p99_ms_or_explicit_score_fallback"],
-                ScoreFallback,
+                Direct,
+                &["frame_p99_ms_direct"],
+                None,
                 &[
                     "foreground_over_5ms_rate",
                     "foreground_frame_pacing",
                     "generic_score",
                 ],
                 Experimental,
-                "Frame source quality varies; unchanged or missing primary uses explicit score fallback.",
+                "Direct-only: both windows need a trusted direct frame source and the normalized score never substitutes for missing or unchanged frame evidence. No product frame source reports Direct yet, so autonomy cannot keep a frame-pacing change.",
             ),
             Self::GameRunnableLatency => (
                 "runnable_p99_ns",
