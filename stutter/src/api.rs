@@ -6,9 +6,14 @@
 
 pub mod telemetry {
     //! Workload identity, frame-source attribution, stream quality and confined capture files.
-    pub use crate::telemetry::{
-        frame_source::*, identity::*, proc_view::live_process, quality::*, registration::*,
-        session::*,
+    pub use crate::{
+        mangohud::{
+            MangoHudTailSession, TailConfig, TailCounters, TailFailure, TailState, TailedFrame,
+        },
+        telemetry::{
+            frame_source::*, identity::*, proc_view::live_process, quality::*, registration::*,
+            session::*,
+        },
     };
 }
 
