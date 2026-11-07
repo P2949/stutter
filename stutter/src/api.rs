@@ -4,6 +4,11 @@
 //! this module, plus the root `run_cli` entry point and root `StutterError`
 //! re-export, instead of depending on internal module layout.
 
+pub mod game_run {
+    //! Launch records written by `stutter game-run` for campaigns that consume its capture directories.
+    pub use crate::game_run::{LaunchRecord, default_capture_root, read_launch_record};
+}
+
 pub mod telemetry {
     //! Workload identity, frame-source attribution, stream quality and confined capture files.
     pub use crate::{

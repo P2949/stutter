@@ -403,6 +403,21 @@ pub(super) struct InspectDrmTracepointsArgs {
 }
 
 #[derive(Args, Debug, Clone)]
+pub(super) struct GameRunArgs {
+    /// Directory for capture directories (default: $XDG_RUNTIME_DIR/stutter/game-run).
+    #[arg(long = "capture-root", value_name = "DIR")]
+    pub(super) capture_root: Option<PathBuf>,
+
+    /// Point MangoHud at a secure capture directory for this launch.
+    #[arg(long = "mangohud")]
+    pub(super) mangohud: bool,
+
+    /// The exact command to run, after `--`.
+    #[arg(last = true, required = true, value_name = "ARGV")]
+    pub(super) argv: Vec<std::ffi::OsString>,
+}
+
+#[derive(Args, Debug, Clone)]
 pub(super) struct WaylandProbeArgs {
     #[arg(long = "duration", default_value_t = 30, value_name = "SECONDS")]
     pub(super) duration_secs: u64,

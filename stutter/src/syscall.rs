@@ -235,3 +235,37 @@ pub fn unix_peer_credentials(
     }
     Ok((cred.pid as u32, cred.uid, cred.gid))
 }
+
+static PENDING_SIGNAL: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+
+extern "C" fn record_signal(signal: libc::c_int) {
+    PENDING_SIGNAL.store(signal, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Records SIGINT, SIGTERM and SIGHUP instead of dying, so a wrapper can forward them to its
+/// child and report the child's own status.
+pub fn catch_termination_signals() {
+    for signal in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP] {
+        // SAFETY: `record_signal` only stores to an atomic, which is async-signal-safe.
+        unsafe { libc::signal(signal, record_signal as *const () as libc::sighandler_t) };
+    }
+}
+
+/// The last caught termination signal, cleared by the call.
+pub fn take_caught_signal() -> Option<i32> {
+    match PENDING_SIGNAL.swap(0, std::sync::atomic::Ordering::SeqCst) {
+        0 => None,
+        signal => Some(signal),
+    }
+}
+
+/// Sends `signal` to exactly process `pid`.
+pub fn send_signal(pid: u32, signal: i32) -> io::Result<()> {
+    let pid = libc::pid_t::try_from(pid).map_err(|_| io::Error::from_raw_os_error(libc::EINVAL))?;
+    // SAFETY: plain kill(2) to one explicit, positive pid.
+    if unsafe { libc::kill(pid, signal) } == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}

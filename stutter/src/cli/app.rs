@@ -11,9 +11,9 @@ use super::{
     release::ReleaseArgs,
     report::{
         AdvisorArgs, ApplyProfileArgs, AuditArgs, CapabilitiesArgs, CheckArgs, CompareArgs,
-        CompletionsArgs, InspectDrmTracepointsArgs, InspectIrqsArgs, InspectTreeArgs, ManArgs,
-        ProbesArgs, ProfilePlanArgs, ProfileTemplateArgs, RecommendArgs, ReportArgs, RestoreArgs,
-        RulesArgs, ScenarioArgs, SummaryArgs, TuneArgs, WaylandProbeArgs,
+        CompletionsArgs, GameRunArgs, InspectDrmTracepointsArgs, InspectIrqsArgs, InspectTreeArgs,
+        ManArgs, ProbesArgs, ProfilePlanArgs, ProfileTemplateArgs, RecommendArgs, ReportArgs,
+        RestoreArgs, RulesArgs, ScenarioArgs, SummaryArgs, TuneArgs, WaylandProbeArgs,
     },
     service::ServiceArgs,
     validate::ValidateArgs,
@@ -92,6 +92,11 @@ pub(super) enum Command {
         about = "Inspect available DRM tracepoints for display-path evidence"
     )]
     InspectDrmTracepoints(InspectDrmTracepointsArgs),
+    #[command(
+        name = "game-run",
+        about = "Run a command unchanged, optionally with MangoHud capture in a secure directory"
+    )]
+    GameRun(GameRunArgs),
     #[command(
         name = "wayland-probe",
         about = "Probe Wayland presentation timing support"

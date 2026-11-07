@@ -53,6 +53,7 @@ pub async fn dispatch(command: AppCommand) -> Result<(), StutterError> {
         AppCommand::InspectDrmTracepoints(input) => {
             misc::run_inspect_drm_tracepoints_command(input)
         }
+        AppCommand::GameRun(input) => misc::run_game_run_command(input),
         AppCommand::WaylandProbe(input) => misc::run_wayland_probe_command(input),
         AppCommand::Agent(input) => agent::run_agent_command(input).await,
         AppCommand::PrivilegedWorker(input) => daemon::run_privileged_worker_command(input),

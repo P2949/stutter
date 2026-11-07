@@ -17,6 +17,10 @@ struct RawIdAllowedPath {
 
 const RAW_ID_ALLOWED_PATHS: &[RawIdAllowedPath] = &[
     RawIdAllowedPath {
+        path: "src/game_run/mod.rs",
+        reason: "launch record DTO persists the launched process pid with its start ticks",
+    },
+    RawIdAllowedPath {
         path: "src/telemetry/registration.rs",
         reason: "local registration DTO carries the kernel-reported peer pid (SO_PEERCRED) at the socket boundary",
     },

@@ -7,7 +7,7 @@ use super::super::{
     release::{ReleaseArgs, ReleaseCommand},
     report::{
         AdvisorArgs, ApplyProfileArgs, AuditArgs, CapabilitiesArgs, CheckArgs, CompareArgs,
-        CompareCommand, CompletionsArgs, InspectDrmTracepointsArgs, InspectIrqsArgs,
+        CompareCommand, CompletionsArgs, GameRunArgs, InspectDrmTracepointsArgs, InspectIrqsArgs,
         InspectTreeArgs, ManArgs, ProbesArgs, ProfilePlanArgs, ProfileTemplateArgs, RecommendArgs,
         ReportArgs, RestoreArgs, SummaryArgs, TuneArgs, WaylandProbeArgs,
     },
@@ -396,6 +396,16 @@ pub(super) fn parse_compare_command(args: CompareArgs) -> anyhow::Result<AppComm
             },
         )),
     }
+}
+
+pub(super) fn parse_game_run_command(args: GameRunArgs) -> anyhow::Result<AppCommand> {
+    Ok(AppCommand::GameRun(
+        crate::commands::input::GameRunCommandInput {
+            capture_root: args.capture_root,
+            mangohud: args.mangohud,
+            argv: args.argv,
+        },
+    ))
 }
 
 pub(super) fn parse_wayland_probe_command(args: WaylandProbeArgs) -> anyhow::Result<AppCommand> {

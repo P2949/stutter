@@ -26,6 +26,7 @@ Commands:
   profile-template         Create example CPU-affinity profile templates
   inspect-irqs             Inspect IRQ distribution and candidate affinity targets
   inspect-drm-tracepoints  Inspect available DRM tracepoints for display-path evidence
+  game-run                 Run a command unchanged, optionally with MangoHud capture in a secure directory
   wayland-probe            Probe Wayland presentation timing support
   autotune                 Manage experimental autotune planning and replay commands
   autotune-status          Inspect experimental autotune controller status

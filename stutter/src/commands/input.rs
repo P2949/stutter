@@ -45,6 +45,7 @@ pub enum AppCommand {
     ProfileTemplate(ProfileTemplateCommandInput),
     InspectIrqs(InspectIrqsCommandInput),
     InspectDrmTracepoints(InspectDrmTracepointsCommandInput),
+    GameRun(GameRunCommandInput),
     WaylandProbe(WaylandProbeCommandInput),
     Agent(AgentCommandInput),
     PrivilegedWorker(PrivilegedWorkerCommandInput),
@@ -343,6 +344,13 @@ pub struct InspectIrqsCommandInput {
 pub struct InspectDrmTracepointsCommandInput {
     pub json: bool,
     pub events_root: Option<PathBuf>,
+}
+
+#[derive(Debug)]
+pub struct GameRunCommandInput {
+    pub capture_root: Option<PathBuf>,
+    pub mangohud: bool,
+    pub argv: Vec<std::ffi::OsString>,
 }
 
 #[derive(Debug)]

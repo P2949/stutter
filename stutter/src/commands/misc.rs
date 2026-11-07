@@ -214,6 +214,23 @@ pub fn run_display_path_compare_command(
     })
 }
 
+pub fn run_game_run_command(input: input::GameRunCommandInput) -> anyhow::Result<()> {
+    let capture_root = match input.capture_root {
+        Some(root) => root,
+        None => crate::game_run::default_capture_root()?,
+    };
+    let code = crate::game_run::run(
+        &crate::game_run::GameRunPlan {
+            argv: input.argv,
+            capture_root,
+            mangohud: input.mangohud,
+        },
+        true,
+    )?;
+    // The wrapper is transparent: it exits exactly as its child did.
+    std::process::exit(code)
+}
+
 pub fn run_wayland_probe_command(input: input::WaylandProbeCommandInput) -> anyhow::Result<()> {
     wayland_probe::run_wayland_probe_command(wayland_probe::WaylandProbeCommandInput {
         duration: input.duration,
