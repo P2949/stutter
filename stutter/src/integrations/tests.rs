@@ -1,6 +1,7 @@
 use std::fs;
 
 use super::*;
+use crate::autotune::operation::MutationOperationKind as Op;
 
 fn root(name: &str) -> std::path::PathBuf {
     let root = std::env::temp_dir().join(format!("stutter-owners-{name}-{}", std::process::id()));
@@ -12,7 +13,17 @@ fn root(name: &str) -> std::path::PathBuf {
 fn process(proc_root: &std::path::Path, pid: u32, comm: &str) {
     let dir = proc_root.join(pid.to_string());
     fs::create_dir_all(&dir).unwrap();
+    // The kernel truncates comm to 15 bytes.
+    let comm: String = comm.chars().take(15).collect();
     fs::write(dir.join("comm"), format!("{comm}\n")).unwrap();
+}
+
+fn sched_ext_state(sys: &std::path::Path, state: &str, ops: Option<&str>) {
+    fs::create_dir_all(sys.join("kernel/sched_ext/root")).unwrap();
+    fs::write(sys.join("kernel/sched_ext/state"), format!("{state}\n")).unwrap();
+    if let Some(ops) = ops {
+        fs::write(sys.join("kernel/sched_ext/root/ops"), format!("{ops}\n")).unwrap();
+    }
 }
 
 #[test]
@@ -21,29 +32,58 @@ fn a_quiet_host_has_no_external_owner() {
     let (proc_root, sys) = (base.join("proc"), base.join("sys"));
     fs::create_dir_all(&proc_root).unwrap();
     process(&proc_root, 10, "bash");
-    fs::create_dir_all(sys.join("kernel/sched_ext")).unwrap();
-    fs::write(sys.join("kernel/sched_ext/state"), "disabled\n").unwrap();
+    sched_ext_state(&sys, "disabled", None);
     let report = probe(&proc_root, &sys);
-    for domain in [
-        ResourceDomain::Scheduler,
-        ResourceDomain::GpuPower,
-        ResourceDomain::TaskPriorityAndPower,
-    ] {
+    for domain in ALL_DOMAINS {
         assert_eq!(report.external_owner(domain), None, "{domain:?}");
     }
     fs::remove_dir_all(&base).unwrap();
 }
 
 #[test]
-fn each_owner_claims_only_its_own_domain() {
-    let base = root("owners");
+fn each_known_owner_claims_exactly_its_own_domains() {
+    let cases: [(&str, ResourceDomain, &[ResourceDomain]); 11] = [
+        (
+            "gamemoded",
+            D::TaskPriority,
+            &[D::TaskPriority, D::CpuPower],
+        ),
+        ("lactd", D::GpuPower, &[D::GpuPower]),
+        ("ananicy-cpp", D::TaskPriority, &[D::TaskPriority]),
+        ("system76-scheduler", D::TaskPriority, &[D::TaskPriority]),
+        ("tuned", D::VmKnobs, &[D::CpuPower, D::VmKnobs]),
+        ("auto-cpufreq", D::CpuPower, &[D::CpuPower]),
+        ("power-profiles-daemon", D::CpuPower, &[D::CpuPower]),
+        ("irqbalance", D::IrqAffinity, &[D::IrqAffinity]),
+        ("bpftune", D::Network, &[D::Network, D::VmKnobs]),
+        ("numad", D::MemoryPlacement, &[D::MemoryPlacement]),
+        ("scx_loader", D::Scheduler, &[D::Scheduler]),
+    ];
+    for (comm, sample, claimed) in cases {
+        let base = root(comm);
+        let (proc_root, sys) = (base.join("proc"), base.join("sys"));
+        fs::create_dir_all(&proc_root).unwrap();
+        process(&proc_root, 11, comm);
+        sched_ext_state(&sys, "disabled", None);
+        let report = probe(&proc_root, &sys);
+        assert!(report.external_owner(sample).is_some(), "{comm}");
+        for domain in ALL_DOMAINS {
+            assert_eq!(
+                report.external_owner(domain).is_some(),
+                claimed.contains(&domain),
+                "{comm} / {domain:?}"
+            );
+        }
+        fs::remove_dir_all(&base).unwrap();
+    }
+}
+
+#[test]
+fn a_loaded_scheduler_owns_the_scheduler_even_without_a_manager() {
+    let base = root("scx");
     let (proc_root, sys) = (base.join("proc"), base.join("sys"));
     fs::create_dir_all(&proc_root).unwrap();
-    process(&proc_root, 11, "gamemoded");
-    process(&proc_root, 12, "lactd");
-    fs::create_dir_all(sys.join("kernel/sched_ext/root")).unwrap();
-    fs::write(sys.join("kernel/sched_ext/state"), "enabled\n").unwrap();
-    fs::write(sys.join("kernel/sched_ext/root/ops"), "scx_lavd\n").unwrap();
+    sched_ext_state(&sys, "enabled", Some("scx_lavd"));
     let report = probe(&proc_root, &sys);
     assert_eq!(
         report.sched_ext,
@@ -51,35 +91,23 @@ fn each_owner_claims_only_its_own_domain() {
             ops: "scx_lavd".into()
         }
     );
-    assert!(report.external_owner(ResourceDomain::Scheduler).is_some());
-    assert!(
-        report
-            .external_owner(ResourceDomain::GpuPower)
-            .unwrap()
-            .contains("LACT")
-    );
-    assert!(
-        report
-            .external_owner(ResourceDomain::TaskPriorityAndPower)
-            .unwrap()
-            .contains("GameMode")
-    );
+    assert!(report.external_owner(D::Scheduler).is_some());
     fs::remove_dir_all(&base).unwrap();
 }
 
 #[test]
-fn a_manager_without_a_loaded_scheduler_still_owns_the_scheduler() {
-    let base = root("manager");
+fn the_oom_guards_are_reported_but_own_no_tuning_domain() {
+    let base = root("oomd");
     let (proc_root, sys) = (base.join("proc"), base.join("sys"));
     fs::create_dir_all(&proc_root).unwrap();
-    process(&proc_root, 13, "scx_loader");
-    fs::create_dir_all(sys.join("kernel/sched_ext")).unwrap();
-    fs::write(sys.join("kernel/sched_ext/state"), "disabled\n").unwrap();
-    assert!(
-        probe(&proc_root, &sys)
-            .external_owner(ResourceDomain::Scheduler)
-            .is_some()
-    );
+    process(&proc_root, 12, "systemd-oomd");
+    process(&proc_root, 13, "uresourced");
+    let report = probe(&proc_root, &sys);
+    assert_eq!(report.daemon(KnownOwner::SystemdOomd), Daemon::Running);
+    assert_eq!(report.daemon(KnownOwner::Uresourced), Daemon::Running);
+    for domain in ALL_DOMAINS {
+        assert_eq!(report.external_owner(domain), None, "{domain:?}");
+    }
     fs::remove_dir_all(&base).unwrap();
 }
 
@@ -87,19 +115,20 @@ fn a_manager_without_a_loaded_scheduler_still_owns_the_scheduler() {
 fn unreadable_state_fails_closed() {
     let base = root("unknown");
     let sys = base.join("sys");
-    fs::create_dir_all(sys.join("kernel/sched_ext")).unwrap();
-    fs::write(sys.join("kernel/sched_ext/state"), "garbage\n").unwrap();
+    sched_ext_state(&sys, "garbage", None);
     let report = probe(&base.join("missing-proc"), &sys);
     assert_eq!(report.sched_ext, SchedExt::Unknown);
-    assert_eq!(report.gamemode, Daemon::Unknown);
-    for domain in [
-        ResourceDomain::Scheduler,
-        ResourceDomain::GpuPower,
-        ResourceDomain::TaskPriorityAndPower,
-    ] {
-        assert!(report.external_owner(domain).is_some(), "{domain:?}");
+    assert_eq!(report.daemon(KnownOwner::GameMode), Daemon::Unknown);
+    for domain in ALL_DOMAINS {
+        // Domains with no possible owner stay free; every claimed one is owned.
+        let claimed =
+            domain == D::Scheduler || OWNERS.iter().any(|spec| spec.domains.contains(&domain));
+        assert_eq!(
+            report.external_owner(domain).is_some(),
+            claimed,
+            "{domain:?}"
+        );
     }
-    // A kernel without sched_ext is not an owner.
     let none = probe(&base.join("missing-proc"), &base.join("no-sys"));
     assert_eq!(none.sched_ext, SchedExt::Unsupported);
     fs::remove_dir_all(&base).unwrap();
@@ -107,13 +136,18 @@ fn unreadable_state_fails_closed() {
 
 #[test]
 fn an_owned_domain_denies_only_the_operations_that_change_it() {
-    use crate::autotune::operation::MutationOperationKind as Op;
-    let owned = OwnerReport {
-        sched_ext: SchedExt::Disabled,
-        scx_manager: Daemon::NotRunning,
-        gamemode: Daemon::Running,
-        lact: Daemon::Running,
-    };
+    let base = root("deny");
+    let (proc_root, sys) = (base.join("proc"), base.join("sys"));
+    fs::create_dir_all(&proc_root).unwrap();
+    for (pid, comm) in [
+        (1, "gamemoded"),
+        (2, "lactd"),
+        (3, "irqbalance"),
+        (4, "tuned"),
+    ] {
+        process(&proc_root, pid, comm);
+    }
+    let owned = probe(&proc_root, &sys);
     for op in [
         Op::Nice,
         Op::IoPrio,
@@ -121,13 +155,16 @@ fn an_owned_domain_denies_only_the_operations_that_change_it() {
         Op::CpuPowerGovernor,
         Op::GpuPowerProfile,
         Op::GpuForcePerformance,
+        Op::VmSwappiness,
+        Op::VmDirtyRatio,
+        Op::IrqKnownDevice,
     ] {
         assert!(owner_denial(Some(&owned), op).is_some(), "{op:?}");
     }
-    // The Supported tuples are never blocked by GameMode or LACT.
+    // The Supported tuples are never blocked by another owner.
     for op in [Op::CpuAffinityProfile, Op::CgroupPlacement] {
         assert_eq!(owner_denial(Some(&owned), op), None, "{op:?}");
     }
-    // Not probed: nothing is claimed either way.
     assert_eq!(owner_denial(None, Op::Nice), None);
+    fs::remove_dir_all(&base).unwrap();
 }

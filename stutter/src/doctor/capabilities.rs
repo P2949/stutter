@@ -103,33 +103,25 @@ pub(crate) fn external_owners_check_at(
     proc_root: &std::path::Path,
     sys_root: &std::path::Path,
 ) -> DoctorCheck {
-    use crate::integrations::{ResourceDomain, probe};
+    use crate::integrations::probe;
     let report = probe(proc_root, sys_root);
     let mut details = BTreeMap::new();
     details.insert("sched_ext".to_owned(), format!("{:?}", report.sched_ext));
-    details.insert(
-        "scx_manager".to_owned(),
-        format!("{:?}", report.scx_manager),
-    );
-    details.insert("gamemode".to_owned(), format!("{:?}", report.gamemode));
-    details.insert("lact".to_owned(), format!("{:?}", report.lact));
-    let owned: Vec<String> = [
-        ResourceDomain::Scheduler,
-        ResourceDomain::GpuPower,
-        ResourceDomain::TaskPriorityAndPower,
-    ]
-    .into_iter()
-    .filter_map(|domain| {
-        report
-            .external_owner(domain)
-            .map(|reason| format!("{domain:?}: {reason}"))
-    })
-    .collect();
+    for (owner, state) in &report.daemons {
+        details.insert(format!("{owner:?}").to_lowercase(), format!("{state:?}"));
+    }
+    let owned: Vec<String> = crate::integrations::ALL_DOMAINS
+        .into_iter()
+        .filter_map(|domain| {
+            report
+                .external_owner(domain)
+                .map(|reason| format!("{domain:?}: {reason}"))
+        })
+        .collect();
     let (status, message) = if owned.is_empty() {
         (
             DoctorStatus::Pass,
-            "no other tuning owner detected for the scheduler, GPU power or task priority"
-                .to_owned(),
+            "no other tuning owner detected for any resource domain".to_owned(),
         )
     } else {
         (
