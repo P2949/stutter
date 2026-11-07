@@ -65,6 +65,7 @@ fn expected_subcommands_are_registered() {
             "preflight",
             "privileged-ebpf-smoke",
             "production-smoke",
+            "real-workload",
             "recovery-controller",
             "refresh-tune-recommendation",
             "release-check",
