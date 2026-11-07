@@ -9,6 +9,14 @@ pub mod game_run {
     pub use crate::game_run::{LaunchRecord, default_capture_root, read_launch_record};
 }
 
+pub mod objective_source {
+    //! Typed local application KPIs: contract, bound-source ingestion and window aggregation.
+    pub use crate::autotune::objective::source::{
+        Aggregation, ContractError, Direction, IngestDenial, KpiContract, MetricClass, MetricSpec,
+        Sample, SampleStore, SourceBinding, WindowAggregate,
+    };
+}
+
 pub mod sensors {
     //! Sensor descriptors, readings, the PSI sensor and the cost-bounded registry.
     pub use crate::autotune::sensors::{

@@ -38,6 +38,7 @@ pub fn game_runnable_unavailable_reason(signals: &ObjectiveSignals) -> Option<St
 }
 mod desktop_interactivity;
 mod frame_log;
+pub mod source;
 pub use frame_log::{FrameLogStats, frame_log_stats};
 mod game_frame_pacing;
 pub use game_frame_pacing::{

@@ -113,6 +113,10 @@ pub(in crate::architecture_tests) const EXPECTED_API_PUBLIC_MODULES: &[ExpectedP
         reason: "launch records and capture roots of the optional game-run wrapper, read by the real-workload campaigns",
     },
     ExpectedPublicModule {
+        name: "objective_source",
+        reason: "typed local-only application KPI contract and ingestion; carries no mutation authority",
+    },
+    ExpectedPublicModule {
         name: "sensors",
         reason: "read-only sensor framework with probes, quality, loss and cost-bounded admission",
     },

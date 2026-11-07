@@ -17,6 +17,10 @@ struct RawIdAllowedPath {
 
 const RAW_ID_ALLOWED_PATHS: &[RawIdAllowedPath] = &[
     RawIdAllowedPath {
+        path: "src/autotune/objective/source/model.rs",
+        reason: "source binding DTO carries the bound process pid with its start ticks for peer verification",
+    },
+    RawIdAllowedPath {
         path: "src/game_run/mod.rs",
         reason: "launch record DTO persists the launched process pid with its start ticks",
     },
