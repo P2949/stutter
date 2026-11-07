@@ -296,3 +296,39 @@ impl MangoHudTailSession {
 #[cfg(test)]
 #[path = "tail_session_tests.rs"]
 mod tests;
+
+/// Drives `session` against a shared status and a bounded frame channel until the channel closes
+/// or the session fails. Frames the channel cannot take are left in the file, never dropped; a
+/// failed session marks the source unhealthy so frame-primary trust ends immediately.
+pub async fn drive_tail_session(
+    mut session: MangoHudTailSession,
+    status: crate::telemetry::live_source::SharedFrameSource,
+    tx: tokio::sync::mpsc::Sender<TailedFrame>,
+    idle_sleep: Duration,
+) {
+    let mut frames = Vec::new();
+    loop {
+        frames.clear();
+        let room = tx.capacity();
+        let state = session.poll(Instant::now(), room, &mut frames);
+        let produced = frames.len();
+        let mut closed = false;
+        for frame in frames.drain(..) {
+            if tx.try_send(frame).is_err() {
+                // Capacity was just checked, so only a closed receiver lands here.
+                closed = true;
+                break;
+            }
+        }
+        if let Ok(mut shared) = status.lock() {
+            if produced > 0 {
+                shared.last_frame_at = Some(Instant::now());
+            }
+            shared.healthy = !matches!(state, TailState::Failed(_));
+        }
+        if closed || matches!(state, TailState::Failed(_)) || tx.is_closed() {
+            return;
+        }
+        tokio::time::sleep(idle_sleep).await;
+    }
+}

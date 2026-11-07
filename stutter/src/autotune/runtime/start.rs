@@ -32,6 +32,7 @@ impl AutotuneRuntime {
             previous_drop_counters: DropCountersSnapshot::default(),
             offender_sampler: std::sync::Mutex::default(),
             candidate_memory_saved: std::sync::Mutex::default(),
+            frame_source: None,
             recent_diagnoses: VecDeque::new(),
             activity_classifier: ActivityClassifier::new(5),
             live_experiments: LiveExperimentManager::new(),

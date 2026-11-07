@@ -20,6 +20,7 @@ use schema::{
 pub use tail::tail_frames;
 pub use tail_session::{
     MangoHudTailSession, TailConfig, TailCounters, TailFailure, TailState, TailedFrame,
+    drive_tail_session,
 };
 #[cfg(test)]
 mod tests;

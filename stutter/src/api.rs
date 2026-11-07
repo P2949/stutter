@@ -9,10 +9,11 @@ pub mod telemetry {
     pub use crate::{
         mangohud::{
             MangoHudTailSession, TailConfig, TailCounters, TailFailure, TailState, TailedFrame,
+            drive_tail_session,
         },
         telemetry::{
-            frame_source::*, identity::*, proc_view::live_process, quality::*, registration::*,
-            session::*,
+            frame_source::*, identity::*, live_source::*, proc_view::live_process, quality::*,
+            registration::*, session::*,
         },
     };
 }

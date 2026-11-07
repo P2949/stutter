@@ -267,6 +267,7 @@ impl AutotuneRuntime {
         forced_reason: Option<&str>,
     ) -> anyhow::Result<Option<AutotuneDecisionStreamEntry>> {
         self.prepare_runtime_phase_for_evaluation()?;
+        self.refresh_frame_attestation();
 
         let observation = self.build_observation();
         self.last_observation = observation.clone();
@@ -585,5 +586,47 @@ impl AutotuneRuntime {
         };
 
         self.transition_runtime_phase(next, format!("live experiment outcome {}", event.as_str()))
+    }
+}
+
+impl AutotuneRuntime {
+    /// Attaches an independently collected frame source. Without one, frames stay unattributed
+    /// and can never be a direct frame-primary signal.
+    pub fn attach_frame_source(
+        &mut self,
+        source: crate::telemetry::live_source::SharedFrameSource,
+    ) {
+        self.frame_source = Some(source);
+    }
+
+    /// Re-evaluates the attached source against the target as it is *now*, so a replaced
+    /// process, a focus change, a stale or a lossy stream withdraws trust at once.
+    fn refresh_frame_attestation(&mut self) {
+        use crate::telemetry::live_source::{TargetView, evaluate};
+        let Some(source) = self.frame_source.clone() else {
+            return;
+        };
+        let Some(identity) = self.last_observation.workload_identity.as_ref() else {
+            return;
+        };
+        let Ok(boot_id) = crate::telemetry::identity::read_boot_id() else {
+            return;
+        };
+        let Ok(status) = source.lock().map(|guard| guard.clone()) else {
+            return;
+        };
+        let view = TargetView {
+            identity,
+            boot_id: &boot_id,
+            uid: crate::syscall::geteuid(),
+            focused: self.last_observation.target_present,
+        };
+        let quality = evaluate(
+            &status,
+            &view,
+            std::path::Path::new("/proc"),
+            std::time::Instant::now(),
+        );
+        self.controller.window.attest_frame_stream(quality);
     }
 }

@@ -101,6 +101,8 @@ pub struct AutotuneRuntime {
     offender_sampler: std::sync::Mutex<crate::autotune::offenders::OffenderSampler>,
     /// The bytes of the candidate memory last written, so an unchanged memory is not rewritten.
     candidate_memory_saved: std::sync::Mutex<Option<Vec<u8>>>,
+    /// The independently collected frame source, when one was attached.
+    frame_source: Option<crate::telemetry::live_source::SharedFrameSource>,
 }
 
 #[cfg(test)]

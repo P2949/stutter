@@ -453,3 +453,95 @@ mod registration {
         fs::remove_dir_all(&dir).unwrap();
     }
 }
+
+mod live {
+    use std::{
+        path::Path,
+        time::{Duration, Instant},
+    };
+
+    use super::super::{
+        frame_source::{Attribution, MeasurementStage, SourceClaim},
+        live_source::*,
+        proc_view::live_process,
+    };
+    use crate::autotune::observation::WorkloadIdentity;
+
+    fn me() -> (WorkloadIdentity, u32, u64) {
+        let pid = std::process::id();
+        let live = live_process(Path::new("/proc"), pid).unwrap();
+        let identity = WorkloadIdentity {
+            root_pid: pid,
+            process_starttime_ticks: Some(live.start_ticks),
+            exe_dev: Some(1),
+            exe_ino: Some(2),
+            cgroup_path: Some("/c".to_owned()),
+            focus_kind: None,
+            class_distribution: Default::default(),
+            stable_hash: "h".to_owned(),
+        };
+        (identity, live.uid, live.start_ticks)
+    }
+
+    fn status(uid: u32, ticks: u64, now: Instant) -> FrameSourceStatus {
+        let mut status = FrameSourceStatus::new(SourceClaim {
+            stage: MeasurementStage::ApplicationFrame,
+            producer_pid: Some(std::process::id()),
+            producer_start_ticks: Some(ticks),
+            file_owner_uid: Some(uid),
+            launch_id_matched: false,
+        });
+        status.last_frame_at = Some(now);
+        status
+    }
+
+    #[test]
+    fn a_live_verified_source_is_direct_and_every_change_withdraws_it() {
+        let (identity, uid, ticks) = me();
+        let now = Instant::now();
+        let view = |focused| TargetView {
+            identity: &identity,
+            boot_id: "boot",
+            uid,
+            focused,
+        };
+        let proc = Path::new("/proc");
+        let good = evaluate(&status(uid, ticks, now), &view(true), proc, now);
+        assert_eq!(good.attribution, Attribution::ValidatedDirect);
+        assert_eq!(good.frame_primary_eligible(), Ok(()));
+
+        // Focus moved away.
+        let swapped = evaluate(&status(uid, ticks, now), &view(false), proc, now);
+        assert_ne!(swapped.attribution, Attribution::ValidatedDirect);
+        // No frame for longer than the freshness limit.
+        let stale = evaluate(
+            &status(uid, ticks, now),
+            &view(true),
+            proc,
+            now + Duration::from_secs(60),
+        );
+        assert_ne!(stale.attribution, Attribution::ValidatedDirect);
+        // A reused pid: the recorded start ticks no longer match the process.
+        let reused = evaluate(&status(uid, ticks + 1, now), &view(true), proc, now);
+        assert_ne!(reused.attribution, Attribution::ValidatedDirect);
+        // Loss or an unhealthy source blocks frame-primary even when attribution is right.
+        let mut lossy = status(uid, ticks, now);
+        lossy.dropped_frames = 3;
+        assert!(
+            evaluate(&lossy, &view(true), proc, now)
+                .frame_primary_eligible()
+                .is_err()
+        );
+        // The target process itself was replaced: its identity is stale.
+        let mut replaced = identity.clone();
+        replaced.process_starttime_ticks = Some(ticks + 5);
+        let replaced_view = TargetView {
+            identity: &replaced,
+            boot_id: "boot",
+            uid,
+            focused: true,
+        };
+        let verdict = evaluate(&status(uid, ticks, now), &replaced_view, proc, now);
+        assert_ne!(verdict.attribution, Attribution::ValidatedDirect);
+    }
+}
