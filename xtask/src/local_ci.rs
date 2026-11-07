@@ -299,7 +299,8 @@ fn current_ids() -> anyhow::Result<(u32, u32)> {
 fn run_live_script(root: &Path, script: &str) -> anyhow::Result<()> {
     let (uid, gid) = current_ids()?;
     println!("--- STAGE: live smoke {script} ---");
-    let output = Command::new("sudo")
+    let mut command = Command::new("sudo");
+    command
         .args(["-n", "setpriv"])
         .arg(format!("--reuid={uid}"))
         .arg(format!("--regid={gid}"))
@@ -318,20 +319,23 @@ fn run_live_script(root: &Path, script: &str) -> anyhow::Result<()> {
         .arg(format!("RUSTUP_TOOLCHAIN={}", rustup_toolchain()))
         .arg("RUST_LOG=info")
         .args(["bash", script])
-        .current_dir(root)
-        .output()
-        .context(
-            "sudo -n setpriv is required for the live smokes (non-interactive privilege only)",
-        )?;
-    print!("{}", String::from_utf8_lossy(&output.stdout));
-    eprint!("{}", String::from_utf8_lossy(&output.stderr));
+        .current_dir(root);
+    // Supervised: an owned process group with a deadline, so a hung smoke cannot be orphaned.
+    let mut policy = crate::process::stage_policy();
+    policy.tee = false;
+    let run = crate::process::supervisor::run(command, &policy).context(
+        "sudo -n setpriv is required for the live smokes (non-interactive privilege only)",
+    )?;
+    print!("{}", run.stdout);
+    eprint!("{}", run.stderr);
+    match &run.outcome {
+        crate::process::supervisor::Outcome::Exited(status) => {
+            ensure!(status.success(), "{script} failed with {status}")
+        }
+        other => anyhow::bail!("{script} did not finish: {other:?}"),
+    }
     ensure!(
-        output.status.success(),
-        "{script} failed with {}",
-        output.status
-    );
-    ensure!(
-        !String::from_utf8_lossy(&output.stdout).contains("SKIP:"),
+        !run.stdout.contains("SKIP:"),
         "{script} skipped: the live smoke needs the capabilities this stage grants"
     );
     Ok(())

@@ -4,7 +4,10 @@ use std::{
     process::Command as ProcessCommand,
 };
 
-use anyhow::{Context, bail};
+use anyhow::bail;
+
+pub mod supervisor;
+use supervisor::{ExecutionPolicy, Outcome, Supervised};
 
 pub const DEFAULT_TOOLCHAIN: &str = "nightly-2026-06-06";
 
@@ -34,15 +37,7 @@ pub fn run_process_with_env(
         command.env(key, value);
     }
 
-    let status = command
-        .status()
-        .with_context(|| format!("failed to start `{command_text}`"))?;
-
-    if !status.success() {
-        bail!("command `{command_text}` failed with status {status}");
-    }
-
-    Ok(())
+    check_outcome(&command_text, &supervisor::run(command, &stage_policy())?)
 }
 
 pub fn run_process_capture_stdout(
@@ -53,31 +48,14 @@ pub fn run_process_capture_stdout(
     let command_text = format_command(program, args);
     println!("--- STAGE: {command_text} ---");
 
-    let output = ProcessCommand::new(program)
+    let mut command = ProcessCommand::new(program);
+    command
         .args(args)
         .current_dir(root)
-        .env("RUSTUP_TOOLCHAIN", rustup_toolchain())
-        .output()
-        .with_context(|| format!("failed to start `{command_text}`"))?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-
-    if !stdout.is_empty() {
-        print!("{stdout}");
-    }
-    if !stderr.is_empty() {
-        eprint!("{stderr}");
-    }
-
-    if !output.status.success() {
-        bail!(
-            "command `{command_text}` failed with status {}",
-            output.status
-        );
-    }
-
-    Ok(stdout)
+        .env("RUSTUP_TOOLCHAIN", rustup_toolchain());
+    let run = supervisor::run(command, &stage_policy())?;
+    check_outcome(&command_text, &run)?;
+    Ok(run.stdout)
 }
 
 pub fn rustup_toolchain() -> String {
@@ -121,4 +99,31 @@ pub fn executable_on_path(program: &str) -> Option<PathBuf> {
     env::split_paths(&paths)
         .map(|dir| dir.join(program))
         .find(|path| path.is_file())
+}
+
+/// Per-stage policy: a generous bound (long builds are legitimate) that can be tightened with
+/// `STUTTER_XTASK_STAGE_TIMEOUT_SECS`. Output is echoed as it arrives and a bounded copy kept.
+pub fn stage_policy() -> ExecutionPolicy {
+    let mut policy = ExecutionPolicy::long_build();
+    if let Some(seconds) = env::var("STUTTER_XTASK_STAGE_TIMEOUT_SECS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|seconds| *seconds > 0)
+    {
+        policy.timeout = Some(std::time::Duration::from_secs(seconds));
+    }
+    policy
+}
+
+fn check_outcome(command_text: &str, run: &Supervised) -> anyhow::Result<()> {
+    match &run.outcome {
+        Outcome::Exited(status) if status.success() => Ok(()),
+        Outcome::Exited(status) => bail!("command `{command_text}` failed with status {status}"),
+        Outcome::TimedOut => bail!(
+            "command `{command_text}` exceeded its deadline; its process group was terminated and reaped"
+        ),
+        Outcome::Cancelled => bail!(
+            "command `{command_text}` was cancelled; its process group was terminated and reaped"
+        ),
+    }
 }
