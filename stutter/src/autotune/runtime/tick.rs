@@ -269,7 +269,8 @@ impl AutotuneRuntime {
         self.prepare_runtime_phase_for_evaluation()?;
         self.refresh_frame_attestation();
 
-        let observation = self.build_observation();
+        let mut observation = self.build_observation();
+        observation.external_owners = self.current_external_owners();
         self.last_observation = observation.clone();
         if !observation.target_present && self.has_kept_actions() && !self.has_active_experiment() {
             // The workload the kept actions were kept for is gone.
@@ -628,5 +629,25 @@ impl AutotuneRuntime {
             std::time::Instant::now(),
         );
         self.controller.window.attest_frame_stream(quality);
+    }
+}
+
+/// How long an owner probe stays valid before `/proc` is scanned again.
+const OWNER_PROBE_TTL: std::time::Duration = std::time::Duration::from_secs(30);
+
+impl AutotuneRuntime {
+    /// The other tuning owners on the host, probed at most once per `OWNER_PROBE_TTL`.
+    fn current_external_owners(&self) -> Option<crate::integrations::OwnerReport> {
+        let mut cache = self.owner_cache.lock().ok()?;
+        let now = std::time::Instant::now();
+        if let Some((at, report)) = cache.as_ref()
+            && now.duration_since(*at) < OWNER_PROBE_TTL
+        {
+            return Some(report.clone());
+        }
+        let report =
+            crate::integrations::probe(std::path::Path::new("/proc"), std::path::Path::new("/sys"));
+        *cache = Some((now, report.clone()));
+        Some(report)
     }
 }

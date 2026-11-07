@@ -103,6 +103,8 @@ pub struct AutotuneRuntime {
     candidate_memory_saved: std::sync::Mutex<Option<Vec<u8>>>,
     /// The independently collected frame source, when one was attached.
     frame_source: Option<crate::telemetry::live_source::SharedFrameSource>,
+    /// The last owner probe and when it ran; `/proc` is not rescanned on every tick.
+    owner_cache: std::sync::Mutex<Option<(std::time::Instant, crate::integrations::OwnerReport)>>,
 }
 
 #[cfg(test)]

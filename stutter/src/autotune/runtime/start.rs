@@ -33,6 +33,7 @@ impl AutotuneRuntime {
             offender_sampler: std::sync::Mutex::default(),
             candidate_memory_saved: std::sync::Mutex::default(),
             frame_source: None,
+            owner_cache: std::sync::Mutex::default(),
             recent_diagnoses: VecDeque::new(),
             activity_classifier: ActivityClassifier::new(5),
             live_experiments: LiveExperimentManager::new(),

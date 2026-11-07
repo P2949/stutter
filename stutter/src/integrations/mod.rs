@@ -124,3 +124,34 @@ impl OwnerReport {
 
 #[cfg(test)]
 mod tests;
+
+use crate::autotune::operation::MutationOperationKind;
+
+/// The resource domain an operation changes, when another controller could own it.
+pub fn operation_domain(operation: MutationOperationKind) -> Option<ResourceDomain> {
+    use MutationOperationKind as Op;
+    match operation {
+        Op::Nice | Op::IoPrio | Op::CpuPowerEpp | Op::CpuPowerGovernor => {
+            Some(ResourceDomain::TaskPriorityAndPower)
+        }
+        Op::GpuPowerProfile | Op::GpuForcePerformance => Some(ResourceDomain::GpuPower),
+        Op::CpuAffinityProfile
+        | Op::Uclamp
+        | Op::CgroupPlacement
+        | Op::VmSwappiness
+        | Op::VmDirtyBackgroundRatio
+        | Op::VmDirtyRatio
+        | Op::IrqKnownDevice
+        | Op::IrqStorageOrUnknown
+        | Op::Unclassified => None,
+    }
+}
+
+/// Why `operation` must be denied because another controller owns its resource. `None` when no
+/// owner report exists (not probed) or the domain is free.
+pub fn owner_denial(
+    owners: Option<&OwnerReport>,
+    operation: MutationOperationKind,
+) -> Option<&'static str> {
+    owners?.external_owner(operation_domain(operation)?)
+}

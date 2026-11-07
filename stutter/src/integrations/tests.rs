@@ -104,3 +104,30 @@ fn unreadable_state_fails_closed() {
     assert_eq!(none.sched_ext, SchedExt::Unsupported);
     fs::remove_dir_all(&base).unwrap();
 }
+
+#[test]
+fn an_owned_domain_denies_only_the_operations_that_change_it() {
+    use crate::autotune::operation::MutationOperationKind as Op;
+    let owned = OwnerReport {
+        sched_ext: SchedExt::Disabled,
+        scx_manager: Daemon::NotRunning,
+        gamemode: Daemon::Running,
+        lact: Daemon::Running,
+    };
+    for op in [
+        Op::Nice,
+        Op::IoPrio,
+        Op::CpuPowerEpp,
+        Op::CpuPowerGovernor,
+        Op::GpuPowerProfile,
+        Op::GpuForcePerformance,
+    ] {
+        assert!(owner_denial(Some(&owned), op).is_some(), "{op:?}");
+    }
+    // The Supported tuples are never blocked by GameMode or LACT.
+    for op in [Op::CpuAffinityProfile, Op::CgroupPlacement] {
+        assert_eq!(owner_denial(Some(&owned), op), None, "{op:?}");
+    }
+    // Not probed: nothing is claimed either way.
+    assert_eq!(owner_denial(None, Op::Nice), None);
+}

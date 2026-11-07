@@ -159,6 +159,9 @@ pub struct AutotuneObservation {
     /// Sustained background CPU consumers of the target's owner that compete with the workload.
     #[serde(default)]
     pub background_offenders: Vec<crate::autotune::offenders::OffenderProcess>,
+    /// Other tuning owners on the host (GameMode, LACT, sched_ext); `None` when not probed.
+    #[serde(default)]
+    pub external_owners: Option<crate::integrations::OwnerReport>,
     pub active_config_snapshot: Option<ActiveConfigSnapshot>,
     pub system_context: Option<SystemContextSnapshot>,
 
@@ -198,6 +201,7 @@ impl Default for AutotuneObservation {
             active_tasks: Vec::new(),
             protected_tasks: Vec::new(),
             background_offenders: Vec::new(),
+            external_owners: None,
             active_config_snapshot: None,
             system_context: None,
             frame_count: 0,

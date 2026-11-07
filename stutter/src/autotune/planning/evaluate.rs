@@ -282,6 +282,14 @@ pub(crate) fn evaluate_proposal_static(
         deny_messages.push(message);
     }
 
+    if let Some(reason) = crate::integrations::owner_denial(
+        input.observation.external_owners.as_ref(),
+        proposal.candidate.operation_kind(),
+    ) {
+        deny_reasons.push(CandidateDenyReason::ExternallyOwnedResource);
+        deny_messages.push(format!("{reason}; stutter does not race another owner"));
+    }
+
     if let Some(snapshot) = input.observation.active_config_snapshot.as_ref() {
         let active_config_input = ActiveConfigMatchInput {
             snapshot,
