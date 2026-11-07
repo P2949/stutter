@@ -17,6 +17,10 @@ struct RawIdAllowedPath {
 
 const RAW_ID_ALLOWED_PATHS: &[RawIdAllowedPath] = &[
     RawIdAllowedPath {
+        path: "src/telemetry/registration.rs",
+        reason: "local registration DTO carries the kernel-reported peer pid (SO_PEERCRED) at the socket boundary",
+    },
+    RawIdAllowedPath {
         path: "src/actions/cgroup/model.rs",
         reason: "cgroup restore snapshots preserve numeric task identity at the action boundary",
     },
