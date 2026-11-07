@@ -33,10 +33,13 @@ fn covers(suite: &str, result: &Value) -> Value {
         "live_autotune_smoke"
         | "live_autotune_soak"
         | "live_bounded_service"
-        | "live_bounded_service_acceptance"
-        | "live_packaged_service_smoke" => json!({
+        | "live_bounded_service_acceptance" => json!({
             "providers": ["cpu_affinity_profile", "cgroup_placement"],
         }),
+        // The packaged smoke proves the installed service is healthy and recovers; it applies
+        // whatever the host configures (no game cgroup destination on some hosts), so it claims
+        // service-level evidence only and no per-provider coverage.
+        "live_packaged_service_smoke" => json!({}),
         "live_game_runnable" => json!({"objectives": ["GameRunnableLatency"]}),
         "live_compile_objective" => {
             json!({"objectives": ["CompileThroughputWithForegroundProtection"]})
@@ -84,6 +87,19 @@ pub fn index_entry(bundle: &Path) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_packaged_smoke_without_per_provider_proof_covers_no_provider() {
+        let result = json!({"checks": 35});
+        assert_eq!(covers("live_packaged_service_smoke", &result), json!({}));
+        for suite in ["live_bounded_service_acceptance", "live_autotune_soak"] {
+            assert_eq!(
+                covers(suite, &result),
+                json!({"providers": ["cpu_affinity_profile", "cgroup_placement"]}),
+                "{suite}"
+            );
+        }
+    }
 
     #[test]
     fn a_bundle_covers_the_provider_it_exercised() {
