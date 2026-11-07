@@ -91,3 +91,59 @@ pub(crate) fn daemon_capabilities_check_from_snapshot(
         details,
     }
 }
+
+/// Who else holds tuning resources on this host: read-only, from kernel state and process
+/// identity. An owner (or an unreadable state) is a warning, never a failure: the autotuner
+/// simply denies the matching domain.
+pub(crate) fn external_owners_check() -> DoctorCheck {
+    external_owners_check_at(std::path::Path::new("/proc"), std::path::Path::new("/sys"))
+}
+
+pub(crate) fn external_owners_check_at(
+    proc_root: &std::path::Path,
+    sys_root: &std::path::Path,
+) -> DoctorCheck {
+    use crate::integrations::{ResourceDomain, probe};
+    let report = probe(proc_root, sys_root);
+    let mut details = BTreeMap::new();
+    details.insert("sched_ext".to_owned(), format!("{:?}", report.sched_ext));
+    details.insert(
+        "scx_manager".to_owned(),
+        format!("{:?}", report.scx_manager),
+    );
+    details.insert("gamemode".to_owned(), format!("{:?}", report.gamemode));
+    details.insert("lact".to_owned(), format!("{:?}", report.lact));
+    let owned: Vec<String> = [
+        ResourceDomain::Scheduler,
+        ResourceDomain::GpuPower,
+        ResourceDomain::TaskPriorityAndPower,
+    ]
+    .into_iter()
+    .filter_map(|domain| {
+        report
+            .external_owner(domain)
+            .map(|reason| format!("{domain:?}: {reason}"))
+    })
+    .collect();
+    let (status, message) = if owned.is_empty() {
+        (
+            DoctorStatus::Pass,
+            "no other tuning owner detected for the scheduler, GPU power or task priority"
+                .to_owned(),
+        )
+    } else {
+        (
+            DoctorStatus::Warn,
+            format!(
+                "externally owned, stutter will deny these: {}",
+                owned.join("; ")
+            ),
+        )
+    };
+    DoctorCheck {
+        name: "external_owners".to_owned(),
+        status,
+        message,
+        details,
+    }
+}
