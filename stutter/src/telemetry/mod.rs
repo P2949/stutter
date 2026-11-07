@@ -6,7 +6,9 @@
 //! mutation path.
 pub mod frame_source;
 pub mod identity;
+pub mod proc_view;
 pub mod quality;
+pub mod registration;
 pub mod session;
 
 #[cfg(test)]

@@ -321,3 +321,135 @@ fn a_permissive_foreign_or_symlinked_directory_is_refused() {
     ));
     fs::remove_dir_all(&dir).unwrap();
 }
+
+mod registration {
+    use std::{
+        fs,
+        io::{Read, Write},
+        os::unix::{
+            fs::{PermissionsExt, symlink},
+            net::UnixStream,
+        },
+    };
+
+    use super::super::registration::*;
+
+    const OWNER: u32 = 1000;
+
+    fn peer(pid: u32, uid: u32) -> PeerCredentials {
+        PeerCredentials { pid, uid }
+    }
+
+    #[test]
+    fn register_cancel_and_inspect_are_the_only_verbs_and_are_bounded() {
+        let mut registry = Registry::new(OWNER);
+        assert_eq!(
+            registry.handle(peer(7, OWNER), "register game-1 7"),
+            Response::Registered
+        );
+        assert_eq!(registry.get("game-1").unwrap().pid, 7);
+        assert_eq!(
+            registry.handle(peer(7, OWNER), "register game-1 7"),
+            Response::Denied("already_registered")
+        );
+        assert_eq!(
+            registry.handle(peer(7, OWNER), "register game-2 8"),
+            Response::Denied("pid_is_not_the_peer")
+        );
+        assert_eq!(
+            registry.handle(peer(7, 0), "inspect"),
+            Response::Denied("wrong_user")
+        );
+        assert_eq!(
+            registry.handle(peer(7, OWNER), "cancel game-1"),
+            Response::Cancelled
+        );
+        assert_eq!(
+            registry.handle(peer(7, OWNER), "cancel game-1"),
+            Response::Denied("unknown_launch_id")
+        );
+        for bad in [
+            "register ../x 7",
+            "register a/b 7",
+            "register  7",
+            "apply nice 1",
+            "register x 7 extra",
+            "",
+        ] {
+            assert!(
+                matches!(registry.handle(peer(7, OWNER), bad), Response::Denied(_)),
+                "{bad}"
+            );
+        }
+        for index in 0..MAX_REGISTRATIONS {
+            let pid = 100 + index as u32;
+            let line = format!("register id{index} {pid}");
+            assert_eq!(
+                registry.handle(peer(pid, OWNER), &line),
+                Response::Registered
+            );
+        }
+        assert_eq!(
+            registry.handle(peer(5, OWNER), "register overflow 5"),
+            Response::Denied("registry_full")
+        );
+    }
+
+    #[test]
+    fn another_process_cannot_cancel_a_registration() {
+        let mut registry = Registry::new(OWNER);
+        registry.handle(peer(7, OWNER), "register g 7");
+        assert_eq!(
+            registry.handle(peer(8, OWNER), "cancel g"),
+            Response::Denied("not_the_registrant")
+        );
+    }
+
+    #[test]
+    fn a_connection_is_authenticated_by_the_kernel_and_bound_by_line_length() {
+        let dir = std::env::temp_dir().join(format!("stutter-reg-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+        let uid = crate::syscall::geteuid();
+        let listener = bind(&dir, "reg.sock", uid).unwrap();
+        let mut registry = Registry::new(uid);
+        let mut client = UnixStream::connect(dir.join("reg.sock")).unwrap();
+        let me = std::process::id();
+        client
+            .write_all(format!("register g {me}\n").as_bytes())
+            .unwrap();
+        let (server, _) = listener.accept().unwrap();
+        serve_connection(&mut registry, server).unwrap();
+        let mut answer = String::new();
+        client.read_to_string(&mut answer).unwrap();
+        assert_eq!(answer, "ok registered\n");
+
+        let mut flood = UnixStream::connect(dir.join("reg.sock")).unwrap();
+        flood.write_all(&vec![b'a'; 4096]).unwrap();
+        let (server, _) = listener.accept().unwrap();
+        serve_connection(&mut registry, server).unwrap();
+        let mut answer = String::new();
+        // The server closes with unread input pending, so the client may see a reset instead.
+        let _ = flood.read_to_string(&mut answer);
+        assert!(answer.is_empty() || answer == "denied bad_request\n");
+        assert!(registry.get("g").is_some());
+
+        // A listener is in use, a stale socket is replaced, other files and symlinks are refused.
+        assert!(matches!(bind(&dir, "reg.sock", uid), Err(BindError::InUse)));
+        drop(listener);
+        assert!(bind(&dir, "reg.sock", uid).is_ok());
+        fs::write(dir.join("plain"), "x").unwrap();
+        assert!(matches!(
+            bind(&dir, "plain", uid),
+            Err(BindError::NotASocket)
+        ));
+        symlink("/tmp", dir.join("lnk")).unwrap();
+        assert!(matches!(bind(&dir, "lnk", uid), Err(BindError::NotASocket)));
+        assert!(matches!(
+            bind(&dir, "../x", uid),
+            Err(BindError::Directory(_))
+        ));
+        fs::remove_dir_all(&dir).unwrap();
+    }
+}

@@ -206,3 +206,32 @@ pub fn openat_nofollow(dir: std::os::fd::BorrowedFd<'_>, name: &str) -> io::Resu
     // SAFETY: `raw` is a freshly opened descriptor that nothing else owns.
     Ok(unsafe { std::fs::File::from_raw_fd(raw) })
 }
+
+/// Credentials of the process on the other end of a connected Unix socket, as recorded by the
+/// kernel when the connection was made (`SO_PEERCRED`).
+pub fn unix_peer_credentials(
+    socket: &std::os::unix::net::UnixStream,
+) -> io::Result<(u32, u32, u32)> {
+    use std::os::fd::AsRawFd;
+    let mut cred = libc::ucred {
+        pid: 0,
+        uid: 0,
+        gid: 0,
+    };
+    let mut len = mem::size_of::<libc::ucred>() as libc::socklen_t;
+    // SAFETY: the descriptor is live for this call and `cred`/`len` describe a writable
+    // `ucred` buffer of exactly `len` bytes.
+    let status = unsafe {
+        libc::getsockopt(
+            socket.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_PEERCRED,
+            (&raw mut cred).cast(),
+            &raw mut len,
+        )
+    };
+    if status != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok((cred.pid as u32, cred.uid, cred.gid))
+}
