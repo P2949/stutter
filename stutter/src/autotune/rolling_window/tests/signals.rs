@@ -158,3 +158,46 @@ fn objective_signals_preserve_gpu_identity_when_sample_has_it() {
         ObjectiveSignalQuality::Direct
     );
 }
+
+#[test]
+fn frames_are_direct_only_when_their_stream_is_verified_and_lossless() {
+    use crate::telemetry::{
+        frame_source::{Attribution, MeasurementStage},
+        quality::StreamQuality,
+    };
+    let mut window = RollingWindow::new(Duration::from_secs(30));
+    assert_eq!(
+        window.objective_signals().signal_quality.frame_pacing,
+        ObjectiveSignalQuality::Missing
+    );
+    window.push_frame(FrameEvent {
+        elapsed_ms: 100,
+        frametime_ms: 16.6,
+    });
+    // Non-empty but unattributed frames are not a direct frame-primary signal.
+    assert_eq!(
+        window.objective_signals().signal_quality.frame_pacing,
+        ObjectiveSignalQuality::Approximate
+    );
+    let verified = StreamQuality {
+        attribution: Attribution::ValidatedDirect,
+        stage: MeasurementStage::ApplicationFrame,
+        unexplained_sequence_gaps: 0,
+        dropped_frames: 0,
+        alignment_uncertainty_ms: 0.5,
+        source_healthy: true,
+    };
+    window.attest_frame_stream(StreamQuality {
+        dropped_frames: 1,
+        ..verified.clone()
+    });
+    assert_eq!(
+        window.objective_signals().signal_quality.frame_pacing,
+        ObjectiveSignalQuality::Approximate
+    );
+    window.attest_frame_stream(verified);
+    assert_eq!(
+        window.objective_signals().signal_quality.frame_pacing,
+        ObjectiveSignalQuality::Direct
+    );
+}

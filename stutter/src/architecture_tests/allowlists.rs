@@ -109,6 +109,10 @@ pub(in crate::architecture_tests) const EXPECTED_ROOT_PUBLIC_MODULES: &[Expected
 
 pub(in crate::architecture_tests) const EXPECTED_API_PUBLIC_MODULES: &[ExpectedPublicModule] = &[
     ExpectedPublicModule {
+        name: "telemetry",
+        reason: "verified workload identity and frame-source provenance for the real-workload campaigns",
+    },
+    ExpectedPublicModule {
         name: "workload_progress",
         reason: "versioned fixed-work marker protocol and runner used by benchmark harnesses",
     },

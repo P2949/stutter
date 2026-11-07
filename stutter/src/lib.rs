@@ -73,6 +73,7 @@ pub(crate) mod summary;
 pub(crate) mod system_inventory;
 pub(crate) mod task_class;
 pub(crate) mod tasks;
+pub(crate) mod telemetry;
 pub(crate) mod topology;
 pub(crate) mod tui;
 pub(crate) mod tune;

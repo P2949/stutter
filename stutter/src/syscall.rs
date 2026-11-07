@@ -165,3 +165,44 @@ pub fn raise_nice_rlimit_for_validation() -> io::Result<()> {
         Err(io::Error::last_os_error())
     }
 }
+
+/// Opens `path` as a directory without following a final symlink.
+pub fn open_dir_nofollow(path: &Path) -> io::Result<std::os::fd::OwnedFd> {
+    use std::os::{fd::FromRawFd, unix::ffi::OsStrExt};
+    let c_path = std::ffi::CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| io::Error::from_raw_os_error(libc::EINVAL))?;
+    // SAFETY: `c_path` is a valid NUL-terminated string that outlives the call.
+    let raw = unsafe {
+        libc::open(
+            c_path.as_ptr(),
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+        )
+    };
+    if raw < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: `raw` is a freshly opened descriptor that nothing else owns.
+    Ok(unsafe { std::os::fd::OwnedFd::from_raw_fd(raw) })
+}
+
+/// Opens `name` relative to the directory descriptor `dir` for reading, without following a
+/// symlink and without blocking on a FIFO.
+pub fn openat_nofollow(dir: std::os::fd::BorrowedFd<'_>, name: &str) -> io::Result<std::fs::File> {
+    use std::os::fd::{AsRawFd, FromRawFd};
+    let c_name =
+        std::ffi::CString::new(name).map_err(|_| io::Error::from_raw_os_error(libc::EINVAL))?;
+    // SAFETY: `dir` is a live descriptor borrowed for this call and `c_name` is a valid
+    // NUL-terminated string that outlives it.
+    let raw = unsafe {
+        libc::openat(
+            dir.as_raw_fd(),
+            c_name.as_ptr(),
+            libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK,
+        )
+    };
+    if raw < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: `raw` is a freshly opened descriptor that nothing else owns.
+    Ok(unsafe { std::fs::File::from_raw_fd(raw) })
+}

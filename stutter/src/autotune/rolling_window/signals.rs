@@ -175,10 +175,17 @@ pub(crate) fn compute_objective_signals(
         } else {
             ObjectiveSignalQuality::Missing
         },
+        // Frames are Direct only when their stream is verified as this workload's application
+        // frames with zero unexplained loss; a non-empty window alone proves nothing.
         frame_pacing: if window.frames().is_empty() {
             ObjectiveSignalQuality::Missing
-        } else {
+        } else if window
+            .frame_stream()
+            .is_some_and(|stream| stream.frame_primary_eligible().is_ok())
+        {
             ObjectiveSignalQuality::Direct
+        } else {
+            ObjectiveSignalQuality::Approximate
         },
         foreground_latency: if window.intervals().is_empty() {
             ObjectiveSignalQuality::Missing

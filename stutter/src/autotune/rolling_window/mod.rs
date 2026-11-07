@@ -30,6 +30,7 @@ pub struct RollingWindow {
     foreground_events: VecDeque<ForegroundEvent>,
     workload_progress: VecDeque<crate::workload_progress::WorkloadProgressRecord>,
     dropped_invalid_frames: u64,
+    frame_stream: Option<crate::telemetry::quality::StreamQuality>,
 }
 
 impl RollingWindow {
@@ -46,7 +47,18 @@ impl RollingWindow {
             foreground_events: VecDeque::new(),
             workload_progress: VecDeque::new(),
             dropped_invalid_frames: 0,
+            frame_stream: None,
         }
+    }
+
+    /// Records the verified provenance and health of the stream feeding `frames()`. Without it
+    /// the frames are unattributed and can never be a direct frame-primary signal.
+    pub fn attest_frame_stream(&mut self, quality: crate::telemetry::quality::StreamQuality) {
+        self.frame_stream = Some(quality);
+    }
+
+    pub fn frame_stream(&self) -> Option<&crate::telemetry::quality::StreamQuality> {
+        self.frame_stream.as_ref()
     }
 
     pub fn intervals(&self) -> &VecDeque<IntervalRecord> {
