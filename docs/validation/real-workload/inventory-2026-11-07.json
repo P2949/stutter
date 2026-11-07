@@ -1,0 +1,29 @@
+{
+  "controlled_tools": [
+    {
+      "name": "vkcube",
+      "path": "/nix/store/ii5wr77qq119h39ws07q61bhgphl6il9-vulkan-tools-1.4.341.0/bin/vkcube"
+    },
+    {
+      "name": "mangohud",
+      "path": "/nix/store/2lp8y485pnzij0fypg0mxx4qdf060xxk-mangohud-0.8.3/bin/mangohud"
+    },
+    {
+      "name": "glxgears",
+      "path": "/run/current-system/sw/bin/glxgears"
+    },
+    {
+      "name": "gamescope",
+      "path": "/run/current-system/sw/bin/gamescope"
+    },
+    {
+      "name": "vkmark",
+      "path": "/nix/store/d4cf1xbax093bld6k11mylgqcxg8c6m9-vkmark-2025.01/bin/vkmark"
+    }
+  ],
+  "steam_titles": [
+    "DARK SOULS™: REMASTERED"
+  ],
+  "qualifying_titles": [],
+  "real_game_disposition": "BlockedResource: no installed title is on the allowlist of games with a repeatable unattended benchmark or replay; no human play is requested and no synthetic run is presented as a game"
+}

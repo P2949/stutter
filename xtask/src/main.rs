@@ -29,6 +29,7 @@ pub mod ops_checks;
 pub mod preflight;
 pub mod process;
 pub mod production_smoke;
+pub mod real_workload;
 pub mod refresh_tune_recommendation;
 pub mod release_output;
 pub mod release_package;
@@ -135,6 +136,11 @@ pub enum XtaskCommand {
         about = "Calibrate and graduate the frame-pacing decision rule on measured MangoHud frame logs"
     )]
     FrameCampaign(frame_campaign::CampaignArgs),
+    #[command(
+        name = "real-workload",
+        about = "Frozen manifests, paired statistics and the host inventory for real-workload evidence"
+    )]
+    RealWorkload(real_workload::RealWorkloadArgs),
     #[command(
         name = "production-smoke",
         about = "Short exact-build smoke of the installed production bounded service"
@@ -532,6 +538,7 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
         XtaskCommand::ProductionSmoke(args) => production_smoke::run(&root, &args),
         XtaskCommand::ObjectiveCampaign(args) => objective_campaign::run(&root, &args),
         XtaskCommand::FrameCampaign(args) => frame_campaign::run(&root, &args),
+        XtaskCommand::RealWorkload(args) => real_workload::run(&args),
         XtaskCommand::EvidenceExport(args) => {
             evidence_bundle::export_bundle(&root, &args.raw, &args.out)
         }

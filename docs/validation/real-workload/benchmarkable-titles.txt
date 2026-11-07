@@ -1,0 +1,2 @@
+# Games with a repeatable unattended benchmark or deterministic replay, one title per line.
+# Empty: no installed title qualifies. A title is never added to obtain a result.
