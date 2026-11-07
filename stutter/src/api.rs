@@ -9,6 +9,14 @@ pub mod game_run {
     pub use crate::game_run::{LaunchRecord, default_capture_root, read_launch_record};
 }
 
+pub mod sensors {
+    //! Sensor descriptors, readings, the PSI sensor and the cost-bounded registry.
+    pub use crate::autotune::sensors::{
+        AdmissionDenied, Availability, ExpensiveBudget, PsiSensor, Sensor, SensorCost,
+        SensorDescriptor, SensorHealth, SensorReading, SensorRegistry, SensorScope,
+    };
+}
+
 pub mod telemetry {
     //! Workload identity, frame-source attribution, stream quality and confined capture files.
     pub use crate::{

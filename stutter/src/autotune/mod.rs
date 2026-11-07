@@ -98,6 +98,7 @@ pub(crate) mod quality;
 pub(crate) mod report_overlay;
 pub(crate) mod rolling_window;
 pub(crate) mod runtime;
+pub(crate) mod sensors;
 pub(crate) mod simulation;
 pub(crate) mod startup_recovery;
 pub(crate) mod state;
