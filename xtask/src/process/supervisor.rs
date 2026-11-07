@@ -34,9 +34,12 @@ extern "C" fn on_signal(_: libc::c_int) {
 /// Turns SIGINT/SIGTERM aimed at this process into a cancellation of the running stage, so an
 /// interrupted agent run reaps its group instead of orphaning it.
 pub fn install_interrupt_handlers() {
-    INSTALL_HANDLERS.call_once(|| unsafe {
-        libc::signal(libc::SIGINT, on_signal as *const () as libc::sighandler_t);
-        libc::signal(libc::SIGTERM, on_signal as *const () as libc::sighandler_t);
+    INSTALL_HANDLERS.call_once(|| {
+        // SAFETY: `on_signal` only stores to an atomic, which is async-signal-safe.
+        unsafe {
+            libc::signal(libc::SIGINT, on_signal as *const () as libc::sighandler_t);
+            libc::signal(libc::SIGTERM, on_signal as *const () as libc::sighandler_t);
+        }
     });
 }
 
