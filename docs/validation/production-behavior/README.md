@@ -94,3 +94,13 @@ outstanding.
 
 The activation touched only the two Stutter units (a dry-activate guard refuses anything that would restart the
 display manager, login or session units). No reboot and no graphical restart were performed.
+
+## Development hygiene: an orphaned local test process
+
+On 2026-11-07 a health check found a local Rust test binary, `target/debug/deps/stutter-e2eb606295b946b2`
+(pid 2061798, parent pid 1), at 99.7 percent of one core and 576 MB after about 32 hours. It was terminated by exact pid
+and a following process and CPU check was clean. It was not part of the production systemd units, whose
+CPU stayed near 1.3 percent throughout. Which test run left it behind is not established, so no production history
+code was changed because of it. The risk is general: a test binary can outlive the command that started it, and the
+`xtask` process runner (`run_process_with_env`) waits without a timeout. Future test runs should use a finite timeout
+and supervise the whole process group; this is recorded as a development-hygiene task, not a defect in the service.

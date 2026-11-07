@@ -262,8 +262,11 @@ policy, health and conflict check above:
 3. an exact contract for the operation, workload, pressure, objective and effect scope exists
    in `stutter/src/autotune/autonomous_support/`.
 
-The registry holds only operations that completed a graduation campaign (today: CPU affinity for a
-stable game under scheduler pressure, judged by `GameRunnableLatency`). Everything else is denied with
+The registry holds only operations that completed a graduation campaign. Today it has two exact
+contracts, both for a game under scheduler pressure and judged by `GameRunnableLatency`: CPU
+affinity for a stable game, and cgroup placement into the administrator-configured game cgroup
+(the second does not inherit the first's grant). It grants nothing for compile, browser, GPU or
+system-wide autonomy. Everything else is denied with
 the stable reason codes `objective_not_supported`,
 `capability_tier_not_supported`, `operation_not_in_support_registry` or
 `operation_not_autonomous`. Suggest and benchmark modes are unaffected. A validation campaign

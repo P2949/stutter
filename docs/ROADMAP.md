@@ -103,7 +103,7 @@ whether prototype code exists.
 | Advisor daemon | Current | `advisor --watch-runs` watches completed runs and emits conservative offline recommendations with structured fix plans. |
 | Fix validation | Current | `recommend --fix-plan` validates advisor hypotheses against repeated baseline/tune A/B evidence and reports validated/rejected/underpowered/inconclusive/invalid-experiment status. |
 | Limited auto-tuner | Supported (bounded) | The bounded autonomous controller applies CPU-affinity and cgroup-placement experiments for its exact registry contracts, with prepared (journal-before-write) transactions, physical verification, rollback, audit and crash recovery; qualified by the M9 soak. Enablement of anything outside `AUTONOMOUS_CONTRACTS` stays gated. |
-| Broader optimizer | Experimental / deferred | Providers and candidate paths exist for nice, ioprio, uclamp, IRQ affinity, CPU power, VM knobs, and GPU power, each evaluated individually and left DeferredEvidence/Experimental; the daemon/service always-on integration is also Experimental. Promotion needs new evidence for each. |
+| Broader optimizer | Experimental / deferred | Providers and candidate paths exist for nice, ioprio, uclamp, IRQ affinity, CPU power, VM knobs, and GPU power, each evaluated individually and left DeferredEvidence/Experimental. The *bounded packaged systemd integration* is Supported (see above); broader autonomous optimization, OpenRC and any global-resource mutation remain Experimental or deferred. Promotion needs new evidence for each. |
 
 ### Autotune Implementation Status
 

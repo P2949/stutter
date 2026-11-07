@@ -45,11 +45,16 @@ state. The validation runner uses SYS_PTRACE to read the fixed actors and owned 
 swap uses that same process. Service suspend uses a fixed typed RTC-wake action and checks
 the kernel suspend success counter.
 
-The recovery, reboot-resume, coverage-driven service soak and portable evidence stages are
-still being completed. They explicitly refuse qualification until their live runners and
-required evidence are present. The completion gate remains at least eight hours of verified
-service dwell, six clean schedule cycles, repeated dangerous events and kept/reverted
-outcomes for both supported operations, with no unsupported apply or unrecovered token.
+Qualification status, kept separate on purpose:
+
+* **Targeted acceptance:** qualified (see the qualification record below).
+* **Production boot check:** qualified.
+* **Exact-build production smoke:** qualified for `d34ab086`, the installed build.
+* **Extended eight-hour endurance contract:** not passed and not claimed. Its gate is unchanged: at
+  least eight hours of verified service dwell, six clean schedule cycles, repeated dangerous events
+  and kept/reverted outcomes for both supported operations, with no unsupported apply or
+  unrecovered token.
+* **Global-resource operations:** none is Supported.
 
 ## Targeted acceptance and extended endurance
 
