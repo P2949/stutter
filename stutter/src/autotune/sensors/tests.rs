@@ -141,3 +141,106 @@ fn expensive_sensors_run_one_at_a_time_with_a_cap_and_a_cooling_period() {
     registry.activate("bpf", 800).unwrap();
     assert!(registry.overhead_ns().contains_key("perf"));
 }
+
+mod pmu {
+    use std::collections::BTreeMap;
+
+    use stutter_core::ids::Tid;
+
+    use super::super::{PmuSensor, Sensor, pmu::reading_from_deltas};
+    use crate::{
+        autotune::objective::ObjectiveSignalQuality as Quality,
+        perf_counters::{CpuPerfConfig, CpuPerfDelta},
+    };
+
+    fn delta(cycles: u64, instructions: u64, running: u64, enabled: u64) -> CpuPerfDelta {
+        CpuPerfDelta {
+            cycles: Some(cycles),
+            instructions: Some(instructions),
+            cache_references: Some(1000),
+            cache_misses: Some(50),
+            time_enabled_ns: Some(enabled),
+            time_running_ns: Some(running),
+            multiplexed: running != enabled,
+            ..CpuPerfDelta::default()
+        }
+    }
+
+    fn tid(value: u32) -> Tid {
+        Tid::from(value)
+    }
+
+    #[test]
+    fn a_fully_counting_set_of_threads_gives_a_direct_reading_with_derived_ratios() {
+        let mut deltas = BTreeMap::new();
+        deltas.insert(tid(1), delta(1000, 2000, 100, 100));
+        deltas.insert(tid(2), delta(1000, 2000, 100, 100));
+        let reading = reading_from_deltas(&deltas, 7);
+        assert_eq!(reading.quality, Quality::Direct);
+        assert_eq!(reading.values["ipc"], 2.0);
+        assert_eq!(reading.values["cache_mpki"], 25.0);
+        assert_eq!(reading.values["cache_miss_rate"], 0.05);
+        assert_eq!(reading.values["running_ratio"], 1.0);
+        assert_eq!(reading.lost, 0);
+    }
+
+    #[test]
+    fn multiplexing_a_low_running_share_and_unusable_threads_never_pose_as_direct() {
+        let mut multiplexed = BTreeMap::new();
+        multiplexed.insert(tid(1), delta(1000, 2000, 90, 100));
+        assert_eq!(
+            reading_from_deltas(&multiplexed, 0).quality,
+            Quality::Approximate
+        );
+
+        let mut starved = BTreeMap::new();
+        starved.insert(tid(1), delta(1000, 2000, 20, 100));
+        assert_eq!(
+            reading_from_deltas(&starved, 0).quality,
+            Quality::Approximate
+        );
+
+        let mut broken = BTreeMap::new();
+        broken.insert(
+            tid(1),
+            CpuPerfDelta {
+                unavailable_reason: Some("denied".into()),
+                ..CpuPerfDelta::default()
+            },
+        );
+        broken.insert(tid(2), delta(1000, 2000, 100, 100));
+        let mixed = reading_from_deltas(&broken, 0);
+        assert_eq!((mixed.lost, mixed.values["threads"]), (1, 1.0));
+
+        let none = reading_from_deltas(&BTreeMap::new(), 0);
+        assert_eq!(none.quality, Quality::Missing);
+        assert!(!none.values.contains_key("ipc"));
+    }
+
+    #[test]
+    fn a_zero_denominator_gives_no_ratio() {
+        let mut deltas = BTreeMap::new();
+        deltas.insert(tid(1), delta(0, 0, 100, 100));
+        let reading = reading_from_deltas(&deltas, 0);
+        assert!(!reading.values.contains_key("ipc"));
+        assert!(!reading.values.contains_key("cache_mpki"));
+        assert_eq!(reading.quality, Quality::Missing);
+    }
+
+    #[test]
+    fn the_sensor_probe_reports_availability_honestly_and_a_targetless_sample_is_missing() {
+        let mut sensor = PmuSensor::new(CpuPerfConfig {
+            include_kernel: false,
+            max_tasks: 4,
+            collect_cache_refs: true,
+        });
+        match sensor.start() {
+            Ok(()) => {
+                // Started but with no target chosen: nothing is invented.
+                assert_eq!(sensor.sample(1).quality, Quality::Missing);
+                sensor.stop();
+            }
+            Err(reason) => assert!(reason.contains("perf_event_open"), "{reason}"),
+        }
+    }
+}

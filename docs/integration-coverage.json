@@ -213,14 +213,15 @@
       ],
       "anchors": [
         "stutter/src/perf_counters/mod.rs",
-        "stutter/src/autotune/sensors/mod.rs"
+        "stutter/src/autotune/sensors/mod.rs",
+        "stutter/src/autotune/sensors/pmu.rs"
       ],
       "status": "first_slice",
-      "g0": "per-TID counters exist; sensor framework exists but PMU is not a sensor yet",
+      "g0": "per-TID counters exist and are now a budgeted Moderate sensor: reading conversion rejects multiplexed, low-running-ratio and zero-denominator conclusions and reports probe availability; no branch/migration/fault/bandwidth events yet",
       "g1": "none",
       "runtime_availability": "perf CLI absent, VTune/LIKWID absent",
       "authority": "O/F",
-      "not_wired": "perf counters are not behind the sensor registry; no offline importers"
+      "not_wired": "the PMU sensor is not activated by the runtime (no diagnostic hypothesis trigger); no architecture-specific events; perf CLI importers missing"
     },
     {
       "id": "5.11",

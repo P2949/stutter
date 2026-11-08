@@ -4,6 +4,7 @@
 //! A sensor that fails suppresses only the candidates that depend on it. Expensive sensors are
 //! admitted one at a time with a duration cap and a cooling period, and their own cost is recorded
 //! so the daemon's incremental overhead stays visible.
+mod pmu;
 mod psi;
 mod registry;
 #[cfg(test)]
@@ -11,6 +12,7 @@ mod tests;
 
 use std::collections::BTreeMap;
 
+pub use pmu::{MIN_RUNNING_RATIO, PmuSensor, reading_from_deltas};
 pub use psi::PsiSensor;
 pub use registry::{AdmissionDenied, ExpensiveBudget, SensorRegistry};
 use serde::{Deserialize, Serialize};
