@@ -107,8 +107,14 @@ pub(crate) fn external_owners_check_at(
     let report = probe(proc_root, sys_root);
     let mut details = BTreeMap::new();
     details.insert("sched_ext".to_owned(), format!("{:?}", report.sched_ext));
-    for (owner, state) in &report.daemons {
-        details.insert(format!("{owner:?}").to_lowercase(), format!("{state:?}"));
+    for adapter in crate::integrations::adapters::adapter_reports(&report) {
+        details.insert(
+            format!("{:?}", adapter.owner).to_lowercase(),
+            format!(
+                "{:?} via {:?}; delegation {}",
+                adapter.status, adapter.interface, adapter.delegation
+            ),
+        );
     }
     let owned: Vec<String> = crate::integrations::ALL_DOMAINS
         .into_iter()

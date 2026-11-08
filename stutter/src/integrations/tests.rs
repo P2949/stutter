@@ -318,3 +318,102 @@ mod receipts {
         assert!(key().render().starts_with("task:42:7:"));
     }
 }
+
+mod adapter_reports {
+    use std::fs;
+
+    use super::super::{adapters::*, *};
+
+    fn host(name: &str, comms: &[&str], sched: Option<&str>) -> OwnerReport {
+        let base =
+            std::env::temp_dir().join(format!("stutter-adapters-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let proc_root = base.join("proc");
+        fs::create_dir_all(&proc_root).unwrap();
+        for (index, comm) in comms.iter().enumerate() {
+            let dir = proc_root.join((100 + index).to_string());
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(dir.join("comm"), format!("{comm}\n")).unwrap();
+        }
+        let sys = base.join("sys");
+        if let Some(state) = sched {
+            fs::create_dir_all(sys.join("kernel/sched_ext")).unwrap();
+            fs::write(sys.join("kernel/sched_ext/state"), format!("{state}\n")).unwrap();
+        }
+        let report = probe(&proc_root, &sys);
+        fs::remove_dir_all(&base).unwrap();
+        report
+    }
+
+    fn status(reports: &[AdapterReport], owner: KnownOwner) -> AdapterStatus {
+        reports.iter().find(|r| r.owner == owner).unwrap().status
+    }
+
+    #[test]
+    fn a_running_tool_is_a_conflict_on_its_domain_and_delegation_is_always_refused() {
+        let reports = adapter_reports(&host(
+            "conflict",
+            &["gamemoded", ".lact-wrapped", "systemd-oomd"],
+            Some("disabled"),
+        ));
+        assert_eq!(reports.len(), 13);
+        assert_eq!(
+            status(&reports, KnownOwner::GameMode),
+            AdapterStatus::Conflict
+        );
+        assert_eq!(status(&reports, KnownOwner::Lact), AdapterStatus::Conflict);
+        assert_eq!(
+            status(&reports, KnownOwner::SystemdOomd),
+            AdapterStatus::ObserveOnly
+        );
+        assert_eq!(
+            status(&reports, KnownOwner::Tuned),
+            AdapterStatus::Unavailable
+        );
+        let lact = reports
+            .iter()
+            .find(|r| r.owner == KnownOwner::Lact)
+            .unwrap();
+        assert_eq!(lact.conflicting_domain, Some(ResourceDomain::GpuPower));
+        for report in &reports {
+            assert!(
+                report.delegation.starts_with("refused"),
+                "{:?}",
+                report.owner
+            );
+        }
+        // D-Bus tools are named, with the reason no delegation exists.
+        let scx = reports
+            .iter()
+            .find(|r| r.owner == KnownOwner::ScxLoader)
+            .unwrap();
+        assert_eq!(scx.interface, Interface::Dbus("org.scx.Loader"));
+        assert!(scx.delegation.contains("D-Bus"));
+    }
+
+    #[test]
+    fn an_unmanaged_scheduler_is_delegable_by_an_administrator_and_unknown_state_fails_closed() {
+        let free = adapter_reports(&host("scx-free", &[], Some("disabled")));
+        assert_eq!(
+            status(&free, KnownOwner::ScxLoader),
+            AdapterStatus::DelegableManual
+        );
+        let unsupported = adapter_reports(&host("scx-none", &[], None));
+        assert_eq!(
+            status(&unsupported, KnownOwner::ScxLoader),
+            AdapterStatus::Unavailable
+        );
+        let blind = OwnerReport {
+            sched_ext: SchedExt::Unknown,
+            daemons: owner_domains()
+                .into_iter()
+                .map(|(owner, _)| (owner, Daemon::Unknown))
+                .collect(),
+        };
+        assert!(
+            adapter_reports(&blind)
+                .iter()
+                .all(|r| r.status == AdapterStatus::Unknown)
+        );
+    }
+}

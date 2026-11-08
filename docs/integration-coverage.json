@@ -148,14 +148,15 @@
         "W13"
       ],
       "anchors": [
-        "stutter/src/integrations/mod.rs"
+        "stutter/src/integrations/mod.rs",
+        "stutter/src/integrations/adapters.rs"
       ],
       "status": "first_slice",
-      "g0": "scx_loader presence marks the scheduler domain owned",
+      "g0": "scx_loader is named with its org.scx.Loader interface and reported DelegableManual (sched_ext present, no manager) or Conflict; delegation is refused explicitly because no verified D-Bus client is linked",
       "g1": "none",
       "runtime_availability": "absent",
       "authority": "O/A/D/F",
-      "not_wired": "no org.scx.Loader D-Bus adapter"
+      "not_wired": "no D-Bus client, so no org.scx.Loader state, version or scheduler list; no strategy transaction"
     },
     {
       "id": "5.8",

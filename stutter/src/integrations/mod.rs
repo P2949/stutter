@@ -322,3 +322,13 @@ pub mod receipt;
 
 #[cfg(test)]
 mod tests;
+
+/// Every known owner with the domains it claims, in table order, for the adapter reports.
+pub(crate) fn owner_domains() -> Vec<(KnownOwner, Vec<ResourceDomain>)> {
+    OWNERS
+        .iter()
+        .map(|spec| (spec.owner, spec.domains.to_vec()))
+        .collect()
+}
+
+pub mod adapters;
