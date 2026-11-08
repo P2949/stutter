@@ -123,9 +123,17 @@ impl PerfCounterGroup {
         }
 
         if config.collect_branches {
-            for (value, event) in [
-                (PERF_COUNT_HW_BRANCH_INSTRUCTIONS, PerfEventKind::Branches),
-                (PERF_COUNT_HW_BRANCH_MISSES, PerfEventKind::BranchMisses),
+            for (value, event, name) in [
+                (
+                    PERF_COUNT_HW_BRANCH_INSTRUCTIONS,
+                    PerfEventKind::Branches,
+                    "branches",
+                ),
+                (
+                    PERF_COUNT_HW_BRANCH_MISSES,
+                    PerfEventKind::BranchMisses,
+                    "branch_misses",
+                ),
             ] {
                 if let Err(err) = group.open_sibling(tid, value, event, config) {
                     if matches!(
@@ -135,14 +143,7 @@ impl PerfCounterGroup {
                         warn!(
                             "cpu_perf_branch_event_unavailable tid={tid} config={value} err={err}"
                         );
-                        group.unsupported_events.push(
-                            match event {
-                                PerfEventKind::Branches => "branches",
-                                PerfEventKind::BranchMisses => "branch_misses",
-                                _ => unreachable!(),
-                            }
-                            .into(),
-                        );
+                        group.unsupported_events.push(name.into());
                     } else {
                         return Err(PerfOpenError::from_io(err));
                     }

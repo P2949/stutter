@@ -63,7 +63,11 @@ pub fn run_privileged_service_worker(
     config.mode = service_backend_mode(
         backend
             .as_deref()
-            .map(|value| value.to_str().context("bounded_service_backend_invalid"))
+            .map(|value| {
+                value
+                    .to_str()
+                    .ok_or(PrivilegedWorkerError::BoundedServiceBackendUnknown)
+            })
             .transpose()?,
     )?;
     config.autotune.allow_medium_risk_apply =
@@ -97,7 +101,7 @@ fn service_backend_mode(backend: Option<&str>) -> anyhow::Result<crate::daemon_p
     match backend {
         None | Some("systemd") => Ok(DaemonMode::ApplyMediumRisk),
         Some("openrc") => Ok(DaemonMode::Observe),
-        Some(_) => anyhow::bail!("bounded_service_backend_unknown"),
+        Some(_) => Err(PrivilegedWorkerError::BoundedServiceBackendUnknown.into()),
     }
 }
 

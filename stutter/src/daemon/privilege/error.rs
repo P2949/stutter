@@ -30,6 +30,8 @@ pub enum PrivilegedWorkerError {
         "bounded_service_requires_prepared_transaction: service applies must use prepare and digest-bound commit"
     )]
     BoundedServiceRequiresPrepared,
+    #[error("bounded_service_backend_unknown: service backend is not recognized")]
+    BoundedServiceBackendUnknown,
     #[error("stale_candidate_plan: stale candidate plan: age {age_ns}ns exceeded max {max_ns}ns")]
     StaleCandidatePlan { age_ns: u128, max_ns: u128 },
 
@@ -158,6 +160,7 @@ impl PrivilegedWorkerError {
             Self::StaleTargetBeforeMutation { .. } => "stale_target_before_mutation",
             Self::ServiceRollbackTokenNotIssued => "service_rollback_token_not_issued",
             Self::BoundedServiceRequiresPrepared => "bounded_service_requires_prepared_transaction",
+            Self::BoundedServiceBackendUnknown => "bounded_service_backend_unknown",
             Self::BoundedServiceTargetBoundaryUnimplemented => {
                 "bounded_service_target_boundary_unimplemented"
             }
