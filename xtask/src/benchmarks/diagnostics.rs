@@ -378,3 +378,52 @@ pub fn import_trace_cmd(text: &str) -> anyhow::Result<ImportedScores> {
     }
     done("trace-cmd", scores)
 }
+
+/// Least share of the interval an event must have been counting for its value to be used. Below
+/// this the kernel multiplexed the counter and the number is an extrapolation, not a measurement.
+const MIN_PERF_RUNNING_PERCENT: f64 = 90.0;
+
+/// `perf stat -x,` CSV: `value,unit,event,run_time_ns,percent_running,...`. An event that was not
+/// counted, not supported, or counted for less than the running floor gives no value, only its
+/// `.running_percent` when that is known; a value is never extrapolated or filled in.
+pub fn import_perf_stat(text: &str) -> anyhow::Result<ImportedScores> {
+    let mut scores = Vec::new();
+    for line in text.lines() {
+        if line.starts_with('#') {
+            continue;
+        }
+        let fields: Vec<&str> = line.split(',').collect();
+        if fields.len() < 5 {
+            continue;
+        }
+        let (value, event) = (fields[0].trim(), fields[2].trim());
+        if event.is_empty() {
+            continue;
+        }
+        let running = fields[4]
+            .trim()
+            .parse::<f64>()
+            .ok()
+            .filter(|p| p.is_finite());
+        if let Some(percent) = running {
+            scores.push(diagnostic(
+                "perf-stat",
+                format!("{event}.running_percent"),
+                percent,
+                "%",
+            ));
+        }
+        let Some(count) = value
+            .parse::<f64>()
+            .ok()
+            .filter(|v| v.is_finite() && *v >= 0.0)
+        else {
+            continue;
+        };
+        if running.is_some_and(|percent| percent >= MIN_PERF_RUNNING_PERCENT) {
+            ensure!(scores.len() < MAX_SAMPLES, "too many events");
+            scores.push(diagnostic("perf-stat", event.to_owned(), count, "count"));
+        }
+    }
+    done("perf-stat", scores)
+}

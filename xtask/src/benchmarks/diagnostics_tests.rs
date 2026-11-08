@@ -88,3 +88,22 @@ fn trace_text_counts_events_and_dropped_events_and_junk_is_an_error() {
         assert!(bad.is_err());
     }
 }
+
+#[test]
+fn perf_stat_values_need_a_full_run_and_are_never_extrapolated() {
+    let text = "# started\n1000000,,cycles,1000000,100.00,,\n500,,cache-misses,400000,40.00,,\n<not counted>,,instructions,0,0.00,,\n<not supported>,,power/energy-pkg/,0,100.00,,\nbad line\n";
+    let stat = import_perf_stat(text).unwrap();
+    assert_eq!(value(&stat, "cycles"), 1_000_000.0);
+    assert_eq!(value(&stat, "cache-misses.running_percent"), 40.0);
+    assert!(
+        !stat.scores.iter().any(|s| s.label == "cache-misses"),
+        "a multiplexed counter gives no value"
+    );
+    assert!(!stat.scores.iter().any(|s| s.label == "instructions"));
+    assert!(!stat.scores.iter().any(|s| s.label == "power/energy-pkg/"));
+    assert!(!stat.application_proof);
+    assert!(import_perf_stat("nothing here").is_err());
+    assert!(
+        import_perf_stat("<not counted>,,cycles,0,0.00,,\n").is_ok_and(|s| s.scores.len() == 1)
+    );
+}
