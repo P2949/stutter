@@ -232,3 +232,149 @@ pub fn import_cyclictest(text: &str) -> anyhow::Result<ImportedScores> {
     }
     done("cyclictest", scores)
 }
+
+/// A bucket bound such as `0`, `16`, `1K`, `2M` as a number.
+fn bound(text: &str) -> Option<f64> {
+    let text = text.trim();
+    let (digits, scale) = match text.chars().last()? {
+        'K' => (&text[..text.len() - 1], 1e3),
+        'M' => (&text[..text.len() - 1], 1e6),
+        'G' => (&text[..text.len() - 1], 1e9),
+        _ => (text, 1.0),
+    };
+    digits
+        .parse::<f64>()
+        .ok()
+        .filter(|v| v.is_finite() && *v >= 0.0)
+        .map(|v| v * scale)
+}
+
+/// Scores for a histogram given as `(bucket lower bound, count)` rows: each bucket's count, the
+/// total, and the lower bound of the bucket that holds the 99th percentile. A bucket is a range, so
+/// the percentile is reported as that bucket's lower bound and never as a point value.
+fn histogram_scores(tool: &str, rows: &[(f64, f64)]) -> anyhow::Result<ImportedScores> {
+    let total: f64 = rows.iter().map(|(_, count)| count).sum();
+    ensure!(total > 0.0, "the {tool} histogram has no counts");
+    let mut scores: Vec<Score> = rows
+        .iter()
+        .map(|(lower, count)| diagnostic(tool, format!("bucket_{lower}"), *count, "count"))
+        .collect();
+    scores.push(diagnostic(tool, "total".to_owned(), total, "count"));
+    let mut seen = 0.0;
+    for (lower, count) in rows {
+        seen += count;
+        if seen >= total * 0.99 {
+            scores.push(diagnostic(
+                tool,
+                "p99_bucket_lower_bound".to_owned(),
+                *lower,
+                "",
+            ));
+            break;
+        }
+    }
+    done(tool, scores)
+}
+
+/// `bpftrace` `hist()` output: rows such as `[2, 4)    7 |@@@|` or `[0]   12 |@@|`.
+pub fn import_bpftrace_hist(text: &str) -> anyhow::Result<ImportedScores> {
+    let mut rows = Vec::new();
+    for line in text.lines() {
+        let line = line.trim();
+        let Some(rest) = line.strip_prefix('[') else {
+            continue;
+        };
+        let Some((range, tail)) = rest.split_once([')', ']']) else {
+            continue;
+        };
+        let Some(lower) = range.split(',').next().and_then(bound) else {
+            continue;
+        };
+        let Some(count) = tail
+            .split_whitespace()
+            .next()
+            .and_then(|c| c.parse::<f64>().ok())
+        else {
+            continue;
+        };
+        ensure!(rows.len() < MAX_SAMPLES, "too many buckets");
+        rows.push((lower, count));
+    }
+    histogram_scores("bpftrace", &rows)
+}
+
+/// BCC `runqlat`/`biolatency` histograms: rows such as `   4 -> 7   : 12   |***|`.
+pub fn import_bcc_hist(text: &str) -> anyhow::Result<ImportedScores> {
+    let mut rows = Vec::new();
+    for line in text.lines() {
+        let Some((range, tail)) = line.split_once(':') else {
+            continue;
+        };
+        let Some((lower, _upper)) = range.split_once("->") else {
+            continue;
+        };
+        let (Some(lower), Some(count)) = (
+            bound(lower),
+            tail.split_whitespace()
+                .next()
+                .and_then(|c| c.parse::<f64>().ok()),
+        ) else {
+            continue;
+        };
+        ensure!(rows.len() < MAX_SAMPLES, "too many buckets");
+        rows.push((lower, count));
+    }
+    histogram_scores("bcc", &rows)
+}
+
+/// `trace-cmd report` or ftrace text: a count per event name, and the events the tracer dropped.
+pub fn import_trace_cmd(text: &str) -> anyhow::Result<ImportedScores> {
+    let mut counts: std::collections::BTreeMap<String, f64> = std::collections::BTreeMap::new();
+    let mut dropped = 0.0;
+    for line in text.lines() {
+        if let Some(rest) = line
+            .split("EVENTS DROPPED")
+            .next()
+            .filter(|_| line.contains("EVENTS DROPPED"))
+        {
+            if let Some(n) = rest
+                .rsplit('[')
+                .next()
+                .and_then(|n| n.trim().parse::<f64>().ok())
+            {
+                dropped += n;
+            }
+            continue;
+        }
+        // `task-1234 [002] 1234.567890: sched_switch: prev_comm=...`
+        let Some((head, tail)) = line.split_once(": ") else {
+            continue;
+        };
+        if !head.contains('[') || !head.contains(']') {
+            continue;
+        }
+        let Some(event) = tail
+            .split(':')
+            .next()
+            .map(str::trim)
+            .filter(|e| !e.is_empty() && !e.contains(' '))
+        else {
+            continue;
+        };
+        *counts.entry(event.to_owned()).or_default() += 1.0;
+        ensure!(counts.len() <= MAX_SAMPLES, "too many event names");
+    }
+    let mut scores: Vec<Score> = counts
+        .into_iter()
+        .map(|(event, n)| diagnostic("trace-cmd", format!("events.{event}"), n, "events"))
+        .collect();
+    if !scores.is_empty() {
+        scores.push(diagnostic(
+            "trace-cmd",
+            "events_dropped".to_owned(),
+            dropped,
+            "events",
+        ));
+    }
+    done("trace-cmd", scores)
+}

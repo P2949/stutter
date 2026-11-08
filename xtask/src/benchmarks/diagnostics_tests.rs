@@ -53,3 +53,38 @@ fn input_without_a_table_is_an_error_never_an_empty_success() {
         assert!(result.is_err());
     }
 }
+
+#[test]
+fn histograms_report_buckets_a_total_and_only_a_bucket_bound_for_p99() {
+    let bpftrace = import_bpftrace_hist("@usecs:\n[0]       10 |@@@@|\n[1]       80 |@@@@@@@@@@|\n[2, 4)     9 |@|\n[1K, 2K)   1 |\n").unwrap();
+    assert_eq!(value(&bpftrace, "total"), 100.0);
+    assert_eq!(value(&bpftrace, "bucket_2"), 9.0);
+    assert_eq!(
+        value(&bpftrace, "p99_bucket_lower_bound"),
+        2.0,
+        "99 of 100 are below the last bucket"
+    );
+    assert!(!bpftrace.application_proof);
+
+    let bcc = import_bcc_hist("     usecs               : count     distribution\n         0 -> 1          : 5        |***|\n         2 -> 3          : 95       |*********|\n").unwrap();
+    assert_eq!(value(&bcc, "total"), 100.0);
+    assert_eq!(value(&bcc, "p99_bucket_lower_bound"), 2.0);
+}
+
+#[test]
+fn trace_text_counts_events_and_dropped_events_and_junk_is_an_error() {
+    let text = "CPU:0 [12 EVENTS DROPPED]\n  game-4242 [002] 100.000001: sched_switch: prev_comm=game prev_pid=4242\n  game-4242 [002] 100.000002: sched_wakeup: comm=x pid=1\n  game-4242 [003] 100.000003: sched_switch: prev_comm=y\n";
+    let trace = import_trace_cmd(text).unwrap();
+    assert_eq!(value(&trace, "events.sched_switch"), 2.0);
+    assert_eq!(value(&trace, "events.sched_wakeup"), 1.0);
+    assert_eq!(value(&trace, "events_dropped"), 12.0);
+
+    for bad in [
+        import_bpftrace_hist("nothing"),
+        import_bpftrace_hist("[0]  0 |\n"),
+        import_bcc_hist(""),
+        import_trace_cmd("not a trace"),
+    ] {
+        assert!(bad.is_err());
+    }
+}

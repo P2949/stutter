@@ -332,7 +332,7 @@
       "g1": "none",
       "runtime_availability": "all absent",
       "authority": "B/O/F",
-      "not_wired": "a cyclictest summary importer exists; no importers for BCC, bpftrace, trace-cmd, KernelShark or rtla, and no bounded Aya causal probes",
+      "not_wired": "importers exist for cyclictest, bpftrace hist(), BCC histograms (runqlat/biolatency) and trace-cmd/ftrace text (event counts and dropped events), reporting a histogram p99 only as a bucket lower bound; no rtla or KernelShark importer, and no bounded Aya causal probes",
       "dispositions": [
         "FixtureVerified",
         "HardwareUnavailable",

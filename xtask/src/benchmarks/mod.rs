@@ -187,6 +187,9 @@ pub enum ScoreTool {
     Blkparse,
     Tuna,
     Cyclictest,
+    BpftraceHist,
+    BccHist,
+    TraceCmd,
 }
 
 fn import_scores(tool: ScoreTool, file: &Path) -> anyhow::Result<String> {
@@ -207,6 +210,13 @@ fn import_scores(tool: ScoreTool, file: &Path) -> anyhow::Result<String> {
         ScoreTool::Tuna => serde_json::to_string_pretty(&diagnostics::import_tuna(&text)?)?,
         ScoreTool::Cyclictest => {
             serde_json::to_string_pretty(&diagnostics::import_cyclictest(&text)?)?
+        }
+        ScoreTool::BpftraceHist => {
+            serde_json::to_string_pretty(&diagnostics::import_bpftrace_hist(&text)?)?
+        }
+        ScoreTool::BccHist => serde_json::to_string_pretty(&diagnostics::import_bcc_hist(&text)?)?,
+        ScoreTool::TraceCmd => {
+            serde_json::to_string_pretty(&diagnostics::import_trace_cmd(&text)?)?
         }
     })
 }
