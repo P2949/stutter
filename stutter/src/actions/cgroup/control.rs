@@ -53,6 +53,10 @@ pub enum ControlDenial {
     NotInEffectiveSet,
     /// No device honors `io.weight` on this host.
     IoWeightNotHonored,
+    /// An io.weight file alone says nothing about an enabled mechanism on the target device.
+    IoWeightMechanismUnknown,
+    EffectiveSetUnavailable,
+    CpuIdleStateUnknown,
     /// The cgroup is not delegated to this user.
     NotDelegated,
 }
@@ -109,8 +113,8 @@ impl CgroupControl {
     pub fn readback_matches(&self, current: &str) -> bool {
         let current = current.trim();
         match self {
-            Self::CpuWeight(_) | Self::IoWeight(_) | Self::CpuIdle(_) => current == self.render(),
-            // `io.weight` also lists per-device lines; the default line is `default <n>`.
+            Self::CpuWeight(_) | Self::CpuIdle(_) => current == self.render(),
+            Self::IoWeight(weight) => io_default_weight(current) == Some(*weight),
             Self::CpuMax { .. } => current == self.render(),
             Self::CpusetCpus(_) | Self::CpusetMems(_) => crate::topology::parse_cpu_list(current)
                 .map(crate::topology::sorted_unique)
@@ -152,12 +156,52 @@ impl CgroupControl {
             } if !(1_000..=1_000_000).contains(period_us) => Err(ControlDenial::OutOfRange(
                 "period must be 1000..=1000000 us",
             )),
-            Self::CpusetCpus(ids) | Self::CpusetMems(ids) if ids.is_empty() => {
-                Err(ControlDenial::OutOfRange("a cpuset may not be empty"))
+            Self::CpusetCpus(ids) | Self::CpusetMems(ids)
+                if ids.is_empty()
+                    || ids.len() > crate::topology::MAX_CPU_ID as usize + 1
+                    || ids.iter().any(|id| *id > crate::topology::MAX_CPU_ID) =>
+            {
+                Err(ControlDenial::OutOfRange(
+                    "cpuset must be nonempty and fit the supported CPU/node id domain",
+                ))
             }
             _ => Ok(()),
         }
     }
+}
+
+/// Kernel readback is a default row followed by per-device overrides, not the scalar write form.
+/// https://docs.kernel.org/admin-guide/cgroup-v2.html#io-interface-files
+fn io_default_weight(current: &str) -> Option<u32> {
+    if current.len() > 65_536 {
+        return None;
+    }
+    let weight = |value: &str| {
+        value
+            .parse::<u32>()
+            .ok()
+            .filter(|value| (1..=10_000).contains(value))
+    };
+    let mut lines = current.lines();
+    let mut first = lines.next()?.split_whitespace();
+    if first.next()? != "default" {
+        return None;
+    }
+    let default = weight(first.next()?)?;
+    if first.next().is_some() {
+        return None;
+    }
+    let mut devices = std::collections::BTreeSet::new();
+    for line in lines {
+        let mut fields = line.split_whitespace();
+        let (major, minor) = fields.next()?.split_once(':')?;
+        let device = (major.parse::<u32>().ok()?, minor.parse::<u32>().ok()?);
+        weight(fields.next()?)?;
+        if fields.next().is_some() || !devices.insert(device) {
+            return None;
+        }
+    }
+    Some(default)
 }
 
 /// Host facts about one cgroup, read from its directory and its parent's.
@@ -167,11 +211,13 @@ pub struct CgroupContext {
     pub enabled_controllers: Vec<String>,
     pub threaded: bool,
     pub cpu_idle: Option<bool>,
+    /// Parent's effective sets, bounding prospective child cpuset changes.
     pub effective_cpus: Option<Vec<u32>>,
     pub effective_mems: Option<Vec<u32>>,
-    /// Whether any block device accepts `io.weight`; `None` when unknown.
+    /// Verified target-device mechanism, supplied separately; presence is not proof.
     pub io_weight_honored: Option<bool>,
-    /// The directory is writable by this user (delegation).
+    /// Directory-ownership hint only, never administrator delegation or mutation authority.
+    /// Worker policy, configured subtree and exact resource receipts must still be verified.
     pub delegated: bool,
 }
 
@@ -185,7 +231,7 @@ impl CgroupContext {
     pub fn read(dir: &Path, euid: u32) -> Self {
         let parent = dir.parent().unwrap_or(dir);
         let list = |name: &str| {
-            read(&dir.join(name))
+            read(&parent.join(name))
                 .and_then(|text| crate::topology::parse_cpu_list(&text).ok())
                 .map(crate::topology::sorted_unique)
         };
@@ -197,15 +243,24 @@ impl CgroupContext {
                 .unwrap_or_default(),
             threaded: read(&dir.join("cgroup.type"))
                 .is_some_and(|kind| kind.starts_with("domain threaded") || kind == "threaded"),
-            cpu_idle: read(&dir.join("cpu.idle")).map(|text| text == "1"),
+            cpu_idle: read(&dir.join("cpu.idle")).and_then(|text| match text.as_str() {
+                "0" => Some(false),
+                "1" => Some(true),
+                _ => None,
+            }),
             effective_cpus: list("cpuset.cpus.effective"),
             effective_mems: list("cpuset.mems.effective"),
-            io_weight_honored: read(&dir.join("io.weight")).map(|text| !text.is_empty()),
+            io_weight_honored: dir
+                .join("io.weight")
+                .try_exists()
+                .ok()
+                .and_then(|exists| (!exists).then_some(false)),
             delegated: owned,
         }
     }
 
-    /// The full read-only preflight of `control` for this cgroup.
+    /// Read-only value/hierarchy feasibility checks. Success never authorizes a write and is not
+    /// proof of scheduler/device effect, exclusive ownership, delegation or a workload benefit.
     pub fn preflight(&self, control: &CgroupControl) -> Result<(), ControlDenial> {
         control.validate_value()?;
         if !self.delegated {
@@ -223,24 +278,34 @@ impl CgroupContext {
             return Err(ControlDenial::ThreadedGroup);
         }
         match control {
+            CgroupControl::CpuWeight(_) if self.cpu_idle.is_none() => {
+                return Err(ControlDenial::CpuIdleStateUnknown);
+            }
             CgroupControl::CpuWeight(_) if self.cpu_idle == Some(true) => {
                 return Err(ControlDenial::IdleOverridesWeight);
             }
             CgroupControl::CpusetCpus(wanted) => {
-                if let Some(effective) = &self.effective_cpus
-                    && !wanted.iter().all(|cpu| effective.contains(cpu))
-                {
+                let effective = self
+                    .effective_cpus
+                    .as_ref()
+                    .ok_or(ControlDenial::EffectiveSetUnavailable)?;
+                if !wanted.iter().all(|cpu| effective.contains(cpu)) {
                     return Err(ControlDenial::NotInEffectiveSet);
                 }
             }
             CgroupControl::CpusetMems(wanted) => {
-                if let Some(effective) = &self.effective_mems
-                    && !wanted.iter().all(|node| effective.contains(node))
-                {
+                let effective = self
+                    .effective_mems
+                    .as_ref()
+                    .ok_or(ControlDenial::EffectiveSetUnavailable)?;
+                if !wanted.iter().all(|node| effective.contains(node)) {
                     return Err(ControlDenial::NotInEffectiveSet);
                 }
             }
-            CgroupControl::IoWeight(_) if self.io_weight_honored != Some(true) => {
+            CgroupControl::IoWeight(_) if self.io_weight_honored.is_none() => {
+                return Err(ControlDenial::IoWeightMechanismUnknown);
+            }
+            CgroupControl::IoWeight(_) if self.io_weight_honored == Some(false) => {
                 return Err(ControlDenial::IoWeightNotHonored);
             }
             _ => {}
