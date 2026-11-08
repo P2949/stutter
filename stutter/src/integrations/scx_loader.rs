@@ -102,8 +102,6 @@ pub fn introspect(client: &mut DbusClient) -> Result<BTreeMap<String, String>, D
     }
 }
 
-/// Proof that an explicit offline campaign allowed a scheduler switch. It has no runtime
-
 /// Arguments a scheduler may be started with: each entry is one exact argument list that was
 /// reviewed for that scheduler. Anything else is refused, so no free-form flag reaches the loader.
 pub type ArgAllowlist = Vec<(String, Vec<Vec<String>>)>;
@@ -173,6 +171,8 @@ pub fn plan_switch_with_args(
         args: args.to_vec(),
     })
 }
+
+/// Proof that an explicit offline campaign allowed a scheduler switch. It has no runtime
 /// constructor, so the daemon, a provider and a remote caller cannot make one.
 #[derive(Debug)]
 pub struct OfflineAuthorization {
