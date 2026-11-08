@@ -364,12 +364,12 @@
         "stutter/src/telemetry/gamescope.rs",
         "stutter/src/wayland_presentation.rs"
       ],
-      "status": "first_slice",
-      "g0": "confined tail session, launch wrapper, launch discovery and verification, managed source polled by the runtime when autotune.frame_capture_root is set, per-tick attribution and quality gate, Gamescope help probe",
-      "g1": "none: no live frame stream has been observed through the service",
+      "status": "code_complete",
+      "g0": "measurement stages are distinct types (application frame, Gamescope presentation, Wayland presentation, KMS flip) and never relabeled; the live experiment clears pending source frames at every phase boundary (`clear_measurement_window`) so a window holds only its own phase; the supervised counterbalanced real-workload run engine in xtask runs the launch wrapper; the source is off by default by design (opt-in `autotune.frame_capture_root`); confined tail session, launch wrapper, launch discovery and verification, managed source polled by the runtime when autotune.frame_capture_root is set, per-tick attribution and quality gate, Gamescope help probe",
+      "g1": "none through the service: no live frame stream has been observed through it (EvidenceDeferred); a controlled vkcube run through the wrapper is an engineering check only",
       "runtime_availability": "MangoHud, Gamescope and vkcube present",
       "authority": "O/F",
-      "not_wired": "off by default; no live game has been observed through the service, phase-correct windows and the real-workload run engine are missing",
+      "not_wired": "nothing",
       "dispositions": [
         "FixtureVerified",
         "EvidenceDeferred"
