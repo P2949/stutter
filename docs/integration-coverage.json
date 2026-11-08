@@ -517,7 +517,7 @@
       "g1": "read on this host at runtime (intel_pstate, 12 policies)",
       "runtime_availability": "thermald absent",
       "authority": "O/A",
-      "not_wired": "no per-policy EPP experiment path; sensor results do not feed any decision (a cheap `cpu_idle` sensor now reads C-state residency per state and RAPL package energy when readable by this user, which is root-only on this host)",
+      "not_wired": "no per-policy EPP experiment (campaign) path, though the CPU-power action now refuses a write that would reach a shared cpufreq policy's sibling CPUs unless every related CPU is named and allowed; sensor results do not feed any decision (a cheap `cpu_idle` sensor now reads C-state residency per state and RAPL package energy when readable by this user, which is root-only on this host)",
       "related_existing": [
         "stutter/src/system_inventory.rs"
       ],

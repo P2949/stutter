@@ -269,6 +269,25 @@ impl CpuPowerAction {
                 .into());
             }
 
+            // A cpufreq policy is shared: writing one CPU's governor or EPP changes every CPU the
+            // policy covers. Each of them must be named by the action and allowed by the policy,
+            // or the write would reach CPUs outside the allowlist.
+            if let Ok(related) = fs::read_to_string(cpufreq.join("related_cpus")) {
+                let covered: BTreeSet<u32> = self.cpus.iter().copied().collect();
+                for sibling in related
+                    .split_whitespace()
+                    .filter_map(|cpu| cpu.parse::<u32>().ok())
+                {
+                    if !covered.contains(&sibling) || !policy.allowed_cpus.contains(&sibling) {
+                        return Err(ActionBoundaryError::PolicyDenied {
+                            action_kind: "cpu_power",
+                            requirement: "shared_cpufreq_policy_fully_covered",
+                        }
+                        .into());
+                    }
+                }
+            }
+
             if let Some(governor) = &self.scaling_governor {
                 let path = cpufreq.join("scaling_governor");
                 files.push(read_target_file(cpu, &path, governor)?);

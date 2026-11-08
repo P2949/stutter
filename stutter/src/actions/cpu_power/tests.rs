@@ -506,3 +506,63 @@ fn apply_with_policy_for_test(
 }
 
 mod prepared_tests;
+
+fn share_policy(root: &Path, cpu: u32, related: &str) {
+    fs::write(
+        root.join("devices/system/cpu")
+            .join(format!("cpu{cpu}"))
+            .join("cpufreq/related_cpus"),
+        format!("{related}\n"),
+    )
+    .unwrap();
+}
+
+#[test]
+fn an_epp_write_to_a_shared_cpufreq_policy_must_cover_and_allow_every_related_cpu() {
+    let root = temp_sysfs_root("shared-policy");
+    write_cpu_cpufreq(&root, 0, "powersave", "balance_performance");
+    write_cpu_cpufreq(&root, 1, "powersave", "balance_performance");
+    write_ac_power(&root, true);
+    share_policy(&root, 0, "0 1");
+    share_policy(&root, 1, "0 1");
+
+    // Naming only CPU 0 would also change CPU 1: refused even though CPU 0 is allowed.
+    let mut partial = action_for(&root);
+    partial.cpus = vec![0];
+    let err = partial
+        .preflight_at(&policy_for(&[0, 1]))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("shared_cpufreq_policy_fully_covered"), "{err}");
+
+    // Naming both but allowing only one is refused for the same reason.
+    let both = action_for(&root);
+    let err = both
+        .preflight_at(&policy_for(&[0]))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("allowed_cpus_contains_target")
+            || err.contains("shared_cpufreq_policy_fully_covered"),
+        "{err}"
+    );
+
+    // Naming and allowing the whole policy is accepted.
+    assert!(both.preflight_at(&policy_for(&[0, 1])).is_ok());
+}
+
+#[test]
+fn per_cpu_policies_and_a_missing_related_cpus_file_keep_working() {
+    let root = temp_sysfs_root("own-policy");
+    write_cpu_cpufreq(&root, 0, "powersave", "balance_performance");
+    write_cpu_cpufreq(&root, 1, "powersave", "balance_performance");
+    write_ac_power(&root, true);
+    share_policy(&root, 0, "0");
+    // CPU 1 has no related_cpus file at all (not every cpufreq driver exposes it).
+    let mut one = action_for(&root);
+    one.cpus = vec![0];
+    assert!(one.preflight_at(&policy_for(&[0])).is_ok());
+    let mut other = action_for(&root);
+    other.cpus = vec![1];
+    assert!(other.preflight_at(&policy_for(&[1])).is_ok());
+}
