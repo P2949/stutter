@@ -52,6 +52,8 @@ pub(crate) struct RulesCheckReport {
     pub(crate) rules_mapped_to_unknown: usize,
     pub(crate) classes: BTreeMap<String, usize>,
     pub(crate) largest_duplicate_groups: Vec<(String, usize)>,
+    /// Names the rule set maps to more than one class: contradictory role hints.
+    pub(crate) class_conflicts: Vec<super::audit::ClassConflict>,
     pub(crate) warnings: Vec<String>,
 }
 
@@ -186,6 +188,7 @@ impl RulesCheckReport {
             .sum();
         report.largest_duplicate_groups = duplicate_groups.into_iter().take(10).collect();
         report.warnings = warning_counts.into_keys().take(20).collect();
+        report.class_conflicts = super::audit::class_conflicts(file);
         report
     }
 
@@ -194,7 +197,9 @@ impl RulesCheckReport {
     }
 
     pub(crate) fn ok(&self) -> bool {
-        self.unknown_mapped_classes == 0 && self.rules_mapped_to_unknown == 0
+        self.unknown_mapped_classes == 0
+            && self.rules_mapped_to_unknown == 0
+            && self.class_conflicts.is_empty()
     }
 }
 

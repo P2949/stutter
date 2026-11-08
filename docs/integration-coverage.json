@@ -53,14 +53,15 @@
       ],
       "anchors": [
         "stutter/src/integrations/mod.rs",
-        "stutter/src/community_rules.rs"
+        "stutter/src/community_rules.rs",
+        "stutter/src/community_rules/audit.rs"
       ],
-      "status": "first_slice",
-      "g0": "presence probe and task-priority domain denial; community rules import exists as classification only",
+      "status": "code_complete",
+      "g0": "presence probe and task-priority domain denial; community rules import is classification only, each rule a typed role hint (TaskClass, confidence capped by identity source so a comm-only match never exceeds 0.75) that is never run as a mutation; `stutter rules check` now audits contradictory hints (one name mapped to two classes, with both classes and sources) and reports them as a warning",
       "g1": "none",
       "runtime_availability": "absent",
       "authority": "B/O/A",
-      "not_wired": "no typed role hints, no conflict audit",
+      "not_wired": "nothing",
       "dispositions": [
         "FixtureVerified",
         "HardwareUnavailable",

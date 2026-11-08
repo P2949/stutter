@@ -18,6 +18,18 @@ pub(crate) fn render_rules_check_report(report: &RulesCheckReport) -> String {
     out.push_str(&format!("imported rules: {}\n", report.imported_rules));
     out.push_str(&format!("objects skipped: {}\n", report.skipped_objects()));
     out.push_str(&format!("duplicates: {}\n", report.duplicates));
+    out.push_str(&format!(
+        "class conflicts: {}\n",
+        report.class_conflicts.len()
+    ));
+    for conflict in report.class_conflicts.iter().take(10) {
+        out.push_str(&format!(
+            "  conflict: {} -> {} (from {})\n",
+            conflict.name,
+            conflict.classes.join(" vs "),
+            conflict.sources.join(", ")
+        ));
+    }
     out.push_str(&format!("ambiguous names: {}\n", report.ambiguous_names));
     out.push_str(&format!(
         "context-required game rules: {}\n",

@@ -7,6 +7,7 @@ pub mod importer;
 pub mod loader;
 pub mod paths;
 
+pub mod audit;
 pub mod classify;
 pub mod commands;
 pub mod db;
@@ -51,3 +52,7 @@ mod rules_command_tests;
 #[cfg(test)]
 #[path = "community_rules/tests/classification.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "community_rules/tests/audit.rs"]
+mod audit_tests;
