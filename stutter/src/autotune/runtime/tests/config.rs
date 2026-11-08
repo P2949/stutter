@@ -128,12 +128,28 @@ fn the_runtime_samples_system_psi_into_every_observation_without_acting_on_it() 
     let first = runtime.sensor_hub.sample();
     let second = runtime.sensor_hub.sample();
     // The real /proc/pressure exists on this kernel; a host without PSI reports why instead.
-    if runtime.sensor_hub.unavailable().is_empty() {
-        assert_eq!(first.len(), 1);
-        assert_eq!(first[0].sensor, "psi_system");
-        assert!(second[0].values.contains_key("cpu_some_avg10"));
-        assert!(first[0].monotonic_ns <= second[0].monotonic_ns);
+    let unavailable: Vec<_> = runtime
+        .sensor_hub
+        .unavailable()
+        .iter()
+        .map(|(id, _)| *id)
+        .collect();
+    let find = |readings: &[crate::autotune::sensors::SensorReading], id: &str| {
+        readings.iter().position(|reading| reading.sensor == id)
+    };
+    // Each sensor is sampled when it could be admitted; one that could not says why instead.
+    if !unavailable.contains(&"psi_system") {
+        let (a, b) = (
+            find(&first, "psi_system").unwrap(),
+            find(&second, "psi_system").unwrap(),
+        );
+        assert!(second[b].values.contains_key("cpu_some_avg10"));
+        assert!(first[a].monotonic_ns <= second[b].monotonic_ns);
     } else {
-        assert!(first.is_empty(), "{:?}", runtime.sensor_hub.unavailable());
+        assert!(find(&first, "psi_system").is_none());
     }
+    assert_eq!(
+        find(&first, "cpu_power").is_some(),
+        !unavailable.contains(&"cpu_power")
+    );
 }

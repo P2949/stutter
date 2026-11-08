@@ -368,13 +368,15 @@
         "W11d",
         "W12"
       ],
-      "anchors": [],
-      "status": "not_started",
-      "g0": "cpufreq policies are inventoried; no sensors/cpu_power.rs",
-      "g1": "none",
+      "anchors": [
+        "stutter/src/autotune/sensors/cpu_power.rs"
+      ],
+      "status": "first_slice",
+      "g0": "cheap cpu_power sensor: per-policy driver/governor/EPP, requested versus actual frequency, boost, AC state and throttle-event deltas with reset detection; sampled by the runtime into every observation",
+      "g1": "read on this host at runtime (intel_pstate, 12 policies)",
       "runtime_availability": "thermald absent",
       "authority": "O/A",
-      "not_wired": "no sensor, no thermald probe",
+      "not_wired": "no thermald probe, no RAPL/package-power or C-state residency, no per-policy EPP experiment path; sensor results do not feed any decision",
       "related_existing": [
         "stutter/src/system_inventory.rs"
       ]

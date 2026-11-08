@@ -244,3 +244,111 @@ mod pmu {
         }
     }
 }
+
+mod cpu_power {
+    use std::{fs, path::Path};
+
+    use super::super::{Availability, CpuPowerSensor, Sensor, SensorHealth};
+    use crate::autotune::objective::ObjectiveSignalQuality as Quality;
+
+    fn put(path: &Path, text: &str) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, text).unwrap();
+    }
+
+    fn policy(system: &Path, number: u32, cur: u64, max: u64) {
+        let dir = system.join(format!("cpu/cpufreq/policy{number}"));
+        put(&dir.join("scaling_cur_freq"), &cur.to_string());
+        put(&dir.join("scaling_max_freq"), &max.to_string());
+        put(&dir.join("scaling_min_freq"), "800000");
+        put(&dir.join("scaling_driver"), "intel_pstate");
+        put(&dir.join("scaling_governor"), "powersave");
+        put(
+            &dir.join("energy_performance_preference"),
+            "balance_performance",
+        );
+    }
+
+    fn base(name: &str) -> (std::path::PathBuf, std::path::PathBuf, std::path::PathBuf) {
+        let root =
+            std::env::temp_dir().join(format!("stutter-cpupower-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        (root.clone(), root.join("system"), root.join("class"))
+    }
+
+    #[test]
+    fn requested_versus_actual_frequency_boost_ac_and_throttle_deltas_are_read_from_sysfs() {
+        let (root, system, class) = base("full");
+        policy(&system, 0, 2_000_000, 4_000_000);
+        policy(&system, 1, 4_000_000, 4_000_000);
+        put(&system.join("cpu/intel_pstate/no_turbo"), "0");
+        put(
+            &system.join("cpu/cpu0/thermal_throttle/core_throttle_count"),
+            "5",
+        );
+        put(
+            &system.join("cpu/cpu0/thermal_throttle/package_throttle_count"),
+            "2",
+        );
+        put(&class.join("power_supply/AC/type"), "Mains");
+        put(&class.join("power_supply/AC/online"), "1");
+        let mut sensor = CpuPowerSensor::new(&system, &class);
+        assert_eq!(sensor.probe(), Availability::Available);
+        sensor.start().unwrap();
+        let first = sensor.sample(1);
+        assert_eq!(first.quality, Quality::Direct);
+        assert_eq!(first.values["policy0_cur_over_max"], 0.5);
+        assert_eq!(first.values["policy1_cur_over_max"], 1.0);
+        assert_eq!(
+            (first.values["boost_enabled"], first.values["on_ac"]),
+            (1.0, 1.0)
+        );
+        assert!(
+            !first.values.contains_key("throttle_events_delta"),
+            "no delta on the first sample"
+        );
+        assert!(
+            first
+                .provenance
+                .contains("intel_pstate/powersave/balance_performance x2")
+        );
+        put(
+            &system.join("cpu/cpu0/thermal_throttle/core_throttle_count"),
+            "9",
+        );
+        let second = sensor.sample(2);
+        assert_eq!(second.values["throttle_events_delta"], 4.0);
+        // A counter that went backwards is a reset: loss, not a negative delta.
+        put(
+            &system.join("cpu/cpu0/thermal_throttle/core_throttle_count"),
+            "1",
+        );
+        let reset = sensor.sample(3);
+        assert_eq!(reset.lost, 1);
+        assert!(!reset.values.contains_key("throttle_events_delta"));
+        assert!(matches!(sensor.health(), SensorHealth::Degraded(_)));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_host_without_cpufreq_or_throttle_files_reports_less_and_invents_nothing() {
+        let (root, system, class) = base("bare");
+        fs::create_dir_all(&system).unwrap();
+        let mut sensor = CpuPowerSensor::new(&system, &class);
+        assert!(
+            matches!(sensor.probe(), Availability::Unavailable(reason) if reason.contains("cpufreq"))
+        );
+        assert!(sensor.start().is_err());
+        let empty = sensor.sample(1);
+        assert_eq!(empty.quality, Quality::Missing);
+        assert!(empty.values.is_empty());
+        // On battery: a Mains supply that is offline, and no boost file, adds only that.
+        policy(&system, 0, 1_000_000, 2_000_000);
+        put(&class.join("power_supply/AC/type"), "Mains");
+        put(&class.join("power_supply/AC/online"), "0");
+        let battery = sensor.sample(2);
+        assert_eq!(battery.values["on_ac"], 0.0);
+        assert!(!battery.values.contains_key("boost_enabled"));
+        fs::remove_dir_all(&root).unwrap();
+    }
+}

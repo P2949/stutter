@@ -7,7 +7,7 @@
 use std::{path::Path, time::Instant};
 
 use crate::autotune::sensors::{
-    AdmissionDenied, ExpensiveBudget, PsiSensor, SensorReading, SensorRegistry,
+    AdmissionDenied, CpuPowerSensor, ExpensiveBudget, PsiSensor, SensorReading, SensorRegistry,
 };
 
 pub(super) struct SensorHub {
@@ -21,11 +21,17 @@ impl SensorHub {
     pub(super) fn new(proc_root: &Path) -> Self {
         let mut registry = SensorRegistry::new(ExpensiveBudget::default());
         registry.register(Box::new(PsiSensor::system(proc_root)));
+        registry.register(Box::new(CpuPowerSensor::new(
+            Path::new("/sys/devices/system"),
+            Path::new("/sys/class"),
+        )));
         let started = Instant::now();
         let mut unavailable = Vec::new();
-        if let Err(denied) = registry.activate("psi_system", 0) {
-            log::info!("sensor psi_system unavailable: {}", describe(&denied));
-            unavailable.push(("psi_system", describe(&denied)));
+        for id in ["psi_system", "cpu_power"] {
+            if let Err(denied) = registry.activate(id, 0) {
+                log::info!("sensor {id} unavailable: {}", describe(&denied));
+                unavailable.push((id, describe(&denied)));
+            }
         }
         Self {
             registry,
