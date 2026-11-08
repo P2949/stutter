@@ -513,7 +513,7 @@
       "g1": "read on this host at runtime (intel_pstate, 12 policies)",
       "runtime_availability": "thermald absent",
       "authority": "O/A",
-      "not_wired": "no RAPL/package-power or C-state residency, no per-policy EPP experiment path; sensor results do not feed any decision",
+      "not_wired": "no per-policy EPP experiment path; sensor results do not feed any decision (a cheap `cpu_idle` sensor now reads C-state residency per state and RAPL package energy when readable by this user, which is root-only on this host)",
       "related_existing": [
         "stutter/src/system_inventory.rs"
       ],

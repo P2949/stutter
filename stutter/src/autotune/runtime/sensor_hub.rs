@@ -8,10 +8,10 @@ use std::{path::Path, time::Instant};
 
 use crate::{
     autotune::sensors::{
-        AdmissionDenied, BlockIoSensor, CpuPowerSensor, DamonSensor, Escalator, ExpensiveBudget,
-        NetworkSensor, NumaFaultSensor, NumaSensor, OomGuardSensor, PmuSensor, PmuTargets,
-        PsiSensor, ResctrlSensor, SchedExtSensor, SensorReading, SensorRegistry, Thresholds,
-        session_cgroup_dir,
+        AdmissionDenied, BlockIoSensor, CpuIdleSensor, CpuPowerSensor, DamonSensor, Escalator,
+        ExpensiveBudget, NetworkSensor, NumaFaultSensor, NumaSensor, OomGuardSensor, PmuSensor,
+        PmuTargets, PsiSensor, ResctrlSensor, SchedExtSensor, SensorReading, SensorRegistry,
+        Thresholds, session_cgroup_dir,
     },
     perf_counters::CpuPerfConfig,
 };
@@ -55,6 +55,10 @@ impl SensorHub {
         registry.register(Box::new(ResctrlSensor::new(Path::new("/sys/fs"))));
         registry.register(Box::new(NetworkSensor::new(proc_root.to_path_buf())));
         registry.register(Box::new(NumaFaultSensor::new(proc_root.to_path_buf())));
+        registry.register(Box::new(CpuIdleSensor::new(
+            Path::new("/sys/devices/system"),
+            Path::new("/sys/class"),
+        )));
         registry.register(Box::new(SchedExtSensor::new(std::path::PathBuf::from(
             "/sys",
         ))));
@@ -70,6 +74,7 @@ impl SensorHub {
             "resctrl_inventory",
             "network",
             "numa_faults",
+            "cpu_idle",
             "sched_ext",
             "block_io",
         ];
