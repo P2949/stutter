@@ -102,6 +102,37 @@ impl IrqOwner {
     }
 }
 
+/// The risk of steering an IRQ, never lower than the name-based risk: an IRQ whose owner is
+/// storage, or that no PCI device claims, is high risk whatever its name suggests.
+pub fn risk_with_attribution(
+    name_risk: crate::actions::irq_affinity::IrqAffinityRisk,
+    owner: &IrqOwner,
+) -> crate::actions::irq_affinity::IrqAffinityRisk {
+    if owner.is_storage_or_unknown() {
+        crate::actions::irq_affinity::IrqAffinityRisk::HighRisk
+    } else {
+        name_risk
+    }
+}
+
+/// The risk for `irq` on the real host: the name-based risk, raised by what sysfs says owns the
+/// IRQ. In unit tests there is no real sysfs to consult, so the name-based risk stands.
+pub fn attributed_risk(
+    irq: u32,
+    name_risk: crate::actions::irq_affinity::IrqAffinityRisk,
+) -> crate::actions::irq_affinity::IrqAffinityRisk {
+    #[cfg(test)]
+    {
+        let _ = irq;
+        name_risk
+    }
+    #[cfg(not(test))]
+    {
+        let owners = attribute_irqs(Path::new("/sys/bus/pci/devices"));
+        risk_with_attribution(name_risk, &IrqOwner::of(&owners, irq))
+    }
+}
+
 #[cfg(test)]
 #[path = "irq_attribution_tests.rs"]
 mod tests;

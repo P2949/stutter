@@ -82,3 +82,29 @@ fn the_real_host_pci_tree_reads_without_panicking() {
         assert!(irq > 0 || matches!(owner, IrqOwner::Pci { .. }));
     }
 }
+
+#[test]
+fn attribution_can_only_raise_the_risk_of_steering_an_irq() {
+    use crate::actions::irq_affinity::IrqAffinityRisk::{HighRisk, ReversibleMediumRisk};
+    let pci = |class| IrqOwner::Pci {
+        slot: "0000:01:00.0".into(),
+        class,
+    };
+    assert_eq!(
+        risk_with_attribution(ReversibleMediumRisk, &pci(PciClass::Network)),
+        ReversibleMediumRisk
+    );
+    assert_eq!(
+        risk_with_attribution(ReversibleMediumRisk, &pci(PciClass::Storage)),
+        HighRisk
+    );
+    assert_eq!(
+        risk_with_attribution(ReversibleMediumRisk, &IrqOwner::Unattributed),
+        HighRisk
+    );
+    assert_eq!(
+        risk_with_attribution(HighRisk, &pci(PciClass::Network)),
+        HighRisk,
+        "attribution never lowers a risk"
+    );
+}

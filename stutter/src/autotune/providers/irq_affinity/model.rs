@@ -83,7 +83,10 @@ impl CandidateProvider for IrqAffinityProvider {
                     evidence_model.irq,
                     evidence_model.device.clone(),
                     evidence_model.suggested_mask.clone(),
-                    device_class.default_risk(),
+                    crate::irq_attribution::attributed_risk(
+                        evidence_model.irq,
+                        device_class.default_risk(),
+                    ),
                     evidence,
                 ),
                 evidence: vec![CandidateEvidence::new(
