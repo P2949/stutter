@@ -1,0 +1,63 @@
+# Real-workload telemetry and external owners
+
+This page describes the opt-in pieces that let Stutter observe a real game's frames and recognise
+other tuning tools on the machine. None of it is on by default, none of it widens what the autotuner
+may change, and the Supported autonomous boundary in [CAPABILITIES.md](CAPABILITIES.md) is
+unchanged. The honest status of every tool is in
+[INTEGRATION_IMPLEMENTATION_STATUS.md](INTEGRATION_IMPLEMENTATION_STATUS.md).
+
+## Launching a game with frame capture
+
+```sh
+stutter game-run --mangohud -- %command%
+```
+
+`game-run` starts the exact command with its working directory, environment, stdio, signals and exit
+status preserved, so it works as a Steam launch option. With `--mangohud` it also points MangoHud at a
+fresh owner-only directory under `$XDG_RUNTIME_DIR/stutter/game-run` and asks for a per-frame log. It
+never forces itself or MangoHud on an existing launch, holds no privilege, and keeps the 16 newest
+capture directories. A launch id it records is correlation data only.
+
+## Letting the controller use the frames
+
+```toml
+[autotune]
+frame_capture_root = "/run/user/1000/stutter/game-run"
+```
+
+Left unset, nothing changes. When set, the controller looks for a launch that is verified (owner-only
+directory, this boot, this user, the recorded process still the same one) and whose process tree
+contains the focused game, then tails that log. Frames become a *direct* frame signal only while each
+tick re-verifies the producer, focus, freshness and the absence of any loss. A wrong game, a replaced
+process, a stale or lossy stream, or a truncated log can never produce a frame-primary keep, and frames
+produced before a measurement phase ended are discarded at the boundary. Direct frames never authorise
+an operation; the existing frame-pacing calibration is unchanged.
+
+## What `stutter doctor` shows
+
+* `external_owners`: which tuning domains another tool holds (GameMode, LACT, sched_ext, Ananicy,
+  System76 Scheduler, TuneD, auto-cpufreq, power-profiles-daemon, irqbalance, bpftune, numad), with the
+  interface Stutter could read it through and why delegation is refused. A process name is only a hint,
+  and anything unreadable counts as owned.
+* `exact_owner_states`: what GameMode (client count), `scx_loader` (current scheduler) and
+  power-profiles-daemon (active profile) report about themselves over D-Bus. This reads and never writes.
+* `topology` and `boot_environment`: cache and CCD domains, verified capacity classes, NUMA distances,
+  GPU locality, kernel, preemption model and isolation parameters, each with a fingerprint. A stored
+  experiment is not reused when the topology or boot context changes.
+
+## Sensors
+
+The runtime samples pressure (PSI), CPU power state, NUMA locality, DAMON and resctrl inventory and the
+user slice's memory-event counters on every evaluation, and costs well under a millisecond. Sustained
+pressure raises a *logged hypothesis*, which may start the PMU sensor under a one-at-a-time budget. A
+reading is context for diagnosis and never triggers a write.
+
+## Offline tools (xtask)
+
+* `xtask real-workload validate | run | resume | evaluate | inventory`: a frozen, counterbalanced,
+  supervised comparison with a preregistered threshold. A run on this repository's controlled vkcube
+  workload is under [validation/real-workload](validation/real-workload/controlled-vkcube/README.md);
+  it is an engineering check, not real-game evidence.
+* `xtask benchmarks verify | import-hyperfine`: verified external artifacts as evidence, never as authority.
+* `xtask offline-optimization check`: PGO, AutoFDO and BOLT plans are validated, never built or applied.
+* `xtask closeout-report`: the per-tool dispositions, refusing to overstate the ledger.

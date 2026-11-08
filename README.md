@@ -27,6 +27,7 @@ validated by the available evidence.
 - [Architecture boundaries](docs/ARCHITECTURE_BOUNDARIES.md)
 - [Artifact schema](docs/ARTIFACT_SCHEMA.md)
 - [Roadmap](docs/ROADMAP.md)
+- [Real-workload telemetry and external owners](docs/REAL_WORKLOAD_TELEMETRY.md)
 - [KCD1 case study](reports/kcd1-case-study/)
 - [Contributing](CONTRIBUTING.md)
 
