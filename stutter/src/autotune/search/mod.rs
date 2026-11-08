@@ -7,6 +7,7 @@
 //! per-block outcomes by regret and time to benefit, and production keeps its conservative ranking
 //! unless a comparison on real data justifies more.
 pub mod ensemble;
+pub mod learning;
 
 use std::collections::BTreeMap;
 
