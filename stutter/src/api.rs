@@ -5,7 +5,7 @@
 //! re-export, instead of depending on internal module layout.
 
 pub use crate::api_integration::{
-    game_run, objective_source, ownership, sensors, telemetry, topology,
+    experiments, game_run, objective_source, ownership, sensors, telemetry, topology,
 };
 
 pub mod workload_progress {

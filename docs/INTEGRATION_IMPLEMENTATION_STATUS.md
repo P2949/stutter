@@ -35,6 +35,7 @@ game under scheduler pressure judged by `GameRunnableLatency`. Nothing in this l
 | Owner probes | the planner denies an operation whose domain a detected owner holds, with a 30 s cached probe | the probe is process-name based, so it is a hint; a typed receipt model (exact resource, owner class, expiry, drift) exists and fails closed, but nothing yet issues receipts from an exact adapter or checks them in the worker before commit; D-Bus adapters are missing |
 | Sensors | none | the sensor registry and PSI sensor exist and are tested, but the runtime does not use them |
 | Generic KPIs | none | typed contract and bounded ingestion exist with the known defects listed in the plan (weighted aggregates, peer start time, future timestamps) |
+| Experiment statistics | none in the live manager | immutable `ExperimentDesign` and `ExperimentEvidence`, a Student-t interval over independent blocks, a fixed-N rule that refuses early looks, a Bonferroni-adjusted sequential rule, and a tested demonstration that unadjusted peeking inflates false positives while the adjusted design holds its budget; the live experiment manager does not use them yet and candidate memory is unchanged |
 | Real workloads | `xtask real-workload validate`, `evaluate`, `inventory`, `run` (supervised, resumable); one controlled vkcube comparison run, EngineeringPass and NoBenefit | a real-game cohort (BlockedResource), fault-injection runs, a service-attached run |
 
 ## Real-host observations

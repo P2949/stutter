@@ -41,6 +41,7 @@ pub(crate) mod offenders;
 
 pub(crate) mod emergency_restore;
 pub(crate) mod experiment;
+pub(crate) mod experiment_design;
 pub(crate) mod external_mutation;
 pub(crate) mod generate_profiles;
 pub(crate) mod gpu_focus;
@@ -102,4 +103,5 @@ pub(crate) mod sensors;
 pub(crate) mod simulation;
 pub(crate) mod startup_recovery;
 pub(crate) mod state;
+pub(crate) mod statistics;
 pub(crate) mod tui_panel;
