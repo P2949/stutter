@@ -58,6 +58,7 @@ pub struct KpiCollector {
     digest: String,
     boot_id: String,
     source_session: String,
+    context_epoch: u64,
     started_ns: u64,
     executable_identity: (u64, u64),
     store: SampleStore,
@@ -123,7 +124,7 @@ impl KpiCollector {
         }
         super::ObservedKpiBlock::capture(
             request,
-            self.source_session.clone(),
+            self.session_identity(),
             self.boot_id.clone(),
             &self.contract,
             &self.store,
@@ -159,6 +160,7 @@ impl KpiCollector {
             digest,
             boot_id,
             source_session: crate::telemetry::identity::new_capture_id()?,
+            context_epoch: 0,
             started_ns: crate::syscall::clock_gettime_ns(libc::CLOCK_MONOTONIC)?,
             executable_identity: (executable.dev(), executable.ino()),
             store: SampleStore::new(contract.clone()),
@@ -176,6 +178,10 @@ impl KpiCollector {
     fn deny(&mut self, reason: &str) {
         self.denied = self.denied.saturating_add(1);
         self.last_denial = Some(reason.to_owned());
+    }
+
+    fn session_identity(&self) -> String {
+        format!("{}:{}", self.source_session, self.context_epoch)
     }
 
     /// Only the exact currently resolved root may supply this observer. A focus/process change
@@ -198,6 +204,9 @@ impl KpiCollector {
             && std::fs::metadata(proc_root.join(binding.pid.to_string()).join("exe"))
                 .is_ok_and(|meta| (meta.dev(), meta.ino()) == self.executable_identity);
         if !active {
+            if self.context_active {
+                self.context_epoch = self.context_epoch.saturating_add(1);
+            }
             self.store = SampleStore::new(self.contract.clone());
             self.context_active = false;
             self.connection = None;
@@ -358,7 +367,7 @@ impl KpiCollector {
             .collect();
         KpiObservation {
             contract_digest: self.digest.clone(),
-            source_session: self.source_session.clone(),
+            source_session: self.session_identity(),
             binding: self.contract.binding,
             status: status.to_owned(),
             accepted_samples: self.accepted,
@@ -453,6 +462,7 @@ mod tests {
             report.metrics[1].aggregate.is_none(),
             "a missing hard guardrail is not synthesized"
         );
+        let original_session = report.source_session.clone();
         let lost = collector.poll(
             Some((bound.pid, bound.start_ticks + 1)),
             Path::new("/proc"),
@@ -460,6 +470,7 @@ mod tests {
             1_000_000_000,
         );
         assert_eq!(lost.status, "target_identity_mismatch");
+        assert_ne!(lost.source_session, original_session);
         assert!(lost.metrics.iter().all(|metric| metric.aggregate.is_none()));
         let restored = collector.poll(target, Path::new("/proc"), at, 1_000_000_000);
         assert!(
@@ -538,5 +549,49 @@ mod tests {
         assert!(!scratch.0.join("kpi.sock").exists());
         drop(collector(&scratch.0, bound));
         assert!(!scratch.0.join("kpi.sock").exists());
+    }
+
+    #[test]
+    fn a_rejected_bound_source_row_withdraws_completeness_even_when_valid_rows_exist() {
+        let scratch = Scratch::new("loss");
+        let bound = binding(std::process::id());
+        let target = Some((bound.pid, bound.start_ticks));
+        let mut collector = collector(&scratch.0, bound);
+        let from = now();
+        collector.poll(target, Path::new("/proc"), from, 1_000_000_000);
+        let mut stream = UnixStream::connect(scratch.0.join("kpi.sock")).unwrap();
+        let at = now();
+        for metric in ["deadline_miss_count", "xrun_count"] {
+            writeln!(stream, "{{\"metric\":\"{metric}\",\"value\":1,\"monotonic_ns\":{at},\"work_unit\":\"fixed\",\"population\":1000,\"kind\":\"batch_sum\"}}").unwrap();
+        }
+        stream.write_all(b"not json\n").unwrap();
+        let mut report = collector.poll(target, Path::new("/proc"), now(), 1_000_000_000);
+        for _ in 0..30 {
+            if report.denied_samples > 0 {
+                break;
+            }
+            report = collector.poll(target, Path::new("/proc"), now(), 1_000_000_000);
+        }
+        assert_eq!(report.accepted_samples, 2);
+        assert_eq!(report.last_denial.as_deref(), Some("bad_json"));
+        assert!(
+            report
+                .metrics
+                .iter()
+                .filter_map(|metric| metric.aggregate)
+                .all(|aggregate| !aggregate.complete)
+        );
+        assert!(
+            collector
+                .capture_block(super::super::KpiBlockRequest {
+                    block_id: "block".into(),
+                    run_id: "run".into(),
+                    work_unit: "fixed".into(),
+                    context_fingerprint: "ctx".into(),
+                    from_ns: from,
+                    to_ns: now(),
+                })
+                .is_err()
+        );
     }
 }

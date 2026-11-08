@@ -42,10 +42,14 @@ A p99 of batch p99s is `QuantileOfSummaries`; an incompatible mean/sum/max/last 
 Mixed work IDs, capacity loss, stale/underpopulated windows and nonfinite aggregates cannot supply
 a complete direct block. The service does not consume these diagnostics as an autonomous objective.
 
-The embedding API can freeze a `KpiObservationStudyConfig` on an `AutotuneRuntime`, capture
+The embedding API can freeze a `KpiObservationStudyConfig` on an observation-only `AutotuneRuntime`, capture
 `ObservedKpiBlock`s, submit counterbalanced independent pairs and analyse planned fixed-N or adjusted
-sequential looks. Hard guardrail limits are explicit and frozen. Captures contain the accepted raw
-samples and can be serialized for evidence, but cannot be deserialized into trusted capture objects.
+sequential looks. Hard guardrail limits and one completed-work identity are frozen across all pairs.
+Target retirement changes the
+capture session epoch, invalidating an unfinished study even if the same process returns. Rejected
+source rows and partial/lost input withdraw completeness; previously accepted rows cannot hide them.
+Captures contain accepted raw samples and can be serialized for evidence, but cannot be deserialized
+into trusted capture objects.
 Imported JSON and a matching digest do not establish collector provenance. Raw captures must be
 retained by the campaign; `verify_captures` reconstructs metric aggregates and every statistical
 interval and rejects coherent but fabricated interval claims. The observation-study path never

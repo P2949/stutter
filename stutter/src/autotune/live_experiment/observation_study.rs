@@ -13,6 +13,9 @@ use crate::autotune::{
 pub struct KpiObservationStudyConfig {
     pub design: ExperimentDesign,
     pub contract: KpiContract,
+    /// Exact completed-work/input identity, fixed before collecting the first pair.
+    #[serde(default)]
+    pub work_unit: String,
     /// Exact maximum regressions, percent, fixed before the first block. No default threshold.
     pub hard_guardrail_regression_percent: BTreeMap<String, f64>,
 }
@@ -71,6 +74,10 @@ impl LiveExperimentManager {
             self.observation_study.is_none(),
             "an observation study is already frozen"
         );
+        anyhow::ensure!(
+            !self.has_active_experiment() && self.pending_objective_evidence.is_none(),
+            "an action experiment is already active"
+        );
         config
             .design
             .validate()
@@ -99,6 +106,12 @@ impl LiveExperimentManager {
         anyhow::ensure!(
             !config.design.context_fingerprint.is_empty(),
             "missing study context"
+        );
+        anyhow::ensure!(
+            !config.work_unit.is_empty()
+                && config.work_unit.len() <= 128
+                && !config.work_unit.chars().any(char::is_control),
+            "missing or invalid frozen work identity"
         );
         anyhow::ensure!(
             config.hard_guardrail_regression_percent.len() == config.contract.hard_guardrails.len(),
@@ -290,7 +303,8 @@ impl ObservationStudy {
             "measurement context drifted"
         );
         anyhow::ensure!(
-            baseline.work_unit() == treatment.work_unit(),
+            baseline.work_unit() == self.config.work_unit
+                && treatment.work_unit() == self.config.work_unit,
             "work inputs differ"
         );
         anyhow::ensure!(

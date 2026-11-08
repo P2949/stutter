@@ -290,6 +290,7 @@ fn run(out: &Path) -> anyhow::Result<()> {
             washout_seconds: 0,
         },
         contract: contract.clone(),
+        work_unit: WORK_ID.into(),
         hard_guardrail_regression_percent: std::collections::BTreeMap::from([(
             "completed_units".into(),
             0.0,

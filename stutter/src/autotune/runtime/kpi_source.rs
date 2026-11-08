@@ -66,6 +66,10 @@ impl AutotuneRuntime {
         &mut self,
         config: crate::autotune::live_experiment::KpiObservationStudyConfig,
     ) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            self.config.mode() == crate::daemon::policy::DaemonMode::Observe,
+            "KPI studies require observation-only runtime mode"
+        );
         let collector = self
             .kpi_collector
             .as_ref()

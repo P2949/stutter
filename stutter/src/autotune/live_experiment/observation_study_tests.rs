@@ -69,6 +69,7 @@ impl Rig {
                 washout_seconds: 0,
             },
             contract: self.contract.clone(),
+            work_unit: "fixed-input".into(),
             hard_guardrail_regression_percent: BTreeMap::from([("xrun_count".into(), 0.0)]),
         }
     }
@@ -217,4 +218,23 @@ fn predesign_replayed_missing_summary_and_drifted_blocks_cannot_supply_valid_evi
     manager.begin_kpi_observation_study(wrong).unwrap();
     let pair = rig.pair(0, 70.0, 100.0);
     assert!(manager.observe_kpi_pair(&pair.0, &pair.1).is_err());
+}
+
+#[test]
+fn losing_and_reacquiring_the_same_target_cannot_transfer_the_old_study_session() {
+    let mut rig = Rig::new("focus-epoch");
+    let mut manager = LiveExperimentManager::new();
+    manager.begin_kpi_observation_study(rig.config()).unwrap();
+    let pair = rig.pair(0, 70.0, 100.0);
+    manager.observe_kpi_pair(&pair.0, &pair.1).unwrap();
+    rig.collector.poll(None, Path::new("/proc"), now(), 1);
+    rig.stream = UnixStream::connect(rig.dir.join("kpi.sock")).unwrap();
+    let pair = rig.pair(1, 70.0, 100.0);
+    assert!(
+        manager
+            .observe_kpi_pair(&pair.0, &pair.1)
+            .unwrap_err()
+            .to_string()
+            .contains("source session changed")
+    );
 }
