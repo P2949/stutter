@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "source_sha": "1d5a3ef0458f08d7e50ff5c00c2dcc6a505d52d2",
+  "command": "nix develop --command cargo run -q -p xtask -- ci",
+  "result": "PASS",
+  "stages": [
+    "policy",
+    "lint",
+    "build",
+    "objective",
+    "smoke",
+    "campaign",
+    "daemon-safety",
+    "schema"
+  ],
+  "log_sha256": "9891b40a0049d8e84f5f8404b4c57af7a130fccd33a27860d41c221899c2b10a",
+  "build_log_sha256": "876dcb57058577c97b8289fe955f04bbb76411abfa53a27fb6e5ac7745ad9f34",
+  "service_observed_binary_sha256": "4f601e93ccf74318950f62bea1a68425d33b2503ab80a4d3c9da28fde71507c2",
+  "post_ci_debug_binary_sha256": "420523a2c40c960de366b1dde0ab2e0a1a4c1846e40a6f2282262836604efd5a",
+  "scope": "Source CI and separate observation-only transient-service proof. No production deployment, new autonomous contract or full PLAN.md closeout."
+}

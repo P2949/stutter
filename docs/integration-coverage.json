@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "source_sha": "8f1af0f26a2e7f65303799dadd1ba539de9f4cae",
+  "source_sha": "1d5a3ef0458f08d7e50ff5c00c2dcc6a505d52d2",
   "recorded": "2026-11-08",
   "statuses": [
     "not_started",
@@ -366,17 +366,21 @@
         "stutter/src/wayland_presentation.rs"
       ],
       "status": "code_complete",
-      "g0": "measurement stages are distinct types (application frame, Gamescope presentation, Wayland presentation, KMS flip) and never relabeled; the live experiment clears pending source frames at every phase boundary (`clear_measurement_window`) so a window holds only its own phase; the supervised counterbalanced real-workload run engine in xtask runs the launch wrapper; the source is off by default by design (opt-in `autotune.frame_capture_root`); confined tail session, launch wrapper, launch discovery and verification, managed source polled by the runtime when autotune.frame_capture_root is set, per-tick attribution and quality gate, Gamescope help probe",
-      "g1": "none through the service: no live frame stream has been observed through it (EvidenceDeferred); a controlled vkcube run through the wrapper is an engineering check only",
+      "g0": "measurement stages are distinct types (application frame, Gamescope presentation, Wayland presentation, KMS flip) and never relabeled; the live experiment clears pending source frames at every phase boundary (`clear_measurement_window`) so a window holds only its own phase; the supervised counterbalanced real-workload run engine in xtask runs the launch wrapper; the source is off by default by design (opt-in `autotune.frame_capture_root`); confined tail session, launch wrapper, launch discovery and verification, managed source polled by the runtime when autotune.frame_capture_root is set, per-tick attribution and quality gate, Gamescope help probe; sole-renderer producer binding, per-batch competition checks, ambiguity taint and decision-stream source diagnostics; live competition reproduced and denied",
+      "g1": "Separate transient development controller observed genuine vkcube MangoHud frames; renderer competition withdrew attribution on the next tick. Poll-derived clock estimates 482-507 ms failed the unchanged 2 ms gate. No direct frame-primary keep, real-game benefit or Gamescope/Wayland/KMS physical qualification.",
       "runtime_availability": "MangoHud, Gamescope and vkcube present",
       "authority": "O/F",
-      "not_wired": "nothing",
+      "not_wired": "Qualified production-time/flush clock bound and further installed-service/phase/crash qualification remain deferred; no new frame-primary support claim.",
       "dispositions": [
         "FixtureVerified",
-        "EvidenceDeferred"
+        "EvidenceDeferred",
+        "RealObserved"
       ],
-      "evidence": [],
-      "unblock": null
+      "evidence": [
+        "docs/validation/controller-frame-2026-11-08/RESULTS.md",
+        "docs/validation/controller-frame-2026-11-08/summary.json"
+      ],
+      "unblock": "Verified producer timestamps and flush/error bounds meeting 2 ms, plus source-bound service acceptance; preserve fail-closed behavior. No threshold relaxation or GPU profile experiments."
     },
     {
       "id": "5.13",
@@ -821,21 +825,31 @@
         "W13"
       ],
       "anchors": [
-        "stutter/src/autotune/objective/source/mod.rs"
+        "stutter/src/autotune/objective/source/mod.rs",
+        "stutter/src/autotune/objective/source/collector.rs",
+        "stutter/src/autotune/objective/source/block.rs",
+        "stutter/src/autotune/runtime/kpi_source.rs",
+        "stutter/src/autotune/live_experiment/observation_study.rs",
+        "xtask/src/kpi_observation.rs"
       ],
       "status": "first_slice",
-      "g0": "typed local KPI contract, bound-process ingestion with live start-time verification, weighted aggregates, quantile-of-summaries labelling, eviction reporting, and a framed Unix-socket front end (kernel peer credentials, bounded lines and samples per connection)",
-      "g1": "none",
+      "g0": "Optional runtime KPI observer bound by kernel peer UID/PID, live start ticks, executable identity, boot and source/context epoch; nonblocking bounded ingestion, explicit batch mean/sum/max/last semantics, diagnostic legacy summaries, work/loss/freshness/completeness gates; frozen observation-only paired study reconstructs metrics and intervals from private collector-origin raw captures and cannot populate keep evidence. Positive, negative, spoofing, replay, drift, guardrail and false-interval fixtures pass.",
+      "g1": "At exact committed source 1d5a3ef0, a separate live-BPF observation-only transient controller accepted all 16 samples from eight completed CPU fixed-work runs, no denials, all decisions observed, clean process/socket stop. The independent-block harness also completed and verified raw reconstruction. This is KPI transport/measurement evidence, not HTTP/RPC or network outcome qualification.",
       "runtime_availability": "benchmark tools absent",
       "authority": "O/F/E",
-      "not_wired": "the KPI socket front end is not bound by the daemon; `stutter kpi-serve` binds it standalone for observation (confined socket, kernel-authenticated peer, one summary line per metric per connection, observation only); a bounded read-only Prometheus text-snapshot importer (series, label and freshness limits) and an offered-load/error comparator (`xtask benchmarks compare-load`: offered load must match, errors may not rise, then p99) exist; no OpenTelemetry reader and no daemon consumption",
+      "not_wired": "No new action/keep authority; normal daemon objectives do not consume generic KPI declarations. OpenTelemetry reader, typed namespace/socket experiment families, local offered-load network execution and exact installed-production acceptance remain incomplete. Existing Prometheus snapshot import and compare-load remain read-only.",
       "dispositions": [
         "FixtureVerified",
         "HardwareUnavailable",
-        "EvidenceDeferred"
+        "EvidenceDeferred",
+        "RealObserved"
       ],
-      "evidence": [],
-      "unblock": "Needs on the host: benchmark tools absent"
+      "evidence": [
+        "docs/KPI_OBSERVATION.md",
+        "docs/validation/kpi-observation-2026-11-08/service-summary.json",
+        "docs/validation/kpi-observation-2026-11-08/source-ci-receipt.json"
+      ],
+      "unblock": "HTTP/RPC/network physical proof requires an owned local disposable service, versioned benchmark tools, fixed offered load and direct latency/error/completion guards. CPU fixed-work transport evidence is not a network qualification; implementation items above remain pending."
     },
     {
       "id": "5.28",
@@ -1053,5 +1067,10 @@
       "evidence": [],
       "unblock": null
     }
-  ]
+  ],
+  "verification": {
+    "source_sha": "1d5a3ef0458f08d7e50ff5c00c2dcc6a505d52d2",
+    "source_ci": "docs/validation/kpi-observation-2026-11-08/source-ci-receipt.json",
+    "scope": "Source CI, fixture verification and observation-only transient-service KPI acceptance. G1 is separate from mechanism, benefit, autonomous authority and final deployment."
+  }
 }

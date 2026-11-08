@@ -1,0 +1,49 @@
+{
+  "evidence_kind": "controlled_real",
+  "source": "1d5a3ef0458f08d7e50ff5c00c2dcc6a505d52d2",
+  "binary": "/nix/store/5hw6qy0pglipjv8v0j445dprq3j2w055-stutter",
+  "binary_sha256": "4f601e93ccf74318950f62bea1a68425d33b2503ab80a4d3c9da28fde71507c2",
+  "started_unix": 1794177176.600752,
+  "mode": "observe",
+  "scheduler_monitor": "live BPF via lightweight preset",
+  "units": [
+    "stutter-kpi-observe-20261108",
+    "stutter-kpi-workload-20261108"
+  ],
+  "ended_unix": 1794177199.729715,
+  "ticks": 21,
+  "kpi_ticks": 21,
+  "peak_accepted": 16,
+  "peak_denied": 0,
+  "source_statuses": {
+    "observing": 18,
+    "target_identity_mismatch": 3
+  },
+  "decisions": {
+    "observed": 21
+  },
+  "raw_samples": 16,
+  "completed_work_records": 8,
+  "both_required_metrics_observed": true,
+  "last_denials": [
+    "None"
+  ],
+  "socket_cleaned": true,
+  "authorizes_mutation": false,
+  "raw_artifact_sha256": {
+    "observe.py": "825f7180535d727167ca6f1911b1d60955b0235b7503c528f713e0ba564bc626",
+    "run.log": "4fb558d174d5c64c888d89167cc1d5cd0e649a011b9fbe1a3a8d23774dbd60f9",
+    "started.json": "fcf1d727f60da3cd326f116fa3b231990acffd45b2d0866f8a99a33111a864e7",
+    "contract.json": "be5d75bd73785179d965dc33c6bff9bc1121a6173192b6234ebbf5e520c665ac",
+    "config.toml": "927acd61474288088fb06cecf27fe5eab5f61bca45c3b4970f54891ee9bc382b",
+    "workload.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "controller.log": "f524940d2e03383dd84cf883a493a11d94716139d19b0a5492a8878150a1dbe2",
+    "decisions.jsonl": "02557bcd48296903ab13e3a70cca0e85af641beb8b141b7010b0d27c6cb0d8f8",
+    "raw-samples.jsonl": "a9547b093e0de907878378ca8a154d598b4b695a92df3fde88e28969741a14ac",
+    "stutter-kpi-observe-20261108-state.txt": "0e8eb77b3eac22e950fb352ab2336bd60632af83e14901e6370bef0861f0a5fa",
+    "stutter-kpi-observe-20261108-after-stop.txt": "1a1c4b194123d6184764802dc3ad8f8c2807947c352f75653bad79fb4a4165e9",
+    "stutter-kpi-workload-20261108-state.txt": "0e8eb77b3eac22e950fb352ab2336bd60632af83e14901e6370bef0861f0a5fa",
+    "stutter-kpi-workload-20261108-after-stop.txt": "1a1c4b194123d6184764802dc3ad8f8c2807947c352f75653bad79fb4a4165e9",
+    "finished.json": "60a7eb6bac43a1bbb7d0e8d752ac9c22e4fe07b176b5cc25f03183fa9ab028b2"
+  }
+}
