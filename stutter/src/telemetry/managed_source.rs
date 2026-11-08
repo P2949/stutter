@@ -78,6 +78,9 @@ pub struct ManagedFrameSource {
     /// A phase-boundary drain ran out of bound: completeness is not known until the next one.
     boundary_unproven: bool,
     last_competition_check: Option<Instant>,
+    /// The bound of a phase-boundary drain: rounds of `drain_room` frames.
+    drain_rounds: usize,
+    drain_room: usize,
 }
 
 impl ManagedFrameSource {
@@ -102,6 +105,8 @@ impl ManagedFrameSource {
             unplaced: 0,
             boundary_unproven: false,
             last_competition_check: None,
+            drain_rounds: MAX_DRAIN_ROUNDS,
+            drain_room: DRAIN_ROOM,
         }
     }
 
@@ -175,8 +180,8 @@ impl ManagedFrameSource {
     pub fn discard_pending(&mut self, proc_root: &std::path::Path, now: Instant) -> Drain {
         let mut discarded = 0;
         let mut proven = false;
-        for _ in 0..MAX_DRAIN_ROUNDS {
-            let outcome = self.poll(proc_root, now, DRAIN_ROOM);
+        for _ in 0..self.drain_rounds {
+            let outcome = self.poll(proc_root, now, self.drain_room);
             if outcome.gone || outcome.frames.is_empty() {
                 proven = !outcome.gone;
                 break;
@@ -204,17 +209,29 @@ impl ManagedFrameSource {
             return;
         }
         self.last_competition_check = Some(now);
-        let renderers = super::renderers::count_mangohud_renderers(
+        let renderers = super::renderers::mangohud_renderers(
             proc_root,
             self.launch.record.pid,
             self.launch.record.start_ticks,
             self.uid,
         );
         let logs = super::renderers::live_log_count(&self.launch.dir, LIVE_LOG_WINDOW);
-        let renderer_competition = if renderers == 0 { 1 } else { renderers - 1 };
-        let log_competition = logs.saturating_sub(1);
-        let competing = renderer_competition + log_competition;
-        self.publish(|status| status.competing_targets = competing);
+        let renderer_competition = if renderers.is_empty() {
+            1
+        } else {
+            renderers.len() - 1
+        };
+        let competing = renderer_competition + logs.saturating_sub(1);
+        // With exactly one renderer the producer is that process, not the launcher above it: the
+        // target must then be the renderer or sit in its tree, and a sibling helper is not.
+        let sole = (renderers.len() == 1).then(|| renderers[0]);
+        self.publish(|status| {
+            status.competing_targets = competing;
+            if let Some((pid, start_ticks)) = sole {
+                status.claim.producer_pid = Some(pid);
+                status.claim.producer_start_ticks = Some(start_ticks);
+            }
+        });
     }
 
     /// Reads at most `room` frames. Opens the session once a log file exists in the capture
@@ -277,5 +294,14 @@ impl std::fmt::Debug for ManagedFrameSource {
             .field("launch_pid", &self.launch.record.pid)
             .field("session_open", &self.session.is_some())
             .finish()
+    }
+}
+
+#[cfg(test)]
+impl ManagedFrameSource {
+    /// Shrinks the drain bound so a test can prove the unfinished-drain case with a tiny backlog.
+    pub(crate) fn set_drain_bound_for_test(&mut self, rounds: usize, room: usize) {
+        self.drain_rounds = rounds;
+        self.drain_room = room;
     }
 }

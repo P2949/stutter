@@ -330,18 +330,20 @@ fn rejected_rows_and_missing_timestamps_are_loss_and_a_reset_clears_them() {
 
 #[test]
 fn an_unfinished_drain_at_a_phase_boundary_is_not_a_clean_boundary() {
-    // More frames waiting than the bounded drain can read: 64 rounds of 4096 plus some.
+    // More frames waiting than the bounded drain can read. The bound is shrunk to 2 rounds of 8
+    // frames so the case is proven with a small log; the production bound is 64 rounds of 4096.
     let mut csv = String::from("fps,frametime,elapsed\n");
-    for index in 1..=(64 * 4096 + 50u64) {
+    for index in 1..=(2 * 8 + 5u64) {
         csv.push_str(&format!("60,16.6,{}\n", index * 1_000_000));
     }
     let (base, proc_root, _dir, mut source) = launched("backlog", &csv);
+    source.set_drain_bound_for_test(2, 8);
     let now = Instant::now();
     source.record_alignment(0.5, 0);
     source.record_frame_age(now, Some(Duration::from_millis(5)));
     let first = source.discard_pending(&proc_root, now);
     assert!(!first.proven, "the bound ran out before the end of the log");
-    assert_eq!(first.discarded, 64 * 4096);
+    assert_eq!(first.discarded, 2 * 8);
     let status = source.shared_status().lock().unwrap().clone();
     assert_eq!(status.unexplained_gaps, 1);
     assert_eq!(
@@ -375,6 +377,51 @@ fn a_new_log_of_the_same_launch_is_a_new_generation_that_never_reuses_an_epoch()
     assert_ne!(
         second.frames[0].epoch, before,
         "an epoch number is never reused across logs"
+    );
+    fs::remove_dir_all(&base).unwrap();
+}
+
+#[test]
+fn with_one_renderer_the_producer_is_that_renderer_so_a_sibling_helper_is_not_the_target() {
+    let csv = "fps,frametime,elapsed\n60,16.6,1000000\n";
+    let (base, proc_root, _dir, mut source) = launched("sole-renderer", csv);
+    // A helper process under the same launcher that never draws.
+    process(&proc_root, 150, 77, 11);
+    let now = Instant::now();
+    source.poll(&proc_root, now, 100);
+    source.record_frame_age(now, Some(Duration::from_millis(5)));
+    source.record_alignment(0.5, 0);
+    let status = source.shared_status().lock().unwrap().clone();
+    assert_eq!(
+        status.claim.producer_pid,
+        Some(100),
+        "the producer is the renderer, not the launcher"
+    );
+
+    let against = |pid: u32, ticks: u64| {
+        let identity = identity_for(pid, ticks);
+        evaluate(
+            &status,
+            &TargetView {
+                identity: &identity,
+                boot_id: "boot",
+                uid: uid(),
+                focused: true,
+            },
+            &proc_root,
+            now,
+        )
+        .attribution
+    };
+    assert_eq!(
+        against(100, 5),
+        Attribution::ValidatedDirect,
+        "the renderer itself"
+    );
+    assert_ne!(
+        against(150, 11),
+        Attribution::ValidatedDirect,
+        "a sibling helper is not the producer's tree"
     );
     fs::remove_dir_all(&base).unwrap();
 }

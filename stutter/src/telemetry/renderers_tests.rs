@@ -32,16 +32,13 @@ fn exactly_the_mangohud_renderers_inside_the_launch_tree_are_counted() {
     process(&root, 101, 100, 6, HUD); // a renderer under it
     process(&root, 102, 101, 7, PLAIN); // a helper under the renderer
     process(&root, 103, 1, 8, HUD); // an unrelated MangoHud process
-    assert_eq!(count_mangohud_renderers(&root, 100, 5, uid), 1);
+    assert_eq!(mangohud_renderers(&root, 100, 5, uid).len(), 1);
     process(&root, 104, 100, 9, HUD); // a second renderer: now ambiguous
-    assert_eq!(count_mangohud_renderers(&root, 100, 5, uid), 2);
+    assert_eq!(mangohud_renderers(&root, 100, 5, uid).len(), 2);
     // A reused launcher pid (different start time) matches nothing.
-    assert_eq!(count_mangohud_renderers(&root, 100, 999, uid), 0);
+    assert_eq!(mangohud_renderers(&root, 100, 999, uid).len(), 0);
     // Another user's tree is not ours to count.
-    assert_eq!(
-        count_mangohud_renderers(&root, 100, 5, uid.wrapping_add(1)),
-        0
-    );
+    assert!(mangohud_renderers(&root, 100, 5, uid.wrapping_add(1)).is_empty());
     fs::remove_dir_all(&root).unwrap();
 }
 
@@ -50,11 +47,8 @@ fn a_launcher_that_is_itself_the_renderer_counts_and_a_missing_proc_counts_none(
     let root = tree("self");
     let uid = crate::syscall::geteuid();
     process(&root, 200, 1, 5, HUD);
-    assert_eq!(count_mangohud_renderers(&root, 200, 5, uid), 1);
-    assert_eq!(
-        count_mangohud_renderers(&root.join("absent"), 200, 5, uid),
-        0
-    );
+    assert_eq!(mangohud_renderers(&root, 200, 5, uid).len(), 1);
+    assert!(mangohud_renderers(&root.join("absent"), 200, 5, uid).is_empty());
     fs::remove_dir_all(&root).unwrap();
 }
 

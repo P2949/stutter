@@ -29,17 +29,18 @@ fn maps_mention_mangohud(path: &Path) -> bool {
     text.contains("libMangoHud")
 }
 
-/// Processes of `uid` at or below the launch process that have MangoHud mapped.
-pub fn count_mangohud_renderers(
+/// The processes (pid, start ticks) of `uid` at or below the launch process that have MangoHud
+/// mapped: the candidate producers of the log.
+pub fn mangohud_renderers(
     proc_root: &Path,
     launch_pid: u32,
     launch_start_ticks: u64,
     uid: u32,
-) -> usize {
+) -> Vec<(u32, u64)> {
     let Ok(entries) = fs::read_dir(proc_root) else {
-        return 0;
+        return Vec::new();
     };
-    let mut count = 0;
+    let mut found = Vec::new();
     for entry in entries.flatten().take(MAX_SCAN) {
         let Some(pid) = entry
             .file_name()
@@ -57,10 +58,10 @@ pub fn count_mangohud_renderers(
                 .iter()
                 .any(|&(ancestor, ticks)| ancestor == launch_pid && ticks == launch_start_ticks);
         if live.uid == uid && in_tree && maps_mention_mangohud(&entry.path().join("maps")) {
-            count += 1;
+            found.push((pid, live.start_ticks));
         }
     }
-    count
+    found
 }
 
 /// MangoHud CSV logs (not summaries) in `dir` written within `window`.
