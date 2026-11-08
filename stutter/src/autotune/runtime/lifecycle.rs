@@ -84,7 +84,7 @@ impl AutotuneRuntime {
             .actions
             .contains(&DaemonLifecycleAction::ClearMeasurementWindows)
         {
-            self.controller.window.clear();
+            self.clear_measurement_window();
         }
         let rollback = transition
             .actions

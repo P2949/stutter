@@ -14,8 +14,7 @@ use super::{
 use crate::{autotune::observation::WorkloadIdentity, game_run::LaunchRecord};
 
 fn scratch(name: &str) -> PathBuf {
-    let dir =
-        std::env::temp_dir().join(format!("stutter-launch-{name}-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("stutter-launch-{name}-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     dir
@@ -146,5 +145,33 @@ fn frames_flow_from_a_launch_log_and_trust_follows_the_live_target() {
     fs::remove_dir_all(proc_root.join("77")).unwrap();
     assert!(source.poll(&proc_root, now, 100).gone);
     assert!(!source.shared_status().lock().unwrap().healthy);
+    fs::remove_dir_all(&base).unwrap();
+}
+
+#[test]
+fn frames_produced_before_a_phase_boundary_are_discarded_and_later_ones_still_flow() {
+    let base = scratch("phase");
+    let proc_root = base.join("proc");
+    process(&proc_root, 77, 1, 9);
+    let dir = capture(&base, "run", &record(77, 9, uid()));
+    let log = dir.join("game_2026.csv");
+    let mut csv = String::from("fps,frametime,elapsed\n");
+    for index in 1..=10u64 {
+        csv.push_str(&format!("60,16.6,{}\n", index * 17_000_000));
+    }
+    fs::write(&log, &csv).unwrap();
+    let launch = verify_launch(&dir, uid(), "boot", &proc_root).unwrap();
+    let mut source = ManagedFrameSource::new(launch, uid());
+    let now = Instant::now();
+    // Ten frames from the previous phase are waiting; the boundary throws them away.
+    assert_eq!(source.discard_pending(&proc_root, now), 10);
+    assert!(source.poll(&proc_root, now, 100).frames.is_empty());
+    // Frames written after the boundary are delivered normally.
+    let mut file = fs::OpenOptions::new().append(true).open(&log).unwrap();
+    std::io::Write::write_all(&mut file, b"60,16.6,200000000\n60,16.6,217000000\n").unwrap();
+    assert_eq!(source.poll(&proc_root, now, 100).frames.len(), 2);
+    // A source that is gone discards nothing and does not panic.
+    fs::remove_dir_all(proc_root.join("77")).unwrap();
+    assert_eq!(source.discard_pending(&proc_root, now), 0);
     fs::remove_dir_all(&base).unwrap();
 }

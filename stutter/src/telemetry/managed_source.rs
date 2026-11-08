@@ -39,6 +39,9 @@ pub fn newest_frame_log(dir: &std::path::Path) -> Option<String> {
     logs.pop().map(|(_, name)| name)
 }
 
+const DRAIN_ROOM: usize = 4096;
+const MAX_DRAIN_ROUNDS: usize = 64;
+
 pub struct PollOutcome {
     pub frames: Vec<TailedFrame>,
     /// The launched process no longer exists or is not the one recorded.
@@ -81,6 +84,21 @@ impl ManagedFrameSource {
         if let Ok(mut status) = self.status.lock() {
             update(&mut status);
         }
+    }
+
+    /// Reads and discards every frame already in the log, so a phase boundary does not let frames
+    /// produced before it land in the next phase's window. Bounded: at most `MAX_DRAIN_ROUNDS`
+    /// polls of `DRAIN_ROOM` frames. Returns how many frames were discarded.
+    pub fn discard_pending(&mut self, proc_root: &std::path::Path, now: Instant) -> usize {
+        let mut discarded = 0;
+        for _ in 0..MAX_DRAIN_ROUNDS {
+            let outcome = self.poll(proc_root, now, DRAIN_ROOM);
+            if outcome.frames.is_empty() {
+                break;
+            }
+            discarded += outcome.frames.len();
+        }
+        discarded
     }
 
     /// Reads at most `room` frames. Opens the session once a log file exists in the capture

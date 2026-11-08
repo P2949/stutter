@@ -119,3 +119,14 @@ impl AutotuneRuntime {
         self.managed_source = Some(source);
     }
 }
+
+impl AutotuneRuntime {
+    /// Ends a measurement phase: clears the window and discards the frames already waiting in the
+    /// source, so nothing produced before the boundary is scored in the next phase.
+    pub(super) fn clear_measurement_window(&mut self) {
+        self.controller.window.clear();
+        if let Some(source) = self.managed_source.as_mut() {
+            source.discard_pending(Path::new("/proc"), Instant::now());
+        }
+    }
+}

@@ -169,7 +169,7 @@ impl AutotuneRuntime {
                 reasons,
                 ..
             } => {
-                self.controller.window.clear();
+                self.clear_measurement_window();
                 if self.live_experiments.has_active_experiment() {
                     self.rollback_live_experiment(
                         crate::audit::unix_nanos_now(),
@@ -192,7 +192,7 @@ impl AutotuneRuntime {
                 return self.evaluate_and_emit(Some("focus changed; measurement window reset"));
             }
             MonitorEvent::FocusCleared { reason, .. } => {
-                self.controller.window.clear();
+                self.clear_measurement_window();
                 if self.live_experiments.has_active_experiment() {
                     self.rollback_live_experiment(
                         crate::audit::unix_nanos_now(),
@@ -522,7 +522,7 @@ impl AutotuneRuntime {
         self.persist_candidate_memory();
 
         if outcome.clear_measurement_window {
-            self.controller.window.clear();
+            self.clear_measurement_window();
         }
 
         if let Some(context) = outcome.history_context {
