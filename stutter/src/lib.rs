@@ -1,5 +1,7 @@
 pub mod api;
 pub(crate) mod api_integration;
+#[cfg(test)]
+mod parser_robustness_tests;
 pub(crate) mod syscall;
 
 pub(crate) mod actions;

@@ -240,3 +240,43 @@ impl TapCreate for PathBuf {
         self
     }
 }
+
+#[test]
+fn arbitrary_frame_log_text_never_panics_and_damaged_logs_are_refused() {
+    let tokens = [
+        "fps",
+        "frametime",
+        "elapsed",
+        ",",
+        "\n",
+        "60",
+        "16.6",
+        "-1",
+        "NaN",
+        "1e999",
+        "abc",
+        "",
+        "\r",
+        "é",
+    ];
+    let mut state = 0xABCD_EF01_2345_6789u64;
+    for _ in 0..20_000 {
+        let mut text = String::new();
+        for _ in 0..(state % 20) {
+            state ^= state >> 12;
+            state ^= state << 25;
+            state ^= state >> 27;
+            text.push_str(
+                tokens[(state.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 33) as usize % tokens.len()],
+            );
+        }
+        state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        if let Some(times) = read_frametimes(&text, 0.0) {
+            // Anything accepted is a non-empty list of finite positive times.
+            assert!(
+                !times.is_empty() && times.iter().all(|t| t.is_finite() && *t > 0.0),
+                "{text:?}"
+            );
+        }
+    }
+}

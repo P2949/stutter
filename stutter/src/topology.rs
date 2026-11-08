@@ -256,6 +256,9 @@ fn read_cpu_list(path: &Path) -> Option<Vec<u32>> {
     parse_cpu_list(data.trim()).ok()
 }
 
+/// The largest CPU id accepted from any CPU list.
+pub(crate) const MAX_CPU_ID: u32 = 65_535;
+
 pub(crate) fn parse_cpu_list(value: &str) -> anyhow::Result<Vec<u32>> {
     let mut cpus = Vec::new();
 
@@ -274,6 +277,10 @@ pub(crate) fn parse_cpu_list(value: &str) -> anyhow::Result<Vec<u32>> {
 
         if start > end {
             anyhow::bail!("invalid CPU range {part}: start is greater than end");
+        }
+        // A short string must not expand into billions of ids: no kernel has more CPUs than this.
+        if end > MAX_CPU_ID {
+            anyhow::bail!("CPU id {end} is above the supported maximum {MAX_CPU_ID}");
         }
 
         cpus.extend(start..=end);

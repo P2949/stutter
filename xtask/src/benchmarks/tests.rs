@@ -171,3 +171,37 @@ fn hyperfine_exports_import_as_samples_and_damaged_ones_are_refused() {
         assert!(hyperfine::import(bad.as_bytes()).is_err(), "{bad}");
     }
 }
+
+/// Seeded pseudo-random bytes: failures reproduce.
+fn noise(seed: u64, len: usize) -> Vec<u8> {
+    let mut state = seed.max(1);
+    (0..len)
+        .map(|_| {
+            state ^= state >> 12;
+            state ^= state << 25;
+            state ^= state >> 27;
+            (state.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 56) as u8
+        })
+        .collect()
+}
+
+#[test]
+fn arbitrary_bytes_never_panic_the_importers_or_become_an_accepted_artifact() {
+    for seed in 1..400 {
+        let bytes = noise(seed, (seed as usize * 7) % 600);
+        assert!(hyperfine::import(&bytes).is_err(), "seed {seed}");
+        assert!(
+            serde_json::from_slice::<ArtifactManifest>(&bytes).is_err(),
+            "seed {seed}"
+        );
+    }
+    // JSON-shaped but hostile: still refused or harmlessly empty, never a panic.
+    for hostile in [
+        r#"{"results":[{"times":[1e999]}]}"#,
+        r#"{"results":[{"times":[0.1,null]}]}"#,
+        r#"{"results":"x"}"#,
+        r#"[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[["#,
+    ] {
+        assert!(hyperfine::import(hostile.as_bytes()).is_err(), "{hostile}");
+    }
+}

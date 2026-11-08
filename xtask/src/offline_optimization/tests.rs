@@ -191,3 +191,27 @@ fn the_build_id_is_read_from_the_note_section_and_garbage_is_refused() {
     big_endian[5] = 2;
     assert_eq!(parse_build_id(&big_endian), None);
 }
+
+#[test]
+fn a_corrupted_elf_never_panics_or_reads_out_of_bounds() {
+    let good = synthetic_elf(&[0xde, 0xad, 0xbe, 0xef]);
+    let mut state = 0x1234_5678_9ABC_DEF0u64;
+    let mut next = move || {
+        state ^= state >> 12;
+        state ^= state << 25;
+        state ^= state >> 27;
+        state.wrapping_mul(0x2545_F491_4F6C_DD1D)
+    };
+    for _ in 0..20_000 {
+        let mut corrupted = good.clone();
+        for _ in 0..(next() % 6 + 1) {
+            let at = (next() % corrupted.len() as u64) as usize;
+            corrupted[at] = (next() >> 56) as u8;
+        }
+        if next() % 4 == 0 {
+            corrupted.truncate((next() % corrupted.len() as u64) as usize);
+        }
+        // Whatever the corruption, the answer is a build id or nothing: no panic.
+        let _ = parse_build_id(&corrupted);
+    }
+}
