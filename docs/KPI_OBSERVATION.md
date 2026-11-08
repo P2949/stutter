@@ -13,6 +13,11 @@ The collector creates `kpi.sock` with mode 0600 and refuses an existing path. Th
 bounded regular JSON `KpiContract` file. Its binding must match the currently resolved root's
 UID, PID and live start time. Executable identity, boot and collector session are tracked as well.
 The wire protocol is newline-delimited `Sample` JSON, with one `ok` or typed denial per line.
+The producer and observer must share the active Linux time namespace: `CLOCK_MONOTONIC` is scoped
+to that namespace ([Linux time namespace contract](https://man7.org/linux/man-pages/man7/time_namespaces.7.html)).
+Missing, different or changed namespace identities withdraw this source; no offset is guessed.
+Captures record the namespace and executable identity. Older diagnostic JSON without this added
+namespace field still decodes and does not acquire capture provenance.
 An example after completing known work is:
 
 ```json

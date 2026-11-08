@@ -238,6 +238,28 @@ fn only_a_clean_validated_application_stream_is_frame_primary() {
 }
 
 #[test]
+fn uncertainty_must_be_finite_nonnegative_and_within_the_existing_bound() {
+    for value in [f64::NEG_INFINITY, -1.0, f64::INFINITY, f64::NAN, 2.000_001] {
+        let quality = StreamQuality {
+            alignment_uncertainty_ms: value,
+            ..good_quality()
+        };
+        assert_eq!(
+            quality.frame_primary_eligible(),
+            Err(QualityDenial::AlignmentUncertain),
+            "{value}"
+        );
+    }
+    for value in [0.0, 0.5, 2.0] {
+        let quality = StreamQuality {
+            alignment_uncertainty_ms: value,
+            ..good_quality()
+        };
+        assert_eq!(quality.frame_primary_eligible(), Ok(()));
+    }
+}
+
+#[test]
 fn a_rotated_source_starts_a_new_epoch() {
     let id = TelemetryStreamId::new(
         key(100, 5),

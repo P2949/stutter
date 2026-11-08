@@ -39,6 +39,9 @@ pub(super) fn load(
         // Failure only withdraws this optional source. Runnable-only behavior still works.
         Err(error) => {
             log::warn!("KPI observer unavailable: {error}");
+            let denial = error
+                .downcast_ref::<crate::telemetry::proc_view::ClockNamespaceDenial>()
+                .map_or("invalid_configuration", |denial| denial.code());
             (
                 None,
                 Some(KpiObservation {
@@ -49,10 +52,11 @@ pub(super) fn load(
                         pid: 0,
                         start_ticks: 0,
                     },
+                    clock_namespace: None,
                     status: "unavailable_contract_or_socket".into(),
                     accepted_samples: 0,
                     denied_samples: 0,
-                    last_denial: Some("invalid_configuration".into()),
+                    last_denial: Some(denial.into()),
                     metrics: Vec::new(),
                     authorizes_mutation: false,
                 }),

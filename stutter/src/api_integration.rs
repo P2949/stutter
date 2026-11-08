@@ -43,7 +43,10 @@ pub mod telemetry {
             gamescope::{GamescopeSupport, probe as probe_gamescope},
             identity::*,
             live_source::*,
-            proc_view::live_process,
+            proc_view::{
+                ClockNamespaceDenial, ClockNamespaceIdentity, live_process,
+                shared_monotonic_namespace,
+            },
             quality::*,
             registration::*,
             session::*,

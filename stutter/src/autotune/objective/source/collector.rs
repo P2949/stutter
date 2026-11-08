@@ -33,6 +33,8 @@ pub struct KpiObservation {
     pub contract_digest: String,
     pub source_session: String,
     pub binding: super::SourceBinding,
+    #[serde(default)]
+    pub clock_namespace: Option<crate::telemetry::proc_view::ClockNamespaceIdentity>,
     pub status: String,
     pub accepted_samples: u64,
     pub denied_samples: u64,
@@ -61,6 +63,7 @@ pub struct KpiCollector {
     context_epoch: u64,
     started_ns: u64,
     executable_identity: (u64, u64),
+    clock_namespace: crate::telemetry::proc_view::ClockNamespaceIdentity,
     store: SampleStore,
     connection: Option<Connection>,
     context_active: bool,
@@ -110,6 +113,14 @@ impl KpiCollector {
             (executable.dev(), executable.ino()) == self.executable_identity,
             "producer executable changed before capture"
         );
+        anyhow::ensure!(
+            crate::telemetry::proc_view::shared_monotonic_namespace(
+                Path::new("/proc"),
+                binding.pid,
+                std::process::id()
+            )? == self.clock_namespace,
+            "clock namespace changed before capture"
+        );
         let now_ns = crate::syscall::clock_gettime_ns(libc::CLOCK_MONOTONIC)?;
         anyhow::ensure!(request.to_ns <= now_ns, "block ends in the future");
         anyhow::ensure!(
@@ -126,6 +137,8 @@ impl KpiCollector {
             request,
             self.session_identity(),
             self.boot_id.clone(),
+            self.clock_namespace,
+            self.executable_identity,
             &self.contract,
             &self.store,
         )
@@ -145,6 +158,11 @@ impl KpiCollector {
             "KPI producer identity has changed"
         );
         let executable = std::fs::metadata(format!("/proc/{}/exe", contract.binding.pid))?;
+        let clock_namespace = crate::telemetry::proc_view::shared_monotonic_namespace(
+            Path::new("/proc"),
+            contract.binding.pid,
+            std::process::id(),
+        )?;
         let boot_id = crate::telemetry::identity::read_boot_id()?;
         let listener =
             crate::telemetry::registration::bind_fresh(dir, "kpi.sock", contract.binding.uid)
@@ -163,6 +181,7 @@ impl KpiCollector {
             context_epoch: 0,
             started_ns: crate::syscall::clock_gettime_ns(libc::CLOCK_MONOTONIC)?,
             executable_identity: (executable.dev(), executable.ino()),
+            clock_namespace,
             store: SampleStore::new(contract.clone()),
             contract,
             connection: None,
@@ -203,6 +222,15 @@ impl KpiCollector {
         let active = active
             && std::fs::metadata(proc_root.join(binding.pid.to_string()).join("exe"))
                 .is_ok_and(|meta| (meta.dev(), meta.ino()) == self.executable_identity);
+        let clock = active.then(|| {
+            crate::telemetry::proc_view::shared_monotonic_namespace(
+                proc_root,
+                binding.pid,
+                std::process::id(),
+            )
+        });
+        let clock_matches = clock.is_some_and(|result| result == Ok(self.clock_namespace));
+        let active = active && clock_matches;
         if !active {
             if self.context_active {
                 self.context_epoch = self.context_epoch.saturating_add(1);
@@ -211,7 +239,12 @@ impl KpiCollector {
             self.context_active = false;
             self.connection = None;
             self.loss_since_ns = None;
-            return self.observation("target_identity_mismatch", now_ns, window_ns);
+            let status = match clock {
+                Some(Err(denial)) => denial.code(),
+                Some(Ok(_)) if !clock_matches => "clock_namespace_changed",
+                _ => "target_identity_mismatch",
+            };
+            return self.observation(status, now_ns, window_ns);
         }
         if !self.context_active {
             self.context_started_ns = now_ns;
@@ -369,6 +402,7 @@ impl KpiCollector {
             contract_digest: self.digest.clone(),
             source_session: self.session_identity(),
             binding: self.contract.binding,
+            clock_namespace: Some(self.clock_namespace),
             status: status.to_owned(),
             accepted_samples: self.accepted,
             denied_samples: self.denied,
@@ -592,6 +626,31 @@ mod tests {
                     to_ns: now(),
                 })
                 .is_err()
+        );
+    }
+
+    #[test]
+    fn a_clock_namespace_change_retires_the_source_and_diagnostic_old_json_still_loads() {
+        let scratch = Scratch::new("clock-drift");
+        let bound = binding(std::process::id());
+        let target = Some((bound.pid, bound.start_ticks));
+        let mut collector = collector(&scratch.0, bound);
+        let good = collector.poll(target, Path::new("/proc"), now(), 1);
+        assert_eq!(good.status, "observing");
+        assert!(good.clock_namespace.is_some());
+        let mut old = serde_json::to_value(&good).unwrap();
+        old.as_object_mut().unwrap().remove("clock_namespace");
+        let decoded: KpiObservation = serde_json::from_value(old).unwrap();
+        assert!(decoded.clock_namespace.is_none());
+        collector.clock_namespace.inode ^= 1;
+        let changed = collector.poll(target, Path::new("/proc"), now(), 1);
+        assert_eq!(changed.status, "clock_namespace_changed");
+        assert_ne!(changed.source_session, good.source_session);
+        assert!(
+            changed
+                .metrics
+                .iter()
+                .all(|metric| metric.aggregate.is_none())
         );
     }
 }

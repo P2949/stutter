@@ -43,7 +43,8 @@ impl StreamQuality {
         if self.unexplained_sequence_gaps > 0 || self.dropped_frames > 0 {
             return Err(QualityDenial::UnexplainedLoss);
         }
-        if self.alignment_uncertainty_ms.is_nan()
+        if !self.alignment_uncertainty_ms.is_finite()
+            || self.alignment_uncertainty_ms < 0.0
             || self.alignment_uncertainty_ms > MAX_ALIGNMENT_UNCERTAINTY_MS
         {
             return Err(QualityDenial::AlignmentUncertain);
