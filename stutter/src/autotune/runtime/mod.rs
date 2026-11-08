@@ -17,6 +17,7 @@ mod phase;
 mod plan_output;
 pub(crate) mod planning;
 mod restore;
+mod sensor_hub;
 pub(crate) mod session;
 mod start;
 mod state_snapshot;
@@ -110,6 +111,8 @@ pub struct AutotuneRuntime {
     managed_source: Option<crate::telemetry::managed_source::ManagedFrameSource>,
     frame_epoch: u64,
     last_frame_discovery: Option<std::time::Instant>,
+    /// Always-on cheap sensors, sampled once per evaluation.
+    sensor_hub: sensor_hub::SensorHub,
 }
 
 #[cfg(test)]

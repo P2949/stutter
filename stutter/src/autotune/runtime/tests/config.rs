@@ -119,3 +119,21 @@ fn worker_only_service_refuses_in_process_managed_missing_socket_and_wrong_mode(
     config.daemon_config.autotune.privileged_worker_socket = None;
     assert!(validate_runtime_config(&config).is_err());
 }
+
+#[test]
+fn the_runtime_samples_system_psi_into_every_observation_without_acting_on_it() {
+    let mut config = AutotuneRuntimeConfig::suggest(None, Some(std::process::id()), None);
+    config.history_log = None;
+    let mut runtime = AutotuneRuntime::new(config);
+    let first = runtime.sensor_hub.sample();
+    let second = runtime.sensor_hub.sample();
+    // The real /proc/pressure exists on this kernel; a host without PSI reports why instead.
+    if runtime.sensor_hub.unavailable().is_empty() {
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].sensor, "psi_system");
+        assert!(second[0].values.contains_key("cpu_some_avg10"));
+        assert!(first[0].monotonic_ns <= second[0].monotonic_ns);
+    } else {
+        assert!(first.is_empty(), "{:?}", runtime.sensor_hub.unavailable());
+    }
+}

@@ -143,7 +143,7 @@ impl Sensor for PsiSensor {
         };
         let has_delta = values.keys().any(|key| key.ends_with("_stall_us"));
         SensorReading {
-            sensor: self.descriptor().id,
+            sensor: self.descriptor().id.to_owned(),
             monotonic_ns,
             scope: self.descriptor().scope,
             quality: if has_delta {

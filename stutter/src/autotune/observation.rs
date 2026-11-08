@@ -162,6 +162,9 @@ pub struct AutotuneObservation {
     /// Other tuning owners on the host (GameMode, LACT, sched_ext); `None` when not probed.
     #[serde(default)]
     pub external_owners: Option<crate::integrations::OwnerReport>,
+    /// The latest readings of the always-on read-only sensors (system PSI).
+    #[serde(default)]
+    pub sensor_readings: Vec<crate::autotune::sensors::SensorReading>,
     pub active_config_snapshot: Option<ActiveConfigSnapshot>,
     pub system_context: Option<SystemContextSnapshot>,
 
@@ -202,6 +205,7 @@ impl Default for AutotuneObservation {
             protected_tasks: Vec::new(),
             background_offenders: Vec::new(),
             external_owners: None,
+            sensor_readings: Vec::new(),
             active_config_snapshot: None,
             system_context: None,
             frame_count: 0,

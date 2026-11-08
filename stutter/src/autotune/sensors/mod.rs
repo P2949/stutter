@@ -64,7 +64,7 @@ pub enum SensorHealth {
 /// One reading. `monotonic_ns` is the caller's monotonic clock so readings order and age correctly.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SensorReading {
-    pub sensor: &'static str,
+    pub sensor: String,
     pub monotonic_ns: u64,
     pub scope: SensorScope,
     pub quality: ObjectiveSignalQuality,
@@ -75,7 +75,7 @@ pub struct SensorReading {
     pub provenance: String,
 }
 
-pub trait Sensor {
+pub trait Sensor: Send {
     fn descriptor(&self) -> SensorDescriptor;
     /// Probes the real feature and permission now.
     fn probe(&self) -> Availability;

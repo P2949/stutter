@@ -201,6 +201,7 @@ impl AutotuneObservationBuilder {
                 .filter(|offender| !runnable_members.contains(&offender.pid.as_u32()))
                 .collect(),
             external_owners: None,
+            sensor_readings: Vec::new(),
             active_config_snapshot: Some(active_config_snapshot),
             system_context: Some(system_context),
             frame_count: window_score.frame_count,

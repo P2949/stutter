@@ -272,6 +272,7 @@ impl AutotuneRuntime {
 
         let mut observation = self.build_observation();
         observation.external_owners = self.current_external_owners();
+        observation.sensor_readings = self.sensor_hub.sample();
         self.last_observation = observation.clone();
         if !observation.target_present && self.has_kept_actions() && !self.has_active_experiment() {
             // The workload the kept actions were kept for is gone.

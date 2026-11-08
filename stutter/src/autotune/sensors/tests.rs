@@ -89,7 +89,7 @@ impl Sensor for Fake {
     }
     fn sample(&mut self, monotonic_ns: u64) -> SensorReading {
         SensorReading {
-            sensor: self.id,
+            sensor: self.id.to_owned(),
             monotonic_ns,
             scope: SensorScope::System,
             quality: ObjectiveSignalQuality::Direct,
