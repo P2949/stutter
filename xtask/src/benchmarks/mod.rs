@@ -173,6 +173,18 @@ pub enum BenchmarksCommand {
     ImportHyperfine { file: PathBuf },
     /// Read sysbench, stress-ng, benchstat or Phoronix output as typed, non-proof scores.
     ImportScores { tool: ScoreTool, file: PathBuf },
+    /// Compare two load-test runs (JSON `LoadRun` files): offered load must match, errors may not
+    /// rise, then p99 is compared.
+    CompareLoad {
+        baseline: PathBuf,
+        candidate: PathBuf,
+        /// Largest allowed difference in offered load, percent.
+        #[arg(long, default_value_t = 5)]
+        load_tolerance_percent: u32,
+        /// Smallest p99 change that counts as faster or slower, percent.
+        #[arg(long, default_value_t = 10)]
+        effect_percent: u32,
+    },
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug, Eq, PartialEq)]
@@ -192,6 +204,7 @@ pub enum ScoreTool {
     TraceCmd,
     PerfStat,
     PerfReport,
+    Prometheus,
 }
 
 fn import_scores(tool: ScoreTool, file: &Path) -> anyhow::Result<String> {
@@ -223,6 +236,12 @@ fn import_scores(tool: ScoreTool, file: &Path) -> anyhow::Result<String> {
         ScoreTool::PerfReport => {
             serde_json::to_string_pretty(&diagnostics::import_perf_report(&text)?)?
         }
+        ScoreTool::Prometheus => {
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_millis() as u64;
+            serde_json::to_string_pretty(&scores::import_prometheus(&text, now_ms, 60_000)?)?
+        }
         ScoreTool::TraceCmd => {
             serde_json::to_string_pretty(&diagnostics::import_trace_cmd(&text)?)?
         }
@@ -231,6 +250,28 @@ fn import_scores(tool: ScoreTool, file: &Path) -> anyhow::Result<String> {
 
 pub fn run(args: &BenchmarksArgs) -> anyhow::Result<()> {
     match &args.command {
+        BenchmarksCommand::CompareLoad {
+            baseline,
+            candidate,
+            load_tolerance_percent,
+            effect_percent,
+        } => {
+            let read = |path: &Path| -> anyhow::Result<scores::LoadRun> {
+                ensure!(
+                    fs::metadata(path)?.len() <= MAX_ARTIFACT_BYTES,
+                    "file is over the size limit"
+                );
+                serde_json::from_slice(&fs::read(path)?).context("not a load run")
+            };
+            let verdict = scores::compare_load(
+                read(baseline)?,
+                read(candidate)?,
+                f64::from(*load_tolerance_percent),
+                f64::from(*effect_percent),
+            )?;
+            println!("{verdict:?}");
+            Ok(())
+        }
         BenchmarksCommand::ImportScores { tool, file } => {
             println!("{}", import_scores(*tool, file)?);
             Ok(())

@@ -46,3 +46,116 @@ fn malformed_empty_or_foreign_input_is_an_error_never_a_zero() {
     assert!(import_phoronix("<xml/>").is_err());
     assert!(import_phoronix("<PhoronixTestSuite><Result><Title>t</Title><Value>NaN</Value></Result></PhoronixTestSuite>").is_err());
 }
+
+#[test]
+fn a_prometheus_snapshot_is_bounded_read_only_and_drops_stale_or_non_finite_samples() {
+    let text = "# HELP up x\n# TYPE up gauge\nup{job=\"app\"} 1\nhttp_requests_total{code=\"200\"} 42 9000\nold_metric 5 1000\nbad NaN\ninf_metric +Inf\nplain 7\n";
+    let snapshot = import_prometheus(text, 10_000, 5_000).unwrap();
+    let labels: Vec<&str> = snapshot.scores.iter().map(|s| s.label.as_str()).collect();
+    assert_eq!(
+        labels,
+        [
+            "up{job=\"app\"}",
+            "http_requests_total{code=\"200\"}",
+            "plain"
+        ]
+    );
+    assert!(!snapshot.application_proof);
+    let many = format!(
+        "m{{{}}} 1\n",
+        (0..9)
+            .map(|i| format!("l{i}=\"v\""))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    assert!(import_prometheus(&many, 0, 1).is_err(), "too many labels");
+    let long = format!("m{{l=\"{}\"}} 1\n", "x".repeat(200));
+    assert!(import_prometheus(&long, 0, 1).is_err(), "label too long");
+    assert!(
+        import_prometheus("m{l=\"x\" 1\n", 0, 1).is_err(),
+        "unclosed label set"
+    );
+    assert!(import_prometheus("# only comments\n", 0, 1).is_err());
+}
+
+#[test]
+fn a_load_comparison_needs_matched_offered_load_and_never_rewards_more_errors() {
+    let base = LoadRun {
+        offered_per_second: 1000.0,
+        completed: 9_900,
+        errors: 100,
+        p99_ms: 50.0,
+    };
+    let faster = LoadRun {
+        p99_ms: 35.0,
+        ..base
+    };
+    assert_eq!(
+        compare_load(base, faster, 5.0, 10.0).unwrap(),
+        LoadVerdict::CandidateFaster
+    );
+    let slower = LoadRun {
+        p99_ms: 70.0,
+        ..base
+    };
+    assert_eq!(
+        compare_load(base, slower, 5.0, 10.0).unwrap(),
+        LoadVerdict::CandidateSlower
+    );
+    assert_eq!(
+        compare_load(
+            base,
+            LoadRun {
+                p99_ms: 49.0,
+                ..base
+            },
+            5.0,
+            10.0
+        )
+        .unwrap(),
+        LoadVerdict::Equivalent
+    );
+    let throttled = LoadRun {
+        offered_per_second: 500.0,
+        p99_ms: 10.0,
+        ..base
+    };
+    assert_eq!(
+        compare_load(base, throttled, 5.0, 10.0).unwrap(),
+        LoadVerdict::OfferedLoadDiffers
+    );
+    let erroring = LoadRun {
+        completed: 9_000,
+        errors: 1_000,
+        p99_ms: 10.0,
+        ..base
+    };
+    assert_eq!(
+        compare_load(base, erroring, 5.0, 10.0).unwrap(),
+        LoadVerdict::MoreErrors
+    );
+    assert!(
+        compare_load(
+            LoadRun {
+                p99_ms: f64::NAN,
+                ..base
+            },
+            base,
+            5.0,
+            10.0
+        )
+        .is_err()
+    );
+    assert!(
+        compare_load(
+            base,
+            LoadRun {
+                completed: 0,
+                ..base
+            },
+            5.0,
+            10.0
+        )
+        .is_err()
+    );
+}

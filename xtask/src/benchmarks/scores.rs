@@ -218,3 +218,134 @@ pub fn import_phoronix(xml: &str) -> anyhow::Result<ImportedScores> {
         application_proof: false,
     })
 }
+
+/// Most series and labels a Prometheus snapshot may carry before it is refused.
+const MAX_SERIES: usize = 10_000;
+const MAX_LABELS: usize = 8;
+const MAX_LABEL_BYTES: usize = 128;
+
+/// A Prometheus text-exposition snapshot as typed samples. Read-only and bounded: a snapshot with
+/// more series, more labels per series, or longer label values than the limits is refused, `NaN`
+/// and infinite values are skipped, and a sample older than `max_age_ms` against `now_ms` is
+/// dropped (a sample with no timestamp is taken as fresh because the scrape time is the
+/// snapshot's). Comments, `# TYPE` and `# HELP` lines are not data.
+pub fn import_prometheus(
+    text: &str,
+    now_ms: u64,
+    max_age_ms: u64,
+) -> anyhow::Result<ImportedScores> {
+    let mut scores = Vec::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let (series, rest) = match line.find('{') {
+            Some(open) => {
+                let close = line[open..]
+                    .find('}')
+                    .map(|i| open + i)
+                    .context("a series has an unclosed label set")?;
+                let labels = &line[open + 1..close];
+                ensure!(
+                    labels.split(',').filter(|l| !l.trim().is_empty()).count() <= MAX_LABELS,
+                    "a series has more than {MAX_LABELS} labels"
+                );
+                ensure!(
+                    labels.split(',').all(|l| l.len() <= MAX_LABEL_BYTES),
+                    "a label is longer than {MAX_LABEL_BYTES} bytes"
+                );
+                (line[..close + 1].to_owned(), line[close + 1..].trim())
+            }
+            None => match line.split_once(char::is_whitespace) {
+                Some((name, rest)) => (name.to_owned(), rest.trim()),
+                None => continue,
+            },
+        };
+        let mut fields = rest.split_whitespace();
+        let Some(value) = fields.next().and_then(|v| v.parse::<f64>().ok()) else {
+            continue;
+        };
+        if !value.is_finite() {
+            continue;
+        }
+        if let Some(stamp) = fields.next().and_then(|t| t.parse::<u64>().ok())
+            && now_ms.saturating_sub(stamp) > max_age_ms
+        {
+            continue;
+        }
+        ensure!(scores.len() < MAX_SERIES, "more than {MAX_SERIES} series");
+        scores.push(Score {
+            tool: "prometheus".to_owned(),
+            label: series,
+            value,
+            unit: String::new(),
+            higher_is_better: None,
+        });
+    }
+    ensure!(!scores.is_empty(), "the snapshot has no usable sample");
+    Ok(ImportedScores {
+        tool: "prometheus".to_owned(),
+        scores,
+        application_proof: false,
+    })
+}
+
+/// One load-test run: what was offered, what completed, what failed.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LoadRun {
+    pub offered_per_second: f64,
+    pub completed: u64,
+    pub errors: u64,
+    pub p99_ms: f64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LoadVerdict {
+    /// The two runs offered materially different load: their latencies are not comparable.
+    OfferedLoadDiffers,
+    /// The candidate failed more requests: faster errors are not a win.
+    MoreErrors,
+    CandidateFaster,
+    CandidateSlower,
+    Equivalent,
+}
+
+/// Compares a baseline and a candidate load run. Offered load must match within
+/// `load_tolerance_percent`, error rates may not rise, and only then is p99 compared against
+/// `effect_percent`. Offered-load comparison first keeps a rate-limited run from looking faster.
+pub fn compare_load(
+    baseline: LoadRun,
+    candidate: LoadRun,
+    load_tolerance_percent: f64,
+    effect_percent: f64,
+) -> anyhow::Result<LoadVerdict> {
+    for run in [baseline, candidate] {
+        ensure!(
+            run.offered_per_second.is_finite()
+                && run.offered_per_second > 0.0
+                && run.p99_ms.is_finite()
+                && run.p99_ms > 0.0
+                && run.completed > 0,
+            "a load run has a non-positive or non-finite figure"
+        );
+    }
+    let load_gap = (candidate.offered_per_second - baseline.offered_per_second).abs()
+        / baseline.offered_per_second
+        * 100.0;
+    if load_gap > load_tolerance_percent {
+        return Ok(LoadVerdict::OfferedLoadDiffers);
+    }
+    let rate = |run: LoadRun| run.errors as f64 / (run.completed + run.errors) as f64;
+    if rate(candidate) > rate(baseline) {
+        return Ok(LoadVerdict::MoreErrors);
+    }
+    let change = (baseline.p99_ms - candidate.p99_ms) / baseline.p99_ms * 100.0;
+    Ok(if change > effect_percent {
+        LoadVerdict::CandidateFaster
+    } else if change < -effect_percent {
+        LoadVerdict::CandidateSlower
+    } else {
+        LoadVerdict::Equivalent
+    })
+}

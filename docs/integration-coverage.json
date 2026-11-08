@@ -828,7 +828,7 @@
       "g1": "none",
       "runtime_availability": "benchmark tools absent",
       "authority": "O/F/E",
-      "not_wired": "the KPI socket front end is not bound by the daemon; `stutter kpi-serve` binds it standalone for observation (confined socket, kernel-authenticated peer, one summary line per metric per connection, observation only); no load comparator, no Prometheus or OpenTelemetry readers",
+      "not_wired": "the KPI socket front end is not bound by the daemon; `stutter kpi-serve` binds it standalone for observation (confined socket, kernel-authenticated peer, one summary line per metric per connection, observation only); a bounded read-only Prometheus text-snapshot importer (series, label and freshness limits) and an offered-load/error comparator (`xtask benchmarks compare-load`: offered load must match, errors may not rise, then p99) exist; no OpenTelemetry reader and no daemon consumption",
       "dispositions": [
         "FixtureVerified",
         "HardwareUnavailable",
