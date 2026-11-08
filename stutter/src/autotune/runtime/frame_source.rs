@@ -57,7 +57,7 @@ pub(super) fn launch_matches_target(
 
 impl AutotuneRuntime {
     /// Finds, polls and retires the managed frame source. A no-op without a configured root.
-    pub(super) fn poll_frame_source(&mut self) {
+    pub(super) fn poll_frame_source(&mut self, identity: Option<&WorkloadIdentity>) {
         let Some(root) = self
             .config
             .daemon_config
@@ -70,7 +70,7 @@ impl AutotuneRuntime {
         let proc_root = Path::new("/proc");
         let now = Instant::now();
         if self.managed_source.is_none() {
-            self.discover_frame_source(&root, proc_root, now);
+            self.discover_frame_source(&root, proc_root, now, identity);
         }
         let Some(source) = self.managed_source.as_mut() else {
             return;
@@ -110,7 +110,13 @@ impl AutotuneRuntime {
         }
     }
 
-    fn discover_frame_source(&mut self, root: &Path, proc_root: &Path, now: Instant) {
+    fn discover_frame_source(
+        &mut self,
+        root: &Path,
+        proc_root: &Path,
+        now: Instant,
+        identity: Option<&WorkloadIdentity>,
+    ) {
         if self
             .last_frame_discovery
             .is_some_and(|at| now.duration_since(at) < DISCOVERY_INTERVAL)
@@ -118,7 +124,7 @@ impl AutotuneRuntime {
             return;
         }
         self.last_frame_discovery = Some(now);
-        let Some(identity) = self.last_observation.workload_identity.clone() else {
+        let Some(identity) = identity.cloned() else {
             return;
         };
         let Ok(boot_id) = read_boot_id() else {
@@ -147,5 +153,36 @@ impl AutotuneRuntime {
         if let Some(source) = self.managed_source.as_mut() {
             source.discard_pending(Path::new("/proc"), Instant::now());
         }
+    }
+}
+
+impl AutotuneRuntime {
+    /// Whether frame capture is configured at all; without it nothing here runs.
+    pub(super) fn frame_capture_enabled(&self) -> bool {
+        self.config
+            .daemon_config
+            .autotune
+            .frame_capture_root
+            .is_some()
+    }
+
+    /// Retires a source that does not belong to the target *as it is now*. A focus change, a
+    /// replaced process or a lost identity ends the source and its attestation at once, before any
+    /// frame from it can be read for, or attested against, the new target.
+    pub(super) fn reconcile_frame_source(&mut self, identity: Option<&WorkloadIdentity>) {
+        let Some(source) = self.managed_source.as_ref() else {
+            return;
+        };
+        let belongs = identity.is_some_and(|identity| {
+            launch_matches_target(source.launch(), identity, Path::new("/proc"))
+        });
+        if belongs {
+            return;
+        }
+        self.managed_source = None;
+        self.frame_source = None;
+        self.frame_clock = crate::telemetry::frame_clock::FrameClock::default();
+        self.frame_epoch = 0;
+        self.controller.window.clear_frames();
     }
 }

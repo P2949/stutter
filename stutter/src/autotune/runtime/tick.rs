@@ -272,8 +272,16 @@ impl AutotuneRuntime {
         forced_reason: Option<&str>,
     ) -> anyhow::Result<Option<AutotuneDecisionStreamEntry>> {
         self.prepare_runtime_phase_for_evaluation()?;
-        self.poll_frame_source();
-        self.refresh_frame_attestation();
+        // With frame capture on, resolve the target as it is *now* first: the source is retired
+        // if it belongs to the previous target, then polled and attested against this identity,
+        // and only then is the observation the planner sees built from that window.
+        if self.frame_capture_enabled() {
+            let current = self.build_observation();
+            let identity = current.workload_identity.clone();
+            self.reconcile_frame_source(identity.as_ref());
+            self.poll_frame_source(identity.as_ref());
+            self.refresh_frame_attestation(identity.as_ref(), current.target_present);
+        }
 
         let mut observation = self.build_observation();
         observation.external_owners = self.current_external_owners();
@@ -632,12 +640,16 @@ impl AutotuneRuntime {
 
     /// Re-evaluates the attached source against the target as it is *now*, so a replaced
     /// process, a focus change, a stale or a lossy stream withdraws trust at once.
-    fn refresh_frame_attestation(&mut self) {
+    fn refresh_frame_attestation(
+        &mut self,
+        identity: Option<&crate::autotune::observation::WorkloadIdentity>,
+        focused: bool,
+    ) {
         use crate::telemetry::live_source::{TargetView, evaluate};
         let Some(source) = self.frame_source.clone() else {
             return;
         };
-        let Some(identity) = self.last_observation.workload_identity.as_ref() else {
+        let Some(identity) = identity else {
             return;
         };
         let Ok(boot_id) = crate::telemetry::identity::read_boot_id() else {
@@ -650,7 +662,7 @@ impl AutotuneRuntime {
             identity,
             boot_id: &boot_id,
             uid: crate::syscall::geteuid(),
-            focused: self.last_observation.target_present,
+            focused,
         };
         let quality = evaluate(
             &status,

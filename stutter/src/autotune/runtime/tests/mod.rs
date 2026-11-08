@@ -148,6 +148,8 @@ mod config;
 
 mod daemon_state;
 mod fault_reporting;
+#[cfg(test)]
+mod frame_attestation;
 
 mod emission;
 

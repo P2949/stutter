@@ -75,6 +75,11 @@ impl ManagedFrameSource {
         }
     }
 
+    /// The verified launch this source reads.
+    pub fn launch(&self) -> &DiscoveredLaunch {
+        &self.launch
+    }
+
     /// The shared status the runtime evaluates.
     pub fn shared_status(&self) -> SharedFrameSource {
         Arc::clone(&self.status)
