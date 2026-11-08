@@ -905,12 +905,12 @@
       "anchors": [
         "stutter/src/autotune/search/mod.rs"
       ],
-      "status": "first_slice",
-      "g0": "bounded structured search grammar: named dimensions, finite values, forbidden combinations, a size cap, validation before search",
+      "status": "code_complete",
+      "g0": "the contract is the method with no MPI package dependency: bounded structured search grammar: named dimensions, finite values, forbidden combinations, a size cap, validation before search; grid, seeded-random and paired-elimination policies replayed offline over recorded blocks with regret and trials-to-find, never inventing a measurement",
       "g1": "none",
       "runtime_availability": "not applicable",
       "authority": "B/F",
-      "not_wired": "no MPI-specific parameters; used only as a method",
+      "not_wired": "nothing",
       "dispositions": [
         "FixtureVerified",
         "EvidenceDeferred"
