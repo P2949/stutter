@@ -785,7 +785,7 @@
         "stutter/src/actions/ioprio/mod.rs"
       ],
       "status": "first_slice",
-      "g0": "ioprio action exists and is denied while GameMode owns task priority; no block scheduler operations, no I/O sensor",
+      "g0": "ioprio action exists and is denied while GameMode owns task priority; no block scheduler operations; a cheap `block_io` sensor reads whole-disk completed I/Os, sectors, busy and queue time as deltas plus the in-flight gauge (never a decision input, not per-application)",
       "g1": "none",
       "runtime_availability": "ionice present, fio and blktrace absent",
       "authority": "O/F/E",

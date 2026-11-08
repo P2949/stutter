@@ -4,6 +4,7 @@
 //! A sensor that fails suppresses only the candidates that depend on it. Expensive sensors are
 //! admitted one at a time with a duration cap and a cooling period, and their own cost is recorded
 //! so the daemon's incremental overhead stays visible.
+mod block_io;
 mod cpu_power;
 mod escalation;
 #[cfg(test)]
@@ -20,6 +21,7 @@ mod tests;
 
 use std::collections::BTreeMap;
 
+pub use block_io::BlockIoSensor;
 pub use cpu_power::{CpuPowerSensor, thermal_guard_event};
 pub use escalation::{Escalator, Hypothesis, Thresholds, Trigger, diagnostic_sensor};
 pub use memory_domains::{DamonSensor, NumaSensor, ResctrlSensor};
