@@ -104,3 +104,24 @@ CPU stayed near 1.3 percent throughout. Which test run left it behind is not est
 code was changed because of it. The risk is general: a test binary can outlive the command that started it, and the
 `xtask` process runner (`run_process_with_env`) waits without a timeout. Future test runs should use a finite timeout
 and supervise the whole process group; this is recorded as a development-hygiene task, not a defect in the service.
+
+## Exact-build smoke of `e37984c1` (packages A–H source)
+
+The installed service was upgraded to the build of source `e37984c1` (binary SHA-256
+`c96d2bc4043b091dbe4062d77416a6bc831551d0f81ce28e8aec4f28aa92cbc2`) with the guarded flow: release
+build, NixosConf pin of source and binary hash together, `validate fast`, system build, a dry-activate
+that listed only the two Stutter units (no display-manager, login or graphical unit), a test
+activation, the exact-build smoke, then the boot default. No reboot.
+
+* `production-smoke`: **PASS, 35 of 35 checks** ([record](smoke-final-e37984c1.json), bundle
+  `live_packaged_service_smoke-e37984c1-1794096425356`, indexed).
+* Idle controller CPU **1.87 percent** of one core over 30 s (limit 5), resident memory **58 MB**
+  (limit 256), 0 state-changing decisions among 30 records, 0 stale temporary files, history 59.8 MB
+  (limit 168), 0 outstanding root tokens.
+* This build adds the telemetry, source-attribution, sensor, ownership and supervisor code of the new
+  plan. The owner probe the runtime now runs reads `/proc` once per 30 s; the measured idle cost
+  above includes it.
+* The journal warnings at the time of the smoke are the deliberate controller kill-while-applied case.
+
+The service default is unchanged: no frame source is attached, so frames stay unattributed and
+runnable-latency tuning behaves as before.
