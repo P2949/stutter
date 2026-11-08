@@ -20,14 +20,16 @@
         "W13"
       ],
       "anchors": [
-        "stutter/src/integrations/mod.rs"
+        "stutter/src/integrations/mod.rs",
+        "stutter/src/integrations/dbus/mod.rs",
+        "stutter/src/integrations/exact.rs"
       ],
       "status": "first_slice",
-      "g0": "owner presence probe and per-domain denial (task priority, CPU power); no active-target observer, no D-Bus",
-      "g1": "observed gamemoded running on this host",
+      "g0": "owner presence probe and per-domain denial; plus a bounded read-only D-Bus client that reads GameMode ClientCount through its own session-bus interface",
+      "g1": "gamemoded running and its exact D-Bus ClientCount read as 0 (idle) on this host",
       "runtime_availability": "present",
       "authority": "O/A/F",
-      "not_wired": "the probe is process-name based; no activation detection per target",
+      "not_wired": "presence still denies task-priority and CPU-power operations even at ClientCount 0 (fail closed); no per-target activation attribution",
       "dispositions": [
         "FixtureVerified",
         "RealObserved",
@@ -191,14 +193,16 @@
       ],
       "anchors": [
         "stutter/src/integrations/mod.rs",
-        "stutter/src/integrations/adapters.rs"
+        "stutter/src/integrations/adapters.rs",
+        "stutter/src/integrations/dbus/mod.rs",
+        "stutter/src/integrations/exact.rs"
       ],
       "status": "first_slice",
-      "g0": "scx_loader is named with its org.scx.Loader interface and reported DelegableManual (sched_ext present, no manager) or Conflict; delegation is refused explicitly because no verified D-Bus client is linked",
-      "g1": "none",
+      "g0": "scx_loader named with org.scx.Loader; the read-only D-Bus client reads its bus-name owner and CurrentScheduler; reported DelegableManual or Conflict; delegation refused (no verified write path)",
+      "g1": "org.scx.Loader read over the system bus on this host: no owner (absent)",
       "runtime_availability": "absent",
       "authority": "O/A/D/F",
-      "not_wired": "no D-Bus client, so no org.scx.Loader state, version or scheduler list; no strategy transaction",
+      "not_wired": "no StartScheduler/SwitchScheduler/StopScheduler, no scheduler list or version negotiation, no strategy transaction",
       "dispositions": [
         "FixtureVerified",
         "HardwareUnavailable",
@@ -460,14 +464,15 @@
         "W11d"
       ],
       "anchors": [
-        "stutter/src/integrations/mod.rs"
+        "stutter/src/integrations/mod.rs",
+        "stutter/src/integrations/exact.rs"
       ],
       "status": "first_slice",
-      "g0": "auto-cpufreq and power-profiles-daemon presence mark CPU power owned; TLP is not probed",
-      "g1": "none",
+      "g0": "auto-cpufreq and power-profiles-daemon presence mark CPU power owned; the read-only D-Bus client reads power-profiles-daemon ActiveProfile when its name has an owner",
+      "g1": "power-profiles-daemon read over the system bus on this host: no owner (absent)",
       "runtime_availability": "all absent",
       "authority": "O/A/D",
-      "not_wired": "no PPD D-Bus hold adapter, no TLP probe",
+      "not_wired": "no HoldProfile/ReleaseProfile scoped hold, no TLP probe",
       "dispositions": [
         "FixtureVerified",
         "HardwareUnavailable",

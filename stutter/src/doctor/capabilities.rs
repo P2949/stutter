@@ -276,3 +276,32 @@ pub(crate) fn boot_environment_check() -> DoctorCheck {
         details,
     }
 }
+
+/// What GameMode, `scx_loader` and power-profiles-daemon say about themselves over D-Bus.
+pub(crate) fn exact_owner_states_check() -> DoctorCheck {
+    use crate::integrations::exact::{Exact, ExactOwnerStates};
+    fn show<T: std::fmt::Debug>(state: &Exact<T>) -> String {
+        match state {
+            Exact::Absent => "absent (the bus name has no owner)".to_owned(),
+            Exact::Present(value) => format!("{value:?}"),
+            Exact::Unreachable(reason) => format!("unreachable: {reason}"),
+        }
+    }
+    let states = ExactOwnerStates::read();
+    let mut details = BTreeMap::new();
+    details.insert(
+        "gamemode_clients".to_owned(),
+        show(&states.gamemode_clients),
+    );
+    details.insert(
+        "scx_loader_scheduler".to_owned(),
+        show(&states.scx_loader_scheduler),
+    );
+    details.insert("power_profile".to_owned(), show(&states.power_profile));
+    DoctorCheck {
+        name: "exact_owner_states".to_owned(),
+        status: DoctorStatus::Pass,
+        message: "owner state through each tool's own D-Bus interface".to_owned(),
+        details,
+    }
+}

@@ -1,8 +1,8 @@
 //! What Stutter can truthfully say about each tool: its interface, its state and why delegation is
 //! or is not offered (package W6).
 //!
-//! Where a tool's documented control interface is a D-Bus service and no verified D-Bus client is
-//! linked, the adapter says so and refuses delegation. It never scrapes a command line to pretend
+//! Where a tool's documented control interface is a D-Bus service, Stutter has only a read-only
+//! client, so the adapter says so and refuses delegation. It never scrapes a command line to pretend
 //! otherwise, and a tool that is merely running is a `Conflict` on the domains it claims, not an
 //! authority Stutter may use.
 use serde::{Deserialize, Serialize};
