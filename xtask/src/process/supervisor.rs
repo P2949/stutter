@@ -8,6 +8,7 @@
 use std::{
     io::{Read, Write},
     os::unix::process::CommandExt,
+    path::Path,
     process::{Command, ExitStatus, Stdio},
     sync::{
         Arc, Once,
@@ -19,8 +20,7 @@ use std::{
 
 use anyhow::Context;
 
-/// Environment marker every supervised child inherits, so a leftover is attributable to its owner.
-pub const OWNER_ENV: &str = "STUTTER_XTASK_OWNER_PID";
+use super::ownership::{self, OWNER_ENV};
 
 const POLL: Duration = Duration::from_millis(20);
 
@@ -154,14 +154,36 @@ fn stop_group(group: i32, grace: Duration) {
     signal_group(group, libc::SIGKILL);
 }
 
+static STAGE_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// This stage's owner identity: the process and a unique stage number.
+fn stage_owner() -> Option<ownership::Owner> {
+    let stage = STAGE_COUNTER.fetch_add(1, Ordering::SeqCst);
+    ownership::current_owner(Path::new("/proc")).map(|owner| owner.with_stage(stage))
+}
+
+static ORPHANS_RECONCILED: Once = Once::new();
+
 /// Runs `command` as an owned process group under `policy` and reaps it.
 pub fn run(mut command: Command, policy: &ExecutionPolicy) -> anyhow::Result<Supervised> {
     install_interrupt_handlers();
+    // Once per process: leftovers of a crashed earlier xtask are killed before new work starts.
+    ORPHANS_RECONCILED.call_once(|| {
+        let uid = unsafe_uid();
+        let killed = ownership::reconcile_orphans(Path::new("/proc"), uid, Duration::from_secs(2));
+        if killed > 0 {
+            eprintln!("supervisor: reaped {killed} orphaned process(es) of a crashed xtask");
+        }
+    });
+    let stage = stage_owner();
     command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .env(OWNER_ENV, std::process::id().to_string())
+        .env(
+            OWNER_ENV,
+            stage.map_or_else(|| std::process::id().to_string(), ownership::Owner::render),
+        )
         .process_group(0);
     // SAFETY: only async-signal-safe prctl before exec; the direct child dies if this process does.
     unsafe {
@@ -207,6 +229,10 @@ pub fn run(mut command: Command, policy: &ExecutionPolicy) -> anyhow::Result<Sup
     };
     // Whatever the outcome, no member of the owned group may outlive the stage.
     stop_group(group, policy.grace);
+    // A child that detached with setsid left the group but kept the owner marker.
+    if let Some(owner) = stage {
+        ownership::sweep_owned(Path::new("/proc"), unsafe_uid(), owner, policy.grace);
+    }
     let _ = child.wait();
     // Killed members become zombies until init reaps them; give that a bounded moment.
     let gone = Instant::now() + Duration::from_secs(2);
@@ -230,8 +256,15 @@ pub fn run(mut command: Command, policy: &ExecutionPolicy) -> anyhow::Result<Sup
     })
 }
 
+fn unsafe_uid() -> u32 {
+    // SAFETY: geteuid has no preconditions and cannot fail.
+    unsafe { libc::geteuid() }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::os::unix::process::ExitStatusExt;
+
     use super::*;
 
     fn sh(script: &str) -> Command {
@@ -335,6 +368,67 @@ mod tests {
     #[test]
     fn children_carry_the_owner_marker() {
         let result = run(sh(&format!("echo ${OWNER_ENV}")), &quiet(5000)).unwrap();
-        assert_eq!(result.stdout.trim(), std::process::id().to_string());
+        let owner = ownership::current_owner(Path::new("/proc")).unwrap();
+        let marker = ownership::Owner::parse(result.stdout.trim()).unwrap();
+        assert_eq!(
+            (marker.pid, marker.start_ticks),
+            (owner.pid, owner.start_ticks)
+        );
+        assert!(marker.stage > 0);
+    }
+
+    fn alive(pid: u32) -> bool {
+        Path::new(&format!("/proc/{pid}")).exists()
+            && std::fs::read_to_string(format!("/proc/{pid}/stat"))
+                .is_ok_and(|stat| !stat.contains(") Z "))
+    }
+
+    #[test]
+    fn a_setsid_escapee_is_found_by_its_marker_and_killed() {
+        let file = std::env::temp_dir().join(format!("stutter-escapee-{}", std::process::id()));
+        let script = format!("setsid sleep 600 & echo $! > {}; sleep 0.3", file.display());
+        let result = run(sh(&script), &quiet(5000)).unwrap();
+        assert_eq!(exit_code(&result), Some(0));
+        let pid: u32 = std::fs::read_to_string(&file)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(!alive(pid), "the detached child survived the stage");
+        std::fs::remove_file(&file).unwrap();
+    }
+
+    #[test]
+    fn orphans_of_a_dead_owner_are_reaped_but_a_live_owner_is_left_alone() {
+        let uid = unsafe_uid();
+        let mut orphan = Command::new("sleep")
+            .arg("600")
+            .env(OWNER_ENV, "4000000:1")
+            .spawn()
+            .unwrap();
+        let live = ownership::current_owner(Path::new("/proc")).unwrap();
+        let mut kept = Command::new("sleep")
+            .arg("600")
+            .env(OWNER_ENV, live.render())
+            .spawn()
+            .unwrap();
+        let mut unrelated = Command::new("sleep").arg("600").spawn().unwrap();
+        // Another test thread may already have run the once-per-process reconcile; either way the
+        // orphan must end up killed by a signal.
+        ownership::reconcile_orphans(Path::new("/proc"), uid, Duration::from_millis(300));
+        let orphan_status = orphan.wait().unwrap();
+        let kept_alive = kept.try_wait().unwrap().is_none();
+        let unrelated_alive = unrelated.try_wait().unwrap().is_none();
+        for child in [&mut kept, &mut unrelated] {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        assert!(
+            orphan_status.signal().is_some(),
+            "the orphan was not reaped"
+        );
+        assert!(kept_alive, "a live owner's child was killed");
+        assert!(unrelated_alive, "an unmarked process was killed");
     }
 }

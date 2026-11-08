@@ -6,6 +6,7 @@ use std::{
 
 use anyhow::bail;
 
+pub mod ownership;
 pub mod supervisor;
 use supervisor::{ExecutionPolicy, Outcome, Supervised};
 
