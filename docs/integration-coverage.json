@@ -267,11 +267,11 @@
         "stutter/src/wayland_presentation.rs"
       ],
       "status": "first_slice",
-      "g0": "confined tail session, launch wrapper, source attribution and quality gate, Gamescope help probe; attach_frame_source exists",
+      "g0": "confined tail session, launch wrapper, launch discovery and verification, managed source polled by the runtime when autotune.frame_capture_root is set, per-tick attribution and quality gate, Gamescope help probe",
       "g1": "none: no live frame stream has been observed through the service",
       "runtime_availability": "MangoHud, Gamescope and vkcube present",
       "authority": "O/F",
-      "not_wired": "nothing in the service attaches a source; phase windows and the real-workload run engine are missing"
+      "not_wired": "off by default; no live game has been observed through the service, phase-correct windows and the real-workload run engine are missing"
     },
     {
       "id": "5.13",

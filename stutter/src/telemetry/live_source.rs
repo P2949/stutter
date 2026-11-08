@@ -90,6 +90,7 @@ pub fn evaluate(
             .as_millis()
             .min(u128::from(u64::MAX)) as u64
     });
+    let key_root_pid = key.root_pid;
     let observation = SourceObservation {
         target: key,
         target_focused: target.focused,
@@ -99,6 +100,9 @@ pub fn evaluate(
             .and_then(|pid| live_process(proc_root, pid)),
         competing_targets: status.competing_targets,
         source_age_ms: age,
+        target_ancestors: live_process(proc_root, key_root_pid)
+            .map(|live| live.ancestors)
+            .unwrap_or_default(),
     };
     let attribution =
         attribute(&status.claim, stage, &observation).unwrap_or(Attribution::ObservedUnattributed);

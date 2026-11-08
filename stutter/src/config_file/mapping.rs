@@ -235,6 +235,13 @@ pub fn apply_daemon_user_config_overrides(
     {
         daemon_config.autotune.privileged_worker_shutdown_poll_ms = poll_ms;
     }
+    if let Some(root) = user_config
+        .autotune
+        .as_ref()
+        .and_then(|autotune| autotune.frame_capture_root.clone())
+    {
+        daemon_config.autotune.frame_capture_root = Some(root);
+    }
     if let Some(policy) = user_config
         .autotune
         .as_ref()

@@ -7,7 +7,9 @@
 pub mod frame_source;
 pub mod gamescope;
 pub mod identity;
+pub mod launch_discovery;
 pub mod live_source;
+pub mod managed_source;
 pub mod proc_view;
 pub mod quality;
 pub mod registration;

@@ -124,6 +124,12 @@ impl RollingWindow {
             && self.workload_progress.is_empty()
     }
 
+    /// Drops the frames and the stream attestation, for a source that ended or began a new epoch.
+    pub fn clear_frames(&mut self) {
+        self.frames.clear();
+        self.frame_stream = None;
+    }
+
     pub fn clear(&mut self) {
         self.intervals.clear();
         self.frames.clear();

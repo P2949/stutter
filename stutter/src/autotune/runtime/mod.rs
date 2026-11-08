@@ -9,6 +9,7 @@ pub(crate) mod config;
 pub(crate) mod daemon_state;
 pub(crate) mod decision_view;
 pub(crate) mod emission;
+mod frame_source;
 pub(crate) mod history;
 mod kept_release;
 mod lifecycle;
@@ -105,6 +106,10 @@ pub struct AutotuneRuntime {
     frame_source: Option<crate::telemetry::live_source::SharedFrameSource>,
     /// The last owner probe and when it ran; `/proc` is not rescanned on every tick.
     owner_cache: std::sync::Mutex<Option<(std::time::Instant, crate::integrations::OwnerReport)>>,
+    /// The frame source found for the focused launch, when `frame_capture_root` is configured.
+    managed_source: Option<crate::telemetry::managed_source::ManagedFrameSource>,
+    frame_epoch: u64,
+    last_frame_discovery: Option<std::time::Instant>,
 }
 
 #[cfg(test)]

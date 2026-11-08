@@ -31,7 +31,7 @@ game under scheduler pressure judged by `GameRunnableLatency`. Nothing in this l
 | Area | Wired into the live runtime | Present but not wired |
 |---|---|---|
 | Process safety | `xtask` stages run under a supervised process group with deadlines | detached-child scopes, parent-crash orphan reconciliation, the validation runner's own executor |
-| Frame source | `AutotuneRuntime::attach_frame_source` evaluates a source against the target every tick | nothing in the service attaches a source; phase windows, the installed-service bridge and the run engine are missing |
+| Frame source | with `autotune.frame_capture_root` set the runtime discovers a verified `game-run` launch for the focused target, tails its log and evaluates trust every tick | off by default; no live game has been observed through the service; phase windows and the run engine are missing |
 | Owner probes | the planner denies an operation whose domain a detected owner holds, with a 30 s cached probe | the probe is process-name based, so it is a hint; exact resource receipts, D-Bus adapters and worker pre-commit checks are missing |
 | Sensors | none | the sensor registry and PSI sensor exist and are tested, but the runtime does not use them |
 | Generic KPIs | none | typed contract and bounded ingestion exist with the known defects listed in the plan (weighted aggregates, peer start time, future timestamps) |

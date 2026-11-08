@@ -272,3 +272,25 @@ the stable reason codes `objective_not_supported`,
 `operation_not_autonomous`. Suggest and benchmark modes are unaffected. A validation campaign
 may hold an override for exactly one operation and objective; it never authorises other
 operations, remote callers or high-risk operations.
+
+## Opt-in frame source: `frame_capture_root`
+
+```toml
+[autotune]
+frame_capture_root = "/run/user/1000/stutter/game-run"
+```
+
+Unset (the default), the controller stays source-less: no launch is searched for, frames stay
+unattributed and runnable-latency tuning behaves exactly as before. When set to an absolute
+directory of `stutter game-run --mangohud` capture directories, the controller looks, every five
+seconds, for a *verified* launch whose process tree contains the focused target. A launch is
+verified when its capture directory is owner-only and not a symlink, its record names this boot and
+this user, and the recorded process is still the same live process (same start time). It then tails
+that launch's MangoHud log through a confined session and feeds the frames into the rolling window.
+
+Frames count as a direct frame-primary signal only while every tick re-verifies that the producer
+is still the recorded process inside the target's tree, the target is focused, the source is fresh,
+and nothing was dropped or malformed. A launch id is correlation only: it can raise a source to
+`LaunchBound` at most, and only the verified log owner and ancestry give `ValidatedDirect`. Direct
+frames never authorise an operation; the existing 50 percent and 2400-frame calibration is
+unchanged.

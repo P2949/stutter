@@ -50,6 +50,7 @@ fn observed(pid: u32, ticks: u64) -> SourceObservation {
         }),
         competing_targets: 0,
         source_age_ms: 10,
+        target_ancestors: vec![(50, 3)],
     }
 }
 
@@ -601,4 +602,32 @@ mod gamescope {
         assert!(started.elapsed() < std::time::Duration::from_secs(10));
         fs::remove_dir_all(hung.parent().unwrap()).unwrap();
     }
+}
+
+#[test]
+fn a_launcher_above_the_target_belongs_to_the_same_launch_tree() {
+    // The launch pid (the wrapper's child, a launcher) is an ancestor of the target renderer.
+    let mut observation = observed(77, 9);
+    observation.target = key(100, 5);
+    observation.target_ancestors = vec![(77, 9)];
+    observation.producer = Some(LiveProcess {
+        start_ticks: 9,
+        uid: 1000,
+        ancestors: vec![(1, 1)],
+    });
+    assert_eq!(
+        verdict(&claim(77, 9), &observation),
+        Ok(Attribution::ValidatedDirect)
+    );
+    // A launcher that is not an ancestor, or whose start time differs, is unrelated.
+    observation.target_ancestors = vec![(78, 9)];
+    assert_eq!(
+        verdict(&claim(77, 9), &observation),
+        Err(SourceDenial::NotInTargetTree)
+    );
+    observation.target_ancestors = vec![(77, 10)];
+    assert_eq!(
+        verdict(&claim(77, 9), &observation),
+        Err(SourceDenial::NotInTargetTree)
+    );
 }

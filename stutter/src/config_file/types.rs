@@ -98,6 +98,7 @@ pub struct AutotuneConfigFile {
     pub privileged_worker_socket_ready_timeout_ms: Option<u64>,
     pub privileged_worker_socket_ready_retry_ms: Option<u64>,
     pub privileged_worker_shutdown_poll_ms: Option<u64>,
+    pub frame_capture_root: Option<PathBuf>,
     pub external_mutation_policy:
         Option<crate::autotune::external_mutation::ExternalMutationPolicy>,
     pub high_risk_dry_run: Option<bool>,

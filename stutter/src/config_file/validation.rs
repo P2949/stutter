@@ -208,6 +208,11 @@ pub fn validate_daemon_user_config(config: &UserConfigFile) -> Result<()> {
             autotune.privileged_worker_shutdown_poll_ms,
             10_000,
         )?;
+        if let Some(root) = autotune.frame_capture_root.as_ref()
+            && !root.is_absolute()
+        {
+            anyhow::bail!("autotune.frame_capture_root must be an absolute path");
+        }
     }
     Ok(())
 }

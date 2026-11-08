@@ -57,6 +57,8 @@ pub struct SourceObservation {
     /// Other candidate workloads this source could equally belong to.
     pub competing_targets: usize,
     pub source_age_ms: u64,
+    /// The target root's ancestors as `(pid, start_ticks)`, nearest first.
+    pub target_ancestors: Vec<(u32, u64)>,
 }
 
 /// Why a source cannot be attributed to the target.
@@ -108,7 +110,13 @@ pub fn attribute(
     let under_target = live.ancestors.iter().any(|&(ancestor, ticks)| {
         ancestor == observed.target.root_pid && ticks == observed.target.start_ticks
     });
-    if !is_target && !under_target {
+    // The launcher may be the target or sit above it, and the renderer may sit below either: both
+    // belong to one launch tree. Anything outside that relation is a different process.
+    let target_under_producer = observed
+        .target_ancestors
+        .iter()
+        .any(|&(ancestor, ticks)| ancestor == pid && Some(ticks) == claim.producer_start_ticks);
+    if !is_target && !under_target && !target_under_producer {
         return Err(SourceDenial::NotInTargetTree);
     }
     if observed.competing_targets > 0 {

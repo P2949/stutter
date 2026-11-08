@@ -267,6 +267,7 @@ impl AutotuneRuntime {
         forced_reason: Option<&str>,
     ) -> anyhow::Result<Option<AutotuneDecisionStreamEntry>> {
         self.prepare_runtime_phase_for_evaluation()?;
+        self.poll_frame_source();
         self.refresh_frame_attestation();
 
         let mut observation = self.build_observation();
