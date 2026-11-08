@@ -3,6 +3,8 @@ mod candidate;
 #[cfg(test)]
 mod dry_run;
 #[cfg(test)]
+mod llc;
+#[cfg(test)]
 mod suggestion;
 #[cfg(test)]
 mod support;

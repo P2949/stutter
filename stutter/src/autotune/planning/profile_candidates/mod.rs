@@ -57,6 +57,7 @@ pub struct CandidateProfileStatus {
 
 pub mod gaming;
 pub mod helpers;
+pub mod llc;
 pub mod rules;
 pub mod topology;
 pub mod validate;
