@@ -166,11 +166,11 @@
         "stutter/src/integrations/mod.rs"
       ],
       "status": "first_slice",
-      "g0": "kernel state tracker and scheduler-domain ownership from /sys/kernel/sched_ext",
+      "g0": "kernel state tracker, scheduler-domain ownership from /sys/kernel/sched_ext, and a gated offline strategy adapter (see 5.7) for switching with exact restore",
       "g1": "sched_ext present and disabled on this host",
       "runtime_availability": "present",
       "authority": "O/F/E",
-      "not_wired": "no strategy experiment, no sensors/sched_ext.rs",
+      "not_wired": "no sensors/sched_ext.rs, no matched-workload scheduler comparison, no per-scheduler cgroup/nice/uclamp semantics table",
       "dispositions": [
         "FixtureVerified",
         "RealObserved",
@@ -195,14 +195,15 @@
         "stutter/src/integrations/mod.rs",
         "stutter/src/integrations/adapters.rs",
         "stutter/src/integrations/dbus/mod.rs",
-        "stutter/src/integrations/exact.rs"
+        "stutter/src/integrations/exact.rs",
+        "stutter/src/integrations/scx_loader.rs"
       ],
       "status": "first_slice",
-      "g0": "scx_loader named with org.scx.Loader; the read-only D-Bus client reads its bus-name owner and CurrentScheduler; reported DelegableManual or Conflict; delegation refused (no verified write path)",
+      "g0": "scx_loader named with org.scx.Loader; read-only D-Bus state (CurrentScheduler, SchedulerMode, SupportedSchedulers), introspected method signatures, and a gated offline strategy adapter: plan_switch (allowlist, supported, exact restore) with typed denials and execute/restore that need an OfflineAuthorization only a campaign can construct, verified against the loader and the kernel ops (fake-bus fixtures)",
       "g1": "org.scx.Loader read over the system bus on this host: no owner (absent)",
       "runtime_availability": "absent",
       "authority": "O/A/D/F",
-      "not_wired": "no StartScheduler/SwitchScheduler/StopScheduler, no scheduler list or version negotiation, no strategy transaction",
+      "not_wired": "never run against a real scx_loader (none installed); no SwitchSchedulerWithArgs; no experiment campaign, matched-workload comparison or evidence; not reachable from the daemon, providers or remote callers by construction",
       "dispositions": [
         "FixtureVerified",
         "HardwareUnavailable",

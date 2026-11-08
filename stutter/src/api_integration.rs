@@ -69,3 +69,8 @@ pub mod pm_qos {
     //! The PM QoS CPU-latency lease: policy, power guards and a descriptor-bound request.
     pub use crate::actions::pm_qos::*;
 }
+
+pub mod owner_interfaces {
+    //! The read-only D-Bus client, exact owner states, and the gated offline `scx_loader` adapter.
+    pub use crate::integrations::{dbus::*, exact::*, scx_loader::*};
+}

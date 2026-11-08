@@ -7,8 +7,17 @@
 //! `org.freedesktop.DBus.Properties.Get`. Every read has a timeout and a size bound.
 mod client;
 #[cfg(test)]
+pub(crate) mod fake;
+#[cfg(test)]
 mod tests;
 mod wire;
 
 pub use client::{BusKind, DbusClient, DbusError, session_bus_path, system_bus_path};
 pub use wire::Value;
+pub(crate) use wire::Writer;
+
+/// A wire reader over `bytes`, for tests that decode a call body.
+#[cfg(test)]
+pub(crate) fn fake_reader(bytes: &[u8]) -> wire::Reader<'_> {
+    wire::Reader::new(bytes)
+}
