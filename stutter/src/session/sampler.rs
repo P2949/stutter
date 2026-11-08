@@ -12,6 +12,7 @@ impl SamplerRuntime {
         let cpu_perf_sampler = if config.probes.cpu_perf {
             Some(crate::perf_counters::CpuPerfSampler::new(
                 crate::perf_counters::CpuPerfConfig {
+                    collect_branches: false,
                     include_kernel: config.cpu_perf.include_kernel,
                     max_tasks: config.cpu_perf.max_tasks,
                     collect_cache_refs: config.cpu_perf.collect_cache_refs,

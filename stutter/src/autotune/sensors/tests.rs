@@ -228,8 +228,34 @@ mod pmu {
     }
 
     #[test]
+    fn invalid_timing_false_multiplex_flags_partial_threads_and_overflow_are_not_direct() {
+        let invalid = BTreeMap::from([(tid(1), delta(1000, 2000, 101, 100))]);
+        assert_eq!(reading_from_deltas(&invalid, 0).quality, Quality::Missing);
+        let mut hidden = delta(1000, 2000, 50, 100);
+        hidden.multiplexed = false;
+        assert_eq!(
+            reading_from_deltas(&BTreeMap::from([(tid(1), hidden)]), 0).quality,
+            Quality::Approximate
+        );
+        let mixed = BTreeMap::from([
+            (tid(1), delta(1000, 2000, 100, 100)),
+            (tid(2), CpuPerfDelta::default()),
+        ]);
+        assert_eq!(reading_from_deltas(&mixed, 0).quality, Quality::Approximate);
+        let overflow = BTreeMap::from([
+            (tid(1), delta(u64::MAX, 2000, 100, 100)),
+            (tid(2), delta(1, 2000, 100, 100)),
+        ]);
+        let reading = reading_from_deltas(&overflow, 0);
+        assert_eq!(reading.quality, Quality::Missing);
+        assert!(!reading.values.contains_key("ipc"));
+        assert!(reading.lost > 0);
+    }
+
+    #[test]
     fn the_sensor_probe_reports_availability_honestly_and_a_targetless_sample_is_missing() {
         let mut sensor = PmuSensor::new(CpuPerfConfig {
+            collect_branches: false,
             include_kernel: false,
             max_tasks: 4,
             collect_cache_refs: true,

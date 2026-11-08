@@ -13,6 +13,8 @@ pub struct CpuPerfConfig {
     pub include_kernel: bool,
     pub max_tasks: usize,
     pub collect_cache_refs: bool,
+    /// Optional generic hardware branch counters; absence leaves their values missing.
+    pub collect_branches: bool,
 }
 
 pub(super) fn normalize_config(mut config: CpuPerfConfig) -> CpuPerfConfig {
@@ -20,9 +22,9 @@ pub(super) fn normalize_config(mut config: CpuPerfConfig) -> CpuPerfConfig {
         config.max_tasks = 1;
     }
 
-    let event_count = event_count(config.collect_cache_refs) as u64;
+    let event_count = event_count(config.collect_cache_refs, config.collect_branches) as u64;
     if let Some(available) = available_fd_budget() {
-        let requested_fds = config.max_tasks as u64 * event_count;
+        let requested_fds = (config.max_tasks as u64).saturating_mul(event_count);
         let half_budget = available / 2;
         if requested_fds > half_budget && half_budget >= event_count {
             let capped = (half_budget / event_count).max(1) as usize;
@@ -52,8 +54,8 @@ fn available_fd_budget() -> Option<u64> {
     Some(rlim_cur.saturating_sub(open_count))
 }
 
-fn event_count(collect_cache_refs: bool) -> usize {
-    if collect_cache_refs { 4 } else { 3 }
+fn event_count(collect_cache_refs: bool, collect_branches: bool) -> usize {
+    3 + usize::from(collect_cache_refs) + 2 * usize::from(collect_branches)
 }
 
 pub(super) fn select_target_tids(

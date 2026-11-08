@@ -1,11 +1,17 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct CpuPerfDelta {
     pub cycles: Option<u64>,
     pub instructions: Option<u64>,
     pub cache_references: Option<u64>,
     pub cache_misses: Option<u64>,
+    pub branches: Option<u64>,
+    pub branch_misses: Option<u64>,
+    pub branch_miss_rate: Option<f64>,
+    /// Optional events rejected by this kernel/PMU; never represented by zero counts.
+    pub unsupported_events: Vec<String>,
 
     pub ipc: Option<f64>,
     pub cache_miss_rate: Option<f64>,
@@ -20,17 +26,19 @@ pub struct CpuPerfDelta {
 }
 
 pub(super) fn scale(raw: u64, time_enabled: u64, time_running: u64) -> Option<u64> {
-    if time_running == 0 {
+    if time_running == 0 || time_running > time_enabled {
         return None;
     }
     if time_running == time_enabled {
         return Some(raw);
     }
 
-    Some(((raw as u128 * time_enabled as u128) / time_running as u128) as u64)
+    u64::try_from((raw as u128 * time_enabled as u128) / time_running as u128).ok()
 }
 
 pub(super) fn apply_derived_metrics(delta: &mut CpuPerfDelta) {
+    delta.branch_miss_rate =
+        ratio(delta.branch_misses, delta.branches).filter(|ratio| *ratio <= 1.0);
     delta.ipc = ratio(delta.instructions, delta.cycles);
     delta.cache_miss_rate = ratio(delta.cache_misses, delta.cache_references);
     delta.cache_mpki = match (delta.cache_misses, delta.instructions) {
@@ -60,6 +68,38 @@ mod tests {
         assert_eq!(scale(100, 20, 10), Some(200));
         assert_eq!(scale(100, 10, 0), None);
         assert_eq!(scale(u64::MAX, u64::MAX, u64::MAX), Some(u64::MAX));
+    }
+
+    #[test]
+    fn impossible_timing_and_scaled_overflow_are_missing() {
+        assert_eq!(scale(100, 0, 1), None);
+        assert_eq!(scale(100, 10, 11), None);
+        assert_eq!(scale(u64::MAX, u64::MAX, 1), None);
+    }
+
+    #[test]
+    fn old_counter_json_decodes_with_new_events_missing() {
+        let old: CpuPerfDelta =
+            serde_json::from_str(r#"{"cycles":100,"instructions":200}"#).unwrap();
+        assert_eq!(old.branches, None);
+        assert_eq!(old.branch_misses, None);
+        assert!(old.unsupported_events.is_empty());
+    }
+
+    #[test]
+    fn branch_ratio_requires_a_real_nonzero_consistent_population() {
+        let mut delta = CpuPerfDelta {
+            branches: Some(100),
+            branch_misses: Some(3),
+            ..Default::default()
+        };
+        apply_derived_metrics(&mut delta);
+        assert_eq!(delta.branch_miss_rate, Some(0.03));
+        for branches in [None, Some(0), Some(2)] {
+            delta.branches = branches;
+            apply_derived_metrics(&mut delta);
+            assert_eq!(delta.branch_miss_rate, None);
+        }
     }
 
     #[test]

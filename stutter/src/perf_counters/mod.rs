@@ -1,4 +1,5 @@
 mod group;
+mod interval;
 mod limits;
 mod sample;
 mod syscall;

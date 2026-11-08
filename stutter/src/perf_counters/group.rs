@@ -10,6 +10,8 @@ const PERF_COUNT_HW_CPU_CYCLES: u64 = 0;
 const PERF_COUNT_HW_INSTRUCTIONS: u64 = 1;
 const PERF_COUNT_HW_CACHE_REFERENCES: u64 = 2;
 const PERF_COUNT_HW_CACHE_MISSES: u64 = 3;
+const PERF_COUNT_HW_BRANCH_INSTRUCTIONS: u64 = 4;
+const PERF_COUNT_HW_BRANCH_MISSES: u64 = 5;
 
 const PERF_FORMAT_TOTAL_TIME_ENABLED: u64 = 1 << 0;
 const PERF_FORMAT_TOTAL_TIME_RUNNING: u64 = 1 << 1;
@@ -63,6 +65,8 @@ pub(super) struct PerfCounterGroup {
     leader: OwnedFd,
     siblings: Vec<OwnedFd>,
     events: Vec<PerfEventKind>,
+    intervals: super::interval::IntervalTracker,
+    unsupported_events: Vec<String>,
 }
 
 impl PerfCounterGroup {
@@ -78,6 +82,8 @@ impl PerfCounterGroup {
             leader,
             siblings: Vec::new(),
             events: vec![PerfEventKind::Cycles],
+            intervals: super::interval::IntervalTracker::new(1),
+            unsupported_events: Vec::new(),
         };
 
         group
@@ -106,6 +112,7 @@ impl PerfCounterGroup {
             )
         {
             if matches!(err.raw_os_error(), Some(libc::EINVAL | libc::ENOENT)) {
+                group.unsupported_events.push("cache_references".into());
                 warn!(
                     "cpu_perf_cache_references_unavailable tid={} err={}",
                     tid, err
@@ -115,9 +122,37 @@ impl PerfCounterGroup {
             }
         }
 
+        if config.collect_branches {
+            for (value, event) in [
+                (PERF_COUNT_HW_BRANCH_INSTRUCTIONS, PerfEventKind::Branches),
+                (PERF_COUNT_HW_BRANCH_MISSES, PerfEventKind::BranchMisses),
+            ] {
+                if let Err(err) = group.open_sibling(tid, value, event, config) {
+                    if matches!(
+                        err.raw_os_error(),
+                        Some(libc::EINVAL | libc::ENOENT | libc::EOPNOTSUPP | libc::ENODEV)
+                    ) {
+                        warn!(
+                            "cpu_perf_branch_event_unavailable tid={tid} config={value} err={err}"
+                        );
+                        group.unsupported_events.push(
+                            match event {
+                                PerfEventKind::Branches => "branches",
+                                PerfEventKind::BranchMisses => "branch_misses",
+                                _ => unreachable!(),
+                            }
+                            .into(),
+                        );
+                    } else {
+                        return Err(PerfOpenError::from_io(err));
+                    }
+                }
+            }
+        }
         group
             .reset_and_enable()
             .map_err(|err| PerfOpenError::from_message(err.to_string()))?;
+        group.intervals = super::interval::IntervalTracker::new(group.events.len());
         Ok(group)
     }
 
@@ -137,63 +172,27 @@ impl PerfCounterGroup {
 
     pub(super) fn sample_interval(&mut self) -> Result<CpuPerfDelta, String> {
         let expected = self.events.len();
-        let mut values = [0u64; 7];
+        let mut values = [0u64; super::interval::WORDS];
         let expected_bytes = (3 + expected) * mem::size_of::<u64>();
         let read_bytes = syscall::read_counters(self.leader.fd, &mut values, expected_bytes)
-            .map_err(|err| format!("read failed: {err}"))?;
+            .map_err(|err| {
+                self.intervals.invalidate();
+                format!("read failed: {err}")
+            })?;
         if read_bytes as usize != expected_bytes {
+            self.intervals.invalidate();
             return Err(format!(
                 "short perf group read: got {} bytes, expected {}",
                 read_bytes, expected_bytes
             ));
         }
 
-        let nr = values[0] as usize;
-        let time_enabled = values[1];
-        let time_running = values[2];
-        if nr != expected {
-            return Ok(CpuPerfDelta {
-                time_enabled_ns: Some(time_enabled),
-                time_running_ns: Some(time_running),
-                unavailable_reason: Some(format!(
-                    "perf group returned {} values, expected {}",
-                    nr, expected
-                )),
-                ..Default::default()
-            });
-        }
-
-        let multiplexed = time_enabled != time_running && time_enabled > 0;
-        let mut scaled = false;
-        let mut delta = CpuPerfDelta {
-            time_enabled_ns: Some(time_enabled),
-            time_running_ns: Some(time_running),
-            multiplexed,
-            ..Default::default()
-        };
-
-        for (idx, kind) in self.events.iter().copied().enumerate() {
-            let raw = values[3 + idx];
-            let value = super::sample::scale(raw, time_enabled, time_running);
-            if multiplexed && value.is_some() {
-                scaled = true;
-            }
-            match kind {
-                PerfEventKind::Cycles => delta.cycles = value,
-                PerfEventKind::Instructions => delta.instructions = value,
-                PerfEventKind::CacheMisses => delta.cache_misses = value,
-                PerfEventKind::CacheReferences => delta.cache_references = value,
-            }
-        }
-
-        super::sample::apply_derived_metrics(&mut delta);
-        delta.scaled = scaled;
-
-        if let Err(err) = self.reset_and_enable() {
-            delta.unavailable_reason = Some(format!("perf group reset failed: {err}"));
-        }
-
-        Ok(delta)
+        let values = self.intervals.interval(values, expected)?;
+        Ok(decode_interval(
+            &self.events,
+            values,
+            &self.unsupported_events,
+        ))
     }
 
     fn reset_and_enable(&self) -> io::Result<()> {
@@ -204,12 +203,58 @@ impl PerfCounterGroup {
     }
 }
 
+fn decode_interval(
+    events: &[PerfEventKind],
+    values: [u64; super::interval::WORDS],
+    unsupported: &[String],
+) -> CpuPerfDelta {
+    let time_enabled = values[1];
+    let time_running = values[2];
+
+    let multiplexed = time_enabled != time_running && time_enabled > 0;
+    let mut scaled = false;
+    let mut delta = CpuPerfDelta {
+        time_enabled_ns: Some(time_enabled),
+        time_running_ns: Some(time_running),
+        multiplexed,
+        unsupported_events: unsupported.to_vec(),
+        ..Default::default()
+    };
+
+    for (idx, kind) in events.iter().copied().enumerate() {
+        let raw = values[3 + idx];
+        let value = super::sample::scale(raw, time_enabled, time_running);
+        if value.is_none() {
+            delta.unavailable_reason =
+                Some("perf interval did not run or scaled count overflowed".into());
+        }
+        if multiplexed && value.is_some() {
+            scaled = true;
+        }
+        match kind {
+            PerfEventKind::Cycles => delta.cycles = value,
+            PerfEventKind::Instructions => delta.instructions = value,
+            PerfEventKind::CacheMisses => delta.cache_misses = value,
+            PerfEventKind::CacheReferences => delta.cache_references = value,
+            PerfEventKind::Branches => delta.branches = value,
+            PerfEventKind::BranchMisses => delta.branch_misses = value,
+        }
+    }
+
+    super::sample::apply_derived_metrics(&mut delta);
+    delta.scaled = scaled;
+
+    delta
+}
+
 #[derive(Clone, Copy)]
 enum PerfEventKind {
     Cycles,
     Instructions,
     CacheMisses,
     CacheReferences,
+    Branches,
+    BranchMisses,
 }
 
 pub(super) struct OwnedFd {
@@ -299,3 +344,7 @@ pub(crate) fn try_open_disabled_cycles_current_thread(include_kernel: bool) -> i
     let _owned = OwnedFd::new(fd);
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "group_tests.rs"]
+mod tests;

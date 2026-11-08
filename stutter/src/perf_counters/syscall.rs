@@ -40,6 +40,12 @@ pub fn perf_ioctl(fd: RawFd, request: libc::c_ulong, arg: libc::c_ulong) -> io::
 }
 
 pub fn read_counters(fd: RawFd, values: &mut [u64], expected_bytes: usize) -> io::Result<usize> {
+    if expected_bytes > std::mem::size_of_val(values) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "perf read exceeds buffer",
+        ));
+    }
     // SAFETY: values has capacity for the maximum configured group payload,
     // and expected_bytes is derived from the active event count.
     let read_bytes = unsafe {

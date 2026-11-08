@@ -31,18 +31,36 @@ pub fn reading_from_deltas(
     let usable: Vec<&CpuPerfDelta> = deltas
         .values()
         .filter(|delta| {
-            delta.unavailable_reason.is_none() && delta.time_running_ns.unwrap_or(0) > 0
+            delta.unavailable_reason.is_none()
+                && matches!((delta.time_enabled_ns, delta.time_running_ns),
+                    (Some(enabled), Some(running)) if running > 0 && running <= enabled)
         })
         .collect();
-    let lost = (deltas.len() - usable.len()) as u64;
-    let sum = |field: fn(&CpuPerfDelta) -> Option<u64>| -> Option<u64> {
+    let mut lost = (deltas.len() - usable.len()) as u64;
+    let mut overflow = false;
+    let mut sum = |field: fn(&CpuPerfDelta) -> Option<u64>| -> Option<u64> {
         usable.iter().try_fold(0u64, |total, delta| {
-            field(delta).map(|value| total.saturating_add(value))
+            let next = total.checked_add(field(delta)?);
+            overflow |= next.is_none();
+            next
         })
     };
-    let enabled: u64 = usable.iter().filter_map(|d| d.time_enabled_ns).sum();
-    let running: u64 = usable.iter().filter_map(|d| d.time_running_ns).sum();
-    let multiplexed = usable.iter().filter(|delta| delta.multiplexed).count();
+    let enabled: u128 = usable
+        .iter()
+        .filter_map(|d| d.time_enabled_ns)
+        .map(u128::from)
+        .sum();
+    let running: u128 = usable
+        .iter()
+        .filter_map(|d| d.time_running_ns)
+        .map(u128::from)
+        .sum();
+    let multiplexed = usable
+        .iter()
+        .filter(|delta| {
+            delta.multiplexed || delta.scaled || delta.time_enabled_ns != delta.time_running_ns
+        })
+        .count();
 
     let mut values = BTreeMap::new();
     values.insert("threads".to_owned(), usable.len() as f64);
@@ -55,6 +73,8 @@ pub fn reading_from_deltas(
     let instructions = sum(|d| d.instructions);
     let references = sum(|d| d.cache_references);
     let misses = sum(|d| d.cache_misses);
+    let branches = sum(|d| d.branches);
+    let branch_misses = sum(|d| d.branch_misses);
     // A ratio needs a positive denominator; a zero or absent one is no conclusion at all.
     if let (Some(instructions), Some(cycles)) = (instructions, cycles)
         && cycles > 0
@@ -77,14 +97,31 @@ pub fn reading_from_deltas(
             misses as f64 / references as f64,
         );
     }
-    let quality =
-        if usable.is_empty() || !values.contains_key("ipc") && !values.contains_key("cache_mpki") {
-            ObjectiveSignalQuality::Missing
-        } else if multiplexed > 0 || ratio.is_some_and(|ratio| ratio < MIN_RUNNING_RATIO) {
-            ObjectiveSignalQuality::Approximate
-        } else {
-            ObjectiveSignalQuality::Direct
-        };
+    if let (Some(misses), Some(branches)) = (branch_misses, branches)
+        && branches > 0
+        && misses <= branches
+    {
+        values.insert("branch_miss_rate".into(), misses as f64 / branches as f64);
+    }
+    if overflow {
+        values.retain(|key, _| {
+            matches!(
+                key.as_str(),
+                "threads" | "threads_multiplexed" | "running_ratio"
+            )
+        });
+        lost += 1;
+    }
+    let quality = if overflow
+        || usable.is_empty()
+        || !values.contains_key("ipc") && !values.contains_key("cache_mpki")
+    {
+        ObjectiveSignalQuality::Missing
+    } else if lost > 0 || multiplexed > 0 || ratio.is_some_and(|ratio| ratio < MIN_RUNNING_RATIO) {
+        ObjectiveSignalQuality::Approximate
+    } else {
+        ObjectiveSignalQuality::Direct
+    };
     SensorReading {
         sensor: "pmu_threads".to_owned(),
         monotonic_ns,

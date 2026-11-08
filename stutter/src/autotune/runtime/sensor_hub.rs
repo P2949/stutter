@@ -38,6 +38,7 @@ impl SensorHub {
         let mut registry = SensorRegistry::new(ExpensiveBudget::default());
         // The PMU sensor is registered but never activated here: only an escalation starts it.
         let pmu = PmuSensor::new(CpuPerfConfig {
+            collect_branches: false,
             include_kernel: false,
             max_tasks: 8,
             collect_cache_refs: true,
