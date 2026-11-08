@@ -726,11 +726,11 @@
         "stutter/src/autotune/sensors/memory_domains.rs"
       ],
       "status": "first_slice",
-      "g0": "read-only resctrl inventory (closids, rmids, allocation groups) reported unavailable when not mounted",
+      "g0": "a cheap `resctrl_monitor` sensor reads L3 llc_occupancy (gauge) and mbm_total/local bytes (counter deltas) summed over monitored domains, counting `Unavailable`/`Error` reads as lost and never as zero; read-only resctrl inventory (closids, rmids, allocation groups) reported unavailable when not mounted",
       "g1": "resctrl is not mounted on this host (HardwareUnavailable for physical proof)",
       "runtime_availability": "resctrl not mounted on this host",
       "authority": "O/E",
-      "not_wired": "no occupancy or bandwidth monitoring, no CAT/MBA operations",
+      "not_wired": "no CAT/MBA allocation operations (by design: this only reads)",
       "dispositions": [
         "FixtureVerified",
         "RealObserved",

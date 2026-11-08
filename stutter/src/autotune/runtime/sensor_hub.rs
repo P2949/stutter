@@ -10,8 +10,8 @@ use crate::{
     autotune::sensors::{
         AdmissionDenied, BlockIoSensor, CpuIdleSensor, CpuPowerSensor, DamonSensor, Escalator,
         ExpensiveBudget, NetworkSensor, NumaFaultSensor, NumaSensor, OomGuardSensor, PmuSensor,
-        PmuTargets, PsiSensor, ResctrlSensor, SchedExtSensor, SensorReading, SensorRegistry,
-        Thresholds, session_cgroup_dir,
+        PmuTargets, PsiSensor, ResctrlMonitorSensor, ResctrlSensor, SchedExtSensor, SensorReading,
+        SensorRegistry, Thresholds, session_cgroup_dir,
     },
     perf_counters::CpuPerfConfig,
 };
@@ -53,6 +53,7 @@ impl SensorHub {
         registry.register(Box::new(NumaSensor::new(Path::new("/sys/devices/system"))));
         registry.register(Box::new(DamonSensor::new(Path::new("/sys/kernel/mm"))));
         registry.register(Box::new(ResctrlSensor::new(Path::new("/sys/fs"))));
+        registry.register(Box::new(ResctrlMonitorSensor::new(Path::new("/sys/fs"))));
         registry.register(Box::new(NetworkSensor::new(proc_root.to_path_buf())));
         registry.register(Box::new(NumaFaultSensor::new(proc_root.to_path_buf())));
         registry.register(Box::new(CpuIdleSensor::new(
@@ -72,6 +73,7 @@ impl SensorHub {
             "numa_stat",
             "damon_state",
             "resctrl_inventory",
+            "resctrl_monitor",
             "network",
             "numa_faults",
             "cpu_idle",
