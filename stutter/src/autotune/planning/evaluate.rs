@@ -282,23 +282,29 @@ pub(crate) fn evaluate_proposal_static(
         deny_messages.push(message);
     }
 
-    if proposal.candidate.operation_kind()
-        == crate::autotune::operation::MutationOperationKind::Nice
-        && let Some(snapshot) = input.observation.active_config_snapshot.as_ref()
-    {
+    if let Some(snapshot) = input.observation.active_config_snapshot.as_ref() {
+        use crate::{
+            autotune::operation::MutationOperationKind as Op, integrations::user_intent as intent,
+        };
         let targets: Vec<u32> = input
             .observation
             .active_tasks
             .iter()
             .map(|task| task.tid.as_u32())
             .collect();
-        if let Some(tid) = crate::integrations::user_intent::explicit_nice_conflict(
-            &snapshot.nice.per_tid,
-            &targets,
-        ) {
+        let conflict = match proposal.candidate.operation_kind() {
+            Op::Nice => intent::explicit_nice_conflict(&snapshot.nice.per_tid, &targets)
+                .map(|tid| (tid, "a non-default nice value")),
+            Op::IoPrio => intent::explicit_ioprio_conflict(&snapshot.ionice.per_tid, &targets)
+                .map(|tid| (tid, "an explicit I/O priority")),
+            Op::Uclamp => intent::explicit_uclamp_conflict(&snapshot.uclamp.per_tid, &targets)
+                .map(|tid| (tid, "a non-default utilization clamp")),
+            _ => None,
+        };
+        if let Some((tid, what)) = conflict {
             deny_reasons.push(CandidateDenyReason::UserExplicitSetting);
             deny_messages.push(format!(
-                "task {tid} already has a non-default nice value set by the user or a launcher"
+                "task {tid} already has {what} set by the user or a launcher"
             ));
         }
     }

@@ -871,21 +871,22 @@
       "anchors": [
         "stutter/src/actions/mod.rs",
         "stutter/src/integrations/user_intent.rs",
-        "stutter/src/architecture_tests/native_controls_only.rs"
+        "stutter/src/architecture_tests/native_controls_only.rs",
+        "stutter/src/autotune/planning/evaluate.rs"
       ],
-      "status": "first_slice",
-      "g0": "native affinity, nice, ionice and uclamp actions with readback; user intent read back from the kernel (restricted CPU mask, non-default nice, real-time policy) as UserExplicit receipts; a Nice candidate is denied when a target already has a non-default nice value; architecture tests forbid running taskset/nice/ionice/chrt/cpupower, any sched_setscheduler, and any sched_setattr that does not keep policy and parameters (no real-time promotion path exists)",
-      "g1": "none",
+      "status": "code_complete",
+      "g0": "native affinity, nice, ionice and uclamp actions with readback; user intent read back from the kernel for every setting the plan names (CPU mask, nice, real-time policy, ionice, uclamp, NUMA memory policy, cgroup cpu.weight/max/idle) as UserExplicit receipts or readers; Nice, I/O-priority and uclamp candidates are denied when a target already carries a user or launcher setting; architecture tests forbid running taskset/nice/ionice/chrt/cpupower, any sched_setscheduler, and any sched_setattr that does not keep policy and parameters, so no real-time promotion path exists",
+      "g1": "this process's affinity, nice and policy read from the real /proc on this host",
       "runtime_availability": "taskset, chrt, ionice, systemd-run present; numactl, cpupower absent",
       "authority": "O/A",
-      "not_wired": "ionice, uclamp and NUMA memory-policy intent are not read back; the affinity and cgroup-placement Supported operations deliberately do not consult user receipts (existing behaviour unchanged)",
+      "not_wired": "nothing",
       "dispositions": [
+        "CodeComplete",
         "FixtureVerified",
-        "HardwareUnavailable",
+        "RealObserved",
         "EvidenceDeferred"
       ],
-      "evidence": [],
-      "unblock": "Needs on the host: taskset, chrt, ionice, systemd-run present; numactl, cpupower absent"
+      "evidence": []
     },
     {
       "id": "extra.mpi",

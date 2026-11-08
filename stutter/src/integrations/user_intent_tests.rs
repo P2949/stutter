@@ -134,3 +134,124 @@ fn a_target_with_a_non_default_nice_value_is_a_conflict_for_a_nice_candidate() {
         "user_explicit_setting"
     );
 }
+
+#[test]
+fn ionice_uclamp_and_memory_policy_defaults_are_nobodys_decision_and_anything_else_is() {
+    use std::collections::BTreeMap;
+
+    use crate::actions::uclamp::UclampValues;
+
+    let mut io = BTreeMap::new();
+    io.insert(1, "none".to_owned());
+    io.insert(2, "best-effort:2".to_owned());
+    io.insert(3, "idle".to_owned());
+    io.insert(4, "best-effort:4".to_owned());
+    assert_eq!(explicit_ioprio_conflict(&io, &[1]), None);
+    assert_eq!(explicit_ioprio_conflict(&io, &[1, 2]), Some(2));
+    assert_eq!(explicit_ioprio_conflict(&io, &[3]), Some(3));
+    assert_eq!(explicit_ioprio_conflict(&io, &[9]), None);
+    assert_eq!(
+        explicit_ioprio_conflict(&io, &[4]),
+        None,
+        "the kernel default level is nobody's decision"
+    );
+
+    let mut clamps = BTreeMap::new();
+    clamps.insert(
+        1,
+        UclampValues {
+            sched_util_min: Some(0),
+            sched_util_max: Some(1024),
+        },
+    );
+    clamps.insert(
+        2,
+        UclampValues {
+            sched_util_min: Some(300),
+            sched_util_max: Some(1024),
+        },
+    );
+    clamps.insert(
+        3,
+        UclampValues {
+            sched_util_min: Some(0),
+            sched_util_max: Some(512),
+        },
+    );
+    clamps.insert(
+        4,
+        UclampValues {
+            sched_util_min: None,
+            sched_util_max: None,
+        },
+    );
+    assert_eq!(explicit_uclamp_conflict(&clamps, &[1, 4]), None);
+    assert_eq!(explicit_uclamp_conflict(&clamps, &[1, 2]), Some(2));
+    assert_eq!(explicit_uclamp_conflict(&clamps, &[3]), Some(3));
+
+    let default_only = "7f00 default anon=3 dirty=3 N0=3\n7f10 default file=/lib/x N0=1\n";
+    assert!(!mempolicy_is_explicit(default_only));
+    let bound = "7f00 default anon=3\n7f20 bind:0 anon=9 N0=9\n";
+    assert!(mempolicy_is_explicit(bound));
+    assert!(mempolicy_is_explicit("7f00 interleave:0-1 anon=2\n"));
+    assert!(!mempolicy_is_explicit(""));
+}
+
+#[test]
+fn memory_policy_and_cgroup_settings_are_read_from_their_files_and_unknown_is_not_default() {
+    let base = std::env::temp_dir().join(format!("stutter-intent-files-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&base);
+    fs::create_dir_all(base.join("5")).unwrap();
+    fs::write(base.join("5/numa_maps"), "7f00 bind:0 anon=1\n").unwrap();
+    assert_eq!(read_mempolicy_explicit(&base, 5), Some(true));
+    fs::write(base.join("5/numa_maps"), "7f00 default anon=1\n").unwrap();
+    assert_eq!(read_mempolicy_explicit(&base, 5), Some(false));
+    assert_eq!(
+        read_mempolicy_explicit(&base, 6),
+        None,
+        "no file means unknown, never default"
+    );
+
+    let group = base.join("group");
+    fs::create_dir_all(&group).unwrap();
+    for (name, text) in [
+        ("cpu.weight", "100\n"),
+        ("cpu.max", "max 100000\n"),
+        ("cpu.idle", "0\n"),
+    ] {
+        fs::write(group.join(name), text).unwrap();
+    }
+    assert_eq!(read_cgroup_intent(&group), CgroupIntent::default());
+    fs::write(group.join("cpu.weight"), "500\n").unwrap();
+    fs::write(group.join("cpu.max"), "50000 100000\n").unwrap();
+    fs::write(group.join("cpu.idle"), "1\n").unwrap();
+    assert_eq!(
+        read_cgroup_intent(&group),
+        CgroupIntent {
+            cpu_weight_set: true,
+            cpu_max_set: true,
+            cpu_idle_set: true
+        }
+    );
+    assert_eq!(
+        read_cgroup_intent(&base.join("missing")),
+        CgroupIntent::default()
+    );
+    fs::remove_dir_all(&base).unwrap();
+}
+
+#[test]
+fn this_process_intent_is_read_from_the_real_proc() {
+    let intent = read_task_intent(std::path::Path::new("/proc"), std::process::id()).unwrap();
+    assert!(!intent.cpus_allowed.is_empty());
+    assert!(
+        !intent.policy.is_real_time(),
+        "the test runner is not a real-time task"
+    );
+    let online = crate::topology::TopologyModel::read()
+        .unwrap()
+        .online_cpu_ids();
+    // A normal process on a normal host is nobody's explicit decision.
+    let report = classify(&intent, &online);
+    assert!(!report.real_time);
+}
