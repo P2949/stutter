@@ -493,6 +493,8 @@ mod live {
             launch_id_matched: false,
         });
         status.last_frame_at = Some(now);
+        // A measured alignment: the default is unknown, and unknown is never trusted.
+        status.alignment_uncertainty_ms = 0.5;
         status
     }
 

@@ -108,3 +108,73 @@ fn a_batch_spanning_two_epochs_keeps_them_apart_and_only_the_current_one_is_trus
         "the new epoch's first poll has no bound"
     );
 }
+
+#[test]
+fn a_better_offset_or_a_newly_known_bound_invalidates_the_frames_already_mapped() {
+    let base = Instant::now();
+    let mut clock = FrameClock::default();
+    // First poll: frames mapped under an unknown bound.
+    let first = clock.align(at(base, 0), Some(1_000_000), 4096, vec![frame(0, 500)]);
+    assert!(
+        !first.invalidate_window,
+        "nothing was mapped before the first poll"
+    );
+    // The bound becomes known on the second poll: frames from the first must not be qualified.
+    let second = clock.align(at(base, 100), Some(1_000_100), 4096, vec![frame(0, 595)]);
+    assert!(second.invalidate_window);
+    // A steady third poll changes nothing about earlier frames.
+    let third = clock.align(at(base, 200), Some(1_000_200), 4096, vec![frame(0, 695)]);
+    assert!(!third.invalidate_window);
+    // A much tighter offset (this frame is 50 ms "earlier" on the monitor clock) revises it.
+    let tighter = clock.align(at(base, 300), Some(1_000_250), 4096, vec![frame(0, 795)]);
+    assert!(tighter.invalidate_window);
+    // Sub-millisecond jitter is not a revision.
+    let jitter = clock.align(at(base, 400), Some(1_000_355), 4096, vec![frame(0, 900)]);
+    assert!(!jitter.invalidate_window);
+}
+
+#[test]
+fn a_partial_backlog_makes_a_known_alignment_unknown_and_invalidates() {
+    let base = Instant::now();
+    let mut clock = FrameClock::default();
+    clock.align(at(base, 0), Some(5_000), 4096, vec![frame(0, 100)]);
+    clock.align(at(base, 50), Some(5_050), 4096, vec![frame(0, 150)]);
+    assert!(clock.uncertainty_ms().is_finite());
+    // The next poll filled its room (two frames, room two): only part of the backlog was read.
+    let partial = clock.align(
+        at(base, 100),
+        Some(5_100),
+        2,
+        vec![frame(0, 160), frame(0, 170)],
+    );
+    assert!(partial.invalidate_window);
+    assert!(
+        clock.uncertainty_ms().is_nan(),
+        "a partial read proves no freshness"
+    );
+}
+
+#[test]
+fn absurd_source_times_are_lost_not_aliased_and_never_overflow() {
+    let base = Instant::now();
+    let mut clock = FrameClock::default();
+    let out = clock.align(
+        at(base, 0),
+        Some(1_000),
+        4096,
+        vec![
+            frame(0, u64::MAX),
+            frame(0, MAX_SOURCE_ELAPSED_MS + 1),
+            frame(0, 500),
+        ],
+    );
+    assert_eq!(out.unplaced, 2);
+    assert_eq!(out.frames.len(), 1);
+    // A huge monitor time with a tiny source time maps without overflow too.
+    let mut other = FrameClock::default();
+    let big = other.align(at(base, 0), Some(u64::MAX), 4096, vec![frame(0, 1)]);
+    assert_eq!(big.frames.len(), 1);
+    let none = FrameClock::default().align(at(base, 0), Some(1), 4096, vec![frame(0, u64::MAX)]);
+    assert!(none.frames.is_empty());
+    assert_eq!(none.unplaced, 1);
+}

@@ -14,6 +14,7 @@ pub mod managed_source;
 pub mod proc_view;
 pub mod quality;
 pub mod registration;
+pub mod renderers;
 pub mod session;
 
 #[cfg(test)]

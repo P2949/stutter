@@ -12,7 +12,7 @@ use std::{
 };
 
 use super::{
-    parser::MangoHudLiveParser,
+    parser::{LineOutcome, MangoHudLiveParser},
     schema::{schema_from_headers, split_csv_line},
 };
 use crate::{
@@ -47,6 +47,8 @@ impl Default for TailConfig {
 pub struct TailCounters {
     pub frames: u64,
     pub oversize_lines_discarded: u64,
+    /// Data rows that did not parse or failed the plausibility filter: lost frames.
+    pub rejected_lines: u64,
     pub truncations: u64,
     pub replacements: u64,
 }
@@ -277,8 +279,8 @@ impl MangoHudTailSession {
                         return Err(TailFailure::NoHeader);
                     }
                 }
-                Some(parser) => {
-                    if let Some(event) = parser.parse_line(line) {
+                Some(parser) => match parser.parse_line_checked(line) {
+                    LineOutcome::Frame(event) => {
                         self.counters.frames += 1;
                         *produced += 1;
                         out.push(TailedFrame {
@@ -286,7 +288,11 @@ impl MangoHudTailSession {
                             event,
                         });
                     }
-                }
+                    LineOutcome::Rejected | LineOutcome::NoTimestamp => {
+                        self.counters.rejected_lines += 1;
+                    }
+                    LineOutcome::NotData => {}
+                },
             }
         }
         Ok(())

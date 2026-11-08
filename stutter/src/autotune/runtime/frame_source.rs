@@ -95,18 +95,36 @@ impl AutotuneRuntime {
         let aligned = self
             .frame_clock
             .align(now, monitor_now, FRAMES_PER_POLL, outcome.frames);
-        source.record_alignment(self.frame_clock.uncertainty_ms(), aligned.unplaced);
+        let uncertainty = self.frame_clock.uncertainty_ms();
+        source.record_alignment(uncertainty, aligned.unplaced);
         if aligned.epoch_changed {
-            // A new epoch (rotation, truncation, replacement) never mixes with the old frames.
+            // A new epoch (rotation, truncation, replacement) never mixes with the old frames,
+            // and what was lost in the old one does not taint the new one.
+            source.reset_loss();
+        }
+        if aligned.epoch_changed || aligned.invalidate_window {
+            // Frames mapped under an earlier alignment are not covered by this one. Clearing also
+            // withdraws the attestation, which is re-derived from the source on this tick.
             self.controller.window.clear_frames();
         }
         let current = aligned.frames.last().map(|(epoch, _)| *epoch);
+        let mut newest_mapped = None;
         for (epoch, event) in aligned.frames {
             if Some(epoch) != current {
                 continue;
             }
             self.frame_epoch = epoch;
+            newest_mapped = Some(event.elapsed_ms);
             self.controller.window.push_frame(event);
+        }
+        // Frame age is measured on the controller's clock from the frame's mapped time, never
+        // from when it was read: an old backlog read now is old. It is only claimed when the
+        // alignment itself is bounded, and an unknown age stays unknown (it ages, never refreshes).
+        if let (Some(mapped), Some(now_ms), true) =
+            (newest_mapped, monitor_now, uncertainty.is_finite())
+        {
+            let age_ms = now_ms.saturating_sub(mapped);
+            source.record_frame_age(now, Some(Duration::from_millis(age_ms)));
         }
     }
 

@@ -139,6 +139,20 @@ pub struct MangoHudLiveParser {
     plausibility_filter: MangoHudFramePlausibilityFilter,
 }
 
+/// What one CSV line was. A blank or comment line is not data and not loss; a line that was data
+/// but could not be used is a rejected row, which is loss.
+#[derive(Clone, Debug)]
+pub enum LineOutcome {
+    Frame(FrameEvent),
+    /// Blank or a `#` comment.
+    NotData,
+    /// A data row that did not parse or failed the plausibility filter.
+    Rejected,
+    /// A well-formed row with no source timestamp. Without the source's own event time a frame
+    /// cannot be placed on any clock, so it is loss, never an assumed time zero.
+    NoTimestamp,
+}
+
 impl MangoHudLiveParser {
     pub(super) fn new(schema: MangoHudCsvSchema) -> Self {
         Self {
@@ -148,21 +162,32 @@ impl MangoHudLiveParser {
     }
 
     pub fn parse_line(&mut self, line: &str) -> Option<FrameEvent> {
+        match self.parse_line_checked(line) {
+            LineOutcome::Frame(event) => Some(event),
+            LineOutcome::NotData | LineOutcome::Rejected | LineOutcome::NoTimestamp => None,
+        }
+    }
+
+    /// Like [`parse_line`](Self::parse_line) but says *why* there is no frame, so a rejected row
+    /// is counted as loss and a blank or comment line is not.
+    pub fn parse_line_checked(&mut self, line: &str) -> LineOutcome {
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') {
-            return None;
+            return LineOutcome::NotData;
         }
-
-        let (raw_elapsed_ms, frametime_ms) = parse_frame_line(&self.schema, line)?;
+        let Some((raw_elapsed_ms, frametime_ms)) = parse_frame_line(&self.schema, line) else {
+            return LineOutcome::Rejected;
+        };
         if !self
             .plausibility_filter
             .accept(raw_elapsed_ms, frametime_ms)
         {
-            return None;
+            return LineOutcome::Rejected;
         }
-        let elapsed_ms = raw_elapsed_ms.unwrap_or(0);
-
-        Some(FrameEvent {
+        let Some(elapsed_ms) = raw_elapsed_ms else {
+            return LineOutcome::NoTimestamp;
+        };
+        LineOutcome::Frame(FrameEvent {
             elapsed_ms,
             frametime_ms,
         })

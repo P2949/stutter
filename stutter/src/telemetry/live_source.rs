@@ -41,7 +41,8 @@ impl FrameSourceStatus {
             unexplained_gaps: 0,
             healthy: true,
             competing_targets: 0,
-            alignment_uncertainty_ms: 0.0,
+            // Unknown until the clock mapping has measured it: never an assumed zero.
+            alignment_uncertainty_ms: f64::NAN,
         }
     }
 }

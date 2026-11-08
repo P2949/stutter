@@ -311,3 +311,26 @@ fn frames_on_a_foreign_clock_are_pruned_by_the_next_interval_so_they_must_be_map
     mapped.push_interval(interval(3_601_000, 1));
     assert_eq!(mapped.frame_count(), 2);
 }
+
+#[test]
+fn clearing_the_window_withdraws_the_frame_stream_attestation_too() {
+    use crate::telemetry::{
+        frame_source::{Attribution, MeasurementStage},
+        quality::StreamQuality,
+    };
+    let mut window = RollingWindow::new(Duration::from_secs(10));
+    window.push_frame(frame(1_000, 16.0));
+    window.attest_frame_stream(StreamQuality {
+        attribution: Attribution::ValidatedDirect,
+        stage: MeasurementStage::ApplicationFrame,
+        unexplained_sequence_gaps: 0,
+        dropped_frames: 0,
+        alignment_uncertainty_ms: 0.5,
+        source_healthy: true,
+    });
+    assert!(window.frame_stream().is_some());
+    window.clear();
+    // Trust describes the data it was attested for; across a phase boundary it must not survive.
+    assert!(window.frame_stream().is_none());
+    assert_eq!(window.frame_count(), 0);
+}

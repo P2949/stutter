@@ -141,6 +141,8 @@ impl RollingWindow {
         self.foreground_events.clear();
         self.workload_progress.clear();
         self.dropped_invalid_frames = 0;
+        // Trust belongs to the data it described: a cleared window attests nothing.
+        self.frame_stream = None;
     }
 
     pub fn latest_elapsed_ms(&self) -> Option<u64> {
