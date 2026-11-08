@@ -50,6 +50,9 @@ pub struct BootEnvironment {
     /// Hash of the whole command line, so a changed parameter changes the identity.
     pub cmdline_hash: String,
     pub environment_hash: String,
+    /// The same identity without the generation: what a stored experiment depends on. A rebuild
+    /// that changes nothing about the kernel, isolation or scheduler does not invalidate memory.
+    pub context_hash: String,
 }
 
 pub fn preempt_mode(kernel_version: &str) -> PreemptMode {
@@ -133,6 +136,7 @@ impl BootEnvironment {
             scheduler_ext_ops,
             cmdline_hash: daemon_profile_stable_hash([cmdline.as_str()]),
             environment_hash: String::new(),
+            context_hash: String::new(),
         };
         // The boot id is excluded: the same environment after a reboot is the same environment.
         let rendered = format!(
@@ -146,6 +150,16 @@ impl BootEnvironment {
             environment.cmdline_hash
         );
         environment.environment_hash = daemon_profile_stable_hash([rendered.as_str()]);
+        let context = format!(
+            "{}|{:?}|{:?}|{:?}|{:?}|{}",
+            environment.kernel_release,
+            environment.preempt,
+            environment.isolation,
+            environment.microcode,
+            environment.scheduler_ext_ops,
+            environment.cmdline_hash
+        );
+        environment.context_hash = daemon_profile_stable_hash([context.as_str()]);
         environment
     }
 

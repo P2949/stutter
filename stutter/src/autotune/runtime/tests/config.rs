@@ -153,3 +153,19 @@ fn the_runtime_samples_system_psi_into_every_observation_without_acting_on_it() 
         !unavailable.contains(&"cpu_power")
     );
 }
+
+#[test]
+fn the_context_signature_joins_inventory_topology_and_boot_context_and_is_stable_between_ticks() {
+    use super::super::context_signature::compose;
+    assert_eq!(compose("inv", "topo", "ctx"), "inv+topo+ctx");
+    let mut config = AutotuneRuntimeConfig::suggest(None, Some(std::process::id()), None);
+    config.history_log = None;
+    let runtime = AutotuneRuntime::new(config);
+    let first = runtime.context_signature("inventory-hash");
+    let second = runtime.context_signature("inventory-hash");
+    assert_eq!(first, second, "cached, so stable between ticks");
+    assert!(first.starts_with("inventory-hash+"), "{first}");
+    assert_eq!(first.matches('+').count(), 2, "{first}");
+    // A different inventory is a different key and is not served from the cache.
+    assert!(runtime.context_signature("other").starts_with("other+"));
+}

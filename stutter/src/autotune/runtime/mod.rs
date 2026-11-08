@@ -6,6 +6,7 @@ use std::{collections::BTreeMap, path::PathBuf};
 
 pub(crate) mod acceptance;
 pub(crate) mod config;
+mod context_signature;
 pub(crate) mod daemon_state;
 pub(crate) mod decision_view;
 pub(crate) mod emission;
@@ -113,6 +114,8 @@ pub struct AutotuneRuntime {
     last_frame_discovery: Option<std::time::Instant>,
     /// Always-on cheap sensors, sampled once per evaluation.
     sensor_hub: sensor_hub::SensorHub,
+    /// The cached context signature: when computed, for which inventory hash, and its value.
+    context_cache: std::sync::Mutex<Option<(std::time::Instant, String, String)>>,
 }
 
 #[cfg(test)]

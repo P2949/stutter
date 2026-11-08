@@ -197,7 +197,7 @@
       "g1": "none",
       "runtime_availability": "absent",
       "authority": "O/B",
-      "not_wired": "the planner does not yet use topology v2 for placement hypotheses; no hwloc XML cross-check; topology fingerprint is not yet part of the candidate-memory key"
+      "not_wired": "the planner does not yet use topology v2 for placement hypotheses; no hwloc XML cross-check"
     },
     {
       "id": "5.10",
@@ -741,7 +741,7 @@
       "g1": "read on this host (kernel 6.18.57, PREEMPT_DYNAMIC, no isolation)",
       "runtime_availability": "kernel parameters, not live tunables",
       "authority": "F",
-      "not_wired": "not part of the candidate-memory key or experiment context fingerprint yet; no comparator or resumable cross-boot campaign uses it"
+      "not_wired": "no comparator or resumable cross-boot campaign uses it; the context hash (without the generation) is part of the candidate-memory key"
     },
     {
       "id": "extra.workloads",

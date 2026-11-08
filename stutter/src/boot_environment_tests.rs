@@ -107,3 +107,21 @@ fn the_raw_command_line_is_never_stored_and_housekeeping_excludes_every_isolated
     );
     fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn a_rebuild_that_changes_only_the_generation_keeps_the_context_hash() {
+    let (a, first) = host("ctx-a", "root=x quiet", "#1 SMP PREEMPT_DYNAMIC", "gen-1");
+    let (b, other_generation) = host("ctx-b", "root=x quiet", "#1 SMP PREEMPT_DYNAMIC", "gen-2");
+    assert_ne!(first.environment_hash, other_generation.environment_hash);
+    assert_eq!(first.context_hash, other_generation.context_hash);
+    let (c, isolated) = host(
+        "ctx-c",
+        "root=x quiet nohz_full=2",
+        "#1 SMP PREEMPT_DYNAMIC",
+        "gen-1",
+    );
+    assert_ne!(first.context_hash, isolated.context_hash);
+    for dir in [a, b, c] {
+        fs::remove_dir_all(dir).unwrap();
+    }
+}

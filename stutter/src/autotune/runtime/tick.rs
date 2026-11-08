@@ -273,6 +273,10 @@ impl AutotuneRuntime {
         let mut observation = self.build_observation();
         observation.external_owners = self.current_external_owners();
         observation.sensor_readings = self.sensor_hub.sample();
+        // A stored experiment is keyed on the full context, not the bare inventory hash.
+        if let Some(inventory) = observation.topology_signature.clone() {
+            observation.topology_signature = Some(self.context_signature(&inventory));
+        }
         self.last_observation = observation.clone();
         if !observation.target_present && self.has_kept_actions() && !self.has_active_experiment() {
             // The workload the kept actions were kept for is gone.
