@@ -292,3 +292,22 @@ fn clear_removes_all_streams() {
     assert!(window.is_empty());
     assert_eq!(window.total_event_count(), 0);
 }
+
+#[test]
+fn frames_on_a_foreign_clock_are_pruned_by_the_next_interval_so_they_must_be_mapped_first() {
+    // The monitor has run for an hour. A game's own clock reads 10 s. Pushed as they are, the
+    // frames vanish at the next interval: they are 3_590 s behind the window. That is why every
+    // frame is mapped onto the monitor clock (`FrameClock`) before it reaches the window.
+    let mut unmapped = RollingWindow::new(Duration::from_secs(10));
+    unmapped.push_frame(frame(10_000, 16.0));
+    unmapped.push_frame(frame(10_016, 16.0));
+    unmapped.push_interval(interval(3_600_000, 1));
+    assert_eq!(unmapped.frame_count(), 0);
+
+    let mut mapped = RollingWindow::new(Duration::from_secs(10));
+    mapped.push_interval(interval(3_599_000, 1));
+    mapped.push_frame(frame(3_600_000, 16.0));
+    mapped.push_frame(frame(3_600_016, 16.0));
+    mapped.push_interval(interval(3_601_000, 1));
+    assert_eq!(mapped.frame_count(), 2);
+}

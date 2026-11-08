@@ -104,6 +104,11 @@ impl AutotuneRuntime {
             } => {
                 // A suspended gap must clear the window before these intervals join it.
                 self.poll_lifecycle_clock()?;
+                // The newest interval's time on the monitor clock is the controller's "now", the
+                // reference the game's frame clock is mapped onto.
+                if let Some(latest) = records.iter().map(|record| record.elapsed_ms).max() {
+                    self.interval_anchor = Some((latest, std::time::Instant::now()));
+                }
                 let scored_samples = records
                     .iter()
                     .map(|record| record.samples)

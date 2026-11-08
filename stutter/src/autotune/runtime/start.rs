@@ -36,6 +36,8 @@ impl AutotuneRuntime {
             owner_cache: std::sync::Mutex::default(),
             managed_source: None,
             frame_epoch: 0,
+            frame_clock: crate::telemetry::frame_clock::FrameClock::default(),
+            interval_anchor: None,
             last_frame_discovery: None,
             sensor_hub: super::sensor_hub::SensorHub::new(std::path::Path::new("/proc")),
             context_cache: std::sync::Mutex::default(),

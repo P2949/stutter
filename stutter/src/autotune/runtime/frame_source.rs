@@ -79,16 +79,34 @@ impl AutotuneRuntime {
         if outcome.gone {
             self.managed_source = None;
             self.frame_source = None;
+            self.frame_clock = crate::telemetry::frame_clock::FrameClock::default();
             self.controller.window.clear_frames();
             return;
         }
-        for frame in outcome.frames {
+        // The game's clock is not the monitor's: every frame is mapped through a measured offset,
+        // and the source's alignment uncertainty is whatever that measurement can bound (unknown
+        // until it can bound it), never an assumed zero.
+        let monitor_now = self.interval_anchor.map(|(elapsed_ms, arrived)| {
+            elapsed_ms.saturating_add(
+                u64::try_from(now.saturating_duration_since(arrived).as_millis())
+                    .unwrap_or(u64::MAX),
+            )
+        });
+        let aligned = self
+            .frame_clock
+            .align(now, monitor_now, FRAMES_PER_POLL, outcome.frames);
+        source.record_alignment(self.frame_clock.uncertainty_ms(), aligned.unplaced);
+        if aligned.epoch_changed {
             // A new epoch (rotation, truncation, replacement) never mixes with the old frames.
-            if frame.epoch != self.frame_epoch {
-                self.frame_epoch = frame.epoch;
-                self.controller.window.clear_frames();
+            self.controller.window.clear_frames();
+        }
+        let current = aligned.frames.last().map(|(epoch, _)| *epoch);
+        for (epoch, event) in aligned.frames {
+            if Some(epoch) != current {
+                continue;
             }
-            self.controller.window.push_frame(frame.event);
+            self.frame_epoch = epoch;
+            self.controller.window.push_frame(event);
         }
     }
 
@@ -116,6 +134,7 @@ impl AutotuneRuntime {
         let source = ManagedFrameSource::new(launch, uid);
         self.frame_source = Some(source.shared_status());
         self.frame_epoch = 0;
+        self.frame_clock = crate::telemetry::frame_clock::FrameClock::default();
         self.managed_source = Some(source);
     }
 }

@@ -80,6 +80,15 @@ impl ManagedFrameSource {
         Arc::clone(&self.status)
     }
 
+    /// Publishes the measured clock alignment (`NaN` when unknown) and counts frames that could
+    /// not be placed on the controller's clock as lost.
+    pub fn record_alignment(&self, uncertainty_ms: f64, unplaced_frames: u64) {
+        self.publish(|status| {
+            status.alignment_uncertainty_ms = uncertainty_ms;
+            status.dropped_frames = status.dropped_frames.saturating_add(unplaced_frames);
+        });
+    }
+
     fn publish(&self, update: impl FnOnce(&mut FrameSourceStatus)) {
         if let Ok(mut status) = self.status.lock() {
             update(&mut status);

@@ -112,6 +112,10 @@ pub struct AutotuneRuntime {
     /// The frame source found for the focused launch, when `frame_capture_root` is configured.
     managed_source: Option<crate::telemetry::managed_source::ManagedFrameSource>,
     frame_epoch: u64,
+    /// Maps the game's frame clock onto the monitor clock the rolling window is keyed on.
+    frame_clock: crate::telemetry::frame_clock::FrameClock,
+    /// The newest interval's monitor-clock time and when it arrived: the controller's "now".
+    interval_anchor: Option<(u64, std::time::Instant)>,
     last_frame_discovery: Option<std::time::Instant>,
     /// Always-on cheap sensors, sampled once per evaluation.
     sensor_hub: sensor_hub::SensorHub,
