@@ -264,7 +264,7 @@
       "g1": "none",
       "runtime_availability": "absent",
       "authority": "O/B",
-      "not_wired": "topology v2 yields a validated game-llc-pack placement hypothesis (`generate_plan_with_cache_locality`, new profile name so never autonomous) but the daemon's provider still generates the default set only; the hwloc cross-check is a library function not yet exposed through doctor or a CLI",
+      "not_wired": "topology v2 yields a validated game-llc-pack placement hypothesis (`generate_plan_with_cache_locality`, new profile name so never autonomous) but the daemon's provider deliberately still generates the default set only: the autonomous registry gates the CPU-affinity operation, not a profile name, so adding a profile there would widen a qualified Supported contract without qualification (PLAN: no new autonomous tuple unless separately qualified); the hwloc cross-check is a library function not yet exposed through doctor or a CLI",
       "dispositions": [
         "FixtureVerified",
         "HardwareUnavailable",
