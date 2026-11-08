@@ -711,14 +711,15 @@
         "W14"
       ],
       "anchors": [
-        "stutter-validation-runner/src/boot/mod.rs"
+        "stutter-validation-runner/src/boot/mod.rs",
+        "stutter/src/boot_environment.rs"
       ],
       "status": "first_slice",
-      "g0": "persistent validation runner with 6.12 and 7.2 specialisations exists; no BootEnvironmentIdentity",
+      "g0": "persistent validation runner with 6.12 and 7.2 specialisations exists; BootEnvironment now fingerprints kernel, preemption model, isolation and generation",
       "g1": "earlier multi-kernel resume evidence is retained",
       "runtime_availability": "6.12 and 7.2 specialisations configured",
       "authority": "F",
-      "not_wired": "no typed boot-environment fingerprint"
+      "not_wired": "no typed cross-boot campaign using BootEnvironmentIdentity; RT, Zen, Liquorix and CachyOS kernels are not available as reproducible specialisations here"
     },
     {
       "id": "extra.boot",
@@ -732,13 +733,15 @@
       "packages": [
         "W14"
       ],
-      "anchors": [],
-      "status": "not_started",
-      "g0": "none",
-      "g1": "none",
+      "anchors": [
+        "stutter/src/boot_environment.rs"
+      ],
+      "status": "first_slice",
+      "g0": "typed boot environment: kernel release, preemption model from the version string, parsed nohz_full/rcu_nocbs/isolcpus/irqaffinity CPU lists, microcode, generation, sched_ext ops, command-line hash (never the raw line), environment hash that ignores the boot id; housekeeping CPUs; reported by doctor",
+      "g1": "read on this host (kernel 6.18.57, PREEMPT_DYNAMIC, no isolation)",
       "runtime_availability": "kernel parameters, not live tunables",
       "authority": "F",
-      "not_wired": "no environment fingerprint"
+      "not_wired": "not part of the candidate-memory key or experiment context fingerprint yet; no comparator or resumable cross-boot campaign uses it"
     },
     {
       "id": "extra.workloads",

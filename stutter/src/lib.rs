@@ -7,6 +7,7 @@ pub(crate) mod agent;
 pub(crate) mod alert;
 pub(crate) mod artifacts;
 pub(crate) mod autotune;
+pub(crate) mod boot_environment;
 pub(crate) mod config;
 pub(crate) mod daemon;
 pub(crate) mod daemon_policy;

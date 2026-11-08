@@ -220,3 +220,59 @@ pub(crate) fn topology_check_at(
         details,
     }
 }
+
+/// The boot environment's identity: informational, and the basis for not carrying a result across
+/// a different kernel, isolation setup or generation. The command line itself is not shown.
+pub(crate) fn boot_environment_check() -> DoctorCheck {
+    use crate::boot_environment::BootEnvironment;
+    let environment = BootEnvironment::read_at(
+        std::path::Path::new("/proc"),
+        std::path::Path::new("/sys"),
+        std::path::Path::new("/run"),
+    );
+    let mut details = BTreeMap::new();
+    details.insert(
+        "kernel_release".to_owned(),
+        environment.kernel_release.clone(),
+    );
+    details.insert("preempt".to_owned(), format!("{:?}", environment.preempt));
+    details.insert(
+        "nohz_full".to_owned(),
+        format!("{:?}", environment.isolation.nohz_full),
+    );
+    details.insert(
+        "isolcpus".to_owned(),
+        format!("{:?}", environment.isolation.isolcpus),
+    );
+    details.insert(
+        "rcu_nocbs".to_owned(),
+        format!("{:?}", environment.isolation.rcu_nocbs),
+    );
+    details.insert(
+        "microcode".to_owned(),
+        environment
+            .microcode
+            .clone()
+            .unwrap_or_else(|| "unknown".to_owned()),
+    );
+    details.insert(
+        "generation".to_owned(),
+        environment
+            .generation
+            .clone()
+            .unwrap_or_else(|| "unknown".to_owned()),
+    );
+    details.insert(
+        "environment_hash".to_owned(),
+        environment.environment_hash.clone(),
+    );
+    DoctorCheck {
+        name: "boot_environment".to_owned(),
+        status: DoctorStatus::Pass,
+        message: format!(
+            "kernel {} ({:?}), environment {}",
+            environment.kernel_release, environment.preempt, environment.environment_hash
+        ),
+        details,
+    }
+}

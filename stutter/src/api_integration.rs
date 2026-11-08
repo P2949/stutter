@@ -59,3 +59,8 @@ pub mod search {
     //! Offline candidate-search policies over a finite legal space, and their replay on history.
     pub use crate::autotune::search::*;
 }
+
+pub mod boot_environment {
+    //! The boot environment's identity: kernel, preemption model, isolation parameters, generation.
+    pub use crate::boot_environment::*;
+}
