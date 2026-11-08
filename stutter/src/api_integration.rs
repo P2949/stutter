@@ -12,7 +12,7 @@ pub mod objective_source {
 
 pub mod ownership {
     //! Exact resource ownership receipts and the process-name owner probe.
-    pub use crate::integrations::{receipt::*, *};
+    pub use crate::integrations::{gpu_identity::*, receipt::*, *};
 }
 
 pub mod sensors {

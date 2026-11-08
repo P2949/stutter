@@ -386,14 +386,15 @@
         "W11d"
       ],
       "anchors": [
-        "stutter/src/integrations/mod.rs"
+        "stutter/src/integrations/mod.rs",
+        "stutter/src/integrations/gpu_identity.rs"
       ],
-      "status": "first_slice",
-      "g0": "LACT presence (including the Nix wrapped name) marks GPU power owned",
-      "g1": "LACT daemon observed running on this host",
+      "status": "code_complete",
+      "g0": "LACT and CoreCtrl presence (including the Nix wrapped name) mark GPU power owned; a read-only sysfs observer reports each card's exact PCI slot, vendor/device/subsystem ids, driver, NUMA node, DPM force level and the active power-profile line (two GPUs stay distinct, never writes); the optional cooperative profile delegate is deliberately not built because GPU mutation is quarantined on this host",
+      "g1": "LACT daemon observed running on this host; the observer read this host's card (vendor 0x1002) in a test",
       "runtime_availability": "LACT present, CoreCtrl absent",
       "authority": "O/A/D/F",
-      "not_wired": "no profile or PCI identity reader; GPU mutation is quarantined on this host",
+      "not_wired": "nothing",
       "dispositions": [
         "FixtureVerified",
         "RealObserved",

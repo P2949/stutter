@@ -57,6 +57,8 @@ pub enum KnownOwner {
     /// Applies power settings from a oneshot unit: visible only through systemd.
     Tlp,
     Thermald,
+    /// A GUI/daemon that writes GPU and CPU power profiles.
+    CoreCtrl,
 }
 
 struct OwnerSpec {
@@ -138,6 +140,11 @@ const OWNERS: &[OwnerSpec] = &[
         owner: KnownOwner::Tlp,
         comms: &[],
         domains: &[D::CpuPower],
+    },
+    OwnerSpec {
+        owner: KnownOwner::CoreCtrl,
+        comms: &["corectrl", "corectrl_helper"],
+        domains: &[D::GpuPower],
     },
     OwnerSpec {
         owner: KnownOwner::Thermald,
@@ -295,6 +302,7 @@ impl OwnerReport {
             KnownOwner::Numad => "numad manages memory placement",
             KnownOwner::Tlp => "TLP manages power settings",
             KnownOwner::Thermald => "thermald manages thermal limits",
+            KnownOwner::CoreCtrl => "CoreCtrl manages the GPU profile",
             KnownOwner::SystemdOomd | KnownOwner::Uresourced => "an out-of-memory guard owns this",
         })
     }
@@ -352,6 +360,7 @@ pub(crate) fn owner_domains() -> Vec<(KnownOwner, Vec<ResourceDomain>)> {
 pub mod adapters;
 pub mod dbus;
 pub mod exact;
+pub mod gpu_identity;
 pub mod scx_loader;
 pub mod tuned;
 pub mod units;

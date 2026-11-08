@@ -65,6 +65,7 @@ fn interface_of(owner: KnownOwner) -> Interface {
         | KnownOwner::Irqbalance
         | KnownOwner::Bpftune
         | KnownOwner::Numad
+        | KnownOwner::CoreCtrl
         | KnownOwner::Uresourced => Interface::ProcessOnly,
     }
 }
