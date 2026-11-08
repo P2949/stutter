@@ -57,7 +57,17 @@ pub fn run_privileged_service_worker(
         None,
     );
     crate::config_file::apply_daemon_user_config_overrides(&mut config, Some(&user_config));
-    config.autotune.allow_medium_risk_apply = true;
+    // Only the root service environment selects a backend, never a socket request or user KPI.
+    // Existing systemd units predate the tag. Unknown tags fail closed, not as qualified systemd.
+    let backend = std::env::var_os("STUTTER_SERVICE_BACKEND");
+    config.mode = service_backend_mode(
+        backend
+            .as_deref()
+            .map(|value| value.to_str().context("bounded_service_backend_invalid"))
+            .transpose()?,
+    )?;
+    config.autotune.allow_medium_risk_apply =
+        config.mode == crate::daemon_policy::DaemonMode::ApplyMediumRisk;
     config.safety.allow_high_risk = false;
     config.safety.allow_persistent_effects = false;
     let policy =
@@ -80,6 +90,15 @@ pub fn run_privileged_service_worker(
         return Ok(());
     }
     super::worker::run_worker(socket_path, &service, Some((uid, policy)))
+}
+
+fn service_backend_mode(backend: Option<&str>) -> anyhow::Result<crate::daemon_policy::DaemonMode> {
+    use crate::daemon_policy::DaemonMode;
+    match backend {
+        None | Some("systemd") => Ok(DaemonMode::ApplyMediumRisk),
+        Some("openrc") => Ok(DaemonMode::Observe),
+        Some(_) => anyhow::bail!("bounded_service_backend_unknown"),
+    }
 }
 
 /// The service never accepts a caller-selected mutation ceiling. Its operation envelope is
@@ -160,6 +179,42 @@ pub(super) fn validate_request(request: &PrivilegedWorkerRequest) -> anyhow::Res
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn unqualified_service_backend_cannot_inherit_apply_but_can_recover() {
+        use crate::daemon_policy::{ActionSource, DaemonMode, DaemonPolicy, PolicyIntent};
+        assert_eq!(
+            service_backend_mode(None).unwrap(),
+            DaemonMode::ApplyMediumRisk
+        );
+        assert_eq!(
+            service_backend_mode(Some("systemd")).unwrap(),
+            DaemonMode::ApplyMediumRisk
+        );
+        assert!(service_backend_mode(Some("OpenRC")).is_err());
+        assert!(service_backend_mode(Some("")).is_err());
+        let mut policy = DaemonPolicy::apply_medium_risk(ActionSource::AutotuneRuntime);
+        policy.mode = service_backend_mode(Some("openrc")).unwrap();
+        let plan = wire(crate::autotune::objective::ObjectiveKind::GameRunnableLatency);
+        let candidate = plan.into_plan_request().unwrap().candidate;
+        assert!(
+            policy
+                .check_action_with_context(
+                    PolicyIntent::Apply,
+                    &candidate.descriptor(),
+                    &Default::default()
+                )
+                .is_err()
+        );
+        assert!(
+            policy
+                .check_action_with_context(
+                    PolicyIntent::Rollback,
+                    &candidate.descriptor(),
+                    &Default::default()
+                )
+                .is_ok()
+        );
+    }
     fn wire(objective: crate::autotune::objective::ObjectiveKind) -> PrivilegedWorkerCandidatePlan {
         let candidate =
             crate::autotune::planning::candidate::CandidateAction::cpu_affinity_profile_for(

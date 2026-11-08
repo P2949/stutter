@@ -6,6 +6,7 @@ Before=stutter-autotune-bounded@%i.service
 Type=simple
 User=root
 Environment=STUTTER_SERVICE_CONFIG=@CONFIG_DIR@/autotune-bounded-%i.toml
+Environment=STUTTER_SERVICE_BACKEND=systemd
 Environment=HOME=/var/lib/stutter/worker-%i
 ExecStart=@BINARY@ privileged-worker --socket /run/stutter-worker-%i/worker.sock --controller-user %i
 ExecStartPost=-@SYSTEMCTL@ --no-block start stutter-autotune-bounded@%i.service

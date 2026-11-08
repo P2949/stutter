@@ -2,16 +2,23 @@
 # Experimental template; OpenRC has no Supported service evidence.
 name="Stutter bounded autotune"
 command="@BINARY@"
+# Installed per-user identity is fixed after OpenRC loads conf.d.
+stutter_controller_user="@CONTROLLER_USER@"
 command_user="${stutter_controller_user}"
-command_background=yes
+supervisor=supervise-daemon
+respawn_delay=1
+respawn_max=5
+respawn_period=60
+stopgroup=yes
+retry="TERM/5/KILL/2"
 no_new_privs=yes
 umask=0077
 capabilities="^cap_bpf,^cap_perfmon,^cap_sys_resource,^cap_dac_read_search"
-pidfile="/run/stutter-autotune-bounded.pid"
-command_args="autotune --config @CONFIG_DIR@/autotune-bounded-${stutter_controller_user}.toml --mode apply-medium-risk --allow-medium-risk --auto-focus --focus-source heuristic --preset diagnosis"
+pidfile="/run/stutter-worker-${stutter_controller_user}/controller.pid"
+command_args="autotune --config @CONFIG_DIR@/autotune-bounded-${stutter_controller_user}.toml --mode observe --auto-focus --focus-source heuristic --preset lightweight"
 export HOME="/var/lib/stutter/autotune-${stutter_controller_user}"
 export STUTTER_SERVICE_WORKER_SOCKET="/run/stutter-worker-${stutter_controller_user}/worker.sock"
-depend() { need localmount stutter-privileged-worker; }
+depend() { need localmount "stutter-privileged-worker.${stutter_controller_user}"; }
 start_pre() {
     [ -n "${stutter_controller_user}" ] && [ "$(id -u -- "${stutter_controller_user}")" -gt 0 ] || return 64
     checkpath --directory --mode 0700 --owner "${stutter_controller_user}" "${HOME}"

@@ -49,7 +49,7 @@ pub(super) fn execute(plan: &ServicePlan) -> anyhow::Result<()> {
         return Ok(());
     }
     let worker_name = if plan.manager == ServiceManager::OpenRc {
-        "stutter-privileged-worker"
+        &format!("stutter-privileged-worker.{user}")
     } else {
         "stutter-privileged-worker@.service"
     };
@@ -86,6 +86,7 @@ pub(super) fn execute(plan: &ServicePlan) -> anyhow::Result<()> {
         (&worker, worker_template),
     ] {
         let rendered = template
+            .replace("@CONTROLLER_USER@", user)
             .replace(
                 "@BINARY@",
                 plan.binary_path

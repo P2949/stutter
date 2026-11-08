@@ -9,7 +9,16 @@ pub fn default_service_binary_path() -> PathBuf {
 }
 
 pub fn build_service_plan(request: ServiceCommandRequest) -> ServicePlan {
-    let unit_name = request.mode.unit_name(request.manager).to_owned();
+    let unit_name = if request.mode == ServiceMode::SystemBoundedAutotune
+        && request.manager == ServiceManager::OpenRc
+    {
+        format!(
+            "stutter-autotune-bounded.{}",
+            request.controller_user.as_deref().unwrap_or("USER")
+        )
+    } else {
+        request.mode.unit_name(request.manager).to_owned()
+    };
     let unit_source = request.mode.packaged_unit_source(request.manager);
     let unit_dir = request
         .unit_dir
@@ -62,7 +71,11 @@ pub fn build_service_plan(request: ServiceCommandRequest) -> ServicePlan {
             )
         });
         let worker_name = if request.manager == ServiceManager::OpenRc {
-            "stutter-privileged-worker"
+            // OpenRC multiplexed instances must not share pidfiles or overwrite another user.
+            &format!(
+                "stutter-privileged-worker.{}",
+                request.controller_user.as_deref().unwrap_or("USER")
+            )
         } else {
             "stutter-privileged-worker@.service"
         };

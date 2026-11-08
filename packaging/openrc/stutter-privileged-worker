@@ -1,14 +1,31 @@
 #!/sbin/openrc-run
-# Experimental; configure stutter_controller_user in /etc/conf.d for both components.
+# Experimental: this backend has no autonomous service qualification.
 name="Stutter bounded mutation worker"
 command="@BINARY@"
-command_background=yes
-pidfile="/run/stutter-privileged-worker.pid"
+stutter_controller_user="@CONTROLLER_USER@"
+supervisor=supervise-daemon
+respawn_delay=1
+respawn_max=5
+respawn_period=60
+stopgroup=yes
+retry="TERM/5/KILL/2"
+no_new_privs=yes
+umask=0077
+# libcap IAB: ! blocks a bounding capability; ^ grants ambient/inheritable.
+# Bound all currently defined Linux capabilities except the four existing worker capabilities.
+capabilities="^cap_chown,^cap_dac_override,^cap_sys_ptrace,^cap_sys_nice,!2,!3,!4,!5,!6,!7,!8,!9,!10,!11,!12,!13,!14,!15,!16,!17,!18,!20,!21,!22,!24,!25,!26,!27,!28,!29,!30,!31,!32,!33,!34,!35,!36,!37,!38,!39,!40"
+pidfile="/run/stutter-worker-${stutter_controller_user}/supervisor.pid"
 command_args="privileged-worker --controller-user ${stutter_controller_user} --socket /run/stutter-worker-${stutter_controller_user}/worker.sock"
 export STUTTER_SERVICE_CONFIG="@CONFIG_DIR@/autotune-bounded-${stutter_controller_user}.toml"
+# Root-side policy independently refuses automatic apply on this unqualified backend.
+export STUTTER_SERVICE_BACKEND=openrc
 export HOME="/var/lib/stutter/worker-${stutter_controller_user}"
 depend() { need localmount; }
 start_pre() {
+    # A newer kernel capability requires review rather than silently retaining it as root.
+    read -r stutter_cap_last < /proc/sys/kernel/cap_last_cap || return 78
+    case "${stutter_cap_last}" in ''|*[!0-9]*) return 78 ;; esac
+    [ "${stutter_cap_last}" -le 40 ] || return 78
     [ -n "${stutter_controller_user}" ] && [ "$(id -u -- "${stutter_controller_user}")" -gt 0 ] || return 64
     checkpath --directory --mode 0711 --owner root "/run/stutter-worker-${stutter_controller_user}"
     checkpath --directory --mode 0700 --owner root "${HOME}"
