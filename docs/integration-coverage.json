@@ -293,7 +293,7 @@
       "g1": "none",
       "runtime_availability": "perf CLI absent, VTune/LIKWID absent",
       "authority": "O/F",
-      "not_wired": "the PMU sensor is not activated by the runtime (no diagnostic hypothesis trigger); no architecture-specific events; perf CLI importers missing",
+      "not_wired": "the PMU sensor is started only by the escalator and counts a task list taken without stats; no architecture-specific events; perf CLI importers missing",
       "dispositions": [
         "FixtureVerified",
         "HardwareUnavailable",
@@ -651,11 +651,11 @@
         "stutter/src/psi.rs"
       ],
       "status": "first_slice",
-      "g0": "system and cgroup PSI delta sensor with reset detection and the registry",
+      "g0": "system and cgroup PSI delta sensor with reset detection, sampled into every observation; an escalator turns sustained pressure (CPU, memory, I/O, thermal throttling, OOM events) into a logged hypothesis and admits the PMU sensor under its budget; PSI alone never triggers a write",
       "g1": "none through the sensor path",
       "runtime_availability": "present",
       "authority": "O",
-      "not_wired": "the registry is not wired into the runtime; no escalation trigger",
+      "not_wired": "no observer-effect A/B comparison; memory and I/O hypotheses have no expensive diagnostic sensor",
       "dispositions": [
         "FixtureVerified",
         "EvidenceDeferred"

@@ -272,6 +272,8 @@ impl AutotuneRuntime {
 
         let mut observation = self.build_observation();
         observation.external_owners = self.current_external_owners();
+        self.sensor_hub
+            .set_pmu_targets(&self.target_state.active_tasks);
         observation.sensor_readings = self.sensor_hub.sample();
         // A stored experiment is keyed on the full context, not the bare inventory hash.
         if let Some(inventory) = observation.topology_signature.clone() {

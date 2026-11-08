@@ -99,23 +99,33 @@ pub fn reading_from_deltas(
 pub struct PmuSensor {
     sampler: Option<CpuPerfSampler>,
     config: CpuPerfConfig,
-    targets: Option<(TaskMap, TaskStatsMap)>,
+    targets: PmuTargets,
     health: SensorHealth,
 }
+
+/// The threads to count, shared so the runtime can update them while the registry owns the sensor.
+pub type PmuTargets = std::sync::Arc<std::sync::Mutex<Option<(TaskMap, TaskStatsMap)>>>;
 
 impl PmuSensor {
     pub fn new(config: CpuPerfConfig) -> Self {
         Self {
             sampler: None,
             config,
-            targets: None,
+            targets: PmuTargets::default(),
             health: SensorHealth::Healthy,
         }
     }
 
     /// The threads to count in the next sample, chosen by the caller from a diagnostic hypothesis.
     pub fn set_targets(&mut self, active: TaskMap, stats: TaskStatsMap) {
-        self.targets = Some((active, stats));
+        if let Ok(mut targets) = self.targets.lock() {
+            *targets = Some((active, stats));
+        }
+    }
+
+    /// A handle the runtime keeps to choose the threads while the registry owns this sensor.
+    pub fn targets_handle(&self) -> PmuTargets {
+        std::sync::Arc::clone(&self.targets)
     }
 }
 
@@ -147,11 +157,14 @@ impl Sensor for PmuSensor {
     }
 
     fn sample(&mut self, monotonic_ns: u64) -> SensorReading {
-        let deltas = match (self.sampler.as_mut(), self.targets.as_ref()) {
-            (Some(sampler), Some((active, stats))) => {
-                sampler.sync_targets(active, stats);
-                sampler.sample_interval()
-            }
+        let deltas = match (self.sampler.as_mut(), self.targets.lock()) {
+            (Some(sampler), Ok(targets)) => match targets.as_ref() {
+                Some((active, stats)) => {
+                    sampler.sync_targets(active, stats);
+                    sampler.sample_interval()
+                }
+                None => BTreeMap::new(),
+            },
             _ => BTreeMap::new(),
         };
         let reading = reading_from_deltas(&deltas, monotonic_ns);
@@ -172,6 +185,8 @@ impl Sensor for PmuSensor {
 
     fn stop(&mut self) {
         self.sampler = None;
-        self.targets = None;
+        if let Ok(mut targets) = self.targets.lock() {
+            *targets = None;
+        }
     }
 }
