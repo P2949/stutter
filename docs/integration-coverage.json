@@ -840,14 +840,15 @@
       "anchors": [
         "xtask/src/real_workload/mod.rs",
         "xtask/src/benchmarks/mod.rs",
-        "xtask/src/benchmarks/hyperfine.rs"
+        "xtask/src/benchmarks/hyperfine.rs",
+        "xtask/src/benchmarks/scores.rs"
       ],
-      "status": "first_slice",
-      "g0": "frozen manifest, paired statistics, supervised run engine, a verified artifact manifest and a hyperfine JSON importer (samples, exit codes); no benchstat, Phoronix, sysbench or stress-ng adapters",
+      "status": "code_complete",
+      "g0": "frozen manifest, paired statistics, supervised run engine, a verified artifact manifest and a hyperfine JSON importer (samples, exit codes); sysbench, stress-ng, benchstat and Phoronix importers produce typed scores that are constant application_proof=false (`xtask benchmarks import-scores`); malformed input is an error",
       "g1": "controlled-real vkcube comparison run once: EngineeringPass, NoBenefit (docs/validation/real-workload/controlled-vkcube)",
       "runtime_availability": "all absent",
       "authority": "F",
-      "not_wired": "no xtask/benchmarks module",
+      "not_wired": "nothing",
       "dispositions": [
         "FixtureVerified",
         "RealObserved",

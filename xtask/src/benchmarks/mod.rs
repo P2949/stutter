@@ -6,6 +6,9 @@
 //! independent run id, the clock window, the population and loss, the exit status and the SHA-256
 //! of every artifact file, and refuses an oversize, truncated or tampered file.
 mod hyperfine;
+mod scores;
+#[cfg(test)]
+mod scores_tests;
 #[cfg(test)]
 mod tests;
 
@@ -165,10 +168,38 @@ pub enum BenchmarksCommand {
     Verify { manifest: PathBuf },
     /// Read a `hyperfine --export-json` file as run samples.
     ImportHyperfine { file: PathBuf },
+    /// Read sysbench, stress-ng, benchstat or Phoronix output as typed, non-proof scores.
+    ImportScores { tool: ScoreTool, file: PathBuf },
+}
+
+#[derive(clap::ValueEnum, Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ScoreTool {
+    Sysbench,
+    StressNg,
+    Benchstat,
+    Phoronix,
+}
+
+fn import_scores(tool: ScoreTool, file: &Path) -> anyhow::Result<String> {
+    ensure!(
+        fs::metadata(file)?.len() <= MAX_ARTIFACT_BYTES,
+        "file is over the size limit"
+    );
+    let text = String::from_utf8(fs::read(file)?).context("file is not UTF-8 text")?;
+    Ok(match tool {
+        ScoreTool::Sysbench => serde_json::to_string_pretty(&scores::import_sysbench(&text)?)?,
+        ScoreTool::StressNg => serde_json::to_string_pretty(&scores::import_stress_ng(&text)?)?,
+        ScoreTool::Benchstat => serde_json::to_string_pretty(&scores::import_benchstat(&text)?)?,
+        ScoreTool::Phoronix => serde_json::to_string_pretty(&scores::import_phoronix(&text)?)?,
+    })
 }
 
 pub fn run(args: &BenchmarksArgs) -> anyhow::Result<()> {
     match &args.command {
+        BenchmarksCommand::ImportScores { tool, file } => {
+            println!("{}", import_scores(*tool, file)?);
+            Ok(())
+        }
         BenchmarksCommand::Verify { manifest } => {
             let verified = verify(manifest)?;
             println!(
