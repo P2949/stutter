@@ -1,0 +1,13 @@
+{
+  "slot": 0,
+  "pair": 0,
+  "arm": "baseline",
+  "exit": "ended_by_deadline",
+  "frames": 3101,
+  "metrics": {
+    "frame_mean_ms": 6.450826191551123,
+    "frame_p99_ms": 6.56113
+  },
+  "gpu_faults": [],
+  "gpu_health_observed": true
+}

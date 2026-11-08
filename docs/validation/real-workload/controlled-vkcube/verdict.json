@@ -1,0 +1,23 @@
+{
+  "engineering_pass": true,
+  "outcome": "NoBenefit",
+  "pairs": 6,
+  "effect_percent": -6.149199076344485,
+  "ci_low": -12.660085113058054,
+  "ci_high": 0.36168696036908443,
+  "reason": "no meaningful gain: the upper bound is below the minimum effect",
+  "baseline": {
+    "n": 6,
+    "mean": 6.554566666666666,
+    "p50": 6.54999,
+    "p95": 6.57089,
+    "p99": 6.57089
+  },
+  "treatment": {
+    "n": 6,
+    "mean": 6.957470000000001,
+    "p50": 6.80728,
+    "p95": 7.70504,
+    "p99": 7.70504
+  }
+}

@@ -35,7 +35,7 @@ game under scheduler pressure judged by `GameRunnableLatency`. Nothing in this l
 | Owner probes | the planner denies an operation whose domain a detected owner holds, with a 30 s cached probe | the probe is process-name based, so it is a hint; exact resource receipts, D-Bus adapters and worker pre-commit checks are missing |
 | Sensors | none | the sensor registry and PSI sensor exist and are tested, but the runtime does not use them |
 | Generic KPIs | none | typed contract and bounded ingestion exist with the known defects listed in the plan (weighted aggregates, peer start time, future timestamps) |
-| Real workloads | `xtask real-workload validate`, `evaluate`, `inventory` | `run` and `resume`, real capture and paired executions |
+| Real workloads | `xtask real-workload validate`, `evaluate`, `inventory`, `run` (supervised, resumable); one controlled vkcube comparison run, EngineeringPass and NoBenefit | a real-game cohort (BlockedResource), fault-injection runs, a service-attached run |
 
 ## Real-host observations
 

@@ -612,8 +612,8 @@
         "xtask/src/real_workload/mod.rs"
       ],
       "status": "first_slice",
-      "g0": "frozen manifest and paired statistics exist; no benchmark importers",
-      "g1": "none",
+      "g0": "frozen manifest, paired statistics, supervised run/resume engine with counterbalanced arms, frame metrics, GPU-health check; benchmark importers still missing",
+      "g1": "controlled-real vkcube comparison run once: EngineeringPass, NoBenefit (docs/validation/real-workload/controlled-vkcube)",
       "runtime_availability": "all absent",
       "authority": "F",
       "not_wired": "no xtask/benchmarks module"
