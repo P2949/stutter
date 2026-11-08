@@ -181,7 +181,7 @@ fn sampling_every_always_on_sensor_stays_cheap_enough_for_every_tick() {
         let _ = runtime.sensor_hub.sample();
     }
     let per_sample = started.elapsed() / rounds;
-    eprintln!("always-on sensor sample: {per_sample:?} per evaluation");
+    log::info!("always-on sensor sample: {per_sample:?} per evaluation");
     // About one evaluation a second runs this; at 5 ms it would still be 0.5 percent of a core.
     assert!(
         per_sample < std::time::Duration::from_millis(5),
