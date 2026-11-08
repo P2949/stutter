@@ -59,6 +59,11 @@ pub struct Manifest {
     pub workload: String,
     pub launch_mode: LaunchMode,
     pub work_unit: String,
+    /// The exact argv of the workload, run through `stutter game-run`. The treatment arm adds only
+    /// what `candidate` names; baseline and treatment are otherwise identical.
+    pub command: Vec<String>,
+    /// The workload never finishes by itself; each execution is ended after warmup plus measure.
+    pub time_boxed: bool,
     /// Instrumentation (for example MangoHud) is the same in both arms; this records which.
     pub instrumentation: Vec<String>,
     /// Kernel, driver, compositor, display, refresh, cap, HDR and VRR settings.
@@ -103,6 +108,12 @@ impl Manifest {
         ensure!(!self.workload.trim().is_empty(), "workload is empty");
         ensure!(!self.work_unit.trim().is_empty(), "work_unit is empty");
         ensure!(!self.candidate.trim().is_empty(), "candidate is empty");
+        ensure!(
+            self.command
+                .first()
+                .is_some_and(|program| !program.trim().is_empty()),
+            "command must name the workload program"
+        );
         ensure!(self.measure_seconds > 0, "measure_seconds must be positive");
         ensure!(
             self.timeout_seconds

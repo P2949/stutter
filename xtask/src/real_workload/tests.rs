@@ -21,6 +21,8 @@ fn manifest() -> Manifest {
         workload: "vkcube".into(),
         launch_mode: LaunchMode::Native,
         work_unit: "fixed 60 s scene".into(),
+        command: vec!["vkcube".into()],
+        time_boxed: true,
         instrumentation: vec!["mangohud".into()],
         context: Default::default(),
         warmup_seconds: 5,

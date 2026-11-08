@@ -114,7 +114,10 @@ pub fn mangohud_config(existing: Option<&str>, capture_dir: &Path) -> anyhow::Re
         .filter(|value| !value.is_empty())
         .map(|value| format!("{value},"))
         .unwrap_or_default();
-    config.push_str(&format!("output_folder={dir},autostart_log=1"));
+    // `log_interval=0` logs every frame; the default interval would sample every 100 ms.
+    config.push_str(&format!(
+        "output_folder={dir},autostart_log=1,log_interval=0"
+    ));
     Ok(config)
 }
 

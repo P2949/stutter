@@ -85,6 +85,7 @@ fn the_launch_is_recorded_securely_and_mangohud_is_opt_in() {
     assert_eq!(parts[1], "1");
     assert!(parts[2].contains(&format!("output_folder={}", root.join(parts[0]).display())));
     assert!(parts[2].contains("autostart_log=1"));
+    assert!(parts[2].contains("log_interval=0"), "per-frame logging");
     fs::remove_dir_all(&root).unwrap();
 }
 

@@ -1,8 +1,13 @@
 //! Controlled-real and unattended real-game evidence (package D): the frozen manifest, the paired
 //! statistics and the preregistered classification, and the honest inventory of what can run.
+mod frames;
+mod health;
 mod inventory;
 mod manifest;
 mod outcome;
+mod run;
+#[cfg(test)]
+mod run_tests;
 #[cfg(test)]
 mod tests;
 
@@ -30,6 +35,16 @@ pub enum RealWorkloadCommand {
         manifest: PathBuf,
         /// JSON: {"facts": {...}, "pairs": [...]}.
         results: PathBuf,
+    },
+    /// Run, or resume, the frozen comparison with supervised executions. An existing output
+    /// directory with the same manifest is resumed; a different manifest is refused.
+    Run {
+        manifest: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+        /// The stutter binary whose SHA-256 the manifest froze.
+        #[arg(long)]
+        stutter_bin: PathBuf,
     },
     /// Record what real-workload material this host has and its disposition.
     Inventory {
@@ -60,6 +75,15 @@ pub fn run(args: &RealWorkloadArgs) -> anyhow::Result<()> {
     match &args.command {
         RealWorkloadCommand::Validate { manifest } => {
             println!("{}", read_manifest(manifest)?.frozen_digest()?);
+            Ok(())
+        }
+        RealWorkloadCommand::Run {
+            manifest,
+            out,
+            stutter_bin,
+        } => {
+            let report = run::run(manifest, out, stutter_bin, true)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
             Ok(())
         }
         RealWorkloadCommand::Evaluate { manifest, results } => {
