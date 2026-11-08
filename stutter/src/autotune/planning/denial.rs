@@ -34,6 +34,9 @@ pub enum CandidateDenyReason {
     ExternallyOwnedResource,
     /// The user or a launcher already set this attribute on a target task; it is not overridden.
     UserExplicitSetting,
+    /// A sched_ext scheduler is in charge and it is not verified to honor the knob this operation
+    /// relies on (nice or uclamp), so the operation could do nothing or something else.
+    SchedulerSemanticsUnverified,
     KeptActionNoLongerActive,
     ObjectiveNotAllowedForWorkload,
     /// Normal autonomous apply requires a Supported objective that allows it.
@@ -82,6 +85,7 @@ impl CandidateDenyReason {
             Self::ExternalMutationDetected => "external_mutation_detected",
             Self::ExternallyOwnedResource => "externally_owned_resource",
             Self::UserExplicitSetting => "user_explicit_setting",
+            Self::SchedulerSemanticsUnverified => "scheduler_semantics_unverified",
             Self::KeptActionNoLongerActive => "kept_action_no_longer_active",
             Self::ObjectiveNotAllowedForWorkload => "objective_not_allowed_for_workload",
             Self::ObjectiveNotSupported => "objective_not_supported",

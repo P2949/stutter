@@ -309,6 +309,29 @@ pub(crate) fn evaluate_proposal_static(
         }
     }
 
+    if let Some(owners) = input.observation.external_owners.as_ref() {
+        use crate::{
+            autotune::operation::MutationOperationKind as Op,
+            integrations::{
+                SchedExt,
+                sched_semantics::{Knob, knob_is_honored},
+            },
+        };
+        let knob = match proposal.candidate.operation_kind() {
+            Op::Nice => Some(Knob::Nice),
+            Op::Uclamp => Some(Knob::Uclamp),
+            _ => None,
+        };
+        if let (Some(knob), SchedExt::Enabled { ops }) = (knob, &owners.sched_ext)
+            && !knob_is_honored(Some(ops.as_str()), knob)
+        {
+            deny_reasons.push(CandidateDenyReason::SchedulerSemanticsUnverified);
+            deny_messages.push(format!(
+                "the sched_ext scheduler {ops} is not verified to honor {knob:?}"
+            ));
+        }
+    }
+
     if let Some(reason) = crate::integrations::owner_denial(
         input.observation.external_owners.as_ref(),
         proposal.candidate.operation_kind(),
