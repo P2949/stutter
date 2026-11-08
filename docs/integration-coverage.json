@@ -589,11 +589,11 @@
         "stutter/src/autotune/objective/source/mod.rs"
       ],
       "status": "first_slice",
-      "g0": "typed local KPI contract and bounded ingestion, which has known defects listed in W4",
+      "g0": "typed local KPI contract, bound-process ingestion with live start-time verification, weighted aggregates, quantile-of-summaries labelling, eviction reporting, and a framed Unix-socket front end (kernel peer credentials, bounded lines and samples per connection)",
       "g1": "none",
       "runtime_availability": "benchmark tools absent",
       "authority": "O/F/E",
-      "not_wired": "no socket server, no network sensor, no load comparator"
+      "not_wired": "the socket front end is not bound by the service yet; no network sensor, no load comparator, no Prometheus or OpenTelemetry readers"
     },
     {
       "id": "5.28",

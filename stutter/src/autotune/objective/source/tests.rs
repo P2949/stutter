@@ -310,3 +310,102 @@ fn a_capacity_eviction_is_reported_as_an_incomplete_window() {
         .unwrap();
     assert!(recent.complete);
 }
+
+mod socket {
+    use std::{
+        io::{BufRead, BufReader, Write},
+        os::unix::net::UnixStream,
+        path::Path,
+        time::Instant,
+    };
+
+    use super::super::*;
+    use crate::telemetry::proc_view::live_process;
+
+    fn contract_for_this_process() -> KpiContract {
+        let pid = std::process::id();
+        let live = live_process(Path::new("/proc"), pid).unwrap();
+        KpiContract {
+            binding: SourceBinding {
+                uid: crate::syscall::geteuid(),
+                pid,
+                start_ticks: live.start_ticks,
+            },
+            primary: super::spec("request_p99", Aggregation::P99),
+            hard_guardrails: vec![super::spec("error_rate", Aggregation::Mean)],
+            advisory_guardrails: vec![],
+        }
+    }
+
+    fn line(metric: &str, at_ms: u64) -> String {
+        format!(
+            r#"{{"metric":"{metric}","value":5.0,"monotonic_ns":{},"work_unit":null,"population":20,"kind":"summary"}}"#,
+            at_ms * 1_000_000
+        )
+    }
+
+    #[test]
+    fn samples_over_a_socket_are_authenticated_by_the_kernel_and_answered_one_by_one() {
+        let (client, server) = UnixStream::pair().unwrap();
+        let mut store = SampleStore::new(contract_for_this_process());
+        let began = Instant::now();
+        let now = move || began.elapsed().as_nanos() as u64 + 10_000_000_000;
+        let base_ms = 10_000;
+        let mut writer = &client;
+        writeln!(writer, "{}", line("request_p99", base_ms)).unwrap();
+        writeln!(writer, "{}", line("request_p99", base_ms)).unwrap(); // a replay
+        writeln!(writer, "{}", line("nonsense", base_ms + 5)).unwrap();
+        writeln!(writer, "not json").unwrap();
+        writeln!(writer, "{}", line("request_p99", base_ms + 10)).unwrap();
+        client.shutdown(std::net::Shutdown::Write).unwrap();
+        let accepted = serve_connection(&mut store, server, Path::new("/proc"), now).unwrap();
+        assert_eq!(accepted, 2);
+        let replies: Vec<String> = BufReader::new(&client)
+            .lines()
+            .map(Result::unwrap)
+            .collect();
+        assert_eq!(
+            replies,
+            [
+                "ok",
+                "denied not_after_previous",
+                "denied unknown_metric",
+                "denied bad_json",
+                "ok"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_peer_that_is_not_the_bound_process_gets_only_denials() {
+        let (client, server) = UnixStream::pair().unwrap();
+        // Bound to a different process than this test's.
+        let mut contract = contract_for_this_process();
+        contract.binding.pid = std::process::id().wrapping_add(1);
+        let mut store = SampleStore::new(contract);
+        let mut writer = &client;
+        writeln!(writer, "{}", line("request_p99", 10_000)).unwrap();
+        client.shutdown(std::net::Shutdown::Write).unwrap();
+        let accepted =
+            serve_connection(&mut store, server, Path::new("/proc"), || 10_000_000_000).unwrap();
+        assert_eq!(accepted, 0);
+        let reply = BufReader::new(&client).lines().next().unwrap().unwrap();
+        assert_eq!(reply, "denied not_the_bound_process");
+    }
+
+    #[test]
+    fn an_oversize_line_is_denied_and_a_connection_is_bounded() {
+        let (client, server) = UnixStream::pair().unwrap();
+        let mut store = SampleStore::new(contract_for_this_process());
+        let mut writer = &client;
+        writeln!(writer, "{}", "x".repeat(600)).unwrap();
+        client.shutdown(std::net::Shutdown::Write).unwrap();
+        serve_connection(&mut store, server, Path::new("/proc"), || 0).unwrap();
+        let reply = BufReader::new(&client).lines().next().unwrap().unwrap();
+        assert_eq!(reply, "denied line_too_long");
+        assert_eq!(
+            denial_code(IngestDenial::FutureTimestamp),
+            "future_timestamp"
+        );
+    }
+}
