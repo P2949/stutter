@@ -5,6 +5,7 @@
 //! admitted one at a time with a duration cap and a cooling period, and their own cost is recorded
 //! so the daemon's incremental overhead stays visible.
 mod cpu_power;
+mod oom_guard;
 mod pmu;
 mod psi;
 mod registry;
@@ -14,6 +15,7 @@ mod tests;
 use std::collections::BTreeMap;
 
 pub use cpu_power::CpuPowerSensor;
+pub use oom_guard::{OomGuardSensor, session_cgroup_dir};
 pub use pmu::{MIN_RUNNING_RATIO, PmuSensor, reading_from_deltas};
 pub use psi::PsiSensor;
 pub use registry::{AdmissionDenied, ExpensiveBudget, SensorRegistry};

@@ -436,14 +436,15 @@
         "W12"
       ],
       "anchors": [
-        "stutter/src/integrations/mod.rs"
+        "stutter/src/integrations/mod.rs",
+        "stutter/src/autotune/sensors/oom_guard.rs"
       ],
       "status": "first_slice",
-      "g0": "reported, owning no tuning domain",
-      "g1": "systemd-oomd observed running on this host",
+      "g0": "reported daemons own no tuning domain; oom_guard sensor reads the user slice memory.events (kill, high, max, oom deltas with reset and removal handling), sampled by the runtime",
+      "g1": "systemd-oomd observed running; user slice memory.events readable on this host",
       "runtime_availability": "systemd-oomd running",
       "authority": "O/A",
-      "not_wired": "no cgroup memory.events sensor, no protected-session guard"
+      "not_wired": "no protected-session or compositor/audio guard process list; guard counters do not yet invalidate a running comparison; uresourced state not read"
     },
     {
       "id": "5.21",

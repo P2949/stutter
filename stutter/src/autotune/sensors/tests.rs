@@ -352,3 +352,69 @@ mod cpu_power {
         fs::remove_dir_all(&root).unwrap();
     }
 }
+
+mod oom_guard {
+    use std::{fs, path::Path};
+
+    use super::super::{
+        Availability, OomGuardSensor, Sensor, SensorHealth, oom_guard::session_cgroup_dir,
+    };
+    use crate::autotune::objective::ObjectiveSignalQuality as Quality;
+
+    fn events(dir: &Path, oom_kill: u64, high: u64) {
+        fs::create_dir_all(dir).unwrap();
+        fs::write(
+            dir.join("memory.events"),
+            format!("low 0\nhigh {high}\nmax 0\noom 0\noom_kill {oom_kill}\noom_group_kill 0\n"),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn the_session_slice_is_found_from_the_process_cgroup() {
+        let root = Path::new("/sys/fs/cgroup");
+        let text = "0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-x.scope\n";
+        assert_eq!(
+            session_cgroup_dir(root, text, 1000).unwrap(),
+            root.join("user.slice/user-1000.slice")
+        );
+        // Not under a user slice: the process's own cgroup.
+        assert_eq!(
+            session_cgroup_dir(root, "0::/system.slice/foo.service\n", 1000).unwrap(),
+            root.join("system.slice/foo.service")
+        );
+        assert!(session_cgroup_dir(root, "1:name=systemd:/x\n", 1000).is_none());
+    }
+
+    #[test]
+    fn kills_and_throttles_are_reported_as_deltas_and_a_reset_is_loss() {
+        let dir = std::env::temp_dir().join(format!("stutter-oom-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        events(&dir, 0, 0);
+        let mut sensor = OomGuardSensor::new(dir.clone());
+        assert_eq!(sensor.probe(), Availability::Available);
+        sensor.start().unwrap();
+        assert_eq!(
+            sensor.sample(1).quality,
+            Quality::Missing,
+            "no delta on the first sample"
+        );
+        events(&dir, 2, 5);
+        let second = sensor.sample(2);
+        assert_eq!(
+            (second.values["oom_kill_delta"], second.values["high_delta"]),
+            (2.0, 5.0)
+        );
+        assert_eq!(second.quality, Quality::Direct);
+        events(&dir, 1, 5);
+        let reset = sensor.sample(3);
+        assert_eq!(reset.lost, 1);
+        assert!(!reset.values.contains_key("oom_kill_delta"));
+        assert!(matches!(sensor.health(), SensorHealth::Degraded(_)));
+        // The cgroup disappears: degraded and missing, not a crash and not zeros.
+        fs::remove_dir_all(&dir).unwrap();
+        let gone = sensor.sample(4);
+        assert_eq!(gone.quality, Quality::Missing);
+        assert!(matches!(sensor.probe(), Availability::Unavailable(_)));
+    }
+}
