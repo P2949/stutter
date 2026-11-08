@@ -255,3 +255,43 @@ pub fn operation_needs_receipt(
 ) -> bool {
     super::operation_domain(operation).is_some()
 }
+
+/// What a rollback may do with a resource it applied a value to.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RestoreDecision {
+    /// The resource still holds exactly what Stutter applied and nobody else owns it: put the
+    /// original back.
+    Restore,
+    /// Someone else wrote the resource, or an external owner now holds it. Restoring would
+    /// overwrite their state: leave it, record the conflict, and keep diagnosing.
+    LeaveExternal { reason: LeaveReason },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LeaveReason {
+    ValueChanged { applied: String, current: String },
+    OwnerNow(OwnerClass),
+}
+
+/// Compare-before-restore. `applied` is the canonical value Stutter wrote, `current` what the
+/// resource holds now, and `owner_now` what an exact interface says about its owner now.
+pub fn restore_decision(applied: &str, current: &str, owner_now: OwnerClass) -> RestoreDecision {
+    match owner_now {
+        OwnerClass::StutterOwned | OwnerClass::UnmanagedVerified => {}
+        other => {
+            return RestoreDecision::LeaveExternal {
+                reason: LeaveReason::OwnerNow(other),
+            };
+        }
+    }
+    if applied == current {
+        RestoreDecision::Restore
+    } else {
+        RestoreDecision::LeaveExternal {
+            reason: LeaveReason::ValueChanged {
+                applied: applied.to_owned(),
+                current: current.to_owned(),
+            },
+        }
+    }
+}

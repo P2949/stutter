@@ -13,6 +13,7 @@ pub mod objective_source {
 pub mod ownership {
     //! Exact resource ownership receipts and the process-name owner probe.
     pub use crate::{
+        actions::precommit::owner_unchanged,
         integrations::{gpu_identity::*, receipt::*, *},
         irq_attribution::*,
     };
