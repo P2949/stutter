@@ -215,3 +215,15 @@ pub fn join_cgroup(procs_file: &std::ffi::CStr) -> io::Result<()> {
     unsafe { libc::close(fd) };
     result
 }
+
+/// Sends `signal` to every member of process group `pgid`. The group must be one this process
+/// created for its own child; a negative pid addresses exactly that group.
+pub fn signal_group(pgid: u32, signal: i32) -> io::Result<()> {
+    let pgid =
+        libc::pid_t::try_from(pgid).map_err(|_| io::Error::from_raw_os_error(libc::EINVAL))?;
+    if pgid <= 1 {
+        return Err(io::Error::from_raw_os_error(libc::EINVAL));
+    }
+    // SAFETY: kill(2) with a negative pid addresses the group `pgid`, which is > 1 here.
+    check(libc::c_long::from(unsafe { libc::kill(-pgid, signal) })).map(drop)
+}

@@ -120,3 +120,39 @@ fn a_modified_binary_is_never_executed() {
     assert!(message.contains("pinned digest"), "{message}");
     assert!(verify_pinned(&scratch.path().join("absent"), &digest).is_err());
 }
+
+#[test]
+fn ending_a_run_ends_its_whole_process_group() {
+    use std::{os::unix::process::CommandExt, process::Command, time::Duration};
+
+    use crate::{process::reap_group, sys};
+
+    // A child that ignores TERM and a grandchild that does too, in the child's own group.
+    let mut child = Command::new("sh")
+        .args(["-c", "trap '' TERM; (trap '' TERM; sleep 600) & sleep 600"])
+        .process_group(0)
+        .spawn()
+        .unwrap();
+    let group = child.id();
+    let mut sentinel = Command::new("sleep").arg("600").spawn().unwrap();
+    std::thread::sleep(Duration::from_millis(150));
+    assert!(
+        sys::signal_group(group, 0).is_ok(),
+        "the group should exist"
+    );
+    reap_group(&mut child, Duration::from_millis(300));
+    assert!(
+        sys::signal_group(group, 0).is_err(),
+        "a group member survived"
+    );
+    assert!(
+        sentinel.try_wait().unwrap().is_none(),
+        "an unrelated process was killed"
+    );
+    sentinel.kill().unwrap();
+    sentinel.wait().unwrap();
+    assert!(
+        sys::signal_group(1, 0).is_err(),
+        "pid 1 must never be addressed"
+    );
+}

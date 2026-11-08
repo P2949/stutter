@@ -342,7 +342,9 @@ impl SystemExecutor {
             .env_clear()
             .env("PATH", &plan.path_env)
             .env("HOME", &plan.attempt_dir)
-            .stdin(Stdio::null());
+            .stdin(Stdio::null())
+            // Its own group, so a timeout or the end of the run can end every descendant.
+            .process_group(0);
         if let Some(cargo_home) = &plan.cargo_home {
             command.env("CARGO_HOME", cargo_home);
         }
@@ -402,14 +404,15 @@ impl SystemExecutor {
                 break status;
             }
             if started.elapsed() > timeout {
-                let _ = child.kill();
-                let _ = child.wait();
+                reap_group(&mut child, Duration::from_secs(3));
                 return Err(failure(format!(
-                    "{label} exceeded its time limit and was killed"
+                    "{label} exceeded its time limit and its process group was terminated"
                 )));
             }
             std::thread::sleep(Duration::from_millis(200));
         };
+        // A descendant that outlived the main process is still part of this run.
+        reap_group(&mut child, Duration::from_secs(3));
         Ok(json!({
             "action": label,
             "exit_code": status.code(),
@@ -849,4 +852,24 @@ fn owner_cargo_home(auth: &Authorization) -> Option<PathBuf> {
     let passwd = std::fs::read_to_string("/etc/passwd").ok()?;
     let cargo = crate::install::home_of(&passwd, auth.owner_uid)?.join(".cargo");
     cargo.is_dir().then_some(cargo)
+}
+
+/// Ends every member of the child's own process group (its pid): TERM, a bounded grace, KILL,
+/// then reaps the child. Only the group this runner created for the child is ever signalled.
+pub(crate) fn reap_group(child: &mut std::process::Child, grace: Duration) {
+    let group = child.id();
+    let group_alive = || sys::signal_group(group, 0).is_ok();
+    let _ = sys::signal_group(group, libc::SIGTERM);
+    let deadline = Instant::now() + grace;
+    while group_alive() && Instant::now() < deadline {
+        // Reaping the main process turns it from a zombie into nothing, so the group can empty.
+        let _ = child.try_wait();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let _ = sys::signal_group(group, libc::SIGKILL);
+    let _ = child.wait();
+    let settle = Instant::now() + Duration::from_secs(2);
+    while group_alive() && Instant::now() < settle {
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
