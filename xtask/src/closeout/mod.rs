@@ -170,6 +170,30 @@ pub fn run(root: &Path, args: &CloseoutArgs) -> anyhow::Result<()> {
             ledger.source_sha
         );
     }
+    // How far HEAD has moved past the source the ledger describes: a stale record says so.
+    let behind = Command::new("git")
+        .args([
+            "rev-list",
+            "--count",
+            &format!("{}..HEAD", ledger.source_sha),
+        ])
+        .current_dir(root)
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned());
+    match behind {
+        Some(count) if count != "0" => {
+            eprintln!(
+                "note: the ledger is {count} commit(s) behind HEAD; re-verify before relying on it"
+            );
+        }
+        Some(_) => {}
+        None => eprintln!(
+            "note: the ledger's source {} is not in this history",
+            ledger.source_sha
+        ),
+    }
     let kernel = fs::read_to_string("/proc/sys/kernel/osrelease").unwrap_or_default();
     let report = render(&ledger, kernel.trim());
     match &args.out {

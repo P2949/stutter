@@ -2,7 +2,7 @@
 
 This is the human-readable companion of [`integration-coverage.json`](integration-coverage.json), the
 machine-readable ledger of every tool and mechanism in the current plan. It records what exists at
-source `e37984c1`, what is *not yet wired*, and which evidence grade each entry has. The grades are
+the source named in the ledger's `source_sha` (currently `8f1af0f2`; `xtask closeout-report` says how far HEAD has moved past it), what is *not yet wired*, and which evidence grade each entry has. The production-deployed build is a separate, older pin (`e37984c1`) and is not described by this file. The grades are
 independent and never inherited from another tool or service backend:
 
 * **G0** code and fixtures, **G1** real observation, **G2** safe manual experiment, **G3** exact
@@ -10,7 +10,7 @@ independent and never inherited from another tool or service backend:
   authority are four separate statuses.
 * A status of `first_slice` means real code and tests exist for part of the entry. `not_started` means
   none. `code_complete` is reserved for entries whose full contract is implemented and fixture-tested;
-  no entry has reached it.
+  entries in that state are listed in the summary below.
 
 ## Summary at this source
 
@@ -31,10 +31,10 @@ game under scheduler pressure judged by `GameRunnableLatency`. Nothing in this l
 | Area | Wired into the live runtime | Present but not wired |
 |---|---|---|
 | Process safety | `xtask` stages run under a supervised process group with deadlines | detached-child scopes, parent-crash orphan reconciliation, the validation runner's own executor |
-| Frame source | with `autotune.frame_capture_root` set the runtime discovers a verified `game-run` launch for the focused target, tails its log and evaluates trust every tick | off by default; no live game has been observed through the service; phase windows and the run engine are missing |
+| Frame source | with `autotune.frame_capture_root` set the runtime discovers a verified `game-run` launch for the focused target, resolves the target first and retires a source that does not belong to it, maps the game clock onto the monitor clock with a measured uncertainty (unknown, never zero, when it cannot be bounded), publishes per-window loss, frame age from the mapped time and whether the last phase boundary was proven, and denies direct attribution on competing renderers or logs | off by default; no live game has been observed through the service; the producer claim is the launcher child, not the single renderer |
 | Owner probes | the planner denies an operation whose domain a detected owner holds, with a 30 s cached probe | the probe is process-name based, so it is a hint; a typed receipt model (exact resource, owner class, expiry, drift) exists and fails closed, but nothing yet issues receipts from an exact adapter or checks them in the worker before commit; the read-only D-Bus client now reads GameMode, scx_loader and power-profiles-daemon state directly, but no D-Bus write path exists |
 | Sensors | system PSI and CPU power (driver, governor, EPP, requested and actual frequency, boost, AC, throttle events) , the user-slice OOM guard counters, NUMA allocation locality, DAMON counts and the resctrl inventory sampled into every observation | the sensor registry and PSI sensor exist and are tested, but the runtime does not use them |
-| Generic KPIs | none | typed contract and bounded ingestion exist with the known defects listed in the plan (weighted aggregates, peer start time, future timestamps) |
+| Generic KPIs | none in the daemon | `stutter kpi-serve` observes one verified process over a confined socket (observation only); versioned experimental audio and browser templates; not connected to the live experiment manager |
 | Context key | the candidate-memory key now uses a context signature joining the system inventory hash, the topology-v2 fingerprint and the boot environment context hash (kernel, preemption, isolation, microcode, scheduler; not the generation), recomputed at most once per minute | **effect on deployment:** a build with this change starts with candidate memory that does not match the old keys, so cooldown and score history from before it are not reused once; this is by design and will be visible in the W19 deploy |
 | Parser robustness (W16) | seeded fuzz-style tests for the registration protocol, the KPI ingest, CPU lists and command-line parameters, the hyperfine importer, the artifact manifest, the ELF build-id reader and the frame-log reader: none panics, state stays bounded, and only exact valid requests are accepted | found and fixed one real defect: a 12-byte CPU list `0-4294967295` would have expanded to about 16 GiB; `parse_cpu_list` now refuses any id above 65535 |
 | Observer effect (W7) | the always-on sensors cost about 0.6 ms per evaluation in a debug build (PSI, CPU power, NUMA, DAMON, resctrl, user-slice OOM guard) and the owner probe 3.3 ms per scan of this host's 343 processes, once per 30 s; both are asserted below generous ceilings in tests | measured on the development host in a debug build, not under the installed service; the exact-build smoke at W19 re-measures idle CPU with these sensors included |
