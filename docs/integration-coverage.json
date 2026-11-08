@@ -581,7 +581,7 @@
       "g1": "none",
       "runtime_availability": "numad and numactl absent",
       "authority": "O/A/E",
-      "not_wired": "no policy or migration operations (by design: moving CPU is not moving memory, and migration is irreversible); the per-process numa_maps summary is a library reader not yet attached to the target",
+      "not_wired": "no policy or migration operations (by design: moving CPU is not moving memory, and migration is irreversible); a target-bound `numa_maps` sensor (bound by pid and live start time, read at most once per 30 s) now reports the target's pages per node",
       "dispositions": [
         "FixtureVerified",
         "HardwareUnavailable",

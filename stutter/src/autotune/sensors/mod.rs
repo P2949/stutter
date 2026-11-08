@@ -13,6 +13,7 @@ mod guard_tests;
 mod memory_domains;
 mod network;
 mod numa_faults;
+mod numa_maps;
 mod oom_guard;
 mod pmu;
 mod psi;
@@ -31,6 +32,7 @@ pub use escalation::{Escalator, Hypothesis, Thresholds, Trigger, diagnostic_sens
 pub use memory_domains::{DamonSensor, NumaSensor, ResctrlSensor};
 pub use network::NetworkSensor;
 pub use numa_faults::{NumaFaultSensor, NumaMapsSummary, parse_numa_maps};
+pub use numa_maps::{MIN_INTERVAL_NS as NUMA_MAPS_MIN_INTERVAL_NS, NumaMapsSensor};
 pub use oom_guard::{OomGuardSensor, memory_guard_event, session_cgroup_dir};
 pub use pmu::{MIN_RUNNING_RATIO, PmuSensor, PmuTargets, reading_from_deltas};
 pub use psi::PsiSensor;

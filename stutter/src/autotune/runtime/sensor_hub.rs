@@ -9,9 +9,9 @@ use std::{path::Path, time::Instant};
 use crate::{
     autotune::sensors::{
         AdmissionDenied, BlockIoSensor, CpuIdleSensor, CpuPowerSensor, DamonSensor, Escalator,
-        ExpensiveBudget, NetworkSensor, NumaFaultSensor, NumaSensor, OomGuardSensor, PmuSensor,
-        PmuTargets, PsiSensor, ResctrlMonitorSensor, ResctrlSensor, SchedExtSensor, SensorReading,
-        SensorRegistry, Thresholds, session_cgroup_dir,
+        ExpensiveBudget, NetworkSensor, NumaFaultSensor, NumaMapsSensor, NumaSensor,
+        OomGuardSensor, PmuSensor, PmuTargets, PsiSensor, ResctrlMonitorSensor, ResctrlSensor,
+        SchedExtSensor, SensorReading, SensorRegistry, Thresholds, session_cgroup_dir,
     },
     perf_counters::CpuPerfConfig,
 };
@@ -21,6 +21,7 @@ pub(super) struct SensorHub {
     cgroup_root: std::path::PathBuf,
     /// The cgroup whose pressure the `psi_cgroup` sensor currently follows.
     tracked_cgroup: Option<String>,
+    tracked_process: Option<(u32, u64)>,
     escalator: Escalator,
     pmu_targets: PmuTargets,
     started: Instant,
@@ -103,6 +104,7 @@ impl SensorHub {
             registry,
             cgroup_root: cgroup_root.to_path_buf(),
             tracked_cgroup: None,
+            tracked_process: None,
             escalator: Escalator::new(Thresholds::default()),
             pmu_targets,
             started,
@@ -132,6 +134,31 @@ impl SensorHub {
         if let Err(denied) = self.registry.activate("psi_cgroup", now_ns) {
             log::debug!(
                 "sensor psi_cgroup unavailable for {path}: {}",
+                describe(&denied)
+            );
+        }
+    }
+
+    /// Follows the target process's NUMA page placement. A change of target (pid or start time)
+    /// replaces the sensor, so one process's pages never describe another; no target means none.
+    pub(super) fn track_target_process(&mut self, target: Option<(u32, u64)>) {
+        if self.tracked_process == target {
+            return;
+        }
+        let now_ns = self.started.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64;
+        self.registry.deactivate("numa_maps", now_ns);
+        self.tracked_process = target;
+        let Some((pid, start_ticks)) = target else {
+            return;
+        };
+        self.registry.register(Box::new(NumaMapsSensor::new(
+            std::path::PathBuf::from("/proc"),
+            pid,
+            start_ticks,
+        )));
+        if let Err(denied) = self.registry.activate("numa_maps", now_ns) {
+            log::debug!(
+                "sensor numa_maps unavailable for pid {pid}: {}",
                 describe(&denied)
             );
         }
