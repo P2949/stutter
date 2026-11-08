@@ -24,6 +24,15 @@ impl AutotuneRuntime {
             let (clients, _games) = crate::integrations::exact::read_gamemode();
             crate::integrations::exact::refine_gamemode(&mut report, &clients);
         }
+        // TuneD only owns what its active profile manages: read the profile to say which.
+        if report.daemon(crate::integrations::KnownOwner::Tuned)
+            == crate::integrations::Daemon::Running
+        {
+            crate::integrations::tuned::refine_tuned(
+                &mut report,
+                crate::integrations::tuned::current_managed_attributes().as_ref(),
+            );
+        }
         // Tools with no long-running process (TLP) are visible only as an active systemd unit.
         crate::integrations::units::refine_with_units(
             &mut report,

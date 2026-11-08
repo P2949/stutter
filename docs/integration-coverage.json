@@ -110,12 +110,12 @@
         "stutter/src/integrations/mod.rs",
         "stutter/src/integrations/tuned.rs"
       ],
-      "status": "first_slice",
-      "g0": "presence probe and CPU power / VM knob domain denial; active profile and mode read through TuneD's read-only control methods (fake-bus tested; never switch_profile)",
+      "status": "code_complete",
+      "g0": "the active profile and mode are read through TuneD's read-only control methods (never switch_profile); the profile's tuned.conf files (with bounded includes) are read for the sections and sysctl keys it manages, and the runtime owner probe lowers TuneD to Idle only when its active profile was read exactly and manages neither CPU power nor VM knobs (an unreadable profile changes nothing); `profile_experiment` builds an offline whole-profile A/B artifact naming exactly what two profiles manage differently, executing nothing (Stutter has no TuneD engine and never calls switch_profile). presence probe and CPU power / VM knob domain denial; active profile and mode read through TuneD's read-only control methods (fake-bus tested; never switch_profile)",
       "g1": "none",
       "runtime_availability": "absent",
       "authority": "O/A/F",
-      "not_wired": "no managed-attribute reader, no whole-profile offline experiment artifact; the profile reader is not yet part of the runtime owner report",
+      "not_wired": "nothing",
       "dispositions": [
         "FixtureVerified",
         "HardwareUnavailable",
