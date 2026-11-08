@@ -3,8 +3,8 @@
 //! `org.scx.Loader` is the documented way to start, switch and stop a sched_ext scheduler. This
 //! adapter reads its state, checks the installed method signatures by introspection, and plans a
 //! switch only to an allowlisted scheduler that the manager supports and only when the exact prior
-//! state can be restored. Executing a plan needs an [`OfflineAuthorization`], a value only an
-//! explicit offline campaign can construct, so no runtime path, provider or remote caller can switch
+//! state can be restored. Executing a plan needs an [`OfflineAuthorization`], which currently has
+//! only a fixture constructor: there is no implemented trusted campaign authority. No runtime path, provider or remote caller can switch
 //! the machine's scheduler. Nothing here parses `scxctl` output or changes dispatch maps.
 use std::collections::BTreeMap;
 
@@ -172,16 +172,23 @@ pub fn plan_switch_with_args(
     })
 }
 
-/// Proof that an explicit offline campaign allowed a scheduler switch. It has no runtime
-/// constructor, so the daemon, a provider and a remote caller cannot make one.
+/// Reserved proof for a trusted offline campaign. Production construction is deliberately
+/// unavailable until the campaign policy, worker, journal and exact ownership path exist.
+/// A campaign name alone is not authorization.
+///
+/// ```compile_fail
+/// use stutter::integrations::scx_loader::OfflineAuthorization;
+/// let forged = OfflineAuthorization::from_campaign("caller-selected-name");
+/// ```
 #[derive(Debug)]
 pub struct OfflineAuthorization {
     campaign: String,
 }
 
 impl OfflineAuthorization {
-    /// For the offline campaign runner, which holds the authorization on disk.
-    pub fn from_campaign(campaign: &str) -> Self {
+    /// Fake-bus fixtures only; never a constructor in the product library.
+    #[cfg(test)]
+    pub(super) fn from_campaign(campaign: &str) -> Self {
         Self {
             campaign: campaign.to_owned(),
         }
@@ -340,9 +347,13 @@ pub fn execute(
         call_switch_with_args(client, plan.method, &plan.to, &plan.args)?;
     }
     let state = read_state(client)?;
-    let kernel_agrees =
-        kernel_ops().is_none_or(|ops| ops.contains(plan.to.trim_start_matches("scx_")));
-    if state.current.as_deref() == Some(plan.to.as_str()) && kernel_agrees {
+    let kernel_agrees = kernel_ops().is_some_and(|ops| {
+        ops == plan.to || ops == plan.to.strip_prefix("scx_").unwrap_or(&plan.to)
+    });
+    if state.current.as_deref() == Some(plan.to.as_str())
+        && state.mode == Some(plan.mode)
+        && kernel_agrees
+    {
         Ok(())
     } else {
         Err(ExecuteError::NotInEffect {

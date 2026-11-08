@@ -5,8 +5,9 @@
 //! the holder wants and the daemon drops it when the holder's bus connection closes. That makes it
 //! scoped and self-releasing, unlike writing the active profile. This module reads the active
 //! profile, checks the installed method signatures, plans a hold only to an allowlisted profile,
-//! and executing it needs the same [`OfflineAuthorization`] the scheduler adapter uses, which only
-//! an explicit offline campaign can construct. The hold is verified, and so is its release.
+//! and executing it needs the same [`OfflineAuthorization`] the scheduler adapter uses. That token
+//! currently has a fake-bus fixture constructor only: a trusted production campaign is not yet
+//! implemented. The hold and release mechanisms are fixture-tested; no runtime path can invoke them.
 use std::collections::BTreeMap;
 
 use super::{

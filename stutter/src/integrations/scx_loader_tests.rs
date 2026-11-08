@@ -247,6 +247,27 @@ fn a_kernel_that_disagrees_makes_the_switch_not_in_effect() {
     );
 }
 
+#[test]
+fn missing_or_lookalike_kernel_ops_never_prove_a_scheduler_switch() {
+    for ops in [None, Some("lavd_other"), Some("unrelated_lavd"), Some("")] {
+        let (mut client, _) = fake_loader();
+        let methods = introspect(&mut client).unwrap();
+        let mut state = state(None, None);
+        state.supported = vec!["scx_lavd".into()];
+        let plan = plan_switch(&state, &methods, "scx_lavd", 1, &["scx_lavd".into()]).unwrap();
+        let result = execute(
+            &mut client,
+            &plan,
+            &OfflineAuthorization::from_campaign("fixture"),
+            || ops.map(str::to_owned),
+        );
+        assert!(
+            matches!(result, Err(ExecuteError::NotInEffect { .. })),
+            "{ops:?}: {result:?}"
+        );
+    }
+}
+
 fn arg_methods() -> BTreeMap<String, String> {
     let mut methods = methods();
     methods.insert("StartSchedulerWithArgs".into(), "sas".into());
