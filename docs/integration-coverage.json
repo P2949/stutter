@@ -476,14 +476,15 @@
       ],
       "anchors": [
         "stutter/src/integrations/mod.rs",
-        "stutter/src/integrations/exact.rs"
+        "stutter/src/integrations/exact.rs",
+        "stutter/src/integrations/power_profiles.rs"
       ],
-      "status": "first_slice",
-      "g0": "auto-cpufreq and power-profiles-daemon presence mark CPU power owned; TLP and thermald are detected through systemd exact unit state (GetUnit/ActiveState, read-only, fake-bus tested); the read-only D-Bus client reads power-profiles-daemon ActiveProfile when its name has an owner",
+      "status": "code_complete",
+      "g0": "a gated offline power-profiles-daemon adapter plans a HoldProfile only to an allowlisted known profile with the exact method signatures, executes only with an OfflineAuthorization (no runtime constructor), verifies the held profile is in effect (else releases at once) and that the prior profile returns after ReleaseProfile; the hold also self-releases when the bus connection closes (fake-bus tested, daemon absent on this host); auto-cpufreq and power-profiles-daemon presence mark CPU power owned; TLP and thermald are detected through systemd exact unit state (GetUnit/ActiveState, read-only, fake-bus tested); the read-only D-Bus client reads power-profiles-daemon ActiveProfile when its name has an owner",
       "g1": "power-profiles-daemon read over the system bus on this host: no owner (absent)",
       "runtime_availability": "all absent",
       "authority": "O/A/D",
-      "not_wired": "no HoldProfile/ReleaseProfile scoped hold",
+      "not_wired": "nothing",
       "dispositions": [
         "FixtureVerified",
         "HardwareUnavailable",

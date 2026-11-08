@@ -361,6 +361,7 @@ pub mod adapters;
 pub mod dbus;
 pub mod exact;
 pub mod gpu_identity;
+pub mod power_profiles;
 pub mod scx_loader;
 pub mod tuned;
 pub mod units;
