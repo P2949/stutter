@@ -6,6 +6,8 @@
 //! order, paired elimination); there is no learned model. They are compared offline on historical
 //! per-block outcomes by regret and time to benefit, and production keeps its conservative ranking
 //! unless a comparison on real data justifies more.
+pub mod ensemble;
+
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};

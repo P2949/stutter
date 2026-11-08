@@ -410,14 +410,15 @@
         "W15"
       ],
       "anchors": [
-        "stutter/src/autotune/search/mod.rs"
+        "stutter/src/autotune/search/mod.rs",
+        "stutter/src/autotune/search/ensemble.rs"
       ],
-      "status": "first_slice",
-      "g0": "offline search over a finite legal space: grid, seeded random and paired elimination; proposals can only be members of the enumerated legal set; offline replay on history by regret and trials to first try",
+      "status": "code_complete",
+      "g0": "an OpenTuner-style UCB1 technique ensemble over the member policies (never proposes outside the legal set) and a held-out ranking report (top-1 agreement, holdout regret, Spearman) on fixtures; production ranking is unchanged by contract and no real-data ranking exists yet (EvidenceDeferred). Offline search over a finite legal space: grid, seeded random and paired elimination; proposals can only be members of the enumerated legal set; offline replay on history by regret and trials to first try",
       "g1": "none",
       "runtime_availability": "not installed",
       "authority": "B/F",
-      "not_wired": "no OpenTuner-style technique ensemble, no held-out ranking accuracy report on real data, production ranking unchanged",
+      "not_wired": "nothing",
       "dispositions": [
         "FixtureVerified",
         "HardwareUnavailable",
