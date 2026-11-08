@@ -10,8 +10,8 @@ mod model;
 #[cfg(test)]
 mod tests;
 
-pub use ingest::{IngestDenial, SampleStore, WindowAggregate};
+pub use ingest::{IngestDenial, SampleStore, Semantics, WindowAggregate};
 pub use model::{
     Aggregation, ContractError, Direction, KpiContract, MetricClass, MetricSpec, Sample,
-    SourceBinding,
+    SampleKind, SourceBinding,
 };

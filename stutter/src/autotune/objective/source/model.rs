@@ -50,6 +50,18 @@ pub struct MetricSpec {
     pub equivalent_within_percent: f64,
 }
 
+/// What a sample stands for. Only raw events support an exact percentile of the stream.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SampleKind {
+    /// One underlying event (a request, a frame).
+    RawEvent,
+    /// A summary of `population` events (a batch mean or batch percentile). The default, because
+    /// it is the weaker claim.
+    #[default]
+    Summary,
+}
+
 /// One sample as the application reports it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Sample {
@@ -60,6 +72,8 @@ pub struct Sample {
     pub work_unit: Option<String>,
     /// Underlying events this sample summarizes.
     pub population: u64,
+    #[serde(default)]
+    pub kind: SampleKind,
 }
 
 /// The one process this source is bound to, by start time so a reused pid never matches.

@@ -2,6 +2,7 @@ use super::*;
 use crate::telemetry::registration::PeerCredentials;
 
 const MS: u64 = 1_000_000;
+const TICKS: u64 = 7;
 
 fn spec(id: &str, aggregation: Aggregation) -> MetricSpec {
     MetricSpec {
@@ -23,7 +24,7 @@ fn contract() -> KpiContract {
         binding: SourceBinding {
             uid: 1000,
             pid: 42,
-            start_ticks: 7,
+            start_ticks: TICKS,
         },
         primary: spec("request_p99", Aggregation::P99),
         hard_guardrails: vec![spec("error_rate", Aggregation::Mean)],
@@ -35,11 +36,25 @@ fn peer(pid: u32, uid: u32) -> PeerCredentials {
     PeerCredentials { pid, uid }
 }
 
-fn line(metric: &str, value: f64, at_ms: u64, population: u64) -> String {
+fn line(metric: &str, value: f64, at_ms: u64, population: u64, kind: &str) -> String {
     format!(
-        r#"{{"metric":"{metric}","value":{value},"monotonic_ns":{},"work_unit":null,"population":{population}}}"#,
+        r#"{{"metric":"{metric}","value":{value},"monotonic_ns":{},"work_unit":null,"population":{population},"kind":"{kind}"}}"#,
         at_ms * MS
     )
+}
+
+fn feed(store: &mut SampleStore, metric: &str, values: &[(f64, u64, &str)], start_ms: u64) {
+    for (index, (value, population, kind)) in values.iter().enumerate() {
+        let at = start_ms + index as u64 * 100;
+        store
+            .ingest_line(
+                peer(42, 1000),
+                TICKS,
+                &line(metric, *value, at, *population, kind),
+                at * MS,
+            )
+            .unwrap();
+    }
 }
 
 #[test]
@@ -67,84 +82,231 @@ fn a_contract_needs_one_primary_distinct_metrics_and_a_hard_guardrail() {
 }
 
 #[test]
-fn only_the_bound_process_of_the_bound_user_may_report() {
+fn only_the_bound_live_process_of_the_bound_user_may_report() {
     let mut store = SampleStore::new(contract());
-    let good = line("request_p99", 12.0, 1000, 20);
+    let good = line("request_p99", 12.0, 1000, 20, "summary");
     assert_eq!(
-        store.ingest_line(peer(42, 0), &good, 1000 * MS),
+        store.ingest_line(peer(42, 0), TICKS, &good, 1000 * MS),
         Err(IngestDenial::WrongUser)
     );
     assert_eq!(
-        store.ingest_line(peer(43, 1000), &good, 1000 * MS),
+        store.ingest_line(peer(43, 1000), TICKS, &good, 1000 * MS),
         Err(IngestDenial::NotTheBoundProcess)
     );
-    assert_eq!(store.ingest_line(peer(42, 1000), &good, 1000 * MS), Ok(()));
+    // The same pid and uid but a different start time is a reused pid.
+    assert_eq!(
+        store.ingest_line(peer(42, 1000), TICKS + 1, &good, 1000 * MS),
+        Err(IngestDenial::PeerStartTimeMismatch)
+    );
+    assert_eq!(
+        store.ingest_line(peer(42, 1000), TICKS, &good, 1000 * MS),
+        Ok(())
+    );
 }
 
 #[test]
-fn bad_stale_unordered_and_unknown_samples_are_refused_not_coerced() {
+fn bad_stale_future_replayed_and_unknown_samples_are_refused_not_coerced() {
     let mut store = SampleStore::new(contract());
-    let me = peer(42, 1000);
+    let ingest = |store: &mut SampleStore, text: &str, now: u64| {
+        store.ingest_line(peer(42, 1000), TICKS, text, now)
+    };
     assert_eq!(
-        store.ingest_line(me, "not json", 0),
+        ingest(&mut store, "not json", 0),
         Err(IngestDenial::BadJson)
     );
     assert_eq!(
-        store.ingest_line(me, &"x".repeat(600), 0),
+        ingest(&mut store, &"x".repeat(600), 0),
         Err(IngestDenial::LineTooLong)
     );
     assert_eq!(
-        store.ingest_line(me, &line("other", 1.0, 100, 5), 100 * MS),
+        ingest(&mut store, &line("other", 1.0, 100, 5, "summary"), 100 * MS),
         Err(IngestDenial::UnknownMetric)
     );
     assert_eq!(
-        store.ingest_line(me, &line("request_p99", 1.0, 100, 0), 100 * MS),
+        ingest(
+            &mut store,
+            &line("request_p99", 1.0, 100, 0, "summary"),
+            100 * MS
+        ),
         Err(IngestDenial::EmptyPopulation)
     );
-    let nan = r#"{"metric":"request_p99","value":1e999,"monotonic_ns":1,"work_unit":null,"population":5}"#;
-    assert!(store.ingest_line(me, nan, 1).is_err());
     assert_eq!(
-        store.ingest_line(me, &line("request_p99", 1.0, 100, 5), 100_000 * MS),
+        ingest(
+            &mut store,
+            &line("request_p99", -1.0, 100, 5, "summary"),
+            100 * MS
+        ),
+        Err(IngestDenial::NegativeValue)
+    );
+    assert_eq!(
+        ingest(
+            &mut store,
+            &line("request_p99", 1.0, 100, 3, "raw_event"),
+            100 * MS
+        ),
+        Err(IngestDenial::RawEventPopulation)
+    );
+    let huge = r#"{"metric":"request_p99","value":1e999,"monotonic_ns":1,"work_unit":null,"population":5}"#;
+    assert!(ingest(&mut store, huge, 1).is_err());
+    assert_eq!(
+        ingest(
+            &mut store,
+            &line("request_p99", 1.0, 100, 5, "summary"),
+            100_000 * MS
+        ),
         Err(IngestDenial::TooOld)
     );
-    store
-        .ingest_line(me, &line("request_p99", 1.0, 200, 5), 200 * MS)
-        .unwrap();
+    // A timestamp far ahead of the local clock is forged.
     assert_eq!(
-        store.ingest_line(me, &line("request_p99", 1.0, 150, 5), 200 * MS),
-        Err(IngestDenial::OutOfOrder)
+        ingest(
+            &mut store,
+            &line("request_p99", 1.0, 10_000, 5, "summary"),
+            100 * MS
+        ),
+        Err(IngestDenial::FutureTimestamp)
+    );
+    ingest(
+        &mut store,
+        &line("request_p99", 1.0, 200, 5, "summary"),
+        200 * MS,
+    )
+    .unwrap();
+    // Out of order and an exact duplicate are both replays.
+    assert_eq!(
+        ingest(
+            &mut store,
+            &line("request_p99", 1.0, 150, 5, "summary"),
+            200 * MS
+        ),
+        Err(IngestDenial::NotAfterPrevious)
+    );
+    assert_eq!(
+        ingest(
+            &mut store,
+            &line("request_p99", 1.0, 200, 5, "summary"),
+            200 * MS
+        ),
+        Err(IngestDenial::NotAfterPrevious)
     );
 }
 
 #[test]
-fn a_window_needs_population_freshness_and_uses_the_declared_aggregation() {
+fn a_mean_of_summaries_is_weighted_by_the_events_each_one_stands_for() {
     let mut store = SampleStore::new(contract());
-    let me = peer(42, 1000);
-    for (index, value) in [10.0, 20.0, 30.0, 40.0].iter().enumerate() {
-        let at = 1000 + index as u64 * 100;
-        store
-            .ingest_line(me, &line("request_p99", *value, at, 3), at * MS)
-            .unwrap();
-    }
-    // 12 events across the window: p99 of the four reported values.
-    let window = store
-        .window("request_p99", 1000 * MS, 1300 * MS, 1400 * MS)
-        .unwrap();
-    assert_eq!(
-        (window.value, window.samples, window.population),
-        (40.0, 4, 12)
+    // 90 fast events averaging 10 and 10 slow events averaging 110: the true mean is 20, not 60.
+    feed(
+        &mut store,
+        "error_rate",
+        &[(10.0, 90, "summary"), (110.0, 10, "summary")],
+        1000,
     );
-    // Too few events in a narrower window.
+    let window = store
+        .window("error_rate", 1000 * MS, 1100 * MS, 1200 * MS)
+        .unwrap();
+    assert!((window.value - 20.0).abs() < 1e-9, "{window:?}");
+    assert_eq!(window.semantics, Semantics::Direct);
+    assert_eq!(window.population, 100);
+}
+
+#[test]
+fn a_percentile_of_batch_percentiles_is_never_a_direct_percentile() {
+    let mut store = SampleStore::new(contract());
+    feed(
+        &mut store,
+        "request_p99",
+        &[
+            (10.0, 5, "summary"),
+            (20.0, 5, "summary"),
+            (40.0, 5, "summary"),
+        ],
+        1000,
+    );
+    let summaries = store
+        .window("request_p99", 1000 * MS, 1200 * MS, 1300 * MS)
+        .unwrap();
+    assert_eq!(summaries.value, 40.0);
+    assert_eq!(summaries.semantics, Semantics::QuantileOfSummaries);
+
+    let mut raw = SampleStore::new(contract());
+    let events: Vec<(f64, u64, &str)> = (1..=20).map(|v| (f64::from(v), 1, "raw_event")).collect();
+    feed(&mut raw, "request_p99", &events, 1000);
+    let window = raw
+        .window("request_p99", 1000 * MS, 3000 * MS, 3100 * MS)
+        .unwrap();
+    assert_eq!(window.value, 20.0);
+    assert_eq!(window.semantics, Semantics::Direct);
+
+    // One summary among raw events downgrades the whole window.
+    let mut mixed = SampleStore::new(contract());
+    let mut events: Vec<(f64, u64, &str)> =
+        (1..=12).map(|v| (f64::from(v), 1, "raw_event")).collect();
+    events.push((50.0, 5, "summary"));
+    feed(&mut mixed, "request_p99", &events, 1000);
+    let window = mixed
+        .window("request_p99", 1000 * MS, 3000 * MS, 3100 * MS)
+        .unwrap();
+    assert_eq!(window.semantics, Semantics::QuantileOfSummaries);
+}
+
+#[test]
+fn a_window_needs_population_and_freshness() {
+    let mut store = SampleStore::new(contract());
+    feed(
+        &mut store,
+        "request_p99",
+        &[
+            (10.0, 3, "summary"),
+            (20.0, 3, "summary"),
+            (30.0, 3, "summary"),
+            (40.0, 3, "summary"),
+        ],
+        1000,
+    );
+    assert!(
+        store
+            .window("request_p99", 1000 * MS, 1300 * MS, 1400 * MS)
+            .is_some()
+    );
     assert!(
         store
             .window("request_p99", 1000 * MS, 1100 * MS, 1400 * MS)
-            .is_none()
+            .is_none(),
+        "too few events"
     );
-    // Stale: the newest sample is older than max_age.
     assert!(
         store
             .window("request_p99", 1000 * MS, 1300 * MS, 100_000 * MS)
-            .is_none()
+            .is_none(),
+        "stale"
     );
     assert!(store.window("unknown", 0, u64::MAX, 0).is_none());
+}
+
+#[test]
+fn a_capacity_eviction_is_reported_as_an_incomplete_window() {
+    let mut small_population = contract();
+    small_population.primary.min_population = 1;
+    let mut store = SampleStore::new(small_population);
+    // 4100 raw events: the first 4 fall out of the 4096-sample ring.
+    for index in 0..4100_u64 {
+        let at = 1000 + index;
+        store
+            .ingest_line(
+                peer(42, 1000),
+                TICKS,
+                &line("request_p99", 5.0, at, 1, "raw_event"),
+                at * MS,
+            )
+            .unwrap();
+    }
+    let now = 1000 + 4100;
+    let whole = store
+        .window("request_p99", 1000 * MS, now * MS, now * MS)
+        .unwrap();
+    assert!(!whole.complete, "the window reaches into evicted samples");
+    assert_eq!(whole.samples, 4096);
+    let recent = store
+        .window("request_p99", 1100 * MS, now * MS, now * MS)
+        .unwrap();
+    assert!(recent.complete);
 }
