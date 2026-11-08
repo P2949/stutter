@@ -756,7 +756,7 @@
       "g1": "none",
       "runtime_availability": "clang, gcc, llvm-bolt, perf2bolt absent on PATH",
       "authority": "F",
-      "not_wired": "no instrumented build, training run, profile conversion, rebuild, correctness suite or paired performance comparison; compilers, perf and BOLT tools are absent on this PATH so nothing could run here",
+      "not_wired": "`xtask offline-optimization run` executes the typed steps (instrumented build, training runs, profile merge/convert, rebuild or llvm-bolt, correctness suite, hyperfine A/B) under the process supervisor, stopping at the first failure, and is fixture-tested with real exec of true/false/sleep; no `perf record` collection step (the AutoFDO/BOLT profile is imported and its build id verified), and compilers, perf and BOLT are absent on this PATH so no real run happened",
       "dispositions": [
         "FixtureVerified",
         "HardwareUnavailable",
