@@ -273,13 +273,47 @@ pub fn ci(root: &Path, only: Option<&str>) -> anyhow::Result<()> {
         }
         None => CI_STAGES.iter().collect(),
     };
+    let timeout = std::env::var("STUTTER_XTASK_CI_TIMEOUT_SECS")
+        .ok()
+        .map(|value| value.parse::<u64>())
+        .transpose()
+        .context("STUTTER_XTASK_CI_TIMEOUT_SECS must be a positive integer")?
+        .unwrap_or(6 * 60 * 60);
+    ensure!(timeout > 0, "CI timeout must be positive");
+    run_stages(root, &stages, std::time::Duration::from_secs(timeout))?;
+    println!("ci: PASS");
+    Ok(())
+}
+
+fn run_stages(root: &Path, stages: &[&Stage], timeout: std::time::Duration) -> anyhow::Result<()> {
+    let deadline = std::time::Instant::now()
+        .checked_add(timeout)
+        .context("CI timeout exceeds the monotonic clock range")?;
     for stage in stages {
         println!("=== ci stage: {} ===", stage.name);
         for command in stage.commands {
-            run_process(root, command.program, command.args)?;
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            ensure!(
+                !remaining.is_zero(),
+                "whole-CI deadline exceeded before {}",
+                stage.name
+            );
+            let mut policy = crate::process::stage_policy();
+            policy.timeout = Some(
+                policy
+                    .timeout
+                    .map_or(remaining, |limit| limit.min(remaining)),
+            );
+            crate::process::run_process_with_policy(
+                root,
+                command.program,
+                command.args,
+                &[],
+                &policy,
+            )
+            .with_context(|| format!("CI stage {} (whole-CI deadline enforced)", stage.name))?;
         }
     }
-    println!("ci: PASS");
     Ok(())
 }
 
@@ -377,12 +411,12 @@ pub fn ci_live(root: &Path) -> anyhow::Result<()> {
 
 /// The crate version, from the workspace metadata.
 fn stutter_version(root: &Path) -> anyhow::Result<String> {
-    let output = Command::new("cargo")
-        .args(["metadata", "--no-deps", "--format-version", "1"])
-        .current_dir(root)
-        .output()?;
-    ensure!(output.status.success(), "cargo metadata failed");
-    let metadata: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    let output = crate::process::run_process_capture_stdout(
+        root,
+        "cargo",
+        &["metadata", "--no-deps", "--format-version", "1"],
+    )?;
+    let metadata: serde_json::Value = serde_json::from_str(&output)?;
     metadata["packages"]
         .as_array()
         .and_then(|packages| packages.iter().find(|p| p["name"] == "stutter"))
@@ -495,6 +529,28 @@ pub fn setup(root: &Path) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_whole_campaign_deadline_is_shared_across_stages() {
+        const COMMANDS: &[CommandSpec] = &[spec("sh", &["-c", "sleep 0.4"])];
+        let first = Stage {
+            name: "first",
+            commands: COMMANDS,
+        };
+        let second = Stage {
+            name: "second",
+            commands: COMMANDS,
+        };
+        // Either command fits on its own; the two together exceed the campaign's budget.
+        let result = run_stages(
+            Path::new("."),
+            &[&first, &second],
+            std::time::Duration::from_millis(650),
+        );
+        let error = format!("{:#}", result.unwrap_err());
+        assert!(error.contains("CI stage second"), "{error}");
+        assert!(error.contains("exceeded its deadline"), "{error}");
+    }
 
     fn text(command: &CommandSpec) -> String {
         format!("{} {}", command.program, command.args.join(" "))

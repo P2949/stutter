@@ -26,6 +26,16 @@ pub fn run_process_with_env(
     args: &[&str],
     extra_env: &[(&str, &str)],
 ) -> anyhow::Result<()> {
+    run_process_with_policy(root, program, args, extra_env, &stage_policy())
+}
+
+pub fn run_process_with_policy(
+    root: &Path,
+    program: &str,
+    args: &[&str],
+    extra_env: &[(&str, &str)],
+    policy: &ExecutionPolicy,
+) -> anyhow::Result<()> {
     let command_text = format_command(program, args);
     println!("--- STAGE: {command_text} ---");
 
@@ -38,7 +48,7 @@ pub fn run_process_with_env(
         command.env(key, value);
     }
 
-    check_outcome(&command_text, &supervisor::run(command, &stage_policy())?)
+    check_outcome(&command_text, &supervisor::run(command, policy)?)
 }
 
 pub fn run_process_capture_stdout(

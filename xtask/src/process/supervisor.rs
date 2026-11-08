@@ -7,7 +7,7 @@
 //! a process this module did not spawn.
 use std::{
     io::{Read, Write},
-    os::unix::process::CommandExt,
+    os::{fd::AsRawFd, unix::process::CommandExt},
     path::Path,
     process::{Command, ExitStatus, Stdio},
     sync::{
@@ -100,37 +100,67 @@ pub struct Supervised {
 struct Captured {
     text: Vec<u8>,
     dropped: u64,
+    complete: bool,
 }
 
-fn drain<R: Read + Send + 'static>(
+fn drain<R: Read + AsRawFd + Send + 'static>(
     mut source: R,
     cap: usize,
     tee: Option<bool>,
-) -> thread::JoinHandle<Captured> {
-    thread::spawn(move || {
+    stop: Arc<AtomicBool>,
+) -> std::io::Result<thread::JoinHandle<Captured>> {
+    // A detached descendant can keep a pipe open after the process group is gone. Never join a
+    // reader blocked on that pipe: nonblocking reads let cleanup end it within one poll interval.
+    let fd = source.as_raw_fd();
+    // SAFETY: fd is a live pipe owned by source; these calls only change its file status flags.
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if flags == -1 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } == -1 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(thread::spawn(move || {
         let mut captured = Captured {
             text: Vec::new(),
             dropped: 0,
+            complete: false,
         };
         let mut chunk = [0u8; 8192];
-        while let Ok(read) = source.read(&mut chunk) {
+        loop {
+            let read = match source.read(&mut chunk) {
+                Ok(read) => read,
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    if stop.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    thread::sleep(POLL);
+                    continue;
+                }
+                Err(_) => break,
+            };
             if read == 0 {
+                captured.complete = true;
                 break;
-            }
-            if let Some(to_stderr) = tee {
-                let _ = if to_stderr {
-                    std::io::stderr().write_all(&chunk[..read])
-                } else {
-                    std::io::stdout().write_all(&chunk[..read])
-                };
             }
             let room = cap.saturating_sub(captured.text.len());
             let keep = room.min(read);
+            if let Some(to_stderr) = tee {
+                // Tee has the same immutable byte cap as capture. Flooding cannot fill an
+                // unbounded parent log after the in-memory limit has been reached.
+                let _ = if to_stderr {
+                    std::io::stderr().write_all(&chunk[..keep])
+                } else {
+                    std::io::stdout().write_all(&chunk[..keep])
+                };
+            }
             captured.text.extend_from_slice(&chunk[..keep]);
             captured.dropped += (read - keep) as u64;
+            if stop.load(Ordering::SeqCst) {
+                // Bound draining even if an escaped writer continuously floods the pipe.
+                break;
+            }
         }
         captured
-    })
+    }))
 }
 
 fn signal_group(group: i32, signal: libc::c_int) {
@@ -186,9 +216,16 @@ pub fn run(mut command: Command, policy: &ExecutionPolicy) -> anyhow::Result<Sup
         )
         .process_group(0);
     // SAFETY: only async-signal-safe prctl before exec; the direct child dies if this process does.
+    let parent = std::process::id() as libc::pid_t;
     unsafe {
-        command.pre_exec(|| {
-            libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL);
+        command.pre_exec(move || {
+            if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL) == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            // The parent may have died between fork and prctl. Never exec after that race.
+            if libc::getppid() != parent {
+                return Err(std::io::Error::from_raw_os_error(libc::ECHILD));
+            }
             Ok(())
         });
     }
@@ -196,20 +233,40 @@ pub fn run(mut command: Command, policy: &ExecutionPolicy) -> anyhow::Result<Sup
         .spawn()
         .context("failed to start supervised command")?;
     let group = child.id() as i32;
+    let stop_readers = Arc::new(AtomicBool::new(false));
     let out = drain(
         child.stdout.take().expect("piped stdout"),
         policy.output_cap / 2,
         policy.tee.then_some(false),
+        Arc::clone(&stop_readers),
     );
     let err = drain(
         child.stderr.take().expect("piped stderr"),
         policy.output_cap / 2,
         policy.tee.then_some(true),
+        Arc::clone(&stop_readers),
     );
+    let (out, err) = match (out, err) {
+        (Ok(out), Ok(err)) => (out, err),
+        (out, err) => {
+            stop_group(group, policy.grace);
+            let _ = child.wait();
+            stop_readers.store(true, Ordering::SeqCst);
+            if let Ok(reader) = out {
+                let _ = reader.join();
+            }
+            if let Ok(reader) = err {
+                let _ = reader.join();
+            }
+            anyhow::bail!("could not configure bounded output readers");
+        }
+    };
     let started = Instant::now();
     let outcome = loop {
-        if let Some(status) = child.try_wait().context("failed to poll child")? {
-            break Outcome::Exited(status);
+        match child.try_wait() {
+            Ok(Some(status)) => break Ok(Outcome::Exited(status)),
+            Ok(None) => {}
+            Err(error) => break Err(error),
         }
         if INTERRUPTED.load(Ordering::SeqCst)
             || policy
@@ -217,13 +274,13 @@ pub fn run(mut command: Command, policy: &ExecutionPolicy) -> anyhow::Result<Sup
                 .as_ref()
                 .is_some_and(|flag| flag.load(Ordering::SeqCst))
         {
-            break Outcome::Cancelled;
+            break Ok(Outcome::Cancelled);
         }
         if policy
             .timeout
             .is_some_and(|limit| started.elapsed() >= limit)
         {
-            break Outcome::TimedOut;
+            break Ok(Outcome::TimedOut);
         }
         thread::sleep(POLL);
     };
@@ -239,14 +296,23 @@ pub fn run(mut command: Command, policy: &ExecutionPolicy) -> anyhow::Result<Sup
     while group_alive(group) && Instant::now() < gone {
         thread::sleep(POLL);
     }
-    let out = out.join().unwrap_or(Captured {
-        text: Vec::new(),
-        dropped: 0,
-    });
-    let err = err.join().unwrap_or(Captured {
-        text: Vec::new(),
-        dropped: 0,
-    });
+    // Allow the finite pipe backlog to drain after cleanup, then stop even if a writer escaped.
+    let drain_deadline = Instant::now() + Duration::from_secs(1);
+    while !(out.is_finished() && err.is_finished()) && Instant::now() < drain_deadline {
+        thread::sleep(POLL);
+    }
+    stop_readers.store(true, Ordering::SeqCst);
+    let out = out
+        .join()
+        .map_err(|_| anyhow::anyhow!("stdout reader panicked"))?;
+    let err = err
+        .join()
+        .map_err(|_| anyhow::anyhow!("stderr reader panicked"))?;
+    anyhow::ensure!(
+        out.complete && err.complete,
+        "output did not reach EOF after cleanup; an uncontained descendant or read failure invalidated the stage"
+    );
+    let outcome = outcome.context("failed to poll child (owned group cleaned up)")?;
     Ok(Supervised {
         outcome,
         stdout: String::from_utf8_lossy(&out.text).into_owned(),
@@ -317,6 +383,34 @@ mod tests {
         assert_eq!(exit_code(&result), Some(0));
         assert!(result.stdout.len() <= 32 * 1024);
         assert!(result.dropped_bytes > 4_000_000);
+    }
+
+    #[test]
+    fn a_markerless_pipe_holder_invalidates_the_stage_without_hanging_the_reader() {
+        let file = std::env::temp_dir().join(format!("stutter-pipe-holder-{}", std::process::id()));
+        let script = format!(
+            "setsid env -u {OWNER_ENV} sh -c 'echo $$ > {}; exec sleep 30' & sleep 0.3",
+            file.display()
+        );
+        let started = Instant::now();
+        let result = run(sh(&script), &quiet(2000));
+        let elapsed = started.elapsed();
+        // This fixture deliberately escapes the marker-based cleanup. Clean it up by the pid
+        // recorded by our own helper before any assertion, including when the test fails.
+        if let Ok(pid) = std::fs::read_to_string(&file) {
+            let pid: i32 = pid.trim().parse().unwrap();
+            unsafe {
+                libc::kill(pid, libc::SIGKILL);
+            }
+        }
+        let _ = std::fs::remove_file(file);
+        assert!(elapsed < Duration::from_secs(10));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("uncontained descendant")
+        );
     }
 
     #[test]

@@ -5,7 +5,16 @@
 //! gone (a crashed or killed xtask) is an orphan of this tool, and one whose owner is the current
 //! process but outlived its stage is an escapee. Both are found by marker and verified owner
 //! identity, never by executable name, and only processes of the same user are touched.
-use std::{fs, os::unix::fs::MetadataExt, path::Path, thread, time::Duration};
+use std::{
+    fs,
+    os::{
+        fd::{AsRawFd, FromRawFd, OwnedFd},
+        unix::fs::MetadataExt,
+    },
+    path::Path,
+    thread,
+    time::Duration,
+};
 
 pub const OWNER_ENV: &str = "STUTTER_XTASK_OWNER";
 /// Most `/proc` entries examined per scan.
@@ -30,11 +39,12 @@ impl Owner {
 
     pub fn parse(text: &str) -> Option<Self> {
         let mut parts = text.split(':');
-        Some(Self {
+        let owner = Self {
             pid: parts.next()?.parse().ok()?,
             start_ticks: parts.next()?.parse().ok()?,
             stage: parts.next().map_or(Some(0), |stage| stage.parse().ok())?,
-        })
+        };
+        (parts.next().is_none() && owner.pid > 1 && owner.start_ticks > 0).then_some(owner)
     }
 }
 
@@ -110,25 +120,49 @@ pub fn marked_processes(proc_root: &Path, uid: u32) -> Vec<Marked> {
 /// TERM, wait up to `grace`, then KILL each listed process, re-checking its identity first so a
 /// recycled pid is never signalled. Returns how many were signalled.
 pub fn terminate(proc_root: &Path, targets: &[Marked], grace: Duration) -> usize {
-    let still_same =
-        |target: &Marked| start_ticks(proc_root, target.pid) == Some(target.start_ticks);
-    let signal = |target: &Marked, sig: libc::c_int| {
-        if still_same(target) {
-            // SAFETY: a single explicit, positive pid whose identity was just re-verified.
-            unsafe { libc::kill(target.pid as libc::pid_t, sig) };
+    // Open the kernel identity before checking starttime. A recycled numeric pid can never be
+    // signalled between a /proc check and kill: pidfd_send_signal stays bound to this process.
+    // A kernel that cannot provide pidfds fails closed rather than using the racy fallback.
+    let handles: Vec<(&Marked, OwnedFd)> = targets
+        .iter()
+        .filter_map(|target| {
+            if target.pid <= 1 {
+                return None;
+            }
+            // SAFETY: pidfd_open takes a positive pid and zero flags and returns a new owned fd.
+            let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, target.pid, 0) };
+            if fd < 0 {
+                return None;
+            }
+            let handle = unsafe { OwnedFd::from_raw_fd(fd as i32) };
+            (start_ticks(proc_root, target.pid) == Some(target.start_ticks))
+                .then_some((target, handle))
+        })
+        .collect();
+    let signal = |fd: &OwnedFd, sig: libc::c_int| {
+        // SAFETY: fd is an owned process handle, with no siginfo and no flags.
+        unsafe {
+            libc::syscall(
+                libc::SYS_pidfd_send_signal,
+                fd.as_raw_fd(),
+                sig,
+                std::ptr::null::<libc::siginfo_t>(),
+                0,
+            ) == 0
         }
     };
-    for target in targets {
-        signal(target, libc::SIGTERM);
+    let mut signalled = 0;
+    for (_, fd) in &handles {
+        signalled += usize::from(signal(fd, libc::SIGTERM));
     }
     let deadline = std::time::Instant::now() + grace;
-    while targets.iter().any(still_same) && std::time::Instant::now() < deadline {
+    while handles.iter().any(|(_, fd)| signal(fd, 0)) && std::time::Instant::now() < deadline {
         thread::sleep(Duration::from_millis(20));
     }
-    for target in targets {
-        signal(target, libc::SIGKILL);
+    for (_, fd) in &handles {
+        signal(fd, libc::SIGKILL);
     }
-    targets.len()
+    signalled
 }
 
 /// Kills escapees of `owner`: marked processes it owns that outlived their stage.
@@ -147,4 +181,37 @@ pub fn reconcile_orphans(proc_root: &Path, uid: u32, grace: Duration) -> usize {
         .filter(|marked| !owner_alive(proc_root, marked.owner))
         .collect();
     terminate(proc_root, &orphans, grace)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn owner_markers_require_a_complete_non_system_identity() {
+        for text in ["1:10:1", "0:10", "12:0:1", "12:10:1:garbage", "12:10:1:2"] {
+            assert!(Owner::parse(text).is_none(), "{text}");
+        }
+        assert_eq!(Owner::parse("12:10").unwrap().stage, 0);
+        assert_eq!(Owner::parse("12:10:4").unwrap().stage, 4);
+    }
+
+    #[test]
+    fn a_changed_starttime_never_signals_the_replacement() {
+        let mut sentinel = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let target = Marked {
+            pid: sentinel.id(),
+            start_ticks: 0,
+            owner: current_owner(Path::new("/proc")).unwrap(),
+        };
+        let count = terminate(Path::new("/proc"), &[target], Duration::from_millis(20));
+        let alive = sentinel.try_wait().unwrap().is_none();
+        let _ = sentinel.kill();
+        let _ = sentinel.wait();
+        assert_eq!(count, 0);
+        assert!(alive);
+    }
 }
