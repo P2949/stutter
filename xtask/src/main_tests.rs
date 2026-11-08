@@ -27,6 +27,7 @@ fn expected_subcommands_are_registered() {
     assert_eq!(
         names,
         vec![
+            "benchmarks",
             "calibrate",
             "capability-check",
             "ci",

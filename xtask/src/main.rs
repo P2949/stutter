@@ -3,6 +3,7 @@ use std::{env, path::PathBuf};
 use anyhow::{Context, bail};
 use clap::{Parser, Subcommand};
 
+pub mod benchmarks;
 pub mod capability_check;
 pub mod coverage_maturity;
 pub mod dependency_hygiene;
@@ -136,6 +137,11 @@ pub enum XtaskCommand {
         about = "Calibrate and graduate the frame-pacing decision rule on measured MangoHud frame logs"
     )]
     FrameCampaign(frame_campaign::CampaignArgs),
+    #[command(
+        name = "benchmarks",
+        about = "Verify and import external benchmark and diagnostic artifacts as evidence (never as authority)"
+    )]
+    Benchmarks(benchmarks::BenchmarksArgs),
     #[command(
         name = "real-workload",
         about = "Frozen manifests, paired statistics and the host inventory for real-workload evidence"
@@ -539,6 +545,7 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
         XtaskCommand::ObjectiveCampaign(args) => objective_campaign::run(&root, &args),
         XtaskCommand::FrameCampaign(args) => frame_campaign::run(&root, &args),
         XtaskCommand::RealWorkload(args) => real_workload::run(&args),
+        XtaskCommand::Benchmarks(args) => benchmarks::run(&args),
         XtaskCommand::EvidenceExport(args) => {
             evidence_bundle::export_bundle(&root, &args.raw, &args.out)
         }

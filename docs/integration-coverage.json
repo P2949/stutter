@@ -241,13 +241,15 @@
         "W8",
         "W13"
       ],
-      "anchors": [],
-      "status": "not_started",
-      "g0": "none",
+      "anchors": [
+        "xtask/src/benchmarks/mod.rs"
+      ],
+      "status": "first_slice",
+      "g0": "offline external-artifact verification: tool/version, exact argv, build id, role/phase, unit, run id, clock window, population/loss, exit code and a SHA-256 per file; oversize, symlinked, escaping, missing and tampered files refused; carries no authority",
       "g1": "none",
       "runtime_availability": "all absent",
       "authority": "B/O/F",
-      "not_wired": "no diagnostic manifest or importer"
+      "not_wired": "no per-tool importers for BCC, bpftrace, trace-cmd, KernelShark, rtla or cyclictest yet, only the generic manifest"
     },
     {
       "id": "5.12",
@@ -624,10 +626,12 @@
         "W13"
       ],
       "anchors": [
-        "xtask/src/real_workload/mod.rs"
+        "xtask/src/real_workload/mod.rs",
+        "xtask/src/benchmarks/mod.rs",
+        "xtask/src/benchmarks/hyperfine.rs"
       ],
       "status": "first_slice",
-      "g0": "frozen manifest, paired statistics, supervised run/resume engine with counterbalanced arms, frame metrics, GPU-health check; benchmark importers still missing",
+      "g0": "frozen manifest, paired statistics, supervised run engine, a verified artifact manifest and a hyperfine JSON importer (samples, exit codes); no benchstat, Phoronix, sysbench or stress-ng adapters",
       "g1": "controlled-real vkcube comparison run once: EngineeringPass, NoBenefit (docs/validation/real-workload/controlled-vkcube)",
       "runtime_availability": "all absent",
       "authority": "F",
@@ -690,13 +694,15 @@
         "W9",
         "W13"
       ],
-      "anchors": [],
-      "status": "not_started",
-      "g0": "none",
+      "anchors": [
+        "xtask/src/benchmarks/mod.rs"
+      ],
+      "status": "first_slice",
+      "g0": "the same verified manifest covers iostat, pidstat, numastat and blktrace captures as artifact files with checksums and loss accounting",
       "g1": "none",
       "runtime_availability": "all absent",
       "authority": "O/F",
-      "not_wired": "no capture or import schema"
+      "not_wired": "no tool-specific parsers"
     },
     {
       "id": "extra.kernels",
