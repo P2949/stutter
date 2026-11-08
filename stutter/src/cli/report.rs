@@ -647,3 +647,26 @@ pub(super) struct ScenarioPathArgs {
 #[cfg(test)]
 #[path = "tests/report.rs"]
 mod tests;
+
+#[derive(Args, Debug, Clone)]
+pub(super) struct KpiServeArgs {
+    /// Owner-only directory the socket is created in.
+    #[arg(long = "dir", value_name = "DIR")]
+    pub(super) dir: PathBuf,
+
+    /// Socket file name inside the directory.
+    #[arg(long = "name", default_value = "kpi.sock", value_name = "NAME")]
+    pub(super) name: String,
+
+    /// JSON `KpiContract`: the metrics and the one process allowed to report them.
+    #[arg(long = "contract", value_name = "FILE")]
+    pub(super) contract: PathBuf,
+
+    /// Window each printed summary covers.
+    #[arg(long = "window", default_value_t = 10, value_name = "SECONDS")]
+    pub(super) window_secs: u64,
+
+    /// Stop after this many connections (default: serve until interrupted).
+    #[arg(long = "connections", value_name = "N")]
+    pub(super) connections: Option<usize>,
+}

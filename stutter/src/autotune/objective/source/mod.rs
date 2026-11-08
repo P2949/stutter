@@ -7,6 +7,7 @@
 //! never enable an operation, bypass an objective's maturity or the support registry.
 mod ingest;
 mod model;
+mod serve;
 mod server;
 #[cfg(test)]
 mod tests;
@@ -16,4 +17,5 @@ pub use model::{
     Aggregation, ContractError, Direction, KpiContract, MetricClass, MetricSpec, Sample,
     SampleKind, SourceBinding,
 };
+pub use serve::{MetricSummary, serve_observer};
 pub use server::{MAX_SAMPLES_PER_CONNECTION, denial_code, serve_connection};

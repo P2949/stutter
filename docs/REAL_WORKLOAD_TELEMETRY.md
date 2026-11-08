@@ -61,3 +61,22 @@ reading is context for diagnosis and never triggers a write.
 * `xtask benchmarks verify | import-hyperfine`: verified external artifacts as evidence, never as authority.
 * `xtask offline-optimization check`: PGO, AutoFDO and BOLT plans are validated, never built or applied.
 * `xtask closeout-report`: the per-tool dispositions, refusing to overstate the ledger.
+
+## Observing an application KPI
+
+An application can report its own KPI (a request p99, a batch completion time) over a local socket.
+`stutter kpi-serve` binds an owner-only socket and prints, after each connection, one JSON line per
+contract metric summarizing the last window:
+
+```sh
+stutter kpi-serve --dir "$XDG_RUNTIME_DIR/stutter/kpi" --contract kpi-contract.json --window 10
+```
+
+The contract is a JSON `KpiContract`: one primary metric, at least one hard guardrail, and the one
+process (uid, pid and live start time) allowed to report. Each sample is a line of JSON; the reply
+line is `ok` or `denied <reason>`. The peer's identity comes from the kernel, not from the sender;
+a reused pid, a stale or future timestamp, a replay or an unknown metric is denied. A quantile of
+batch summaries is labelled `quantile_of_summaries` and is never a request or frame percentile.
+
+This is observation only. It is not part of the daemon, it runs no operation, and a summary it
+prints authorizes nothing.

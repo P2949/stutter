@@ -8,8 +8,8 @@ use super::super::{
     report::{
         AdvisorArgs, ApplyProfileArgs, AuditArgs, CapabilitiesArgs, CheckArgs, CompareArgs,
         CompareCommand, CompletionsArgs, GameRunArgs, InspectDrmTracepointsArgs, InspectIrqsArgs,
-        InspectTreeArgs, ManArgs, ProbesArgs, ProfilePlanArgs, ProfileTemplateArgs, RecommendArgs,
-        ReportArgs, RestoreArgs, SummaryArgs, TuneArgs, WaylandProbeArgs,
+        InspectTreeArgs, KpiServeArgs, ManArgs, ProbesArgs, ProfilePlanArgs, ProfileTemplateArgs,
+        RecommendArgs, ReportArgs, RestoreArgs, SummaryArgs, TuneArgs, WaylandProbeArgs,
     },
     validate::{ValidateArgs, parse_optional_task_class},
 };
@@ -507,4 +507,19 @@ mod probes_tests {
             other => panic!("expected probes command, got {other:?}"),
         }
     }
+}
+
+pub(super) fn parse_kpi_serve_command(args: KpiServeArgs) -> anyhow::Result<AppCommand> {
+    if args.window_secs == 0 {
+        anyhow::bail!("--window must be greater than zero");
+    }
+    Ok(AppCommand::KpiServe(
+        crate::commands::kpi::KpiServeCommandInput {
+            dir: args.dir,
+            name: args.name,
+            contract: args.contract,
+            window: Duration::from_secs(args.window_secs),
+            connections: args.connections,
+        },
+    ))
 }

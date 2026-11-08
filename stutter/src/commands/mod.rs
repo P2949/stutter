@@ -2,6 +2,7 @@ pub mod agent;
 pub mod autotune;
 pub mod daemon;
 pub mod input;
+pub mod kpi;
 pub mod misc;
 pub mod monitor;
 pub mod release;
@@ -54,6 +55,7 @@ pub async fn dispatch(command: AppCommand) -> Result<(), StutterError> {
             misc::run_inspect_drm_tracepoints_command(input)
         }
         AppCommand::GameRun(input) => misc::run_game_run_command(input),
+        AppCommand::KpiServe(input) => kpi::run_kpi_serve_command(input),
         AppCommand::WaylandProbe(input) => misc::run_wayland_probe_command(input),
         AppCommand::Agent(input) => agent::run_agent_command(input).await,
         AppCommand::PrivilegedWorker(input) => daemon::run_privileged_worker_command(input),

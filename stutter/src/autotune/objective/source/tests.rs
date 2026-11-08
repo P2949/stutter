@@ -409,3 +409,70 @@ mod socket {
         );
     }
 }
+
+mod observer {
+    use std::{io::Write, os::unix::net::UnixStream, path::Path};
+
+    use super::*;
+    use crate::{
+        autotune::objective::source::serve_observer,
+        telemetry::{proc_view::live_process, registration::bind},
+    };
+
+    #[test]
+    fn the_observer_authenticates_the_peer_and_prints_a_summary_per_metric() {
+        let dir = std::env::temp_dir().join(format!("stutter-kpi-obs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::os::unix::fs::PermissionsExt::from_mode(0o700))
+            .unwrap();
+        let uid = crate::syscall::geteuid();
+        let listener = bind(&dir, "kpi.sock", uid).unwrap();
+        let pid = std::process::id();
+        let live = live_process(Path::new("/proc"), pid).unwrap();
+        let contract = KpiContract {
+            binding: SourceBinding {
+                uid,
+                pid,
+                start_ticks: live.start_ticks,
+            },
+            primary: spec("request_p99", Aggregation::Mean),
+            hard_guardrails: vec![spec("error_rate", Aggregation::Mean)],
+            advisory_guardrails: vec![],
+        };
+        let socket = dir.join("kpi.sock");
+        let client = std::thread::spawn(move || {
+            let mut stream = UnixStream::connect(socket).unwrap();
+            let at = crate::syscall::clock_gettime_ns(libc::CLOCK_MONOTONIC).unwrap() - 1_000_000;
+            writeln!(stream, r#"{{"metric":"request_p99","value":7.5,"monotonic_ns":{at},"work_unit":null,"population":20,"kind":"summary"}}"#).unwrap();
+            stream.shutdown(std::net::Shutdown::Write).unwrap();
+            let mut reply = String::new();
+            std::io::Read::read_to_string(&mut stream, &mut reply).unwrap();
+            reply
+        });
+        let mut out = Vec::new();
+        let handled = serve_observer(
+            contract,
+            &listener,
+            Path::new("/proc"),
+            60_000_000_000,
+            Some(1),
+            &mut out,
+        )
+        .unwrap();
+        assert_eq!(handled, 1);
+        let reply = client.join().unwrap();
+        assert_eq!(reply, "ok\n");
+        let text = String::from_utf8(out).unwrap();
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines.len(), 2, "one line per contract metric: {text}");
+        assert!(
+            lines[0].contains("\"metric\":\"request_p99\"") && lines[0].contains("\"value\":7.5"),
+            "{text}"
+        );
+        assert!(
+            lines[1].contains("\"metric\":\"error_rate\"") && lines[1].contains("\"value\":null")
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+}

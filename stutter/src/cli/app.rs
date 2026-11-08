@@ -12,8 +12,8 @@ use super::{
     report::{
         AdvisorArgs, ApplyProfileArgs, AuditArgs, CapabilitiesArgs, CheckArgs, CompareArgs,
         CompletionsArgs, GameRunArgs, InspectDrmTracepointsArgs, InspectIrqsArgs, InspectTreeArgs,
-        ManArgs, ProbesArgs, ProfilePlanArgs, ProfileTemplateArgs, RecommendArgs, ReportArgs,
-        RestoreArgs, RulesArgs, ScenarioArgs, SummaryArgs, TuneArgs, WaylandProbeArgs,
+        KpiServeArgs, ManArgs, ProbesArgs, ProfilePlanArgs, ProfileTemplateArgs, RecommendArgs,
+        ReportArgs, RestoreArgs, RulesArgs, ScenarioArgs, SummaryArgs, TuneArgs, WaylandProbeArgs,
     },
     service::ServiceArgs,
     validate::ValidateArgs,
@@ -97,6 +97,11 @@ pub(super) enum Command {
         about = "Run a command unchanged, optionally with MangoHud capture in a secure directory"
     )]
     GameRun(GameRunArgs),
+    #[command(
+        name = "kpi-serve",
+        about = "Observe an application KPI over a confined local socket (no daemon, no mutation)"
+    )]
+    KpiServe(KpiServeArgs),
     #[command(
         name = "wayland-probe",
         about = "Probe Wayland presentation timing support"

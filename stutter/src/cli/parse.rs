@@ -67,6 +67,7 @@ where
             reports::parse_inspect_drm_tracepoints_command(args)
         }
         Some(Command::GameRun(args)) => reports::parse_game_run_command(args),
+        Some(Command::KpiServe(args)) => reports::parse_kpi_serve_command(args),
         Some(Command::WaylandProbe(args)) => reports::parse_wayland_probe_command(args),
         Some(Command::Autotune(args)) => autotune::parse_autotune_command(args),
         Some(Command::AutotuneStatus(args)) => autotune::parse_autotune_status_command(args),

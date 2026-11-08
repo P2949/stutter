@@ -23,6 +23,7 @@ stutter
   inspect-irqs
   inspect-drm-tracepoints
   game-run
+  kpi-serve
   wayland-probe
   autotune
   autotune-status

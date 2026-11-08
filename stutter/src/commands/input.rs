@@ -46,6 +46,7 @@ pub enum AppCommand {
     InspectIrqs(InspectIrqsCommandInput),
     InspectDrmTracepoints(InspectDrmTracepointsCommandInput),
     GameRun(GameRunCommandInput),
+    KpiServe(super::kpi::KpiServeCommandInput),
     WaylandProbe(WaylandProbeCommandInput),
     Agent(AgentCommandInput),
     PrivilegedWorker(PrivilegedWorkerCommandInput),
