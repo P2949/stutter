@@ -73,6 +73,10 @@ pub struct Plan {
     /// The correctness suite for a binary; `{binary}` is replaced.
     #[serde(default)]
     pub verify_argv: Vec<String>,
+    /// Collect the AutoFDO/BOLT profile with `perf record` on the one training input instead of
+    /// importing one. Mutually exclusive with `profile`.
+    #[serde(default)]
+    pub collect_profile: bool,
 }
 
 /// Why a plan cannot be started.
@@ -85,6 +89,10 @@ pub enum Finding {
     OutputIsInstalledPath(String),
     /// AutoFDO and BOLT need a profile.
     ProfileRequired,
+    /// A profile is both supplied and asked to be collected.
+    ProfileAndCollection,
+    /// Collecting a profile needs exactly one training input.
+    CollectNeedsOneTrainingInput,
     /// The profile was collected from a different build than the binary it will be applied to.
     BuildIdMismatch {
         profile: String,
@@ -160,7 +168,14 @@ pub fn validate(
     {
         findings.push(Finding::BadGuardrails);
     }
-    if matches!(plan.kind, Kind::AutoFdo | Kind::Bolt) {
+    if matches!(plan.kind, Kind::AutoFdo | Kind::Bolt) && plan.collect_profile {
+        if plan.profile.is_some() {
+            findings.push(Finding::ProfileAndCollection);
+        }
+        if plan.training_inputs.len() != 1 {
+            findings.push(Finding::CollectNeedsOneTrainingInput);
+        }
+    } else if matches!(plan.kind, Kind::AutoFdo | Kind::Bolt) {
         match &plan.profile {
             None => findings.push(Finding::ProfileRequired),
             Some(profile) => match binary_build_id(&plan.input_binary) {

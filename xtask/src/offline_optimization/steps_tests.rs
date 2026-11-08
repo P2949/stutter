@@ -35,6 +35,7 @@ fn plan(kind: Kind) -> Plan {
             .to_vec(),
         run_argv: ["{binary}", "{input}"].map(Into::into).to_vec(),
         verify_argv: ["{binary}", "--selftest"].map(Into::into).to_vec(),
+        collect_profile: false,
         guardrails: Guardrails {
             max_startup_regression_percent: 5.0,
             max_size_growth_percent: 20.0,
@@ -172,4 +173,83 @@ fn a_missing_program_and_a_timeout_fail_the_step_and_all_passing_is_all_passed()
         .all_passed()
     );
     std::fs::remove_dir_all(&work).unwrap();
+}
+
+#[test]
+fn collecting_a_profile_adds_a_perf_record_step_on_the_one_training_input() {
+    let work = PathBuf::from("/tmp/w");
+    let mut fdo = plan(Kind::AutoFdo);
+    fdo.collect_profile = true;
+    fdo.profile = None;
+    fdo.training_inputs.truncate(1);
+    let steps = workflow_steps(&fdo, &work).unwrap();
+    assert_eq!(
+        names(&steps),
+        [
+            "collect-profile",
+            "convert-profile",
+            "rebuild",
+            "verify",
+            "compare-0"
+        ]
+    );
+    assert_eq!(
+        steps[0].argv,
+        [
+            "perf",
+            "record",
+            "-b",
+            "-o",
+            "/tmp/w/perf.data",
+            "--",
+            "/work/app",
+            "train/a"
+        ]
+    );
+    assert!(
+        steps[1]
+            .argv
+            .contains(&"--profile=/tmp/w/perf.data".to_owned())
+    );
+
+    let mut bolt = plan(Kind::Bolt);
+    bolt.collect_profile = true;
+    bolt.profile = None;
+    bolt.training_inputs.truncate(1);
+    let steps = workflow_steps(&bolt, &work).unwrap();
+    assert!(steps[0].argv.contains(&"cycles:u".to_owned()));
+    assert!(steps[1].argv.contains(&"/tmp/w/perf.data".to_owned()));
+}
+
+#[test]
+fn collection_conflicting_with_an_imported_profile_or_many_inputs_is_a_finding() {
+    let all: std::collections::BTreeSet<String> = [
+        "clang",
+        "perf",
+        "create_llvm_prof",
+        "perf2bolt",
+        "llvm-bolt",
+    ]
+    .map(String::from)
+    .into();
+    let same = |_: &std::path::Path| Some("abcd".to_owned());
+    let mut both = plan(Kind::Bolt);
+    both.collect_profile = true;
+    both.training_inputs.truncate(1);
+    assert_eq!(
+        validate(&both, &all, same),
+        vec![Finding::ProfileAndCollection]
+    );
+    let mut many = plan(Kind::Bolt);
+    many.collect_profile = true;
+    many.profile = None;
+    assert_eq!(
+        validate(&many, &all, same),
+        vec![Finding::CollectNeedsOneTrainingInput]
+    );
+    let mut ok = plan(Kind::Bolt);
+    ok.collect_profile = true;
+    ok.profile = None;
+    ok.training_inputs.truncate(1);
+    assert!(validate(&ok, &all, same).is_empty());
 }

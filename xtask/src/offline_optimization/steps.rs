@@ -85,6 +85,35 @@ pub fn workflow_steps(plan: &Plan, work: &Path) -> anyhow::Result<Vec<Step>> {
         env,
     };
     let mut steps = Vec::new();
+    // The profile the conversion step reads: imported, or collected here with `perf record`.
+    let profile_path = |steps: &mut Vec<Step>, perf_flags: &[&str]| -> anyhow::Result<String> {
+        if plan.collect_profile {
+            ensure!(
+                !plan.run_argv.is_empty(),
+                "collecting a profile needs a run_argv"
+            );
+            let training = plan
+                .training_inputs
+                .first()
+                .context("collecting a profile needs a training input")?;
+            let mut argv = vec!["perf".to_owned(), "record".to_owned()];
+            argv.extend(perf_flags.iter().map(|flag| (*flag).to_owned()));
+            argv.extend(["-o".to_owned(), w("perf.data"), "--".to_owned()]);
+            argv.extend(substitute(
+                &plan.run_argv,
+                &[("{binary}", &input), ("{input}", &training.path)],
+            ));
+            steps.push(step("collect-profile", argv, Vec::new()));
+            Ok(w("perf.data"))
+        } else {
+            Ok(plan
+                .profile
+                .as_ref()
+                .context("a profile is required")?
+                .path
+                .clone())
+        }
+    };
     match plan.kind {
         Kind::Pgo => {
             ensure!(
@@ -136,13 +165,13 @@ pub fn workflow_steps(plan: &Plan, work: &Path) -> anyhow::Result<Vec<Step>> {
             ));
         }
         Kind::AutoFdo => {
-            let profile = plan.profile.as_ref().context("AutoFDO needs a profile")?;
+            let profile = profile_path(&mut steps, &["-b"])?;
             steps.push(step(
                 "convert-profile",
                 vec![
                     "create_llvm_prof".to_owned(),
                     format!("--binary={input}"),
-                    format!("--profile={}", profile.path),
+                    format!("--profile={profile}"),
                     format!("--out={}", w("autofdo.prof")),
                 ],
                 Vec::new(),
@@ -157,14 +186,14 @@ pub fn workflow_steps(plan: &Plan, work: &Path) -> anyhow::Result<Vec<Step>> {
             ));
         }
         Kind::Bolt => {
-            let profile = plan.profile.as_ref().context("BOLT needs a profile")?;
+            let profile = profile_path(&mut steps, &["-e", "cycles:u", "-j", "any,u"])?;
             steps.push(step(
                 "convert-profile",
                 vec![
                     "perf2bolt".to_owned(),
                     input.clone(),
                     "-p".to_owned(),
-                    profile.path.clone(),
+                    profile.clone(),
                     "-o".to_owned(),
                     w("bolt.fdata"),
                 ],

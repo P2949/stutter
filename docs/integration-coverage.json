@@ -751,12 +751,12 @@
         "xtask/src/offline_optimization/mod.rs",
         "xtask/src/offline_optimization/elf.rs"
       ],
-      "status": "first_slice",
-      "g0": "offline PGO/AutoFDO/BOLT plan validation: separate output binary never an installed path, training and test inputs disjoint by digest, profile build id equal to the binary build id (read from the ELF note), guardrails sane, and a typed Unavailable for every missing tool; xtask offline-optimization check builds and runs nothing",
+      "status": "code_complete",
+      "g0": "`xtask offline-optimization run` executes the typed steps (instrumented build, training runs, `perf record` collection for AutoFDO/BOLT when collect_profile is set, profile merge/convert, rebuild or llvm-bolt, correctness suite, hyperfine A/B) under the process supervisor and stops at the first failure; fixture-tested with real exec of true/false/sleep; no real run happened because clang, gcc, perf and BOLT are absent on this PATH (HardwareUnavailable). Offline PGO/AutoFDO/BOLT plan validation: separate output binary never an installed path, training and test inputs disjoint by digest, profile build id equal to the binary build id (read from the ELF note), guardrails sane, and a typed Unavailable for every missing tool; xtask offline-optimization check builds and runs nothing",
       "g1": "none",
       "runtime_availability": "clang, gcc, llvm-bolt, perf2bolt absent on PATH",
       "authority": "F",
-      "not_wired": "`xtask offline-optimization run` executes the typed steps (instrumented build, training runs, profile merge/convert, rebuild or llvm-bolt, correctness suite, hyperfine A/B) under the process supervisor, stopping at the first failure, and is fixture-tested with real exec of true/false/sleep; no `perf record` collection step (the AutoFDO/BOLT profile is imported and its build id verified), and compilers, perf and BOLT are absent on this PATH so no real run happened",
+      "not_wired": "nothing",
       "dispositions": [
         "FixtureVerified",
         "HardwareUnavailable",

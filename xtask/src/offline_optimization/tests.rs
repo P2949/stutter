@@ -31,6 +31,7 @@ fn plan(kind: Kind) -> Plan {
         build_argv: Vec::new(),
         run_argv: Vec::new(),
         verify_argv: Vec::new(),
+        collect_profile: false,
         guardrails: Guardrails {
             max_startup_regression_percent: 5.0,
             max_size_growth_percent: 20.0,
