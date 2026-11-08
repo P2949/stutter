@@ -116,8 +116,14 @@ fn execute_one(
     let mut command = Command::new(&argv[0]);
     command.args(&argv[1..]).current_dir(out);
     let measured = Duration::from_secs(manifest.warmup_seconds + manifest.measure_seconds);
+    // MangoHud stops and flushes its log at the end of the measured window; game-run appends the
+    // output folder and per-frame interval to this.
+    command.env(
+        "MANGOHUD_CONFIG",
+        format!("log_duration={}", measured.as_secs()),
+    );
     let mut policy = ExecutionPolicy::bounded(if manifest.time_boxed {
-        measured + Duration::from_secs(2)
+        measured + Duration::from_secs(4)
     } else {
         Duration::from_secs(manifest.timeout_seconds)
     });
