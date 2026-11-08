@@ -18,6 +18,7 @@ use crate::actions::{
 };
 
 mod acceptance;
+pub(crate) mod control;
 mod fs_io;
 mod model;
 mod ownership;

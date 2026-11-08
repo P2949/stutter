@@ -462,14 +462,15 @@
       "anchors": [
         "stutter/src/actions/cgroup/mod.rs",
         "stutter/src/autotune/providers/cgroup.rs",
-        "packaging/openrc"
+        "packaging/openrc",
+        "stutter/src/actions/cgroup/control.rs"
       ],
       "status": "first_slice",
-      "g0": "cgroup placement only; no cpu.weight/idle/max/cpuset/memory/io operations; OpenRC packaging files exist but no lifecycle tests",
+      "g0": "cgroup placement only as an operation; typed values and read-only preflight now exist for cpu.weight, cpu.idle, cpu.max, cpuset.cpus, cpuset.mems, memory.min, memory.low, memory.high and io.weight (range checks, delegation, subtree_control, threaded groups, idle-versus-weight, effective cpuset, io.weight honored, risk class, exact readback); OpenRC packaging files exist but no lifecycle tests",
       "g1": "placement observed on the production host",
       "runtime_availability": "cgroup v2 present, OpenRC absent",
       "authority": "O/A/E",
-      "not_wired": "typed knobs and the OpenRC controller lifecycle are not built"
+      "not_wired": "no operation kind, provider, candidate, journal or worker commit exists for any of these knobs, so none can run; systemd1 SetUnitProperties and the OpenRC controller lifecycle are not built"
     },
     {
       "id": "5.22",

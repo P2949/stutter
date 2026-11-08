@@ -49,3 +49,8 @@ pub mod experiments {
     //! Immutable experiment designs, evidence and the interval statistics behind them.
     pub use crate::autotune::{experiment_design::*, statistics::*};
 }
+
+pub mod cgroup_control {
+    //! Typed cgroup resource-control values and their read-only preflight.
+    pub use crate::actions::cgroup::control::*;
+}
