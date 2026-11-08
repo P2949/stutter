@@ -537,14 +537,15 @@
       ],
       "anchors": [
         "stutter/src/integrations/mod.rs",
-        "stutter/src/irq_inspect.rs"
+        "stutter/src/irq_inspect.rs",
+        "stutter/src/irq_attribution.rs"
       ],
       "status": "first_slice",
-      "g0": "presence marks IRQ affinity owned",
+      "g0": "presence marks IRQ affinity owned; `attribute_irqs` maps each IRQ to its owning PCI slot from the kernel's msi_irqs files and classifies it by PCI class code (storage/network/display/usb), with an unclaimed IRQ `Unattributed` and storage-or-unknown kept out of automatic paths",
       "g1": "none",
       "runtime_availability": "absent",
       "authority": "O/A/E",
-      "not_wired": "no queue-to-IRQ attribution",
+      "not_wired": "attribution is a library reader not yet consumed by the IRQ affinity action's collision-safe transaction; no live irqbalance interop evidence",
       "dispositions": [
         "FixtureVerified",
         "HardwareUnavailable",

@@ -51,6 +51,7 @@ pub(crate) mod foreground;
 pub(crate) mod gpu_engine;
 pub(crate) mod hwmon;
 pub(crate) mod integrations;
+pub(crate) mod irq_attribution;
 pub(crate) mod irq_inspect;
 pub(crate) mod mangohud;
 pub(crate) mod metadata;
