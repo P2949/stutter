@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "source_sha": "e37984c1c424d0c048e8ce3aae8cb244663d1abe",
+  "source_sha": "452514778c2677017871bad7452ef6dca37fa3d9",
   "recorded": "2026-11-08",
   "statuses": [
     "not_started",
@@ -27,7 +27,14 @@
       "g1": "observed gamemoded running on this host",
       "runtime_availability": "present",
       "authority": "O/A/F",
-      "not_wired": "the probe is process-name based; no activation detection per target"
+      "not_wired": "the probe is process-name based; no activation detection per target",
+      "dispositions": [
+        "FixtureVerified",
+        "RealObserved",
+        "EvidenceDeferred"
+      ],
+      "evidence": [],
+      "unblock": null
     },
     {
       "id": "5.2",
@@ -49,7 +56,14 @@
       "g1": "none",
       "runtime_availability": "absent",
       "authority": "B/O/A",
-      "not_wired": "no typed role hints, no conflict audit"
+      "not_wired": "no typed role hints, no conflict audit",
+      "dispositions": [
+        "FixtureVerified",
+        "HardwareUnavailable",
+        "EvidenceDeferred"
+      ],
+      "evidence": [],
+      "unblock": "Needs on the host: absent"
     },
     {
       "id": "5.3",
@@ -68,7 +82,14 @@
       "g1": "none",
       "runtime_availability": "absent",
       "authority": "B/O/A",
-      "not_wired": "no focus-manager state"
+      "not_wired": "no focus-manager state",
+      "dispositions": [
+        "FixtureVerified",
+        "HardwareUnavailable",
+        "EvidenceDeferred"
+      ],
+      "evidence": [],
+      "unblock": "Needs on the host: absent"
     },
     {
       "id": "5.4",
@@ -88,7 +109,14 @@
       "g1": "none",
       "runtime_availability": "absent",
       "authority": "O/A/F",
-      "not_wired": "no profile or managed-attribute reader"
+      "not_wired": "no profile or managed-attribute reader",
+      "dispositions": [
+        "FixtureVerified",
+        "HardwareUnavailable",
+        "EvidenceDeferred"
+      ],
+      "evidence": [],
+      "unblock": "Needs on the host: absent"
     },
     {
       "id": "5.5",
@@ -108,7 +136,14 @@
       "g1": "none",
       "runtime_availability": "absent",
       "authority": "O/A",
-      "not_wired": "no tuner enumeration, no network sensor"
+      "not_wired": "no tuner enumeration, no network sensor",
+      "dispositions": [
+        "FixtureVerified",
+        "HardwareUnavailable",
+        "EvidenceDeferred"
+      ],
+      "evidence": [],
+      "unblock": "Needs on the host: absent"
     },
     {
       "id": "5.6",
@@ -133,7 +168,14 @@
       "g1": "sched_ext present and disabled on this host",
       "runtime_availability": "present",
       "authority": "O/F/E",
-      "not_wired": "no strategy experiment, no sensors/sched_ext.rs"
+      "not_wired": "no strategy experiment, no sensors/sched_ext.rs",
+      "dispositions": [
+        "FixtureVerified",
+        "RealObserved",
+        "EvidenceDeferred"
+      ],
+      "evidence": [],
+      "unblock": null
     },
     {
       "id": "5.7",
@@ -156,7 +198,14 @@
       "g1": "none",
       "runtime_availability": "absent",
       "authority": "O/A/D/F",
-      "not_wired": "no D-Bus client, so no org.scx.Loader state, version or scheduler list; no strategy transaction"
+      "not_wired": "no D-Bus client, so no org.scx.Loader state, version or scheduler list; no strategy transaction",
+      "dispositions": [
+        "FixtureVerified",
+        "HardwareUnavailable",
+        "EvidenceDeferred"
+      ],
+      "evidence": [],
+      "unblock": "Needs on the host: absent"
     },
     {
       "id": "5.8",
@@ -178,7 +227,15 @@
       "g1": "DAMON admin interface present on this host but root-only, so unavailable to the controller user",
       "runtime_availability": "kernel interface present (/sys/kernel/mm/damon/admin), damo absent",
       "authority": "O/F/E",
-      "not_wired": "no owned DAMOS scheme, no quota or goal feedback, no damo parity manifest, no hot/cold region summary"
+      "not_wired": "no owned DAMOS scheme, no quota or goal feedback, no damo parity manifest, no hot/cold region summary",
+      "dispositions": [
+        "FixtureVerified",
+        "RealObserved",
+        "HardwareUnavailable",
+        "EvidenceDeferred"
+      ],
+      "evidence": [],
+      "unblock": "Needs on the host: kernel interface present (/sys/kernel/mm/damon/admin), damo absent"
     },
     {
       "id": "5.9",
@@ -197,7 +254,14 @@
       "g1": "none",
       "runtime_availability": "absent",
       "authority": "O/B",
-      "not_wired": "the planner does not yet use topology v2 for placement hypotheses; no hwloc XML cross-check"
+      "not_wired": "the planner does not yet use topology v2 for placement hypotheses; no hwloc XML cross-check",
+      "dispositions": [
+        "FixtureVerified",
+        "HardwareUnavailable",
+        "EvidenceDeferred"
+      ],
+      "evidence": [],
+      "unblock": "Needs on the host: absent"
     },
     {
       "id": "5.10",
@@ -224,7 +288,14 @@
       "g1": "none",
       "runtime_availability": "perf CLI absent, VTune/LIKWID absent",
       "authority": "O/F",
-      "not_wired": "the PMU sensor is not activated by the runtime (no diagnostic hypothesis trigger); no architecture-specific events; perf CLI importers missing"
+      "not_wired": "the PMU sensor is not activated by the runtime (no diagnostic hypothesis trigger); no architecture-specific events; perf CLI importers missing",
+      "dispositions": [
+        "FixtureVerified",
+        "HardwareUnavailable",
+        "EvidenceDeferred"
+      ],
+      "evidence": [],
+      "unblock": "Needs on the host: perf CLI absent, VTune/LIKWID absent"
     },
     {
       "id": "5.11",
@@ -249,7 +320,14 @@
       "g1": "none",
       "runtime_availability": "all absent",
       "authority": "B/O/F",
-      "not_wired": "no per-tool importers for BCC, bpftrace, trace-cmd, KernelShark, rtla or cyclictest yet, only the generic manifest"
+      "not_wired": "no per-tool importers for BCC, bpftrace, trace-cmd, KernelShark, rtla or cyclictest yet, only the generic manifest",
+      "dispositions": [
+        "FixtureVerified",
+        "HardwareUnavailable",
+        "EvidenceDeferred"
+      ],
+      "evidence": [],
+      "unblock": "Needs on the host: all absent"
     },
     {
       "id": "5.12",
@@ -277,7 +355,13 @@
       "g1": "none: no live frame stream has been observed through the service",
       "runtime_availability": "MangoHud, Gamescope and vkcube present",
       "authority": "O/F",
-      "not_wired": "off by default; no live game has been observed through the service, phase-correct windows and the real-workload run engine are missing"
+      "not_wired": "off by default; no live game has been observed through the service, phase-correct windows and the real-workload run engine are missing",
+      "dispositions": [
+        "FixtureVerified",
+        "EvidenceDeferred"
+      ],
+      "evidence": [],
+      "unblock": null
     },
     {
       "id": "5.13",
@@ -298,7 +382,15 @@
       "g1": "LACT daemon observed running on this host",
       "runtime_availability": "LACT present, CoreCtrl absent",
       "authority": "O/A/D/F",
-      "not_wired": "no profile or PCI identity reader; GPU mutation is quarantined on this host"
+      "not_wired": "no profile or PCI identity reader; GPU mutation is quarantined on this host",
+      "dispositions": [
+        "FixtureVerified",
+        "RealObserved",
+        "HardwareUnavailable",
+        "EvidenceDeferred"
+      ],
+      "evidence": [],
+      "unblock": "Needs on the host: LACT present, CoreCtrl absent"
     },
     {
       "id": "5.14",
@@ -317,7 +409,14 @@
       "g1": "none",
       "runtime_availability": "not installed",
       "authority": "B/F",
-      "not_wired": "no OpenTuner-style technique ensemble, no held-out ranking accuracy report on real data, production ranking unchanged"
+      "not_wired": "no OpenTuner-style technique ensemble, no held-out ranking accuracy report on real data, production ranking unchanged",
+      "dispositions": [
+        "FixtureVerified",
+        "HardwareUnavailable",
+        "EvidenceDeferred"
+      ],
+      "evidence": [],
+      "unblock": "Needs on the host: not installed"
     },
     {
       "id": "5.15",
@@ -339,7 +438,14 @@
       "g1": "none",
       "runtime_availability": "not installed",
       "authority": "B/F",
-      "not_wired": "no Kernel Tuner or OtterTune importer, no Bayesian or bandit policy, no correctness-constraint import"
+      "not_wired": "no Kernel Tuner or OtterTune importer, no Bayesian or bandit policy, no correctness-constraint import",
+      "dispositions": [
+        "FixtureVerified",
+        "HardwareUnavailable",
+        "EvidenceDeferred"
+      ],
+      "evidence": [],
+      "unblock": "Needs on the host: not installed"
     },
     {
       "id": "5.16",
@@ -361,7 +467,14 @@
       "g1": "none",
       "runtime_availability": "all absent",
       "authority": "O/A/D",
-      "not_wired": "no PPD D-Bus hold adapter, no TLP probe"
+      "not_wired": "no PPD D-Bus hold adapter, no TLP probe",
+      "dispositions": [
+        "FixtureVerified",
+        "HardwareUnavailable",
+        "EvidenceDeferred"
+      ],
+      "evidence": [],
+      "unblock": "Needs on the host: all absent"
     },
     {
       "id": "5.17",
@@ -387,7 +500,15 @@
       "not_wired": "no thermald probe, no RAPL/package-power or C-state residency, no per-policy EPP experiment path; sensor results do not feed any decision",
       "related_existing": [
         "stutter/src/system_inventory.rs"
-      ]
+      ],
+      "dispositions": [
+        "FixtureVerified",
+        "RealObserved",
+        "HardwareUnavailable",
+        "EvidenceDeferred"
+      ],
+      "evidence": [],
+      "unblock": "Needs on the host: thermald absent"
     },
     {
       "id": "5.18",
@@ -408,7 +529,14 @@
       "g1": "none",
       "runtime_availability": "absent",
       "authority": "O/A/E",
-      "not_wired": "no queue-to-IRQ attribution"
+      "not_wired": "no queue-to-IRQ attribution",
+      "dispositions": [
+        "FixtureVerified",
+        "HardwareUnavailable",
+        "EvidenceDeferred"
+      ],
+      "evidence": [],
+      "unblock": "Needs on the host: absent"
     },
     {
       "id": "5.19",
@@ -431,7 +559,14 @@
       "g1": "none",
       "runtime_availability": "numad and numactl absent",
       "authority": "O/A/E",
-      "not_wired": "no numa_maps or fault/migration accounting, no policy or migration operations"
+      "not_wired": "no numa_maps or fault/migration accounting, no policy or migration operations",
+      "dispositions": [
+        "FixtureVerified",
+        "HardwareUnavailable",
+        "EvidenceDeferred"
+      ],
+      "evidence": [],
+      "unblock": "Needs on the host: numad and numactl absent"
     },
     {
       "id": "5.20",
@@ -453,7 +588,14 @@
       "g1": "systemd-oomd observed running; user slice memory.events readable on this host",
       "runtime_availability": "systemd-oomd running",
       "authority": "O/A",
-      "not_wired": "no protected-session or compositor/audio guard process list; guard counters do not yet invalidate a running comparison; uresourced state not read"
+      "not_wired": "no protected-session or compositor/audio guard process list; guard counters do not yet invalidate a running comparison; uresourced state not read",
+      "dispositions": [
+        "FixtureVerified",
+        "RealObserved",
+        "EvidenceDeferred"
+      ],
+      "evidence": [],
+      "unblock": null
     },
     {
       "id": "5.21",
@@ -479,7 +621,15 @@
       "g1": "placement observed on the production host",
       "runtime_availability": "cgroup v2 present, OpenRC absent",
       "authority": "O/A/E",
-      "not_wired": "no operation kind, provider, candidate, journal or worker commit exists for any of these knobs, so none can run; systemd1 SetUnitProperties and the OpenRC controller lifecycle are not built"
+      "not_wired": "no operation kind, provider, candidate, journal or worker commit exists for any of these knobs, so none can run; systemd1 SetUnitProperties and the OpenRC controller lifecycle are not built",
+      "dispositions": [
+        "FixtureVerified",
+        "RealObserved",
+        "HardwareUnavailable",
+        "EvidenceDeferred"
+      ],
+      "evidence": [],
+      "unblock": "Needs on the host: cgroup v2 present, OpenRC absent"
     },
     {
       "id": "5.22",
@@ -499,7 +649,13 @@
       "g1": "none through the sensor path",
       "runtime_availability": "present",
       "authority": "O",
-      "not_wired": "the registry is not wired into the runtime; no escalation trigger"
+      "not_wired": "the registry is not wired into the runtime; no escalation trigger",
+      "dispositions": [
+        "FixtureVerified",
+        "EvidenceDeferred"
+      ],
+      "evidence": [],
+      "unblock": null
     },
     {
       "id": "5.23",
@@ -518,7 +674,14 @@
       "g1": "/dev/cpu_dma_latency exists on this host; no lease has been taken",
       "runtime_availability": "/dev/cpu_dma_latency present",
       "authority": "O/E",
-      "not_wired": "not an operation kind and not routed through the worker: no journal, no controller path, no experiment; system-wide effect so it can never be a low-risk default"
+      "not_wired": "not an operation kind and not routed through the worker: no journal, no controller path, no experiment; system-wide effect so it can never be a low-risk default",
+      "dispositions": [
+        "FixtureVerified",
+        "RealObserved",
+        "EvidenceDeferred"
+      ],
+      "evidence": [],
+      "unblock": null
     },
     {
       "id": "5.24",
@@ -539,7 +702,15 @@
       "g1": "resctrl is not mounted on this host (HardwareUnavailable for physical proof)",
       "runtime_availability": "resctrl not mounted on this host",
       "authority": "O/E",
-      "not_wired": "no occupancy or bandwidth monitoring, no CAT/MBA operations"
+      "not_wired": "no occupancy or bandwidth monitoring, no CAT/MBA operations",
+      "dispositions": [
+        "FixtureVerified",
+        "RealObserved",
+        "HardwareUnavailable",
+        "EvidenceDeferred"
+      ],
+      "evidence": [],
+      "unblock": "Needs on the host: resctrl not mounted on this host"
     },
     {
       "id": "5.25",
@@ -560,7 +731,14 @@
       "g1": "none",
       "runtime_availability": "clang, gcc, llvm-bolt, perf2bolt absent on PATH",
       "authority": "F",
-      "not_wired": "no instrumented build, training run, profile conversion, rebuild, correctness suite or paired performance comparison; compilers, perf and BOLT tools are absent on this PATH so nothing could run here"
+      "not_wired": "no instrumented build, training run, profile conversion, rebuild, correctness suite or paired performance comparison; compilers, perf and BOLT tools are absent on this PATH so nothing could run here",
+      "dispositions": [
+        "FixtureVerified",
+        "HardwareUnavailable",
+        "EvidenceDeferred"
+      ],
+      "evidence": [],
+      "unblock": "Needs on the host: clang, gcc, llvm-bolt, perf2bolt absent on PATH"
     },
     {
       "id": "5.26",
@@ -588,7 +766,14 @@
       "g1": "none",
       "runtime_availability": "ionice present, fio and blktrace absent",
       "authority": "O/F/E",
-      "not_wired": "ioprio is not yet scoped to a measured offender"
+      "not_wired": "ioprio is not yet scoped to a measured offender",
+      "dispositions": [
+        "FixtureVerified",
+        "HardwareUnavailable",
+        "EvidenceDeferred"
+      ],
+      "evidence": [],
+      "unblock": "Needs on the host: ionice present, fio and blktrace absent"
     },
     {
       "id": "5.27",
@@ -614,7 +799,14 @@
       "g1": "none",
       "runtime_availability": "benchmark tools absent",
       "authority": "O/F/E",
-      "not_wired": "the socket front end is not bound by the service yet; no network sensor, no load comparator, no Prometheus or OpenTelemetry readers"
+      "not_wired": "the socket front end is not bound by the service yet; no network sensor, no load comparator, no Prometheus or OpenTelemetry readers",
+      "dispositions": [
+        "FixtureVerified",
+        "HardwareUnavailable",
+        "EvidenceDeferred"
+      ],
+      "evidence": [],
+      "unblock": "Needs on the host: benchmark tools absent"
     },
     {
       "id": "5.28",
@@ -640,7 +832,15 @@
       "g1": "controlled-real vkcube comparison run once: EngineeringPass, NoBenefit (docs/validation/real-workload/controlled-vkcube)",
       "runtime_availability": "all absent",
       "authority": "F",
-      "not_wired": "no xtask/benchmarks module"
+      "not_wired": "no xtask/benchmarks module",
+      "dispositions": [
+        "FixtureVerified",
+        "RealObserved",
+        "HardwareUnavailable",
+        "EvidenceDeferred"
+      ],
+      "evidence": [],
+      "unblock": "Needs on the host: all absent"
     },
     {
       "id": "5.29",
@@ -665,7 +865,14 @@
       "g1": "none",
       "runtime_availability": "taskset, chrt, ionice, systemd-run present; numactl, cpupower absent",
       "authority": "O/A",
-      "not_wired": "explicit user settings are not yet treated as ownership constraints"
+      "not_wired": "explicit user settings are not yet treated as ownership constraints",
+      "dispositions": [
+        "FixtureVerified",
+        "HardwareUnavailable",
+        "EvidenceDeferred"
+      ],
+      "evidence": [],
+      "unblock": "Needs on the host: taskset, chrt, ionice, systemd-run present; numactl, cpupower absent"
     },
     {
       "id": "extra.mpi",
@@ -683,7 +890,13 @@
       "g1": "none",
       "runtime_availability": "not applicable",
       "authority": "B/F",
-      "not_wired": "no MPI-specific parameters; used only as a method"
+      "not_wired": "no MPI-specific parameters; used only as a method",
+      "dispositions": [
+        "FixtureVerified",
+        "EvidenceDeferred"
+      ],
+      "evidence": [],
+      "unblock": null
     },
     {
       "id": "extra.diag",
@@ -707,7 +920,14 @@
       "g1": "none",
       "runtime_availability": "all absent",
       "authority": "O/F",
-      "not_wired": "no tool-specific parsers"
+      "not_wired": "no tool-specific parsers",
+      "dispositions": [
+        "FixtureVerified",
+        "HardwareUnavailable",
+        "EvidenceDeferred"
+      ],
+      "evidence": [],
+      "unblock": "Needs on the host: all absent"
     },
     {
       "id": "extra.kernels",
@@ -730,7 +950,14 @@
       "g1": "earlier multi-kernel resume evidence is retained",
       "runtime_availability": "6.12 and 7.2 specialisations configured",
       "authority": "F",
-      "not_wired": "no typed cross-boot campaign using BootEnvironmentIdentity; RT, Zen, Liquorix and CachyOS kernels are not available as reproducible specialisations here"
+      "not_wired": "no typed cross-boot campaign using BootEnvironmentIdentity; RT, Zen, Liquorix and CachyOS kernels are not available as reproducible specialisations here",
+      "dispositions": [
+        "FixtureVerified",
+        "RealObserved",
+        "EvidenceDeferred"
+      ],
+      "evidence": [],
+      "unblock": null
     },
     {
       "id": "extra.boot",
@@ -752,7 +979,14 @@
       "g1": "read on this host (kernel 6.18.57, PREEMPT_DYNAMIC, no isolation)",
       "runtime_availability": "kernel parameters, not live tunables",
       "authority": "F",
-      "not_wired": "no comparator or resumable cross-boot campaign uses it; the context hash (without the generation) is part of the candidate-memory key"
+      "not_wired": "no comparator or resumable cross-boot campaign uses it; the context hash (without the generation) is part of the candidate-memory key",
+      "dispositions": [
+        "FixtureVerified",
+        "RealObserved",
+        "EvidenceDeferred"
+      ],
+      "evidence": [],
+      "unblock": null
     },
     {
       "id": "extra.workloads",
@@ -774,7 +1008,14 @@
       "g1": "controlled fixed-work evidence is indexed",
       "runtime_availability": "present",
       "authority": "O/F",
-      "not_wired": "no audio xrun or browser response source"
+      "not_wired": "no audio xrun or browser response source",
+      "dispositions": [
+        "FixtureVerified",
+        "RealObserved",
+        "EvidenceDeferred"
+      ],
+      "evidence": [],
+      "unblock": null
     }
   ]
 }

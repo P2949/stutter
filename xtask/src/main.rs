@@ -5,6 +5,7 @@ use clap::{Parser, Subcommand};
 
 pub mod benchmarks;
 pub mod capability_check;
+pub mod closeout;
 pub mod coverage_maturity;
 pub mod dependency_hygiene;
 pub mod diagnosis_calibration;
@@ -143,6 +144,11 @@ pub enum XtaskCommand {
         about = "Check a PGO, AutoFDO or BOLT plan against this host and the safety rules; builds nothing"
     )]
     OfflineOptimization(offline_optimization::OfflineOptimizationArgs),
+    #[command(
+        name = "closeout-report",
+        about = "Generate the local closeout report from the integration coverage ledger; fails if the ledger overstates"
+    )]
+    CloseoutReport(closeout::CloseoutArgs),
     #[command(
         name = "benchmarks",
         about = "Verify and import external benchmark and diagnostic artifacts as evidence (never as authority)"
@@ -552,6 +558,7 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
         XtaskCommand::FrameCampaign(args) => frame_campaign::run(&root, &args),
         XtaskCommand::RealWorkload(args) => real_workload::run(&args),
         XtaskCommand::Benchmarks(args) => benchmarks::run(&args),
+        XtaskCommand::CloseoutReport(args) => closeout::run(&root, &args),
         XtaskCommand::OfflineOptimization(args) => offline_optimization::run(&args),
         XtaskCommand::EvidenceExport(args) => {
             evidence_bundle::export_bundle(&root, &args.raw, &args.out)

@@ -34,6 +34,7 @@ fn expected_subcommands_are_registered() {
             "ci-all",
             "ci-live",
             "clippy",
+            "closeout-report",
             "dependency-hygiene",
             "diagnosis-study",
             "ebpf-manifest",
