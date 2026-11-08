@@ -9,8 +9,8 @@ use std::{path::Path, time::Instant};
 use crate::{
     autotune::sensors::{
         AdmissionDenied, CpuPowerSensor, DamonSensor, Escalator, ExpensiveBudget, NetworkSensor,
-        NumaSensor, OomGuardSensor, PmuSensor, PmuTargets, PsiSensor, ResctrlSensor, SensorReading,
-        SensorRegistry, Thresholds, session_cgroup_dir,
+        NumaFaultSensor, NumaSensor, OomGuardSensor, PmuSensor, PmuTargets, PsiSensor,
+        ResctrlSensor, SensorReading, SensorRegistry, Thresholds, session_cgroup_dir,
     },
     perf_counters::CpuPerfConfig,
 };
@@ -53,6 +53,7 @@ impl SensorHub {
         registry.register(Box::new(DamonSensor::new(Path::new("/sys/kernel/mm"))));
         registry.register(Box::new(ResctrlSensor::new(Path::new("/sys/fs"))));
         registry.register(Box::new(NetworkSensor::new(proc_root.to_path_buf())));
+        registry.register(Box::new(NumaFaultSensor::new(proc_root.to_path_buf())));
         let mut ids = vec![
             "psi_system",
             "cpu_power",
@@ -60,6 +61,7 @@ impl SensorHub {
             "damon_state",
             "resctrl_inventory",
             "network",
+            "numa_faults",
         ];
         let session = std::fs::read_to_string(proc_root.join("self/cgroup"))
             .ok()
