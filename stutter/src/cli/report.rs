@@ -659,8 +659,16 @@ pub(super) struct KpiServeArgs {
     pub(super) name: String,
 
     /// JSON `KpiContract`: the metrics and the one process allowed to report them.
-    #[arg(long = "contract", value_name = "FILE")]
-    pub(super) contract: PathBuf,
+    #[arg(long = "contract", value_name = "FILE", conflicts_with = "template")]
+    pub(super) contract: Option<PathBuf>,
+
+    /// An experimental contract template (`audio-xrun` or `browser-response`), bound to --pid.
+    #[arg(long = "template", value_name = "NAME", requires = "pid")]
+    pub(super) template: Option<String>,
+
+    /// The one process allowed to report when --template is used (its live start time is read).
+    #[arg(long = "pid", value_name = "PID", requires = "template")]
+    pub(super) pid: Option<u32>,
 
     /// Window each printed summary covers.
     #[arg(long = "window", default_value_t = 10, value_name = "SECONDS")]

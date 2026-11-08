@@ -17,6 +17,10 @@ struct RawIdAllowedPath {
 
 const RAW_ID_ALLOWED_PATHS: &[RawIdAllowedPath] = &[
     RawIdAllowedPath {
+        path: "src/cli/report.rs",
+        reason: "kpi-serve takes the operator-supplied pid of the one process allowed to report; its live start time is read and bound before any sample is accepted",
+    },
+    RawIdAllowedPath {
         path: "src/autotune/objective/source/model.rs",
         reason: "source binding DTO carries the bound process pid with its start ticks for peer verification",
     },

@@ -9,6 +9,7 @@ mod ingest;
 mod model;
 mod serve;
 mod server;
+mod templates;
 #[cfg(test)]
 mod tests;
 
@@ -19,3 +20,4 @@ pub use model::{
 };
 pub use serve::{MetricSummary, serve_observer};
 pub use server::{MAX_SAMPLES_PER_CONNECTION, denial_code, serve_connection};
+pub use templates::{ExperimentalTemplate, TEMPLATE_VERSION, audio_xrun, browser_response};

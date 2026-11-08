@@ -1036,14 +1036,15 @@
       ],
       "anchors": [
         "stutter/src/workload_progress/mod.rs",
-        "stutter/src/autotune/objective/compile_throughput.rs"
+        "stutter/src/autotune/objective/compile_throughput.rs",
+        "stutter/src/autotune/objective/source/templates.rs"
       ],
-      "status": "first_slice",
-      "g0": "fixed-work compile objective is Supported; audio, browser and desktop direct sources are not built",
+      "status": "code_complete",
+      "g0": "versioned `experimental-1` KPI contract templates for low-latency audio (deadline misses with server xruns as a hard guardrail) and browser/desktop interactivity (input-to-response p95 with long tasks as a hard guardrail) are bound to one live process (`stutter kpi-serve --template audio-xrun|browser-response --pid`), reported by the application over the confined kernel-authenticated socket, never derived from CPU use, never authorizing an operation; the thresholds are declared, not calibrated, and positive/neutral/harmful campaigns on a real audio or browser workload are EvidenceDeferred. fixed-work compile objective is Supported; audio, browser and desktop direct sources are not built",
       "g1": "controlled fixed-work evidence is indexed",
       "runtime_availability": "present",
       "authority": "O/F",
-      "not_wired": "no audio xrun or browser response source",
+      "not_wired": "nothing",
       "dispositions": [
         "FixtureVerified",
         "RealObserved",

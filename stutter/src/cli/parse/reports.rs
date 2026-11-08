@@ -518,7 +518,13 @@ pub(super) fn parse_kpi_serve_command(args: KpiServeArgs) -> anyhow::Result<AppC
         crate::commands::kpi::KpiServeCommandInput {
             dir: args.dir,
             name: args.name,
-            contract: args.contract,
+            source: match (args.contract, args.template, args.pid) {
+                (Some(path), None, None) => crate::commands::kpi::ContractSource::File(path),
+                (None, Some(name), Some(pid)) => {
+                    crate::commands::kpi::ContractSource::Template { name, pid }
+                }
+                _ => anyhow::bail!("give either --contract FILE or --template NAME --pid PID"),
+            },
             window: Duration::from_secs(args.window_secs),
             connections: args.connections,
         },

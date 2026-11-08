@@ -80,3 +80,12 @@ batch summaries is labelled `quantile_of_summaries` and is never a request or fr
 
 This is observation only. It is not part of the daemon, it runs no operation, and a summary it
 prints authorizes nothing.
+
+### Experimental audio and browser contracts
+
+Instead of writing a contract file, `--template audio-xrun --pid PID` or `--template
+browser-response --pid PID` binds a versioned experimental contract (`experimental-1`) to one live
+process of yours. Audio is judged on the application's own audio-callback deadline misses with
+server-reported xruns as a hard guardrail; browser and desktop interactivity on the p95 of
+input-to-response time with long main-thread tasks as a hard guardrail. The thresholds are declared,
+not calibrated, nothing is derived from CPU use, and the contract authorizes no operation.
