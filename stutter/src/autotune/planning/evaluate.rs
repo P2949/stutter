@@ -282,6 +282,27 @@ pub(crate) fn evaluate_proposal_static(
         deny_messages.push(message);
     }
 
+    if proposal.candidate.operation_kind()
+        == crate::autotune::operation::MutationOperationKind::Nice
+        && let Some(snapshot) = input.observation.active_config_snapshot.as_ref()
+    {
+        let targets: Vec<u32> = input
+            .observation
+            .active_tasks
+            .iter()
+            .map(|task| task.tid.as_u32())
+            .collect();
+        if let Some(tid) = crate::integrations::user_intent::explicit_nice_conflict(
+            &snapshot.nice.per_tid,
+            &targets,
+        ) {
+            deny_reasons.push(CandidateDenyReason::UserExplicitSetting);
+            deny_messages.push(format!(
+                "task {tid} already has a non-default nice value set by the user or a launcher"
+            ));
+        }
+    }
+
     if let Some(reason) = crate::integrations::owner_denial(
         input.observation.external_owners.as_ref(),
         proposal.candidate.operation_kind(),

@@ -32,6 +32,8 @@ pub enum CandidateDenyReason {
     ExternalMutationDetected,
     /// Another controller (GameMode, LACT, sched_ext) owns the resource this operation changes.
     ExternallyOwnedResource,
+    /// The user or a launcher already set this attribute on a target task; it is not overridden.
+    UserExplicitSetting,
     KeptActionNoLongerActive,
     ObjectiveNotAllowedForWorkload,
     /// Normal autonomous apply requires a Supported objective that allows it.
@@ -79,6 +81,7 @@ impl CandidateDenyReason {
             Self::ActiveConfigUnknown => "active_config_unknown",
             Self::ExternalMutationDetected => "external_mutation_detected",
             Self::ExternallyOwnedResource => "externally_owned_resource",
+            Self::UserExplicitSetting => "user_explicit_setting",
             Self::KeptActionNoLongerActive => "kept_action_no_longer_active",
             Self::ObjectiveNotAllowedForWorkload => "objective_not_allowed_for_workload",
             Self::ObjectiveNotSupported => "objective_not_supported",

@@ -869,14 +869,16 @@
         "W11g"
       ],
       "anchors": [
-        "stutter/src/actions/mod.rs"
+        "stutter/src/actions/mod.rs",
+        "stutter/src/integrations/user_intent.rs",
+        "stutter/src/architecture_tests/native_controls_only.rs"
       ],
       "status": "first_slice",
-      "g0": "native affinity, nice and ioprio actions with readback exist; user-intent detection is not built",
+      "g0": "native affinity, nice, ionice and uclamp actions with readback; user intent read back from the kernel (restricted CPU mask, non-default nice, real-time policy) as UserExplicit receipts; a Nice candidate is denied when a target already has a non-default nice value; architecture tests forbid running taskset/nice/ionice/chrt/cpupower, any sched_setscheduler, and any sched_setattr that does not keep policy and parameters (no real-time promotion path exists)",
       "g1": "none",
       "runtime_availability": "taskset, chrt, ionice, systemd-run present; numactl, cpupower absent",
       "authority": "O/A",
-      "not_wired": "explicit user settings are not yet treated as ownership constraints",
+      "not_wired": "ionice, uclamp and NUMA memory-policy intent are not read back; the affinity and cgroup-placement Supported operations deliberately do not consult user receipts (existing behaviour unchanged)",
       "dispositions": [
         "FixtureVerified",
         "HardwareUnavailable",

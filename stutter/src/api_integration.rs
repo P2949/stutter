@@ -72,5 +72,5 @@ pub mod pm_qos {
 
 pub mod owner_interfaces {
     //! The read-only D-Bus client, exact owner states, and the gated offline `scx_loader` adapter.
-    pub use crate::integrations::{dbus::*, exact::*, scx_loader::*};
+    pub use crate::integrations::{dbus::*, exact::*, scx_loader::*, user_intent::*};
 }

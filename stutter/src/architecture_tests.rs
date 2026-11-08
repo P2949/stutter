@@ -27,6 +27,7 @@ mod integration_ledger;
 mod kernel_compatibility;
 mod module_layout;
 mod mutation_paths;
+mod native_controls_only;
 mod objectives;
 mod panic_paths;
 mod privileged_errors;
