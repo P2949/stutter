@@ -17,8 +17,8 @@ independent and never inherited from another tool or service backend:
 | | count |
 |---|---|
 | ledger entries | 34 (29 dossiers and 5 extras) |
-| `first_slice` | 26 |
-| `not_started` | 8 |
+| `first_slice` | 29 |
+| `not_started` | 5 |
 | `code_complete` | 0 |
 | entries with a G1 real observation | a handful (GameMode, LACT, systemd-oomd, sched_ext state, placement) |
 | entries with G2 or G3 evidence for something new | 0 |

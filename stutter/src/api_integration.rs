@@ -54,3 +54,8 @@ pub mod cgroup_control {
     //! Typed cgroup resource-control values and their read-only preflight.
     pub use crate::actions::cgroup::control::*;
 }
+
+pub mod search {
+    //! Offline candidate-search policies over a finite legal space, and their replay on history.
+    pub use crate::autotune::search::*;
+}

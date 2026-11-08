@@ -5,7 +5,7 @@
 //! re-export, instead of depending on internal module layout.
 
 pub use crate::api_integration::{
-    cgroup_control, experiments, game_run, objective_source, ownership, sensors, telemetry,
+    cgroup_control, experiments, game_run, objective_source, ownership, search, sensors, telemetry,
     topology,
 };
 

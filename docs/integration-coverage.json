@@ -307,13 +307,15 @@
         "W10",
         "W15"
       ],
-      "anchors": [],
-      "status": "not_started",
-      "g0": "none",
+      "anchors": [
+        "stutter/src/autotune/search/mod.rs"
+      ],
+      "status": "first_slice",
+      "g0": "offline search over a finite legal space: grid, seeded random and paired elimination; proposals can only be members of the enumerated legal set; offline replay on history by regret and trials to first try",
       "g1": "none",
       "runtime_availability": "not installed",
       "authority": "B/F",
-      "not_wired": "no offline search adapter"
+      "not_wired": "no OpenTuner-style technique ensemble, no held-out ranking accuracy report on real data, production ranking unchanged"
     },
     {
       "id": "5.15",
@@ -327,13 +329,15 @@
         "W13",
         "W15"
       ],
-      "anchors": [],
-      "status": "not_started",
-      "g0": "none",
+      "anchors": [
+        "stutter/src/autotune/search/mod.rs"
+      ],
+      "status": "first_slice",
+      "g0": "the legal-space and replay interface that Bayesian/SMBO and bandit methods would plug into, with a hard no-invented-candidates rule; no learned model",
       "g1": "none",
       "runtime_availability": "not installed",
       "authority": "B/F",
-      "not_wired": "no importer, no offline learning comparison"
+      "not_wired": "no Kernel Tuner or OtterTune importer, no Bayesian or bandit policy, no correctness-constraint import"
     },
     {
       "id": "5.16",
@@ -662,13 +666,15 @@
       "packages": [
         "W15"
       ],
-      "anchors": [],
-      "status": "not_started",
-      "g0": "none",
+      "anchors": [
+        "stutter/src/autotune/search/mod.rs"
+      ],
+      "status": "first_slice",
+      "g0": "bounded structured search grammar: named dimensions, finite values, forbidden combinations, a size cap, validation before search",
       "g1": "none",
       "runtime_availability": "not applicable",
       "authority": "B/F",
-      "not_wired": "no bounded search grammar"
+      "not_wired": "no MPI-specific parameters; used only as a method"
     },
     {
       "id": "extra.diag",
