@@ -282,6 +282,9 @@ impl AutotuneRuntime {
         self.sensor_hub
             .set_pmu_targets(&self.target_state.active_tasks);
         observation.sensor_readings = self.sensor_hub.sample();
+        // A memory guard firing in the user's session makes a running experiment untrustworthy:
+        // restore and invalidate it. This is a safety stop, never an input to planning.
+        self.abort_on_memory_guard(&observation.sensor_readings)?;
         // A stored experiment is keyed on the full context, not the bare inventory hash.
         if let Some(inventory) = observation.topology_signature.clone() {
             observation.topology_signature = Some(self.context_signature(&inventory));
@@ -664,5 +667,28 @@ impl AutotuneRuntime {
             crate::integrations::probe(std::path::Path::new("/proc"), std::path::Path::new("/sys"));
         *cache = Some((now, report.clone()));
         Some(report)
+    }
+}
+
+impl AutotuneRuntime {
+    /// Restores and invalidates a running experiment when the session's memory guard fired in
+    /// `readings`. Returns whether it did. It never starts or changes anything.
+    pub(super) fn abort_on_memory_guard(
+        &mut self,
+        readings: &[crate::autotune::sensors::SensorReading],
+    ) -> anyhow::Result<bool> {
+        let Some(event) = crate::autotune::sensors::memory_guard_event(readings)
+            .or_else(|| crate::autotune::sensors::thermal_guard_event(readings))
+        else {
+            return Ok(false);
+        };
+        if !self.has_active_experiment() {
+            return Ok(false);
+        }
+        self.rollback_live_experiment(
+            crate::audit::unix_nanos_now(),
+            &format!("session guard fired: {event}"),
+        )?;
+        Ok(true)
     }
 }

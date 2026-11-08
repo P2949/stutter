@@ -279,3 +279,42 @@ fn stopping_the_controller_rolls_back_kept_actions_too() {
 
     assert!(!runtime.has_kept_actions());
 }
+
+#[test]
+fn a_firing_memory_guard_restores_a_running_experiment_and_a_quiet_one_leaves_it_alone() {
+    use crate::autotune::{
+        objective::ObjectiveSignalQuality,
+        sensors::{SensorReading, SensorScope},
+    };
+    let guard = |kills: f64| SensorReading {
+        sensor: "oom_guard".to_owned(),
+        monotonic_ns: 0,
+        scope: SensorScope::Cgroup,
+        quality: ObjectiveSignalQuality::Direct,
+        values: [("oom_kill_delta".to_owned(), kills)].into_iter().collect(),
+        lost: 0,
+        provenance: String::new(),
+    };
+    let mut runtime = simulated_runtime_with_active_experiment();
+    // Ticks are evaluated while measuring, which is where a revert is a legal transition.
+    runtime
+        .transition_runtime_phase(AutotuneRuntimePhase::MeasuringCandidate, "test")
+        .unwrap();
+    assert!(runtime.has_active_experiment());
+    assert!(
+        !runtime.abort_on_memory_guard(&[guard(0.0)]).unwrap(),
+        "quiet: nothing happens"
+    );
+    assert!(runtime.has_active_experiment());
+    assert!(
+        !runtime.abort_on_memory_guard(&[]).unwrap(),
+        "no reading: nothing happens"
+    );
+    assert!(
+        runtime.abort_on_memory_guard(&[guard(1.0)]).unwrap(),
+        "a kill aborts it"
+    );
+    assert!(!runtime.has_active_experiment());
+    // With nothing running, a firing guard has nothing to abort and changes nothing.
+    assert!(!runtime.abort_on_memory_guard(&[guard(5.0)]).unwrap());
+}

@@ -587,21 +587,23 @@
       ],
       "anchors": [
         "stutter/src/integrations/mod.rs",
-        "stutter/src/autotune/sensors/oom_guard.rs"
+        "stutter/src/autotune/sensors/oom_guard.rs",
+        "stutter/src/autotune/runtime/tick.rs",
+        "stutter/src/architecture_tests/native_controls_only.rs"
       ],
-      "status": "first_slice",
-      "g0": "reported daemons own no tuning domain; oom_guard sensor reads the user slice memory.events (kill, high, max, oom deltas with reset and removal handling), sampled by the runtime",
-      "g1": "systemd-oomd observed running; user slice memory.events readable on this host",
+      "status": "code_complete",
+      "g0": "systemd-oomd and uresourced reported (own no tuning domain; presence is not proof of owning a cgroup); the user slice's memory.events counters (kill, OOM, memory.max, memory.high deltas) and thermal-throttle events are guards: a running experiment is restored and invalidated when either fires; the existing protected-task checks cover compositor, audio and foreground; suspend gaps already invalidate a running experiment; an architecture test forbids touching oom_score_adj or memory.oom.*, so nothing can tune the OOM killer",
+      "g1": "systemd-oomd observed running and the user slice memory.events read on this host",
       "runtime_availability": "systemd-oomd running",
       "authority": "O/A",
-      "not_wired": "no protected-session or compositor/audio guard process list; guard counters do not yet invalidate a running comparison; uresourced state not read",
+      "not_wired": "nothing",
       "dispositions": [
+        "CodeComplete",
         "FixtureVerified",
         "RealObserved",
         "EvidenceDeferred"
       ],
-      "evidence": [],
-      "unblock": null
+      "evidence": []
     },
     {
       "id": "5.21",

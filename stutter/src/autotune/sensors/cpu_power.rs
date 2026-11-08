@@ -221,3 +221,19 @@ impl Sensor for CpuPowerSensor {
         self.previous_throttle = None;
     }
 }
+
+/// Whether the CPU throttled for thermal reasons in `readings`' interval. A comparison that ran
+/// through throttling measured the heat, not the candidate, so the runtime invalidates it.
+pub fn thermal_guard_event(readings: &[SensorReading]) -> Option<String> {
+    let reading = readings
+        .iter()
+        .find(|reading| reading.sensor == "cpu_power")?;
+    let events = reading
+        .values
+        .get("throttle_events_delta")
+        .copied()
+        .filter(|events| *events > 0.0)?;
+    Some(format!(
+        "{events} thermal throttle event(s) in the interval"
+    ))
+}

@@ -1,6 +1,7 @@
 //! Stutter changes affinity, nice, I/O priority and uclamp through native syscalls with readback,
 //! never by running `taskset`, `nice`, `ionice`, `chrt` or `cpupower`, and it can never promote a
-//! task to a real-time policy.
+//! task to a real-time policy. It also never touches the OOM killer's knobs (`oom_score_adj`,
+//! `memory.oom.group`): the guards only watch and stop, they never tune.
 use std::{fs, path::Path};
 
 use super::workspace_root;
@@ -47,6 +48,14 @@ fn no_production_code_runs_a_tuning_binary_or_sets_a_real_time_policy() {
             for binary in ["taskset", "nice", "ionice", "chrt", "cpupower", "renice"] {
                 if line.contains(&format!("Command::new(\"{binary}\")")) {
                     violations.push(format!("{path}:{} runs `{binary}`", index + 1));
+                }
+            }
+            for oom in ["oom_score_adj", "memory.oom.group", "memory.oom"] {
+                if line.contains(oom) {
+                    violations.push(format!(
+                        "{path}:{} touches the OOM killer ({oom})",
+                        index + 1
+                    ));
                 }
             }
             if line.contains("sched_setscheduler") {

@@ -149,3 +149,22 @@ impl Sensor for OomGuardSensor {
         self.previous = None;
     }
 }
+
+/// Why the session's memory guard fired in `readings`, if it did: any kill, OOM event, `memory.max`
+/// hit or `memory.high` throttle in the interval. A running experiment is not trustworthy past
+/// this, so the runtime restores and invalidates it. It is a safety stop, never a tuning input.
+pub fn memory_guard_event(readings: &[SensorReading]) -> Option<String> {
+    let reading = readings
+        .iter()
+        .find(|reading| reading.sensor == "oom_guard")?;
+    ["oom_kill_delta", "oom_delta", "max_delta", "high_delta"]
+        .into_iter()
+        .find_map(|key| {
+            let count = reading
+                .values
+                .get(key)
+                .copied()
+                .filter(|count| *count > 0.0)?;
+            Some(format!("{key} = {count} in the interval"))
+        })
+}

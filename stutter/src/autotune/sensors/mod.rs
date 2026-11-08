@@ -6,6 +6,8 @@
 //! so the daemon's incremental overhead stays visible.
 mod cpu_power;
 mod escalation;
+#[cfg(test)]
+mod guard_tests;
 mod memory_domains;
 mod oom_guard;
 mod pmu;
@@ -16,10 +18,10 @@ mod tests;
 
 use std::collections::BTreeMap;
 
-pub use cpu_power::CpuPowerSensor;
+pub use cpu_power::{CpuPowerSensor, thermal_guard_event};
 pub use escalation::{Escalator, Hypothesis, Thresholds, Trigger, diagnostic_sensor};
 pub use memory_domains::{DamonSensor, NumaSensor, ResctrlSensor};
-pub use oom_guard::{OomGuardSensor, session_cgroup_dir};
+pub use oom_guard::{OomGuardSensor, memory_guard_event, session_cgroup_dir};
 pub use pmu::{MIN_RUNNING_RATIO, PmuSensor, PmuTargets, reading_from_deltas};
 pub use psi::PsiSensor;
 pub use registry::{AdmissionDenied, ExpensiveBudget, SensorRegistry};
