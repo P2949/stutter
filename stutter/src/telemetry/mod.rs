@@ -5,6 +5,7 @@
 //! Launch identifiers are correlation data and never privileged authority, and this module has no
 //! mutation path.
 pub mod frame_source;
+pub mod gamescope;
 pub mod identity;
 pub mod live_source;
 pub mod proc_view;

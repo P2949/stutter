@@ -160,7 +160,18 @@ pub struct OwnerReport {
     pub daemons: BTreeMap<KnownOwner, Daemon>,
 }
 
+/// NixOS wraps daemons (`.lact-wrapped`, `.gamemoded-wrapped`): the kernel `comm` is the wrapper name.
+fn normalize_comm(comm: &str) -> &str {
+    let comm = comm.strip_prefix('.').unwrap_or(comm);
+    // The 15-byte truncation can cut the suffix short (`-wrap`), so any prefix of it counts.
+    (2..=8)
+        .rev()
+        .find_map(|len| comm.strip_suffix(&"-wrapped"[..len]))
+        .unwrap_or(comm)
+}
+
 fn comm_matches(comm: &str, pattern: &str) -> bool {
+    let comm = normalize_comm(comm);
     match pattern.strip_suffix('*') {
         Some(prefix) => comm.starts_with(prefix),
         None => comm == &pattern[..pattern.len().min(COMM_BYTES)],

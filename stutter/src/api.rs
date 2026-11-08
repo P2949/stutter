@@ -11,18 +11,12 @@ pub mod game_run {
 
 pub mod objective_source {
     //! Typed local application KPIs: contract, bound-source ingestion and window aggregation.
-    pub use crate::autotune::objective::source::{
-        Aggregation, ContractError, Direction, IngestDenial, KpiContract, MetricClass, MetricSpec,
-        Sample, SampleStore, SourceBinding, WindowAggregate,
-    };
+    pub use crate::autotune::objective::source::*;
 }
 
 pub mod sensors {
     //! Sensor descriptors, readings, the PSI sensor and the cost-bounded registry.
-    pub use crate::autotune::sensors::{
-        AdmissionDenied, Availability, ExpensiveBudget, PsiSensor, Sensor, SensorCost,
-        SensorDescriptor, SensorHealth, SensorReading, SensorRegistry, SensorScope,
-    };
+    pub use crate::autotune::sensors::*;
 }
 
 pub mod telemetry {
@@ -33,8 +27,14 @@ pub mod telemetry {
             drive_tail_session,
         },
         telemetry::{
-            frame_source::*, identity::*, live_source::*, proc_view::live_process, quality::*,
-            registration::*, session::*,
+            frame_source::*,
+            gamescope::{GamescopeSupport, help_documents_mangoapp, probe as probe_gamescope},
+            identity::*,
+            live_source::*,
+            proc_view::live_process,
+            quality::*,
+            registration::*,
+            session::*,
         },
     };
 }

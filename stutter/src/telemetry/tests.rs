@@ -545,3 +545,60 @@ mod live {
         assert_ne!(verdict.attribution, Attribution::ValidatedDirect);
     }
 }
+
+mod gamescope {
+    use std::{fs, os::unix::fs::PermissionsExt, path::Path};
+
+    use super::super::gamescope::*;
+
+    fn script(name: &str, body: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("stutter-gs-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("gamescope");
+        fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    }
+
+    #[test]
+    fn help_text_decides_whether_mangoapp_is_documented() {
+        assert!(help_documents_mangoapp(
+            "Options:\n  --mangoapp   enable mangoapp\n"
+        ));
+        assert!(!help_documents_mangoapp("Options:\n  --fsr-sharpness N\n"));
+        assert!(!help_documents_mangoapp("see the mangoapp manual"));
+    }
+
+    #[test]
+    fn a_binary_is_asked_not_assumed() {
+        let with = script(
+            "with",
+            "echo 'usage: gamescope'; echo '  --mangoapp  enable mangoapp'",
+        );
+        assert_eq!(probe(&with), GamescopeSupport::Installed { mangoapp: true });
+        let without = script(
+            "without",
+            "echo 'usage: gamescope'; echo '  --fsr-sharpness N'",
+        );
+        assert_eq!(
+            probe(&without),
+            GamescopeSupport::Installed { mangoapp: false }
+        );
+        assert_eq!(
+            probe(Path::new("/nonexistent/gamescope")),
+            GamescopeSupport::NotInstalled
+        );
+        fs::remove_dir_all(with.parent().unwrap()).unwrap();
+        fs::remove_dir_all(without.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn a_hanging_binary_is_killed_at_the_deadline() {
+        let hung = script("hung", "sleep 60");
+        let started = std::time::Instant::now();
+        assert!(matches!(probe(&hung), GamescopeSupport::Unprobeable(_)));
+        assert!(started.elapsed() < std::time::Duration::from_secs(10));
+        fs::remove_dir_all(hung.parent().unwrap()).unwrap();
+    }
+}

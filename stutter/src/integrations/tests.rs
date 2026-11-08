@@ -168,3 +168,17 @@ fn an_owned_domain_denies_only_the_operations_that_change_it() {
     assert_eq!(owner_denial(None, Op::Nice), None);
     fs::remove_dir_all(&base).unwrap();
 }
+
+#[test]
+fn nix_wrapped_daemon_names_are_recognised() {
+    let base = root("wrapped");
+    let (proc_root, sys) = (base.join("proc"), base.join("sys"));
+    fs::create_dir_all(&proc_root).unwrap();
+    process(&proc_root, 20, ".lact-wrapped");
+    process(&proc_root, 21, ".gamemoded-wrapped");
+    let report = probe(&proc_root, &sys);
+    assert_eq!(report.daemon(KnownOwner::Lact), Daemon::Running);
+    assert_eq!(report.daemon(KnownOwner::GameMode), Daemon::Running);
+    assert!(report.external_owner(D::GpuPower).is_some());
+    fs::remove_dir_all(&base).unwrap();
+}

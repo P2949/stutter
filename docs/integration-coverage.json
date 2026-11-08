@@ -1,0 +1,749 @@
+{
+  "schema_version": 1,
+  "source_sha": "e37984c1c424d0c048e8ce3aae8cb244663d1abe",
+  "recorded": "2026-11-08",
+  "statuses": [
+    "not_started",
+    "first_slice",
+    "code_complete"
+  ],
+  "grades": "G0 code and fixtures, G1 real observation, G2 safe manual experiment, G3 exact autonomous tuple; none of them is inherited between tools or backends",
+  "entries": [
+    {
+      "id": "5.1",
+      "tools": [
+        "GameMode"
+      ],
+      "packages": [
+        "W2",
+        "W6",
+        "W13"
+      ],
+      "anchors": [
+        "stutter/src/integrations/mod.rs"
+      ],
+      "status": "first_slice",
+      "g0": "owner presence probe and per-domain denial (task priority, CPU power); no active-target observer, no D-Bus",
+      "g1": "observed gamemoded running on this host",
+      "runtime_availability": "present",
+      "authority": "O/A/F",
+      "not_wired": "the probe is process-name based; no activation detection per target"
+    },
+    {
+      "id": "5.2",
+      "tools": [
+        "Ananicy",
+        "Ananicy-cpp",
+        "community rules"
+      ],
+      "packages": [
+        "W6",
+        "W8"
+      ],
+      "anchors": [
+        "stutter/src/integrations/mod.rs",
+        "stutter/src/community_rules.rs"
+      ],
+      "status": "first_slice",
+      "g0": "presence probe and task-priority domain denial; community rules import exists as classification only",
+      "g1": "none",
+      "runtime_availability": "absent",
+      "authority": "B/O/A",
+      "not_wired": "no typed role hints, no conflict audit"
+    },
+    {
+      "id": "5.3",
+      "tools": [
+        "System76 Scheduler"
+      ],
+      "packages": [
+        "W6",
+        "W12"
+      ],
+      "anchors": [
+        "stutter/src/integrations/mod.rs"
+      ],
+      "status": "first_slice",
+      "g0": "presence probe and task-priority domain denial",
+      "g1": "none",
+      "runtime_availability": "absent",
+      "authority": "B/O/A",
+      "not_wired": "no focus-manager state"
+    },
+    {
+      "id": "5.4",
+      "tools": [
+        "TuneD"
+      ],
+      "packages": [
+        "W6",
+        "W11d",
+        "W13"
+      ],
+      "anchors": [
+        "stutter/src/integrations/mod.rs"
+      ],
+      "status": "first_slice",
+      "g0": "presence probe and CPU power / VM knob domain denial",
+      "g1": "none",
+      "runtime_availability": "absent",
+      "authority": "O/A/F",
+      "not_wired": "no profile or managed-attribute reader"
+    },
+    {
+      "id": "5.5",
+      "tools": [
+        "Oracle bpftune"
+      ],
+      "packages": [
+        "W6",
+        "W9",
+        "W11f"
+      ],
+      "anchors": [
+        "stutter/src/integrations/mod.rs"
+      ],
+      "status": "first_slice",
+      "g0": "presence probe and network / VM knob domain denial",
+      "g1": "none",
+      "runtime_availability": "absent",
+      "authority": "O/A",
+      "not_wired": "no tuner enumeration, no network sensor"
+    },
+    {
+      "id": "5.6",
+      "tools": [
+        "sched_ext",
+        "scx_lavd",
+        "scx_bpfland",
+        "other SCX schedulers"
+      ],
+      "packages": [
+        "W6",
+        "W9",
+        "W11b",
+        "W12"
+      ],
+      "anchors": [
+        "stutter/src/scx.rs",
+        "stutter/src/integrations/mod.rs"
+      ],
+      "status": "first_slice",
+      "g0": "kernel state tracker and scheduler-domain ownership from /sys/kernel/sched_ext",
+      "g1": "sched_ext present and disabled on this host",
+      "runtime_availability": "present",
+      "authority": "O/F/E",
+      "not_wired": "no strategy experiment, no sensors/sched_ext.rs"
+    },
+    {
+      "id": "5.7",
+      "tools": [
+        "scx_loader",
+        "scxctl",
+        "scxtui"
+      ],
+      "packages": [
+        "W6",
+        "W11b",
+        "W13"
+      ],
+      "anchors": [
+        "stutter/src/integrations/mod.rs"
+      ],
+      "status": "first_slice",
+      "g0": "scx_loader presence marks the scheduler domain owned",
+      "g1": "none",
+      "runtime_availability": "absent",
+      "authority": "O/A/D/F",
+      "not_wired": "no org.scx.Loader D-Bus adapter"
+    },
+    {
+      "id": "5.8",
+      "tools": [
+        "DAMON",
+        "DAMOS",
+        "damo"
+      ],
+      "packages": [
+        "W9",
+        "W11c",
+        "W13"
+      ],
+      "anchors": [],
+      "status": "not_started",
+      "g0": "none",
+      "g1": "none",
+      "runtime_availability": "kernel interface present (/sys/kernel/mm/damon/admin), damo absent",
+      "authority": "O/F/E",
+      "not_wired": "no sensor, no owned scheme"
+    },
+    {
+      "id": "5.9",
+      "tools": [
+        "hwloc"
+      ],
+      "packages": [
+        "W8"
+      ],
+      "anchors": [],
+      "status": "not_started",
+      "g0": "native topology model exists; no hwloc cross-check, no v2 normalization",
+      "g1": "none",
+      "runtime_availability": "absent",
+      "authority": "O/B",
+      "not_wired": "topology v2 not built",
+      "related_existing": [
+        "stutter/src/topology.rs"
+      ]
+    },
+    {
+      "id": "5.10",
+      "tools": [
+        "perf",
+        "perf_event_open",
+        "Intel VTune",
+        "AMD uProf",
+        "LIKWID"
+      ],
+      "packages": [
+        "W7",
+        "W8",
+        "W9",
+        "W13"
+      ],
+      "anchors": [
+        "stutter/src/perf_counters/mod.rs",
+        "stutter/src/autotune/sensors/mod.rs"
+      ],
+      "status": "first_slice",
+      "g0": "per-TID counters exist; sensor framework exists but PMU is not a sensor yet",
+      "g1": "none",
+      "runtime_availability": "perf CLI absent, VTune/LIKWID absent",
+      "authority": "O/F",
+      "not_wired": "perf counters are not behind the sensor registry; no offline importers"
+    },
+    {
+      "id": "5.11",
+      "tools": [
+        "BCC",
+        "bpftrace",
+        "trace-cmd",
+        "ftrace",
+        "KernelShark",
+        "rtla",
+        "cyclictest"
+      ],
+      "packages": [
+        "W8",
+        "W13"
+      ],
+      "anchors": [],
+      "status": "not_started",
+      "g0": "none",
+      "g1": "none",
+      "runtime_availability": "all absent",
+      "authority": "B/O/F",
+      "not_wired": "no diagnostic manifest or importer"
+    },
+    {
+      "id": "5.12",
+      "tools": [
+        "MangoHud",
+        "Gamescope",
+        "Wayland presentation",
+        "DRM/KMS"
+      ],
+      "packages": [
+        "W2",
+        "W3",
+        "W4",
+        "W9"
+      ],
+      "anchors": [
+        "stutter/src/mangohud/tail_session.rs",
+        "stutter/src/game_run/mod.rs",
+        "stutter/src/telemetry/live_source.rs",
+        "stutter/src/telemetry/gamescope.rs",
+        "stutter/src/wayland_presentation.rs"
+      ],
+      "status": "first_slice",
+      "g0": "confined tail session, launch wrapper, source attribution and quality gate, Gamescope help probe; attach_frame_source exists",
+      "g1": "none: no live frame stream has been observed through the service",
+      "runtime_availability": "MangoHud, Gamescope and vkcube present",
+      "authority": "O/F",
+      "not_wired": "nothing in the service attaches a source; phase windows and the real-workload run engine are missing"
+    },
+    {
+      "id": "5.13",
+      "tools": [
+        "LACT",
+        "CoreCtrl"
+      ],
+      "packages": [
+        "W6",
+        "W9",
+        "W11d"
+      ],
+      "anchors": [
+        "stutter/src/integrations/mod.rs"
+      ],
+      "status": "first_slice",
+      "g0": "LACT presence (including the Nix wrapped name) marks GPU power owned",
+      "g1": "LACT daemon observed running on this host",
+      "runtime_availability": "LACT present, CoreCtrl absent",
+      "authority": "O/A/D/F",
+      "not_wired": "no profile or PCI identity reader; GPU mutation is quarantined on this host"
+    },
+    {
+      "id": "5.14",
+      "tools": [
+        "OpenTuner"
+      ],
+      "packages": [
+        "W10",
+        "W15"
+      ],
+      "anchors": [],
+      "status": "not_started",
+      "g0": "none",
+      "g1": "none",
+      "runtime_availability": "not installed",
+      "authority": "B/F",
+      "not_wired": "no offline search adapter"
+    },
+    {
+      "id": "5.15",
+      "tools": [
+        "Kernel Tuner",
+        "OtterTune",
+        "Bayesian/SMBO",
+        "contextual bandits"
+      ],
+      "packages": [
+        "W13",
+        "W15"
+      ],
+      "anchors": [],
+      "status": "not_started",
+      "g0": "none",
+      "g1": "none",
+      "runtime_availability": "not installed",
+      "authority": "B/F",
+      "not_wired": "no importer, no offline learning comparison"
+    },
+    {
+      "id": "5.16",
+      "tools": [
+        "TLP",
+        "auto-cpufreq",
+        "power-profiles-daemon"
+      ],
+      "packages": [
+        "W6",
+        "W9",
+        "W11d"
+      ],
+      "anchors": [
+        "stutter/src/integrations/mod.rs"
+      ],
+      "status": "first_slice",
+      "g0": "auto-cpufreq and power-profiles-daemon presence mark CPU power owned; TLP is not probed",
+      "g1": "none",
+      "runtime_availability": "all absent",
+      "authority": "O/A/D",
+      "not_wired": "no PPD D-Bus hold adapter, no TLP probe"
+    },
+    {
+      "id": "5.17",
+      "tools": [
+        "thermald",
+        "CPUFreq",
+        "intel_pstate",
+        "amd_pstate"
+      ],
+      "packages": [
+        "W9",
+        "W11d",
+        "W12"
+      ],
+      "anchors": [],
+      "status": "not_started",
+      "g0": "cpufreq policies are inventoried; no sensors/cpu_power.rs",
+      "g1": "none",
+      "runtime_availability": "thermald absent",
+      "authority": "O/A",
+      "not_wired": "no sensor, no thermald probe",
+      "related_existing": [
+        "stutter/src/system_inventory.rs"
+      ]
+    },
+    {
+      "id": "5.18",
+      "tools": [
+        "irqbalance"
+      ],
+      "packages": [
+        "W6",
+        "W9",
+        "W11e"
+      ],
+      "anchors": [
+        "stutter/src/integrations/mod.rs",
+        "stutter/src/irq_inspect.rs"
+      ],
+      "status": "first_slice",
+      "g0": "presence marks IRQ affinity owned",
+      "g1": "none",
+      "runtime_availability": "absent",
+      "authority": "O/A/E",
+      "not_wired": "no queue-to-IRQ attribution"
+    },
+    {
+      "id": "5.19",
+      "tools": [
+        "numad",
+        "automatic NUMA balancing",
+        "numactl"
+      ],
+      "packages": [
+        "W8",
+        "W9",
+        "W11c"
+      ],
+      "anchors": [
+        "stutter/src/integrations/mod.rs"
+      ],
+      "status": "first_slice",
+      "g0": "numad presence marks memory placement owned",
+      "g1": "none",
+      "runtime_availability": "numad and numactl absent",
+      "authority": "O/A/E",
+      "not_wired": "no NUMA sensor or policy operations"
+    },
+    {
+      "id": "5.20",
+      "tools": [
+        "systemd-oomd",
+        "uresourced"
+      ],
+      "packages": [
+        "W6",
+        "W9",
+        "W12"
+      ],
+      "anchors": [
+        "stutter/src/integrations/mod.rs"
+      ],
+      "status": "first_slice",
+      "g0": "reported, owning no tuning domain",
+      "g1": "systemd-oomd observed running on this host",
+      "runtime_availability": "systemd-oomd running",
+      "authority": "O/A",
+      "not_wired": "no cgroup memory.events sensor, no protected-session guard"
+    },
+    {
+      "id": "5.21",
+      "tools": [
+        "cgroups v2",
+        "systemd resource control",
+        "OpenRC"
+      ],
+      "packages": [
+        "W5",
+        "W6",
+        "W11a",
+        "W14"
+      ],
+      "anchors": [
+        "stutter/src/actions/cgroup/mod.rs",
+        "stutter/src/autotune/providers/cgroup.rs",
+        "packaging/openrc"
+      ],
+      "status": "first_slice",
+      "g0": "cgroup placement only; no cpu.weight/idle/max/cpuset/memory/io operations; OpenRC packaging files exist but no lifecycle tests",
+      "g1": "placement observed on the production host",
+      "runtime_availability": "cgroup v2 present, OpenRC absent",
+      "authority": "O/A/E",
+      "not_wired": "typed knobs and the OpenRC controller lifecycle are not built"
+    },
+    {
+      "id": "5.22",
+      "tools": [
+        "PSI"
+      ],
+      "packages": [
+        "W7",
+        "W9"
+      ],
+      "anchors": [
+        "stutter/src/autotune/sensors/psi.rs",
+        "stutter/src/psi.rs"
+      ],
+      "status": "first_slice",
+      "g0": "system and cgroup PSI delta sensor with reset detection and the registry",
+      "g1": "none through the sensor path",
+      "runtime_availability": "present",
+      "authority": "O",
+      "not_wired": "the registry is not wired into the runtime; no escalation trigger"
+    },
+    {
+      "id": "5.23",
+      "tools": [
+        "PM QoS"
+      ],
+      "packages": [
+        "W9",
+        "W11d"
+      ],
+      "anchors": [],
+      "status": "not_started",
+      "g0": "none",
+      "g1": "none",
+      "runtime_availability": "/dev/cpu_dma_latency present",
+      "authority": "O/E",
+      "not_wired": "no lease operation, no sensor"
+    },
+    {
+      "id": "5.24",
+      "tools": [
+        "resctrl",
+        "Intel RDT",
+        "AMD QoS"
+      ],
+      "packages": [
+        "W9",
+        "W11c"
+      ],
+      "anchors": [],
+      "status": "not_started",
+      "g0": "none",
+      "g1": "none",
+      "runtime_availability": "resctrl not mounted on this host",
+      "authority": "O/E",
+      "not_wired": "no sensor, no allocation operations"
+    },
+    {
+      "id": "5.25",
+      "tools": [
+        "GCC/Clang PGO",
+        "AutoFDO",
+        "LLVM BOLT"
+      ],
+      "packages": [
+        "W13"
+      ],
+      "anchors": [],
+      "status": "not_started",
+      "g0": "none",
+      "g1": "none",
+      "runtime_availability": "clang, gcc, llvm-bolt, perf2bolt absent on PATH",
+      "authority": "F",
+      "not_wired": "no offline_optimization module"
+    },
+    {
+      "id": "5.26",
+      "tools": [
+        "ionice",
+        "BFQ",
+        "Kyber",
+        "mq-deadline",
+        "fio",
+        "blktrace",
+        "biosnoop",
+        "biolatency"
+      ],
+      "packages": [
+        "W9",
+        "W11a",
+        "W11e",
+        "W13"
+      ],
+      "anchors": [
+        "stutter/src/actions/ioprio/mod.rs"
+      ],
+      "status": "first_slice",
+      "g0": "ioprio action exists and is denied while GameMode owns task priority; no block scheduler operations, no I/O sensor",
+      "g1": "none",
+      "runtime_availability": "ionice present, fio and blktrace absent",
+      "authority": "O/F/E",
+      "not_wired": "ioprio is not yet scoped to a measured offender"
+    },
+    {
+      "id": "5.27",
+      "tools": [
+        "congestion controls",
+        "socket policy",
+        "iperf3",
+        "wrk",
+        "wrk2",
+        "h2load"
+      ],
+      "packages": [
+        "W4",
+        "W9",
+        "W11f",
+        "W13"
+      ],
+      "anchors": [
+        "stutter/src/autotune/objective/source/mod.rs"
+      ],
+      "status": "first_slice",
+      "g0": "typed local KPI contract and bounded ingestion, which has known defects listed in W4",
+      "g1": "none",
+      "runtime_availability": "benchmark tools absent",
+      "authority": "O/F/E",
+      "not_wired": "no socket server, no network sensor, no load comparator"
+    },
+    {
+      "id": "5.28",
+      "tools": [
+        "hyperfine",
+        "benchstat",
+        "Phoronix Test Suite",
+        "sysbench",
+        "stress-ng"
+      ],
+      "packages": [
+        "W1",
+        "W10",
+        "W13"
+      ],
+      "anchors": [
+        "xtask/src/real_workload/mod.rs"
+      ],
+      "status": "first_slice",
+      "g0": "frozen manifest and paired statistics exist; no benchmark importers",
+      "g1": "none",
+      "runtime_availability": "all absent",
+      "authority": "F",
+      "not_wired": "no xtask/benchmarks module"
+    },
+    {
+      "id": "5.29",
+      "tools": [
+        "taskset",
+        "numactl",
+        "nice",
+        "chrt",
+        "systemd-run",
+        "cpupower"
+      ],
+      "packages": [
+        "W5",
+        "W6",
+        "W11g"
+      ],
+      "anchors": [
+        "stutter/src/actions/mod.rs"
+      ],
+      "status": "first_slice",
+      "g0": "native affinity, nice and ioprio actions with readback exist; user-intent detection is not built",
+      "g1": "none",
+      "runtime_availability": "taskset, chrt, ionice, systemd-run present; numactl, cpupower absent",
+      "authority": "O/A",
+      "not_wired": "explicit user settings are not yet treated as ownership constraints"
+    },
+    {
+      "id": "extra.mpi",
+      "tools": [
+        "Intel MPI autotuning concept"
+      ],
+      "packages": [
+        "W15"
+      ],
+      "anchors": [],
+      "status": "not_started",
+      "g0": "none",
+      "g1": "none",
+      "runtime_availability": "not applicable",
+      "authority": "B/F",
+      "not_wired": "no bounded search grammar"
+    },
+    {
+      "id": "extra.diag",
+      "tools": [
+        "tuna",
+        "iostat",
+        "pidstat",
+        "numastat",
+        "blktrace"
+      ],
+      "packages": [
+        "W8",
+        "W9",
+        "W13"
+      ],
+      "anchors": [],
+      "status": "not_started",
+      "g0": "none",
+      "g1": "none",
+      "runtime_availability": "all absent",
+      "authority": "O/F",
+      "not_wired": "no capture or import schema"
+    },
+    {
+      "id": "extra.kernels",
+      "tools": [
+        "PREEMPT_RT",
+        "Zen",
+        "Liquorix",
+        "CachyOS",
+        "custom kernels"
+      ],
+      "packages": [
+        "W14"
+      ],
+      "anchors": [
+        "stutter-validation-runner/src/boot/mod.rs"
+      ],
+      "status": "first_slice",
+      "g0": "persistent validation runner with 6.12 and 7.2 specialisations exists; no BootEnvironmentIdentity",
+      "g1": "earlier multi-kernel resume evidence is retained",
+      "runtime_availability": "6.12 and 7.2 specialisations configured",
+      "authority": "F",
+      "not_wired": "no typed boot-environment fingerprint"
+    },
+    {
+      "id": "extra.boot",
+      "tools": [
+        "nohz_full",
+        "isolcpus",
+        "rcu_nocbs",
+        "housekeeping",
+        "IRQ/RCU isolation"
+      ],
+      "packages": [
+        "W14"
+      ],
+      "anchors": [],
+      "status": "not_started",
+      "g0": "none",
+      "g1": "none",
+      "runtime_availability": "kernel parameters, not live tunables",
+      "authority": "F",
+      "not_wired": "no environment fingerprint"
+    },
+    {
+      "id": "extra.workloads",
+      "tools": [
+        "low-latency audio",
+        "desktop and browser interactivity",
+        "fixed-work compilation"
+      ],
+      "packages": [
+        "W4",
+        "W12"
+      ],
+      "anchors": [
+        "stutter/src/workload_progress/mod.rs",
+        "stutter/src/autotune/objective/compile_throughput.rs"
+      ],
+      "status": "first_slice",
+      "g0": "fixed-work compile objective is Supported; audio, browser and desktop direct sources are not built",
+      "g1": "controlled fixed-work evidence is indexed",
+      "runtime_availability": "present",
+      "authority": "O/F",
+      "not_wired": "no audio xrun or browser response source"
+    }
+  ]
+}
