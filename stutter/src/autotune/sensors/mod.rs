@@ -16,6 +16,7 @@ mod oom_guard;
 mod pmu;
 mod psi;
 mod registry;
+mod sched_ext;
 #[cfg(test)]
 mod tests;
 
@@ -31,6 +32,7 @@ pub use oom_guard::{OomGuardSensor, memory_guard_event, session_cgroup_dir};
 pub use pmu::{MIN_RUNNING_RATIO, PmuSensor, PmuTargets, reading_from_deltas};
 pub use psi::PsiSensor;
 pub use registry::{AdmissionDenied, ExpensiveBudget, SensorRegistry};
+pub use sched_ext::{SchedExtSensor, scheduler_change_event};
 use serde::{Deserialize, Serialize};
 
 use crate::autotune::objective::ObjectiveSignalQuality;

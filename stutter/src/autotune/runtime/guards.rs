@@ -43,6 +43,7 @@ impl AutotuneRuntime {
     ) -> anyhow::Result<bool> {
         let Some(event) = crate::autotune::sensors::memory_guard_event(readings)
             .or_else(|| crate::autotune::sensors::thermal_guard_event(readings))
+            .or_else(|| crate::autotune::sensors::scheduler_change_event(readings))
         else {
             return Ok(false);
         };

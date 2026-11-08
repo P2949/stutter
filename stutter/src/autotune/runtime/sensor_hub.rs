@@ -10,7 +10,8 @@ use crate::{
     autotune::sensors::{
         AdmissionDenied, BlockIoSensor, CpuPowerSensor, DamonSensor, Escalator, ExpensiveBudget,
         NetworkSensor, NumaFaultSensor, NumaSensor, OomGuardSensor, PmuSensor, PmuTargets,
-        PsiSensor, ResctrlSensor, SensorReading, SensorRegistry, Thresholds, session_cgroup_dir,
+        PsiSensor, ResctrlSensor, SchedExtSensor, SensorReading, SensorRegistry, Thresholds,
+        session_cgroup_dir,
     },
     perf_counters::CpuPerfConfig,
 };
@@ -54,6 +55,9 @@ impl SensorHub {
         registry.register(Box::new(ResctrlSensor::new(Path::new("/sys/fs"))));
         registry.register(Box::new(NetworkSensor::new(proc_root.to_path_buf())));
         registry.register(Box::new(NumaFaultSensor::new(proc_root.to_path_buf())));
+        registry.register(Box::new(SchedExtSensor::new(std::path::PathBuf::from(
+            "/sys",
+        ))));
         registry.register(Box::new(BlockIoSensor::new(
             proc_root.to_path_buf(),
             std::path::PathBuf::from("/sys"),
@@ -66,6 +70,7 @@ impl SensorHub {
             "resctrl_inventory",
             "network",
             "numa_faults",
+            "sched_ext",
             "block_io",
         ];
         let session = std::fs::read_to_string(proc_root.join("self/cgroup"))
