@@ -31,6 +31,8 @@ fn process(proc_root: &Path, pid: u32, ppid: u32, start: u64) {
         format!("{pid} (game) S {ppid} 0 0 0 0 0 0 0 0 0 0 0 0 0 20 0 1 0 {start} 0 0"),
     )
     .unwrap();
+    // A process whose address space is readable and maps nothing of interest: a launcher or helper.
+    fs::write(dir.join("maps"), "7f00 r-xp /usr/lib/libc.so.6\n").unwrap();
 }
 
 fn capture(root: &Path, name: &str, record: &LaunchRecord) -> PathBuf {

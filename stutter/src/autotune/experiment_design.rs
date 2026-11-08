@@ -50,6 +50,10 @@ pub enum DesignError {
     BadStoppingRule,
     DuplicateBlockId,
     BlockIdsDoNotCoverThePlan,
+    /// A practical-effect or margin threshold is NaN or infinite.
+    NonFiniteThreshold,
+    /// `looks * blocks_per_look` does not fit: the plan is impossible, not merely large.
+    PlanOverflow,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -69,6 +73,8 @@ pub enum AnalysisRefused {
     /// More looks than the design paid for.
     LooksExhausted,
     TooFewBlocks,
+    /// The design's own plan overflows, so there is no expected block count to analyse against.
+    ImpossiblePlan,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -82,6 +88,9 @@ pub struct Analysis {
 
 impl ExperimentDesign {
     pub fn validate(&self) -> Result<(), DesignError> {
+        if !self.min_effect_percent.is_finite() || !self.equivalence_margin_percent.is_finite() {
+            return Err(DesignError::NonFiniteThreshold);
+        }
         if self.equivalence_margin_percent <= 0.0
             || self.min_effect_percent <= self.equivalence_margin_percent
         {
@@ -103,7 +112,9 @@ impl ExperimentDesign {
                 {
                     return Err(DesignError::BadStoppingRule);
                 }
-                looks * blocks_per_look
+                looks
+                    .checked_mul(blocks_per_look)
+                    .ok_or(DesignError::PlanOverflow)?
             }
         };
         if planned < 2 {
@@ -151,7 +162,10 @@ impl ExperimentDesign {
                 }
                 let confidence =
                     bonferroni_confidence(alpha, looks).ok_or(AnalysisRefused::TooFewBlocks)?;
-                (confidence, (look * blocks_per_look) as usize, look == looks)
+                let expected = look
+                    .checked_mul(blocks_per_look)
+                    .ok_or(AnalysisRefused::ImpossiblePlan)?;
+                (confidence, expected as usize, look == looks)
             }
         };
         if improvements.len() < expected_blocks || improvements.len() < 2 {
@@ -201,18 +215,70 @@ pub struct ExperimentEvidence {
 }
 
 impl ExperimentEvidence {
-    /// Evidence is acceptable only if it names this exact design and never exceeds its looks.
+    /// Evidence is acceptable only if it names this exact design, never exceeds its looks, and
+    /// every recorded analysis is what that design would have produced: the look numbers run
+    /// 1, 2, ... in order, each analysis used the planned block count and confidence for its
+    /// look, its interval is finite and ordered, and its decision is the design's own
+    /// classification of that interval. Only the final analysis may have stopped the experiment,
+    /// so every earlier one is `Uncertain`, and the evidence's decision is the final analysis's.
+    /// A matching digest alone proves nothing: a decision is checked against the numbers.
     pub fn consistent_with(&self, design: &ExperimentDesign) -> bool {
-        let looks_allowed = match design.stopping {
-            StoppingRule::FixedN { .. } => 1,
-            StoppingRule::Sequential { looks, .. } => looks as usize,
+        if self.design_digest != design.digest() || design.validate().is_err() {
+            return false;
+        }
+        let (looks_allowed, last_look_number) = match design.stopping {
+            StoppingRule::FixedN { .. } => (1, 1),
+            StoppingRule::Sequential { looks, .. } => (looks as usize, looks),
         };
-        self.design_digest == design.digest()
-            && self.analyses.len() <= looks_allowed
-            && self
-                .analyses
-                .last()
-                .is_some_and(|last| last.decision == self.decision)
+        let Some(final_analysis) = self.analyses.last() else {
+            return false;
+        };
+        if self.analyses.len() > looks_allowed || final_analysis.decision != self.decision {
+            return false;
+        }
+        let last_index = self.analyses.len() - 1;
+        self.analyses.iter().enumerate().all(|(index, analysis)| {
+            let look = u32::try_from(index + 1).unwrap_or(u32::MAX);
+            let (confidence, blocks) = match design.stopping {
+                StoppingRule::FixedN { blocks, confidence } => (confidence, blocks as usize),
+                StoppingRule::Sequential {
+                    looks,
+                    blocks_per_look,
+                    alpha,
+                } => {
+                    let (Some(confidence), Some(blocks)) = (
+                        bonferroni_confidence(alpha, looks),
+                        look.checked_mul(blocks_per_look),
+                    ) else {
+                        return false;
+                    };
+                    (confidence, blocks as usize)
+                }
+            };
+            let (low, mean, high) = analysis.interval;
+            let ordered = [low, mean, high].iter().all(|value| value.is_finite())
+                && low <= mean
+                && mean <= high;
+            let interval = Interval {
+                mean,
+                low,
+                high,
+                blocks,
+                confidence,
+            };
+            // A drifted block set is recorded as invalid whatever its numbers say; any other
+            // decision must be exactly what the numbers classify to.
+            let decision_follows = analysis.decision == Decision::InvalidExperiment
+                || analysis.decision == design.classify(&interval, look == last_look_number);
+            let stops_early = analysis.decision != Decision::Uncertain;
+            analysis.look == look
+                && analysis.blocks == blocks
+                && analysis.confidence == confidence
+                && ordered
+                && decision_follows
+                // Only the last analysis may have ended the experiment.
+                && (index == last_index || !stops_early)
+        })
     }
 }
 

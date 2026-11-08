@@ -216,17 +216,46 @@ fn repeated_unadjusted_peeking_manufactures_significance_and_the_adjusted_design
     );
 }
 
+/// Runs a sequential design the way an honest experiment would: analyse at each look in order and
+/// stop at the first look that decides.
+fn honest_run(design: &ExperimentDesign, gains: &[f64]) -> ExperimentEvidence {
+    let looks = match design.stopping {
+        StoppingRule::Sequential { looks, .. } => looks,
+        StoppingRule::FixedN { .. } => 1,
+    };
+    let mut analyses = Vec::new();
+    for look in 1..=looks {
+        let analysis = design.analyse(gains, look, false).unwrap();
+        let decided = analysis.decision != Decision::Uncertain;
+        analyses.push(analysis);
+        if decided {
+            break;
+        }
+    }
+    let decision = analyses.last().unwrap().decision;
+    ExperimentEvidence {
+        design_digest: design.digest(),
+        analyses,
+        decision,
+        overhead_note: "none measured".into(),
+    }
+}
+
+/// Four noisy early blocks, then steady large gains: the first look cannot decide.
+fn late_gains() -> Vec<f64> {
+    let mut gains = vec![14.0, 2.0, 16.0, 3.0];
+    gains.extend((0..12).map(|i| 14.0 + f64::from(i % 4) * 0.5));
+    gains
+}
+
 #[test]
 fn evidence_must_name_the_exact_design_and_never_exceed_its_looks() {
     let design = sequential();
-    let gains: Vec<f64> = (0..16).map(|i| 14.0 + f64::from(i % 4) * 0.5).collect();
-    let analysis = design.analyse(&gains, 4, false).unwrap();
-    let evidence = ExperimentEvidence {
-        design_digest: design.digest(),
-        analyses: vec![analysis.clone()],
-        decision: analysis.decision,
-        overhead_note: "none measured".into(),
-    };
+    let evidence = honest_run(&design, &late_gains());
+    assert!(
+        evidence.analyses.len() >= 2,
+        "the first look must not decide"
+    );
     assert!(evidence.consistent_with(&design));
     let mut other = design.clone();
     other.min_effect_percent = 9.0;
@@ -235,9 +264,114 @@ fn evidence_must_name_the_exact_design_and_never_exceed_its_looks() {
         "a changed threshold is a different design"
     );
     let mut too_many = evidence.clone();
-    too_many.analyses = vec![analysis; 5];
+    too_many.analyses = vec![evidence.analyses[0].clone(); 5];
     assert!(!too_many.consistent_with(&design));
     let mut wrong_decision = evidence;
     wrong_decision.decision = Decision::Harmful;
     assert!(!wrong_decision.consistent_with(&design));
+}
+
+#[test]
+fn a_matching_digest_with_forged_analyses_is_not_verified_evidence() {
+    let design = sequential();
+    let honest = honest_run(&design, &late_gains());
+    assert!(honest.consistent_with(&design));
+
+    // Skipping the early looks: only the deciding look is shown.
+    let mut skipped = honest.clone();
+    skipped.analyses = vec![honest.analyses.last().unwrap().clone()];
+    assert!(
+        !skipped.consistent_with(&design),
+        "look numbers must run 1, 2, ..."
+    );
+
+    // A decision that the recorded interval does not support.
+    let mut forged = honest.clone();
+    let last = forged.analyses.last_mut().unwrap();
+    last.decision = Decision::Beneficial;
+    last.interval = (-5.0, 0.0, 5.0);
+    forged.decision = Decision::Beneficial;
+    assert!(
+        !forged.consistent_with(&design),
+        "Beneficial needs the interval to clear the effect"
+    );
+
+    // An early look that already decided cannot be followed by more looks.
+    let mut continued = honest.clone();
+    let mut extra = honest.analyses.last().unwrap().clone();
+    extra.look += 1;
+    continued.analyses.push(extra);
+    assert!(!continued.consistent_with(&design));
+
+    // The wrong block count or confidence for its look.
+    let mut blocks = honest.clone();
+    blocks.analyses.last_mut().unwrap().blocks += 1;
+    assert!(!blocks.consistent_with(&design));
+    let mut confidence = honest.clone();
+    confidence.analyses.last_mut().unwrap().confidence = 0.5;
+    assert!(!confidence.consistent_with(&design));
+
+    // A non-finite or reversed interval.
+    let mut nan = honest.clone();
+    nan.analyses.last_mut().unwrap().interval = (f64::NAN, 1.0, 2.0);
+    assert!(!nan.consistent_with(&design));
+    let mut reversed = honest.clone();
+    reversed.analyses.last_mut().unwrap().interval = (5.0, 4.0, 3.0);
+    assert!(!reversed.consistent_with(&design));
+
+    // Empty evidence names a digest but proves nothing.
+    let mut empty = honest;
+    empty.analyses.clear();
+    assert!(!empty.consistent_with(&design));
+}
+
+#[test]
+fn a_drifted_block_set_is_recorded_as_invalid_and_stays_consistent() {
+    let design = fixed();
+    let gains = vec![14.0; 8];
+    let analysis = design.analyse(&gains, 1, true).unwrap();
+    assert_eq!(analysis.decision, Decision::InvalidExperiment);
+    let evidence = ExperimentEvidence {
+        design_digest: design.digest(),
+        analyses: vec![analysis],
+        decision: Decision::InvalidExperiment,
+        overhead_note: String::new(),
+    };
+    assert!(evidence.consistent_with(&design));
+}
+
+#[test]
+fn impossible_plans_and_non_finite_thresholds_are_refused_not_wrapped() {
+    // looks * blocks_per_look overflows u32.
+    let huge = design(StoppingRule::Sequential {
+        looks: 70_000,
+        blocks_per_look: 70_000,
+        alpha: 0.05,
+    });
+    assert_eq!(huge.validate(), Err(DesignError::PlanOverflow));
+    // Analysing a design whose plan overflows is refused rather than computing a wrapped count.
+    assert_eq!(
+        huge.analyse(&[1.0, 2.0], 70_000, false),
+        Err(AnalysisRefused::ImpossiblePlan)
+    );
+
+    for (effect, margin) in [
+        (f64::NAN, 3.0),
+        (10.0, f64::NAN),
+        (f64::INFINITY, 3.0),
+        (10.0, f64::INFINITY),
+        (f64::NEG_INFINITY, 3.0),
+    ] {
+        let mut bad = fixed();
+        bad.min_effect_percent = effect;
+        bad.equivalence_margin_percent = margin;
+        assert_eq!(
+            bad.validate(),
+            Err(DesignError::NonFiniteThreshold),
+            "{effect} {margin}"
+        );
+    }
+    // A sound design is unaffected.
+    assert!(fixed().validate().is_ok());
+    assert!(sequential().validate().is_ok());
 }

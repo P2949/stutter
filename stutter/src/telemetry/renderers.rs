@@ -19,29 +19,93 @@ const MAX_SCAN: usize = 8192;
 /// Most bytes of one `maps` file searched.
 const MAX_MAPS_BYTES: u64 = 4 * 1024 * 1024;
 
-fn maps_mention_mangohud(path: &Path) -> bool {
-    let Ok(file) = fs::File::open(path) else {
-        return false;
-    };
-    let mut text = String::new();
-    // `maps` is text; a read error or a truncated read just yields what was seen.
-    let _ = file.take(MAX_MAPS_BYTES).read_to_string(&mut text);
-    text.contains("libMangoHud")
+/// What inspecting one process's `maps` found.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MapsVerdict {
+    Mentions,
+    /// The whole file was read and MangoHud is not in it.
+    Absent,
+    /// The file could not be opened or read, or was longer than the bound: nothing is proven.
+    Unknown,
 }
 
-/// The processes (pid, start ticks) of `uid` at or below the launch process that have MangoHud
-/// mapped: the candidate producers of the log.
+fn inspect_maps(path: &Path) -> MapsVerdict {
+    let Ok(file) = fs::File::open(path) else {
+        return MapsVerdict::Unknown;
+    };
+    let mut bytes = Vec::new();
+    // `maps` is text; an invalid byte must not hide a mapping, so it is searched as bytes.
+    if file.take(MAX_MAPS_BYTES).read_to_end(&mut bytes).is_err() {
+        return MapsVerdict::Unknown;
+    }
+    let found = bytes
+        .windows(b"libMangoHud".len())
+        .any(|window| window == b"libMangoHud");
+    if found {
+        MapsVerdict::Mentions
+    } else if bytes.len() as u64 >= MAX_MAPS_BYTES {
+        // Read to the bound without finding it: the rest of the file was never looked at.
+        MapsVerdict::Unknown
+    } else {
+        MapsVerdict::Absent
+    }
+}
+
+/// The result of scanning a launch tree for MangoHud renderers.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RendererScan {
+    /// The processes (pid, start ticks) of the user at or below the launch process that have
+    /// MangoHud mapped: the candidate producers of the log.
+    pub found: Vec<(u32, u64)>,
+    /// Whether every process that could be a renderer was inspected to the end. `false` when the
+    /// scan hit its entry limit, `/proc` could not be listed, or an in-tree process's `maps` could
+    /// not be read in full: an unseen renderer cannot be ruled out, so "one found" proves nothing.
+    pub complete: bool,
+}
+
+impl RendererScan {
+    /// The one producer, only when the scan was exhaustive and found exactly one.
+    pub fn sole(&self) -> Option<(u32, u64)> {
+        (self.complete && self.found.len() == 1).then(|| self.found[0])
+    }
+}
+
+/// Scans the launch tree of `launch_pid` for processes of `uid` that have MangoHud mapped.
 pub fn mangohud_renderers(
     proc_root: &Path,
     launch_pid: u32,
     launch_start_ticks: u64,
     uid: u32,
-) -> Vec<(u32, u64)> {
+) -> RendererScan {
+    scan_with_limit(proc_root, launch_pid, launch_start_ticks, uid, MAX_SCAN)
+}
+
+fn scan_with_limit(
+    proc_root: &Path,
+    launch_pid: u32,
+    launch_start_ticks: u64,
+    uid: u32,
+    limit: usize,
+) -> RendererScan {
     let Ok(entries) = fs::read_dir(proc_root) else {
-        return Vec::new();
+        return RendererScan::default();
     };
-    let mut found = Vec::new();
-    for entry in entries.flatten().take(MAX_SCAN) {
+    let mut scan = RendererScan {
+        found: Vec::new(),
+        complete: true,
+    };
+    let mut seen = 0usize;
+    for entry in entries {
+        let Ok(entry) = entry else {
+            // A directory entry that cannot be read is a process that cannot be ruled out.
+            scan.complete = false;
+            continue;
+        };
+        seen += 1;
+        if seen > limit {
+            scan.complete = false;
+            break;
+        }
         let Some(pid) = entry
             .file_name()
             .to_str()
@@ -57,11 +121,16 @@ pub fn mangohud_renderers(
                 .ancestors
                 .iter()
                 .any(|&(ancestor, ticks)| ancestor == launch_pid && ticks == launch_start_ticks);
-        if live.uid == uid && in_tree && maps_mention_mangohud(&entry.path().join("maps")) {
-            found.push((pid, live.start_ticks));
+        if live.uid != uid || !in_tree {
+            continue;
+        }
+        match inspect_maps(&entry.path().join("maps")) {
+            MapsVerdict::Mentions => scan.found.push((pid, live.start_ticks)),
+            MapsVerdict::Absent => {}
+            MapsVerdict::Unknown => scan.complete = false,
         }
     }
-    found
+    scan
 }
 
 /// MangoHud CSV logs (not summaries) in `dir` written within `window`.

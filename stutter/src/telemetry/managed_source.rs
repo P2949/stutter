@@ -209,28 +209,32 @@ impl ManagedFrameSource {
             return;
         }
         self.last_competition_check = Some(now);
-        let renderers = super::renderers::mangohud_renderers(
+        let scan = super::renderers::mangohud_renderers(
             proc_root,
             self.launch.record.pid,
             self.launch.record.start_ticks,
             self.uid,
         );
         let logs = super::renderers::live_log_count(&self.launch.dir, LIVE_LOG_WINDOW);
-        let renderer_competition = if renderers.is_empty() {
-            1
-        } else {
-            renderers.len() - 1
-        };
+        let found = scan.found.len();
+        let mut renderer_competition = if found == 0 { 1 } else { found - 1 };
+        // An incomplete scan (limit hit, unreadable or truncated maps) cannot prove uniqueness: an
+        // unseen renderer might exist, so it counts as competition.
+        if !scan.complete {
+            renderer_competition = renderer_competition.max(1);
+        }
         let competing = renderer_competition + logs.saturating_sub(1);
-        // With exactly one renderer the producer is that process, not the launcher above it: the
-        // target must then be the renderer or sit in its tree, and a sibling helper is not.
-        let sole = (renderers.len() == 1).then(|| renderers[0]);
+        // With exactly one renderer, seen in an exhaustive scan, the producer is that process, not
+        // the launcher above it: the target must then be the renderer or sit in its tree.
+        let sole = scan.sole();
+        let (launch_pid, launch_ticks) = (self.launch.record.pid, self.launch.record.start_ticks);
         self.publish(|status| {
             status.competing_targets = competing;
-            if let Some((pid, start_ticks)) = sole {
-                status.claim.producer_pid = Some(pid);
-                status.claim.producer_start_ticks = Some(start_ticks);
-            }
+            // Without an exhaustively established sole renderer the producer reverts to the
+            // launcher child; a producer chosen by an earlier, complete scan is not kept.
+            let (pid, start_ticks) = sole.unwrap_or((launch_pid, launch_ticks));
+            status.claim.producer_pid = Some(pid);
+            status.claim.producer_start_ticks = Some(start_ticks);
         });
     }
 
