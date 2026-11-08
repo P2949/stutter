@@ -358,6 +358,7 @@ pub(crate) fn owner_domains() -> Vec<(KnownOwner, Vec<ResourceDomain>)> {
 }
 
 pub mod adapters;
+pub mod capability_probe;
 pub mod dbus;
 pub mod exact;
 pub mod gpu_identity;

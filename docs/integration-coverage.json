@@ -80,14 +80,15 @@
         "W12"
       ],
       "anchors": [
-        "stutter/src/integrations/mod.rs"
+        "stutter/src/integrations/mod.rs",
+        "stutter/src/integrations/capability_probe.rs"
       ],
-      "status": "first_slice",
-      "g0": "presence probe and task-priority domain denial",
+      "status": "code_complete",
+      "g0": "System76 Scheduler is detected by process name and its systemd unit; a semantic capability probe introspects com.system76.Scheduler and reports `UnsupportedInterface` when the interface exposes only setters (SetForegroundProcess, Reload) and no readable property, so its focus state is never invented or scraped and Stutter never calls the setter; its task-priority claim denies nice/ionice candidates as for every other owner (fake-bus tested). presence probe and task-priority domain denial",
       "g1": "none",
       "runtime_availability": "absent",
       "authority": "B/O/A",
-      "not_wired": "no focus-manager state",
+      "not_wired": "nothing",
       "dispositions": [
         "FixtureVerified",
         "HardwareUnavailable",
@@ -137,12 +138,12 @@
       "anchors": [
         "stutter/src/integrations/mod.rs"
       ],
-      "status": "first_slice",
-      "g0": "a cheap `network` sensor reads TCP retransmits, timeouts, listen overflows and non-loopback interface drops as deltas (never a decision input); presence probe and network / VM knob domain denial",
+      "status": "code_complete",
+      "g0": "bpftune exposes no documented read or control interface, so it is a `ProcessOnly` adapter with delegation refused and a typed UnsupportedInterface capability result rather than a scraped tuner list; the system `network` sensor reports the network-side effect it could have; no generic sysctl controller exists. a cheap `network` sensor reads TCP retransmits, timeouts, listen overflows and non-loopback interface drops as deltas (never a decision input); presence probe and network / VM knob domain denial",
       "g1": "none",
       "runtime_availability": "absent",
       "authority": "O/A",
-      "not_wired": "no bpftune tuner enumeration (no documented read interface was verified); the network sensor exists but is not tied to bpftune ownership",
+      "not_wired": "nothing",
       "dispositions": [
         "FixtureVerified",
         "HardwareUnavailable",
