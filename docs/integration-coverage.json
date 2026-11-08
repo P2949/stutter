@@ -978,19 +978,20 @@
         "stutter-validation-runner/src/boot/mod.rs",
         "stutter/src/boot_environment.rs"
       ],
-      "status": "first_slice",
-      "g0": "persistent validation runner with 6.12 and 7.2 specialisations exists; BootEnvironment now fingerprints kernel, preemption model, isolation and generation",
+      "status": "code_complete",
+      "g0": "a typed cross-boot campaign (`CrossBootCampaign` with `compare_boots`) keys every block by the boot environment identity, so kernel variants are analysed separately; RT, Zen, Liquorix and CachyOS kernels are not available as reproducible specialisations on this host (HardwareUnavailable), so no run on them happened; persistent validation runner with 6.12 and 7.2 specialisations exists; BootEnvironment now fingerprints kernel, preemption model, isolation and generation",
       "g1": "earlier multi-kernel resume evidence is retained",
       "runtime_availability": "6.12 and 7.2 specialisations configured",
       "authority": "F",
-      "not_wired": "no typed cross-boot campaign using BootEnvironmentIdentity; RT, Zen, Liquorix and CachyOS kernels are not available as reproducible specialisations here",
+      "not_wired": "nothing",
       "dispositions": [
         "FixtureVerified",
         "RealObserved",
+        "HardwareUnavailable",
         "EvidenceDeferred"
       ],
       "evidence": [],
-      "unblock": null
+      "unblock": "Needs on the host: RT, Zen, Liquorix and CachyOS kernel specialisations"
     },
     {
       "id": "extra.boot",
@@ -1007,12 +1008,12 @@
       "anchors": [
         "stutter/src/boot_environment.rs"
       ],
-      "status": "first_slice",
-      "g0": "typed boot environment: kernel release, preemption model from the version string, parsed nohz_full/rcu_nocbs/isolcpus/irqaffinity CPU lists, microcode, generation, sched_ext ops, command-line hash (never the raw line), environment hash that ignores the boot id; housekeeping CPUs; reported by doctor",
+      "status": "code_complete",
+      "g0": "`compare_boots` names exactly what differs between two boots (kernel, preemption, each isolation key, microcode, sched_ext, command line; a generation-only change is reported but still comparable) and `CrossBootCampaign` groups blocks by context hash so blocks from different kernels are never pooled, refuses a repeated block, and survives a reboot as a JSON file; the context hash without the generation is also part of the candidate-memory key; typed boot environment: kernel release, preemption model from the version string, parsed nohz_full/rcu_nocbs/isolcpus/irqaffinity CPU lists, microcode, generation, sched_ext ops, command-line hash (never the raw line), environment hash that ignores the boot id; housekeeping CPUs; reported by doctor",
       "g1": "read on this host (kernel 6.18.57, PREEMPT_DYNAMIC, no isolation)",
       "runtime_availability": "kernel parameters, not live tunables",
       "authority": "F",
-      "not_wired": "no comparator or resumable cross-boot campaign uses it; the context hash (without the generation) is part of the candidate-memory key",
+      "not_wired": "nothing",
       "dispositions": [
         "FixtureVerified",
         "RealObserved",

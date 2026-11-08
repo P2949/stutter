@@ -67,7 +67,7 @@ pub mod search {
 
 pub mod boot_environment {
     //! The boot environment's identity: kernel, preemption model, isolation parameters, generation.
-    pub use crate::boot_environment::*;
+    pub use crate::{boot_campaign::*, boot_environment::*};
 }
 
 pub mod pm_qos {
