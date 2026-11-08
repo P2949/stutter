@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "evidence_kind": "controlled_real",
+  "source_commit": "db6f5d9bb8a2bce62a0efa6fabd84d15028b021d",
+  "binary_sha256": "efe479defaac47987ec94d8c551142cf000405bc44b0ced7e4ef4566e41a4ba0",
+  "workload": "vkcube",
+  "launch_mode": "native",
+  "work_unit": "640x480 cube, FIFO present (vsync-capped), 20 s measured after 5 s warmup",
+  "command": ["mangohud", "vkcube", "--c", "2000000000", "--width", "640", "--height", "480", "--present_mode", "2"],
+  "time_boxed": true,
+  "instrumentation": ["mangohud per-frame log (log_interval=0)"],
+  "context": {"purpose": "engineering check of the runner on an owned, light, vsync-capped workload; not real-game evidence"},
+  "warmup_seconds": 5,
+  "measure_seconds": 20,
+  "cooldown_seconds": 2,
+  "timeout_seconds": 60,
+  "max_pairs": 6,
+  "candidate": "taskset:2-3",
+  "primary": {"name": "frame_p99_ms", "unit": "ms", "direction": "lower_is_better"},
+  "min_effect_percent": 10.0,
+  "equivalence_margin_percent": 3.0,
+  "guardrails": [
+    {"metric": {"name": "frame_mean_ms", "unit": "ms", "direction": "lower_is_better"}, "max_regression_percent": 5.0}
+  ],
+  "abort_rules": ["any amdgpu reset, ring timeout or hang in the kernel log aborts the study", "an unreadable kernel log blocks the cohort"]
+}
