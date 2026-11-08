@@ -14,6 +14,11 @@ pub mod objective_source {
     pub use crate::autotune::objective::source::*;
 }
 
+pub mod ownership {
+    //! Exact resource ownership receipts and the process-name owner probe.
+    pub use crate::integrations::{receipt::*, *};
+}
+
 pub mod sensors {
     //! Sensor descriptors, readings, the PSI sensor and the cost-bounded registry.
     pub use crate::autotune::sensors::*;

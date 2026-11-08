@@ -182,3 +182,139 @@ fn nix_wrapped_daemon_names_are_recognised() {
     assert!(report.external_owner(D::GpuPower).is_some());
     fs::remove_dir_all(&base).unwrap();
 }
+
+mod receipts {
+    use super::super::receipt::*;
+    use crate::autotune::operation::MutationOperationKind as Op;
+
+    const T: u64 = 1_000;
+
+    fn key() -> ResourceKey {
+        ResourceKey::Task {
+            pid: 42,
+            start_ticks: 7,
+            attribute: TaskAttribute::Nice,
+        }
+    }
+
+    fn receipt(owner: OwnerClass) -> ResourceReceipt {
+        ResourceReceipt {
+            key: key(),
+            owner,
+            source: "test".into(),
+            observed_at_ns: T,
+            expires_at_ns: T + 500,
+            observed_value: "0".into(),
+        }
+    }
+
+    #[test]
+    fn only_a_fresh_matching_receipt_of_a_free_resource_permits_a_mutation() {
+        for owner in [OwnerClass::StutterOwned, OwnerClass::UnmanagedVerified] {
+            assert_eq!(
+                receipt(owner).permits_mutation(&key(), T + 10, "0"),
+                Ok(()),
+                "{owner:?}"
+            );
+        }
+        for owner in [
+            OwnerClass::ExternalConfirmed,
+            OwnerClass::ExternalSuspected,
+            OwnerClass::UserExplicit,
+            OwnerClass::SharedReadOnly,
+            OwnerClass::Unknown,
+        ] {
+            assert_eq!(
+                receipt(owner).permits_mutation(&key(), T + 10, "0"),
+                Err(ReceiptDenial::Owner(owner))
+            );
+        }
+    }
+
+    #[test]
+    fn staleness_drift_and_the_wrong_resource_all_deny() {
+        let free = receipt(OwnerClass::UnmanagedVerified);
+        assert_eq!(
+            free.permits_mutation(&key(), T + 500, "0"),
+            Err(ReceiptDenial::Expired)
+        );
+        assert_eq!(
+            free.permits_mutation(&key(), T - 1, "0"),
+            Err(ReceiptDenial::Expired)
+        );
+        assert_eq!(
+            free.permits_mutation(&key(), T + 10, "5"),
+            Err(ReceiptDenial::ExternalChange)
+        );
+        let other = ResourceKey::Task {
+            pid: 42,
+            start_ticks: 8,
+            attribute: TaskAttribute::Nice,
+        };
+        assert_eq!(
+            free.permits_mutation(&other, T + 10, "0"),
+            Err(ReceiptDenial::WrongResource)
+        );
+        assert_eq!(free.drift("0"), Drift::None);
+        assert_eq!(
+            free.drift("9"),
+            Drift::ExternalChange {
+                expected: "0".into(),
+                current: "9".into()
+            }
+        );
+    }
+
+    #[test]
+    fn a_hint_never_permits_anything_and_absence_proves_nothing() {
+        let present = receipt_from_hint(key(), true, "0", T, 500);
+        let absent = receipt_from_hint(key(), false, "0", T, 500);
+        assert_eq!(present.owner, OwnerClass::ExternalSuspected);
+        assert_eq!(absent.owner, OwnerClass::Unknown);
+        for hint in [&present, &absent] {
+            assert!(hint.permits_mutation(&key(), T + 1, "0").is_err());
+        }
+    }
+
+    #[test]
+    fn the_book_is_bounded_keeps_the_newest_and_a_missing_receipt_denies() {
+        let mut book = ReceiptBook::default();
+        assert_eq!(book.permit(&key(), T, "0"), Err(ReceiptDenial::NoReceipt));
+        book.record(receipt(OwnerClass::UnmanagedVerified));
+        assert_eq!(book.permit(&key(), T + 1, "0"), Ok(()));
+        // The same resource re-observed as externally owned replaces the old receipt.
+        book.record(receipt(OwnerClass::ExternalConfirmed));
+        assert_eq!(book.len(), 1);
+        assert!(book.permit(&key(), T + 1, "0").is_err());
+        for pid in 0..5000_u32 {
+            book.record(ResourceReceipt {
+                key: ResourceKey::Task {
+                    pid,
+                    start_ticks: 1,
+                    attribute: TaskAttribute::Nice,
+                },
+                observed_at_ns: u64::from(pid),
+                ..receipt(OwnerClass::Unknown)
+            });
+        }
+        assert!(book.len() <= 4096);
+    }
+
+    #[test]
+    fn the_supported_operations_need_no_receipt_and_every_other_family_does() {
+        for op in [Op::CpuAffinityProfile, Op::CgroupPlacement, Op::Uclamp] {
+            assert!(!operation_needs_receipt(op), "{op:?}");
+        }
+        for op in [
+            Op::Nice,
+            Op::IoPrio,
+            Op::CpuPowerEpp,
+            Op::GpuPowerProfile,
+            Op::VmSwappiness,
+            Op::IrqKnownDevice,
+        ] {
+            assert!(operation_needs_receipt(op), "{op:?}");
+        }
+        assert!(key().render().starts_with("task:42:7:"));
+    }
+}

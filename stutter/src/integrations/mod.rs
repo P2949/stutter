@@ -318,5 +318,7 @@ pub const ALL_DOMAINS: [ResourceDomain; 8] = [
     D::Network,
 ];
 
+pub mod receipt;
+
 #[cfg(test)]
 mod tests;

@@ -117,6 +117,10 @@ pub(in crate::architecture_tests) const EXPECTED_API_PUBLIC_MODULES: &[ExpectedP
         reason: "typed local-only application KPI contract and ingestion; carries no mutation authority",
     },
     ExpectedPublicModule {
+        name: "ownership",
+        reason: "exact resource ownership receipts and the read-only owner probe; fails closed",
+    },
+    ExpectedPublicModule {
         name: "sensors",
         reason: "read-only sensor framework with probes, quality, loss and cost-bounded admission",
     },
