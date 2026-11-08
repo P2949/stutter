@@ -26,6 +26,7 @@ pub mod mutation_campaign;
 pub mod no_allow_attrs;
 pub mod objective_campaign;
 pub mod objective_docs;
+pub mod offline_optimization;
 pub mod ops_checks;
 pub mod preflight;
 pub mod process;
@@ -137,6 +138,11 @@ pub enum XtaskCommand {
         about = "Calibrate and graduate the frame-pacing decision rule on measured MangoHud frame logs"
     )]
     FrameCampaign(frame_campaign::CampaignArgs),
+    #[command(
+        name = "offline-optimization",
+        about = "Check a PGO, AutoFDO or BOLT plan against this host and the safety rules; builds nothing"
+    )]
+    OfflineOptimization(offline_optimization::OfflineOptimizationArgs),
     #[command(
         name = "benchmarks",
         about = "Verify and import external benchmark and diagnostic artifacts as evidence (never as authority)"
@@ -546,6 +552,7 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
         XtaskCommand::FrameCampaign(args) => frame_campaign::run(&root, &args),
         XtaskCommand::RealWorkload(args) => real_workload::run(&args),
         XtaskCommand::Benchmarks(args) => benchmarks::run(&args),
+        XtaskCommand::OfflineOptimization(args) => offline_optimization::run(&args),
         XtaskCommand::EvidenceExport(args) => {
             evidence_bundle::export_bundle(&root, &args.raw, &args.out)
         }

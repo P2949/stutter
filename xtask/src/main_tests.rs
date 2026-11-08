@@ -61,6 +61,7 @@ fn expected_subcommands_are_registered() {
             "no-allow-attrs",
             "objective-campaign",
             "objective-docs",
+            "offline-optimization",
             "package",
             "package-layout-check",
             "preflight",

@@ -551,13 +551,16 @@
       "packages": [
         "W13"
       ],
-      "anchors": [],
-      "status": "not_started",
-      "g0": "none",
+      "anchors": [
+        "xtask/src/offline_optimization/mod.rs",
+        "xtask/src/offline_optimization/elf.rs"
+      ],
+      "status": "first_slice",
+      "g0": "offline PGO/AutoFDO/BOLT plan validation: separate output binary never an installed path, training and test inputs disjoint by digest, profile build id equal to the binary build id (read from the ELF note), guardrails sane, and a typed Unavailable for every missing tool; xtask offline-optimization check builds and runs nothing",
       "g1": "none",
       "runtime_availability": "clang, gcc, llvm-bolt, perf2bolt absent on PATH",
       "authority": "F",
-      "not_wired": "not started: no offline_optimization module, no PGO, AutoFDO or BOLT workflow; compilers and BOLT tools are absent on this PATH"
+      "not_wired": "no instrumented build, training run, profile conversion, rebuild, correctness suite or paired performance comparison; compilers, perf and BOLT tools are absent on this PATH so nothing could run here"
     },
     {
       "id": "5.26",
