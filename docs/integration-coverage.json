@@ -106,14 +106,15 @@
         "W13"
       ],
       "anchors": [
-        "stutter/src/integrations/mod.rs"
+        "stutter/src/integrations/mod.rs",
+        "stutter/src/integrations/tuned.rs"
       ],
       "status": "first_slice",
-      "g0": "presence probe and CPU power / VM knob domain denial",
+      "g0": "presence probe and CPU power / VM knob domain denial; active profile and mode read through TuneD's read-only control methods (fake-bus tested; never switch_profile)",
       "g1": "none",
       "runtime_availability": "absent",
       "authority": "O/A/F",
-      "not_wired": "no profile or managed-attribute reader",
+      "not_wired": "no managed-attribute reader, no whole-profile offline experiment artifact; the profile reader is not yet part of the runtime owner report",
       "dispositions": [
         "FixtureVerified",
         "HardwareUnavailable",

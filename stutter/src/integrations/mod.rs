@@ -353,6 +353,7 @@ pub mod adapters;
 pub mod dbus;
 pub mod exact;
 pub mod scx_loader;
+pub mod tuned;
 pub mod units;
 pub mod user_intent;
 
