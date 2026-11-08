@@ -648,16 +648,21 @@
       ],
       "anchors": [
         "stutter/src/autotune/sensors/psi.rs",
-        "stutter/src/psi.rs"
+        "stutter/src/psi.rs",
+        "stutter/src/autotune/runtime/sensor_hub.rs",
+        "stutter/src/autotune/sensors/escalation.rs",
+        "stutter/src/architecture_tests/sensors_no_decision.rs"
       ],
-      "status": "first_slice",
-      "g0": "system and cgroup PSI delta sensor with reset detection, sampled into every observation; an escalator turns sustained pressure (CPU, memory, I/O, thermal throttling, OOM events) into a logged hypothesis and admits the PMU sensor under its budget; PSI alone never triggers a write",
-      "g1": "none through the sensor path",
+      "status": "code_complete",
+      "g0": "system PSI (some and full, deltas, reset detection) and the target cgroup's own pressure (followed, replaced on a target change, confined to the mount), sampled into every observation; an escalator turns sustained pressure into a logged hypothesis and a budgeted diagnostic sensor; an architecture test proves no decision code can read a sensor reading, so pressure alone can never cause an action",
+      "g1": "the runtime samples this host's real /proc/pressure in a test (cpu_some_avg10 and monotonic timestamps)",
       "runtime_availability": "present",
       "authority": "O",
-      "not_wired": "no observer-effect A/B comparison; memory and I/O hypotheses have no expensive diagnostic sensor",
+      "not_wired": "nothing",
       "dispositions": [
+        "CodeComplete",
         "FixtureVerified",
+        "RealObserved",
         "EvidenceDeferred"
       ],
       "evidence": [],

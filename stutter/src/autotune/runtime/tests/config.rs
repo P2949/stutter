@@ -188,3 +188,49 @@ fn sampling_every_always_on_sensor_stays_cheap_enough_for_every_tick() {
         "{per_sample:?}"
     );
 }
+
+#[test]
+fn the_target_cgroups_own_pressure_is_followed_replaced_on_a_target_change_and_never_escapes_the_mount()
+ {
+    let base = std::env::temp_dir().join(format!("stutter-hub-cgroup-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    for group in ["game.scope", "other.scope"] {
+        let dir = base.join(group);
+        std::fs::create_dir_all(&dir).unwrap();
+        for resource in ["cpu", "memory", "io"] {
+            std::fs::write(
+                dir.join(format!("{resource}.pressure")),
+                "some avg10=1.00 avg60=0.00 avg300=0.00 total=100\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=10\n",
+            )
+            .unwrap();
+        }
+    }
+    let proc_root = std::path::Path::new("/proc");
+    let mut hub = super::super::sensor_hub::SensorHub::with_cgroup_root(proc_root, &base);
+    hub.track_target_cgroup(Some("/game.scope"));
+    let readings = hub.sample();
+    let cgroup = readings
+        .iter()
+        .find(|r| r.sensor == "psi_cgroup")
+        .expect("cgroup pressure follows the target");
+    assert!(
+        cgroup.provenance.ends_with("game.scope"),
+        "{}",
+        cgroup.provenance
+    );
+    // The target changes: the sensor now follows the new cgroup, not the old one.
+    hub.track_target_cgroup(Some("/other.scope"));
+    let readings = hub.sample();
+    let cgroup = readings.iter().find(|r| r.sensor == "psi_cgroup").unwrap();
+    assert!(
+        cgroup.provenance.ends_with("other.scope"),
+        "{}",
+        cgroup.provenance
+    );
+    // No target cgroup, or a path that tries to leave the mount: nothing is followed.
+    hub.track_target_cgroup(None);
+    assert!(hub.sample().iter().all(|r| r.sensor != "psi_cgroup"));
+    hub.track_target_cgroup(Some("/../../etc"));
+    assert!(hub.sample().iter().all(|r| r.sensor != "psi_cgroup"));
+    std::fs::remove_dir_all(&base).unwrap();
+}

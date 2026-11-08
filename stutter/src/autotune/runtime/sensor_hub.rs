@@ -17,6 +17,9 @@ use crate::{
 
 pub(super) struct SensorHub {
     registry: SensorRegistry,
+    cgroup_root: std::path::PathBuf,
+    /// The cgroup whose pressure the `psi_cgroup` sensor currently follows.
+    tracked_cgroup: Option<String>,
     escalator: Escalator,
     pmu_targets: PmuTargets,
     started: Instant,
@@ -26,6 +29,10 @@ pub(super) struct SensorHub {
 
 impl SensorHub {
     pub(super) fn new(proc_root: &Path) -> Self {
+        Self::with_cgroup_root(proc_root, Path::new("/sys/fs/cgroup"))
+    }
+
+    pub(super) fn with_cgroup_root(proc_root: &Path, cgroup_root: &Path) -> Self {
         let mut registry = SensorRegistry::new(ExpensiveBudget::default());
         // The PMU sensor is registered but never activated here: only an escalation starts it.
         let pmu = PmuSensor::new(CpuPerfConfig {
@@ -73,10 +80,39 @@ impl SensorHub {
         }
         Self {
             registry,
+            cgroup_root: cgroup_root.to_path_buf(),
+            tracked_cgroup: None,
             escalator: Escalator::new(Thresholds::default()),
             pmu_targets,
             started,
             unavailable,
+        }
+    }
+
+    /// Follows the pressure of the target's own cgroup (for example `/user.slice/app-game.scope`).
+    /// A change of target replaces the sensor, so pressure of an old target never describes a new
+    /// one; a target without a cgroup, or one whose pressure files are absent, simply has none.
+    pub(super) fn track_target_cgroup(&mut self, cgroup_path: Option<&str>) {
+        if self.tracked_cgroup.as_deref() == cgroup_path {
+            return;
+        }
+        let now_ns = self.started.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64;
+        self.registry.deactivate("psi_cgroup", now_ns);
+        self.tracked_cgroup = cgroup_path.map(str::to_owned);
+        let Some(path) = cgroup_path else { return };
+        let relative = path.trim_start_matches('/');
+        // The path comes from procfs; never let it climb out of the cgroup mount.
+        if relative.split('/').any(|part| part == ".." || part == ".") {
+            return;
+        }
+        self.registry.register(Box::new(PsiSensor::cgroup(
+            &self.cgroup_root.join(relative),
+        )));
+        if let Err(denied) = self.registry.activate("psi_cgroup", now_ns) {
+            log::debug!(
+                "sensor psi_cgroup unavailable for {path}: {}",
+                describe(&denied)
+            );
         }
     }
 

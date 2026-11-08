@@ -272,6 +272,13 @@ impl AutotuneRuntime {
 
         let mut observation = self.build_observation();
         observation.external_owners = self.current_external_owners();
+        // The pressure of the target's own cgroup follows the target, and only the target.
+        self.sensor_hub.track_target_cgroup(
+            observation
+                .workload_identity
+                .as_ref()
+                .and_then(|identity| identity.cgroup_path.as_deref()),
+        );
         self.sensor_hub
             .set_pmu_targets(&self.target_state.active_tasks);
         observation.sensor_readings = self.sensor_hub.sample();
