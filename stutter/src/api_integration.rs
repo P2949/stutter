@@ -22,7 +22,7 @@ pub mod sensors {
 
 pub mod topology {
     //! Cache, die, capacity, NUMA-distance and PCI-locality facts with a change fingerprint.
-    pub use crate::topology_v2::*;
+    pub use crate::{topology_hwloc::*, topology_v2::*};
 }
 
 pub mod telemetry {

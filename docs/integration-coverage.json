@@ -255,14 +255,15 @@
       ],
       "anchors": [
         "stutter/src/topology_v2.rs",
-        "stutter/src/topology.rs"
+        "stutter/src/topology.rs",
+        "stutter/src/topology_hwloc.rs"
       ],
       "status": "first_slice",
-      "g0": "native topology v2 from sysfs: LLC domains, capacity classes, larger-cache regions from verified sizes, dies, frequency domains, NUMA distances, GPU locality, cpuset-effective CPUs and a change fingerprint, reported by doctor; no hwloc cross-check",
+      "g0": "native topology v2 from sysfs: LLC domains, capacity classes, larger-cache regions from verified sizes, dies, frequency domains, NUMA distances, GPU locality, cpuset-effective CPUs and a change fingerprint, reported by doctor; an hwloc XML export is read as data and cross-checked against native cache domains and usable CPUs (advisory: a difference is named, never applied; hwloc is never linked or run)",
       "g1": "none",
       "runtime_availability": "absent",
       "authority": "O/B",
-      "not_wired": "the planner does not yet use topology v2 for placement hypotheses; no hwloc XML cross-check",
+      "not_wired": "the planner does not yet use topology v2 for placement hypotheses; the cross-check is a library function not yet exposed through doctor or a CLI",
       "dispositions": [
         "FixtureVerified",
         "HardwareUnavailable",

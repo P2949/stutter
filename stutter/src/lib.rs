@@ -81,6 +81,7 @@ pub(crate) mod task_class;
 pub(crate) mod tasks;
 pub(crate) mod telemetry;
 pub(crate) mod topology;
+pub(crate) mod topology_hwloc;
 pub(crate) mod topology_v2;
 pub(crate) mod tui;
 pub(crate) mod tune;
