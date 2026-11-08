@@ -510,13 +510,15 @@
         "W9",
         "W11d"
       ],
-      "anchors": [],
-      "status": "not_started",
-      "g0": "none",
-      "g1": "none",
+      "anchors": [
+        "stutter/src/actions/pm_qos.rs"
+      ],
+      "status": "first_slice",
+      "g0": "descriptor-bound CPU-latency lease for /dev/cpu_dma_latency: binary u32 request, aggregate-target verification, hold deadline, release on drop or holder death; policy with a latency floor and ceiling and AC and no-throttling guards that fail closed",
+      "g1": "/dev/cpu_dma_latency exists on this host; no lease has been taken",
       "runtime_availability": "/dev/cpu_dma_latency present",
       "authority": "O/E",
-      "not_wired": "no lease operation, no sensor"
+      "not_wired": "not an operation kind and not routed through the worker: no journal, no controller path, no experiment; system-wide effect so it can never be a low-risk default"
     },
     {
       "id": "5.24",
@@ -555,7 +557,7 @@
       "g1": "none",
       "runtime_availability": "clang, gcc, llvm-bolt, perf2bolt absent on PATH",
       "authority": "F",
-      "not_wired": "no offline_optimization module"
+      "not_wired": "not started: no offline_optimization module, no PGO, AutoFDO or BOLT workflow; compilers and BOLT tools are absent on this PATH"
     },
     {
       "id": "5.26",

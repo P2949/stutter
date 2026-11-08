@@ -64,3 +64,8 @@ pub mod boot_environment {
     //! The boot environment's identity: kernel, preemption model, isolation parameters, generation.
     pub use crate::boot_environment::*;
 }
+
+pub mod pm_qos {
+    //! The PM QoS CPU-latency lease: policy, power guards and a descriptor-bound request.
+    pub use crate::actions::pm_qos::*;
+}
