@@ -5,6 +5,9 @@
 //! the tool and version, the exact argv, the build id, the role and phase, the unit, the
 //! independent run id, the clock window, the population and loss, the exit status and the SHA-256
 //! of every artifact file, and refuses an oversize, truncated or tampered file.
+mod diagnostics;
+#[cfg(test)]
+mod diagnostics_tests;
 mod hyperfine;
 mod scores;
 #[cfg(test)]
@@ -178,6 +181,12 @@ pub enum ScoreTool {
     StressNg,
     Benchstat,
     Phoronix,
+    Iostat,
+    Pidstat,
+    Numastat,
+    Blkparse,
+    Tuna,
+    Cyclictest,
 }
 
 fn import_scores(tool: ScoreTool, file: &Path) -> anyhow::Result<String> {
@@ -191,6 +200,14 @@ fn import_scores(tool: ScoreTool, file: &Path) -> anyhow::Result<String> {
         ScoreTool::StressNg => serde_json::to_string_pretty(&scores::import_stress_ng(&text)?)?,
         ScoreTool::Benchstat => serde_json::to_string_pretty(&scores::import_benchstat(&text)?)?,
         ScoreTool::Phoronix => serde_json::to_string_pretty(&scores::import_phoronix(&text)?)?,
+        ScoreTool::Iostat => serde_json::to_string_pretty(&diagnostics::import_iostat(&text)?)?,
+        ScoreTool::Pidstat => serde_json::to_string_pretty(&diagnostics::import_pidstat(&text)?)?,
+        ScoreTool::Numastat => serde_json::to_string_pretty(&diagnostics::import_numastat(&text)?)?,
+        ScoreTool::Blkparse => serde_json::to_string_pretty(&diagnostics::import_blkparse(&text)?)?,
+        ScoreTool::Tuna => serde_json::to_string_pretty(&diagnostics::import_tuna(&text)?)?,
+        ScoreTool::Cyclictest => {
+            serde_json::to_string_pretty(&diagnostics::import_cyclictest(&text)?)?
+        }
     })
 }
 

@@ -30,7 +30,7 @@ fn each_tool_parses_into_typed_scores_and_none_is_application_proof() {
 
     let phoronix = import_phoronix(PHORONIX).unwrap();
     assert_eq!(phoronix.scores[0].value, 1500.5);
-    assert!(phoronix.scores[0].higher_is_better);
+    assert_eq!(phoronix.scores[0].higher_is_better, Some(true));
     assert!(!phoronix.application_proof);
 }
 

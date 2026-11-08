@@ -328,7 +328,7 @@
       "g1": "none",
       "runtime_availability": "all absent",
       "authority": "B/O/F",
-      "not_wired": "no per-tool importers for BCC, bpftrace, trace-cmd, KernelShark, rtla or cyclictest yet, only the generic manifest",
+      "not_wired": "a cyclictest summary importer exists; no importers for BCC, bpftrace, trace-cmd, KernelShark or rtla, and no bounded Aya causal probes",
       "dispositions": [
         "FixtureVerified",
         "HardwareUnavailable",
@@ -933,14 +933,15 @@
         "W13"
       ],
       "anchors": [
-        "xtask/src/benchmarks/mod.rs"
+        "xtask/src/benchmarks/mod.rs",
+        "xtask/src/benchmarks/diagnostics.rs"
       ],
-      "status": "first_slice",
-      "g0": "the same verified manifest covers iostat, pidstat, numastat and blktrace captures as artifact files with checksums and loss accounting",
+      "status": "code_complete",
+      "g0": "tool-specific parsers (`xtask benchmarks import-scores`: iostat, pidstat, numastat, blkparse, tuna) give typed diagnostic scores with no better-direction and application_proof=false; the same verified manifest covers iostat, pidstat, numastat and blktrace captures as artifact files with checksums and loss accounting",
       "g1": "none",
       "runtime_availability": "all absent",
       "authority": "O/F",
-      "not_wired": "no tool-specific parsers",
+      "not_wired": "nothing",
       "dispositions": [
         "FixtureVerified",
         "HardwareUnavailable",

@@ -14,7 +14,8 @@ pub struct Score {
     pub label: String,
     pub value: f64,
     pub unit: String,
-    pub higher_is_better: bool,
+    /// `None` when the tool does not say which direction is better (a diagnostic column).
+    pub higher_is_better: Option<bool>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -25,7 +26,7 @@ pub struct ImportedScores {
     pub application_proof: bool,
 }
 
-fn finite(text: &str) -> Option<f64> {
+pub(super) fn finite(text: &str) -> Option<f64> {
     text.trim()
         .trim_end_matches('s')
         .parse::<f64>()
@@ -33,13 +34,13 @@ fn finite(text: &str) -> Option<f64> {
         .filter(|v| v.is_finite() && *v >= 0.0)
 }
 
-fn score(tool: &str, label: &str, value: f64, unit: &str, higher: bool) -> Score {
+pub(super) fn score(tool: &str, label: &str, value: f64, unit: &str, higher: bool) -> Score {
     Score {
         tool: tool.to_owned(),
         label: label.to_owned(),
         value,
         unit: unit.to_owned(),
-        higher_is_better: higher,
+        higher_is_better: Some(higher),
     }
 }
 
