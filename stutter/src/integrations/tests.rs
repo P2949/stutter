@@ -356,7 +356,7 @@ mod adapter_reports {
             &["gamemoded", ".lact-wrapped", "systemd-oomd"],
             Some("disabled"),
         ));
-        assert_eq!(reports.len(), 13);
+        assert_eq!(reports.len(), 15);
         assert_eq!(
             status(&reports, KnownOwner::GameMode),
             AdapterStatus::Conflict

@@ -24,6 +24,11 @@ impl AutotuneRuntime {
             let (clients, _games) = crate::integrations::exact::read_gamemode();
             crate::integrations::exact::refine_gamemode(&mut report, &clients);
         }
+        // Tools with no long-running process (TLP) are visible only as an active systemd unit.
+        crate::integrations::units::refine_with_units(
+            &mut report,
+            &crate::integrations::units::read_system_unit_states(),
+        );
         *cache = Some((now, report.clone()));
         Some(report)
     }

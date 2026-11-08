@@ -471,11 +471,11 @@
         "stutter/src/integrations/exact.rs"
       ],
       "status": "first_slice",
-      "g0": "auto-cpufreq and power-profiles-daemon presence mark CPU power owned; the read-only D-Bus client reads power-profiles-daemon ActiveProfile when its name has an owner",
+      "g0": "auto-cpufreq and power-profiles-daemon presence mark CPU power owned; TLP and thermald are detected through systemd exact unit state (GetUnit/ActiveState, read-only, fake-bus tested); the read-only D-Bus client reads power-profiles-daemon ActiveProfile when its name has an owner",
       "g1": "power-profiles-daemon read over the system bus on this host: no owner (absent)",
       "runtime_availability": "all absent",
       "authority": "O/A/D",
-      "not_wired": "no HoldProfile/ReleaseProfile scoped hold, no TLP probe",
+      "not_wired": "no HoldProfile/ReleaseProfile scoped hold",
       "dispositions": [
         "FixtureVerified",
         "HardwareUnavailable",
@@ -505,7 +505,7 @@
       "g1": "read on this host at runtime (intel_pstate, 12 policies)",
       "runtime_availability": "thermald absent",
       "authority": "O/A",
-      "not_wired": "no thermald probe, no RAPL/package-power or C-state residency, no per-policy EPP experiment path; sensor results do not feed any decision",
+      "not_wired": "no RAPL/package-power or C-state residency, no per-policy EPP experiment path; sensor results do not feed any decision",
       "related_existing": [
         "stutter/src/system_inventory.rs"
       ],

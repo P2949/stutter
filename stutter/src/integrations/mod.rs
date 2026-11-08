@@ -54,6 +54,9 @@ pub enum KnownOwner {
     /// Kills under memory pressure: never tuned, only a guardrail.
     SystemdOomd,
     Uresourced,
+    /// Applies power settings from a oneshot unit: visible only through systemd.
+    Tlp,
+    Thermald,
 }
 
 struct OwnerSpec {
@@ -130,6 +133,16 @@ const OWNERS: &[OwnerSpec] = &[
         owner: KnownOwner::Uresourced,
         comms: &["uresourced"],
         domains: &[],
+    },
+    OwnerSpec {
+        owner: KnownOwner::Tlp,
+        comms: &[],
+        domains: &[D::CpuPower],
+    },
+    OwnerSpec {
+        owner: KnownOwner::Thermald,
+        comms: &["thermald"],
+        domains: &[D::CpuPower],
     },
 ];
 
@@ -280,6 +293,8 @@ impl OwnerReport {
             KnownOwner::Irqbalance => "irqbalance manages IRQ affinity",
             KnownOwner::Bpftune => "bpftune manages network and VM settings",
             KnownOwner::Numad => "numad manages memory placement",
+            KnownOwner::Tlp => "TLP manages power settings",
+            KnownOwner::Thermald => "thermald manages thermal limits",
             KnownOwner::SystemdOomd | KnownOwner::Uresourced => "an out-of-memory guard owns this",
         })
     }
@@ -338,6 +353,7 @@ pub mod adapters;
 pub mod dbus;
 pub mod exact;
 pub mod scx_loader;
+pub mod units;
 pub mod user_intent;
 
 /// The domains some other owner currently claims in `report`.

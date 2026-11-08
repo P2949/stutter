@@ -57,6 +57,7 @@ fn interface_of(owner: KnownOwner) -> Interface {
         KnownOwner::GameMode => Interface::Dbus("com.feralinteractive.GameMode"),
         KnownOwner::Tuned => Interface::Dbus("com.redhat.tuned"),
         KnownOwner::SystemdOomd => Interface::Dbus("org.freedesktop.oom1"),
+        KnownOwner::Tlp | KnownOwner::Thermald => Interface::Dbus("org.freedesktop.systemd1"),
         KnownOwner::Lact
         | KnownOwner::AnanicyCpp
         | KnownOwner::System76Scheduler
