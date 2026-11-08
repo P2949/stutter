@@ -562,6 +562,20 @@ mod gamescope {
         path
     }
 
+    /// Probes, retrying only the transient "Text file busy" a freshly written script can hit when
+    /// another test thread forks while its write descriptor is still open.
+    fn probe_script(path: &Path) -> GamescopeSupport {
+        for _ in 0..50 {
+            match probe(path) {
+                GamescopeSupport::Unprobeable(reason) if reason.contains("busy") => {
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
+                other => return other,
+            }
+        }
+        probe(path)
+    }
+
     #[test]
     fn help_text_decides_whether_mangoapp_is_documented() {
         assert!(help_documents_mangoapp(
@@ -577,13 +591,16 @@ mod gamescope {
             "with",
             "echo 'usage: gamescope'; echo '  --mangoapp  enable mangoapp'",
         );
-        assert_eq!(probe(&with), GamescopeSupport::Installed { mangoapp: true });
+        assert_eq!(
+            probe_script(&with),
+            GamescopeSupport::Installed { mangoapp: true }
+        );
         let without = script(
             "without",
             "echo 'usage: gamescope'; echo '  --fsr-sharpness N'",
         );
         assert_eq!(
-            probe(&without),
+            probe_script(&without),
             GamescopeSupport::Installed { mangoapp: false }
         );
         assert_eq!(
@@ -598,7 +615,10 @@ mod gamescope {
     fn a_hanging_binary_is_killed_at_the_deadline() {
         let hung = script("hung", "sleep 60");
         let started = std::time::Instant::now();
-        assert!(matches!(probe(&hung), GamescopeSupport::Unprobeable(_)));
+        assert!(matches!(
+            probe_script(&hung),
+            GamescopeSupport::Unprobeable(_)
+        ));
         assert!(started.elapsed() < std::time::Duration::from_secs(10));
         fs::remove_dir_all(hung.parent().unwrap()).unwrap();
     }
