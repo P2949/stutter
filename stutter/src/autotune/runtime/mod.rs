@@ -11,6 +11,7 @@ pub(crate) mod daemon_state;
 pub(crate) mod decision_view;
 pub(crate) mod emission;
 mod frame_source;
+mod guards;
 pub(crate) mod history;
 mod kept_release;
 mod lifecycle;
@@ -116,6 +117,8 @@ pub struct AutotuneRuntime {
     sensor_hub: sensor_hub::SensorHub,
     /// The cached context signature: when computed, for which inventory hash, and its value.
     context_cache: std::sync::Mutex<Option<(std::time::Instant, String, String)>>,
+    /// The domains another owner claimed at the last owner probe.
+    claimed_domains: std::collections::BTreeSet<crate::integrations::ResourceDomain>,
 }
 
 #[cfg(test)]

@@ -433,3 +433,30 @@ fn a_real_owner_probe_and_context_signature_cost_little_on_this_host() {
         "{per_probe:?}"
     );
 }
+
+#[test]
+fn an_owner_that_appears_during_an_experiment_is_noticed_only_for_the_domain_it_changes() {
+    use std::collections::BTreeSet;
+    let base = root("appear");
+    let (proc_root, sys) = (base.join("proc"), base.join("sys"));
+    fs::create_dir_all(&proc_root).unwrap();
+    let quiet = probe(&proc_root, &sys);
+    let before = claimed_domains(&quiet);
+    assert!(before.is_empty());
+    process(&proc_root, 1, "gamemoded");
+    let busy = probe(&proc_root, &sys);
+    assert!(claimed_domains(&busy).contains(&D::TaskPriority));
+    // GameMode appeared: a Nice or governor experiment is invalidated, an affinity one is not.
+    assert!(owner_appeared_for(&before, &busy, Op::Nice));
+    assert!(owner_appeared_for(&before, &busy, Op::CpuPowerGovernor));
+    assert!(!owner_appeared_for(&before, &busy, Op::CpuAffinityProfile));
+    assert!(!owner_appeared_for(&before, &busy, Op::GpuPowerProfile));
+    // Already claimed at the start of the experiment: not an appearance.
+    assert!(!owner_appeared_for(
+        &claimed_domains(&busy),
+        &busy,
+        Op::Nice
+    ));
+    assert!(!owner_appeared_for(&BTreeSet::new(), &quiet, Op::Nice));
+    fs::remove_dir_all(&base).unwrap();
+}

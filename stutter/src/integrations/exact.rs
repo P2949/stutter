@@ -151,3 +151,155 @@ mod tests {
         }
     }
 }
+
+/// GameMode's exact state alone, reading only the session bus and only when asked, so the runtime
+/// does not connect to a bus for tools that are not running.
+pub fn read_gamemode() -> (Exact<i64>, Exact<Vec<u32>>) {
+    let mut session = connect(BusKind::Session);
+    let clients = read_property(
+        &mut session,
+        "com.feralinteractive.GameMode",
+        "/com/feralinteractive/GameMode",
+        "com.feralinteractive.GameMode",
+        "ClientCount",
+        integer,
+    );
+    let games = match (&clients, &mut session) {
+        (Exact::Present(count), Ok(client)) if *count > 0 => list_games(client),
+        (Exact::Present(_), _) => Exact::Present(Vec::new()),
+        (Exact::Absent, _) => Exact::Absent,
+        (Exact::Unreachable(reason), _) => Exact::Unreachable(reason.clone()),
+    };
+    (clients, games)
+}
+
+/// The processes registered with GameMode: `ListGames` returns `a(io)`, pid then object path.
+fn list_games(client: &mut DbusClient) -> Exact<Vec<u32>> {
+    match client.call(
+        "com.feralinteractive.GameMode",
+        "/com/feralinteractive/GameMode",
+        "com.feralinteractive.GameMode",
+        "ListGames",
+        "",
+        &[],
+    ) {
+        Ok(values) => match values.first() {
+            Some(Value::Array(items)) => Exact::Present(games_from(items)),
+            _ => Exact::Unreachable("unexpected ListGames reply".to_owned()),
+        },
+        Err(error) => Exact::Unreachable(format!("{error:?}")),
+    }
+}
+
+/// The pids in a `ListGames` array. A malformed entry is skipped, never guessed.
+pub fn games_from(items: &[Value]) -> Vec<u32> {
+    items
+        .iter()
+        .filter_map(|item| match item {
+            Value::Struct(fields) => match fields.first() {
+                Some(Value::I32(pid)) => u32::try_from(*pid).ok(),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect()
+}
+
+/// Refines a process-name report with what GameMode says about itself. Only an exact answer may
+/// *lower* a claim: a GameMode serving nobody (`ClientCount` 0) claims no domain because it only
+/// acts for registered clients. A reachable client count above zero keeps the claim, and an
+/// unreachable bus changes nothing, so the report still fails closed.
+pub fn refine_gamemode(report: &mut super::OwnerReport, clients: &Exact<i64>) {
+    use super::{Daemon, KnownOwner};
+    if report.daemon(KnownOwner::GameMode) != Daemon::Running {
+        return;
+    }
+    match clients {
+        Exact::Present(0) => {
+            report.daemons.insert(KnownOwner::GameMode, Daemon::Idle);
+        }
+        Exact::Present(_) | Exact::Absent | Exact::Unreachable(_) => {}
+    }
+}
+
+#[cfg(test)]
+mod gamemode_tests {
+    use super::*;
+    use crate::integrations::{Daemon, KnownOwner, OwnerReport, ResourceDomain, SchedExt};
+
+    fn report(state: Daemon) -> OwnerReport {
+        let mut daemons = std::collections::BTreeMap::new();
+        for (owner, _) in crate::integrations::owner_domains() {
+            daemons.insert(owner, Daemon::NotRunning);
+        }
+        daemons.insert(KnownOwner::GameMode, state);
+        OwnerReport {
+            sched_ext: SchedExt::Disabled,
+            daemons,
+        }
+    }
+
+    #[test]
+    fn a_gamemode_serving_nobody_claims_no_domain_and_every_other_answer_keeps_the_claim() {
+        let mut idle = report(Daemon::Running);
+        refine_gamemode(&mut idle, &Exact::Present(0));
+        assert_eq!(idle.daemon(KnownOwner::GameMode), Daemon::Idle);
+        assert_eq!(idle.external_owner(ResourceDomain::TaskPriority), None);
+        assert_eq!(idle.external_owner(ResourceDomain::CpuPower), None);
+
+        for kept in [
+            Exact::Present(2),
+            Exact::Absent,
+            Exact::Unreachable("bus down".into()),
+        ] {
+            let mut report = report(Daemon::Running);
+            refine_gamemode(&mut report, &kept);
+            assert_eq!(
+                report.daemon(KnownOwner::GameMode),
+                Daemon::Running,
+                "{kept:?}"
+            );
+            assert!(
+                report
+                    .external_owner(ResourceDomain::TaskPriority)
+                    .is_some(),
+                "{kept:?}"
+            );
+        }
+        // A process that is not running is never refined into anything.
+        let mut absent = report(Daemon::NotRunning);
+        refine_gamemode(&mut absent, &Exact::Present(0));
+        assert_eq!(absent.daemon(KnownOwner::GameMode), Daemon::NotRunning);
+    }
+
+    #[test]
+    fn the_registered_games_come_from_the_listgames_structs_and_bad_entries_are_skipped() {
+        let items = vec![
+            Value::Struct(vec![Value::I32(4242), Value::Path("/g/1".into())]),
+            Value::Struct(vec![Value::I32(-1), Value::Path("/g/2".into())]),
+            Value::Struct(vec![Value::Str("x".into())]),
+            Value::U32(7),
+        ];
+        assert_eq!(games_from(&items), vec![4242]);
+        assert!(games_from(&[]).is_empty());
+    }
+}
+
+/// Whether `root_pid` (or a descendant the caller names) is registered with GameMode. This is an
+/// *identity* annotation only: it can corroborate that a process is a game, and it never raises
+/// the trust of a frame or KPI source and never authorises an operation.
+pub fn is_registered_with_gamemode(games: &[u32], pid: u32) -> bool {
+    games.contains(&pid)
+}
+
+#[cfg(test)]
+mod gamemode_identity_tests {
+    use super::is_registered_with_gamemode;
+
+    #[test]
+    fn registration_corroborates_identity_for_exactly_the_listed_pids() {
+        assert!(is_registered_with_gamemode(&[4242, 7], 4242));
+        assert!(!is_registered_with_gamemode(&[4242], 4243));
+        assert!(!is_registered_with_gamemode(&[], 1));
+    }
+}

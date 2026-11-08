@@ -22,21 +22,23 @@
       "anchors": [
         "stutter/src/integrations/mod.rs",
         "stutter/src/integrations/dbus/mod.rs",
-        "stutter/src/integrations/exact.rs"
+        "stutter/src/integrations/exact.rs",
+        "stutter/src/autotune/runtime/guards.rs",
+        "xtask/src/real_workload/run.rs"
       ],
-      "status": "first_slice",
-      "g0": "owner presence probe and per-domain denial; plus a bounded read-only D-Bus client that reads GameMode ClientCount through its own session-bus interface",
-      "g1": "gamemoded running and its exact D-Bus ClientCount read as 0 (idle) on this host",
+      "status": "code_complete",
+      "g0": "GameMode is detected by its own D-Bus interface: ClientCount (idle versus serving) and ListGames pids; an idle GameMode claims no domain (only an exact answer can lower a claim; unreachable keeps it), an active one denies task-priority and CPU-power operations; a GameMode that starts serving during an experiment restores and invalidates it; registration is an identity annotation only, never KPI trust; xtask real-workload can run an opaque whole-profile gamemoderun-on versus off comparison",
+      "g1": "gamemoded observed running and its exact D-Bus ClientCount read as 0 (idle) on this host",
       "runtime_availability": "present",
       "authority": "O/A/F",
-      "not_wired": "presence still denies task-priority and CPU-power operations even at ClientCount 0 (fail closed); no per-target activation attribution",
+      "not_wired": "nothing",
       "dispositions": [
+        "CodeComplete",
         "FixtureVerified",
         "RealObserved",
         "EvidenceDeferred"
       ],
-      "evidence": [],
-      "unblock": null
+      "evidence": []
     },
     {
       "id": "5.2",

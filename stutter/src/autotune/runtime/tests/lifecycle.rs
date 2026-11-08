@@ -318,3 +318,31 @@ fn a_firing_memory_guard_restores_a_running_experiment_and_a_quiet_one_leaves_it
     // With nothing running, a firing guard has nothing to abort and changes nothing.
     assert!(!runtime.abort_on_memory_guard(&[guard(5.0)]).unwrap());
 }
+
+#[test]
+fn an_owner_appearing_leaves_an_experiment_alone_unless_its_operation_changes_that_domain() {
+    use crate::integrations::{Daemon, KnownOwner, OwnerReport, SchedExt};
+    let mut daemons = std::collections::BTreeMap::new();
+    for (owner, _) in crate::integrations::owner_domains() {
+        daemons.insert(owner, Daemon::NotRunning);
+    }
+    let quiet = OwnerReport {
+        sched_ext: SchedExt::Disabled,
+        daemons: daemons.clone(),
+    };
+    daemons.insert(KnownOwner::GameMode, Daemon::Running);
+    let busy = OwnerReport {
+        sched_ext: SchedExt::Disabled,
+        daemons,
+    };
+    let mut runtime = simulated_runtime_with_active_experiment();
+    runtime
+        .transition_runtime_phase(AutotuneRuntimePhase::MeasuringCandidate, "test")
+        .unwrap();
+    assert!(!runtime.abort_on_owner_appearance(None).unwrap());
+    assert!(!runtime.abort_on_owner_appearance(Some(&quiet)).unwrap());
+    // The simulated experiment is an unclassified fake: its operation changes no claimable domain,
+    // so GameMode appearing does not touch it, and the claims are remembered.
+    assert!(!runtime.abort_on_owner_appearance(Some(&busy)).unwrap());
+    assert!(runtime.has_active_experiment());
+}

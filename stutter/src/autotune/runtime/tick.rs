@@ -272,6 +272,7 @@ impl AutotuneRuntime {
 
         let mut observation = self.build_observation();
         observation.external_owners = self.current_external_owners();
+        self.abort_on_owner_appearance(observation.external_owners.as_ref())?;
         // The pressure of the target's own cgroup follows the target, and only the target.
         self.sensor_hub.track_target_cgroup(
             observation
@@ -647,48 +648,5 @@ impl AutotuneRuntime {
             std::time::Instant::now(),
         );
         self.controller.window.attest_frame_stream(quality);
-    }
-}
-
-/// How long an owner probe stays valid before `/proc` is scanned again.
-const OWNER_PROBE_TTL: std::time::Duration = std::time::Duration::from_secs(30);
-
-impl AutotuneRuntime {
-    /// The other tuning owners on the host, probed at most once per `OWNER_PROBE_TTL`.
-    fn current_external_owners(&self) -> Option<crate::integrations::OwnerReport> {
-        let mut cache = self.owner_cache.lock().ok()?;
-        let now = std::time::Instant::now();
-        if let Some((at, report)) = cache.as_ref()
-            && now.duration_since(*at) < OWNER_PROBE_TTL
-        {
-            return Some(report.clone());
-        }
-        let report =
-            crate::integrations::probe(std::path::Path::new("/proc"), std::path::Path::new("/sys"));
-        *cache = Some((now, report.clone()));
-        Some(report)
-    }
-}
-
-impl AutotuneRuntime {
-    /// Restores and invalidates a running experiment when the session's memory guard fired in
-    /// `readings`. Returns whether it did. It never starts or changes anything.
-    pub(super) fn abort_on_memory_guard(
-        &mut self,
-        readings: &[crate::autotune::sensors::SensorReading],
-    ) -> anyhow::Result<bool> {
-        let Some(event) = crate::autotune::sensors::memory_guard_event(readings)
-            .or_else(|| crate::autotune::sensors::thermal_guard_event(readings))
-        else {
-            return Ok(false);
-        };
-        if !self.has_active_experiment() {
-            return Ok(false);
-        }
-        self.rollback_live_experiment(
-            crate::audit::unix_nanos_now(),
-            &format!("session guard fired: {event}"),
-        )?;
-        Ok(true)
     }
 }

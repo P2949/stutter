@@ -39,6 +39,7 @@ impl AutotuneRuntime {
             last_frame_discovery: None,
             sensor_hub: super::sensor_hub::SensorHub::new(std::path::Path::new("/proc")),
             context_cache: std::sync::Mutex::default(),
+            claimed_domains: std::collections::BTreeSet::new(),
             recent_diagnoses: VecDeque::new(),
             activity_classifier: ActivityClassifier::new(5),
             live_experiments: LiveExperimentManager::new(),

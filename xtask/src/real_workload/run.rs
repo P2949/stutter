@@ -27,9 +27,16 @@ use crate::{
 pub enum Candidate {
     /// Pin the workload to a CPU list with `taskset`.
     Taskset(String),
+    /// Run the workload under `gamemoderun`: an opaque, whole-profile comparison of GameMode on
+    /// against off. The effect is the profile's as a whole, never a per-knob attribution, and it
+    /// gives the baseline no GameMode at all.
+    GameMode,
 }
 
 pub fn parse_candidate(text: &str) -> Option<Candidate> {
+    if text == "gamemode" {
+        return Some(Candidate::GameMode);
+    }
     let list = text.strip_prefix("taskset:")?;
     (!list.is_empty()
         && list
@@ -81,8 +88,12 @@ pub fn execution_argv(
         "--".into(),
     ];
     if arm == Arm::Treatment {
-        let Candidate::Taskset(list) = candidate;
-        argv.extend(["taskset".into(), "-c".into(), list.clone()]);
+        match candidate {
+            Candidate::Taskset(list) => {
+                argv.extend(["taskset".into(), "-c".into(), list.clone()]);
+            }
+            Candidate::GameMode => argv.push("gamemoderun".into()),
+        }
     }
     argv.extend(manifest.command.iter().cloned());
     argv

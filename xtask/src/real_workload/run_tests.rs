@@ -53,6 +53,10 @@ fn only_a_known_unprivileged_treatment_is_parsed_and_arms_differ_only_by_it() {
         parse_candidate("taskset:2-3,6"),
         Some(Candidate::Taskset("2-3,6".into()))
     );
+    assert_eq!(parse_candidate("gamemode"), Some(Candidate::GameMode));
+    for not_gamemode in ["gamemode:1", "GameMode", "gamemoderun"] {
+        assert_eq!(parse_candidate(not_gamemode), None, "{not_gamemode}");
+    }
     for bad in ["taskset:", "taskset:1;rm", "nice:5", "cpu_affinity_profile"] {
         assert_eq!(parse_candidate(bad), None, "{bad}");
     }
@@ -279,4 +283,39 @@ fn arbitrary_frame_log_text_never_panics_and_damaged_logs_are_refused() {
             );
         }
     }
+}
+
+#[test]
+fn a_gamemode_comparison_is_the_whole_profile_on_against_off_and_nothing_else_differs() {
+    let manifest = tiny_manifest(
+        "a".repeat(64),
+        "gamemode",
+        vec!["game".into(), "--x".into()],
+    );
+    let base = execution_argv(
+        Path::new("/s"),
+        Path::new("/c"),
+        &manifest,
+        Arm::Baseline,
+        &Candidate::GameMode,
+    );
+    let treat = execution_argv(
+        Path::new("/s"),
+        Path::new("/c"),
+        &manifest,
+        Arm::Treatment,
+        &Candidate::GameMode,
+    );
+    assert!(
+        !base.contains(&"gamemoderun".to_owned()),
+        "the baseline has no GameMode at all"
+    );
+    assert!(treat.ends_with(&[
+        "--".to_owned(),
+        "gamemoderun".into(),
+        "game".into(),
+        "--x".into()
+    ]));
+    // Everything before the treatment prefix is identical in both arms.
+    assert_eq!(base[..base.len() - 2], treat[..treat.len() - 3]);
 }

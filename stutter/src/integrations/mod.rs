@@ -148,6 +148,9 @@ pub enum SchedExt {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Daemon {
     NotRunning,
+    /// The process runs but the tool's own interface says it is serving nobody right now, so it
+    /// claims no domain. Only an exact interface can say this; a process name never can.
+    Idle,
     /// The process exists. Whether it currently acts is not known from here.
     Running,
     /// `/proc` could not be scanned: treated as running.
@@ -249,7 +252,7 @@ impl OwnerReport {
         OWNERS
             .iter()
             .filter(|spec| spec.domains.contains(&domain))
-            .filter(|spec| self.daemon(spec.owner) != Daemon::NotRunning)
+            .filter(|spec| !matches!(self.daemon(spec.owner), Daemon::NotRunning | Daemon::Idle))
             .map(|spec| spec.owner)
             .collect()
     }
@@ -336,3 +339,23 @@ pub mod dbus;
 pub mod exact;
 pub mod scx_loader;
 pub mod user_intent;
+
+/// The domains some other owner currently claims in `report`.
+pub fn claimed_domains(report: &OwnerReport) -> std::collections::BTreeSet<ResourceDomain> {
+    ALL_DOMAINS
+        .into_iter()
+        .filter(|domain| report.external_owner(*domain).is_some())
+        .collect()
+}
+
+/// Whether `operation` changes a domain that became claimed since `previous`: an owner that
+/// appeared (GameMode started serving a game, a manager started) while an experiment runs.
+pub fn owner_appeared_for(
+    previous: &std::collections::BTreeSet<ResourceDomain>,
+    report: &OwnerReport,
+    operation: MutationOperationKind,
+) -> bool {
+    operation_domain(operation).is_some_and(|domain| {
+        report.external_owner(domain).is_some() && !previous.contains(&domain)
+    })
+}

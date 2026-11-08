@@ -75,7 +75,7 @@ pub fn adapter_reports(report: &OwnerReport) -> Vec<AdapterReport> {
         .map(|(owner, domains)| {
             let interface = interface_of(owner);
             let daemon = report.daemon(owner);
-            let conflicting_domain = (daemon != Daemon::NotRunning)
+            let conflicting_domain = (!matches!(daemon, Daemon::NotRunning | Daemon::Idle))
                 .then(|| domains.first().copied())
                 .flatten();
             let scx_without_manager = owner == KnownOwner::ScxLoader
@@ -84,7 +84,9 @@ pub fn adapter_reports(report: &OwnerReport) -> Vec<AdapterReport> {
             let status = match (daemon, conflicting_domain) {
                 (Daemon::Unknown, _) => AdapterStatus::Unknown,
                 (Daemon::Running, Some(_)) => AdapterStatus::Conflict,
-                (Daemon::Running, None) => AdapterStatus::ObserveOnly,
+                (Daemon::Running | Daemon::Idle, None) | (Daemon::Idle, Some(_)) => {
+                    AdapterStatus::ObserveOnly
+                }
                 (Daemon::NotRunning, _) if scx_without_manager => AdapterStatus::DelegableManual,
                 (Daemon::NotRunning, _) => AdapterStatus::Unavailable,
             };
