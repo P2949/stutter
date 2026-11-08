@@ -181,6 +181,12 @@ fn fake_loader() -> (DbusClient, crate::integrations::dbus::fake::Calls) {
                 live.1 = reader.u32().unwrap();
                 Reply::Body(String::new(), Vec::new())
             }
+            (_, "StartSchedulerWithArgs" | "SwitchSchedulerWithArgs") => {
+                let mut reader = crate::integrations::dbus::fake_reader(&call.body);
+                live.0 = reader.string().unwrap();
+                live.1 = 1;
+                Reply::Body(String::new(), Vec::new())
+            }
             (_, "StopScheduler") => {
                 live.0 = "unknown".into();
                 Reply::Body(String::new(), Vec::new())
@@ -239,4 +245,180 @@ fn a_kernel_that_disagrees_makes_the_switch_not_in_effect() {
         matches!(result, Err(ExecuteError::NotInEffect { .. })),
         "{result:?}"
     );
+}
+
+fn arg_methods() -> BTreeMap<String, String> {
+    let mut methods = methods();
+    methods.insert("StartSchedulerWithArgs".into(), "sas".into());
+    methods.insert("SwitchSchedulerWithArgs".into(), "sas".into());
+    methods
+}
+
+fn reviewed() -> ArgAllowlist {
+    vec![(
+        "scx_lavd".into(),
+        vec![vec!["--performance".into()], vec!["--powersave".into()]],
+    )]
+}
+
+#[test]
+fn only_a_reviewed_argument_list_can_be_planned_and_the_restore_is_exact() {
+    let none = state(None, None);
+    let args = vec!["--performance".to_owned()];
+    let plan = plan_switch_with_args(
+        &none,
+        &arg_methods(),
+        "scx_lavd",
+        1,
+        &args,
+        &allow(),
+        &reviewed(),
+    )
+    .unwrap();
+    assert_eq!(plan.method, "StartSchedulerWithArgs");
+    assert_eq!(plan.restore, Restore::Stop);
+    assert_eq!(plan.args, args);
+
+    let running = state(Some("scx_bpfland"), Some(2));
+    let plan = plan_switch_with_args(
+        &running,
+        &arg_methods(),
+        "scx_lavd",
+        1,
+        &args,
+        &allow(),
+        &reviewed(),
+    )
+    .unwrap();
+    assert_eq!(plan.method, "SwitchSchedulerWithArgs");
+    assert_eq!(
+        plan.restore,
+        Restore::SwitchBack {
+            name: "scx_bpfland".into(),
+            mode: 2
+        }
+    );
+
+    let free_form = vec!["--perf; rm -rf /".to_owned()];
+    assert_eq!(
+        plan_switch_with_args(
+            &none,
+            &arg_methods(),
+            "scx_lavd",
+            1,
+            &free_form,
+            &allow(),
+            &reviewed()
+        ),
+        Err(SwitchDenial::ArgumentsNotAllowlisted)
+    );
+    assert_eq!(
+        plan_switch_with_args(
+            &none,
+            &arg_methods(),
+            "scx_bpfland",
+            1,
+            &args,
+            &allow(),
+            &reviewed()
+        ),
+        Err(SwitchDenial::ArgumentsNotAllowlisted),
+        "a list reviewed for one scheduler is not valid for another"
+    );
+    let mut no_method = arg_methods();
+    no_method.remove("StartSchedulerWithArgs");
+    assert_eq!(
+        plan_switch_with_args(
+            &none,
+            &no_method,
+            "scx_lavd",
+            1,
+            &args,
+            &allow(),
+            &reviewed()
+        ),
+        Err(SwitchDenial::MethodMissing("StartSchedulerWithArgs"))
+    );
+    let mut no_back = arg_methods();
+    no_back.remove("SwitchScheduler");
+    assert_eq!(
+        plan_switch_with_args(
+            &running,
+            &no_back,
+            "scx_lavd",
+            1,
+            &args,
+            &allow(),
+            &reviewed()
+        ),
+        Err(SwitchDenial::UnsupportedRestore),
+        "a switch with arguments needs the plain switch to restore"
+    );
+    // No arguments is the plain switch.
+    let plain = plan_switch_with_args(
+        &none,
+        &arg_methods(),
+        "scx_lavd",
+        1,
+        &[],
+        &allow(),
+        &reviewed(),
+    )
+    .unwrap();
+    assert_eq!(plain.method, "StartScheduler");
+    assert!(plain.args.is_empty());
+}
+
+#[test]
+fn a_string_array_is_encoded_with_its_byte_length_and_inter_element_padding() {
+    let mut writer = Writer::default();
+    writer.string_array(&["ab".to_owned(), "c".to_owned()]);
+    // "ab": 4 + 2 + 1 = 7 bytes, 1 pad, "c": 4 + 1 + 1 = 6 bytes: 14 bytes of array data.
+    assert_eq!(&writer.buf[..4], &14u32.to_le_bytes());
+    assert_eq!(writer.buf.len(), 4 + 14);
+    let mut empty = Writer::default();
+    empty.string_array(&[]);
+    assert_eq!(empty.buf, 0u32.to_le_bytes());
+}
+
+#[test]
+fn an_authorized_switch_with_arguments_sends_exactly_the_reviewed_list() {
+    let (mut client, calls) = fake_loader();
+    let methods = {
+        let mut found = introspect(&mut client).unwrap();
+        found.insert("StartSchedulerWithArgs".into(), "sas".into());
+        found
+    };
+    let mut state = state(None, None);
+    state.supported = vec!["scx_lavd".into()];
+    let args = vec!["--performance".to_owned()];
+    let plan = plan_switch_with_args(
+        &state,
+        &methods,
+        "scx_lavd",
+        1,
+        &args,
+        &["scx_lavd".into()],
+        &reviewed(),
+    )
+    .unwrap();
+    let auth = OfflineAuthorization::from_campaign("c");
+    execute(&mut client, &plan, &auth, || Some("lavd".into())).unwrap();
+    let sent = calls
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|call| call.member == "StartSchedulerWithArgs")
+        .cloned()
+        .unwrap();
+    assert_eq!(sent.signature, "sas");
+    let mut reader = crate::integrations::dbus::fake_reader(&sent.body);
+    assert_eq!(reader.string().unwrap(), "scx_lavd");
+    assert_eq!(
+        reader.value("as").unwrap(),
+        crate::integrations::dbus::Value::Array(vec![crate::integrations::dbus::Value::Str(
+            "--performance".into()
+        )])
+    );
+    restore(&mut client, &plan, &auth).unwrap();
 }

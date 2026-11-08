@@ -79,6 +79,20 @@ impl Writer {
         self.buf.extend(value.as_bytes());
         self.buf.push(0);
     }
+
+    /// An `as` array: a byte length, then each string. The length excludes alignment before the
+    /// first element and counts only the element bytes, as the D-Bus wire format requires.
+    pub fn string_array(&mut self, items: &[String]) {
+        self.align(4);
+        let at = self.buf.len();
+        self.buf.extend([0u8; 4]);
+        let start = self.buf.len();
+        for item in items {
+            self.string(item);
+        }
+        let length = (self.buf.len() - start) as u32;
+        self.buf[at..at + 4].copy_from_slice(&length.to_le_bytes());
+    }
 }
 
 pub struct Reader<'a> {

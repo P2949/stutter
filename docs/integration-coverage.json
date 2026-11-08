@@ -206,11 +206,11 @@
         "stutter/src/integrations/scx_loader.rs"
       ],
       "status": "first_slice",
-      "g0": "scx_loader named with org.scx.Loader; read-only D-Bus state (CurrentScheduler, SchedulerMode, SupportedSchedulers), introspected method signatures, and a gated offline strategy adapter: plan_switch (allowlist, supported, exact restore) with typed denials and execute/restore that need an OfflineAuthorization only a campaign can construct, verified against the loader and the kernel ops (fake-bus fixtures)",
+      "g0": "`plan_switch_with_args` plans StartSchedulerWithArgs / SwitchSchedulerWithArgs (`sas`) only for an argument list that equals a reviewed entry for that scheduler (no free-form flag), with the same exact restore, executed over a verified `as` array encoding (fake-bus round trip); scx_loader named with org.scx.Loader; read-only D-Bus state (CurrentScheduler, SchedulerMode, SupportedSchedulers), introspected method signatures, and a gated offline strategy adapter: plan_switch (allowlist, supported, exact restore) with typed denials and execute/restore that need an OfflineAuthorization only a campaign can construct, verified against the loader and the kernel ops (fake-bus fixtures)",
       "g1": "org.scx.Loader read over the system bus on this host: no owner (absent)",
       "runtime_availability": "absent",
       "authority": "O/A/D/F",
-      "not_wired": "never run against a real scx_loader (none installed); no SwitchSchedulerWithArgs; no experiment campaign or real evidence (the matched-workload comparison exists as `compare_schedulers`); not reachable from the daemon, providers or remote callers by construction",
+      "not_wired": "never run against a real scx_loader (none installed); no experiment campaign or real evidence (the matched-workload comparison exists as `compare_schedulers`); not reachable from the daemon, providers or remote callers by construction",
       "dispositions": [
         "FixtureVerified",
         "HardwareUnavailable",

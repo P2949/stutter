@@ -103,6 +103,76 @@ pub fn introspect(client: &mut DbusClient) -> Result<BTreeMap<String, String>, D
 }
 
 /// Proof that an explicit offline campaign allowed a scheduler switch. It has no runtime
+
+/// Arguments a scheduler may be started with: each entry is one exact argument list that was
+/// reviewed for that scheduler. Anything else is refused, so no free-form flag reaches the loader.
+pub type ArgAllowlist = Vec<(String, Vec<Vec<String>>)>;
+
+/// Plans a switch to `to` with `args`, which must equal one reviewed entry for `to`. Uses
+/// `SwitchSchedulerWithArgs` / `StartSchedulerWithArgs` (`sas`); the prior state is restored exactly
+/// as for a plain switch. Empty `args` is a plain switch and goes through [`plan_switch`].
+pub fn plan_switch_with_args(
+    state: &ScxLoaderState,
+    methods: &BTreeMap<String, String>,
+    to: &str,
+    mode: u32,
+    args: &[String],
+    allowlist: &[String],
+    arg_allowlist: &ArgAllowlist,
+) -> Result<SwitchPlan, SwitchDenial> {
+    if args.is_empty() {
+        return plan_switch(state, methods, to, mode, allowlist);
+    }
+    if !allowlist.iter().any(|allowed| allowed == to) {
+        return Err(SwitchDenial::NotAllowlisted);
+    }
+    if !state.supported.iter().any(|supported| supported == to) {
+        return Err(SwitchDenial::UnsupportedScheduler);
+    }
+    let reviewed = arg_allowlist
+        .iter()
+        .find(|(name, _)| name == to)
+        .is_some_and(|(_, lists)| lists.iter().any(|list| list == args));
+    if !reviewed {
+        return Err(SwitchDenial::ArgumentsNotAllowlisted);
+    }
+    let need = |method: &'static str, signature: &str| -> Result<(), SwitchDenial> {
+        match methods.get(method) {
+            None => Err(SwitchDenial::MethodMissing(method)),
+            Some(found) if found != signature => Err(SwitchDenial::SignatureMismatch {
+                method,
+                found: found.clone(),
+            }),
+            Some(_) => Ok(()),
+        }
+    };
+    let (method, restore) = match (&state.current, state.mode) {
+        (None, _) => {
+            need("StartSchedulerWithArgs", "sas")?;
+            need("StopScheduler", "").map_err(|_| SwitchDenial::UnsupportedRestore)?;
+            ("StartSchedulerWithArgs", Restore::Stop)
+        }
+        (Some(prior), Some(prior_mode)) => {
+            need("SwitchSchedulerWithArgs", "sas")?;
+            need("SwitchScheduler", "su").map_err(|_| SwitchDenial::UnsupportedRestore)?;
+            (
+                "SwitchSchedulerWithArgs",
+                Restore::SwitchBack {
+                    name: prior.clone(),
+                    mode: prior_mode,
+                },
+            )
+        }
+        (Some(_), None) => return Err(SwitchDenial::UnsupportedRestore),
+    };
+    Ok(SwitchPlan {
+        to: to.to_owned(),
+        mode,
+        method,
+        restore,
+        args: args.to_vec(),
+    })
+}
 /// constructor, so the daemon, a provider and a remote caller cannot make one.
 #[derive(Debug)]
 pub struct OfflineAuthorization {
@@ -137,11 +207,15 @@ pub struct SwitchPlan {
     /// `StartScheduler` when nothing runs, `SwitchScheduler` when something does.
     pub method: &'static str,
     pub restore: Restore,
+    /// Extra arguments for the scheduler, from the per-scheduler allowlist; empty for a plain switch.
+    pub args: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SwitchDenial {
     NotAllowlisted,
+    /// The argument list is not one of the reviewed lists for this scheduler.
+    ArgumentsNotAllowlisted,
     UnsupportedScheduler,
     AlreadyRunning,
     MethodMissing(&'static str),
@@ -204,6 +278,7 @@ pub fn plan_switch(
         mode,
         method,
         restore,
+        args: Vec::new(),
     })
 }
 
@@ -237,6 +312,20 @@ fn call_switch(
         .map(drop)
 }
 
+fn call_switch_with_args(
+    client: &mut DbusClient,
+    method: &str,
+    name: &str,
+    args: &[String],
+) -> Result<(), DbusError> {
+    let mut body = Writer::default();
+    body.string(name);
+    body.string_array(args);
+    client
+        .call(SERVICE, PATH, INTERFACE, method, "sas", &body.buf)
+        .map(drop)
+}
+
 /// Performs the planned switch and verifies the loader reports it and the kernel agrees
 /// (`kernel_ops` reads `/sys/kernel/sched_ext/root/ops`).
 pub fn execute(
@@ -245,7 +334,11 @@ pub fn execute(
     _authorization: &OfflineAuthorization,
     kernel_ops: impl Fn() -> Option<String>,
 ) -> Result<(), ExecuteError> {
-    call_switch(client, plan.method, &plan.to, plan.mode)?;
+    if plan.args.is_empty() {
+        call_switch(client, plan.method, &plan.to, plan.mode)?;
+    } else {
+        call_switch_with_args(client, plan.method, &plan.to, &plan.args)?;
+    }
     let state = read_state(client)?;
     let kernel_agrees =
         kernel_ops().is_none_or(|ops| ops.contains(plan.to.trim_start_matches("scx_")));
