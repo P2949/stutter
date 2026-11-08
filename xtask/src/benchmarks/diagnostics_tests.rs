@@ -107,3 +107,14 @@ fn perf_stat_values_need_a_full_run_and_are_never_extrapolated() {
         import_perf_stat("<not counted>,,cycles,0,0.00,,\n").is_ok_and(|s| s.scores.len() == 1)
     );
 }
+
+#[test]
+fn a_perf_report_gives_sample_shares_per_symbol_and_skips_headers_and_noise() {
+    let text = "# Overhead  Command  Shared Object  Symbol\n# ........\n    41.20%  game  game  [.] render_frame\n     7.05%  game  libc.so.6  [.] memcpy\n     2.00%  kworker  [kernel.kallsyms]  [k] _raw_spin_lock\n  not a row\n   150.00%  bad  bad  [.] overflow\n";
+    let report = import_perf_report(text).unwrap();
+    assert_eq!(value(&report, "game:game:render_frame"), 41.2);
+    assert_eq!(value(&report, "game:libc.so.6:memcpy"), 7.05);
+    assert_eq!(report.scores.len(), 3, "an impossible share is skipped");
+    assert!(!report.application_proof);
+    assert!(import_perf_report("# only a header\n").is_err());
+}

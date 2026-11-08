@@ -191,6 +191,7 @@ pub enum ScoreTool {
     BccHist,
     TraceCmd,
     PerfStat,
+    PerfReport,
 }
 
 fn import_scores(tool: ScoreTool, file: &Path) -> anyhow::Result<String> {
@@ -218,6 +219,9 @@ fn import_scores(tool: ScoreTool, file: &Path) -> anyhow::Result<String> {
         ScoreTool::BccHist => serde_json::to_string_pretty(&diagnostics::import_bcc_hist(&text)?)?,
         ScoreTool::PerfStat => {
             serde_json::to_string_pretty(&diagnostics::import_perf_stat(&text)?)?
+        }
+        ScoreTool::PerfReport => {
+            serde_json::to_string_pretty(&diagnostics::import_perf_report(&text)?)?
         }
         ScoreTool::TraceCmd => {
             serde_json::to_string_pretty(&diagnostics::import_trace_cmd(&text)?)?

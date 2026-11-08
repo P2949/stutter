@@ -303,7 +303,7 @@
       "g1": "none",
       "runtime_availability": "perf CLI absent, VTune/LIKWID absent",
       "authority": "O/F",
-      "not_wired": "the PMU sensor is started only by the escalator and counts a task list taken without stats; no architecture-specific events; a `perf stat -x,` importer exists (a counter multiplexed below 90 percent running, not counted or unsupported gives no value, never an extrapolation); no perf script/record importer",
+      "not_wired": "the PMU sensor is started only by the escalator and counts a task list taken without stats; no architecture-specific events; a `perf stat -x,` importer exists (a counter multiplexed below 90 percent running, not counted or unsupported gives no value, never an extrapolation); a `perf report --stdio` importer gives per-symbol sample shares; no perf script/record importer and no VTune, uProf or LIKWID importer (formats not verified on this host, tools absent)",
       "dispositions": [
         "FixtureVerified",
         "HardwareUnavailable",

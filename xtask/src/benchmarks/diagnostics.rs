@@ -427,3 +427,43 @@ pub fn import_perf_stat(text: &str) -> anyhow::Result<ImportedScores> {
     }
     done("perf-stat", scores)
 }
+
+/// `perf report --stdio` (or `--no-children`) rows: `  12.34%  command  shared_object  [.] symbol`.
+/// Each row becomes the share of samples for that symbol. A share is a proportion of the recorded
+/// samples, not a time or a count, and `perf` percentages that do not parse are skipped.
+pub fn import_perf_report(text: &str) -> anyhow::Result<ImportedScores> {
+    let mut scores = Vec::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if line.starts_with('#') {
+            continue;
+        }
+        let Some((percent, rest)) = line.split_once('%') else {
+            continue;
+        };
+        let Some(share) = percent
+            .trim()
+            .parse::<f64>()
+            .ok()
+            .filter(|v| v.is_finite() && (0.0..=100.0).contains(v))
+        else {
+            continue;
+        };
+        // After the percentage: command, shared object, then `[.]`/`[k]` and the symbol.
+        let Some((head, symbol)) = rest.split_once("] ") else {
+            continue;
+        };
+        let mut head = head.split_whitespace();
+        let (Some(command), Some(object)) = (head.next(), head.next()) else {
+            continue;
+        };
+        ensure!(scores.len() < MAX_SAMPLES, "too many rows");
+        scores.push(diagnostic(
+            "perf-report",
+            format!("{command}:{object}:{}", symbol.trim()),
+            share,
+            "% of samples",
+        ));
+    }
+    done("perf-report", scores)
+}
