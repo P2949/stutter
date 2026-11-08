@@ -49,6 +49,31 @@ pub struct AutotuneDecisionStreamEntry {
     pub data_quality_reason_codes: Vec<String>,
     pub decision: String,
     pub reason: String,
+    /// Read-only provenance/quality of an explicitly attached frame source. Older streams omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame_source: Option<FrameSourceDiagnostic>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kpi_source: Option<crate::autotune::objective::source::KpiObservation>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct FrameSourceDiagnostic {
+    pub producer_pid: Option<u32>,
+    pub producer_start_ticks: Option<u64>,
+    pub file_owner_uid: Option<u32>,
+    pub epoch: u64,
+    pub window_frames: usize,
+    pub oldest_elapsed_ms: Option<u64>,
+    pub newest_elapsed_ms: Option<u64>,
+    pub source_age_ms: Option<u64>,
+    pub competing_targets: usize,
+    pub dropped_frames: u64,
+    pub unexplained_gaps: u64,
+    /// None means unbounded/unknown, never zero.
+    pub alignment_uncertainty_ms: Option<f64>,
+    pub healthy: bool,
+    pub attribution: Option<crate::telemetry::frame_source::Attribution>,
+    pub primary_denial: Option<crate::telemetry::quality::QualityDenial>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -121,7 +146,40 @@ impl AutotuneRuntime {
             data_quality_reason_codes: observation.data_quality.reason_code_strings(),
             decision: decision_label(decision),
             reason,
+            frame_source: self.frame_source_diagnostic(),
+            kpi_source: self.kpi_observation.clone(),
         }
+    }
+
+    fn frame_source_diagnostic(&self) -> Option<FrameSourceDiagnostic> {
+        let status = self.frame_source.as_ref()?.lock().ok()?;
+        let window = &self.controller.window;
+        let quality = window.frame_stream();
+        Some(FrameSourceDiagnostic {
+            producer_pid: status.claim.producer_pid,
+            producer_start_ticks: status.claim.producer_start_ticks,
+            file_owner_uid: status.claim.file_owner_uid,
+            epoch: self.frame_epoch,
+            window_frames: window.frames().len(),
+            oldest_elapsed_ms: window.frames().front().map(|frame| frame.elapsed_ms),
+            newest_elapsed_ms: window.frames().back().map(|frame| frame.elapsed_ms),
+            source_age_ms: status
+                .last_frame_at
+                .map(|at| u64::try_from(at.elapsed().as_millis()).unwrap_or(u64::MAX)),
+            competing_targets: status.competing_targets,
+            dropped_frames: status.dropped_frames,
+            unexplained_gaps: status.unexplained_gaps,
+            alignment_uncertainty_ms: status
+                .alignment_uncertainty_ms
+                .is_finite()
+                .then_some(status.alignment_uncertainty_ms),
+            healthy: status.healthy,
+            attribution: quality.map(|quality| quality.attribution),
+            primary_denial: quality.map_or(
+                Some(crate::telemetry::quality::QualityDenial::NotValidatedDirect),
+                |quality| quality.frame_primary_eligible().err(),
+            ),
+        })
     }
 
     pub(super) fn append_decision_log(
@@ -173,6 +231,8 @@ mod tests {
             data_quality_reason_codes: Vec::new(),
             decision: "observed".to_owned(),
             reason: "test entry".to_owned(),
+            frame_source: None,
+            kpi_source: None,
         }
     }
 

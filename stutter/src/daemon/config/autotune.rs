@@ -56,6 +56,11 @@ pub struct DaemonAutotuneConfig {
     /// source-less: no launch is searched for and frames stay unattributed.
     #[serde(default)]
     pub frame_capture_root: Option<PathBuf>,
+    /// Optional observation-only KPI contract and confined local socket directory.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kpi_contract: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kpi_socket_dir: Option<PathBuf>,
     #[serde(default)]
     pub external_mutation_policy: ExternalMutationPolicy,
     #[serde(default)]
@@ -85,6 +90,8 @@ impl Default for DaemonAutotuneConfig {
                 default_privileged_worker_socket_ready_retry_ms(),
             privileged_worker_shutdown_poll_ms: default_privileged_worker_shutdown_poll_ms(),
             frame_capture_root: None,
+            kpi_contract: None,
+            kpi_socket_dir: None,
             external_mutation_policy: ExternalMutationPolicy::default(),
             high_risk_dry_run: false,
             workload_policy: DaemonWorkloadPolicyConfig::default(),

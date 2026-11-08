@@ -60,6 +60,14 @@ pub enum SampleKind {
     /// it is the weaker claim.
     #[default]
     Summary,
+    /// Arithmetic mean of exactly `population` nonoverlapping underlying events.
+    BatchMean,
+    /// Sum of exactly `population` nonoverlapping underlying events.
+    BatchSum,
+    /// Maximum of exactly `population` nonoverlapping underlying events.
+    BatchMax,
+    /// Last event in a batch of exactly `population` nonoverlapping underlying events.
+    BatchLast,
 }
 
 /// One sample as the application reports it.
@@ -106,6 +114,16 @@ fn check_spec(spec: &MetricSpec) -> Result<(), ContractError> {
     if spec.id.trim().is_empty() || spec.unit.trim().is_empty() {
         return bad("id and unit must not be empty");
     }
+    if spec.id.len() > 64
+        || spec.unit.len() > 32
+        || spec
+            .id
+            .chars()
+            .chain(spec.unit.chars())
+            .any(char::is_control)
+    {
+        return bad("id/unit exceeds its bound or contains control characters");
+    }
     if spec.max_age_ms == 0 || spec.min_population == 0 {
         return bad("max_age_ms and min_population must be positive");
     }
@@ -127,6 +145,23 @@ fn check_spec(spec: &MetricSpec) -> Result<(), ContractError> {
 
 impl KpiContract {
     pub fn validate(&self) -> Result<(), ContractError> {
+        if self
+            .hard_guardrails
+            .len()
+            .saturating_add(self.advisory_guardrails.len())
+            > 63
+        {
+            return Err(ContractError::BadSpec(
+                self.primary.id.clone(),
+                "at most 64 metrics are allowed",
+            ));
+        }
+        if self.binding.pid <= 1 || self.binding.start_ticks == 0 {
+            return Err(ContractError::BadSpec(
+                self.primary.id.clone(),
+                "source requires a live non-system process identity",
+            ));
+        }
         let mut seen = BTreeSet::new();
         let all = std::iter::once(&self.primary)
             .chain(&self.hard_guardrails)

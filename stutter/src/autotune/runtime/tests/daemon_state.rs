@@ -122,6 +122,8 @@ fn daemon_state_snapshot_serializes_live_runtime_state() {
         data_quality_reason_codes: vec!["measurement_uncertain".to_owned()],
         decision: "faulted".to_owned(),
         reason: "rollback failed".to_owned(),
+        frame_source: None,
+        kpi_source: None,
     });
     let kept_candidate = CandidateAction::cpu_affinity_profile(low_risk_profile(), 1234);
     runtime.controller.state.record_candidate_result(

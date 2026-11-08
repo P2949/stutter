@@ -213,6 +213,22 @@ pub fn validate_daemon_user_config(config: &UserConfigFile) -> Result<()> {
         {
             anyhow::bail!("autotune.frame_capture_root must be an absolute path");
         }
+        anyhow::ensure!(
+            autotune.kpi_contract.is_some() == autotune.kpi_socket_dir.is_some(),
+            "autotune.kpi_contract and kpi_socket_dir must be configured together"
+        );
+        for path in [
+            autotune.kpi_contract.as_ref(),
+            autotune.kpi_socket_dir.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            anyhow::ensure!(
+                path.is_absolute(),
+                "KPI contract and socket directory must be absolute paths"
+            );
+        }
     }
     Ok(())
 }

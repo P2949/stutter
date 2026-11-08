@@ -19,6 +19,7 @@ pub mod fixture_coverage;
 pub mod fixtures;
 pub mod frame_campaign;
 pub mod kernel_matrix;
+pub mod kpi_observation;
 mod live_acceptance;
 pub mod local_ci;
 pub mod local_ci_policy;
@@ -71,6 +72,13 @@ pub struct Cli {
 
 #[derive(Clone, Debug, Eq, PartialEq, Subcommand)]
 pub enum XtaskCommand {
+    #[command(
+        about = "Demonstrate bound KPI observation and frozen raw-block analysis without mutations"
+    )]
+    KpiObservation {
+        #[command(subcommand)]
+        command: kpi_observation::KpiObservationCommand,
+    },
     #[command(about = "Run canonical live observation acceptance and retain evidence")]
     LiveAcceptance {
         #[command(subcommand)]
@@ -488,6 +496,7 @@ fn main() -> anyhow::Result<()> {
 fn run(command: XtaskCommand) -> anyhow::Result<()> {
     let root = repo_root()?;
     match command {
+        XtaskCommand::KpiObservation { command } => kpi_observation::execute(command),
         XtaskCommand::LiveAcceptance { suite } => live_acceptance::run(&root, suite),
         XtaskCommand::RecoveryController { mode } => live_acceptance::recovery::controller(mode),
         XtaskCommand::LiveBurst {

@@ -24,8 +24,11 @@ impl AutotuneRuntime {
                 crate::autotune::candidate_memory::CandidateMemory::load(&path);
         }
 
+        let (kpi_collector, kpi_observation) = super::kpi_source::load(&config);
         Self {
             target_state: RuntimeTargetState::new(config.tree_pid()),
+            kpi_collector,
+            kpi_observation,
             controller,
             latest_focus: None,
             latest_drop_counters: DropCountersSnapshot::default(),

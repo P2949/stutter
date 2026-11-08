@@ -260,11 +260,29 @@ fn two_renderers_under_one_launcher_or_none_at_all_deny_direct_attribution() {
     // A second MangoHud renderer appears under the same launcher: which one wrote the rows?
     process(&proc_root, 101, 77, 6);
     fs::write(proc_root.join("101/maps"), HUD).unwrap();
-    let later = now + Duration::from_secs(6);
+    // A new producer must withdraw the earlier grant inside the old five-second cache period.
+    let later = now + Duration::from_millis(1);
     source.poll(&proc_root, later, 100);
     assert_ne!(
         quality_of(&source, &proc_root, later).attribution,
         Attribution::ValidatedDirect
+    );
+    // A competitor exiting cannot retroactively attest the rows collected while it existed.
+    fs::remove_dir_all(proc_root.join("101")).unwrap();
+    let recovered = later + Duration::from_millis(1);
+    source.poll(&proc_root, recovered, 100);
+    let quality = quality_of(&source, &proc_root, recovered);
+    assert_eq!(quality.attribution, Attribution::ValidatedDirect);
+    assert_eq!(
+        quality.frame_primary_eligible(),
+        Err(super::quality::QualityDenial::UnexplainedLoss)
+    );
+    assert!(source.discard_pending(&proc_root, recovered).proven);
+    source.record_frame_age(recovered, Some(Duration::from_millis(1)));
+    assert!(
+        quality_of(&source, &proc_root, recovered)
+            .frame_primary_eligible()
+            .is_ok()
     );
     fs::remove_dir_all(&base).unwrap();
 
@@ -286,12 +304,18 @@ fn two_live_logs_in_one_capture_directory_are_ambiguous() {
     let csv = "fps,frametime,elapsed\n60,16.6,1000000\n";
     let (base, proc_root, dir, mut source) = launched("two-logs", csv);
     let now = Instant::now();
-    fs::write(dir.join("game_other.csv"), csv).unwrap();
     source.poll(&proc_root, now, 100);
     source.record_frame_age(now, Some(Duration::from_millis(5)));
     source.record_alignment(0.5, 0);
-    assert_ne!(
+    assert_eq!(
         quality_of(&source, &proc_root, now).attribution,
+        Attribution::ValidatedDirect
+    );
+    fs::write(dir.join("game_other.csv"), csv).unwrap();
+    let later = now + Duration::from_millis(1);
+    source.poll(&proc_root, later, 100);
+    assert_ne!(
+        quality_of(&source, &proc_root, later).attribution,
         Attribution::ValidatedDirect
     );
     fs::remove_dir_all(&base).unwrap();

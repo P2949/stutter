@@ -197,7 +197,7 @@ fn a_mean_of_summaries_is_weighted_by_the_events_each_one_stands_for() {
     feed(
         &mut store,
         "error_rate",
-        &[(10.0, 90, "summary"), (110.0, 10, "summary")],
+        &[(10.0, 90, "batch_mean"), (110.0, 10, "batch_mean")],
         1000,
     );
     let window = store
@@ -206,6 +206,112 @@ fn a_mean_of_summaries_is_weighted_by_the_events_each_one_stands_for() {
     assert!((window.value - 20.0).abs() < 1e-9, "{window:?}");
     assert_eq!(window.semantics, Semantics::Direct);
     assert_eq!(window.population, 100);
+}
+
+#[test]
+fn legacy_batch_percentiles_cannot_masquerade_as_a_direct_mean() {
+    let mut store = SampleStore::new(contract());
+    // Batch A: 89 zeros and one 100 (p99=100); batch B: ten ones (p99=1).
+    // The raw-event mean is 1.1; weighting the p99 summaries yields 90.1.
+    feed(
+        &mut store,
+        "error_rate",
+        &[(100.0, 90, "summary"), (1.0, 10, "summary")],
+        1000,
+    );
+    let window = store
+        .window("error_rate", 1000 * MS, 1100 * MS, 1200 * MS)
+        .unwrap();
+    assert!((window.value - 90.1).abs() < 1e-9);
+    assert_ne!(window.value, 1.1);
+    assert_eq!(window.semantics, Semantics::DiagnosticSummary);
+    // Omitted kind remains decodable as the weaker legacy claim.
+    let sample: Sample = serde_json::from_str(
+        r#"{"metric":"m","value":1,"monotonic_ns":1,"work_unit":null,"population":10}"#,
+    )
+    .unwrap();
+    assert_eq!(sample.kind, SampleKind::Summary);
+}
+
+#[test]
+fn sum_max_and_last_require_their_own_compatible_batch_semantics() {
+    for (aggregation, kind, expected) in [
+        (Aggregation::Sum, "batch_sum", 120.0),
+        (Aggregation::Max, "batch_max", 110.0),
+        (Aggregation::Last, "batch_last", 110.0),
+    ] {
+        for reported_kind in [kind, "summary", "batch_mean"] {
+            let mut contract = contract();
+            contract.primary.aggregation = aggregation;
+            let mut store = SampleStore::new(contract);
+            feed(
+                &mut store,
+                "request_p99",
+                &[(10.0, 90, reported_kind), (110.0, 10, reported_kind)],
+                1000,
+            );
+            let aggregate = store
+                .window("request_p99", 1000 * MS, 1100 * MS, 1200 * MS)
+                .unwrap();
+            assert_eq!(aggregate.value, expected);
+            assert_eq!(
+                aggregate.semantics,
+                if reported_kind == kind {
+                    Semantics::Direct
+                } else {
+                    Semantics::DiagnosticSummary
+                }
+            );
+        }
+    }
+}
+
+#[test]
+fn one_ambiguous_summary_downgrades_an_otherwise_compatible_mean() {
+    let mut store = SampleStore::new(contract());
+    feed(
+        &mut store,
+        "error_rate",
+        &[(10.0, 90, "batch_mean"), (110.0, 10, "summary")],
+        1000,
+    );
+    assert_eq!(
+        store
+            .window("error_rate", 1000 * MS, 1100 * MS, 1200 * MS)
+            .unwrap()
+            .semantics,
+        Semantics::DiagnosticSummary
+    );
+}
+
+#[test]
+fn overflowing_population_or_result_has_no_aggregate() {
+    let mut store = SampleStore::new(contract());
+    feed(
+        &mut store,
+        "error_rate",
+        &[(1.0, u64::MAX, "batch_mean"), (1.0, 1, "batch_mean")],
+        1000,
+    );
+    assert!(
+        store
+            .window("error_rate", 1000 * MS, 1100 * MS, 1200 * MS)
+            .is_none()
+    );
+    let mut contract = contract();
+    contract.primary.aggregation = Aggregation::Sum;
+    let mut store = SampleStore::new(contract);
+    feed(
+        &mut store,
+        "request_p99",
+        &[(1e308, 10, "batch_sum"), (1e308, 10, "batch_sum")],
+        1000,
+    );
+    assert!(
+        store
+            .window("request_p99", 1000 * MS, 1100 * MS, 1200 * MS)
+            .is_none()
+    );
 }
 
 #[test]

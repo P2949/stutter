@@ -114,6 +114,7 @@ fn drain<R: Read + AsRawFd + Send + 'static>(
     let fd = source.as_raw_fd();
     // SAFETY: fd is a live pipe owned by source; these calls only change its file status flags.
     let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    // SAFETY: source still owns this live pipe; F_SETFL takes only fd and status flags.
     if flags == -1 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } == -1 {
         return Err(std::io::Error::last_os_error());
     }
@@ -215,8 +216,8 @@ pub fn run(mut command: Command, policy: &ExecutionPolicy) -> anyhow::Result<Sup
             stage.map_or_else(|| std::process::id().to_string(), ownership::Owner::render),
         )
         .process_group(0);
-    // SAFETY: only async-signal-safe prctl before exec; the direct child dies if this process does.
     let parent = std::process::id() as libc::pid_t;
+    // SAFETY: the hook uses only async-signal-safe syscalls with no allocation or locks.
     unsafe {
         command.pre_exec(move || {
             if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL) == -1 {
@@ -399,6 +400,7 @@ mod tests {
         // recorded by our own helper before any assertion, including when the test fails.
         if let Ok(pid) = std::fs::read_to_string(&file) {
             let pid: i32 = pid.trim().parse().unwrap();
+            // SAFETY: this pid was recorded by the test's own still-running detached helper.
             unsafe {
                 libc::kill(pid, libc::SIGKILL);
             }

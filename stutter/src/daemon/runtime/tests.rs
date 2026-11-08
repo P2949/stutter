@@ -285,6 +285,8 @@ fn daemon_runtime_decision_event_updates_phase_target_and_last_decision() {
                 data_quality_reason_codes: Vec::new(),
                 decision: "start_experiment".to_owned(),
                 reason: "candidate evidence is strong".to_owned(),
+                frame_source: None,
+                kpi_source: None,
             },
         )))
         .unwrap();

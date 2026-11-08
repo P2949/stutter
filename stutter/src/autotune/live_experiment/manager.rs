@@ -31,6 +31,8 @@ pub struct LiveExperimentManager {
     pub(crate) failed_apply_context: Option<LiveExperimentHistoryContext>,
     /// The comparison that decided the last keep-point, consumed by the revert it triggers.
     pub(crate) pending_objective_evidence: Option<ObjectiveEvidence>,
+    /// Separate observation records, never read by the mutation/keep state machine.
+    pub(super) observation_study: Option<super::observation_study::ObservationStudy>,
 }
 
 #[doc(hidden)]

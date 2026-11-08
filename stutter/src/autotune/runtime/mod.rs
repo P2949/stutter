@@ -14,6 +14,7 @@ mod frame_source;
 mod guards;
 pub(crate) mod history;
 mod kept_release;
+mod kpi_source;
 mod lifecycle;
 mod phase;
 mod plan_output;
@@ -107,6 +108,8 @@ pub struct AutotuneRuntime {
     candidate_memory_saved: std::sync::Mutex<Option<Vec<u8>>>,
     /// The independently collected frame source, when one was attached.
     frame_source: Option<crate::telemetry::live_source::SharedFrameSource>,
+    kpi_collector: Option<crate::autotune::objective::source::KpiCollector>,
+    kpi_observation: Option<crate::autotune::objective::source::KpiObservation>,
     /// The last owner probe and when it ran; `/proc` is not rescanned on every tick.
     owner_cache: std::sync::Mutex<Option<(std::time::Instant, crate::integrations::OwnerReport)>>,
     /// The frame source found for the focused launch, when `frame_capture_root` is configured.

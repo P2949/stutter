@@ -6,6 +6,8 @@ pub(crate) use journal::reserve_experiment_restore_path;
 mod kept_rollback;
 mod lifecycle;
 mod manager;
+mod observation_study;
+pub use observation_study::{KpiObservationStudyConfig, KpiObservationStudyEvidence};
 mod model;
 mod rollback;
 mod scoring;

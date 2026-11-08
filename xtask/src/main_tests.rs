@@ -51,6 +51,7 @@ fn expected_subcommands_are_registered() {
             "generate-completions",
             "generate-man",
             "kernel-matrix",
+            "kpi-observation",
             "live-acceptance",
             "live-burst",
             "live-compile",

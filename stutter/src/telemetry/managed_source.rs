@@ -41,8 +41,6 @@ pub fn newest_frame_log(dir: &std::path::Path) -> Option<String> {
 
 const DRAIN_ROOM: usize = 4096;
 const MAX_DRAIN_ROUNDS: usize = 64;
-/// How often the launch tree and capture directory are re-examined for competing producers.
-const COMPETITION_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
 /// A log written this recently counts as live.
 const LIVE_LOG_WINDOW: std::time::Duration = std::time::Duration::from_secs(10);
 
@@ -77,7 +75,6 @@ pub struct ManagedFrameSource {
     unplaced: u64,
     /// A phase-boundary drain ran out of bound: completeness is not known until the next one.
     boundary_unproven: bool,
-    last_competition_check: Option<Instant>,
     /// The bound of a phase-boundary drain: rounds of `drain_room` frames.
     drain_rounds: usize,
     drain_room: usize,
@@ -104,7 +101,6 @@ impl ManagedFrameSource {
             loss_baseline: 0,
             unplaced: 0,
             boundary_unproven: false,
-            last_competition_check: None,
             drain_rounds: MAX_DRAIN_ROUNDS,
             drain_room: DRAIN_ROOM,
         }
@@ -201,14 +197,10 @@ impl ManagedFrameSource {
     /// or more than one live log in the capture directory. Either makes the source ambiguous (it
     /// cannot be said which process wrote which rows); no renderer found at all means the producer
     /// could not be established. Both count as a competing target and deny direct attribution.
-    fn check_competition(&mut self, proc_root: &std::path::Path, now: Instant) {
-        if self
-            .last_competition_check
-            .is_some_and(|at| now.saturating_duration_since(at) < COMPETITION_INTERVAL)
-        {
-            return;
-        }
-        self.last_competition_check = Some(now);
+    fn check_competition(&mut self, proc_root: &std::path::Path) {
+        // A prior scan cannot attest the current batch: renderers/logs can appear between polls.
+        // Scan once per bounded batch, never per frame. Scan limits withdraw trust rather than
+        // treating an incomplete result as proof of uniqueness.
         let scan = super::renderers::mangohud_renderers(
             proc_root,
             self.launch.record.pid,
@@ -224,6 +216,11 @@ impl ManagedFrameSource {
             renderer_competition = renderer_competition.max(1);
         }
         let competing = renderer_competition + logs.saturating_sub(1);
+        if competing > 0 {
+            // Ambiguous rows may already be in the rolling window. A later unique scan cannot
+            // retroactively attest them. A clean new epoch or proven boundary drain is required.
+            self.boundary_unproven = true;
+        }
         // With exactly one renderer, seen in an exhaustive scan, the producer is that process, not
         // the launcher above it: the target must then be the renderer or sit in its tree.
         let sole = scan.sole();
@@ -251,7 +248,7 @@ impl ManagedFrameSource {
                 gone: true,
             };
         }
-        self.check_competition(proc_root, now);
+        self.check_competition(proc_root);
         let newest = newest_frame_log(&self.launch.dir);
         if let Some(name) = newest
             && self.log_name.as_deref() != Some(name.as_str())
@@ -265,7 +262,10 @@ impl ManagedFrameSource {
             self.log_name = Some(name);
             self.loss_baseline = 0;
             self.unplaced = 0;
-            self.boundary_unproven = false;
+            self.boundary_unproven = self
+                .status
+                .lock()
+                .map_or(true, |status| status.competing_targets > 0);
         }
         let mut frames = Vec::new();
         let Some(session) = self.session.as_mut() else {

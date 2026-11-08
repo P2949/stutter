@@ -31,6 +31,11 @@ pub struct PeerCredentials {
     pub uid: u32,
 }
 
+pub fn kernel_peer_credentials(stream: &UnixStream) -> io::Result<PeerCredentials> {
+    let (pid, uid, _) = crate::syscall::unix_peer_credentials(stream)?;
+    Ok(PeerCredentials { pid, uid })
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Registration {
     pub launch_id: String,
@@ -194,6 +199,20 @@ pub fn bind(dir: &Path, name: &str, owner_uid: u32) -> Result<UnixListener, Bind
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
         Err(error) => return Err(BindError::Io(error)),
     }
+    let listener = UnixListener::bind(&path).map_err(BindError::Io)?;
+    std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o600))
+        .map_err(BindError::Io)?;
+    Ok(listener)
+}
+
+/// Binds without connecting to, deleting or replacing an existing socket. A runtime observer
+/// must never block at startup on an old listener's full accept queue.
+pub fn bind_fresh(dir: &Path, name: &str, owner_uid: u32) -> Result<UnixListener, BindError> {
+    ConfinedDir::open(dir, owner_uid).map_err(BindError::Directory)?;
+    if name.is_empty() || name.contains('/') || name == "." || name == ".." {
+        return Err(BindError::Directory(ConfinementError::BadName));
+    }
+    let path = dir.join(name);
     let listener = UnixListener::bind(&path).map_err(BindError::Io)?;
     std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o600))
         .map_err(BindError::Io)?;

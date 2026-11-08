@@ -53,7 +53,12 @@ pub mod telemetry {
 
 pub mod experiments {
     //! Immutable experiment designs, evidence and the interval statistics behind them.
-    pub use crate::autotune::{experiment_design::*, sched_compare::*, statistics::*};
+    pub use crate::autotune::{
+        experiment_design::*,
+        live_experiment::{KpiObservationStudyConfig, KpiObservationStudyEvidence},
+        sched_compare::*,
+        statistics::*,
+    };
 }
 
 pub mod cgroup_control {

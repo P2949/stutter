@@ -3,6 +3,31 @@ use std::path::PathBuf;
 use crate::config_file::*;
 
 #[test]
+fn optional_kpi_paths_are_absolute_paired_and_mapped_without_granting_authority() {
+    let mut config = UserConfigFile {
+        autotune: Some(AutotuneConfigFile {
+            kpi_contract: Some("/tmp/contract.json".into()),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    assert!(validate_daemon_user_config(&config).is_err());
+    config.autotune.as_mut().unwrap().kpi_socket_dir = Some("relative".into());
+    assert!(validate_daemon_user_config(&config).is_err());
+    config.autotune.as_mut().unwrap().kpi_socket_dir = Some("/tmp/observer".into());
+    assert!(validate_daemon_user_config(&config).is_ok());
+    let mut daemon = crate::daemon::DaemonConfig::default();
+    let mode = daemon.mode;
+    apply_daemon_user_config_overrides(&mut daemon, Some(&config));
+    assert_eq!(
+        daemon.autotune.kpi_contract.as_deref(),
+        Some(std::path::Path::new("/tmp/contract.json"))
+    );
+    assert_eq!(daemon.mode, mode);
+    assert!(!daemon.safety.allow_high_risk);
+}
+
+#[test]
 fn daemon_user_config_validation_rejects_invalid_confidence_and_family_names() {
     let invalid_confidence = UserConfigFile {
         daemon_min_confidence: Some(1.25),

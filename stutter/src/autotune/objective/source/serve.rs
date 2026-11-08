@@ -18,7 +18,7 @@ pub struct MetricSummary {
     pub value: Option<f64>,
     pub samples: usize,
     pub population: u64,
-    /// `direct` or `quantile_of_summaries`: the latter is never a request or frame percentile.
+    /// Only `direct` can describe an underlying-event aggregate; the other labels are diagnostic.
     pub semantics: Option<&'static str>,
     pub complete: Option<bool>,
 }
@@ -44,6 +44,7 @@ fn summaries(
                 semantics: aggregate.map(|a| match a.semantics {
                     Semantics::Direct => "direct",
                     Semantics::QuantileOfSummaries => "quantile_of_summaries",
+                    Semantics::DiagnosticSummary => "diagnostic_summary",
                 }),
                 complete: aggregate.map(|a| a.complete),
             }

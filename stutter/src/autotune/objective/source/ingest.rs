@@ -32,17 +32,19 @@ pub enum IngestDenial {
 }
 
 /// What an aggregate truthfully is.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Semantics {
-    /// Computed over raw events (or a population-weighted mean of summaries): a direct figure.
+    /// Computed over raw events or explicitly compatible batch statistics.
     Direct,
     /// A quantile of per-batch summaries: not a percentile of the underlying events, so it can
     /// never back a direct request or frame percentile claim.
     QuantileOfSummaries,
+    /// An aggregate of ambiguous or incompatible statistics, never an underlying-event result.
+    DiagnosticSummary,
 }
 
 /// What a window of samples says, with its size so the caller can judge it.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct WindowAggregate {
     pub value: f64,
     pub samples: usize,
@@ -52,19 +54,29 @@ pub struct WindowAggregate {
     pub complete: bool,
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct Series {
     samples: VecDeque<Sample>,
     /// Newest timestamp that was evicted by capacity, if any.
     evicted_through_ns: Option<u64>,
 }
 
+#[derive(Debug)]
 pub struct SampleStore {
     contract: KpiContract,
     series: BTreeMap<String, Series>,
 }
 
 impl SampleStore {
+    pub(super) fn block_samples(&self, from_ns: u64, to_ns: u64) -> Vec<Sample> {
+        self.series
+            .values()
+            .flat_map(|series| series.samples.iter())
+            .filter(|sample| (from_ns..=to_ns).contains(&sample.monotonic_ns))
+            .take(8193)
+            .cloned()
+            .collect()
+    }
     pub fn new(contract: KpiContract) -> Self {
         Self {
             contract,
@@ -147,21 +159,32 @@ impl SampleStore {
     ) -> Option<WindowAggregate> {
         let spec = self.contract.spec(metric)?;
         let series = self.series.get(metric)?;
-        if now_ns.saturating_sub(series.samples.back()?.monotonic_ns)
-            > spec.max_age_ms.saturating_mul(1_000_000)
-        {
-            return None;
-        }
         let inside: Vec<&Sample> = series
             .samples
             .iter()
             .filter(|sample| (from_ns..=to_ns).contains(&sample.monotonic_ns))
             .collect();
-        let population: u64 = inside.iter().map(|sample| sample.population).sum();
+        let newest = inside.last()?;
+        if now_ns.saturating_sub(newest.monotonic_ns) > spec.max_age_ms.saturating_mul(1_000_000) {
+            return None;
+        }
+        let work_unit = inside.first()?.work_unit.as_deref();
+        if inside
+            .iter()
+            .any(|sample| sample.work_unit.as_deref() != work_unit)
+        {
+            return None;
+        }
+        let population = inside
+            .iter()
+            .try_fold(0_u64, |total, sample| total.checked_add(sample.population))?;
         if inside.is_empty() || population < spec.min_population {
             return None;
         }
         let (value, semantics) = aggregate(spec, &inside);
+        if !value.is_finite() {
+            return None;
+        }
         let complete = series
             .evicted_through_ns
             .is_none_or(|evicted| evicted < from_ns);
@@ -196,34 +219,39 @@ fn aggregate(spec: &MetricSpec, samples: &[&Sample]) -> (f64, Semantics) {
         )
     };
     let weight: f64 = samples.iter().map(|sample| sample.population as f64).sum();
+    let compatible = |batch_kind: SampleKind| {
+        if samples
+            .iter()
+            .all(|sample| sample.kind == SampleKind::RawEvent || sample.kind == batch_kind)
+        {
+            Semantics::Direct
+        } else {
+            Semantics::DiagnosticSummary
+        }
+    };
     match spec.aggregation {
-        // A population-weighted mean of summaries equals the mean of the underlying events.
+        // Only explicitly declared batch means compose this way. A legacy summary might be p99.
         Aggregation::Mean => (
             samples
                 .iter()
-                .map(|sample| sample.value * sample.population as f64)
-                .sum::<f64>()
-                / weight,
-            Semantics::Direct,
+                .map(|sample| sample.value * (sample.population as f64 / weight))
+                .sum::<f64>(),
+            compatible(SampleKind::BatchMean),
         ),
         Aggregation::Sum => (
             samples.iter().map(|sample| sample.value).sum(),
-            Semantics::Direct,
+            compatible(SampleKind::BatchSum),
         ),
         Aggregation::Max => (
             samples
                 .iter()
                 .map(|sample| sample.value)
                 .fold(f64::MIN, f64::max),
-            if all_raw {
-                Semantics::Direct
-            } else {
-                Semantics::QuantileOfSummaries
-            },
+            compatible(SampleKind::BatchMax),
         ),
         Aggregation::Last => (
             samples.last().map_or(0.0, |sample| sample.value),
-            Semantics::Direct,
+            compatible(SampleKind::BatchLast),
         ),
         Aggregation::P50 => quantile(0.50),
         Aggregation::P95 => quantile(0.95),

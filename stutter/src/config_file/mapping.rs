@@ -242,6 +242,10 @@ pub fn apply_daemon_user_config_overrides(
     {
         daemon_config.autotune.frame_capture_root = Some(root);
     }
+    if let Some(autotune) = user_config.autotune.as_ref() {
+        daemon_config.autotune.kpi_contract = autotune.kpi_contract.clone();
+        daemon_config.autotune.kpi_socket_dir = autotune.kpi_socket_dir.clone();
+    }
     if let Some(policy) = user_config
         .autotune
         .as_ref()

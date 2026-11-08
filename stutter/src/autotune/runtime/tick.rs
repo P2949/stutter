@@ -284,6 +284,7 @@ impl AutotuneRuntime {
         }
 
         let mut observation = self.build_observation();
+        self.poll_kpi_source(observation.workload_identity.as_ref());
         observation.external_owners = self.current_external_owners();
         self.abort_on_owner_appearance(observation.external_owners.as_ref())?;
         // The pressure of the target's own cgroup follows the target, and only the target.

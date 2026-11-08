@@ -134,6 +134,7 @@ pub fn terminate(proc_root: &Path, targets: &[Marked], grace: Duration) -> usize
             if fd < 0 {
                 return None;
             }
+            // SAFETY: pidfd_open succeeded and returned a fresh fd owned by this scope.
             let handle = unsafe { OwnedFd::from_raw_fd(fd as i32) };
             (start_ticks(proc_root, target.pid) == Some(target.start_ticks))
                 .then_some((target, handle))
