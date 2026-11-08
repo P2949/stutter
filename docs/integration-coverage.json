@@ -185,16 +185,16 @@
       "packages": [
         "W8"
       ],
-      "anchors": [],
-      "status": "not_started",
-      "g0": "native topology model exists; no hwloc cross-check, no v2 normalization",
+      "anchors": [
+        "stutter/src/topology_v2.rs",
+        "stutter/src/topology.rs"
+      ],
+      "status": "first_slice",
+      "g0": "native topology v2 from sysfs: LLC domains, capacity classes, larger-cache regions from verified sizes, dies, frequency domains, NUMA distances, GPU locality, cpuset-effective CPUs and a change fingerprint, reported by doctor; no hwloc cross-check",
       "g1": "none",
       "runtime_availability": "absent",
       "authority": "O/B",
-      "not_wired": "topology v2 not built",
-      "related_existing": [
-        "stutter/src/topology.rs"
-      ]
+      "not_wired": "the planner does not yet use topology v2 for placement hypotheses; no hwloc XML cross-check; topology fingerprint is not yet part of the candidate-memory key"
     },
     {
       "id": "5.10",

@@ -4,45 +4,9 @@
 //! this module, plus the root `run_cli` entry point and root `StutterError`
 //! re-export, instead of depending on internal module layout.
 
-pub mod game_run {
-    //! Launch records written by `stutter game-run` for campaigns that consume its capture directories.
-    pub use crate::game_run::{LaunchRecord, default_capture_root, read_launch_record};
-}
-
-pub mod objective_source {
-    //! Typed local application KPIs: contract, bound-source ingestion and window aggregation.
-    pub use crate::autotune::objective::source::*;
-}
-
-pub mod ownership {
-    //! Exact resource ownership receipts and the process-name owner probe.
-    pub use crate::integrations::{receipt::*, *};
-}
-
-pub mod sensors {
-    //! Sensor descriptors, readings, the PSI sensor and the cost-bounded registry.
-    pub use crate::autotune::sensors::*;
-}
-
-pub mod telemetry {
-    //! Workload identity, frame-source attribution, stream quality and confined capture files.
-    pub use crate::{
-        mangohud::{
-            MangoHudTailSession, TailConfig, TailCounters, TailFailure, TailState, TailedFrame,
-            drive_tail_session,
-        },
-        telemetry::{
-            frame_source::*,
-            gamescope::{GamescopeSupport, help_documents_mangoapp, probe as probe_gamescope},
-            identity::*,
-            live_source::*,
-            proc_view::live_process,
-            quality::*,
-            registration::*,
-            session::*,
-        },
-    };
-}
+pub use crate::api_integration::{
+    game_run, objective_source, ownership, sensors, telemetry, topology,
+};
 
 pub mod workload_progress {
     //! Fixed-work identity, marker protocol, and validated completion evidence.

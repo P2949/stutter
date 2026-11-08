@@ -11,7 +11,7 @@ mod registry;
 pub mod tracepoints;
 mod utils;
 
-use capabilities::{daemon_capabilities_check, external_owners_check};
+use capabilities::{daemon_capabilities_check, external_owners_check, topology_check};
 use ebpf::{ebpf_build_check, ebpf_runtime_permission_check};
 use ebpf_map_sizing::ebpf_map_sizing_check;
 use hwmon::hwmon_check;
@@ -48,6 +48,7 @@ pub fn build_doctor_report(input: &DoctorInput) -> DoctorReport {
         ebpf_map_sizing_check(),
         daemon_capabilities_check(),
         external_owners_check(),
+        topology_check(),
         tracepoint_check(input),
         probe_registry_check(input),
     ];

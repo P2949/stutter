@@ -1,4 +1,5 @@
 pub mod api;
+pub(crate) mod api_integration;
 pub(crate) mod syscall;
 
 pub(crate) mod actions;
@@ -77,6 +78,7 @@ pub(crate) mod task_class;
 pub(crate) mod tasks;
 pub(crate) mod telemetry;
 pub(crate) mod topology;
+pub(crate) mod topology_v2;
 pub(crate) mod tui;
 pub(crate) mod tune;
 pub(crate) mod validate;

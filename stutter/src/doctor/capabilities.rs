@@ -139,3 +139,78 @@ pub(crate) fn external_owners_check_at(
         details,
     }
 }
+
+/// The cache, die, capacity and locality facts the planner may use for placement hypotheses,
+/// read natively from sysfs. Informational: an absent fact is reported as absent, never guessed.
+pub(crate) fn topology_check() -> DoctorCheck {
+    topology_check_at(
+        std::path::Path::new("/sys/devices/system"),
+        std::path::Path::new("/sys/class"),
+    )
+}
+
+pub(crate) fn topology_check_at(
+    system_root: &std::path::Path,
+    class_root: &std::path::Path,
+) -> DoctorCheck {
+    use crate::{topology::TopologyModel, topology_v2::TopologyV2};
+    let mut details = BTreeMap::new();
+    let base = match TopologyModel::read_at(system_root) {
+        Ok(base) => base,
+        Err(error) => {
+            return DoctorCheck {
+                name: "topology".to_owned(),
+                status: DoctorStatus::Warn,
+                message: format!("the base CPU topology could not be read: {error:#}"),
+                details,
+            };
+        }
+    };
+    let effective = base.online_cpu_ids();
+    let topo = TopologyV2::read_at(system_root, class_root, &base, effective);
+    details.insert(
+        "online_cpus".to_owned(),
+        base.online_cpu_ids().len().to_string(),
+    );
+    details.insert("llc_domains".to_owned(), topo.llc_domains.len().to_string());
+    details.insert(
+        "capacity_classes".to_owned(),
+        if topo.capacity_classes.is_empty() {
+            "none reported (homogeneous or not exposed)".to_owned()
+        } else {
+            topo.capacity_classes.len().to_string()
+        },
+    );
+    details.insert(
+        "larger_cache_cpus".to_owned(),
+        if topo.larger_cache_cpus.is_empty() {
+            "none verified".to_owned()
+        } else {
+            crate::topology::cpus_to_range_string(&topo.larger_cache_cpus)
+        },
+    );
+    details.insert(
+        "frequency_domains".to_owned(),
+        topo.frequency_domains.len().to_string(),
+    );
+    details.insert(
+        "numa_nodes".to_owned(),
+        topo.numa_distance.len().to_string(),
+    );
+    details.insert(
+        "gpu_devices".to_owned(),
+        topo.gpu_locality.len().to_string(),
+    );
+    details.insert("fingerprint".to_owned(), topo.fingerprint.clone());
+    DoctorCheck {
+        name: "topology".to_owned(),
+        status: DoctorStatus::Pass,
+        message: format!(
+            "{} LLC domain(s), {} capacity class(es), fingerprint {}",
+            topo.llc_domains.len(),
+            topo.capacity_classes.len(),
+            topo.fingerprint
+        ),
+        details,
+    }
+}

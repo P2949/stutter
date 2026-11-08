@@ -109,26 +109,6 @@ pub(in crate::architecture_tests) const EXPECTED_ROOT_PUBLIC_MODULES: &[Expected
 
 pub(in crate::architecture_tests) const EXPECTED_API_PUBLIC_MODULES: &[ExpectedPublicModule] = &[
     ExpectedPublicModule {
-        name: "game_run",
-        reason: "launch records and capture roots of the optional game-run wrapper, read by the real-workload campaigns",
-    },
-    ExpectedPublicModule {
-        name: "objective_source",
-        reason: "typed local-only application KPI contract and ingestion; carries no mutation authority",
-    },
-    ExpectedPublicModule {
-        name: "ownership",
-        reason: "exact resource ownership receipts and the read-only owner probe; fails closed",
-    },
-    ExpectedPublicModule {
-        name: "sensors",
-        reason: "read-only sensor framework with probes, quality, loss and cost-bounded admission",
-    },
-    ExpectedPublicModule {
-        name: "telemetry",
-        reason: "verified workload identity and frame-source provenance for the real-workload campaigns",
-    },
-    ExpectedPublicModule {
         name: "workload_progress",
         reason: "versioned fixed-work marker protocol and runner used by benchmark harnesses",
     },
