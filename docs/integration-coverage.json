@@ -138,11 +138,11 @@
         "stutter/src/integrations/mod.rs"
       ],
       "status": "first_slice",
-      "g0": "presence probe and network / VM knob domain denial",
+      "g0": "a cheap `network` sensor reads TCP retransmits, timeouts, listen overflows and non-loopback interface drops as deltas (never a decision input); presence probe and network / VM knob domain denial",
       "g1": "none",
       "runtime_availability": "absent",
       "authority": "O/A",
-      "not_wired": "no tuner enumeration, no network sensor",
+      "not_wired": "no bpftune tuner enumeration (no documented read interface was verified); the network sensor exists but is not tied to bpftune ownership",
       "dispositions": [
         "FixtureVerified",
         "HardwareUnavailable",
@@ -821,7 +821,7 @@
       "g1": "none",
       "runtime_availability": "benchmark tools absent",
       "authority": "O/F/E",
-      "not_wired": "the socket front end is not bound by the service yet; no network sensor, no load comparator, no Prometheus or OpenTelemetry readers",
+      "not_wired": "the socket front end is not bound by the service yet; no load comparator, no Prometheus or OpenTelemetry readers",
       "dispositions": [
         "FixtureVerified",
         "HardwareUnavailable",

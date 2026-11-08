@@ -9,6 +9,7 @@ mod escalation;
 #[cfg(test)]
 mod guard_tests;
 mod memory_domains;
+mod network;
 mod oom_guard;
 mod pmu;
 mod psi;
@@ -21,6 +22,7 @@ use std::collections::BTreeMap;
 pub use cpu_power::{CpuPowerSensor, thermal_guard_event};
 pub use escalation::{Escalator, Hypothesis, Thresholds, Trigger, diagnostic_sensor};
 pub use memory_domains::{DamonSensor, NumaSensor, ResctrlSensor};
+pub use network::NetworkSensor;
 pub use oom_guard::{OomGuardSensor, memory_guard_event, session_cgroup_dir};
 pub use pmu::{MIN_RUNNING_RATIO, PmuSensor, PmuTargets, reading_from_deltas};
 pub use psi::PsiSensor;
