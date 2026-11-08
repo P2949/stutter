@@ -170,13 +170,15 @@
         "W11c",
         "W13"
       ],
-      "anchors": [],
-      "status": "not_started",
-      "g0": "none",
-      "g1": "none",
+      "anchors": [
+        "stutter/src/autotune/sensors/memory_domains.rs"
+      ],
+      "status": "first_slice",
+      "g0": "read-only damon_state sensor (kdamond, running and scheme counts only, no addresses; root-only files report permission denied)",
+      "g1": "DAMON admin interface present on this host but root-only, so unavailable to the controller user",
       "runtime_availability": "kernel interface present (/sys/kernel/mm/damon/admin), damo absent",
       "authority": "O/F/E",
-      "not_wired": "no sensor, no owned scheme"
+      "not_wired": "no owned DAMOS scheme, no quota or goal feedback, no damo parity manifest, no hot/cold region summary"
     },
     {
       "id": "5.9",
@@ -415,14 +417,15 @@
         "W11c"
       ],
       "anchors": [
-        "stutter/src/integrations/mod.rs"
+        "stutter/src/integrations/mod.rs",
+        "stutter/src/autotune/sensors/memory_domains.rs"
       ],
       "status": "first_slice",
-      "g0": "numad presence marks memory placement owned",
+      "g0": "numad presence marks memory placement owned; numa_stat sensor reads per-node numastat deltas and the remote-allocation ratio of the interval",
       "g1": "none",
       "runtime_availability": "numad and numactl absent",
       "authority": "O/A/E",
-      "not_wired": "no NUMA sensor or policy operations"
+      "not_wired": "no numa_maps or fault/migration accounting, no policy or migration operations"
     },
     {
       "id": "5.20",
@@ -520,13 +523,15 @@
         "W9",
         "W11c"
       ],
-      "anchors": [],
-      "status": "not_started",
-      "g0": "none",
-      "g1": "none",
+      "anchors": [
+        "stutter/src/autotune/sensors/memory_domains.rs"
+      ],
+      "status": "first_slice",
+      "g0": "read-only resctrl inventory (closids, rmids, allocation groups) reported unavailable when not mounted",
+      "g1": "resctrl is not mounted on this host (HardwareUnavailable for physical proof)",
       "runtime_availability": "resctrl not mounted on this host",
       "authority": "O/E",
-      "not_wired": "no sensor, no allocation operations"
+      "not_wired": "no occupancy or bandwidth monitoring, no CAT/MBA operations"
     },
     {
       "id": "5.25",

@@ -7,8 +7,8 @@
 use std::{path::Path, time::Instant};
 
 use crate::autotune::sensors::{
-    AdmissionDenied, CpuPowerSensor, ExpensiveBudget, OomGuardSensor, PsiSensor, SensorReading,
-    SensorRegistry, session_cgroup_dir,
+    AdmissionDenied, CpuPowerSensor, DamonSensor, ExpensiveBudget, NumaSensor, OomGuardSensor,
+    PsiSensor, ResctrlSensor, SensorReading, SensorRegistry, session_cgroup_dir,
 };
 
 pub(super) struct SensorHub {
@@ -28,7 +28,16 @@ impl SensorHub {
         )));
         let started = Instant::now();
         let mut unavailable = Vec::new();
-        let mut ids = vec!["psi_system", "cpu_power"];
+        registry.register(Box::new(NumaSensor::new(Path::new("/sys/devices/system"))));
+        registry.register(Box::new(DamonSensor::new(Path::new("/sys/kernel/mm"))));
+        registry.register(Box::new(ResctrlSensor::new(Path::new("/sys/fs"))));
+        let mut ids = vec![
+            "psi_system",
+            "cpu_power",
+            "numa_stat",
+            "damon_state",
+            "resctrl_inventory",
+        ];
         let session = std::fs::read_to_string(proc_root.join("self/cgroup"))
             .ok()
             .and_then(|text| {

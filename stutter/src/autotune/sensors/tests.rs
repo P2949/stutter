@@ -418,3 +418,126 @@ mod oom_guard {
         assert!(matches!(sensor.probe(), Availability::Unavailable(_)));
     }
 }
+
+mod memory_domains {
+    use std::{fs, os::unix::fs::PermissionsExt, path::Path};
+
+    use super::super::{Availability, DamonSensor, NumaSensor, ResctrlSensor, Sensor};
+    use crate::autotune::objective::ObjectiveSignalQuality as Quality;
+
+    fn put(path: &Path, text: &str) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, text).unwrap();
+    }
+
+    fn root(name: &str) -> std::path::PathBuf {
+        let root =
+            std::env::temp_dir().join(format!("stutter-memdom-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    fn numastat(system: &Path, node: u32, hit: u64, local: u64, other: u64) {
+        put(
+            &system.join(format!("node/node{node}/numastat")),
+            &format!(
+                "numa_hit {hit}\nnuma_miss 0\nnuma_foreign 0\ninterleave_hit 1\nlocal_node {local}\nother_node {other}\n"
+            ),
+        );
+    }
+
+    #[test]
+    fn numa_locality_is_a_ratio_of_the_interval_and_absent_hardware_is_unavailable() {
+        let base = root("numa");
+        let system = base.join("system");
+        numastat(&system, 0, 100, 100, 0);
+        numastat(&system, 1, 100, 100, 0);
+        let mut sensor = NumaSensor::new(&system);
+        assert_eq!(sensor.probe(), Availability::Available);
+        sensor.start().unwrap();
+        assert_eq!(sensor.sample(1).quality, Quality::Missing);
+        // Node 0 gains 90 local and 10 remote allocations.
+        numastat(&system, 0, 200, 190, 10);
+        let second = sensor.sample(2);
+        assert_eq!(second.values["local_node_delta"], 90.0);
+        assert!((second.values["remote_ratio"] - 0.1).abs() < 1e-12);
+        // No allocations in the next interval: no ratio rather than zero.
+        let idle = sensor.sample(3);
+        assert!(!idle.values.contains_key("remote_ratio"));
+        // A reset is loss.
+        numastat(&system, 0, 5, 5, 0);
+        assert_eq!(
+            sensor.sample(4).lost,
+            3,
+            "hit, local and other all went backwards"
+        );
+        let none = NumaSensor::new(&base.join("empty"));
+        assert!(matches!(none.probe(), Availability::Unavailable(_)));
+        fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn damon_reports_counts_only_and_a_root_only_interface_is_permission_denied() {
+        let base = root("damon");
+        let admin = base.join("damon/admin/kdamonds");
+        put(&admin.join("nr_kdamonds"), "2\n");
+        put(&admin.join("0/state"), "on\n");
+        put(&admin.join("0/contexts/nr_contexts"), "1\n");
+        put(&admin.join("0/contexts/0/schemes/nr_schemes"), "3\n");
+        put(&admin.join("1/state"), "off\n");
+        let mut sensor = DamonSensor::new(&base);
+        assert_eq!(sensor.probe(), Availability::Available);
+        let reading = sensor.sample(1);
+        assert_eq!(
+            (
+                reading.values["kdamonds"],
+                reading.values["kdamonds_running"],
+                reading.values["schemes_installed"]
+            ),
+            (2.0, 1.0, 3.0)
+        );
+        // Root-only: the reason is permission denied, not an empty healthy reading.
+        fs::set_permissions(admin.join("nr_kdamonds"), fs::Permissions::from_mode(0o000)).unwrap();
+        if crate::syscall::geteuid() != 0 {
+            assert!(
+                matches!(sensor.probe(), Availability::Unavailable(r) if r.contains("permission denied"))
+            );
+            assert_eq!(sensor.sample(2).quality, Quality::Missing);
+        }
+        assert!(matches!(
+            DamonSensor::new(&base.join("none")).probe(),
+            Availability::Unavailable(_)
+        ));
+        fs::set_permissions(admin.join("nr_kdamonds"), fs::Permissions::from_mode(0o600)).unwrap();
+        fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn resctrl_is_an_inventory_when_mounted_and_unavailable_when_not() {
+        let base = root("resctrl");
+        let mut sensor = ResctrlSensor::new(&base);
+        assert!(
+            matches!(sensor.probe(), Availability::Unavailable(r) if r.contains("not mounted"))
+        );
+        put(&base.join("resctrl/info/L3/num_closids"), "16\n");
+        put(&base.join("resctrl/info/L3_MON/num_rmids"), "256\n");
+        fs::create_dir_all(base.join("resctrl/mon_groups")).unwrap();
+        fs::create_dir_all(base.join("resctrl/game")).unwrap();
+        assert_eq!(sensor.probe(), Availability::Available);
+        let values = sensor.sample(1).values;
+        assert_eq!(
+            (
+                values["l3_closids"],
+                values["l3_rmids"],
+                values["allocation_groups"]
+            ),
+            (16.0, 256.0, 1.0)
+        );
+        assert!(
+            !values.contains_key("mba_closids"),
+            "absent hardware is absent, not zero"
+        );
+        fs::remove_dir_all(&base).unwrap();
+    }
+}
