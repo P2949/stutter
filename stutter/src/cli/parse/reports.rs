@@ -9,7 +9,8 @@ use super::super::{
         AdvisorArgs, ApplyProfileArgs, AuditArgs, CapabilitiesArgs, CheckArgs, CompareArgs,
         CompareCommand, CompletionsArgs, GameRunArgs, InspectDrmTracepointsArgs, InspectIrqsArgs,
         InspectTreeArgs, KpiServeArgs, ManArgs, ProbesArgs, ProfilePlanArgs, ProfileTemplateArgs,
-        RecommendArgs, ReportArgs, RestoreArgs, SummaryArgs, TuneArgs, WaylandProbeArgs,
+        RecommendArgs, ReportArgs, RestoreArgs, SummaryArgs, TopologyCheckArgs, TuneArgs,
+        WaylandProbeArgs,
     },
     validate::{ValidateArgs, parse_optional_task_class},
 };
@@ -520,6 +521,14 @@ pub(super) fn parse_kpi_serve_command(args: KpiServeArgs) -> anyhow::Result<AppC
             contract: args.contract,
             window: Duration::from_secs(args.window_secs),
             connections: args.connections,
+        },
+    ))
+}
+
+pub(super) fn parse_topology_check_command(args: TopologyCheckArgs) -> anyhow::Result<AppCommand> {
+    Ok(AppCommand::TopologyCheck(
+        crate::commands::topology_check::TopologyCheckCommandInput {
+            hwloc_xml: args.hwloc_xml,
         },
     ))
 }

@@ -24,6 +24,7 @@ stutter
   inspect-drm-tracepoints
   game-run
   kpi-serve
+  topology-check
   wayland-probe
   autotune
   autotune-status

@@ -28,6 +28,7 @@ Commands:
   inspect-drm-tracepoints  Inspect available DRM tracepoints for display-path evidence
   game-run                 Run a command unchanged, optionally with MangoHud capture in a secure directory
   kpi-serve                Observe an application KPI over a confined local socket (no daemon, no mutation)
+  topology-check           Cross-check the native CPU topology against an hwloc XML export (advisory)
   wayland-probe            Probe Wayland presentation timing support
   autotune                 Manage experimental autotune planning and replay commands
   autotune-status          Inspect experimental autotune controller status

@@ -670,3 +670,10 @@ pub(super) struct KpiServeArgs {
     #[arg(long = "connections", value_name = "N")]
     pub(super) connections: Option<usize>,
 }
+
+#[derive(Args, Debug, Clone)]
+pub(super) struct TopologyCheckArgs {
+    /// An hwloc XML export (`lstopo --of xml`). hwloc is never linked or run.
+    #[arg(long = "hwloc-xml", value_name = "FILE")]
+    pub(super) hwloc_xml: PathBuf,
+}

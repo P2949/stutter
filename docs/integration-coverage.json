@@ -264,12 +264,12 @@
         "stutter/src/topology_hwloc.rs",
         "stutter/src/autotune/planning/profile_candidates/llc.rs"
       ],
-      "status": "first_slice",
-      "g0": "native topology v2 from sysfs: LLC domains, capacity classes, larger-cache regions from verified sizes, dies, frequency domains, NUMA distances, GPU locality, cpuset-effective CPUs and a change fingerprint, reported by doctor; an hwloc XML export is read as data and cross-checked against native cache domains and usable CPUs (advisory: a difference is named, never applied; hwloc is never linked or run)",
+      "status": "code_complete",
+      "g0": "`stutter topology-check --hwloc-xml FILE` cross-checks the native cache domains and usable CPUs against an hwloc XML export (advisory: a difference is named and exits non-zero, nothing is applied; hwloc is never linked or run; exercised against this host with a Machine-only export, which correctly reports the missing L3 object). The topology-v2 fingerprint is part of the candidate-memory context signature. The placement hypothesis `game-llc-pack` is available offline through `generate_plan_with_cache_locality` and is deliberately not added to the daemon provider, because the autonomous registry gates the CPU-affinity operation rather than a profile name (PLAN: no new autonomous tuple unless separately qualified). native topology v2 from sysfs: LLC domains, capacity classes, larger-cache regions from verified sizes, dies, frequency domains, NUMA distances, GPU locality, cpuset-effective CPUs and a change fingerprint, reported by doctor; an hwloc XML export is read as data and cross-checked against native cache domains and usable CPUs (advisory: a difference is named, never applied; hwloc is never linked or run)",
       "g1": "none",
       "runtime_availability": "absent",
       "authority": "O/B",
-      "not_wired": "topology v2 yields a validated game-llc-pack placement hypothesis (`generate_plan_with_cache_locality`, new profile name so never autonomous) but the daemon's provider deliberately still generates the default set only: the autonomous registry gates the CPU-affinity operation, not a profile name, so adding a profile there would widen a qualified Supported contract without qualification (PLAN: no new autonomous tuple unless separately qualified); the hwloc cross-check is a library function not yet exposed through doctor or a CLI",
+      "not_wired": "nothing",
       "dispositions": [
         "FixtureVerified",
         "HardwareUnavailable",
