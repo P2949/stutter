@@ -171,6 +171,12 @@ fn the_engine_runs_counterbalanced_arms_and_the_treatment_really_changes_the_wor
         report.verdict
     );
     assert!((report.verdict.effect_percent - 20.0).abs() < 1e-6);
+    let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+    assert_eq!(
+        mode(&out.join("captures/slot-000")),
+        0o700,
+        "game-run needs an owner-only capture root"
+    );
     assert!(report.verdict.engineering_pass);
     // Resuming repeats nothing and gives the same verdict.
     let again = run(&manifest_path, &out, &stutter, false).unwrap();

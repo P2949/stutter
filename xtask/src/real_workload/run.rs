@@ -111,7 +111,10 @@ fn execute_one(
 ) -> anyhow::Result<(Execution, Option<FrameMetrics>)> {
     let arm = manifest.arm_at(slot);
     let capture_root = out.join("captures").join(format!("slot-{slot:03}"));
-    fs::create_dir_all(&capture_root)?;
+    // Owner-only: `stutter game-run` refuses a capture root that others can enter.
+    std::os::unix::fs::DirBuilderExt::mode(&mut fs::DirBuilder::new(), 0o700)
+        .recursive(true)
+        .create(&capture_root)?;
     let argv = execution_argv(stutter_bin, &capture_root, manifest, arm, candidate);
     let mut command = Command::new(&argv[0]);
     command.args(&argv[1..]).current_dir(out);
