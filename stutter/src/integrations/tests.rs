@@ -417,3 +417,19 @@ mod adapter_reports {
         );
     }
 }
+
+#[test]
+fn a_real_owner_probe_and_context_signature_cost_little_on_this_host() {
+    let started = std::time::Instant::now();
+    let rounds = 20;
+    for _ in 0..rounds {
+        let _ = probe(std::path::Path::new("/proc"), std::path::Path::new("/sys"));
+    }
+    let per_probe = started.elapsed() / rounds;
+    eprintln!("owner probe: {per_probe:?} per scan of the real /proc");
+    // It runs at most once per 30 seconds; even 50 ms would be far below one percent of a core.
+    assert!(
+        per_probe < std::time::Duration::from_millis(50),
+        "{per_probe:?}"
+    );
+}

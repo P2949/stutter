@@ -169,3 +169,22 @@ fn the_context_signature_joins_inventory_topology_and_boot_context_and_is_stable
     // A different inventory is a different key and is not served from the cache.
     assert!(runtime.context_signature("other").starts_with("other+"));
 }
+
+#[test]
+fn sampling_every_always_on_sensor_stays_cheap_enough_for_every_tick() {
+    let mut config = AutotuneRuntimeConfig::suggest(None, Some(std::process::id()), None);
+    config.history_log = None;
+    let mut runtime = AutotuneRuntime::new(config);
+    let rounds = 200;
+    let started = std::time::Instant::now();
+    for _ in 0..rounds {
+        let _ = runtime.sensor_hub.sample();
+    }
+    let per_sample = started.elapsed() / rounds;
+    eprintln!("always-on sensor sample: {per_sample:?} per evaluation");
+    // About one evaluation a second runs this; at 5 ms it would still be 0.5 percent of a core.
+    assert!(
+        per_sample < std::time::Duration::from_millis(5),
+        "{per_sample:?}"
+    );
+}
