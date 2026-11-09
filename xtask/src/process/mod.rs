@@ -8,6 +8,7 @@ use anyhow::bail;
 
 pub mod ownership;
 pub mod supervisor;
+mod tee;
 use supervisor::{ExecutionPolicy, Outcome, Supervised};
 
 pub const DEFAULT_TOOLCHAIN: &str = "nightly-2026-06-06";
@@ -127,6 +128,12 @@ pub fn stage_policy() -> ExecutionPolicy {
 }
 
 fn check_outcome(command_text: &str, run: &Supervised) -> anyhow::Result<()> {
+    if run.tee_dropped_bytes > 0 {
+        bail!(
+            "command `{command_text}` omitted {} captured bytes from console echo; stage evidence is incomplete",
+            run.tee_dropped_bytes
+        );
+    }
     match &run.outcome {
         Outcome::Exited(status) if status.success() => Ok(()),
         Outcome::Exited(status) => bail!("command `{command_text}` failed with status {status}"),

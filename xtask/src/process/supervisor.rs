@@ -5,7 +5,7 @@
 //! through verified pidfds, waits a bounded grace, then uses cgroup.kill and verifies the group
 //! emptied. A process group and legacy owner markers remain additional cleanup/diagnostic tools.
 use std::{
-    io::{Read, Write},
+    io::Read,
     os::{fd::AsRawFd, unix::process::CommandExt},
     path::Path,
     process::{Command, ExitStatus, Stdio},
@@ -92,6 +92,8 @@ pub struct Supervised {
     pub stderr: String,
     /// Output bytes that were drained but not retained because of the cap.
     pub dropped_bytes: u64,
+    /// Captured bytes omitted from console echo because its sink was unavailable/backpressured.
+    pub tee_dropped_bytes: u64,
     /// The process group that was supervised (equal to the child's pid).
     pub group: i32,
 }
@@ -99,6 +101,7 @@ pub struct Supervised {
 struct Captured {
     text: Vec<u8>,
     dropped: u64,
+    tee_dropped: u64,
     complete: bool,
 }
 
@@ -117,10 +120,12 @@ fn drain<R: Read + AsRawFd + Send + 'static>(
     if flags == -1 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } == -1 {
         return Err(std::io::Error::last_os_error());
     }
+    let mut sink = tee.and_then(super::tee::ConsoleSink::open);
     Ok(thread::spawn(move || {
         let mut captured = Captured {
             text: Vec::new(),
             dropped: 0,
+            tee_dropped: 0,
             complete: false,
         };
         let mut chunk = [0u8; 8192];
@@ -143,14 +148,9 @@ fn drain<R: Read + AsRawFd + Send + 'static>(
             }
             let room = cap.saturating_sub(captured.text.len());
             let keep = room.min(read);
-            if let Some(to_stderr) = tee {
-                // Tee has the same immutable byte cap as capture. Flooding cannot fill an
-                // unbounded parent log after the in-memory limit has been reached.
-                let _ = if to_stderr {
-                    std::io::stderr().write_all(&chunk[..keep])
-                } else {
-                    std::io::stdout().write_all(&chunk[..keep])
-                };
+            if tee.is_some() {
+                let echoed = sink.as_mut().map_or(0, |sink| sink.echo(&chunk[..keep]));
+                captured.tee_dropped += (keep - echoed) as u64;
             }
             captured.text.extend_from_slice(&chunk[..keep]);
             captured.dropped += (read - keep) as u64;
@@ -329,6 +329,7 @@ pub fn run(mut command: Command, policy: &ExecutionPolicy) -> anyhow::Result<Sup
         stdout: String::from_utf8_lossy(&out.text).into_owned(),
         stderr: String::from_utf8_lossy(&err.text).into_owned(),
         dropped_bytes: out.dropped + err.dropped,
+        tee_dropped_bytes: out.tee_dropped + err.tee_dropped,
         group,
     })
 }
@@ -394,6 +395,63 @@ mod tests {
         assert_eq!(exit_code(&result), Some(0));
         assert!(result.stdout.len() <= 32 * 1024);
         assert!(result.dropped_bytes > 4_000_000);
+    }
+
+    #[test]
+    fn a_backpressured_tee_cannot_block_stage_completion() {
+        const CHILD: &str = "STUTTER_TEST_BACKPRESSURED_TEE";
+        if std::env::var_os(CHILD).is_some() {
+            let mut policy = quiet(2000);
+            policy.tee = true;
+            policy.output_cap = 1024 * 1024;
+            let result = run(sh("yes x | head -c 5000000"), &policy).unwrap();
+            assert_eq!(exit_code(&result), Some(0));
+            assert!(result.stdout.len() <= policy.output_cap / 2);
+            assert!(result.stdout.starts_with("x\nx\n"));
+            assert!(result.tee_dropped_bytes > 0);
+            assert!(super::super::check_outcome("backpressured fixture", &result).is_err());
+            // The harness itself would print to the intentionally full pipe after returning.
+            std::process::exit(0);
+        }
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "process::supervisor::tests::a_backpressured_tee_cannot_block_stage_completion",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        // Deliberately do not drain the child's console pipe until it exits.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let finished = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break Some(status);
+            }
+            if Instant::now() >= deadline {
+                break None;
+            }
+            thread::sleep(POLL);
+        };
+        if finished.is_none() {
+            child.kill().unwrap();
+            child.wait().unwrap();
+        }
+        let mut output = Vec::new();
+        child
+            .stdout
+            .take()
+            .unwrap()
+            .read_to_end(&mut output)
+            .unwrap();
+        assert!(
+            finished.is_some(),
+            "tee blocked the supervisor after its stage deadline"
+        );
+        assert!(finished.unwrap().success());
     }
 
     #[test]

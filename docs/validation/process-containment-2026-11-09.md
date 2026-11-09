@@ -53,3 +53,12 @@ nix develop --command cargo clippy -p xtask -p stutter-validation-runner --all-t
 
 Each concurrent checkout must use its own Cargo target directory. Cargo's build lock does not
 make concurrent test execution safe when another checkout can replace the same executable.
+
+The console-echo follow-up reproduces a full stdout pipe in a disposable test process. Echo now
+uses an independently nonblocking pipe/device description or per-call nonblocking socket send;
+it preserves regular-file offsets and never changes the caller's stdout flags. Lost echo bytes
+are counted separately and make the validation stage fail as incomplete evidence. The original
+five-second regression timeout and the passing follow-up are retained in `.llm-runs/tee-*`.
+The unsafe-documentation guard, all 17 process tests, full library (3,265 passed, ten ignored),
+and xtask Clippy passed after correcting the two immediately preceding SAFETY comments. These
+checks do not constitute consolidated CI or deployment qualification for this follow-up.
