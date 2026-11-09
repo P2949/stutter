@@ -1,6 +1,6 @@
 # Closeout report
 
-Source `a175c9860fb0704f4a0f62ff5770a2d141f15ef4`, kernel `6.18.57`. Generated from the integration coverage ledger; it cannot claim more than the ledger records.
+Source `a49af6f684f42726fd45d48f90011edca01343e2`, kernel `6.18.57`. Generated from the integration coverage ledger; it cannot claim more than the ledger records.
 
 ## Disposition counts
 
@@ -86,7 +86,7 @@ Source `a175c9860fb0704f4a0f62ff5770a2d141f15ef4`, kernel `6.18.57`. Generated f
 
 ## Verified subcapabilities
 
-25 items, each with a code anchor and a positive and a negative test: 11 operations, 11 observations, 3 typed refusals (a refusal explains an unsafe or impossible scope; it is not an actuator).
+28 items, each with a code anchor and a positive and a negative test: 11 operations, 14 observations, 3 typed refusals (a refusal explains an unsafe or impossible scope; it is not an actuator).
 
 | id | dossier | kind |
 |---|---|---|
@@ -115,3 +115,6 @@ Source `a175c9860fb0704f4a0f62ff5770a2d141f15ef4`, kernel `6.18.57`. Generated f
 | frames/fail-closed-input-and-counters | 5.12 | observation |
 | frames/verified-stamp-accuracy-claims | 5.12 | observation |
 | frames/decision-time-revalidation | 5.12 | observation |
+| frames/executable-image-binding | 5.12 | observation |
+| frames/trusted-capture-provenance | 5.12 | observation |
+| frames/unique-monotonic-reference-pairs | 5.12 | observation |

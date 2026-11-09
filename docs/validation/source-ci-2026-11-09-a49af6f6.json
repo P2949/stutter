@@ -1,0 +1,34 @@
+{
+  "result": "PASS",
+  "source_sha": "a49af6f684f42726fd45d48f90011edca01343e2",
+  "source_clean": true,
+  "build_output": "fresh local clone checkout/target (exclusive to this checkout); run at nice 19, ionice idle, 3 build jobs because a game was running on the host",
+  "commands": [
+    "nix develop --command cargo run -q -p xtask -- ci",
+    "nix develop --command cargo clippy --workspace --all-targets -- -D warnings",
+    "nix develop --command cargo run -q -p xtask -- release-check"
+  ],
+  "library": {
+    "passed": 3440,
+    "ignored": 16
+  },
+  "xtask": {
+    "passed": 556
+  },
+  "validation_runner": {
+    "passed": 106,
+    "ignored": 7
+  },
+  "architecture_tests": {
+    "passed": 125
+  },
+  "release_binary_sha256": "9714c664f3b20a477cdf8059f6735fffea0746ed0c075811d9def16d5f4fd00a",
+  "logs_sha256": {
+    "ci.log": "44feeb86a92a35669ade83565349def54e7af23ed3e0ef9769be32bc1b8f4be2",
+    "clippy-workspace.log": "9e884dab2f0ac04d3d315a804235349a43f1da97ece567979a98bd57bed1154c",
+    "release-check.log": "91e82e45e8640912f3583bd7763a1bbd45e014485e7fb5a8d30f3b2376139b9c"
+  },
+  "scope": "committed-source validation of the code commit with the fail-closed production-smoke preflight (exact fixture identity, strict history audit) and the stamped-source executable-image binding, monotonic reference pairs and trusted-capture provenance, on top of a175c986",
+  "not_deployed": "The production service is still the 4f3baa07 build (binary bf79d9c4...). Nothing since is reachable from the daemon or the bounded service, and the final-source deployment is deferred (BlockedResource: host not quiescent), so this receipt does not qualify the installed binary.",
+  "note": "documentation-only commits after this sha do not change the built binary"
+}
