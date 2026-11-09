@@ -1,0 +1,21 @@
+{
+  "kind": "controlled_real",
+  "mode": "observe",
+  "source_sha": "1962369ea400f6feb629397045438bee015fccd3",
+  "source_clean": true,
+  "binary_sha256": "f63fb61bbcf409768d118d8793a915562bd9e214b51205d01b4e71985eb096a0",
+  "preset": "default diagnosis preset",
+  "controller_exit": "success; MainPID 0 after stop; cgroup empty",
+  "decision_records": 62,
+  "frame_source_attribution": "ValidatedDirect (sole renderer, producer pid/start ticks resolved)",
+  "primary_denial": "AlignmentUncertain",
+  "alignment_uncertainty_ms_observed": "454-496",
+  "dropped_frames": 0,
+  "outstanding_tokens_after": 0,
+  "kernel_fault_lines": 0,
+  "raw_sha256": {
+    "decisions.jsonl": "ed726bac66371044a2d012935d0dae0278329cdf2528d7bb564832865c7652a8",
+    "controller.log": "cb234d4aed3ccc5023fa65e39a8b9edec5c1aaae983c163f03ea7f82971d6ef6",
+    "kernel.log": "19c4e28b2f54ea8f217db4e622b0a5c758efa7b77ce2dc0394b6d159568c0b2e"
+  }
+}
