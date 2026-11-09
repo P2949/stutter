@@ -545,6 +545,10 @@ impl ActionExecutor for SystemExecutor {
         verify_pinned(&xtask_path(auth), &auth.xtask_sha256)?;
         verify_pinned(&stutter_path(auth), &auth.stutter_sha256)?;
         let leaf = if mutation.is_some_and(|m| m.needs_delegated_cgroup()) {
+            // A subtree left by a crashed runner may still hold escaped descendants: end and
+            // prove it empty before it is reused.
+            crate::delegation::contain_end(Path::new("/sys/fs/cgroup"), &auth.campaign_id)
+                .map_err(|e| failure(format!("stale delegated subtree not cleared: {e}")))?;
             let owner = self
                 .drop_to_owner
                 .then_some((auth.owner_uid, auth.owner_gid));
@@ -564,10 +568,24 @@ impl ActionExecutor for SystemExecutor {
             SUITE_TIMEOUT,
             leaf.as_deref(),
         );
-        if leaf.is_some() {
-            let _ = crate::delegation::remove(Path::new("/sys/fs/cgroup"), &auth.campaign_id);
+        if leaf.is_none() {
+            return result;
         }
-        result
+        // Every exit path ends the whole delegated subtree; a failure here fails the run.
+        let cleanup =
+            crate::delegation::contain_end(Path::new("/sys/fs/cgroup"), &auth.campaign_id);
+        match (result, cleanup) {
+            (Ok(value), Ok(())) => Ok(value),
+            (Ok(_), Err(error)) => Err(failure(format!(
+                "{}: delegated subtree containment not proven: {error}",
+                suite.xtask_name()
+            ))),
+            (Err(denial), Ok(())) => Err(denial),
+            (Err((code, message)), Err(error)) => Err((
+                code,
+                format!("{message}; delegated subtree containment also failed: {error}"),
+            )),
+        }
     }
 
     fn recording(&self, auth: &Authorization, envelope: &Envelope) -> Result<Value, Denial> {

@@ -99,7 +99,7 @@ fn start_ticks(pid: u32) -> Option<u64> {
 }
 
 /// Uses the caller's owned current cgroup without changing ancestor limits or controllers.
-fn delegated_root() -> anyhow::Result<PathBuf> {
+pub(crate) fn delegated_root() -> anyhow::Result<PathBuf> {
     let text = fs::read_to_string("/proc/self/cgroup")?;
     let relative = text
         .lines()
