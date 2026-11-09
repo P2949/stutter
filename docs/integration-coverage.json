@@ -524,11 +524,11 @@
         "stutter/src/autotune/sensors/cpu_power.rs"
       ],
       "status": "code_complete",
-      "g0": "cheap cpu_power sensor: per-policy driver/governor/EPP, requested versus actual frequency, boost, AC state and throttle-event deltas with reset detection; sampled by the runtime into every observation; the EPP provider now consults the cpu_power sensor: any throttle event since the last reading, or a reading that lost counts, withholds the preference change (thermal protection is a mitigation to leave alone; thermald is never disabled), and candidates are per cpufreq policy with every related CPU named",
+      "g0": "cheap cpu_power sensor: per-policy driver/governor/EPP, requested versus actual frequency, boost, AC state and throttle-event deltas with reset detection; sampled by the runtime into every observation; per-cpufreq-policy EPP candidates name every related CPU, and thermal protection is a mitigation left alone: the provider withholds the change while the thermal_degraded objective signal is set (test `cpu_power_provider_blocks_thermal_degraded`), on battery by default, and when system health is not ok; thermald is never disabled",
       "g1": "read on this host at runtime (intel_pstate, 12 policies)",
       "runtime_availability": "thermald absent",
       "authority": "O/A",
-      "not_wired": "no new EPP benefit campaign (the prior negative pilot is retained, not rerun); thermald absent on this host; RAPL energy is root-only here",
+      "not_wired": "sensor readings are deliberately not decision inputs (architecture guard `decision_code_never_reads_sensor_readings`); no new EPP benefit campaign (the prior negative pilot is retained, not rerun); thermald absent on this host; RAPL energy is root-only here",
       "related_existing": [
         "stutter/src/system_inventory.rs"
       ],
