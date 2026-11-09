@@ -346,7 +346,7 @@ impl Drop for Fixture {
 fn spawn_fixture(out: &Path, name: &str, cpu: u32, seconds: u64) -> anyhow::Result<Fixture> {
     // The installed controller picks its target heuristically: nothing that could be chosen instead
     // of this fixture may exist when it starts, nor once it is ready.
-    isolation::ensure_quiet(out, "before starting a fixture")?;
+    isolation::ensure_quiet("before starting a fixture")?;
     let directory = out.join("steamapps/common").join(name);
     fs::create_dir_all(&directory)?;
     let game = directory.join(name);
@@ -371,9 +371,10 @@ fn spawn_fixture(out: &Path, name: &str, cpu: u32, seconds: u64) -> anyhow::Resu
         .spawn()
         .context("start the workload fixture")?;
     let fixture = Fixture { child };
-    isolation::record_fixture(fixture.child.id());
+    // The fixture is known by exact identity (pid and start time), or the run cannot proceed.
+    isolation::record_fixture(Path::new("/proc"), fixture.child.id())?;
     wait_for("the fixture to be ready", 20, || ready.exists())?;
-    isolation::ensure_quiet(out, "after the fixture was ready")?;
+    isolation::ensure_quiet("after the fixture was ready")?;
     Ok(fixture)
 }
 
@@ -403,7 +404,7 @@ fn run_inner(root: &Path, args: &SmokeArgs) -> anyhow::Result<()> {
     );
     fs::create_dir_all(&args.out)?;
     // Before anything is measured or mutated: no competing workload, or no test.
-    isolation::ensure_quiet(&args.out, "before anything is measured or mutated")?;
+    isolation::ensure_quiet("before anything is measured or mutated")?;
     let user = match &args.user {
         Some(user) => user.clone(),
         None => run_text("id", &["-un"])?.trim().to_owned(),
@@ -455,7 +456,7 @@ fn run_inner(root: &Path, args: &SmokeArgs) -> anyhow::Result<()> {
 
     // Idle behaviour first: nothing to optimise, so nothing may change and the cost must stay small.
     let history = matrix::history_path(&user);
-    let mut history_offset = fs::metadata(&history).map_or(0, |metadata| metadata.len());
+    let history_start = fs::metadata(&history).map_or(0, |metadata| metadata.len());
     checks.extend(matrix::idle(&controller, &history, args.idle_seconds));
 
     // Events that must leave the service clean. Every applied case starts the product's 300 second
@@ -568,10 +569,10 @@ fn run_inner(root: &Path, args: &SmokeArgs) -> anyhow::Result<()> {
 
     // A competitor that appeared at any point taints the whole run; and whatever the controller
     // changed must have been on a fixture this run started.
-    let _ = isolation::ensure_quiet(&args.out, "at the end of the run");
-    let records = new_records(&history, &mut history_offset);
+    let _ = isolation::ensure_quiet("at the end of the run");
+    let audit = isolation::audit_history(&history, history_start);
     checks.push(isolation::only_fixture_targets(
-        &records,
+        &audit,
         &isolation::fixtures(),
     ));
 

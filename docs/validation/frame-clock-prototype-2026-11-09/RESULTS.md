@@ -133,3 +133,50 @@ What this still cannot establish: that the raw pairs were really measured agains
 reference. The module can make a number impossible to state without raw data and impossible to apply
 to the wrong renderer; it cannot witness the measurement. That needs the instrumented renderer and
 the reference apparatus, so the real-game direct-frame path stays `EvidenceDeferred`.
+
+## Third review round: executable identity and capture provenance (2026-11-09, evening)
+
+- **`execve` no longer keeps trust.** A pid and start time survive `execve`, which swaps the program
+  image. The bound source now stores a cheap identity of the executable (device, inode, size and
+  modification time of `/proc/<pid>/exe`) and compares it at every evidence decision and ingest; a
+  change retires the source and drops its accuracy claim, so the old program's calibration cannot carry
+  over to a new one. A producer whose executable cannot be identified is not bound at all.
+- **Reference rows must be real events.** Pairs must be strictly increasing in both the stamp and the
+  reference column: a repeated, replayed or reordered row is refused (`NotMonotonic`) and cannot pad a
+  measurement.
+- **Caller-typed data confers nothing.** The raw-pairs constructor is now module-private. The only
+  public way to obtain a claim is `StampAccuracy::from_trusted_capture`, which reads a capture file only
+  if it lies in a path where every component is owned by root and not writable by group or others (no
+  symlink, checked on the open file, the same trust model as the campaign receipt), names a closed set
+  of external reference kinds, and has no unknown fields. The bound is still recomputed from the raw
+  pairs. What this establishes is that an unprivileged caller cannot have written the capture; it still
+  cannot witness the physical measurement, which needs the real renderer and reference apparatus.
+
+## Production smoke isolation, second round
+
+The smoke's preflight now fails closed: an unenumerable `/proc`, an unreadable entry, a command line
+that stays unreadable after bounded retries, a candidate whose identity cannot be read, and a CPU-load
+sample that is missing, malformed, non-finite, negative or without elapsed time all block, exactly as a
+detected competitor does; only a process that genuinely vanished is skipped. A fixture is exempt only by
+exact identity (its pid and start time, or an ancestor's), no longer by a command line that merely lies
+under the smoke's output directory. The post-run audit is strict: every state-changing history record
+must name a parseable pid that is a fixture of this run, whose comm matches and whose start time, where
+recorded, equals the fixture's; a record that cannot be attributed fails, and so does a history that
+shrank (rotation) or has unparsable lines. This build's history leaves `process_starttime_ticks` null, so
+those records bind by pid and comm only, and the check says so.
+
+### Evaluation: an exact validation-only target fence at the privileged worker
+
+Feasible without expanding normal authority, because it can only **narrow**. The worker already
+revalidates that a candidate's named task (tid, comm, start time) is still the live task
+(`daemon/privilege/revalidate.rs`) and restricts service targets by uid and cgroup
+(`service_targets.rs`); it does not know which campaign authorized a target. A fence would be an
+expiring, root-owned file (written by the runner or by `sudo -n`, with the receipt's trust model) naming
+one pid and start time, enforced beside `ServiceTargets`: while a valid fence exists, any candidate
+whose target is not the fenced task is denied; with no fence, behaviour is unchanged. It is **not
+implemented here** because it changes the production privileged worker: it needs its own tests, a
+qualification and a deployment, which is the work the final-source deploy is already waiting on. Until it
+exists the installed-service *mutation* smoke remains only as safe as the preflight plus the strict
+post-run audit, and must not be run while the desktop is in use. The deterministic isolated
+transient-controller acceptance suites remain the way to exercise the mutation path without the
+installed service.

@@ -3,15 +3,15 @@ use std::{fs, path::Path};
 use super::*;
 use crate::telemetry::quality::QualityDenial;
 
-const RENDERER: u32 = 4242;
-const OBSERVER: u32 = 100;
-const OWNER: u32 = 1000;
-const T0: u64 = 1_000_000_000;
-const EXE_BYTES: &[u8] = b"instrumented-renderer-build-1";
-const BOOT: &str = "boot-id-1";
+pub(super) const RENDERER: u32 = 4242;
+pub(super) const OBSERVER: u32 = 100;
+pub(super) const OWNER: u32 = 1000;
+pub(super) const T0: u64 = 1_000_000_000;
+pub(super) const EXE_BYTES: &[u8] = b"instrumented-renderer-build-1";
+pub(super) const BOOT: &str = "boot-id-1";
 
 /// A fake `/proc`: a renderer started at tick 777 and an observer, sharing one time namespace.
-fn proc_tree(name: &str) -> PathBuf {
+pub(super) fn proc_tree(name: &str) -> PathBuf {
     let root = std::env::temp_dir().join(format!("stutter-stamped-{name}-{}", std::process::id()));
     let _ = fs::remove_dir_all(&root);
     for pid in [RENDERER, OBSERVER] {
@@ -33,7 +33,7 @@ fn proc_tree(name: &str) -> PathBuf {
     root
 }
 
-fn set_start(root: &Path, pid: u32, ticks: u64) {
+pub(super) fn set_start(root: &Path, pid: u32, ticks: u64) {
     fs::write(
         root.join(format!("{pid}/stat")),
         format!("{pid} (app) S 1 {pid} {pid} 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 {ticks} 0 0 0\n"),
@@ -41,7 +41,7 @@ fn set_start(root: &Path, pid: u32, ticks: u64) {
     .unwrap();
 }
 
-fn source(root: &Path) -> StampedSource {
+pub(super) fn source(root: &Path) -> StampedSource {
     StampedSource::new(SourcePolicy {
         owner_uid: OWNER,
         renderer_pid: RENDERER,
@@ -51,19 +51,19 @@ fn source(root: &Path) -> StampedSource {
     })
 }
 
-const PEER: PeerCredentials = PeerCredentials {
+pub(super) const PEER: PeerCredentials = PeerCredentials {
     pid: RENDERER,
     uid: OWNER,
 };
 
-fn hello(epoch: u64, first_seq: u64) -> String {
+pub(super) fn hello(epoch: u64, first_seq: u64) -> String {
     format!(
         r#"{{"version":1,"epoch":{epoch},"first_seq":{first_seq},"event":"present","clock":"CLOCK_MONOTONIC"}}"#
     )
 }
 
 /// Feeds `count` frames from `from`, 4 ms apart, each seen `latency_ns` after its stamp.
-fn feed(source: &mut StampedSource, from: u64, count: u64, latency_ns: u64) -> u64 {
+pub(super) fn feed(source: &mut StampedSource, from: u64, count: u64, latency_ns: u64) -> u64 {
     let mut rx = 0;
     for seq in from..from + count {
         let stamp = T0 + seq * 4_000_000;
@@ -75,7 +75,7 @@ fn feed(source: &mut StampedSource, from: u64, count: u64, latency_ns: u64) -> u
     rx
 }
 
-fn unix_now() -> u64 {
+pub(super) fn unix_now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -83,7 +83,7 @@ fn unix_now() -> u64 {
 }
 
 /// Raw (stamp, reference) pairs in which every stamp is `error_ns` after its reference.
-fn raw_pairs(count: usize, error_ns: u64) -> String {
+pub(super) fn raw_pairs(count: usize, error_ns: u64) -> String {
     (0..count)
         .map(|i| {
             let reference = 10_000_000 + i as u64 * 16_600_000;
@@ -92,12 +92,12 @@ fn raw_pairs(count: usize, error_ns: u64) -> String {
         .collect()
 }
 
-fn exe_sha() -> String {
+pub(super) fn exe_sha() -> String {
     stutter_core::hash::sha256_hex(EXE_BYTES)
 }
 
 /// A claim measured for the fixture renderer, its `present` event and this boot, valid for a day.
-fn claim_with(
+pub(super) fn claim_with(
     count: usize,
     error_ns: u64,
     exe: &str,
@@ -116,7 +116,7 @@ fn claim_with(
     )
 }
 
-fn accuracy(error_ns: u64) -> StampAccuracy {
+pub(super) fn accuracy(error_ns: u64) -> StampAccuracy {
     claim_with(
         MIN_ACCURACY_SAMPLES,
         error_ns,
@@ -129,7 +129,7 @@ fn accuracy(error_ns: u64) -> StampAccuracy {
 }
 
 /// Sets a verified claim on a bound source.
-fn set_accuracy(source: &mut StampedSource, error_ns: u64) {
+pub(super) fn set_accuracy(source: &mut StampedSource, error_ns: u64) {
     source
         .set_stamp_accuracy(accuracy(error_ns), unix_now())
         .unwrap();
@@ -167,162 +167,6 @@ fn fast_delivery_without_an_independent_stamp_accuracy_is_denied_not_trusted() {
     set_accuracy(&mut source, 2_500_000);
     assert_eq!(
         source.quality_at(now).frame_primary_eligible(),
-        Err(QualityDenial::AlignmentUncertain)
-    );
-}
-
-#[test]
-fn a_claim_is_recomputed_from_raw_pairs_and_cannot_understate_the_measured_error() {
-    // Errors of 0.3, -1.2 and 0.5 ms among otherwise exact pairs: the bound is the worst absolute one.
-    let mut raw = raw_pairs(MIN_ACCURACY_SAMPLES, 0);
-    raw.push_str("10300000 10000000\n9000000 10200000\n10500000 10000000\n");
-    let claim = StampAccuracy::from_raw_pairs(
-        ReferenceKind::HighSpeedCamera,
-        &exe_sha(),
-        "present",
-        BOOT,
-        unix_now() + 60,
-        unix_now(),
-        &raw,
-    )
-    .unwrap();
-    assert_eq!(claim.max_error_ns(), 1_200_000);
-    assert_eq!(claim.samples(), MIN_ACCURACY_SAMPLES + 3);
-    assert_eq!(claim.reference(), ReferenceKind::HighSpeedCamera);
-    assert_eq!(
-        claim.evidence_sha256(),
-        stutter_core::hash::sha256_hex(raw.as_bytes())
-    );
-    // The bias is recorded, not subtracted: an unmodelled offset is error.
-    assert!(claim.bias_ns().abs() < 1_000);
-    // Changing one pair changes the digest, so a claim names the exact raw evidence it came from.
-    let altered = raw.replacen("10500000 10000000", "10500001 10000000", 1);
-    let other = StampAccuracy::from_raw_pairs(
-        ReferenceKind::HighSpeedCamera,
-        &exe_sha(),
-        "present",
-        BOOT,
-        unix_now() + 60,
-        unix_now(),
-        &altered,
-    )
-    .unwrap();
-    assert_ne!(other.evidence_sha256(), claim.evidence_sha256());
-}
-
-#[test]
-fn a_claim_with_too_few_malformed_or_expired_evidence_is_refused() {
-    let far = unix_now() + 86_400;
-    let build = |raw: &str, valid_until: u64| {
-        StampAccuracy::from_raw_pairs(
-            ReferenceKind::Photodiode,
-            &exe_sha(),
-            "present",
-            BOOT,
-            valid_until,
-            unix_now(),
-            raw,
-        )
-    };
-    assert_eq!(
-        claim_with(
-            MIN_ACCURACY_SAMPLES - 1,
-            100,
-            &exe_sha(),
-            "present",
-            BOOT,
-            far
-        ),
-        Err(AccuracyRefusal::TooFewSamples)
-    );
-    assert_eq!(build("", far), Err(AccuracyRefusal::TooFewSamples));
-    for bad in ["1 2 3\n", "x y\n", "5\n", "-1 2\n", "1.5 2\n"] {
-        let raw = format!("{}{bad}", raw_pairs(MIN_ACCURACY_SAMPLES, 10));
-        assert_eq!(build(&raw, far), Err(AccuracyRefusal::Malformed), "{bad:?}");
-    }
-    assert_eq!(
-        claim_with(
-            MIN_ACCURACY_SAMPLES,
-            100,
-            &exe_sha(),
-            "present",
-            BOOT,
-            unix_now()
-        ),
-        Err(AccuracyRefusal::Expired)
-    );
-    let huge = raw_pairs(MAX_ACCURACY_SAMPLES + 1, 5);
-    assert_eq!(build(&huge, far), Err(AccuracyRefusal::TooManySamples));
-}
-
-#[test]
-fn a_claim_is_accepted_only_for_the_bound_renderer_event_and_boot() {
-    let root = proc_tree("claim-binding");
-    let far = unix_now() + 86_400;
-    let mut source = source(&root);
-    // Nothing bound: nothing for a claim to describe.
-    assert_eq!(
-        source.set_stamp_accuracy(accuracy(100), unix_now()),
-        Err(AccuracyRefusal::NotBound)
-    );
-    source.bind(PEER, &hello(1, 0)).unwrap();
-    let refused = |source: &mut StampedSource, claim: Result<StampAccuracy, AccuracyRefusal>| {
-        source.set_stamp_accuracy(claim.unwrap(), unix_now())
-    };
-    let other_exe = stutter_core::hash::sha256_hex(b"some other binary");
-    assert_eq!(
-        refused(
-            &mut source,
-            claim_with(1000, 100, &other_exe, "present", BOOT, far)
-        ),
-        Err(AccuracyRefusal::WrongRenderer)
-    );
-    assert_eq!(
-        refused(
-            &mut source,
-            claim_with(1000, 100, &exe_sha(), "swapchain", BOOT, far)
-        ),
-        Err(AccuracyRefusal::WrongEvent)
-    );
-    assert_eq!(
-        refused(
-            &mut source,
-            claim_with(1000, 100, &exe_sha(), "present", "another-boot", far)
-        ),
-        Err(AccuracyRefusal::WrongBoot)
-    );
-    // The window ended between measuring and applying.
-    assert_eq!(
-        source.set_stamp_accuracy(accuracy(100), far + 1),
-        Err(AccuracyRefusal::Expired)
-    );
-    // The renderer binary was replaced on disk after the measurement: no longer that renderer.
-    fs::write(root.join(format!("{RENDERER}/exe")), b"rebuilt renderer").unwrap();
-    assert_eq!(
-        source.set_stamp_accuracy(accuracy(100), unix_now()),
-        Err(AccuracyRefusal::WrongRenderer)
-    );
-    // And a matching claim is accepted once everything agrees.
-    fs::write(root.join(format!("{RENDERER}/exe")), EXE_BYTES).unwrap();
-    source
-        .set_stamp_accuracy(accuracy(100), unix_now())
-        .unwrap();
-}
-
-#[test]
-fn an_accuracy_claim_that_expires_while_in_use_stops_counting_at_the_next_decision() {
-    let root = proc_tree("claim-expiry");
-    let mut source = source(&root);
-    source.bind(PEER, &hello(1, 0)).unwrap();
-    let now = feed(&mut source, 0, 1500, 30_000);
-    let short = claim_with(1000, 50_000, &exe_sha(), "present", BOOT, unix_now() + 1).unwrap();
-    source.set_stamp_accuracy(short, unix_now()).unwrap();
-    assert_eq!(source.quality_at(now).frame_primary_eligible(), Ok(()));
-    std::thread::sleep(std::time::Duration::from_millis(2_100));
-    let quality = source.quality_at(now);
-    assert!(quality.alignment_uncertainty_ms.is_nan(), "{quality:?}");
-    assert_eq!(
-        quality.frame_primary_eligible(),
         Err(QualityDenial::AlignmentUncertain)
     );
 }
@@ -610,5 +454,82 @@ fn a_renderer_that_exits_or_has_its_pid_reused_right_before_the_decision_is_no_l
     assert_eq!(
         source.quality_at(now).frame_primary_eligible(),
         Err(QualityDenial::NotValidatedDirect)
+    );
+}
+
+fn replace_exe(root: &Path, bytes: &[u8]) {
+    // What `execve` does to the identity: the path now leads to a different file.
+    let new = root.join("exe.new");
+    fs::write(&new, bytes).unwrap();
+    fs::rename(&new, root.join(format!("{RENDERER}/exe"))).unwrap();
+}
+
+#[test]
+fn a_renderer_that_execs_another_program_keeps_its_pid_and_start_time_but_not_its_trust() {
+    let root = proc_tree("execve");
+    let mut source = source(&root);
+    source.bind(PEER, &hello(1, 0)).unwrap();
+    let now = feed(&mut source, 0, 1500, 30_000);
+    set_accuracy(&mut source, 50_000);
+    assert_eq!(source.quality_at(now).frame_primary_eligible(), Ok(()));
+    // Same pid, same start ticks, different executable image.
+    replace_exe(&root, b"a completely different program");
+    let live = live_process(&root, RENDERER).unwrap();
+    assert_eq!(
+        live.start_ticks, 777,
+        "the pid and start time are unchanged"
+    );
+    // Decided immediately, with no frame arriving first.
+    let quality = source.quality_at(now);
+    assert_eq!(
+        quality.frame_primary_eligible(),
+        Err(QualityDenial::NotValidatedDirect)
+    );
+    assert!(!source.is_bound());
+    // The calibration claim went with the image: binding the new program needs its own.
+    assert_eq!(
+        source.ingest(r#"{"seq":1500,"monotonic_ns":1}"#, 2),
+        Err(IngestError::NotBound)
+    );
+    source.bind(PEER, &hello(2, 0)).unwrap();
+    let later = feed(&mut source, 0, 1500, 30_000);
+    assert_eq!(
+        source.quality_at(later).frame_primary_eligible(),
+        Err(QualityDenial::AlignmentUncertain),
+        "the old program's accuracy must not carry over"
+    );
+    // A claim measured for the old binary is refused for the new one.
+    assert_eq!(
+        source.set_stamp_accuracy(accuracy(50_000), unix_now()),
+        Err(AccuracyRefusal::WrongRenderer)
+    );
+}
+
+#[test]
+fn rewriting_the_binary_in_place_or_during_an_active_stream_is_also_a_change() {
+    let root = proc_tree("exe-rewrite");
+    let mut source = source(&root);
+    source.bind(PEER, &hello(1, 0)).unwrap();
+    feed(&mut source, 0, 1200, 30_000);
+    // The same file overwritten with different content (a new size and modification time).
+    fs::write(
+        root.join(format!("{RENDERER}/exe")),
+        b"patched renderer with more bytes",
+    )
+    .unwrap();
+    assert_eq!(
+        source.ingest(r#"{"seq":1200,"monotonic_ns":9999999999}"#, 10_000_000_000),
+        Err(IngestError::NotBound)
+    );
+    assert!(!source.is_bound());
+}
+
+#[test]
+fn a_producer_whose_executable_cannot_be_identified_is_not_bound() {
+    let root = proc_tree("no-exe");
+    fs::remove_file(root.join(format!("{RENDERER}/exe"))).unwrap();
+    assert_eq!(
+        source(&root).bind(PEER, &hello(1, 0)),
+        Err(BindDenial::ExecutableUnreadable)
     );
 }

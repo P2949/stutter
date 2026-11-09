@@ -24,7 +24,11 @@
 //! bound is recomputed from them, and it is accepted only for the renderer binary, frame event and boot
 //! it was measured for, within its validity window. This module cannot produce that reference: it needs a real
 //! instrumented renderer measured against something outside the renderer.
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    os::unix::fs::MetadataExt,
+    path::{Path, PathBuf},
+};
 
 use serde::Deserialize;
 
@@ -79,6 +83,8 @@ pub enum BindDenial {
     ReplayedEpoch,
     /// A bound producer is still alive.
     CompetingProducer,
+    /// The producer's executable cannot be identified, so a later change to it could not be seen.
+    ExecutableUnreadable,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -118,6 +124,15 @@ pub enum AccuracyRefusal {
     WrongEvent,
     /// The claim was measured in another boot.
     WrongBoot,
+    /// The pairs are not strictly increasing in both columns: a repeated or reordered event is not
+    /// a measurement of a frame stream.
+    NotMonotonic,
+    /// The capture was not written where only the trusted collector account can write.
+    UntrustedCapture,
+    /// The capture file could not be read.
+    UnreadableCapture,
+    /// The capture file is not a well-formed capture, or names an unknown reference kind.
+    MalformedCapture,
 }
 
 /// A measured bound on how far a stamp can differ from the real frame event, computed from raw
@@ -152,6 +167,23 @@ pub struct StampAccuracy {
     evidence_sha256: String,
 }
 
+/// The largest capture file read: a million pairs of two 20-digit numbers fit with room to spare.
+const MAX_CAPTURE_BYTES: u64 = 64 * 1024 * 1024;
+
+/// What the trusted collector writes.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Capture {
+    version: u32,
+    reference: String,
+    renderer_exe_sha256: String,
+    event: String,
+    boot_id: String,
+    valid_until_unix: u64,
+    /// One `stamp_ns reference_ns` pair per line.
+    pairs: String,
+}
+
 /// The most pairs one measurement may hold.
 pub const MAX_ACCURACY_SAMPLES: usize = 1_000_000;
 
@@ -160,7 +192,7 @@ impl StampAccuracy {
     /// the shared clock. The bound is the largest absolute difference (the bias is kept for the
     /// record, not subtracted: an unmodelled constant offset is still error). Nothing about the
     /// claim is taken on trust except that the pairs were measured.
-    pub fn from_raw_pairs(
+    pub(super) fn from_raw_pairs(
         reference: ReferenceKind,
         renderer_exe_sha256: &str,
         event: &str,
@@ -174,6 +206,7 @@ impl StampAccuracy {
         }
         let mut samples = 0_usize;
         let (mut max_error, mut sum) = (0_u64, 0_i128);
+        let mut previous: Option<(u64, u64)> = None;
         for line in raw.lines().map(str::trim).filter(|line| !line.is_empty()) {
             let mut fields = line.split_whitespace();
             let (Some(stamp), Some(truth), None) = (fields.next(), fields.next(), fields.next())
@@ -183,6 +216,14 @@ impl StampAccuracy {
             let (Ok(stamp), Ok(truth)) = (stamp.parse::<u64>(), truth.parse::<u64>()) else {
                 return Err(AccuracyRefusal::Malformed);
             };
+            // Each event is a distinct frame: both columns must strictly increase, so duplicated,
+            // replayed or reordered rows cannot pad a measurement.
+            if previous
+                .is_some_and(|(last_stamp, last_truth)| stamp <= last_stamp || truth <= last_truth)
+            {
+                return Err(AccuracyRefusal::NotMonotonic);
+            }
+            previous = Some((stamp, truth));
             let error = i128::from(stamp) - i128::from(truth);
             max_error = max_error.max(u64::try_from(error.unsigned_abs()).unwrap_or(u64::MAX));
             sum += error;
@@ -206,6 +247,57 @@ impl StampAccuracy {
             valid_until_unix,
             evidence_sha256: stutter_core::hash::sha256_hex(raw.as_bytes()),
         })
+    }
+
+    /// The only public way to obtain a claim: from a capture file a trusted collector wrote.
+    ///
+    /// A claim built from strings a caller typed proves nothing about where the numbers came from, so
+    /// this module offers no such constructor outside itself. The capture must lie in a path where
+    /// every component is owned by root and not writable by group or others (no symlinks, checked on
+    /// the open file), which only the privileged collector can satisfy; its content is a JSON
+    /// object naming the reference, the renderer binary, the frame event, the boot, a validity
+    /// window and the raw `stamp reference` pairs, from which the bound is recomputed. That root
+    /// ownership is the trust anchor: the code can refuse anything an unprivileged caller could
+    /// have written, but it cannot witness the physical measurement itself.
+    pub fn from_trusted_capture(path: &Path, now_unix: u64) -> Result<Self, AccuracyRefusal> {
+        Self::from_trusted_capture_with(path, now_unix, Path::new("/"), 0)
+    }
+
+    pub(super) fn from_trusted_capture_with(
+        path: &Path,
+        now_unix: u64,
+        anchor: &Path,
+        trusted_uid: u32,
+    ) -> Result<Self, AccuracyRefusal> {
+        use crate::integrations::campaign_receipt::{MintRefusal, read_trusted_text};
+        let text =
+            read_trusted_text(path, anchor, trusted_uid, MAX_CAPTURE_BYTES).map_err(|refusal| {
+                match refusal {
+                    MintRefusal::UntrustedPath(_) => AccuracyRefusal::UntrustedCapture,
+                    MintRefusal::Malformed => AccuracyRefusal::TooManySamples,
+                    _ => AccuracyRefusal::UnreadableCapture,
+                }
+            })?;
+        let capture: Capture =
+            serde_json::from_str(&text).map_err(|_| AccuracyRefusal::MalformedCapture)?;
+        if capture.version != 1 {
+            return Err(AccuracyRefusal::MalformedCapture);
+        }
+        let reference = match capture.reference.as_str() {
+            "photodiode" => ReferenceKind::Photodiode,
+            "display_hardware_timestamp" => ReferenceKind::DisplayHardwareTimestamp,
+            "high_speed_camera" => ReferenceKind::HighSpeedCamera,
+            _ => return Err(AccuracyRefusal::MalformedCapture),
+        };
+        Self::from_raw_pairs(
+            reference,
+            &capture.renderer_exe_sha256,
+            &capture.event,
+            &capture.boot_id,
+            capture.valid_until_unix,
+            now_unix,
+            &capture.pairs,
+        )
     }
 
     pub fn max_error_ns(&self) -> u64 {
@@ -236,6 +328,29 @@ struct Bound {
     start_ticks: u64,
     /// The frame event the producer announced in its hello.
     event: String,
+    /// The executable image the process was running when it bound.
+    exe: ExeIdentity,
+}
+
+/// A cheap identity of the executable a process is running: the file's device, inode, size and
+/// modification time. `execve` keeps the pid and the start time but changes the image, and with
+/// it this identity; so does replacing or rewriting the binary. Comparing it costs one `stat`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ExeIdentity {
+    dev: u64,
+    ino: u64,
+    len: u64,
+    mtime: (i64, i64),
+}
+
+fn exe_identity(proc_root: &Path, pid: u32) -> Option<ExeIdentity> {
+    let meta = fs::metadata(proc_root.join(pid.to_string()).join("exe")).ok()?;
+    Some(ExeIdentity {
+        dev: meta.dev(),
+        ino: meta.ino(),
+        len: meta.len(),
+        mtime: (meta.mtime(), meta.mtime_nsec()),
+    })
 }
 
 #[derive(Debug)]
@@ -303,9 +418,13 @@ impl StampedSource {
         let still = self.bound.as_ref().is_some_and(|bound| {
             live_process(&self.policy.proc_root, bound.pid)
                 .is_some_and(|live| live.start_ticks == bound.start_ticks)
+                // The same pid and start time can be running a different program after `execve`.
+                && exe_identity(&self.policy.proc_root, bound.pid) == Some(bound.exe)
         });
         if !still {
             self.bound = None;
+            // A claim describes one renderer image; it does not outlive it.
+            self.accuracy = None;
         }
     }
 
@@ -340,6 +459,8 @@ impl StampedSource {
         if self.last_epoch.is_some_and(|last| hello.epoch <= last) {
             return Err(BindDenial::ReplayedEpoch);
         }
+        let exe = exe_identity(&self.policy.proc_root, peer.pid)
+            .ok_or(BindDenial::ExecutableUnreadable)?;
         if self
             .bound
             .as_ref()
@@ -354,6 +475,7 @@ impl StampedSource {
             pid: peer.pid,
             start_ticks: live.start_ticks,
             event: hello.event.clone(),
+            exe,
         });
         Ok(())
     }
@@ -429,3 +551,7 @@ impl StampedSource {
 #[cfg(test)]
 #[path = "stamped_source_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "stamped_accuracy_tests.rs"]
+mod accuracy_tests;

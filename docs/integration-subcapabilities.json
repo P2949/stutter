@@ -278,8 +278,8 @@
       "symbol": "from_raw_pairs",
       "positive_test": "a_claim_is_recomputed_from_raw_pairs_and_cannot_understate_the_measured_error",
       "negative_test": "a_claim_is_accepted_only_for_the_bound_renderer_event_and_boot",
-      "positive_file": "stutter/src/telemetry/stamped_source_tests.rs",
-      "negative_file": "stutter/src/telemetry/stamped_source_tests.rs"
+      "positive_file": "stutter/src/telemetry/stamped_accuracy_tests.rs",
+      "negative_file": "stutter/src/telemetry/stamped_accuracy_tests.rs"
     },
     {
       "id": "frames/decision-time-revalidation",
@@ -289,8 +289,41 @@
       "symbol": "pub fn quality_at",
       "positive_test": "an_accuracy_claim_that_expires_while_in_use_stops_counting_at_the_next_decision",
       "negative_test": "a_renderer_that_exits_or_has_its_pid_reused_right_before_the_decision_is_no_longer_trusted",
+      "positive_file": "stutter/src/telemetry/stamped_accuracy_tests.rs",
+      "negative_file": "stutter/src/telemetry/stamped_source_tests.rs"
+    },
+    {
+      "id": "frames/executable-image-binding",
+      "entry": "5.12",
+      "kind": "observation",
+      "anchor": "stutter/src/telemetry/stamped_source.rs",
+      "symbol": "fn exe_identity",
+      "positive_test": "a_producer_whose_executable_cannot_be_identified_is_not_bound",
+      "negative_test": "a_renderer_that_execs_another_program_keeps_its_pid_and_start_time_but_not_its_trust",
       "positive_file": "stutter/src/telemetry/stamped_source_tests.rs",
       "negative_file": "stutter/src/telemetry/stamped_source_tests.rs"
+    },
+    {
+      "id": "frames/trusted-capture-provenance",
+      "entry": "5.12",
+      "kind": "observation",
+      "anchor": "stutter/src/telemetry/stamped_source.rs",
+      "symbol": "pub fn from_trusted_capture",
+      "positive_test": "a_trusted_capture_must_still_be_well_formed_fresh_and_a_real_event_series",
+      "negative_test": "only_a_capture_written_where_the_trusted_collector_alone_can_write_confers_a_claim",
+      "positive_file": "stutter/src/telemetry/stamped_accuracy_tests.rs",
+      "negative_file": "stutter/src/telemetry/stamped_accuracy_tests.rs"
+    },
+    {
+      "id": "frames/unique-monotonic-reference-pairs",
+      "entry": "5.12",
+      "kind": "observation",
+      "anchor": "stutter/src/telemetry/stamped_source.rs",
+      "symbol": "NotMonotonic",
+      "positive_test": "a_claim_is_recomputed_from_raw_pairs_and_cannot_understate_the_measured_error",
+      "negative_test": "duplicated_replayed_or_reordered_reference_rows_cannot_pad_a_measurement",
+      "positive_file": "stutter/src/telemetry/stamped_accuracy_tests.rs",
+      "negative_file": "stutter/src/telemetry/stamped_accuracy_tests.rs"
     }
   ]
 }

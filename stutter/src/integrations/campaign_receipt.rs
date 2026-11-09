@@ -212,6 +212,36 @@ fn read_receipt(
     ))
 }
 
+/// Reads a file only if it was written where only `trusted_uid` could write: every component from
+/// `anchor` down is a real directory or file owned by that user and not writable by group or others,
+/// the file is opened without following a symlink, and the *open file's* own owner and mode are
+/// checked, so nothing can be swapped between the check and the read. `max_bytes` bounds the read.
+/// This is the trust model of the campaign receipt, offered to other root-written artifacts.
+pub(crate) fn read_trusted_text(
+    path: &Path,
+    anchor: &Path,
+    trusted_uid: u32,
+    max_bytes: u64,
+) -> Result<String, MintRefusal> {
+    trusted(path, anchor, trusted_uid)?;
+    let mut file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(path)
+        .map_err(|_| MintRefusal::Unreadable)?;
+    let meta = file.metadata().map_err(|_| MintRefusal::Unreadable)?;
+    if !meta.is_file() || meta.uid() != trusted_uid || meta.mode() & 0o022 != 0 {
+        return Err(MintRefusal::UntrustedPath(path.to_path_buf()));
+    }
+    if meta.len() > max_bytes {
+        return Err(MintRefusal::Malformed);
+    }
+    let mut text = String::new();
+    file.read_to_string(&mut text)
+        .map_err(|_| MintRefusal::Unreadable)?;
+    Ok(text)
+}
+
 /// Opens the caller's local use journal without following a symlink, and only if it is the
 /// caller's own regular file.
 fn open_local_journal(journal: &Path, caller_uid: u32) -> Result<File, MintRefusal> {
