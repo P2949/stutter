@@ -122,3 +122,9 @@ pub mod damos_transaction {
         DamosRequest, DamosRestore, prepare as prepare_damos,
     };
 }
+
+pub mod pmu_events {
+    //! The optional PMU event catalog: software, cache and vendor uncore events, resolved from the
+    //! host without opening a counter.
+    pub use crate::perf_counters::arch_events::*;
+}

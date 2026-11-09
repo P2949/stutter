@@ -6,7 +6,8 @@
 
 pub use crate::api_integration::{
     boot_environment, cgroup_control, damos_transaction, experiments, game_run, objective_source,
-    owner_interfaces, ownership, pm_qos, resctrl_allocation, search, sensors, telemetry, topology,
+    owner_interfaces, ownership, pm_qos, pmu_events, resctrl_allocation, search, sensors,
+    telemetry, topology,
 };
 
 pub mod workload_progress {

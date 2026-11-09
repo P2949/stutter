@@ -301,23 +301,27 @@
       "anchors": [
         "stutter/src/perf_counters/mod.rs",
         "stutter/src/autotune/sensors/mod.rs",
-        "stutter/src/autotune/sensors/pmu.rs"
+        "stutter/src/autotune/sensors/pmu.rs",
+        "xtask/src/benchmarks/profiles.rs",
+        "stutter/src/perf_counters/arch_events.rs"
       ],
-      "status": "first_slice",
-      "g0": "Budgeted per-TID PMU sampler with matched cumulative count/time interval deltas, overflow and invalid-time refusal, partial-thread quality downgrade; optional generic branch events with explicit missing-event metadata, disabled in runtime; no fault/migration or architecture-specific bandwidth events yet",
+      "status": "code_complete",
+      "g0": "Budgeted per-TID PMU sampler with matched cumulative count/time interval deltas, overflow and invalid-time refusal, partial-thread quality downgrade; optional generic branch events with explicit missing-event metadata, disabled in runtime; no fault/migration or architecture-specific bandwidth events yet; offline importers for `perf script` (per-event samples and period, per-command share), and for the CSV profile tables of Intel VTune, AMD uProf and LIKWID (first column as the row, numeric cells only, never extrapolated); an optional PMU event catalog (`perf_counters::arch_events`: software page-fault, migration and context-switch counts, generalized L1D/LLC/dTLB read-miss events, and Intel/AMD uncore memory-bandwidth events whose PMU type and encoding are discovered from sysfs and resolve to Unavailable with a reason, never zero, when absent) that opens no counter and is not enabled by the runtime",
       "g1": "Controlled own-thread development readback: three existing four-event intervals counted; optional six-event set failed to yield usable counts and remains EvidenceDeferred. See source-bound development report.",
       "runtime_availability": "perf CLI absent, VTune/LIKWID absent",
       "authority": "O/F",
-      "not_wired": "the PMU sensor is started only by the escalator and counts a task list taken without stats; no architecture-specific events; a `perf stat -x,` importer exists (a counter multiplexed below 90 percent running, not counted or unsupported gives no value, never an extrapolation); a `perf report --stdio` importer gives per-symbol sample shares; no perf script/record importer and no VTune, uProf or LIKWID importer (formats not verified on this host, tools absent)",
+      "not_wired": "the PMU sensor starting only on escalation is by design (cost-bounded sensors); the architecture events are catalogued and resolved but not opened by the runtime; importer formats are fixture-verified from the documented layouts (the tools are absent here)",
       "dispositions": [
+        "CodeComplete",
         "FixtureVerified",
+        "RealObserved",
         "HardwareUnavailable",
         "EvidenceDeferred"
       ],
       "evidence": [
         "docs/validation/pmu-2026-11-08.md"
       ],
-      "unblock": "Needs on the host: perf CLI absent, VTune/LIKWID absent"
+      "unblock": "perf CLI, VTune, uProf and LIKWID are absent on this host, and the optional six-event group failed to give usable counts here: real captures from each tool and a PMU that supports the wider event group are needed to call their importers and the architecture events RealObserved"
     },
     {
       "id": "5.11",

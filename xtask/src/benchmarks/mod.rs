@@ -9,6 +9,10 @@ mod diagnostics;
 #[cfg(test)]
 mod diagnostics_tests;
 mod hyperfine;
+mod profiles;
+#[cfg(test)]
+#[path = "profiles_tests.rs"]
+mod profiles_tests;
 mod scores;
 #[cfg(test)]
 mod scores_tests;
@@ -206,6 +210,10 @@ pub enum ScoreTool {
     TraceCmd,
     PerfStat,
     PerfReport,
+    PerfScript,
+    Vtune,
+    Uprof,
+    Likwid,
     Prometheus,
 }
 
@@ -244,6 +252,21 @@ fn import_scores(tool: ScoreTool, file: &Path) -> anyhow::Result<String> {
         ScoreTool::PerfReport => {
             serde_json::to_string_pretty(&diagnostics::import_perf_report(&text)?)?
         }
+        ScoreTool::PerfScript => {
+            serde_json::to_string_pretty(&profiles::import_perf_script(&text)?)?
+        }
+        ScoreTool::Vtune => serde_json::to_string_pretty(&profiles::import_profile_table(
+            profiles::ProfileTool::Vtune,
+            &text,
+        )?)?,
+        ScoreTool::Uprof => serde_json::to_string_pretty(&profiles::import_profile_table(
+            profiles::ProfileTool::Uprof,
+            &text,
+        )?)?,
+        ScoreTool::Likwid => serde_json::to_string_pretty(&profiles::import_profile_table(
+            profiles::ProfileTool::Likwid,
+            &text,
+        )?)?,
         ScoreTool::Prometheus => {
             let now_ms = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)?
