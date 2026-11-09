@@ -1,0 +1,18 @@
+{
+  "result": "PASS",
+  "source_sha": "7541d6071fc89071f145bb50d32205ad09785a42",
+  "source_clean": true,
+  "build_output": "fresh local clone checkout/target (exclusive to this checkout)",
+  "commands": [
+    "nix develop --command cargo run -q -p xtask -- ci",
+    "nix develop --command cargo clippy --workspace --all-targets -- -D warnings"
+  ],
+  "library": { "passed": 3294, "ignored": 10 },
+  "xtask": { "passed": 520 },
+  "logs_sha256": {
+    "ci.log": "78e356627c5074f389b091382436df09221908d4ea28b1ec65981e740226e7b8",
+    "clippy-workspace.log": "2c0510f077a4323ad8928317e915426104758e510b0c5d06e97396d12f5a73dc"
+  },
+  "scope": "committed-source validation only; no deployment or new qualification; supersedes the 6638a5b3 receipt for the development HEAD",
+  "note": "ledger and closeout-report remain 23/34 code_complete; this receipt is not the W19 completion gate"
+}
