@@ -95,6 +95,23 @@ impl SensorHub {
             registry.register(Box::new(OomGuardSensor::new(dir)));
             ids.push("oom_guard");
         }
+        // Counter and inventory sensors are read every few seconds, not every tick: an idle
+        // controller must stay far below its CPU budget. The guards (memory, thermal, scheduler
+        // change) and pressure stay at the tick cadence.
+        const SECOND: u64 = 1_000_000_000;
+        for (id, seconds) in [
+            ("numa_stat", 30),
+            ("damon_state", 30),
+            ("resctrl_inventory", 30),
+            ("resctrl_monitor", 5),
+            ("network", 5),
+            ("numa_faults", 5),
+            ("cpu_idle", 10),
+            ("block_io", 5),
+            ("cpu_power", 2),
+        ] {
+            registry.set_min_interval(id, seconds * SECOND);
+        }
         for id in ids {
             if let Err(denied) = registry.activate(id, 0) {
                 log::info!("sensor {id} unavailable: {}", describe(&denied));

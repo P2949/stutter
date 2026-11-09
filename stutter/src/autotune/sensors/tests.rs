@@ -567,3 +567,55 @@ mod memory_domains {
         fs::remove_dir_all(&base).unwrap();
     }
 }
+
+#[test]
+fn a_sensor_with_a_minimum_interval_is_sampled_no_more_often_than_that() {
+    use crate::autotune::sensors::{ExpensiveBudget, SensorRegistry};
+
+    struct Counting;
+    impl Sensor for Counting {
+        fn descriptor(&self) -> SensorDescriptor {
+            SensorDescriptor {
+                id: "counting",
+                cost: SensorCost::Cheap,
+                scope: SensorScope::System,
+                requires: "test",
+            }
+        }
+        fn probe(&self) -> Availability {
+            Availability::Available
+        }
+        fn start(&mut self) -> Result<(), String> {
+            Ok(())
+        }
+        fn sample(&mut self, monotonic_ns: u64) -> SensorReading {
+            SensorReading {
+                sensor: "counting".to_owned(),
+                monotonic_ns,
+                scope: SensorScope::System,
+                quality: crate::autotune::objective::ObjectiveSignalQuality::Direct,
+                values: Default::default(),
+                lost: 0,
+                provenance: "test".to_owned(),
+            }
+        }
+        fn health(&self) -> SensorHealth {
+            SensorHealth::Healthy
+        }
+        fn stop(&mut self) {}
+    }
+
+    let mut registry = SensorRegistry::new(ExpensiveBudget::default());
+    registry.register(Box::new(Counting));
+    registry.activate("counting", 0).unwrap();
+    registry.set_min_interval("counting", 5_000_000_000);
+    let mut sampled = Vec::new();
+    for second in 0..12u64 {
+        if !registry.sample_all(second * 1_000_000_000).is_empty() {
+            sampled.push(second);
+        }
+    }
+    assert_eq!(sampled, vec![0, 5, 10]);
+    registry.set_min_interval("counting", 0);
+    assert_eq!(registry.sample_all(13_000_000_000).len(), 1);
+}

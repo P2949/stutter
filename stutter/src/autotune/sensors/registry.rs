@@ -39,6 +39,9 @@ struct Entry {
     running_since: Option<u64>,
     /// Time spent inside `sample`, as the sensor's own incremental cost.
     cost_ns: u64,
+    /// Shortest time between two samples of this sensor; `0` samples on every call.
+    min_interval_ns: u64,
+    last_sample_ns: Option<u64>,
 }
 
 #[derive(Default)]
@@ -63,6 +66,8 @@ impl SensorRegistry {
                 sensor,
                 running_since: None,
                 cost_ns: 0,
+                min_interval_ns: 0,
+                last_sample_ns: None,
             },
         );
     }
@@ -131,6 +136,14 @@ impl SensorRegistry {
                 stopped_expensive = true;
                 continue;
             }
+            if entry.min_interval_ns > 0
+                && entry
+                    .last_sample_ns
+                    .is_some_and(|last| now_ns.saturating_sub(last) < entry.min_interval_ns)
+            {
+                continue;
+            }
+            entry.last_sample_ns = Some(now_ns);
             let begun = std::time::Instant::now();
             readings.push(entry.sensor.sample(now_ns));
             entry.cost_ns = entry
@@ -141,6 +154,14 @@ impl SensorRegistry {
             self.last_expensive_stop_ns = Some(now_ns);
         }
         readings
+    }
+
+    /// Samples sensor `id` at most once per `interval_ns` (`0` restores every call). A sensor of
+    /// cumulative counters reports a longer window, never a wrong one, when it is sampled less often.
+    pub fn set_min_interval(&mut self, id: &str, interval_ns: u64) {
+        if let Some(entry) = self.entries.get_mut(id) {
+            entry.min_interval_ns = interval_ns;
+        }
     }
 
     pub fn deactivate(&mut self, id: &str, now_ns: u64) {
