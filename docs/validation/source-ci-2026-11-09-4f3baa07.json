@@ -1,0 +1,21 @@
+{
+  "result": "PASS",
+  "source_sha": "4f3baa07aface5cdf355095e2de82ece4ebc4c21",
+  "source_clean": true,
+  "build_output": "fresh local clone checkout/target (exclusive to this checkout)",
+  "commands": [
+    "nix develop --command cargo run -q -p xtask -- ci",
+    "nix develop --command cargo clippy --workspace --all-targets -- -D warnings",
+    "nix develop --command cargo run -q -p xtask -- release-check"
+  ],
+  "library": { "passed": 3345, "ignored": 10 },
+  "xtask": { "passed": 524 },
+  "release_binary_sha256": "bf79d9c4a4fd3da18a079f1ccddf8c772f9a7c1b12da49e7d698a8c20c20d8a6",
+  "logs_sha256": {
+    "ci.log": "a3e1376046a00296eea5cea296cb9222eb5625c2d2df649f6673730c1e07d428",
+    "clippy-workspace.log": "e61453a937485bb5e5ef0edc2b779d8addb8437c82663b7d98c28d28db2abd5c",
+    "release-check.log": "1025288a012c9e20c5d5064098be85e6b72fb312dd40d0fc28f7d8b0c77323c6"
+  },
+  "scope": "committed-source validation of the final code commit deployed by NixosConf commit 250e3cf",
+  "note": "docs-only commits after 4f3baa07 (ledger pin, this receipt, the deployment record) do not change the built binary"
+}

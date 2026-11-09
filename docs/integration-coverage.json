@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "source_sha": "6638a5b3a0a87714aa70439878f0fa009d6cdf9c",
-  "recorded": "2026-11-08",
+  "source_sha": "4f3baa07aface5cdf355095e2de82ece4ebc4c21",
+  "recorded": "2026-11-09",
   "statuses": [
     "not_started",
     "first_slice",
@@ -1110,8 +1110,9 @@
     }
   ],
   "verification": {
-    "source_sha": "6638a5b3a0a87714aa70439878f0fa009d6cdf9c",
-    "scope": "Clean committed-source CI and explicit workspace Clippy. Live observations retain their separate source pins; this is not a deployment receipt.",
-    "source_ci": "docs/validation/source-ci-2026-11-09.json"
+    "source_sha": "4f3baa07aface5cdf355095e2de82ece4ebc4c21",
+    "scope": "Clean committed-source CI, explicit workspace Clippy and release-check of the final code commit, deployed through NixosConf 250e3cf with a passing exact-build production-smoke. Live observations retain their separate source pins.",
+    "source_ci": "docs/validation/source-ci-2026-11-09-4f3baa07.json",
+    "deploy": "docs/validation/production-deploy-2026-11-09/RESULTS.md"
   }
 }
