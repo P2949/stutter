@@ -137,3 +137,9 @@ pub mod pmu_events {
     //! host without opening a counter.
     pub use crate::perf_counters::arch_events::*;
 }
+
+pub mod network_capability {
+    //! Read-only congestion-control and qdisc inventory, and the typed refusals for socket
+    //! options and qdisc replacement.
+    pub use crate::actions::net_capability::*;
+}

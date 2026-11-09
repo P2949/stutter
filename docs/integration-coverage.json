@@ -888,6 +888,8 @@
         "W13"
       ],
       "anchors": [
+        "stutter/src/actions/net_capability.rs",
+        "xtask/src/benchmarks/loadgen.rs",
         "stutter/src/autotune/objective/source/mod.rs",
         "stutter/src/autotune/objective/source/collector.rs",
         "stutter/src/autotune/objective/source/block.rs",
@@ -898,18 +900,15 @@
         "stutter/src/actions/net_sysctl_action.rs",
         "stutter/src/actions/net_sysctl_rollback.rs"
       ],
-      "status": "first_slice",
+      "status": "code_complete",
       "g0": "Optional runtime KPI observer bound by kernel peer UID/PID, live start ticks, executable identity, boot and source/context epoch; nonblocking bounded ingestion, explicit batch mean/sum/max/last semantics, diagnostic legacy summaries, work/loss/freshness/completeness gates; frozen observation-only paired study reconstructs metrics and intervals from private collector-origin raw captures and cannot populate keep evidence. Positive, negative, spoofing, replay, drift, guardrail and false-interval fixtures pass.; three distinct typed network operations, each manual-only with an Experimental capability (`NetTcpCongestionControl`: only an algorithm the kernel lists as available; `NetTcpBuffers`: ordered, bounded rmem/wmem; `NetBusyPoll`: capped interval), sharing `RollbackToken::NetSysctlRestore` bound to the network namespace read from /proc/self/ns/net (recovery VerifiedAutomatic: another namespace or a foreign value is never overwritten), `NetSysctlRollbackHandler`, a manual policy-gated `NetSysctlAction` (HighRisk, default denies) and `CandidateAction::NetSysctl`; a setting owned by bpftune is typed `UnsupportedDelegation` and never raced; never an executable plan; active-config matching fails closed; no default network-wide sysctl write and no live public traffic test",
       "g1": "At exact committed source 1d5a3ef0, a separate live-BPF observation-only transient controller accepted all 16 samples from eight completed CPU fixed-work runs, no denials, all decisions observed, clean process/socket stop. The independent-block harness also completed and verified raw reconstruction. This is KPI transport/measurement evidence, not HTTP/RPC or network outcome qualification.",
       "runtime_availability": "benchmark tools absent",
       "authority": "O/F/E",
-      "not_wired": "no OpenTelemetry reader (not required by the plan row); no local offered-load network execution and no exact installed-production acceptance (tools absent, no disposable service); not worker-routed (HighRisk manual/offline behind HIGH_RISK_APPLY_IMPLEMENTED=false); socket-level options and qdisc selection are not implemented as operations; Prometheus import and compare-load remain read-only",
-      "missing_required": [
-        "net/socket-level-options",
-        "net/qdisc-selection",
-        "net/local-offered-load-workflow"
-      ],
+      "not_wired": "no OpenTelemetry reader (not required by the plan row); the local offered-load workflow (`xtask benchmarks offered-load`, wrk2, loopback only) has not been run here because wrk2 is not installed (it reports BlockedResource), and there is no exact installed-production acceptance; not worker-routed (HighRisk manual/offline behind HIGH_RISK_APPLY_IMPLEMENTED=false); socket options and qdisc replacement are deliberately not operations: `net_capability` gives the read-only congestion-control and qdisc inventory and typed refusals that state why (a socket option needs the owning descriptor; replacing a root qdisc cannot be restored exactly); Prometheus import and compare-load remain read-only",
+      "missing_required": [],
       "dispositions": [
+        "CodeComplete",
         "EvidenceDeferred",
         "FixtureVerified",
         "HardwareUnavailable",

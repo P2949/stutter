@@ -9,6 +9,7 @@ mod diagnostics;
 #[cfg(test)]
 mod diagnostics_tests;
 mod hyperfine;
+mod loadgen;
 mod profiles;
 #[cfg(test)]
 #[path = "profiles_tests.rs"]
@@ -177,6 +178,22 @@ pub enum BenchmarksCommand {
     ImportHyperfine { file: PathBuf },
     /// Read sysbench, stress-ng, benchstat or Phoronix output as typed, non-proof scores.
     ImportScores { tool: ScoreTool, file: PathBuf },
+    /// Offer a fixed, bounded request rate to a service on this host with `wrk2`, and write the
+    /// result as a `LoadRun` for `compare-load`. Loopback targets only; a missing `wrk2` is reported
+    /// as blocked, never as a run.
+    OfferedLoad {
+        /// `host:port` or `http://host:port/path`, loopback only.
+        target: String,
+        #[arg(long, default_value_t = 10)]
+        seconds: u64,
+        #[arg(long, default_value_t = 100)]
+        rate: u64,
+        #[arg(long, default_value_t = 4)]
+        connections: u64,
+        /// Where to write the `LoadRun` JSON.
+        #[arg(long)]
+        out: PathBuf,
+    },
     /// Compare two load-test runs (JSON `LoadRun` files): offered load must match, errors may not
     /// rise, then p99 is compared.
     CompareLoad {
@@ -303,6 +320,20 @@ pub fn run(args: &BenchmarksArgs) -> anyhow::Result<()> {
                 f64::from(*effect_percent),
             )?;
             println!("{verdict:?}");
+            Ok(())
+        }
+        BenchmarksCommand::OfferedLoad {
+            target,
+            seconds,
+            rate,
+            connections,
+            out,
+        } => {
+            let plan = loadgen::plan(target, *seconds, *rate, *connections)?;
+            let run = loadgen::run(&plan)?;
+            let json = serde_json::to_string_pretty(&run)?;
+            fs::write(out, &json).with_context(|| format!("write {}", out.display()))?;
+            println!("{json}");
             Ok(())
         }
         BenchmarksCommand::ImportScores { tool, file } => {
