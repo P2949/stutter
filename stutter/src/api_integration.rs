@@ -51,6 +51,7 @@ pub mod telemetry {
             registration::*,
             session::*,
             stamped_frames::*,
+            stamped_source::*,
         },
     };
 }

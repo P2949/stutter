@@ -17,6 +17,7 @@ pub mod registration;
 pub mod renderers;
 pub mod session;
 pub mod stamped_frames;
+pub mod stamped_source;
 
 #[cfg(test)]
 mod tests;

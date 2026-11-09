@@ -80,3 +80,31 @@ as the earlier version computed for them.
 Still not measured, and still the reason the real-game direct-frame path stays `EvidenceDeferred`:
 how accurately a renderer's stamp matches its actual presentation event. Delivery latency and
 event-stamp accuracy are different quantities, and only the first is measured here.
+
+## Authenticated, epoch-bound source (`telemetry::stamped_source`)
+
+Delivery latency was never meant to stand in for source trust or stamp accuracy, so the stream now
+sits behind a source that binds the producer and keeps the two uncertainties apart:
+
+- **Binding.** The producer is bound only when the kernel's peer credentials name the expected user
+  and process, that process is alive with the start time the controller recorded (a reused pid is
+  refused), producer and controller share a `CLOCK_MONOTONIC` time namespace, and its hello names
+  protocol version 1, `CLOCK_MONOTONIC`, a supported frame event (`present` only) and a source epoch
+  greater than every epoch already used (a replayed hello is refused). A bound, living producer makes
+  a second claim `CompetingProducer`. A producer that exits is withdrawn on the next check, every
+  bind resets the stream's trust, and a late first frame in an epoch is counted as unexplained loss.
+- **Two bounds.** The alignment uncertainty reported to the unchanged 2 ms gate is the measured
+  delivery bound **plus** a stamp-error bound that must come from an independent reference
+  (`StampAccuracy`: at least 1000 comparisons and a named reference, dropped when a different
+  process binds). Without it the uncertainty is unknown and the gate denies however fast the socket
+  is. Tests cover both bounds present (eligible), delivery only (denied), a stamp error that takes the
+  sum over 2 ms (denied), wrong user and process, reused pid, vanished process, another time
+  namespace, bad and replayed hellos, an unsupported event, a competing producer, restart with a new
+  epoch (recalibration and re-established accuracy both required), and real socket peer
+  credentials.
+
+What is still missing is the part that needs a real renderer: the instrumented producer, an
+independent reference for the stamp-versus-presentation error, and connecting the bound source to the
+live observation-only controller. Until a measured `StampAccuracy` exists for a real renderer this
+source cannot make any real-game stream frame-primary, and the real-game direct-frame path stays
+`EvidenceDeferred`.

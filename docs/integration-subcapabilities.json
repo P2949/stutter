@@ -236,6 +236,28 @@
       "negative_test": "a_stall_after_more_than_131072_fast_frames_still_denies_the_stream",
       "positive_file": "stutter/src/telemetry/stamped_frames_tests.rs",
       "negative_file": "stutter/src/telemetry/stamped_frames_tests.rs"
+    },
+    {
+      "id": "frames/authenticated-epoch-bound-source",
+      "entry": "5.12",
+      "kind": "observation",
+      "anchor": "stutter/src/telemetry/stamped_source.rs",
+      "symbol": "pub fn bind",
+      "positive_test": "an_authenticated_producer_with_both_bounds_is_eligible_under_the_unchanged_gate",
+      "negative_test": "fast_delivery_without_an_independent_stamp_accuracy_is_denied_not_trusted",
+      "positive_file": "stutter/src/telemetry/stamped_source_tests.rs",
+      "negative_file": "stutter/src/telemetry/stamped_source_tests.rs"
+    },
+    {
+      "id": "frames/producer-identity-and-epoch-binding",
+      "entry": "5.12",
+      "kind": "observation",
+      "anchor": "stutter/src/telemetry/stamped_source.rs",
+      "symbol": "ReplayedEpoch",
+      "positive_test": "real_socket_peer_credentials_bind_this_process_and_refuse_another",
+      "negative_test": "the_producer_is_bound_by_user_process_start_time_and_time_namespace",
+      "positive_file": "stutter/src/telemetry/stamped_source_tests.rs",
+      "negative_file": "stutter/src/telemetry/stamped_source_tests.rs"
     }
   ]
 }
