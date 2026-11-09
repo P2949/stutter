@@ -308,6 +308,7 @@ pub fn safety_class_for_rollback_token(token: &RollbackToken) -> SafetyClass {
         | RollbackToken::ResctrlGroupRemove { .. }
         | RollbackToken::DamosTeardown { .. }
         | RollbackToken::CgroupControlRestore { .. }
+        | RollbackToken::BlockSchedulerRestore { .. }
         | RollbackToken::SysfsRestore { .. } => SafetyClass::HighRisk,
     }
 }

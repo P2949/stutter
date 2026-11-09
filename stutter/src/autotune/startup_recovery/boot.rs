@@ -29,6 +29,7 @@ pub(super) fn task_boot_superseded(
         | RollbackToken::ResctrlGroupRemove { .. }
         | RollbackToken::DamosTeardown { .. }
         | RollbackToken::CgroupControlRestore { .. }
+        | RollbackToken::BlockSchedulerRestore { .. }
         | RollbackToken::SysfsRestore { .. } => Ok(false),
     }
 }

@@ -262,3 +262,68 @@ impl CandidatePlan for CgroupControlActionPlan {
         self.action.describe()
     }
 }
+
+/// A manual-only device-wide block scheduler selection. Never converted to an executable plan.
+#[derive(Clone, Debug)]
+pub struct BlockSchedulerActionPlan {
+    pub name: String,
+    pub action: crate::actions::block_scheduler_action::BlockSchedulerAction,
+    pub evidence: Vec<CandidateEvidence>,
+    pub objective: ObjectiveKind,
+}
+
+impl BlockSchedulerActionPlan {
+    pub fn manual(
+        request: crate::actions::block_scheduler::BlockSchedulerRequest,
+        objective: ObjectiveKind,
+    ) -> Self {
+        Self {
+            name: format!("block_scheduler_{}_{}", request.device, request.scheduler),
+            action: crate::actions::block_scheduler_action::BlockSchedulerAction::new(request),
+            evidence: Vec::new(),
+            objective,
+        }
+    }
+}
+
+impl CandidatePlan for BlockSchedulerActionPlan {
+    fn candidate_name(&self) -> &str {
+        &self.name
+    }
+
+    fn action_kind(&self) -> &'static str {
+        "block_io_scheduler"
+    }
+
+    fn target_root_pid(&self) -> Option<u32> {
+        None
+    }
+
+    fn action_id(&self) -> crate::actions::ActionId {
+        self.action.id()
+    }
+
+    fn safety_class(&self) -> SafetyClass {
+        self.action.safety_class()
+    }
+
+    fn effect_scope(&self) -> ActionEffectScope {
+        ActionEffectScope::SystemWide
+    }
+
+    fn evidence(&self) -> &[CandidateEvidence] {
+        &self.evidence
+    }
+
+    fn objective(&self) -> ObjectiveKind {
+        self.objective
+    }
+
+    fn conflict_group(&self) -> ActionConflictGroup {
+        ActionConflictGroup::IoPriority
+    }
+
+    fn describe(&self) -> String {
+        self.action.describe()
+    }
+}

@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use super::candidate::{CandidateAction, CandidateEvidence, CandidatePlan};
 pub use super::manual_plans::{
-    CgroupControlActionPlan, DamosActionPlan, PmQosActionPlan, ResctrlActionPlan,
+    BlockSchedulerActionPlan, CgroupControlActionPlan, DamosActionPlan, PmQosActionPlan,
+    ResctrlActionPlan,
 };
 use crate::{
     actions::{
@@ -73,6 +74,7 @@ impl CandidateExecutablePlan {
             | CandidateAction::Resctrl { .. }
             | CandidateAction::Damos { .. }
             | CandidateAction::CgroupControl { .. }
+            | CandidateAction::BlockScheduler { .. }
             | CandidateAction::VmKnob { .. }
             | CandidateAction::Fake { .. } => None,
         }

@@ -295,7 +295,9 @@ impl PrivilegedActionService for ServiceActionService {
                 // kdamond configuration does not survive a reboot.
                 | RollbackToken::DamosTeardown { .. }
                 // Cgroup directories do not survive a reboot.
-                | RollbackToken::CgroupControlRestore { .. } => Ok(RollbackResult { affected_tasks: 0 }),
+                | RollbackToken::CgroupControlRestore { .. }
+                // The scheduler choice is volatile: the kernel resets it at boot.
+                | RollbackToken::BlockSchedulerRestore { .. } => Ok(RollbackResult { affected_tasks: 0 }),
                 RollbackToken::CpuPowerRestore { .. }
                 | RollbackToken::IrqAffinityRestore { .. }
                 | RollbackToken::GpuPowerRestore { .. }

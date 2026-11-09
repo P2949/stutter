@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn ionice_provider_targets_active_tree_and_excludes_protected_or_unknown_tasks() {
+fn ionice_provider_never_lowers_the_important_tree_without_a_measured_offender() {
     let policy = apply_medium_policy_with_compile_cgroup();
     let provider = IoPrioProvider;
     let mut observation = provider_observation(SituationKind::IoPressure, FocusGroupKind::Desktop);
@@ -25,19 +25,7 @@ fn ionice_provider_targets_active_tree_and_excludes_protected_or_unknown_tasks()
         profiles: &[],
     };
 
-    let proposals = provider.propose(&input);
-
-    assert_eq!(proposals.len(), 1);
-    let CandidateAction::IoPrio { plan } = &proposals[0].candidate else {
-        panic!("expected ionice candidate");
-    };
-    assert_eq!(
-        plan.action
-            .targets
-            .iter()
-            .map(|target| target.tid.as_u32())
-            .collect::<Vec<_>>(),
-        vec![1234, 1235, 1236]
-    );
-    assert!(proposals[0].deny_reasons.is_empty());
+    // Generic I/O pressure has no measured competing offender, and the game tree is the
+    // important workload: nothing is proposed, whatever tasks it contains.
+    assert!(provider.propose(&input).is_empty());
 }

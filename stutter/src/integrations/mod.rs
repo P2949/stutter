@@ -335,6 +335,7 @@ pub fn operation_domain(operation: MutationOperationKind) -> Option<ResourceDoma
         | Op::CgroupMemoryLow
         | Op::CgroupMemoryHigh
         | Op::CgroupIoWeight
+        | Op::BlockIoScheduler
         | Op::Unclassified => None,
     }
 }

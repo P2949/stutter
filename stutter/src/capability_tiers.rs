@@ -75,7 +75,7 @@ const BOUNDED_SERVICE: &[&str] = &[
     "live_bounded_service_acceptance",
 ];
 
-pub const CAPABILITIES: [Capability; 41] = [
+pub const CAPABILITIES: [Capability; 42] = [
     obs(
         "doctor",
         "Local preflight checks",
@@ -455,6 +455,18 @@ pub const CAPABILITIES: [Capability; 41] = [
         required_evidence: &[],
         required_release_evidence: &[],
         limitations: "Delegated group only, preflighted hierarchy, foreign changes abort, restore only while the value is still ours; manual only, never autonomous. Does not inherit cgroup placement or another knob's maturity.",
+    },
+    Capability {
+        id: "block_io_scheduler",
+        title: "Block I/O scheduler selection",
+        class: CapabilityClass::Mutating,
+        tier: CapabilityTier::Experimental,
+        target_tier: CapabilityTier::Experimental,
+        commands: &["autotune"],
+        providers: &["block_scheduler"],
+        required_evidence: &[],
+        required_release_evidence: &[],
+        limitations: "Device-wide effect. Authorized, unprotected device only; the scheduler must be one the device lists; restore only on the same device while ours is active. Manual only, never autonomous. Does not inherit another operation's maturity.",
     },
     Capability {
         id: "bounded_autotune_controller",

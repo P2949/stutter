@@ -296,6 +296,9 @@ pub fn verify_rollback_restored_baseline(
         CandidateAction::CgroupControl { .. } => RollbackVerification::unavailable(
             "typed cgroup control values are not part of the active configuration snapshot",
         ),
+        CandidateAction::BlockScheduler { .. } => RollbackVerification::unavailable(
+            "block scheduler selections are not part of the active configuration snapshot",
+        ),
         CandidateAction::Fake { .. } => {
             RollbackVerification::unavailable("fake candidate has no active config verifier")
         }

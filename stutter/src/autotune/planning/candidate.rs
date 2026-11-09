@@ -5,10 +5,10 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use super::executable_plan::{
-    CgroupControlActionPlan, CgroupPlacementActionPlan, CpuAffinityProfilePlan, CpuPowerActionPlan,
-    DamosActionPlan, FakeCandidatePlan, GpuPowerActionPlan, IoPrioActionPlan,
-    IrqAffinityActionPlan, NiceActionPlan, PmQosActionPlan, ResctrlActionPlan, UclampActionPlan,
-    VmKnobActionPlan,
+    BlockSchedulerActionPlan, CgroupControlActionPlan, CgroupPlacementActionPlan,
+    CpuAffinityProfilePlan, CpuPowerActionPlan, DamosActionPlan, FakeCandidatePlan,
+    GpuPowerActionPlan, IoPrioActionPlan, IrqAffinityActionPlan, NiceActionPlan, PmQosActionPlan,
+    ResctrlActionPlan, UclampActionPlan, VmKnobActionPlan,
 };
 use crate::{
     actions::SafetyClass,
@@ -35,6 +35,7 @@ pub enum CandidateAction {
     Resctrl { plan: ResctrlActionPlan },
     Damos { plan: DamosActionPlan },
     CgroupControl { plan: CgroupControlActionPlan },
+    BlockScheduler { plan: BlockSchedulerActionPlan },
     Fake { plan: FakeCandidatePlan },
 }
 
@@ -264,6 +265,7 @@ impl CandidateAction {
             Self::Resctrl { plan } => plan,
             Self::Damos { plan } => plan,
             Self::CgroupControl { plan } => plan,
+            Self::BlockScheduler { plan } => plan,
             Self::Fake { plan } => plan,
         }
     }
@@ -302,7 +304,7 @@ pub trait CandidatePlan {
 /// Registry of mutation provider kinds (everything except the test-only fake).
 /// `is_mutation_provider` is an exhaustive match, so a new candidate variant cannot
 /// compile until this registry is revisited; coverage tooling uses it as a denominator.
-pub const MUTATION_PROVIDER_KINDS: [&str; 13] = [
+pub const MUTATION_PROVIDER_KINDS: [&str; 14] = [
     "cpu_affinity_profile",
     "nice",
     "ionice",
@@ -316,6 +318,7 @@ pub const MUTATION_PROVIDER_KINDS: [&str; 13] = [
     "resctrl",
     "damos",
     "cgroup_control",
+    "block_scheduler",
 ];
 
 impl CandidateAction {
@@ -333,7 +336,8 @@ impl CandidateAction {
             | Self::PmQos { .. }
             | Self::Resctrl { .. }
             | Self::Damos { .. }
-            | Self::CgroupControl { .. } => true,
+            | Self::CgroupControl { .. }
+            | Self::BlockScheduler { .. } => true,
             Self::Fake { .. } => false,
         }
     }

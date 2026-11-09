@@ -95,6 +95,7 @@ fn the_policy_promotes_the_core_capabilities_and_the_graduated_cpu_affinity_and_
         "cgroup_memory_low",
         "cgroup_memory_high",
         "cgroup_io_weight",
+        "block_io_scheduler",
         "remote_agent_mutation",
     ] {
         assert_eq!(

@@ -42,10 +42,13 @@ impl CandidateProvider for IoPrioProvider {
             return Vec::new();
         }
 
+        // Only helpers that are the offender (compiler/linker, browser helpers) may be lowered. The
+        // whole target tree is the important workload and is never lowered by default: generic I/O
+        // pressure without a measured competing offender proposes nothing.
         let selector = match input.observation.primary_situation {
             SituationKind::CompileLinkerPressure => TaskTargetSelector::CompilerAndLinker,
             SituationKind::BrowserIoPressure => TaskTargetSelector::BrowserRenderersAndHelpers,
-            _ => TaskTargetSelector::FullTargetTree,
+            _ => return Vec::new(),
         };
         let selection = mutable_task_targets_for_observation_with_mode(
             input.observation,

@@ -811,21 +811,26 @@
         "W13"
       ],
       "anchors": [
-        "stutter/src/actions/ioprio/mod.rs"
+        "stutter/src/actions/ioprio/mod.rs",
+        "stutter/src/actions/block_scheduler.rs",
+        "stutter/src/actions/block_scheduler_action.rs",
+        "stutter/src/actions/block_scheduler_rollback.rs"
       ],
-      "status": "first_slice",
-      "g0": "ioprio action exists and is denied while GameMode owns task priority; no block scheduler operations; a cheap `block_io` sensor reads whole-disk completed I/Os, sectors, busy and queue time as deltas plus the in-flight gauge (never a decision input, not per-application)",
+      "status": "code_complete",
+      "g0": "ioprio action exists and is denied while GameMode owns task priority; no block scheduler operations; a cheap `block_io` sensor reads whole-disk completed I/Os, sectors, busy and queue time as deltas plus the in-flight gauge (never a decision input, not per-application); the ionice provider no longer lowers the important tree: only offender helpers (compiler/linker, browser helpers) are lowered and generic I/O pressure without a measured offender proposes nothing; device-wide scheduler selection is a prepared transaction (`block_scheduler`: supported-list validation from queue/scheduler, authorized and unprotected devices only, readback, restore by device number and only while ours is active) with `RollbackToken::BlockSchedulerRestore`, handler, manual policy-gated `BlockSchedulerAction` (HighRisk, default denies) and `CandidateAction::BlockScheduler` classified as manual-only `BlockIoScheduler`; never an executable plan",
       "g1": "none",
       "runtime_availability": "ionice present, fio and blktrace absent",
       "authority": "O/F/E",
-      "not_wired": "ioprio is not yet scoped to a measured offender",
+      "not_wired": "not worker-routed (HighRisk manual/offline behind HIGH_RISK_APPLY_IMPLEMENTED=false); no per-process offender I/O accounting source beyond the compile/browser helper selectors; no real-device scheduler campaign; no blktrace/biosnoop importer",
       "dispositions": [
+        "CodeComplete",
         "FixtureVerified",
+        "RealObserved",
         "HardwareUnavailable",
         "EvidenceDeferred"
       ],
       "evidence": [],
-      "unblock": "Needs on the host: ionice present, fio and blktrace absent"
+      "unblock": "blktrace/biosnoop/biolatency/fio absent; a real-device scheduler mechanism and target-versus-bystander campaign needs an explicitly disposable authorized block device (none is designated on this host)"
     },
     {
       "id": "5.27",

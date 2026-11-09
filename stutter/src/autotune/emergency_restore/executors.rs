@@ -85,6 +85,7 @@ pub fn restore_rollback_token_direct(
         RollbackToken::ResctrlGroupRemove { records } => restore_resctrl_groups(records),
         RollbackToken::DamosTeardown { records } => restore_damos(records),
         RollbackToken::CgroupControlRestore { records } => restore_cgroup_controls(records),
+        RollbackToken::BlockSchedulerRestore { records } => restore_block_schedulers(records),
         RollbackToken::SysfsRestore {
             path,
             original_value,
@@ -518,6 +519,18 @@ pub(super) fn restore_cgroup_controls(
 ) -> anyhow::Result<RollbackRestoreSummary> {
     let check = crate::actions::cgroup::control_rollback::restore_all(records);
     let mut summary = RollbackRestoreSummary::success("cgroup-control-restore", check.restored);
+    summary.skipped_items = check.already + check.foreign + check.replaced;
+    summary.skipped_identity_mismatch = check.replaced;
+    summary.failed_items = check.unproven;
+    summary.messages = check.messages;
+    Ok(summary)
+}
+
+pub(super) fn restore_block_schedulers(
+    records: &[crate::actions::block_scheduler::BlockSchedulerRecord],
+) -> anyhow::Result<RollbackRestoreSummary> {
+    let check = crate::actions::block_scheduler_rollback::restore_all(records);
+    let mut summary = RollbackRestoreSummary::success("block-scheduler-restore", check.restored);
     summary.skipped_items = check.already + check.foreign + check.replaced;
     summary.skipped_identity_mismatch = check.replaced;
     summary.failed_items = check.unproven;

@@ -75,6 +75,10 @@ pub(crate) fn recovery_descriptor(token: &RollbackToken) -> RollbackRecoveryDesc
             VerifiedAutomatic,
             "the recorded group must still be the same kernel object (device and inode) and the control file must still hold the value this transaction wrote; a replaced group or a foreign value is never overwritten, and a baseline that cannot be written back exactly is never recorded",
         ),
+        RollbackToken::BlockSchedulerRestore { .. } => (
+            VerifiedAutomatic,
+            "the recorded device must still have the recorded major:minor number and still have the applied scheduler active; a different device or another owner's choice is never overwritten",
+        ),
     };
     RollbackRecoveryDescriptor {
         token_kind: token.kind(),

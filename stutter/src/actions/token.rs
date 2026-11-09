@@ -98,6 +98,11 @@ pub enum RollbackToken {
     CgroupControlRestore {
         records: Vec<super::cgroup::control_transaction::ControlRecord>,
     },
+    /// A device-wide block I/O scheduler choice: recovery restores the original only on the same
+    /// device (by number) and only while the applied scheduler is still active.
+    BlockSchedulerRestore {
+        records: Vec<super::block_scheduler::BlockSchedulerRecord>,
+    },
 }
 
 impl RollbackToken {
@@ -117,6 +122,7 @@ impl RollbackToken {
             Self::ResctrlGroupRemove { .. } => "resctrl-group-remove",
             Self::DamosTeardown { .. } => "damos-teardown",
             Self::CgroupControlRestore { .. } => "cgroup-control-restore",
+            Self::BlockSchedulerRestore { .. } => "block-scheduler-restore",
         }
     }
 
@@ -314,6 +320,7 @@ impl RollbackToken {
             Self::ResctrlGroupRemove { records } => records.len(),
             Self::DamosTeardown { records } => records.len(),
             Self::CgroupControlRestore { records } => records.len(),
+            Self::BlockSchedulerRestore { records } => records.len(),
         }
     }
 
@@ -332,6 +339,7 @@ impl RollbackToken {
             | Self::ResctrlGroupRemove { .. }
             | Self::DamosTeardown { .. }
             | Self::CgroupControlRestore { .. }
+            | Self::BlockSchedulerRestore { .. }
             | Self::VmKnobRestore { .. } => None,
         }
     }

@@ -27,6 +27,9 @@
 pub(crate) mod fake_action;
 
 pub(crate) mod acceptance;
+pub(crate) mod block_scheduler;
+pub(crate) mod block_scheduler_action;
+pub(crate) mod block_scheduler_rollback;
 pub(crate) mod cgroup;
 pub(crate) mod cpu_affinity;
 pub(crate) mod cpu_power;

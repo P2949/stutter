@@ -93,6 +93,10 @@ impl CandidateAction {
                 plan.action.control.file_and_controller().0,
                 plan.action.dir.display()
             ),
+            CandidateAction::BlockScheduler { plan } => format!(
+                "block_scheduler {} -> {}",
+                plan.action.request.device, plan.action.request.scheduler
+            ),
             CandidateAction::Fake { plan } => {
                 format!("fake action_id={}", plan.action_id.as_str())
             }
@@ -409,6 +413,9 @@ impl CandidateAction {
                 summary: self.planned_state_summary(),
             },
             CandidateAction::CgroupControl { .. } => ActiveConfigMatch::Unknown {
+                summary: self.planned_state_summary(),
+            },
+            CandidateAction::BlockScheduler { .. } => ActiveConfigMatch::Unknown {
                 summary: self.planned_state_summary(),
             },
             CandidateAction::Fake { .. } => ActiveConfigMatch::Unknown {

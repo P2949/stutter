@@ -149,6 +149,17 @@ pub fn manual_restore_command_for_token(token: &RollbackToken) -> String {
             })
             .collect::<Vec<_>>()
             .join(" && "),
+        RollbackToken::BlockSchedulerRestore { records } => records
+            .iter()
+            .map(|record| {
+                format!(
+                    "printf '%s' {} | sudo tee {} >/dev/null",
+                    shell_quote_value(&record.original),
+                    shell_quote_path(&record.queue)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" && "),
     }
 }
 
@@ -182,6 +193,7 @@ pub(super) fn safety_class_for_rollback_token(token: &RollbackToken) -> SafetyCl
         | RollbackToken::ResctrlGroupRemove { .. }
         | RollbackToken::DamosTeardown { .. }
         | RollbackToken::CgroupControlRestore { .. }
+        | RollbackToken::BlockSchedulerRestore { .. }
         | RollbackToken::SysfsRestore { .. } => SafetyClass::HighRisk,
     }
 }
@@ -202,6 +214,7 @@ pub(super) fn rollback_token_kind(token: &RollbackToken) -> &'static str {
         RollbackToken::ResctrlGroupRemove { .. } => "resctrl-group-remove",
         RollbackToken::DamosTeardown { .. } => "damos-teardown",
         RollbackToken::CgroupControlRestore { .. } => "cgroup-control-restore",
+        RollbackToken::BlockSchedulerRestore { .. } => "block-scheduler-restore",
     }
 }
 

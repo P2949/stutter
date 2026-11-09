@@ -428,3 +428,38 @@ fn each_cgroup_knob_is_its_own_manual_only_operation_with_its_own_capability() {
     }
     assert_eq!(capabilities.len(), 9);
 }
+
+#[test]
+fn a_block_scheduler_candidate_is_its_own_manual_only_operation_and_never_an_executable_plan() {
+    use crate::{
+        actions::block_scheduler::BlockSchedulerRequest,
+        autotune::{
+            objective::ObjectiveKind,
+            planning::{
+                candidate::CandidateAction,
+                executable_plan::{BlockSchedulerActionPlan, CandidateExecutablePlan},
+            },
+        },
+    };
+    let candidate = CandidateAction::BlockScheduler {
+        plan: BlockSchedulerActionPlan::manual(
+            BlockSchedulerRequest {
+                device: "disk1".into(),
+                scheduler: "bfq".into(),
+                authorized: Default::default(),
+                protected: Default::default(),
+            },
+            ObjectiveKind::GameRunnableLatency,
+        ),
+    };
+    assert_eq!(
+        candidate.operation_kind(),
+        MutationOperationKind::BlockIoScheduler
+    );
+    assert!(MutationOperationKind::BlockIoScheduler.is_manual_only());
+    assert!(CandidateExecutablePlan::from_candidate(&candidate).is_none());
+    assert_eq!(
+        MutationOperationKind::BlockIoScheduler.capability_id(),
+        Some("block_io_scheduler")
+    );
+}

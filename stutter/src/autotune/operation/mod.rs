@@ -54,12 +54,16 @@ pub enum MutationOperationKind {
     CgroupMemoryHigh,
     CgroupIoWeight,
 
+    /// A device-wide block I/O scheduler selection (BFQ, Kyber, mq-deadline, none) on an
+    /// explicitly authorized, unprotected device.
+    BlockIoScheduler,
+
     /// Test-only or unrecognisable payloads. Never authorised by any contract.
     Unclassified,
 }
 
 impl MutationOperationKind {
-    pub const ALL: [Self; 27] = [
+    pub const ALL: [Self; 28] = [
         Self::CpuAffinityProfile,
         Self::Uclamp,
         Self::Nice,
@@ -86,6 +90,7 @@ impl MutationOperationKind {
         Self::CgroupMemoryLow,
         Self::CgroupMemoryHigh,
         Self::CgroupIoWeight,
+        Self::BlockIoScheduler,
         Self::Unclassified,
     ];
 
@@ -117,6 +122,7 @@ impl MutationOperationKind {
             Self::CgroupMemoryLow => "cgroup_memory_low",
             Self::CgroupMemoryHigh => "cgroup_memory_high",
             Self::CgroupIoWeight => "cgroup_io_weight",
+            Self::BlockIoScheduler => "block_io_scheduler",
             Self::Unclassified => "unclassified",
         }
     }
@@ -152,6 +158,7 @@ impl MutationOperationKind {
             Self::CgroupMemoryLow => Some("cgroup_memory_low"),
             Self::CgroupMemoryHigh => Some("cgroup_memory_high"),
             Self::CgroupIoWeight => Some("cgroup_io_weight"),
+            Self::BlockIoScheduler => Some("block_io_scheduler"),
             Self::Unclassified => None,
         }
     }
@@ -191,6 +198,7 @@ impl MutationOperationKind {
                 | Self::CgroupMemoryLow
                 | Self::CgroupMemoryHigh
                 | Self::CgroupIoWeight
+                | Self::BlockIoScheduler
                 | Self::Unclassified
         )
     }
@@ -222,6 +230,7 @@ impl CandidateAction {
             Self::Resctrl { .. } => MutationOperationKind::ResctrlCacheAllocation,
             Self::Damos { .. } => MutationOperationKind::DamosScheme,
             Self::CgroupControl { plan } => cgroup_control_operation(&plan.action.control),
+            Self::BlockScheduler { .. } => MutationOperationKind::BlockIoScheduler,
             Self::Fake { .. } => MutationOperationKind::Unclassified,
         }
     }

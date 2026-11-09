@@ -69,6 +69,7 @@ fn mechanism_for(operation: MutationOperationKind) -> MechanismEvidence {
         DamosScheme | CgroupCpuWeight | CgroupCpuIdle | CgroupCpuMax | CgroupCpusetCpus
         | CgroupCpusetMems | CgroupMemoryMin | CgroupMemoryLow | CgroupMemoryHigh
         | CgroupIoWeight => MechanismEvidence::ResourceGroupObserved,
+        BlockIoScheduler => MechanismEvidence::ResourceGroupObserved,
         ResctrlCacheAllocation => MechanismEvidence::ResourceGroupObserved,
         Unclassified => MechanismEvidence::None,
     }
