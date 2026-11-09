@@ -7,63 +7,184 @@
 use super::*;
 use crate::autotune::{objective::ObjectiveKind, planning::candidate::CandidateAction};
 
-fn env_number(name: &str) -> u32 {
-    std::env::var(name)
-        .unwrap_or_else(|_| panic!("{name} is not set"))
-        .parse()
-        .unwrap_or_else(|_| panic!("{name} is not a number"))
+fn sleeper() -> std::process::Child {
+    std::process::Command::new("sleep")
+        .arg("600")
+        .spawn()
+        .expect("a disposable sleeper")
 }
 
-fn dry_run(client: &UnixSocketPrivilegedActionService, pid: u32) -> anyhow::Result<()> {
-    let candidate = CandidateAction::cpu_affinity_profile_for(
+fn allowed(pid: u32) -> String {
+    std::fs::read_to_string(format!("/proc/{pid}/status"))
+        .expect("status")
+        .lines()
+        .find_map(|line| line.strip_prefix("Cpus_allowed_list:"))
+        .expect("Cpus_allowed_list")
+        .trim()
+        .to_owned()
+}
+
+/// Writes the fence into the transient worker's root-owned state directory, as root, the way the
+/// smoke does.
+fn fence(home: &str, pid: u32, seconds_from_now: i64) {
+    use std::io::Write;
+    let ticks = crate::watch::process_root_starttime(pid).expect("start ticks");
+    let boot = std::fs::read_to_string("/proc/sys/kernel/random/boot_id").expect("boot id");
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_secs();
+    let expires = now.saturating_add_signed(seconds_from_now);
+    let body = format!(
+        r#"{{"version":1,"uid":{},"root_pid":{pid},"start_ticks":{ticks},"boot_id":"{}","expires_unix":{expires}}}"#,
+        crate::syscall::geteuid(),
+        boot.trim()
+    );
+    let path = format!("{home}/validation-fence.json");
+    let mut tee = std::process::Command::new("sudo")
+        .args(["-n", "tee", &path])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .spawn()
+        .expect("sudo tee");
+    tee.stdin
+        .take()
+        .expect("stdin")
+        .write_all(body.as_bytes())
+        .expect("write");
+    assert!(tee.wait().expect("tee").success());
+    assert!(
+        std::process::Command::new("sudo")
+            .args(["-n", "chmod", "0644", &path])
+            .status()
+            .expect("chmod")
+            .success()
+    );
+}
+
+fn affinity_candidate(pid: u32) -> CandidateAction {
+    CandidateAction::cpu_affinity_profile_for(
         crate::profiles::Profile {
             name: "live-fence".into(),
-            rules: vec![],
+            rules: vec![crate::profiles::ProfileRule {
+                affinity: Some(crate::affinity::CpuMask::parse("0").expect("mask")),
+                nice: None,
+                ionice: None,
+                match_class: vec![],
+                match_comm: vec![
+                    crate::process::model::CompiledPattern::new("sleep".into()).expect("pattern"),
+                ],
+            }],
         },
         pid,
         ObjectiveKind::GameRunnableLatency,
+    )
+}
+
+fn apply_request(candidate: CandidateAction) -> CandidateApplyRequest {
+    CandidateApplyRequest {
+        plan: CandidatePlanRequest::from_candidate(candidate, crate::audit::unix_nanos_now()),
+        policy: crate::daemon_policy::DaemonPolicy::apply_medium_risk(
+            crate::daemon_policy::ActionSource::Test,
+        ),
+        context: Default::default(),
+        max_plan_age_nanos: 60_000_000_000,
+    }
+}
+
+/// The full two-phase exchange against a real root worker: a decoy is refused at prepare and never
+/// touched, the fenced fixture is applied and restored, and a fence that moves between prepare and
+/// commit stops the first mutable write.
+#[test]
+#[ignore = "live: needs STUTTER_QUALIFY_SOCKET and STUTTER_QUALIFY_HOME of a transient root worker"]
+fn a_real_worker_applies_restores_and_refuses_at_precommit_under_the_fence() {
+    let socket = std::env::var("STUTTER_QUALIFY_SOCKET").expect("STUTTER_QUALIFY_SOCKET");
+    let home = std::env::var("STUTTER_QUALIFY_HOME").expect("STUTTER_QUALIFY_HOME");
+    let client = UnixSocketPrivilegedActionService::new(socket);
+    let (mut fixture, mut decoy) = (sleeper(), sleeper());
+    let (fixture_pid, decoy_pid) = (fixture.id(), decoy.id());
+    let (fixture_before, decoy_before) = (allowed(fixture_pid), allowed(decoy_pid));
+    assert_ne!(
+        fixture_before, "0",
+        "the fixture must have somewhere to move from"
+    );
+    fence(&home, fixture_pid, 300);
+
+    // Prepare: the decoy is refused, its hook never runs, nothing about it changes.
+    let mut hooked = false;
+    let refused = client
+        .apply_candidate_prepared(apply_request(affinity_candidate(decoy_pid)), &mut |_| {
+            hooked = true;
+            Ok(())
+        })
+        .expect_err("the decoy must be refused at prepare");
+    assert!(
+        format!("{refused:#}").contains("validation_fence_target_not_fenced"),
+        "{refused:#}"
+    );
+    assert!(!hooked && allowed(decoy_pid) == decoy_before);
+
+    // The fenced fixture is prepared, committed and really changed, then restored.
+    let candidate = affinity_candidate(fixture_pid);
+    let applied = client
+        .apply_candidate_prepared(apply_request(candidate.clone()), &mut |_| Ok(()))
+        .expect("the fenced fixture applies");
+    assert_eq!(
+        allowed(fixture_pid),
+        "0",
+        "the placement was read back as changed"
     );
     client
-        .dry_run_candidate(CandidateApplyRequest {
-            plan: CandidatePlanRequest::from_candidate(candidate, crate::audit::unix_nanos_now()),
+        .rollback(RollbackRequest {
+            candidate: candidate.clone(),
+            token: applied.rollback,
             policy: crate::daemon_policy::DaemonPolicy::apply_medium_risk(
                 crate::daemon_policy::ActionSource::Test,
             ),
             context: Default::default(),
-            max_plan_age_nanos: 60_000_000_000,
         })
-        .map(|_| ())
-}
-
-#[test]
-#[ignore = "live: needs STUTTER_QUALIFY_SOCKET, STUTTER_QUALIFY_FIXTURE_PID and STUTTER_QUALIFY_DECOY_PID"]
-fn a_real_worker_refuses_a_decoy_the_fence_does_not_name() {
-    let socket = std::env::var("STUTTER_QUALIFY_SOCKET").expect("STUTTER_QUALIFY_SOCKET");
-    let (fixture, decoy) = (
-        env_number("STUTTER_QUALIFY_FIXTURE_PID"),
-        env_number("STUTTER_QUALIFY_DECOY_PID"),
+        .expect("the rollback succeeds");
+    assert_eq!(allowed(fixture_pid), fixture_before, "restored exactly");
+    assert_eq!(
+        allowed(decoy_pid),
+        decoy_before,
+        "the decoy was never touched"
     );
-    let client = UnixSocketPrivilegedActionService::new(socket);
-    let report = client
-        .fence_status()
-        .expect("the worker answers fence_status");
-    assert_eq!(report.state, "active", "{report:?}");
-    assert_eq!(report.root_pid, Some(fixture), "{report:?}");
 
-    let refused = dry_run(&client, decoy).expect_err("the decoy must be refused");
-    let refused = format!("{refused:#}");
+    // Precommit: the fence moves to the decoy after the prepare. The commit must not mutate.
+    let moved = client.apply_candidate_prepared(apply_request(candidate), &mut |_| {
+        fence(&home, decoy_pid, 300);
+        Ok(())
+    });
     assert!(
-        refused.contains("validation_fence_target_not_fenced"),
-        "{refused}"
+        moved.is_err(),
+        "a fence that moved must stop the first mutable write"
     );
-
-    // The fixture is not refused by the fence. Ordinary checks may still refuse it for their own
-    // reasons; those are different, and the fence adds nothing to them.
-    match dry_run(&client, fixture) {
-        Ok(()) => {}
-        Err(error) => {
-            let error = format!("{error:#}");
-            assert!(!error.contains("validation_fence"), "{error}");
-        }
-    }
+    assert_eq!(allowed(fixture_pid), fixture_before, "nothing was written");
+    assert_eq!(
+        client.settle_issued_tokens().expect("settle"),
+        0,
+        "no token left outstanding"
+    );
+    // Expiry between prepare and commit: an expired fence refuses every mutation, so the commit stops.
+    fence(&home, fixture_pid, 300);
+    let expired = client.apply_candidate_prepared(
+        apply_request(affinity_candidate(fixture_pid)),
+        &mut |_| {
+            fence(&home, fixture_pid, -5);
+            Ok(())
+        },
+    );
+    assert!(
+        expired.is_err(),
+        "a fence that expired mid-transaction must stop the commit"
+    );
+    assert_eq!(allowed(fixture_pid), fixture_before, "nothing was written");
+    assert_eq!(
+        client.settle_issued_tokens().expect("settle"),
+        0,
+        "no token left outstanding"
+    );
+    let _ = (fixture.kill(), decoy.kill());
+    let _ = (fixture.wait(), decoy.wait());
 }

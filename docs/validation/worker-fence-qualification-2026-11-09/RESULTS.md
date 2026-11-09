@@ -34,12 +34,26 @@ Decoy and fixture (`live_fence_tests.rs::a_real_worker_refuses_a_decoy_the_fence
 * Dry run for the **fixture**: passed the fence and the target checks; refused only afterwards by an ordinary check
   (`profile 'live-fence' has no rules`), which is the test's empty profile, not the fence.
 
-## What this does not establish
-* The decoy was refused on the dry-run path, which runs the worker's prepare-entry target check
-  (`ServiceTargets::candidate`, the same function `ApplyPrepared` calls at prepare). The precommit re-check
-  (`prepared`) and a full prepare, commit, restore exchange against a live worker were not exercised live; they are
-  covered by the fake-`/proc` unit tests only.
-* Worker restart, fence expiry mid-transaction, rollback before and after expiry, and test-runner SIGKILL were not
-  run live.
-* The installed production worker (`4f3baa07`) does not know `fence_status` at all, so the smoke correctly refuses to
-  mutate against it. Qualifying the installed build still needs the final-source deploy on a free desktop.
+## Second run: the full two-phase exchange (same binary, fresh transient worker)
+Harness: `live_fence_tests.rs::a_real_worker_applies_restores_and_refuses_at_precommit_under_the_fence` (ignored;
+`STUTTER_QUALIFY_SOCKET` and `STUTTER_QUALIFY_HOME` select the transient worker). It spawns two disposable `sleep`
+processes of the same account, fences one (written as root with `sudo -n tee`, as the smoke does) and drives real
+`ApplyPrepared` / commit / `Rollback` / `SettleIssuedTokens` requests. Binary: the release build of `2f9abb20`
+(sha256 prefix `fcad15d9f81e82ac`, equal to its receipt's `release_binary_sha256`; the executable code is that of
+`71d90506`). Results, all passing:
+* **Decoy at prepare:** refused with `validation_fence_target_not_fenced`; the commit hook never ran; the decoy's
+  `Cpus_allowed_list` was unchanged.
+* **Fixture:** prepared and committed; its allowed CPUs were read back from `/proc` as changed to `0`; the rollback
+  restored the original list exactly; the decoy was never touched.
+* **Precommit, fence moved:** the fence was rewritten to name the decoy between the prepare and the commit; the
+  worker refused the commit, nothing was written to the fixture, and the settle answer reported 0 outstanding.
+* **Precommit, fence expired:** the fence was rewritten as already expired between prepare and commit; the commit was
+  refused, nothing was written, 0 outstanding.
+* Afterwards the worker was stopped with its own `shutdown` request, its directories were removed, no test process
+  remained, and the production worker and controller units stayed `active` and untouched throughout.
+
+## What this still does not establish
+* Worker restart with an outstanding token under a fence, and a runner SIGKILL mid-session, were not run live (the
+  restart and owner-death recovery paths have their own earlier live evidence without the fence).
+* The installed production worker (`4f3baa07`) does not know `fence_status`, so the smoke correctly refuses to mutate
+  against it. Qualifying the installed build needs the final-source deploy on a free desktop.
