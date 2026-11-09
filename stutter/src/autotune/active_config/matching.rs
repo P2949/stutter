@@ -80,6 +80,10 @@ impl CandidateAction {
             CandidateAction::PmQos { plan } => {
                 format!("pm_qos_cpu_latency latency_us={}", plan.action.latency_us)
             }
+            CandidateAction::Resctrl { plan } => format!(
+                "resctrl_cache_allocation group={} mask={:#x}",
+                plan.action.request.name, plan.action.request.mask
+            ),
             CandidateAction::Fake { plan } => {
                 format!("fake action_id={}", plan.action_id.as_str())
             }
@@ -387,6 +391,9 @@ impl CandidateAction {
             // The aggregate PM QoS target is not part of the active configuration snapshot, so a
             // match can never be claimed.
             CandidateAction::PmQos { .. } => ActiveConfigMatch::Unknown {
+                summary: self.planned_state_summary(),
+            },
+            CandidateAction::Resctrl { .. } => ActiveConfigMatch::Unknown {
                 summary: self.planned_state_summary(),
             },
             CandidateAction::Fake { .. } => ActiveConfigMatch::Unknown {

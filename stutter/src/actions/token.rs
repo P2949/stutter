@@ -84,6 +84,10 @@ pub enum RollbackToken {
     PmQosRelease {
         records: Vec<super::pm_qos_transaction::PmQosReleaseRecord>,
     },
+    /// A Stutter-owned resctrl control group: recovery removes exactly the recorded kernel object.
+    ResctrlGroupRemove {
+        records: Vec<super::resctrl_alloc::ResctrlGroupRecord>,
+    },
 }
 
 impl RollbackToken {
@@ -100,6 +104,7 @@ impl RollbackToken {
             Self::GpuPowerRestore { .. } => "gpu-power-restore",
             Self::SysfsRestore { .. } => "sysfs-restore",
             Self::PmQosRelease { .. } => "pm-qos-release",
+            Self::ResctrlGroupRemove { .. } => "resctrl-group-remove",
         }
     }
 
@@ -294,6 +299,7 @@ impl RollbackToken {
             Self::GpuPowerRestore { records } => records.len(),
             Self::SysfsRestore { .. } => 1,
             Self::PmQosRelease { records } => records.len(),
+            Self::ResctrlGroupRemove { records } => records.len(),
         }
     }
 
@@ -309,6 +315,7 @@ impl RollbackToken {
             | Self::CpuPowerRestore { .. }
             | Self::GpuPowerRestore { .. }
             | Self::PmQosRelease { .. }
+            | Self::ResctrlGroupRemove { .. }
             | Self::VmKnobRestore { .. } => None,
         }
     }

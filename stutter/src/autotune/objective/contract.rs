@@ -22,6 +22,8 @@ pub enum MechanismEvidence {
     IrqPlacementObserved,
     /// The sysctl value was read back.
     SysctlValueObserved,
+    /// The resource-control group and its allocation were read back from the kernel filesystem.
+    ResourceGroupObserved,
     None,
 }
 
@@ -64,6 +66,7 @@ fn mechanism_for(operation: MutationOperationKind) -> MechanismEvidence {
         }
         IrqKnownDevice | IrqStorageOrUnknown => MechanismEvidence::IrqPlacementObserved,
         PmQosCpuLatency => MechanismEvidence::PowerAttributeObserved,
+        ResctrlCacheAllocation => MechanismEvidence::ResourceGroupObserved,
         Unclassified => MechanismEvidence::None,
     }
 }

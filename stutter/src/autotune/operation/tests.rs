@@ -297,3 +297,27 @@ fn a_pm_qos_candidate_is_its_own_manual_only_operation_and_never_an_executable_p
         Some("pm_qos_cpu_latency")
     );
 }
+
+#[test]
+fn a_resctrl_candidate_is_its_own_manual_only_operation_and_never_an_executable_plan() {
+    use crate::autotune::{
+        objective::ObjectiveKind,
+        planning::{
+            candidate::CandidateAction,
+            executable_plan::{CandidateExecutablePlan, ResctrlActionPlan},
+        },
+    };
+    let candidate = CandidateAction::Resctrl {
+        plan: ResctrlActionPlan::manual("trial", 0xf0, ObjectiveKind::GameRunnableLatency),
+    };
+    assert_eq!(
+        candidate.operation_kind(),
+        MutationOperationKind::ResctrlCacheAllocation
+    );
+    assert!(MutationOperationKind::ResctrlCacheAllocation.is_manual_only());
+    assert!(CandidateExecutablePlan::from_candidate(&candidate).is_none());
+    assert_eq!(
+        MutationOperationKind::ResctrlCacheAllocation.capability_id(),
+        Some("resctrl_cache_allocation")
+    );
+}

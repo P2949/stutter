@@ -36,12 +36,15 @@ pub enum MutationOperationKind {
     /// A system-wide CPU wake-latency request (`/dev/cpu_dma_latency`), held as a lease.
     PmQosCpuLatency,
 
+    /// An L3 cache allocation group (resctrl CAT), owned by Stutter and removed on restore.
+    ResctrlCacheAllocation,
+
     /// Test-only or unrecognisable payloads. Never authorised by any contract.
     Unclassified,
 }
 
 impl MutationOperationKind {
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 17] = [
         Self::CpuAffinityProfile,
         Self::Uclamp,
         Self::Nice,
@@ -57,6 +60,7 @@ impl MutationOperationKind {
         Self::IrqKnownDevice,
         Self::IrqStorageOrUnknown,
         Self::PmQosCpuLatency,
+        Self::ResctrlCacheAllocation,
         Self::Unclassified,
     ];
 
@@ -77,6 +81,7 @@ impl MutationOperationKind {
             Self::IrqKnownDevice => "irq_known_device",
             Self::IrqStorageOrUnknown => "irq_storage_or_unknown",
             Self::PmQosCpuLatency => "pm_qos_cpu_latency",
+            Self::ResctrlCacheAllocation => "resctrl_cache_allocation",
             Self::Unclassified => "unclassified",
         }
     }
@@ -101,6 +106,7 @@ impl MutationOperationKind {
             Self::IrqKnownDevice => Some("irq_affinity_known_device"),
             Self::IrqStorageOrUnknown => Some("irq_affinity_storage_or_unknown"),
             Self::PmQosCpuLatency => Some("pm_qos_cpu_latency"),
+            Self::ResctrlCacheAllocation => Some("resctrl_cache_allocation"),
             Self::Unclassified => None,
         }
     }
@@ -129,6 +135,7 @@ impl MutationOperationKind {
                 | Self::VmDirtyRatio
                 | Self::IrqStorageOrUnknown
                 | Self::PmQosCpuLatency
+                | Self::ResctrlCacheAllocation
                 | Self::Unclassified
         )
     }
@@ -157,6 +164,7 @@ impl CandidateAction {
             Self::GpuPower { plan } => gpu_power_operation(&plan.action),
             Self::VmKnob { plan } => vm_operation(&plan.action),
             Self::PmQos { .. } => MutationOperationKind::PmQosCpuLatency,
+            Self::Resctrl { .. } => MutationOperationKind::ResctrlCacheAllocation,
             Self::Fake { .. } => MutationOperationKind::Unclassified,
         }
     }

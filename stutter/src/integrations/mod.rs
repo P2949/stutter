@@ -321,7 +321,11 @@ pub fn operation_domain(operation: MutationOperationKind) -> Option<ResourceDoma
             Some(ResourceDomain::VmKnobs)
         }
         Op::IrqKnownDevice | Op::IrqStorageOrUnknown => Some(ResourceDomain::IrqAffinity),
-        Op::CpuAffinityProfile | Op::Uclamp | Op::CgroupPlacement | Op::Unclassified => None,
+        Op::CpuAffinityProfile
+        | Op::Uclamp
+        | Op::CgroupPlacement
+        | Op::ResctrlCacheAllocation
+        | Op::Unclassified => None,
     }
 }
 

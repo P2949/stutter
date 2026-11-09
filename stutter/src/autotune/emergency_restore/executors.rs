@@ -82,6 +82,7 @@ pub fn restore_rollback_token_direct(
         RollbackToken::VmKnobRestore { records } => restore_vm_knob_records(records),
         RollbackToken::GpuPowerRestore { records } => restore_gpu_power_records(records),
         RollbackToken::PmQosRelease { records } => restore_pm_qos_release(records),
+        RollbackToken::ResctrlGroupRemove { records } => restore_resctrl_groups(records),
         RollbackToken::SysfsRestore {
             path,
             original_value,
@@ -457,6 +458,18 @@ pub(super) fn restore_pm_qos_release(
     let mut summary = RollbackRestoreSummary::success("pm-qos-release", check.released);
     summary.skipped_items = check.unproven;
     summary.failed_items = check.unreadable;
+    summary.messages = check.messages;
+    Ok(summary)
+}
+
+pub(super) fn restore_resctrl_groups(
+    records: &[crate::actions::resctrl_alloc::ResctrlGroupRecord],
+) -> anyhow::Result<RollbackRestoreSummary> {
+    let check = crate::actions::resctrl_rollback::remove_all(records);
+    let mut summary = RollbackRestoreSummary::success("resctrl-group-remove", check.removed);
+    summary.skipped_items = check.absent;
+    summary.skipped_identity_mismatch = check.replaced;
+    summary.failed_items = check.unproven;
     summary.messages = check.messages;
     Ok(summary)
 }

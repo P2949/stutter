@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use super::executable_plan::{
     CgroupPlacementActionPlan, CpuAffinityProfilePlan, CpuPowerActionPlan, FakeCandidatePlan,
     GpuPowerActionPlan, IoPrioActionPlan, IrqAffinityActionPlan, NiceActionPlan, PmQosActionPlan,
-    UclampActionPlan, VmKnobActionPlan,
+    ResctrlActionPlan, UclampActionPlan, VmKnobActionPlan,
 };
 use crate::{
     actions::SafetyClass,
@@ -31,6 +31,7 @@ pub enum CandidateAction {
     GpuPower { plan: GpuPowerActionPlan },
     VmKnob { plan: VmKnobActionPlan },
     PmQos { plan: PmQosActionPlan },
+    Resctrl { plan: ResctrlActionPlan },
     Fake { plan: FakeCandidatePlan },
 }
 
@@ -257,6 +258,7 @@ impl CandidateAction {
             Self::GpuPower { plan } => plan,
             Self::VmKnob { plan } => plan,
             Self::PmQos { plan } => plan,
+            Self::Resctrl { plan } => plan,
             Self::Fake { plan } => plan,
         }
     }
@@ -295,7 +297,7 @@ pub trait CandidatePlan {
 /// Registry of mutation provider kinds (everything except the test-only fake).
 /// `is_mutation_provider` is an exhaustive match, so a new candidate variant cannot
 /// compile until this registry is revisited; coverage tooling uses it as a denominator.
-pub const MUTATION_PROVIDER_KINDS: [&str; 10] = [
+pub const MUTATION_PROVIDER_KINDS: [&str; 11] = [
     "cpu_affinity_profile",
     "nice",
     "ionice",
@@ -306,6 +308,7 @@ pub const MUTATION_PROVIDER_KINDS: [&str; 10] = [
     "gpu_power",
     "vm_knob",
     "pm_qos",
+    "resctrl",
 ];
 
 impl CandidateAction {
@@ -320,7 +323,8 @@ impl CandidateAction {
             | Self::CpuPower { .. }
             | Self::GpuPower { .. }
             | Self::VmKnob { .. }
-            | Self::PmQos { .. } => true,
+            | Self::PmQos { .. }
+            | Self::Resctrl { .. } => true,
             Self::Fake { .. } => false,
         }
     }

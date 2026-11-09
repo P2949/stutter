@@ -67,6 +67,7 @@ impl CandidateExecutablePlan {
             | CandidateAction::CpuPower { .. }
             | CandidateAction::GpuPower { .. }
             | CandidateAction::PmQos { .. }
+            | CandidateAction::Resctrl { .. }
             | CandidateAction::VmKnob { .. }
             | CandidateAction::Fake { .. } => None,
         }
@@ -124,6 +125,26 @@ pub struct IoPrioActionPlan {
     pub target_root_pid: Option<u32>,
     pub evidence: Vec<CandidateEvidence>,
     pub objective: ObjectiveKind,
+}
+
+/// A manual-only resctrl cache-allocation group. Never converted to an executable plan.
+#[derive(Clone, Debug)]
+pub struct ResctrlActionPlan {
+    pub name: String,
+    pub action: crate::actions::resctrl_action::ResctrlCatAction,
+    pub evidence: Vec<CandidateEvidence>,
+    pub objective: ObjectiveKind,
+}
+
+impl ResctrlActionPlan {
+    pub fn manual(name: &str, mask: u64, objective: ObjectiveKind) -> Self {
+        Self {
+            name: format!("resctrl_cat_{name}"),
+            action: crate::actions::resctrl_action::ResctrlCatAction::new(name, mask),
+            evidence: Vec::new(),
+            objective,
+        }
+    }
 }
 
 /// A manual-only PM QoS request. It is never converted to an executable plan: HighRisk.
@@ -373,6 +394,48 @@ impl CandidatePlan for IoPrioActionPlan {
 
     fn conflict_group(&self) -> ActionConflictGroup {
         ActionConflictGroup::IoPriority
+    }
+
+    fn describe(&self) -> String {
+        self.action.describe()
+    }
+}
+
+impl CandidatePlan for ResctrlActionPlan {
+    fn candidate_name(&self) -> &str {
+        &self.name
+    }
+
+    fn action_kind(&self) -> &'static str {
+        "resctrl_cache_allocation"
+    }
+
+    fn target_root_pid(&self) -> Option<u32> {
+        None
+    }
+
+    fn action_id(&self) -> crate::actions::ActionId {
+        self.action.id()
+    }
+
+    fn safety_class(&self) -> SafetyClass {
+        self.action.safety_class()
+    }
+
+    fn effect_scope(&self) -> ActionEffectScope {
+        ActionEffectScope::SystemWide
+    }
+
+    fn evidence(&self) -> &[CandidateEvidence] {
+        &self.evidence
+    }
+
+    fn objective(&self) -> ObjectiveKind {
+        self.objective
+    }
+
+    fn conflict_group(&self) -> ActionConflictGroup {
+        ActionConflictGroup::None
     }
 
     fn describe(&self) -> String {

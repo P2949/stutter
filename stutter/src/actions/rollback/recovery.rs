@@ -63,6 +63,10 @@ pub(crate) fn recovery_descriptor(token: &RollbackToken) -> RollbackRecoveryDesc
             VerifiedAutomatic,
             "the lease ends with its holder descriptor; recovery only reads the aggregate target and never writes, and reports a target still equal to the request as unproven",
         ),
+        RollbackToken::ResctrlGroupRemove { .. } => (
+            VerifiedAutomatic,
+            "the recorded group path must still name the same kernel object (device and inode); a replaced or absent group is never removed and an absent one is reported as already gone",
+        ),
     };
     RollbackRecoveryDescriptor {
         token_kind: token.kind(),

@@ -649,6 +649,7 @@ fn rollback_token_kind(token: &RollbackToken) -> &'static str {
         RollbackToken::GpuPowerRestore { .. } => "gpu-power-restore",
         RollbackToken::SysfsRestore { .. } => "sysfs-restore",
         RollbackToken::PmQosRelease { .. } => "pm-qos-release",
+        RollbackToken::ResctrlGroupRemove { .. } => "resctrl-group-remove",
     }
 }
 

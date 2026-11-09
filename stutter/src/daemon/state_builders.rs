@@ -305,6 +305,7 @@ pub fn safety_class_for_rollback_token(token: &RollbackToken) -> SafetyClass {
         | RollbackToken::VmKnobRestore { .. }
         | RollbackToken::GpuPowerRestore { .. }
         | RollbackToken::PmQosRelease { .. }
+        | RollbackToken::ResctrlGroupRemove { .. }
         | RollbackToken::SysfsRestore { .. } => SafetyClass::HighRisk,
     }
 }

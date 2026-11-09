@@ -39,7 +39,9 @@ pub(crate) mod pm_qos_rollback;
 pub(crate) mod pm_qos_transaction;
 pub(crate) mod pm_qos_watchdog;
 pub(crate) mod precommit;
+pub(crate) mod resctrl_action;
 pub(crate) mod resctrl_alloc;
+pub(crate) mod resctrl_rollback;
 pub(crate) mod task_lifecycle;
 
 pub(crate) mod ioprio;

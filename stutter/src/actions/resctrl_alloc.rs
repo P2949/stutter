@@ -67,6 +67,14 @@ pub struct CatPrepared {
     root_schemata: String,
 }
 
+/// What recovery needs to remove exactly the group this transaction created.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ResctrlGroupRecord {
+    pub group: PathBuf,
+    pub dev: u64,
+    pub ino: u64,
+}
+
 #[derive(Debug)]
 pub struct CatCommitted {
     group: PathBuf,
@@ -184,18 +192,33 @@ impl CatPrepared {
 }
 
 impl CatCommitted {
+    pub fn record(&self) -> ResctrlGroupRecord {
+        ResctrlGroupRecord {
+            group: self.group.clone(),
+            dev: self.identity.0,
+            ino: self.identity.1,
+        }
+    }
+
     /// Removes the group this transaction created, if the path still names it.
     pub fn restore(self) -> CatRestore {
-        match fs::metadata(&self.group) {
-            Err(error) if error.kind() == io::ErrorKind::NotFound => CatRestore::Absent,
-            Err(_) => CatRestore::Unproven,
-            Ok(meta) if (meta.dev(), meta.ino()) != self.identity => CatRestore::UnsafeToRestore,
-            Ok(_) => {
-                if remove_group(&self.group).is_ok() {
-                    CatRestore::Removed
-                } else {
-                    CatRestore::Unproven
-                }
+        remove_recorded(&self.record())
+    }
+}
+
+/// Removes the recorded group only while the path still names the same kernel object.
+pub fn remove_recorded(record: &ResctrlGroupRecord) -> CatRestore {
+    match fs::metadata(&record.group) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => CatRestore::Absent,
+        Err(_) => CatRestore::Unproven,
+        Ok(meta) if (meta.dev(), meta.ino()) != (record.dev, record.ino) => {
+            CatRestore::UnsafeToRestore
+        }
+        Ok(_) => {
+            if remove_group(&record.group).is_ok() {
+                CatRestore::Removed
+            } else {
+                CatRestore::Unproven
             }
         }
     }

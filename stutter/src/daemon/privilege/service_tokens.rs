@@ -289,7 +289,9 @@ impl PrivilegedActionService for ServiceActionService {
                 | RollbackToken::UclampRestore { .. }
                 | RollbackToken::IoPrioRestore { .. }
                 // A PM QoS lease cannot outlive the boot that held it.
-                | RollbackToken::PmQosRelease { .. } => Ok(RollbackResult { affected_tasks: 0 }),
+                | RollbackToken::PmQosRelease { .. }
+                // resctrl is volatile: its groups vanish at reboot.
+                | RollbackToken::ResctrlGroupRemove { .. } => Ok(RollbackResult { affected_tasks: 0 }),
                 RollbackToken::CpuPowerRestore { .. }
                 | RollbackToken::IrqAffinityRestore { .. }
                 | RollbackToken::GpuPowerRestore { .. }

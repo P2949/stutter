@@ -740,22 +740,24 @@
       ],
       "anchors": [
         "stutter/src/autotune/sensors/memory_domains.rs",
-        "stutter/src/actions/resctrl_alloc.rs"
+        "stutter/src/actions/resctrl_alloc.rs",
+        "stutter/src/actions/resctrl_action.rs",
+        "stutter/src/actions/resctrl_rollback.rs"
       ],
-      "status": "first_slice",
-      "g0": "a cheap `resctrl_monitor` sensor reads L3 llc_occupancy (gauge) and mbm_total/local bytes (counter deltas) summed over monitored domains, counting `Unavailable`/`Error` reads as lost and never as zero; read-only resctrl inventory (closids, rmids, allocation groups) reported unavailable when not mounted; experimental L3 allocation transaction (`resctrl_alloc`): hardware mask/min-width/closid validation, owned group with per-domain schemata readback, default-group bystander check, restore removes only the group with unchanged identity; fake-root tests, task assignment not performed",
+      "status": "code_complete",
+      "g0": "a cheap `resctrl_monitor` sensor reads L3 llc_occupancy (gauge) and mbm_total/local bytes (counter deltas) summed over monitored domains, counting `Unavailable`/`Error` reads as lost and never as zero; read-only resctrl inventory (closids, rmids, allocation groups) reported unavailable when not mounted; experimental L3 allocation transaction (`resctrl_alloc`): hardware mask/min-width/closid validation, owned group with per-domain schemata readback, default-group bystander check, restore removes only the group with unchanged identity; fake-root tests, task assignment not performed; `RollbackToken::ResctrlGroupRemove` (recovery removes only the recorded kernel object), `ResctrlRollbackHandler`, manual policy-gated `ResctrlCatAction` (HighRisk, SystemWide, default denies) and `CandidateAction::Resctrl` classified as manual-only `ResctrlCacheAllocation` with an Experimental capability; never an executable plan; active-config matching fails closed",
       "g1": "resctrl is not mounted on this host (HardwareUnavailable for physical proof)",
       "runtime_availability": "resctrl not mounted on this host",
       "authority": "O/E",
-      "not_wired": "CAT allocation is a fake-root verified transaction only: no MBA, no task assignment, not an operation kind or worker-routed; no real-hardware readback here (resctrl unmounted on this host)",
+      "not_wired": "no MBA, no task assignment, not worker-routed (HighRisk manual/offline behind HIGH_RISK_APPLY_IMPLEMENTED=false); no real-hardware readback here",
       "dispositions": [
+        "CodeComplete",
         "FixtureVerified",
-        "RealObserved",
         "HardwareUnavailable",
         "EvidenceDeferred"
       ],
       "evidence": [],
-      "unblock": "Needs on the host: resctrl not mounted on this host"
+      "unblock": "resctrl is not mounted on this host: needs an x86 CPU with RDT/QoS allocation and a mounted resctrl filesystem for a real-hardware readback and a target-versus-bystander campaign"
     },
     {
       "id": "5.25",

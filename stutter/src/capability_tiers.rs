@@ -75,7 +75,7 @@ const BOUNDED_SERVICE: &[&str] = &[
     "live_bounded_service_acceptance",
 ];
 
-pub const CAPABILITIES: [Capability; 30] = [
+pub const CAPABILITIES: [Capability; 31] = [
     obs(
         "doctor",
         "Local preflight checks",
@@ -323,6 +323,18 @@ pub const CAPABILITIES: [Capability; 30] = [
         required_evidence: &[],
         required_release_evidence: &[],
         limitations: "System-wide effect: keeps every CPU out of deep idle states while held. A worker-owned descriptor lease with an enforced hold deadline; manual only, never autonomous, not a low-risk default. Does not inherit another operation's maturity.",
+    },
+    Capability {
+        id: "resctrl_cache_allocation",
+        title: "resctrl L3 cache allocation group",
+        class: CapabilityClass::Mutating,
+        tier: CapabilityTier::Experimental,
+        target_tier: CapabilityTier::Experimental,
+        commands: &["autotune"],
+        providers: &["resctrl"],
+        required_evidence: &[],
+        required_release_evidence: &[],
+        limitations: "Shared-cache allocation affects every task on the host. Owned group with a validated capacity bitmask and a default-group bystander check; manual only, never autonomous, no task assignment. Does not inherit another operation's maturity.",
     },
     Capability {
         id: "bounded_autotune_controller",
@@ -666,7 +678,6 @@ mod tests {
             "vm_dirty_ratio",
             "irq_affinity_known_device",
             "irq_affinity_storage_or_unknown",
-            "pm_qos_cpu_latency",
         ] {
             assert_ne!(capability(id).tier, CapabilityTier::Supported, "{id}");
             assert_ne!(

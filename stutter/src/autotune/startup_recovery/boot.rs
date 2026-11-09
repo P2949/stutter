@@ -26,6 +26,7 @@ pub(super) fn task_boot_superseded(
         | RollbackToken::GpuPowerRestore { .. }
         | RollbackToken::VmKnobRestore { .. }
         | RollbackToken::PmQosRelease { .. }
+        | RollbackToken::ResctrlGroupRemove { .. }
         | RollbackToken::SysfsRestore { .. } => Ok(false),
     }
 }
