@@ -201,6 +201,7 @@ pub enum ScoreTool {
     Pidstat,
     Numastat,
     Blkparse,
+    Biosnoop,
     Tuna,
     Cyclictest,
     RtlaTimerlat,
@@ -232,6 +233,7 @@ fn import_scores(tool: ScoreTool, file: &Path) -> anyhow::Result<String> {
         ScoreTool::Pidstat => serde_json::to_string_pretty(&diagnostics::import_pidstat(&text)?)?,
         ScoreTool::Numastat => serde_json::to_string_pretty(&diagnostics::import_numastat(&text)?)?,
         ScoreTool::Blkparse => serde_json::to_string_pretty(&diagnostics::import_blkparse(&text)?)?,
+        ScoreTool::Biosnoop => serde_json::to_string_pretty(&diagnostics::import_biosnoop(&text)?)?,
         ScoreTool::Tuna => serde_json::to_string_pretty(&diagnostics::import_tuna(&text)?)?,
         ScoreTool::Cyclictest => {
             serde_json::to_string_pretty(&diagnostics::import_cyclictest(&text)?)?

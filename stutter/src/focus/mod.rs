@@ -32,6 +32,7 @@ mod foreground_scoring;
 pub(crate) mod group_build;
 mod group_candidates;
 pub(crate) mod groups;
+pub(crate) mod io_attribution;
 mod process_scan;
 pub(crate) mod provider;
 mod public_api;

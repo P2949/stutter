@@ -89,6 +89,10 @@ const RAW_ID_ALLOWED_PATHS: &[RawIdAllowedPath] = &[
         reason: "decoded event boundary mirrors raw eBPF CPU/IRQ fields",
     },
     RawIdAllowedPath {
+        path: "src/focus/io_attribution.rs",
+        reason: "offender attribution reports procfs pid plus start-time identity from focus snapshots; the pair is the identity any later action re-verifies",
+    },
+    RawIdAllowedPath {
         path: "src/focus/snapshot.rs",
         reason: "focus process snapshots mirror procfs IDs before focus grouping",
     },

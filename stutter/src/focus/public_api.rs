@@ -19,6 +19,7 @@ pub use super::{
         FocusGroup, FocusGroupKind, FocusScoreBreakdown, SafetyWarning, safety_warnings_for_group,
         situation_for_group,
     },
+    io_attribution::{IoOffender, rank_io_offenders},
     provider::focus_snapshot_at,
     resolve::{FocusDecision, FocusPolicy, FocusResolver, ResolvedFocus},
     snapshot::{

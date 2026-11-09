@@ -518,10 +518,10 @@ pub mod focus {
         focus::{
             Classification, FocusCache, FocusCounters, FocusDecision, FocusGroup, FocusGroupKind,
             FocusPolicy, FocusProcess, FocusResolver, FocusScoreBreakdown, FocusSnapshot,
-            PriorityBand, ProcessIdentity, ResolvedFocus, SafetyWarning, ThreadIdentity,
-            build_focus_snapshot_from_processes, classify_process, classify_thread,
-            focus_snapshot_at, priority_band_for_class, safety_warnings_for_group,
-            situation_for_group,
+            IoOffender, PriorityBand, ProcessIdentity, ResolvedFocus, SafetyWarning,
+            ThreadIdentity, build_focus_snapshot_from_processes, classify_process, classify_thread,
+            focus_snapshot_at, priority_band_for_class, rank_io_offenders,
+            safety_warnings_for_group, situation_for_group,
         },
         process_tree::TaskClass as SystemTaskClass,
     };

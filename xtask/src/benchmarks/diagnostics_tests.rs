@@ -165,3 +165,50 @@ fn rtla_osnoise_rows_become_per_cpu_noise_columns_and_garbage_is_an_error() {
     assert!(import_rtla_osnoise("").is_err());
     assert!(import_rtla_osnoise("CPU Period Runtime\n0 1 2\n").is_err());
 }
+
+#[test]
+fn biosnoop_rows_become_per_process_io_and_latency_scores_and_garbage_is_refused() {
+    let text = "TIME(s)     COMM           PID     DISK    T SECTOR     BYTES  LAT(ms)\n\
+0.000000    jbd2/sda1-8    191     sda     W 2048       4096      0.50\n\
+0.100000    jbd2/sda1-8    191     sda     W 2056       8192      1.50\n\
+0.200000    Web Content    4242    sda     R 100        4096      0.25\n";
+    let scores = import_biosnoop(text).unwrap();
+    assert!(!scores.application_proof);
+    let value = |label: &str| {
+        scores
+            .scores
+            .iter()
+            .find(|score| score.label == label)
+            .unwrap_or_else(|| panic!("missing {label}"))
+            .value
+    };
+    assert_eq!(value("jbd2/sda1-8.191.ios"), 2.0);
+    assert_eq!(value("jbd2/sda1-8.191.bytes"), 12288.0);
+    assert_eq!(value("jbd2/sda1-8.191.latency_mean_ms"), 1.0);
+    assert_eq!(value("jbd2/sda1-8.191.latency_max_ms"), 1.5);
+    // A command with a space is kept whole, and every score is a non-directional diagnostic.
+    assert_eq!(value("Web_Content.4242.ios"), 1.0);
+    assert!(scores.scores.iter().all(|s| s.higher_is_better.is_none()));
+    assert!(import_biosnoop("TIME(s) COMM PID DISK T SECTOR BYTES LAT(ms)\n").is_err());
+    assert!(import_biosnoop("hello world").is_err());
+}
+
+#[test]
+fn blkparse_event_lines_add_per_issuing_process_queue_totals() {
+    let text = "  8,0    3        1     0.000000000   697  Q   W 223490 + 8 [kworker/u8:2]\n\
+  8,0    3        2     0.000010000   697  Q   W 223498 + 16 [kworker/u8:2]\n\
+  8,0    3        3     0.000020000   697  C   W 223490 + 8 [0]\n\
+Reads Completed:       10,       40KiB\n";
+    let scores = import_blkparse(text).unwrap();
+    let value = |label: &str| {
+        scores
+            .scores
+            .iter()
+            .find(|score| score.label == label)
+            .unwrap_or_else(|| panic!("missing {label}"))
+            .value
+    };
+    assert_eq!(value("process.kworker/u8:2.697.queued_ios"), 2.0);
+    assert_eq!(value("process.kworker/u8:2.697.queued_sectors"), 24.0);
+    assert_eq!(value("reads_completed"), 10.0);
+}

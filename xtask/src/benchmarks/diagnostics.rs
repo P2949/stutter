@@ -167,7 +167,115 @@ pub fn import_blkparse(text: &str) -> anyhow::Result<ImportedScores> {
             ));
         }
     }
+    scores.extend(blkparse_process_scores(text));
     done("blkparse", scores)
+}
+
+/// Per-process totals from queued (`Q`) `blkparse` event lines, keyed by the issuing command:
+/// `8,0  3  1  0.000000000  697  Q  W 223490 + 8 [kworker/u8:2]`.
+fn blkparse_process_scores(text: &str) -> Vec<Score> {
+    let mut totals: std::collections::BTreeMap<String, (f64, f64)> = Default::default();
+    for line in text.lines() {
+        let tokens: Vec<&str> = line.split_whitespace().collect();
+        let queued = tokens.len() >= 11
+            && tokens[0].split_once(',').is_some_and(|(major, minor)| {
+                major.parse::<u32>().is_ok() && minor.parse::<u32>().is_ok()
+            })
+            && tokens[5] == "Q"
+            && tokens[8] == "+";
+        if !queued {
+            continue;
+        }
+        let Some(comm) = tokens
+            .last()
+            .and_then(|last| last.strip_prefix('[')?.strip_suffix(']'))
+        else {
+            continue;
+        };
+        let Some(sectors) = finite(tokens[9]) else {
+            continue;
+        };
+        let entry = totals.entry(format!("{comm}.{}", tokens[4])).or_default();
+        entry.0 += 1.0;
+        entry.1 += sectors;
+    }
+    totals
+        .into_iter()
+        .flat_map(|(process, (ios, sectors))| {
+            [
+                diagnostic(
+                    "blkparse",
+                    format!("process.{process}.queued_ios"),
+                    ios,
+                    "ios",
+                ),
+                diagnostic(
+                    "blkparse",
+                    format!("process.{process}.queued_sectors"),
+                    sectors,
+                    "sectors",
+                ),
+            ]
+        })
+        .collect()
+}
+
+/// BCC `biosnoop` rows (`TIME(s) COMM PID DISK T SECTOR BYTES LAT(ms)`): per-process I/O count,
+/// bytes and latency. The command may contain spaces, so the fixed columns are read from the right.
+pub fn import_biosnoop(text: &str) -> anyhow::Result<ImportedScores> {
+    #[derive(Default)]
+    struct Totals {
+        ios: f64,
+        bytes: f64,
+        latency_sum: f64,
+        latency_max: f64,
+    }
+    let mut totals: std::collections::BTreeMap<String, Totals> = Default::default();
+    for line in text.lines() {
+        let tokens: Vec<&str> = line.split_whitespace().collect();
+        if tokens.len() < 8 || finite(tokens[0]).is_none() {
+            continue; // the header, blank lines and tool banners
+        }
+        let n = tokens.len();
+        let (Some(pid), Some(bytes), Some(latency)) = (
+            tokens[n - 6].parse::<u32>().ok(),
+            finite(tokens[n - 2]),
+            finite(tokens[n - 1]),
+        ) else {
+            continue;
+        };
+        if !matches!(tokens[n - 4], "R" | "W") || latency < 0.0 || bytes < 0.0 {
+            continue;
+        }
+        let comm = tokens[1..n - 6].join("_");
+        let entry = totals.entry(format!("{comm}.{pid}")).or_default();
+        entry.ios += 1.0;
+        entry.bytes += bytes;
+        entry.latency_sum += latency;
+        entry.latency_max = entry.latency_max.max(latency);
+    }
+    let scores = totals
+        .into_iter()
+        .flat_map(|(process, t)| {
+            [
+                diagnostic("biosnoop", format!("{process}.ios"), t.ios, "ios"),
+                diagnostic("biosnoop", format!("{process}.bytes"), t.bytes, "bytes"),
+                diagnostic(
+                    "biosnoop",
+                    format!("{process}.latency_mean_ms"),
+                    t.latency_sum / t.ios,
+                    "ms",
+                ),
+                diagnostic(
+                    "biosnoop",
+                    format!("{process}.latency_max_ms"),
+                    t.latency_max,
+                    "ms",
+                ),
+            ]
+        })
+        .collect();
+    done("biosnoop", scores)
 }
 
 /// `tuna --show_threads`: rtprio and context-switch counts per thread. The affinity column is a
