@@ -149,3 +149,17 @@ pub mod memory_policy {
     //! `set_mempolicy`/`mbind` (there is no cross-process form of those calls).
     pub use crate::actions::memory_policy::*;
 }
+
+pub mod unit_properties {
+    //! Gated, offline runtime resource-control properties on Stutter-owned systemd units.
+    pub use crate::integrations::systemd_properties::{
+        PlanDenial, PropertyError, PropertyPlan, UNSET as UNIT_PROPERTY_UNSET, UnitProperty,
+        apply as apply_unit_properties, plan_properties as plan_unit_properties,
+        read_property as read_unit_property, restore as restore_unit_properties,
+    };
+}
+
+pub mod service_manager {
+    //! Service-manager detection (systemd or OpenRC) and service-to-cgroup resolution.
+    pub use crate::integrations::service_manager::*;
+}

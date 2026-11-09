@@ -68,6 +68,34 @@ impl Writer {
         self.buf.extend(value.to_le_bytes());
     }
 
+    pub fn u64(&mut self, value: u64) {
+        self.align(8);
+        self.buf.extend(value.to_le_bytes());
+    }
+
+    /// A D-Bus boolean: a 4-byte 0 or 1.
+    pub fn bool(&mut self, value: bool) {
+        self.u32(u32::from(value));
+    }
+
+    /// An `a(sv)` array of name and `t` (u64) variant pairs, the shape `SetUnitProperties` takes.
+    /// The length counts the element bytes only, after the 8-byte alignment structs require.
+    pub fn u64_properties(&mut self, items: &[(&str, u64)]) {
+        self.align(4);
+        let at = self.buf.len();
+        self.buf.extend([0u8; 4]);
+        self.align(8);
+        let start = self.buf.len();
+        for (name, value) in items {
+            self.align(8);
+            self.string(name);
+            self.signature("t");
+            self.u64(*value);
+        }
+        let length = (self.buf.len() - start) as u32;
+        self.buf[at..at + 4].copy_from_slice(&length.to_le_bytes());
+    }
+
     pub fn string(&mut self, value: &str) {
         self.u32(value.len() as u32);
         self.buf.extend(value.as_bytes());

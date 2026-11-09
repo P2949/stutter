@@ -667,6 +667,8 @@
         "W14"
       ],
       "anchors": [
+        "stutter/src/integrations/systemd_properties.rs",
+        "stutter/src/integrations/service_manager.rs",
         "stutter/src/actions/cgroup/mod.rs",
         "stutter/src/autotune/providers/cgroup.rs",
         "packaging/openrc",
@@ -676,17 +678,15 @@
         "stutter/src/actions/cgroup/control_rollback.rs",
         "stutter/src/actions/cgroup/control_transaction.rs"
       ],
-      "status": "first_slice",
+      "status": "code_complete",
       "g0": "Cgroup placement remains the only operation. Typed knob values and read-only feasibility checks cover weights, idle/max, cpusets, memory bounds and I/O; unknown device effectiveness, CPU-idle state or effective masks deny. Canonical io.weight readback is parsed. Per-user OpenRC templates, observation-only root policy, rendered hooks and an unprivileged real supervisor fixture exist; full product lifecycle remains incomplete.; each knob has a prepared control transaction (`cgroup/control_transaction`): preflight, baseline and group-identity capture, abort on a foreign change or replaced group, write with readback (baseline written back when not applied), compare-before-restore; fake-root tests for all nine knobs; nine knobs are each their own operation (`MutationOperationKind::Cgroup*`) with their own Experimental capability, a shared `RollbackToken::CgroupControlRestore` (identity and compare-before-restore recovery, VerifiedAutomatic), `CgroupControlRollbackHandler`, a manual policy-gated `CgroupControlAction` (HighRisk, default denies) and `CandidateAction::CgroupControl`; never an executable plan; active-config matching fails closed; the OpenRC hooks refuse root/empty identity and a newer capability set",
       "g1": "placement observed on the production host",
       "runtime_availability": "cgroup v2 present, OpenRC absent",
       "authority": "O/A/E",
-      "not_wired": "not worker-routed (HighRisk manual/offline behind HIGH_RISK_APPLY_IMPLEMENTED=false); systemd1 SetUnitProperties adapter and a real OpenRC host acceptance are not done and are not represented as passed; no per-knob real-device campaign",
-      "missing_required": [
-        "cgroup/systemd-set-unit-properties-adapter",
-        "cgroup/openrc-backend"
-      ],
+      "not_wired": "not worker-routed (HighRisk manual/offline behind HIGH_RISK_APPLY_IMPLEMENTED=false); the systemd1 SetUnitProperties adapter (runtime-only, Stutter-owned `stutter-*` units, five bounded properties, readback and restore) is fake-bus verified and gated behind OfflineAuthorization so no runtime path invokes it; the OpenRC cgroup layout (`service_manager`) is fixture-verified only and a real OpenRC host acceptance is not done and is not represented as passed; no per-knob real-device campaign",
+      "missing_required": [],
       "dispositions": [
+        "CodeComplete",
         "EvidenceDeferred",
         "FixtureVerified",
         "MechanismValidated",

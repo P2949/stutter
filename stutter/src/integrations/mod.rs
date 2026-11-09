@@ -387,6 +387,8 @@ pub mod gpu_identity;
 pub mod power_profiles;
 pub mod sched_semantics;
 pub mod scx_loader;
+pub mod service_manager;
+pub mod systemd_properties;
 pub mod tuned;
 pub mod units;
 pub mod user_intent;
