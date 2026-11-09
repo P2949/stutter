@@ -87,7 +87,7 @@ pub mod boot_environment {
 
 pub mod pm_qos {
     //! The PM QoS CPU-latency lease: policy, power guards and a descriptor-bound request.
-    pub use crate::actions::{pm_qos::*, pm_qos_transaction::*};
+    pub use crate::actions::{pm_qos::*, pm_qos_transaction::*, pm_qos_watchdog::*};
 }
 
 pub mod owner_interfaces {
