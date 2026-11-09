@@ -712,19 +712,20 @@
         "stutter/src/actions/pm_qos_rollback.rs",
         "stutter/src/actions/pm_qos_action.rs"
       ],
-      "status": "first_slice",
+      "status": "code_complete",
       "g0": "descriptor-bound CPU-latency lease for /dev/cpu_dma_latency: binary u32 request, aggregate-target verification, hold deadline, release on drop or holder death; policy with a latency floor and ceiling and AC and no-throttling guards that fail closed; prepared transaction (`pm_qos_transaction`): dry-run prepare reads the baseline and refuses denied, unavailable or already-satisfied requests; commit rechecks power guards and acquires the verified lease; restore releases and proves the baseline (or another requester) in the aggregate, else Unproven; fake-device tests; `pm_qos_watchdog` owns the lease on a dedicated thread and releases it at the policy hold limit independently of the owner (owner may release early or only shorten the limit; drop releases); `RollbackToken::PmQosRelease` with an explicit recovery descriptor, startup-recovery boot policy, emergency executor, manual command, service-token handling and a `PmQosRollbackHandler` in both rollback registries: recovery never writes, a lease whose aggregate target still equals the request is reported unproven; manual policy-gated action (`pm_qos_action`, HighRisk, SystemWide, default policy denies) holding the lease under the deadline watchdog and releasing it on rollback, plus a `CandidateAction::PmQos` candidate classified as `MutationOperationKind::PmQosCpuLatency` (manual-only, Experimental capability `pm_qos_cpu_latency`); it can never become an executable autotune plan, and active-config matching and rollback verification fail closed",
       "g1": "/dev/cpu_dma_latency exists on this host; no lease has been taken",
       "runtime_availability": "/dev/cpu_dma_latency present",
       "authority": "O/E",
       "not_wired": "no provider proposes it and no worker operation carries it: by design a HighRisk manual/offline operation behind the HIGH_RISK_APPLY_IMPLEMENTED=false denial; no real-device mechanism campaign; active-config snapshots do not read the aggregate target",
       "dispositions": [
+        "CodeComplete",
         "FixtureVerified",
         "RealObserved",
         "EvidenceDeferred"
       ],
       "evidence": [],
-      "unblock": null
+      "unblock": "Real-device mechanism and benefit campaign: needs an authorized, isolated workload with a direct latency KPI; the lease itself is system-wide and stays manual-only."
     },
     {
       "id": "5.24",
