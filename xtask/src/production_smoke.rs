@@ -338,6 +338,8 @@ impl Drop for Fixture {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+        // The fence belonged to this fixture.
+        isolation::remove_fence();
     }
 }
 
@@ -375,6 +377,8 @@ fn spawn_fixture(out: &Path, name: &str, cpu: u32, seconds: u64) -> anyhow::Resu
     isolation::record_fixture(Path::new("/proc"), fixture.child.id())?;
     wait_for("the fixture to be ready", 20, || ready.exists())?;
     isolation::ensure_quiet("after the fixture was ready")?;
+    // Fence the worker to this fixture, by exact identity, for as long as it runs.
+    isolation::write_fence(fixture.child.id(), seconds)?;
     Ok(fixture)
 }
 
@@ -410,6 +414,7 @@ fn run_inner(root: &Path, args: &SmokeArgs) -> anyhow::Result<()> {
         None => run_text("id", &["-un"])?.trim().to_owned(),
     };
     let uid: u32 = run_text("id", &["-u", &user])?.trim().parse()?;
+    isolation::arm_fence(&user, uid);
     let controller = format!("stutter-autotune-bounded@{user}.service");
     let worker = format!("stutter-privileged-worker@{user}.service");
     let mut checks = Vec::new();

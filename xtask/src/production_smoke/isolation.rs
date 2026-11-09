@@ -449,6 +449,97 @@ pub(super) fn only_fixture_targets(audit: &HistoryAudit, fixtures: &[FixtureIden
     }
 }
 
+/// Where the worker looks for its validation fence, and the account it is for. Armed once the
+/// smoke knows the user; until then no fence is written.
+static FENCE: Mutex<Option<(std::path::PathBuf, u32)>> = Mutex::new(None);
+
+pub(super) fn arm_fence(user: &str, uid: u32) {
+    if let Ok(mut fence) = FENCE.lock() {
+        *fence = Some((
+            std::path::PathBuf::from(format!(
+                "/var/lib/stutter/worker-{user}/validation-fence.json"
+            )),
+            uid,
+        ));
+    }
+}
+
+/// The fence file's content: one process (pid and start time), the account, the boot and an expiry.
+pub(super) fn fence_json(
+    uid: u32,
+    root_pid: u32,
+    start_ticks: u64,
+    boot_id: &str,
+    expires_unix: u64,
+) -> String {
+    serde_json::json!({
+        "version": 1,
+        "uid": uid,
+        "root_pid": root_pid,
+        "start_ticks": start_ticks,
+        "boot_id": boot_id.trim(),
+        "expires_unix": expires_unix,
+    })
+    .to_string()
+}
+
+/// Fences the privileged worker to one fixture, by exact identity, for `seconds` plus a margin. A
+/// worker build that honours the fence then refuses any other target while it stands; an older one
+/// ignores the file. Written as root (`sudo -n`, as the smoke already reads the ledger) so no
+/// unprivileged caller can write or lift one.
+pub(super) fn write_fence(pid: u32, seconds: u64) -> anyhow::Result<()> {
+    use std::io::Write;
+    let armed = FENCE.lock().ok().and_then(|fence| fence.clone());
+    let Some((path, uid)) = armed else {
+        return Ok(());
+    };
+    let live = live_process(Path::new("/proc"), pid)
+        .ok_or_else(|| anyhow::anyhow!("the fixture's identity cannot be read to fence it"))?;
+    let boot = fs::read_to_string("/proc/sys/kernel/random/boot_id")?;
+    let expires = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_secs()
+        .saturating_add(seconds)
+        .saturating_add(120);
+    let body = fence_json(uid, pid, live.start_ticks, &boot, expires);
+    let mut tee = std::process::Command::new("sudo")
+        .args(["-n", "tee"])
+        .arg(&path)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .spawn()?;
+    tee.stdin
+        .take()
+        .ok_or_else(|| anyhow::anyhow!("no stdin for the fence writer"))?
+        .write_all(body.as_bytes())?;
+    anyhow::ensure!(
+        tee.wait()?.success(),
+        "the validation fence could not be written"
+    );
+    let chmod = std::process::Command::new("sudo")
+        .args(["-n", "chmod", "0644"])
+        .arg(&path)
+        .status()?;
+    anyhow::ensure!(
+        chmod.success(),
+        "the validation fence could not be made readable"
+    );
+    Ok(())
+}
+
+/// Lifts the fence. Best effort: a fence that cannot be removed only makes the worker stricter.
+pub(super) fn remove_fence() {
+    let armed = FENCE.lock().ok().and_then(|fence| fence.clone());
+    if let Some((path, _)) = armed {
+        let _ = std::process::Command::new("sudo")
+            .args(["-n", "rm", "-f"])
+            .arg(&path)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
+}
+
 #[cfg(test)]
 #[path = "isolation_tests.rs"]
 mod tests;

@@ -43,6 +43,7 @@ mod revalidate;
 mod service_targets;
 mod service_tokens;
 mod socket;
+mod validation_fence;
 mod worker;
 pub use allowlist::PrivilegeCommandAllowlist;
 pub(crate) use audit::{CandidateBoundaryAuditInput, PrivilegeBoundaryAuditInput};

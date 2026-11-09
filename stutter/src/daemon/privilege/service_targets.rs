@@ -15,11 +15,46 @@ use crate::{
 pub(super) struct ServiceTargets {
     uid: u32,
     cgroup: Option<PathBuf>,
+    /// The validation fence file, if this service honours one, and the account that must own it.
+    fence: Option<(PathBuf, u32)>,
 }
 
 impl ServiceTargets {
     pub(super) fn new(uid: u32, cgroup: Option<PathBuf>) -> Self {
-        Self { uid, cgroup }
+        Self {
+            uid,
+            cgroup,
+            fence: None,
+        }
+    }
+
+    /// Honours a validation fence file (see `validation_fence`), which may only narrow the targets,
+    /// and which must be owned by `trusted_uid` (root in production).
+    pub(super) fn with_fence(mut self, path: PathBuf, trusted_uid: u32) -> Self {
+        self.fence = Some((path, trusted_uid));
+        self
+    }
+
+    fn fence_check(&self, proc_root: &Path, status: &str) -> anyhow::Result<()> {
+        let Some((path, trusted_uid)) = &self.fence else {
+            return Ok(());
+        };
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(u64::MAX, |elapsed| elapsed.as_secs());
+        let boot =
+            fs::read_to_string(proc_root.join("sys/kernel/random/boot_id")).unwrap_or_default();
+        let state = super::validation_fence::load(path, now, boot.trim(), self.uid, *trusted_uid)?;
+        // Without a fence nothing is checked; with one, the task's process must be the fenced one.
+        if state == super::validation_fence::FenceState::Absent {
+            return Ok(());
+        }
+        let tgid = status
+            .lines()
+            .find_map(|line| line.strip_prefix("Tgid:"))
+            .and_then(|value| value.trim().parse::<u32>().ok())
+            .context("validation_fence_target_not_fenced: the task's process cannot be read")?;
+        super::validation_fence::check_task(&state, proc_root, tgid)
     }
 
     pub(super) fn candidate(&self, candidate: &CandidateAction) -> anyhow::Result<()> {
@@ -108,6 +143,8 @@ impl ServiceTargets {
             self.uid != 0 && ids.len() == 4 && ids.iter().all(|uid| *uid == self.uid),
             "bounded_service_target_uid_denied"
         );
+        // A validation fence can only narrow: the task still had to pass the checks above.
+        self.fence_check(proc_root, &status)?;
         if let Some(permitted) = &self.cgroup {
             let base = Path::new("/sys/fs/cgroup");
             ensure!(
@@ -238,5 +275,150 @@ mod churn_tests {
         let denied = targets.task(root.path(), 4243).unwrap_err();
         assert!(denied.downcast_ref::<PrivilegedWorkerError>().is_none());
         assert!(format!("{denied:#}").contains("bounded_service_target_uid_denied"));
+    }
+}
+
+#[cfg(test)]
+mod fence_tests {
+    use std::os::unix::fs::PermissionsExt;
+
+    use super::*;
+
+    const NOW_OFFSET: u64 = 3600;
+
+    fn me() -> u32 {
+        crate::syscall::geteuid()
+    }
+
+    /// A fake `/proc` with two processes of the service account (500 with a thread 502, and 501),
+    /// and a fence file in a directory only this user can write.
+    struct World {
+        root: crate::test_support::TestRoot,
+        fence: PathBuf,
+    }
+
+    fn unix_now() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    }
+
+    fn world(name: &str) -> World {
+        let root = crate::test_support::TestRoot::new(name);
+        for (tid, tgid, ticks) in [(500, 500, 777), (501, 501, 800), (502, 500, 777)] {
+            let dir = root.join(tid.to_string());
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(
+                dir.join("status"),
+                format!("Uid:\t1000\t1000\t1000\t1000\nTgid:\t{tgid}\n"),
+            )
+            .unwrap();
+            fs::write(
+                dir.join("stat"),
+                format!(
+                    "{tid} (app) S 1 {tid} {tid} 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 {ticks} 0 0 0\n"
+                ),
+            )
+            .unwrap();
+        }
+        fs::create_dir_all(root.join("sys/kernel/random")).unwrap();
+        fs::write(root.join("sys/kernel/random/boot_id"), "boot-1\n").unwrap();
+        let dir = root.join("state");
+        fs::create_dir_all(&dir).unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
+        let fence = dir.join("validation-fence.json");
+        World { root, fence }
+    }
+
+    fn write_fence(world: &World, pid: u32, ticks: u64, expires: u64) {
+        fs::write(
+            &world.fence,
+            format!(
+                r#"{{"version":1,"uid":1000,"root_pid":{pid},"start_ticks":{ticks},"boot_id":"boot-1","expires_unix":{expires}}}"#
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&world.fence, fs::Permissions::from_mode(0o644)).unwrap();
+    }
+
+    fn targets(world: &World) -> ServiceTargets {
+        ServiceTargets::new(1000, None).with_fence(world.fence.clone(), me())
+    }
+
+    fn reason(error: anyhow::Error) -> String {
+        format!("{error:#}")
+    }
+
+    #[test]
+    fn without_a_fence_every_task_of_the_service_account_is_targetable_as_before() {
+        let world = world("fence-none");
+        // Not configured at all, and configured but with no file.
+        ServiceTargets::new(1000, None)
+            .task(world.root.path(), 501)
+            .unwrap();
+        targets(&world).task(world.root.path(), 501).unwrap();
+        targets(&world).task(world.root.path(), 500).unwrap();
+    }
+
+    #[test]
+    fn a_fence_narrows_the_targets_to_the_fenced_process_and_its_threads() {
+        let world = world("fence-narrow");
+        write_fence(&world, 500, 777, unix_now() + NOW_OFFSET);
+        let targets = targets(&world);
+        targets.task(world.root.path(), 500).unwrap();
+        targets.task(world.root.path(), 502).unwrap();
+        let stranger = reason(targets.task(world.root.path(), 501).unwrap_err());
+        assert!(
+            stranger.contains("validation_fence_target_not_fenced"),
+            "{stranger}"
+        );
+    }
+
+    #[test]
+    fn a_fence_never_grants_what_the_ordinary_checks_refuse() {
+        let world = world("fence-grants-nothing");
+        write_fence(&world, 500, 777, unix_now() + NOW_OFFSET);
+        // The fenced process now belongs to another account: still refused by the uid check.
+        fs::write(
+            world.root.join("500/status"),
+            "Uid:\t0\t0\t0\t0\nTgid:\t500\n",
+        )
+        .unwrap();
+        assert!(
+            reason(targets(&world).task(world.root.path(), 500).unwrap_err())
+                .contains("bounded_service_target_uid_denied")
+        );
+    }
+
+    #[test]
+    fn a_reused_pid_an_expired_fence_and_an_unreadable_one_refuse_even_the_fenced_task() {
+        let world = world("fence-refuse");
+        // The fence names pid 500 at a start time it does not have: a reused pid.
+        write_fence(&world, 500, 111, unix_now() + NOW_OFFSET);
+        assert!(
+            reason(targets(&world).task(world.root.path(), 500).unwrap_err()).contains("reused")
+        );
+        // An expired fence is not ignored: it refuses everything until it is removed.
+        write_fence(&world, 500, 777, unix_now() - 5);
+        assert!(
+            reason(targets(&world).task(world.root.path(), 500).unwrap_err())
+                .contains("expired_remove_it")
+        );
+        // A fence that cannot be parsed, or that anyone could have written, refuses everything.
+        fs::write(&world.fence, "garbage").unwrap();
+        assert!(
+            reason(targets(&world).task(world.root.path(), 500).unwrap_err())
+                .contains("validation_fence_malformed")
+        );
+        write_fence(&world, 500, 777, unix_now() + NOW_OFFSET);
+        fs::set_permissions(&world.fence, fs::Permissions::from_mode(0o666)).unwrap();
+        assert!(
+            reason(targets(&world).task(world.root.path(), 500).unwrap_err())
+                .contains("validation_fence_untrusted")
+        );
+        // Removing the fence restores ordinary operation.
+        fs::remove_file(&world.fence).unwrap();
+        targets(&world).task(world.root.path(), 501).unwrap();
     }
 }

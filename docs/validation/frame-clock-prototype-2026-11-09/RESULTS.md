@@ -180,3 +180,25 @@ exists the installed-service *mutation* smoke remains only as safe as the prefli
 post-run audit, and must not be run while the desktop is in use. The deterministic isolated
 transient-controller acceptance suites remain the way to exercise the mutation path without the
 installed service.
+
+### Update: the validation target fence is now built (not deployed)
+
+Implemented in `stutter/src/daemon/privilege/validation_fence.rs` and enforced in
+`ServiceTargets::task`, the one place every target task of the bounded service passes. It only narrows:
+
+- no `validation-fence.json` in the worker's state directory: behaviour is unchanged;
+- a valid fence (one pid and start time, the service account, this boot, an expiry) refuses any task whose
+  process is not the fenced one, including a reused pid, and a fenced task still has to pass the ordinary
+  uid and cgroup checks (the fence grants nothing, tested);
+- a fence that is present but untrusted (not owned by root, group- or world-writable, a symlink, oversize),
+  malformed, for another account or boot, or **expired** refuses every mutation, with a reason that says to
+  remove it. A stale file therefore stops tuning until it is removed, the safe direction;
+- the file is read as root-owned text with the receipt's trust model, so an unprivileged caller can neither
+  write a fence of its choosing nor lift one.
+
+`xtask production-smoke` arms it: after each fixture is ready it writes the fence for that fixture (through
+`sudo -n`, as it already reads the ledger) and removes it when the fixture is dropped. Worker builds before
+this change ignore the file, so the smoke's preflight and strict audit remain the protection against an older
+worker. This is a change to the production privileged worker: it is unit-tested against fake `/proc` trees
+only, has not been run against a live worker, and needs the final-source deployment (and its smoke on a host
+proven free) before it counts as qualified.

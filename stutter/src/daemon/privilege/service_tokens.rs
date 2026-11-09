@@ -51,7 +51,8 @@ impl ServiceActionService {
         Self {
             inner: InProcessPrivilegedActionService::default(),
             ledger: home.join("issued-tokens.json"),
-            targets: super::service_targets::ServiceTargets::new(uid, cgroup),
+            targets: super::service_targets::ServiceTargets::new(uid, cgroup)
+                .with_fence(home.join(super::validation_fence::FENCE_FILE), 0),
         }
     }
 

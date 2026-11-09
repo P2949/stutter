@@ -400,3 +400,40 @@ fn the_history_is_read_strictly_from_where_the_smoke_began() {
     assert!(audit_history(&path, 0).unreadable.is_none());
     assert!(audit_history(&path, start).unreadable.is_some());
 }
+
+#[test]
+fn the_fence_the_smoke_writes_has_exactly_the_fields_the_worker_reads_and_nothing_else() {
+    let body = fence_json(1000, 4242, 777, "boot-1\n", 9_999);
+    let value: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let mut keys: Vec<&str> = value
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort_unstable();
+    // The worker refuses unknown fields, so any drift here makes every mutation refused.
+    assert_eq!(
+        keys,
+        [
+            "boot_id",
+            "expires_unix",
+            "root_pid",
+            "start_ticks",
+            "uid",
+            "version"
+        ]
+    );
+    assert_eq!(value["version"], 1);
+    assert_eq!(value["uid"], 1000);
+    assert_eq!(value["root_pid"], 4242);
+    assert_eq!(value["start_ticks"], 777);
+    assert_eq!(value["boot_id"], "boot-1", "the boot id is trimmed");
+    assert_eq!(value["expires_unix"], 9_999);
+}
+
+#[test]
+fn without_a_user_nothing_is_fenced_and_nothing_is_written() {
+    // Not armed in this test process: writing is a no-op, never a stray sudo call.
+    assert!(write_fence(1, 60).is_ok());
+}
