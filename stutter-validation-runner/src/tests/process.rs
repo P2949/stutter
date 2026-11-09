@@ -156,3 +156,38 @@ fn ending_a_run_ends_its_whole_process_group() {
         "pid 1 must never be addressed"
     );
 }
+
+#[test]
+#[ignore = "live disposable kernel cgroup; requires caller-owned delegation"]
+fn live_action_end_kills_a_detached_descendant_and_spares_an_unrelated_process() {
+    use std::{process::Command, time::Duration};
+
+    let mut cgroup = crate::containment::OwnedCgroup::prepare()
+        .expect("BlockedResource: caller-owned cgroup required");
+    // The child starts a new session, ignores TERM and clears nothing it needs: a process group
+    // cannot reach it, the owned cgroup can.
+    let mut command = Command::new("sh");
+    command.args([
+        "-c",
+        "setsid sh -c 'trap \"\" TERM; exec sleep 600' & sleep 600",
+    ]);
+    cgroup.attach(&mut command).unwrap();
+    let mut child = command.spawn().unwrap();
+    let mut sentinel = Command::new("sleep").arg("600").spawn().unwrap();
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(cgroup.populated().unwrap());
+    let started = std::time::Instant::now();
+    crate::process::contain_end_for_test(&mut cgroup, &mut child).unwrap();
+    assert!(started.elapsed() < Duration::from_secs(10));
+    // `finish` kills, verifies the group empty and removes it: the group being gone is the proof.
+    assert!(
+        cgroup.populated().is_err(),
+        "the owned cgroup was not removed"
+    );
+    assert!(
+        sentinel.try_wait().unwrap().is_none(),
+        "an unrelated process was killed"
+    );
+    sentinel.kill().unwrap();
+    sentinel.wait().unwrap();
+}

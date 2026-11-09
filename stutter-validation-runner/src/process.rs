@@ -377,6 +377,19 @@ impl SystemExecutor {
         }
         let mut command = Self::command(plan);
         command.stdout(Stdio::piped()).stderr(Stdio::piped());
+        // Without a suite-delegated leaf every action runs in a fresh kernel-owned cgroup, so a
+        // detached (setsid) or environment-cleared descendant cannot outlive the action. There is
+        // no process-group-only fallback: no containment, no command.
+        let mut owned = if delegated_leaf.is_none() {
+            let cgroup = crate::containment::OwnedCgroup::prepare()
+                .map_err(|error| failure(format!("cannot contain {label}: {error:#}")))?;
+            cgroup.attach(&mut command).map_err(|error| {
+                failure(format!("cannot attach {label} to its cgroup: {error}"))
+            })?;
+            Some(cgroup)
+        } else {
+            None
+        };
         let attach = delegated_leaf
             .map(|leaf| {
                 std::ffi::CString::new(leaf.join("cgroup.procs").into_os_string().into_vec())
@@ -407,7 +420,7 @@ impl SystemExecutor {
         let capture = match capture {
             Ok(capture) => capture,
             Err(error) => {
-                reap_group(&mut child, Duration::from_secs(3));
+                let _ = contain_end(owned.as_mut(), &mut child);
                 return Err(failure(format!("could not capture {label}: {error}")));
             }
         };
@@ -420,19 +433,21 @@ impl SystemExecutor {
                 break status;
             }
             if started.elapsed() > timeout {
-                reap_group(&mut child, Duration::from_secs(3));
+                let contained = contain_end(owned.as_mut(), &mut child);
                 let log_status = capture.finish();
                 return Err(failure(format!(
-                    "{label} exceeded its time limit and its process group was terminated; log: {log_status:?}"
+                    "{label} exceeded its time limit and its owned cgroup was terminated; containment: {contained:?}; log: {log_status:?}"
                 )));
             }
             std::thread::sleep(Duration::from_millis(200));
         };
         // A descendant that outlived the main process is still part of this run.
-        reap_group(&mut child, Duration::from_secs(3));
+        let contained = contain_end(owned.as_mut(), &mut child);
         capture
             .finish()
             .map_err(|error| failure(format!("{label}: {error}")))?;
+        contained
+            .map_err(|error| failure(format!("{label}: containment not proven: {error:#}")))?;
         Ok(json!({
             "action": label,
             "exit_code": status.code(),
@@ -892,4 +907,29 @@ pub(crate) fn reap_group(child: &mut std::process::Child, grace: Duration) {
     while group_alive() && Instant::now() < settle {
         std::thread::sleep(Duration::from_millis(20));
     }
+}
+
+/// Ends the action: the owned cgroup (when there is one) is terminated with a grace period and
+/// then killed and verified empty, covering detached descendants; the child's own process group
+/// is reaped as before. An error means containment was not proven.
+fn contain_end(
+    owned: Option<&mut crate::containment::OwnedCgroup>,
+    child: &mut std::process::Child,
+) -> anyhow::Result<()> {
+    let result = match owned {
+        Some(cgroup) => cgroup
+            .terminate(Duration::from_secs(3))
+            .and_then(|()| cgroup.finish()),
+        None => Ok(()),
+    };
+    reap_group(child, Duration::from_secs(3));
+    result
+}
+
+#[cfg(test)]
+pub(crate) fn contain_end_for_test(
+    owned: &mut crate::containment::OwnedCgroup,
+    child: &mut std::process::Child,
+) -> anyhow::Result<()> {
+    contain_end(Some(owned), child)
 }
