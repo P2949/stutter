@@ -782,17 +782,15 @@
         "stutter/src/actions/resctrl_action.rs",
         "stutter/src/actions/resctrl_rollback.rs"
       ],
-      "status": "first_slice",
-      "g0": "a cheap `resctrl_monitor` sensor reads L3 llc_occupancy (gauge) and mbm_total/local bytes (counter deltas) summed over monitored domains, counting `Unavailable`/`Error` reads as lost and never as zero; read-only resctrl inventory (closids, rmids, allocation groups) reported unavailable when not mounted; experimental L3 allocation transaction (`resctrl_alloc`): hardware mask/min-width/closid validation, owned group with per-domain schemata readback, default-group bystander check, restore removes only the group with unchanged identity; fake-root tests, task assignment not performed; `RollbackToken::ResctrlGroupRemove` (recovery removes only the recorded kernel object), `ResctrlRollbackHandler`, manual policy-gated `ResctrlCatAction` (HighRisk, SystemWide, default denies) and `CandidateAction::Resctrl` classified as manual-only `ResctrlCacheAllocation` with an Experimental capability; never an executable plan; active-config matching fails closed",
+      "status": "code_complete",
+      "g0": "the same prepared transaction can add a percentage-mode MBA limit (hardware minimum and granularity respected, MBps mode refused) and move named processes into the owned group (live start-time identity, every thread, only tasks still in the default group, each thread read back as a member, group removed on any failure so the kernel returns every task); a cheap `resctrl_monitor` sensor reads L3 llc_occupancy (gauge) and mbm_total/local bytes (counter deltas) summed over monitored domains, counting `Unavailable`/`Error` reads as lost and never as zero; read-only resctrl inventory (closids, rmids, allocation groups) reported unavailable when not mounted; experimental L3 allocation transaction (`resctrl_alloc`): hardware mask/min-width/closid validation, owned group with per-domain schemata readback, default-group bystander check, restore removes only the group with unchanged identity; fake-root tests, task assignment not performed; `RollbackToken::ResctrlGroupRemove` (recovery removes only the recorded kernel object), `ResctrlRollbackHandler`, manual policy-gated `ResctrlCatAction` (HighRisk, SystemWide, default denies) and `CandidateAction::Resctrl` classified as manual-only `ResctrlCacheAllocation` with an Experimental capability; never an executable plan; active-config matching fails closed",
       "g1": "verified 2026-11-09: the i5-10600K exposes no RDT flag (no rdt_a, cat_l3, cqm_llc or mba in /proc/cpuinfo) and resctrl is not in /proc/filesystems, so the filesystem cannot be mounted on this CPU: HardwareUnavailable is a checked fact, not an assumption",
       "runtime_availability": "resctrl not mounted on this host",
       "authority": "O/E",
-      "not_wired": "no MBA, no task assignment, not worker-routed (HighRisk manual/offline behind HIGH_RISK_APPLY_IMPLEMENTED=false); no real-hardware readback here",
-      "missing_required": [
-        "resctrl/mba-allocation",
-        "resctrl/verified-task-assignment"
-      ],
+      "not_wired": "not worker-routed (HighRisk manual/offline behind HIGH_RISK_APPLY_IMPLEMENTED=false); no real-hardware readback here",
+      "missing_required": [],
       "dispositions": [
+        "CodeComplete",
         "FixtureVerified",
         "HardwareUnavailable",
         "EvidenceDeferred"

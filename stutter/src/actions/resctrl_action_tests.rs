@@ -20,6 +20,7 @@ fn action(root: PathBuf) -> ResctrlCatAction {
         request: CatRequest {
             name: "t1".into(),
             mask: 0xf0,
+            ..Default::default()
         },
     }
 }
@@ -85,4 +86,17 @@ fn recovery_through_the_registry_removes_the_recorded_group() {
     let summary = crate::autotune::emergency_restore::restore_rollback_token(&token).unwrap();
     assert_eq!(summary.restored_items, 1);
     assert!(!root.join("stutter-cat-t1").exists());
+}
+
+#[test]
+fn the_builders_carry_bandwidth_and_tasks_into_the_request() {
+    use crate::actions::resctrl_alloc::CatTask;
+    let action = ResctrlCatAction::new("b1", 0xf0)
+        .with_bandwidth(40)
+        .with_tasks(vec![CatTask {
+            task: 7,
+            start_ticks: 9,
+        }]);
+    assert_eq!(action.request.mba_percent, Some(40));
+    assert_eq!(action.request.tasks.len(), 1);
 }

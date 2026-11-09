@@ -109,8 +109,9 @@ pub mod owner_interfaces {
 pub mod resctrl_allocation {
     //! Experimental resctrl L3 allocation as a prepared transaction (fake-root verified).
     pub use crate::actions::resctrl_alloc::{
-        CatCommitError, CatCommitted, CatDenial, CatPrepared, CatRequest, CatRestore,
-        prepare as prepare_cat,
+        CatCommitError, CatCommitted, CatDenial, CatPrepared, CatRequest, CatRestore, CatTask,
+        MAX_ASSIGNED_TASKS, TaskInspector, prepare as prepare_cat,
+        prepare_with as prepare_cat_with,
     };
 }
 

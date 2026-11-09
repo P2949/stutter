@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use super::{
     ActionBoundaryError, ActionId, ActionState, ActionWarning, RollbackToken, SafetyClass,
     TuningAction,
-    resctrl_alloc::{CatPrepared, CatRequest, prepare},
+    resctrl_alloc::{CatPrepared, CatRequest, prepare_with},
     resctrl_rollback::remove_all,
 };
 
@@ -33,8 +33,21 @@ impl ResctrlCatAction {
             request: CatRequest {
                 name: name.into(),
                 mask,
+                ..Default::default()
             },
         }
+    }
+
+    /// Also limits memory bandwidth to `percent` on every MB domain (percentage mode only).
+    pub fn with_bandwidth(mut self, percent: u32) -> Self {
+        self.request.mba_percent = Some(percent);
+        self
+    }
+
+    /// Also moves these processes (every thread, by live start time) into the group.
+    pub fn with_tasks(mut self, tasks: Vec<super::resctrl_alloc::CatTask>) -> Self {
+        self.request.tasks = tasks;
+        self
     }
 
     fn prepared(&self, policy: &ResctrlActionPolicy) -> anyhow::Result<CatPrepared> {
@@ -45,7 +58,7 @@ impl ResctrlCatAction {
             }
             .into());
         }
-        prepare(&self.root, &self.request)
+        prepare_with(&self.root, &self.request, &live_task)
             .map_err(|error| anyhow::anyhow!("resctrl_cache_allocation refused: {error:?}"))
     }
 
@@ -154,3 +167,15 @@ impl TuningAction for ResctrlCatAction {
 #[cfg(test)]
 #[path = "resctrl_action_tests.rs"]
 mod tests;
+
+/// A process's live start time and every thread id, read from the host's `/proc`.
+fn live_task(task: u32) -> Option<(u64, Vec<u32>)> {
+    let proc_root = std::path::Path::new("/proc");
+    let start = crate::telemetry::proc_view::live_process(proc_root, task)?.start_ticks;
+    let threads: Vec<u32> = std::fs::read_dir(proc_root.join(task.to_string()).join("task"))
+        .ok()?
+        .flatten()
+        .filter_map(|entry| entry.file_name().to_str()?.parse().ok())
+        .collect();
+    Some((start, threads))
+}
