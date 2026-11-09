@@ -39,6 +39,7 @@ fn token_inventory() -> Vec<RollbackToken> {
         RollbackToken::DamosTeardown { records: vec![] },
         RollbackToken::CgroupControlRestore { records: vec![] },
         RollbackToken::BlockSchedulerRestore { records: vec![] },
+        RollbackToken::ScxSchedulerRestore { records: vec![] },
         RollbackToken::SysfsRestore {
             path: PathBuf::from("unused-knob"),
             original_value: "0".to_owned(),
@@ -81,7 +82,7 @@ fn startup_registry_has_only_explicitly_authorized_providers_and_no_manual_fallb
             );
         }
     }
-    assert_eq!(kinds.len(), 15);
+    assert_eq!(kinds.len(), 16);
 }
 
 #[test]

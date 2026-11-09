@@ -97,6 +97,10 @@ impl CandidateAction {
                 "block_scheduler {} -> {}",
                 plan.action.request.device, plan.action.request.scheduler
             ),
+            CandidateAction::ScxStrategy { plan } => format!(
+                "sched_ext_strategy {} mode {}",
+                plan.switch.to, plan.switch.mode
+            ),
             CandidateAction::Fake { plan } => {
                 format!("fake action_id={}", plan.action_id.as_str())
             }
@@ -416,6 +420,9 @@ impl CandidateAction {
                 summary: self.planned_state_summary(),
             },
             CandidateAction::BlockScheduler { .. } => ActiveConfigMatch::Unknown {
+                summary: self.planned_state_summary(),
+            },
+            CandidateAction::ScxStrategy { .. } => ActiveConfigMatch::Unknown {
                 summary: self.planned_state_summary(),
             },
             CandidateAction::Fake { .. } => ActiveConfigMatch::Unknown {

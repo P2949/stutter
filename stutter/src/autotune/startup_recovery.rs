@@ -653,6 +653,7 @@ fn rollback_token_kind(token: &RollbackToken) -> &'static str {
         RollbackToken::DamosTeardown { .. } => "damos-teardown",
         RollbackToken::CgroupControlRestore { .. } => "cgroup-control-restore",
         RollbackToken::BlockSchedulerRestore { .. } => "block-scheduler-restore",
+        RollbackToken::ScxSchedulerRestore { .. } => "scx-scheduler-restore",
     }
 }
 

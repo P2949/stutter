@@ -70,6 +70,7 @@ fn mechanism_for(operation: MutationOperationKind) -> MechanismEvidence {
         | CgroupCpusetMems | CgroupMemoryMin | CgroupMemoryLow | CgroupMemoryHigh
         | CgroupIoWeight => MechanismEvidence::ResourceGroupObserved,
         BlockIoScheduler => MechanismEvidence::ResourceGroupObserved,
+        SchedExtSchedulerStrategy => MechanismEvidence::ResourceGroupObserved,
         ResctrlCacheAllocation => MechanismEvidence::ResourceGroupObserved,
         Unclassified => MechanismEvidence::None,
     }

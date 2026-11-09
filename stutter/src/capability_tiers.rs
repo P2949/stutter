@@ -75,7 +75,7 @@ const BOUNDED_SERVICE: &[&str] = &[
     "live_bounded_service_acceptance",
 ];
 
-pub const CAPABILITIES: [Capability; 42] = [
+pub const CAPABILITIES: [Capability; 43] = [
     obs(
         "doctor",
         "Local preflight checks",
@@ -467,6 +467,18 @@ pub const CAPABILITIES: [Capability; 42] = [
         required_evidence: &[],
         required_release_evidence: &[],
         limitations: "Device-wide effect. Authorized, unprotected device only; the scheduler must be one the device lists; restore only on the same device while ours is active. Manual only, never autonomous. Does not inherit another operation's maturity.",
+    },
+    Capability {
+        id: "sched_ext_scheduler_strategy",
+        title: "sched_ext scheduler strategy switch",
+        class: CapabilityClass::Mutating,
+        tier: CapabilityTier::Experimental,
+        target_tier: CapabilityTier::Experimental,
+        commands: &["autotune"],
+        providers: &["sched_ext_strategy"],
+        required_evidence: &[],
+        required_release_evidence: &[],
+        limitations: "Global effect on every task. Allowlisted scheduler and reviewed arguments only, exact restore of the prior scheduler and mode, offline campaign authorization; manual only, never autonomous, no second SCX daemon. Does not inherit another operation's maturity.",
     },
     Capability {
         id: "bounded_autotune_controller",

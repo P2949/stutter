@@ -299,6 +299,9 @@ pub fn verify_rollback_restored_baseline(
         CandidateAction::BlockScheduler { .. } => RollbackVerification::unavailable(
             "block scheduler selections are not part of the active configuration snapshot",
         ),
+        CandidateAction::ScxStrategy { .. } => RollbackVerification::unavailable(
+            "the sched_ext scheduler is verified through org.scx.Loader, not the active configuration snapshot",
+        ),
         CandidateAction::Fake { .. } => {
             RollbackVerification::unavailable("fake candidate has no active config verifier")
         }

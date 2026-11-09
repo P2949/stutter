@@ -30,6 +30,7 @@ pub(super) fn task_boot_superseded(
         | RollbackToken::DamosTeardown { .. }
         | RollbackToken::CgroupControlRestore { .. }
         | RollbackToken::BlockSchedulerRestore { .. }
+        | RollbackToken::ScxSchedulerRestore { .. }
         | RollbackToken::SysfsRestore { .. } => Ok(false),
     }
 }

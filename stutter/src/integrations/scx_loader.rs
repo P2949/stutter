@@ -185,6 +185,22 @@ pub struct OfflineAuthorization {
     campaign: String,
 }
 
+/// What a rollback token carries so the prior scheduler state can be put back exactly.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ScxRestoreRecord {
+    pub applied: String,
+    pub restore: Restore,
+}
+
+impl SwitchPlan {
+    pub fn restore_record(&self) -> ScxRestoreRecord {
+        ScxRestoreRecord {
+            applied: self.to.clone(),
+            restore: self.restore.clone(),
+        }
+    }
+}
+
 impl OfflineAuthorization {
     /// Fake-bus fixtures only; never a constructor in the product library.
     #[cfg(test)]
@@ -199,7 +215,7 @@ impl OfflineAuthorization {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Restore {
     /// No SCX scheduler was running: stopping the one started returns to the kernel default.
     Stop,

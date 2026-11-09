@@ -160,6 +160,16 @@ pub fn manual_restore_command_for_token(token: &RollbackToken) -> String {
             })
             .collect::<Vec<_>>()
             .join(" && "),
+        RollbackToken::ScxSchedulerRestore { records } => records
+            .iter()
+            .map(|record| match &record.restore {
+                crate::integrations::scx_loader::Restore::Stop => "scxctl stop".to_owned(),
+                crate::integrations::scx_loader::Restore::SwitchBack { name, mode } => {
+                    format!("scxctl switch --sched {name} --mode {mode}")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" && "),
     }
 }
 
@@ -194,6 +204,7 @@ pub(super) fn safety_class_for_rollback_token(token: &RollbackToken) -> SafetyCl
         | RollbackToken::DamosTeardown { .. }
         | RollbackToken::CgroupControlRestore { .. }
         | RollbackToken::BlockSchedulerRestore { .. }
+        | RollbackToken::ScxSchedulerRestore { .. }
         | RollbackToken::SysfsRestore { .. } => SafetyClass::HighRisk,
     }
 }
@@ -215,6 +226,7 @@ pub(super) fn rollback_token_kind(token: &RollbackToken) -> &'static str {
         RollbackToken::DamosTeardown { .. } => "damos-teardown",
         RollbackToken::CgroupControlRestore { .. } => "cgroup-control-restore",
         RollbackToken::BlockSchedulerRestore { .. } => "block-scheduler-restore",
+        RollbackToken::ScxSchedulerRestore { .. } => "scx-scheduler-restore",
     }
 }
 

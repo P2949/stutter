@@ -297,7 +297,9 @@ impl PrivilegedActionService for ServiceActionService {
                 // Cgroup directories do not survive a reboot.
                 | RollbackToken::CgroupControlRestore { .. }
                 // The scheduler choice is volatile: the kernel resets it at boot.
-                | RollbackToken::BlockSchedulerRestore { .. } => Ok(RollbackResult { affected_tasks: 0 }),
+                | RollbackToken::BlockSchedulerRestore { .. }
+                // A sched_ext scheduler does not survive a reboot.
+                | RollbackToken::ScxSchedulerRestore { .. } => Ok(RollbackResult { affected_tasks: 0 }),
                 RollbackToken::CpuPowerRestore { .. }
                 | RollbackToken::IrqAffinityRestore { .. }
                 | RollbackToken::GpuPowerRestore { .. }

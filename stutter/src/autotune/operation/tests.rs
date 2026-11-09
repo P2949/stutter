@@ -463,3 +463,54 @@ fn a_block_scheduler_candidate_is_its_own_manual_only_operation_and_never_an_exe
         Some("block_io_scheduler")
     );
 }
+
+#[test]
+fn an_scx_strategy_candidate_is_manual_only_never_executable_and_its_token_is_manual_recovery() {
+    use crate::{
+        actions::RollbackToken,
+        autotune::{
+            objective::ObjectiveKind,
+            planning::{
+                candidate::CandidateAction,
+                executable_plan::{CandidateExecutablePlan, ScxStrategyPlan},
+            },
+        },
+        integrations::scx_loader::{Restore, SwitchPlan},
+    };
+    let switch = SwitchPlan {
+        to: "scx_lavd".into(),
+        mode: 0,
+        method: "SwitchScheduler",
+        restore: Restore::SwitchBack {
+            name: "scx_bpfland".into(),
+            mode: 1,
+        },
+        args: Vec::new(),
+    };
+    let token = RollbackToken::ScxSchedulerRestore {
+        records: vec![switch.restore_record()],
+    };
+    let candidate = CandidateAction::ScxStrategy {
+        plan: ScxStrategyPlan::manual(switch, ObjectiveKind::GameRunnableLatency),
+    };
+    assert_eq!(
+        candidate.operation_kind(),
+        MutationOperationKind::SchedExtSchedulerStrategy
+    );
+    assert!(MutationOperationKind::SchedExtSchedulerStrategy.is_manual_only());
+    assert!(CandidateExecutablePlan::from_candidate(&candidate).is_none());
+    assert_eq!(token.kind(), "scx-scheduler-restore");
+    let json = serde_json::to_string(&token).unwrap();
+    assert_eq!(serde_json::from_str::<RollbackToken>(&json).unwrap(), token);
+    let descriptor = crate::actions::rollback::recovery::recovery_descriptor(&token);
+    assert_eq!(
+        descriptor.automatic_recovery,
+        crate::actions::rollback::recovery::AutomaticRecoveryCapability::ManualOnly
+    );
+    assert_eq!(
+        crate::autotune::emergency_restore::manual_restore_command_for_token(&token),
+        "scxctl switch --sched scx_bpfland --mode 1"
+    );
+    let error = crate::autotune::emergency_restore::restore_rollback_token(&token).unwrap_err();
+    assert!(error.to_string().contains("offline authorization"));
+}

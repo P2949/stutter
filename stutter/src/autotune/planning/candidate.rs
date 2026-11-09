@@ -8,7 +8,7 @@ use super::executable_plan::{
     BlockSchedulerActionPlan, CgroupControlActionPlan, CgroupPlacementActionPlan,
     CpuAffinityProfilePlan, CpuPowerActionPlan, DamosActionPlan, FakeCandidatePlan,
     GpuPowerActionPlan, IoPrioActionPlan, IrqAffinityActionPlan, NiceActionPlan, PmQosActionPlan,
-    ResctrlActionPlan, UclampActionPlan, VmKnobActionPlan,
+    ResctrlActionPlan, ScxStrategyPlan, UclampActionPlan, VmKnobActionPlan,
 };
 use crate::{
     actions::SafetyClass,
@@ -36,6 +36,7 @@ pub enum CandidateAction {
     Damos { plan: DamosActionPlan },
     CgroupControl { plan: CgroupControlActionPlan },
     BlockScheduler { plan: BlockSchedulerActionPlan },
+    ScxStrategy { plan: ScxStrategyPlan },
     Fake { plan: FakeCandidatePlan },
 }
 
@@ -266,6 +267,7 @@ impl CandidateAction {
             Self::Damos { plan } => plan,
             Self::CgroupControl { plan } => plan,
             Self::BlockScheduler { plan } => plan,
+            Self::ScxStrategy { plan } => plan,
             Self::Fake { plan } => plan,
         }
     }
@@ -304,7 +306,7 @@ pub trait CandidatePlan {
 /// Registry of mutation provider kinds (everything except the test-only fake).
 /// `is_mutation_provider` is an exhaustive match, so a new candidate variant cannot
 /// compile until this registry is revisited; coverage tooling uses it as a denominator.
-pub const MUTATION_PROVIDER_KINDS: [&str; 14] = [
+pub const MUTATION_PROVIDER_KINDS: [&str; 15] = [
     "cpu_affinity_profile",
     "nice",
     "ionice",
@@ -319,6 +321,7 @@ pub const MUTATION_PROVIDER_KINDS: [&str; 14] = [
     "damos",
     "cgroup_control",
     "block_scheduler",
+    "sched_ext_strategy",
 ];
 
 impl CandidateAction {
@@ -337,7 +340,8 @@ impl CandidateAction {
             | Self::Resctrl { .. }
             | Self::Damos { .. }
             | Self::CgroupControl { .. }
-            | Self::BlockScheduler { .. } => true,
+            | Self::BlockScheduler { .. }
+            | Self::ScxStrategy { .. } => true,
             Self::Fake { .. } => false,
         }
     }

@@ -58,12 +58,16 @@ pub enum MutationOperationKind {
     /// explicitly authorized, unprotected device.
     BlockIoScheduler,
 
+    /// A global sched_ext scheduler switch through `org.scx.Loader`, restored to the exact prior
+    /// scheduler and mode. Never autonomous.
+    SchedExtSchedulerStrategy,
+
     /// Test-only or unrecognisable payloads. Never authorised by any contract.
     Unclassified,
 }
 
 impl MutationOperationKind {
-    pub const ALL: [Self; 28] = [
+    pub const ALL: [Self; 29] = [
         Self::CpuAffinityProfile,
         Self::Uclamp,
         Self::Nice,
@@ -91,6 +95,7 @@ impl MutationOperationKind {
         Self::CgroupMemoryHigh,
         Self::CgroupIoWeight,
         Self::BlockIoScheduler,
+        Self::SchedExtSchedulerStrategy,
         Self::Unclassified,
     ];
 
@@ -123,6 +128,7 @@ impl MutationOperationKind {
             Self::CgroupMemoryHigh => "cgroup_memory_high",
             Self::CgroupIoWeight => "cgroup_io_weight",
             Self::BlockIoScheduler => "block_io_scheduler",
+            Self::SchedExtSchedulerStrategy => "sched_ext_scheduler_strategy",
             Self::Unclassified => "unclassified",
         }
     }
@@ -159,6 +165,7 @@ impl MutationOperationKind {
             Self::CgroupMemoryHigh => Some("cgroup_memory_high"),
             Self::CgroupIoWeight => Some("cgroup_io_weight"),
             Self::BlockIoScheduler => Some("block_io_scheduler"),
+            Self::SchedExtSchedulerStrategy => Some("sched_ext_scheduler_strategy"),
             Self::Unclassified => None,
         }
     }
@@ -199,6 +206,7 @@ impl MutationOperationKind {
                 | Self::CgroupMemoryHigh
                 | Self::CgroupIoWeight
                 | Self::BlockIoScheduler
+                | Self::SchedExtSchedulerStrategy
                 | Self::Unclassified
         )
     }
@@ -231,6 +239,7 @@ impl CandidateAction {
             Self::Damos { .. } => MutationOperationKind::DamosScheme,
             Self::CgroupControl { plan } => cgroup_control_operation(&plan.action.control),
             Self::BlockScheduler { .. } => MutationOperationKind::BlockIoScheduler,
+            Self::ScxStrategy { .. } => MutationOperationKind::SchedExtSchedulerStrategy,
             Self::Fake { .. } => MutationOperationKind::Unclassified,
         }
     }

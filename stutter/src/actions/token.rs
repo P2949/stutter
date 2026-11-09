@@ -103,6 +103,12 @@ pub enum RollbackToken {
     BlockSchedulerRestore {
         records: Vec<super::block_scheduler::BlockSchedulerRecord>,
     },
+    /// A sched_ext scheduler switch made through `org.scx.Loader`: the prior scheduler and mode (or
+    /// stop) to put back. Recovery needs the loader bus and an offline campaign authorization, so
+    /// it is never automatic.
+    ScxSchedulerRestore {
+        records: Vec<crate::integrations::scx_loader::ScxRestoreRecord>,
+    },
 }
 
 impl RollbackToken {
@@ -123,6 +129,7 @@ impl RollbackToken {
             Self::DamosTeardown { .. } => "damos-teardown",
             Self::CgroupControlRestore { .. } => "cgroup-control-restore",
             Self::BlockSchedulerRestore { .. } => "block-scheduler-restore",
+            Self::ScxSchedulerRestore { .. } => "scx-scheduler-restore",
         }
     }
 
@@ -321,6 +328,7 @@ impl RollbackToken {
             Self::DamosTeardown { records } => records.len(),
             Self::CgroupControlRestore { records } => records.len(),
             Self::BlockSchedulerRestore { records } => records.len(),
+            Self::ScxSchedulerRestore { records } => records.len(),
         }
     }
 
@@ -340,6 +348,7 @@ impl RollbackToken {
             | Self::DamosTeardown { .. }
             | Self::CgroupControlRestore { .. }
             | Self::BlockSchedulerRestore { .. }
+            | Self::ScxSchedulerRestore { .. }
             | Self::VmKnobRestore { .. } => None,
         }
     }

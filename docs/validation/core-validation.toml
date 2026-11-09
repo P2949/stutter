@@ -82,6 +82,7 @@ experimental = [
     "cgroup_memory_high",
     "cgroup_io_weight",
     "block_io_scheduler",
+    "sched_ext_scheduler_strategy",
     "remote_agent_mutation",
 ]
 internal = [

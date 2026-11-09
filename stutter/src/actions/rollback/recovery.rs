@@ -79,6 +79,10 @@ pub(crate) fn recovery_descriptor(token: &RollbackToken) -> RollbackRecoveryDesc
             VerifiedAutomatic,
             "the recorded device must still have the recorded major:minor number and still have the applied scheduler active; a different device or another owner's choice is never overwritten",
         ),
+        RollbackToken::ScxSchedulerRestore { .. } => (
+            ManualOnly,
+            "restoring the prior sched_ext scheduler needs the org.scx.Loader bus and an offline campaign authorization; recovery is never automatic and a prior state that cannot be put back exactly is never recorded",
+        ),
     };
     RollbackRecoveryDescriptor {
         token_kind: token.kind(),

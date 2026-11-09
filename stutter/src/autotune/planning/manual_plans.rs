@@ -327,3 +327,76 @@ impl CandidatePlan for BlockSchedulerActionPlan {
         self.action.describe()
     }
 }
+
+/// A manual-only sched_ext scheduler switch through `org.scx.Loader`. It carries the validated
+/// switch plan (exact restore included) but is never converted to an executable plan: execution
+/// needs the loader bus and an offline campaign authorization.
+#[derive(Clone, Debug)]
+pub struct ScxStrategyPlan {
+    pub name: String,
+    pub switch: crate::integrations::scx_loader::SwitchPlan,
+    pub evidence: Vec<CandidateEvidence>,
+    pub objective: ObjectiveKind,
+}
+
+impl ScxStrategyPlan {
+    pub fn manual(
+        switch: crate::integrations::scx_loader::SwitchPlan,
+        objective: ObjectiveKind,
+    ) -> Self {
+        Self {
+            name: format!("scx_strategy_{}_{}", switch.to, switch.mode),
+            switch,
+            evidence: Vec::new(),
+            objective,
+        }
+    }
+}
+
+impl CandidatePlan for ScxStrategyPlan {
+    fn candidate_name(&self) -> &str {
+        &self.name
+    }
+
+    fn action_kind(&self) -> &'static str {
+        "sched_ext_scheduler_strategy"
+    }
+
+    fn target_root_pid(&self) -> Option<u32> {
+        None
+    }
+
+    fn action_id(&self) -> crate::actions::ActionId {
+        crate::actions::ActionId::new(format!(
+            "scx:switch:{}:mode={}",
+            self.switch.to, self.switch.mode
+        ))
+    }
+
+    fn safety_class(&self) -> SafetyClass {
+        SafetyClass::HighRisk
+    }
+
+    fn effect_scope(&self) -> ActionEffectScope {
+        ActionEffectScope::SystemWide
+    }
+
+    fn evidence(&self) -> &[CandidateEvidence] {
+        &self.evidence
+    }
+
+    fn objective(&self) -> ObjectiveKind {
+        self.objective
+    }
+
+    fn conflict_group(&self) -> ActionConflictGroup {
+        ActionConflictGroup::None
+    }
+
+    fn describe(&self) -> String {
+        format!(
+            "switch the sched_ext scheduler to {} (mode {}) via org.scx.Loader",
+            self.switch.to, self.switch.mode
+        )
+    }
+}

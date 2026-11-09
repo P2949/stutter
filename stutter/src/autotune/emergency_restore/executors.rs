@@ -86,6 +86,10 @@ pub fn restore_rollback_token_direct(
         RollbackToken::DamosTeardown { records } => restore_damos(records),
         RollbackToken::CgroupControlRestore { records } => restore_cgroup_controls(records),
         RollbackToken::BlockSchedulerRestore { records } => restore_block_schedulers(records),
+        RollbackToken::ScxSchedulerRestore { .. } => anyhow::bail!(
+            "restoring the sched_ext scheduler needs the org.scx.Loader bus and an offline authorization; run: {}",
+            manual_restore_command_for_token(token)
+        ),
         RollbackToken::SysfsRestore {
             path,
             original_value,
