@@ -78,8 +78,18 @@ line is `ok` or `denied <reason>`. The peer's identity comes from the kernel, no
 a reused pid, a stale or future timestamp, a replay or an unknown metric is denied. A quantile of
 batch summaries is labelled `quantile_of_summaries` and is never a request or frame percentile.
 
-This is observation only. It is not part of the daemon, it runs no operation, and a summary it
-prints authorizes nothing.
+The standalone `kpi-serve` command is observation only: it runs no operation, and a summary it
+prints authorizes nothing. The daemon can also attach the same exact-process collector when the
+optional `kpi_contract` and `kpi_socket_dir` settings are present; it feeds runtime diagnostics and
+the frozen observation-only study, never a keep decision on its own.
+
+### Sensor cadence
+
+Sensors are not all sampled every tick. The sensor hub gives each a minimum interval so the idle
+cost stays inside its budget: `numa_stat`, `damon_state` and `resctrl_inventory` every 30 s;
+`resctrl_monitor`, `network`, `numa_faults` and `block_io` every 5 s; `cpu_idle` every 10 s;
+`cpu_power` every 2 s. The safety guards (`psi`, `oom_guard`, `sched_ext`) stay on every tick.
+The table is in `stutter/src/autotune/runtime/sensor_hub.rs`.
 
 ### Experimental audio and browser contracts
 

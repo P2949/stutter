@@ -2,7 +2,7 @@
 
 This is the human-readable companion of [`integration-coverage.json`](integration-coverage.json), the
 machine-readable ledger of every tool and mechanism in the current plan. It records what exists at
-the verification baseline named in the ledger's `source_sha` (currently `6638a5b3`; [receipt](validation/source-ci-2026-11-09.json)). The wiring table also describes newer development changes and links their evidence below; it does not silently promote that verification pin. Live observations keep their own source pins. The production-deployed build is a separate, older pin (`e37984c1`) and is not described by this file. The grades are
+the verification baseline named in the ledger's `source_sha` (currently `4f3baa07`, the deployed source; [receipt](validation/source-ci-2026-11-09-4f3baa07.json)). Later commits add the audit work described below, which has targeted tests but no exact-source receipt of its own until the ledger is re-pinned. The wiring table also describes newer development changes and links their evidence below; it does not silently promote that verification pin. Live observations keep their own source pins. The production-deployed build is a separate, older pin (`e37984c1`) and is not described by this file. The grades are
 independent and never inherited from another tool or service backend:
 
 * **G0** code and fixtures, **G1** real observation, **G2** safe manual experiment, **G3** exact
