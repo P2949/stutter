@@ -1,0 +1,24 @@
+{
+  "result": "PASS",
+  "source_sha": "947b22ed8358ce95ff15f11a8d9e42886cd42b82",
+  "source_clean": true,
+  "build_output": "fresh local clone checkout/target (exclusive to this checkout)",
+  "commands": [
+    "nix develop --command cargo run -q -p xtask -- ci",
+    "nix develop --command cargo clippy --workspace --all-targets -- -D warnings",
+    "nix develop --command cargo run -q -p xtask -- release-check"
+  ],
+  "library": { "passed": 3405, "ignored": 15 },
+  "xtask": { "passed": 540 },
+  "validation_runner": { "passed": 106, "ignored": 7 },
+  "architecture_tests": { "passed": 125 },
+  "release_binary_sha256": "3e86c2ddcd2b38c747ff5f4f83436a3e75db23ce843ecab7869dd489af1337e9",
+  "logs_sha256": {
+    "ci.log": "2e151f8c32f85ec2144361dc5d15c72d6f23c4433eef528d39893f6edbad6a89",
+    "clippy-workspace.log": "0da93ba14970efe4cb377149b11edd0c9289778987fff2b798e68d9535a127c5",
+    "release-check.log": "f4f9bd43bf33e4f644101c22f2a40d825422a4967ac8ae750335e50f5f4bc0a9"
+  },
+  "scope": "committed-source validation of the code commit that adds the KPI scenario study and the renderer-stamped frame-stream prototype on top of 0b8d7a6f (scope-bound offline authorization, hardened systemd and DAMOS recovery, delegated-subtree reaper, subcapability manifest)",
+  "not_deployed": "The production service is still the 4f3baa07 build (binary bf79d9c4...). Nothing since is reachable from the daemon or the bounded service, so no re-deploy was done and this receipt does not qualify the installed binary.",
+  "note": "documentation-only commits after this sha do not change the built binary"
+}
