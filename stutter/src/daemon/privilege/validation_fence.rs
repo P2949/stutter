@@ -59,24 +59,79 @@ pub(super) fn load(
     service_uid: u32,
     trusted_uid: u32,
 ) -> anyhow::Result<FenceState> {
+    match read_text(path, trusted_uid)? {
+        None => Ok(FenceState::Absent),
+        Some(text) => parse(&text, now_unix, boot_id, service_uid),
+    }
+}
+
+/// The fence file's text if it exists and is trusted (`None` when there is no file at all).
+fn read_text(path: &Path, trusted_uid: u32) -> anyhow::Result<Option<String>> {
     match std::fs::symlink_metadata(path) {
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(FenceState::Absent);
-        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => bail!("validation_fence_unreadable: {error}"),
         Ok(_) => {}
     }
     let anchor = path
         .parent()
         .context("validation_fence_untrusted: the fence has no directory")?;
-    let text = crate::integrations::campaign_receipt::read_trusted_text(
+    crate::integrations::campaign_receipt::read_trusted_text(
         path,
         anchor,
         trusted_uid,
         MAX_FENCE_BYTES,
     )
-    .map_err(|refusal| anyhow::anyhow!("validation_fence_untrusted: {refusal:?}"))?;
-    let fence: Fence = serde_json::from_str(&text)
+    .map(Some)
+    .map_err(|refusal| anyhow::anyhow!("validation_fence_untrusted: {refusal:?}"))
+}
+
+/// The worker's own reading of its fence, for the read-only status request: what it enforces right
+/// now, with the digest of the exact bytes it read. Never grants anything.
+pub(super) fn report(
+    path: &Path,
+    now_unix: u64,
+    boot_id: &str,
+    service_uid: u32,
+    trusted_uid: u32,
+) -> super::FenceReport {
+    let mut report = super::FenceReport {
+        protocol: 1,
+        state: "absent".to_owned(),
+        reason: None,
+        root_pid: None,
+        start_ticks: None,
+        uid: service_uid,
+        boot_id: boot_id.to_owned(),
+        fence_sha256: None,
+    };
+    let state = read_text(path, trusted_uid).and_then(|text| match text {
+        None => Ok(FenceState::Absent),
+        Some(text) => {
+            report.fence_sha256 = Some(stutter_core::hash::sha256_hex(text.as_bytes()));
+            parse(&text, now_unix, boot_id, service_uid)
+        }
+    });
+    match state {
+        Ok(FenceState::Absent) => {}
+        Ok(FenceState::DenyAll) => "deny_all".clone_into(&mut report.state),
+        Ok(FenceState::Active {
+            root_pid,
+            start_ticks,
+        }) => {
+            "active".clone_into(&mut report.state);
+            report.root_pid = Some(root_pid);
+            report.start_ticks = Some(start_ticks);
+        }
+        Err(error) => {
+            "refusing".clone_into(&mut report.state);
+            report.reason = Some(error.to_string());
+        }
+    }
+    report
+}
+
+fn parse(text: &str, now_unix: u64, boot_id: &str, service_uid: u32) -> anyhow::Result<FenceState> {
+    let fence: Fence = serde_json::from_str(text)
         .map_err(|error| anyhow::anyhow!("validation_fence_malformed: {error}"))?;
     ensure!(
         fence.version == 1,

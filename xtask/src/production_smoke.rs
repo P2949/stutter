@@ -13,13 +13,14 @@ use std::{
     io::{Read, Seek, SeekFrom},
     os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::Command,
     time::{Duration, Instant},
 };
 
 use anyhow::{Context, bail, ensure};
 use clap::Args;
 use serde_json::{Value, json};
+use session::{Expected, Fixture, SESSION_SECONDS, Session, spawn_fixture};
 
 use crate::evidence_metadata::{self as shared, SUITE_PACKAGED_SERVICE_SMOKE, Source};
 
@@ -330,71 +331,6 @@ fn allowed_lists(pid: u32) -> Vec<String> {
         .collect()
 }
 
-/// How long a validation session fences the worker; a forgotten one expires and refuses mutation until removed.
-const SESSION_SECONDS: u64 = 1800;
-
-/// Ends the validation session (lifts the fence) when the run is over, however it ends, after every
-/// token has settled.
-struct Session;
-
-impl Drop for Session {
-    fn drop(&mut self) {
-        isolation::remove_fence();
-    }
-}
-
-struct Fixture {
-    child: std::process::Child,
-}
-
-impl Drop for Fixture {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-        // Back to deny-all, not to no fence: the worker must refuse every target until the session ends.
-        let _ = isolation::deny_all(SESSION_SECONDS);
-    }
-}
-
-/// A distinct `name` is a distinct workload identity: the controller does not retry a recently tried
-/// candidate for the same identity, so each smoke case uses its own.
-fn spawn_fixture(out: &Path, name: &str, cpu: u32, seconds: u64) -> anyhow::Result<Fixture> {
-    // The installed controller picks its target heuristically: nothing that could be chosen instead
-    // of this fixture may exist when it starts, nor once it is ready.
-    isolation::ensure_quiet("before starting a fixture")?;
-    let directory = out.join("steamapps/common").join(name);
-    fs::create_dir_all(&directory)?;
-    let game = directory.join(name);
-    let this = std::env::current_exe()?;
-    fs::copy(&this, &game).context("install the workload fixture")?;
-    fs::copy(&this, directory.join("wineserver")).context("install the workload helper")?;
-    let ready = out.join("fixture.ready");
-    let child = Command::new("taskset")
-        .args(["-c", &cpu.to_string()])
-        .arg(&game)
-        .args([
-            "live-workload",
-            "--interactive-root",
-            "--wine-helper",
-            "--seconds",
-        ])
-        .arg(seconds.to_string())
-        .arg("--ready")
-        .arg(&ready)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .context("start the workload fixture")?;
-    let fixture = Fixture { child };
-    // The fixture is known by exact identity (pid and start time), or the run cannot proceed.
-    isolation::record_fixture(Path::new("/proc"), fixture.child.id())?;
-    wait_for("the fixture to be ready", 20, || ready.exists())?;
-    isolation::ensure_quiet("after the fixture was ready")?;
-    // Fence the worker to this fixture, by exact identity, for as long as it runs.
-    isolation::write_fence(fixture.child.id(), seconds)?;
-    Ok(fixture)
-}
-
 pub fn run(root: &Path, args: &SmokeArgs) -> anyhow::Result<()> {
     let outcome = run_inner(root, args);
     if isolation::blocked().is_empty() {
@@ -429,7 +365,8 @@ fn run_inner(root: &Path, args: &SmokeArgs) -> anyhow::Result<()> {
     let uid: u32 = run_text("id", &["-u", &user])?.trim().parse()?;
     isolation::arm_fence(&user, uid)?;
     let _session = Session;
-    isolation::deny_all(SESSION_SECONDS).context("start the deny-all validation session")?;
+    let denied =
+        isolation::deny_all(SESSION_SECONDS).context("start the deny-all validation session")?;
     let controller = format!("stutter-autotune-bounded@{user}.service");
     let worker = format!("stutter-privileged-worker@{user}.service");
     let mut checks = Vec::new();
@@ -441,6 +378,13 @@ fn run_inner(root: &Path, args: &SmokeArgs) -> anyhow::Result<()> {
     ));
     let controller_properties = unit_properties(&controller)?;
     let worker_properties = unit_properties(&worker)?;
+    let socket = session::socket_of(
+        worker_properties
+            .get("ExecStart")
+            .map_or("", String::as_str),
+    )
+    .context("the worker unit names no --socket: it cannot be asked about its fence")?;
+    session::set_worker(socket, uid)?;
     checks.extend(unit_checks(
         "controller",
         &controller_properties,
@@ -459,6 +403,20 @@ fn run_inner(root: &Path, args: &SmokeArgs) -> anyhow::Result<()> {
         0,
         false,
     ));
+    // The worker itself must say it enforces the deny-all fence just written. An older worker that
+    // ignores the file answers with an error here, and nothing below mutates anything.
+    checks.push(match session::acknowledge(&Expected::DenyAll, &denied) {
+        Ok(()) => Check::new(
+            "worker_acknowledges_the_deny_all_fence",
+            true,
+            "the running worker reported exactly the deny-all fence that was written",
+        ),
+        Err(error) => Check::new(
+            "worker_acknowledges_the_deny_all_fence",
+            false,
+            format!("{error:#}"),
+        ),
+    });
     fs::write(
         args.out.join("unit-state.json"),
         serde_json::to_vec_pretty(&json!({
@@ -693,5 +651,6 @@ fn write_evidence(root: &Path, args: &SmokeArgs, checks: &[Check]) -> anyhow::Re
 
 mod isolation;
 mod matrix;
+mod session;
 #[cfg(test)]
 mod tests;

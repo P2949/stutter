@@ -35,6 +35,8 @@ mod audit;
 mod bounded;
 mod error;
 mod exchange;
+#[cfg(test)]
+mod fence_status_tests;
 mod in_process;
 mod model;
 #[path = "../../../shared/linux_peer/ffi.rs"]
@@ -96,6 +98,10 @@ pub trait PrivilegedActionService: fmt::Debug + Send + Sync {
     ) -> anyhow::Result<usize> {
         let _ = policy;
         Err(PrivilegedWorkerError::SettleIssuedTokensUnsupported.into())
+    }
+    /// The worker's own, current reading of its validation fence (read-only).
+    fn fence_status(&self) -> anyhow::Result<FenceReport> {
+        Err(PrivilegedWorkerError::FenceStatusUnsupported.into())
     }
 }
 

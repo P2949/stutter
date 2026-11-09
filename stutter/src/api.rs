@@ -435,12 +435,12 @@ pub mod daemon {
             RemoteApplyPolicy, RemotePolicyContext, RollbackRequirement, build_daemon_policy,
         },
         privilege::{
-            CandidateApplyRequest, CandidatePlanRequest, InProcessPrivilegedActionService,
-            PrivilegeCommandAllowlist, PrivilegeCommandRequest, PrivilegeDecision,
-            PrivilegeProcessRole, PrivilegeTransport, PrivilegedActionService, PrivilegedOperation,
-            PrivilegedWorkerHandle, PrivilegedWorkerRequest, PrivilegedWorkerResponse,
-            RollbackRequest, UnixSocketPrivilegedActionService, privileged_operation_audit_event,
-            run_privileged_worker_with_service,
+            CandidateApplyRequest, CandidatePlanRequest, FenceReport,
+            InProcessPrivilegedActionService, PrivilegeCommandAllowlist, PrivilegeCommandRequest,
+            PrivilegeDecision, PrivilegeProcessRole, PrivilegeTransport, PrivilegedActionService,
+            PrivilegedOperation, PrivilegedWorkerHandle, PrivilegedWorkerRequest,
+            PrivilegedWorkerResponse, RollbackRequest, UnixSocketPrivilegedActionService,
+            privileged_operation_audit_event, run_privileged_worker_with_service,
         },
         state::{
             DAEMON_STATE_SCHEMA_VERSION, DaemonDecisionState, DaemonDegradedStatus,

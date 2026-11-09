@@ -16,6 +16,8 @@ pub enum PrivilegedWorkerError {
         "settle_issued_tokens_unsupported: only the bounded service worker keeps an issued-token ledger"
     )]
     SettleIssuedTokensUnsupported,
+    #[error("fence_status_unsupported: only the bounded service worker reads a validation fence")]
+    FenceStatusUnsupported,
     #[error("stale_target_before_mutation: {detail}")]
     StaleTargetBeforeMutation { detail: String },
     #[error(
@@ -156,6 +158,7 @@ impl PrivilegedWorkerError {
         match self {
             Self::ServiceTokenAlreadyOutstanding => "service_token_already_outstanding",
             Self::SettleIssuedTokensUnsupported => "settle_issued_tokens_unsupported",
+            Self::FenceStatusUnsupported => "fence_status_unsupported",
             Self::ServiceRollbackUnresolved => "service_rollback_unresolved",
             Self::StaleTargetBeforeMutation { .. } => "stale_target_before_mutation",
             Self::ServiceRollbackTokenNotIssued => "service_rollback_token_not_issued",

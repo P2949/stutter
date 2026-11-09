@@ -322,6 +322,22 @@ impl PrivilegedWorkerCandidatePlan {
     }
 }
 
+/// What a worker reports about its validation fence, read from its own state directory at the time
+/// of the request. `state` is `absent` (ordinary operation), `deny_all`, `active` (one exact process),
+/// `refusing` (the file is present but cannot be trusted: every mutation is refused, `reason` says
+/// why) or `not_honoured` (this service does not read a fence).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FenceReport {
+    pub protocol: u32,
+    pub state: String,
+    pub reason: Option<String>,
+    pub root_pid: Option<u32>,
+    pub start_ticks: Option<u64>,
+    pub uid: u32,
+    pub boot_id: String,
+    pub fence_sha256: Option<String>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "request", rename_all = "snake_case")]
 pub enum PrivilegedWorkerRequest {
@@ -364,6 +380,10 @@ pub enum PrivilegedWorkerRequest {
     /// Bounded service only: settle every token the worker itself issued. Carries no token, path
     /// or plan, so it cannot name anything beyond the worker's own durable ledger.
     SettleIssuedTokens,
+    /// Bounded service only: read-only report of the validation fence the worker itself reads from
+    /// its own root-owned state directory right now. Carries nothing, grants nothing and writes
+    /// nothing; the answer is evidence about the worker, not a credential.
+    FenceStatus,
     Shutdown,
 }
 
@@ -375,7 +395,9 @@ impl PrivilegedWorkerRequest {
             | Self::ApplyPrepared { .. }
             | Self::CommitPrepared { .. } => PrivilegedOperation::ApplyAction,
             Self::Rollback { .. } => PrivilegedOperation::RollbackAction,
-            Self::Shutdown | Self::SettleIssuedTokens => PrivilegedOperation::ControlDaemon,
+            Self::Shutdown | Self::SettleIssuedTokens | Self::FenceStatus => {
+                PrivilegedOperation::ControlDaemon
+            }
         }
     }
 
@@ -388,6 +410,7 @@ impl PrivilegedWorkerRequest {
             Self::Rollback { .. } => "rollback",
             Self::Shutdown => "shutdown",
             Self::SettleIssuedTokens => "settle_issued_tokens",
+            Self::FenceStatus => "fence_status",
         }
     }
 
@@ -398,7 +421,7 @@ impl PrivilegedWorkerRequest {
                 Some(PolicyIntent::Apply)
             }
             Self::Rollback { .. } => Some(PolicyIntent::Rollback),
-            Self::Shutdown | Self::SettleIssuedTokens => None,
+            Self::Shutdown | Self::SettleIssuedTokens | Self::FenceStatus => None,
         }
     }
 
@@ -408,7 +431,10 @@ impl PrivilegedWorkerRequest {
             | Self::Apply { plan, .. }
             | Self::ApplyPrepared { plan, .. }
             | Self::Rollback { plan, .. } => Some(&plan.descriptor),
-            Self::CommitPrepared { .. } | Self::Shutdown | Self::SettleIssuedTokens => None,
+            Self::CommitPrepared { .. }
+            | Self::Shutdown
+            | Self::SettleIssuedTokens
+            | Self::FenceStatus => None,
         }
     }
 }
@@ -436,6 +462,10 @@ pub enum PrivilegedWorkerResponse {
     },
     Settled {
         outstanding: usize,
+    },
+    /// The worker's own reading of its validation fence.
+    FenceStatus {
+        report: FenceReport,
     },
     Error {
         reason_code: String,

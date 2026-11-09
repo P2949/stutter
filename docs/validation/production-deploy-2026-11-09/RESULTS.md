@@ -106,9 +106,12 @@ Code-level, unit-tested only; not live-qualified (no isolated transient worker h
 * A validation session starts as a deny-all fence (`root_pid` 0 in the fence file, a worker state `DenyAll`), becomes
   the exact fixture while one is active, returns to deny-all between fixtures and is lifted only when the run ends,
   after the tokens have settled. Arming and writing are fallible: no armed fence means no mutation case.
-* Still missing: a non-mutating acknowledgment from the *running* worker that it loaded the fence. Until that exists
-  (it needs a worker protocol change and an isolated transient worker), the pinned-binary hash is the only proof that
-  the worker is a fence-aware build, and live qualification stays outstanding.
-* The history audit fails any state-changing record without a process start time.
+* Worker acknowledgment (authorized by the user's 9 November instruction): a closed, read-only `fence_status` request
+  makes the running bounded worker report the fence it reads from its own root-owned state directory (state, exact
+  pid and start ticks, account, boot, digest of the bytes read). The smoke asks it after writing the deny-all fence and
+  again after fencing each fixture, and refuses unless the report is exactly what was written; a worker that predates
+  the request answers with an error, so it can never reach a mutation case. Unit-tested only: the installed worker
+  (4f3baa07) does not have it, and no real root worker has answered it yet, so live qualification (decoy refused at
+  prepare and precommit) is still outstanding.
 * `closeout-report --strict` now also requires the newest committed report to match the ledger pin and the
   current manifest.

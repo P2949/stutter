@@ -404,6 +404,22 @@ fn handle_privileged_worker_connection(
         stream.flush()?;
         return Ok(false);
     }
+    if matches!(request, PrivilegedWorkerRequest::FenceStatus) {
+        // Read-only: the worker reads its own fence now; only the bounded service has one.
+        let response = match service_policy {
+            Some(_) => service
+                .fence_status()
+                .map(|report| PrivilegedWorkerResponse::FenceStatus { report })
+                .unwrap_or_else(PrivilegedWorkerResponse::from_error),
+            None => PrivilegedWorkerResponse::from_error(
+                PrivilegedWorkerError::FenceStatusUnsupported.into(),
+            ),
+        };
+        serde_json::to_writer(&mut stream, &response)?;
+        stream.write_all(b"\n")?;
+        stream.flush()?;
+        return Ok(false);
+    }
     let shutdown = matches!(request, PrivilegedWorkerRequest::Shutdown);
     let response = if matches!(request, PrivilegedWorkerRequest::ApplyPrepared { .. }) {
         let audit_sink = PrivilegeAuditSink::default();
@@ -582,6 +598,9 @@ fn execute_privileged_worker_request_inner(
         PrivilegedWorkerRequest::SettleIssuedTokens => {
             Err(PrivilegedWorkerError::SettleIssuedTokensUnsupported.into())
         }
+        PrivilegedWorkerRequest::FenceStatus => {
+            Err(PrivilegedWorkerError::FenceStatusUnsupported.into())
+        }
         PrivilegedWorkerRequest::Shutdown => Ok(PrivilegedWorkerResponse::Shutdown {
             message: "privileged worker shutdown requested".to_owned(),
         }),
@@ -622,6 +641,13 @@ fn execute_privileged_worker_request_inner(
             "shutdown_completed",
             "shutdown_completed",
             "privileged worker shutdown completed",
+            0,
+        ),
+        PrivilegedWorkerResponse::FenceStatus { .. } => (
+            true,
+            "fence_status_reported",
+            "fence_status_reported",
+            "privileged worker reported its validation fence",
             0,
         ),
         PrivilegedWorkerResponse::Settled { outstanding } => (

@@ -35,6 +35,27 @@ impl ServiceTargets {
         self
     }
 
+    /// What this service enforces right now, read from the fence file by the same code that enforces it.
+    pub(super) fn fence_report(&self) -> super::FenceReport {
+        let boot = fs::read_to_string("/proc/sys/kernel/random/boot_id").unwrap_or_default();
+        let Some((path, trusted_uid)) = &self.fence else {
+            return super::FenceReport {
+                protocol: 1,
+                state: "not_honoured".to_owned(),
+                reason: None,
+                root_pid: None,
+                start_ticks: None,
+                uid: self.uid,
+                boot_id: boot.trim().to_owned(),
+                fence_sha256: None,
+            };
+        };
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(u64::MAX, |elapsed| elapsed.as_secs());
+        super::validation_fence::report(path, now, boot.trim(), self.uid, *trusted_uid)
+    }
+
     fn fence_check(&self, proc_root: &Path, status: &str) -> anyhow::Result<()> {
         let Some((path, trusted_uid)) = &self.fence else {
             return Ok(());

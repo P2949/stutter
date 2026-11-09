@@ -483,7 +483,7 @@ pub(super) fn fence_json(
 /// worker build that honours the fence then refuses any other target while it stands; an older one
 /// ignores the file. Written as root (`sudo -n`, as the smoke already reads the ledger) so no
 /// unprivileged caller can write or lift one.
-pub(super) fn write_fence(pid: u32, seconds: u64) -> anyhow::Result<()> {
+pub(super) fn write_fence(pid: u32, seconds: u64) -> anyhow::Result<String> {
     use std::io::Write;
     let armed = FENCE.lock().ok().and_then(|fence| fence.clone());
     let Some((path, uid)) = armed else {
@@ -525,12 +525,12 @@ pub(super) fn write_fence(pid: u32, seconds: u64) -> anyhow::Result<()> {
         chmod.success(),
         "the validation fence could not be made readable"
     );
-    Ok(())
+    Ok(stutter_core::hash::sha256_hex(body.as_bytes()))
 }
 
 /// The validation session between and around fixtures: the worker refuses every new target, while
 /// restoring what it already holds stays possible.
-pub(super) fn deny_all(seconds: u64) -> anyhow::Result<()> {
+pub(super) fn deny_all(seconds: u64) -> anyhow::Result<String> {
     write_fence(0, seconds)
 }
 

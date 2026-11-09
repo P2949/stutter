@@ -184,6 +184,9 @@ impl ServiceActionService {
 }
 
 impl PrivilegedActionService for ServiceActionService {
+    fn fence_status(&self) -> anyhow::Result<FenceReport> {
+        Ok(self.targets.fence_report())
+    }
     fn settle_issued_tokens(
         &self,
         policy: &crate::daemon_policy::DaemonPolicy,

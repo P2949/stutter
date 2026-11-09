@@ -71,6 +71,15 @@ impl UnixSocketPrivilegedActionService {
         }
     }
 
+    /// Asks the bounded worker what validation fence it is enforcing right now (read-only).
+    pub fn fence_status(&self) -> anyhow::Result<FenceReport> {
+        match self.call_worker(PrivilegedWorkerRequest::FenceStatus)? {
+            PrivilegedWorkerResponse::FenceStatus { report } => Ok(report),
+            response @ PrivilegedWorkerResponse::Error { .. } => Err(response.into_error()),
+            other => Err(unexpected_response_error(other)),
+        }
+    }
+
     pub fn request_shutdown(&self) -> anyhow::Result<()> {
         match self.call_worker(PrivilegedWorkerRequest::Shutdown)? {
             PrivilegedWorkerResponse::Shutdown { .. } => Ok(()),

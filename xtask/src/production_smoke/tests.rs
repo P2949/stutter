@@ -180,3 +180,141 @@ mod cooldown_and_policy_activity {
         );
     }
 }
+
+#[test]
+fn the_workers_socket_is_read_from_its_exec_start_and_only_when_absolute() {
+    use super::session::socket_of;
+    let property = "{ path=/nix/store/x-stutter ; argv[]=/nix/store/x-stutter privileged-worker --socket /run/stutter-worker-p2949/worker.sock --controller-user p2949 ; ignore_errors=no }";
+    assert_eq!(
+        socket_of(property),
+        Some(std::path::PathBuf::from(
+            "/run/stutter-worker-p2949/worker.sock"
+        ))
+    );
+    assert_eq!(
+        socket_of("{ path=/x ; argv[]=/x privileged-worker --controller-user p ; }"),
+        None
+    );
+    assert_eq!(
+        socket_of("{ path=/x ; argv[]=/x privileged-worker --socket relative.sock ; }"),
+        None
+    );
+    assert_eq!(socket_of(""), None);
+}
+
+#[test]
+fn the_workers_report_must_be_exactly_the_fence_that_was_written() {
+    use stutter::api::daemon::FenceReport;
+
+    use super::session::{Expected, mismatches};
+    let report = |state: &str, pid: Option<u32>, ticks: Option<u64>| FenceReport {
+        protocol: 1,
+        state: state.to_owned(),
+        reason: None,
+        root_pid: pid,
+        start_ticks: ticks,
+        uid: 1000,
+        boot_id: "boot".to_owned(),
+        fence_sha256: Some("abc".to_owned()),
+    };
+    let fixture = Expected::Fixture {
+        pid: 7,
+        start_ticks: 99,
+    };
+    assert!(
+        mismatches(
+            &report("deny_all", None, None),
+            &Expected::DenyAll,
+            "boot\n",
+            1000,
+            "abc"
+        )
+        .is_empty()
+    );
+    assert!(
+        mismatches(
+            &report("active", Some(7), Some(99)),
+            &fixture,
+            "boot",
+            1000,
+            "abc"
+        )
+        .is_empty()
+    );
+    // Each way the worker can disagree is its own refusal.
+    assert!(
+        !mismatches(
+            &report("absent", None, None),
+            &Expected::DenyAll,
+            "boot",
+            1000,
+            "abc"
+        )
+        .is_empty()
+    );
+    assert!(
+        !mismatches(
+            &report("refusing", None, None),
+            &fixture,
+            "boot",
+            1000,
+            "abc"
+        )
+        .is_empty()
+    );
+    assert!(
+        !mismatches(
+            &report("active", Some(8), Some(99)),
+            &fixture,
+            "boot",
+            1000,
+            "abc"
+        )
+        .is_empty()
+    );
+    assert!(
+        !mismatches(
+            &report("active", Some(7), Some(98)),
+            &fixture,
+            "boot",
+            1000,
+            "abc"
+        )
+        .is_empty()
+    );
+    assert!(
+        !mismatches(
+            &report("deny_all", None, None),
+            &Expected::DenyAll,
+            "other",
+            1000,
+            "abc"
+        )
+        .is_empty()
+    );
+    assert!(
+        !mismatches(
+            &report("deny_all", None, None),
+            &Expected::DenyAll,
+            "boot",
+            1001,
+            "abc"
+        )
+        .is_empty()
+    );
+    assert!(
+        !mismatches(
+            &report("deny_all", None, None),
+            &Expected::DenyAll,
+            "boot",
+            1000,
+            "different"
+        )
+        .is_empty()
+    );
+    let mut stale = report("deny_all", None, None);
+    stale.fence_sha256 = None;
+    assert!(!mismatches(&stale, &Expected::DenyAll, "boot", 1000, "abc").is_empty());
+    stale.protocol = 2;
+    assert!(!mismatches(&stale, &Expected::DenyAll, "boot", 1000, "abc").is_empty());
+}

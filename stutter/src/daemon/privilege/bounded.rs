@@ -115,7 +115,9 @@ pub(super) fn validate_request(request: &PrivilegedWorkerRequest) -> anyhow::Res
         PrivilegedWorkerRequest::Apply { .. } => {
             return Err(PrivilegedWorkerError::BoundedServiceRequiresPrepared.into());
         }
-        PrivilegedWorkerRequest::Shutdown | PrivilegedWorkerRequest::SettleIssuedTokens => {
+        PrivilegedWorkerRequest::Shutdown
+        | PrivilegedWorkerRequest::SettleIssuedTokens
+        | PrivilegedWorkerRequest::FenceStatus => {
             return Ok(());
         }
         PrivilegedWorkerRequest::CommitPrepared { .. } => {
