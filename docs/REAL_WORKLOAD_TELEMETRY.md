@@ -91,6 +91,16 @@ cost stays inside its budget: `numa_stat`, `damon_state` and `resctrl_inventory`
 `cpu_power` every 2 s. The safety guards (`psi`, `oom_guard`, `sched_ext`) stay on every tick.
 The table is in `stutter/src/autotune/runtime/sensor_hub.rs`.
 
+### Renderer-stamped frames (prototype)
+
+The direct-frame requirement stays EvidenceDeferred for real games. A measured alternative to the
+MangoHud polling offset exists as an opt-in prototype: `telemetry::stamped_frames` validates a
+producer-stamped `CLOCK_MONOTONIC` stream and turns its measured delivery latency into the alignment
+uncertainty the unchanged 2 ms gate checks, and `xtask frame-clock-prototype` measures it on a
+controlled fixture. On the 2026-11-09 fixture runs the bound was under 2 ms in four of six runs and
+not under heavy CPU oversubscription; it is not wired into the daemon and establishes no
+attribution. See `docs/validation/frame-clock-prototype-2026-11-09/RESULTS.md`.
+
 ### Experimental audio and browser contracts
 
 Instead of writing a contract file, `--template audio-xrun --pid PID` or `--template

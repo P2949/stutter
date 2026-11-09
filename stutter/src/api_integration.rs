@@ -50,6 +50,7 @@ pub mod telemetry {
             quality::*,
             registration::*,
             session::*,
+            stamped_frames::*,
         },
     };
 }

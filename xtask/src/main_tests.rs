@@ -48,6 +48,7 @@ fn expected_subcommands_are_registered() {
             "fixture-update",
             "fmt",
             "frame-campaign",
+            "frame-clock-prototype",
             "generate-completions",
             "generate-man",
             "kernel-matrix",

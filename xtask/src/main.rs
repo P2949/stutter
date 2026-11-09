@@ -18,6 +18,7 @@ pub mod fixed_work;
 pub mod fixture_coverage;
 pub mod fixtures;
 pub mod frame_campaign;
+mod frame_clock_prototype;
 pub mod kernel_matrix;
 pub mod kpi_observation;
 mod live_acceptance;
@@ -79,6 +80,10 @@ pub enum XtaskCommand {
         #[command(subcommand)]
         command: kpi_observation::KpiObservationCommand,
     },
+    #[command(
+        about = "Measure the delivery bound of a renderer-stamped frame stream on a controlled fixture"
+    )]
+    FrameClockPrototype(frame_clock_prototype::FrameClockArgs),
     #[command(about = "Run canonical live observation acceptance and retain evidence")]
     LiveAcceptance {
         #[command(subcommand)]
@@ -497,6 +502,7 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
     let root = repo_root()?;
     match command {
         XtaskCommand::KpiObservation { command } => kpi_observation::execute(command),
+        XtaskCommand::FrameClockPrototype(args) => frame_clock_prototype::run(&args),
         XtaskCommand::LiveAcceptance { suite } => live_acceptance::run(&root, suite),
         XtaskCommand::RecoveryController { mode } => live_acceptance::recovery::controller(mode),
         XtaskCommand::LiveBurst {
