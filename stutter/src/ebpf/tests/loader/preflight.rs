@@ -188,25 +188,33 @@ fn gates_optional_tracepoint_validation_by_config() {
     assert!(!availability.sched_stat_wait);
     assert!(!availability.irq_handler);
 
-    // Validating with cpu_freq = true should FAIL
+    // An enabled optional probe whose layout is incompatible degrades to unavailable coverage:
+    // the monitor still starts, and the probe is never attached with guessed offsets.
     config.probes.cpu_freq = true;
-    let err = validate_tracepoint_formats(&dir, &config).unwrap_err();
-    assert!(err.to_string().contains("cpu_frequency"));
+    let availability = validate_tracepoint_formats(&dir, &config).unwrap();
+    assert!(!availability.cpu_frequency);
     config.probes.cpu_freq = false;
 
-    // Validating with stat_wait = true should FAIL
     config.probes.stat_wait = true;
-    let err = validate_tracepoint_formats(&dir, &config).unwrap_err();
-    assert!(err.to_string().contains("sched_stat_wait"));
+    let availability = validate_tracepoint_formats(&dir, &config).unwrap();
+    assert!(!availability.sched_stat_wait);
     config.probes.stat_wait = false;
 
-    // Validating with irq_latency = true should FAIL
-    config.probes.irq_latency = true;
     // irq_latency also requires --irq N in CLI, but validate_tracepoint_formats
     // only cares about the irq_latency flag and existence of files.
-    let err = validate_tracepoint_formats(&dir, &config).unwrap_err();
-    assert!(err.to_string().contains("irq_handler_entry"));
+    config.probes.irq_latency = true;
+    let availability = validate_tracepoint_formats(&dir, &config).unwrap();
+    assert!(!availability.irq_handler);
     config.probes.irq_latency = false;
+
+    // A required tracepoint with an incompatible layout still fails closed.
+    fs::write(
+        dir.join("sched/sched_switch/format"),
+        "field:pid_t prev_pid; offset:99; size:4; signed:1;",
+    )
+    .unwrap();
+    let err = validate_tracepoint_formats(&dir, &config).unwrap_err();
+    assert!(err.to_string().contains("sched_switch"));
 
     fs::remove_dir_all(dir).ok();
 }

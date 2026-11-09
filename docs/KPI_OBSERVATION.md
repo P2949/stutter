@@ -71,6 +71,8 @@ independently checked checksum, and uses four counterbalanced pairs of identical
 are persisted before analysis. It checks reconstruction, action-state emptiness, producer exit and
 socket cleanup. The source metrics are real; scheduler monitor ticks are supplied by the harness.
 It does not change a setting, qualify the installed service or demonstrate a tuning benefit. The
-2026-11-08 first run completed with the frozen classifier's `Equivalent` verdict; its interval
-excluded a 20 percent gain but did not establish strict equivalence within the 5 percent margin.
+2026-11-08 first run completed under the then-current classifier, which labelled it `Equivalent`; its
+interval excluded a 20 percent gain but did not establish strict equivalence within the 5 percent
+margin. The classifier no longer makes that claim: ruling out the benefit floor now yields
+`Uncertain` unless the whole interval lies inside the margin.
 Raw evidence is retained privately in `.llm-runs/kpi-observation-20261108`.

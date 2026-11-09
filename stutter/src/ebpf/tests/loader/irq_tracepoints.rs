@@ -168,12 +168,9 @@ fn irq_preflight_rejects_bad_irq_handler_exit_offset() {
 
     config.probes.irq_latency = true;
 
-    let result = validate_tracepoint_formats(&dir, &config);
-    assert!(result.is_err());
-    let err = result.unwrap_err();
-    let err_str = format!("{err:#}");
-    assert!(err_str.contains("irq_handler_exit"));
-    assert!(err_str.contains("expected offset 8, got 12"));
+    // The IRQ probe is optional: an incompatible layout degrades coverage instead of failing.
+    let availability = validate_tracepoint_formats(&dir, &config).unwrap();
+    assert!(!availability.irq_handler);
 
     let preflight =
         crate::ebpf::preflight::tracepoint_preflight(&dir, false, false, true, false, false);

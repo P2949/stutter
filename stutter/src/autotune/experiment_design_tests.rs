@@ -375,3 +375,29 @@ fn impossible_plans_and_non_finite_thresholds_are_refused_not_wrapped() {
     assert!(fixed().validate().is_ok());
     assert!(sequential().validate().is_ok());
 }
+
+#[test]
+fn ruling_out_the_benefit_floor_is_not_proven_equivalence() {
+    // Estimate about +4%, interval reaching beyond the +/-3% margin and below the 10% floor:
+    // no meaningful benefit is demonstrated, but equivalence is not either.
+    let gains = [4.0, 9.0, -1.0, 7.0, 0.0, 8.0, 1.0, 3.0];
+    let analysis = fixed().analyse(&gains, 1, false).unwrap();
+    assert!(analysis.interval.2 < 10.0 && analysis.interval.2 >= 3.0);
+    assert_eq!(analysis.decision, Decision::Uncertain);
+    let evidence = ExperimentEvidence {
+        design_digest: fixed().digest(),
+        analyses: vec![analysis],
+        decision: Decision::Uncertain,
+        overhead_note: String::new(),
+    };
+    assert!(evidence.consistent_with(&fixed()));
+}
+
+#[test]
+fn equivalence_needs_the_whole_interval_inside_the_margin() {
+    let tight = [0.5, -0.4, 0.2, 0.1, -0.2, 0.3, 0.0, -0.1];
+    assert_eq!(
+        fixed().analyse(&tight, 1, false).unwrap().decision,
+        Decision::Equivalent
+    );
+}

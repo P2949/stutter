@@ -161,7 +161,15 @@ pub(crate) fn validate_optional_tracepoint_format_at(
         return Ok(false);
     }
 
-    validate_tracepoint_format_at_named(path, name, expected_offsets)?;
+    // A present but incompatible optional tracepoint is unavailable coverage, never a startup
+    // failure: attaching it with the wrong offsets would read the wrong field.
+    if let Err(error) = validate_tracepoint_format_at_named(path, name, expected_offsets) {
+        log::warn!(
+            "optional tracepoint {} has an incompatible layout; continuing without it (degraded coverage): {error:#}",
+            name.as_str()
+        );
+        return Ok(false);
+    }
     Ok(true)
 }
 

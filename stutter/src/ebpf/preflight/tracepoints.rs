@@ -335,17 +335,17 @@ pub(crate) fn validate_tracepoint_formats(
     let irq_exit = events_root.join("irq/irq_handler_exit/format");
 
     let irq_handler = if config.probes.irq_latency && irq_entry.exists() && irq_exit.exists() {
-        validate_tracepoint_format_at_named(
+        validate_optional_tracepoint_format_at(
             &irq_entry,
             TRACEPOINT_IRQ_HANDLER_ENTRY,
             IRQ_HANDLER_FIELDS,
-        )?;
-        validate_tracepoint_format_at_named(
+            true,
+        )? && validate_optional_tracepoint_format_at(
             &irq_exit,
             TRACEPOINT_IRQ_HANDLER_EXIT,
             IRQ_HANDLER_FIELDS,
-        )?;
-        true
+            true,
+        )?
     } else {
         false
     };

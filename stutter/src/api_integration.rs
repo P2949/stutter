@@ -66,7 +66,13 @@ pub mod experiments {
 
 pub mod cgroup_control {
     //! Typed cgroup resource-control values and their read-only preflight.
-    pub use crate::actions::cgroup::control::*;
+    pub use crate::actions::cgroup::{
+        control::*,
+        control_transaction::{
+            CommitError, ControlCommitted, ControlFiles, ControlPrepared, PrepareError, RealFiles,
+            RestoreOutcome, prepare as prepare_control,
+        },
+    };
 }
 
 pub mod search {

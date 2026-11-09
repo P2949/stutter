@@ -145,12 +145,12 @@ impl ExperimentDesign {
         look: u32,
         drifted: bool,
     ) -> Result<Analysis, AnalysisRefused> {
-        let (confidence, expected_blocks, last_look) = match self.stopping {
+        let (confidence, expected_blocks) = match self.stopping {
             StoppingRule::FixedN { blocks, confidence } => {
                 if improvements.len() != blocks as usize || look != 1 {
                     return Err(AnalysisRefused::EarlyLookAtFixedN);
                 }
-                (confidence, blocks as usize, true)
+                (confidence, blocks as usize)
             }
             StoppingRule::Sequential {
                 looks,
@@ -165,7 +165,7 @@ impl ExperimentDesign {
                 let expected = look
                     .checked_mul(blocks_per_look)
                     .ok_or(AnalysisRefused::ImpossiblePlan)?;
-                (confidence, expected as usize, look == looks)
+                (confidence, expected as usize)
             }
         };
         if improvements.len() < expected_blocks || improvements.len() < 2 {
@@ -176,7 +176,7 @@ impl ExperimentDesign {
         let decision = if drifted {
             Decision::InvalidExperiment
         } else {
-            self.classify(&interval, last_look)
+            self.classify(&interval)
         };
         Ok(Analysis {
             look,
@@ -187,7 +187,7 @@ impl ExperimentDesign {
         })
     }
 
-    fn classify(&self, interval: &Interval, last_look: bool) -> Decision {
+    fn classify(&self, interval: &Interval) -> Decision {
         if interval.low >= self.min_effect_percent {
             Decision::Beneficial
         } else if interval.high <= -self.equivalence_margin_percent {
@@ -196,10 +196,9 @@ impl ExperimentDesign {
             && interval.high < self.equivalence_margin_percent
         {
             Decision::Equivalent
-        } else if last_look && interval.high < self.min_effect_percent {
-            // Too small to matter, though not shown equivalent: no meaningful gain.
-            Decision::Equivalent
         } else {
+            // Strict equivalence is unproven: ruling out the meaningful-benefit floor is not it.
+            // The raw interval stays in the analysis; the verdict stays Uncertain, never kept.
             Decision::Uncertain
         }
     }
@@ -226,9 +225,9 @@ impl ExperimentEvidence {
         if self.design_digest != design.digest() || design.validate().is_err() {
             return false;
         }
-        let (looks_allowed, last_look_number) = match design.stopping {
-            StoppingRule::FixedN { .. } => (1, 1),
-            StoppingRule::Sequential { looks, .. } => (looks as usize, looks),
+        let looks_allowed = match design.stopping {
+            StoppingRule::FixedN { .. } => 1,
+            StoppingRule::Sequential { looks, .. } => looks as usize,
         };
         let Some(final_analysis) = self.analyses.last() else {
             return false;
@@ -269,7 +268,7 @@ impl ExperimentEvidence {
             // A drifted block set is recorded as invalid whatever its numbers say; any other
             // decision must be exactly what the numbers classify to.
             let decision_follows = analysis.decision == Decision::InvalidExperiment
-                || analysis.decision == design.classify(&interval, look == last_look_number);
+                || analysis.decision == design.classify(&interval);
             let stops_early = analysis.decision != Decision::Uncertain;
             analysis.look == look
                 && analysis.blocks == blocks

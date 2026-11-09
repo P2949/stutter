@@ -19,6 +19,7 @@ use crate::actions::{
 
 mod acceptance;
 pub(crate) mod control;
+pub(crate) mod control_transaction;
 mod fs_io;
 mod model;
 mod ownership;

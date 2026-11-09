@@ -24,7 +24,7 @@ runtime collector and its observation-only experiment-manager interface. Four co
 of identical arms were preregistered, and raw blocks were persisted before admission/analysis.
 Every aggregate and interval was reconstructed successfully from those captures. The frozen
 classifier returned `Equivalent`: estimated improvement 4.19%, 95% interval -3.71% to +12.09%,
-below the predeclared 20% benefit floor. This does **not** establish strict equivalence within 5%,
+below the predeclared 20% benefit floor. This does **not** establish strict equivalence within 5%, (Later classifier revision: this outcome would now be `Uncertain`, since the interval is not inside the margin.)
 nor benefit from a tuning action: no setting differed between arms. This harness supplied monitor
 ticks itself; the separate service check above supplied the actual live-monitor acceptance.
 That first harness run used a development executable pinned by its own SHA in the private summary;
