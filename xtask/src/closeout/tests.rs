@@ -304,3 +304,29 @@ fn the_frozen_baseline_names_fifteen_requirements_each_in_the_manifest() {
     let frozen: Vec<&str> = subcaps::PLAN_BASELINE.iter().map(|(id, _)| *id).collect();
     assert_eq!(declared, frozen);
 }
+
+#[test]
+fn a_committed_report_must_match_the_pin_and_the_current_body() {
+    let root = std::env::temp_dir().join(format!("stutter-report-{}", std::process::id()));
+    let directory = root.join("docs/validation");
+    fs::create_dir_all(&directory).unwrap();
+    let fresh = "# Closeout report\n\nSource `abc`, kernel `1`. Generated.\n\n## Disposition counts\n\nbody\n";
+    // Only the kernel differs: still the same report.
+    fs::write(
+        directory.join("closeout-report-1.md"),
+        fresh.replace("kernel `1`", "kernel `2`"),
+    )
+    .unwrap();
+    assert!(committed_report_matches(&root, "abc", fresh).is_ok());
+    // A stale pin and a stale body are each refused.
+    let stale_pin = fresh.replace("`abc`", "`old`");
+    fs::write(directory.join("closeout-report-1.md"), &stale_pin).unwrap();
+    assert!(committed_report_matches(&root, "abc", fresh).is_err());
+    fs::write(
+        directory.join("closeout-report-1.md"),
+        fresh.replace("body", "fewer items"),
+    )
+    .unwrap();
+    assert!(committed_report_matches(&root, "abc", fresh).is_err());
+    let _ = fs::remove_dir_all(&root);
+}

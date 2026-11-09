@@ -275,7 +275,7 @@ fn every_state_change_must_be_on_a_fixture_started_by_this_run() {
         ),
         record(
             "candidate_applied",
-            target(json!(100), json!("StutterAcceptan"), json!(null)),
+            target(json!(100), json!("StutterAcceptan"), json!(5000)),
         ),
         record(
             "candidate_kept",
@@ -288,8 +288,18 @@ fn every_state_change_must_be_on_a_fixture_started_by_this_run() {
     ]);
     let check = only_fixture_targets(&good, &fixtures);
     assert!(check.passed, "{}", check.detail);
+
+    let unticked = audit_of(vec![record(
+        "candidate_applied",
+        target(json!(100), json!("StutterAcceptan"), json!(null)),
+    )]);
+    let check = only_fixture_targets(&unticked, &fixtures);
     assert!(
-        check.detail.contains("1 record(s) carry no start time"),
+        !check.passed,
+        "a record with no start time is not exact identity"
+    );
+    assert!(
+        check.detail.contains("carries no process start time"),
         "{}",
         check.detail
     );
@@ -433,7 +443,8 @@ fn the_fence_the_smoke_writes_has_exactly_the_fields_the_worker_reads_and_nothin
 }
 
 #[test]
-fn without_a_user_nothing_is_fenced_and_nothing_is_written() {
-    // Not armed in this test process: writing is a no-op, never a stray sudo call.
-    assert!(write_fence(1, 60).is_ok());
+fn an_unarmed_fence_refuses_instead_of_silently_running_unfenced() {
+    // Not armed in this test process: a mutation case must not proceed, and no sudo call is made.
+    assert!(write_fence(1, 60).is_err());
+    assert!(deny_all(60).is_err());
 }

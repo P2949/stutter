@@ -385,7 +385,6 @@ pub(super) fn only_fixture_targets(audit: &HistoryAudit, fixtures: &[FixtureIden
         );
     }
     let mut changes = 0_usize;
-    let mut unrecorded_ticks = 0_usize;
     let mut problems = Vec::new();
     for (index, record) in audit.records.iter().enumerate() {
         let Some(decision) = record["decision"]["decision"].as_str() else {
@@ -420,7 +419,9 @@ pub(super) fn only_fixture_targets(audit: &HistoryAudit, fixtures: &[FixtureIden
             None => problems.push(format!("record {index} ({decision}) names no process comm for pid {pid}")),
         }
         match &target["process_starttime_ticks"] {
-            Value::Null => unrecorded_ticks += 1,
+            Value::Null => problems.push(format!(
+                "record {index} ({decision}) carries no process start time for pid {pid}: a pid and comm alone cannot rule out pid reuse"
+            )),
             ticks if ticks.as_u64() == Some(fixture.start_ticks) => {}
             other => problems.push(format!(
                 "record {index} ({decision}) names start time {other} for pid {pid}, but the fixture started at {}",
@@ -429,18 +430,11 @@ pub(super) fn only_fixture_targets(audit: &HistoryAudit, fixtures: &[FixtureIden
         }
     }
     if problems.is_empty() {
-        let note = if unrecorded_ticks > 0 {
-            format!(
-                "; {unrecorded_ticks} record(s) carry no start time, so those bind by pid and comm only"
-            )
-        } else {
-            String::new()
-        };
         Check::new(
             NAME,
             true,
             format!(
-                "{changes} state change(s), all on the {} fixture(s) this run started{note}",
+                "{changes} state change(s), all on the {} fixture(s) this run started",
                 fixtures.len()
             ),
         )
@@ -453,15 +447,17 @@ pub(super) fn only_fixture_targets(audit: &HistoryAudit, fixtures: &[FixtureIden
 /// smoke knows the user; until then no fence is written.
 static FENCE: Mutex<Option<(std::path::PathBuf, u32)>> = Mutex::new(None);
 
-pub(super) fn arm_fence(user: &str, uid: u32) {
-    if let Ok(mut fence) = FENCE.lock() {
-        *fence = Some((
-            std::path::PathBuf::from(format!(
-                "/var/lib/stutter/worker-{user}/validation-fence.json"
-            )),
-            uid,
-        ));
-    }
+pub(super) fn arm_fence(user: &str, uid: u32) -> anyhow::Result<()> {
+    let mut fence = FENCE
+        .lock()
+        .map_err(|_| anyhow::anyhow!("the validation fence state is poisoned"))?;
+    *fence = Some((
+        std::path::PathBuf::from(format!(
+            "/var/lib/stutter/worker-{user}/validation-fence.json"
+        )),
+        uid,
+    ));
+    Ok(())
 }
 
 /// The fence file's content: one process (pid and start time), the account, the boot and an expiry.
@@ -491,17 +487,22 @@ pub(super) fn write_fence(pid: u32, seconds: u64) -> anyhow::Result<()> {
     use std::io::Write;
     let armed = FENCE.lock().ok().and_then(|fence| fence.clone());
     let Some((path, uid)) = armed else {
-        return Ok(());
+        anyhow::bail!("no validation fence is armed: refusing to run a mutation case unfenced");
     };
-    let live = live_process(Path::new("/proc"), pid)
-        .ok_or_else(|| anyhow::anyhow!("the fixture's identity cannot be read to fence it"))?;
+    let ticks = if pid == 0 {
+        0
+    } else {
+        live_process(Path::new("/proc"), pid)
+            .ok_or_else(|| anyhow::anyhow!("the fixture's identity cannot be read to fence it"))?
+            .start_ticks
+    };
     let boot = fs::read_to_string("/proc/sys/kernel/random/boot_id")?;
     let expires = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)?
         .as_secs()
         .saturating_add(seconds)
         .saturating_add(120);
-    let body = fence_json(uid, pid, live.start_ticks, &boot, expires);
+    let body = fence_json(uid, pid, ticks, &boot, expires);
     let mut tee = std::process::Command::new("sudo")
         .args(["-n", "tee"])
         .arg(&path)
@@ -525,6 +526,12 @@ pub(super) fn write_fence(pid: u32, seconds: u64) -> anyhow::Result<()> {
         "the validation fence could not be made readable"
     );
     Ok(())
+}
+
+/// The validation session between and around fixtures: the worker refuses every new target, while
+/// restoring what it already holds stays possible.
+pub(super) fn deny_all(seconds: u64) -> anyhow::Result<()> {
+    write_fence(0, seconds)
 }
 
 /// Lifts the fence. Best effort: a fence that cannot be removed only makes the worker stricter.

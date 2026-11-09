@@ -330,6 +330,19 @@ fn allowed_lists(pid: u32) -> Vec<String> {
         .collect()
 }
 
+/// How long a validation session fences the worker; a forgotten one expires and refuses mutation until removed.
+const SESSION_SECONDS: u64 = 1800;
+
+/// Ends the validation session (lifts the fence) when the run is over, however it ends, after every
+/// token has settled.
+struct Session;
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        isolation::remove_fence();
+    }
+}
+
 struct Fixture {
     child: std::process::Child,
 }
@@ -338,8 +351,8 @@ impl Drop for Fixture {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
-        // The fence belonged to this fixture.
-        isolation::remove_fence();
+        // Back to deny-all, not to no fence: the worker must refuse every target until the session ends.
+        let _ = isolation::deny_all(SESSION_SECONDS);
     }
 }
 
@@ -414,7 +427,9 @@ fn run_inner(root: &Path, args: &SmokeArgs) -> anyhow::Result<()> {
         None => run_text("id", &["-un"])?.trim().to_owned(),
     };
     let uid: u32 = run_text("id", &["-u", &user])?.trim().parse()?;
-    isolation::arm_fence(&user, uid);
+    isolation::arm_fence(&user, uid)?;
+    let _session = Session;
+    isolation::deny_all(SESSION_SECONDS).context("start the deny-all validation session")?;
     let controller = format!("stutter-autotune-bounded@{user}.service");
     let worker = format!("stutter-privileged-worker@{user}.service");
     let mut checks = Vec::new();
@@ -452,6 +467,19 @@ fn run_inner(root: &Path, args: &SmokeArgs) -> anyhow::Result<()> {
         }))?,
     )?;
 
+    // No mutation case may start unless the running services are exactly the build under test.
+    let failed: Vec<&str> = checks
+        .iter()
+        .filter(|check| !check.passed)
+        .map(|check| check.name.as_str())
+        .collect();
+    if !failed.is_empty() {
+        write_evidence(root, args, &checks)?;
+        bail!(
+            "refusing every mutation case: the running services are not the build under test ({})",
+            failed.join(", ")
+        );
+    }
     let (baseline_outstanding, baseline_entries) = ledger(&user).unwrap_or((usize::MAX, 0));
     checks.push(Check::new(
         "nothing_outstanding_before",

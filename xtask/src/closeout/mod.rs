@@ -226,6 +226,7 @@ pub fn run(root: &Path, args: &CloseoutArgs) -> anyhow::Result<()> {
     report.push_str(&subcaps::render(&manifest));
     if args.strict {
         strict_source_check(root, &ledger.source_sha)?;
+        committed_report_matches(root, &ledger.source_sha, &report)?;
     }
     if args.strict || args.run_tests {
         let ran = subcaps::run_tests(&manifest, root)?;
@@ -246,6 +247,42 @@ pub fn run(root: &Path, args: &CloseoutArgs) -> anyhow::Result<()> {
             ledger.entries.len()
         );
     }
+    Ok(())
+}
+
+/// The newest committed closeout report must be the one this ledger and manifest generate now: the
+/// same pinned source and the same body (the kernel line is host-specific and is not compared).
+fn committed_report_matches(root: &Path, source_sha: &str, fresh: &str) -> anyhow::Result<()> {
+    let directory = root.join("docs/validation");
+    let mut reports: Vec<_> = fs::read_dir(&directory)
+        .with_context(|| format!("read {}", directory.display()))?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("closeout-report-") && name.ends_with(".md"))
+        })
+        .collect();
+    reports.sort();
+    let latest = reports
+        .last()
+        .context("no committed closeout report under docs/validation")?;
+    let committed = fs::read_to_string(latest)?;
+    ensure!(
+        committed.contains(&format!("Source `{source_sha}`")),
+        "{} names a different source than the ledger pin {source_sha}; regenerate it",
+        latest.display()
+    );
+    let body = |text: &str| {
+        text.split_once("## Disposition counts")
+            .map(|(_, rest)| rest.to_owned())
+    };
+    ensure!(
+        body(&committed).is_some() && body(&committed) == body(fresh),
+        "{} does not match the report the current ledger and subcapability manifest generate; regenerate it",
+        latest.display()
+    );
     Ok(())
 }
 

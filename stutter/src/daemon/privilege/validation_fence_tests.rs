@@ -173,3 +173,16 @@ fn a_task_passes_only_if_its_process_is_the_fenced_one_and_still_the_same_proces
     // Without a fence everything passes: the fence is the only thing that narrows.
     check_task(&FenceState::Absent, &proc, 501).unwrap();
 }
+
+#[test]
+fn a_deny_all_session_refuses_every_target_but_is_not_malformed() {
+    let dir = state_dir("deny-all");
+    let path = write_fence(&dir, &fence_json(0, 0, 9_999_999_999));
+    let state = load_at(&path, 1_000).expect("a deny-all fence is valid");
+    assert_eq!(state, FenceState::DenyAll);
+    let proc_root = proc_with("deny-all-proc", &[(500, 42)]);
+    let error = check_task(&state, &proc_root, 500).unwrap_err().to_string();
+    assert!(error.contains("validation_fence_deny_all"), "{error}");
+    // An expired deny-all session still refuses, so a forgotten one stops tuning until removed.
+    assert!(refusal(load_at(&path, 10_000_000_000)).contains("validation_fence_expired_remove_it"));
+}

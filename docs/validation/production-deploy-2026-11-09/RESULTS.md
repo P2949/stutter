@@ -97,3 +97,18 @@ controller's history is checked: every state change must be on a fixture this ru
 refused before measuring anything (`.llm-runs/production-smoke-20261109-blocked-demo`, 23 matching
 processes, 0 checks, production untouched). This does not make the heuristic controller pick the fixture
 over a real game; it makes the smoke refuse to run when it could.
+
+## Fence lifecycle and audit tightening (follow-up to the 9 November review)
+
+Code-level, unit-tested only; not live-qualified (no isolated transient worker has run it yet).
+
+* The smoke now refuses every mutation case unless the running controller and worker checks all pass.
+* A validation session starts as a deny-all fence (`root_pid` 0 in the fence file, a worker state `DenyAll`), becomes
+  the exact fixture while one is active, returns to deny-all between fixtures and is lifted only when the run ends,
+  after the tokens have settled. Arming and writing are fallible: no armed fence means no mutation case.
+* Still missing: a non-mutating acknowledgment from the *running* worker that it loaded the fence. Until that exists
+  (it needs a worker protocol change and an isolated transient worker), the pinned-binary hash is the only proof that
+  the worker is a fence-aware build, and live qualification stays outstanding.
+* The history audit fails any state-changing record without a process start time.
+* `closeout-report --strict` now also requires the newest committed report to match the ledger pin and the
+  current manifest.

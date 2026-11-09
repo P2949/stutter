@@ -44,6 +44,9 @@ struct Fence {
 pub(super) enum FenceState {
     /// No fence: ordinary operation.
     Absent,
+    /// A validation session is open but no fixture is: every new target is refused (restoring what is
+    /// already held is not a target and stays possible).
+    DenyAll,
     /// Only the process `root_pid`, started at `start_ticks`, may be targeted.
     Active { root_pid: u32, start_ticks: u64 },
 }
@@ -88,6 +91,9 @@ pub(super) fn load(
         now_unix < fence.expires_unix,
         "validation_fence_expired_remove_it"
     );
+    if fence.root_pid == 0 {
+        return Ok(FenceState::DenyAll);
+    }
     ensure!(fence.root_pid > 1, "validation_fence_malformed: no target");
     Ok(FenceState::Active {
         root_pid: fence.root_pid,
@@ -97,6 +103,9 @@ pub(super) fn load(
 
 /// Whether a task of process `tgid` may be targeted under `state`.
 pub(super) fn check_task(state: &FenceState, proc_root: &Path, tgid: u32) -> anyhow::Result<()> {
+    if *state == FenceState::DenyAll {
+        bail!("validation_fence_deny_all: no fixture is active in this validation session");
+    }
     let FenceState::Active {
         root_pid,
         start_ticks,
