@@ -84,6 +84,7 @@ pub fn restore_rollback_token_direct(
         RollbackToken::PmQosRelease { records } => restore_pm_qos_release(records),
         RollbackToken::ResctrlGroupRemove { records } => restore_resctrl_groups(records),
         RollbackToken::DamosTeardown { records } => restore_damos(records),
+        RollbackToken::CgroupControlRestore { records } => restore_cgroup_controls(records),
         RollbackToken::SysfsRestore {
             path,
             original_value,
@@ -509,5 +510,17 @@ pub(super) fn restore_damos(
             }
         }
     }
+    Ok(summary)
+}
+
+pub(super) fn restore_cgroup_controls(
+    records: &[crate::actions::cgroup::control_transaction::ControlRecord],
+) -> anyhow::Result<RollbackRestoreSummary> {
+    let check = crate::actions::cgroup::control_rollback::restore_all(records);
+    let mut summary = RollbackRestoreSummary::success("cgroup-control-restore", check.restored);
+    summary.skipped_items = check.already + check.foreign + check.replaced;
+    summary.skipped_identity_mismatch = check.replaced;
+    summary.failed_items = check.unproven;
+    summary.messages = check.messages;
     Ok(summary)
 }

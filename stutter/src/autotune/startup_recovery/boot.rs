@@ -28,6 +28,7 @@ pub(super) fn task_boot_superseded(
         | RollbackToken::PmQosRelease { .. }
         | RollbackToken::ResctrlGroupRemove { .. }
         | RollbackToken::DamosTeardown { .. }
+        | RollbackToken::CgroupControlRestore { .. }
         | RollbackToken::SysfsRestore { .. } => Ok(false),
     }
 }

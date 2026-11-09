@@ -293,6 +293,9 @@ pub fn verify_rollback_restored_baseline(
         CandidateAction::Damos { .. } => RollbackVerification::unavailable(
             "DAMOS state is not part of the active configuration snapshot, and reclaim is not restorable",
         ),
+        CandidateAction::CgroupControl { .. } => RollbackVerification::unavailable(
+            "typed cgroup control values are not part of the active configuration snapshot",
+        ),
         CandidateAction::Fake { .. } => {
             RollbackVerification::unavailable("fake candidate has no active config verifier")
         }

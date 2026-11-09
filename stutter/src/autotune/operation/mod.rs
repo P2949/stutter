@@ -42,12 +42,24 @@ pub enum MutationOperationKind {
     /// A DAMOS scheme on one kdamond. Reclaim and LRU actions are irreversible in effect.
     DamosScheme,
 
+    /// Typed cgroup resource-control knobs, each its own operation. None inherits the maturity of
+    /// cgroup placement.
+    CgroupCpuWeight,
+    CgroupCpuIdle,
+    CgroupCpuMax,
+    CgroupCpusetCpus,
+    CgroupCpusetMems,
+    CgroupMemoryMin,
+    CgroupMemoryLow,
+    CgroupMemoryHigh,
+    CgroupIoWeight,
+
     /// Test-only or unrecognisable payloads. Never authorised by any contract.
     Unclassified,
 }
 
 impl MutationOperationKind {
-    pub const ALL: [Self; 18] = [
+    pub const ALL: [Self; 27] = [
         Self::CpuAffinityProfile,
         Self::Uclamp,
         Self::Nice,
@@ -65,6 +77,15 @@ impl MutationOperationKind {
         Self::PmQosCpuLatency,
         Self::ResctrlCacheAllocation,
         Self::DamosScheme,
+        Self::CgroupCpuWeight,
+        Self::CgroupCpuIdle,
+        Self::CgroupCpuMax,
+        Self::CgroupCpusetCpus,
+        Self::CgroupCpusetMems,
+        Self::CgroupMemoryMin,
+        Self::CgroupMemoryLow,
+        Self::CgroupMemoryHigh,
+        Self::CgroupIoWeight,
         Self::Unclassified,
     ];
 
@@ -87,6 +108,15 @@ impl MutationOperationKind {
             Self::PmQosCpuLatency => "pm_qos_cpu_latency",
             Self::ResctrlCacheAllocation => "resctrl_cache_allocation",
             Self::DamosScheme => "damos_scheme",
+            Self::CgroupCpuWeight => "cgroup_cpu_weight",
+            Self::CgroupCpuIdle => "cgroup_cpu_idle",
+            Self::CgroupCpuMax => "cgroup_cpu_max",
+            Self::CgroupCpusetCpus => "cgroup_cpuset_cpus",
+            Self::CgroupCpusetMems => "cgroup_cpuset_mems",
+            Self::CgroupMemoryMin => "cgroup_memory_min",
+            Self::CgroupMemoryLow => "cgroup_memory_low",
+            Self::CgroupMemoryHigh => "cgroup_memory_high",
+            Self::CgroupIoWeight => "cgroup_io_weight",
             Self::Unclassified => "unclassified",
         }
     }
@@ -113,6 +143,15 @@ impl MutationOperationKind {
             Self::PmQosCpuLatency => Some("pm_qos_cpu_latency"),
             Self::ResctrlCacheAllocation => Some("resctrl_cache_allocation"),
             Self::DamosScheme => Some("damos_scheme"),
+            Self::CgroupCpuWeight => Some("cgroup_cpu_weight"),
+            Self::CgroupCpuIdle => Some("cgroup_cpu_idle"),
+            Self::CgroupCpuMax => Some("cgroup_cpu_max"),
+            Self::CgroupCpusetCpus => Some("cgroup_cpuset_cpus"),
+            Self::CgroupCpusetMems => Some("cgroup_cpuset_mems"),
+            Self::CgroupMemoryMin => Some("cgroup_memory_min"),
+            Self::CgroupMemoryLow => Some("cgroup_memory_low"),
+            Self::CgroupMemoryHigh => Some("cgroup_memory_high"),
+            Self::CgroupIoWeight => Some("cgroup_io_weight"),
             Self::Unclassified => None,
         }
     }
@@ -143,6 +182,15 @@ impl MutationOperationKind {
                 | Self::PmQosCpuLatency
                 | Self::ResctrlCacheAllocation
                 | Self::DamosScheme
+                | Self::CgroupCpuWeight
+                | Self::CgroupCpuIdle
+                | Self::CgroupCpuMax
+                | Self::CgroupCpusetCpus
+                | Self::CgroupCpusetMems
+                | Self::CgroupMemoryMin
+                | Self::CgroupMemoryLow
+                | Self::CgroupMemoryHigh
+                | Self::CgroupIoWeight
                 | Self::Unclassified
         )
     }
@@ -173,8 +221,26 @@ impl CandidateAction {
             Self::PmQos { .. } => MutationOperationKind::PmQosCpuLatency,
             Self::Resctrl { .. } => MutationOperationKind::ResctrlCacheAllocation,
             Self::Damos { .. } => MutationOperationKind::DamosScheme,
+            Self::CgroupControl { plan } => cgroup_control_operation(&plan.action.control),
             Self::Fake { .. } => MutationOperationKind::Unclassified,
         }
+    }
+}
+
+fn cgroup_control_operation(
+    control: &crate::actions::cgroup::control::CgroupControl,
+) -> MutationOperationKind {
+    use crate::actions::cgroup::control::CgroupControl as C;
+    match control {
+        C::CpuWeight(_) => MutationOperationKind::CgroupCpuWeight,
+        C::CpuIdle(_) => MutationOperationKind::CgroupCpuIdle,
+        C::CpuMax { .. } => MutationOperationKind::CgroupCpuMax,
+        C::CpusetCpus(_) => MutationOperationKind::CgroupCpusetCpus,
+        C::CpusetMems(_) => MutationOperationKind::CgroupCpusetMems,
+        C::MemoryMin(_) => MutationOperationKind::CgroupMemoryMin,
+        C::MemoryLow(_) => MutationOperationKind::CgroupMemoryLow,
+        C::MemoryHigh(_) => MutationOperationKind::CgroupMemoryHigh,
+        C::IoWeight(_) => MutationOperationKind::CgroupIoWeight,
     }
 }
 

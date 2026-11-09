@@ -357,3 +357,74 @@ fn a_damos_candidate_is_its_own_manual_only_operation_and_never_an_executable_pl
     assert!(MutationOperationKind::DamosScheme.is_manual_only());
     assert!(CandidateExecutablePlan::from_candidate(&candidate).is_none());
 }
+
+#[test]
+fn each_cgroup_knob_is_its_own_manual_only_operation_with_its_own_capability() {
+    use crate::{
+        actions::cgroup::control::CgroupControl,
+        autotune::{
+            objective::ObjectiveKind,
+            planning::{
+                candidate::CandidateAction,
+                executable_plan::{CandidateExecutablePlan, CgroupControlActionPlan},
+            },
+        },
+    };
+    let knobs = [
+        (
+            CgroupControl::CpuWeight(100),
+            MutationOperationKind::CgroupCpuWeight,
+        ),
+        (
+            CgroupControl::CpuIdle(true),
+            MutationOperationKind::CgroupCpuIdle,
+        ),
+        (
+            CgroupControl::CpuMax {
+                quota_us: Some(1000),
+                period_us: 100_000,
+            },
+            MutationOperationKind::CgroupCpuMax,
+        ),
+        (
+            CgroupControl::CpusetCpus(vec![0]),
+            MutationOperationKind::CgroupCpusetCpus,
+        ),
+        (
+            CgroupControl::CpusetMems(vec![0]),
+            MutationOperationKind::CgroupCpusetMems,
+        ),
+        (
+            CgroupControl::MemoryMin(1),
+            MutationOperationKind::CgroupMemoryMin,
+        ),
+        (
+            CgroupControl::MemoryLow(1),
+            MutationOperationKind::CgroupMemoryLow,
+        ),
+        (
+            CgroupControl::MemoryHigh(None),
+            MutationOperationKind::CgroupMemoryHigh,
+        ),
+        (
+            CgroupControl::IoWeight(100),
+            MutationOperationKind::CgroupIoWeight,
+        ),
+    ];
+    let mut capabilities = std::collections::BTreeSet::new();
+    for (control, expected) in knobs {
+        let candidate = CandidateAction::CgroupControl {
+            plan: CgroupControlActionPlan::manual(
+                std::path::PathBuf::from("/nonexistent"),
+                control,
+                ObjectiveKind::GameRunnableLatency,
+            ),
+        };
+        assert_eq!(candidate.operation_kind(), expected);
+        assert_ne!(expected, MutationOperationKind::CgroupPlacement);
+        assert!(expected.is_manual_only());
+        assert!(CandidateExecutablePlan::from_candidate(&candidate).is_none());
+        assert!(capabilities.insert(expected.capability_id().unwrap()));
+    }
+    assert_eq!(capabilities.len(), 9);
+}

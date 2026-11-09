@@ -293,7 +293,9 @@ impl PrivilegedActionService for ServiceActionService {
                 // resctrl is volatile: its groups vanish at reboot.
                 | RollbackToken::ResctrlGroupRemove { .. }
                 // kdamond configuration does not survive a reboot.
-                | RollbackToken::DamosTeardown { .. } => Ok(RollbackResult { affected_tasks: 0 }),
+                | RollbackToken::DamosTeardown { .. }
+                // Cgroup directories do not survive a reboot.
+                | RollbackToken::CgroupControlRestore { .. } => Ok(RollbackResult { affected_tasks: 0 }),
                 RollbackToken::CpuPowerRestore { .. }
                 | RollbackToken::IrqAffinityRestore { .. }
                 | RollbackToken::GpuPowerRestore { .. }

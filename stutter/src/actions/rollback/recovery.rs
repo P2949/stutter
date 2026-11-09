@@ -71,6 +71,10 @@ pub(crate) fn recovery_descriptor(token: &RollbackToken) -> RollbackRecoveryDesc
             ManualOnly,
             "configuration teardown is exact but page reclaim or migration already done is irreversible, so recovery is never automatic and never claims the memory state was restored",
         ),
+        RollbackToken::CgroupControlRestore { .. } => (
+            VerifiedAutomatic,
+            "the recorded group must still be the same kernel object (device and inode) and the control file must still hold the value this transaction wrote; a replaced group or a foreign value is never overwritten, and a baseline that cannot be written back exactly is never recorded",
+        ),
     };
     RollbackRecoveryDescriptor {
         token_kind: token.kind(),

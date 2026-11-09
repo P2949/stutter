@@ -307,6 +307,7 @@ pub fn safety_class_for_rollback_token(token: &RollbackToken) -> SafetyClass {
         | RollbackToken::PmQosRelease { .. }
         | RollbackToken::ResctrlGroupRemove { .. }
         | RollbackToken::DamosTeardown { .. }
+        | RollbackToken::CgroupControlRestore { .. }
         | RollbackToken::SysfsRestore { .. } => SafetyClass::HighRisk,
     }
 }

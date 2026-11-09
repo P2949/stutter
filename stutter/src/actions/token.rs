@@ -93,6 +93,11 @@ pub enum RollbackToken {
     DamosTeardown {
         records: Vec<super::damos_scheme::DamosRecord>,
     },
+    /// Typed cgroup resource-control values (cpu.weight, memory.high, ...): recovery restores each
+    /// baseline only while the group is the same kernel object and the file still holds our value.
+    CgroupControlRestore {
+        records: Vec<super::cgroup::control_transaction::ControlRecord>,
+    },
 }
 
 impl RollbackToken {
@@ -111,6 +116,7 @@ impl RollbackToken {
             Self::PmQosRelease { .. } => "pm-qos-release",
             Self::ResctrlGroupRemove { .. } => "resctrl-group-remove",
             Self::DamosTeardown { .. } => "damos-teardown",
+            Self::CgroupControlRestore { .. } => "cgroup-control-restore",
         }
     }
 
@@ -307,6 +313,7 @@ impl RollbackToken {
             Self::PmQosRelease { records } => records.len(),
             Self::ResctrlGroupRemove { records } => records.len(),
             Self::DamosTeardown { records } => records.len(),
+            Self::CgroupControlRestore { records } => records.len(),
         }
     }
 
@@ -324,6 +331,7 @@ impl RollbackToken {
             | Self::PmQosRelease { .. }
             | Self::ResctrlGroupRemove { .. }
             | Self::DamosTeardown { .. }
+            | Self::CgroupControlRestore { .. }
             | Self::VmKnobRestore { .. } => None,
         }
     }

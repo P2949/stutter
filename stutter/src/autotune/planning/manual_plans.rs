@@ -196,3 +196,69 @@ impl CandidatePlan for PmQosActionPlan {
         self.action.describe()
     }
 }
+
+/// A manual-only typed cgroup resource-control write. Never converted to an executable plan.
+#[derive(Clone, Debug)]
+pub struct CgroupControlActionPlan {
+    pub name: String,
+    pub action: crate::actions::cgroup::control_action::CgroupControlAction,
+    pub evidence: Vec<CandidateEvidence>,
+    pub objective: ObjectiveKind,
+}
+
+impl CgroupControlActionPlan {
+    pub fn manual(
+        dir: std::path::PathBuf,
+        control: crate::actions::cgroup::control::CgroupControl,
+        objective: ObjectiveKind,
+    ) -> Self {
+        Self {
+            name: format!("cgroup_control_{}", control.file_and_controller().0),
+            action: crate::actions::cgroup::control_action::CgroupControlAction { dir, control },
+            evidence: Vec::new(),
+            objective,
+        }
+    }
+}
+
+impl CandidatePlan for CgroupControlActionPlan {
+    fn candidate_name(&self) -> &str {
+        &self.name
+    }
+
+    fn action_kind(&self) -> &'static str {
+        "cgroup_resource_control"
+    }
+
+    fn target_root_pid(&self) -> Option<u32> {
+        None
+    }
+
+    fn action_id(&self) -> crate::actions::ActionId {
+        self.action.id()
+    }
+
+    fn safety_class(&self) -> SafetyClass {
+        self.action.safety_class()
+    }
+
+    fn effect_scope(&self) -> ActionEffectScope {
+        ActionEffectScope::SystemWide
+    }
+
+    fn evidence(&self) -> &[CandidateEvidence] {
+        &self.evidence
+    }
+
+    fn objective(&self) -> ObjectiveKind {
+        self.objective
+    }
+
+    fn conflict_group(&self) -> ActionConflictGroup {
+        ActionConflictGroup::CgroupPlacement
+    }
+
+    fn describe(&self) -> String {
+        self.action.describe()
+    }
+}

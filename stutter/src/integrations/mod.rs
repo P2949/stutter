@@ -326,6 +326,15 @@ pub fn operation_domain(operation: MutationOperationKind) -> Option<ResourceDoma
         | Op::CgroupPlacement
         | Op::ResctrlCacheAllocation
         | Op::DamosScheme
+        | Op::CgroupCpuWeight
+        | Op::CgroupCpuIdle
+        | Op::CgroupCpuMax
+        | Op::CgroupCpusetCpus
+        | Op::CgroupCpusetMems
+        | Op::CgroupMemoryMin
+        | Op::CgroupMemoryLow
+        | Op::CgroupMemoryHigh
+        | Op::CgroupIoWeight
         | Op::Unclassified => None,
     }
 }

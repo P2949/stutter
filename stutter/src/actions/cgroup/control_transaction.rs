@@ -78,12 +78,20 @@ pub struct ControlPrepared {
     identity: (u64, u64),
 }
 
+/// What recovery needs to restore one control exactly: the group (by path and kernel identity),
+/// the control, the baseline text before the write.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ControlRecord {
+    pub dir: PathBuf,
+    pub control: CgroupControl,
+    pub baseline: String,
+    pub dev: u64,
+    pub ino: u64,
+}
+
 #[derive(Debug)]
 pub struct ControlCommitted {
-    dir: PathBuf,
-    control: CgroupControl,
-    baseline: String,
-    identity: (u64, u64),
+    record: ControlRecord,
 }
 
 fn identity(dir: &Path) -> Option<(u64, u64)> {
@@ -171,41 +179,54 @@ impl ControlPrepared {
             return Err(CommitError::ReadbackMismatch { restored });
         }
         Ok(ControlCommitted {
-            dir: self.dir,
-            control: self.control,
-            baseline: self.baseline,
-            identity: self.identity,
+            record: ControlRecord {
+                dir: self.dir,
+                control: self.control,
+                baseline: self.baseline,
+                dev: self.identity.0,
+                ino: self.identity.1,
+            },
         })
     }
 }
 
 impl ControlCommitted {
+    pub fn record(&self) -> ControlRecord {
+        self.record.clone()
+    }
+
     /// Writes the baseline back only while the file still holds our value.
     pub fn restore(self, files: &dyn ControlFiles) -> RestoreOutcome {
-        let (file, _) = self.control.file_and_controller();
-        let path = self.dir.join(file);
-        if identity(&self.dir) != Some(self.identity) {
-            return RestoreOutcome::UnsafeToRestore;
-        }
-        let Ok(current) = files.read(&path) else {
-            return RestoreOutcome::UnsafeToRestore;
-        };
-        if same(&self.control, &current, &self.baseline) {
-            return RestoreOutcome::AlreadyRestored;
-        }
-        if !self.control.readback_matches(&current) {
-            return RestoreOutcome::ExternallyChanged;
-        }
-        let Some(text) = restore_text(&self.control, &self.baseline) else {
-            return RestoreOutcome::UnsafeToRestore;
-        };
-        if files.write(&path, &text).is_err() {
-            return RestoreOutcome::Unproven;
-        }
-        match files.read(&path) {
-            Ok(after) if same(&self.control, &after, &self.baseline) => RestoreOutcome::Restored,
-            _ => RestoreOutcome::Unproven,
-        }
+        restore_recorded(&self.record, files)
+    }
+}
+
+/// Restores one recorded control: the group must still be the same kernel object, and the file
+/// must still hold our value (or already the baseline); a foreign value is left untouched.
+pub fn restore_recorded(record: &ControlRecord, files: &dyn ControlFiles) -> RestoreOutcome {
+    let (file, _) = record.control.file_and_controller();
+    let path = record.dir.join(file);
+    if identity(&record.dir) != Some((record.dev, record.ino)) {
+        return RestoreOutcome::UnsafeToRestore;
+    }
+    let Ok(current) = files.read(&path) else {
+        return RestoreOutcome::UnsafeToRestore;
+    };
+    if same(&record.control, &current, &record.baseline) {
+        return RestoreOutcome::AlreadyRestored;
+    }
+    if !record.control.readback_matches(&current) {
+        return RestoreOutcome::ExternallyChanged;
+    }
+    let Some(text) = restore_text(&record.control, &record.baseline) else {
+        return RestoreOutcome::UnsafeToRestore;
+    };
+    if files.write(&path, &text).is_err() {
+        return RestoreOutcome::Unproven;
+    }
+    match files.read(&path) {
+        Ok(after) if same(&record.control, &after, &record.baseline) => RestoreOutcome::Restored,
+        _ => RestoreOutcome::Unproven,
     }
 }
 

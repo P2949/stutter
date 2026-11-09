@@ -86,6 +86,15 @@ fn the_policy_promotes_the_core_capabilities_and_the_graduated_cpu_affinity_and_
         "pm_qos_cpu_latency",
         "resctrl_cache_allocation",
         "damos_scheme",
+        "cgroup_cpu_weight",
+        "cgroup_cpu_idle",
+        "cgroup_cpu_max",
+        "cgroup_cpuset_cpus",
+        "cgroup_cpuset_mems",
+        "cgroup_memory_min",
+        "cgroup_memory_low",
+        "cgroup_memory_high",
+        "cgroup_io_weight",
         "remote_agent_mutation",
     ] {
         assert_eq!(

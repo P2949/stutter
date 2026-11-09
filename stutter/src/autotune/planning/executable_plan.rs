@@ -3,7 +3,9 @@
 use serde::{Deserialize, Serialize};
 
 use super::candidate::{CandidateAction, CandidateEvidence, CandidatePlan};
-pub use super::manual_plans::{DamosActionPlan, PmQosActionPlan, ResctrlActionPlan};
+pub use super::manual_plans::{
+    CgroupControlActionPlan, DamosActionPlan, PmQosActionPlan, ResctrlActionPlan,
+};
 use crate::{
     actions::{
         SafetyClass, TuningAction, cgroup::CgroupPlacementAction, cpu_power::CpuPowerAction,
@@ -70,6 +72,7 @@ impl CandidateExecutablePlan {
             | CandidateAction::PmQos { .. }
             | CandidateAction::Resctrl { .. }
             | CandidateAction::Damos { .. }
+            | CandidateAction::CgroupControl { .. }
             | CandidateAction::VmKnob { .. }
             | CandidateAction::Fake { .. } => None,
         }

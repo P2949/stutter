@@ -88,6 +88,11 @@ impl CandidateAction {
                 "damos_scheme task={} action={:?}",
                 plan.action.request.task, plan.action.request.action
             ),
+            CandidateAction::CgroupControl { plan } => format!(
+                "cgroup_control {} in {}",
+                plan.action.control.file_and_controller().0,
+                plan.action.dir.display()
+            ),
             CandidateAction::Fake { plan } => {
                 format!("fake action_id={}", plan.action_id.as_str())
             }
@@ -401,6 +406,9 @@ impl CandidateAction {
                 summary: self.planned_state_summary(),
             },
             CandidateAction::Damos { .. } => ActiveConfigMatch::Unknown {
+                summary: self.planned_state_summary(),
+            },
+            CandidateAction::CgroupControl { .. } => ActiveConfigMatch::Unknown {
                 summary: self.planned_state_summary(),
             },
             CandidateAction::Fake { .. } => ActiveConfigMatch::Unknown {

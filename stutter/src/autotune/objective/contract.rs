@@ -66,7 +66,9 @@ fn mechanism_for(operation: MutationOperationKind) -> MechanismEvidence {
         }
         IrqKnownDevice | IrqStorageOrUnknown => MechanismEvidence::IrqPlacementObserved,
         PmQosCpuLatency => MechanismEvidence::PowerAttributeObserved,
-        DamosScheme => MechanismEvidence::ResourceGroupObserved,
+        DamosScheme | CgroupCpuWeight | CgroupCpuIdle | CgroupCpuMax | CgroupCpusetCpus
+        | CgroupCpusetMems | CgroupMemoryMin | CgroupMemoryLow | CgroupMemoryHigh
+        | CgroupIoWeight => MechanismEvidence::ResourceGroupObserved,
         ResctrlCacheAllocation => MechanismEvidence::ResourceGroupObserved,
         Unclassified => MechanismEvidence::None,
     }

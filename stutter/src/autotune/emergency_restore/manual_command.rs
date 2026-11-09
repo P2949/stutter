@@ -126,6 +126,29 @@ pub fn manual_restore_command_for_token(token: &RollbackToken) -> String {
             })
             .collect::<Vec<_>>()
             .join(" && "),
+        RollbackToken::CgroupControlRestore { records } => records
+            .iter()
+            .filter_map(|record| {
+                let (file, _) = record.control.file_and_controller();
+                let text = if file == "io.weight" {
+                    record
+                        .baseline
+                        .lines()
+                        .next()?
+                        .trim()
+                        .strip_prefix("default ")?
+                        .to_owned()
+                } else {
+                    record.baseline.trim().to_owned()
+                };
+                Some(format!(
+                    "printf '%s' {} | sudo tee {} >/dev/null",
+                    shell_quote_value(&text),
+                    shell_quote_path(&record.dir.join(file))
+                ))
+            })
+            .collect::<Vec<_>>()
+            .join(" && "),
     }
 }
 
@@ -158,6 +181,7 @@ pub(super) fn safety_class_for_rollback_token(token: &RollbackToken) -> SafetyCl
         | RollbackToken::PmQosRelease { .. }
         | RollbackToken::ResctrlGroupRemove { .. }
         | RollbackToken::DamosTeardown { .. }
+        | RollbackToken::CgroupControlRestore { .. }
         | RollbackToken::SysfsRestore { .. } => SafetyClass::HighRisk,
     }
 }
@@ -177,6 +201,7 @@ pub(super) fn rollback_token_kind(token: &RollbackToken) -> &'static str {
         RollbackToken::PmQosRelease { .. } => "pm-qos-release",
         RollbackToken::ResctrlGroupRemove { .. } => "resctrl-group-remove",
         RollbackToken::DamosTeardown { .. } => "damos-teardown",
+        RollbackToken::CgroupControlRestore { .. } => "cgroup-control-restore",
     }
 }
 

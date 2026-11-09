@@ -194,6 +194,7 @@ pub(crate) fn startup_rollback_registry() -> RollbackRegistry {
     });
     registry.register(crate::actions::pm_qos_rollback::PmQosRollbackHandler);
     registry.register(crate::actions::resctrl_rollback::ResctrlRollbackHandler);
+    registry.register(crate::actions::cgroup::control_rollback::CgroupControlRollbackHandler);
     registry
 }
 
@@ -220,6 +221,7 @@ fn rollback_registry(require_verified_identity: bool) -> RollbackRegistry {
     registry.register(crate::actions::vm_knobs::VmKnobRollbackHandler);
     registry.register(crate::actions::pm_qos_rollback::PmQosRollbackHandler);
     registry.register(crate::actions::resctrl_rollback::ResctrlRollbackHandler);
+    registry.register(crate::actions::cgroup::control_rollback::CgroupControlRollbackHandler);
     registry
 }
 
