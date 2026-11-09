@@ -332,3 +332,42 @@ fn reading_the_calibration_costs_the_same_on_a_young_and_an_old_stream() {
         "20000 calibration reads took {elapsed:?}"
     );
 }
+
+#[test]
+fn the_maximum_counter_is_refused_without_a_panic_or_a_wrap() {
+    let mut stream = StampedStream::default();
+    stream.push(frame(0, T0), T0 + 1_000).unwrap();
+    assert_eq!(
+        stream.push(frame(u64::MAX, T0 + 16_000_000), T0 + 16_001_000),
+        Err(StampError::SequenceOverflow)
+    );
+    // The refusal is counted as loss and changes nothing else: the next real frame still follows.
+    assert_eq!(stream.rejected(), 1);
+    assert_eq!(stream.accepted(), 1);
+    stream
+        .push(frame(1, T0 + 16_600_000), T0 + 16_601_000)
+        .unwrap();
+    // A stream that starts at the very top of the range cannot continue either.
+    let mut top = StampedStream::new(1, u64::MAX - 1);
+    top.push(frame(u64::MAX - 1, T0), T0 + 1).unwrap();
+    assert_eq!(
+        top.push(frame(u64::MAX, T0 + 1_000_000), T0 + 1_000_001),
+        Err(StampError::SequenceOverflow)
+    );
+    // A huge forward jump saturates the gap counter instead of overflowing it.
+    let mut jump = StampedStream::default();
+    jump.push(frame(0, T0), T0 + 1).unwrap();
+    jump.push(frame(u64::MAX - 1, T0 + 1_000_000), T0 + 1_000_001)
+        .unwrap();
+    assert_eq!(jump.unexplained_gaps(), u64::MAX - 2);
+}
+
+#[test]
+fn an_invalid_message_is_loss_and_denies_a_stream_that_was_otherwise_complete() {
+    let mut stream = StampedStream::default();
+    let now = feed(&mut stream, 0, 1500, 16_600_000, 100_000);
+    assert_eq!(eligible(&stream, now), Ok(()));
+    stream.record_invalid();
+    assert_eq!(stream.rejected(), 1);
+    assert_eq!(eligible(&stream, now), Err(QualityDenial::UnexplainedLoss));
+}

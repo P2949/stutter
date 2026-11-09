@@ -344,6 +344,9 @@ impl Drop for Fixture {
 /// A distinct `name` is a distinct workload identity: the controller does not retry a recently tried
 /// candidate for the same identity, so each smoke case uses its own.
 fn spawn_fixture(out: &Path, name: &str, cpu: u32, seconds: u64) -> anyhow::Result<Fixture> {
+    // The installed controller picks its target heuristically: nothing that could be chosen instead
+    // of this fixture may exist when it starts, nor once it is ready.
+    isolation::ensure_quiet(out, "before starting a fixture")?;
     let directory = out.join("steamapps/common").join(name);
     fs::create_dir_all(&directory)?;
     let game = directory.join(name);
@@ -368,17 +371,39 @@ fn spawn_fixture(out: &Path, name: &str, cpu: u32, seconds: u64) -> anyhow::Resu
         .spawn()
         .context("start the workload fixture")?;
     let fixture = Fixture { child };
+    isolation::record_fixture(fixture.child.id());
     wait_for("the fixture to be ready", 20, || ready.exists())?;
+    isolation::ensure_quiet(out, "after the fixture was ready")?;
     Ok(fixture)
 }
 
 pub fn run(root: &Path, args: &SmokeArgs) -> anyhow::Result<()> {
+    let outcome = run_inner(root, args);
+    if isolation::blocked().is_empty() {
+        return outcome;
+    }
+    // A competing workload was seen: whatever happened, this run is not a product verdict. If the
+    // run stopped before writing its evidence, write the blocked evidence now.
+    if !args.out.join("result.json").exists() {
+        let _ = fs::create_dir_all(&args.out);
+        let _ = write_evidence(root, args, &[]);
+    }
+    bail!(
+        "production-smoke BLOCKED (environment, not a product result): {} competing process(es) or busy host, first: {}",
+        isolation::blocked().len(),
+        isolation::blocked().first().cloned().unwrap_or_default()
+    )
+}
+
+fn run_inner(root: &Path, args: &SmokeArgs) -> anyhow::Result<()> {
     ensure!(!args.out.exists(), "{} already exists", args.out.display());
     ensure!(
         args.binary_sha256.len() == 64 && args.binary_sha256.bytes().all(|b| b.is_ascii_hexdigit()),
         "--binary-sha256 must be the 64 hex digit SHA-256 of the build under test"
     );
     fs::create_dir_all(&args.out)?;
+    // Before anything is measured or mutated: no competing workload, or no test.
+    isolation::ensure_quiet(&args.out, "before anything is measured or mutated")?;
     let user = match &args.user {
         Some(user) => user.clone(),
         None => run_text("id", &["-un"])?.trim().to_owned(),
@@ -430,6 +455,7 @@ pub fn run(root: &Path, args: &SmokeArgs) -> anyhow::Result<()> {
 
     // Idle behaviour first: nothing to optimise, so nothing may change and the cost must stay small.
     let history = matrix::history_path(&user);
+    let mut history_offset = fs::metadata(&history).map_or(0, |metadata| metadata.len());
     checks.extend(matrix::idle(&controller, &history, args.idle_seconds));
 
     // Events that must leave the service clean. Every applied case starts the product's 300 second
@@ -540,11 +566,21 @@ pub fn run(root: &Path, args: &SmokeArgs) -> anyhow::Result<()> {
         "both units active and no token outstanding after every case",
     ));
 
+    // A competitor that appeared at any point taints the whole run; and whatever the controller
+    // changed must have been on a fixture this run started.
+    let _ = isolation::ensure_quiet(&args.out, "at the end of the run");
+    let records = new_records(&history, &mut history_offset);
+    checks.push(isolation::only_fixture_targets(
+        &records,
+        &isolation::fixtures(),
+    ));
+
     write_evidence(root, args, &checks)
 }
 
 fn write_evidence(root: &Path, args: &SmokeArgs, checks: &[Check]) -> anyhow::Result<()> {
-    let passed = checks.iter().all(|check| check.passed);
+    let blocked = isolation::blocked();
+    let passed = blocked.is_empty() && checks.iter().all(|check| check.passed);
     let binary = checks
         .iter()
         .find(|check| check.name == "controller_binary_is_immutable")
@@ -573,7 +609,8 @@ fn write_evidence(root: &Path, args: &SmokeArgs, checks: &[Check]) -> anyhow::Re
         &args.out,
         SUITE_PACKAGED_SERVICE_SMOKE,
         json!({
-            "status": if passed { "PASS" } else { "FAIL" },
+            "status": if !blocked.is_empty() { "BlockedResource" } else if passed { "PASS" } else { "FAIL" },
+            "blocked_by": blocked,
             "evidence_kind": "controlled_real",
             "scope": "Exact-build smoke of the installed production bounded service: the running controller and worker execute the pinned immutable binary as the intended accounts with the intended capabilities, a workload fixture is discovered and a prepared mutation is applied through the root worker and settled, and the units restart, stop and start cleanly with no token outstanding.",
             "not_claimed": [
@@ -589,10 +626,30 @@ fn write_evidence(root: &Path, args: &SmokeArgs, checks: &[Check]) -> anyhow::Re
     )?;
     println!(
         "production-smoke: {} ({} checks); raw evidence in {}",
-        if passed { "PASS" } else { "FAIL" },
+        if !blocked.is_empty() {
+            "BLOCKED (environment, not a product result)"
+        } else if passed {
+            "PASS"
+        } else {
+            "FAIL"
+        },
         checks.len(),
         args.out.display()
     );
+    if !blocked.is_empty() {
+        for reason in blocked.iter().take(5) {
+            println!("BLOCKED {reason}");
+        }
+        if blocked.len() > 5 {
+            println!(
+                "BLOCKED ... and {} more (all are in result.json)",
+                blocked.len() - 5
+            );
+        }
+        bail!(
+            "the production smoke was blocked by the environment; it says nothing about the build"
+        );
+    }
     for check in checks.iter().filter(|check| !check.passed) {
         println!("FAIL {}: {}", check.name, check.detail);
     }
@@ -600,6 +657,7 @@ fn write_evidence(root: &Path, args: &SmokeArgs, checks: &[Check]) -> anyhow::Re
     Ok(())
 }
 
+mod isolation;
 mod matrix;
 #[cfg(test)]
 mod tests;

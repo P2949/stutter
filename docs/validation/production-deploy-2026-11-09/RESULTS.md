@@ -67,3 +67,33 @@ prepared branch can be deployed with the same guarded sequence once the host has
 The new code is not reachable from the daemon, so staying on `4f3baa07` changes no installed
 behaviour. Raw evidence: `.llm-runs/production-smoke-20261109-cc3e0730` and
 `.llm-runs/production-smoke-20261109-4f3baa07-recheck`.
+
+## Final-source deployment: deferred, `BlockedResource` (host not quiescent) (2026-11-09, evening)
+
+A background job (`deploy-when-free.sh`) had been queued to run the guarded activation, smoke and switch
+once no game had been detected for five minutes. It was **stopped without having started any
+activation** (its log shows only the start of the wait), and the script was disabled. Five quiet
+minutes is not proof that the desktop is free for a test activation, and the smoke exercises real
+mutation and recovery. No unattended deployment will be scheduled.
+
+The prepared NixosConf branch `host/stutter-w19-final-cc3e0730` (local only, never pushed) pins
+`cc3e0730`, which is now superseded by later code; it must not be deployed or pushed as is. Production
+stays on `4f3baa07`; nothing since is reachable from the daemon or the bounded service, so no installed
+behaviour differs. If the plan's final-source deploy is still wanted, it needs the guarded sequence on a
+build of the then-final commit, with the host demonstrably free.
+
+### The smoke can no longer mistake a busy host for a product failure
+
+`xtask production-smoke` now refuses to act unless it can show nothing on the host could be selected
+instead of its fixture. Before anything is measured or mutated, before each fixture starts, after each
+is ready and again at the end, it checks that no process looks like a game or its runtime (the whole
+command line is matched: a Steam library path with either slash, Steam's launcher, Proton,
+pressure-vessel, gamescope, wine and its servers, a Windows executable, with the smoke's own fixtures
+under its output directory excluded) and that the host is under 40% busy. A competitor at any of those
+points makes the whole run `BlockedResource`: the result is written with the competing processes and no
+product verdict, and the command exits with a message that says it is environmental. Afterwards the
+controller's history is checked: every state change must be on a fixture this run started
+(`controller_changed_only_the_disposable_fixtures`). Run against this host while a game was running it
+refused before measuring anything (`.llm-runs/production-smoke-20261109-blocked-demo`, 23 matching
+processes, 0 checks, production untouched). This does not make the heuristic controller pick the fixture
+over a real game; it makes the smoke refuse to run when it could.

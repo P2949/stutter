@@ -67,6 +67,9 @@ pub enum StampError {
     Stale,
     /// The counter went backwards or repeated.
     SequenceRegress,
+    /// The counter is at its maximum, so no frame can follow it: not a counter a real producer
+    /// reaches, and refused rather than wrapped.
+    SequenceOverflow,
 }
 
 #[derive(Debug)]
@@ -178,22 +181,32 @@ impl StampedStream {
         self.unexplained_gaps
     }
 
+    /// Counts one message that could not be parsed or accepted at all (malformed, truncated,
+    /// oversize or dropped before it became a frame). A boundary that is unproven is loss: the
+    /// stream's quality reports it exactly as a rejected frame.
+    pub fn record_invalid(&mut self) {
+        self.rejected = self.rejected.saturating_add(1);
+    }
+
     /// Validates one frame against the controller's reading of the same clock taken as it arrived,
     /// and records its delivery latency. A rejected frame is counted and changes nothing else.
     pub fn push(&mut self, frame: StampedFrame, rx_ns: u64) -> Result<u64, StampError> {
         let verdict = self.check(frame, rx_ns);
         let Ok(latency) = verdict else {
-            self.rejected += 1;
+            self.rejected = self.rejected.saturating_add(1);
             return verdict;
         };
         // Every counter below the expected one was already counted; a jump forward is loss nobody
-        // explained, including a first frame that is not the epoch's first.
-        self.unexplained_gaps += frame.seq - self.expected_seq;
+        // explained, including a first frame that is not the epoch's first. `check` has refused the
+        // maximum counter, so `seq + 1` cannot overflow, and the counters saturate.
+        self.unexplained_gaps = self
+            .unexplained_gaps
+            .saturating_add(frame.seq - self.expected_seq);
         self.expected_seq = frame.seq + 1;
         self.last_stamp_ns = Some(frame.monotonic_ns);
         self.last_rx_ns = Some(rx_ns);
         let index = self.accepted;
-        self.accepted += 1;
+        self.accepted = self.accepted.saturating_add(1);
         // Sliding maximum: drop what the new latency dominates and what left the window.
         while self
             .window
@@ -211,8 +224,9 @@ impl StampedStream {
             self.window.pop_front();
         }
         self.lifetime_max_ns = self.lifetime_max_ns.max(latency);
-        self.sum_ns += u128::from(latency);
-        self.histogram[bucket_of(latency)] += 1;
+        self.sum_ns = self.sum_ns.saturating_add(u128::from(latency));
+        let bucket = bucket_of(latency);
+        self.histogram[bucket] = self.histogram[bucket].saturating_add(1);
         Ok(latency)
     }
 
@@ -223,6 +237,9 @@ impl StampedStream {
         let latency = rx_ns - frame.monotonic_ns;
         if latency > MAX_FRAME_AGE_NS {
             return Err(StampError::Stale);
+        }
+        if frame.seq == u64::MAX {
+            return Err(StampError::SequenceOverflow);
         }
         if frame.seq < self.expected_seq {
             return Err(StampError::SequenceRegress);

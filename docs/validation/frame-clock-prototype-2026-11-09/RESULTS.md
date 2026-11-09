@@ -108,3 +108,28 @@ independent reference for the stamp-versus-presentation error, and connecting th
 live observation-only controller. Until a measured `StampAccuracy` exists for a real renderer this
 source cannot make any real-game stream frame-primary, and the real-game direct-frame path stays
 `EvidenceDeferred`.
+
+## Second review round: fail-closed hardening of the source (2026-11-09, evening)
+
+Review findings against `cf02c4bd`, all fixed and tested:
+
+- **Invalid input is loss.** A malformed, truncated or oversize (over 256 bytes) line now counts as a
+  rejected message, so a stream that was otherwise complete reports loss and is denied; it used to
+  return an error and leave the quality unchanged.
+- **No counter overflow.** The maximum sequence number is refused (`SequenceOverflow`) instead of
+  panicking in debug or wrapping in release, and every counter (accepted, rejected, gaps, histogram,
+  sum) saturates.
+- **Decision-time revalidation.** `quality_at` rechecks the renderer's identity first, so a renderer
+  that exited, or whose pid was reused, since the last frame is no longer `ValidatedDirect`.
+- **Unforgeable accuracy claims.** `StampAccuracy` has private fields and is built only from raw
+  (stamp, independent-reference) pairs by `from_raw_pairs`: the bound is recomputed from the pairs
+  (largest absolute difference, bias recorded not subtracted), the claim names the digest of its raw
+  evidence and one of a closed set of external reference kinds (photodiode, display hardware
+  timestamp, high-speed camera), and the source accepts it only for the bound renderer binary (its
+  sha256 recomputed from the process's executable), the frame event the producer announced, this
+  boot, and within its validity window, which is checked again at every decision.
+
+What this still cannot establish: that the raw pairs were really measured against a physical
+reference. The module can make a number impossible to state without raw data and impossible to apply
+to the wrong renderer; it cannot witness the measurement. That needs the instrumented renderer and
+the reference apparatus, so the real-game direct-frame path stays `EvidenceDeferred`.

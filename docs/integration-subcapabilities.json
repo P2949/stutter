@@ -258,6 +258,39 @@
       "negative_test": "the_producer_is_bound_by_user_process_start_time_and_time_namespace",
       "positive_file": "stutter/src/telemetry/stamped_source_tests.rs",
       "negative_file": "stutter/src/telemetry/stamped_source_tests.rs"
+    },
+    {
+      "id": "frames/fail-closed-input-and-counters",
+      "entry": "5.12",
+      "kind": "observation",
+      "anchor": "stutter/src/telemetry/stamped_source.rs",
+      "symbol": "MAX_STAMPED_LINE_BYTES",
+      "positive_test": "the_maximum_sequence_number_from_an_authenticated_producer_is_refused_not_a_panic",
+      "negative_test": "a_malformed_truncated_or_oversize_line_after_a_complete_calibration_is_loss_and_denies",
+      "positive_file": "stutter/src/telemetry/stamped_source_tests.rs",
+      "negative_file": "stutter/src/telemetry/stamped_source_tests.rs"
+    },
+    {
+      "id": "frames/verified-stamp-accuracy-claims",
+      "entry": "5.12",
+      "kind": "observation",
+      "anchor": "stutter/src/telemetry/stamped_source.rs",
+      "symbol": "from_raw_pairs",
+      "positive_test": "a_claim_is_recomputed_from_raw_pairs_and_cannot_understate_the_measured_error",
+      "negative_test": "a_claim_is_accepted_only_for_the_bound_renderer_event_and_boot",
+      "positive_file": "stutter/src/telemetry/stamped_source_tests.rs",
+      "negative_file": "stutter/src/telemetry/stamped_source_tests.rs"
+    },
+    {
+      "id": "frames/decision-time-revalidation",
+      "entry": "5.12",
+      "kind": "observation",
+      "anchor": "stutter/src/telemetry/stamped_source.rs",
+      "symbol": "pub fn quality_at",
+      "positive_test": "an_accuracy_claim_that_expires_while_in_use_stops_counting_at_the_next_decision",
+      "negative_test": "a_renderer_that_exits_or_has_its_pid_reused_right_before_the_decision_is_no_longer_trusted",
+      "positive_file": "stutter/src/telemetry/stamped_source_tests.rs",
+      "negative_file": "stutter/src/telemetry/stamped_source_tests.rs"
     }
   ]
 }

@@ -19,9 +19,12 @@
 //! Delivery latency is not stamp accuracy. The alignment uncertainty reported to the gate is the
 //! measured delivery bound **plus** a stamp-error bound that must be supplied from an independent
 //! reference ([`StampAccuracy`]); without one the uncertainty is unknown (`NaN`) and the gate
-//! denies, however fast the socket is. This module cannot produce that reference: it needs a real
+//! denies, however fast the socket is. A `StampAccuracy` cannot be written as a literal: it is built
+//! only from the raw pairs of (renderer stamp, independent reference time) that were measured, the
+//! bound is recomputed from them, and it is accepted only for the renderer binary, frame event and boot
+//! it was measured for, within its validity window. This module cannot produce that reference: it needs a real
 //! instrumented renderer measured against something outside the renderer.
-use std::path::PathBuf;
+use std::{fs, path::PathBuf};
 
 use serde::Deserialize;
 
@@ -36,6 +39,8 @@ use super::{
 pub const PROTOCOL_VERSION: u32 = 1;
 /// The frame events a producer may stamp. Only the present call has defined semantics here.
 pub const SUPPORTED_EVENTS: [&str; 1] = ["present"];
+/// The longest frame line accepted; a real frame record is under 100 bytes.
+pub const MAX_STAMPED_LINE_BYTES: usize = 256;
 /// Fewest reference samples a stamp-accuracy measurement may rest on.
 pub const MIN_ACCURACY_SAMPLES: usize = 1000;
 
@@ -80,22 +85,157 @@ pub enum BindDenial {
 pub enum IngestError {
     NotBound,
     Malformed,
+    /// The line is longer than [`MAX_STAMPED_LINE_BYTES`].
+    Oversize,
     Rejected(StampError),
 }
 
-/// A measured bound on how far a stamp can differ from the real frame event, from an independent
-/// reference. It rests on at least [`MIN_ACCURACY_SAMPLES`] comparisons and names its reference.
-#[derive(Clone, Debug, PartialEq)]
+/// What the independent reference was. Only references outside the renderer count: the renderer
+/// cannot grade its own timestamps, and there is deliberately no free-form or "self" kind.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReferenceKind {
+    Photodiode,
+    DisplayHardwareTimestamp,
+    HighSpeedCamera,
+}
+
+/// Why a stamp-accuracy claim was refused.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AccuracyRefusal {
+    /// Fewer than [`MIN_ACCURACY_SAMPLES`] pairs.
+    TooFewSamples,
+    /// More pairs than any real measurement needs.
+    TooManySamples,
+    /// A line is not two unsigned integers, or a stamp or reference is out of range.
+    Malformed,
+    /// The validity window has already ended.
+    Expired,
+    /// No renderer is bound, so there is nothing the claim could describe.
+    NotBound,
+    /// The claim was measured for another renderer binary than the one bound.
+    WrongRenderer,
+    /// The claim was measured for another frame event than the one the producer announced.
+    WrongEvent,
+    /// The claim was measured in another boot.
+    WrongBoot,
+}
+
+/// A measured bound on how far a stamp can differ from the real frame event, computed from raw
+/// (stamp, reference) pairs. It rests on at least [`MIN_ACCURACY_SAMPLES`] of them and is bound to the
+/// renderer binary, the frame event and the boot it was measured for, within a validity window. Its
+/// fields are private so it cannot be built any other way.
+///
+/// ```compile_fail
+/// use stutter::api::telemetry::{ReferenceKind, StampAccuracy};
+/// let forged = StampAccuracy {
+///     max_error_ns: 0,
+///     bias_ns: 0,
+///     samples: 1000,
+///     reference: ReferenceKind::Photodiode,
+///     renderer_exe_sha256: String::new(),
+///     event: String::new(),
+///     boot_id: String::new(),
+///     valid_until_unix: 0,
+///     evidence_sha256: String::new(),
+/// };
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StampAccuracy {
-    pub max_error_ns: u64,
-    pub samples: usize,
-    pub reference: String,
+    max_error_ns: u64,
+    bias_ns: i64,
+    samples: usize,
+    reference: ReferenceKind,
+    renderer_exe_sha256: String,
+    event: String,
+    boot_id: String,
+    valid_until_unix: u64,
+    evidence_sha256: String,
+}
+
+/// The most pairs one measurement may hold.
+pub const MAX_ACCURACY_SAMPLES: usize = 1_000_000;
+
+impl StampAccuracy {
+    /// Builds a claim from raw measurement text: one `stamp_ns reference_ns` pair per line, both on
+    /// the shared clock. The bound is the largest absolute difference (the bias is kept for the
+    /// record, not subtracted: an unmodelled constant offset is still error). Nothing about the
+    /// claim is taken on trust except that the pairs were measured.
+    pub fn from_raw_pairs(
+        reference: ReferenceKind,
+        renderer_exe_sha256: &str,
+        event: &str,
+        boot_id: &str,
+        valid_until_unix: u64,
+        now_unix: u64,
+        raw: &str,
+    ) -> Result<Self, AccuracyRefusal> {
+        if valid_until_unix <= now_unix {
+            return Err(AccuracyRefusal::Expired);
+        }
+        let mut samples = 0_usize;
+        let (mut max_error, mut sum) = (0_u64, 0_i128);
+        for line in raw.lines().map(str::trim).filter(|line| !line.is_empty()) {
+            let mut fields = line.split_whitespace();
+            let (Some(stamp), Some(truth), None) = (fields.next(), fields.next(), fields.next())
+            else {
+                return Err(AccuracyRefusal::Malformed);
+            };
+            let (Ok(stamp), Ok(truth)) = (stamp.parse::<u64>(), truth.parse::<u64>()) else {
+                return Err(AccuracyRefusal::Malformed);
+            };
+            let error = i128::from(stamp) - i128::from(truth);
+            max_error = max_error.max(u64::try_from(error.unsigned_abs()).unwrap_or(u64::MAX));
+            sum += error;
+            samples += 1;
+            if samples > MAX_ACCURACY_SAMPLES {
+                return Err(AccuracyRefusal::TooManySamples);
+            }
+        }
+        if samples < MIN_ACCURACY_SAMPLES {
+            return Err(AccuracyRefusal::TooFewSamples);
+        }
+        let bias = (sum / samples as i128).clamp(i128::from(i64::MIN), i128::from(i64::MAX));
+        Ok(Self {
+            max_error_ns: max_error,
+            bias_ns: bias as i64,
+            samples,
+            reference,
+            renderer_exe_sha256: renderer_exe_sha256.to_ascii_lowercase(),
+            event: event.to_owned(),
+            boot_id: boot_id.trim().to_owned(),
+            valid_until_unix,
+            evidence_sha256: stutter_core::hash::sha256_hex(raw.as_bytes()),
+        })
+    }
+
+    pub fn max_error_ns(&self) -> u64 {
+        self.max_error_ns
+    }
+
+    pub fn bias_ns(&self) -> i64 {
+        self.bias_ns
+    }
+
+    pub fn samples(&self) -> usize {
+        self.samples
+    }
+
+    pub fn reference(&self) -> ReferenceKind {
+        self.reference
+    }
+
+    /// The digest of the raw pairs the claim was computed from, for the evidence record.
+    pub fn evidence_sha256(&self) -> &str {
+        &self.evidence_sha256
+    }
 }
 
 #[derive(Debug)]
 struct Bound {
     pid: u32,
     start_ticks: u64,
+    /// The frame event the producer announced in its hello.
+    event: String,
 }
 
 #[derive(Debug)]
@@ -126,16 +266,36 @@ impl StampedSource {
         self.bound.is_some()
     }
 
-    /// Records an independent measurement of stamp accuracy. A measurement with too few samples
-    /// or no named reference is refused. It describes this renderer, so it is dropped whenever a
-    /// different process binds.
-    pub fn set_stamp_accuracy(&mut self, accuracy: StampAccuracy) -> bool {
-        let valid =
-            accuracy.samples >= MIN_ACCURACY_SAMPLES && !accuracy.reference.trim().is_empty();
-        if valid {
-            self.accuracy = Some(accuracy);
+    /// Records a stamp-accuracy claim for the bound renderer. It is accepted only if a renderer is
+    /// bound, the claim was measured for *that* binary (its sha256 is recomputed here from the
+    /// process's executable), for the frame event the producer announced, in this boot, and its
+    /// validity window has not ended. It describes this renderer, so it is dropped whenever a
+    /// different process binds, and expiry is checked again whenever quality is decided.
+    pub fn set_stamp_accuracy(
+        &mut self,
+        accuracy: StampAccuracy,
+        now_unix: u64,
+    ) -> Result<(), AccuracyRefusal> {
+        self.revalidate();
+        let bound = self.bound.as_ref().ok_or(AccuracyRefusal::NotBound)?;
+        if accuracy.valid_until_unix <= now_unix {
+            return Err(AccuracyRefusal::Expired);
         }
-        valid
+        if accuracy.event != bound.event {
+            return Err(AccuracyRefusal::WrongEvent);
+        }
+        let boot = fs::read_to_string(self.policy.proc_root.join("sys/kernel/random/boot_id"))
+            .unwrap_or_default();
+        if boot.trim().is_empty() || boot.trim() != accuracy.boot_id {
+            return Err(AccuracyRefusal::WrongBoot);
+        }
+        let exe = fs::read(self.policy.proc_root.join(format!("{}/exe", bound.pid)))
+            .map_err(|_| AccuracyRefusal::WrongRenderer)?;
+        if stutter_core::hash::sha256_hex(&exe) != accuracy.renderer_exe_sha256 {
+            return Err(AccuracyRefusal::WrongRenderer);
+        }
+        self.accuracy = Some(accuracy);
+        Ok(())
     }
 
     /// The producer is bound only while it is still the recorded process.
@@ -193,6 +353,7 @@ impl StampedSource {
         self.bound = Some(Bound {
             pid: peer.pid,
             start_ticks: live.start_ticks,
+            event: hello.event.clone(),
         });
         Ok(())
     }
@@ -214,17 +375,37 @@ impl StampedSource {
         if self.bound.is_none() {
             return Err(IngestError::NotBound);
         }
-        let frame: StampedFrame =
-            serde_json::from_str(line.trim()).map_err(|_| IngestError::Malformed)?;
+        // A message that never becomes a frame is loss: a malformed, truncated or oversize line
+        // leaves the stream's boundary unproven, so it is counted and the stream's quality says so.
+        if line.len() > MAX_STAMPED_LINE_BYTES {
+            self.stream.record_invalid();
+            return Err(IngestError::Oversize);
+        }
+        let Ok(frame) = serde_json::from_str::<StampedFrame>(line.trim()) else {
+            self.stream.record_invalid();
+            return Err(IngestError::Malformed);
+        };
         self.stream
             .push(frame, rx_ns)
             .map_err(IngestError::Rejected)
     }
 
-    /// The quality for the frame-primary gate. The attribution is `ValidatedDirect` only while a
-    /// producer is bound; the alignment is the delivery bound plus the stamp-error bound, and is
-    /// unknown until both exist.
-    pub fn quality_at(&self, now_ns: u64) -> StreamQuality {
+    /// The quality for the frame-primary gate, decided now: the renderer's identity is rechecked
+    /// first, so a renderer that exited (or whose pid was reused) since the last frame is no longer
+    /// `ValidatedDirect`. The alignment is the delivery bound plus the stamp-error bound, and is
+    /// unknown until both exist; an expired accuracy claim is as good as none.
+    pub fn quality_at(&mut self, now_ns: u64) -> StreamQuality {
+        self.revalidate();
+        let now_unix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(u64::MAX, |elapsed| elapsed.as_secs());
+        if self
+            .accuracy
+            .as_ref()
+            .is_some_and(|accuracy| accuracy.valid_until_unix <= now_unix)
+        {
+            self.accuracy = None;
+        }
         let bound = self.bound.is_some();
         let mut quality = self.stream.quality_at(
             now_ns,
