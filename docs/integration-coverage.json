@@ -600,22 +600,21 @@
         "W11c"
       ],
       "anchors": [
+        "stutter/src/actions/memory_policy.rs",
         "stutter/src/integrations/mod.rs",
         "stutter/src/autotune/sensors/memory_domains.rs",
         "stutter/src/autotune/sensors/numa_faults.rs",
         "stutter/src/actions/numa_migration.rs"
       ],
-      "status": "first_slice",
+      "status": "code_complete",
       "g0": "a cheap `numa_faults` sensor reads automatic-NUMA-balancing hinting faults, local faults and migrated pages from /proc/vmstat as deltas with a local-fault ratio, and `parse_numa_maps` sums one process's pages per node; numad presence marks memory placement owned; numa_stat sensor reads per-node numastat deltas and the remote-allocation ratio of the interval; separate typed memory operation `NumaMigratePages` (`MutationOperationKind`, manual-only, Experimental capability): target verified by live start time, nodes checked against the online list and disjoint, explicit irreversible acknowledgement, `migrate_pages(2)` behind a wrapper with before/after page accounting from numa_maps, `RollbackToken::NumaMigration` whose recovery is ManualOnly and never claims the layout was restored, manual policy-gated `NumaMigrationAction` (HighRisk, persistent effect) and `CandidateAction::NumaMigration`; cpuset.mems is the separate `CgroupCpusetMems` operation; never an executable plan",
       "g1": "read-only on this host (2026-11-09): one NUMA node online (`/sys/devices/system/node/online` = 0), `kernel.numa_balancing` = 0, and `/proc/self/numa_maps` readable; no migration was performed",
       "runtime_availability": "numad and numactl absent",
       "authority": "O/A/E",
-      "not_wired": "set_mempolicy/mbind apply only to the calling thread or its own address space, so no foreign-process policy operation exists by design; no numad coexistence beyond the owner probe; not worker-routed (HighRisk manual/offline behind HIGH_RISK_APPLY_IMPLEMENTED=false); no real multi-node migration readback",
-      "missing_required": [
-        "numa/process-scoped-memory-policy-refusal-contract",
-        "numa/numad-coexistence-behaviour"
-      ],
+      "not_wired": "set_mempolicy/mbind apply only to the calling thread or its own address space, so no foreign-process policy operation exists by design (`memory_policy` states that as a typed refusal and observes the policy read-only from numa_maps); a running numad denies the migration action before any page is touched; not worker-routed (HighRisk manual/offline behind HIGH_RISK_APPLY_IMPLEMENTED=false); no real multi-node migration readback",
+      "missing_required": [],
       "dispositions": [
+        "CodeComplete",
         "FixtureVerified",
         "HardwareUnavailable",
         "EvidenceDeferred"

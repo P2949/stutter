@@ -38,6 +38,7 @@ pub(crate) mod damos_parity;
 pub(crate) mod damos_regions;
 pub(crate) mod damos_scheme;
 pub(crate) mod gpu_power;
+pub(crate) mod memory_policy;
 pub(crate) mod net_capability;
 pub(crate) mod net_sysctl;
 pub(crate) mod net_sysctl_action;

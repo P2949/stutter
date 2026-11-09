@@ -46,6 +46,7 @@ fn allowed() -> NumaMigrationPolicy {
     NumaMigrationPolicy {
         allow: true,
         acknowledge_irreversible: true,
+        ..Default::default()
     }
 }
 
@@ -83,6 +84,7 @@ fn the_default_policy_denies_and_the_action_is_high_risk_with_a_persistent_effec
     let unacknowledged = NumaMigrationPolicy {
         allow: true,
         acknowledge_irreversible: false,
+        ..Default::default()
     };
     let mover = Mover {
         fake: &fake,
@@ -161,4 +163,40 @@ fn recovery_names_the_manual_command_and_the_executor_refuses_to_pretend() {
         "migratepages 4242 1 0"
     );
     assert!(crate::autotune::emergency_restore::restore_rollback_token(&token).is_err());
+}
+
+#[test]
+fn a_running_memory_placement_owner_is_never_raced_and_its_absence_allows_the_move() {
+    let fake = fake("numad");
+    let base = fake.proc_root.parent().unwrap().to_path_buf();
+    let probe = || crate::integrations::probe(&fake.proc_root, &base);
+    // No numad: the owner field stays empty and the move proceeds as before.
+    let free = allowed().with_owners(&probe());
+    assert!(free.external_owner.is_none());
+    let mover = Mover {
+        fake: &fake,
+        calls: Cell::new(0),
+    };
+    action(&fake).apply_with_policy(&free, &mover).unwrap();
+    assert_eq!(mover.calls.get(), 1);
+
+    // numad appears: the same request is denied before any page is touched.
+    let numad = fake.proc_root.join("9000");
+    fs::create_dir_all(&numad).unwrap();
+    fs::write(numad.join("comm"), "numad\n").unwrap();
+    let owned = allowed().with_owners(&probe());
+    assert!(owned.external_owner.is_some(), "numad was not detected");
+    let blocked = Mover {
+        fake: &fake,
+        calls: Cell::new(0),
+    };
+    let error = action(&fake)
+        .apply_with_policy(&owned, &blocked)
+        .unwrap_err();
+    assert!(
+        format!("{error:#}").contains("memory_placement_not_owned_by_another_controller"),
+        "{error:#}"
+    );
+    assert_eq!(blocked.calls.get(), 0, "no migration was attempted");
+    assert!(action(&fake).preflight_with_policy(&owned).is_err());
 }

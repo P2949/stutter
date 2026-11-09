@@ -46,6 +46,19 @@ pub struct NumaMigrationPolicy {
     pub allow: bool,
     /// Migration is irreversible in effect and must be acknowledged.
     pub acknowledge_irreversible: bool,
+    /// Another controller that owns memory placement (`numad`), as the owner probe found it. While
+    /// one runs its placement is never raced.
+    pub external_owner: Option<String>,
+}
+
+impl NumaMigrationPolicy {
+    /// The policy with `external_owner` taken from an owner probe of the host.
+    pub fn with_owners(mut self, owners: &crate::integrations::OwnerReport) -> Self {
+        self.external_owner = owners
+            .external_owner(crate::integrations::ResourceDomain::MemoryPlacement)
+            .map(str::to_owned);
+        self
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -103,6 +116,12 @@ impl NumaMigrationAction {
         }
         if !policy.acknowledge_irreversible {
             return Err(Self::denied("acknowledge_irreversible"));
+        }
+        if policy.external_owner.is_some() {
+            // numad (or another placement owner) is actively moving this process's memory.
+            return Err(Self::denied(
+                "memory_placement_not_owned_by_another_controller",
+            ));
         }
         let live = crate::telemetry::proc_view::live_process(&self.proc_root, self.task)
             .ok_or_else(|| Self::denied("target_process_alive"))?;

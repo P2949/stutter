@@ -143,3 +143,9 @@ pub mod network_capability {
     //! options and qdisc replacement.
     pub use crate::actions::net_capability::*;
 }
+
+pub mod memory_policy {
+    //! Read-only process memory-policy observation and the typed refusal for foreign-process
+    //! `set_mempolicy`/`mbind` (there is no cross-process form of those calls).
+    pub use crate::actions::memory_policy::*;
+}
