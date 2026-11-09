@@ -43,3 +43,17 @@ entry stays `HardwareUnavailable`/`EvidenceDeferred`. NUMA remains impossible wi
 `scx.cscheds` were fetched and contain no `scx_loader` binary or D-Bus service file, and there is
 no standalone nixpkgs package for it. The 5.7 D-Bus switch therefore stays unvalidated here; it
 needs a distribution or build that ships `scx_loader` (e.g. the upstream `scx-loader` crate).
+
+## Delegated validation subtree: owner death (live, real kernel)
+
+`delegation::contain_end` (normal exits) and the new `DelegatedReaper` (owner death) were run
+against a real cgroup v2 delegation with the ignored live tests in
+`stutter-validation-runner/src/delegation.rs`:
+
+- `live_containment_end_kills_a_setsid_grandchild_and_spares_an_unrelated_process`: a `setsid`,
+  TERM-ignoring grandchild inside the subtree was killed by the ordinary cleanup; an unrelated
+  sentinel survived; the subtree was removed.
+- `live_owner_sigkill_leaves_no_descendant_in_the_delegated_subtree`: the heartbeat was held by a
+  separate owner process which was then `SIGKILL`ed with the grandchild running; within 5 s the
+  independent reaper had emptied the subtree, the sentinel survived, and a later ordinary cleanup
+  found it empty and removed it.

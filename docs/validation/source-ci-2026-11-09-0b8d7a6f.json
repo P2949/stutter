@@ -1,0 +1,24 @@
+{
+  "result": "PASS",
+  "source_sha": "0b8d7a6f30e751b54fbc0b6d265a51a96545bc9b",
+  "source_clean": true,
+  "build_output": "fresh local clone checkout/target (exclusive to this checkout)",
+  "commands": [
+    "nix develop --command cargo run -q -p xtask -- ci",
+    "nix develop --command cargo clippy --workspace --all-targets -- -D warnings",
+    "nix develop --command cargo run -q -p xtask -- release-check"
+  ],
+  "library": { "passed": 3399, "ignored": 15 },
+  "xtask": { "passed": 534 },
+  "validation_runner": { "passed": 106, "ignored": 7 },
+  "architecture_tests": { "passed": 125 },
+  "release_binary_sha256": "467ed5fdfafc17e4a4ceeaa23b8743cc7481a6cb47ddf315ba79cc0cc4e81838",
+  "logs_sha256": {
+    "ci.log": "6745aad86c53471f54b45a85fb593d5208f273e4d2a6f0a92461bfd734cccb9a",
+    "clippy-workspace.log": "e653b5bd5d2f775b0ba557c1fff999c7dc92f94fc930017f308bd22cd4945b34",
+    "release-check.log": "3871471727206268524bc6e3ed738b0d4793da059f9f99b759f65f43d55e64d4"
+  },
+  "scope": "committed-source validation of the code commit that adds scope-bound offline authorization, the hardened systemd and DAMOS recovery, the delegated-subtree owner-death reaper, and the subcapability manifest with strict closeout",
+  "not_deployed": "The production service is still the 4f3baa07 build (binary bf79d9c4...). Nothing this commit changes is reachable from the daemon or the bounded service (offline adapters are HighRisk, manual and behind HIGH_RISK_APPLY_IMPLEMENTED=false; no shipped campaign grants IssueOfflineReceipt), so no re-deploy was done and this receipt does not qualify the installed binary.",
+  "note": "documentation-only commits after this sha (this receipt, the ledger pin) do not change the built binary; the live delegated-subtree tests ran separately on the real kernel and passed (see docs/validation/live-mechanisms-2026-11-09/RESULTS.md)"
+}
