@@ -163,3 +163,10 @@ pub mod service_manager {
     //! Service-manager detection (systemd or OpenRC) and service-to-cgroup resolution.
     pub use crate::integrations::service_manager::*;
 }
+
+pub mod campaign_authorization {
+    //! The trusted, receipt-verifying, journalled way to obtain an offline authorization.
+    pub use crate::integrations::campaign_receipt::{
+        CampaignScope, MintRefusal, mint_authorization,
+    };
+}

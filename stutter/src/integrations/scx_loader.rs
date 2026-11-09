@@ -203,6 +203,11 @@ impl SwitchPlan {
 
 impl OfflineAuthorization {
     /// Fake-bus fixtures only; never a constructor in the product library.
+    /// The only product constructor: used by the receipt-verifying factory and nothing else.
+    pub(super) fn minted(campaign: String) -> Self {
+        Self { campaign }
+    }
+
     #[cfg(test)]
     pub(super) fn from_campaign(campaign: &str) -> Self {
         Self {

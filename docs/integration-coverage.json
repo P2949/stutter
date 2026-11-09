@@ -502,6 +502,8 @@
         "W11d"
       ],
       "anchors": [
+        "stutter/src/integrations/campaign_receipt.rs",
+        "stutter-validation-runner/src/receipt.rs",
         "stutter/src/integrations/mod.rs",
         "stutter/src/integrations/exact.rs",
         "stutter/src/integrations/power_profiles.rs"
@@ -511,9 +513,9 @@
       "g1": "power-profiles-daemon read over the system bus on this host: no owner (absent)",
       "runtime_availability": "all absent",
       "authority": "O/A/D",
-      "not_wired": "Trusted production campaign/token factory and worker/journal integration are absent; the scoped hold mechanism is fake-bus tested, and OfflineAuthorization has a fixture-only constructor.",
+      "not_wired": "The trusted factory exists: `campaign_authorization::mint_authorization` verifies a root-written receipt (every path component root-owned and not group or world writable, no symlinks; boot, user, scope and expiry checked) and journals the issue durably before returning an authorization, and the runner has `receipt::write_receipt` to produce one. No runner protocol request issues a receipt yet, so no production campaign can obtain one; the scoped hold mechanism is fake-bus tested.",
       "missing_required": [
-        "power/campaign-token-factory-and-worker-journal-integration"
+        "power/runner-request-that-issues-receipts"
       ],
       "dispositions": [
         "FixtureVerified",

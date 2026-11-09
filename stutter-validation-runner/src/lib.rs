@@ -13,6 +13,7 @@ pub mod install;
 pub mod model;
 pub mod process;
 pub mod protocol;
+pub mod receipt;
 pub mod resume;
 pub mod server;
 pub mod service;
