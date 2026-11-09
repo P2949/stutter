@@ -1,6 +1,6 @@
 # Closeout report
 
-Source `664ed4af5876fae365abcbd981addb4bb81fd3d6`, kernel `6.18.57`. Generated from the integration coverage ledger; it cannot claim more than the ledger records.
+Source `00b30f36b4f0be4ffd4960f40b7cc88d1e81b880`, kernel `6.18.57`. Generated from the integration coverage ledger; it cannot claim more than the ledger records.
 
 ## Disposition counts
 

@@ -1,0 +1,34 @@
+{
+  "result": "PASS",
+  "source_sha": "00b30f36b4f0be4ffd4960f40b7cc88d1e81b880",
+  "source_clean": true,
+  "build_output": "fresh local clone checkout/target (exclusive to this checkout); run at nice 19, ionice idle, 3 build jobs because a game was running on the host",
+  "commands": [
+    "nix develop --command cargo run -q -p xtask -- ci",
+    "nix develop --command cargo clippy --workspace --all-targets -- -D warnings",
+    "nix develop --command cargo run -q -p xtask -- release-check"
+  ],
+  "library": {
+    "passed": 3450,
+    "ignored": 16
+  },
+  "xtask": {
+    "passed": 559
+  },
+  "validation_runner": {
+    "passed": 106,
+    "ignored": 7
+  },
+  "architecture_tests": {
+    "passed": 125
+  },
+  "release_binary_sha256": "de024d074948e18d61678f11ece585f01e6c3f0dc447970799e1f9a27c2555ec",
+  "logs_sha256": {
+    "ci.log": "7bcb5d17283126694cc39cfe4dcc475ec5b34ae019da7e930de285ed5e406b6a",
+    "clippy-workspace.log": "9056c68878f8c390addff063829293ebc13f6992e297af70a71c1535ea4f66a0",
+    "release-check.log": "76762ac9fa4f89aea7861692535a24c527dbc2952fa2e4358f0f0a9c165e51ce"
+  },
+  "scope": "committed-source validation of the smoke fence lifecycle (deny-all validation session, fallible arming, mutation gated on unit checks), the exact start-tick history audit, the worker DenyAll fence state and the closeout-report consistency check, on top of 664ed4af",
+  "not_deployed": "The production service is still the 4f3baa07 build, which has no fence. The worker fence and its deny-all state are unit-tested only and not live-qualified; the worker does not yet acknowledge a loaded fence to the smoke. The final-source deployment is deferred (BlockedResource: host not quiescent), so this receipt does not qualify the installed binary.",
+  "note": "documentation-only commits after this sha do not change the built binary"
+}
