@@ -76,3 +76,12 @@ interval excluded a 20 percent gain but did not establish strict equivalence wit
 margin. The classifier no longer makes that claim: ruling out the benefit floor now yields
 `Uncertain` unless the whole interval lies inside the margin.
 Raw evidence is retained privately in `.llm-runs/kpi-observation-20261108`.
+
+### Scenarios
+
+`kpi-observation run --scenario identical|slower|faster|short-work` changes one arm for real
+(the treatment doing the work three times, the baseline doing it three times, or the treatment
+completing only half of it) and fails the run unless the study classifies the outcome correctly:
+`Harmful`, `Beneficial`, not-a-win-or-loss, and `InvalidExperiment` for an arm that looks faster
+only by completing less work. The 2026-11-09 results, intervals and hashes are in
+`docs/validation/kpi-scenarios-2026-11-09/RESULTS.md`.

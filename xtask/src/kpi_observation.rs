@@ -29,12 +29,50 @@ use stutter::api::{
 const WORK: u64 = 100_000;
 const WORK_ID: &str = "integer-fold-v1-100000";
 
+/// What the second arm does differently. Every scenario really runs; none is a recorded fixture.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, clap::ValueEnum)]
+pub enum Scenario {
+    /// Both arms do the same work: the neutral case, which must not be called a win or a loss.
+    #[default]
+    Identical,
+    /// The treatment arm does the fixed work three times over: a real regression.
+    Slower,
+    /// The baseline arm does the work three times over, the treatment once: a real improvement.
+    Faster,
+    /// The treatment arm completes only half the work, so it looks faster while failing the hard
+    /// completed-units guardrail. It must never be classified as beneficial.
+    ShortWork,
+}
+
+impl Scenario {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Identical => "identical",
+            Self::Slower => "slower",
+            Self::Faster => "faster",
+            Self::ShortWork => "short-work",
+        }
+    }
+
+    /// (repetitions of the fixed work, steps in each repetition) for one arm.
+    fn arm(self, treatment: bool) -> (u32, u64) {
+        match (self, treatment) {
+            (Self::Slower, true) | (Self::Faster, false) => (3, WORK),
+            (Self::ShortWork, true) => (1, WORK / 2),
+            _ => (1, WORK),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Subcommand)]
 pub enum KpiObservationCommand {
-    /// Run eight independently completed, identical fixed-work executions, with no actuator.
+    /// Run eight independently completed fixed-work executions, with no actuator. The default
+    /// scenario has identical arms; the others change one arm for real.
     Run {
         #[arg(long)]
         out: PathBuf,
+        #[arg(long, value_enum, default_value_t = Scenario::Identical)]
+        scenario: Scenario,
     },
     #[command(hide = true)]
     Producer {
@@ -42,16 +80,23 @@ pub enum KpiObservationCommand {
         control: PathBuf,
         #[arg(long)]
         socket: PathBuf,
+        #[arg(long, value_enum, default_value_t = Scenario::Identical)]
+        scenario: Scenario,
     },
 }
 
+#[cfg(test)]
 fn fixed_work() -> u64 {
-    (0..WORK).fold(0_u64, |value, index| {
+    work_steps(WORK)
+}
+
+fn work_steps(steps: u64) -> u64 {
+    (0..steps).fold(0_u64, |value, index| {
         std::hint::black_box(value.wrapping_mul(6364136223846793005).wrapping_add(index))
     })
 }
 
-fn producer(control: &Path, socket: &Path) -> anyhow::Result<()> {
+fn producer(control: &Path, socket: &Path, scenario: Scenario) -> anyhow::Result<()> {
     let mut control = UnixStream::connect(control)?;
     control.set_read_timeout(Some(Duration::from_secs(20)))?;
     control.set_write_timeout(Some(Duration::from_secs(2)))?;
@@ -66,7 +111,12 @@ fn producer(control: &Path, socket: &Path) -> anyhow::Result<()> {
         if line == "stop\n" {
             return Ok(());
         }
-        ensure!(line == "measure\n", "unknown bounded producer request");
+        let treatment = match line.as_str() {
+            "measure baseline\n" => false,
+            "measure treatment\n" => true,
+            _ => anyhow::bail!("unknown bounded producer request"),
+        };
+        let (repetitions, steps) = scenario.arm(treatment);
         if source.is_none() {
             let stream = UnixStream::connect(socket)?;
             stream.set_read_timeout(Some(Duration::from_secs(3)))?;
@@ -74,12 +124,21 @@ fn producer(control: &Path, socket: &Path) -> anyhow::Result<()> {
             source = Some(BufReader::new(stream));
         }
         let started = Instant::now();
-        ensure!(fixed_work() == expected, "fixed-work correctness failed");
+        for _ in 0..repetitions {
+            let checksum = work_steps(steps);
+            // The full fold has an independently known checksum; a shortened one is a different
+            // computation and is reported as exactly what it completed.
+            ensure!(
+                steps != WORK || checksum == expected,
+                "fixed-work correctness failed"
+            );
+            std::hint::black_box(checksum);
+        }
         let milliseconds = started.elapsed().as_secs_f64() * 1000.0;
         let at = monotonic_now_ns()?;
         for (metric, value) in [
             ("fixed_work_ms", milliseconds),
-            ("completed_units", WORK as f64),
+            ("completed_units", steps as f64),
         ] {
             let sample = Sample {
                 metric: metric.into(),
@@ -157,7 +216,7 @@ fn capture(
     started: Instant,
 ) -> anyhow::Result<ObservedKpiBlock> {
     let from_ns = monotonic_now_ns()?;
-    control.write_all(b"measure\n")?;
+    control.write_all(format!("measure {arm}\n").as_bytes())?;
     let deadline = Instant::now() + Duration::from_secs(5);
     let mut reply = Vec::new();
     loop {
@@ -201,7 +260,7 @@ fn capture(
     Ok(block)
 }
 
-fn run(out: &Path) -> anyhow::Result<()> {
+fn run(out: &Path, scenario: Scenario) -> anyhow::Result<()> {
     fs::DirBuilder::new()
         .mode(0o700)
         .create(out)
@@ -218,7 +277,8 @@ fn run(out: &Path) -> anyhow::Result<()> {
         .args(["kpi-observation", "producer", "--control"])
         .arg(&control_path)
         .arg("--socket")
-        .arg(out.join("kpi.sock"));
+        .arg(out.join("kpi.sock"))
+        .args(["--scenario", scenario.name()]);
     let cancel = Arc::new(AtomicBool::new(false));
     let mut policy = crate::process::supervisor::ExecutionPolicy::bounded(Duration::from_secs(45));
     policy.tee = false;
@@ -276,7 +336,7 @@ fn run(out: &Path) -> anyhow::Result<()> {
             objective: "Experimental completed fixed work".into(),
             metric: contract.primary.id.clone(),
             unit: contract.primary.unit.clone(),
-            candidate: "identical arms; no actuator".into(),
+            candidate: format!("scenario {}; no actuator", scenario.name()),
             context_fingerprint: context.clone(),
             min_effect_percent: 20.0,
             equivalence_margin_percent: 5.0,
@@ -309,6 +369,7 @@ fn run(out: &Path) -> anyhow::Result<()> {
     control.set_nonblocking(true)?;
     let started = Instant::now();
     let mut pairs = Vec::new();
+    let mut refused: Option<String> = None;
     for index in 0_u32..4 {
         let (first, second) = if index.is_multiple_of(2) {
             ("baseline", "treatment")
@@ -334,16 +395,33 @@ fn run(out: &Path) -> anyhow::Result<()> {
             started,
         )?;
         let pair = if first == "baseline" { (a, b) } else { (b, a) };
-        runtime.observe_kpi_pair(&pair.0, &pair.1)?;
+        if let Err(error) = runtime.observe_kpi_pair(&pair.0, &pair.1) {
+            // A pair the study refuses (the hard guardrail) is the expected result of a scenario
+            // that completes less work, and a failure of any other.
+            ensure!(
+                scenario == Scenario::ShortWork,
+                "the study refused a pair in the {} scenario: {error:#}",
+                scenario.name()
+            );
+            refused = Some(format!("{error:#}"));
+            break;
+        }
         pairs.push(pair);
     }
-    let evidence = runtime.analyse_kpi_observation_study(1)?;
-    let refs: Vec<_> = pairs.iter().map(|(a, b)| (a, b)).collect();
-    evidence.verify_captures(&design, &refs)?;
-    fs::write(
-        out.join("evidence.json"),
-        serde_json::to_vec_pretty(&evidence)?,
-    )?;
+    let decision = if let Some(reason) = &refused {
+        // The study refused the pair: nothing was analysed, and nothing is called beneficial.
+        serde_json::json!({ "refused_by_hard_guardrail": reason })
+    } else {
+        let evidence = runtime.analyse_kpi_observation_study(1)?;
+        let refs: Vec<_> = pairs.iter().map(|(a, b)| (a, b)).collect();
+        evidence.verify_captures(&design, &refs)?;
+        ensure_expected(scenario, evidence.evidence.decision)?;
+        fs::write(
+            out.join("evidence.json"),
+            serde_json::to_vec_pretty(&evidence)?,
+        )?;
+        serde_json::to_value(evidence.evidence.decision)?
+    };
     ensure!(
         !runtime.has_active_experiment() && !runtime.has_kept_actions(),
         "observation acquired action state"
@@ -369,12 +447,36 @@ fn run(out: &Path) -> anyhow::Result<()> {
     fs::write(
         out.join("summary.json"),
         serde_json::to_vec_pretty(
-            &serde_json::json!({"schema_version":1,"evidence_kind":"controlled_real","scope":"runtime KPI and independent-block statistics; harness-supplied monitor ticks, no installed-service or scheduler qualification","xtask_sha256":digest,"completed_runs":8,"source_bound":true,"raw_reconstruction_verified":true,"authorizes_mutation":false,"outstanding_owned_tokens":0,"decision":evidence.evidence.decision}),
+            &serde_json::json!({"schema_version":1,"evidence_kind":"controlled_real","scope":"runtime KPI and independent-block statistics; harness-supplied monitor ticks, no installed-service or scheduler qualification","xtask_sha256":digest,"scenario":scenario.name(),"completed_runs":pairs.len() * 2,"source_bound":true,"raw_reconstruction_verified":true,"authorizes_mutation":false,"outstanding_owned_tokens":0,"decision":decision}),
         )?,
     )?;
     println!(
-        "kpi-observation: completed 8 fixed-work runs; {:?}; no mutation authority",
-        evidence.evidence.decision
+        "kpi-observation: scenario {}; {} fixed-work runs; {decision}; no mutation authority",
+        scenario.name(),
+        pairs.len() * 2
+    );
+    Ok(())
+}
+
+/// What each scenario must be classified as. A different answer is a failure of the study, so a
+/// real regression cannot pass as neutral, nor a neutral run as a win.
+fn ensure_expected(
+    scenario: Scenario,
+    decision: stutter::api::experiments::Decision,
+) -> anyhow::Result<()> {
+    use stutter::api::experiments::Decision;
+    let ok = match scenario {
+        Scenario::Identical => !matches!(decision, Decision::Beneficial | Decision::Harmful),
+        Scenario::Slower => decision == Decision::Harmful,
+        Scenario::Faster => decision == Decision::Beneficial,
+        // Faster on the primary metric but short of the completed-units hard guardrail: the
+        // study must call the experiment invalid (or refuse the pair), never beneficial.
+        Scenario::ShortWork => decision == Decision::InvalidExperiment,
+    };
+    ensure!(
+        ok,
+        "the {} scenario was classified {decision:?}, which is wrong for it",
+        scenario.name()
     );
     Ok(())
 }
@@ -386,8 +488,12 @@ fn unsafe_uid() -> u32 {
 
 pub fn execute(command: KpiObservationCommand) -> anyhow::Result<()> {
     match command {
-        KpiObservationCommand::Run { out } => run(&out),
-        KpiObservationCommand::Producer { control, socket } => producer(&control, &socket),
+        KpiObservationCommand::Run { out, scenario } => run(&out, scenario),
+        KpiObservationCommand::Producer {
+            control,
+            socket,
+            scenario,
+        } => producer(&control, &socket, scenario),
     }
 }
 
@@ -426,5 +532,52 @@ mod tests {
             .to_string();
         assert!(help.contains("run"));
         assert!(!help.contains("producer"));
+    }
+}
+
+#[cfg(test)]
+mod scenario_tests {
+    use super::*;
+
+    #[test]
+    fn each_scenario_changes_exactly_the_arm_it_names() {
+        let (identical, slower, faster, short) = (
+            Scenario::Identical,
+            Scenario::Slower,
+            Scenario::Faster,
+            Scenario::ShortWork,
+        );
+        assert_eq!(identical.arm(false), identical.arm(true));
+        assert_eq!(slower.arm(false), (1, WORK));
+        assert_eq!(slower.arm(true), (3, WORK));
+        assert_eq!(faster.arm(false), (3, WORK));
+        assert_eq!(faster.arm(true), (1, WORK));
+        assert_eq!(short.arm(false), (1, WORK));
+        assert_eq!(short.arm(true), (1, WORK / 2));
+    }
+
+    #[test]
+    fn a_wrong_classification_fails_the_study() {
+        use stutter::api::experiments::Decision;
+        for (scenario, right) in [
+            (Scenario::Slower, Decision::Harmful),
+            (Scenario::Faster, Decision::Beneficial),
+            (Scenario::ShortWork, Decision::InvalidExperiment),
+            (Scenario::Identical, Decision::Uncertain),
+        ] {
+            assert!(ensure_expected(scenario, right).is_ok(), "{scenario:?}");
+        }
+        // A regression passed off as neutral, a neutral run called a win, and a short-work arm
+        // called beneficial are all failures.
+        assert!(ensure_expected(Scenario::Slower, Decision::Uncertain).is_err());
+        assert!(ensure_expected(Scenario::Identical, Decision::Beneficial).is_err());
+        assert!(ensure_expected(Scenario::ShortWork, Decision::Beneficial).is_err());
+        assert!(ensure_expected(Scenario::Faster, Decision::Equivalent).is_err());
+    }
+
+    #[test]
+    fn a_shortened_fold_is_a_different_computation_and_the_full_one_keeps_its_checksum() {
+        assert_ne!(work_steps(WORK / 2), fixed_work());
+        assert_eq!(fixed_work(), 17_641_615_109_599_008_432);
     }
 }
