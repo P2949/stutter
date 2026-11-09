@@ -38,3 +38,8 @@ left behind. `stutter-autotune-bounded@p2949` and `stutter-privileged-worker@p29
 throughout. This exercises the kernel enable/disable path the `sched_ext` sensor reads. It does
 **not** validate the `scx_loader` D-Bus switch (5.7): no `scx_loader` exists on this host, so that
 entry stays `HardwareUnavailable`/`EvidenceDeferred`. NUMA remains impossible with one node.
+
+`scx_loader` availability (checked 2026-11-09): nixpkgs `scx.full`/`scx.rustscheds` 1.1.4 and
+`scx.cscheds` were fetched and contain no `scx_loader` binary or D-Bus service file, and there is
+no standalone nixpkgs package for it. The 5.7 D-Bus switch therefore stays unvalidated here; it
+needs a distribution or build that ships `scx_loader` (e.g. the upstream `scx-loader` crate).
