@@ -26,3 +26,15 @@ load rather than showing a regression of this build. The exact-build smoke was r
 deployed binary after the failed first attempt, as the plan allows. No reboot, no GPU or LACT
 change, and no public GitHub issue, PR, comment or release was created (the NixosConf branch was
 pushed without a PR).
+
+## NixosConf `main` promotion (2026-11-09, evening)
+
+`./scripts/validate full` was run on the deployed commit `250e3cf` (branch
+`host/stutter-w19-328b3f2b`) and passed: all flake checks evaluated, every named validation
+(activation-safety, blank-disk-reconstruction, granular-impermanence, interrupted-recovery,
+persistent-identity, recovery-iso, workstation-smoke, desktop and the rest) reported `Validating`
+with no failure, exit 0. The local receipt is
+`/etc/nixos/.git/local-validation/receipts/250e3cf8be4ef6182585705e81406a493ecc2139/full.json`.
+With that receipt in place, `main` (`db578b2`) was fast-forwarded to `250e3cf` (two commits: the
+pin to `328b3f2b` and the re-pin to `4f3baa07`), no force, no PR. `main` now equals the commit the
+host is running. No reboot, no activation and no service change was involved in the promotion.
