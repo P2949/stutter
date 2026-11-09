@@ -21,6 +21,8 @@ use crate::{
 
 /// Longest a single suite may run before the runner kills it.
 const SUITE_TIMEOUT: Duration = Duration::from_secs(2 * 60 * 60);
+/// One immutable combined stdout/stderr budget for each privileged-runner action.
+const ACTION_LOG_CAP: usize = 16 * 1024 * 1024;
 /// SCHED_FIFO priority of the controlled contender (matches the manual `chrt -f 50`).
 const BURST_PRIORITY: i32 = 50;
 
@@ -374,12 +376,7 @@ impl SystemExecutor {
                 .map_err(|error| failure(format!("chown log: {error}")))?;
         }
         let mut command = Self::command(plan);
-        command
-            .stdout(
-                log.try_clone()
-                    .map_err(|error| failure(error.to_string()))?,
-            )
-            .stderr(log);
+        command.stdout(Stdio::piped()).stderr(Stdio::piped());
         let attach = delegated_leaf
             .map(|leaf| {
                 std::ffi::CString::new(leaf.join("cgroup.procs").into_os_string().into_vec())
@@ -395,6 +392,25 @@ impl SystemExecutor {
         let mut child = command
             .spawn()
             .map_err(|error| failure(format!("could not start {label}: {error}")))?;
+        let capture = crate::bounded_log::BoundedLog::start(
+            log,
+            child
+                .stdout
+                .take()
+                .ok_or_else(|| failure("missing stdout pipe"))?,
+            child
+                .stderr
+                .take()
+                .ok_or_else(|| failure("missing stderr pipe"))?,
+            ACTION_LOG_CAP,
+        );
+        let capture = match capture {
+            Ok(capture) => capture,
+            Err(error) => {
+                reap_group(&mut child, Duration::from_secs(3));
+                return Err(failure(format!("could not capture {label}: {error}")));
+            }
+        };
         let started = Instant::now();
         let status = loop {
             if let Some(status) = child
@@ -405,14 +421,18 @@ impl SystemExecutor {
             }
             if started.elapsed() > timeout {
                 reap_group(&mut child, Duration::from_secs(3));
+                let log_status = capture.finish();
                 return Err(failure(format!(
-                    "{label} exceeded its time limit and its process group was terminated"
+                    "{label} exceeded its time limit and its process group was terminated; log: {log_status:?}"
                 )));
             }
             std::thread::sleep(Duration::from_millis(200));
         };
         // A descendant that outlived the main process is still part of this run.
         reap_group(&mut child, Duration::from_secs(3));
+        capture
+            .finish()
+            .map_err(|error| failure(format!("{label}: {error}")))?;
         Ok(json!({
             "action": label,
             "exit_code": status.code(),

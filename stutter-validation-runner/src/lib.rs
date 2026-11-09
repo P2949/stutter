@@ -3,6 +3,7 @@
 //! socket, gated by kernel peer credentials and a root-owned authorization.
 pub mod authorization;
 pub mod boot;
+mod bounded_log;
 pub mod cli;
 pub mod client;
 pub mod containment;

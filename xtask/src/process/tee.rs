@@ -8,9 +8,12 @@ use std::{
     },
 };
 
+/// Longest a single chunk may wait for a slow console before the sink is declared stalled.
+const STALL_BUDGET: std::time::Duration = std::time::Duration::from_millis(500);
+
 pub(super) enum ConsoleSink {
-    File(File),
-    Socket(File),
+    File(File, bool),
+    Socket(File, bool),
 }
 
 impl ConsoleSink {
@@ -28,11 +31,11 @@ impl ConsoleSink {
         let file = unsafe { File::from_raw_fd(copy) };
         let kind = file.metadata().ok()?.file_type();
         if kind.is_socket() {
-            return Some(Self::Socket(file));
+            return Some(Self::Socket(file, false));
         }
         if kind.is_file() {
             // Preserve the original shared file offset/append semantics for regular logs.
-            return Some(Self::File(file));
+            return Some(Self::File(file, false));
         }
         if kind.is_fifo() || kind.is_char_device() {
             // Reopening procfd creates an independent open description: O_NONBLOCK must not
@@ -42,27 +45,57 @@ impl ConsoleSink {
                 .custom_flags(libc::O_NONBLOCK | libc::O_CLOEXEC)
                 .open(format!("/proc/self/fd/{}", file.as_raw_fd()))
                 .ok()?;
-            return Some(Self::File(sink));
+            return Some(Self::File(sink, false));
         }
         None
     }
 
+    /// Echoes `bytes`, waiting briefly while the console is full. Returns how many bytes were
+    /// written. A sink that stays stalled past `STALL_BUDGET` is abandoned so capture never blocks.
     pub(super) fn echo(&mut self, bytes: &[u8]) -> usize {
-        match self {
-            Self::File(file) => file.write(bytes).unwrap_or(0),
-            Self::Socket(file) => {
-                // SAFETY: file owns a socket fd and bytes is valid for the supplied length.
-                let written = unsafe {
+        let (file, stalled, socket) = match self {
+            Self::File(file, stalled) => (file, stalled, false),
+            Self::Socket(file, stalled) => (file, stalled, true),
+        };
+        if *stalled {
+            return 0;
+        }
+        let started = std::time::Instant::now();
+        let mut done = 0;
+        while done < bytes.len() {
+            let rest = &bytes[done..];
+            let written = if socket {
+                // SAFETY: file owns a socket fd and rest is valid for the supplied length.
+                let sent = unsafe {
                     libc::send(
                         file.as_raw_fd(),
-                        bytes.as_ptr().cast(),
-                        bytes.len(),
+                        rest.as_ptr().cast(),
+                        rest.len(),
                         libc::MSG_DONTWAIT | libc::MSG_NOSIGNAL,
                     )
                 };
-                usize::try_from(written).unwrap_or(0)
+                usize::try_from(sent).map_err(|_| std::io::Error::last_os_error())
+            } else {
+                file.write(rest)
+            };
+            match written {
+                Ok(0) => break,
+                Ok(count) => done += count,
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    if started.elapsed() >= STALL_BUDGET {
+                        *stalled = true;
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(2));
+                }
+                Err(_) => {
+                    *stalled = true;
+                    break;
+                }
             }
         }
+        done
     }
 }
 
