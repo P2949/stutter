@@ -28,3 +28,13 @@ kernel: `EINVAL` once and `EBUSY` on later attempts. The transaction reported `n
 tore its configuration down, and `nr_kdamonds` was back at 0 afterwards. The mechanism is therefore
 **not validated** (`BlockedResource`), while the refusal path, the cleanup and the "never touch
 another owner's kdamond" rule were exercised on the real kernel.
+
+## sched_ext: real kernel switch and restore observed (no `scx_loader`)
+
+`/sys/kernel/sched_ext/state` was `disabled`. `scx_simple` (nixpkgs `scx_cscheds`, run as root for
+8 s with SIGINT) took the kernel to `state=enabled`, `root/ops=simple`, `enable_seq=1`; after the
+loader exited ("unregistered from user space") the state was `disabled` again with no scheduler
+left behind. `stutter-autotune-bounded@p2949` and `stutter-privileged-worker@p2949` stayed active
+throughout. This exercises the kernel enable/disable path the `sched_ext` sensor reads. It does
+**not** validate the `scx_loader` D-Bus switch (5.7): no `scx_loader` exists on this host, so that
+entry stays `HardwareUnavailable`/`EvidenceDeferred`. NUMA remains impossible with one node.
