@@ -313,7 +313,9 @@ pub fn operation_domain(operation: MutationOperationKind) -> Option<ResourceDoma
     use MutationOperationKind as Op;
     match operation {
         Op::Nice | Op::IoPrio => Some(ResourceDomain::TaskPriority),
-        Op::CpuPowerEpp | Op::CpuPowerGovernor => Some(ResourceDomain::CpuPower),
+        Op::CpuPowerEpp | Op::CpuPowerGovernor | Op::PmQosCpuLatency => {
+            Some(ResourceDomain::CpuPower)
+        }
         Op::GpuPowerProfile | Op::GpuForcePerformance => Some(ResourceDomain::GpuPower),
         Op::VmSwappiness | Op::VmDirtyBackgroundRatio | Op::VmDirtyRatio => {
             Some(ResourceDomain::VmKnobs)

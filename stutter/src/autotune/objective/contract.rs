@@ -63,6 +63,7 @@ fn mechanism_for(operation: MutationOperationKind) -> MechanismEvidence {
             MechanismEvidence::SysctlValueObserved
         }
         IrqKnownDevice | IrqStorageOrUnknown => MechanismEvidence::IrqPlacementObserved,
+        PmQosCpuLatency => MechanismEvidence::PowerAttributeObserved,
         Unclassified => MechanismEvidence::None,
     }
 }

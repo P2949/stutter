@@ -75,7 +75,7 @@ const BOUNDED_SERVICE: &[&str] = &[
     "live_bounded_service_acceptance",
 ];
 
-pub const CAPABILITIES: [Capability; 29] = [
+pub const CAPABILITIES: [Capability; 30] = [
     obs(
         "doctor",
         "Local preflight checks",
@@ -311,6 +311,18 @@ pub const CAPABILITIES: [Capability; 29] = [
         required_evidence: &[],
         required_release_evidence: &[],
         limitations: "System-wide effect. Storage and unknown IRQs are manual / high-risk and never autonomous. Does not inherit another operation's maturity.",
+    },
+    Capability {
+        id: "pm_qos_cpu_latency",
+        title: "PM QoS CPU wake-latency lease",
+        class: CapabilityClass::Mutating,
+        tier: CapabilityTier::Experimental,
+        target_tier: CapabilityTier::Experimental,
+        commands: &["autotune"],
+        providers: &[],
+        required_evidence: &[],
+        required_release_evidence: &[],
+        limitations: "System-wide effect: keeps every CPU out of deep idle states while held. A worker-owned descriptor lease with an enforced hold deadline; manual only, never autonomous, not a low-risk default. Does not inherit another operation's maturity.",
     },
     Capability {
         id: "bounded_autotune_controller",
@@ -654,6 +666,7 @@ mod tests {
             "vm_dirty_ratio",
             "irq_affinity_known_device",
             "irq_affinity_storage_or_unknown",
+            "pm_qos_cpu_latency",
         ] {
             assert_ne!(capability(id).tier, CapabilityTier::Supported, "{id}");
             assert_ne!(

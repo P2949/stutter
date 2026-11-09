@@ -33,12 +33,15 @@ pub enum MutationOperationKind {
     IrqKnownDevice,
     IrqStorageOrUnknown,
 
+    /// A system-wide CPU wake-latency request (`/dev/cpu_dma_latency`), held as a lease.
+    PmQosCpuLatency,
+
     /// Test-only or unrecognisable payloads. Never authorised by any contract.
     Unclassified,
 }
 
 impl MutationOperationKind {
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 16] = [
         Self::CpuAffinityProfile,
         Self::Uclamp,
         Self::Nice,
@@ -53,6 +56,7 @@ impl MutationOperationKind {
         Self::VmDirtyRatio,
         Self::IrqKnownDevice,
         Self::IrqStorageOrUnknown,
+        Self::PmQosCpuLatency,
         Self::Unclassified,
     ];
 
@@ -72,6 +76,7 @@ impl MutationOperationKind {
             Self::VmDirtyRatio => "vm_dirty_ratio",
             Self::IrqKnownDevice => "irq_known_device",
             Self::IrqStorageOrUnknown => "irq_storage_or_unknown",
+            Self::PmQosCpuLatency => "pm_qos_cpu_latency",
             Self::Unclassified => "unclassified",
         }
     }
@@ -95,6 +100,7 @@ impl MutationOperationKind {
             Self::VmDirtyRatio => Some("vm_dirty_ratio"),
             Self::IrqKnownDevice => Some("irq_affinity_known_device"),
             Self::IrqStorageOrUnknown => Some("irq_affinity_storage_or_unknown"),
+            Self::PmQosCpuLatency => Some("pm_qos_cpu_latency"),
             Self::Unclassified => None,
         }
     }
@@ -122,6 +128,7 @@ impl MutationOperationKind {
                 | Self::VmDirtyBackgroundRatio
                 | Self::VmDirtyRatio
                 | Self::IrqStorageOrUnknown
+                | Self::PmQosCpuLatency
                 | Self::Unclassified
         )
     }
