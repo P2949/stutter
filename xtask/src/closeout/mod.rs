@@ -52,6 +52,11 @@ pub struct Entry {
     pub g0: String,
     pub g1: String,
     pub not_wired: String,
+    /// Stable ids of plan-required subcapabilities with no implementation yet. Distinct from
+    /// `not_wired`, which also records physical evidence that cannot be gathered here: a
+    /// `code_complete` entry has none of these.
+    #[serde(default)]
+    pub missing_required: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -84,6 +89,11 @@ pub fn validate(ledger: &Ledger) -> anyhow::Result<()> {
             }
         }
         if entry.status == "code_complete" {
+            ensure!(
+                entry.missing_required.is_empty(),
+                "{id}: code_complete but required subcapabilities are missing: {}",
+                entry.missing_required.join(", ")
+            );
             ensure!(
                 entry.dispositions.iter().any(|d| d == "FixtureVerified"),
                 "{id}: code_complete needs verified fixtures"

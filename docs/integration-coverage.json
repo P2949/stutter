@@ -239,14 +239,18 @@
         "stutter/src/actions/damos_scheme.rs",
         "stutter/src/actions/damos_action.rs"
       ],
-      "status": "code_complete",
+      "status": "first_slice",
       "g0": "read-only damon_state sensor (kdamond, running and scheme counts only, no addresses; root-only files report permission denied); experimental DAMOS scheme transaction (`damos_scheme`): claims only an idle kdamond, one vaddr context for a start-ticks-verified process, `stat` is monitoring-only while every reclaim/LRU action is classed irreversible and needs acknowledgement plus a bounded quota; commit reads the configuration and run state back, restore clears only a configuration that is still ours; fake-sysfs tests; `RollbackToken::DamosTeardown` (manual-only recovery that never claims reclaimed pages were restored), manual policy-gated `DamosSchemeAction` (HighRisk, SystemWide, default denies, irreversible actions need acknowledgement) and `CandidateAction::Damos` classified as manual-only `DamosScheme` with an Experimental capability; never an executable plan; active-config matching fails closed",
       "g1": "DAMON admin sysfs read as root (2026-11-09): nr_kdamonds 0 yet a `[kdamond.0]` kernel thread already runs from boot, so an in-kernel DAMON module owns DAMON on this host; a live monitoring-only `stat` scheme was configured and the kernel refused to start it (EINVAL/EBUSY), the transaction rolled back to nr_kdamonds 0 (docs/validation/live-mechanisms-2026-11-09/RESULTS.md)",
       "runtime_availability": "kernel interface present (/sys/kernel/mm/damon/admin), damo absent",
       "authority": "O/F/E",
       "not_wired": "no quota-goal feedback, no damo parity manifest, no hot/cold region summary, not worker-routed (HighRisk manual/offline behind HIGH_RISK_APPLY_IMPLEMENTED=false); no real-hardware readback here",
+      "missing_required": [
+        "damos/quota-goal-feedback",
+        "damos/hot-cold-region-summary",
+        "damos/damo-parity-manifest"
+      ],
       "dispositions": [
-        "CodeComplete",
         "FixtureVerified",
         "RealObserved",
         "HardwareUnavailable",
@@ -503,12 +507,15 @@
         "stutter/src/integrations/exact.rs",
         "stutter/src/integrations/power_profiles.rs"
       ],
-      "status": "code_complete",
+      "status": "first_slice",
       "g0": "a gated offline power-profiles-daemon adapter plans a HoldProfile only to an allowlisted known profile with the exact method signatures, executes only with an OfflineAuthorization (no runtime constructor), verifies the held profile is in effect (else releases at once) and that the prior profile returns after ReleaseProfile; the hold also self-releases when the bus connection closes (fake-bus tested, daemon absent on this host); auto-cpufreq and power-profiles-daemon presence mark CPU power owned; TLP and thermald are detected through systemd exact unit state (GetUnit/ActiveState, read-only, fake-bus tested); the read-only D-Bus client reads power-profiles-daemon ActiveProfile when its name has an owner",
       "g1": "power-profiles-daemon read over the system bus on this host: no owner (absent)",
       "runtime_availability": "all absent",
       "authority": "O/A/D",
       "not_wired": "Trusted production campaign/token factory and worker/journal integration are absent; the scoped hold mechanism is fake-bus tested, and OfflineAuthorization has a fixture-only constructor.",
+      "missing_required": [
+        "power/campaign-token-factory-and-worker-journal-integration"
+      ],
       "dispositions": [
         "FixtureVerified",
         "HardwareUnavailable",
@@ -599,14 +606,17 @@
         "stutter/src/autotune/sensors/numa_faults.rs",
         "stutter/src/actions/numa_migration.rs"
       ],
-      "status": "code_complete",
+      "status": "first_slice",
       "g0": "a cheap `numa_faults` sensor reads automatic-NUMA-balancing hinting faults, local faults and migrated pages from /proc/vmstat as deltas with a local-fault ratio, and `parse_numa_maps` sums one process's pages per node; numad presence marks memory placement owned; numa_stat sensor reads per-node numastat deltas and the remote-allocation ratio of the interval; separate typed memory operation `NumaMigratePages` (`MutationOperationKind`, manual-only, Experimental capability): target verified by live start time, nodes checked against the online list and disjoint, explicit irreversible acknowledgement, `migrate_pages(2)` behind a wrapper with before/after page accounting from numa_maps, `RollbackToken::NumaMigration` whose recovery is ManualOnly and never claims the layout was restored, manual policy-gated `NumaMigrationAction` (HighRisk, persistent effect) and `CandidateAction::NumaMigration`; cpuset.mems is the separate `CgroupCpusetMems` operation; never an executable plan",
       "g1": "read-only on this host (2026-11-09): one NUMA node online (`/sys/devices/system/node/online` = 0), `kernel.numa_balancing` = 0, and `/proc/self/numa_maps` readable; no migration was performed",
       "runtime_availability": "numad and numactl absent",
       "authority": "O/A/E",
       "not_wired": "set_mempolicy/mbind apply only to the calling thread or its own address space, so no foreign-process policy operation exists by design; no numad coexistence beyond the owner probe; not worker-routed (HighRisk manual/offline behind HIGH_RISK_APPLY_IMPLEMENTED=false); no real multi-node migration readback",
+      "missing_required": [
+        "numa/process-scoped-memory-policy-refusal-contract",
+        "numa/numad-coexistence-behaviour"
+      ],
       "dispositions": [
-        "CodeComplete",
         "FixtureVerified",
         "HardwareUnavailable",
         "EvidenceDeferred"
@@ -668,14 +678,17 @@
         "stutter/src/actions/cgroup/control_rollback.rs",
         "stutter/src/actions/cgroup/control_transaction.rs"
       ],
-      "status": "code_complete",
+      "status": "first_slice",
       "g0": "Cgroup placement remains the only operation. Typed knob values and read-only feasibility checks cover weights, idle/max, cpusets, memory bounds and I/O; unknown device effectiveness, CPU-idle state or effective masks deny. Canonical io.weight readback is parsed. Per-user OpenRC templates, observation-only root policy, rendered hooks and an unprivileged real supervisor fixture exist; full product lifecycle remains incomplete.; each knob has a prepared control transaction (`cgroup/control_transaction`): preflight, baseline and group-identity capture, abort on a foreign change or replaced group, write with readback (baseline written back when not applied), compare-before-restore; fake-root tests for all nine knobs; nine knobs are each their own operation (`MutationOperationKind::Cgroup*`) with their own Experimental capability, a shared `RollbackToken::CgroupControlRestore` (identity and compare-before-restore recovery, VerifiedAutomatic), `CgroupControlRollbackHandler`, a manual policy-gated `CgroupControlAction` (HighRisk, default denies) and `CandidateAction::CgroupControl`; never an executable plan; active-config matching fails closed; the OpenRC hooks refuse root/empty identity and a newer capability set",
       "g1": "placement observed on the production host",
       "runtime_availability": "cgroup v2 present, OpenRC absent",
       "authority": "O/A/E",
       "not_wired": "not worker-routed (HighRisk manual/offline behind HIGH_RISK_APPLY_IMPLEMENTED=false); systemd1 SetUnitProperties adapter and a real OpenRC host acceptance are not done and are not represented as passed; no per-knob real-device campaign",
+      "missing_required": [
+        "cgroup/systemd-set-unit-properties-adapter",
+        "cgroup/openrc-backend"
+      ],
       "dispositions": [
-        "CodeComplete",
         "EvidenceDeferred",
         "FixtureVerified",
         "MechanismValidated",
@@ -769,14 +782,17 @@
         "stutter/src/actions/resctrl_action.rs",
         "stutter/src/actions/resctrl_rollback.rs"
       ],
-      "status": "code_complete",
+      "status": "first_slice",
       "g0": "a cheap `resctrl_monitor` sensor reads L3 llc_occupancy (gauge) and mbm_total/local bytes (counter deltas) summed over monitored domains, counting `Unavailable`/`Error` reads as lost and never as zero; read-only resctrl inventory (closids, rmids, allocation groups) reported unavailable when not mounted; experimental L3 allocation transaction (`resctrl_alloc`): hardware mask/min-width/closid validation, owned group with per-domain schemata readback, default-group bystander check, restore removes only the group with unchanged identity; fake-root tests, task assignment not performed; `RollbackToken::ResctrlGroupRemove` (recovery removes only the recorded kernel object), `ResctrlRollbackHandler`, manual policy-gated `ResctrlCatAction` (HighRisk, SystemWide, default denies) and `CandidateAction::Resctrl` classified as manual-only `ResctrlCacheAllocation` with an Experimental capability; never an executable plan; active-config matching fails closed",
       "g1": "verified 2026-11-09: the i5-10600K exposes no RDT flag (no rdt_a, cat_l3, cqm_llc or mba in /proc/cpuinfo) and resctrl is not in /proc/filesystems, so the filesystem cannot be mounted on this CPU: HardwareUnavailable is a checked fact, not an assumption",
       "runtime_availability": "resctrl not mounted on this host",
       "authority": "O/E",
       "not_wired": "no MBA, no task assignment, not worker-routed (HighRisk manual/offline behind HIGH_RISK_APPLY_IMPLEMENTED=false); no real-hardware readback here",
+      "missing_required": [
+        "resctrl/mba-allocation",
+        "resctrl/verified-task-assignment"
+      ],
       "dispositions": [
-        "CodeComplete",
         "FixtureVerified",
         "HardwareUnavailable",
         "EvidenceDeferred"
@@ -836,14 +852,17 @@
         "stutter/src/actions/block_scheduler_action.rs",
         "stutter/src/actions/block_scheduler_rollback.rs"
       ],
-      "status": "code_complete",
+      "status": "first_slice",
       "g0": "ioprio action exists and is denied while GameMode owns task priority; no block scheduler operations; a cheap `block_io` sensor reads whole-disk completed I/Os, sectors, busy and queue time as deltas plus the in-flight gauge (never a decision input, not per-application); the ionice provider no longer lowers the important tree: only offender helpers (compiler/linker, browser helpers) are lowered and generic I/O pressure without a measured offender proposes nothing; device-wide scheduler selection is a prepared transaction (`block_scheduler`: supported-list validation from queue/scheduler, authorized and unprotected devices only, readback, restore by device number and only while ours is active) with `RollbackToken::BlockSchedulerRestore`, handler, manual policy-gated `BlockSchedulerAction` (HighRisk, default denies) and `CandidateAction::BlockScheduler` classified as manual-only `BlockIoScheduler`; never an executable plan",
       "g1": "read-only on this host (2026-11-09): /sys/block/nvme0n1/queue/scheduler reads `[none] mq-deadline kyber` (bfq not built in) and the loop devices read the same; no scheduler was changed",
       "runtime_availability": "ionice present, fio and blktrace absent",
       "authority": "O/F/E",
       "not_wired": "not worker-routed (HighRisk manual/offline behind HIGH_RISK_APPLY_IMPLEMENTED=false); no per-process offender I/O accounting source beyond the compile/browser helper selectors; no real-device scheduler campaign; no blktrace/biosnoop importer",
+      "missing_required": [
+        "blockio/per-process-offender-attribution",
+        "blockio/blktrace-biosnoop-importers"
+      ],
       "dispositions": [
-        "CodeComplete",
         "EvidenceDeferred",
         "FixtureVerified",
         "HardwareUnavailable",
@@ -882,14 +901,18 @@
         "stutter/src/actions/net_sysctl_action.rs",
         "stutter/src/actions/net_sysctl_rollback.rs"
       ],
-      "status": "code_complete",
+      "status": "first_slice",
       "g0": "Optional runtime KPI observer bound by kernel peer UID/PID, live start ticks, executable identity, boot and source/context epoch; nonblocking bounded ingestion, explicit batch mean/sum/max/last semantics, diagnostic legacy summaries, work/loss/freshness/completeness gates; frozen observation-only paired study reconstructs metrics and intervals from private collector-origin raw captures and cannot populate keep evidence. Positive, negative, spoofing, replay, drift, guardrail and false-interval fixtures pass.; three distinct typed network operations, each manual-only with an Experimental capability (`NetTcpCongestionControl`: only an algorithm the kernel lists as available; `NetTcpBuffers`: ordered, bounded rmem/wmem; `NetBusyPoll`: capped interval), sharing `RollbackToken::NetSysctlRestore` bound to the network namespace read from /proc/self/ns/net (recovery VerifiedAutomatic: another namespace or a foreign value is never overwritten), `NetSysctlRollbackHandler`, a manual policy-gated `NetSysctlAction` (HighRisk, default denies) and `CandidateAction::NetSysctl`; a setting owned by bpftune is typed `UnsupportedDelegation` and never raced; never an executable plan; active-config matching fails closed; no default network-wide sysctl write and no live public traffic test",
       "g1": "At exact committed source 1d5a3ef0, a separate live-BPF observation-only transient controller accepted all 16 samples from eight completed CPU fixed-work runs, no denials, all decisions observed, clean process/socket stop. The independent-block harness also completed and verified raw reconstruction. This is KPI transport/measurement evidence, not HTTP/RPC or network outcome qualification.",
       "runtime_availability": "benchmark tools absent",
       "authority": "O/F/E",
       "not_wired": "no OpenTelemetry reader (not required by the plan row); no local offered-load network execution and no exact installed-production acceptance (tools absent, no disposable service); not worker-routed (HighRisk manual/offline behind HIGH_RISK_APPLY_IMPLEMENTED=false); socket-level options and qdisc selection are not implemented as operations; Prometheus import and compare-load remain read-only",
+      "missing_required": [
+        "net/socket-level-options",
+        "net/qdisc-selection",
+        "net/local-offered-load-workflow"
+      ],
       "dispositions": [
-        "CodeComplete",
         "EvidenceDeferred",
         "FixtureVerified",
         "HardwareUnavailable",

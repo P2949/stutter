@@ -12,6 +12,7 @@ fn entry(status: &str, dispositions: &[&str], evidence: &[&str], unblock: Option
         g0: String::new(),
         g1: String::new(),
         not_wired: "nothing | wired".into(),
+        missing_required: Vec::new(),
     }
 }
 
@@ -103,4 +104,15 @@ fn the_real_ledger_in_the_repository_validates() {
     let ledger: Ledger = serde_json::from_slice(&text).unwrap();
     validate(&ledger).unwrap();
     assert_eq!(ledger.entries.len(), 34);
+}
+
+#[test]
+fn code_complete_with_a_missing_required_subcapability_is_refused() {
+    let mut incomplete = entry("code_complete", &["FixtureVerified"], &[], None);
+    incomplete.missing_required = vec!["resctrl/mba-allocation".into()];
+    let error = validate(&ledger(vec![incomplete])).unwrap_err().to_string();
+    assert!(error.contains("resctrl/mba-allocation"), "{error}");
+    let mut partial = entry("first_slice", &["FixtureVerified"], &[], None);
+    partial.missing_required = vec!["resctrl/mba-allocation".into()];
+    validate(&ledger(vec![partial])).unwrap();
 }

@@ -80,6 +80,12 @@ fn entries_are_truthful_about_status_and_anchors() {
                 problems.push(format!("{id}: missing {field}"));
             }
         }
+        let missing = entry["missing_required"].as_array().map_or(0, Vec::len);
+        if status == "code_complete" && missing != 0 {
+            problems.push(format!(
+                "{id}: code_complete but {missing} required subcapabilities are missing"
+            ));
+        }
         if status == "code_complete"
             && entry["g1"].as_str() == Some("none")
             && entry["not_wired"].as_str() != Some("nothing")
