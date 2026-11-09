@@ -2,7 +2,7 @@
 
 This is the human-readable companion of [`integration-coverage.json`](integration-coverage.json), the
 machine-readable ledger of every tool and mechanism in the current plan. It records what exists at
-the verification baseline named in the ledger's `source_sha` (currently `947b22ed`; [receipt](validation/source-ci-2026-11-09-947b22ed.json)); the deployed production source is still `4f3baa07` ([receipt](validation/source-ci-2026-11-09-4f3baa07.json)) and nothing since then is reachable from the daemon. The wiring table also describes newer development changes and links their evidence below; it does not silently promote that verification pin. Live observations keep their own source pins. The production-deployed build is a separate, older pin (`e37984c1`) and is not described by this file. The grades are
+the verification baseline named in the ledger's `source_sha` (currently `947b22ed`; [receipt](validation/source-ci-2026-11-09-947b22ed.json)); the deployed production source is still `4f3baa07` ([receipt](validation/source-ci-2026-11-09-4f3baa07.json)) and nothing since then is reachable from the daemon. The wiring table also describes newer development changes and links their evidence below; it does not silently promote that verification pin. Live observations keep their own source pins. The production-deployed build is a separate, older pin (`4f3baa07`, as stated above) and is not described by this file. The grades are
 independent and never inherited from another tool or service backend:
 
 * **G0** code and fixtures, **G1** real observation, **G2** safe manual experiment, **G3** exact
@@ -72,3 +72,19 @@ Observed on the development host at this source (G1 only, no experiments):
 * Absent hardware or tooling is a runtime-availability fact, not a PASS.
 * GPU electrical and profile mutation stays quarantined on this host; nothing here reruns the LACT or
   `vkmark` pilot.
+
+## Status and disposition semantics
+
+`status = code_complete` (the implementation is finished and fixture-tested, with no missing required
+subcapability) and the `CodeComplete` disposition mean the same thing and are required together: an
+entry carries both or neither, and `xtask closeout-report` refuses either alone. All 34 entries
+carry both. Every other disposition is a separate rung of the evidence ladder and is never implied
+by `CodeComplete`: `FixtureVerified` (fixtures), `RealObserved` (a real observation), `MechanismValidated`
+(a physical mechanism check) and `BenefitValidated` (a measured benefit) each need their own evidence,
+and `HardwareUnavailable` / `EvidenceDeferred` record what cannot be shown here and why.
+
+The subcapability manifest (`integration-subcapabilities.json`) is checked against a plan baseline
+that is frozen in the closeout code, not only in the JSON; every item names the file that declares its
+positive and negative test, which must be a `#[test]` function there, and `closeout-report --strict`
+(or `--run-tests`) executes each non-ignored test and requires it to pass exactly once. Ignored (live)
+tests are verified to exist but need their own privileged resources.

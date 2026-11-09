@@ -28,6 +28,10 @@ pub struct Item {
     pub symbol: String,
     pub positive_test: String,
     pub negative_test: String,
+    /// The file that declares each test. The test must be a `#[test]` function in exactly this
+    /// file, so an identically named function elsewhere cannot stand in for it.
+    pub positive_file: String,
+    pub negative_file: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -36,6 +40,31 @@ pub struct Manifest {
     pub baseline: Vec<String>,
     pub items: Vec<Item>,
 }
+
+/// The plan-derived baseline, frozen here in code rather than in the editable manifest: each
+/// subcapability the plan requires, with the dossier it belongs to. The manifest's own `baseline`
+/// must equal this list exactly, so removing a requirement from the JSON alone, or from both the
+/// JSON's lists, is caught, and changing this list is a code change that review sees.
+pub const PLAN_BASELINE: &[(&str, &str)] = &[
+    ("damos/quota-goal-feedback", "5.8"),
+    ("damos/hot-cold-region-summary", "5.8"),
+    ("damos/damo-parity-manifest", "5.8"),
+    (
+        "power/campaign-token-factory-and-worker-journal-integration",
+        "5.16",
+    ),
+    ("numa/process-scoped-memory-policy-refusal-contract", "5.19"),
+    ("numa/numad-coexistence-behaviour", "5.19"),
+    ("cgroup/systemd-set-unit-properties-adapter", "5.21"),
+    ("cgroup/openrc-backend", "5.21"),
+    ("resctrl/mba-allocation", "5.24"),
+    ("resctrl/verified-task-assignment", "5.24"),
+    ("blockio/per-process-offender-attribution", "5.26"),
+    ("blockio/blktrace-biosnoop-importers", "5.26"),
+    ("net/socket-level-options", "5.27"),
+    ("net/qdisc-selection", "5.27"),
+    ("net/local-offered-load-workflow", "5.27"),
+];
 
 const KINDS: [&str; 3] = ["operation", "observation", "refusal"];
 const SOURCE_ROOTS: [&str; 3] = ["stutter/src", "xtask/src", "stutter-validation-runner/src"];
@@ -81,6 +110,119 @@ fn declared_functions(root: &Path) -> BTreeSet<String> {
     names
 }
 
+/// True only if `file` declares `fn name` directly under a `#[test]` attribute (an `#[ignore]` or
+/// doc comment may sit between them): a helper, a comment or a same-named function elsewhere is
+/// not a test.
+pub fn is_test_in(root: &Path, file: &str, name: &str) -> bool {
+    let Ok(text) = fs::read_to_string(root.join(file)) else {
+        return false;
+    };
+    let lines: Vec<&str> = text.lines().map(str::trim).collect();
+    let needle = format!("fn {name}(");
+    lines.iter().enumerate().any(|(at, line)| {
+        if !(line.starts_with(&needle) || line.starts_with(&format!("pub {needle}"))) {
+            return false;
+        }
+        // Walk up through attributes and doc comments to the first other line.
+        lines[..at]
+            .iter()
+            .rev()
+            .take_while(|above| {
+                above.starts_with("#[") || above.starts_with("///") || above.is_empty()
+            })
+            .any(|above| *above == "#[test]")
+    })
+}
+
+/// The cargo package a source file belongs to, and whether its tests run in the library target.
+fn package_of(file: &str) -> Option<(&'static str, bool)> {
+    if file.starts_with("stutter-validation-runner/") {
+        Some(("stutter-validation-runner", true))
+    } else if file.starts_with("stutter/") {
+        Some(("stutter", true))
+    } else if file.starts_with("xtask/") {
+        Some(("xtask", false))
+    } else {
+        None
+    }
+}
+
+/// Whether a test is `#[ignore]`d (a live test): such a test is verified to exist but needs its
+/// own privileged resources, so it is not run here.
+fn is_ignored(root: &Path, file: &str, name: &str) -> bool {
+    let Ok(text) = fs::read_to_string(root.join(file)) else {
+        return false;
+    };
+    let lines: Vec<&str> = text.lines().map(str::trim).collect();
+    let needle = format!("fn {name}(");
+    lines.iter().enumerate().any(|(at, line)| {
+        line.starts_with(&needle)
+            && lines[..at]
+                .iter()
+                .rev()
+                .take_while(|above| {
+                    above.starts_with("#[") || above.starts_with("///") || above.is_empty()
+                })
+                .any(|above| above.starts_with("#[ignore"))
+    })
+}
+
+/// Runs every non-ignored positive and negative test of every item and requires each to execute
+/// and pass: at least one test matched, none failed. Returns how many distinct tests ran.
+pub fn run_tests(manifest: &Manifest, root: &Path) -> anyhow::Result<usize> {
+    let mut seen = BTreeSet::new();
+    let mut failures = Vec::new();
+    for item in &manifest.items {
+        for (test, file) in [
+            (&item.positive_test, &item.positive_file),
+            (&item.negative_test, &item.negative_file),
+        ] {
+            if is_ignored(root, file, test) || !seen.insert((file.clone(), test.clone())) {
+                continue;
+            }
+            let (package, lib) = package_of(file).context("test file is outside the workspace")?;
+            let list = std::process::Command::new("cargo")
+                .current_dir(root)
+                .args(["test", "-q", "-p", package])
+                .args(if lib { vec!["--lib"] } else { vec![] })
+                .args(["--", "--list", test])
+                .output()
+                .with_context(|| format!("list {test}"))?;
+            let listing = String::from_utf8_lossy(&list.stdout);
+            let Some(path) = listing
+                .lines()
+                .filter_map(|line| line.strip_suffix(": test"))
+                .find(|path| path.rsplit("::").next() == Some(test.as_str()))
+            else {
+                failures.push(format!(
+                    "{}: {test} is not listed by the test harness",
+                    item.id
+                ));
+                continue;
+            };
+            let mut run = std::process::Command::new("cargo");
+            run.current_dir(root).args(["test", "-q", "-p", package]);
+            if lib {
+                run.arg("--lib");
+            }
+            run.args(["--", "--exact", path]);
+            let output = run.output().with_context(|| format!("run {test}"))?;
+            let text = String::from_utf8_lossy(&output.stdout);
+            let ran_one = text.contains("test result: ok. 1 passed; 0 failed");
+            if !output.status.success() || !ran_one {
+                failures.push(format!(
+                    "{}: {test} did not run and pass exactly once",
+                    item.id
+                ));
+            }
+        }
+    }
+    if !failures.is_empty() {
+        bail!("subcapability tests failed:\n{}", failures.join("\n"));
+    }
+    Ok(seen.len())
+}
+
 /// Checks every item against the tree and every `code_complete` entry against its items.
 pub fn validate(manifest: &Manifest, ledger: &Ledger, root: &Path) -> anyhow::Result<()> {
     let ids: BTreeSet<&str> = manifest.items.iter().map(|item| item.id.as_str()).collect();
@@ -88,10 +230,23 @@ pub fn validate(manifest: &Manifest, ledger: &Ledger, root: &Path) -> anyhow::Re
         ids.len() == manifest.items.len(),
         "duplicate subcapability id"
     );
-    for required in &manifest.baseline {
+    // The baseline is the one frozen in code: the manifest's copy must equal it exactly, and every
+    // frozen item must be present under its own dossier.
+    let frozen: Vec<&str> = PLAN_BASELINE.iter().map(|(id, _)| *id).collect();
+    let declared: Vec<&str> = manifest.baseline.iter().map(String::as_str).collect();
+    ensure!(
+        declared == frozen,
+        "the manifest baseline differs from the plan baseline frozen in code: {declared:?} vs {frozen:?}"
+    );
+    for (required, dossier) in PLAN_BASELINE {
+        let item = manifest.items.iter().find(|item| item.id == *required);
         ensure!(
-            ids.contains(required.as_str()),
+            item.is_some(),
             "baseline subcapability {required} was removed from the manifest"
+        );
+        ensure!(
+            item.is_some_and(|item| item.entry == *dossier),
+            "baseline subcapability {required} was moved to another dossier (it belongs to {dossier})"
         );
     }
     let functions = declared_functions(root);
@@ -109,12 +264,17 @@ pub fn validate(manifest: &Manifest, ledger: &Ledger, root: &Path) -> anyhow::Re
             )),
             Err(_) => failures.push(format!("{}: anchor {} is missing", item.id, item.anchor)),
         }
-        for (role, test) in [
-            ("positive", &item.positive_test),
-            ("negative", &item.negative_test),
+        for (role, test, file) in [
+            ("positive", &item.positive_test, &item.positive_file),
+            ("negative", &item.negative_test, &item.negative_file),
         ] {
             if !functions.contains(test.as_str()) {
                 failures.push(format!("{}: {role} test {test} does not exist", item.id));
+            } else if !is_test_in(root, file, test) {
+                failures.push(format!(
+                    "{}: {role} test {test} is not a #[test] function in {file}",
+                    item.id
+                ));
             }
         }
         if !ledger.entries.iter().any(|entry| entry.id == item.entry) {

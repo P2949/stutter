@@ -90,6 +90,12 @@ pub fn validate(ledger: &Ledger) -> anyhow::Result<()> {
             }
         }
         if entry.status == "code_complete" {
+            // The status and the disposition say the same thing: an entry whose implementation is
+            // complete carries the `CodeComplete` disposition, and only such an entry does.
+            ensure!(
+                entry.dispositions.iter().any(|d| d == "CodeComplete"),
+                "{id}: status code_complete but no CodeComplete disposition"
+            );
             ensure!(
                 entry.missing_required.is_empty(),
                 "{id}: code_complete but required subcapabilities are missing: {}",
@@ -166,6 +172,10 @@ pub struct CloseoutArgs {
     /// only by documentation, so the ledger describes the code that is actually being qualified.
     #[arg(long)]
     pub strict: bool,
+    /// Execute every non-ignored positive and negative test of every subcapability and require
+    /// each to run and pass (implied by `--strict`).
+    #[arg(long)]
+    pub run_tests: bool,
 }
 
 pub fn run(root: &Path, args: &CloseoutArgs) -> anyhow::Result<()> {
@@ -216,6 +226,10 @@ pub fn run(root: &Path, args: &CloseoutArgs) -> anyhow::Result<()> {
     report.push_str(&subcaps::render(&manifest));
     if args.strict {
         strict_source_check(root, &ledger.source_sha)?;
+    }
+    if args.strict || args.run_tests {
+        let ran = subcaps::run_tests(&manifest, root)?;
+        eprintln!("note: {ran} subcapability tests were executed and passed");
     }
     match &args.out {
         Some(out) => fs::write(out, &report).with_context(|| format!("write {}", out.display()))?,

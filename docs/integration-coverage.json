@@ -63,6 +63,7 @@
       "authority": "B/O/A",
       "not_wired": "nothing",
       "dispositions": [
+        "CodeComplete",
         "FixtureVerified",
         "HardwareUnavailable",
         "EvidenceDeferred"
@@ -90,6 +91,7 @@
       "authority": "B/O/A",
       "not_wired": "nothing",
       "dispositions": [
+        "CodeComplete",
         "FixtureVerified",
         "HardwareUnavailable",
         "EvidenceDeferred"
@@ -118,6 +120,7 @@
       "authority": "O/A/F",
       "not_wired": "nothing",
       "dispositions": [
+        "CodeComplete",
         "FixtureVerified",
         "HardwareUnavailable",
         "EvidenceDeferred"
@@ -145,6 +148,7 @@
       "authority": "O/A",
       "not_wired": "nothing",
       "dispositions": [
+        "CodeComplete",
         "FixtureVerified",
         "HardwareUnavailable",
         "EvidenceDeferred"
@@ -180,6 +184,7 @@
       "authority": "O/F/E",
       "not_wired": "nothing",
       "dispositions": [
+        "CodeComplete",
         "FixtureVerified",
         "RealObserved",
         "EvidenceDeferred"
@@ -282,6 +287,7 @@
       "authority": "O/B",
       "not_wired": "nothing",
       "dispositions": [
+        "CodeComplete",
         "FixtureVerified",
         "HardwareUnavailable",
         "EvidenceDeferred"
@@ -393,6 +399,7 @@
       "authority": "O/F",
       "not_wired": "Qualified production-time/flush clock bound and further installed-service/phase/crash qualification remain deferred; no new frame-primary support claim.",
       "dispositions": [
+        "CodeComplete",
         "FixtureVerified",
         "EvidenceDeferred",
         "RealObserved"
@@ -425,6 +432,7 @@
       "authority": "O/A/D/F",
       "not_wired": "nothing",
       "dispositions": [
+        "CodeComplete",
         "FixtureVerified",
         "RealObserved",
         "HardwareUnavailable",
@@ -453,6 +461,7 @@
       "authority": "B/F",
       "not_wired": "nothing",
       "dispositions": [
+        "CodeComplete",
         "FixtureVerified",
         "HardwareUnavailable",
         "EvidenceDeferred"
@@ -483,6 +492,7 @@
       "authority": "B/F",
       "not_wired": "nothing",
       "dispositions": [
+        "CodeComplete",
         "FixtureVerified",
         "HardwareUnavailable",
         "EvidenceDeferred"
@@ -582,6 +592,7 @@
       "authority": "O/A/E",
       "not_wired": "nothing",
       "dispositions": [
+        "CodeComplete",
         "FixtureVerified",
         "HardwareUnavailable",
         "EvidenceDeferred"
@@ -819,6 +830,7 @@
       "authority": "F",
       "not_wired": "nothing",
       "dispositions": [
+        "CodeComplete",
         "FixtureVerified",
         "HardwareUnavailable",
         "EvidenceDeferred"
@@ -951,6 +963,7 @@
       "authority": "F",
       "not_wired": "nothing",
       "dispositions": [
+        "CodeComplete",
         "FixtureVerified",
         "RealObserved",
         "HardwareUnavailable",
@@ -1012,6 +1025,7 @@
       "authority": "B/F",
       "not_wired": "nothing",
       "dispositions": [
+        "CodeComplete",
         "FixtureVerified",
         "EvidenceDeferred"
       ],
@@ -1043,6 +1057,7 @@
       "authority": "O/F",
       "not_wired": "nothing",
       "dispositions": [
+        "CodeComplete",
         "FixtureVerified",
         "HardwareUnavailable",
         "EvidenceDeferred"
@@ -1073,6 +1088,7 @@
       "authority": "F",
       "not_wired": "nothing",
       "dispositions": [
+        "CodeComplete",
         "FixtureVerified",
         "RealObserved",
         "HardwareUnavailable",
@@ -1103,6 +1119,7 @@
       "authority": "F",
       "not_wired": "nothing",
       "dispositions": [
+        "CodeComplete",
         "FixtureVerified",
         "RealObserved",
         "EvidenceDeferred"
@@ -1133,6 +1150,7 @@
       "authority": "O/F",
       "not_wired": "nothing",
       "dispositions": [
+        "CodeComplete",
         "FixtureVerified",
         "RealObserved",
         "EvidenceDeferred"

@@ -108,7 +108,12 @@ fn the_real_ledger_in_the_repository_validates() {
 
 #[test]
 fn code_complete_with_a_missing_required_subcapability_is_refused() {
-    let mut incomplete = entry("code_complete", &["FixtureVerified"], &[], None);
+    let mut incomplete = entry(
+        "code_complete",
+        &["FixtureVerified", "CodeComplete"],
+        &[],
+        None,
+    );
     incomplete.missing_required = vec!["resctrl/mba-allocation".into()];
     let error = validate(&ledger(vec![incomplete])).unwrap_err().to_string();
     assert!(error.contains("resctrl/mba-allocation"), "{error}");
@@ -183,4 +188,119 @@ fn only_documentation_changes_are_allowed_between_the_ledger_source_and_head() {
         ["stutter/src/actions/damos_scheme.rs", "xtask/Cargo.toml"]
     );
     assert!(subcaps::code_changes(&["docs/a.md", "docs/b/c.json"]).is_empty());
+}
+
+#[test]
+fn code_complete_status_and_the_codecomplete_disposition_must_agree_both_ways() {
+    // Status without the disposition is refused (the schema says they mean the same thing).
+    let error = validate(&ledger(vec![entry(
+        "code_complete",
+        &["FixtureVerified"],
+        &[],
+        None,
+    )]))
+    .unwrap_err()
+    .to_string();
+    assert!(error.contains("no CodeComplete disposition"), "{error}");
+    // Disposition without the status was already refused.
+    assert!(
+        validate(&ledger(vec![entry(
+            "first_slice",
+            &["FixtureVerified", "CodeComplete"],
+            &[],
+            None
+        )]))
+        .is_err()
+    );
+    validate(&ledger(vec![entry(
+        "code_complete",
+        &["FixtureVerified", "CodeComplete"],
+        &[],
+        None,
+    )]))
+    .unwrap();
+}
+
+fn scratch_tree(name: &str) -> std::path::PathBuf {
+    let root = std::env::temp_dir().join(format!("stutter-subcaps-{name}-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(root.join("stutter/src")).unwrap();
+    root
+}
+
+#[test]
+fn a_test_must_be_a_real_test_function_in_its_named_file_not_a_look_alike() {
+    let root = scratch_tree("is-test");
+    fs::write(
+        root.join("stutter/src/a_tests.rs"),
+        "#[test]\nfn real_one() {}\n\n#[test]\n#[ignore = \"live\"]\nfn real_ignored() {}\n\nfn helper_with_the_name() {}\n\n// fn in_a_comment() {}\n\n/// docs\n#[test]\nfn documented() {}\n",
+    )
+    .unwrap();
+    fs::write(root.join("stutter/src/b.rs"), "fn real_one() {}\n").unwrap();
+    let f = "stutter/src/a_tests.rs";
+    assert!(subcaps::is_test_in(&root, f, "real_one"));
+    assert!(subcaps::is_test_in(&root, f, "real_ignored"));
+    assert!(subcaps::is_test_in(&root, f, "documented"));
+    // An unrelated function with the right name, a comment, a missing name and the wrong file.
+    assert!(!subcaps::is_test_in(&root, f, "helper_with_the_name"));
+    assert!(!subcaps::is_test_in(&root, f, "in_a_comment"));
+    assert!(!subcaps::is_test_in(&root, f, "absent"));
+    assert!(!subcaps::is_test_in(&root, "stutter/src/b.rs", "real_one"));
+    assert!(!subcaps::is_test_in(
+        &root,
+        "stutter/src/missing.rs",
+        "real_one"
+    ));
+}
+
+#[test]
+fn the_manifest_baseline_is_frozen_in_code_so_editing_the_json_alone_cannot_remove_a_requirement() {
+    let root = workspace_root();
+    let ledger: Ledger =
+        serde_json::from_slice(&fs::read(root.join("docs/integration-coverage.json")).unwrap())
+            .unwrap();
+    let load = || subcaps::load(&root).unwrap();
+    // Dropping an item AND its baseline id from the JSON: the frozen list still requires it.
+    let mut both = load();
+    both.items.retain(|item| item.id != "net/qdisc-selection");
+    both.baseline.retain(|id| id != "net/qdisc-selection");
+    let error = subcaps::validate(&both, &ledger, &root)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("differs from the plan baseline frozen in code"),
+        "{error}"
+    );
+    // Moving a baseline item to a different dossier.
+    let mut moved = load();
+    moved
+        .items
+        .iter_mut()
+        .find(|i| i.id == "net/qdisc-selection")
+        .unwrap()
+        .entry = "5.1".into();
+    let error = subcaps::validate(&moved, &ledger, &root)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("moved to another dossier"), "{error}");
+    // Pointing a test at the wrong file.
+    let mut wrong_file = load();
+    wrong_file.items[0].positive_file = "stutter/src/actions/net_capability_tests.rs".into();
+    let error = subcaps::validate(&wrong_file, &ledger, &root)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("is not a #[test] function in"), "{error}");
+    // Renaming a test, and swapping in a real but unrelated test name that is not in the claimed file.
+    let mut renamed = load();
+    renamed.items[0].negative_test = "renamed_away".into();
+    assert!(subcaps::validate(&renamed, &ledger, &root).is_err());
+}
+
+#[test]
+fn the_frozen_baseline_names_fifteen_requirements_each_in_the_manifest() {
+    assert_eq!(subcaps::PLAN_BASELINE.len(), 15);
+    let manifest = subcaps::load(&workspace_root()).unwrap();
+    let declared: Vec<&str> = manifest.baseline.iter().map(String::as_str).collect();
+    let frozen: Vec<&str> = subcaps::PLAN_BASELINE.iter().map(|(id, _)| *id).collect();
+    assert_eq!(declared, frozen);
 }
