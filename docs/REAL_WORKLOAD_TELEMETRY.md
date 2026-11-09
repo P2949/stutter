@@ -97,7 +97,7 @@ The direct-frame requirement stays EvidenceDeferred for real games. A measured a
 MangoHud polling offset exists as an opt-in prototype: `telemetry::stamped_frames` validates a
 producer-stamped `CLOCK_MONOTONIC` stream and turns its measured delivery latency into the alignment
 uncertainty the unchanged 2 ms gate checks, and `xtask frame-clock-prototype` measures it on a
-controlled fixture. On the 2026-11-09 fixture runs the bound was under 2 ms in four of six runs and
+controlled fixture. On the 2026-11-09 fixture runs the bound was under 2 ms in four of seven runs and
 not under heavy CPU oversubscription; it is not wired into the daemon and establishes no
 attribution. See `docs/validation/frame-clock-prototype-2026-11-09/RESULTS.md`.
 
