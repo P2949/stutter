@@ -57,3 +57,35 @@ against a real cgroup v2 delegation with the ignored live tests in
   separate owner process which was then `SIGKILL`ed with the grandchild running; within 5 s the
   independent reaper had emptied the subtree, the sentinel survived, and a later ordinary cleanup
   found it empty and removed it.
+
+## scx_loader D-Bus switch and restore: real loader on a private bus (2026-11-09)
+
+The pinned nixpkgs ships no `scx_loader`, so the upstream crate `scx_loader` 1.1.3 was built from
+crates.io (`cargo install --locked`, binary sha256
+`12703406550c556a369872b538ea06b810bf6dbdb79945680746acffff1df699`) and run as root on a **private** root-run
+`dbus-daemon` socket under `/tmp`; the system bus and the host's services were never touched.
+`scx_bpfland` 1.1.4 (nixpkgs `scx.rustscheds`) was the scheduler. The ignored live test
+`live_real_scx_loader_switch_and_restore_over_a_private_bus` then ran as the unprivileged user:
+
+- authorization was minted by the **production** factory from a receipt a root process wrote under
+  a root-owned path (scope `scheduler_switch`, this user, this boot) — no fixture constructor;
+- the adapter's introspection, planning and `StartScheduler` call matched the real loader's method
+  signatures; the loader reported `scx_bpfland` (mode 0) and the kernel's
+  `/sys/kernel/sched_ext/state` read `enabled`; restore returned the loader to no scheduler and the
+  kernel to `disabled`.
+
+Two defects in the adapter were found only by this run and fixed: (1) the loader answers the call
+as soon as it has spawned the scheduler and the kernel attaches it a moment later, so reading once,
+immediately, reported a working switch as not in effect (it now polls for up to 5 s); (2) the kernel
+names the scheduler `bpfland_1.1.4_x86_64_unknown_linux_gnu`, with a version and target suffix,
+which the exact-name check rejected (it now accepts the bare name or the bare name followed by
+`_<digit>`, and still rejects lookalikes such as `bpfland_other`). Both are covered by unit tests.
+
+**What this is and is not.** The real loader's polkit check ("Checking auth") needs a polkit
+authority, which a private bus does not have; a minimal stub authority that authorizes every request
+was run on the private bus only. So the loader's own authorization layer is *not* exercised, the
+loader was not the packaged system service, and no matched-workload benefit was measured. This is a
+`RealObserved` mechanism result for the adapter against the real loader, not `MechanismValidated`
+for a production `scx_loader` deployment. A first run of this test left `scx_bpfland` running when
+the loader was killed (the loader does not stop its child); it was stopped by pid and the cleanup now
+stops the scheduler by exact name and checks `sched_ext` is `disabled`.

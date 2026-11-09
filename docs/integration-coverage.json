@@ -209,18 +209,19 @@
       ],
       "status": "code_complete",
       "g0": "`plan_switch_with_args` plans StartSchedulerWithArgs / SwitchSchedulerWithArgs (`sas`) only for an argument list that equals a reviewed entry for that scheduler (no free-form flag), with the same exact restore, executed over a verified `as` array encoding (fake-bus round trip); scx_loader named with org.scx.Loader; read-only D-Bus state (CurrentScheduler, SchedulerMode, SupportedSchedulers), introspected method signatures, and a gated offline strategy adapter: plan_switch (allowlist, supported, exact restore) with typed denials and execute/restore that need an OfflineAuthorization only a campaign can construct, verified against the loader and the kernel ops (fake-bus fixtures); `MutationOperationKind::SchedExtSchedulerStrategy` (manual-only, Experimental capability), `RollbackToken::ScxSchedulerRestore` carrying the exact prior scheduler and mode or stop (recovery ManualOnly: needs the loader bus and an offline authorization, with the `scxctl` command named), and `CandidateAction::ScxStrategy` carrying the validated switch plan; never an executable plan; active-config matching fails closed",
-      "g1": "org.scx.Loader read over the system bus on this host: no owner (absent)",
+      "g1": "org.scx.Loader is absent on the system bus of this host; the adapter was run against a real scx_loader 1.1.3 (built from crates.io) on a private bus with a stub polkit authority: production-factory authorization, plan, StartScheduler, loader+kernel verification and restore passed (docs/validation/live-mechanisms-2026-11-09/RESULTS.md)",
       "runtime_availability": "absent",
       "authority": "O/A/D/F",
       "not_wired": "no real scx_loader here, so no real switch/restore or matched-workload campaign; not reachable from the daemon, providers or remote callers by construction (HighRisk manual/offline behind HIGH_RISK_APPLY_IMPLEMENTED=false)",
       "dispositions": [
+        "RealObserved",
         "CodeComplete",
         "FixtureVerified",
         "HardwareUnavailable",
         "EvidenceDeferred"
       ],
       "evidence": [],
-      "unblock": "scx_loader is not installed or running on this host: needs org.scx.Loader on the system bus and a sched_ext kernel for a real switch/restore readback and the matched-workload comparison campaign"
+      "unblock": "the packaged scx_loader as a system service with a real polkit authority and bus policy on the host (the real-loader check used a private bus and a stub polkit), and the matched-workload comparison campaign"
     },
     {
       "id": "5.8",

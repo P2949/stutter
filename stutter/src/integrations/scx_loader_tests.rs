@@ -244,7 +244,13 @@ fn a_kernel_that_disagrees_makes_the_switch_not_in_effect() {
     state.supported = vec!["scx_lavd".into()];
     let plan = plan_switch(&state, &methods, "scx_lavd", 1, &["scx_lavd".into()]).unwrap();
     let auth = OfflineAuthorization::from_campaign("c", CampaignScope::SchedulerSwitch);
-    let result = execute(&mut client, &plan, &auth, || Some("bpfland".into()));
+    let result = execute_within(
+        &mut client,
+        &plan,
+        &auth,
+        || Some("bpfland".into()),
+        std::time::Duration::from_millis(120),
+    );
     assert!(
         matches!(result, Err(ExecuteError::NotInEffect { .. })),
         "{result:?}"
@@ -259,11 +265,12 @@ fn missing_or_lookalike_kernel_ops_never_prove_a_scheduler_switch() {
         let mut state = state(None, None);
         state.supported = vec!["scx_lavd".into()];
         let plan = plan_switch(&state, &methods, "scx_lavd", 1, &["scx_lavd".into()]).unwrap();
-        let result = execute(
+        let result = execute_within(
             &mut client,
             &plan,
             &OfflineAuthorization::from_campaign("fixture", CampaignScope::SchedulerSwitch),
             || ops.map(str::to_owned),
+            std::time::Duration::from_millis(120),
         );
         assert!(
             matches!(result, Err(ExecuteError::NotInEffect { .. })),
@@ -481,4 +488,162 @@ fn an_authorization_for_another_scope_never_reaches_the_bus() {
             "a denied authorization sent something to the bus"
         );
     }
+}
+
+/// Live: the real `scx_loader` on a *private* bus, through the production authorization factory.
+///
+/// Needs `STUTTER_LIVE_SCX_BUS` (the private bus socket path), `STUTTER_LIVE_SCX_RECEIPT` (a receipt
+/// a root process wrote under a root-owned path, granting `scheduler_switch` to this user for this
+/// boot) and `STUTTER_LIVE_SCX_JOURNAL` (a new file path for the local use journal). The system bus
+/// is never touched; only the scheduler the test starts is switched in and then stopped.
+#[test]
+#[ignore = "live: needs a real scx_loader on a private bus and a root-written receipt"]
+fn live_real_scx_loader_switch_and_restore_over_a_private_bus() {
+    use crate::integrations::campaign_receipt::mint_authorization;
+    let env = |name: &str| {
+        std::env::var(name).unwrap_or_else(|_| panic!("BlockedResource: {name} is not set"))
+    };
+    let bus = env("STUTTER_LIVE_SCX_BUS");
+    let receipt = env("STUTTER_LIVE_SCX_RECEIPT");
+    let journal = env("STUTTER_LIVE_SCX_JOURNAL");
+    let scheduler = std::env::var("STUTTER_LIVE_SCX_SCHEDULER").unwrap_or("scx_bpfland".into());
+
+    let mut client =
+        DbusClient::connect_path(std::path::Path::new(&bus), crate::syscall::geteuid())
+            .expect("connect to the private bus");
+    // The production factory: a root-written receipt, not a fixture constructor.
+    let auth = mint_authorization(
+        std::path::Path::new(&receipt),
+        std::path::Path::new(&journal),
+        CampaignScope::SchedulerSwitch,
+    )
+    .expect("the receipt must verify");
+    assert_eq!(auth.scope(), CampaignScope::SchedulerSwitch);
+
+    let before = read_state(&mut client).expect("a real scx_loader answers GetState-equivalents");
+    assert_eq!(
+        before.current, None,
+        "a scheduler is already running: refusing to disturb it"
+    );
+    let methods = introspect(&mut client).expect("introspection of the real loader");
+    let mut planning = state(None, None);
+    planning.supported = before.supported.clone();
+    assert!(
+        planning.supported.contains(&scheduler),
+        "the loader does not list {scheduler}: {:?}",
+        planning.supported
+    );
+    let plan = plan_switch(
+        &planning,
+        &methods,
+        &scheduler,
+        0,
+        std::slice::from_ref(&scheduler),
+    )
+    .expect("the real loader's method signatures match what the adapter expects");
+
+    let kernel_ops = || {
+        std::fs::read_to_string("/sys/kernel/sched_ext/root/ops")
+            .ok()
+            .map(|text| text.trim().to_owned())
+    };
+    if let Err(error) = execute(&mut client, &plan, &auth, kernel_ops) {
+        // Report what the real loader and kernel say, so a mismatch names itself.
+        let seen = read_state(&mut client);
+        panic!(
+            "switch not verified: {error:?}; planned mode {}; loader state {seen:?}; kernel ops {:?}; sched_ext state {:?}",
+            plan.mode,
+            std::fs::read_to_string("/sys/kernel/sched_ext/root/ops"),
+            std::fs::read_to_string("/sys/kernel/sched_ext/state"),
+        );
+    }
+
+    let during = read_state(&mut client).unwrap();
+    assert_eq!(during.current.as_deref(), Some(scheduler.as_str()));
+    let enabled = std::fs::read_to_string("/sys/kernel/sched_ext/state").unwrap();
+    assert_eq!(enabled.trim(), "enabled");
+
+    restore(&mut client, &plan, &auth).expect("restore verified");
+    let after = read_state(&mut client).unwrap();
+    assert_eq!(after.current, None, "the loader still reports a scheduler");
+    // The kernel may take a moment to finish unloading.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let text = std::fs::read_to_string("/sys/kernel/sched_ext/state").unwrap();
+        if text.trim() == "disabled" {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "sched_ext did not return to disabled"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
+#[test]
+fn a_switch_the_kernel_attaches_a_moment_later_is_waited_for_and_one_it_never_attaches_is_not() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    // The loader answers at once; the kernel reports the scheduler only on its third reading.
+    let (mut client, _calls) = fake_loader();
+    let methods = introspect(&mut client).unwrap();
+    let mut planning = state(None, None);
+    planning.supported = vec!["scx_lavd".into()];
+    let plan = plan_switch(&planning, &methods, "scx_lavd", 1, &["scx_lavd".into()]).unwrap();
+    let auth = OfflineAuthorization::from_campaign("late", CampaignScope::SchedulerSwitch);
+    let reads = AtomicUsize::new(0);
+    execute_within(
+        &mut client,
+        &plan,
+        &auth,
+        || (reads.fetch_add(1, Ordering::SeqCst) >= 2).then(|| "lavd".to_owned()),
+        std::time::Duration::from_secs(2),
+    )
+    .unwrap();
+    assert!(
+        reads.load(Ordering::SeqCst) >= 3,
+        "the kernel was read only once"
+    );
+
+    let (mut client, _calls) = fake_loader();
+    let never = execute_within(
+        &mut client,
+        &plan,
+        &auth,
+        || None,
+        std::time::Duration::from_millis(150),
+    );
+    assert!(
+        matches!(never, Err(ExecuteError::NotInEffect { .. })),
+        "{never:?}"
+    );
+}
+
+#[test]
+fn the_kernels_versioned_ops_name_matches_its_scheduler_and_lookalikes_do_not() {
+    // What a real kernel reports for scx_bpfland 1.1.4.
+    assert!(kernel_ops_match(
+        "bpfland_1.1.4_x86_64_unknown_linux_gnu",
+        "scx_bpfland"
+    ));
+    assert!(kernel_ops_match(
+        "bpfland_1.1.4_x86_64_unknown_linux_gnu\n",
+        "scx_bpfland"
+    ));
+    assert!(kernel_ops_match("bpfland", "scx_bpfland"));
+    assert!(kernel_ops_match("scx_bpfland", "scx_bpfland"));
+    assert!(kernel_ops_match("lavd", "scx_lavd"));
+    for wrong in [
+        "bpfland_other",
+        "bpflandx",
+        "xbpfland",
+        "unrelated_bpfland",
+        "lavd_1.0",
+        "",
+        "_1",
+    ] {
+        assert!(!kernel_ops_match(wrong, "scx_bpfland"), "{wrong:?}");
+    }
+    assert!(!kernel_ops_match("anything_1", ""));
+    assert!(!kernel_ops_match("anything_1", "scx_"));
 }

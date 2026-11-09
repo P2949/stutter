@@ -472,13 +472,48 @@ fn call_switch_with_args(
         .map(drop)
 }
 
+/// Whether the kernel's `sched_ext` ops name is the scheduler `to`. The kernel reports the name the
+/// scheduler registered, which real schedulers suffix with a version and target
+/// (`bpfland_1.1.4_x86_64_unknown_linux_gnu`), so the bare name, or the bare name followed by
+/// `_` and a digit, matches. A different scheduler that merely shares a prefix or suffix
+/// (`bpfland_other`, `unrelated_bpfland`) does not.
+pub fn kernel_ops_match(ops: &str, to: &str) -> bool {
+    let ops = ops.trim();
+    let bare = to.strip_prefix("scx_").unwrap_or(to);
+    if bare.is_empty() {
+        return false;
+    }
+    ops == to
+        || ops == bare
+        || ops
+            .strip_prefix(bare)
+            .and_then(|rest| rest.strip_prefix('_'))
+            .is_some_and(|rest| rest.starts_with(|c: char| c.is_ascii_digit()))
+}
+
+/// How long the loader and the kernel get to agree after a switch call. A real loader answers the
+/// call as soon as it has spawned the scheduler binary; the kernel attaches the scheduler a moment
+/// later, so reading it once, immediately, reports a switch that is working as not in effect.
+pub const SETTLE: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// Performs the planned switch and verifies the loader reports it and the kernel agrees
-/// (`kernel_ops` reads `/sys/kernel/sched_ext/root/ops`).
+/// (`kernel_ops` reads `/sys/kernel/sched_ext/root/ops`), within [`SETTLE`].
 pub fn execute(
     client: &mut DbusClient,
     plan: &SwitchPlan,
     authorization: &OfflineAuthorization,
     kernel_ops: impl Fn() -> Option<String>,
+) -> Result<(), ExecuteError> {
+    execute_within(client, plan, authorization, kernel_ops, SETTLE)
+}
+
+/// [`execute`] with the settle window supplied.
+pub fn execute_within(
+    client: &mut DbusClient,
+    plan: &SwitchPlan,
+    authorization: &OfflineAuthorization,
+    kernel_ops: impl Fn() -> Option<String>,
+    settle: std::time::Duration,
 ) -> Result<(), ExecuteError> {
     authorization
         .require(super::campaign_receipt::CampaignScope::SchedulerSwitch)
@@ -488,20 +523,23 @@ pub fn execute(
     } else {
         call_switch_with_args(client, plan.method, &plan.to, &plan.args)?;
     }
-    let state = read_state(client)?;
-    let kernel_agrees = kernel_ops().is_some_and(|ops| {
-        ops == plan.to || ops == plan.to.strip_prefix("scx_").unwrap_or(&plan.to)
-    });
-    if state.current.as_deref() == Some(plan.to.as_str())
-        && state.mode == Some(plan.mode)
-        && kernel_agrees
-    {
-        Ok(())
-    } else {
-        Err(ExecuteError::NotInEffect {
-            wanted: plan.to.clone(),
-            current: state.current,
-        })
+    let deadline = std::time::Instant::now() + settle;
+    loop {
+        let state = read_state(client)?;
+        let kernel_agrees = kernel_ops().is_some_and(|ops| kernel_ops_match(&ops, &plan.to));
+        if state.current.as_deref() == Some(plan.to.as_str())
+            && state.mode == Some(plan.mode)
+            && kernel_agrees
+        {
+            return Ok(());
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(ExecuteError::NotInEffect {
+                wanted: plan.to.clone(),
+                current: state.current,
+            });
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
     }
 }
 
