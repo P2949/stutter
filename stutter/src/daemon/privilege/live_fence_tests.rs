@@ -52,7 +52,6 @@ fn a_real_worker_refuses_a_decoy_the_fence_does_not_name() {
 
     let refused = dry_run(&client, decoy).expect_err("the decoy must be refused");
     let refused = format!("{refused:#}");
-    println!("decoy refusal: {refused}");
     assert!(
         refused.contains("validation_fence_target_not_fenced"),
         "{refused}"
@@ -61,10 +60,9 @@ fn a_real_worker_refuses_a_decoy_the_fence_does_not_name() {
     // The fixture is not refused by the fence. Ordinary checks may still refuse it for their own
     // reasons; those are different, and the fence adds nothing to them.
     match dry_run(&client, fixture) {
-        Ok(()) => println!("fixture: dry run accepted"),
+        Ok(()) => {}
         Err(error) => {
             let error = format!("{error:#}");
-            println!("fixture ordinary refusal: {error}");
             assert!(!error.contains("validation_fence"), "{error}");
         }
     }
