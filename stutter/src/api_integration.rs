@@ -105,3 +105,11 @@ pub mod owner_interfaces {
         user_intent::*,
     };
 }
+
+pub mod resctrl_allocation {
+    //! Experimental resctrl L3 allocation as a prepared transaction (fake-root verified).
+    pub use crate::actions::resctrl_alloc::{
+        CatCommitError, CatCommitted, CatDenial, CatPrepared, CatRequest, CatRestore,
+        prepare as prepare_cat,
+    };
+}

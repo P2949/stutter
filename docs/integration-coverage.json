@@ -735,14 +735,15 @@
         "W11c"
       ],
       "anchors": [
-        "stutter/src/autotune/sensors/memory_domains.rs"
+        "stutter/src/autotune/sensors/memory_domains.rs",
+        "stutter/src/actions/resctrl_alloc.rs"
       ],
       "status": "first_slice",
-      "g0": "a cheap `resctrl_monitor` sensor reads L3 llc_occupancy (gauge) and mbm_total/local bytes (counter deltas) summed over monitored domains, counting `Unavailable`/`Error` reads as lost and never as zero; read-only resctrl inventory (closids, rmids, allocation groups) reported unavailable when not mounted",
+      "g0": "a cheap `resctrl_monitor` sensor reads L3 llc_occupancy (gauge) and mbm_total/local bytes (counter deltas) summed over monitored domains, counting `Unavailable`/`Error` reads as lost and never as zero; read-only resctrl inventory (closids, rmids, allocation groups) reported unavailable when not mounted; experimental L3 allocation transaction (`resctrl_alloc`): hardware mask/min-width/closid validation, owned group with per-domain schemata readback, default-group bystander check, restore removes only the group with unchanged identity; fake-root tests, task assignment not performed",
       "g1": "resctrl is not mounted on this host (HardwareUnavailable for physical proof)",
       "runtime_availability": "resctrl not mounted on this host",
       "authority": "O/E",
-      "not_wired": "no CAT/MBA allocation operations (by design: this only reads)",
+      "not_wired": "CAT allocation is a fake-root verified transaction only: no MBA, no task assignment, not an operation kind or worker-routed; no real-hardware readback here (resctrl unmounted on this host)",
       "dispositions": [
         "FixtureVerified",
         "RealObserved",

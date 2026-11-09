@@ -36,6 +36,7 @@ pub(crate) mod pm_qos;
 pub(crate) mod pm_qos_transaction;
 pub(crate) mod pm_qos_watchdog;
 pub(crate) mod precommit;
+pub(crate) mod resctrl_alloc;
 pub(crate) mod task_lifecycle;
 
 pub(crate) mod ioprio;
