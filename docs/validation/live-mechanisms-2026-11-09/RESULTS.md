@@ -16,3 +16,15 @@ control unchanged at `cubic`).
 Not covered by this evidence: resctrl (not mounted), DAMOS (root-only interface, no isolated
 workload), NUMA migration (single node), the sched_ext strategy (no `scx_loader`), `busy_poll` in the
 initial namespace (would touch the host), and any mechanism through the privileged worker.
+
+## DAMOS: BlockedResource on this host (live refusal, cleanly rolled back)
+
+A `[kdamond.0]` kernel thread has been running since boot, so DAMON is already owned by an in-kernel
+module here (its module parameters are root-only readable through the sysfs permission set used by
+the test). With `nr_kdamonds` at 0, the live test created one kdamond and configured a monitoring-only
+`stat` scheme for its own process. By hand as root every configuration write (operations, one target,
+one scheme, action, quotas, size bounds) succeeded, but starting it (`state` = `on`) was refused by the
+kernel: `EINVAL` once and `EBUSY` on later attempts. The transaction reported `not in effect`,
+tore its configuration down, and `nr_kdamonds` was back at 0 afterwards. The mechanism is therefore
+**not validated** (`BlockedResource`), while the refusal path, the cleanup and the "never touch
+another owner's kdamond" rule were exercised on the real kernel.

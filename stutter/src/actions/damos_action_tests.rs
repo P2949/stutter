@@ -140,3 +140,51 @@ fn recovery_is_manual_only_and_says_pages_are_not_restored() {
     assert_eq!(summary.restored_items, 1);
     assert!(summary.messages.iter().any(|m| m.contains("not restored")));
 }
+
+/// Live: the real DAMON admin sysfs, run as root. One kdamond is created for the test, a
+/// monitoring-only (`stat`) scheme is configured for this very process, read back as running,
+/// torn down through rollback, and the kdamond is removed again. Nothing is reclaimed or moved.
+#[test]
+#[ignore = "live: needs root and /sys/kernel/mm/damon/admin"]
+fn live_real_damon_stat_scheme_runs_and_tears_down() {
+    let admin = PathBuf::from(DAMON_ADMIN_ROOT);
+    let count = admin.join("kdamonds/nr_kdamonds");
+    assert_eq!(
+        fs::read_to_string(&count)
+            .expect("BlockedResource: DAMON sysfs")
+            .trim(),
+        "0",
+        "another owner has kdamonds: not touched"
+    );
+    fs::write(&count, "1").unwrap();
+    let action = DamosSchemeAction {
+        admin: admin.clone(),
+        request: request(DamosAction::Stat),
+    };
+    let outcome = (|| {
+        let token = action.apply_with_policy(&DamosActionPolicy { allow: true })?;
+        let running = fs::read_to_string(admin.join("kdamonds/0/state"))?;
+        action.rollback(&token)?;
+        let stopped = fs::read_to_string(admin.join("kdamonds/0/state"))?;
+        anyhow::Ok((running.trim().to_owned(), stopped.trim().to_owned()))
+    })();
+    // Remove the kdamond whatever happened, so nothing is left running.
+    let _ = fs::write(admin.join("kdamonds/0/state"), "off");
+    fs::write(&count, "0").unwrap();
+    {
+        use std::io::Write;
+        let _ = writeln!(std::io::stderr(), "damon live: {outcome:?}");
+    }
+    match outcome {
+        Ok((running, stopped)) => {
+            assert_eq!(running, "on");
+            assert_eq!(stopped, "off");
+        }
+        // The kernel may refuse (for example because an in-kernel DAMON module already owns a
+        // kdamond): that is a typed, cleanly rolled-back refusal, never a half-configured kdamond.
+        Err(error) => {
+            assert!(error.to_string().contains("not in effect"), "{error}");
+            assert_eq!(fs::read_to_string(&count).unwrap().trim(), "0");
+        }
+    }
+}
