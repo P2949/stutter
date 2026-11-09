@@ -109,6 +109,11 @@ pub enum RollbackToken {
     ScxSchedulerRestore {
         records: Vec<crate::integrations::scx_loader::ScxRestoreRecord>,
     },
+    /// A NUMA page migration: not exactly reversible, so this records the before and after page
+    /// counts and recovery is manual.
+    NumaMigration {
+        records: Vec<super::numa_migration::NumaMigrationRecord>,
+    },
 }
 
 impl RollbackToken {
@@ -130,6 +135,7 @@ impl RollbackToken {
             Self::CgroupControlRestore { .. } => "cgroup-control-restore",
             Self::BlockSchedulerRestore { .. } => "block-scheduler-restore",
             Self::ScxSchedulerRestore { .. } => "scx-scheduler-restore",
+            Self::NumaMigration { .. } => "numa-migration",
         }
     }
 
@@ -329,6 +335,7 @@ impl RollbackToken {
             Self::CgroupControlRestore { records } => records.len(),
             Self::BlockSchedulerRestore { records } => records.len(),
             Self::ScxSchedulerRestore { records } => records.len(),
+            Self::NumaMigration { records } => records.len(),
         }
     }
 
@@ -349,6 +356,7 @@ impl RollbackToken {
             | Self::CgroupControlRestore { .. }
             | Self::BlockSchedulerRestore { .. }
             | Self::ScxSchedulerRestore { .. }
+            | Self::NumaMigration { .. }
             | Self::VmKnobRestore { .. } => None,
         }
     }

@@ -62,12 +62,15 @@ pub enum MutationOperationKind {
     /// scheduler and mode. Never autonomous.
     SchedExtSchedulerStrategy,
 
+    /// Moving one process's pages between NUMA nodes. Irreversible in effect; never autonomous.
+    NumaMigratePages,
+
     /// Test-only or unrecognisable payloads. Never authorised by any contract.
     Unclassified,
 }
 
 impl MutationOperationKind {
-    pub const ALL: [Self; 29] = [
+    pub const ALL: [Self; 30] = [
         Self::CpuAffinityProfile,
         Self::Uclamp,
         Self::Nice,
@@ -96,6 +99,7 @@ impl MutationOperationKind {
         Self::CgroupIoWeight,
         Self::BlockIoScheduler,
         Self::SchedExtSchedulerStrategy,
+        Self::NumaMigratePages,
         Self::Unclassified,
     ];
 
@@ -129,6 +133,7 @@ impl MutationOperationKind {
             Self::CgroupIoWeight => "cgroup_io_weight",
             Self::BlockIoScheduler => "block_io_scheduler",
             Self::SchedExtSchedulerStrategy => "sched_ext_scheduler_strategy",
+            Self::NumaMigratePages => "numa_migrate_pages",
             Self::Unclassified => "unclassified",
         }
     }
@@ -166,6 +171,7 @@ impl MutationOperationKind {
             Self::CgroupIoWeight => Some("cgroup_io_weight"),
             Self::BlockIoScheduler => Some("block_io_scheduler"),
             Self::SchedExtSchedulerStrategy => Some("sched_ext_scheduler_strategy"),
+            Self::NumaMigratePages => Some("numa_migrate_pages"),
             Self::Unclassified => None,
         }
     }
@@ -207,6 +213,7 @@ impl MutationOperationKind {
                 | Self::CgroupIoWeight
                 | Self::BlockIoScheduler
                 | Self::SchedExtSchedulerStrategy
+                | Self::NumaMigratePages
                 | Self::Unclassified
         )
     }
@@ -240,6 +247,7 @@ impl CandidateAction {
             Self::CgroupControl { plan } => cgroup_control_operation(&plan.action.control),
             Self::BlockScheduler { .. } => MutationOperationKind::BlockIoScheduler,
             Self::ScxStrategy { .. } => MutationOperationKind::SchedExtSchedulerStrategy,
+            Self::NumaMigration { .. } => MutationOperationKind::NumaMigratePages,
             Self::Fake { .. } => MutationOperationKind::Unclassified,
         }
     }

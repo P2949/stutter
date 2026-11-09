@@ -400,3 +400,68 @@ impl CandidatePlan for ScxStrategyPlan {
         )
     }
 }
+
+/// A manual-only NUMA page migration (irreversible in effect). Never an executable plan.
+#[derive(Clone, Debug)]
+pub struct NumaMigrationActionPlan {
+    pub name: String,
+    pub action: crate::actions::numa_migration::NumaMigrationAction,
+    pub evidence: Vec<CandidateEvidence>,
+    pub objective: ObjectiveKind,
+}
+
+impl NumaMigrationActionPlan {
+    pub fn manual(
+        action: crate::actions::numa_migration::NumaMigrationAction,
+        objective: ObjectiveKind,
+    ) -> Self {
+        Self {
+            name: format!("numa_migrate_task_{}", action.task),
+            action,
+            evidence: Vec::new(),
+            objective,
+        }
+    }
+}
+
+impl CandidatePlan for NumaMigrationActionPlan {
+    fn candidate_name(&self) -> &str {
+        &self.name
+    }
+
+    fn action_kind(&self) -> &'static str {
+        "numa_migrate_pages"
+    }
+
+    fn target_root_pid(&self) -> Option<u32> {
+        Some(self.action.task)
+    }
+
+    fn action_id(&self) -> crate::actions::ActionId {
+        self.action.id()
+    }
+
+    fn safety_class(&self) -> SafetyClass {
+        self.action.safety_class()
+    }
+
+    fn effect_scope(&self) -> ActionEffectScope {
+        ActionEffectScope::SystemWide
+    }
+
+    fn evidence(&self) -> &[CandidateEvidence] {
+        &self.evidence
+    }
+
+    fn objective(&self) -> ObjectiveKind {
+        self.objective
+    }
+
+    fn conflict_group(&self) -> ActionConflictGroup {
+        ActionConflictGroup::VmMemory
+    }
+
+    fn describe(&self) -> String {
+        self.action.describe()
+    }
+}

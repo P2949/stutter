@@ -101,6 +101,10 @@ impl CandidateAction {
                 "sched_ext_strategy {} mode {}",
                 plan.switch.to, plan.switch.mode
             ),
+            CandidateAction::NumaMigration { plan } => format!(
+                "numa_migrate task={} {:?}->{:?}",
+                plan.action.task, plan.action.from_nodes, plan.action.to_nodes
+            ),
             CandidateAction::Fake { plan } => {
                 format!("fake action_id={}", plan.action_id.as_str())
             }
@@ -423,6 +427,9 @@ impl CandidateAction {
                 summary: self.planned_state_summary(),
             },
             CandidateAction::ScxStrategy { .. } => ActiveConfigMatch::Unknown {
+                summary: self.planned_state_summary(),
+            },
+            CandidateAction::NumaMigration { .. } => ActiveConfigMatch::Unknown {
                 summary: self.planned_state_summary(),
             },
             CandidateAction::Fake { .. } => ActiveConfigMatch::Unknown {

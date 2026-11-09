@@ -71,6 +71,7 @@ fn mechanism_for(operation: MutationOperationKind) -> MechanismEvidence {
         | CgroupIoWeight => MechanismEvidence::ResourceGroupObserved,
         BlockIoScheduler => MechanismEvidence::ResourceGroupObserved,
         SchedExtSchedulerStrategy => MechanismEvidence::ResourceGroupObserved,
+        NumaMigratePages => MechanismEvidence::PlacementObserved,
         ResctrlCacheAllocation => MechanismEvidence::ResourceGroupObserved,
         Unclassified => MechanismEvidence::None,
     }

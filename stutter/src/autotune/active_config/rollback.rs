@@ -302,6 +302,9 @@ pub fn verify_rollback_restored_baseline(
         CandidateAction::ScxStrategy { .. } => RollbackVerification::unavailable(
             "the sched_ext scheduler is verified through org.scx.Loader, not the active configuration snapshot",
         ),
+        CandidateAction::NumaMigration { .. } => RollbackVerification::unavailable(
+            "page migration is not restorable, so no rollback can be verified",
+        ),
         CandidateAction::Fake { .. } => {
             RollbackVerification::unavailable("fake candidate has no active config verifier")
         }

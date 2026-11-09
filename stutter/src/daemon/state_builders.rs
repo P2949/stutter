@@ -310,6 +310,7 @@ pub fn safety_class_for_rollback_token(token: &RollbackToken) -> SafetyClass {
         | RollbackToken::CgroupControlRestore { .. }
         | RollbackToken::BlockSchedulerRestore { .. }
         | RollbackToken::ScxSchedulerRestore { .. }
+        | RollbackToken::NumaMigration { .. }
         | RollbackToken::SysfsRestore { .. } => SafetyClass::HighRisk,
     }
 }

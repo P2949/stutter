@@ -514,3 +514,29 @@ fn an_scx_strategy_candidate_is_manual_only_never_executable_and_its_token_is_ma
     let error = crate::autotune::emergency_restore::restore_rollback_token(&token).unwrap_err();
     assert!(error.to_string().contains("offline authorization"));
 }
+
+#[test]
+fn a_numa_migration_candidate_is_its_own_manual_only_operation_and_never_an_executable_plan() {
+    use crate::{
+        actions::numa_migration::NumaMigrationAction,
+        autotune::{
+            objective::ObjectiveKind,
+            planning::{
+                candidate::CandidateAction,
+                executable_plan::{CandidateExecutablePlan, NumaMigrationActionPlan},
+            },
+        },
+    };
+    let candidate = CandidateAction::NumaMigration {
+        plan: NumaMigrationActionPlan::manual(
+            NumaMigrationAction::new(1, 1, vec![0], vec![1]),
+            ObjectiveKind::GameRunnableLatency,
+        ),
+    };
+    assert_eq!(
+        candidate.operation_kind(),
+        MutationOperationKind::NumaMigratePages
+    );
+    assert!(MutationOperationKind::NumaMigratePages.is_manual_only());
+    assert!(CandidateExecutablePlan::from_candidate(&candidate).is_none());
+}

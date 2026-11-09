@@ -337,6 +337,7 @@ pub fn operation_domain(operation: MutationOperationKind) -> Option<ResourceDoma
         | Op::CgroupIoWeight
         | Op::BlockIoScheduler
         | Op::SchedExtSchedulerStrategy
+        | Op::NumaMigratePages
         | Op::Unclassified => None,
     }
 }

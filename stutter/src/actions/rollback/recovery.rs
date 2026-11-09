@@ -83,6 +83,10 @@ pub(crate) fn recovery_descriptor(token: &RollbackToken) -> RollbackRecoveryDesc
             ManualOnly,
             "restoring the prior sched_ext scheduler needs the org.scx.Loader bus and an offline campaign authorization; recovery is never automatic and a prior state that cannot be put back exactly is never recorded",
         ),
+        RollbackToken::NumaMigration { .. } => (
+            ManualOnly,
+            "page migration is irreversible in effect: pages reclaimed, pinned or faulted in later do not return, so recovery is never automatic and never claims the memory layout was restored",
+        ),
     };
     RollbackRecoveryDescriptor {
         token_kind: token.kind(),

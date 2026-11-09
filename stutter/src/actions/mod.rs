@@ -37,6 +37,7 @@ pub(crate) mod damos_action;
 pub(crate) mod damos_scheme;
 pub(crate) mod gpu_power;
 pub(crate) mod nice;
+pub(crate) mod numa_migration;
 pub(crate) mod pm_qos;
 pub(crate) mod pm_qos_action;
 pub(crate) mod pm_qos_rollback;

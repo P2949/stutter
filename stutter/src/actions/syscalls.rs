@@ -140,3 +140,28 @@ pub(crate) fn sched_setattr(tid: u32, values: SchedUclamp) -> io::Result<()> {
         Err(io::Error::last_os_error())
     }
 }
+
+/// `migrate_pages(2)`: moves the pages of `pid` that sit on the `from` nodes to the `to` nodes
+/// (bit `n` is node `n`, nodes 0..=63). Returns the kernel's count of pages it could not move.
+/// The effect cannot be undone by calling it again: pages that were reclaimed or are pinned stay
+/// where they are.
+pub fn migrate_pages(pid: u32, from: u64, to: u64) -> io::Result<u64> {
+    // maxnode is one more than the highest node bit the masks may use.
+    const MAX_NODE: libc::c_ulong = 64 + 1;
+    // SAFETY: both masks are live u64 values for the whole call and maxnode covers exactly
+    // their 64 bits; the remaining arguments are plain integers.
+    let rc = unsafe {
+        libc::syscall(
+            libc::SYS_migrate_pages,
+            pid as libc::pid_t,
+            MAX_NODE,
+            &from as *const u64,
+            &to as *const u64,
+        )
+    };
+    if rc >= 0 {
+        Ok(rc as u64)
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}

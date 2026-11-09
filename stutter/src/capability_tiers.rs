@@ -75,7 +75,7 @@ const BOUNDED_SERVICE: &[&str] = &[
     "live_bounded_service_acceptance",
 ];
 
-pub const CAPABILITIES: [Capability; 43] = [
+pub const CAPABILITIES: [Capability; 44] = [
     obs(
         "doctor",
         "Local preflight checks",
@@ -479,6 +479,18 @@ pub const CAPABILITIES: [Capability; 43] = [
         required_evidence: &[],
         required_release_evidence: &[],
         limitations: "Global effect on every task. Allowlisted scheduler and reviewed arguments only, exact restore of the prior scheduler and mode, offline campaign authorization; manual only, never autonomous, no second SCX daemon. Does not inherit another operation's maturity.",
+    },
+    Capability {
+        id: "numa_migrate_pages",
+        title: "NUMA page migration",
+        class: CapabilityClass::Mutating,
+        tier: CapabilityTier::Experimental,
+        target_tier: CapabilityTier::Experimental,
+        commands: &["autotune"],
+        providers: &["numa_migration"],
+        required_evidence: &[],
+        required_release_evidence: &[],
+        limitations: "Irreversible in effect: moved pages are not returned and recovery is manual. Verified target by start time, online disjoint nodes, acknowledgement required; manual only, never autonomous. Moving CPU affinity is not moving memory. Does not inherit another operation's maturity.",
     },
     Capability {
         id: "bounded_autotune_controller",

@@ -586,21 +586,23 @@
       "anchors": [
         "stutter/src/integrations/mod.rs",
         "stutter/src/autotune/sensors/memory_domains.rs",
-        "stutter/src/autotune/sensors/numa_faults.rs"
+        "stutter/src/autotune/sensors/numa_faults.rs",
+        "stutter/src/actions/numa_migration.rs"
       ],
-      "status": "first_slice",
-      "g0": "a cheap `numa_faults` sensor reads automatic-NUMA-balancing hinting faults, local faults and migrated pages from /proc/vmstat as deltas with a local-fault ratio, and `parse_numa_maps` sums one process's pages per node; numad presence marks memory placement owned; numa_stat sensor reads per-node numastat deltas and the remote-allocation ratio of the interval",
-      "g1": "none",
+      "status": "code_complete",
+      "g0": "a cheap `numa_faults` sensor reads automatic-NUMA-balancing hinting faults, local faults and migrated pages from /proc/vmstat as deltas with a local-fault ratio, and `parse_numa_maps` sums one process's pages per node; numad presence marks memory placement owned; numa_stat sensor reads per-node numastat deltas and the remote-allocation ratio of the interval; separate typed memory operation `NumaMigratePages` (`MutationOperationKind`, manual-only, Experimental capability): target verified by live start time, nodes checked against the online list and disjoint, explicit irreversible acknowledgement, `migrate_pages(2)` behind a wrapper with before/after page accounting from numa_maps, `RollbackToken::NumaMigration` whose recovery is ManualOnly and never claims the layout was restored, manual policy-gated `NumaMigrationAction` (HighRisk, persistent effect) and `CandidateAction::NumaMigration`; cpuset.mems is the separate `CgroupCpusetMems` operation; never an executable plan",
+      "g1": "read-only on this host (2026-11-09): one NUMA node online (`/sys/devices/system/node/online` = 0), `kernel.numa_balancing` = 0, and `/proc/self/numa_maps` readable; no migration was performed",
       "runtime_availability": "numad and numactl absent",
       "authority": "O/A/E",
-      "not_wired": "no policy or migration operations (by design: moving CPU is not moving memory, and migration is irreversible); a target-bound `numa_maps` sensor (bound by pid and live start time, read at most once per 30 s) now reports the target's pages per node",
+      "not_wired": "set_mempolicy/mbind apply only to the calling thread or its own address space, so no foreign-process policy operation exists by design; no numad coexistence beyond the owner probe; not worker-routed (HighRisk manual/offline behind HIGH_RISK_APPLY_IMPLEMENTED=false); no real multi-node migration readback",
       "dispositions": [
+        "CodeComplete",
         "FixtureVerified",
         "HardwareUnavailable",
         "EvidenceDeferred"
       ],
       "evidence": [],
-      "unblock": "Needs on the host: numad and numactl absent"
+      "unblock": "this host has a single NUMA node and no numad or numactl: a real node-to-node migration readback and locality/KPI campaign needs a multi-node machine and an isolated authorized workload"
     },
     {
       "id": "5.20",

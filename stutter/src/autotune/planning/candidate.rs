@@ -7,8 +7,9 @@ use serde::{Deserialize, Serialize};
 use super::executable_plan::{
     BlockSchedulerActionPlan, CgroupControlActionPlan, CgroupPlacementActionPlan,
     CpuAffinityProfilePlan, CpuPowerActionPlan, DamosActionPlan, FakeCandidatePlan,
-    GpuPowerActionPlan, IoPrioActionPlan, IrqAffinityActionPlan, NiceActionPlan, PmQosActionPlan,
-    ResctrlActionPlan, ScxStrategyPlan, UclampActionPlan, VmKnobActionPlan,
+    GpuPowerActionPlan, IoPrioActionPlan, IrqAffinityActionPlan, NiceActionPlan,
+    NumaMigrationActionPlan, PmQosActionPlan, ResctrlActionPlan, ScxStrategyPlan, UclampActionPlan,
+    VmKnobActionPlan,
 };
 use crate::{
     actions::SafetyClass,
@@ -37,6 +38,7 @@ pub enum CandidateAction {
     CgroupControl { plan: CgroupControlActionPlan },
     BlockScheduler { plan: BlockSchedulerActionPlan },
     ScxStrategy { plan: ScxStrategyPlan },
+    NumaMigration { plan: NumaMigrationActionPlan },
     Fake { plan: FakeCandidatePlan },
 }
 
@@ -268,6 +270,7 @@ impl CandidateAction {
             Self::CgroupControl { plan } => plan,
             Self::BlockScheduler { plan } => plan,
             Self::ScxStrategy { plan } => plan,
+            Self::NumaMigration { plan } => plan,
             Self::Fake { plan } => plan,
         }
     }
@@ -306,7 +309,7 @@ pub trait CandidatePlan {
 /// Registry of mutation provider kinds (everything except the test-only fake).
 /// `is_mutation_provider` is an exhaustive match, so a new candidate variant cannot
 /// compile until this registry is revisited; coverage tooling uses it as a denominator.
-pub const MUTATION_PROVIDER_KINDS: [&str; 15] = [
+pub const MUTATION_PROVIDER_KINDS: [&str; 16] = [
     "cpu_affinity_profile",
     "nice",
     "ionice",
@@ -322,6 +325,7 @@ pub const MUTATION_PROVIDER_KINDS: [&str; 15] = [
     "cgroup_control",
     "block_scheduler",
     "sched_ext_strategy",
+    "numa_migration",
 ];
 
 impl CandidateAction {
@@ -341,7 +345,8 @@ impl CandidateAction {
             | Self::Damos { .. }
             | Self::CgroupControl { .. }
             | Self::BlockScheduler { .. }
-            | Self::ScxStrategy { .. } => true,
+            | Self::ScxStrategy { .. }
+            | Self::NumaMigration { .. } => true,
             Self::Fake { .. } => false,
         }
     }

@@ -170,6 +170,21 @@ pub fn manual_restore_command_for_token(token: &RollbackToken) -> String {
             })
             .collect::<Vec<_>>()
             .join(" && "),
+        RollbackToken::NumaMigration { records } => records
+            .iter()
+            .map(|record| {
+                let list = |nodes: &[u32]| {
+                    nodes.iter().map(u32::to_string).collect::<Vec<_>>().join(",")
+                };
+                format!(
+                    "migratepages {} {} {}",
+                    record.task,
+                    list(&record.to_nodes),
+                    list(&record.from_nodes)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" && "),
     }
 }
 
@@ -205,6 +220,7 @@ pub(super) fn safety_class_for_rollback_token(token: &RollbackToken) -> SafetyCl
         | RollbackToken::CgroupControlRestore { .. }
         | RollbackToken::BlockSchedulerRestore { .. }
         | RollbackToken::ScxSchedulerRestore { .. }
+        | RollbackToken::NumaMigration { .. }
         | RollbackToken::SysfsRestore { .. } => SafetyClass::HighRisk,
     }
 }
@@ -227,6 +243,7 @@ pub(super) fn rollback_token_kind(token: &RollbackToken) -> &'static str {
         RollbackToken::CgroupControlRestore { .. } => "cgroup-control-restore",
         RollbackToken::BlockSchedulerRestore { .. } => "block-scheduler-restore",
         RollbackToken::ScxSchedulerRestore { .. } => "scx-scheduler-restore",
+        RollbackToken::NumaMigration { .. } => "numa-migration",
     }
 }
 
