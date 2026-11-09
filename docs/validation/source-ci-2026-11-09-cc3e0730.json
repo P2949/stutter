@@ -1,0 +1,34 @@
+{
+  "result": "PASS",
+  "source_sha": "cc3e0730b60ba176d7b3b4ad2b3b038ff958b4df",
+  "source_clean": true,
+  "build_output": "fresh local clone checkout/target (exclusive to this checkout)",
+  "commands": [
+    "nix develop --command cargo run -q -p xtask -- ci",
+    "nix develop --command cargo clippy --workspace --all-targets -- -D warnings",
+    "nix develop --command cargo run -q -p xtask -- release-check"
+  ],
+  "library": {
+    "passed": 3425,
+    "ignored": 16
+  },
+  "xtask": {
+    "passed": 544
+  },
+  "validation_runner": {
+    "passed": 106,
+    "ignored": 7
+  },
+  "architecture_tests": {
+    "passed": 125
+  },
+  "release_binary_sha256": "58884a30730220a3cd6d8228e79a92241d0bd9196bb1e367f99e43b67a96b3c4",
+  "logs_sha256": {
+    "ci.log": "2d048444226b20bad162f1c36970260627a3e099f8be1dcf1d8373a81f8b1e0b",
+    "clippy-workspace.log": "34171756fc6ca526125e0428fb972166d77947c31dd0a9b5787e3fe8dec39075",
+    "release-check.log": "4a0f004eab405b2569eb6f71bd9d503cb1ea077ef62bd192e938a91d22c63e17"
+  },
+  "scope": "committed-source validation of the code commit adding the never-stale stamped-frame calibration, the authenticated epoch-bound stamped source, the real-scx_loader adapter fixes, the frozen-baseline subcapability gate with executed tests, and the CodeComplete reconciliation, on top of 947b22ed",
+  "not_deployed": "The production service is still the 4f3baa07 build (binary bf79d9c4...). Nothing since is reachable from the daemon or the bounded service, so no re-deploy was done and this receipt does not qualify the installed binary.",
+  "note": "documentation-only commits after this sha do not change the built binary"
+}
