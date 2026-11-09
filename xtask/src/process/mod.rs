@@ -131,10 +131,10 @@ fn check_outcome(command_text: &str, run: &Supervised) -> anyhow::Result<()> {
         Outcome::Exited(status) if status.success() => Ok(()),
         Outcome::Exited(status) => bail!("command `{command_text}` failed with status {status}"),
         Outcome::TimedOut => bail!(
-            "command `{command_text}` exceeded its deadline; its process group was terminated and reaped"
+            "command `{command_text}` exceeded its deadline; its owned cgroup was terminated and its child reaped"
         ),
         Outcome::Cancelled => bail!(
-            "command `{command_text}` was cancelled; its process group was terminated and reaped"
+            "command `{command_text}` was cancelled; its owned cgroup was terminated and its child reaped"
         ),
     }
 }

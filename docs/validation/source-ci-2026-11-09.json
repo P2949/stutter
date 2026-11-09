@@ -1,0 +1,23 @@
+{
+  "result": "PASS",
+  "source_sha": "6638a5b3a0a87714aa70439878f0fa009d6cdf9c",
+  "source_clean": true,
+  "build_output": "checkout/target (exclusive to this checkout)",
+  "commands": [
+    "nix develop --command cargo run -q -p xtask -- ci",
+    "nix develop --command cargo clippy --workspace --all-targets -- -D warnings"
+  ],
+  "library": {
+    "passed": 3265,
+    "ignored": 10
+  },
+  "xtask": {
+    "passed": 516
+  },
+  "logs_sha256": {
+    "ci.log": "836180e04fec3c8cd311e1024d44275956012f880afc8650ba7011274e075e47",
+    "clippy-workspace.log": "f966a9f2a083c3de269e745523ae2e05fbc569ecac0afea261e184d7ffd4a563"
+  },
+  "scope": "committed-source validation only; no deployment or new qualification",
+  "excluded_attempt": "ci-shared-target-inconclusive.log: shared build artifacts, cancelled and excluded"
+}

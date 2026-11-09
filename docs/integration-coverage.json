@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "source_sha": "1d5a3ef0458f08d7e50ff5c00c2dcc6a505d52d2",
+  "source_sha": "6638a5b3a0a87714aa70439878f0fa009d6cdf9c",
   "recorded": "2026-11-08",
   "statuses": [
     "not_started",
@@ -299,8 +299,8 @@
         "stutter/src/autotune/sensors/pmu.rs"
       ],
       "status": "first_slice",
-      "g0": "per-TID counters exist and are now a budgeted Moderate sensor: reading conversion rejects multiplexed, low-running-ratio and zero-denominator conclusions and reports probe availability; no branch/migration/fault/bandwidth events yet",
-      "g1": "none",
+      "g0": "Budgeted per-TID PMU sampler with matched cumulative count/time interval deltas, overflow and invalid-time refusal, partial-thread quality downgrade; optional generic branch events with explicit missing-event metadata, disabled in runtime; no fault/migration or architecture-specific bandwidth events yet",
+      "g1": "Controlled own-thread development readback: three existing four-event intervals counted; optional six-event set failed to yield usable counts and remains EvidenceDeferred. See source-bound development report.",
       "runtime_availability": "perf CLI absent, VTune/LIKWID absent",
       "authority": "O/F",
       "not_wired": "the PMU sensor is started only by the escalator and counts a task list taken without stats; no architecture-specific events; a `perf stat -x,` importer exists (a counter multiplexed below 90 percent running, not counted or unsupported gives no value, never an extrapolation); a `perf report --stdio` importer gives per-symbol sample shares; no perf script/record importer and no VTune, uProf or LIKWID importer (formats not verified on this host, tools absent)",
@@ -309,7 +309,9 @@
         "HardwareUnavailable",
         "EvidenceDeferred"
       ],
-      "evidence": [],
+      "evidence": [
+        "docs/validation/pmu-2026-11-08.md"
+      ],
       "unblock": "Needs on the host: perf CLI absent, VTune/LIKWID absent"
     },
     {
@@ -491,7 +493,7 @@
       "g1": "power-profiles-daemon read over the system bus on this host: no owner (absent)",
       "runtime_availability": "all absent",
       "authority": "O/A/D",
-      "not_wired": "nothing",
+      "not_wired": "Trusted production campaign/token factory and worker/journal integration are absent; the scoped hold mechanism is fake-bus tested, and OfflineAuthorization has a fixture-only constructor.",
       "dispositions": [
         "FixtureVerified",
         "HardwareUnavailable",
@@ -645,18 +647,20 @@
         "stutter/src/actions/cgroup/control.rs"
       ],
       "status": "first_slice",
-      "g0": "cgroup placement only as an operation; typed values and read-only preflight now exist for cpu.weight, cpu.idle, cpu.max, cpuset.cpus, cpuset.mems, memory.min, memory.low, memory.high and io.weight (range checks, delegation, subtree_control, threaded groups, idle-versus-weight, effective cpuset, io.weight honored, risk class, exact readback); OpenRC packaging files exist but no lifecycle tests",
+      "g0": "Cgroup placement remains the only operation. Typed knob values and read-only feasibility checks cover weights, idle/max, cpusets, memory bounds and I/O; unknown device effectiveness, CPU-idle state or effective masks deny. Canonical io.weight readback is parsed. Per-user OpenRC templates, observation-only root policy, rendered hooks and an unprivileged real supervisor fixture exist; full product lifecycle remains incomplete.",
       "g1": "placement observed on the production host",
       "runtime_availability": "cgroup v2 present, OpenRC absent",
       "authority": "O/A/E",
-      "not_wired": "no operation kind, provider, candidate, journal or worker commit exists for any of these knobs, so none can run; systemd1 SetUnitProperties and the OpenRC controller lifecycle are not built",
+      "not_wired": "New knobs lack operation/provider/candidate/journal/worker commits and cannot run. systemd1 SetUnitProperties, full OpenRC product recovery/delegation fixtures and independent installed-backend acceptance remain unfinished.",
       "dispositions": [
         "FixtureVerified",
         "RealObserved",
         "HardwareUnavailable",
         "EvidenceDeferred"
       ],
-      "evidence": [],
+      "evidence": [
+        "docs/validation/openrc-2026-11-08.md"
+      ],
       "unblock": "Needs on the host: cgroup v2 present, OpenRC absent"
     },
     {
@@ -1069,8 +1073,8 @@
     }
   ],
   "verification": {
-    "source_sha": "1d5a3ef0458f08d7e50ff5c00c2dcc6a505d52d2",
-    "source_ci": "docs/validation/kpi-observation-2026-11-08/source-ci-receipt.json",
-    "scope": "Source CI, fixture verification and observation-only transient-service KPI acceptance. G1 is separate from mechanism, benefit, autonomous authority and final deployment."
+    "source_sha": "6638a5b3a0a87714aa70439878f0fa009d6cdf9c",
+    "scope": "Clean committed-source CI and explicit workspace Clippy. Live observations retain their separate source pins; this is not a deployment receipt.",
+    "source_ci": "docs/validation/source-ci-2026-11-09.json"
   }
 }

@@ -1,0 +1,21 @@
+{
+  "scope": "development validation-container implementation; W1 partial; no product qualification",
+  "source_base": "6638a5b3a0a87714aa70439878f0fa009d6cdf9c",
+  "source_patch": "d70321731f5d0923a0ff460697d4e5df89a86a7919028d2189be150738a4d65a",
+  "focused_passed": 12,
+  "xtask_passed": 516,
+  "xtask_integration_passed": 1,
+  "runner_passed": 91,
+  "runner_live_ignored_in_default_suite": 4,
+  "clippy": "PASS",
+  "production_controller_pid": 1985,
+  "production_worker_pid": 1889,
+  "logs_sha256": {
+    "containment-final-focused.log": "0be0ac1b08f8a2f6f00191ceffac38baa29d915b4797d3271f61d03e344622a3",
+    "containment-final-supervisor.log": "1fd1820a38a4e083367841fb666a43fc74037c06cdecd1b9fa5feb31b0a7215f",
+    "containment-xtask-full.log": "9e36549808b8b559d117b00ca4b06771d6f27e86f69b3ebf9e5b2ba3b8f3bea4",
+    "containment-runner-full.log": "9ed973a07594cdd3f639ea2c23697f3bdcff9c31d664c2e2dd668864914ddaa7",
+    "containment-final-clippy-checked.log": "465e982644a345c69b0a7c67ebdf44764ce391aec23e6b26f0028f51bd573cef",
+    "containment-source.patch": "d70321731f5d0923a0ff460697d4e5df89a86a7919028d2189be150738a4d65a"
+  }
+}

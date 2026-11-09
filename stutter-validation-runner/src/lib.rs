@@ -5,6 +5,7 @@ pub mod authorization;
 pub mod boot;
 pub mod cli;
 pub mod client;
+pub mod containment;
 pub mod credentials;
 pub mod delegation;
 pub mod install;

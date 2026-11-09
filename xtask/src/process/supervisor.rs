@@ -1,10 +1,9 @@
 //! Supervised execution of agent-owned child processes.
 //!
-//! Every stage runs in a fresh process group that this module owns (the group id is the child's
-//! pid, set before exec). On a deadline, a cancellation or the end of the stage the whole group
-//! is signalled TERM, given a bounded grace, then KILLed and reaped, so a stage never leaves an
-//! owned descendant behind. Only that verified group is ever signalled: never a name match, never
-//! a process this module did not spawn.
+//! Every stage requires a fresh owned kernel cgroup and a separate owner-crash reaper. Children
+//! enter it before exec; setsid and environment clearing retain containment. Cleanup sends TERM
+//! through verified pidfds, waits a bounded grace, then uses cgroup.kill and verifies the group
+//! emptied. A process group and legacy owner markers remain additional cleanup/diagnostic tools.
 use std::{
     io::{Read, Write},
     os::{fd::AsRawFd, unix::process::CommandExt},
@@ -207,6 +206,9 @@ pub fn run(mut command: Command, policy: &ExecutionPolicy) -> anyhow::Result<Sup
         }
     });
     let stage = stage_owner();
+    let mut containment = stutter_validation_runner::containment::OwnedCgroup::prepare()
+        .context("cannot contain validation stage; command was not started")?;
+    containment.attach(&mut command)?;
     command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -251,6 +253,7 @@ pub fn run(mut command: Command, policy: &ExecutionPolicy) -> anyhow::Result<Sup
         (Ok(out), Ok(err)) => (out, err),
         (out, err) => {
             stop_group(group, policy.grace);
+            let cleanup = containment.finish();
             let _ = child.wait();
             stop_readers.store(true, Ordering::SeqCst);
             if let Ok(reader) = out {
@@ -259,6 +262,7 @@ pub fn run(mut command: Command, policy: &ExecutionPolicy) -> anyhow::Result<Sup
             if let Ok(reader) = err {
                 let _ = reader.join();
             }
+            cleanup?;
             anyhow::bail!("could not configure bounded output readers");
         }
     };
@@ -286,11 +290,15 @@ pub fn run(mut command: Command, policy: &ExecutionPolicy) -> anyhow::Result<Sup
         thread::sleep(POLL);
     };
     // Whatever the outcome, no member of the owned group may outlive the stage.
-    stop_group(group, policy.grace);
+    let termination = containment.terminate(policy.grace);
+    if termination.is_err() {
+        stop_group(group, policy.grace);
+    }
     // A child that detached with setsid left the group but kept the owner marker.
     if let Some(owner) = stage {
         ownership::sweep_owned(Path::new("/proc"), unsafe_uid(), owner, policy.grace);
     }
+    let cleanup = containment.finish();
     let _ = child.wait();
     // Killed members become zombies until init reaps them; give that a bounded moment.
     let gone = Instant::now() + Duration::from_secs(2);
@@ -314,6 +322,8 @@ pub fn run(mut command: Command, policy: &ExecutionPolicy) -> anyhow::Result<Sup
         "output did not reach EOF after cleanup; an uncontained descendant or read failure invalidated the stage"
     );
     let outcome = outcome.context("failed to poll child (owned group cleaned up)")?;
+    termination.context("validation stage graceful termination failed")?;
+    cleanup.context("validation cgroup cleanup failed")?;
     Ok(Supervised {
         outcome,
         stdout: String::from_utf8_lossy(&out.text).into_owned(),
@@ -387,7 +397,7 @@ mod tests {
     }
 
     #[test]
-    fn a_markerless_pipe_holder_invalidates_the_stage_without_hanging_the_reader() {
+    fn a_markerless_pipe_holder_is_contained_without_hanging_the_reader() {
         let file = std::env::temp_dir().join(format!("stutter-pipe-holder-{}", std::process::id()));
         let script = format!(
             "setsid env -u {OWNER_ENV} sh -c 'echo $$ > {}; exec sleep 30' & sleep 0.3",
@@ -396,22 +406,17 @@ mod tests {
         let started = Instant::now();
         let result = run(sh(&script), &quiet(2000));
         let elapsed = started.elapsed();
-        // This fixture deliberately escapes the marker-based cleanup. Clean it up by the pid
-        // recorded by our own helper before any assertion, including when the test fails.
-        if let Ok(pid) = std::fs::read_to_string(&file) {
-            let pid: i32 = pid.trim().parse().unwrap();
-            // SAFETY: this pid was recorded by the test's own still-running detached helper.
-            unsafe {
-                libc::kill(pid, libc::SIGKILL);
-            }
-        }
+        let pid: u32 = std::fs::read_to_string(&file)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
         let _ = std::fs::remove_file(file);
         assert!(elapsed < Duration::from_secs(10));
+        assert_eq!(exit_code(&result.unwrap()), Some(0));
         assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("uncontained descendant")
+            !alive(pid),
+            "markerless detached child survived kernel cleanup"
         );
     }
 
