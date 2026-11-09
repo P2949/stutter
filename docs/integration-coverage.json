@@ -233,14 +233,15 @@
         "W13"
       ],
       "anchors": [
-        "stutter/src/autotune/sensors/memory_domains.rs"
+        "stutter/src/autotune/sensors/memory_domains.rs",
+        "stutter/src/actions/damos_scheme.rs"
       ],
       "status": "first_slice",
-      "g0": "read-only damon_state sensor (kdamond, running and scheme counts only, no addresses; root-only files report permission denied)",
+      "g0": "read-only damon_state sensor (kdamond, running and scheme counts only, no addresses; root-only files report permission denied); experimental DAMOS scheme transaction (`damos_scheme`): claims only an idle kdamond, one vaddr context for a start-ticks-verified process, `stat` is monitoring-only while every reclaim/LRU action is classed irreversible and needs acknowledgement plus a bounded quota; commit reads the configuration and run state back, restore clears only a configuration that is still ours; fake-sysfs tests",
       "g1": "DAMON admin interface present on this host but root-only, so unavailable to the controller user",
       "runtime_availability": "kernel interface present (/sys/kernel/mm/damon/admin), damo absent",
       "authority": "O/F/E",
-      "not_wired": "no owned DAMOS scheme, no quota or goal feedback, no damo parity manifest, no hot/cold region summary",
+      "not_wired": "DAMOS is a fake-sysfs verified transaction only: not an operation kind or worker-routed, no quota-goal feedback, no damo parity manifest, no hot/cold region summary; the real admin interface is root-only on this host",
       "dispositions": [
         "FixtureVerified",
         "RealObserved",

@@ -30,6 +30,7 @@ pub(crate) mod acceptance;
 pub(crate) mod cgroup;
 pub(crate) mod cpu_affinity;
 pub(crate) mod cpu_power;
+pub(crate) mod damos_scheme;
 pub(crate) mod gpu_power;
 pub(crate) mod nice;
 pub(crate) mod pm_qos;

@@ -113,3 +113,12 @@ pub mod resctrl_allocation {
         prepare as prepare_cat,
     };
 }
+
+pub mod damos_transaction {
+    //! Experimental DAMOS scheme as a prepared transaction (fake-root verified, irreversible
+    //! actions classed and gated).
+    pub use crate::actions::damos_scheme::{
+        DamosAction, DamosCommitError, DamosCommitted, DamosDenial, DamosPrepared, DamosQuota,
+        DamosRequest, DamosRestore, prepare as prepare_damos,
+    };
+}
