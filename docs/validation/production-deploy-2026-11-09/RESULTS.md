@@ -38,3 +38,32 @@ with no failure, exit 0. The local receipt is
 With that receipt in place, `main` (`db578b2`) was fast-forwarded to `250e3cf` (two commits: the
 pin to `328b3f2b` and the re-pin to `4f3baa07`), no force, no PR. `main` now equals the commit the
 host is running. No reboot, no activation and no service change was involved in the promotion.
+
+## Attempted redeploy of the final source `cc3e0730` (2026-11-09, 16:2x): not switched
+
+Prepared as the plan's final exact-source deploy: the clean-clone release binary
+(sha256 `58884a30…b3c4`, in `docs/validation/source-ci-2026-11-09-cc3e0730.json`) was added to the Nix
+store, and NixosConf branch `host/stutter-w19-final-cc3e0730` (commit `541841d`, local only) moved the
+source pin, `flake.lock` and `binarySha256` together. `./scripts/validate affected` passed with an
+exact-commit receipt; the toplevel built; `dry-activate` listed only the two Stutter units; guarded
+`switch-to-configuration test` ran both services on the new binary with 0 outstanding tokens.
+
+`production-smoke` then **FAILED 5 of 35 checks** (`exit_while_applied`,
+`controller_killed_while_applied`, `workload_discovered_and_mutated_through_the_worker`,
+`the_mutation_was_physically_applied`, `the_experiment_resolved`: the controller never resolved the
+fixture as a target). Per the plan nothing was switched; the previous generation
+(`system-102-link`) was reactivated and verified (binary `bf79d9c4…`, 0 tokens).
+
+**Diagnosis.** The identical smoke run against the previously deployed `4f3baa07` build failed the
+same five checks, so this is not a regression of the new binary. The controller runs with
+`--auto-focus --focus-source heuristic`; its log shows no target for the whole window. A real game
+(Dark Souls Remastered under Proton) was running on the host at 154% CPU, which a heuristic focus
+source cannot be expected to ignore in favour of a synthetic fixture. The earlier 35/35 pass (06:29)
+had no game running. The smoke needs a host without a real game in the foreground.
+
+**State and next step.** Production stays on `4f3baa07`; `/etc/nixos` is back on
+`host/stutter-w19-328b3f2b` (matching the running system) and `main` is unchanged at `250e3cf`. The
+prepared branch can be deployed with the same guarded sequence once the host has no game running.
+The new code is not reachable from the daemon, so staying on `4f3baa07` changes no installed
+behaviour. Raw evidence: `.llm-runs/production-smoke-20261109-cc3e0730` and
+`.llm-runs/production-smoke-20261109-4f3baa07-recheck`.
