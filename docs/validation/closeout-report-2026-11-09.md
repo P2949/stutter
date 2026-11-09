@@ -1,6 +1,6 @@
 # Closeout report
 
-Source `cc3e0730b60ba176d7b3b4ad2b3b038ff958b4df`, kernel `6.18.57`. Generated from the integration coverage ledger; it cannot claim more than the ledger records.
+Source `a175c9860fb0704f4a0f62ff5770a2d141f15ef4`, kernel `6.18.57`. Generated from the integration coverage ledger; it cannot claim more than the ledger records.
 
 ## Disposition counts
 
@@ -86,7 +86,7 @@ Source `cc3e0730b60ba176d7b3b4ad2b3b038ff958b4df`, kernel `6.18.57`. Generated f
 
 ## Verified subcapabilities
 
-22 items, each with a code anchor and a positive and a negative test: 11 operations, 8 observations, 3 typed refusals (a refusal explains an unsafe or impossible scope; it is not an actuator).
+25 items, each with a code anchor and a positive and a negative test: 11 operations, 11 observations, 3 typed refusals (a refusal explains an unsafe or impossible scope; it is not an actuator).
 
 | id | dossier | kind |
 |---|---|---|
@@ -112,3 +112,6 @@ Source `cc3e0730b60ba176d7b3b4ad2b3b038ff958b4df`, kernel `6.18.57`. Generated f
 | frames/stamped-calibration-never-stale | 5.12 | observation |
 | frames/authenticated-epoch-bound-source | 5.12 | observation |
 | frames/producer-identity-and-epoch-binding | 5.12 | observation |
+| frames/fail-closed-input-and-counters | 5.12 | observation |
+| frames/verified-stamp-accuracy-claims | 5.12 | observation |
+| frames/decision-time-revalidation | 5.12 | observation |

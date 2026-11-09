@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "source_sha": "cc3e0730b60ba176d7b3b4ad2b3b038ff958b4df",
+  "source_sha": "a175c9860fb0704f4a0f62ff5770a2d141f15ef4",
   "recorded": "2026-11-09",
   "statuses": [
     "not_started",
@@ -1160,9 +1160,9 @@
     }
   ],
   "verification": {
-    "source_sha": "cc3e0730b60ba176d7b3b4ad2b3b038ff958b4df",
+    "source_sha": "a175c9860fb0704f4a0f62ff5770a2d141f15ef4",
     "scope": "Clean committed-source CI, explicit workspace Clippy and release-check of the code commit with the never-stale stamped-frame calibration, the authenticated stamped source, the real-scx_loader adapter fixes and the frozen-baseline subcapability gate. The deployed production build is the earlier 4f3baa07 (NixosConf 250e3cf, 35/35 smoke); nothing since is reachable from the daemon, so it was not re-deployed. Live observations retain their separate source pins.",
-    "source_ci": "docs/validation/source-ci-2026-11-09-cc3e0730.json",
+    "source_ci": "docs/validation/source-ci-2026-11-09-a175c986.json",
     "deploy": "docs/validation/production-deploy-2026-11-09/RESULTS.md"
   }
 }
