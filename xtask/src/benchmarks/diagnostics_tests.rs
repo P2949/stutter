@@ -118,3 +118,50 @@ fn a_perf_report_gives_sample_shares_per_symbol_and_skips_headers_and_noise() {
     assert!(!report.application_proof);
     assert!(import_perf_report("# only a header\n").is_err());
 }
+
+#[test]
+fn rtla_timerlat_rows_become_per_cpu_irq_and_thread_latencies_and_garbage_is_an_error() {
+    let text = "                                     Timer Latency\n  0 00:00:12   |          IRQ Timer Latency (us)        |         Thread Timer Latency (us)\nCPU COUNT      |      cur       min       avg       max |      cur       min       avg       max\n  0 #12322     |        1         0         1        15 |       10         3         9        31\n  1 #12321     |        2         0         2        20 |       11         4        10        45\n";
+    let imported = import_rtla_timerlat(text).unwrap();
+    assert!(!imported.application_proof);
+    let find = |label: &str| {
+        imported
+            .scores
+            .iter()
+            .find(|score| score.label == label)
+            .map(|score| score.value)
+    };
+    assert_eq!(find("cpu0.count"), Some(12322.0));
+    assert_eq!(find("cpu0.irq_max"), Some(15.0));
+    assert_eq!(find("cpu1.thread_max"), Some(45.0));
+    assert_eq!(find("cpu1.thread_avg"), Some(10.0));
+    assert!(
+        imported
+            .scores
+            .iter()
+            .all(|score| score.higher_is_better.is_none())
+    );
+    assert!(import_rtla_timerlat("hello").is_err());
+    assert!(import_rtla_timerlat("CPU COUNT |\nnot a row\n").is_err());
+}
+
+#[test]
+fn rtla_osnoise_rows_become_per_cpu_noise_columns_and_garbage_is_an_error() {
+    let text = "                                          Operating System Noise\nduration:   0 00:00:15 | time is in us\nCPU Period       Runtime        Noise  % CPU Aval   Max Noise   Max Single          HW          NMI          IRQ      Softirq       Thread\n  0 #14        14000000      1022587    92.69       79202        34202           0           0         7981           12        1112\n";
+    let imported = import_rtla_osnoise(text).unwrap();
+    let find = |label: &str| {
+        imported
+            .scores
+            .iter()
+            .find(|score| score.label == label)
+            .map(|score| (score.value, score.unit.clone()))
+    };
+    assert_eq!(find("cpu0.noise"), Some((1022587.0, "us".to_owned())));
+    assert_eq!(
+        find("cpu0.cpu_available_pct"),
+        Some((92.69, "%".to_owned()))
+    );
+    assert_eq!(find("cpu0.irq"), Some((7981.0, String::new())));
+    assert!(import_rtla_osnoise("").is_err());
+    assert!(import_rtla_osnoise("CPU Period Runtime\n0 1 2\n").is_err());
+}

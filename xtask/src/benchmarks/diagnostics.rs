@@ -467,3 +467,100 @@ pub fn import_perf_report(text: &str) -> anyhow::Result<ImportedScores> {
     }
     done("perf-report", scores)
 }
+
+/// `rtla timerlat top` rows: `CPU COUNT | IRQ cur min avg max | Thread cur min avg max [| user ...]`
+/// (latencies in microseconds). Kernel scheduling noise, never an application outcome.
+pub fn import_rtla_timerlat(text: &str) -> anyhow::Result<ImportedScores> {
+    let mut scores = Vec::new();
+    let mut seen_header = false;
+    for line in text.lines() {
+        if line.contains("COUNT") {
+            seen_header = true;
+            continue;
+        }
+        if !seen_header {
+            continue;
+        }
+        let groups: Vec<&str> = line.split('|').collect();
+        let head: Vec<&str> = groups
+            .first()
+            .copied()
+            .unwrap_or("")
+            .split_whitespace()
+            .collect();
+        let [cpu, count] = head[..] else { continue };
+        let (Ok(cpu), Some(count)) = (cpu.parse::<u32>(), finite(count.trim_start_matches('#')))
+        else {
+            continue;
+        };
+        scores.push(diagnostic(
+            "rtla-timerlat",
+            format!("cpu{cpu}.count"),
+            count,
+            "",
+        ));
+        for (name, group) in ["irq", "thread", "user"].iter().zip(&groups[1..]) {
+            let cells: Vec<&str> = group.split_whitespace().collect();
+            if cells.len() != 4 {
+                continue;
+            }
+            for (stat, cell) in ["cur", "min", "avg", "max"].iter().zip(&cells) {
+                if let Some(value) = finite(cell) {
+                    scores.push(diagnostic(
+                        "rtla-timerlat",
+                        format!("cpu{cpu}.{name}_{stat}"),
+                        value,
+                        "us",
+                    ));
+                }
+            }
+        }
+    }
+    done("rtla-timerlat", scores)
+}
+
+/// `rtla osnoise top` rows: `CPU #Period Runtime Noise %CPUAvail MaxNoise MaxSingle HW NMI IRQ
+/// Softirq Thread` (times in microseconds, the rest are counts).
+pub fn import_rtla_osnoise(text: &str) -> anyhow::Result<ImportedScores> {
+    const COLUMNS: [(&str, &str); 10] = [
+        ("runtime", "us"),
+        ("noise", "us"),
+        ("cpu_available_pct", "%"),
+        ("max_noise", "us"),
+        ("max_single", "us"),
+        ("hw", ""),
+        ("nmi", ""),
+        ("irq", ""),
+        ("softirq", ""),
+        ("thread", ""),
+    ];
+    let mut scores = Vec::new();
+    let mut seen_header = false;
+    for line in text.lines() {
+        if line.contains("Max Noise") || line.contains("Runtime") {
+            seen_header = true;
+            continue;
+        }
+        if !seen_header {
+            continue;
+        }
+        let tokens: Vec<&str> = line.split_whitespace().collect();
+        if tokens.len() != COLUMNS.len() + 2 {
+            continue;
+        }
+        let Ok(cpu) = tokens[0].parse::<u32>() else {
+            continue;
+        };
+        for ((name, unit), cell) in COLUMNS.iter().zip(&tokens[2..]) {
+            if let Some(value) = finite(cell) {
+                scores.push(diagnostic(
+                    "rtla-osnoise",
+                    format!("cpu{cpu}.{name}"),
+                    value,
+                    unit,
+                ));
+            }
+        }
+    }
+    done("rtla-osnoise", scores)
+}

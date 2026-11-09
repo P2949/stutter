@@ -199,6 +199,8 @@ pub enum ScoreTool {
     Blkparse,
     Tuna,
     Cyclictest,
+    RtlaTimerlat,
+    RtlaOsnoise,
     BpftraceHist,
     BccHist,
     TraceCmd,
@@ -225,6 +227,12 @@ fn import_scores(tool: ScoreTool, file: &Path) -> anyhow::Result<String> {
         ScoreTool::Tuna => serde_json::to_string_pretty(&diagnostics::import_tuna(&text)?)?,
         ScoreTool::Cyclictest => {
             serde_json::to_string_pretty(&diagnostics::import_cyclictest(&text)?)?
+        }
+        ScoreTool::RtlaTimerlat => {
+            serde_json::to_string_pretty(&diagnostics::import_rtla_timerlat(&text)?)?
+        }
+        ScoreTool::RtlaOsnoise => {
+            serde_json::to_string_pretty(&diagnostics::import_rtla_osnoise(&text)?)?
         }
         ScoreTool::BpftraceHist => {
             serde_json::to_string_pretty(&diagnostics::import_bpftrace_hist(&text)?)?

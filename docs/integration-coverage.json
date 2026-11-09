@@ -335,21 +335,25 @@
         "W13"
       ],
       "anchors": [
-        "xtask/src/benchmarks/mod.rs"
+        "xtask/src/benchmarks/mod.rs",
+        "xtask/src/benchmarks/diagnostics.rs",
+        "stutter-ebpf/src/scheduler.rs"
       ],
-      "status": "first_slice",
-      "g0": "offline external-artifact verification: tool/version, exact argv, build id, role/phase, unit, run id, clock window, population/loss, exit code and a SHA-256 per file; oversize, symlinked, escaping, missing and tampered files refused; carries no authority",
-      "g1": "none",
+      "status": "code_complete",
+      "g0": "offline external-artifact verification: tool/version, exact argv, build id, role/phase, unit, run id, clock window, population/loss, exit code and a SHA-256 per file; oversize, symlinked, escaping, missing and tampered files refused; carries no authority; `rtla timerlat top` (per-CPU IRQ/thread/user latency) and `rtla osnoise top` (per-CPU noise columns) importers with positive and negative fixtures; KernelShark has no data format of its own (it reads trace-cmd data), so the trace-cmd importer is its importer; the bounded causal probes are the existing Aya programs in stutter-ebpf (scheduler wakeup/switch and runnable depth, IRQ latency, block I/O, DRM fence, KMS) with no arbitrary privileged BPF text accepted anywhere",
+      "g1": "the monitor validated this kernel`s sched_switch/sched_wakeup tracepoint formats and attached its bounded Aya probes on this host (2026-11-09 controlled run); every external tool (bcc, bpftrace, trace-cmd, rtla, cyclictest) is absent",
       "runtime_availability": "all absent",
       "authority": "B/O/F",
-      "not_wired": "importers exist for cyclictest, bpftrace hist(), BCC histograms (runqlat/biolatency) and trace-cmd/ftrace text (event counts and dropped events), reporting a histogram p99 only as a bucket lower bound; no rtla or KernelShark importer, and no bounded Aya causal probes",
+      "not_wired": "importer formats for rtla are fixture-verified only (no rtla on this host); kernel noise is diagnostic, never an application outcome and never authority",
       "dispositions": [
+        "CodeComplete",
         "FixtureVerified",
+        "RealObserved",
         "HardwareUnavailable",
         "EvidenceDeferred"
       ],
       "evidence": [],
-      "unblock": "Needs on the host: all absent"
+      "unblock": "all external diagnostic tools are absent on this host: importer formats are fixture-verified from the documented layouts and need a real capture from each tool to be called RealObserved"
     },
     {
       "id": "5.12",
