@@ -368,6 +368,18 @@ pub const ALL_DOMAINS: [ResourceDomain; 8] = [
 
 pub mod receipt;
 
+/// Proof that a plan came out of its planner. Its field and constructor are private to
+/// `integrations`, so a plan assembled as a struct literal anywhere else cannot be built: an
+/// adapter only ever executes what its own validation produced.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlanSeal(());
+
+impl PlanSeal {
+    pub(in crate::integrations) fn issue() -> Self {
+        Self(())
+    }
+}
+
 #[cfg(test)]
 mod tests;
 

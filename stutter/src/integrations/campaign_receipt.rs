@@ -5,12 +5,18 @@
 //! directory (no symlink) owned by root and not writable by group or others, and the file itself
 //! must be root-owned and read-only to everyone else, so an unprivileged caller cannot write one.
 //! The receipt names the campaign, the scopes it grants, the user it is for, the boot it belongs
-//! to and when it expires; each of those is checked against the host *now*. Minting also appends a
-//! line to the campaign journal and syncs it before the authorization is returned, so an
-//! authorization is never in use without a durable record of having been issued.
+//! to and when it expires.
+//!
+//! The authorization this returns is bound to exactly one scope, user, boot and expiry, and to the
+//! identity of the receipt file itself. Every adapter checks all of that again at the moment it
+//! acts ([`OfflineAuthorization::require`]), so an authorization cannot be used for another
+//! scope, after it expires, in another boot, by another user, or after its receipt was removed or
+//! replaced (revocation). The authoritative record of an issue is the runner's root-owned
+//! `issued.jsonl`; the journal line written here is the caller's own local use record and proves
+//! nothing on its own.
 use std::{
-    fs::{self, OpenOptions},
-    io::Write,
+    fs::{self, File, OpenOptions},
+    io::{Read, Write},
     os::unix::fs::{MetadataExt, OpenOptionsExt},
     path::{Component, Path, PathBuf},
 };
@@ -23,6 +29,8 @@ use super::scx_loader::OfflineAuthorization;
 pub enum CampaignScope {
     PowerProfileHold,
     SchedulerSwitch,
+    /// Runtime resource-control properties on Stutter-owned systemd units.
+    UnitProperties,
 }
 
 impl CampaignScope {
@@ -30,6 +38,7 @@ impl CampaignScope {
         match self {
             Self::PowerProfileHold => "power_profile_hold",
             Self::SchedulerSwitch => "scheduler_switch",
+            Self::UnitProperties => "unit_properties",
         }
     }
 }
@@ -46,8 +55,22 @@ pub enum MintRefusal {
     /// The receipt is for a different user than the caller.
     WrongUser,
     ScopeNotGranted,
-    /// The issue could not be recorded durably, so nothing was issued.
+    /// The issue could not be recorded locally, so nothing was issued.
     JournalFailed,
+}
+
+/// Why an authorization may not be used for an action right now.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AuthorizationDenied {
+    WrongScope {
+        required: CampaignScope,
+        granted: CampaignScope,
+    },
+    Expired,
+    WrongBoot,
+    WrongUser,
+    /// The receipt it came from is gone, replaced or no longer trusted.
+    Revoked,
 }
 
 #[derive(Deserialize)]
@@ -57,6 +80,72 @@ struct Receipt {
     owner_uid: u32,
     boot_id: String,
     expires_unix: u64,
+}
+
+/// The facts an authorization is checked against when it is used.
+#[derive(Clone, Debug)]
+pub(super) struct UseFacts {
+    pub now_unix: u64,
+    pub boot_id: String,
+    pub caller_uid: u32,
+}
+
+impl UseFacts {
+    pub(super) fn now() -> Self {
+        Self {
+            now_unix: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |elapsed| elapsed.as_secs()),
+            boot_id: current_boot_id(),
+            caller_uid: crate::syscall::geteuid(),
+        }
+    }
+}
+
+pub(super) fn current_boot_id() -> String {
+    fs::read_to_string("/proc/sys/kernel/random/boot_id")
+        .unwrap_or_default()
+        .trim()
+        .to_owned()
+}
+
+/// The identity of the receipt file an authorization came from, re-verified at every use.
+#[derive(Clone, Debug)]
+pub(super) struct ReceiptBinding {
+    path: PathBuf,
+    anchor: PathBuf,
+    trusted_uid: u32,
+    dev: u64,
+    ino: u64,
+    len: u64,
+    mtime: (i64, i64),
+}
+
+impl ReceiptBinding {
+    fn of(path: &Path, meta: &fs::Metadata, anchor: &Path, trusted_uid: u32) -> Self {
+        Self {
+            path: path.to_path_buf(),
+            anchor: anchor.to_path_buf(),
+            trusted_uid,
+            dev: meta.dev(),
+            ino: meta.ino(),
+            len: meta.len(),
+            mtime: (meta.mtime(), meta.mtime_nsec()),
+        }
+    }
+
+    /// The same file, still reached through a trusted path.
+    pub(super) fn still_valid(&self) -> bool {
+        trusted(&self.path, &self.anchor, self.trusted_uid).is_ok()
+            && fs::symlink_metadata(&self.path).is_ok_and(|meta| {
+                (
+                    meta.dev(),
+                    meta.ino(),
+                    meta.len(),
+                    (meta.mtime(), meta.mtime_nsec()),
+                ) == (self.dev, self.ino, self.len, self.mtime)
+            })
+    }
 }
 
 /// Every component from `anchor` down to `path` must be a real, non-symlink entry owned by
@@ -95,56 +184,95 @@ struct HostFacts<'a> {
     trusted_uid: u32,
 }
 
+/// Opens the receipt without following a symlink, checks the *open file's* own owner and mode (so
+/// nothing can be swapped between the check and the read), and returns its text and identity.
+fn read_receipt(
+    path: &Path,
+    host: &HostFacts<'_>,
+) -> Result<(String, ReceiptBinding), MintRefusal> {
+    trusted(path, host.anchor, host.trusted_uid)?;
+    let mut file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(path)
+        .map_err(|_| MintRefusal::Unreadable)?;
+    let meta = file.metadata().map_err(|_| MintRefusal::Unreadable)?;
+    if !meta.is_file() || meta.uid() != host.trusted_uid || meta.mode() & 0o022 != 0 {
+        return Err(MintRefusal::UntrustedPath(path.to_path_buf()));
+    }
+    if meta.len() > 64 * 1024 {
+        return Err(MintRefusal::Malformed);
+    }
+    let mut text = String::new();
+    file.read_to_string(&mut text)
+        .map_err(|_| MintRefusal::Unreadable)?;
+    Ok((
+        text,
+        ReceiptBinding::of(path, &meta, host.anchor, host.trusted_uid),
+    ))
+}
+
+/// Opens the caller's local use journal without following a symlink, and only if it is the
+/// caller's own regular file.
+fn open_local_journal(journal: &Path, caller_uid: u32) -> Result<File, MintRefusal> {
+    let file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(journal)
+        .map_err(|_| MintRefusal::JournalFailed)?;
+    let meta = file.metadata().map_err(|_| MintRefusal::JournalFailed)?;
+    if !meta.is_file() || meta.uid() != caller_uid {
+        return Err(MintRefusal::JournalFailed);
+    }
+    Ok(file)
+}
+
 fn mint_with(
     receipt: &Path,
     journal: &Path,
     scope: CampaignScope,
     host: &HostFacts<'_>,
 ) -> Result<OfflineAuthorization, MintRefusal> {
-    let HostFacts {
-        now_unix,
-        boot_id,
-        caller_uid,
-        anchor,
-        trusted_uid,
-    } = *host;
-    trusted(receipt, anchor, trusted_uid)?;
-    let text = fs::read_to_string(receipt).map_err(|_| MintRefusal::Unreadable)?;
+    let (text, binding) = read_receipt(receipt, host)?;
     let parsed: Receipt = serde_json::from_str(&text).map_err(|_| MintRefusal::Malformed)?;
     if parsed.campaign_id.is_empty() || parsed.campaign_id.len() > 120 {
         return Err(MintRefusal::Malformed);
     }
-    if parsed.expires_unix <= now_unix {
+    if parsed.expires_unix <= host.now_unix {
         return Err(MintRefusal::Expired);
     }
-    if parsed.boot_id.trim() != boot_id.trim() || boot_id.trim().is_empty() {
+    if parsed.boot_id.trim() != host.boot_id.trim() || host.boot_id.trim().is_empty() {
         return Err(MintRefusal::WrongBoot);
     }
-    if parsed.owner_uid != caller_uid {
+    if parsed.owner_uid != host.caller_uid {
         return Err(MintRefusal::WrongUser);
     }
     if !parsed.scopes.iter().any(|granted| granted == scope.name()) {
         return Err(MintRefusal::ScopeNotGranted);
     }
-    // Durable before use: the issue is recorded and synced, or nothing is issued.
+    // Recorded locally before use: the issue is written and synced, or nothing is issued.
     let line = format!(
         "{}\n",
         serde_json::json!({
             "campaign": parsed.campaign_id,
             "scope": scope.name(),
-            "issued_unix": now_unix,
+            "issued_unix": host.now_unix,
         })
     );
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .mode(0o600)
-        .open(journal)
-        .map_err(|_| MintRefusal::JournalFailed)?;
+    let mut file = open_local_journal(journal, host.caller_uid)?;
     file.write_all(line.as_bytes())
         .and_then(|()| file.sync_all())
         .map_err(|_| MintRefusal::JournalFailed)?;
-    Ok(OfflineAuthorization::minted(parsed.campaign_id))
+    Ok(OfflineAuthorization::minted(
+        parsed.campaign_id,
+        scope,
+        parsed.owner_uid,
+        parsed.boot_id.trim().to_owned(),
+        parsed.expires_unix,
+        binding,
+    ))
 }
 
 /// Mints an authorization for `scope` from a runner-written receipt, as the calling user, now.
@@ -153,19 +281,15 @@ pub fn mint_authorization(
     journal: &Path,
     scope: CampaignScope,
 ) -> Result<OfflineAuthorization, MintRefusal> {
-    let now_unix = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |elapsed| elapsed.as_secs());
-    let boot_id = fs::read_to_string("/proc/sys/kernel/random/boot_id").unwrap_or_default();
-    let caller_uid = crate::syscall::geteuid();
+    let facts = UseFacts::now();
     mint_with(
         receipt,
         journal,
         scope,
         &HostFacts {
-            now_unix,
-            boot_id: &boot_id,
-            caller_uid,
+            now_unix: facts.now_unix,
+            boot_id: &facts.boot_id,
+            caller_uid: facts.caller_uid,
             anchor: Path::new("/"),
             trusted_uid: 0,
         },

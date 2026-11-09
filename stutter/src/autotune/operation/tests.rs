@@ -478,16 +478,14 @@ fn an_scx_strategy_candidate_is_manual_only_never_executable_and_its_token_is_ma
         },
         integrations::scx_loader::{Restore, SwitchPlan},
     };
-    let switch = SwitchPlan {
-        to: "scx_lavd".into(),
-        mode: 0,
-        method: "SwitchScheduler",
-        restore: Restore::SwitchBack {
+    let switch = SwitchPlan::fixture(
+        "scx_lavd",
+        0,
+        Restore::SwitchBack {
             name: "scx_bpfland".into(),
             mode: 1,
         },
-        args: Vec::new(),
-    };
+    );
     let token = RollbackToken::ScxSchedulerRestore {
         records: vec![switch.restore_record()],
     };

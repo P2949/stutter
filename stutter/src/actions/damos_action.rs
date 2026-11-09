@@ -145,7 +145,7 @@ impl TuningAction for DamosSchemeAction {
         };
         for record in records {
             match teardown_recorded(record) {
-                DamosRestore::Cleared { .. } => {}
+                DamosRestore::Cleared { .. } | DamosRestore::ClearedTargetReplaced { .. } => {}
                 DamosRestore::ExternallyChanged => {
                     return Err(ActionBoundaryError::restore_failed(
                         "damos_scheme",

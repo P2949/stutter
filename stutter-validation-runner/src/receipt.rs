@@ -18,7 +18,7 @@ use std::{
 use serde_json::json;
 
 /// Scopes a receipt may grant, the same names the library accepts.
-pub const SCOPES: [&str; 2] = ["power_profile_hold", "scheduler_switch"];
+pub const SCOPES: [&str; 3] = ["power_profile_hold", "scheduler_switch", "unit_properties"];
 
 /// Longest a receipt may live; a campaign that needs longer is issued a new one.
 pub const MAX_LIFETIME_SECONDS: u64 = 6 * 60 * 60;
@@ -75,8 +75,35 @@ pub fn write_receipt(
         .open(&temporary)?;
     file.write_all(body.to_string().as_bytes())?;
     file.sync_all()?;
+    // The authoritative issue record lives with the root-owned receipts, not with the caller: it is
+    // appended and synced before the receipt becomes visible, so a receipt never exists unrecorded.
+    let journal_line = format!(
+        "{}\n",
+        json!({
+            "campaign": campaign_id,
+            "owner_uid": owner_uid,
+            "scopes": scopes,
+            "boot_id": boot_id.trim(),
+            "issued_unix": now_unix,
+            "expires_unix": now_unix.saturating_add(lifetime_seconds),
+        })
+    );
+    let recorded = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .mode(0o644)
+        .open(dir.join("issued.jsonl"))
+        .and_then(|mut journal| {
+            journal.write_all(journal_line.as_bytes())?;
+            journal.sync_all()
+        });
+    if let Err(error) = recorded {
+        let _ = fs::remove_file(&temporary);
+        return Err(error);
+    }
     let target = dir.join(format!("{campaign_id}.json"));
     fs::rename(&temporary, &target)?;
+
     fs::File::open(&dir)?.sync_all()?;
     Ok(target)
 }
@@ -125,6 +152,24 @@ mod tests {
         assert_eq!(value["boot_id"], "boot-1");
         assert_eq!(value["expires_unix"], 5_600);
         assert!(!state.join("receipts/.w19-power.json.tmp").exists());
+        let issued = fs::read_to_string(state.join("receipts/issued.jsonl")).unwrap();
+        assert_eq!(issued.lines().count(), 1);
+        assert!(
+            issued.contains("w19-power") && issued.contains("power_profile_hold"),
+            "{issued}"
+        );
+    }
+
+    #[test]
+    fn a_receipt_is_never_visible_without_its_authoritative_journal_line() {
+        let state = root("journal-fail");
+        fs::create_dir_all(state.join("receipts/issued.jsonl")).unwrap();
+        let result = write_receipt(&state, "w19", 1000, &["scheduler_switch"], "b", 1, 60);
+        assert!(result.is_err(), "the journal could not be appended");
+        assert!(
+            !state.join("receipts/w19.json").exists(),
+            "a receipt appeared unrecorded"
+        );
     }
 
     #[test]

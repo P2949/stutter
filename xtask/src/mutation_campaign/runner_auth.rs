@@ -17,6 +17,7 @@ pub fn grants(operation: &OperationSection) -> BTreeSet<TaskGrant> {
                 task_id: stage.as_str().to_owned(),
                 action: RunnerAction::ExecuteLiveSuite,
                 suite: Some(live),
+                receipt_scope: None,
             });
         }
     }
@@ -26,6 +27,7 @@ pub fn grants(operation: &OperationSection) -> BTreeSet<TaskGrant> {
         task_id: Stage::BenefitCalibration.as_str().to_owned(),
         action: RunnerAction::ExecuteLiveSuite,
         suite: Some(LiveSuite::AffinityBenefit),
+        receipt_scope: None,
     });
     // Its controlled scheduler contention is requested as a typed burst, never started by the
     // suite itself with privilege.
@@ -33,6 +35,7 @@ pub fn grants(operation: &OperationSection) -> BTreeSet<TaskGrant> {
         task_id: Stage::BenefitCalibration.as_str().to_owned(),
         action: RunnerAction::ExecuteSchedulerBurst,
         suite: None,
+        receipt_scope: None,
     });
     if operation.privileged_worker {
         for action in [
@@ -43,6 +46,7 @@ pub fn grants(operation: &OperationSection) -> BTreeSet<TaskGrant> {
                 task_id: CAMPAIGN_TASK.to_owned(),
                 action,
                 suite: None,
+                receipt_scope: None,
             });
         }
     }
@@ -55,6 +59,7 @@ pub fn grants(operation: &OperationSection) -> BTreeSet<TaskGrant> {
             task_id: CAMPAIGN_TASK.to_owned(),
             action,
             suite: None,
+            receipt_scope: None,
         });
     }
     grants
@@ -108,16 +113,19 @@ mod tests {
             task_id: "benefit_calibration".to_owned(),
             action: RunnerAction::ExecuteLiveSuite,
             suite: Some(LiveSuite::AffinityBenefit),
+            receipt_scope: None,
         }));
         assert!(grants.contains(&TaskGrant {
             task_id: "mechanical_apply_verify_rollback".to_owned(),
             action: RunnerAction::ExecuteLiveSuite,
             suite: Some(LiveSuite::Affinity),
+            receipt_scope: None,
         }));
         assert!(grants.contains(&TaskGrant {
             task_id: "fault_matrix".to_owned(),
             action: RunnerAction::ExecuteLiveSuite,
             suite: Some(LiveSuite::Recovery),
+            receipt_scope: None,
         }));
     }
 

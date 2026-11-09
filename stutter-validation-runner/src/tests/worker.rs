@@ -150,8 +150,9 @@ fn an_offline_receipt_needs_its_own_grant_a_known_scope_and_a_bounded_lifetime()
         ask(&auth, 600).unwrap_err().0,
         ErrorCode::ActionNotPermitted
     );
-    auth.grants
-        .insert(grant("campaign", RunnerAction::IssueOfflineReceipt, None));
+    let mut scoped = grant("campaign", RunnerAction::IssueOfflineReceipt, None);
+    scoped.receipt_scope = Some(ReceiptScope::PowerProfileHold);
+    auth.grants.insert(scoped);
     assert!(ask(&auth, 600).is_ok());
     for bad in [0, crate::receipt::MAX_LIFETIME_SECONDS + 1] {
         assert_eq!(
@@ -187,4 +188,58 @@ fn the_default_executor_refuses_to_issue_a_receipt() {
         .issue_offline_receipt(&auth, ReceiptScope::SchedulerSwitch, 60)
         .unwrap_err();
     assert_eq!(error.0, ErrorCode::Unsupported);
+}
+
+#[test]
+fn a_receipt_grant_is_scope_specific_so_a_granted_scope_never_opens_another() {
+    use crate::model::ReceiptScope;
+    let mut auth = authorization("/work/stutter");
+    let mut power = grant("campaign", RunnerAction::IssueOfflineReceipt, None);
+    power.receipt_scope = Some(ReceiptScope::PowerProfileHold);
+    auth.grants.insert(power);
+    let ask = |scope| {
+        auth.authorize(
+            &peer(me()),
+            &envelope(
+                "campaign",
+                Request::IssueOfflineReceipt {
+                    scope,
+                    lifetime_seconds: 60,
+                },
+            ),
+            8,
+        )
+    };
+    assert!(ask(ReceiptScope::PowerProfileHold).is_ok());
+    for other in [ReceiptScope::SchedulerSwitch, ReceiptScope::UnitProperties] {
+        assert_eq!(
+            ask(other).unwrap_err().0,
+            ErrorCode::TaskNotPermitted,
+            "{other:?}"
+        );
+    }
+}
+
+#[test]
+fn an_authorization_with_a_malformed_receipt_grant_does_not_validate() {
+    use crate::model::ReceiptScope;
+    let mut auth = authorization("/work/stutter");
+    // The action without a scope, and a scope on another action.
+    auth.grants
+        .insert(grant("campaign", RunnerAction::IssueOfflineReceipt, None));
+    assert!(auth.validate_shape().is_err());
+    auth.grants.clear();
+    let mut stray = grant(
+        "campaign",
+        RunnerAction::StartAutotunePrivilegedWorker,
+        None,
+    );
+    stray.receipt_scope = Some(ReceiptScope::SchedulerSwitch);
+    auth.grants.insert(stray);
+    assert!(auth.validate_shape().is_err());
+    auth.grants.clear();
+    let mut fine = grant("campaign", RunnerAction::IssueOfflineReceipt, None);
+    fine.receipt_scope = Some(ReceiptScope::UnitProperties);
+    auth.grants.insert(fine);
+    assert!(auth.validate_shape().is_ok(), "{:?}", auth.validate_shape());
 }

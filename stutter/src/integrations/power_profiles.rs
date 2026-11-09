@@ -29,6 +29,7 @@ pub struct HoldPlan {
     pub application_id: String,
     /// The profile that was active before the hold, which must be active again after release.
     pub restore_to: String,
+    seal: super::PlanSeal,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -87,6 +88,7 @@ pub fn plan_hold(
         reason: reason.to_owned(),
         application_id: application_id.to_owned(),
         restore_to: active.to_owned(),
+        seal: super::PlanSeal::issue(),
     })
 }
 
@@ -103,6 +105,8 @@ pub enum HoldError {
         wanted: String,
         active: String,
     },
+    /// The authorization does not cover a profile hold; nothing was sent to the bus.
+    Unauthorized(super::campaign_receipt::AuthorizationDenied),
 }
 
 impl From<DbusError> for HoldError {
@@ -131,8 +135,11 @@ fn release_call(client: &mut DbusClient, cookie: u32) -> Result<(), DbusError> {
 pub fn acquire(
     client: &mut DbusClient,
     plan: &HoldPlan,
-    _authorization: &OfflineAuthorization,
+    authorization: &OfflineAuthorization,
 ) -> Result<Hold, HoldError> {
+    authorization
+        .require(super::campaign_receipt::CampaignScope::PowerProfileHold)
+        .map_err(HoldError::Unauthorized)?;
     let mut body = Writer::default();
     body.string(&plan.profile);
     body.string(&plan.reason);

@@ -67,11 +67,13 @@ pub fn grants() -> BTreeSet<TaskGrant> {
         task_id: task.to_owned(),
         action: RunnerAction::ExecuteLiveSuite,
         suite: Some(suite),
+        receipt_scope: None,
     };
     let plain = |task: &str, action| TaskGrant {
         task_id: task.to_owned(),
         action,
         suite: None,
+        receipt_scope: None,
     };
     let mut grants = BTreeSet::from([
         live("live-observation", LiveSuite::Observation),

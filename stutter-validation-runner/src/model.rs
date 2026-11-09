@@ -43,6 +43,7 @@ impl ControllerKind {
 pub enum ReceiptScope {
     PowerProfileHold,
     SchedulerSwitch,
+    UnitProperties,
 }
 
 impl ReceiptScope {
@@ -50,6 +51,7 @@ impl ReceiptScope {
         match self {
             Self::PowerProfileHold => "power_profile_hold",
             Self::SchedulerSwitch => "scheduler_switch",
+            Self::UnitProperties => "unit_properties",
         }
     }
 }
@@ -302,6 +304,14 @@ impl Request {
         }
     }
 
+    /// The scope an `IssueOfflineReceipt` asks for.
+    pub fn receipt_scope(&self) -> Option<ReceiptScope> {
+        match self {
+            Self::IssueOfflineReceipt { scope, .. } => Some(*scope),
+            _ => None,
+        }
+    }
+
     pub fn suite(&self) -> Option<LiveSuite> {
         match self {
             Self::ExecuteLiveSuite { suite, .. } => Some(*suite),
@@ -467,6 +477,10 @@ pub struct TaskGrant {
     pub action: RunnerAction,
     /// Required for `ExecuteLiveSuite`; the grant names exactly one suite.
     pub suite: Option<LiveSuite>,
+    /// Required for `IssueOfflineReceipt`, and only for it: the one scope this grant may issue.
+    /// Absent in older authorizations, which therefore grant no receipt scope.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receipt_scope: Option<ReceiptScope>,
 }
 
 /// Root-owned authorization for one campaign. It names what may run; the caller never does.

@@ -70,6 +70,7 @@ pub(super) fn grant(task: &str, action: RunnerAction, suite: Option<LiveSuite>) 
         task_id: task.to_owned(),
         action,
         suite,
+        receipt_scope: None,
     }
 }
 

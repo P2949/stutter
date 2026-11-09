@@ -206,3 +206,130 @@ fn the_production_factory_trusts_only_root_so_a_user_written_receipt_is_refused(
         "{result:?}"
     );
 }
+
+fn minted(root: &Path, scope: CampaignScope) -> (PathBuf, OfflineAuthorization) {
+    let path = receipt(
+        root,
+        &good("power_profile_hold").replace("power_profile_hold", scope.name()),
+    );
+    let authorization = mint(root, &path, scope).unwrap();
+    (path, authorization)
+}
+
+fn facts(now: u64, boot: &str, uid: u32) -> UseFacts {
+    UseFacts {
+        now_unix: now,
+        boot_id: boot.to_owned(),
+        caller_uid: uid,
+    }
+}
+
+#[test]
+fn a_minted_authorization_is_bound_to_its_scope_and_cannot_be_used_for_another() {
+    let root = tree("scope");
+    let (_, auth) = minted(&root, CampaignScope::PowerProfileHold);
+    let now = facts(NOW, BOOT, me());
+    assert_eq!(
+        auth.require_at(CampaignScope::PowerProfileHold, &now),
+        Ok(())
+    );
+    for other in [
+        CampaignScope::SchedulerSwitch,
+        CampaignScope::UnitProperties,
+    ] {
+        assert_eq!(
+            auth.require_at(other, &now),
+            Err(AuthorizationDenied::WrongScope {
+                required: other,
+                granted: CampaignScope::PowerProfileHold
+            })
+        );
+        assert!(auth.require_for_restore_at(other, &now).is_err());
+    }
+    // No scope can be asked of a receipt that does not grant it, so it never mints at all.
+    let path = receipt(&root, &good("power_profile_hold"));
+    assert_eq!(
+        mint(&root, &path, CampaignScope::UnitProperties).unwrap_err(),
+        MintRefusal::ScopeNotGranted
+    );
+}
+
+#[test]
+fn expiry_boot_and_user_are_rechecked_when_the_authorization_is_used() {
+    let root = tree("use-time");
+    let (_, auth) = minted(&root, CampaignScope::SchedulerSwitch);
+    let scope = CampaignScope::SchedulerSwitch;
+    assert_eq!(auth.require_at(scope, &facts(NOW + 59, BOOT, me())), Ok(()));
+    assert_eq!(
+        auth.require_at(scope, &facts(NOW + 60, BOOT, me())),
+        Err(AuthorizationDenied::Expired)
+    );
+    assert_eq!(
+        auth.require_at(scope, &facts(NOW, "another-boot", me())),
+        Err(AuthorizationDenied::WrongBoot)
+    );
+    assert_eq!(
+        auth.require_at(scope, &facts(NOW, BOOT, me().wrapping_add(1))),
+        Err(AuthorizationDenied::WrongUser)
+    );
+    // Putting state back is never blocked by an expiry or a boot change, only by scope and user.
+    assert_eq!(
+        auth.require_for_restore_at(scope, &facts(NOW + 10_000, "another-boot", me())),
+        Ok(())
+    );
+    assert_eq!(
+        auth.require_for_restore_at(scope, &facts(NOW, BOOT, me().wrapping_add(1))),
+        Err(AuthorizationDenied::WrongUser)
+    );
+}
+
+#[test]
+fn removing_or_replacing_the_receipt_revokes_the_authorization() {
+    let root = tree("revoke");
+    let (path, auth) = minted(&root, CampaignScope::PowerProfileHold);
+    let now = facts(NOW, BOOT, me());
+    assert_eq!(
+        auth.require_at(CampaignScope::PowerProfileHold, &now),
+        Ok(())
+    );
+    // Replaced by another file with the same content: a different file, so not the same grant.
+    let replacement = root.join("campaign/replacement.json");
+    fs::copy(&path, &replacement).unwrap();
+    fs::set_permissions(&replacement, fs::Permissions::from_mode(0o644)).unwrap();
+    fs::rename(&replacement, &path).unwrap();
+    assert_eq!(
+        auth.require_at(CampaignScope::PowerProfileHold, &now),
+        Err(AuthorizationDenied::Revoked)
+    );
+    let (path, auth) = minted(&root, CampaignScope::PowerProfileHold);
+    fs::remove_file(&path).unwrap();
+    assert_eq!(
+        auth.require_at(CampaignScope::PowerProfileHold, &now),
+        Err(AuthorizationDenied::Revoked)
+    );
+    // Revocation does not stop a restore: cleanup stays possible.
+    assert_eq!(
+        auth.require_for_restore_at(CampaignScope::PowerProfileHold, &now),
+        Ok(())
+    );
+}
+
+#[test]
+fn a_symlinked_receipt_and_a_symlinked_journal_are_refused_not_followed() {
+    let root = tree("nofollow");
+    let real = receipt(&root, &good("power_profile_hold"));
+    let link = root.join("campaign/link.json");
+    symlink(&real, &link).unwrap();
+    assert!(matches!(
+        mint(&root, &link, CampaignScope::PowerProfileHold),
+        Err(MintRefusal::UntrustedPath(_))
+    ));
+    let target = root.join("victim.txt");
+    fs::write(&target, "keep").unwrap();
+    symlink(&target, root.join("journal.jsonl")).unwrap();
+    assert_eq!(
+        mint(&root, &real, CampaignScope::PowerProfileHold).unwrap_err(),
+        MintRefusal::JournalFailed
+    );
+    assert_eq!(fs::read_to_string(&target).unwrap(), "keep");
+}

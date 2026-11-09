@@ -113,6 +113,12 @@ pub enum DamosRestore {
     Cleared {
         irreversible_effect_possible: bool,
     },
+    /// Stopped and cleared, but the watched pid now names a different process than the one that
+    /// was recorded (the original exited and the number was reused). The kdamond holds a reference
+    /// to the original process, not the number, so nothing else was monitored or touched.
+    ClearedTargetReplaced {
+        irreversible_effect_possible: bool,
+    },
     /// The kdamond no longer holds our configuration: left untouched.
     ExternallyChanged,
     Unproven,
@@ -353,10 +359,39 @@ fn goal_holds(scheme: &Path, record: &DamosRecord) -> bool {
     }
 }
 
+/// Whether the process a scheme was started for is still the one that was recorded.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TargetState {
+    Same,
+    /// The process exited. Nothing is left to monitor, and clearing is still correct.
+    Gone,
+    /// The pid is alive with a different start time: a reused number, not our target.
+    Replaced,
+}
+
+fn target_state(
+    record: &DamosRecord,
+    live_start_ticks: &dyn Fn(u32) -> Option<u64>,
+) -> TargetState {
+    match live_start_ticks(record.task) {
+        Some(ticks) if ticks == record.task_start_ticks => TargetState::Same,
+        Some(_) => TargetState::Replaced,
+        None => TargetState::Gone,
+    }
+}
+
+fn live_process_start(task: u32) -> Option<u64> {
+    crate::telemetry::proc_view::live_process(Path::new("/proc"), task).map(|live| live.start_ticks)
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum DamosFeedbackError {
     /// The scheme has no `user_input` goal to feed.
     NoUserInputGoal,
+    /// The target exited, so there is nothing to feed a measurement for.
+    TargetGone,
+    /// The recorded pid now names a different process; its measurements are not ours to feed.
+    TargetReplaced,
     /// The kdamond is not the recorded object holding the recorded configuration.
     NotOurs,
     Write,
@@ -365,8 +400,22 @@ pub enum DamosFeedbackError {
 /// Feeds the measured value of a `user_input` goal to the kernel, only while the kdamond is still
 /// exactly the recorded one; the value written must read back.
 pub fn feed_goal(record: &DamosRecord, current: u64) -> Result<(), DamosFeedbackError> {
+    feed_goal_with(record, current, &live_process_start)
+}
+
+/// [`feed_goal`] with the live start-time lookup supplied (the host's `/proc` in production).
+pub fn feed_goal_with(
+    record: &DamosRecord,
+    current: u64,
+    live_start_ticks: &dyn Fn(u32) -> Option<u64>,
+) -> Result<(), DamosFeedbackError> {
     if record.goal_metric.as_deref() != Some(DamosGoalMetric::UserInput.name()) {
         return Err(DamosFeedbackError::NoUserInputGoal);
+    }
+    match target_state(record, live_start_ticks) {
+        TargetState::Same => {}
+        TargetState::Gone => return Err(DamosFeedbackError::TargetGone),
+        TargetState::Replaced => return Err(DamosFeedbackError::TargetReplaced),
     }
     if !holds(&record.kdamond, record) {
         return Err(DamosFeedbackError::NotOurs);
@@ -395,6 +444,25 @@ fn stop_and_clear(kdamond: &Path) -> bool {
 /// Stops and clears the recorded kdamond only while it is the recorded kernel object and still
 /// holds every recorded value; anything else is left untouched.
 pub fn teardown_recorded(record: &DamosRecord) -> DamosRestore {
+    teardown_recorded_with(record, &live_process_start)
+}
+
+/// [`teardown_recorded`] with the live start-time lookup supplied. A target that exited is cleared
+/// as before; a pid that now names a different process is cleared too but reported as such, so
+/// recovery never mistakes a reused number for the recorded process.
+pub fn teardown_recorded_with(
+    record: &DamosRecord,
+    live_start_ticks: &dyn Fn(u32) -> Option<u64>,
+) -> DamosRestore {
+    let target = target_state(record, live_start_ticks);
+    let cleared = |irreversible_effect_possible| match target {
+        TargetState::Replaced => DamosRestore::ClearedTargetReplaced {
+            irreversible_effect_possible,
+        },
+        _ => DamosRestore::Cleared {
+            irreversible_effect_possible,
+        },
+    };
     if !holds(&record.kdamond, record) {
         // Already torn down is success, but only if the same kdamond object is idle and empty; a
         // replaced or reconfigured one is not ours and is left alone.
@@ -404,17 +472,13 @@ pub fn teardown_recorded(record: &DamosRecord) -> DamosRestore {
                 (dev, ino) == (record.kdamond_dev, record.kdamond_ino)
             });
         return if idle {
-            DamosRestore::Cleared {
-                irreversible_effect_possible: record.irreversible,
-            }
+            cleared(record.irreversible)
         } else {
             DamosRestore::ExternallyChanged
         };
     }
     if stop_and_clear(&record.kdamond) {
-        DamosRestore::Cleared {
-            irreversible_effect_possible: record.irreversible,
-        }
+        cleared(record.irreversible)
     } else {
         DamosRestore::Unproven
     }

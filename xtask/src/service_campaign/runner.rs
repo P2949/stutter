@@ -27,6 +27,7 @@ pub fn target(state: &State) -> RunnerTarget {
             task_id: stage.id().to_owned(),
             action: RunnerAction::BoundedService,
             suite: None,
+            receipt_scope: None,
         });
         if matches!(
             stage,
@@ -36,6 +37,7 @@ pub fn target(state: &State) -> RunnerTarget {
                 task_id: stage.id().to_owned(),
                 action: RunnerAction::ExecuteSchedulerBurst,
                 suite: None,
+                receipt_scope: None,
             });
         }
     }
@@ -48,12 +50,14 @@ pub fn target(state: &State) -> RunnerTarget {
             task_id: CAMPAIGN_TASK.to_owned(),
             action,
             suite: None,
+            receipt_scope: None,
         });
     }
     grants.insert(TaskGrant {
         task_id: Stage::Reboots.id().to_owned(),
         action: RunnerAction::Reboot,
         suite: None,
+        receipt_scope: None,
     });
     RunnerTarget {
         campaign_id: state.campaign_id.clone(),

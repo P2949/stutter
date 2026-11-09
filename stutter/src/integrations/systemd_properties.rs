@@ -3,12 +3,20 @@
 //! `org.freedesktop.systemd1.Manager.SetUnitProperties(name, runtime, properties)` changes a unit's
 //! cgroup resource controls the way `systemctl set-property --runtime` does: for the running unit
 //! only, written to no unit file and gone at the next boot. This adapter plans such a change for a
-//! unit whose name marks it as Stutter's own (`stutter-*`), only for five bounded u64 properties,
-//! captures the values the unit had, applies the change with `runtime = true`, reads each property
-//! back, and can restore the captured values. Executing needs the same [`OfflineAuthorization`] as
-//! the other bus adapters, which currently has a fake-bus fixture constructor only, so no runtime
-//! path can invoke it. The same controls on a unit systemd does not own are the cgroup operations.
+//! unit whose name marks it as Stutter's own (`stutter-*`), only for five bounded u64 properties.
+//!
+//! The plan is sealed (it can only come from [`plan_properties`]) and records the unit's
+//! *generation* (when it last became active) and each property's value at planning. Applying
+//! re-reads both first: a restarted unit or a property someone else changed since planning is
+//! refused with nothing written. After a write, any failure (the call, a readback, a mismatch) is
+//! reconciled rather than propagated: each property is put back only if it still holds exactly
+//! what this adapter wrote, and one that holds anything else is reported as an external change and
+//! left alone. Restoring follows the same compare-before-restore rule. Executing needs an
+//! [`OfflineAuthorization`] bound to the `UnitProperties` scope, which only a runner-issued receipt
+//! can provide, so no runtime path invokes this.
 use super::{
+    PlanSeal,
+    campaign_receipt::{AuthorizationDenied, CampaignScope},
     dbus::{DbusClient, DbusError, Value, Writer},
     scx_loader::OfflineAuthorization,
 };
@@ -16,6 +24,8 @@ use super::{
 pub const SERVICE: &str = "org.freedesktop.systemd1";
 pub const PATH: &str = "/org/freedesktop/systemd1";
 pub const MANAGER: &str = "org.freedesktop.systemd1.Manager";
+const UNIT_INTERFACE: &str = "org.freedesktop.systemd1.Unit";
+const GENERATION_PROPERTY: &str = "ActiveEnterTimestampMonotonic";
 
 /// What systemd reports for an unset limit: the property's "infinity".
 pub const UNSET: u64 = u64::MAX;
@@ -50,12 +60,27 @@ impl UnitProperty {
     }
 }
 
+/// A validated change. Its fields can be read but the plan cannot be built outside
+/// [`plan_properties`].
+///
+/// ```compile_fail
+/// use stutter::integrations::systemd_properties::PropertyPlan;
+/// let forged = PropertyPlan {
+///     unit: "sshd.service".into(),
+///     changes: vec![],
+///     restore: vec![],
+///     generation: 1,
+/// };
+/// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PropertyPlan {
     pub unit: String,
     pub changes: Vec<(UnitProperty, u64)>,
-    /// What each changed property held before, to write back on restore.
+    /// What each changed property held at planning, to write back on restore.
     pub restore: Vec<(UnitProperty, u64)>,
+    /// The unit's `ActiveEnterTimestampMonotonic` at planning: a restart changes it.
+    pub generation: u64,
+    seal: PlanSeal,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -67,6 +92,8 @@ pub enum PlanDenial {
     BadValue(UnitProperty),
     /// A changed property's current value was not supplied, so it could not be restored.
     CurrentValueUnknown(UnitProperty),
+    /// The unit reported no generation, so a restart could not be detected.
+    GenerationUnknown,
 }
 
 fn owned_unit(unit: &str) -> bool {
@@ -82,11 +109,13 @@ fn owned_unit(unit: &str) -> bool {
         && matches!(suffix, "service" | "scope" | "slice")
 }
 
-/// Plans a runtime change; `current` is each property's value as read from the unit.
+/// Plans a runtime change; `current` is each property's value and `generation` the unit's, both as
+/// read from the unit just now.
 pub fn plan_properties(
     unit: &str,
     changes: &[(UnitProperty, u64)],
     current: &[(UnitProperty, u64)],
+    generation: Option<u64>,
 ) -> Result<PropertyPlan, PlanDenial> {
     if !owned_unit(unit) {
         return Err(PlanDenial::NotOwnedUnit);
@@ -94,6 +123,9 @@ pub fn plan_properties(
     if changes.is_empty() {
         return Err(PlanDenial::EmptyChange);
     }
+    let generation = generation
+        .filter(|g| *g > 0)
+        .ok_or(PlanDenial::GenerationUnknown)?;
     let mut restore = Vec::new();
     for (index, (property, value)) in changes.iter().enumerate() {
         if changes[..index].iter().any(|(other, _)| other == property) {
@@ -112,24 +144,45 @@ pub fn plan_properties(
         unit: unit.to_owned(),
         changes: changes.to_vec(),
         restore,
+        generation,
+        seal: PlanSeal::issue(),
     })
 }
 
 #[derive(Debug)]
 pub enum PropertyError {
     Dbus(DbusError),
-    /// A property did not read back as written; the captured values were written back.
+    /// The authorization does not cover unit properties; nothing was sent to the bus.
+    Unauthorized(AuthorizationDenied),
+    /// The unit was restarted since planning; nothing was written (or, on restore, nothing was
+    /// touched, because a restart already reset its runtime properties).
+    UnitChanged {
+        planned: u64,
+        found: Option<u64>,
+    },
+    /// A property no longer holds the value it had at planning; nothing was written.
+    StaleBaseline {
+        property: UnitProperty,
+        planned: u64,
+        found: Option<u64>,
+    },
+    /// A property did not read back as written; every property still holding what this adapter
+    /// wrote was put back.
     NotInEffect {
         property: UnitProperty,
         wanted: u64,
         found: Option<u64>,
-        restored: bool,
+        unresolved: Vec<UnitProperty>,
     },
-    /// After restore a property does not hold the captured value.
-    NotRestored {
-        property: UnitProperty,
-        wanted: u64,
-        found: Option<u64>,
+    /// The write or a read failed part-way. Each property was reconciled; any that someone else
+    /// changed is listed and was left alone.
+    PartialFailure {
+        error: DbusError,
+        unresolved: Vec<UnitProperty>,
+    },
+    /// Someone else changed these properties after this adapter did, so they were not restored.
+    ExternalChange {
+        unresolved: Vec<UnitProperty>,
     },
 }
 
@@ -161,6 +214,13 @@ fn unit_path(client: &mut DbusClient, unit: &str) -> Result<String, DbusError> {
     }
 }
 
+fn u64_of(value: Value) -> Option<u64> {
+    match value {
+        Value::U64(value) => Some(value),
+        _ => None,
+    }
+}
+
 /// Reads one property as it is now (`None` when the unit does not report a u64 for it).
 pub fn read_property(
     client: &mut DbusClient,
@@ -168,12 +228,23 @@ pub fn read_property(
     property: UnitProperty,
 ) -> Result<Option<u64>, DbusError> {
     let path = unit_path(client, unit)?;
-    Ok(
-        match client.get_property(SERVICE, &path, interface_of(unit), property.name())? {
-            Value::U64(value) => Some(value),
-            _ => None,
-        },
-    )
+    Ok(u64_of(client.get_property(
+        SERVICE,
+        &path,
+        interface_of(unit),
+        property.name(),
+    )?))
+}
+
+/// The unit's generation: when it last became active, in monotonic microseconds.
+pub fn read_generation(client: &mut DbusClient, unit: &str) -> Result<Option<u64>, DbusError> {
+    let path = unit_path(client, unit)?;
+    Ok(u64_of(client.get_property(
+        SERVICE,
+        &path,
+        UNIT_INTERFACE,
+        GENERATION_PROPERTY,
+    )?))
 }
 
 fn set(
@@ -198,53 +269,115 @@ fn set(
         .map(drop)
 }
 
-/// The first property that does not hold its wanted value, if any.
-fn first_mismatch(
-    client: &mut DbusClient,
-    unit: &str,
-    wanted: &[(UnitProperty, u64)],
-) -> Result<Option<(UnitProperty, u64, Option<u64>)>, DbusError> {
-    for (property, value) in wanted {
-        let found = read_property(client, unit, *property)?;
-        if found != Some(*value) {
-            return Ok(Some((*property, *value, found)));
+/// Puts back, among the changed properties, exactly those that still hold what this adapter wrote;
+/// returns the ones that hold anything else (someone else's change), untouched.
+fn reconcile(client: &mut DbusClient, plan: &PropertyPlan) -> Result<Vec<UnitProperty>, DbusError> {
+    let mut to_write = Vec::new();
+    let mut unresolved = Vec::new();
+    for ((property, applied), (_, baseline)) in plan.changes.iter().zip(&plan.restore) {
+        let found = read_property(client, &plan.unit, *property)?;
+        if found == Some(*baseline) {
+            continue;
+        }
+        if found == Some(*applied) {
+            to_write.push((*property, *baseline));
+        } else {
+            unresolved.push(*property);
         }
     }
-    Ok(None)
+    if !to_write.is_empty() {
+        set(client, &plan.unit, &to_write)?;
+        for (property, baseline) in &to_write {
+            if read_property(client, &plan.unit, *property)? != Some(*baseline) {
+                unresolved.push(*property);
+            }
+        }
+    }
+    Ok(unresolved)
 }
 
-/// Applies the plan at runtime and verifies every property; on any mismatch the captured values
-/// are written back before the error is returned.
+/// Fails unless the unit is the one that was planned and every changed property still holds its
+/// planned value.
+fn precommit(client: &mut DbusClient, plan: &PropertyPlan) -> Result<(), PropertyError> {
+    let found = read_generation(client, &plan.unit)?;
+    if found != Some(plan.generation) {
+        return Err(PropertyError::UnitChanged {
+            planned: plan.generation,
+            found,
+        });
+    }
+    for (property, planned) in &plan.restore {
+        let found = read_property(client, &plan.unit, *property)?;
+        if found != Some(*planned) {
+            return Err(PropertyError::StaleBaseline {
+                property: *property,
+                planned: *planned,
+                found,
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Applies the plan at runtime and verifies every property. Any failure after the write is
+/// reconciled by compare-before-restore, never by overwriting someone else's value.
 pub fn apply(
     client: &mut DbusClient,
     plan: &PropertyPlan,
-    _authorization: &OfflineAuthorization,
+    authorization: &OfflineAuthorization,
 ) -> Result<(), PropertyError> {
-    set(client, &plan.unit, &plan.changes)?;
-    match first_mismatch(client, &plan.unit, &plan.changes)? {
-        None => Ok(()),
-        Some((property, wanted, found)) => {
-            let restored = restore(client, plan).is_ok();
-            Err(PropertyError::NotInEffect {
-                property,
-                wanted,
-                found,
-                restored,
-            })
+    authorization
+        .require(CampaignScope::UnitProperties)
+        .map_err(PropertyError::Unauthorized)?;
+    precommit(client, plan)?;
+    let outcome = set(client, &plan.unit, &plan.changes).and_then(|()| {
+        for (property, wanted) in &plan.changes {
+            let found = read_property(client, &plan.unit, *property)?;
+            if found != Some(*wanted) {
+                return Ok(Some((*property, *wanted, found)));
+            }
         }
-    }
-}
-
-/// Writes the captured values back and verifies each one.
-pub fn restore(client: &mut DbusClient, plan: &PropertyPlan) -> Result<(), PropertyError> {
-    set(client, &plan.unit, &plan.restore)?;
-    match first_mismatch(client, &plan.unit, &plan.restore)? {
-        None => Ok(()),
-        Some((property, wanted, found)) => Err(PropertyError::NotRestored {
+        Ok(None)
+    });
+    match outcome {
+        Ok(None) => Ok(()),
+        Ok(Some((property, wanted, found))) => Err(PropertyError::NotInEffect {
             property,
             wanted,
             found,
+            unresolved: reconcile(client, plan)
+                .unwrap_or_else(|_| plan.changes.iter().map(|(property, _)| *property).collect()),
         }),
+        Err(error) => Err(PropertyError::PartialFailure {
+            error,
+            unresolved: reconcile(client, plan)
+                .unwrap_or_else(|_| plan.changes.iter().map(|(property, _)| *property).collect()),
+        }),
+    }
+}
+
+/// Writes the captured values back, property by property and only where this adapter's own value is
+/// still in place. A restarted unit already lost its runtime properties, so nothing is written.
+pub fn restore(
+    client: &mut DbusClient,
+    plan: &PropertyPlan,
+    authorization: &OfflineAuthorization,
+) -> Result<(), PropertyError> {
+    authorization
+        .require_for_restore(CampaignScope::UnitProperties)
+        .map_err(PropertyError::Unauthorized)?;
+    let found = read_generation(client, &plan.unit)?;
+    if found != Some(plan.generation) {
+        return Err(PropertyError::UnitChanged {
+            planned: plan.generation,
+            found,
+        });
+    }
+    let unresolved = reconcile(client, plan)?;
+    if unresolved.is_empty() {
+        Ok(())
+    } else {
+        Err(PropertyError::ExternalChange { unresolved })
     }
 }
 

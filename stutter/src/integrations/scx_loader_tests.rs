@@ -4,9 +4,12 @@ use std::{
 };
 
 use super::*;
-use crate::integrations::dbus::{
-    DbusClient, Writer,
-    fake::{Call, Reply, serve},
+use crate::integrations::{
+    campaign_receipt::CampaignScope,
+    dbus::{
+        DbusClient, Writer,
+        fake::{Call, Reply, serve},
+    },
 };
 
 const XML: &str = r#"<node>
@@ -209,7 +212,8 @@ fn an_authorized_switch_is_verified_and_restored_exactly_and_nothing_extra_is_se
     let mut state = state(None, None);
     state.supported = vec!["scx_lavd".into()];
     let plan = plan_switch(&state, &methods, "scx_lavd", 1, &["scx_lavd".into()]).unwrap();
-    let auth = OfflineAuthorization::from_campaign("scx-campaign-1");
+    let auth =
+        OfflineAuthorization::from_campaign("scx-campaign-1", CampaignScope::SchedulerSwitch);
     assert_eq!(auth.campaign(), "scx-campaign-1");
     execute(&mut client, &plan, &auth, || Some("lavd".into())).unwrap();
     assert_eq!(
@@ -239,7 +243,7 @@ fn a_kernel_that_disagrees_makes_the_switch_not_in_effect() {
     let mut state = state(None, None);
     state.supported = vec!["scx_lavd".into()];
     let plan = plan_switch(&state, &methods, "scx_lavd", 1, &["scx_lavd".into()]).unwrap();
-    let auth = OfflineAuthorization::from_campaign("c");
+    let auth = OfflineAuthorization::from_campaign("c", CampaignScope::SchedulerSwitch);
     let result = execute(&mut client, &plan, &auth, || Some("bpfland".into()));
     assert!(
         matches!(result, Err(ExecuteError::NotInEffect { .. })),
@@ -258,7 +262,7 @@ fn missing_or_lookalike_kernel_ops_never_prove_a_scheduler_switch() {
         let result = execute(
             &mut client,
             &plan,
-            &OfflineAuthorization::from_campaign("fixture"),
+            &OfflineAuthorization::from_campaign("fixture", CampaignScope::SchedulerSwitch),
             || ops.map(str::to_owned),
         );
         assert!(
@@ -423,7 +427,7 @@ fn an_authorized_switch_with_arguments_sends_exactly_the_reviewed_list() {
         &reviewed(),
     )
     .unwrap();
-    let auth = OfflineAuthorization::from_campaign("c");
+    let auth = OfflineAuthorization::from_campaign("c", CampaignScope::SchedulerSwitch);
     execute(&mut client, &plan, &auth, || Some("lavd".into())).unwrap();
     let sent = calls
         .lock()
@@ -442,4 +446,39 @@ fn an_authorized_switch_with_arguments_sends_exactly_the_reviewed_list() {
         )])
     );
     restore(&mut client, &plan, &auth).unwrap();
+}
+
+#[test]
+fn an_authorization_for_another_scope_never_reaches_the_bus() {
+    for wrong in [
+        CampaignScope::PowerProfileHold,
+        CampaignScope::UnitProperties,
+    ] {
+        let (mut client, calls) = fake_loader();
+        let methods = introspect(&mut client).unwrap();
+        let mut state = state(None, None);
+        state.supported = vec!["scx_lavd".into()];
+        let plan = plan_switch(&state, &methods, "scx_lavd", 1, &["scx_lavd".into()]).unwrap();
+        let auth = OfflineAuthorization::from_campaign("c", wrong);
+        let seen = calls.lock().unwrap().len();
+        let result = execute(&mut client, &plan, &auth, || Some("lavd".into()));
+        assert!(
+            matches!(
+                result,
+                Err(ExecuteError::Unauthorized(
+                    crate::integrations::campaign_receipt::AuthorizationDenied::WrongScope { .. }
+                ))
+            ),
+            "{wrong:?}: {result:?}"
+        );
+        assert!(matches!(
+            restore(&mut client, &plan, &auth),
+            Err(ExecuteError::Unauthorized(_))
+        ));
+        assert_eq!(
+            calls.lock().unwrap().len(),
+            seen,
+            "a denied authorization sent something to the bus"
+        );
+    }
 }

@@ -78,6 +78,12 @@ impl Authorization {
             if (grant.action == RunnerAction::ExecuteLiveSuite) != grant.suite.is_some() {
                 return Err("only live-suite grants name a suite, and each must".to_owned());
             }
+            if (grant.action == RunnerAction::IssueOfflineReceipt) != grant.receipt_scope.is_some()
+            {
+                return Err(
+                    "only offline-receipt grants name a receipt scope, and each must".to_owned(),
+                );
+            }
         }
         if self
             .allowed_boot_entries
@@ -163,6 +169,7 @@ impl Authorization {
             task_id: envelope.task_id.clone(),
             action,
             suite: envelope.body.suite(),
+            receipt_scope: envelope.body.receipt_scope(),
         };
         if !self.grants.contains(&wanted) {
             return Err(deny(

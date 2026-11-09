@@ -127,7 +127,8 @@ pub mod damos_transaction {
         damos_scheme::{
             DamosAction, DamosCommitError, DamosCommitted, DamosDenial, DamosFeedbackError,
             DamosGoal, DamosGoalMetric, DamosPrepared, DamosQuota, DamosRequest, DamosRestore,
-            feed_goal, prepare as prepare_damos,
+            TargetState, feed_goal, feed_goal_with, prepare as prepare_damos,
+            teardown_recorded_with,
         },
     };
 }
@@ -155,7 +156,8 @@ pub mod unit_properties {
     pub use crate::integrations::systemd_properties::{
         PlanDenial, PropertyError, PropertyPlan, UNSET as UNIT_PROPERTY_UNSET, UnitProperty,
         apply as apply_unit_properties, plan_properties as plan_unit_properties,
-        read_property as read_unit_property, restore as restore_unit_properties,
+        read_generation as read_unit_generation, read_property as read_unit_property,
+        restore as restore_unit_properties,
     };
 }
 

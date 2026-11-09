@@ -286,7 +286,7 @@ fn a_quota_goal_is_written_read_back_fed_and_tears_down_with_the_scheme() {
         "user_input"
     );
     assert_eq!(read(&root, &format!("{goals}/0/target_value")), "500");
-    feed_goal(&record, 321).unwrap();
+    feed_goal_with(&record, 321, &alive).unwrap();
     assert_eq!(read(&root, &format!("{goals}/0/current_value")), "321");
     assert!(matches!(committed.restore(), DamosRestore::Cleared { .. }));
     assert_eq!(read(&root, "0/state"), "off");
@@ -314,7 +314,7 @@ fn goals_are_denied_without_a_target_or_a_quota_and_feeding_needs_the_exact_owne
     // A scheme with no goal, or a kernel-measured one, has nothing to feed.
     let (_plain_root, plain) = committed_irreversible("goal-plain");
     assert_eq!(
-        feed_goal(&plain, 1).unwrap_err(),
+        feed_goal_with(&plain, 1, &alive).unwrap_err(),
         DamosFeedbackError::NoUserInputGoal
     );
     let psi_root = admin("goal-psi", "off", 0);
@@ -328,7 +328,7 @@ fn goals_are_denied_without_a_target_or_a_quota_and_feeding_needs_the_exact_owne
     .unwrap()
     .record();
     assert_eq!(
-        feed_goal(&psi, 1).unwrap_err(),
+        feed_goal_with(&psi, 1, &alive).unwrap_err(),
         DamosFeedbackError::NoUserInputGoal
     );
     // Someone retargeted the goal: not ours, nothing is written or torn down.
@@ -347,6 +347,58 @@ fn goals_are_denied_without_a_target_or_a_quota_and_feeding_needs_the_exact_owne
         "1",
     )
     .unwrap();
-    assert_eq!(feed_goal(&fed, 5).unwrap_err(), DamosFeedbackError::NotOurs);
+    assert_eq!(
+        feed_goal_with(&fed, 5, &alive).unwrap_err(),
+        DamosFeedbackError::NotOurs
+    );
     assert_eq!(teardown_recorded(&fed), DamosRestore::ExternallyChanged);
+}
+
+#[test]
+fn a_gone_or_reused_target_pid_is_handled_explicitly_in_feeding_and_in_teardown() {
+    let gone = |_: u32| None;
+    let reused = |_: u32| Some(999_999_u64);
+    // Feeding is for the recorded process only.
+    let root = admin("target-feed", "off", 0);
+    let record = prepare(&root, &with_goal(DamosGoalMetric::UserInput, 500), alive)
+        .unwrap()
+        .commit()
+        .unwrap()
+        .record();
+    assert_eq!(
+        feed_goal_with(&record, 1, &gone),
+        Err(DamosFeedbackError::TargetGone)
+    );
+    assert_eq!(
+        feed_goal_with(&record, 1, &reused),
+        Err(DamosFeedbackError::TargetReplaced)
+    );
+    assert_eq!(feed_goal_with(&record, 1, &alive), Ok(()));
+
+    // An exited target is still torn down as before.
+    let (root_gone, record_gone) = committed_irreversible("target-gone");
+    assert_eq!(
+        teardown_recorded_with(&record_gone, &gone),
+        DamosRestore::Cleared {
+            irreversible_effect_possible: true
+        }
+    );
+    assert_eq!(read(&root_gone, "0/state"), "off");
+
+    // A pid that now names another process is cleared but reported, never taken for the target.
+    let (root_reused, record_reused) = committed_irreversible("target-reused");
+    assert_eq!(
+        teardown_recorded_with(&record_reused, &reused),
+        DamosRestore::ClearedTargetReplaced {
+            irreversible_effect_possible: true
+        }
+    );
+    assert_eq!(read(&root_reused, "0/state"), "off");
+
+    // The same process still being alive is the ordinary case.
+    let (_root_same, record_same) = committed_irreversible("target-same");
+    assert!(matches!(
+        teardown_recorded_with(&record_same, &alive),
+        DamosRestore::Cleared { .. }
+    ));
 }

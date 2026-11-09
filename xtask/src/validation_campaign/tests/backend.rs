@@ -222,6 +222,7 @@ fn the_runner_backend_sends_a_typed_request_and_maps_authorization_denials_to_bl
         task_id: "live-observation".to_owned(),
         action: RunnerAction::ExecuteLiveSuite,
         suite: Some(LiveSuite::Observation),
+        receipt_scope: None,
     });
     let authorization = Authorization {
         controller: stutter_validation_runner::model::ControllerKind::CoreValidation,

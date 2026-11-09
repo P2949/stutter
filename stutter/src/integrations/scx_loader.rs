@@ -169,12 +169,17 @@ pub fn plan_switch_with_args(
         method,
         restore,
         args: args.to_vec(),
+        seal: super::PlanSeal::issue(),
     })
 }
 
 /// Reserved proof for a trusted offline campaign. Production construction is deliberately
 /// unavailable until the campaign policy, worker, journal and exact ownership path exist.
 /// A campaign name alone is not authorization.
+///
+/// An authorization is bound to one scope, one user, one boot, an expiry and the receipt file it
+/// came from. Adapters call [`OfflineAuthorization::require`] when they act, so it cannot be used
+/// for another scope, late, in another boot, by another user or after its receipt was revoked.
 ///
 /// ```compile_fail
 /// use stutter::integrations::scx_loader::OfflineAuthorization;
@@ -183,6 +188,12 @@ pub fn plan_switch_with_args(
 #[derive(Debug)]
 pub struct OfflineAuthorization {
     campaign: String,
+    scope: super::campaign_receipt::CampaignScope,
+    owner_uid: u32,
+    boot_id: String,
+    expires_unix: u64,
+    /// The receipt it came from; `None` only for in-process test fixtures.
+    receipt: Option<super::campaign_receipt::ReceiptBinding>,
 }
 
 /// What a rollback token carries so the prior scheduler state can be put back exactly.
@@ -202,17 +213,104 @@ impl SwitchPlan {
 }
 
 impl OfflineAuthorization {
-    /// Fake-bus fixtures only; never a constructor in the product library.
     /// The only product constructor: used by the receipt-verifying factory and nothing else.
-    pub(super) fn minted(campaign: String) -> Self {
-        Self { campaign }
+    pub(super) fn minted(
+        campaign: String,
+        scope: super::campaign_receipt::CampaignScope,
+        owner_uid: u32,
+        boot_id: String,
+        expires_unix: u64,
+        receipt: super::campaign_receipt::ReceiptBinding,
+    ) -> Self {
+        Self {
+            campaign,
+            scope,
+            owner_uid,
+            boot_id,
+            expires_unix,
+            receipt: Some(receipt),
+        }
     }
 
+    /// Fake-bus fixtures only; never a constructor in the product library. It is bound to this
+    /// host's boot and user and an hour of life, so the same checks run as in production.
     #[cfg(test)]
-    pub(super) fn from_campaign(campaign: &str) -> Self {
+    pub(super) fn from_campaign(
+        campaign: &str,
+        scope: super::campaign_receipt::CampaignScope,
+    ) -> Self {
+        let facts = super::campaign_receipt::UseFacts::now();
         Self {
             campaign: campaign.to_owned(),
+            scope,
+            owner_uid: facts.caller_uid,
+            boot_id: facts.boot_id,
+            expires_unix: facts.now_unix + 3600,
+            receipt: None,
         }
+    }
+
+    pub fn scope(&self) -> super::campaign_receipt::CampaignScope {
+        self.scope
+    }
+
+    /// Whether this authorization may start `required` now: the scope matches and it is neither
+    /// expired, from another boot, for another user nor revoked.
+    pub fn require(
+        &self,
+        required: super::campaign_receipt::CampaignScope,
+    ) -> Result<(), super::campaign_receipt::AuthorizationDenied> {
+        self.require_at(required, &super::campaign_receipt::UseFacts::now())
+    }
+
+    pub(super) fn require_at(
+        &self,
+        required: super::campaign_receipt::CampaignScope,
+        facts: &super::campaign_receipt::UseFacts,
+    ) -> Result<(), super::campaign_receipt::AuthorizationDenied> {
+        use super::campaign_receipt::AuthorizationDenied as Denied;
+        self.require_for_restore_at(required, facts)?;
+        if facts.now_unix >= self.expires_unix {
+            return Err(Denied::Expired);
+        }
+        if self.boot_id != facts.boot_id {
+            return Err(Denied::WrongBoot);
+        }
+        if self
+            .receipt
+            .as_ref()
+            .is_some_and(|binding| !binding.still_valid())
+        {
+            return Err(Denied::Revoked);
+        }
+        Ok(())
+    }
+
+    /// What putting state back requires: the right scope and user, but not that the authorization
+    /// is still fresh, so cleaning up is never blocked by an expiry.
+    pub fn require_for_restore(
+        &self,
+        required: super::campaign_receipt::CampaignScope,
+    ) -> Result<(), super::campaign_receipt::AuthorizationDenied> {
+        self.require_for_restore_at(required, &super::campaign_receipt::UseFacts::now())
+    }
+
+    pub(super) fn require_for_restore_at(
+        &self,
+        required: super::campaign_receipt::CampaignScope,
+        facts: &super::campaign_receipt::UseFacts,
+    ) -> Result<(), super::campaign_receipt::AuthorizationDenied> {
+        use super::campaign_receipt::AuthorizationDenied as Denied;
+        if self.scope != required {
+            return Err(Denied::WrongScope {
+                required,
+                granted: self.scope,
+            });
+        }
+        if self.owner_uid != facts.caller_uid {
+            return Err(Denied::WrongUser);
+        }
+        Ok(())
     }
 
     pub fn campaign(&self) -> &str {
@@ -237,6 +335,23 @@ pub struct SwitchPlan {
     pub restore: Restore,
     /// Extra arguments for the scheduler, from the per-scheduler allowlist; empty for a plain switch.
     pub args: Vec<String>,
+    seal: super::PlanSeal,
+}
+
+impl SwitchPlan {
+    /// A plan for tests that only need its restore record; it can execute nothing without an
+    /// authorization, and no product code can call this.
+    #[cfg(test)]
+    pub(crate) fn fixture(to: &str, mode: u32, restore: Restore) -> Self {
+        Self {
+            to: to.to_owned(),
+            mode,
+            method: "SwitchScheduler",
+            restore,
+            args: Vec::new(),
+            seal: super::PlanSeal::issue(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -307,12 +422,15 @@ pub fn plan_switch(
         method,
         restore,
         args: Vec::new(),
+        seal: super::PlanSeal::issue(),
     })
 }
 
 #[derive(Debug)]
 pub enum ExecuteError {
     Dbus(DbusError),
+    /// The authorization does not cover this action; nothing was sent to the bus.
+    Unauthorized(super::campaign_receipt::AuthorizationDenied),
     /// The call returned but the loader (or the kernel) does not report the scheduler.
     NotInEffect {
         wanted: String,
@@ -359,9 +477,12 @@ fn call_switch_with_args(
 pub fn execute(
     client: &mut DbusClient,
     plan: &SwitchPlan,
-    _authorization: &OfflineAuthorization,
+    authorization: &OfflineAuthorization,
     kernel_ops: impl Fn() -> Option<String>,
 ) -> Result<(), ExecuteError> {
+    authorization
+        .require(super::campaign_receipt::CampaignScope::SchedulerSwitch)
+        .map_err(ExecuteError::Unauthorized)?;
     if plan.args.is_empty() {
         call_switch(client, plan.method, &plan.to, plan.mode)?;
     } else {
@@ -388,8 +509,11 @@ pub fn execute(
 pub fn restore(
     client: &mut DbusClient,
     plan: &SwitchPlan,
-    _authorization: &OfflineAuthorization,
+    authorization: &OfflineAuthorization,
 ) -> Result<(), ExecuteError> {
+    authorization
+        .require_for_restore(super::campaign_receipt::CampaignScope::SchedulerSwitch)
+        .map_err(ExecuteError::Unauthorized)?;
     match &plan.restore {
         Restore::Stop => {
             client.call(SERVICE, PATH, INTERFACE, "StopScheduler", "", &[])?;

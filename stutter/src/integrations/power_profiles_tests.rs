@@ -5,6 +5,7 @@ use std::{
 
 use super::*;
 use crate::integrations::{
+    campaign_receipt::CampaignScope,
     dbus::{
         DbusClient, Writer,
         fake::{Call, Reply, serve},
@@ -114,7 +115,8 @@ fn daemon(held: &'static str, after_release: &'static str) -> (DbusClient, Arc<M
 #[test]
 fn a_hold_is_taken_verified_and_released_with_the_prior_profile_back() {
     let (mut client, calls) = daemon("performance", "balanced");
-    let authorization = OfflineAuthorization::from_campaign("test");
+    let authorization =
+        OfflineAuthorization::from_campaign("test", CampaignScope::PowerProfileHold);
     let hold = acquire(
         &mut client,
         &plan("performance", Some("balanced")).unwrap(),
@@ -135,7 +137,8 @@ fn a_hold_is_taken_verified_and_released_with_the_prior_profile_back() {
 #[test]
 fn a_hold_that_is_not_in_effect_is_released_at_once_and_a_failed_restore_is_reported() {
     let (mut client, calls) = daemon("balanced", "balanced");
-    let authorization = OfflineAuthorization::from_campaign("test");
+    let authorization =
+        OfflineAuthorization::from_campaign("test", CampaignScope::PowerProfileHold);
     let error = acquire(
         &mut client,
         &plan("performance", Some("balanced")).unwrap(),
@@ -162,4 +165,27 @@ fn a_hold_that_is_not_in_effect_is_released_at_once_and_a_failed_restore_is_repo
         hold.release(&mut client),
         Err(HoldError::NotRestored { wanted, active }) if wanted == "balanced" && active == "power-saver"
     ));
+}
+
+#[test]
+fn a_hold_with_another_scopes_authorization_is_denied_before_any_bus_call() {
+    for wrong in [
+        CampaignScope::SchedulerSwitch,
+        CampaignScope::UnitProperties,
+    ] {
+        let (mut client, calls) = daemon("performance", "balanced");
+        let before = calls.lock().unwrap().len();
+        let error = acquire(
+            &mut client,
+            &plan("performance", Some("balanced")).unwrap(),
+            &OfflineAuthorization::from_campaign("test", wrong),
+        )
+        .unwrap_err();
+        assert!(matches!(error, HoldError::Unauthorized(_)), "{error:?}");
+        assert_eq!(
+            calls.lock().unwrap().len(),
+            before,
+            "{wrong:?} reached the bus"
+        );
+    }
 }

@@ -504,6 +504,20 @@ pub(super) fn restore_damos(
                     ));
                 }
             }
+            DamosRestore::ClearedTargetReplaced {
+                irreversible_effect_possible,
+            } => {
+                summary.restored_items += 1;
+                summary.messages.push(format!(
+                    "{} configuration cleared; the recorded target pid now names a different process{}",
+                    record.kdamond.display(),
+                    if irreversible_effect_possible {
+                        "; reclaimed or migrated pages are not restored"
+                    } else {
+                        ""
+                    }
+                ));
+            }
             DamosRestore::ExternallyChanged => {
                 summary.skipped_identity_mismatch += 1;
                 summary.skipped_items += 1;
