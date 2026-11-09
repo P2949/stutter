@@ -89,3 +89,25 @@ process of yours. Audio is judged on the application's own audio-callback deadli
 server-reported xruns as a hard guardrail; browser and desktop interactivity on the p95 of
 input-to-response time with long main-thread tasks as a hard guardrail. The thresholds are declared,
 not calibrated, nothing is derived from CPU use, and the contract authorizes no operation.
+
+## Frame-primary clock quality: EvidenceDeferred (2026-11-09)
+
+Direct frame-primary measurement requires the game-to-monitor clock mapping to be bounded within
+2 ms. The only live source today is the MangoHud CSV log. Its `elapsed` column counts from
+MangoHud's own logging start; the file carries no absolute anchor, and lines are buffered and
+flushed by MangoHud's writer, so the only available bound is the observer's poll gap plus the
+unknown flush delay. The development-controller run measured 482-507 ms against the 2 ms gate.
+
+This is recorded as **EvidenceDeferred**, not as a pass and not as a threshold to relax:
+
+- `StreamQuality::frame_primary_eligible` keeps its 2 ms alignment gate; unknown alignment is NaN
+  and denies. Frame data stays diagnostic (attribution, loss and age are still reported).
+- No substitute is accepted: file mtime, CSV read time, a guessed start offset, or a global KMS or
+  compositor event without process correlation.
+- What would unblock it, any one of: a renderer-side timestamp with a documented flush bound in the
+  game's own monotonic clock (for example a Stutter-owned Vulkan layer or a MangoHud build that
+  logs an absolute `CLOCK_MONOTONIC` anchor at start and flushes per frame), or a per-process
+  presentation event stream (DRM fence or KMS events attributed to the producing process) whose
+  error is measured against ground truth on a fixture.
+- Once a candidate exists, retest source loss, rotation, a competing renderer, focus, suspend and
+  phase boundaries before any direct-frame experiment.
