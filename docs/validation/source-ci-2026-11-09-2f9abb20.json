@@ -1,0 +1,35 @@
+{
+  "result": "PASS",
+  "source_sha": "2f9abb2066ed2d3b76cbf7e532925676bdab9910",
+  "source_clean": true,
+  "build_output": "fresh local clone checkout/target (exclusive to this checkout); run at nice 19, ionice idle, CARGO_BUILD_JOBS=3 because a game was running on the host",
+  "commands": [
+    "nix develop --command cargo run -q -p xtask -- ci",
+    "nix develop --command cargo clippy --workspace --all-targets -- -D warnings",
+    "nix develop --command cargo run -q -p xtask -- release-check"
+  ],
+  "library": {
+    "passed": 3455,
+    "ignored": 17
+  },
+  "xtask": {
+    "passed": 561
+  },
+  "validation_runner": {
+    "passed": 106,
+    "ignored": 7
+  },
+  "architecture_tests": {
+    "passed": 125
+  },
+  "release_binary_sha256": "fcad15d9f81e82acdc78a7977ad88a3a5faedcc67ad6e48956249b7757f80ceb",
+  "logs_sha256": {
+    "ci.log": "2cb4710fecca98250a686d9a4e97ab4eebc89b296ba95f76d8cbb6fe47a5eaec",
+    "clippy-workspace.log": "faae950cd99640cbc7e5a03a3c786b5b8f1ad30634c76085c01fcdadaad294bd",
+    "release-check.log": "2224e1f3bb54ba20d44c48a1ff4cf7b7fa494618e6b72ce4f72b651f13d82598"
+  },
+  "scope": "committed-source validation of the ignored live fence qualification harness (live_fence_tests.rs) added on top of 71d90506; the executable code is otherwise that of 71d90506 (read-only fence_status request and the smoke acknowledgment)",
+  "live_evidence": "docs/validation/worker-fence-qualification-2026-11-09/RESULTS.md: a real, isolated, transient root worker built from 71d90506 answered fence_status for six fence states and refused a decoy at the prepare-entry target check. Not run against the installed worker.",
+  "not_deployed": "The production service is still the 4f3baa07 build, which does not know fence_status and has no fence. The final-source deployment is deferred (BlockedResource: host not quiescent), so this receipt does not qualify the installed binary.",
+  "note": "documentation-only commits after this sha do not change the built binary"
+}
