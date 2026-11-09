@@ -126,3 +126,136 @@ fn bounded_openrc_has_fixed_independent_identity_and_observation_policy() {
     assert!(!worker_path.exists());
     assert!(config.exists());
 }
+
+/// Installs the bounded OpenRC units into a scratch directory and returns (controller, worker).
+fn install_scratch(name: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+    let root = crate::test_support::TestRoot::new(name);
+    let plan = build_service_plan(ServiceCommandRequest {
+        controller_user: Some(std::env::var("USER").unwrap()),
+        action: ServiceAction::Install,
+        mode: ServiceMode::SystemBoundedAutotune,
+        manager: ServiceManager::OpenRc,
+        dry_run: false,
+        unit_dir: Some(root.join("init.d")),
+        config_dir: root.join("config"),
+        state_dir: "/var/lib/stutter".into(),
+        log_dir: "/var/log/stutter".into(),
+        binary_path: "/run/current-system/sw/bin/true".into(),
+    });
+    execute_service_plan(&plan).unwrap();
+    let worker = plan.unit_target.with_file_name(format!(
+        "stutter-privileged-worker.{}",
+        std::env::var("USER").unwrap()
+    ));
+    // The scratch root must outlive the paths: keep it for the test process.
+    std::mem::forget(root);
+    (plan.unit_target, worker)
+}
+
+#[test]
+fn openrc_hooks_refuse_root_and_empty_identities_and_unknown_capabilities() {
+    let (controller, worker) = install_scratch("openrc-negative");
+    // The installed identity is baked in after conf.d, so the hooks check the fixed account; a
+    // root account (uid 0) can never be used, whatever the template says.
+    for path in [&controller, &worker] {
+        let text = fs::read_to_string(path).unwrap();
+        assert!(
+            !text.contains("systemctl"),
+            "no systemd call in an OpenRC unit"
+        );
+        let root_variant = text.replace(
+            &format!(
+                "stutter_controller_user=\"{}\"",
+                std::env::var("USER").unwrap()
+            ),
+            "stutter_controller_user=\"root\"",
+        );
+        let patched = path.with_extension("root");
+        fs::write(&patched, root_variant).unwrap();
+        let out = Command::new("sh")
+            .args(["-c", ". \"$1\"; checkpath() { :; }; start_pre", "t"])
+            .arg(&patched)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(64), "{}", path.display());
+        let empty = path.with_extension("empty");
+        fs::write(
+            &empty,
+            text.replace(
+                &format!(
+                    "stutter_controller_user=\"{}\"",
+                    std::env::var("USER").unwrap()
+                ),
+                "stutter_controller_user=\"\"",
+            ),
+        )
+        .unwrap();
+        let out = Command::new("sh")
+            .args(["-c", ". \"$1\"; checkpath() { :; }; start_pre", "t"])
+            .arg(&empty)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(64), "{}", path.display());
+    }
+    // A kernel with a capability beyond the reviewed set refuses to start the worker.
+    let text = fs::read_to_string(&worker).unwrap();
+    let future_kernel = worker.with_extension("future");
+    fs::write(
+        &future_kernel,
+        text.replace("/proc/sys/kernel/cap_last_cap", "/dev/stdin"),
+    )
+    .unwrap();
+    let out = Command::new("sh")
+        .args([
+            "-c",
+            ". \"$1\"; checkpath() { :; }; echo 41 | start_pre",
+            "t",
+        ])
+        .arg(&future_kernel)
+        .output()
+        .unwrap();
+    // `start_pre` reads stdin of the pipeline's right side: give it the value directly.
+    let _ = out;
+    let out = Command::new("sh")
+        .args([
+            "-c",
+            ". \"$1\"; checkpath() { :; }; start_pre < \"$2\"",
+            "t",
+        ])
+        .arg(&future_kernel)
+        .arg({
+            let value = future_kernel.with_extension("cap");
+            fs::write(&value, "41\n").unwrap();
+            value
+        })
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(78));
+}
+
+#[test]
+fn openrc_stop_hooks_restore_and_recover_before_the_service_is_considered_stopped() {
+    let (controller, worker) = install_scratch("openrc-stop");
+    let out = Command::new("sh")
+        .args([
+            "-c",
+            ". \"$1\"; su() { printf 'su %s\\n' \"$*\"; }; stop_post",
+            "t",
+        ])
+        .arg(&controller)
+        .output()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&out.stdout).contains("daemon emergency-restore"));
+    let text = fs::read_to_string(&worker).unwrap();
+    assert!(
+        text.contains("--recover-only"),
+        "the worker recovers journals on stop"
+    );
+    // A failing restore reaches the service manager as a failure of the stop hook.
+    let out = Command::new("sh")
+        .args(["-c", ". \"$1\"; su() { return 73; }; stop_post", "t"])
+        .arg(&controller)
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+}
