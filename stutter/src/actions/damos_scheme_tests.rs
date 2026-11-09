@@ -147,3 +147,114 @@ fn restore_leaves_a_kdamond_someone_else_reconfigured() {
         "not stopped: it is no longer ours"
     );
 }
+
+fn committed_irreversible(name: &str) -> (PathBuf, DamosRecord) {
+    let root = admin(name, "off", 0);
+    fs::write(root.join("kdamonds/0/pid"), "100").unwrap();
+    let committed = prepare(&root, &request(DamosAction::Pageout), alive)
+        .unwrap()
+        .commit()
+        .unwrap();
+    let record = committed.record();
+    assert_eq!(record.task_start_ticks, 777);
+    assert_eq!(record.kdamond_pid.as_deref(), Some("100"));
+    (root, record)
+}
+
+#[test]
+fn recovery_leaves_a_scheme_whose_quota_or_bounds_were_changed_by_someone_else() {
+    for (file, value) in [
+        ("quotas/bytes", "1"),
+        ("quotas/ms", "9"),
+        ("quotas/reset_interval_ms", "500"),
+        ("access_pattern/sz/min", "8192"),
+        ("access_pattern/sz/max", "1"),
+    ] {
+        let (root, record) = committed_irreversible(&format!("fp-{}", file.replace('/', "-")));
+        fs::write(
+            root.join("kdamonds/0/contexts/0/schemes/0").join(file),
+            value,
+        )
+        .unwrap();
+        assert_eq!(teardown_recorded(&record), DamosRestore::ExternallyChanged);
+        assert_eq!(
+            read(&root, "0/state"),
+            "on",
+            "{file}: not ours, not stopped"
+        );
+    }
+    let (root, record) = committed_irreversible("fp-operations");
+    fs::write(root.join("kdamonds/0/contexts/0/operations"), "paddr").unwrap();
+    assert_eq!(teardown_recorded(&record), DamosRestore::ExternallyChanged);
+}
+
+#[test]
+fn recovery_leaves_a_replaced_kdamond_even_when_every_value_matches() {
+    // A different worker thread behind the same sysfs path.
+    let (root, record) = committed_irreversible("replaced-worker");
+    fs::write(root.join("kdamonds/0/pid"), "101").unwrap();
+    assert_eq!(teardown_recorded(&record), DamosRestore::ExternallyChanged);
+    assert_eq!(read(&root, "0/state"), "on");
+
+    // A different sysfs object (new inode) carrying an identical configuration.
+    let (root, record) = committed_irreversible("replaced-object");
+    let original = root.join("kdamonds/0");
+    let aside = root.join("kdamonds/0-original");
+    fs::rename(&original, &aside).unwrap();
+    for (from, to) in walk(&aside) {
+        let target = original.join(to);
+        fs::create_dir_all(target.parent().unwrap()).unwrap();
+        fs::copy(from, target).unwrap();
+    }
+    assert_eq!(teardown_recorded(&record), DamosRestore::ExternallyChanged);
+    assert_eq!(read(&root, "0/state"), "on");
+}
+
+fn walk(dir: &Path) -> Vec<(PathBuf, PathBuf)> {
+    fn inner(base: &Path, dir: &Path, out: &mut Vec<(PathBuf, PathBuf)>) {
+        for entry in fs::read_dir(dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                inner(base, &path, out);
+            } else {
+                out.push((path.clone(), path.strip_prefix(base).unwrap().to_owned()));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    inner(dir, dir, &mut out);
+    out
+}
+
+#[test]
+fn a_record_from_before_identity_was_recorded_is_never_acted_on() {
+    let (root, mut record) = committed_irreversible("legacy");
+    record.task_start_ticks = 0;
+    record.quota_ms = 0;
+    record.quota_bytes = 0;
+    record.quota_reset_interval_ms = 0;
+    record.min_region_bytes = 0;
+    record.max_region_bytes = 0;
+    record.kdamond_dev = 0;
+    record.kdamond_ino = 0;
+    record.kdamond_pid = None;
+    assert_eq!(teardown_recorded(&record), DamosRestore::ExternallyChanged);
+    assert_eq!(read(&root, "0/state"), "on");
+}
+
+#[test]
+fn an_exact_record_tears_the_scheme_down_after_a_crash() {
+    let (root, record) = committed_irreversible("exact");
+    assert_eq!(
+        teardown_recorded(&record),
+        DamosRestore::Cleared {
+            irreversible_effect_possible: true
+        }
+    );
+    assert_eq!(read(&root, "0/state"), "off");
+    // Idempotent: the same object, now idle and empty, is already torn down.
+    assert!(matches!(
+        teardown_recorded(&record),
+        DamosRestore::Cleared { .. }
+    ));
+}

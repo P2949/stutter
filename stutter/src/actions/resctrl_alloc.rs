@@ -39,6 +39,11 @@ pub enum CatDenial {
 #[derive(Debug, PartialEq, Eq)]
 pub enum CatCommitError {
     CreateFailed,
+    /// The group was created but its kernel identity could not be read, so it was never recorded;
+    /// it was removed again (`removed` says whether that worked).
+    IdentityUnreadable {
+        removed: bool,
+    },
     /// The group was created but its schemata did not read back as requested; it was removed.
     ReadbackMismatch {
         removed: bool,
@@ -167,11 +172,20 @@ impl CatPrepared {
     }
 
     pub fn commit(self) -> Result<CatCommitted, CatCommitError> {
+        self.commit_with(|group| fs::metadata(group).map(|meta| (meta.dev(), meta.ino())))
+    }
+
+    fn commit_with(
+        self,
+        identity_of: impl Fn(&Path) -> io::Result<(u64, u64)>,
+    ) -> Result<CatCommitted, CatCommitError> {
         fs::create_dir(&self.group).map_err(|_| CatCommitError::CreateFailed)?;
-        let identity = fs::metadata(&self.group)
-            .map(|meta| (meta.dev(), meta.ino()))
-            .map_err(|_| CatCommitError::CreateFailed)?;
         let remove = || remove_group(&self.group).is_ok();
+        // `create_dir` is exclusive, so the path names the group this call just made; if its
+        // identity cannot be read it cannot be recorded, so it is removed here, not leaked.
+        let Ok(identity) = identity_of(&self.group) else {
+            return Err(CatCommitError::IdentityUnreadable { removed: remove() });
+        };
         let wrote = fs::write(self.group.join("schemata"), format!("{}\n", self.schemata)).is_ok();
         let applied = wrote
             && read(&self.group.join("schemata"))

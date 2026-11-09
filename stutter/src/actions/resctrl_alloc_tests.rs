@@ -110,3 +110,17 @@ fn restore_reports_an_already_absent_group() {
     fs::remove_dir_all(root.join("stutter-cat-trial1")).unwrap();
     assert_eq!(committed.restore(), CatRestore::Absent);
 }
+
+#[test]
+fn a_group_whose_identity_cannot_be_read_after_creation_is_removed_not_leaked() {
+    let root = mount("identity-fault", 4);
+    let prepared = prepare(&root, &request(0x0f0)).unwrap();
+    let error = prepared
+        .commit_with(|_| Err(io::Error::other("injected metadata failure")))
+        .unwrap_err();
+    assert_eq!(error, CatCommitError::IdentityUnreadable { removed: true });
+    assert!(
+        !root.join("stutter-cat-trial1").exists(),
+        "the created group was left behind"
+    );
+}

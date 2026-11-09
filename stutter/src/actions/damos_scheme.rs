@@ -96,19 +96,43 @@ pub struct DamosPrepared {
     request: DamosRequest,
 }
 
-/// What recovery needs to stop and clear exactly the configuration this transaction made.
+/// What recovery needs to stop and clear exactly the configuration this transaction made: the
+/// complete configuration it wrote, the identity of the process it watches, and the identity of
+/// the kernel object (the kdamond's sysfs directory and its worker thread) that carries it. A
+/// record that does not match every part is somebody else's and is never touched. Records from
+/// before these fields existed deserialize to zeros and so match nothing: manual attention.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DamosRecord {
     pub kdamond: PathBuf,
     pub task: u32,
     pub action: String,
     pub irreversible: bool,
+    /// The watched process's start time (clock ticks since boot) when it was committed.
+    #[serde(default)]
+    pub task_start_ticks: u64,
+    #[serde(default)]
+    pub quota_ms: u64,
+    #[serde(default)]
+    pub quota_bytes: u64,
+    #[serde(default)]
+    pub quota_reset_interval_ms: u64,
+    #[serde(default)]
+    pub min_region_bytes: u64,
+    #[serde(default)]
+    pub max_region_bytes: u64,
+    /// Device and inode of the kdamond's sysfs directory.
+    #[serde(default)]
+    pub kdamond_dev: u64,
+    #[serde(default)]
+    pub kdamond_ino: u64,
+    /// The kdamond worker thread's pid, as the kernel reports it while running.
+    #[serde(default)]
+    pub kdamond_pid: Option<String>,
 }
 
 #[derive(Debug)]
 pub struct DamosCommitted {
-    kdamond: PathBuf,
-    request: DamosRequest,
+    record: DamosRecord,
 }
 
 fn text(path: &Path) -> Option<String> {
@@ -180,80 +204,115 @@ impl DamosPrepared {
             put(&scheme.join("access_pattern/sz/max"), r.max_region_bytes)?;
             put(&self.kdamond.join("state"), "on")
         };
-        let committed = DamosCommitted {
-            kdamond: self.kdamond.clone(),
-            request: self.request.clone(),
-        };
         if configure().is_err() {
             // Nothing is running unless `state` was reached; clear whatever was written.
-            let _ = committed.clear();
+            let _ = stop_and_clear(&self.kdamond);
             return Err(DamosCommitError::Write);
         }
-        if !committed.holds_ours() {
-            let cleared = committed.clear();
+        // The record is taken from what the kernel reports after the start, never from the
+        // request alone, so it names the object that is actually running.
+        let Some((dev, ino, pid)) = kdamond_identity(&self.kdamond) else {
+            let cleared = stop_and_clear(&self.kdamond);
+            return Err(DamosCommitError::ReadbackMismatch { cleared });
+        };
+        let record = DamosRecord {
+            kdamond: self.kdamond.clone(),
+            task: r.task,
+            action: r.action.name().to_owned(),
+            irreversible: r.action.irreversible(),
+            task_start_ticks: r.start_ticks,
+            quota_ms: r.quota.ms,
+            quota_bytes: r.quota.bytes,
+            quota_reset_interval_ms: r.quota.reset_interval_ms,
+            min_region_bytes: r.min_region_bytes,
+            max_region_bytes: r.max_region_bytes,
+            kdamond_dev: dev,
+            kdamond_ino: ino,
+            kdamond_pid: pid,
+        };
+        if !holds(&self.kdamond, &record) {
+            let cleared = stop_and_clear(&self.kdamond);
             return Err(DamosCommitError::ReadbackMismatch { cleared });
         }
-        Ok(committed)
+        Ok(DamosCommitted { record })
     }
 }
 
 impl DamosCommitted {
     pub fn record(&self) -> DamosRecord {
-        DamosRecord {
-            kdamond: self.kdamond.clone(),
-            task: self.request.task,
-            action: self.request.action.name().to_owned(),
-            irreversible: self.request.action.irreversible(),
-        }
-    }
-
-    /// The kdamond is running our one context, target and scheme.
-    fn holds_ours(&self) -> bool {
-        let context = self.kdamond.join("contexts/0");
-        let scheme = context.join("schemes/0");
-        text(&self.kdamond.join("state")).as_deref() == Some("on")
-            && text(&self.kdamond.join("contexts/nr_contexts")).as_deref() == Some("1")
-            && text(&context.join("targets/0/pid_target")) == Some(self.request.task.to_string())
-            && text(&scheme.join("action")).as_deref() == Some(self.request.action.name())
-    }
-
-    fn clear(&self) -> bool {
-        let context = self.kdamond.join("contexts/0");
-        put(&self.kdamond.join("state"), "off").is_ok()
-            && put(&context.join("schemes/nr_schemes"), 0).is_ok()
-            && put(&context.join("targets/nr_targets"), 0).is_ok()
-            && put(&self.kdamond.join("contexts/nr_contexts"), 0).is_ok()
-            && text(&self.kdamond.join("state")).as_deref() == Some("off")
-            && text(&self.kdamond.join("contexts/nr_contexts")).as_deref() == Some("0")
+        self.record.clone()
     }
 
     /// Stops and clears the configuration only while the kdamond still holds exactly ours.
     pub fn restore(self) -> DamosRestore {
-        if !self.holds_ours() {
-            return DamosRestore::ExternallyChanged;
-        }
-        if self.clear() {
-            DamosRestore::Cleared {
-                irreversible_effect_possible: self.request.action.irreversible(),
-            }
-        } else {
-            DamosRestore::Unproven
-        }
+        teardown_recorded(&self.record)
     }
 }
 
-/// Stops and clears the recorded kdamond only while it still holds exactly the recorded
-/// configuration; anything else is left untouched.
+/// The kdamond's own identity: its sysfs object and worker pid.
+fn kdamond_identity(kdamond: &Path) -> Option<(u64, u64, Option<String>)> {
+    use std::os::unix::fs::MetadataExt;
+    let meta = fs::metadata(kdamond).ok()?;
+    Some((meta.dev(), meta.ino(), text(&kdamond.join("pid"))))
+}
+
+/// True only while the kdamond runs exactly the one context, target and scheme described, with
+/// every value this transaction wrote, and is the same kernel object that was recorded.
+fn holds(kdamond: &Path, record: &DamosRecord) -> bool {
+    let context = kdamond.join("contexts/0");
+    let scheme = context.join("schemes/0");
+    let value = |path: PathBuf| text(&path);
+    let number = |path: PathBuf, want: u64| value(path) == Some(want.to_string());
+    kdamond_identity(kdamond)
+        == Some((
+            record.kdamond_dev,
+            record.kdamond_ino,
+            record.kdamond_pid.clone(),
+        ))
+        && value(kdamond.join("state")).as_deref() == Some("on")
+        && value(kdamond.join("contexts/nr_contexts")).as_deref() == Some("1")
+        && value(context.join("operations")).as_deref() == Some("vaddr")
+        && value(context.join("targets/nr_targets")).as_deref() == Some("1")
+        && number(context.join("targets/0/pid_target"), u64::from(record.task))
+        && value(scheme.join("action")).as_deref() == Some(record.action.as_str())
+        && value(context.join("schemes/nr_schemes")).as_deref() == Some("1")
+        && number(scheme.join("quotas/ms"), record.quota_ms)
+        && number(scheme.join("quotas/bytes"), record.quota_bytes)
+        && number(
+            scheme.join("quotas/reset_interval_ms"),
+            record.quota_reset_interval_ms,
+        )
+        && number(
+            scheme.join("access_pattern/sz/min"),
+            record.min_region_bytes,
+        )
+        && number(
+            scheme.join("access_pattern/sz/max"),
+            record.max_region_bytes,
+        )
+}
+
+fn stop_and_clear(kdamond: &Path) -> bool {
+    let context = kdamond.join("contexts/0");
+    put(&kdamond.join("state"), "off").is_ok()
+        && put(&context.join("schemes/nr_schemes"), 0).is_ok()
+        && put(&context.join("targets/nr_targets"), 0).is_ok()
+        && put(&kdamond.join("contexts/nr_contexts"), 0).is_ok()
+        && text(&kdamond.join("state")).as_deref() == Some("off")
+        && text(&kdamond.join("contexts/nr_contexts")).as_deref() == Some("0")
+}
+
+/// Stops and clears the recorded kdamond only while it is the recorded kernel object and still
+/// holds every recorded value; anything else is left untouched.
 pub fn teardown_recorded(record: &DamosRecord) -> DamosRestore {
-    let context = record.kdamond.join("contexts/0");
-    let holds_ours = text(&record.kdamond.join("state")).as_deref() == Some("on")
-        && text(&record.kdamond.join("contexts/nr_contexts")).as_deref() == Some("1")
-        && text(&context.join("targets/0/pid_target")) == Some(record.task.to_string())
-        && text(&context.join("schemes/0/action")).as_deref() == Some(record.action.as_str());
-    if !holds_ours {
-        // Already torn down is success; a configuration that is not ours is left alone.
+    if !holds(&record.kdamond, record) {
+        // Already torn down is success, but only if the same kdamond object is idle and empty; a
+        // replaced or reconfigured one is not ours and is left alone.
         let idle = text(&record.kdamond.join("state")).as_deref() == Some("off")
-            && text(&record.kdamond.join("contexts/nr_contexts")).as_deref() == Some("0");
+            && text(&record.kdamond.join("contexts/nr_contexts")).as_deref() == Some("0")
+            && kdamond_identity(&record.kdamond).is_some_and(|(dev, ino, _)| {
+                (dev, ino) == (record.kdamond_dev, record.kdamond_ino)
+            });
         return if idle {
             DamosRestore::Cleared {
                 irreversible_effect_possible: record.irreversible,
@@ -262,13 +321,7 @@ pub fn teardown_recorded(record: &DamosRecord) -> DamosRestore {
             DamosRestore::ExternallyChanged
         };
     }
-    let cleared = put(&record.kdamond.join("state"), "off").is_ok()
-        && put(&context.join("schemes/nr_schemes"), 0).is_ok()
-        && put(&context.join("targets/nr_targets"), 0).is_ok()
-        && put(&record.kdamond.join("contexts/nr_contexts"), 0).is_ok()
-        && text(&record.kdamond.join("state")).as_deref() == Some("off")
-        && text(&record.kdamond.join("contexts/nr_contexts")).as_deref() == Some("0");
-    if cleared {
+    if stop_and_clear(&record.kdamond) {
         DamosRestore::Cleared {
             irreversible_effect_possible: record.irreversible,
         }
