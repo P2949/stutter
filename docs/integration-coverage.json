@@ -818,7 +818,7 @@
       ],
       "status": "code_complete",
       "g0": "ioprio action exists and is denied while GameMode owns task priority; no block scheduler operations; a cheap `block_io` sensor reads whole-disk completed I/Os, sectors, busy and queue time as deltas plus the in-flight gauge (never a decision input, not per-application); the ionice provider no longer lowers the important tree: only offender helpers (compiler/linker, browser helpers) are lowered and generic I/O pressure without a measured offender proposes nothing; device-wide scheduler selection is a prepared transaction (`block_scheduler`: supported-list validation from queue/scheduler, authorized and unprotected devices only, readback, restore by device number and only while ours is active) with `RollbackToken::BlockSchedulerRestore`, handler, manual policy-gated `BlockSchedulerAction` (HighRisk, default denies) and `CandidateAction::BlockScheduler` classified as manual-only `BlockIoScheduler`; never an executable plan",
-      "g1": "none",
+      "g1": "read-only on this host (2026-11-09): /sys/block/nvme0n1/queue/scheduler reads `[none] mq-deadline kyber` (bfq not built in) and the loop devices read the same; no scheduler was changed",
       "runtime_availability": "ionice present, fio and blktrace absent",
       "authority": "O/F/E",
       "not_wired": "not worker-routed (HighRisk manual/offline behind HIGH_RISK_APPLY_IMPLEMENTED=false); no per-process offender I/O accounting source beyond the compile/browser helper selectors; no real-device scheduler campaign; no blktrace/biosnoop importer",
