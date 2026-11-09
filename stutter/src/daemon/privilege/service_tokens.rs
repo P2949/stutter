@@ -301,7 +301,9 @@ impl PrivilegedActionService for ServiceActionService {
                 // A sched_ext scheduler does not survive a reboot.
                 | RollbackToken::ScxSchedulerRestore { .. }
                 // Page placement does not survive a reboot.
-                | RollbackToken::NumaMigration { .. } => Ok(RollbackResult { affected_tasks: 0 }),
+                | RollbackToken::NumaMigration { .. }
+                // Sysctl values are volatile: the kernel resets them at boot.
+                | RollbackToken::NetSysctlRestore { .. } => Ok(RollbackResult { affected_tasks: 0 }),
                 RollbackToken::CpuPowerRestore { .. }
                 | RollbackToken::IrqAffinityRestore { .. }
                 | RollbackToken::GpuPowerRestore { .. }

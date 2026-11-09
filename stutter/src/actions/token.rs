@@ -114,6 +114,11 @@ pub enum RollbackToken {
     NumaMigration {
         records: Vec<super::numa_migration::NumaMigrationRecord>,
     },
+    /// A typed network sysctl write, bound to its network namespace: recovery restores the original
+    /// only in the same namespace and only while the applied value is still set.
+    NetSysctlRestore {
+        records: Vec<super::net_sysctl::NetSysctlRecord>,
+    },
 }
 
 impl RollbackToken {
@@ -136,6 +141,7 @@ impl RollbackToken {
             Self::BlockSchedulerRestore { .. } => "block-scheduler-restore",
             Self::ScxSchedulerRestore { .. } => "scx-scheduler-restore",
             Self::NumaMigration { .. } => "numa-migration",
+            Self::NetSysctlRestore { .. } => "net-sysctl-restore",
         }
     }
 
@@ -336,6 +342,7 @@ impl RollbackToken {
             Self::BlockSchedulerRestore { records } => records.len(),
             Self::ScxSchedulerRestore { records } => records.len(),
             Self::NumaMigration { records } => records.len(),
+            Self::NetSysctlRestore { records } => records.len(),
         }
     }
 
@@ -357,6 +364,7 @@ impl RollbackToken {
             | Self::BlockSchedulerRestore { .. }
             | Self::ScxSchedulerRestore { .. }
             | Self::NumaMigration { .. }
+            | Self::NetSysctlRestore { .. }
             | Self::VmKnobRestore { .. } => None,
         }
     }

@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use super::candidate::{CandidateAction, CandidateEvidence, CandidatePlan};
 pub use super::manual_plans::{
-    BlockSchedulerActionPlan, CgroupControlActionPlan, DamosActionPlan, NumaMigrationActionPlan,
-    PmQosActionPlan, ResctrlActionPlan, ScxStrategyPlan,
+    BlockSchedulerActionPlan, CgroupControlActionPlan, DamosActionPlan, NetSysctlActionPlan,
+    NumaMigrationActionPlan, PmQosActionPlan, ResctrlActionPlan, ScxStrategyPlan,
 };
 use crate::{
     actions::{
@@ -77,6 +77,7 @@ impl CandidateExecutablePlan {
             | CandidateAction::BlockScheduler { .. }
             | CandidateAction::ScxStrategy { .. }
             | CandidateAction::NumaMigration { .. }
+            | CandidateAction::NetSysctl { .. }
             | CandidateAction::VmKnob { .. }
             | CandidateAction::Fake { .. } => None,
         }

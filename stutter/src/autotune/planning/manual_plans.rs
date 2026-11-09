@@ -465,3 +465,65 @@ impl CandidatePlan for NumaMigrationActionPlan {
         self.action.describe()
     }
 }
+
+/// A manual-only typed network sysctl write. Never converted to an executable plan.
+#[derive(Clone, Debug)]
+pub struct NetSysctlActionPlan {
+    pub name: String,
+    pub action: crate::actions::net_sysctl_action::NetSysctlAction,
+    pub evidence: Vec<CandidateEvidence>,
+    pub objective: ObjectiveKind,
+}
+
+impl NetSysctlActionPlan {
+    pub fn manual(knob: crate::actions::net_sysctl::NetKnob, objective: ObjectiveKind) -> Self {
+        Self {
+            name: format!("net_sysctl_{:?}", knob.operation()),
+            action: crate::actions::net_sysctl_action::NetSysctlAction::new(knob),
+            evidence: Vec::new(),
+            objective,
+        }
+    }
+}
+
+impl CandidatePlan for NetSysctlActionPlan {
+    fn candidate_name(&self) -> &str {
+        &self.name
+    }
+
+    fn action_kind(&self) -> &'static str {
+        "net_sysctl"
+    }
+
+    fn target_root_pid(&self) -> Option<u32> {
+        None
+    }
+
+    fn action_id(&self) -> crate::actions::ActionId {
+        self.action.id()
+    }
+
+    fn safety_class(&self) -> SafetyClass {
+        self.action.safety_class()
+    }
+
+    fn effect_scope(&self) -> ActionEffectScope {
+        ActionEffectScope::SystemWide
+    }
+
+    fn evidence(&self) -> &[CandidateEvidence] {
+        &self.evidence
+    }
+
+    fn objective(&self) -> ObjectiveKind {
+        self.objective
+    }
+
+    fn conflict_group(&self) -> ActionConflictGroup {
+        ActionConflictGroup::None
+    }
+
+    fn describe(&self) -> String {
+        self.action.describe()
+    }
+}

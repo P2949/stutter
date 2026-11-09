@@ -351,7 +351,7 @@ mod tests {
         let registries = Registries::from_code();
         assert_eq!(registries.objectives.len(), 9);
         assert_eq!(registries.diagnoses.len(), 9);
-        assert_eq!(registries.providers.len(), 16);
+        assert_eq!(registries.providers.len(), 17);
         assert!(!registries.kernel_capabilities.is_empty());
         assert!(
             registries

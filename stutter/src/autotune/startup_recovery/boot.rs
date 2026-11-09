@@ -32,6 +32,7 @@ pub(super) fn task_boot_superseded(
         | RollbackToken::BlockSchedulerRestore { .. }
         | RollbackToken::ScxSchedulerRestore { .. }
         | RollbackToken::NumaMigration { .. }
+        | RollbackToken::NetSysctlRestore { .. }
         | RollbackToken::SysfsRestore { .. } => Ok(false),
     }
 }

@@ -311,6 +311,7 @@ pub fn safety_class_for_rollback_token(token: &RollbackToken) -> SafetyClass {
         | RollbackToken::BlockSchedulerRestore { .. }
         | RollbackToken::ScxSchedulerRestore { .. }
         | RollbackToken::NumaMigration { .. }
+        | RollbackToken::NetSysctlRestore { .. }
         | RollbackToken::SysfsRestore { .. } => SafetyClass::HighRisk,
     }
 }

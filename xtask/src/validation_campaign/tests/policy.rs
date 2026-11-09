@@ -98,6 +98,9 @@ fn the_policy_promotes_the_core_capabilities_and_the_graduated_cpu_affinity_and_
         "block_io_scheduler",
         "sched_ext_scheduler_strategy",
         "numa_migrate_pages",
+        "net_tcp_congestion_control",
+        "net_tcp_buffers",
+        "net_busy_poll",
         "remote_agent_mutation",
     ] {
         assert_eq!(

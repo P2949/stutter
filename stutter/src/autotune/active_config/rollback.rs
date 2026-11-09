@@ -305,6 +305,9 @@ pub fn verify_rollback_restored_baseline(
         CandidateAction::NumaMigration { .. } => RollbackVerification::unavailable(
             "page migration is not restorable, so no rollback can be verified",
         ),
+        CandidateAction::NetSysctl { .. } => RollbackVerification::unavailable(
+            "network sysctls are per namespace and not part of the active configuration snapshot",
+        ),
         CandidateAction::Fake { .. } => {
             RollbackVerification::unavailable("fake candidate has no active config verifier")
         }

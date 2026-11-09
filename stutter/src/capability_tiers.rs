@@ -75,7 +75,7 @@ const BOUNDED_SERVICE: &[&str] = &[
     "live_bounded_service_acceptance",
 ];
 
-pub const CAPABILITIES: [Capability; 44] = [
+pub const CAPABILITIES: [Capability; 47] = [
     obs(
         "doctor",
         "Local preflight checks",
@@ -491,6 +491,42 @@ pub const CAPABILITIES: [Capability; 44] = [
         required_evidence: &[],
         required_release_evidence: &[],
         limitations: "Irreversible in effect: moved pages are not returned and recovery is manual. Verified target by start time, online disjoint nodes, acknowledgement required; manual only, never autonomous. Moving CPU affinity is not moving memory. Does not inherit another operation's maturity.",
+    },
+    Capability {
+        id: "net_tcp_congestion_control",
+        title: "TCP congestion control",
+        class: CapabilityClass::Mutating,
+        tier: CapabilityTier::Experimental,
+        target_tier: CapabilityTier::Experimental,
+        commands: &["autotune"],
+        providers: &["net_sysctl"],
+        required_evidence: &[],
+        required_release_evidence: &[],
+        limitations: "Namespace-wide state. A bounded value domain, bound to its network namespace, refused while bpftune owns the setting (UnsupportedDelegation); manual only, never autonomous, no live public traffic test. Does not inherit another operation's maturity.",
+    },
+    Capability {
+        id: "net_tcp_buffers",
+        title: "TCP receive and send buffers",
+        class: CapabilityClass::Mutating,
+        tier: CapabilityTier::Experimental,
+        target_tier: CapabilityTier::Experimental,
+        commands: &["autotune"],
+        providers: &["net_sysctl"],
+        required_evidence: &[],
+        required_release_evidence: &[],
+        limitations: "Namespace-wide state. A bounded value domain, bound to its network namespace, refused while bpftune owns the setting (UnsupportedDelegation); manual only, never autonomous, no live public traffic test. Does not inherit another operation's maturity.",
+    },
+    Capability {
+        id: "net_busy_poll",
+        title: "Network busy-poll interval",
+        class: CapabilityClass::Mutating,
+        tier: CapabilityTier::Experimental,
+        target_tier: CapabilityTier::Experimental,
+        commands: &["autotune"],
+        providers: &["net_sysctl"],
+        required_evidence: &[],
+        required_release_evidence: &[],
+        limitations: "Namespace-wide state. A bounded value domain, bound to its network namespace, refused while bpftune owns the setting (UnsupportedDelegation); manual only, never autonomous, no live public traffic test. Does not inherit another operation's maturity.",
     },
     Capability {
         id: "bounded_autotune_controller",

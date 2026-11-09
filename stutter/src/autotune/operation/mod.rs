@@ -65,12 +65,18 @@ pub enum MutationOperationKind {
     /// Moving one process's pages between NUMA nodes. Irreversible in effect; never autonomous.
     NumaMigratePages,
 
+    /// Three distinct network sysctl operations, each manual-only: the TCP congestion control, the
+    /// TCP receive/send buffers and the busy-poll interval.
+    NetTcpCongestionControl,
+    NetTcpBuffers,
+    NetBusyPoll,
+
     /// Test-only or unrecognisable payloads. Never authorised by any contract.
     Unclassified,
 }
 
 impl MutationOperationKind {
-    pub const ALL: [Self; 30] = [
+    pub const ALL: [Self; 33] = [
         Self::CpuAffinityProfile,
         Self::Uclamp,
         Self::Nice,
@@ -100,6 +106,9 @@ impl MutationOperationKind {
         Self::BlockIoScheduler,
         Self::SchedExtSchedulerStrategy,
         Self::NumaMigratePages,
+        Self::NetTcpCongestionControl,
+        Self::NetTcpBuffers,
+        Self::NetBusyPoll,
         Self::Unclassified,
     ];
 
@@ -134,6 +143,9 @@ impl MutationOperationKind {
             Self::BlockIoScheduler => "block_io_scheduler",
             Self::SchedExtSchedulerStrategy => "sched_ext_scheduler_strategy",
             Self::NumaMigratePages => "numa_migrate_pages",
+            Self::NetTcpCongestionControl => "net_tcp_congestion_control",
+            Self::NetTcpBuffers => "net_tcp_buffers",
+            Self::NetBusyPoll => "net_busy_poll",
             Self::Unclassified => "unclassified",
         }
     }
@@ -172,6 +184,9 @@ impl MutationOperationKind {
             Self::BlockIoScheduler => Some("block_io_scheduler"),
             Self::SchedExtSchedulerStrategy => Some("sched_ext_scheduler_strategy"),
             Self::NumaMigratePages => Some("numa_migrate_pages"),
+            Self::NetTcpCongestionControl => Some("net_tcp_congestion_control"),
+            Self::NetTcpBuffers => Some("net_tcp_buffers"),
+            Self::NetBusyPoll => Some("net_busy_poll"),
             Self::Unclassified => None,
         }
     }
@@ -214,6 +229,9 @@ impl MutationOperationKind {
                 | Self::BlockIoScheduler
                 | Self::SchedExtSchedulerStrategy
                 | Self::NumaMigratePages
+                | Self::NetTcpCongestionControl
+                | Self::NetTcpBuffers
+                | Self::NetBusyPoll
                 | Self::Unclassified
         )
     }
@@ -248,6 +266,7 @@ impl CandidateAction {
             Self::BlockScheduler { .. } => MutationOperationKind::BlockIoScheduler,
             Self::ScxStrategy { .. } => MutationOperationKind::SchedExtSchedulerStrategy,
             Self::NumaMigration { .. } => MutationOperationKind::NumaMigratePages,
+            Self::NetSysctl { plan } => net_operation(&plan.action.knob),
             Self::Fake { .. } => MutationOperationKind::Unclassified,
         }
     }
@@ -267,6 +286,15 @@ fn cgroup_control_operation(
         C::MemoryLow(_) => MutationOperationKind::CgroupMemoryLow,
         C::MemoryHigh(_) => MutationOperationKind::CgroupMemoryHigh,
         C::IoWeight(_) => MutationOperationKind::CgroupIoWeight,
+    }
+}
+
+fn net_operation(knob: &crate::actions::net_sysctl::NetKnob) -> MutationOperationKind {
+    use crate::actions::net_sysctl::NetOperation as N;
+    match knob.operation() {
+        N::TcpCongestionControl => MutationOperationKind::NetTcpCongestionControl,
+        N::TcpBuffers => MutationOperationKind::NetTcpBuffers,
+        N::BusyPoll => MutationOperationKind::NetBusyPoll,
     }
 }
 

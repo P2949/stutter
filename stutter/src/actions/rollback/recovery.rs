@@ -87,6 +87,10 @@ pub(crate) fn recovery_descriptor(token: &RollbackToken) -> RollbackRecoveryDesc
             ManualOnly,
             "page migration is irreversible in effect: pages reclaimed, pinned or faulted in later do not return, so recovery is never automatic and never claims the memory layout was restored",
         ),
+        RollbackToken::NetSysctlRestore { .. } => (
+            VerifiedAutomatic,
+            "the recorded sysctl path must belong to the same network namespace (read from /proc/self/ns/net) and still hold the applied value; another namespace or a foreign value is never overwritten",
+        ),
     };
     RollbackRecoveryDescriptor {
         token_kind: token.kind(),

@@ -655,6 +655,7 @@ fn rollback_token_kind(token: &RollbackToken) -> &'static str {
         RollbackToken::BlockSchedulerRestore { .. } => "block-scheduler-restore",
         RollbackToken::ScxSchedulerRestore { .. } => "scx-scheduler-restore",
         RollbackToken::NumaMigration { .. } => "numa-migration",
+        RollbackToken::NetSysctlRestore { .. } => "net-sysctl-restore",
     }
 }
 

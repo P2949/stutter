@@ -72,6 +72,9 @@ fn mechanism_for(operation: MutationOperationKind) -> MechanismEvidence {
         BlockIoScheduler => MechanismEvidence::ResourceGroupObserved,
         SchedExtSchedulerStrategy => MechanismEvidence::ResourceGroupObserved,
         NumaMigratePages => MechanismEvidence::PlacementObserved,
+        NetTcpCongestionControl | NetTcpBuffers | NetBusyPoll => {
+            MechanismEvidence::SysctlValueObserved
+        }
         ResctrlCacheAllocation => MechanismEvidence::ResourceGroupObserved,
         Unclassified => MechanismEvidence::None,
     }

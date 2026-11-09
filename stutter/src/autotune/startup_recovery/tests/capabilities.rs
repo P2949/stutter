@@ -11,6 +11,7 @@ fn automatically_recoverable(token: &RollbackToken) -> bool {
             | RollbackToken::CgroupRestore { .. }
             | RollbackToken::CpuPowerRestore { .. }
             | RollbackToken::PmQosRelease { .. }
+            | RollbackToken::NetSysctlRestore { .. }
             | RollbackToken::CgroupControlRestore { .. }
             | RollbackToken::BlockSchedulerRestore { .. }
             | RollbackToken::ResctrlGroupRemove { .. }
@@ -41,6 +42,7 @@ fn token_inventory() -> Vec<RollbackToken> {
         RollbackToken::BlockSchedulerRestore { records: vec![] },
         RollbackToken::ScxSchedulerRestore { records: vec![] },
         RollbackToken::NumaMigration { records: vec![] },
+        RollbackToken::NetSysctlRestore { records: vec![] },
         RollbackToken::SysfsRestore {
             path: PathBuf::from("unused-knob"),
             original_value: "0".to_owned(),
@@ -51,7 +53,7 @@ fn token_inventory() -> Vec<RollbackToken> {
 #[test]
 fn startup_registry_has_only_explicitly_authorized_providers_and_no_manual_fallback() {
     let registry = crate::autotune::emergency_restore::startup_rollback_registry();
-    assert_eq!(registry.handlers().len(), 9);
+    assert_eq!(registry.handlers().len(), 10);
     let mut kinds = std::collections::BTreeSet::new();
     for token in token_inventory() {
         let descriptor = recovery_descriptor(&token);
@@ -83,7 +85,7 @@ fn startup_registry_has_only_explicitly_authorized_providers_and_no_manual_fallb
             );
         }
     }
-    assert_eq!(kinds.len(), 17);
+    assert_eq!(kinds.len(), 18);
 }
 
 #[test]

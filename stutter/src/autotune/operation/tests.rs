@@ -540,3 +540,42 @@ fn a_numa_migration_candidate_is_its_own_manual_only_operation_and_never_an_exec
     assert!(MutationOperationKind::NumaMigratePages.is_manual_only());
     assert!(CandidateExecutablePlan::from_candidate(&candidate).is_none());
 }
+
+#[test]
+fn the_three_network_sysctl_operations_are_distinct_manual_only_and_never_executable() {
+    use crate::{
+        actions::net_sysctl::NetKnob,
+        autotune::{
+            objective::ObjectiveKind,
+            planning::{
+                candidate::CandidateAction,
+                executable_plan::{CandidateExecutablePlan, NetSysctlActionPlan},
+            },
+        },
+    };
+    let mut seen = std::collections::BTreeSet::new();
+    for (knob, expected) in [
+        (
+            NetKnob::CongestionControl("bbr".into()),
+            MutationOperationKind::NetTcpCongestionControl,
+        ),
+        (
+            NetKnob::TcpRmem([4096, 8192, 16384]),
+            MutationOperationKind::NetTcpBuffers,
+        ),
+        (
+            NetKnob::TcpWmem([4096, 8192, 16384]),
+            MutationOperationKind::NetTcpBuffers,
+        ),
+        (NetKnob::BusyPollUs(10), MutationOperationKind::NetBusyPoll),
+    ] {
+        let candidate = CandidateAction::NetSysctl {
+            plan: NetSysctlActionPlan::manual(knob, ObjectiveKind::GameRunnableLatency),
+        };
+        assert_eq!(candidate.operation_kind(), expected);
+        assert!(expected.is_manual_only());
+        assert!(CandidateExecutablePlan::from_candidate(&candidate).is_none());
+        seen.insert(expected);
+    }
+    assert_eq!(seen.len(), 3);
+}

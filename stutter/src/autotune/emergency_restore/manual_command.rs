@@ -185,6 +185,11 @@ pub fn manual_restore_command_for_token(token: &RollbackToken) -> String {
             })
             .collect::<Vec<_>>()
             .join(" && "),
+        RollbackToken::NetSysctlRestore { records } => sysfs_manual_commands(
+            records
+                .iter()
+                .map(|record| (&record.path, record.original.as_str())),
+        ),
     }
 }
 
@@ -221,6 +226,7 @@ pub(super) fn safety_class_for_rollback_token(token: &RollbackToken) -> SafetyCl
         | RollbackToken::BlockSchedulerRestore { .. }
         | RollbackToken::ScxSchedulerRestore { .. }
         | RollbackToken::NumaMigration { .. }
+        | RollbackToken::NetSysctlRestore { .. }
         | RollbackToken::SysfsRestore { .. } => SafetyClass::HighRisk,
     }
 }
@@ -244,6 +250,7 @@ pub(super) fn rollback_token_kind(token: &RollbackToken) -> &'static str {
         RollbackToken::BlockSchedulerRestore { .. } => "block-scheduler-restore",
         RollbackToken::ScxSchedulerRestore { .. } => "scx-scheduler-restore",
         RollbackToken::NumaMigration { .. } => "numa-migration",
+        RollbackToken::NetSysctlRestore { .. } => "net-sysctl-restore",
     }
 }
 

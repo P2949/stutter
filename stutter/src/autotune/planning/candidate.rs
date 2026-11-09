@@ -7,9 +7,9 @@ use serde::{Deserialize, Serialize};
 use super::executable_plan::{
     BlockSchedulerActionPlan, CgroupControlActionPlan, CgroupPlacementActionPlan,
     CpuAffinityProfilePlan, CpuPowerActionPlan, DamosActionPlan, FakeCandidatePlan,
-    GpuPowerActionPlan, IoPrioActionPlan, IrqAffinityActionPlan, NiceActionPlan,
-    NumaMigrationActionPlan, PmQosActionPlan, ResctrlActionPlan, ScxStrategyPlan, UclampActionPlan,
-    VmKnobActionPlan,
+    GpuPowerActionPlan, IoPrioActionPlan, IrqAffinityActionPlan, NetSysctlActionPlan,
+    NiceActionPlan, NumaMigrationActionPlan, PmQosActionPlan, ResctrlActionPlan, ScxStrategyPlan,
+    UclampActionPlan, VmKnobActionPlan,
 };
 use crate::{
     actions::SafetyClass,
@@ -39,6 +39,7 @@ pub enum CandidateAction {
     BlockScheduler { plan: BlockSchedulerActionPlan },
     ScxStrategy { plan: ScxStrategyPlan },
     NumaMigration { plan: NumaMigrationActionPlan },
+    NetSysctl { plan: NetSysctlActionPlan },
     Fake { plan: FakeCandidatePlan },
 }
 
@@ -271,6 +272,7 @@ impl CandidateAction {
             Self::BlockScheduler { plan } => plan,
             Self::ScxStrategy { plan } => plan,
             Self::NumaMigration { plan } => plan,
+            Self::NetSysctl { plan } => plan,
             Self::Fake { plan } => plan,
         }
     }
@@ -309,7 +311,7 @@ pub trait CandidatePlan {
 /// Registry of mutation provider kinds (everything except the test-only fake).
 /// `is_mutation_provider` is an exhaustive match, so a new candidate variant cannot
 /// compile until this registry is revisited; coverage tooling uses it as a denominator.
-pub const MUTATION_PROVIDER_KINDS: [&str; 16] = [
+pub const MUTATION_PROVIDER_KINDS: [&str; 17] = [
     "cpu_affinity_profile",
     "nice",
     "ionice",
@@ -326,6 +328,7 @@ pub const MUTATION_PROVIDER_KINDS: [&str; 16] = [
     "block_scheduler",
     "sched_ext_strategy",
     "numa_migration",
+    "net_sysctl",
 ];
 
 impl CandidateAction {
@@ -346,7 +349,8 @@ impl CandidateAction {
             | Self::CgroupControl { .. }
             | Self::BlockScheduler { .. }
             | Self::ScxStrategy { .. }
-            | Self::NumaMigration { .. } => true,
+            | Self::NumaMigration { .. }
+            | Self::NetSysctl { .. } => true,
             Self::Fake { .. } => false,
         }
     }
