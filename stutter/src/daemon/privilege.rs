@@ -38,6 +38,8 @@ mod exchange;
 #[cfg(test)]
 mod fence_status_tests;
 mod in_process;
+#[cfg(test)]
+mod live_fence_tests;
 mod model;
 #[path = "../../../shared/linux_peer/ffi.rs"]
 mod peer;
