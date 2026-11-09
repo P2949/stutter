@@ -116,3 +116,71 @@ fn code_complete_with_a_missing_required_subcapability_is_refused() {
     partial.missing_required = vec!["resctrl/mba-allocation".into()];
     validate(&ledger(vec![partial])).unwrap();
 }
+
+fn workspace_root() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .to_path_buf()
+}
+
+#[test]
+fn the_repository_subcapability_manifest_verifies_against_its_anchors_and_tests() {
+    let root = workspace_root();
+    let ledger: Ledger =
+        serde_json::from_slice(&fs::read(root.join("docs/integration-coverage.json")).unwrap())
+            .unwrap();
+    let manifest = subcaps::load(&root).unwrap();
+    subcaps::validate(&manifest, &ledger, &root).unwrap();
+}
+
+#[test]
+fn a_manifest_that_drops_a_baseline_item_or_names_a_missing_anchor_or_test_fails() {
+    let root = workspace_root();
+    let ledger: Ledger =
+        serde_json::from_slice(&fs::read(root.join("docs/integration-coverage.json")).unwrap())
+            .unwrap();
+    let load = || subcaps::load(&root).unwrap();
+    let mut dropped = load();
+    dropped
+        .items
+        .retain(|item| item.id != "resctrl/mba-allocation");
+    let error = subcaps::validate(&dropped, &ledger, &root)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("resctrl/mba-allocation"), "{error}");
+
+    let mut anchor = load();
+    anchor.items[0].anchor = "stutter/src/no_such_file.rs".into();
+    assert!(subcaps::validate(&anchor, &ledger, &root).is_err());
+
+    let mut symbol = load();
+    symbol.items[0].symbol = "definitely_not_in_that_file_xyzzy".into();
+    assert!(subcaps::validate(&symbol, &ledger, &root).is_err());
+
+    let mut test = load();
+    test.items[0].negative_test = "a_test_that_does_not_exist".into();
+    let error = subcaps::validate(&test, &ledger, &root)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("a_test_that_does_not_exist"), "{error}");
+
+    let mut kind = load();
+    kind.items[0].kind = "actuator".into();
+    assert!(subcaps::validate(&kind, &ledger, &root).is_err());
+}
+
+#[test]
+fn only_documentation_changes_are_allowed_between_the_ledger_source_and_head() {
+    let changed = [
+        "docs/validation/x.json",
+        "README.md",
+        "stutter/src/actions/damos_scheme.rs",
+        "xtask/Cargo.toml",
+    ];
+    assert_eq!(
+        subcaps::code_changes(&changed),
+        ["stutter/src/actions/damos_scheme.rs", "xtask/Cargo.toml"]
+    );
+    assert!(subcaps::code_changes(&["docs/a.md", "docs/b/c.json"]).is_empty());
+}

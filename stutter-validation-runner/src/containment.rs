@@ -125,7 +125,7 @@ pub(crate) fn delegated_root() -> anyhow::Result<PathBuf> {
     Ok(root)
 }
 
-fn trusted_shell() -> anyhow::Result<PathBuf> {
+pub(crate) fn trusted_shell() -> anyhow::Result<PathBuf> {
     let shell = Path::new("/bin/sh")
         .canonicalize()
         .context("immutable /bin/sh required for validation reaper")?;

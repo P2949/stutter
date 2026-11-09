@@ -4,6 +4,7 @@
 //! disposition outside the vocabulary, a `CodeComplete` on an entry whose status is not
 //! `code_complete`, a physical-proof disposition without evidence, or an entry with no disposition
 //! at all fails generation, so the report cannot say more than the ledger can show.
+mod subcaps;
 #[cfg(test)]
 mod tests;
 
@@ -161,6 +162,10 @@ pub struct CloseoutArgs {
     /// Where to write the report; printed when omitted.
     #[arg(long)]
     pub out: Option<PathBuf>,
+    /// Final qualification: the tree must be clean and the ledger's source must differ from HEAD
+    /// only by documentation, so the ledger describes the code that is actually being qualified.
+    #[arg(long)]
+    pub strict: bool,
 }
 
 pub fn run(root: &Path, args: &CloseoutArgs) -> anyhow::Result<()> {
@@ -168,6 +173,8 @@ pub fn run(root: &Path, args: &CloseoutArgs) -> anyhow::Result<()> {
     let ledger: Ledger = serde_json::from_slice(&fs::read(&path)?)
         .with_context(|| format!("{} is not a coverage ledger", path.display()))?;
     validate(&ledger)?;
+    let manifest = subcaps::load(root)?;
+    subcaps::validate(&manifest, &ledger, root)?;
     let head = Command::new("git")
         .args(["rev-parse", "HEAD"])
         .current_dir(root)
@@ -205,7 +212,11 @@ pub fn run(root: &Path, args: &CloseoutArgs) -> anyhow::Result<()> {
         ),
     }
     let kernel = fs::read_to_string("/proc/sys/kernel/osrelease").unwrap_or_default();
-    let report = render(&ledger, kernel.trim());
+    let mut report = render(&ledger, kernel.trim());
+    report.push_str(&subcaps::render(&manifest));
+    if args.strict {
+        strict_source_check(root, &ledger.source_sha)?;
+    }
     match &args.out {
         Some(out) => fs::write(out, &report).with_context(|| format!("write {}", out.display()))?,
         None => print!("{report}"),
@@ -221,5 +232,37 @@ pub fn run(root: &Path, args: &CloseoutArgs) -> anyhow::Result<()> {
             ledger.entries.len()
         );
     }
+    Ok(())
+}
+
+/// Strict mode: the working tree is clean and nothing but documentation changed since the source
+/// the ledger describes, so a receipt for that source qualifies the code at HEAD.
+fn strict_source_check(root: &Path, source_sha: &str) -> anyhow::Result<()> {
+    let git = |args: &[&str]| -> anyhow::Result<String> {
+        let output = Command::new("git").args(args).current_dir(root).output()?;
+        ensure!(output.status.success(), "git {args:?} failed");
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    };
+    ensure!(
+        git(&["status", "--porcelain"])?.trim().is_empty(),
+        "strict closeout needs a clean working tree"
+    );
+    ensure!(
+        Command::new("git")
+            .args(["merge-base", "--is-ancestor", source_sha, "HEAD"])
+            .current_dir(root)
+            .status()?
+            .success(),
+        "the ledger's source {source_sha} is not an ancestor of HEAD"
+    );
+    let range = format!("{source_sha}..HEAD");
+    let changed = git(&["diff", "--name-only", &range])?;
+    let paths: Vec<&str> = changed.lines().collect();
+    let code = subcaps::code_changes(&paths);
+    ensure!(
+        code.is_empty(),
+        "code changed since the ledger's source {source_sha}: {}; re-verify and re-pin the ledger",
+        code.join(", ")
+    );
     Ok(())
 }

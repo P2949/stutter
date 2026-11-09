@@ -170,6 +170,101 @@ pub fn remove(cgroup_mount: &Path, campaign_id: &str) -> io::Result<()> {
     walk(&root)
 }
 
+/// An independent process that kills the whole delegated subtree when its owner dies.
+///
+/// It holds an open `cgroup.kill` descriptor for the exact subtree root (so a later rename or
+/// replacement of the path changes nothing it can reach) and reads a private close-on-exec
+/// heartbeat pipe. When the owner exits for any reason, including `SIGKILL`, the pipe closes, the
+/// reaper writes `1` to the kill descriptor and the kernel ends every task in the subtree, whatever
+/// session it started or environment it cleared. Nothing in the owner has to run for this to
+/// happen. It is started before any suite process can exist, and a subtree that cannot be given
+/// one is not used.
+pub struct DelegatedReaper {
+    reaper: std::process::Child,
+    heartbeat: Option<std::os::unix::net::UnixStream>,
+}
+
+impl DelegatedReaper {
+    pub fn start(cgroup_mount: &Path, campaign_id: &str) -> anyhow::Result<Self> {
+        use std::os::{
+            fd::{AsRawFd, OwnedFd},
+            unix::{fs::OpenOptionsExt, net::UnixStream, process::CommandExt},
+        };
+        let root = cgroup_mount.join(subtree_name(campaign_id));
+        anyhow::ensure!(
+            fs::symlink_metadata(&root).is_ok_and(|meta| meta.is_dir()),
+            "the delegated subtree does not exist; refusing to start a reaper"
+        );
+        let kill = fs::OpenOptions::new()
+            .write(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+            .open(root.join("cgroup.kill"))?;
+        anyhow::ensure!(
+            kill.metadata()?.is_file(),
+            "cgroup.kill is not a regular control file"
+        );
+        let (reader, writer) = UnixStream::pair()?;
+        // The suite must never inherit the owner's write end.
+        // SAFETY: F_GETFD only queries a descriptor this function owns.
+        let flags = unsafe { libc::fcntl(writer.as_raw_fd(), libc::F_GETFD) };
+        anyhow::ensure!(
+            flags >= 0 && flags & libc::FD_CLOEXEC != 0,
+            "the reaper heartbeat must close on exec"
+        );
+        let reader: OwnedFd = reader.into();
+        let kill_fd = kill.as_raw_fd();
+        let mut command = std::process::Command::new(crate::containment::trusted_shell()?);
+        command
+            .args(["-c", "while IFS= read -r line; do :; done; printf 1 >&3"])
+            .env_clear()
+            .stdin(std::process::Stdio::from(reader))
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .process_group(0);
+        // SAFETY: only async-signal-safe descriptor operations run between fork and exec.
+        unsafe {
+            command.pre_exec(move || {
+                if libc::dup2(kill_fd, 3) == -1 || libc::fcntl(3, libc::F_SETFD, 0) == -1 {
+                    return Err(io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        let reaper = command.spawn()?;
+        Ok(Self {
+            reaper,
+            heartbeat: Some(writer),
+        })
+    }
+
+    /// Hands the heartbeat write end to the process whose death should trigger the kill (the
+    /// runner keeps it; tests give it to a separate owner they can `SIGKILL`).
+    pub fn take_heartbeat(&mut self) -> Option<std::os::fd::OwnedFd> {
+        self.heartbeat.take().map(Into::into)
+    }
+
+    /// Ends the reaper once the subtree was contained and removed in the ordinary way.
+    pub fn finish(mut self) {
+        self.heartbeat = None;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while std::time::Instant::now() < deadline {
+            if matches!(self.reaper.try_wait(), Ok(Some(_))) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let _ = self.reaper.kill();
+        let _ = self.reaper.wait();
+    }
+}
+
+impl Drop for DelegatedReaper {
+    fn drop(&mut self) {
+        // Dropping without `finish` is an owner exit: the heartbeat closes and the kill fires.
+        self.heartbeat = None;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -277,5 +372,112 @@ mod tests {
         );
         sentinel.kill().unwrap();
         sentinel.wait().unwrap();
+    }
+
+    fn fake_subtree(name: &str) -> (PathBuf, PathBuf) {
+        let mount =
+            std::env::temp_dir().join(format!("stutter-reaper-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&mount);
+        fs::create_dir_all(&mount).unwrap();
+        let root = mount.join(subtree_name("campaign"));
+        fs::create_dir_all(root.join("suite")).unwrap();
+        fs::write(root.join("cgroup.kill"), "").unwrap();
+        (mount, root)
+    }
+
+    #[test]
+    fn the_reaper_kills_the_exact_subtree_when_its_owner_goes_away_and_not_before() {
+        let (mount, root) = fake_subtree("fires");
+        let mut reaper = DelegatedReaper::start(&mount, "campaign").unwrap();
+        let heartbeat = reaper.take_heartbeat().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert_eq!(
+            fs::read_to_string(root.join("cgroup.kill")).unwrap(),
+            "",
+            "the kill fired while the owner was alive"
+        );
+        drop(heartbeat); // the owner exits
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while fs::read_to_string(root.join("cgroup.kill")).unwrap() != "1" {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the reaper never fired"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        reaper.finish();
+        let _ = fs::remove_dir_all(&mount);
+    }
+
+    #[test]
+    fn a_subtree_without_a_kill_file_or_that_is_not_a_directory_gets_no_reaper() {
+        let mount =
+            std::env::temp_dir().join(format!("stutter-reaper-none-{}", std::process::id()));
+        fs::create_dir_all(&mount).unwrap();
+        assert!(DelegatedReaper::start(&mount, "absent").is_err());
+        fs::create_dir_all(mount.join(subtree_name("nokill"))).unwrap();
+        assert!(
+            DelegatedReaper::start(&mount, "nokill").is_err(),
+            "a subtree whose cgroup.kill cannot be opened must not be used"
+        );
+        std::os::unix::fs::symlink("/", mount.join(subtree_name("linked"))).unwrap();
+        assert!(DelegatedReaper::start(&mount, "linked").is_err());
+        let _ = fs::remove_dir_all(&mount);
+    }
+
+    #[test]
+    #[ignore = "live disposable kernel cgroup; requires caller-owned delegation"]
+    fn live_owner_sigkill_leaves_no_descendant_in_the_delegated_subtree() {
+        use std::{
+            io::Write,
+            process::{Command, Stdio},
+            time::{Duration, Instant},
+        };
+        let mount = crate::containment::delegated_root()
+            .expect("BlockedResource: caller-owned cgroup delegation required");
+        let id = format!("live-reaper-{}", std::process::id());
+        let leaf = prepare(&mount, &id, None).unwrap();
+        let mut reaper = DelegatedReaper::start(&mount, &id).unwrap();
+        // The "runner" is a separate process that holds the heartbeat; killing it is the crash.
+        let mut owner = Command::new("sleep")
+            .arg("600")
+            .stdin(Stdio::from(reaper.take_heartbeat().unwrap()))
+            .spawn()
+            .unwrap();
+        let mut suite = Command::new("sh")
+            .args([
+                "-c",
+                "read go; setsid sh -c 'trap \"\" TERM; exec sleep 600' & sleep 600",
+            ])
+            .stdin(Stdio::piped())
+            .spawn()
+            .unwrap();
+        attach(&leaf, suite.id()).unwrap();
+        suite.stdin.as_mut().unwrap().write_all(b"go\n").unwrap();
+        let mut sentinel = Command::new("sleep").arg("600").spawn().unwrap();
+        std::thread::sleep(Duration::from_millis(400));
+        let root = mount.join(subtree_name(&id));
+        assert!(populated(&root).unwrap(), "the suite left nothing running");
+        owner.kill().unwrap(); // SIGKILL: nothing in the owner runs any cleanup
+        owner.wait().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while populated(&root).unwrap() {
+            assert!(
+                Instant::now() < deadline,
+                "a descendant survived the owner's death"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let _ = suite.wait();
+        assert!(
+            sentinel.try_wait().unwrap().is_none(),
+            "an unrelated process was killed"
+        );
+        sentinel.kill().unwrap();
+        sentinel.wait().unwrap();
+        // A later ordinary cleanup finds it already empty and removes the directory.
+        contain_end(&mount, &id).unwrap();
+        assert!(!root.exists());
+        reaper.finish();
     }
 }

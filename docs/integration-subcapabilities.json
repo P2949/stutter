@@ -1,0 +1,129 @@
+{
+  "baseline": [
+    "damos/quota-goal-feedback",
+    "damos/hot-cold-region-summary",
+    "damos/damo-parity-manifest",
+    "power/campaign-token-factory-and-worker-journal-integration",
+    "numa/process-scoped-memory-policy-refusal-contract",
+    "numa/numad-coexistence-behaviour",
+    "cgroup/systemd-set-unit-properties-adapter",
+    "cgroup/openrc-backend",
+    "resctrl/mba-allocation",
+    "resctrl/verified-task-assignment",
+    "blockio/per-process-offender-attribution",
+    "blockio/blktrace-biosnoop-importers",
+    "net/socket-level-options",
+    "net/qdisc-selection",
+    "net/local-offered-load-workflow"
+  ],
+  "items": [
+    {
+      "id": "damos/quota-goal-feedback", "entry": "5.8", "kind": "operation",
+      "anchor": "stutter/src/actions/damos_scheme.rs", "symbol": "feed_goal_with",
+      "positive_test": "a_quota_goal_is_written_read_back_fed_and_tears_down_with_the_scheme",
+      "negative_test": "goals_are_denied_without_a_target_or_a_quota_and_feeding_needs_the_exact_owner"
+    },
+    {
+      "id": "damos/hot-cold-region-summary", "entry": "5.8", "kind": "observation",
+      "anchor": "stutter/src/actions/damos_regions.rs", "symbol": "pub fn summarize",
+      "positive_test": "regions_are_read_and_summarized_into_hot_and_cold_bytes",
+      "negative_test": "malformed_and_inverted_regions_are_skipped_and_a_missing_listing_is_none"
+    },
+    {
+      "id": "damos/damo-parity-manifest", "entry": "5.8", "kind": "observation",
+      "anchor": "stutter/src/actions/damos_parity.rs", "symbol": "DAMO_PARITY",
+      "positive_test": "the_manifest_has_no_duplicate_or_empty_entry_and_names_every_class",
+      "negative_test": "every_operation_claim_points_at_code_that_exists"
+    },
+    {
+      "id": "damos/target-identity-recheck", "entry": "5.8", "kind": "operation",
+      "anchor": "stutter/src/actions/damos_scheme.rs", "symbol": "teardown_recorded_with",
+      "positive_test": "an_exact_record_tears_the_scheme_down_after_a_crash",
+      "negative_test": "a_gone_or_reused_target_pid_is_handled_explicitly_in_feeding_and_in_teardown"
+    },
+    {
+      "id": "power/campaign-token-factory-and-worker-journal-integration", "entry": "5.16", "kind": "operation",
+      "anchor": "stutter/src/integrations/campaign_receipt.rs", "symbol": "pub fn mint_authorization",
+      "positive_test": "a_valid_receipt_mints_an_authorization_and_the_issue_is_journalled_first",
+      "negative_test": "every_check_refuses_with_its_own_reason"
+    },
+    {
+      "id": "power/scope-bound-authorization", "entry": "5.16", "kind": "operation",
+      "anchor": "stutter/src/integrations/scx_loader.rs", "symbol": "fn require_at",
+      "positive_test": "a_minted_authorization_is_bound_to_its_scope_and_cannot_be_used_for_another",
+      "negative_test": "removing_or_replacing_the_receipt_revokes_the_authorization"
+    },
+    {
+      "id": "power/runner-request-that-issues-receipts", "entry": "5.16", "kind": "operation",
+      "anchor": "stutter-validation-runner/src/receipt.rs", "symbol": "pub fn write_receipt",
+      "positive_test": "a_receipt_is_written_atomically_with_the_fields_the_library_parses",
+      "negative_test": "a_receipt_grant_is_scope_specific_so_a_granted_scope_never_opens_another"
+    },
+    {
+      "id": "numa/process-scoped-memory-policy-refusal-contract", "entry": "5.19", "kind": "refusal",
+      "anchor": "stutter/src/actions/memory_policy.rs", "symbol": "pub fn refuse_foreign_policy",
+      "positive_test": "the_policy_column_is_summarized_by_kind_with_the_nodes_it_names",
+      "negative_test": "every_foreign_memory_policy_call_is_refused_with_the_reason_and_the_alternative"
+    },
+    {
+      "id": "numa/numad-coexistence-behaviour", "entry": "5.19", "kind": "operation",
+      "anchor": "stutter/src/actions/numa_migration.rs", "symbol": "external_owner",
+      "positive_test": "a_running_memory_placement_owner_is_never_raced_and_its_absence_allows_the_move",
+      "negative_test": "a_running_memory_placement_owner_is_never_raced_and_its_absence_allows_the_move"
+    },
+    {
+      "id": "cgroup/systemd-set-unit-properties-adapter", "entry": "5.21", "kind": "operation",
+      "anchor": "stutter/src/integrations/systemd_properties.rs", "symbol": "pub fn plan_properties",
+      "positive_test": "applying_writes_runtime_only_verifies_by_readback_and_restore_returns_the_originals",
+      "negative_test": "a_third_party_edit_after_apply_is_never_overwritten_by_restore"
+    },
+    {
+      "id": "cgroup/openrc-backend", "entry": "5.21", "kind": "observation",
+      "anchor": "stutter/src/integrations/service_manager.rs", "symbol": "pub fn service_cgroup",
+      "positive_test": "services_resolve_to_each_managers_cgroup_layout_only_when_the_directory_exists",
+      "negative_test": "names_that_could_escape_the_hierarchy_never_resolve"
+    },
+    {
+      "id": "resctrl/mba-allocation", "entry": "5.24", "kind": "operation",
+      "anchor": "stutter/src/actions/resctrl_alloc.rs", "symbol": "mba_percent",
+      "positive_test": "a_bandwidth_limit_is_written_read_back_and_removed_with_the_group",
+      "negative_test": "bandwidth_is_denied_when_absent_out_of_range_or_off_granularity"
+    },
+    {
+      "id": "resctrl/verified-task-assignment", "entry": "5.24", "kind": "operation",
+      "anchor": "stutter/src/actions/resctrl_alloc.rs", "symbol": "pub struct CatTask",
+      "positive_test": "named_processes_move_into_the_group_by_live_identity_every_thread",
+      "negative_test": "a_failed_assignment_removes_the_group_and_reports_it"
+    },
+    {
+      "id": "blockio/per-process-offender-attribution", "entry": "5.26", "kind": "observation",
+      "anchor": "stutter/src/focus/io_attribution.rs", "symbol": "pub fn rank_io_offenders",
+      "positive_test": "offenders_are_ranked_by_bytes_moved_with_exact_identity_and_shares",
+      "negative_test": "a_process_without_a_start_time_is_never_attributed_and_the_foreground_is_protected"
+    },
+    {
+      "id": "blockio/blktrace-biosnoop-importers", "entry": "5.26", "kind": "observation",
+      "anchor": "xtask/src/benchmarks/diagnostics.rs", "symbol": "pub fn import_biosnoop",
+      "positive_test": "blkparse_event_lines_add_per_issuing_process_queue_totals",
+      "negative_test": "biosnoop_rows_become_per_process_io_and_latency_scores_and_garbage_is_refused"
+    },
+    {
+      "id": "net/socket-level-options", "entry": "5.27", "kind": "refusal",
+      "anchor": "stutter/src/actions/net_capability.rs", "symbol": "pub fn refuse_socket_option",
+      "positive_test": "the_congestion_inventory_reports_current_available_and_allowed",
+      "negative_test": "every_socket_option_and_every_qdisc_replacement_is_refused_with_a_reason"
+    },
+    {
+      "id": "net/qdisc-selection", "entry": "5.27", "kind": "refusal",
+      "anchor": "stutter/src/actions/net_capability.rs", "symbol": "pub fn refuse_qdisc_replacement",
+      "positive_test": "tc_qdisc_output_parses_roots_and_ignores_everything_else",
+      "negative_test": "every_socket_option_and_every_qdisc_replacement_is_refused_with_a_reason"
+    },
+    {
+      "id": "net/local-offered-load-workflow", "entry": "5.27", "kind": "operation",
+      "anchor": "xtask/src/benchmarks/loadgen.rs", "symbol": "pub fn plan",
+      "positive_test": "wrk2_output_becomes_a_load_run_with_errors_counted_and_p99_in_milliseconds",
+      "negative_test": "remote_hosts_https_and_out_of_range_arguments_are_refused"
+    }
+  ]
+}

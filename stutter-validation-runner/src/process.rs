@@ -588,10 +588,26 @@ impl ActionExecutor for SystemExecutor {
             let owner = self
                 .drop_to_owner
                 .then_some((auth.owner_uid, auth.owner_gid));
-            Some(
+            let leaf =
                 crate::delegation::prepare(Path::new("/sys/fs/cgroup"), &auth.campaign_id, owner)
-                    .map_err(|e| failure(format!("could not delegate a cgroup subtree: {e}")))?,
-            )
+                    .map_err(|e| failure(format!("could not delegate a cgroup subtree: {e}")))?;
+            // The independent reaper exists before any suite process can: if the runner dies, the
+            // kernel still ends the whole subtree. No reaper, no suite.
+            match crate::delegation::DelegatedReaper::start(
+                Path::new("/sys/fs/cgroup"),
+                &auth.campaign_id,
+            ) {
+                Ok(reaper) => Some((leaf, reaper)),
+                Err(error) => {
+                    let _ = crate::delegation::contain_end(
+                        Path::new("/sys/fs/cgroup"),
+                        &auth.campaign_id,
+                    );
+                    return Err(failure(format!(
+                        "could not start the delegated-subtree reaper: {error:#}"
+                    )));
+                }
+            }
         } else {
             None
         };
@@ -602,14 +618,15 @@ impl ActionExecutor for SystemExecutor {
             suite.xtask_name(),
             capabilities,
             SUITE_TIMEOUT,
-            leaf.as_deref(),
+            leaf.as_ref().map(|(leaf, _)| leaf.as_path()),
         );
-        if leaf.is_none() {
+        let Some((_, reaper)) = leaf else {
             return result;
-        }
+        };
         // Every exit path ends the whole delegated subtree; a failure here fails the run.
         let cleanup =
             crate::delegation::contain_end(Path::new("/sys/fs/cgroup"), &auth.campaign_id);
+        reaper.finish();
         match (result, cleanup) {
             (Ok(value), Ok(())) => Ok(value),
             (Ok(_), Err(error)) => Err(failure(format!(
