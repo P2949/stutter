@@ -235,22 +235,21 @@
         "W13"
       ],
       "anchors": [
+        "stutter/src/actions/damos_regions.rs",
+        "stutter/src/actions/damos_parity.rs",
         "stutter/src/autotune/sensors/memory_domains.rs",
         "stutter/src/actions/damos_scheme.rs",
         "stutter/src/actions/damos_action.rs"
       ],
-      "status": "first_slice",
-      "g0": "read-only damon_state sensor (kdamond, running and scheme counts only, no addresses; root-only files report permission denied); experimental DAMOS scheme transaction (`damos_scheme`): claims only an idle kdamond, one vaddr context for a start-ticks-verified process, `stat` is monitoring-only while every reclaim/LRU action is classed irreversible and needs acknowledgement plus a bounded quota; commit reads the configuration and run state back, restore clears only a configuration that is still ours; fake-sysfs tests; `RollbackToken::DamosTeardown` (manual-only recovery that never claims reclaimed pages were restored), manual policy-gated `DamosSchemeAction` (HighRisk, SystemWide, default denies, irreversible actions need acknowledgement) and `CandidateAction::Damos` classified as manual-only `DamosScheme` with an Experimental capability; never an executable plan; active-config matching fails closed",
+      "status": "code_complete",
+      "g0": "the scheme can carry one quota goal (user_input fed through `feed_goal` only while the exact recorded kdamond holds the recorded goal, or kernel-measured some_mem_psi_us), `read_tried_regions` and `summarize` give bounded hot and cold region summaries from tried_regions, and the `DAMO_PARITY` manifest states which damo capabilities are operations, read-only or deliberately not provided; read-only damon_state sensor (kdamond, running and scheme counts only, no addresses; root-only files report permission denied); experimental DAMOS scheme transaction (`damos_scheme`): claims only an idle kdamond, one vaddr context for a start-ticks-verified process, `stat` is monitoring-only while every reclaim/LRU action is classed irreversible and needs acknowledgement plus a bounded quota; commit reads the configuration and run state back, restore clears only a configuration that is still ours; fake-sysfs tests; `RollbackToken::DamosTeardown` (manual-only recovery that never claims reclaimed pages were restored), manual policy-gated `DamosSchemeAction` (HighRisk, SystemWide, default denies, irreversible actions need acknowledgement) and `CandidateAction::Damos` classified as manual-only `DamosScheme` with an Experimental capability; never an executable plan; active-config matching fails closed",
       "g1": "DAMON admin sysfs read as root (2026-11-09): nr_kdamonds 0 yet a `[kdamond.0]` kernel thread already runs from boot, so an in-kernel DAMON module owns DAMON on this host; a live monitoring-only `stat` scheme was configured and the kernel refused to start it (EINVAL/EBUSY), the transaction rolled back to nr_kdamonds 0 (docs/validation/live-mechanisms-2026-11-09/RESULTS.md)",
       "runtime_availability": "kernel interface present (/sys/kernel/mm/damon/admin), damo absent",
       "authority": "O/F/E",
-      "not_wired": "no quota-goal feedback, no damo parity manifest, no hot/cold region summary, not worker-routed (HighRisk manual/offline behind HIGH_RISK_APPLY_IMPLEMENTED=false); no real-hardware readback here",
-      "missing_required": [
-        "damos/quota-goal-feedback",
-        "damos/hot-cold-region-summary",
-        "damos/damo-parity-manifest"
-      ],
+      "not_wired": "not worker-routed (HighRisk manual/offline behind HIGH_RISK_APPLY_IMPLEMENTED=false); no real-hardware readback here",
+      "missing_required": [],
       "dispositions": [
+        "CodeComplete",
         "FixtureVerified",
         "RealObserved",
         "HardwareUnavailable",

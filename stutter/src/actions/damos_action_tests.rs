@@ -39,6 +39,7 @@ fn request(action: DamosAction) -> DamosRequest {
         acknowledge_irreversible: true,
         min_region_bytes: 4096,
         max_region_bytes: 1 << 30,
+        goal: None,
     }
 }
 

@@ -116,11 +116,19 @@ pub mod resctrl_allocation {
 }
 
 pub mod damos_transaction {
-    //! Experimental DAMOS scheme as a prepared transaction (fake-root verified, irreversible
-    //! actions classed and gated).
-    pub use crate::actions::damos_scheme::{
-        DamosAction, DamosCommitError, DamosCommitted, DamosDenial, DamosPrepared, DamosQuota,
-        DamosRequest, DamosRestore, prepare as prepare_damos,
+    //! Experimental DAMOS scheme as a prepared transaction, hot/cold region summaries and the damo
+    //! parity manifest (fake-root verified, irreversible actions classed and gated).
+    pub use crate::actions::{
+        damos_parity::{DAMO_PARITY, DamoCapability, Parity},
+        damos_regions::{
+            MAX_TRIED_REGIONS, NAMED_REGIONS, RegionSummary, TriedRegion, read_tried_regions,
+            summarize,
+        },
+        damos_scheme::{
+            DamosAction, DamosCommitError, DamosCommitted, DamosDenial, DamosFeedbackError,
+            DamosGoal, DamosGoalMetric, DamosPrepared, DamosQuota, DamosRequest, DamosRestore,
+            feed_goal, prepare as prepare_damos,
+        },
     };
 }
 

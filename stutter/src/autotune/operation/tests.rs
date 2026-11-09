@@ -346,6 +346,7 @@ fn a_damos_candidate_is_its_own_manual_only_operation_and_never_an_executable_pl
         acknowledge_irreversible: false,
         min_region_bytes: 1,
         max_region_bytes: 2,
+        goal: None,
     };
     let candidate = CandidateAction::Damos {
         plan: DamosActionPlan::manual(request, ObjectiveKind::GameRunnableLatency),

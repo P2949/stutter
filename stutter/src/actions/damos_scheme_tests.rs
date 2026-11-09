@@ -9,7 +9,7 @@ fn admin(name: &str, state: &str, contexts: u32) -> PathBuf {
     let ctx = kd.join("0/contexts/0");
     for dir in [
         ctx.join("targets/0"),
-        ctx.join("schemes/0/quotas"),
+        ctx.join("schemes/0/quotas/goals/0"),
         ctx.join("schemes/0/access_pattern/sz"),
     ] {
         fs::create_dir_all(dir).unwrap();
@@ -33,6 +33,7 @@ fn request(action: DamosAction) -> DamosRequest {
         acknowledge_irreversible: true,
         min_region_bytes: 4096,
         max_region_bytes: 1 << 30,
+        goal: None,
     }
 }
 
@@ -257,4 +258,95 @@ fn an_exact_record_tears_the_scheme_down_after_a_crash() {
         teardown_recorded(&record),
         DamosRestore::Cleared { .. }
     ));
+}
+
+fn with_goal(metric: DamosGoalMetric, target: u64) -> DamosRequest {
+    DamosRequest {
+        goal: Some(DamosGoal {
+            metric,
+            target_value: target,
+        }),
+        ..request(DamosAction::Stat)
+    }
+}
+
+#[test]
+fn a_quota_goal_is_written_read_back_fed_and_tears_down_with_the_scheme() {
+    let root = admin("goal", "off", 0);
+    let committed = prepare(&root, &with_goal(DamosGoalMetric::UserInput, 500), alive)
+        .unwrap()
+        .commit()
+        .unwrap();
+    let record = committed.record();
+    assert_eq!(record.goal_metric.as_deref(), Some("user_input"));
+    let goals = "0/contexts/0/schemes/0/quotas/goals";
+    assert_eq!(read(&root, &format!("{goals}/nr_goals")), "1");
+    assert_eq!(
+        read(&root, &format!("{goals}/0/target_metric")),
+        "user_input"
+    );
+    assert_eq!(read(&root, &format!("{goals}/0/target_value")), "500");
+    feed_goal(&record, 321).unwrap();
+    assert_eq!(read(&root, &format!("{goals}/0/current_value")), "321");
+    assert!(matches!(committed.restore(), DamosRestore::Cleared { .. }));
+    assert_eq!(read(&root, "0/state"), "off");
+}
+
+#[test]
+fn goals_are_denied_without_a_target_or_a_quota_and_feeding_needs_the_exact_owner() {
+    let root = admin("goal-deny", "off", 0);
+    for request in [
+        with_goal(DamosGoalMetric::UserInput, 0),
+        DamosRequest {
+            quota: DamosQuota {
+                ms: 0,
+                bytes: 0,
+                reset_interval_ms: 1000,
+            },
+            ..with_goal(DamosGoalMetric::UserInput, 5)
+        },
+    ] {
+        assert_eq!(
+            prepare(&root, &request, alive).unwrap_err(),
+            DamosDenial::BadGoal
+        );
+    }
+    // A scheme with no goal, or a kernel-measured one, has nothing to feed.
+    let (_plain_root, plain) = committed_irreversible("goal-plain");
+    assert_eq!(
+        feed_goal(&plain, 1).unwrap_err(),
+        DamosFeedbackError::NoUserInputGoal
+    );
+    let psi_root = admin("goal-psi", "off", 0);
+    let psi = prepare(
+        &psi_root,
+        &with_goal(DamosGoalMetric::SomeMemPsiUs, 9),
+        alive,
+    )
+    .unwrap()
+    .commit()
+    .unwrap()
+    .record();
+    assert_eq!(
+        feed_goal(&psi, 1).unwrap_err(),
+        DamosFeedbackError::NoUserInputGoal
+    );
+    // Someone retargeted the goal: not ours, nothing is written or torn down.
+    let fed_root = admin("goal-takeover", "off", 0);
+    let fed = prepare(
+        &fed_root,
+        &with_goal(DamosGoalMetric::UserInput, 500),
+        alive,
+    )
+    .unwrap()
+    .commit()
+    .unwrap()
+    .record();
+    fs::write(
+        fed_root.join("kdamonds/0/contexts/0/schemes/0/quotas/goals/0/target_value"),
+        "1",
+    )
+    .unwrap();
+    assert_eq!(feed_goal(&fed, 5).unwrap_err(), DamosFeedbackError::NotOurs);
+    assert_eq!(teardown_recorded(&fed), DamosRestore::ExternallyChanged);
 }

@@ -34,6 +34,8 @@ pub(crate) mod cgroup;
 pub(crate) mod cpu_affinity;
 pub(crate) mod cpu_power;
 pub(crate) mod damos_action;
+pub(crate) mod damos_parity;
+pub(crate) mod damos_regions;
 pub(crate) mod damos_scheme;
 pub(crate) mod gpu_power;
 pub(crate) mod net_sysctl;
