@@ -389,30 +389,25 @@ fn handle_privileged_worker_connection(
             _ => (), // The closed request validator has already rejected unprepared applies.
         }
     }
-    if matches!(request, PrivilegedWorkerRequest::SettleIssuedTokens) {
-        let response = match service_policy {
-            Some(policy) => service
-                .settle_issued_tokens(policy)
-                .map(|outstanding| PrivilegedWorkerResponse::Settled { outstanding })
-                .unwrap_or_else(PrivilegedWorkerResponse::from_error),
-            None => PrivilegedWorkerResponse::from_error(
-                PrivilegedWorkerError::SettleIssuedTokensUnsupported.into(),
-            ),
-        };
-        serde_json::to_writer(&mut stream, &response)?;
-        stream.write_all(b"\n")?;
-        stream.flush()?;
-        return Ok(false);
-    }
-    if matches!(request, PrivilegedWorkerRequest::FenceStatus) {
-        // Read-only: the worker reads its own fence now; only the bounded service has one.
-        let response = match service_policy {
-            Some(_) => service
+    if matches!(
+        request,
+        PrivilegedWorkerRequest::SettleIssuedTokens | PrivilegedWorkerRequest::FenceStatus
+    ) {
+        // Neither carries data. FenceStatus is read-only: the worker reads its own fence now.
+        let response = match (&request, service_policy) {
+            (PrivilegedWorkerRequest::FenceStatus, Some(_)) => service
                 .fence_status()
                 .map(|report| PrivilegedWorkerResponse::FenceStatus { report })
                 .unwrap_or_else(PrivilegedWorkerResponse::from_error),
-            None => PrivilegedWorkerResponse::from_error(
+            (PrivilegedWorkerRequest::FenceStatus, None) => PrivilegedWorkerResponse::from_error(
                 PrivilegedWorkerError::FenceStatusUnsupported.into(),
+            ),
+            (_, Some(policy)) => service
+                .settle_issued_tokens(policy)
+                .map(|outstanding| PrivilegedWorkerResponse::Settled { outstanding })
+                .unwrap_or_else(PrivilegedWorkerResponse::from_error),
+            (_, None) => PrivilegedWorkerResponse::from_error(
+                PrivilegedWorkerError::SettleIssuedTokensUnsupported.into(),
             ),
         };
         serde_json::to_writer(&mut stream, &response)?;
