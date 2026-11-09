@@ -704,14 +704,15 @@
         "W11d"
       ],
       "anchors": [
-        "stutter/src/actions/pm_qos.rs"
+        "stutter/src/actions/pm_qos.rs",
+        "stutter/src/actions/pm_qos_transaction.rs"
       ],
       "status": "first_slice",
-      "g0": "descriptor-bound CPU-latency lease for /dev/cpu_dma_latency: binary u32 request, aggregate-target verification, hold deadline, release on drop or holder death; policy with a latency floor and ceiling and AC and no-throttling guards that fail closed",
+      "g0": "descriptor-bound CPU-latency lease for /dev/cpu_dma_latency: binary u32 request, aggregate-target verification, hold deadline, release on drop or holder death; policy with a latency floor and ceiling and AC and no-throttling guards that fail closed; prepared transaction (`pm_qos_transaction`): dry-run prepare reads the baseline and refuses denied, unavailable or already-satisfied requests; commit rechecks power guards and acquires the verified lease; restore releases and proves the baseline (or another requester) in the aggregate, else Unproven; fake-device tests",
       "g1": "/dev/cpu_dma_latency exists on this host; no lease has been taken",
       "runtime_availability": "/dev/cpu_dma_latency present",
       "authority": "O/E",
-      "not_wired": "not an operation kind and not routed through the worker: no journal, no controller path, no experiment; system-wide effect so it can never be a low-risk default",
+      "not_wired": "the transaction is not yet a MutationOperationKind/candidate and is not routed through the worker, journal or controller; no experiment; system-wide effect so it can never be a low-risk default",
       "dispositions": [
         "FixtureVerified",
         "RealObserved",

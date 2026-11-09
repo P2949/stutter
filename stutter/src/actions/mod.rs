@@ -33,6 +33,7 @@ pub(crate) mod cpu_power;
 pub(crate) mod gpu_power;
 pub(crate) mod nice;
 pub(crate) mod pm_qos;
+pub(crate) mod pm_qos_transaction;
 pub(crate) mod precommit;
 pub(crate) mod task_lifecycle;
 
