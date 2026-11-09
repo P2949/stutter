@@ -508,16 +508,15 @@
         "stutter/src/integrations/exact.rs",
         "stutter/src/integrations/power_profiles.rs"
       ],
-      "status": "first_slice",
+      "status": "code_complete",
       "g0": "a gated offline power-profiles-daemon adapter plans a HoldProfile only to an allowlisted known profile with the exact method signatures, executes only with an OfflineAuthorization (no runtime constructor), verifies the held profile is in effect (else releases at once) and that the prior profile returns after ReleaseProfile; the hold also self-releases when the bus connection closes (fake-bus tested, daemon absent on this host); auto-cpufreq and power-profiles-daemon presence mark CPU power owned; TLP and thermald are detected through systemd exact unit state (GetUnit/ActiveState, read-only, fake-bus tested); the read-only D-Bus client reads power-profiles-daemon ActiveProfile when its name has an owner",
       "g1": "power-profiles-daemon read over the system bus on this host: no owner (absent)",
       "runtime_availability": "all absent",
       "authority": "O/A/D",
-      "not_wired": "The trusted factory exists: `campaign_authorization::mint_authorization` verifies a root-written receipt (every path component root-owned and not group or world writable, no symlinks; boot, user, scope and expiry checked) and journals the issue durably before returning an authorization, and the runner has `receipt::write_receipt` to produce one. No runner protocol request issues a receipt yet, so no production campaign can obtain one; the scoped hold mechanism is fake-bus tested.",
-      "missing_required": [
-        "power/runner-request-that-issues-receipts"
-      ],
+      "not_wired": "The trusted factory exists: `campaign_authorization::mint_authorization` verifies a root-written receipt (every path component root-owned and not group or world writable, no symlinks; boot, user, scope and expiry checked) and journals the issue durably before returning an authorization, and the runner has `receipt::write_receipt` to produce one. The runner request `IssueOfflineReceipt` (scope and lifetime bounded, derived campaign, user and path, denied unless the campaign authorization grants that action) writes the receipt; no shipped campaign grants it yet, and the adapters are HighRisk manual/offline behind HIGH_RISK_APPLY_IMPLEMENTED=false, so nothing reaches them at runtime; the scoped hold mechanism is fake-bus tested.",
+      "missing_required": [],
       "dispositions": [
+        "CodeComplete",
         "FixtureVerified",
         "HardwareUnavailable",
         "EvidenceDeferred"

@@ -301,6 +301,19 @@ impl Authorization {
                 }
                 Ok(())
             }
+            Request::IssueOfflineReceipt {
+                lifetime_seconds, ..
+            } => {
+                if *lifetime_seconds == 0
+                    || *lifetime_seconds > crate::receipt::MAX_LIFETIME_SECONDS
+                {
+                    return Err(deny(
+                        ErrorCode::InvalidArgument,
+                        "the receipt lifetime is out of range",
+                    ));
+                }
+                Ok(())
+            }
             Request::Status
             | Request::StartAutotunePrivilegedWorker
             | Request::StopAutotunePrivilegedWorker

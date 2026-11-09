@@ -190,6 +190,13 @@ impl Server {
                 .executor
                 .start_privileged_worker(&self.authorization)
                 .map_or_else(from_denial, |data| Response::ok(id, None, data)),
+            Request::IssueOfflineReceipt {
+                scope,
+                lifetime_seconds,
+            } => self
+                .executor
+                .issue_offline_receipt(&self.authorization, *scope, *lifetime_seconds)
+                .map_or_else(from_denial, |data| Response::ok(id, None, data)),
             Request::StopAutotunePrivilegedWorker => self
                 .executor
                 .stop_privileged_worker(&self.authorization)

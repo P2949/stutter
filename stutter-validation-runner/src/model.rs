@@ -38,6 +38,22 @@ impl ControllerKind {
     }
 }
 
+/// What an offline-authorization receipt may grant (the names the product library accepts).
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+pub enum ReceiptScope {
+    PowerProfileHold,
+    SchedulerSwitch,
+}
+
+impl ReceiptScope {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::PowerProfileHold => "power_profile_hold",
+            Self::SchedulerSwitch => "scheduler_switch",
+        }
+    }
+}
+
 /// Live-acceptance suites the runner may launch (as the campaign UID, with fixed capabilities).
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 pub enum LiveSuite {
@@ -194,6 +210,7 @@ pub enum RunnerAction {
     ExecuteWorkloadOverhead,
     StartAutotunePrivilegedWorker,
     StopAutotunePrivilegedWorker,
+    IssueOfflineReceipt,
     PrepareKernelCycle,
     SetNextBoot,
     Reboot,
@@ -248,6 +265,12 @@ pub enum Request {
     /// derives (owned by the campaign user). No path, argument or program is caller-supplied.
     StartAutotunePrivilegedWorker,
     StopAutotunePrivilegedWorker,
+    /// Writes a root-owned offline-authorization receipt for this campaign and user, for one
+    /// scope and a bounded lifetime. Nothing caller-supplied names a path, user or campaign.
+    IssueOfflineReceipt {
+        scope: ReceiptScope,
+        lifetime_seconds: u64,
+    },
     PrepareKernelCycle {
         entry_id: String,
     },
@@ -270,6 +293,7 @@ impl Request {
             Self::ExecuteWorkloadOverhead { .. } => RunnerAction::ExecuteWorkloadOverhead,
             Self::StartAutotunePrivilegedWorker => RunnerAction::StartAutotunePrivilegedWorker,
             Self::StopAutotunePrivilegedWorker => RunnerAction::StopAutotunePrivilegedWorker,
+            Self::IssueOfflineReceipt { .. } => RunnerAction::IssueOfflineReceipt,
             Self::PrepareKernelCycle { .. } => RunnerAction::PrepareKernelCycle,
             Self::SetNextBoot { .. } => RunnerAction::SetNextBoot,
             Self::Reboot => RunnerAction::Reboot,

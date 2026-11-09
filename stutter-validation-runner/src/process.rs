@@ -243,6 +243,18 @@ pub trait ActionExecutor: Send + Sync {
             "the privileged autotune worker is not available".to_owned(),
         ))
     }
+    /// Issues an offline-authorization receipt; unsupported unless an executor provides it.
+    fn issue_offline_receipt(
+        &self,
+        _auth: &Authorization,
+        _scope: crate::model::ReceiptScope,
+        _lifetime_seconds: u64,
+    ) -> Result<Value, Denial> {
+        Err((
+            ErrorCode::Unsupported,
+            "offline receipts are not available".to_owned(),
+        ))
+    }
     fn stop_privileged_worker(&self, _auth: &Authorization) -> Result<Value, Denial> {
         Err((
             ErrorCode::Unsupported,
@@ -515,6 +527,30 @@ impl ActionExecutor for SystemExecutor {
         let pid = child.id();
         *slot = Some(child);
         Ok(json!({"socket": socket, "pid": pid, "already_running": false}))
+    }
+
+    fn issue_offline_receipt(
+        &self,
+        auth: &Authorization,
+        scope: crate::model::ReceiptScope,
+        lifetime_seconds: u64,
+    ) -> Result<Value, Denial> {
+        let boot_id = fs::read_to_string("/proc/sys/kernel/random/boot_id")
+            .map_err(|error| failure(format!("boot id: {error}")))?;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_secs());
+        let path = crate::receipt::write_receipt(
+            Path::new(crate::install::STATE_ROOT),
+            &auth.campaign_id,
+            auth.owner_uid,
+            &[scope.name()],
+            &boot_id,
+            now,
+            lifetime_seconds,
+        )
+        .map_err(|error| failure(format!("could not write the receipt: {error}")))?;
+        Ok(json!({"receipt": path, "scope": scope.name(), "expires_unix": now + lifetime_seconds}))
     }
 
     fn stop_privileged_worker(&self, auth: &Authorization) -> Result<Value, Denial> {

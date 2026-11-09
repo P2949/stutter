@@ -122,3 +122,69 @@ fn a_changed_stutter_binary_is_never_started_as_root() {
     assert_eq!(error.0, ErrorCode::ExecutionFailed);
     assert!(error.1.contains("pinned digest"), "{}", error.1);
 }
+
+#[test]
+fn an_offline_receipt_needs_its_own_grant_a_known_scope_and_a_bounded_lifetime() {
+    use crate::model::ReceiptScope;
+    let mut auth = authorization("/work/stutter");
+    let ask = |auth: &crate::model::Authorization, lifetime| {
+        auth.authorize(
+            &peer(me()),
+            &envelope(
+                "campaign",
+                Request::IssueOfflineReceipt {
+                    scope: ReceiptScope::PowerProfileHold,
+                    lifetime_seconds: lifetime,
+                },
+            ),
+            8,
+        )
+    };
+    // Having other grants is not enough.
+    auth.grants.insert(grant(
+        "campaign",
+        RunnerAction::StartAutotunePrivilegedWorker,
+        None,
+    ));
+    assert_eq!(
+        ask(&auth, 600).unwrap_err().0,
+        ErrorCode::ActionNotPermitted
+    );
+    auth.grants
+        .insert(grant("campaign", RunnerAction::IssueOfflineReceipt, None));
+    assert!(ask(&auth, 600).is_ok());
+    for bad in [0, crate::receipt::MAX_LIFETIME_SECONDS + 1] {
+        assert_eq!(
+            ask(&auth, bad).unwrap_err().0,
+            ErrorCode::InvalidArgument,
+            "{bad}"
+        );
+    }
+}
+
+#[test]
+fn the_default_executor_refuses_to_issue_a_receipt() {
+    use crate::{model::ReceiptScope, process::ActionExecutor};
+    struct Bare;
+    impl ActionExecutor for Bare {
+        fn live_suite(
+            &self,
+            _: &crate::model::Authorization,
+            _: &crate::model::Envelope,
+        ) -> Result<serde_json::Value, crate::authorization::Denial> {
+            unreachable!()
+        }
+        fn scheduler_burst(
+            &self,
+            _: &crate::model::Authorization,
+            _: &crate::model::Envelope,
+        ) -> Result<serde_json::Value, crate::authorization::Denial> {
+            unreachable!()
+        }
+    }
+    let auth = authorization("/work/stutter");
+    let error = Bare
+        .issue_offline_receipt(&auth, ReceiptScope::SchedulerSwitch, 60)
+        .unwrap_err();
+    assert_eq!(error.0, ErrorCode::Unsupported);
+}
