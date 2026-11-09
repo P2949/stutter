@@ -706,10 +706,11 @@
       ],
       "anchors": [
         "stutter/src/actions/pm_qos.rs",
-        "stutter/src/actions/pm_qos_transaction.rs"
+        "stutter/src/actions/pm_qos_transaction.rs",
+        "stutter/src/actions/pm_qos_watchdog.rs"
       ],
       "status": "first_slice",
-      "g0": "descriptor-bound CPU-latency lease for /dev/cpu_dma_latency: binary u32 request, aggregate-target verification, hold deadline, release on drop or holder death; policy with a latency floor and ceiling and AC and no-throttling guards that fail closed; prepared transaction (`pm_qos_transaction`): dry-run prepare reads the baseline and refuses denied, unavailable or already-satisfied requests; commit rechecks power guards and acquires the verified lease; restore releases and proves the baseline (or another requester) in the aggregate, else Unproven; fake-device tests",
+      "g0": "descriptor-bound CPU-latency lease for /dev/cpu_dma_latency: binary u32 request, aggregate-target verification, hold deadline, release on drop or holder death; policy with a latency floor and ceiling and AC and no-throttling guards that fail closed; prepared transaction (`pm_qos_transaction`): dry-run prepare reads the baseline and refuses denied, unavailable or already-satisfied requests; commit rechecks power guards and acquires the verified lease; restore releases and proves the baseline (or another requester) in the aggregate, else Unproven; fake-device tests; `pm_qos_watchdog` owns the lease on a dedicated thread and releases it at the policy hold limit independently of the owner (owner may release early or only shorten the limit; drop releases)",
       "g1": "/dev/cpu_dma_latency exists on this host; no lease has been taken",
       "runtime_availability": "/dev/cpu_dma_latency present",
       "authority": "O/E",

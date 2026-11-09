@@ -98,6 +98,11 @@ impl PmQosHeld {
         self.lease.requested_us
     }
 
+    /// The policy hold limit this lease was acquired under.
+    pub fn max_hold(&self) -> std::time::Duration {
+        self.lease.max_hold()
+    }
+
     /// Whether the hold limit passed and the owner must restore now.
     pub fn expired(&self, now: Instant) -> bool {
         self.lease.expired(now)

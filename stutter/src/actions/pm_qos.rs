@@ -153,6 +153,10 @@ impl PmQosLease {
         })
     }
 
+    pub fn max_hold(&self) -> Duration {
+        self.max_hold
+    }
+
     /// Whether the lease has been held past its limit and must be released by its owner.
     pub fn expired(&self, now: Instant) -> bool {
         now.saturating_duration_since(self.acquired) >= self.max_hold
