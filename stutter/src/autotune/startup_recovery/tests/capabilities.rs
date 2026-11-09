@@ -34,6 +34,7 @@ fn token_inventory() -> Vec<RollbackToken> {
         RollbackToken::VmKnobRestore { records: vec![] },
         RollbackToken::PmQosRelease { records: vec![] },
         RollbackToken::ResctrlGroupRemove { records: vec![] },
+        RollbackToken::DamosTeardown { records: vec![] },
         RollbackToken::SysfsRestore {
             path: PathBuf::from("unused-knob"),
             original_value: "0".to_owned(),
@@ -76,7 +77,7 @@ fn startup_registry_has_only_explicitly_authorized_providers_and_no_manual_fallb
             );
         }
     }
-    assert_eq!(kinds.len(), 12);
+    assert_eq!(kinds.len(), 13);
 }
 
 #[test]

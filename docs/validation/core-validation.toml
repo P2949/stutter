@@ -71,6 +71,7 @@ experimental = [
     "irq_affinity_storage_or_unknown",
     "pm_qos_cpu_latency",
     "resctrl_cache_allocation",
+    "damos_scheme",
     "remote_agent_mutation",
 ]
 internal = [

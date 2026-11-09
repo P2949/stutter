@@ -325,6 +325,7 @@ pub fn operation_domain(operation: MutationOperationKind) -> Option<ResourceDoma
         | Op::Uclamp
         | Op::CgroupPlacement
         | Op::ResctrlCacheAllocation
+        | Op::DamosScheme
         | Op::Unclassified => None,
     }
 }

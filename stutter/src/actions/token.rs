@@ -88,6 +88,11 @@ pub enum RollbackToken {
     ResctrlGroupRemove {
         records: Vec<super::resctrl_alloc::ResctrlGroupRecord>,
     },
+    /// A Stutter-owned DAMOS configuration on one kdamond: recovery stops and clears it only while
+    /// it is still exactly the recorded one. Reclaimed or migrated pages are not restored.
+    DamosTeardown {
+        records: Vec<super::damos_scheme::DamosRecord>,
+    },
 }
 
 impl RollbackToken {
@@ -105,6 +110,7 @@ impl RollbackToken {
             Self::SysfsRestore { .. } => "sysfs-restore",
             Self::PmQosRelease { .. } => "pm-qos-release",
             Self::ResctrlGroupRemove { .. } => "resctrl-group-remove",
+            Self::DamosTeardown { .. } => "damos-teardown",
         }
     }
 
@@ -300,6 +306,7 @@ impl RollbackToken {
             Self::SysfsRestore { .. } => 1,
             Self::PmQosRelease { records } => records.len(),
             Self::ResctrlGroupRemove { records } => records.len(),
+            Self::DamosTeardown { records } => records.len(),
         }
     }
 
@@ -316,6 +323,7 @@ impl RollbackToken {
             | Self::GpuPowerRestore { .. }
             | Self::PmQosRelease { .. }
             | Self::ResctrlGroupRemove { .. }
+            | Self::DamosTeardown { .. }
             | Self::VmKnobRestore { .. } => None,
         }
     }

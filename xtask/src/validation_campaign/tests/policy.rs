@@ -85,6 +85,7 @@ fn the_policy_promotes_the_core_capabilities_and_the_graduated_cpu_affinity_and_
         "irq_affinity_storage_or_unknown",
         "pm_qos_cpu_latency",
         "resctrl_cache_allocation",
+        "damos_scheme",
         "remote_agent_mutation",
     ] {
         assert_eq!(

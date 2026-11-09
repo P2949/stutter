@@ -83,6 +83,7 @@ pub fn restore_rollback_token_direct(
         RollbackToken::GpuPowerRestore { records } => restore_gpu_power_records(records),
         RollbackToken::PmQosRelease { records } => restore_pm_qos_release(records),
         RollbackToken::ResctrlGroupRemove { records } => restore_resctrl_groups(records),
+        RollbackToken::DamosTeardown { records } => restore_damos(records),
         RollbackToken::SysfsRestore {
             path,
             original_value,
@@ -471,5 +472,42 @@ pub(super) fn restore_resctrl_groups(
     summary.skipped_identity_mismatch = check.replaced;
     summary.failed_items = check.unproven;
     summary.messages = check.messages;
+    Ok(summary)
+}
+
+pub(super) fn restore_damos(
+    records: &[crate::actions::damos_scheme::DamosRecord],
+) -> anyhow::Result<RollbackRestoreSummary> {
+    use crate::actions::damos_scheme::{DamosRestore, teardown_recorded};
+    let mut summary = RollbackRestoreSummary::success("damos-teardown", 0);
+    for record in records {
+        match teardown_recorded(record) {
+            DamosRestore::Cleared {
+                irreversible_effect_possible,
+            } => {
+                summary.restored_items += 1;
+                if irreversible_effect_possible {
+                    summary.messages.push(format!(
+                        "{} configuration cleared; reclaimed or migrated pages are not restored",
+                        record.kdamond.display()
+                    ));
+                }
+            }
+            DamosRestore::ExternallyChanged => {
+                summary.skipped_identity_mismatch += 1;
+                summary.skipped_items += 1;
+                summary.messages.push(format!(
+                    "{} no longer holds the recorded configuration: left untouched",
+                    record.kdamond.display()
+                ));
+            }
+            DamosRestore::Unproven => {
+                summary.failed_items += 1;
+                summary
+                    .messages
+                    .push(format!("could not clear {}", record.kdamond.display()));
+            }
+        }
+    }
     Ok(summary)
 }

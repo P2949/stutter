@@ -321,3 +321,39 @@ fn a_resctrl_candidate_is_its_own_manual_only_operation_and_never_an_executable_
         Some("resctrl_cache_allocation")
     );
 }
+
+#[test]
+fn a_damos_candidate_is_its_own_manual_only_operation_and_never_an_executable_plan() {
+    use crate::{
+        actions::damos_scheme::{DamosAction, DamosQuota, DamosRequest},
+        autotune::{
+            objective::ObjectiveKind,
+            planning::{
+                candidate::CandidateAction,
+                executable_plan::{CandidateExecutablePlan, DamosActionPlan},
+            },
+        },
+    };
+    let request = DamosRequest {
+        task: 1,
+        start_ticks: 1,
+        action: DamosAction::Stat,
+        quota: DamosQuota {
+            ms: 1,
+            bytes: 1,
+            reset_interval_ms: 1000,
+        },
+        acknowledge_irreversible: false,
+        min_region_bytes: 1,
+        max_region_bytes: 2,
+    };
+    let candidate = CandidateAction::Damos {
+        plan: DamosActionPlan::manual(request, ObjectiveKind::GameRunnableLatency),
+    };
+    assert_eq!(
+        candidate.operation_kind(),
+        MutationOperationKind::DamosScheme
+    );
+    assert!(MutationOperationKind::DamosScheme.is_manual_only());
+    assert!(CandidateExecutablePlan::from_candidate(&candidate).is_none());
+}

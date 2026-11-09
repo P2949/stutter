@@ -96,6 +96,15 @@ pub struct DamosPrepared {
     request: DamosRequest,
 }
 
+/// What recovery needs to stop and clear exactly the configuration this transaction made.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct DamosRecord {
+    pub kdamond: PathBuf,
+    pub task: u32,
+    pub action: String,
+    pub irreversible: bool,
+}
+
 #[derive(Debug)]
 pub struct DamosCommitted {
     kdamond: PathBuf,
@@ -189,6 +198,15 @@ impl DamosPrepared {
 }
 
 impl DamosCommitted {
+    pub fn record(&self) -> DamosRecord {
+        DamosRecord {
+            kdamond: self.kdamond.clone(),
+            task: self.request.task,
+            action: self.request.action.name().to_owned(),
+            irreversible: self.request.action.irreversible(),
+        }
+    }
+
     /// The kdamond is running our one context, target and scheme.
     fn holds_ours(&self) -> bool {
         let context = self.kdamond.join("contexts/0");
@@ -221,6 +239,41 @@ impl DamosCommitted {
         } else {
             DamosRestore::Unproven
         }
+    }
+}
+
+/// Stops and clears the recorded kdamond only while it still holds exactly the recorded
+/// configuration; anything else is left untouched.
+pub fn teardown_recorded(record: &DamosRecord) -> DamosRestore {
+    let context = record.kdamond.join("contexts/0");
+    let holds_ours = text(&record.kdamond.join("state")).as_deref() == Some("on")
+        && text(&record.kdamond.join("contexts/nr_contexts")).as_deref() == Some("1")
+        && text(&context.join("targets/0/pid_target")) == Some(record.task.to_string())
+        && text(&context.join("schemes/0/action")).as_deref() == Some(record.action.as_str());
+    if !holds_ours {
+        // Already torn down is success; a configuration that is not ours is left alone.
+        let idle = text(&record.kdamond.join("state")).as_deref() == Some("off")
+            && text(&record.kdamond.join("contexts/nr_contexts")).as_deref() == Some("0");
+        return if idle {
+            DamosRestore::Cleared {
+                irreversible_effect_possible: record.irreversible,
+            }
+        } else {
+            DamosRestore::ExternallyChanged
+        };
+    }
+    let cleared = put(&record.kdamond.join("state"), "off").is_ok()
+        && put(&context.join("schemes/nr_schemes"), 0).is_ok()
+        && put(&context.join("targets/nr_targets"), 0).is_ok()
+        && put(&record.kdamond.join("contexts/nr_contexts"), 0).is_ok()
+        && text(&record.kdamond.join("state")).as_deref() == Some("off")
+        && text(&record.kdamond.join("contexts/nr_contexts")).as_deref() == Some("0");
+    if cleared {
+        DamosRestore::Cleared {
+            irreversible_effect_possible: record.irreversible,
+        }
+    } else {
+        DamosRestore::Unproven
     }
 }
 

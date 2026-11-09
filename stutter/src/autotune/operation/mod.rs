@@ -39,12 +39,15 @@ pub enum MutationOperationKind {
     /// An L3 cache allocation group (resctrl CAT), owned by Stutter and removed on restore.
     ResctrlCacheAllocation,
 
+    /// A DAMOS scheme on one kdamond. Reclaim and LRU actions are irreversible in effect.
+    DamosScheme,
+
     /// Test-only or unrecognisable payloads. Never authorised by any contract.
     Unclassified,
 }
 
 impl MutationOperationKind {
-    pub const ALL: [Self; 17] = [
+    pub const ALL: [Self; 18] = [
         Self::CpuAffinityProfile,
         Self::Uclamp,
         Self::Nice,
@@ -61,6 +64,7 @@ impl MutationOperationKind {
         Self::IrqStorageOrUnknown,
         Self::PmQosCpuLatency,
         Self::ResctrlCacheAllocation,
+        Self::DamosScheme,
         Self::Unclassified,
     ];
 
@@ -82,6 +86,7 @@ impl MutationOperationKind {
             Self::IrqStorageOrUnknown => "irq_storage_or_unknown",
             Self::PmQosCpuLatency => "pm_qos_cpu_latency",
             Self::ResctrlCacheAllocation => "resctrl_cache_allocation",
+            Self::DamosScheme => "damos_scheme",
             Self::Unclassified => "unclassified",
         }
     }
@@ -107,6 +112,7 @@ impl MutationOperationKind {
             Self::IrqStorageOrUnknown => Some("irq_affinity_storage_or_unknown"),
             Self::PmQosCpuLatency => Some("pm_qos_cpu_latency"),
             Self::ResctrlCacheAllocation => Some("resctrl_cache_allocation"),
+            Self::DamosScheme => Some("damos_scheme"),
             Self::Unclassified => None,
         }
     }
@@ -136,6 +142,7 @@ impl MutationOperationKind {
                 | Self::IrqStorageOrUnknown
                 | Self::PmQosCpuLatency
                 | Self::ResctrlCacheAllocation
+                | Self::DamosScheme
                 | Self::Unclassified
         )
     }
@@ -165,6 +172,7 @@ impl CandidateAction {
             Self::VmKnob { plan } => vm_operation(&plan.action),
             Self::PmQos { .. } => MutationOperationKind::PmQosCpuLatency,
             Self::Resctrl { .. } => MutationOperationKind::ResctrlCacheAllocation,
+            Self::Damos { .. } => MutationOperationKind::DamosScheme,
             Self::Fake { .. } => MutationOperationKind::Unclassified,
         }
     }

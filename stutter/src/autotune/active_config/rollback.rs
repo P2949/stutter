@@ -290,6 +290,9 @@ pub fn verify_rollback_restored_baseline(
         CandidateAction::Resctrl { .. } => RollbackVerification::unavailable(
             "resctrl groups are not part of the active configuration snapshot",
         ),
+        CandidateAction::Damos { .. } => RollbackVerification::unavailable(
+            "DAMOS state is not part of the active configuration snapshot, and reclaim is not restorable",
+        ),
         CandidateAction::Fake { .. } => {
             RollbackVerification::unavailable("fake candidate has no active config verifier")
         }

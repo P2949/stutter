@@ -67,6 +67,10 @@ pub(crate) fn recovery_descriptor(token: &RollbackToken) -> RollbackRecoveryDesc
             VerifiedAutomatic,
             "the recorded group path must still name the same kernel object (device and inode); a replaced or absent group is never removed and an absent one is reported as already gone",
         ),
+        RollbackToken::DamosTeardown { .. } => (
+            ManualOnly,
+            "configuration teardown is exact but page reclaim or migration already done is irreversible, so recovery is never automatic and never claims the memory state was restored",
+        ),
     };
     RollbackRecoveryDescriptor {
         token_kind: token.kind(),

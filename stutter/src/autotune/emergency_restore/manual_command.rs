@@ -116,6 +116,16 @@ pub fn manual_restore_command_for_token(token: &RollbackToken) -> String {
             .map(|record| format!("sudo rmdir -- {}", shell_quote_path(&record.group)))
             .collect::<Vec<_>>()
             .join(" && "),
+        RollbackToken::DamosTeardown { records } => records
+            .iter()
+            .map(|record| {
+                format!(
+                    "printf off | sudo tee {}/state >/dev/null # reclaimed or migrated pages are not restored",
+                    shell_quote_path(&record.kdamond)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" && "),
     }
 }
 
@@ -147,6 +157,7 @@ pub(super) fn safety_class_for_rollback_token(token: &RollbackToken) -> SafetyCl
         | RollbackToken::GpuPowerRestore { .. }
         | RollbackToken::PmQosRelease { .. }
         | RollbackToken::ResctrlGroupRemove { .. }
+        | RollbackToken::DamosTeardown { .. }
         | RollbackToken::SysfsRestore { .. } => SafetyClass::HighRisk,
     }
 }
@@ -165,6 +176,7 @@ pub(super) fn rollback_token_kind(token: &RollbackToken) -> &'static str {
         RollbackToken::SysfsRestore { .. } => "sysfs-restore",
         RollbackToken::PmQosRelease { .. } => "pm-qos-release",
         RollbackToken::ResctrlGroupRemove { .. } => "resctrl-group-remove",
+        RollbackToken::DamosTeardown { .. } => "damos-teardown",
     }
 }
 

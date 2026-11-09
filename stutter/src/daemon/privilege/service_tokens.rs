@@ -291,7 +291,9 @@ impl PrivilegedActionService for ServiceActionService {
                 // A PM QoS lease cannot outlive the boot that held it.
                 | RollbackToken::PmQosRelease { .. }
                 // resctrl is volatile: its groups vanish at reboot.
-                | RollbackToken::ResctrlGroupRemove { .. } => Ok(RollbackResult { affected_tasks: 0 }),
+                | RollbackToken::ResctrlGroupRemove { .. }
+                // kdamond configuration does not survive a reboot.
+                | RollbackToken::DamosTeardown { .. } => Ok(RollbackResult { affected_tasks: 0 }),
                 RollbackToken::CpuPowerRestore { .. }
                 | RollbackToken::IrqAffinityRestore { .. }
                 | RollbackToken::GpuPowerRestore { .. }

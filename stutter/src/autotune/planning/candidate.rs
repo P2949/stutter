@@ -5,9 +5,9 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use super::executable_plan::{
-    CgroupPlacementActionPlan, CpuAffinityProfilePlan, CpuPowerActionPlan, FakeCandidatePlan,
-    GpuPowerActionPlan, IoPrioActionPlan, IrqAffinityActionPlan, NiceActionPlan, PmQosActionPlan,
-    ResctrlActionPlan, UclampActionPlan, VmKnobActionPlan,
+    CgroupPlacementActionPlan, CpuAffinityProfilePlan, CpuPowerActionPlan, DamosActionPlan,
+    FakeCandidatePlan, GpuPowerActionPlan, IoPrioActionPlan, IrqAffinityActionPlan, NiceActionPlan,
+    PmQosActionPlan, ResctrlActionPlan, UclampActionPlan, VmKnobActionPlan,
 };
 use crate::{
     actions::SafetyClass,
@@ -32,6 +32,7 @@ pub enum CandidateAction {
     VmKnob { plan: VmKnobActionPlan },
     PmQos { plan: PmQosActionPlan },
     Resctrl { plan: ResctrlActionPlan },
+    Damos { plan: DamosActionPlan },
     Fake { plan: FakeCandidatePlan },
 }
 
@@ -259,6 +260,7 @@ impl CandidateAction {
             Self::VmKnob { plan } => plan,
             Self::PmQos { plan } => plan,
             Self::Resctrl { plan } => plan,
+            Self::Damos { plan } => plan,
             Self::Fake { plan } => plan,
         }
     }
@@ -297,7 +299,7 @@ pub trait CandidatePlan {
 /// Registry of mutation provider kinds (everything except the test-only fake).
 /// `is_mutation_provider` is an exhaustive match, so a new candidate variant cannot
 /// compile until this registry is revisited; coverage tooling uses it as a denominator.
-pub const MUTATION_PROVIDER_KINDS: [&str; 11] = [
+pub const MUTATION_PROVIDER_KINDS: [&str; 12] = [
     "cpu_affinity_profile",
     "nice",
     "ionice",
@@ -309,6 +311,7 @@ pub const MUTATION_PROVIDER_KINDS: [&str; 11] = [
     "vm_knob",
     "pm_qos",
     "resctrl",
+    "damos",
 ];
 
 impl CandidateAction {
@@ -324,7 +327,8 @@ impl CandidateAction {
             | Self::GpuPower { .. }
             | Self::VmKnob { .. }
             | Self::PmQos { .. }
-            | Self::Resctrl { .. } => true,
+            | Self::Resctrl { .. }
+            | Self::Damos { .. } => true,
             Self::Fake { .. } => false,
         }
     }

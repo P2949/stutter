@@ -234,22 +234,24 @@
       ],
       "anchors": [
         "stutter/src/autotune/sensors/memory_domains.rs",
-        "stutter/src/actions/damos_scheme.rs"
+        "stutter/src/actions/damos_scheme.rs",
+        "stutter/src/actions/damos_action.rs"
       ],
-      "status": "first_slice",
-      "g0": "read-only damon_state sensor (kdamond, running and scheme counts only, no addresses; root-only files report permission denied); experimental DAMOS scheme transaction (`damos_scheme`): claims only an idle kdamond, one vaddr context for a start-ticks-verified process, `stat` is monitoring-only while every reclaim/LRU action is classed irreversible and needs acknowledgement plus a bounded quota; commit reads the configuration and run state back, restore clears only a configuration that is still ours; fake-sysfs tests",
+      "status": "code_complete",
+      "g0": "read-only damon_state sensor (kdamond, running and scheme counts only, no addresses; root-only files report permission denied); experimental DAMOS scheme transaction (`damos_scheme`): claims only an idle kdamond, one vaddr context for a start-ticks-verified process, `stat` is monitoring-only while every reclaim/LRU action is classed irreversible and needs acknowledgement plus a bounded quota; commit reads the configuration and run state back, restore clears only a configuration that is still ours; fake-sysfs tests; `RollbackToken::DamosTeardown` (manual-only recovery that never claims reclaimed pages were restored), manual policy-gated `DamosSchemeAction` (HighRisk, SystemWide, default denies, irreversible actions need acknowledgement) and `CandidateAction::Damos` classified as manual-only `DamosScheme` with an Experimental capability; never an executable plan; active-config matching fails closed",
       "g1": "DAMON admin interface present on this host but root-only, so unavailable to the controller user",
       "runtime_availability": "kernel interface present (/sys/kernel/mm/damon/admin), damo absent",
       "authority": "O/F/E",
-      "not_wired": "DAMOS is a fake-sysfs verified transaction only: not an operation kind or worker-routed, no quota-goal feedback, no damo parity manifest, no hot/cold region summary; the real admin interface is root-only on this host",
+      "not_wired": "no quota-goal feedback, no damo parity manifest, no hot/cold region summary, not worker-routed (HighRisk manual/offline behind HIGH_RISK_APPLY_IMPLEMENTED=false); no real-hardware readback here",
       "dispositions": [
+        "CodeComplete",
         "FixtureVerified",
         "RealObserved",
         "HardwareUnavailable",
         "EvidenceDeferred"
       ],
       "evidence": [],
-      "unblock": "Needs on the host: kernel interface present (/sys/kernel/mm/damon/admin), damo absent"
+      "unblock": "DAMON admin sysfs is root-only for the controller user on this host: needs an authorized root-side run with an isolated workload, direct KPI and OOM/pressure guards for a real readback and any reclaim study"
     },
     {
       "id": "5.9",
