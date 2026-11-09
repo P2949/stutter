@@ -156,6 +156,7 @@ impl CandidateAction {
             Self::CpuPower { plan } => cpu_power_operation(&plan.action),
             Self::GpuPower { plan } => gpu_power_operation(&plan.action),
             Self::VmKnob { plan } => vm_operation(&plan.action),
+            Self::PmQos { .. } => MutationOperationKind::PmQosCpuLatency,
             Self::Fake { .. } => MutationOperationKind::Unclassified,
         }
     }

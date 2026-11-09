@@ -319,7 +319,7 @@ pub const CAPABILITIES: [Capability; 30] = [
         tier: CapabilityTier::Experimental,
         target_tier: CapabilityTier::Experimental,
         commands: &["autotune"],
-        providers: &[],
+        providers: &["pm_qos"],
         required_evidence: &[],
         required_release_evidence: &[],
         limitations: "System-wide effect: keeps every CPU out of deep idle states while held. A worker-owned descriptor lease with an enforced hold deadline; manual only, never autonomous, not a low-risk default. Does not inherit another operation's maturity.",

@@ -268,3 +268,32 @@ fn only_operations_with_a_prepared_transaction_can_be_registered() {
         );
     }
 }
+
+#[test]
+fn a_pm_qos_candidate_is_its_own_manual_only_operation_and_never_an_executable_plan() {
+    use crate::autotune::{
+        objective::ObjectiveKind,
+        planning::{
+            candidate::CandidateAction,
+            executable_plan::{CandidateExecutablePlan, PmQosActionPlan},
+        },
+    };
+    let candidate = CandidateAction::PmQos {
+        plan: PmQosActionPlan::manual(50, ObjectiveKind::GameRunnableLatency),
+    };
+    assert_eq!(
+        candidate.operation_kind(),
+        MutationOperationKind::PmQosCpuLatency
+    );
+    assert!(MutationOperationKind::PmQosCpuLatency.is_manual_only());
+    assert!(!MutationOperationKind::PmQosCpuLatency.prepared_transaction_implemented());
+    assert!(candidate.is_mutation_provider());
+    assert!(
+        CandidateExecutablePlan::from_candidate(&candidate).is_none(),
+        "a HighRisk system-wide request can never become an executable autotune plan"
+    );
+    assert_eq!(
+        MutationOperationKind::PmQosCpuLatency.capability_id(),
+        Some("pm_qos_cpu_latency")
+    );
+}

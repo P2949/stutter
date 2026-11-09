@@ -77,6 +77,9 @@ impl CandidateAction {
             CandidateAction::VmKnob { plan } => {
                 format!("vm_knob changes={}", plan.action.changes.len())
             }
+            CandidateAction::PmQos { plan } => {
+                format!("pm_qos_cpu_latency latency_us={}", plan.action.latency_us)
+            }
             CandidateAction::Fake { plan } => {
                 format!("fake action_id={}", plan.action_id.as_str())
             }
@@ -381,6 +384,11 @@ impl CandidateAction {
                     summary: self.planned_state_summary(),
                 }
             }
+            // The aggregate PM QoS target is not part of the active configuration snapshot, so a
+            // match can never be claimed.
+            CandidateAction::PmQos { .. } => ActiveConfigMatch::Unknown {
+                summary: self.planned_state_summary(),
+            },
             CandidateAction::Fake { .. } => ActiveConfigMatch::Unknown {
                 summary: self.planned_state_summary(),
             },

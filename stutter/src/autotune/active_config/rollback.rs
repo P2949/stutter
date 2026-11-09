@@ -284,6 +284,9 @@ pub fn verify_rollback_restored_baseline(
                 plan.action.changes.len()
             ))
         }
+        CandidateAction::PmQos { .. } => RollbackVerification::unavailable(
+            "the PM QoS aggregate target is not in the active configuration snapshot",
+        ),
         CandidateAction::Fake { .. } => {
             RollbackVerification::unavailable("fake candidate has no active config verifier")
         }
