@@ -708,14 +708,15 @@
       "anchors": [
         "stutter/src/actions/pm_qos.rs",
         "stutter/src/actions/pm_qos_transaction.rs",
-        "stutter/src/actions/pm_qos_watchdog.rs"
+        "stutter/src/actions/pm_qos_watchdog.rs",
+        "stutter/src/actions/pm_qos_rollback.rs"
       ],
       "status": "first_slice",
-      "g0": "descriptor-bound CPU-latency lease for /dev/cpu_dma_latency: binary u32 request, aggregate-target verification, hold deadline, release on drop or holder death; policy with a latency floor and ceiling and AC and no-throttling guards that fail closed; prepared transaction (`pm_qos_transaction`): dry-run prepare reads the baseline and refuses denied, unavailable or already-satisfied requests; commit rechecks power guards and acquires the verified lease; restore releases and proves the baseline (or another requester) in the aggregate, else Unproven; fake-device tests; `pm_qos_watchdog` owns the lease on a dedicated thread and releases it at the policy hold limit independently of the owner (owner may release early or only shorten the limit; drop releases)",
+      "g0": "descriptor-bound CPU-latency lease for /dev/cpu_dma_latency: binary u32 request, aggregate-target verification, hold deadline, release on drop or holder death; policy with a latency floor and ceiling and AC and no-throttling guards that fail closed; prepared transaction (`pm_qos_transaction`): dry-run prepare reads the baseline and refuses denied, unavailable or already-satisfied requests; commit rechecks power guards and acquires the verified lease; restore releases and proves the baseline (or another requester) in the aggregate, else Unproven; fake-device tests; `pm_qos_watchdog` owns the lease on a dedicated thread and releases it at the policy hold limit independently of the owner (owner may release early or only shorten the limit; drop releases); `RollbackToken::PmQosRelease` with an explicit recovery descriptor, startup-recovery boot policy, emergency executor, manual command, service-token handling and a `PmQosRollbackHandler` in both rollback registries: recovery never writes, a lease whose aggregate target still equals the request is reported unproven",
       "g1": "/dev/cpu_dma_latency exists on this host; no lease has been taken",
       "runtime_availability": "/dev/cpu_dma_latency present",
       "authority": "O/E",
-      "not_wired": "the transaction is not yet a MutationOperationKind/candidate and is not routed through the worker, journal or controller; no experiment; system-wide effect so it can never be a low-risk default",
+      "not_wired": "the token layer exists but no candidate/provider/executable plan/worker operation issues it yet, so no controller path or experiment can acquire a lease; system-wide effect so it can never be a low-risk default",
       "dispositions": [
         "FixtureVerified",
         "RealObserved",

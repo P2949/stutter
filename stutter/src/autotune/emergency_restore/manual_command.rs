@@ -107,6 +107,10 @@ pub fn manual_restore_command_for_token(token: &RollbackToken) -> String {
             shell_quote_value(original_value),
             shell_quote_path(path)
         ),
+        RollbackToken::PmQosRelease { .. } => {
+            "# a PM QoS lease ends when its holder exits: stop the holder; nothing is written back"
+                .to_owned()
+        }
     }
 }
 
@@ -136,6 +140,7 @@ pub(super) fn safety_class_for_rollback_token(token: &RollbackToken) -> SafetyCl
         RollbackToken::CpuPowerRestore { .. }
         | RollbackToken::VmKnobRestore { .. }
         | RollbackToken::GpuPowerRestore { .. }
+        | RollbackToken::PmQosRelease { .. }
         | RollbackToken::SysfsRestore { .. } => SafetyClass::HighRisk,
     }
 }
@@ -152,6 +157,7 @@ pub(super) fn rollback_token_kind(token: &RollbackToken) -> &'static str {
         RollbackToken::VmKnobRestore { .. } => "vm-knob-restore",
         RollbackToken::GpuPowerRestore { .. } => "gpu-power-restore",
         RollbackToken::SysfsRestore { .. } => "sysfs-restore",
+        RollbackToken::PmQosRelease { .. } => "pm-qos-release",
     }
 }
 

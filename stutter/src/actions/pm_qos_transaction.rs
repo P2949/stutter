@@ -45,6 +45,15 @@ pub enum ReleaseOutcome {
     Unproven,
 }
 
+/// What recovery needs to prove a lease is gone: the device, the request that was made and the
+/// aggregate target before it.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PmQosReleaseRecord {
+    pub device: PathBuf,
+    pub requested_us: u32,
+    pub baseline_us: u32,
+}
+
 /// A committed request, held by this process only.
 #[derive(Debug)]
 pub struct PmQosHeld {
@@ -96,6 +105,15 @@ pub fn prepare(
 impl PmQosHeld {
     pub fn requested_us(&self) -> u32 {
         self.lease.requested_us
+    }
+
+    /// The record a rollback token carries for this lease.
+    pub fn release_record(&self) -> PmQosReleaseRecord {
+        PmQosReleaseRecord {
+            device: self.device.clone(),
+            requested_us: self.lease.requested_us,
+            baseline_us: self.baseline_us,
+        }
     }
 
     /// The policy hold limit this lease was acquired under.

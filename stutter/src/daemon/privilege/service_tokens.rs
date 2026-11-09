@@ -287,7 +287,9 @@ impl PrivilegedActionService for ServiceActionService {
                 | RollbackToken::CgroupRestore { .. }
                 | RollbackToken::NiceRestore { .. }
                 | RollbackToken::UclampRestore { .. }
-                | RollbackToken::IoPrioRestore { .. } => Ok(RollbackResult { affected_tasks: 0 }),
+                | RollbackToken::IoPrioRestore { .. }
+                // A PM QoS lease cannot outlive the boot that held it.
+                | RollbackToken::PmQosRelease { .. } => Ok(RollbackResult { affected_tasks: 0 }),
                 RollbackToken::CpuPowerRestore { .. }
                 | RollbackToken::IrqAffinityRestore { .. }
                 | RollbackToken::GpuPowerRestore { .. }

@@ -10,6 +10,7 @@ fn automatically_recoverable(token: &RollbackToken) -> bool {
             | RollbackToken::NiceRestore { .. }
             | RollbackToken::CgroupRestore { .. }
             | RollbackToken::CpuPowerRestore { .. }
+            | RollbackToken::PmQosRelease { .. }
     )
 }
 
@@ -30,6 +31,7 @@ fn token_inventory() -> Vec<RollbackToken> {
         RollbackToken::CpuPowerRestore { records: vec![] },
         RollbackToken::GpuPowerRestore { records: vec![] },
         RollbackToken::VmKnobRestore { records: vec![] },
+        RollbackToken::PmQosRelease { records: vec![] },
         RollbackToken::SysfsRestore {
             path: PathBuf::from("unused-knob"),
             original_value: "0".to_owned(),
@@ -40,7 +42,7 @@ fn token_inventory() -> Vec<RollbackToken> {
 #[test]
 fn startup_registry_has_only_explicitly_authorized_providers_and_no_manual_fallback() {
     let registry = crate::autotune::emergency_restore::startup_rollback_registry();
-    assert_eq!(registry.handlers().len(), 5);
+    assert_eq!(registry.handlers().len(), 6);
     let mut kinds = std::collections::BTreeSet::new();
     for token in token_inventory() {
         let descriptor = recovery_descriptor(&token);
@@ -72,7 +74,7 @@ fn startup_registry_has_only_explicitly_authorized_providers_and_no_manual_fallb
             );
         }
     }
-    assert_eq!(kinds.len(), 10);
+    assert_eq!(kinds.len(), 11);
 }
 
 #[test]

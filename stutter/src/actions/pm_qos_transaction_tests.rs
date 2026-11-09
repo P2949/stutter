@@ -143,3 +143,37 @@ fn a_lease_past_its_hold_limit_is_reported_expired() {
         .unwrap();
     assert!(held.expired(Instant::now()));
 }
+
+#[test]
+fn a_lease_yields_a_token_record_that_round_trips_and_recovery_proves_release() {
+    let device = fake_device("token", 2_000_000);
+    let held = prepare(&device, 50, &PmQosPolicy::default(), &ac())
+        .unwrap()
+        .commit(&ac())
+        .unwrap();
+    let token = crate::actions::RollbackToken::PmQosRelease {
+        records: vec![held.release_record()],
+    };
+    assert_eq!(token.kind(), "pm-qos-release");
+    assert_eq!(token.affected_tasks(), 1);
+    assert!(token.restore_path().is_none());
+    let json = serde_json::to_string(&token).unwrap();
+    let back: crate::actions::RollbackToken = serde_json::from_str(&json).unwrap();
+    assert_eq!(back, token);
+    let descriptor = crate::actions::rollback::recovery::recovery_descriptor(&token);
+    assert_eq!(descriptor.token_kind, "pm-qos-release");
+    assert_eq!(
+        descriptor.automatic_recovery,
+        crate::actions::rollback::recovery::AutomaticRecoveryCapability::VerifiedAutomatic
+    );
+    // While the holder is alive the aggregate equals the request: recovery cannot prove release.
+    let still_held = crate::autotune::emergency_restore::restore_rollback_token(&token).unwrap();
+    assert_eq!(still_held.restored_items, 0);
+    assert_eq!(still_held.skipped_items, 1);
+    // The holder ends (the kernel stand-in drops the request): recovery proves it is gone.
+    drop(held);
+    set(&device, 2_000_000);
+    let gone = crate::autotune::emergency_restore::restore_rollback_token(&token).unwrap();
+    assert_eq!(gone.restored_items, 1);
+    assert_eq!(gone.failed_items, 0);
+}

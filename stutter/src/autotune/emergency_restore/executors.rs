@@ -81,6 +81,7 @@ pub fn restore_rollback_token_direct(
         RollbackToken::CpuPowerRestore { records } => restore_cpu_power_records(records),
         RollbackToken::VmKnobRestore { records } => restore_vm_knob_records(records),
         RollbackToken::GpuPowerRestore { records } => restore_gpu_power_records(records),
+        RollbackToken::PmQosRelease { records } => restore_pm_qos_release(records),
         RollbackToken::SysfsRestore {
             path,
             original_value,
@@ -447,4 +448,15 @@ pub(super) fn restore_gpu_power_records(
         "gpu-power-restore",
         restored,
     ))
+}
+
+pub(super) fn restore_pm_qos_release(
+    records: &[crate::actions::pm_qos_transaction::PmQosReleaseRecord],
+) -> anyhow::Result<RollbackRestoreSummary> {
+    let check = crate::actions::pm_qos_rollback::check_release(records);
+    let mut summary = RollbackRestoreSummary::success("pm-qos-release", check.released);
+    summary.skipped_items = check.unproven;
+    summary.failed_items = check.unreadable;
+    summary.messages = check.messages;
+    Ok(summary)
 }

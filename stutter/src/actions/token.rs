@@ -79,6 +79,11 @@ pub enum RollbackToken {
         path: PathBuf,
         original_value: String,
     },
+    /// A PM QoS CPU-latency lease. There is no value to write back: the request ends when its
+    /// descriptor closes, so recovery proves the aggregate target is no longer ours.
+    PmQosRelease {
+        records: Vec<super::pm_qos_transaction::PmQosReleaseRecord>,
+    },
 }
 
 impl RollbackToken {
@@ -94,6 +99,7 @@ impl RollbackToken {
             Self::VmKnobRestore { .. } => "vm-knob-restore",
             Self::GpuPowerRestore { .. } => "gpu-power-restore",
             Self::SysfsRestore { .. } => "sysfs-restore",
+            Self::PmQosRelease { .. } => "pm-qos-release",
         }
     }
 
@@ -164,6 +170,15 @@ impl RollbackToken {
         match self {
             Self::IoPrioRestore { records } => Ok(records),
             other => Err(other.kind_error("ioprio-restore")),
+        }
+    }
+
+    pub fn into_pm_qos_release(
+        self,
+    ) -> Result<Vec<super::pm_qos_transaction::PmQosReleaseRecord>, RollbackTokenKindError> {
+        match self {
+            Self::PmQosRelease { records } => Ok(records),
+            other => Err(other.kind_error("pm-qos-release")),
         }
     }
 
@@ -278,6 +293,7 @@ impl RollbackToken {
             Self::VmKnobRestore { records } => records.len(),
             Self::GpuPowerRestore { records } => records.len(),
             Self::SysfsRestore { .. } => 1,
+            Self::PmQosRelease { records } => records.len(),
         }
     }
 
@@ -292,6 +308,7 @@ impl RollbackToken {
             | Self::CgroupRestore { .. }
             | Self::CpuPowerRestore { .. }
             | Self::GpuPowerRestore { .. }
+            | Self::PmQosRelease { .. }
             | Self::VmKnobRestore { .. } => None,
         }
     }

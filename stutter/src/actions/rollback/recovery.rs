@@ -59,6 +59,10 @@ pub(crate) fn recovery_descriptor(token: &RollbackToken) -> RollbackRecoveryDesc
             NotRecoverable,
             "arbitrary path token has no automatic resource identity contract",
         ),
+        RollbackToken::PmQosRelease { .. } => (
+            VerifiedAutomatic,
+            "the lease ends with its holder descriptor; recovery only reads the aggregate target and never writes, and reports a target still equal to the request as unproven",
+        ),
     };
     RollbackRecoveryDescriptor {
         token_kind: token.kind(),
