@@ -104,7 +104,13 @@ fn live_real_device_lease_changes_the_aggregate_target_and_rollback_releases_it(
     let held = crate::actions::pm_qos::read_effective(&device).unwrap();
     action.rollback(&token).unwrap();
     let after = crate::actions::pm_qos::read_effective(&device).unwrap();
-    eprintln!("pm_qos live: before={before} held={held} after={after}");
+    {
+        use std::io::Write;
+        let _ = writeln!(
+            std::io::stderr(),
+            "pm_qos live: before={before} held={held} after={after}"
+        );
+    }
     assert!(held <= 1000, "the lease did not take effect: {held}");
     assert_eq!(after, before, "the aggregate target did not return");
 }

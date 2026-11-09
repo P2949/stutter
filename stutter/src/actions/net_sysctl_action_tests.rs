@@ -123,5 +123,8 @@ fn live_real_net_sysctls_in_a_private_namespace_write_read_back_and_restore() {
         assert!(!action.verify().unwrap().applied, "{knob:?} not restored");
         proven.push(format!("{:?}", knob.operation()));
     }
-    eprintln!("net live: proven {proven:?}");
+    {
+        use std::io::Write;
+        let _ = writeln!(std::io::stderr(), "net live: proven {proven:?}");
+    }
 }

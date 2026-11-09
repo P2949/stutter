@@ -674,12 +674,14 @@
       "not_wired": "not worker-routed (HighRisk manual/offline behind HIGH_RISK_APPLY_IMPLEMENTED=false); systemd1 SetUnitProperties adapter and a real OpenRC host acceptance are not done and are not represented as passed; no per-knob real-device campaign",
       "dispositions": [
         "CodeComplete",
+        "EvidenceDeferred",
         "FixtureVerified",
-        "RealObserved",
-        "EvidenceDeferred"
+        "MechanismValidated",
+        "RealObserved"
       ],
       "evidence": [
-        "docs/validation/openrc-2026-11-08.md"
+        "docs/validation/openrc-2026-11-08.md",
+        "docs/validation/live-mechanisms-2026-11-09/RESULTS.md"
       ],
       "unblock": "Real-device campaigns per knob and the systemd1 SetUnitProperties and installed OpenRC backend acceptance: need an authorized delegated subtree with an isolated workload and direct KPI on a real OpenRC host"
     },
@@ -738,11 +740,14 @@
       "not_wired": "no provider proposes it and no worker operation carries it: by design a HighRisk manual/offline operation behind the HIGH_RISK_APPLY_IMPLEMENTED=false denial; no real-device mechanism campaign; active-config snapshots do not read the aggregate target",
       "dispositions": [
         "CodeComplete",
+        "EvidenceDeferred",
         "FixtureVerified",
-        "RealObserved",
-        "EvidenceDeferred"
+        "MechanismValidated",
+        "RealObserved"
       ],
-      "evidence": [],
+      "evidence": [
+        "docs/validation/live-mechanisms-2026-11-09/RESULTS.md"
+      ],
       "unblock": "Real-device mechanism and benefit campaign: needs an authorized, isolated workload with a direct latency KPI; the lease itself is system-wide and stays manual-only."
     },
     {
@@ -837,12 +842,15 @@
       "not_wired": "not worker-routed (HighRisk manual/offline behind HIGH_RISK_APPLY_IMPLEMENTED=false); no per-process offender I/O accounting source beyond the compile/browser helper selectors; no real-device scheduler campaign; no blktrace/biosnoop importer",
       "dispositions": [
         "CodeComplete",
+        "EvidenceDeferred",
         "FixtureVerified",
-        "RealObserved",
         "HardwareUnavailable",
-        "EvidenceDeferred"
+        "MechanismValidated",
+        "RealObserved"
       ],
-      "evidence": [],
+      "evidence": [
+        "docs/validation/live-mechanisms-2026-11-09/RESULTS.md"
+      ],
       "unblock": "blktrace/biosnoop/biolatency/fio absent; a real-device scheduler mechanism and target-versus-bystander campaign needs an explicitly disposable authorized block device (none is designated on this host)"
     },
     {
@@ -880,15 +888,17 @@
       "not_wired": "no OpenTelemetry reader (not required by the plan row); no local offered-load network execution and no exact installed-production acceptance (tools absent, no disposable service); not worker-routed (HighRisk manual/offline behind HIGH_RISK_APPLY_IMPLEMENTED=false); socket-level options and qdisc selection are not implemented as operations; Prometheus import and compare-load remain read-only",
       "dispositions": [
         "CodeComplete",
+        "EvidenceDeferred",
         "FixtureVerified",
         "HardwareUnavailable",
-        "EvidenceDeferred",
+        "MechanismValidated",
         "RealObserved"
       ],
       "evidence": [
         "docs/KPI_OBSERVATION.md",
         "docs/validation/kpi-observation-2026-11-08/service-summary.json",
-        "docs/validation/kpi-observation-2026-11-08/source-ci-receipt.json"
+        "docs/validation/kpi-observation-2026-11-08/source-ci-receipt.json",
+        "docs/validation/live-mechanisms-2026-11-09/RESULTS.md"
       ],
       "unblock": "HTTP/RPC/network physical proof requires an owned local disposable service, versioned benchmark tools (iperf3, wrk, wrk2, h2load are absent here), fixed offered load and direct latency/error/completion guards; the CPU fixed-work transport evidence is not a network qualification, and bpftune is absent so no cooperative strategy was exercised"
     },

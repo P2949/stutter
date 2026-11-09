@@ -1,0 +1,13 @@
+kernel 6.18.57, run as root via sudo, tree based on 6505d9cf plus the uncommitted test cleanup
+--- pm_qos
+pm_qos live: before=2000000000 held=1000 after=2000000000
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3358 filtered out; finished in 0.00s
+--- cgroup
+cgroup live: proven ["cpu.weight", "cpu.idle", "cpu.max", "memory.high", "memory.low", "memory.min"]
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3358 filtered out; finished in 0.00s
+--- net (private netns via unshare -n)
+net live: proven ["TcpCongestionControl", "TcpBuffers", "TcpBuffers"]
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3358 filtered out; finished in 0.00s
+--- block (disposable loop device)
+block live: loop0 before="[none] mq-deadline kyber \n" during="none [mq-deadline] kyber \n" after="[none] mq-deadline kyber \n"
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3358 filtered out; finished in 0.04s

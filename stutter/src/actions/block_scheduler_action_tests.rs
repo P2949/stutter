@@ -115,7 +115,13 @@ fn live_real_loop_device_scheduler_changes_and_restores() {
     let during = fs::read_to_string(&queue).unwrap();
     action.rollback(&token).unwrap();
     let after = fs::read_to_string(&queue).unwrap();
-    eprintln!("block live: {device} before={before:?} during={during:?} after={after:?}");
+    {
+        use std::io::Write;
+        let _ = writeln!(
+            std::io::stderr(),
+            "block live: {device} before={before:?} during={during:?} after={after:?}"
+        );
+    }
     assert!(during.contains(&format!("[{other}]")));
     assert_eq!(after.trim(), before.trim());
 }

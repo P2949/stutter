@@ -158,10 +158,19 @@ fn live_real_cgroup_knobs_write_read_back_and_restore() {
                 );
                 proven.push(control.file_and_controller().0);
             }
-            Err(error) => eprintln!("cgroup live: {control:?} not exercised: {error}"),
+            Err(error) => {
+                use std::io::Write;
+                let _ = writeln!(
+                    std::io::stderr(),
+                    "cgroup live: {control:?} not exercised: {error}"
+                );
+            }
         }
     }
-    eprintln!("cgroup live: proven {proven:?}");
+    {
+        use std::io::Write;
+        let _ = writeln!(std::io::stderr(), "cgroup live: proven {proven:?}");
+    }
     fs::remove_dir(&dir).unwrap();
     assert!(
         proven.contains(&"cpu.weight"),
