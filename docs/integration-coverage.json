@@ -175,7 +175,7 @@
       ],
       "status": "code_complete",
       "g0": "a cheap `sched_ext` sensor reads enabled state, the loaded scheduler's name, and enable_seq / nr_rejected / hotplug_seq deltas; a scheduler switch during an experiment restores and invalidates it through the session guard (never a tuning input); `compare_schedulers` compares two schedulers over matched blocks (same kernel, workload digest, metric, unit and direction, paired by block id, at least three blocks) into a signed percent improvement interval and a verdict, refusing anything unmatched; a semantics table treats the kernel default as honoring nice, cgroup weight and uclamp and every sched_ext scheduler as Unknown until verified, and the planner denies Nice and Uclamp candidates under an unverified sched_ext scheduler (`scheduler_semantics_unverified`); kernel state tracker, scheduler-domain ownership from /sys/kernel/sched_ext, and a gated offline strategy adapter (see 5.7) for switching with exact restore",
-      "g1": "sched_ext present and disabled on this host",
+      "g1": "sched_ext present and disabled on this host; a real switch was observed on 2026-11-09: scx_simple (nixpkgs scx_cscheds) took the kernel to state=enabled ops=simple, enable_seq 0->1, and SIGINT returned it to disabled with the services unaffected (docs/validation/live-mechanisms-2026-11-09/RESULTS.md)",
       "runtime_availability": "present",
       "authority": "O/F/E",
       "not_wired": "nothing",
