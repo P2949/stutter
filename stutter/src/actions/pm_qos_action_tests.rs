@@ -86,3 +86,25 @@ fn rollback_refuses_a_token_of_another_kind() {
     let other = RollbackToken::NiceRestore { records: vec![] };
     assert!(action.rollback(&other).is_err());
 }
+
+/// Live: the real `/dev/cpu_dma_latency`, run as root. Takes a 1 ms lease for a moment, reads the
+/// aggregate target while held, releases it through rollback and reads it again.
+#[test]
+#[ignore = "live: needs root and the real /dev/cpu_dma_latency"]
+fn live_real_device_lease_changes_the_aggregate_target_and_rollback_releases_it() {
+    let device = PathBuf::from(PM_QOS_DEVICE);
+    let before = crate::actions::pm_qos::read_effective(&device).expect("BlockedResource: root");
+    let action = PmQosCpuLatencyAction {
+        device: device.clone(),
+        latency_us: 1000,
+    };
+    let token = action
+        .apply_with_policy(&policy(Duration::from_secs(5)))
+        .unwrap();
+    let held = crate::actions::pm_qos::read_effective(&device).unwrap();
+    action.rollback(&token).unwrap();
+    let after = crate::actions::pm_qos::read_effective(&device).unwrap();
+    eprintln!("pm_qos live: before={before} held={held} after={after}");
+    assert!(held <= 1000, "the lease did not take effect: {held}");
+    assert_eq!(after, before, "the aggregate target did not return");
+}

@@ -87,3 +87,35 @@ fn recovery_is_verified_automatic_and_the_token_round_trips() {
     assert_eq!(summary.restored_items, 0);
     assert_eq!(summary.skipped_identity_mismatch, 1);
 }
+
+/// Live: a disposable loop device named by `STUTTER_LIVE_BLOCK_DEVICE`, run as root. The real
+/// `/sys/block` scheduler list is read, a different scheduler selected, read back and restored.
+#[test]
+#[ignore = "live: needs root and a disposable loop device in STUTTER_LIVE_BLOCK_DEVICE"]
+fn live_real_loop_device_scheduler_changes_and_restores() {
+    let device = std::env::var("STUTTER_LIVE_BLOCK_DEVICE").expect("BlockedResource: loop device");
+    let queue = Path::new("/sys/block")
+        .join(&device)
+        .join("queue/scheduler");
+    let before = fs::read_to_string(&queue).unwrap();
+    let other = before
+        .split_whitespace()
+        .map(|w| w.trim_matches(|c| c == '[' || c == ']').to_owned())
+        .find(|name| !before.contains(&format!("[{name}]")))
+        .expect("a second scheduler");
+    let action = BlockSchedulerAction::new(BlockSchedulerRequest {
+        device: device.clone(),
+        scheduler: other.clone(),
+        authorized: [device.clone()].into(),
+        protected: Default::default(),
+    });
+    let token = action
+        .apply_with_policy(&BlockSchedulerPolicy { allow: true })
+        .unwrap();
+    let during = fs::read_to_string(&queue).unwrap();
+    action.rollback(&token).unwrap();
+    let after = fs::read_to_string(&queue).unwrap();
+    eprintln!("block live: {device} before={before:?} during={during:?} after={after:?}");
+    assert!(during.contains(&format!("[{other}]")));
+    assert_eq!(after.trim(), before.trim());
+}

@@ -119,3 +119,52 @@ fn preflight_denials_surface_before_any_write() {
     assert!(action.apply_with_policy(&allowed()).is_err());
     assert_eq!(fs::read_to_string(dir.join("cpu.weight")).unwrap(), "100\n");
 }
+
+/// Live: a disposable empty cgroup under the real cgroup2 root, run as root. Every knob the host's
+/// root enables is written through the action, read back from the kernel and restored.
+#[test]
+#[ignore = "live: needs root and cgroup2 at /sys/fs/cgroup"]
+fn live_real_cgroup_knobs_write_read_back_and_restore() {
+    let root = PathBuf::from("/sys/fs/cgroup");
+    let dir = root.join(format!("stutter-live-{}", std::process::id()));
+    fs::create_dir(&dir).expect("BlockedResource: root and cgroup2");
+    let cases = [
+        CgroupControl::CpuWeight(300),
+        CgroupControl::CpuIdle(true),
+        CgroupControl::CpuMax {
+            quota_us: Some(50_000),
+            period_us: 100_000,
+        },
+        CgroupControl::MemoryHigh(Some(1 << 30)),
+        CgroupControl::MemoryLow(1 << 20),
+        CgroupControl::MemoryMin(1 << 20),
+    ];
+    let mut proven = Vec::new();
+    for control in cases {
+        let action = CgroupControlAction {
+            dir: dir.clone(),
+            control: control.clone(),
+        };
+        match action.apply_with_policy(&allowed()) {
+            Ok(token) => {
+                assert!(
+                    action.verify().unwrap().applied,
+                    "{control:?} not read back"
+                );
+                action.rollback(&token).unwrap();
+                assert!(
+                    !action.verify().unwrap().applied,
+                    "{control:?} not restored"
+                );
+                proven.push(control.file_and_controller().0);
+            }
+            Err(error) => eprintln!("cgroup live: {control:?} not exercised: {error}"),
+        }
+    }
+    eprintln!("cgroup live: proven {proven:?}");
+    fs::remove_dir(&dir).unwrap();
+    assert!(
+        proven.contains(&"cpu.weight"),
+        "cpu.weight must be exercisable"
+    );
+}

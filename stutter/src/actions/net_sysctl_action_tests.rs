@@ -87,3 +87,41 @@ fn a_foreign_token_is_refused_and_recovery_is_verified_automatic() {
         crate::actions::rollback::recovery::AutomaticRecoveryCapability::VerifiedAutomatic
     );
 }
+
+/// Live: the real `/proc/sys/net`, run as root inside a private network namespace
+/// (`unshare -n`) so no host or other namespace setting is touched.
+#[test]
+#[ignore = "live: needs root and a private network namespace (unshare -n)"]
+fn live_real_net_sysctls_in_a_private_namespace_write_read_back_and_restore() {
+    let available = fs::read_to_string("/proc/sys/net/ipv4/tcp_available_congestion_control")
+        .expect("BlockedResource: /proc/sys/net");
+    let current = fs::read_to_string("/proc/sys/net/ipv4/tcp_congestion_control").unwrap();
+    let other = available
+        .split_whitespace()
+        .find(|name| *name != current.trim())
+        .expect("a second congestion control")
+        .to_owned();
+    let mut proven = Vec::new();
+    // `net.core.busy_poll` exists only in the initial namespace: in a private one it is typed
+    // Unavailable, never written elsewhere.
+    let busy = NetSysctlAction::new(NetKnob::BusyPollUs(50));
+    assert!(
+        busy.apply_with_policy(&allowed())
+            .unwrap_err()
+            .to_string()
+            .contains("Unavailable")
+    );
+    for knob in [
+        NetKnob::CongestionControl(other),
+        NetKnob::TcpWmem([4096, 65_536, 4_194_304]),
+        NetKnob::TcpRmem([4096, 262_144, 8_388_608]),
+    ] {
+        let action = NetSysctlAction::new(knob.clone());
+        let token = action.apply_with_policy(&allowed()).expect("apply");
+        assert!(action.verify().unwrap().applied, "{knob:?} not read back");
+        action.rollback(&token).unwrap();
+        assert!(!action.verify().unwrap().applied, "{knob:?} not restored");
+        proven.push(format!("{:?}", knob.operation()));
+    }
+    eprintln!("net live: proven {proven:?}");
+}
