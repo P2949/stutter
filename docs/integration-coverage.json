@@ -523,23 +523,24 @@
       "anchors": [
         "stutter/src/autotune/sensors/cpu_power.rs"
       ],
-      "status": "first_slice",
-      "g0": "cheap cpu_power sensor: per-policy driver/governor/EPP, requested versus actual frequency, boost, AC state and throttle-event deltas with reset detection; sampled by the runtime into every observation",
+      "status": "code_complete",
+      "g0": "cheap cpu_power sensor: per-policy driver/governor/EPP, requested versus actual frequency, boost, AC state and throttle-event deltas with reset detection; sampled by the runtime into every observation; the EPP provider now consults the cpu_power sensor: any throttle event since the last reading, or a reading that lost counts, withholds the preference change (thermal protection is a mitigation to leave alone; thermald is never disabled), and candidates are per cpufreq policy with every related CPU named",
       "g1": "read on this host at runtime (intel_pstate, 12 policies)",
       "runtime_availability": "thermald absent",
       "authority": "O/A",
-      "not_wired": "no per-policy EPP experiment (campaign) path, though the CPU-power action now refuses a write that would reach a shared cpufreq policy's sibling CPUs unless every related CPU is named and allowed; sensor results do not feed any decision (a cheap `cpu_idle` sensor now reads C-state residency per state and RAPL package energy when readable by this user, which is root-only on this host)",
+      "not_wired": "no new EPP benefit campaign (the prior negative pilot is retained, not rerun); thermald absent on this host; RAPL energy is root-only here",
       "related_existing": [
         "stutter/src/system_inventory.rs"
       ],
       "dispositions": [
+        "CodeComplete",
         "FixtureVerified",
         "RealObserved",
         "HardwareUnavailable",
         "EvidenceDeferred"
       ],
       "evidence": [],
-      "unblock": "Needs on the host: thermald absent"
+      "unblock": "thermald is absent on this host; a per-policy EPP benefit campaign is not repeated because the prior ~0.3% EPP pilot is negative and retained; RAPL energy is root-only here"
     },
     {
       "id": "5.18",

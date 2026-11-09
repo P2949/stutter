@@ -141,6 +141,24 @@ fn cpu_power_evidence(input: &CandidateProviderInput<'_>) -> Option<CpuPowerCand
         return None;
     }
 
+    // Thermal protection is a mitigation to leave alone: any throttle event the sensor saw since
+    // the previous reading, or a missing or lossy power reading, withholds the preference change.
+    let throttling = input
+        .observation
+        .sensor_readings
+        .iter()
+        .filter(|reading| reading.sensor == "cpu_power")
+        .any(|reading| {
+            reading
+                .values
+                .get("throttle_events_delta")
+                .is_some_and(|delta| *delta > 0.0)
+                || reading.lost > 0
+        });
+    if throttling {
+        return None;
+    }
+
     let thermal_headroom = input.observation.objective_signals.thermal_degraded != Some(true)
         && input.system_health.ok_for_apply;
     if !thermal_headroom {
