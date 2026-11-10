@@ -1,0 +1,35 @@
+{
+  "result": "PASS",
+  "source_sha": "d70f1b521c928cac098d775b97bcc45ce18d7886",
+  "source_clean": true,
+  "build_output": "fresh local clone checkout/target (exclusive to this checkout); run at nice 19, ionice idle, CARGO_BUILD_JOBS=3 because a game was running on the host",
+  "commands": [
+    "nix develop --command cargo run -q -p xtask -- ci",
+    "nix develop --command cargo clippy --workspace --all-targets -- -D warnings",
+    "nix develop --command cargo run -q -p xtask -- release-check"
+  ],
+  "library": {
+    "passed": 3455,
+    "ignored": 19
+  },
+  "xtask": {
+    "passed": 561
+  },
+  "validation_runner": {
+    "passed": 106,
+    "ignored": 7
+  },
+  "architecture_tests": {
+    "passed": 125
+  },
+  "release_binary_sha256": "aa8035f343a60cbd9b5b3ba9d96ef53692153f7fa5a545296ec4eea70ebd943c",
+  "logs_sha256": {
+    "ci.log": "39ad26b8d0b8a6c2de864bd84bbeb09a88874263fd153d7a84ea34ecba779dd2",
+    "clippy-workspace.log": "5333ece4ab3b506d7e04d400665fe3b88412336158d009aaa97daf774706f673",
+    "release-check.log": "d06f31310f5a26228c1107346c9e804c57f94b4cabb302239bfe1fc9dfeb8cc1"
+  },
+  "scope": "committed-source validation of the ignored live fence harness (live_fence_tests.rs: two-phase exchange plus the worker SIGKILL and restart phases) on top of 71d90506; the executable code is that of 71d90506 (read-only fence_status request and the smoke acknowledgment)",
+  "live_evidence": "docs/validation/worker-fence-qualification-2026-11-09/RESULTS.md: against a real, isolated, transient root worker: fence_status for six states; decoy refused at prepare; fixture applied and exactly restored; commit refused when the fence moved or expired between prepare and commit; and, after the worker was killed with SIGKILL with a token outstanding and restarted, startup recovery restored the fixture, the fence survived, the decoy was still refused and 0 tokens were outstanding. An invalid first restart attempt is recorded and discarded there. Not run against the installed worker; a runner SIGKILL during an active prepare was not run live.",
+  "not_deployed": "The production service is still the 4f3baa07 build, which does not know fence_status and has no fence. The final-source deployment is deferred (BlockedResource: host not quiescent), so this receipt does not qualify the installed binary.",
+  "note": "documentation-only commits after this sha do not change the built binary"
+}
