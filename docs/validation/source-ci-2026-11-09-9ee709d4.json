@@ -1,0 +1,35 @@
+{
+  "result": "PASS",
+  "source_sha": "9ee709d49dbe8d2433fb49a0c957a646d7780949",
+  "source_clean": true,
+  "build_output": "fresh local clone checkout/target (exclusive to this checkout); run at nice 19, ionice idle, CARGO_BUILD_JOBS=3 because a game was running on the host",
+  "commands": [
+    "nix develop --command cargo run -q -p xtask -- ci",
+    "nix develop --command cargo clippy --workspace --all-targets -- -D warnings",
+    "nix develop --command cargo run -q -p xtask -- release-check"
+  ],
+  "library": {
+    "passed": 3455,
+    "ignored": 17
+  },
+  "xtask": {
+    "passed": 561
+  },
+  "validation_runner": {
+    "passed": 106,
+    "ignored": 7
+  },
+  "architecture_tests": {
+    "passed": 125
+  },
+  "release_binary_sha256": "e474d6264c0254def1a9ec0924f4e8c7d5356b9cbc0d35511972dadb0405c9fd",
+  "logs_sha256": {
+    "ci.log": "932017cc14eaf43cad6f1f7243980f49ec372a133e4bb7bdaa151f665d8673bd",
+    "clippy-workspace.log": "e1a9f4aeea03c351b4fc1567fe08bb6eb0eecec23defa230da614a4945c0f5bc",
+    "release-check.log": "7dcc6fbb7c9ba731186d87543f51f14cf4f5d20fafc61236956278678c467f7d"
+  },
+  "scope": "committed-source validation of the ignored two-phase live fence harness (live_fence_tests.rs) on top of 71d90506; the executable code is that of 71d90506 (read-only fence_status request and the smoke acknowledgment)",
+  "live_evidence": "docs/validation/worker-fence-qualification-2026-11-09/RESULTS.md: a real, isolated, transient root worker answered fence_status for six fence states; refused a decoy at prepare; applied and exactly restored the fenced fixture; refused the commit when the fence moved to the decoy or expired between prepare and commit, writing nothing and leaving no token outstanding. Not run against the installed worker; worker restart and runner SIGKILL under a fence were not run live.",
+  "not_deployed": "The production service is still the 4f3baa07 build, which does not know fence_status and has no fence. The final-source deployment is deferred (BlockedResource: host not quiescent), so this receipt does not qualify the installed binary.",
+  "note": "documentation-only commits after this sha do not change the built binary"
+}
