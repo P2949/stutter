@@ -175,3 +175,42 @@ outside the fixture was touched, and the controller recorded the refusal and kep
 and start time) is one of its ancestors. A stranger, a stranger's child and a reused parent pid are still refused, and
 the fence still only narrows. Test: `a_process_the_fenced_one_started_is_inside_the_fence_and_a_stranger_or_reused_parent_is_not`.
 The binary therefore changes, so this build (`aa8035f3…`) is superseded and its deployment is not retried as is.
+
+## Activation of `9cfca635` (binary `6922c7c6…`): attempts 4 and 5 (2026-11-10)
+
+NixosConf branch `host/stutter-final-9cfca635` at `6091d4f` (local): source pin `9cfca635`, `flake.lock`, and
+`binarySha256 = 6922c7c6d09f4fad2e1a02902da6440fa28823b423f54b78f2e8853c020942bc` moved together; the binary is in the
+store at `/nix/store/4jm60ap6…-stutter` and its hash was re-read equal to the receipt's. `./scripts/validate affected`
+PASS (receipt `6091d4f4…/affected.json`), toplevel `/nix/store/cm4bbc51…-nixos-system-desktop-…`, `dry-activate` touches
+only the two Stutter units.
+
+| # | Result | Cause |
+|---|---|---|
+| 4 | 36 of 37 checks PASS, 1 FAIL, rolled back | the smoke's own audit, not the product, below |
+| 5 | BLOCKED (0 checks), rolled back | a Steam game started during the run (46 pressure-vessel processes); `BlockedResource`, not retried |
+
+**Attempt 4: the fix to the fence worked.** The controller applied, kept and restored experiments on the fixture
+through the worker under the fixture fence (the mutation, physical-change, resolution, token-settled, units-active and
+fence-acknowledgment checks all passed). The one failure, `controller_changed_only_the_disposable_fixtures`, was the
+harness audit rejecting the controller's own correct records for three reasons, each a defect in the audit introduced
+when it was tightened and never run live before:
+
+1. the fixture's comm was captured the instant it was spawned, while it was still the `taskset` that execs it
+   (`taskset` vs the workload's `StutterAcceptan`); it is now refreshed once the fixture is ready, checked against the
+   recorded start time;
+2. the controller's history leaves `target.process_starttime_ticks` null and records the exact start time in
+   `focus.root_starttimes`; the audit now reads it from there and still refuses a missing or different one;
+3. a `restored` record names no target; it is now attributed through its experiment id, which must already have been
+   attributed to a fixture, and an unattributed restore still fails.
+
+Fix `5470215d`, with tests for the focus start time, the restore attribution (including an orphan restore and a restore
+after a refused change) and the comm refresh. The installed binary is unaffected (the change is harness-only), so the
+pinned build above stands.
+
+**Attempt 5** was refused by the smoke's own isolation check before any fixture was started, because the user's
+session began a game. The previous generation was reactivated: `/run/current-system` is `z5c4c0vs…`, both units are
+active, 0 tokens outstanding, no fence file left, no qualification process left. Per the plan this stage is
+`BlockedResource`; nothing was scheduled. To resume once the host is free: from `/etc/nixos` on
+`host/stutter-final-9cfca635`, `bash deploy.sh`-equivalent steps (`switch-to-configuration test`, then
+`xtask production-smoke --binary-sha256 6922c7c6… --out <new dir> --user p2949` inside `nix develop`, switch only on a
+full PASS, reactivate `z5c4c0vs…` otherwise).
