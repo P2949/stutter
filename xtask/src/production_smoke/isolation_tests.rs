@@ -448,3 +448,60 @@ fn an_unarmed_fence_refuses_instead_of_silently_running_unfenced() {
     assert!(write_fence(1, 60).is_err());
     assert!(deny_all(60).is_err());
 }
+
+#[test]
+fn the_start_time_may_come_from_the_focus_record_and_a_restore_is_attributed_through_its_experiment()
+ {
+    let fixtures = [fixture(100, 5000)];
+    let with_focus = |decision: &str, ticks: u64| {
+        let mut value = record(
+            decision,
+            target(json!(100), json!("StutterAcceptan"), json!(null)),
+        );
+        value["focus"] = json!({"root_starttimes": {"100": ticks}});
+        value["experiment_id"] = json!("exp-1");
+        value
+    };
+    let restore = |experiment: &str| {
+        let mut value = record("restored", json!({}));
+        value["experiment_id"] = json!(experiment);
+        value
+    };
+    let good = audit_of(vec![
+        with_focus("candidate_applied", 5000),
+        restore("exp-1"),
+    ]);
+    let check = only_fixture_targets(&good, &fixtures);
+    assert!(check.passed, "{}", check.detail);
+    // The focus names another start time: a reused pid, refused.
+    let reused = audit_of(vec![with_focus("candidate_applied", 9999)]);
+    assert!(!only_fixture_targets(&reused, &fixtures).passed);
+    // A restore of an experiment that was never attributed to a fixture is not attributed.
+    let orphan = audit_of(vec![
+        with_focus("candidate_applied", 5000),
+        restore("exp-other"),
+    ]);
+    assert!(!only_fixture_targets(&orphan, &fixtures).passed);
+    // A restore after a refused change is not attributed either.
+    let refused = audit_of(vec![
+        with_focus("candidate_applied", 9999),
+        restore("exp-1"),
+    ]);
+    assert!(
+        only_fixture_targets(&refused, &fixtures)
+            .detail
+            .contains("no parseable target pid")
+    );
+}
+
+#[test]
+fn a_fixture_recorded_before_its_exec_takes_the_workloads_comm_once_ready() {
+    let root = proc_with("refresh", &[p(80, "taskset")]);
+    fs::write(root.join("80/comm"), "taskset\n").unwrap();
+    record_fixture(&root, 80).unwrap();
+    fs::write(root.join("80/comm"), "StutterAcceptan\n").unwrap();
+    refresh_fixture_comm(&root, 80).unwrap();
+    assert!(fixtures().contains(&fixture(80, 180)));
+    // A process that is not the recorded one is refused.
+    assert!(refresh_fixture_comm(&root, 81).is_err());
+}

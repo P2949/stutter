@@ -183,6 +183,7 @@ pub(super) fn spawn_fixture(
     // The fixture is known by exact identity (pid and start time), or the run cannot proceed.
     isolation::record_fixture(Path::new("/proc"), fixture.child.id())?;
     wait_for("the fixture to be ready", 20, || ready.exists())?;
+    isolation::refresh_fixture_comm(Path::new("/proc"), fixture.child.id())?;
     isolation::ensure_quiet("after the fixture was ready")?;
     // Fence the worker to this fixture, by exact identity, for as long as it runs.
     let written = isolation::write_fence(fixture.child.id(), seconds)?;

@@ -284,6 +284,27 @@ pub(super) fn blocked() -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// The fixture was recorded the instant it was spawned, when it could still be the `taskset` that
+/// execs it; once it is ready, its comm is the workload's own. Its start time does not change
+/// across an exec, and must still be the recorded one.
+pub(super) fn refresh_fixture_comm(proc_root: &Path, pid: u32) -> anyhow::Result<()> {
+    let live = live_process(proc_root, pid)
+        .ok_or_else(|| anyhow::anyhow!("the fixture (pid {pid}) is gone"))?;
+    let comm = fs::read_to_string(proc_root.join(pid.to_string()).join("comm"))?
+        .trim()
+        .to_owned();
+    let mut fixtures = FIXTURES
+        .lock()
+        .map_err(|_| anyhow::anyhow!("the fixture list is poisoned"))?;
+    let fixture = fixtures
+        .iter_mut()
+        .find(|fixture| fixture.pid == pid && fixture.start_ticks == live.start_ticks)
+        .ok_or_else(|| anyhow::anyhow!("the fixture (pid {pid}) is not the recorded process"))?;
+    anyhow::ensure!(!comm.is_empty(), "the fixture has an empty comm");
+    fixture.comm = comm;
+    Ok(())
+}
+
 /// Registers a fixture by exact identity. A fixture whose identity cannot be read is refused: it
 /// could not be told apart from a stranger.
 pub(super) fn record_fixture(proc_root: &Path, pid: u32) -> anyhow::Result<()> {
@@ -386,6 +407,7 @@ pub(super) fn only_fixture_targets(audit: &HistoryAudit, fixtures: &[FixtureIden
     }
     let mut changes = 0_usize;
     let mut problems = Vec::new();
+    let mut attributed = std::collections::HashSet::<&str>::new();
     for (index, record) in audit.records.iter().enumerate() {
         let Some(decision) = record["decision"]["decision"].as_str() else {
             continue;
@@ -395,7 +417,13 @@ pub(super) fn only_fixture_targets(audit: &HistoryAudit, fixtures: &[FixtureIden
         }
         changes += 1;
         let target = &record["target"];
+        let experiment = record["experiment_id"].as_str();
         let Some(pid) = target["root_pid"].as_u64() else {
+            // A restore names the experiment it undoes, not a target: it is attributed through
+            // that experiment, which must already have been attributed to a fixture above.
+            if decision == "restored" && experiment.is_some_and(|id| attributed.contains(id)) {
+                continue;
+            }
             problems.push(format!(
                 "record {index} ({decision}) names no parseable target pid"
             ));
@@ -410,6 +438,7 @@ pub(super) fn only_fixture_targets(audit: &HistoryAudit, fixtures: &[FixtureIden
             ));
             continue;
         };
+        let before = problems.len();
         match target["process_comm"].as_str() {
             Some(comm) if comm.trim() == fixture.comm => {}
             Some(comm) => problems.push(format!(
@@ -418,7 +447,13 @@ pub(super) fn only_fixture_targets(audit: &HistoryAudit, fixtures: &[FixtureIden
             )),
             None => problems.push(format!("record {index} ({decision}) names no process comm for pid {pid}")),
         }
-        match &target["process_starttime_ticks"] {
+        // The controller records the exact start time of the processes it focuses on beside the
+        // target; the target's own field is not always filled.
+        let started = match &target["process_starttime_ticks"] {
+            Value::Null => &record["focus"]["root_starttimes"][pid.to_string()],
+            ticks => ticks,
+        };
+        match started {
             Value::Null => problems.push(format!(
                 "record {index} ({decision}) carries no process start time for pid {pid}: a pid and comm alone cannot rule out pid reuse"
             )),
@@ -427,6 +462,11 @@ pub(super) fn only_fixture_targets(audit: &HistoryAudit, fixtures: &[FixtureIden
                 "record {index} ({decision}) names start time {other} for pid {pid}, but the fixture started at {}",
                 fixture.start_ticks
             )),
+        }
+        if problems.len() == before
+            && let Some(id) = experiment
+        {
+            attributed.insert(id);
         }
     }
     if problems.is_empty() {
