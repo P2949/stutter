@@ -11,7 +11,7 @@
 //!
 //! * with no fence file, nothing changes;
 //! * with a valid fence, a candidate is refused unless every task it names belongs to the fenced
-//!   process, and a fenced task still has to pass every ordinary check (the fence grants nothing);
+//!   process (or one it started), and a fenced task still has to pass every ordinary check (the fence grants nothing);
 //! * a fence that is present but cannot be trusted, read, parsed, or is for another account or boot,
 //!   or has expired, refuses **every** mutation. A stale file therefore stops tuning until it is
 //!   removed, which is the safe direction and is why the reason says to remove it.
@@ -168,7 +168,15 @@ pub(super) fn check_task(state: &FenceState, proc_root: &Path, tgid: u32) -> any
     else {
         return Ok(());
     };
-    ensure!(tgid == *root_pid, "validation_fence_target_not_fenced");
+    if tgid != *root_pid {
+        // A helper the fenced process started (a game's wine server, a launcher's child) is part of
+        // the fixture; anything outside its process tree is not. The ancestor is matched by pid and
+        // start time, so a reused pid does not qualify.
+        let inside = crate::telemetry::proc_view::live_process(proc_root, tgid)
+            .is_some_and(|live| live.ancestors.contains(&(*root_pid, *start_ticks)));
+        ensure!(inside, "validation_fence_target_not_fenced");
+        return Ok(());
+    }
     // The same pid is the fixture only if it is still the process that was fenced.
     let live = crate::telemetry::proc_view::live_process(proc_root, *root_pid)
         .context("validation_fence_target_not_fenced: the fenced process is gone")?;

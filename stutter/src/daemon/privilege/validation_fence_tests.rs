@@ -186,3 +186,31 @@ fn a_deny_all_session_refuses_every_target_but_is_not_malformed() {
     // An expired deny-all session still refuses, so a forgotten one stops tuning until removed.
     assert!(refusal(load_at(&path, 10_000_000_000)).contains("validation_fence_expired_remove_it"));
 }
+
+#[test]
+fn a_process_the_fenced_one_started_is_inside_the_fence_and_a_stranger_or_reused_parent_is_not() {
+    let proc = proc_with("tree", &[(500, 777), (501, 800), (502, 801), (600, 900)]);
+    // 501 is a child of 500 (the fixture's helper); 502 is a child of 600 (a stranger's child).
+    for (pid, parent, ticks) in [(501, 500, 800), (502, 600, 801)] {
+        fs::write(
+            proc.join(format!("{pid}/stat")),
+            format!(
+                "{pid} (app) S {parent} {pid} {pid} 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 {ticks} 0 0 0\n"
+            ),
+        )
+        .unwrap();
+    }
+    let fenced = FenceState::Active {
+        root_pid: 500,
+        start_ticks: 777,
+    };
+    check_task(&fenced, &proc, 501).unwrap();
+    assert!(format!("{:#}", check_task(&fenced, &proc, 502).unwrap_err()).contains("not_fenced"));
+    assert!(format!("{:#}", check_task(&fenced, &proc, 600).unwrap_err()).contains("not_fenced"));
+    // A parent pid that was reused by another process (different start time) does not qualify.
+    let reused = FenceState::Active {
+        root_pid: 500,
+        start_ticks: 111,
+    };
+    assert!(format!("{:#}", check_task(&reused, &proc, 501).unwrap_err()).contains("not_fenced"));
+}
