@@ -1,0 +1,34 @@
+{
+  "result": "PASS",
+  "source_sha": "5470215d7464ffa844c2ee91200f4e0547bcc4ea",
+  "source_clean": true,
+  "build_output": "fresh local clone checkout/target (exclusive to this checkout); run at nice 19, ionice idle, CARGO_BUILD_JOBS=2 because a game was running on the host",
+  "commands": [
+    "nix develop --command cargo run -q -p xtask -- ci",
+    "nix develop --command cargo clippy --workspace --all-targets -- -D warnings",
+    "nix develop --command cargo run -q -p xtask -- release-check"
+  ],
+  "library": {
+    "passed": 3456,
+    "ignored": 19
+  },
+  "xtask": {
+    "passed": 563
+  },
+  "validation_runner": {
+    "passed": 106,
+    "ignored": 7
+  },
+  "architecture_tests": {
+    "passed": 125
+  },
+  "release_binary_sha256": "b8ca32ce6ee5a87a025972de063d8d242b2ea85d53a0b1e0be49208cb81ed8af",
+  "logs_sha256": {
+    "ci.log": "4a311eaaa477a61612f58ddb9712ecb98ba60ebf6dddd79f25f17bda4bd7eb90",
+    "clippy-workspace.log": "e4a1dfda636b3a15732705a06caf30fe8abfa7b8b79455a3d94756d4aa324066",
+    "release-check.log": "00d21efcd3af29319e4f481ce42b5934122501addb4b7d2482cfaebaff49ed27"
+  },
+  "scope": "the production-smoke audit fixes (start time from the focus record, restore attributed through its experiment, fixture comm read after its exec) on top of 9cfca635; the shipped crates are unchanged from 9cfca635, only xtask differs",
+  "not_deployed": "The installed candidate is the 9cfca635 build (sha256 6922c7c6d09f4fad2e1a02902da6440fa28823b423f54b78f2e8853c020942bc; this source embeds its own revision, hence the different hash above). It is not switched: the production smoke has not passed (blocked by a started game on the last attempt); production still runs the 4f3baa07 build.",
+  "note": "documentation-only commits after this sha do not change the built binary"
+}
