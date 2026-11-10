@@ -188,3 +188,66 @@ fn a_real_worker_applies_restores_and_refuses_at_precommit_under_the_fence() {
     let _ = (fixture.kill(), decoy.kill());
     let _ = (fixture.wait(), decoy.wait());
 }
+
+fn env_pid(name: &str) -> u32 {
+    std::env::var(name)
+        .unwrap_or_else(|_| panic!("{name} is not set"))
+        .parse()
+        .unwrap_or_else(|_| panic!("{name} is not a number"))
+}
+
+/// Phase one of the restart qualification: apply to the fenced fixture and leave the token
+/// outstanding, as a controller that died right after the commit would.
+#[test]
+#[ignore = "live: phase one of the worker-restart qualification (see the RESULTS.md procedure)"]
+fn live_phase_apply_and_leave_the_token_outstanding() {
+    let client = UnixSocketPrivilegedActionService::new(
+        std::env::var("STUTTER_QUALIFY_SOCKET").expect("STUTTER_QUALIFY_SOCKET"),
+    );
+    let pid = env_pid("STUTTER_QUALIFY_FIXTURE_PID");
+    client
+        .apply_candidate_prepared(apply_request(affinity_candidate(pid)), &mut |_| Ok(()))
+        .expect("the fenced fixture applies");
+    assert_eq!(
+        allowed(pid),
+        "0",
+        "the placement is changed and its token is outstanding"
+    );
+}
+
+/// Phase two: after the worker was killed with SIGKILL and restarted, its startup recovery must
+/// have restored the fixture, kept the fence, and left nothing outstanding.
+#[test]
+#[ignore = "live: phase two of the worker-restart qualification (see the RESULTS.md procedure)"]
+fn live_phase_after_restart_the_fixture_is_restored_under_the_same_fence() {
+    let client = UnixSocketPrivilegedActionService::new(
+        std::env::var("STUTTER_QUALIFY_SOCKET").expect("STUTTER_QUALIFY_SOCKET"),
+    );
+    let (fixture, decoy) = (
+        env_pid("STUTTER_QUALIFY_FIXTURE_PID"),
+        env_pid("STUTTER_QUALIFY_DECOY_PID"),
+    );
+    let before = std::env::var("STUTTER_QUALIFY_FIXTURE_BEFORE").expect("FIXTURE_BEFORE");
+    assert_eq!(
+        allowed(fixture),
+        before,
+        "startup recovery restored the fixture exactly"
+    );
+    let report = client.fence_status().expect("the restarted worker answers");
+    assert_eq!(
+        (report.state.as_str(), report.root_pid),
+        ("active", Some(fixture))
+    );
+    let refused = client
+        .apply_candidate_prepared(apply_request(affinity_candidate(decoy)), &mut |_| Ok(()))
+        .expect_err("the decoy is still refused after the restart");
+    assert!(
+        format!("{refused:#}").contains("validation_fence_target_not_fenced"),
+        "{refused:#}"
+    );
+    assert_eq!(
+        client.settle_issued_tokens().expect("settle"),
+        0,
+        "nothing left outstanding"
+    );
+}

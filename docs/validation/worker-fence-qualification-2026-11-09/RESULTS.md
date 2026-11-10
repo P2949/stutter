@@ -52,8 +52,29 @@ processes of the same account, fences one (written as root with `sudo -n tee`, a
 * Afterwards the worker was stopped with its own `shutdown` request, its directories were removed, no test process
   remained, and the production worker and controller units stayed `active` and untouched throughout.
 
+## Third run: worker SIGKILL with a token outstanding, then restart (same binary)
+Harness: the two ignored phase tests in `live_fence_tests.rs` (`live_phase_apply_and_leave_the_token_outstanding`,
+`live_phase_after_restart_the_fixture_is_restored_under_the_same_fence`), driven by a shell script that owns the
+worker, the fence file and the two disposable `sleep` processes. Binary: the release build of `9ee709d4` (sha256
+prefix `e474d6264c0254de`, equal to its receipt's `release_binary_sha256`).
+* Phase one applied to the fenced fixture through a real prepare and commit and exited without a rollback, as a
+  controller that died after the commit would: the fixture read back `0` instead of `0-11` and its token was
+  outstanding in the worker's ledger.
+* The worker (the `sudo` wrapper and its child) was killed with `SIGKILL`. A listing afterwards showed no worker
+  process, and the fixture was still `0` while no worker was running.
+* A new worker was started on the same state directory. Right after its startup the fixture read `0-11` again:
+  startup recovery restored it. The restarted worker reported `active` for exactly the same fixture (the fence file
+  survived), refused the decoy with `validation_fence_target_not_fenced`, and `SettleIssuedTokens` answered 0.
+* **An invalid first attempt is recorded for honesty:** the first run of this procedure failed to kill the worker
+  (zsh passed the two pids as one word, `kill` rejected it), so the old worker stayed alive and the second worker's
+  startup did the recovery. That run proved nothing about SIGKILL and was discarded; it also left a stray worker
+  that the second run's kill loop removed. The result above is from the corrected run, in which the absence of the
+  worker was checked before restarting.
+* Cleanup: the worker was stopped with its own `shutdown` request, its directories were removed, a final listing
+  showed no remaining process, and the production worker and controller stayed `active` and untouched.
+
 ## What this still does not establish
-* Worker restart with an outstanding token under a fence, and a runner SIGKILL mid-session, were not run live (the
-  restart and owner-death recovery paths have their own earlier live evidence without the fence).
+* A runner SIGKILL during an active prepare (as opposed to after a commit) was not run live; the controller-side
+  owner-death and recovery paths have their own earlier live evidence without the fence.
 * The installed production worker (`4f3baa07`) does not know `fence_status`, so the smoke correctly refuses to mutate
   against it. Qualifying the installed build needs the final-source deploy on a free desktop.
