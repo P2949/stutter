@@ -144,3 +144,34 @@ was scheduled: no watcher, no timer.
 on a full pass only, `nix-env -p /nix/var/nix/profiles/system --set bx0cz6fb…` and `switch-to-configuration switch`
 (then `./scripts/validate full` if main promotion requires it); on any failure reactivate the previous generation.
 The smoke now asks the running worker to acknowledge the exact fence, so it also qualifies the installed worker.
+
+## Activation attempts of `d70f1b52` on 2026-11-10 (the session was free): rolled back, one real defect found
+
+The user confirmed the desktop was not in use, no game process was running, and the guarded script was run. Each
+attempt activated the new generation with `switch-to-configuration test`, ran one exact-build `production-smoke`, and
+reactivated the previous generation on anything but a full PASS. The system profile was never changed. After every
+attempt `/run/current-system` was the previous generation (`z5c4c0vs…`), both units were active and 0 tokens were
+outstanding.
+
+| # | Result | Cause |
+|---|---|---|
+| 1 | smoke BLOCKED before measuring or mutating anything, rolled back | the host read 53% busy (limit 40%) in the seconds after activation (the activation itself starts `minecraft-server-survival.service`); an environment block, not a product result |
+| 2 | 30 of 32 checks ran, then `Error: No such file or directory` while writing evidence, rolled back | harness invocation: the evidence capture runs `rustc`, which is only on `PATH` inside the dev shell. The script now runs the smoke through `nix develop` |
+| 3 | full smoke, **FAIL** (6 of 32 checks), rolled back | a real defect, below |
+
+**Run 3.** Everything about the installed build passed: pinned binary hash for controller and worker, immutability,
+account, capabilities, no-new-privileges, the worker's acknowledgment of the exact deny-all fence, idle CPU and memory
+bounds, nothing outstanding before, and no state change other than on the three fixtures this run started. The mutation
+cases failed: the controller never applied anything to the fixture. The history shows 34 faulted decisions, all
+`privileged apply failed for autotune candidate 'game-isolate-render': … validation_fence_target_not_fenced`.
+
+**Root cause.** The fixture's focus (the game root) was the fenced process, but the render threads the candidate names
+belong to the fixture's own `wineserver` helper, a child process. `check_task` accepted only the exact fenced tgid,
+so the fence refused the fixture's own descendants. The earlier isolated worker qualification used a target without
+helper processes, so it did not exercise this. The fence failed in the safe direction: nothing was mutated, nothing
+outside the fixture was touched, and the controller recorded the refusal and kept running.
+
+**Fix** (`9cfca635`): a task is admitted when its process is the fenced one, or when the fenced process (matched by pid
+and start time) is one of its ancestors. A stranger, a stranger's child and a reused parent pid are still refused, and
+the fence still only narrows. Test: `a_process_the_fenced_one_started_is_inside_the_fence_and_a_stranger_or_reused_parent_is_not`.
+The binary therefore changes, so this build (`aa8035f3…`) is superseded and its deployment is not retried as is.
