@@ -1,0 +1,34 @@
+{
+  "result": "PASS",
+  "source_sha": "9cfca635b86150262733a33df48f9df29ffd09e3",
+  "source_clean": true,
+  "build_output": "fresh local clone checkout/target (exclusive to this checkout); run at nice 10, CARGO_BUILD_JOBS=3, no game running",
+  "commands": [
+    "nix develop --command cargo run -q -p xtask -- ci",
+    "nix develop --command cargo clippy --workspace --all-targets -- -D warnings",
+    "nix develop --command cargo run -q -p xtask -- release-check"
+  ],
+  "library": {
+    "passed": 3456,
+    "ignored": 19
+  },
+  "xtask": {
+    "passed": 561
+  },
+  "validation_runner": {
+    "passed": 106,
+    "ignored": 7
+  },
+  "architecture_tests": {
+    "passed": 125
+  },
+  "release_binary_sha256": "6922c7c6d09f4fad2e1a02902da6440fa28823b423f54b78f2e8853c020942bc",
+  "logs_sha256": {
+    "ci.log": "6f57866b9b6f1fe013ecb8df8c9e1f39055bcee59498a9018193b32515a63dee",
+    "clippy-workspace.log": "a171c133200d887e380e210dcfea0e182379659e7ceaa6d70ffde281360fd94e",
+    "release-check.log": "d12d408409a88f37f9d298a1b921871c99c4d122066af61aa20cbf9ac9d56b5e"
+  },
+  "scope": "the validation fence admits the fenced process and the processes it started (matched by pid and start time), found by the production smoke of d70f1b52; nothing outside the fixture tree is admitted",
+  "not_deployed": "Not yet deployed or qualified on the installed build at the time of this receipt.",
+  "note": "documentation-only commits after this sha do not change the built binary"
+}
