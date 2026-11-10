@@ -115,3 +115,32 @@ Code-level, unit-tested only; not live-qualified (no isolated transient worker h
   prepare and precommit) is still outstanding.
 * `closeout-report --strict` now also requires the newest committed report to match the ledger pin and the
   current manifest.
+
+## Final-source deployment of `d70f1b52`: prepared, not activated (`BlockedResource`: occupied interactive session) (2026-11-10)
+
+Everything that does not touch the running system was done and verified; the activation stages were not run.
+
+| Stage | Result |
+|---|---|
+| NixosConf branch | `host/stutter-final-d70f1b52` at `19e35fb` (local to `/etc/nixos`, from `origin/main` `250e3cf`): source pin, `flake.lock` and `binarySha256` moved together to Stutter `d70f1b52` and its release binary `aa8035f3…ebd943c` |
+| Binary identity | the clean-clone release build of `d70f1b52`, added to the store with `nix-store --add-fixed` (`/nix/store/jpnksxjy…-stutter`), hash re-read equal to `release_binary_sha256` in the receipt |
+| `./scripts/validate affected` | PASS, exact-commit receipt `/etc/nixos/.git/local-validation/receipts/19e35fb2…/affected.json` |
+| Toplevel | built: `/nix/store/bx0cz6fbw1x6rjn8n2qag429wp5rbcag-nixos-system-desktop-26.05.20261025.1f607aa` |
+| `dry-activate` | would stop and start only `stutter-autotune-bounded@p2949.service` and `stutter-privileged-worker@p2949.service` |
+| `switch-to-configuration test`, `production-smoke`, `switch` | **not run** |
+| Running system | unchanged: `/run/current-system` and the system profile are still `/nix/store/z5c4c0vs…-nixos-system-desktop-…` (previous generation, Stutter `4f3baa07`, binary `bf79d9c4…`); both units active; 0 outstanding tokens; no reboot |
+
+**Why activation was not run.** No game process was running when this was checked (no Steam, Proton or gamescope
+process; load average 2.4), but the machine's interactive session is active (Hyprland, a browser and an editor in use).
+The activation restarts both Stutter units and the exact-build smoke then runs a busy fixture and mutation cases for
+several minutes. An idle-game observation is not proof that the occupied session may be interrupted, and the smoke's own
+heuristic focus source needs a genuinely quiet host. Per the plan this stage is therefore `BlockedResource` and nothing
+was scheduled: no watcher, no timer.
+
+**To resume** (when the session is demonstrably free, from `/etc/nixos` on that branch; the previous generation is
+`/nix/store/z5c4c0vs05bkg7bmg6w5jsqpd08ab26b-nixos-system-desktop-26.05.20261025.1f607aa`):
+`sudo bx0cz6fb…/bin/switch-to-configuration test`; then, from the Stutter checkout,
+`xtask production-smoke --binary-sha256 aa8035f343a60cbd9b5b3ba9d96ef53692153f7fa5a545296ec4eea70ebd943c --out <new dir> --user p2949`;
+on a full pass only, `nix-env -p /nix/var/nix/profiles/system --set bx0cz6fb…` and `switch-to-configuration switch`
+(then `./scripts/validate full` if main promotion requires it); on any failure reactivate the previous generation.
+The smoke now asks the running worker to acknowledge the exact fence, so it also qualifies the installed worker.
