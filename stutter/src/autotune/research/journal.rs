@@ -7,7 +7,7 @@ use std::{
     fs::File,
     io::{Read, Write},
     os::{
-        fd::{AsFd, AsRawFd, FromRawFd, OwnedFd},
+        fd::{AsFd, AsRawFd, OwnedFd},
         unix::fs::MetadataExt,
     },
 };
@@ -121,9 +121,8 @@ impl ResearchJournal {
                 "schedule is not a single ordered study"
             );
         }
-        // SAFETY: dir is an open directory descriptor; flock does not access user memory.
         anyhow::ensure!(
-            unsafe { libc::flock(dir.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0,
+            crate::syscall::flock_exclusive_nonblocking(dir.as_fd()),
             "journal already locked or locking unavailable"
         );
         let schedule_sha256 = stutter_core::hash::sha256_hex(&serde_json::to_vec(&schedule)?);
@@ -181,23 +180,9 @@ impl ResearchJournal {
         let tmp = format!("{index:04}.tmp");
         let final_name = format!("{index:04}.json");
         self.create_synced(&tmp, &serde_json::to_vec(&seal)?)?;
-        let tmp_c = std::ffi::CString::new(tmp)?;
-        let final_c = std::ffi::CString::new(final_name)?;
         // Atomic no-replace rename ensures an existing result is never overwritten.
-        // SAFETY: both names are valid and the same open directory owns the source and target.
-        anyhow::ensure!(
-            unsafe {
-                libc::renameat2(
-                    self.dir.as_raw_fd(),
-                    tmp_c.as_ptr(),
-                    self.dir.as_raw_fd(),
-                    final_c.as_ptr(),
-                    libc::RENAME_NOREPLACE,
-                )
-            } == 0,
-            "cannot publish attempt seal: {}",
-            std::io::Error::last_os_error()
-        );
+        crate::syscall::rename_noreplace_at(self.dir.as_fd(), &tmp, &final_name)
+            .map_err(|error| anyhow::anyhow!("cannot publish attempt seal: {error}"))?;
         self.dir.sync_all()?;
         self.active = None;
         Ok(())
@@ -205,21 +190,7 @@ impl ResearchJournal {
 
     fn create_synced(&self, name: &str, bytes: &[u8]) -> anyhow::Result<()> {
         anyhow::ensure!(bytes.len() <= MAX_RECORD as usize, "record too large");
-        let name = std::ffi::CString::new(name)?;
-        // SAFETY: a generated single-component name and a live directory descriptor are supplied.
-        let fd = unsafe {
-            libc::openat(
-                self.dir.as_raw_fd(),
-                name.as_ptr(),
-                libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
-                0o600,
-            )
-        };
-        if fd < 0 {
-            return Err(std::io::Error::last_os_error().into());
-        }
-        // SAFETY: openat returned a fresh, uniquely owned descriptor.
-        let mut file = unsafe { File::from_raw_fd(fd) };
+        let mut file = crate::syscall::create_new_at(self.dir.as_fd(), name)?;
         file.write_all(bytes)?;
         file.sync_all()?;
         Ok(())

@@ -28,6 +28,7 @@ stutter
   wayland-probe
   autotune
   autotune-status
+  research
   agent
   privileged-worker
   daemon

@@ -32,6 +32,7 @@ Commands:
   wayland-probe            Probe Wayland presentation timing support
   autotune                 Manage experimental autotune planning and replay commands
   autotune-status          Inspect experimental autotune controller status
+  research                 Submit or inspect a bounded resident research campaign
   agent                    Run experimental remote agent endpoints
   privileged-worker        Run the privileged worker used by service paths
   daemon                   Manage experimental daemon/service components

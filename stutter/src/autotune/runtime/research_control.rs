@@ -6,7 +6,7 @@ use std::{
     fs::File,
     io::Write,
     os::{
-        fd::AsRawFd,
+        fd::{AsFd, AsRawFd},
         unix::fs::{FileTypeExt, MetadataExt},
     },
     path::{Path, PathBuf},
@@ -66,9 +66,8 @@ impl ResearchServer {
             dir_meta.is_dir() && dir_meta.uid() == uid && dir_meta.mode() & 0o077 == 0,
             "untrusted research socket directory"
         );
-        // SAFETY: the directory descriptor remains owned until the server is dropped.
         anyhow::ensure!(
-            unsafe { libc::flock(directory_lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0,
+            crate::syscall::flock_exclusive_nonblocking(directory_lock.as_fd()),
             "research controller already owns this directory"
         );
         // All socket operations use the pinned directory, even if its path is renamed.
@@ -113,20 +112,7 @@ impl ResearchServer {
             dev: meta.dev(),
             ino: meta.ino(),
         };
-        // SAFETY: the name is a fixed, NUL-terminated component relative to our open directory.
-        // fchmodat2 with AT_SYMLINK_NOFOLLOW refuses a substituted symlink.
-        let chmod = unsafe {
-            libc::syscall(
-                libc::SYS_fchmodat2,
-                directory_lock.as_raw_fd(),
-                c"research.sock".as_ptr(),
-                0o600 as libc::mode_t,
-                libc::AT_SYMLINK_NOFOLLOW,
-            )
-        };
-        if chmod != 0 {
-            return Err(std::io::Error::last_os_error().into());
-        }
+        crate::syscall::chmod_nofollow_at(directory_lock.as_fd(), c"research.sock", 0o600)?;
         listener.set_nonblocking(true)?;
         let current = std::fs::symlink_metadata(&socket_guard.path)?;
         anyhow::ensure!(

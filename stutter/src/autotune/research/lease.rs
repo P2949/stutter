@@ -7,7 +7,7 @@ use std::{
     fs::File,
     io::{Read, Write},
     os::{
-        fd::{AsFd, AsRawFd, FromRawFd, OwnedFd},
+        fd::{AsFd, AsRawFd, OwnedFd},
         unix::fs::MetadataExt,
     },
 };
@@ -160,9 +160,8 @@ fn locked_dir(dir: OwnedFd, uid: u32) -> anyhow::Result<File> {
         metadata.dev() == reopened.dev() && metadata.ino() == reopened.ino(),
         "campaign directory changed"
     );
-    // SAFETY: dir is a valid open descriptor retained by the returned lease.
     anyhow::ensure!(
-        unsafe { libc::flock(dir.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0,
+        crate::syscall::flock_exclusive_nonblocking(dir.as_fd()),
         "campaign directory is locked"
     );
     Ok(dir)
@@ -202,37 +201,11 @@ fn read_file(dir: &File, uid: u32, name: &str) -> anyhow::Result<Vec<u8>> {
 
 fn write_new(dir: &File, name: &str, bytes: &[u8]) -> anyhow::Result<()> {
     anyhow::ensure!(bytes.len() as u64 <= MAX_FILE, "campaign record too large");
-    let tmp = std::ffi::CString::new(format!("{name}.tmp"))?;
-    let target = std::ffi::CString::new(name)?;
-    // SAFETY: names are generated single components and dir is an open directory descriptor.
-    let raw = unsafe {
-        libc::openat(
-            dir.as_raw_fd(),
-            tmp.as_ptr(),
-            libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
-            0o600,
-        )
-    };
-    if raw < 0 {
-        return Err(std::io::Error::last_os_error().into());
-    }
-    // SAFETY: openat returned a fresh descriptor, uniquely owned by this File.
-    let mut file = unsafe { File::from_raw_fd(raw) };
+    let tmp = format!("{name}.tmp");
+    let mut file = crate::syscall::create_new_at(dir.as_fd(), &tmp)?;
     file.write_all(bytes)?;
     file.sync_all()?;
-    // SAFETY: both generated names are relative to the same open directory.
-    let rc = unsafe {
-        libc::renameat2(
-            dir.as_raw_fd(),
-            tmp.as_ptr(),
-            dir.as_raw_fd(),
-            target.as_ptr(),
-            libc::RENAME_NOREPLACE,
-        )
-    };
-    if rc != 0 {
-        return Err(std::io::Error::last_os_error().into());
-    }
+    crate::syscall::rename_noreplace_at(dir.as_fd(), &tmp, name)?;
     dir.sync_all()?;
     Ok(())
 }

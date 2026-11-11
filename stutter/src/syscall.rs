@@ -296,3 +296,83 @@ pub fn send_signal(pid: u32, signal: i32) -> io::Result<()> {
         Err(io::Error::last_os_error())
     }
 }
+
+/// Take a non-blocking exclusive `flock` on an open descriptor.
+pub fn flock_exclusive_nonblocking(fd: std::os::fd::BorrowedFd<'_>) -> bool {
+    use std::os::fd::AsRawFd;
+    // SAFETY: fd is a live borrowed descriptor; flock does not access user memory.
+    unsafe { libc::flock(fd.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) == 0 }
+}
+
+/// Exclusively create a new private (0600) file relative to an open directory.
+pub fn create_new_at(dir: std::os::fd::BorrowedFd<'_>, name: &str) -> io::Result<std::fs::File> {
+    use std::os::fd::{AsRawFd, FromRawFd};
+    let name = std::ffi::CString::new(name)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "name contains NUL"))?;
+    // SAFETY: name is NUL-terminated and dir is a live directory descriptor.
+    let fd = unsafe {
+        libc::openat(
+            dir.as_raw_fd(),
+            name.as_ptr(),
+            libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+            0o600,
+        )
+    };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: openat returned a fresh descriptor uniquely owned by the File.
+    Ok(unsafe { std::fs::File::from_raw_fd(fd) })
+}
+
+/// Atomically rename within one open directory, failing if the target exists.
+pub fn rename_noreplace_at(
+    dir: std::os::fd::BorrowedFd<'_>,
+    from: &str,
+    to: &str,
+) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+    let invalid = |_| io::Error::new(io::ErrorKind::InvalidInput, "name contains NUL");
+    let from = std::ffi::CString::new(from).map_err(invalid)?;
+    let to = std::ffi::CString::new(to).map_err(invalid)?;
+    // SAFETY: both names are NUL-terminated and relative to the same live directory descriptor.
+    let rc = unsafe {
+        libc::renameat2(
+            dir.as_raw_fd(),
+            from.as_ptr(),
+            dir.as_raw_fd(),
+            to.as_ptr(),
+            libc::RENAME_NOREPLACE,
+        )
+    };
+    if rc == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+/// chmod a name relative to an open directory without following a final symlink.
+pub fn chmod_nofollow_at(
+    dir: std::os::fd::BorrowedFd<'_>,
+    name: &CStr,
+    mode: u32,
+) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+    // SAFETY: name is NUL-terminated, dir is live; fchmodat2 with AT_SYMLINK_NOFOLLOW
+    // refuses a substituted symlink.
+    let rc = unsafe {
+        libc::syscall(
+            libc::SYS_fchmodat2,
+            dir.as_raw_fd(),
+            name.as_ptr(),
+            mode as libc::mode_t,
+            libc::AT_SYMLINK_NOFOLLOW,
+        )
+    };
+    if rc == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
