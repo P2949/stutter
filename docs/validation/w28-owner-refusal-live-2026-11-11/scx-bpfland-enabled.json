@@ -1,0 +1,16 @@
+{
+  "evidence_kind": "production_owner_checks_on_live_host_state",
+  "knob_honored": {
+    "cgroup_cpu_weight": false,
+    "nice": false,
+    "uclamp": false
+  },
+  "owner_denial": {
+    "Nice": "GameMode adjusts task priority and power",
+    "Uclamp": null
+  },
+  "planner_refusal_condition": "SchedulerSemanticsUnverified is raised when a Nice or Uclamp candidate meets SchedExt::Enabled with knob_is_honored == false",
+  "planner_would_refuse": true,
+  "sched_ext": "Enabled { ops: \"bpfland_1.1.4_x86_64_unknown_linux_gnu\" }",
+  "schema_version": 1
+}

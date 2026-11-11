@@ -65,6 +65,7 @@ fn expected_subcommands_are_registered() {
             "objective-campaign",
             "objective-docs",
             "offline-optimization",
+            "owner-refusal-probe",
             "package",
             "package-layout-check",
             "preflight",

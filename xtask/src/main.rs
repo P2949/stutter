@@ -31,6 +31,7 @@ pub mod objective_campaign;
 pub mod objective_docs;
 pub mod offline_optimization;
 pub mod ops_checks;
+mod owner_refusal_probe;
 pub mod preflight;
 pub mod process;
 pub mod production_smoke;
@@ -87,6 +88,8 @@ pub enum XtaskCommand {
     FrameClockPrototype(frame_clock_prototype::FrameClockArgs),
     /// Bind a real instrumented Vulkan renderer to the authenticated stamped source and record the result
     RendererProducer(renderer_producer::RendererProducerArgs),
+    /// Apply the planner's real owner-conflict checks to the live sched_ext state
+    OwnerRefusalProbe(owner_refusal_probe::OwnerRefusalArgs),
     #[command(about = "Run canonical live observation acceptance and retain evidence")]
     LiveAcceptance {
         #[command(subcommand)]
@@ -507,6 +510,7 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
         XtaskCommand::KpiObservation { command } => kpi_observation::execute(command),
         XtaskCommand::FrameClockPrototype(args) => frame_clock_prototype::run(&args),
         XtaskCommand::RendererProducer(args) => renderer_producer::run(&args),
+        XtaskCommand::OwnerRefusalProbe(args) => owner_refusal_probe::run(&args),
         XtaskCommand::LiveAcceptance { suite } => live_acceptance::run(&root, suite),
         XtaskCommand::RecoveryController { mode } => live_acceptance::recovery::controller(mode),
         XtaskCommand::LiveBurst {

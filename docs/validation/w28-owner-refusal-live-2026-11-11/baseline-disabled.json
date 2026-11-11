@@ -1,0 +1,16 @@
+{
+  "evidence_kind": "production_owner_checks_on_live_host_state",
+  "knob_honored": {
+    "cgroup_cpu_weight": true,
+    "nice": true,
+    "uclamp": true
+  },
+  "owner_denial": {
+    "Nice": "GameMode adjusts task priority and power",
+    "Uclamp": null
+  },
+  "planner_refusal_condition": "SchedulerSemanticsUnverified is raised when a Nice or Uclamp candidate meets SchedExt::Enabled with knob_is_honored == false",
+  "planner_would_refuse": false,
+  "sched_ext": "Disabled",
+  "schema_version": 1
+}
