@@ -1,0 +1,42 @@
+{
+  "authorizes_mutation": false,
+  "context_sha256": "a7008790495419881ca2edf6492c533aa384bb1a3e806b0226262562de159f7a",
+  "cross_context_comparison": "strict: one verified context",
+  "diagnostics": null,
+  "effects": {
+    "compile-primary-threads": {
+      "blocks": 4,
+      "ci95_percent": [
+        -31.772793471195335,
+        -7.909376884274404
+      ],
+      "mean_percent": -19.310055050551647,
+      "verdict": "Harmful"
+    },
+    "hogs-sibling-threads": {
+      "blocks": 4,
+      "ci95_percent": [
+        23.657795891992073,
+        32.75030525205217
+      ],
+      "mean_percent": 27.700462879694236,
+      "verdict": "Beneficial"
+    }
+  },
+  "invalid_slots": 0,
+  "manifest_sha256": "ae6b74296931460fbd7cf69c608ba0b29769d0d2a39140550b6268382a57bad5",
+  "outside_space_dropped": 0,
+  "practical_percent": 2.0,
+  "ranking": null,
+  "ranking_note": "InsufficientLegalCandidateEvidence: fewer than three legal candidates with blocks in both splits",
+  "record_store": "slot_journal",
+  "records_without_context": 0,
+  "schema_version": 1,
+  "study_id": "e13-local-transfer",
+  "training_favourite": {
+    "candidate": "hogs-sibling-threads",
+    "holdout_mean_percent": 24.94094809794636,
+    "training_mean_percent": 30.45997766144211
+  },
+  "valid_slots": 12
+}

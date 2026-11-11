@@ -39,7 +39,8 @@
         "EvidenceDeferred"
       ],
       "evidence": [
-        "docs/validation/e7-service-explain-2026-11-11/RESULTS.md"
+        "docs/validation/e7-service-explain-2026-11-11/RESULTS.md",
+        "docs/validation/e16-status-review-2026-11-11/RESULTS.md"
       ]
     },
     {
@@ -333,7 +334,8 @@
         "NotPlannedForVerification"
       ],
       "evidence": [
-        "docs/validation/pmu-2026-11-08.md"
+        "docs/validation/pmu-2026-11-08.md",
+        "docs/validation/e14-e3-vs-e4-diagnostics-2026-11-11/RESULTS.md"
       ],
       "unblock": "perf and LIKWID installed; Intel VTune and AMD uProf are vendor tools not planned for verification (development targets this machine only); the optional six-event group yielded no usable counts on this PMU"
     },
@@ -410,7 +412,8 @@
         "docs/validation/controller-frame-2026-11-08/RESULTS.md",
         "docs/validation/controller-frame-2026-11-08/summary.json",
         "docs/validation/renderer-producer-2026-11-11/RESULTS.md",
-        "docs/validation/e6-wsi-timing-probe-2026-11-11/RESULTS.md"
+        "docs/validation/e6-wsi-timing-probe-2026-11-11/RESULTS.md",
+        "docs/validation/e15-renderer-stage-study-2026-11-11/RESULTS.md"
       ],
       "unblock": "W21 done: a real instrumented renderer (vkcube + VK_LAYER_STUTTER_present) binds and is ValidatedDirect with 0 gaps (docs/validation/renderer-producer-2026-11-11/RESULTS.md). Not planned for verification (needs a photodiode, high-speed camera or display hardware timestamp, which this machine lacks; development targets this machine only): the independent stamp-accuracy reference, so direct-frame keep stays denied and the frame objective stays measurement-only"
     },
@@ -443,7 +446,8 @@
         "NotPlannedForVerification"
       ],
       "evidence": [
-        "docs/validation/e7-service-explain-2026-11-11/RESULTS.md"
+        "docs/validation/e7-service-explain-2026-11-11/RESULTS.md",
+        "docs/validation/e16-status-review-2026-11-11/RESULTS.md"
       ],
       "unblock": "Not planned for verification (CoreCtrl is an AMD-GPU tool; this host's GPU is under quarantined LACT policy)"
     },
@@ -473,7 +477,8 @@
         "NotPlannedForVerification"
       ],
       "evidence": [
-        "docs/validation/e5-legal-candidate-ranking-2026-11-11/RESULTS.md"
+        "docs/validation/e5-legal-candidate-ranking-2026-11-11/RESULTS.md",
+        "docs/validation/e9-e12-hardening-2026-11-11/RESULTS.md"
       ],
       "unblock": "Not planned for verification (OpenTuner, Kernel Tuner, OtterTune and SMBO libraries are not packaged for this host and add no capability the typed search does not already cover; development targets this machine only)"
     },
@@ -506,7 +511,8 @@
         "NotPlannedForVerification"
       ],
       "evidence": [
-        "docs/validation/e5-legal-candidate-ranking-2026-11-11/RESULTS.md"
+        "docs/validation/e5-legal-candidate-ranking-2026-11-11/RESULTS.md",
+        "docs/validation/e9-e12-hardening-2026-11-11/RESULTS.md"
       ],
       "unblock": "Not planned for verification (OpenTuner, Kernel Tuner, OtterTune and SMBO libraries are not packaged for this host and add no capability the typed search does not already cover; development targets this machine only)"
     },
@@ -716,7 +722,9 @@
         "docs/validation/openrc-2026-11-08.md",
         "docs/validation/live-mechanisms-2026-11-09/RESULTS.md",
         "docs/validation/w27-cgroup-readback-2026-11-11/RESULTS.md",
-        "docs/validation/e4-scope-weight-study-2026-11-11/RESULTS.md"
+        "docs/validation/e4-scope-weight-study-2026-11-11/RESULTS.md",
+        "docs/validation/e9-e12-hardening-2026-11-11/RESULTS.md",
+        "docs/validation/e13-local-transfer-2026-11-11/RESULTS.md"
       ],
       "unblock": "Real-device campaigns per knob and the systemd1 SetUnitProperties and installed OpenRC backend acceptance: need an authorized delegated subtree with an isolated workload and direct KPI on a real OpenRC host | OpenRC backend: not planned for verification (a different init platform; development targets this machine only). Real cgroup delegation and readback on an owned user scope are recorded in docs/validation/w27-cgroup-readback-2026-11-11/RESULTS.md; io.weight and cpuset are not delegated to this account."
     },
@@ -748,7 +756,9 @@
         "RealObserved",
         "EvidenceDeferred"
       ],
-      "evidence": [],
+      "evidence": [
+        "docs/validation/e14-e3-vs-e4-diagnostics-2026-11-11/RESULTS.md"
+      ],
       "unblock": null
     },
     {
@@ -973,7 +983,9 @@
         "RealObserved",
         "EvidenceDeferred"
       ],
-      "evidence": [],
+      "evidence": [
+        "docs/validation/e14-e3-vs-e4-diagnostics-2026-11-11/RESULTS.md"
+      ],
       "unblock": "tools installed; a real capture or campaign from each is the remaining evidence, recorded per slice in docs/validation/phase-tools-2026-11-11/RESULTS.md"
     },
     {
@@ -1010,7 +1022,9 @@
         "EvidenceDeferred"
       ],
       "evidence": [
-        "docs/validation/e3-affinity-study-2026-11-11/RESULTS.md"
+        "docs/validation/e3-affinity-study-2026-11-11/RESULTS.md",
+        "docs/validation/e9-e12-hardening-2026-11-11/RESULTS.md",
+        "docs/validation/e13-local-transfer-2026-11-11/RESULTS.md"
       ]
     },
     {
@@ -1162,7 +1176,9 @@
       ],
       "evidence": [
         "docs/validation/e3-affinity-study-2026-11-11/RESULTS.md",
-        "docs/validation/e4-scope-weight-study-2026-11-11/RESULTS.md"
+        "docs/validation/e4-scope-weight-study-2026-11-11/RESULTS.md",
+        "docs/validation/e13-local-transfer-2026-11-11/RESULTS.md",
+        "docs/validation/e14-e3-vs-e4-diagnostics-2026-11-11/RESULTS.md"
       ],
       "unblock": null
     }

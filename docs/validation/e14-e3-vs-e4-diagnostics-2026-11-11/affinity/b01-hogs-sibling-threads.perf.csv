@@ -1,0 +1,7 @@
+# started on Wed Nov 11 14:26:31 2026
+
+9822.88,msec,task-clock:u,9822882480,100.00,,
+0,,context-switches:u,9822882480,100.00,,
+0,,cpu-migrations:u,9822882480,100.00,,
+40399603543,,cycles:u,9822882480,100.00,,
+33541141544,,instructions:u,9822882480,100.00,,

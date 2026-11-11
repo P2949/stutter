@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "study_id": "e14a-affinity-diag",
+  "identity": "docs/validation/e14-e3-vs-e4-diagnostics-2026-11-11/identity.json",
+  "hog_threads": 12,
+  "blocks": 3,
+  "training_blocks": 1,
+  "arm_timeout_secs": 180,
+  "practical_percent": 2.0,
+  "baseline": {
+    "name": "baseline",
+    "compile": {
+      "kind": "Unrestricted"
+    },
+    "hogs": {
+      "kind": "Unrestricted"
+    }
+  },
+  "candidates": [
+    {
+      "name": "hogs-sibling-threads",
+      "compile": {
+        "kind": "Unrestricted"
+      },
+      "hogs": {
+        "kind": "Cpus",
+        "value": "6-11"
+      }
+    }
+  ],
+  "diagnostics": true
+}

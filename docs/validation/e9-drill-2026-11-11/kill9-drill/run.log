@@ -1,0 +1,7 @@
+warning: Git tree '/home/p2949/Development/stutter' is dirty
+Stutter development environment
+Rust:        rustc 1.98.0-nightly (8954863c8 2026-06-05)
+Cargo:       cargo 1.98.0-nightly (0b1123a48 2026-06-01)
+bpf-linker:  bpf-linker 0.12.0
+cargo-deny:  cargo-deny 0.19.6
+b01-baseline valid=true elapsed_ns=Some(9364530264)

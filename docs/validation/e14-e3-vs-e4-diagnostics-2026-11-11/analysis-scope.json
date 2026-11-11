@@ -1,0 +1,63 @@
+{
+  "authorizes_mutation": false,
+  "context_sha256": "33482ba117756b112d0af9a73289975329adece0e095d90020c31c9c98b07119",
+  "cross_context_comparison": "strict: one verified context",
+  "diagnostics": {
+    "arms": {
+      "baseline": {
+        "means": {
+          "cpu_seconds_per_wall_second": 1.4690550555088837,
+          "cycles_user": 40724085118.0,
+          "instructions_user": 33536706507.666668,
+          "ipc_user": 0.8235346980298153,
+          "psi_cpu_some_delta_ms": 2138.2226666666666,
+          "task_clock_ms": 10282.966666666667
+        },
+        "slots_with_diagnostics": 3,
+        "slots_without": 0
+      },
+      "hogs-scope-weight-10": {
+        "means": {
+          "cpu_seconds_per_wall_second": 1.5886810289342534,
+          "cycles_user": 40170910442.333336,
+          "instructions_user": 33537579962.333332,
+          "ipc_user": 0.8348965802533184,
+          "psi_cpu_some_delta_ms": 1669.9336666666668,
+          "task_clock_ms": 10137.006666666666
+        },
+        "slots_with_diagnostics": 3,
+        "slots_without": 0
+      }
+    },
+    "invalid_signals": "context-switches and cpu-migrations: InvalidSignal under user-space-only perf (perf_event_paranoid=2); they read 0 and are not reported as zero",
+    "limits": "no runnable-delay tracepoint (needs tracefs rights); correlation, not cause; perf wrapper overhead is identical in every arm",
+    "scopes": "perf: the compile's own process tree, user-space only; psi: SYSTEM-wide CPU stall time; neither is runnable delay of one task"
+  },
+  "effects": {
+    "hogs-scope-weight-10": {
+      "blocks": 3,
+      "ci95_percent": [
+        5.540995461196228,
+        12.50330011907585
+      ],
+      "mean_percent": 8.77102925407341,
+      "verdict": "Beneficial"
+    }
+  },
+  "invalid_slots": 0,
+  "manifest_sha256": "c649cc39b84ede803e6b66a92ba8c891ba8317c95df65d781decc532142da62a",
+  "outside_space_dropped": 0,
+  "practical_percent": 2.0,
+  "ranking": null,
+  "ranking_note": "InsufficientLegalCandidateEvidence: fewer than three legal candidates with blocks in both splits",
+  "record_store": "slot_journal",
+  "records_without_context": 0,
+  "schema_version": 1,
+  "study_id": "e14b-scope-diag",
+  "training_favourite": {
+    "candidate": "hogs-scope-weight-10",
+    "holdout_mean_percent": 10.386046150512,
+    "training_mean_percent": 5.540995461196228
+  },
+  "valid_slots": 6
+}

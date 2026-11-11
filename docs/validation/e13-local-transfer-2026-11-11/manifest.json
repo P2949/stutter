@@ -1,6 +1,42 @@
-{"schema_version":1,"study_id":"e13-local-transfer","identity":"docs/validation/e13-local-transfer-2026-11-11/identity.json","hog_threads":12,"blocks":4,"training_blocks":2,"arm_timeout_secs":180,"practical_percent":2.0,
- "output_artifact":"release/libstutter_validation_runner.rlib",
- "baseline":{"name":"baseline","compile":{"kind":"Unrestricted"},"hogs":{"kind":"Unrestricted"}},
- "candidates":[
-  {"name":"hogs-sibling-threads","compile":{"kind":"Unrestricted"},"hogs":{"kind":"Cpus","value":"6-11"}},
-  {"name":"compile-primary-threads","compile":{"kind":"Cpus","value":"0-5"},"hogs":{"kind":"Unrestricted"}}]}
+{
+  "schema_version": 1,
+  "study_id": "e13-local-transfer",
+  "identity": "docs/validation/e13-local-transfer-2026-11-11/identity.json",
+  "hog_threads": 12,
+  "blocks": 4,
+  "training_blocks": 2,
+  "arm_timeout_secs": 180,
+  "practical_percent": 2.0,
+  "baseline": {
+    "name": "baseline",
+    "compile": {
+      "kind": "Unrestricted"
+    },
+    "hogs": {
+      "kind": "Unrestricted"
+    }
+  },
+  "candidates": [
+    {
+      "name": "hogs-sibling-threads",
+      "compile": {
+        "kind": "Unrestricted"
+      },
+      "hogs": {
+        "kind": "Cpus",
+        "value": "6-11"
+      }
+    },
+    {
+      "name": "compile-primary-threads",
+      "compile": {
+        "kind": "Cpus",
+        "value": "0-5"
+      },
+      "hogs": {
+        "kind": "Unrestricted"
+      }
+    }
+  ],
+  "output_artifact": "release/libstutter_validation_runner.rlib"
+}

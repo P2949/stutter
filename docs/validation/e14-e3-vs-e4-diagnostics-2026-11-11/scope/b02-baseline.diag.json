@@ -1,0 +1,30 @@
+{
+  "perf": {
+    "events": {
+      "context-switches:u": {
+        "percent_counted": 100.0,
+        "value": 0.0
+      },
+      "cpu-migrations:u": {
+        "percent_counted": 100.0,
+        "value": 0.0
+      },
+      "cycles:u": {
+        "percent_counted": 100.0,
+        "value": 40417698408.0
+      },
+      "instructions:u": {
+        "percent_counted": 100.0,
+        "value": 33535280155.0
+      },
+      "task-clock:u": {
+        "percent_counted": 100.0,
+        "value": 10197.42
+      }
+    },
+    "scope": "the compile's process tree, user-space only",
+    "status": "ok"
+  },
+  "psi_cpu_some_delta_us": 1847681,
+  "psi_scope": "system-wide stall time, kernel microseconds"
+}

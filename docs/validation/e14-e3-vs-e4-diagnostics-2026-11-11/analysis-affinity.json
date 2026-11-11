@@ -1,0 +1,63 @@
+{
+  "authorizes_mutation": false,
+  "context_sha256": "33482ba117756b112d0af9a73289975329adece0e095d90020c31c9c98b07119",
+  "cross_context_comparison": "strict: one verified context",
+  "diagnostics": {
+    "arms": {
+      "baseline": {
+        "means": {
+          "cpu_seconds_per_wall_second": 1.0498893296729592,
+          "cycles_user": 41807018270.333336,
+          "instructions_user": 33537139088.666668,
+          "ipc_user": 0.802255187878842,
+          "psi_cpu_some_delta_ms": 3801.58,
+          "task_clock_ms": 10566.77
+        },
+        "slots_with_diagnostics": 3,
+        "slots_without": 0
+      },
+      "hogs-sibling-threads": {
+        "means": {
+          "cpu_seconds_per_wall_second": 1.6891647759126833,
+          "cycles_user": 40833749680.666664,
+          "instructions_user": 33540141096.666668,
+          "ipc_user": 0.8215805230865034,
+          "psi_cpu_some_delta_ms": 3890.145,
+          "task_clock_ms": 9946.456666666667
+        },
+        "slots_with_diagnostics": 3,
+        "slots_without": 0
+      }
+    },
+    "invalid_signals": "context-switches and cpu-migrations: InvalidSignal under user-space-only perf (perf_event_paranoid=2); they read 0 and are not reported as zero",
+    "limits": "no runnable-delay tracepoint (needs tracefs rights); correlation, not cause; perf wrapper overhead is identical in every arm",
+    "scopes": "perf: the compile's own process tree, user-space only; psi: SYSTEM-wide CPU stall time; neither is runnable delay of one task"
+  },
+  "effects": {
+    "hogs-sibling-threads": {
+      "blocks": 3,
+      "ci95_percent": [
+        35.99439789518922,
+        44.63541327697908
+      ],
+      "mean_percent": 41.35393311740457,
+      "verdict": "Beneficial"
+    }
+  },
+  "invalid_slots": 0,
+  "manifest_sha256": "a241ab252902c5e4b0ea15f7d354af8c6488c9e680fe77247fc7c036307858db",
+  "outside_space_dropped": 0,
+  "practical_percent": 2.0,
+  "ranking": null,
+  "ranking_note": "InsufficientLegalCandidateEvidence: fewer than three legal candidates with blocks in both splits",
+  "record_store": "slot_journal",
+  "records_without_context": 0,
+  "schema_version": 1,
+  "study_id": "e14a-affinity-diag",
+  "training_favourite": {
+    "candidate": "hogs-sibling-threads",
+    "holdout_mean_percent": 40.31490558608415,
+    "training_mean_percent": 43.4319881800454
+  },
+  "valid_slots": 6
+}
