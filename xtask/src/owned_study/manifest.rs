@@ -242,3 +242,21 @@ impl Manifest {
         slots
     }
 }
+
+/// Digest of everything that makes two timings comparable: running kernel, boot, effective CPU set,
+/// sched_ext state and the exact fixed-work identity file.
+pub fn context_digest(identity: &Path) -> anyhow::Result<String> {
+    let read = |path: &str| {
+        std::fs::read_to_string(path)
+            .map_or_else(|_| "absent".to_owned(), |text| text.trim().to_owned())
+    };
+    let cpus = effective_cpus_of_self()?;
+    let text = format!(
+        "kernel={}\nboot={}\ncpus={cpus:?}\nsched_ext={}\nidentity={}\n",
+        read("/proc/sys/kernel/osrelease"),
+        read("/proc/sys/kernel/random/boot_id"),
+        read("/sys/kernel/sched_ext/state"),
+        sha256_hex(&std::fs::read(identity).context("read the identity")?),
+    );
+    Ok(sha256_hex(text.as_bytes()))
+}

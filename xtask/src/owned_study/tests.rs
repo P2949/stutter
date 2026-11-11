@@ -3,7 +3,10 @@ use std::{collections::BTreeSet, path::PathBuf};
 use super::{
     analyze::{analyze, bootstrap, verdict},
     manifest::{Arm, Manifest, Placement, effective_cpus_of_status, parse_cpulist},
-    run::{Readback, Record, competing_game, parse_readback, placed_command, readback_matches},
+    run::{
+        Readback, Record, competing_game, ensure_same_context, parse_readback, placed_command,
+        readback_matches,
+    },
 };
 
 fn scratch(name: &str) -> PathBuf {
@@ -357,6 +360,7 @@ fn record(block: u32, arm: &str, ns: u64, digest: &str) -> Record {
         valid: true,
         reason: None,
         elapsed_ns: Some(ns),
+        context: None,
     }
 }
 
@@ -500,4 +504,73 @@ fn a_corrupted_results_file_authorizes_nothing() {
     std::fs::write(&path, "{\"slot\": 1\n").expect("write");
     assert!(analyze(&m, &path).is_err());
     assert!(analyze(&m, &dir.join("absent.jsonl")).is_err());
+}
+
+#[test]
+fn records_from_another_context_are_never_mixed_or_resumed() {
+    let dir = scratch("context");
+    let m = manifest(&dir);
+    let d = m.digest();
+    let mut a = record(1, "baseline", 8_000_000_000, &d);
+    let mut b = record(1, "split", 6_000_000_000, &d);
+    a.context = Some("ctx-a".into());
+    b.context = Some("ctx-b".into());
+    assert!(
+        analyze(&m, &write_results(&dir, &[a.clone(), b.clone()])).is_err(),
+        "two contexts in one study"
+    );
+    b.context = Some("ctx-a".into());
+    let report = analyze(&m, &write_results(&dir, &[a.clone(), b])).expect("one context");
+    assert_eq!(report["context_sha256"], "ctx-a");
+    assert_eq!(report["records_without_context"], 0);
+    let line = serde_json::to_string(&a).expect("json");
+    assert!(ensure_same_context(&line, "ctx-a").is_ok());
+    assert!(
+        ensure_same_context(&line, "ctx-b").is_err(),
+        "a changed boot/kernel/scheduler refuses the resume"
+    );
+    assert!(ensure_same_context("", "ctx-b").is_ok());
+    let legacy = serde_json::to_string(&record(1, "baseline", 1, &d)).expect("json");
+    assert!(
+        ensure_same_context(&legacy, "x").is_ok(),
+        "a record with no context is reported, not silently trusted"
+    );
+    assert_eq!(
+        super::manifest::context_digest(&m.identity).expect("digest"),
+        super::manifest::context_digest(&m.identity).expect("digest")
+    );
+}
+
+#[test]
+fn an_illegal_candidate_with_a_great_score_never_reaches_the_ranker() {
+    let dir = scratch("illegal");
+    let m = manifest(&dir);
+    let d = m.digest();
+    let mut records = Vec::new();
+    for block in 1..=6u32 {
+        records.push(record(block, "baseline", 8_000_000_000, &d));
+        records.push(record(block, "hogs-6-11", 7_000_000_000, &d));
+        records.push(record(block, "split", 6_900_000_000, &d));
+        records.push(record(block, "starved", 12_000_000_000, &d));
+        // Imported or replayed evidence for operations outside the legal space, with the best score of all.
+        for illegal in [
+            "nice-19",
+            "uclamp-max",
+            "pm-qos-0",
+            "gpu-power-profile",
+            "scx-switch",
+        ] {
+            records.push(record(block, illegal, 1_000_000_000, &d));
+        }
+    }
+    let report = analyze(&m, &write_results(&dir, &records)).expect("analysis");
+    let effects = report["effects"].as_object().expect("effects");
+    assert!(
+        effects
+            .keys()
+            .all(|name| m.candidates.iter().any(|c| &c.name == name))
+    );
+    assert!(effects.get("nice-19").is_none());
+    assert_ne!(report["training_favourite"]["candidate"], "nice-19");
+    assert_eq!(report["authorizes_mutation"], false);
 }

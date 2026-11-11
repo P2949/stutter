@@ -114,6 +114,14 @@ pub fn analyze(manifest: &Manifest, results: &Path) -> anyhow::Result<serde_json
             .all(|r| r.manifest_sha256 == digest && r.study_id == manifest.study_id),
         "a record belongs to another manifest"
     );
+    let contexts: std::collections::BTreeSet<&str> = records
+        .iter()
+        .filter_map(|r| r.context.as_deref())
+        .collect();
+    anyhow::ensure!(
+        contexts.len() <= 1,
+        "the records span more than one context (boot, kernel, scheduler, CPU set or work identity)"
+    );
     let rows = improvements(manifest, &records);
     let seed = u64::from_str_radix(&digest[..16], 16).unwrap_or(1);
     let threshold = manifest.practical_percent;
@@ -162,6 +170,8 @@ pub fn analyze(manifest: &Manifest, results: &Path) -> anyhow::Result<serde_json
     Ok(serde_json::json!({
         "schema_version": 1, "study_id": manifest.study_id, "manifest_sha256": digest,
         "practical_percent": threshold,
+        "context_sha256": contexts.iter().next(),
+        "records_without_context": records.iter().filter(|r| r.context.is_none()).count(),
         "valid_slots": records.iter().filter(|r| r.valid).count(),
         "invalid_slots": records.iter().filter(|r| !r.valid).count(),
         "effects": effects,

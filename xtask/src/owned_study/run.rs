@@ -35,6 +35,9 @@ pub struct Record {
     pub valid: bool,
     pub reason: Option<String>,
     pub elapsed_ns: Option<u64>,
+    /// Digest of the kernel, boot, effective CPUs, sched_ext state and work identity the slot ran under.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -275,6 +278,8 @@ pub fn run(manifest: &Manifest, out: &Path) -> anyhow::Result<()> {
     }
     let results = out.join("results.jsonl");
     let recorded = fs::read_to_string(&results).unwrap_or_default();
+    let context = super::manifest::context_digest(&manifest.identity)?;
+    ensure_same_context(&recorded, &context)?;
     let identity: FixedWorkIdentity = serde_json::from_slice(&fs::read(&manifest.identity)?)?;
     let mut log = fs::OpenOptions::new()
         .create(true)
@@ -305,6 +310,7 @@ pub fn run(manifest: &Manifest, out: &Path) -> anyhow::Result<()> {
             valid: outcome.is_ok(),
             reason: outcome.as_ref().err().cloned(),
             elapsed_ns: outcome.ok(),
+            context: Some(context.clone()),
         };
         writeln!(log, "{}", serde_json::to_string(&record)?)?;
         log.flush()?;
@@ -328,4 +334,23 @@ pub fn pending_slots(manifest: &Manifest, recorded: &str) -> Vec<Slot> {
         .into_iter()
         .filter(|slot| !done.contains(&slot.id))
         .collect()
+}
+
+/// A resumed study must run under the context it started in: another boot, kernel, scheduler,
+/// CPU set or work identity would mix incomparable timings.
+pub fn ensure_same_context(recorded: &str, current: &str) -> anyhow::Result<()> {
+    for record in recorded
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Record>(line).ok())
+    {
+        ensure!(
+            record
+                .context
+                .as_deref()
+                .is_none_or(|context| context == current),
+            "the context changed since slot {} was recorded: start a new study directory",
+            record.slot
+        );
+    }
+    Ok(())
 }
