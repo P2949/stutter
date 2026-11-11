@@ -103,5 +103,4 @@ tests are verified to exist but need their own privileged resources.
 | W29 | multi-node NUMA, RDT, kernel-owned kdamond: `NotPlannedForVerification` | ledger 5.19, 5.24, 5.8 |
 | W30 | local `wrk2` offered-load, `hyperfine` import, real hwloc cross-check captured | `validation/phase-tools-2026-11-11/` |
 
-Not done: W28 (sched_ext coexistence: loading a scheduler on the live desktop is outside what an unattended run may do),
-the real-game frame benefit study, and the W32 registry-led review beyond this table.
+Later the same day W28 (live sched_ext coexistence), W29/W31 blockers and the W32 review were recorded: `validation/w28-w29-w31-host-facts-2026-11-11/`, `validation/w32-review-2026-11-11/`. The real-game frame benefit study is `NotPlannedForVerification` (needs a photodiode, camera or display-timestamp reference this machine lacks).
