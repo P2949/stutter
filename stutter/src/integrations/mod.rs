@@ -201,6 +201,29 @@ fn comm_matches(comm: &str, pattern: &str) -> bool {
     }
 }
 
+// Only suppress this known kernel helper when procfs positively identifies it as a
+// kernel thread. Missing or malformed stat data remains a conservative owner hint.
+fn is_scx_kernel_helper(comm: &str, stat: &str) -> bool {
+    const PF_KTHREAD: u64 = 0x0020_0000;
+    if comm != "scx_enable_help" && comm != "scx_enable_helper" {
+        return false;
+    }
+    let Some((head, fields)) = stat.rsplit_once(") ") else {
+        return false;
+    };
+    let Some((_, stat_comm)) = head.split_once(" (") else {
+        return false;
+    };
+    if stat_comm != "scx_enable_helper" {
+        return false;
+    }
+    fields
+        .split_whitespace()
+        .nth(6) // field 9 (flags), after pid and parenthesized comm
+        .and_then(|flags| flags.parse::<u64>().ok())
+        .is_some_and(|flags| flags & PF_KTHREAD != 0)
+}
+
 /// The distinct process names in `/proc`, or `None` when it cannot be read.
 fn process_names(proc_root: &Path) -> Option<BTreeSet<String>> {
     let entries = fs::read_dir(proc_root).ok()?;
@@ -212,7 +235,14 @@ fn process_names(proc_root: &Path) -> Option<BTreeSet<String>> {
             continue;
         }
         if let Ok(comm) = fs::read_to_string(entry.path().join("comm")) {
-            names.insert(comm.trim().to_owned());
+            let comm = comm.trim();
+            let kernel_helper = (comm == "scx_enable_help" || comm == "scx_enable_helper")
+                && fs::read_to_string(entry.path().join("stat"))
+                    .ok()
+                    .is_some_and(|stat| is_scx_kernel_helper(comm, &stat));
+            if !kernel_helper {
+                names.insert(comm.to_owned());
+            }
         }
     }
     Some(names)

@@ -96,6 +96,44 @@ fn a_loaded_scheduler_owns_the_scheduler_even_without_a_manager() {
 }
 
 #[test]
+fn scx_kernel_helper_is_not_a_loader_but_ambiguous_processes_remain_owners() {
+    let base = root("scx-kernel-helper");
+    let (proc_root, sys) = (base.join("proc"), base.join("sys"));
+    fs::create_dir_all(&proc_root).unwrap();
+    sched_ext_state(&sys, "disabled", None);
+    process(&proc_root, 42, "scx_enable_helper");
+    let stat = proc_root.join("42/stat");
+    fs::write(&stat, "42 (scx_enable_helper) S 2 0 0 0 -1 2129984\n").unwrap();
+    assert_eq!(
+        probe(&proc_root, &sys).daemon(KnownOwner::ScxLoader),
+        Daemon::NotRunning
+    );
+    fs::write(proc_root.join("42/comm"), "scx_enable_helper\n").unwrap();
+    assert_eq!(
+        probe(&proc_root, &sys).daemon(KnownOwner::ScxLoader),
+        Daemon::NotRunning
+    );
+    fs::write(&stat, "42 (scx_enable_helper) S 2 0 0 0 -1 0\n").unwrap();
+    assert_eq!(
+        probe(&proc_root, &sys).daemon(KnownOwner::ScxLoader),
+        Daemon::Running
+    );
+    fs::write(&stat, "malformed").unwrap();
+    assert_eq!(
+        probe(&proc_root, &sys).daemon(KnownOwner::ScxLoader),
+        Daemon::Running
+    );
+    sched_ext_state(&sys, "enabled", Some("scx_lavd"));
+    fs::write(&stat, "42 (scx_enable_helper) S 2 0 0 0 -1 2129984\n").unwrap();
+    assert!(
+        probe(&proc_root, &sys)
+            .external_owner(D::Scheduler)
+            .is_some()
+    );
+    fs::remove_dir_all(&base).unwrap();
+}
+
+#[test]
 fn the_oom_guards_are_reported_but_own_no_tuning_domain() {
     let base = root("oomd");
     let (proc_root, sys) = (base.join("proc"), base.join("sys"));
