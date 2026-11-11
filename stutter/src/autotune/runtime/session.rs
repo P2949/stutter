@@ -38,6 +38,16 @@ pub async fn run_autotune_controller_session(
             None
         }
     };
+    let mut research_coordinator = super::research_control::ResearchCoordinator::new(
+        runtime
+            .config()
+            .daemon_config
+            .autotune
+            .research_campaign_dir
+            .clone(),
+        None,
+        "BlockedHostIdentity",
+    );
     warn_if_unmanaged_privileged_worker_missing(runtime.config())?;
     let mut worker_handle = maybe_spawn_privileged_worker(runtime.config())?;
     let mut event_loop_iterations = 0u64;
@@ -79,7 +89,9 @@ pub async fn run_autotune_controller_session(
                 None => break,
             },
             Some(request) = research_rx.recv() => {
-                super::research_control::respond(request);
+                let now = (crate::audit::unix_nanos_now() / 1_000_000_000)
+                    .min(u128::from(u64::MAX)) as u64;
+                research_coordinator.handle(request, now);
                 continue;
             }
         };

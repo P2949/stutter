@@ -65,6 +65,7 @@ pub enum ResearchPhase {
     Preflight,
     Prepared,
     AwaitSafeWindow,
+    Paused,
     Launching,
     Attesting,
     Warmup,
@@ -90,6 +91,8 @@ impl ResearchPhase {
             (Requested, Preflight)
                 | (Preflight, Prepared)
                 | (Prepared, AwaitSafeWindow)
+                | (AwaitSafeWindow, Paused)
+                | (Paused, AwaitSafeWindow)
                 | (AwaitSafeWindow, Launching)
                 | (Launching, Attesting)
                 | (Attesting, Warmup)

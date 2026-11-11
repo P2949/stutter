@@ -64,6 +64,9 @@ pub struct DaemonAutotuneConfig {
     /// Optional private user-owned directory for resident research-control IPC.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub research_socket_dir: Option<PathBuf>,
+    /// Dedicated private directory for one frozen resident research campaign.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub research_campaign_dir: Option<PathBuf>,
     #[serde(default)]
     pub external_mutation_policy: ExternalMutationPolicy,
     #[serde(default)]
@@ -96,6 +99,7 @@ impl Default for DaemonAutotuneConfig {
             kpi_contract: None,
             kpi_socket_dir: None,
             research_socket_dir: None,
+            research_campaign_dir: None,
             external_mutation_policy: ExternalMutationPolicy::default(),
             high_risk_dry_run: false,
             workload_policy: DaemonWorkloadPolicyConfig::default(),
