@@ -22,3 +22,15 @@ Multi-node NUMA and RDT are `NotPlannedForVerification` (ledger 5.19, 5.24, 5.8)
 This host is NixOS/systemd 6.18.57; OpenRC is `NotPlannedForVerification` (ledger 5.21). Alternate-kernel (RT, Zen, Liquorix,
 CachyOS) campaigns need reboots, which this session may not perform: `BootUnavailable`, ledger `extra.kernels`. No blank
 cross-init Supported entry exists.
+
+## W28 follow-up: a lower-risk live attempt at the owner-conflict refusal (2026-11-11)
+
+Tried `sudo stutter autotune --mode suggest` (observation only, decision log and recording in a scratch directory and root's
+state directory; no mutation) against a fixture workload, once without and once with `scx_bpfland` loaded
+(`/sys/kernel/sched_ext/state` `enabled` during the run, `disabled` afterwards; no game running). Both runs ended `rc=0`. Neither
+decision log contains any sched_ext or owner field, and the fixture never leaves `Observing` (`LowFocusConfidence`,
+`candidate_count` 0), so the planner has no candidate to refuse and the owner-conflict denial cannot appear. Result: this path
+cannot demonstrate the refusal. Showing it live needs a new smoke case (a foreign scheduler loaded while the controller
+holds an exact fenced fixture and a candidate is eligible), which is a harness change, a new exact-build receipt and another
+guarded activation. The refusal itself is covered by the planner fixtures (`planning/denial.rs`: a sched_ext scheduler in
+charge that is not verified to honor the knob).
