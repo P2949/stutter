@@ -65,6 +65,7 @@ fn expected_subcommands_are_registered() {
             "objective-campaign",
             "objective-docs",
             "offline-optimization",
+            "owned-study",
             "owner-refusal-probe",
             "package",
             "package-layout-check",

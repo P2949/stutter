@@ -1,0 +1,28 @@
+{
+  "authorizes_mutation": false,
+  "effects": {
+    "explicit-all-cpus": {
+      "blocks": 2,
+      "ci95_percent": [
+        -1.061429313619625,
+        10.51957565449385
+      ],
+      "mean_percent": 4.729073170437113,
+      "verdict": "Inconclusive"
+    }
+  },
+  "invalid_slots": 0,
+  "manifest_sha256": "b59523091a234f923485c2b9767348d2de2f7d4347d9774552aebd0dae1a6d3d",
+  "outside_space_dropped": 0,
+  "practical_percent": 2.0,
+  "ranking": null,
+  "ranking_note": "InsufficientLegalCandidateEvidence: fewer than three legal candidates with blocks in both splits",
+  "schema_version": 1,
+  "study_id": "e2-aa",
+  "training_favourite": {
+    "candidate": "explicit-all-cpus",
+    "holdout_mean_percent": -1.061429313619625,
+    "training_mean_percent": 10.51957565449385
+  },
+  "valid_slots": 4
+}

@@ -1,0 +1,7 @@
+{"schema_version":1,"study_id":"e3-affinity","identity":"docs/validation/e3-affinity-study-2026-11-11/identity.json","hog_threads":12,"blocks":6,"training_blocks":3,"arm_timeout_secs":180,"practical_percent":2.0,
+ "baseline":{"name":"baseline","compile":{"kind":"Unrestricted"},"hogs":{"kind":"Unrestricted"}},
+ "candidates":[
+  {"name":"compile-primary-threads","compile":{"kind":"Cpus","value":"0-5"},"hogs":{"kind":"Unrestricted"}},
+  {"name":"hogs-sibling-threads","compile":{"kind":"Unrestricted"},"hogs":{"kind":"Cpus","value":"6-11"}},
+  {"name":"partition-primary-vs-sibling","compile":{"kind":"Cpus","value":"0-5"},"hogs":{"kind":"Cpus","value":"6-11"}},
+  {"name":"compile-two-cpus-control","compile":{"kind":"Cpus","value":"0-1"},"hogs":{"kind":"Unrestricted"}}]}

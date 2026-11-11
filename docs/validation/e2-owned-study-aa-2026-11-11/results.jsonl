@@ -1,0 +1,4 @@
+{"study_id":"e2-aa","manifest_sha256":"b59523091a234f923485c2b9767348d2de2f7d4347d9774552aebd0dae1a6d3d","slot":"b01-baseline","block":1,"arm":"baseline","valid":true,"reason":null,"elapsed_ns":9676880232}
+{"study_id":"e2-aa","manifest_sha256":"b59523091a234f923485c2b9767348d2de2f7d4347d9774552aebd0dae1a6d3d","slot":"b01-explicit-all-cpus","block":1,"arm":"explicit-all-cpus","valid":true,"reason":null,"elapsed_ns":8658913495}
+{"study_id":"e2-aa","manifest_sha256":"b59523091a234f923485c2b9767348d2de2f7d4347d9774552aebd0dae1a6d3d","slot":"b02-baseline","block":2,"arm":"baseline","valid":true,"reason":null,"elapsed_ns":9862046738}
+{"study_id":"e2-aa","manifest_sha256":"b59523091a234f923485c2b9767348d2de2f7d4347d9774552aebd0dae1a6d3d","slot":"b02-explicit-all-cpus","block":2,"arm":"explicit-all-cpus","valid":true,"reason":null,"elapsed_ns":9966725393}

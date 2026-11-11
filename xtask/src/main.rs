@@ -31,6 +31,7 @@ pub mod objective_campaign;
 pub mod objective_docs;
 pub mod offline_optimization;
 pub mod ops_checks;
+mod owned_study;
 mod owner_refusal_probe;
 pub mod preflight;
 pub mod process;
@@ -90,6 +91,11 @@ pub enum XtaskCommand {
     RendererProducer(renderer_producer::RendererProducerArgs),
     /// Apply the planner's real owner-conflict checks to the live sched_ext state
     OwnerRefusalProbe(owner_refusal_probe::OwnerRefusalArgs),
+    /// Run an owned fixed-work placement study (frozen manifest, supervised runner, analysis)
+    OwnedStudy {
+        #[command(subcommand)]
+        command: owned_study::Command,
+    },
     #[command(about = "Run canonical live observation acceptance and retain evidence")]
     LiveAcceptance {
         #[command(subcommand)]
@@ -511,6 +517,7 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
         XtaskCommand::FrameClockPrototype(args) => frame_clock_prototype::run(&args),
         XtaskCommand::RendererProducer(args) => renderer_producer::run(&args),
         XtaskCommand::OwnerRefusalProbe(args) => owner_refusal_probe::run(&args),
+        XtaskCommand::OwnedStudy { command } => owned_study::execute(command),
         XtaskCommand::LiveAcceptance { suite } => live_acceptance::run(&root, suite),
         XtaskCommand::RecoveryController { mode } => live_acceptance::recovery::controller(mode),
         XtaskCommand::LiveBurst {
