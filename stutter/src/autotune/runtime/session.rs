@@ -88,6 +88,8 @@ pub async fn run_autotune_controller_session(
     warn_if_unmanaged_privileged_worker_missing(runtime.config())?;
     let mut worker_handle = maybe_spawn_privileged_worker(runtime.config())?;
     let mut event_loop_iterations = 0u64;
+    let mut research_deadline_tick = tokio::time::interval(Duration::from_secs(1));
+    research_deadline_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     let (stop_task, _stop_tx_guard) = if duration.is_some() || external_stop.is_some() {
         (
@@ -121,6 +123,12 @@ pub async fn run_autotune_controller_session(
 
     loop {
         let event = tokio::select! {
+            _ = research_deadline_tick.tick(), if _research_server.is_some() => {
+                let now = (crate::audit::unix_nanos_now() / 1_000_000_000)
+                    .min(u128::from(u64::MAX)) as u64;
+                research_coordinator.on_deadline(now);
+                continue;
+            }
             event = event_rx.recv() => match event {
                 Some(event) => event,
                 None => break,
@@ -136,12 +144,15 @@ pub async fn run_autotune_controller_session(
                 let now = (crate::audit::unix_nanos_now() / 1_000_000_000)
                     .min(u128::from(u64::MAX)) as u64;
                 research_coordinator.set_mutable_action_present(
-                    runtime.has_active_experiment() || runtime.has_kept_actions(),
+                    runtime.has_active_experiment()
+                        || runtime.has_kept_actions()
+                        || runtime.controller_state().active_experiment.is_some(),
                 );
                 research_coordinator.handle(request, now);
                 continue;
             }
         };
+        runtime.research_campaign_active = research_coordinator.owns_action_slot();
         runtime.on_event(event)?;
         event_loop_iterations = event_loop_iterations.saturating_add(1);
         if event_loop_iterations.is_multiple_of(30)

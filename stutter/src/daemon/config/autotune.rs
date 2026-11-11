@@ -67,7 +67,7 @@ pub struct DaemonAutotuneConfig {
     /// Dedicated private directory for one frozen resident research campaign.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub research_campaign_dir: Option<PathBuf>,
-    /// Exact SteamApps library root independently inventoried before research admission.
+    /// Primary Steam client's SteamApps directory; other registered libraries are discovered.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub research_steamapps_dir: Option<PathBuf>,
     /// Root-owned Nix proton-lab source manifest used to attest installed custom Proton tools.

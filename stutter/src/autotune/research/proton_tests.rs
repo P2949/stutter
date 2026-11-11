@@ -347,3 +347,29 @@ fn stable_classification_excludes_experimental_hotfix_and_runtime_packages() {
     }
     assert_eq!(stable_proton_version("Proton 10.0 Beta"), None);
 }
+
+#[test]
+fn valve_inventory_merges_registered_libraries_without_hiding_duplicates() {
+    let uid = crate::syscall::geteuid();
+    let root = tempfile::tempdir().unwrap();
+    let first = root.path().join("first");
+    let second = root.path().join("second");
+    std::fs::create_dir(&first).unwrap();
+    std::fs::create_dir(&second).unwrap();
+    install_steam_proton(&second, 100, "Proton 10.0", "Proton 10.0", "10.0", 4);
+    let scan = || {
+        vec![
+            inspect_valve_stable(&first, uid).unwrap(),
+            inspect_valve_stable(&second, uid).unwrap(),
+        ]
+    };
+    let selected = merge_valve_candidates(ProtonSource::ValveStable, scan()).unwrap();
+    assert_eq!(selected.eligibility, ProtonEligibility::Eligible);
+    install_steam_proton(&first, 101, "Proton 9.0", "Proton 9.0", "9.0", 4);
+    let ambiguous = merge_valve_candidates(ProtonSource::ValveStable, scan()).unwrap();
+    assert_eq!(
+        ambiguous.eligibility,
+        ProtonEligibility::Blocked(ProtonBlockReason::AmbiguousInstallations)
+    );
+    assert!(ambiguous.path.is_none());
+}

@@ -28,13 +28,14 @@ pub(crate) mod proton;
 mod steam_inventory;
 mod vdf;
 pub use journal::{AttemptOutcome, AttemptRecord, AttemptSlot, ResearchJournal};
-pub use lease::{CampaignFacts, CampaignLease};
+pub use lease::{CampaignBlockReason, CampaignFacts, CampaignLease};
 pub(crate) use protocol::read_frame as read_control_frame;
 pub use protocol::{AuthenticatedRequest, ResearchRequest, receive_request};
 pub(crate) use proton::{SteamClientIdentity, SteamProcessIdentity, inspect_proton_inventory};
 pub use steam_inventory::{
     CyberpunkInstallation, SteamUpdateStatus, inspect_cyberpunk_installation,
 };
+pub(crate) use steam_inventory::{discover_cyberpunk_installation, discover_steam_libraries};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

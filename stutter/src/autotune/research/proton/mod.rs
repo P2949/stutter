@@ -16,7 +16,7 @@ mod tool;
 use custom::{custom_candidates, supports_x86_64_v3, x86_64_v3_flag_sets_supported};
 pub(crate) use steam::inspect_proton_inventory;
 #[cfg(test)]
-use steam::inspect_valve_stable;
+use steam::{inspect_valve_stable, merge_valve_candidates};
 #[cfg(test)]
 use steam_client::stable_proton_version;
 #[cfg(test)]
@@ -41,6 +41,7 @@ pub enum ProtonBlockReason {
     NotInstalled,
     Updating,
     AmbiguousStableBuild,
+    AmbiguousInstallations,
     UnsupportedCpuIsa,
 }
 
@@ -155,6 +156,16 @@ impl ProtonInventory {
                             && candidate.tool.is_some()
                             && candidate.path.is_none(),
                         "ambiguous Proton Stable inventory is malformed"
+                    )
+                }
+                ProtonEligibility::Blocked(ProtonBlockReason::AmbiguousInstallations) => {
+                    anyhow::ensure!(
+                        matches!(
+                            candidate.source,
+                            ProtonSource::ValveStable | ProtonSource::ValveExperimental
+                        ) && candidate.tool.is_some()
+                            && candidate.path.is_none(),
+                        "ambiguous Valve Proton inventory is malformed"
                     )
                 }
                 ProtonEligibility::Blocked(_) => anyhow::ensure!(

@@ -261,6 +261,47 @@ fn one_verified_intent_is_durable_pausable_cancellable_and_terminal() {
 }
 
 #[test]
+fn deadline_seals_a_waiting_or_paused_campaign_without_a_client_request() {
+    for paused in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        let (intent, facts) = fixture();
+        let mut coordinator = ResearchCoordinator::new(
+            Some(dir.path().to_path_buf()),
+            Some(facts.clone()),
+            "BlockedHostIdentity",
+        );
+        send(
+            &mut coordinator,
+            ResearchRequest::Submit {
+                intent: Box::new(intent),
+            },
+            100,
+        );
+        if paused {
+            send(&mut coordinator, ResearchRequest::Pause {}, 101);
+        }
+        coordinator.on_deadline(3_609);
+        assert!(coordinator.active.is_some());
+        coordinator.on_deadline(3_610);
+        let status = send(&mut coordinator, ResearchRequest::Status {}, 3_610);
+        assert!(status.contains("DeadlineExpired") && status.contains("blocked"));
+        drop(coordinator);
+        let recovered = CampaignLease::recover(
+            crate::syscall::open_dir_no_symlinks(dir.path()).unwrap(),
+            &facts,
+            3_610,
+        )
+        .unwrap();
+        assert_eq!(recovered.phase(), ResearchPhase::Blocked);
+        assert_eq!(
+            recovered.block_reason(),
+            Some(crate::autotune::research::CampaignBlockReason::DeadlineExpired)
+        );
+    }
+}
+
+#[test]
 fn intent_without_verified_facts_never_creates_campaign_records() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
@@ -367,8 +408,10 @@ fn cancellation_during_an_unsettled_launch_does_not_claim_restoration() {
     coordinator.active = Some(ActiveCampaign {
         lease,
         intent_sha256: digest,
+        deadline_unix_seconds: 3_610,
     });
     coordinator.submitted = true;
+    coordinator.on_deadline(3_610);
     let result = send(&mut coordinator, ResearchRequest::Cancel {}, 101);
     assert!(result.contains("CancellationNeedsExecutorSettlement"));
     assert_eq!(

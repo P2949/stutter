@@ -87,6 +87,8 @@ pub struct OnlineAutotuneController {
 #[derive(Debug)]
 pub struct AutotuneRuntime {
     config: AutotuneRuntimeConfig,
+    /// A resident research campaign owns the action slot until its action study grants it.
+    research_campaign_active: bool,
     controller: OnlineAutotuneController,
     latest_focus: Option<AutotuneObservationFocus>,
     target_state: RuntimeTargetState,

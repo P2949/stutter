@@ -93,11 +93,21 @@ pub async fn run(input: ResearchClientInput) -> anyhow::Result<()> {
         proton_manifest,
     } = &input.action
     {
-        let game = crate::autotune::research::inspect_cyberpunk_installation(steamapps, uid)?;
+        let libraries = crate::autotune::research::discover_steam_libraries(steamapps, uid)?;
+        let (_, game) =
+            crate::autotune::research::discover_cyberpunk_installation(&libraries, uid)?;
         let proton = proton_manifest
             .as_deref()
-            .map(|path| crate::autotune::research::inspect_proton_inventory(path, steamapps, uid))
+            .map(|path| {
+                crate::autotune::research::inspect_proton_inventory(
+                    path, steamapps, &libraries, uid,
+                )
+            })
             .transpose()?;
+        anyhow::ensure!(
+            crate::autotune::research::discover_steam_libraries(steamapps, uid)? == libraries,
+            "Steam libraries changed during inventory"
+        );
         let inventory = serde_json::json!({
             "schema_version": 1,
             "cyberpunk": game,

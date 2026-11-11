@@ -133,6 +133,14 @@ struct Event {
     to: ResearchPhase,
     previous_sha256: String,
     at_unix_seconds: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    block_reason: Option<CampaignBlockReason>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CampaignBlockReason {
+    DeadlineExpired,
 }
 
 /// A lease locks one private campaign directory; a separate resident/global lock is also needed.
@@ -145,6 +153,7 @@ pub struct CampaignLease {
     deadline_unix_seconds: u64,
     last_unix_seconds: u64,
     event_limit: usize,
+    block_reason: Option<CampaignBlockReason>,
 }
 
 fn locked_dir(dir: OwnedFd, uid: u32) -> anyhow::Result<File> {
@@ -258,6 +267,7 @@ impl CampaignLease {
             deadline_unix_seconds,
             last_unix_seconds: now,
             event_limit,
+            block_reason: None,
         })
     }
 
@@ -294,6 +304,7 @@ impl CampaignLease {
         let mut phase = ResearchPhase::Requested;
         let mut last_unix_seconds = header.admitted_unix_seconds;
         let mut sequence = 0_u32;
+        let mut block_reason = None;
         while !names.is_empty() {
             sequence += 1;
             anyhow::ensure!(sequence as usize <= event_limit, "too many campaign events");
@@ -309,6 +320,9 @@ impl CampaignLease {
                     && event.from == phase
                     && event.previous_sha256 == previous
                     && phase.permits(event.to)
+                    && (event.block_reason.is_none() || event.to == ResearchPhase::Blocked)
+                    && (event.block_reason != Some(CampaignBlockReason::DeadlineExpired)
+                        || event.at_unix_seconds >= header.intent.deadline_unix_seconds)
                     && event.at_unix_seconds >= last_unix_seconds
                     && event.at_unix_seconds <= now
                     && (event.at_unix_seconds < header.intent.deadline_unix_seconds
@@ -316,6 +330,7 @@ impl CampaignLease {
                 "campaign event chain mismatch"
             );
             phase = event.to;
+            block_reason = event.block_reason;
             last_unix_seconds = event.at_unix_seconds;
             previous = stutter_core::hash::sha256_hex(&bytes);
         }
@@ -342,11 +357,16 @@ impl CampaignLease {
             deadline_unix_seconds: header.intent.deadline_unix_seconds,
             last_unix_seconds,
             event_limit,
+            block_reason,
         })
     }
 
     pub fn phase(&self) -> ResearchPhase {
         self.phase
+    }
+
+    pub fn block_reason(&self) -> Option<CampaignBlockReason> {
+        self.block_reason
     }
 
     fn verify_current(&self) -> anyhow::Result<()> {
@@ -367,6 +387,9 @@ impl CampaignLease {
                     && event.from == phase
                     && event.previous_sha256 == previous
                     && phase.permits(event.to)
+                    && (event.block_reason.is_none() || event.to == ResearchPhase::Blocked)
+                    && (event.block_reason != Some(CampaignBlockReason::DeadlineExpired)
+                        || event.at_unix_seconds >= self.deadline_unix_seconds)
                     && event.at_unix_seconds >= last_unix_seconds
                     && (event.at_unix_seconds < self.deadline_unix_seconds || is_cleanup(event.to)),
                 "campaign event chain changed"
@@ -390,6 +413,27 @@ impl CampaignLease {
     /// Append one phase transition. `now` must come from the controller, never the client;
     /// active-time/monotonic budgets, external work and worker actions need their own gates.
     pub fn advance(&mut self, next: ResearchPhase, now: u64) -> anyhow::Result<()> {
+        self.advance_inner(next, now, None)
+    }
+
+    pub fn block_for_deadline(&mut self, now: u64) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            now >= self.deadline_unix_seconds,
+            "campaign deadline has not expired"
+        );
+        self.advance_inner(
+            ResearchPhase::Blocked,
+            now,
+            Some(CampaignBlockReason::DeadlineExpired),
+        )
+    }
+
+    fn advance_inner(
+        &mut self,
+        next: ResearchPhase,
+        now: u64,
+        block_reason: Option<CampaignBlockReason>,
+    ) -> anyhow::Result<()> {
         anyhow::ensure!(
             self.phase.permits(next) && (self.sequence as usize) < self.event_limit,
             "invalid campaign transition"
@@ -406,6 +450,7 @@ impl CampaignLease {
             to: next,
             previous_sha256: self.previous_sha256.clone(),
             at_unix_seconds: now,
+            block_reason,
         };
         let bytes = serde_json::to_vec(&event)?;
         write_new(&self.dir, &format!("event-{sequence:04}.json"), &bytes)?;
@@ -413,6 +458,7 @@ impl CampaignLease {
         self.sequence = sequence;
         self.previous_sha256 = stutter_core::hash::sha256_hex(&bytes);
         self.last_unix_seconds = now;
+        self.block_reason = block_reason;
         Ok(())
     }
 

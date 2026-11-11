@@ -12,6 +12,18 @@ use crate::{
 };
 
 impl AutotuneRuntime {
+    /// Research screening is observation-only until a frozen action study explicitly owns a slot.
+    pub(super) fn select_candidate_for_normal_control(
+        &mut self,
+        observation: &AutotuneObservation,
+    ) -> anyhow::Result<Option<CandidateAction>> {
+        let candidate = self.select_candidate_for_observation(observation)?;
+        if self.research_campaign_active {
+            return Ok(None);
+        }
+        Ok(candidate)
+    }
+
     pub(super) fn select_candidate_for_observation(
         &mut self,
         observation: &AutotuneObservation,

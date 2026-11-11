@@ -26,6 +26,7 @@ impl AutotuneRuntime {
 
         let (kpi_collector, kpi_observation) = super::kpi_source::load(&config);
         Self {
+            research_campaign_active: false,
             target_state: RuntimeTargetState::new(config.tree_pid()),
             kpi_collector,
             kpi_observation,

@@ -237,12 +237,99 @@ pub(super) fn inspect_valve_stable(
     }
 }
 
-/// Read the immutable Nix tool manifest and the fixed Steam Experimental AppID without changing
-/// either installation. The caller supplies the controller-owned manifest path and the SteamApps
-/// directory already bound to the authenticated UID.
+fn inspect_experimental(steamapps: &Path, owner_uid: u32) -> anyhow::Result<ProtonCandidate> {
+    Ok(
+        if let Some(manifest) = read_steam_appmanifest(steamapps, owner_uid, EXPERIMENTAL_APP_ID)? {
+            anyhow::ensure!(
+                manifest.name == "Proton Experimental"
+                    && manifest.install_dir == "Proton - Experimental"
+                    && Path::new(&manifest.install_dir).components().count() == 1
+                    && Path::new(&manifest.install_dir)
+                        .components()
+                        .all(|item| matches!(item, Component::Normal(_))),
+                "unexpected Proton Experimental manifest"
+            );
+            let common = Path::new(steamapps).join("common");
+            let common_fd = crate::syscall::open_dir_no_symlinks(&common)?;
+            anyhow::ensure!(
+                File::from(common_fd.try_clone()?).metadata()?.uid() == owner_uid,
+                "Steam common directory owner mismatch"
+            );
+            let path = common.join(&manifest.install_dir);
+            let provenance = serde_json::json!({
+                "app_id": EXPERIMENTAL_APP_ID,
+                "build_id": manifest.build_id,
+            });
+            let mut candidate = inspect_tool_directory(ToolSpec {
+                source: ProtonSource::ValveExperimental,
+                expected_id: "proton_experimental",
+                expected_version: "experimental",
+                compatibility_display_name: None,
+                path: &path,
+                owner_uid,
+                immutable: false,
+                provenance: &provenance,
+                app_manifest_sha256: Some(&manifest.sha256),
+            })?;
+            if manifest.update_status != SteamUpdateStatus::NoPendingUpdateIndicated {
+                candidate.eligibility = ProtonEligibility::Blocked(ProtonBlockReason::Updating);
+            }
+            candidate
+        } else {
+            ProtonCandidate::blocked(
+                ProtonSource::ValveExperimental,
+                ProtonBlockReason::NotInstalled,
+            )
+        },
+    )
+}
+
+pub(super) fn merge_valve_candidates(
+    source: ProtonSource,
+    candidates: Vec<ProtonCandidate>,
+) -> anyhow::Result<ProtonCandidate> {
+    let mut present: Vec<_> = candidates
+        .into_iter()
+        .filter(|candidate| {
+            candidate.eligibility != ProtonEligibility::Blocked(ProtonBlockReason::NotInstalled)
+        })
+        .collect();
+    match present.len() {
+        0 => Ok(ProtonCandidate::blocked(
+            source,
+            ProtonBlockReason::NotInstalled,
+        )),
+        1 => Ok(present.remove(0)),
+        _ => {
+            let mut identities: Vec<_> = present
+                .into_iter()
+                .map(|candidate| {
+                    candidate
+                        .tool
+                        .ok_or_else(|| anyhow::anyhow!("installed Valve Proton lacks identity"))
+                })
+                .collect::<anyhow::Result<_>>()?;
+            identities.sort_by(|left, right| left.identity_sha256.cmp(&right.identity_sha256));
+            let identity_sha256 = stutter_core::hash::sha256_hex(&serde_json::to_vec(&identities)?);
+            Ok(ProtonCandidate {
+                source,
+                version: None,
+                tool: Some(ResearchTool {
+                    source,
+                    identity_sha256,
+                }),
+                eligibility: ProtonEligibility::Blocked(ProtonBlockReason::AmbiguousInstallations),
+                path: None,
+            })
+        }
+    }
+}
+
+/// Inventory all registered libraries while binding the Steam client to its primary directory.
 pub(crate) fn inspect_proton_inventory(
     manifest_path: &Path,
     steamapps: &Path,
+    libraries: &[std::path::PathBuf],
     owner_uid: u32,
 ) -> anyhow::Result<ProtonInventory> {
     anyhow::ensure!(owner_uid != 0, "Steam user must be unprivileged");
@@ -257,54 +344,26 @@ pub(crate) fn inspect_proton_inventory(
         .ok_or_else(|| anyhow::anyhow!("invalid Proton manifest name"))?;
     let manifest = read_trusted_file(store.as_fd(), manifest_name, 0, MAX_LAB_MANIFEST, true)?;
     let mut candidates = custom_candidates(&manifest.bytes, 0, Path::new("/nix/store"))?;
-
-    let experimental = if let Some(manifest) =
-        read_steam_appmanifest(steamapps, owner_uid, EXPERIMENTAL_APP_ID)?
-    {
-        anyhow::ensure!(
-            manifest.name == "Proton Experimental"
-                && manifest.install_dir == "Proton - Experimental"
-                && Path::new(&manifest.install_dir).components().count() == 1
-                && Path::new(&manifest.install_dir)
-                    .components()
-                    .all(|item| matches!(item, Component::Normal(_))),
-            "unexpected Proton Experimental manifest"
-        );
-        let common = Path::new(steamapps).join("common");
-        let common_fd = crate::syscall::open_dir_no_symlinks(&common)?;
-        anyhow::ensure!(
-            File::from(common_fd.try_clone()?).metadata()?.uid() == owner_uid,
-            "Steam common directory owner mismatch"
-        );
-        let path = common.join(&manifest.install_dir);
-        let provenance = serde_json::json!({
-            "app_id": EXPERIMENTAL_APP_ID,
-            "build_id": manifest.build_id,
-        });
-        let mut candidate = inspect_tool_directory(ToolSpec {
-            source: ProtonSource::ValveExperimental,
-            expected_id: "proton_experimental",
-            expected_version: "experimental",
-            compatibility_display_name: None,
-            path: &path,
-            owner_uid,
-            immutable: false,
-            provenance: &provenance,
-            app_manifest_sha256: Some(&manifest.sha256),
-        })?;
-        if manifest.update_status != SteamUpdateStatus::NoPendingUpdateIndicated {
-            candidate.eligibility = ProtonEligibility::Blocked(ProtonBlockReason::Updating);
-        }
-        candidate
-    } else {
-        ProtonCandidate::blocked(
-            ProtonSource::ValveExperimental,
-            ProtonBlockReason::NotInstalled,
-        )
-    };
-    candidates.push(experimental);
-    candidates.push(inspect_valve_stable(steamapps, owner_uid)?);
+    anyhow::ensure!(
+        super::super::discover_steam_libraries(steamapps, owner_uid)? == libraries,
+        "Steam libraries changed during inventory"
+    );
+    let mut experimental = Vec::new();
+    let mut stable = Vec::new();
+    for library in libraries {
+        experimental.push(inspect_experimental(library, owner_uid)?);
+        stable.push(inspect_valve_stable(library, owner_uid)?);
+    }
+    candidates.push(merge_valve_candidates(
+        ProtonSource::ValveExperimental,
+        experimental,
+    )?);
+    candidates.push(merge_valve_candidates(ProtonSource::ValveStable, stable)?);
     let steam_client = inspect_steam_client_identity(steamapps, owner_uid)?;
+    anyhow::ensure!(
+        super::super::discover_steam_libraries(steamapps, owner_uid)? == libraries,
+        "Steam libraries changed during inventory"
+    );
     let inventory = ProtonInventory {
         schema_version: 1,
         candidates,

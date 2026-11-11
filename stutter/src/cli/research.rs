@@ -15,8 +15,9 @@ pub(super) struct ResearchArgs {
 
 #[derive(Subcommand, Debug)]
 enum ResearchCommand {
-    /// Inspect the installed Cyberpunk Steam manifest without launching Steam or the game.
+    /// Inspect registered Steam libraries without launching Steam or the game.
     Inventory {
+        /// Primary Steam client's SteamApps directory; other libraries are discovered from it.
         steamapps: PathBuf,
         /// Root-owned proton-lab manifest emitted by the pinned Nix package.
         #[arg(long)]

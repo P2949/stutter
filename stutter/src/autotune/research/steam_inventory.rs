@@ -3,13 +3,131 @@ use std::{
     fs::File,
     io::Read,
     os::{fd::AsFd, unix::fs::MetadataExt},
-    path::Path,
+    path::{Component, Path, PathBuf},
 };
 
 use serde::{Deserialize, Serialize};
 
 const MAX_MANIFEST: u64 = 1024 * 1024;
 const MAX_GAME_EXECUTABLE: u64 = 256 * 1024 * 1024;
+const MAX_LIBRARIES: usize = 32;
+
+/// Discover registered Steam libraries from the client's primary SteamApps directory. Paths are
+/// process-local and every directory is opened without following symlinks before it is accepted.
+pub(crate) fn discover_steam_libraries(
+    primary: &Path,
+    owner_uid: u32,
+) -> anyhow::Result<Vec<PathBuf>> {
+    anyhow::ensure!(owner_uid != 0, "Steam user must be unprivileged");
+    let primary_fd = crate::syscall::open_dir_no_symlinks(primary)?;
+    let primary_meta = File::from(primary_fd.try_clone()?).metadata()?;
+    anyhow::ensure!(
+        primary_meta.is_dir() && primary_meta.uid() == owner_uid,
+        "untrusted primary Steam library"
+    );
+    let file = crate::syscall::openat_nofollow(primary_fd.as_fd(), "libraryfolders.vdf")?;
+    let before = file.metadata()?;
+    anyhow::ensure!(
+        before.is_file()
+            && before.uid() == owner_uid
+            && before.nlink() == 1
+            && before.len() <= MAX_MANIFEST,
+        "untrusted Steam library registry"
+    );
+    let mut bytes = Vec::new();
+    (&file).take(MAX_MANIFEST + 1).read_to_end(&mut bytes)?;
+    let after = file.metadata()?;
+    anyhow::ensure!(
+        bytes.len() as u64 == before.len()
+            && before.dev() == after.dev()
+            && before.ino() == after.ino()
+            && before.len() == after.len()
+            && before.mtime() == after.mtime()
+            && before.mtime_nsec() == after.mtime_nsec(),
+        "Steam library registry changed while reading"
+    );
+    let document = super::vdf::VdfDocument::parse(&bytes)?;
+    anyhow::ensure!(
+        document.name == "libraryfolders",
+        "unexpected Steam library registry root"
+    );
+    let root = document.root_object()?;
+    anyhow::ensure!(
+        !root.is_empty() && root.len() <= MAX_LIBRARIES,
+        "invalid Steam library count"
+    );
+    let mut result = Vec::new();
+    let mut identities = std::collections::BTreeSet::new();
+    for (key, value) in root {
+        anyhow::ensure!(
+            !key.is_empty() && key.bytes().all(|byte| byte.is_ascii_digit()),
+            "invalid Steam library index"
+        );
+        let library = value
+            .object()
+            .ok_or_else(|| anyhow::anyhow!("invalid Steam library entry"))?;
+        let path = Path::new(
+            field(library, "path").ok_or_else(|| anyhow::anyhow!("Steam library has no path"))?,
+        );
+        anyhow::ensure!(
+            path.is_absolute()
+                && path
+                    .components()
+                    .all(|part| matches!(part, Component::RootDir | Component::Normal(_))),
+            "unsafe Steam library path"
+        );
+        let steamapps = path.join("steamapps");
+        let directory = File::from(crate::syscall::open_dir_no_symlinks(&steamapps)?);
+        let meta = directory.metadata()?;
+        anyhow::ensure!(
+            meta.is_dir() && meta.uid() == owner_uid && identities.insert((meta.dev(), meta.ino())),
+            "untrusted or duplicate Steam library"
+        );
+        result.push(steamapps);
+    }
+    anyhow::ensure!(
+        identities.contains(&(primary_meta.dev(), primary_meta.ino())),
+        "primary Steam library missing from registry"
+    );
+    let current =
+        crate::syscall::openat_nofollow(primary_fd.as_fd(), "libraryfolders.vdf")?.metadata()?;
+    let primary_current = File::from(crate::syscall::open_dir_no_symlinks(primary)?).metadata()?;
+    anyhow::ensure!(
+        current.dev() == before.dev()
+            && current.ino() == before.ino()
+            && current.len() == before.len()
+            && current.mtime() == before.mtime()
+            && current.mtime_nsec() == before.mtime_nsec()
+            && primary_current.dev() == primary_meta.dev()
+            && primary_current.ino() == primary_meta.ino(),
+        "Steam library registry changed during discovery"
+    );
+    Ok(result)
+}
+
+/// Find exactly one installed Cyberpunk manifest in registered libraries; duplicate copies are
+/// ambiguous and library registry app lists are not treated as ownership or installation proof.
+pub(crate) fn discover_cyberpunk_installation(
+    libraries: &[PathBuf],
+    owner_uid: u32,
+) -> anyhow::Result<(PathBuf, CyberpunkInstallation)> {
+    let mut found = None;
+    for steamapps in libraries {
+        let dir = crate::syscall::open_dir_no_symlinks(steamapps)?;
+        match crate::syscall::openat_nofollow(dir.as_fd(), "appmanifest_1091500.acf") {
+            Ok(_) => {
+                anyhow::ensure!(found.is_none(), "ambiguous Cyberpunk installations");
+                found = Some((
+                    steamapps.clone(),
+                    inspect_cyberpunk_installation(steamapps, owner_uid)?,
+                ));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    found.ok_or_else(|| anyhow::anyhow!("Cyberpunk is not installed in a registered Steam library"))
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -47,7 +165,14 @@ fn parse_manifest(bytes: &[u8]) -> anyhow::Result<CyberpunkInstallation> {
     let installation_directory = field(root, "installdir")
         .ok_or_else(|| anyhow::anyhow!("missing installation directory"))?;
     anyhow::ensure!(
-        app_id == 1_091_500 && build_id != 0 && installation_directory == "Cyberpunk 2077",
+        app_id == 1_091_500
+            && build_id != 0
+            && installation_directory.len() <= 255
+            && !installation_directory.contains('/')
+            && Path::new(installation_directory).components().count() == 1
+            && Path::new(installation_directory)
+                .components()
+                .all(|component| matches!(component, Component::Normal(_))),
         "Steam manifest is not the expected Cyberpunk installation"
     );
 
@@ -133,7 +258,10 @@ pub fn inspect_cyberpunk_installation(
         "Steam manifest changed while reading"
     );
     let mut installation = parse_manifest(&bytes)?;
-    let executable_dir = steamapps.join("common/Cyberpunk 2077/bin/x64");
+    let executable_dir = steamapps
+        .join("common")
+        .join(&installation.installation_directory)
+        .join("bin/x64");
     let executable_dir = crate::syscall::open_dir_no_symlinks(&executable_dir)?;
     let executable = crate::syscall::openat_nofollow(executable_dir.as_fd(), "Cyberpunk2077.exe")?;
     let exe_before = executable.metadata()?;
@@ -230,6 +358,9 @@ mod tests {
         assert!(parse_manifest(manifest("\"appid\" \"1091500\"").as_bytes()).is_err());
         assert!(parse_manifest(manifest("").replace("1091500", "1").as_bytes()).is_err());
         assert!(
+            parse_manifest(manifest("").replace("Cyberpunk 2077", "name/.").as_bytes()).is_err()
+        );
+        assert!(
             parse_manifest(
                 manifest("")
                     .replace(
@@ -272,5 +403,98 @@ mod tests {
         assert!(inspect_cyberpunk_installation(&alias, crate::syscall::geteuid()).is_err());
         std::fs::write(exe_dir.join("Cyberpunk2077.exe"), b"not a PE").unwrap();
         assert!(inspect_cyberpunk_installation(&actual, crate::syscall::geteuid()).is_err());
+    }
+
+    #[test]
+    fn inventory_uses_the_safe_directory_recorded_by_the_manifest() {
+        let root = tempfile::tempdir().unwrap();
+        let steamapps = root.path().join("steamapps");
+        let executable = steamapps.join("common/Alternate Install/bin/x64");
+        std::fs::create_dir_all(&executable).unwrap();
+        std::fs::write(
+            steamapps.join("appmanifest_1091500.acf"),
+            manifest("").replace("Cyberpunk 2077", "Alternate Install"),
+        )
+        .unwrap();
+        std::fs::write(executable.join("Cyberpunk2077.exe"), b"MZfixture").unwrap();
+        let result = inspect_cyberpunk_installation(&steamapps, crate::syscall::geteuid()).unwrap();
+        assert_eq!(result.installation_directory, "Alternate Install");
+        assert!(result.game_executable_sha256.is_some());
+        assert!(!result.entitlement_verified);
+    }
+
+    #[test]
+    fn registered_libraries_find_a_secondary_install_and_reject_duplicates() {
+        let root = tempfile::tempdir().unwrap();
+        let primary = root.path().join("primary");
+        let secondary = root.path().join("secondary");
+        std::fs::create_dir_all(primary.join("steamapps")).unwrap();
+        let game = secondary.join("steamapps/common/Installed Game/bin/x64");
+        std::fs::create_dir_all(&game).unwrap();
+        std::fs::write(game.join("Cyberpunk2077.exe"), b"MZfixture").unwrap();
+        let game_manifest = manifest("").replace("Cyberpunk 2077", "Installed Game");
+        std::fs::write(
+            secondary.join("steamapps/appmanifest_1091500.acf"),
+            &game_manifest,
+        )
+        .unwrap();
+        let registry = |second: &Path| {
+            format!(
+                "\"libraryfolders\" {{ \"0\" {{ \"path\" \"{}\" }} \"1\" {{ \"path\" \"{}\" }} }}",
+                primary.display(),
+                second.display()
+            )
+        };
+        let registry_path = primary.join("steamapps/libraryfolders.vdf");
+        std::fs::write(&registry_path, registry(&secondary)).unwrap();
+        let uid = crate::syscall::geteuid();
+        let libraries = discover_steam_libraries(&primary.join("steamapps"), uid).unwrap();
+        let (library, game) = discover_cyberpunk_installation(&libraries, uid).unwrap();
+        assert_eq!(library, secondary.join("steamapps"));
+        assert_eq!(game.installation_directory, "Installed Game");
+        assert!(!game.entitlement_verified);
+        std::fs::create_dir_all(primary.join("steamapps/common/Installed Game/bin/x64")).unwrap();
+        std::fs::write(
+            primary.join("steamapps/common/Installed Game/bin/x64/Cyberpunk2077.exe"),
+            b"MZfixture",
+        )
+        .unwrap();
+        std::fs::write(
+            primary.join("steamapps/appmanifest_1091500.acf"),
+            &game_manifest,
+        )
+        .unwrap();
+        assert!(discover_cyberpunk_installation(&libraries, uid).is_err());
+        std::fs::write(&registry_path, registry(&primary)).unwrap();
+        assert!(discover_steam_libraries(&primary.join("steamapps"), uid).is_err());
+    }
+
+    #[test]
+    fn registered_library_symlinks_and_unlisted_primary_fail_closed() {
+        use std::os::unix::fs::symlink;
+        let root = tempfile::tempdir().unwrap();
+        let primary = root.path().join("primary");
+        let secondary = root.path().join("secondary");
+        std::fs::create_dir_all(primary.join("steamapps")).unwrap();
+        std::fs::create_dir_all(secondary.join("steamapps")).unwrap();
+        let alias = root.path().join("alias");
+        symlink(&secondary, &alias).unwrap();
+        let registry = primary.join("steamapps/libraryfolders.vdf");
+        let value = |path: &Path| {
+            format!(
+                "\"libraryfolders\" {{ \"0\" {{ \"path\" \"{}\" }} }}",
+                path.display()
+            )
+        };
+        std::fs::write(&registry, value(&alias)).unwrap();
+        assert!(
+            discover_steam_libraries(&primary.join("steamapps"), crate::syscall::geteuid())
+                .is_err()
+        );
+        std::fs::write(&registry, value(&secondary)).unwrap();
+        assert!(
+            discover_steam_libraries(&primary.join("steamapps"), crate::syscall::geteuid())
+                .is_err()
+        );
     }
 }

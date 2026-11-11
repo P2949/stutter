@@ -336,7 +336,7 @@ impl AutotuneRuntime {
                     AutotuneRuntimePhase::Planning,
                     "planning candidates for observation",
                 )?;
-                let candidate = self.select_candidate_for_observation(&observation)?;
+                let candidate = self.select_candidate_for_normal_control(&observation)?;
                 self.plan_external_mutation_recovery_decision()
                     .unwrap_or_else(|| {
                         decide_autotune_transition(

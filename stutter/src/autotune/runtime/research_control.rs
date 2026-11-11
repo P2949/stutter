@@ -1,7 +1,7 @@
 //! Optional local research-control transport. It has no worker or launcher authority.
 //!
-//! Connections are bounded and parsed away from monitor ticks. The resident loop owns request
-//! decisions. Until campaign admission and recovery are implemented, it refuses submission.
+//! Connections are bounded and parsed away from monitor ticks. The resident loop owns admission
+//! and management; Steam execution and complete campaign recovery remain separate work.
 use std::{
     fs::File,
     io::Write,
@@ -21,8 +21,8 @@ use tokio::{
 };
 
 use crate::autotune::research::{
-    AuthenticatedRequest, CampaignFacts, CampaignLease, ResearchPhase, ResearchRequest,
-    receive_request,
+    AuthenticatedRequest, CampaignBlockReason, CampaignFacts, CampaignLease, ResearchPhase,
+    ResearchRequest, receive_request,
 };
 
 const SOCKET_NAME: &str = "research.sock";
@@ -37,11 +37,13 @@ pub(super) struct Envelope {
 struct ActiveCampaign {
     lease: CampaignLease,
     intent_sha256: String,
+    deadline_unix_seconds: u64,
 }
 
 struct TerminalCampaign {
     phase: ResearchPhase,
     intent_sha256: String,
+    code: &'static str,
 }
 
 /// Controller-owned admission and management state. The production controller supplies host
@@ -58,6 +60,10 @@ pub(super) struct ResearchCoordinator {
 }
 
 impl ResearchCoordinator {
+    pub(super) fn owns_action_slot(&self) -> bool {
+        self.active.is_some()
+    }
+
     pub(super) fn new(
         campaign_dir: Option<PathBuf>,
         facts: Option<CampaignFacts>,
@@ -104,6 +110,7 @@ impl ResearchCoordinator {
     }
 
     pub(super) fn handle(&mut self, envelope: Envelope, now: u64) {
+        self.on_deadline(now);
         let response = if envelope.request.revalidate_peer().is_err() {
             response("denied", "PeerChanged")
         } else {
@@ -141,6 +148,7 @@ impl ResearchCoordinator {
                 "status": "ok",
                 "phase": terminal.phase,
                 "intent_sha256": terminal.intent_sha256,
+                "code": terminal.code,
             })
             .to_string()
                 + "\n";
@@ -213,6 +221,7 @@ impl ResearchCoordinator {
         self.active = Some(ActiveCampaign {
             lease,
             intent_sha256: digest,
+            deadline_unix_seconds: intent.deadline_unix_seconds,
         });
         let Some(active) = self.active.as_mut() else {
             return response("blocked", "InternalStateError");
@@ -293,9 +302,44 @@ impl ResearchCoordinator {
         self.terminal = Some(TerminalCampaign {
             phase: ResearchPhase::Aborted,
             intent_sha256: active.intent_sha256.clone(),
+            code: "Cancelled",
         });
         self.active = None;
         self.status()
+    }
+
+    /// Expire only a quiescent boundary. An active executor must settle its own resources first.
+    pub(super) fn on_deadline(&mut self, now: u64) {
+        let Some(active) = self.active.as_mut() else {
+            return;
+        };
+        if now < active.deadline_unix_seconds
+            || !matches!(
+                active.lease.phase(),
+                ResearchPhase::Requested
+                    | ResearchPhase::Preflight
+                    | ResearchPhase::Prepared
+                    | ResearchPhase::AwaitSafeWindow
+                    | ResearchPhase::Paused
+            )
+        {
+            return;
+        }
+        if active.lease.advance(ResearchPhase::Restoring, now).is_err()
+            || active.lease.block_for_deadline(now).is_err()
+        {
+            log::error!("research deadline settlement could not be persisted");
+            return;
+        }
+        self.terminal = Some(TerminalCampaign {
+            phase: ResearchPhase::Blocked,
+            intent_sha256: active.intent_sha256.clone(),
+            code: match active.lease.block_reason() {
+                Some(CampaignBlockReason::DeadlineExpired) => "DeadlineExpired",
+                None => "Blocked",
+            },
+        });
+        self.active = None;
     }
 
     fn block_after_admission(&mut self, now: u64, code: &'static str) -> String {

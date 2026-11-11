@@ -241,7 +241,9 @@ pub fn collect_campaign_facts(
     }
     let session_id =
         active_wayland_session(uid).map_err(|_| HostFactsError::new("BlockedDesktopSession"))?;
-    let game = crate::autotune::research::inspect_cyberpunk_installation(&steamapps, uid)
+    let libraries = crate::autotune::research::discover_steam_libraries(&steamapps, uid)
+        .map_err(|_| HostFactsError::new("BlockedSteamLibraries"))?;
+    let (_, game) = crate::autotune::research::discover_cyberpunk_installation(&libraries, uid)
         .map_err(|_| HostFactsError::new("BlockedGameInstallation"))?;
     if game.manifest_update_status
         != crate::autotune::research::SteamUpdateStatus::NoPendingUpdateIndicated
@@ -251,9 +253,13 @@ pub fn collect_campaign_facts(
     let game_executable_sha256 = game
         .game_executable_sha256
         .ok_or_else(|| HostFactsError::new("BlockedGameInstallation"))?;
-    let proton =
-        crate::autotune::research::inspect_proton_inventory(&proton_manifest, &steamapps, uid)
-            .map_err(|_| HostFactsError::new("BlockedProtonInventory"))?;
+    let proton = crate::autotune::research::inspect_proton_inventory(
+        &proton_manifest,
+        &steamapps,
+        &libraries,
+        uid,
+    )
+    .map_err(|_| HostFactsError::new("BlockedProtonInventory"))?;
     let tools: Vec<ResearchTool> = proton.tools();
     let steam_client: SteamClientIdentity = proton
         .steam_client
