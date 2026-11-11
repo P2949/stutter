@@ -32,3 +32,17 @@ coexistence; W29/W31 blockers stated; W30 real `wrk2`/`hyperfine`/hwloc captures
 * **Different-hardware / platform items** (multi-node NUMA, RDT, OpenRC, vendor VTune/uProf, CoreCtrl, alternate kernels that
   need reboots, a kdamond-free host, the packaged `scx_loader`): `NotPlannedForVerification` or `BootUnavailable` with the
   reason recorded in the ledger.
+
+## Probe: is any independent frame-timing reference reachable on this host? (2026-11-11)
+
+* No camera: no `/dev/video*`. No light or photodiode sensor: no `/sys/bus/iio/devices`. USB devices are input, audio, hub and LED
+  controllers only (no capture device).
+* The only DRM device is `card1` (one connected output, `DP-3`) and it is the display of the user's active Wayland session
+  (`Type=wayland`, `Active=yes`). A display hardware timestamp (page-flip/vblank) for a frame needs the application to own the
+  scan-out (`vkcube --wsi display`, DRM master), which means taking the display from that session; and a composited window's
+  present has no one-to-one page flip to pair with. Doing that to the user's only display is excluded by the standing constraint not
+  to disturb an occupied session.
+
+So every accepted reference kind (photodiode, display hardware timestamp, high-speed camera) is unavailable here by hardware or
+by the standing session constraint, which makes the W22 independent reference, and with it the real-game direct-frame benefit
+study, an irreducible blocker on this machine, not merely unfinished work.
