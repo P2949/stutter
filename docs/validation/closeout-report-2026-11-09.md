@@ -6,7 +6,7 @@ Source `711a82e4a55bf620abcaa77a7832d95b9c67e2b9`, kernel `6.18.57`. Generated f
 
 | disposition | entries |
 |---|---|
-| NotPlannedForVerification | 9 |
+| NotPlannedForVerification | 10 |
 | EvidenceDeferred | 31 |
 | HardwareUnavailable | 0 |
 | SafetyAborted | 0 |
@@ -32,7 +32,7 @@ Source `711a82e4a55bf620abcaa77a7832d95b9c67e2b9`, kernel `6.18.57`. Generated f
 | 5.9 | hwloc | W8 | code_complete | CodeComplete, FixtureVerified, RealObserved | nothing |
 | 5.10 | perf, perf_event_open, Intel VTune, AMD uProf, LIKWID | W7 W8 W9 W13 | code_complete | CodeComplete, FixtureVerified, RealObserved, EvidenceDeferred, NotPlannedForVerification | the PMU sensor starting only on escalation is by design (cost-bounded sensors); the architecture events are catalogued and resolved but not opened by the runtime; importer formats are fixture-verified from the documented layouts (the tools are absent here) |
 | 5.11 | BCC, bpftrace, trace-cmd, ftrace, KernelShark, rtla, cyclictest | W8 W13 | code_complete | CodeComplete, FixtureVerified, RealObserved, EvidenceDeferred | importer formats for rtla are fixture-verified only (no rtla on this host); kernel noise is diagnostic, never an application outcome and never authority |
-| 5.12 | MangoHud, Gamescope, Wayland presentation, DRM/KMS | W2 W3 W4 W9 | code_complete | CodeComplete, FixtureVerified, EvidenceDeferred, RealObserved | Qualified production-time/flush clock bound and further installed-service/phase/crash qualification remain deferred; no new frame-primary support claim. |
+| 5.12 | MangoHud, Gamescope, Wayland presentation, DRM/KMS | W2 W3 W4 W9 | code_complete | CodeComplete, EvidenceDeferred, FixtureVerified, NotPlannedForVerification, RealObserved | Qualified production-time/flush clock bound and further installed-service/phase/crash qualification remain deferred; no new frame-primary support claim. |
 | 5.13 | LACT, CoreCtrl | W6 W9 W11d | code_complete | CodeComplete, FixtureVerified, RealObserved, EvidenceDeferred, NotPlannedForVerification | nothing |
 | 5.14 | OpenTuner | W10 W15 | code_complete | CodeComplete, FixtureVerified, EvidenceDeferred, NotPlannedForVerification | nothing |
 | 5.15 | Kernel Tuner, OtterTune, Bayesian/SMBO, contextual bandits | W13 W15 | code_complete | CodeComplete, FixtureVerified, EvidenceDeferred, NotPlannedForVerification | nothing |
@@ -67,7 +67,7 @@ Source `711a82e4a55bf620abcaa77a7832d95b9c67e2b9`, kernel `6.18.57`. Generated f
 * **5.9** (hwloc): none: a real hwloc XML export agrees with the native topology (stutter topology-check, 40 objects)
 * **5.10** (perf, perf_event_open, Intel VTune, AMD uProf, LIKWID): perf and LIKWID installed; Intel VTune and AMD uProf are vendor tools not planned for verification (development targets this machine only); the optional six-event group yielded no usable counts on this PMU
 * **5.11** (BCC, bpftrace, trace-cmd, ftrace, KernelShark, rtla, cyclictest): tools installed; a real capture or campaign from each is the remaining evidence, recorded per slice in docs/validation/phase-tools-2026-11-11/RESULTS.md
-* **5.12** (MangoHud, Gamescope, Wayland presentation, DRM/KMS): Verified producer timestamps and flush/error bounds meeting 2 ms, plus source-bound service acceptance; preserve fail-closed behavior. No threshold relaxation or GPU profile experiments.
+* **5.12** (MangoHud, Gamescope, Wayland presentation, DRM/KMS): W21 done: a real instrumented renderer (vkcube + VK_LAYER_STUTTER_present) binds and is ValidatedDirect with 0 gaps (docs/validation/renderer-producer-2026-11-11/RESULTS.md). Not planned for verification (needs a photodiode, high-speed camera or display hardware timestamp, which this machine lacks; development targets this machine only): the independent stamp-accuracy reference, so direct-frame keep stays denied and the frame objective stays measurement-only
 * **5.13** (LACT, CoreCtrl): Not planned for verification (CoreCtrl is an AMD-GPU tool; this host's GPU is under quarantined LACT policy)
 * **5.14** (OpenTuner): Not planned for verification (OpenTuner, Kernel Tuner, OtterTune and SMBO libraries are not packaged for this host and add no capability the typed search does not already cover; development targets this machine only)
 * **5.15** (Kernel Tuner, OtterTune, Bayesian/SMBO, contextual bandits): Not planned for verification (OpenTuner, Kernel Tuner, OtterTune and SMBO libraries are not packaged for this host and add no capability the typed search does not already cover; development targets this machine only)

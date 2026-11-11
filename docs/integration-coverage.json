@@ -396,15 +396,17 @@
       "not_wired": "Qualified production-time/flush clock bound and further installed-service/phase/crash qualification remain deferred; no new frame-primary support claim.",
       "dispositions": [
         "CodeComplete",
-        "FixtureVerified",
         "EvidenceDeferred",
+        "FixtureVerified",
+        "NotPlannedForVerification",
         "RealObserved"
       ],
       "evidence": [
         "docs/validation/controller-frame-2026-11-08/RESULTS.md",
-        "docs/validation/controller-frame-2026-11-08/summary.json"
+        "docs/validation/controller-frame-2026-11-08/summary.json",
+        "docs/validation/renderer-producer-2026-11-11/RESULTS.md"
       ],
-      "unblock": "Verified producer timestamps and flush/error bounds meeting 2 ms, plus source-bound service acceptance; preserve fail-closed behavior. No threshold relaxation or GPU profile experiments."
+      "unblock": "W21 done: a real instrumented renderer (vkcube + VK_LAYER_STUTTER_present) binds and is ValidatedDirect with 0 gaps (docs/validation/renderer-producer-2026-11-11/RESULTS.md). Not planned for verification (needs a photodiode, high-speed camera or display hardware timestamp, which this machine lacks; development targets this machine only): the independent stamp-accuracy reference, so direct-frame keep stays denied and the frame objective stays measurement-only"
     },
     {
       "id": "5.13",

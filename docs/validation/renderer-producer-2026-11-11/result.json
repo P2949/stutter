@@ -1,0 +1,46 @@
+{
+  "accepted": 2400,
+  "bound_by": "kernel peer credentials, process start time, shared monotonic time namespace, hello epoch",
+  "calibration": {
+    "frames": 2400,
+    "max_ns": 2157510,
+    "mean_ns": 33183.73625,
+    "p99_ns": 65536
+  },
+  "delivery_while_running": {
+    "frames": 1200,
+    "max_ns": 2157510,
+    "mean_ns": 36184.175833333335,
+    "p99_ns": 81920
+  },
+  "event": "application present submission (vkQueuePresentKHR entry); not scan-out",
+  "evidence_kind": "real_instrumented_renderer",
+  "malformed": 0,
+  "quality_after_renderer_exit": {
+    "alignment_uncertainty_ms": null,
+    "attribution": "Unavailable",
+    "dropped_frames": 0,
+    "source_healthy": false,
+    "stage": "ApplicationFrame",
+    "unexplained_sequence_gaps": 0
+  },
+  "rejected": 0,
+  "renderer": "vkcube (unmodified Vulkan application) with VK_LAYER_STUTTER_present",
+  "renderer_pid": 622145,
+  "renderer_start_ticks": 25541316,
+  "schema_version": 1,
+  "stamp_accuracy_reference": "none: no photodiode, camera or display hardware timestamp exists on this host",
+  "unexplained_gaps": 0,
+  "while_running_midstream": {
+    "direct_frame_keep": "denied: AlignmentUncertain",
+    "quality": {
+      "alignment_uncertainty_ms": null,
+      "attribution": "ValidatedDirect",
+      "dropped_frames": 0,
+      "source_healthy": true,
+      "stage": "ApplicationFrame",
+      "unexplained_sequence_gaps": 0
+    }
+  },
+  "wrong_process_policy_result": "Err(WrongProcess)"
+}

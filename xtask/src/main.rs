@@ -38,6 +38,7 @@ pub mod real_workload;
 pub mod refresh_tune_recommendation;
 pub mod release_output;
 pub mod release_package;
+mod renderer_producer;
 pub mod score_evaluation;
 pub mod score_matrix;
 pub mod score_target;
@@ -84,6 +85,8 @@ pub enum XtaskCommand {
         about = "Measure the delivery bound of a renderer-stamped frame stream on a controlled fixture"
     )]
     FrameClockPrototype(frame_clock_prototype::FrameClockArgs),
+    /// Bind a real instrumented Vulkan renderer to the authenticated stamped source and record the result
+    RendererProducer(renderer_producer::RendererProducerArgs),
     #[command(about = "Run canonical live observation acceptance and retain evidence")]
     LiveAcceptance {
         #[command(subcommand)]
@@ -503,6 +506,7 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
     match command {
         XtaskCommand::KpiObservation { command } => kpi_observation::execute(command),
         XtaskCommand::FrameClockPrototype(args) => frame_clock_prototype::run(&args),
+        XtaskCommand::RendererProducer(args) => renderer_producer::run(&args),
         XtaskCommand::LiveAcceptance { suite } => live_acceptance::run(&root, suite),
         XtaskCommand::RecoveryController { mode } => live_acceptance::recovery::controller(mode),
         XtaskCommand::LiveBurst {
