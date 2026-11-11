@@ -1,0 +1,34 @@
+{
+  "result": "PASS",
+  "source_sha": "fc1bb2e7fbd6a35a5229bcf84a2995eebad17b4c",
+  "source_clean": true,
+  "build_output": "fresh local clone checkout/target (exclusive to this checkout); run at nice 10, CARGO_BUILD_JOBS=4, no game was running",
+  "commands": [
+    "nix develop --command cargo run -q -p xtask -- ci",
+    "nix develop --command cargo clippy --workspace --all-targets -- -D warnings",
+    "nix develop --command cargo run -q -p xtask -- release-check"
+  ],
+  "library": {
+    "passed": 3456,
+    "ignored": 19
+  },
+  "xtask": {
+    "passed": 563
+  },
+  "validation_runner": {
+    "passed": 106,
+    "ignored": 7
+  },
+  "architecture_tests": {
+    "passed": 125
+  },
+  "release_binary_sha256": "a0a2bdcb3e3007a62113fc70ca39b123cdd54a2ee5e3226a247ab5fe3f83163a",
+  "logs_sha256": {
+    "ci.log": "64d199ca5880d717ff3b2a6b5eaeda8b509bbc41f800cf24e0b3d5c6d644e6d3",
+    "clippy-workspace.log": "7729f62f9a0f5a841496521ea5ab092ec09769488a51660eb6441a5ec5c1ebbb",
+    "release-check.log": "298c0459b37b4148dd4478be94e4a39604f3fe53f2bd46745268f655f1b60e8d"
+  },
+  "scope": "the observation-only owner-refusal-probe xtask subcommand (W28 live evidence); xtask only, the shipped crates are unchanged from 9cfca635",
+  "deployed": "The installed build is the 9cfca635 binary (6922c7c6…), activated after a passing exact-build production-smoke; this source embeds its own revision, hence the different hash above.",
+  "note": "documentation-only commits after this sha do not change the built binary"
+}

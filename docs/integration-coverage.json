@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "source_sha": "7ed0f78b683157f188041e5486e77fc8238a26bc",
+  "source_sha": "fc1bb2e7fbd6a35a5229bcf84a2995eebad17b4c",
   "recorded": "2026-11-09",
   "statuses": [
     "not_started",
@@ -185,7 +185,9 @@
         "RealObserved",
         "EvidenceDeferred"
       ],
-      "evidence": [],
+      "evidence": [
+        "docs/validation/w28-owner-refusal-live-2026-11-11/RESULTS.md"
+      ],
       "unblock": null
     },
     {
@@ -1150,9 +1152,9 @@
     }
   ],
   "verification": {
-    "source_sha": "7ed0f78b683157f188041e5486e77fc8238a26bc",
+    "source_sha": "fc1bb2e7fbd6a35a5229bcf84a2995eebad17b4c",
     "scope": "Clean committed-source CI, explicit workspace Clippy and release-check of the code commit with the never-stale stamped-frame calibration, the authenticated stamped source, the real-scx_loader adapter fixes and the frozen-baseline subcapability gate. The deployed production build is the earlier 4f3baa07 (NixosConf 250e3cf, 35/35 smoke); nothing since is reachable from the daemon, so it was not re-deployed. Live observations retain their separate source pins.",
-    "source_ci": "docs/validation/source-ci-2026-11-11-7ed0f78b.json",
+    "source_ci": "docs/validation/source-ci-2026-11-11-fc1bb2e7.json",
     "deploy": "docs/validation/production-deploy-2026-11-09/RESULTS.md"
   }
 }
