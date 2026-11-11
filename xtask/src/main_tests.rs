@@ -78,6 +78,7 @@ fn expected_subcommands_are_registered() {
             "release-package",
             "release-publish",
             "release-verify",
+            "renderer-producer",
             "report-golden-update",
             "schema-check",
             "score-evaluate",
