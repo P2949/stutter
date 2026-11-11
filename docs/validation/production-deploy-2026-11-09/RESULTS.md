@@ -214,3 +214,14 @@ active, 0 tokens outstanding, no fence file left, no qualification process left.
 `host/stutter-final-9cfca635`, `bash deploy.sh`-equivalent steps (`switch-to-configuration test`, then
 `xtask production-smoke --binary-sha256 6922c7c6… --out <new dir> --user p2949` inside `nix develop`, switch only on a
 full PASS, reactivate `z5c4c0vs…` otherwise).
+
+## Attempt 6: activated (2026-11-11)
+
+With no game process running, `switch-to-configuration test` of the candidate toplevel `cm4bbc51…` (Stutter binary
+`6922c7c6…`, source `9cfca635`) was followed by one exact-build `xtask production-smoke` inside `nix develop`:
+**PASS (37 checks**, 38 PASS entries in `result.json`, 0 FAIL, 0 BLOCKED), including `worker_acknowledges_the_deny_all_fence`
+(the installed worker's own read-only `fence_status` answered with exactly the fence written) and the fenced-fixture
+mutation through the worker. Only then were the system profile `--set` (`system-103-link`) and `switch-to-configuration
+switch` run. Afterwards `/run/current-system` and the system profile are `cm4bbc51…`, both units active, 0 tokens
+outstanding. The previous generation `z5c4c0vs…` is preserved for rollback. No reboot. NixosConf branch
+`host/stutter-final-9cfca635` at `6091d4f` (local; not merged to `main`).
