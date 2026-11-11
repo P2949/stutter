@@ -1,0 +1,60 @@
+{
+  "authorizes_mutation": false,
+  "effects": {
+    "compile-scope-weight-1-control": {
+      "blocks": 6,
+      "ci95_percent": [
+        -394.91073911391214,
+        -258.9969598151472
+      ],
+      "mean_percent": -323.02838367488914,
+      "verdict": "Harmful"
+    },
+    "compile-scope-weight-1000": {
+      "blocks": 6,
+      "ci95_percent": [
+        5.2546009852283975,
+        8.931639366311279
+      ],
+      "mean_percent": 7.127527420599716,
+      "verdict": "Beneficial"
+    },
+    "hogs-scope-weight-10": {
+      "blocks": 6,
+      "ci95_percent": [
+        2.2671156037497644,
+        10.35724587931469
+      ],
+      "mean_percent": 5.8550067991450625,
+      "verdict": "Beneficial"
+    },
+    "hogs-scope-weight-50": {
+      "blocks": 6,
+      "ci95_percent": [
+        -2.80958318909065,
+        4.463182926810585
+      ],
+      "mean_percent": 0.624913930093946,
+      "verdict": "Inconclusive"
+    }
+  },
+  "invalid_slots": 0,
+  "manifest_sha256": "192c1d731c2c9ee324c8b14744c7b598c08b066eb5996e9f7eb7927eb392912a",
+  "outside_space_dropped": 0,
+  "practical_percent": 2.0,
+  "ranking": {
+    "candidates": 4,
+    "holdout_regret": 0.0,
+    "spearman": 1.0,
+    "top1_agrees": true
+  },
+  "ranking_note": "ranked among legal manifest candidates only",
+  "schema_version": 1,
+  "study_id": "e4-scope-weight",
+  "training_favourite": {
+    "candidate": "compile-scope-weight-1000",
+    "holdout_mean_percent": 7.625621652137869,
+    "training_mean_percent": 6.629433189061562
+  },
+  "valid_slots": 30
+}
