@@ -17,3 +17,20 @@ Scope decision (user, 2026-11-11): development targets this machine only. Items 
 * `hyperfine --export-json` imported by `xtask benchmarks import-hyperfine` (`all_exited_zero: true`).
 * `perf stat` and `fio` (JSON output) run on this host; their importers stay fixture-verified until a captured artifact is
   imported in a later slice.
+
+## Second tool batch (NixosConf `host/stutter-phase-tools-2`, merged to `main`)
+
+Installed, inert on PATH, no service enabled: ananicy-cpp, system76-scheduler, tuned, bpftune, hwloc, scx (schedulers), likwid,
+bpftrace, trace-cmd, kernelshark, rt-tests (cyclictest), irqbalance, tlp, power-profiles-daemon, auto-cpufreq, sysstat (iostat,
+pidstat), numastat, tuna, stress-ng, sysbench, thermald, gcc, clang. Generation `2m2lpklm…` activated (only `polkit` and
+`dbus-broker` restarted; both Stutter units active, 0 tokens); `validate affected` PASS.
+
+Real capture: `lstopo --of xml` from the real hwloc, then `stutter topology-check --hwloc-xml`: "the native topology agrees with
+hwloc (40 object(s) read)". Ledger 5.9 is `RealObserved` on that evidence. `fio` (JSON) and `stress-ng` ran locally; their
+importers stay fixture-verified until a captured artifact is imported.
+
+Ledger reclassification: `HardwareUnavailable` is dropped where the blocker was only an absent tool (the entry now records the
+installed tools and that a real capture/campaign is the remaining evidence). `NotPlannedForVerification` (reason recorded) now
+covers: NUMA multi-node (5.19), RDT (5.24), CoreCtrl (5.13), OpenTuner/Kernel Tuner/OtterTune/SMBO libraries (5.14, 5.15),
+the packaged `scx_loader` + polkit service, absent from the pinned nixpkgs (5.7), the in-kernel-owned kdamond (5.8), vendor
+VTune/uProf (5.10) and RT/Zen/Liquorix/CachyOS kernels that need reboots (extra.kernels).

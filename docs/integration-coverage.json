@@ -59,17 +59,16 @@
       "status": "code_complete",
       "g0": "presence probe and task-priority domain denial; community rules import is classification only, each rule a typed role hint (TaskClass, confidence capped by identity source so a comm-only match never exceeds 0.75) that is never run as a mutation; `stutter rules check` now audits contradictory hints (one name mapped to two classes, with both classes and sources) and reports them as a warning",
       "g1": "none",
-      "runtime_availability": "absent",
+      "runtime_availability": "ananicy-cpp installed on this host 2026-11-11 (NixosConf stutter-tools.nix, inert on PATH)",
       "authority": "B/O/A",
       "not_wired": "nothing",
       "dispositions": [
         "CodeComplete",
         "FixtureVerified",
-        "HardwareUnavailable",
         "EvidenceDeferred"
       ],
       "evidence": [],
-      "unblock": "Needs on the host: absent"
+      "unblock": "tools installed; a real capture or campaign from each is the remaining evidence, recorded per slice in docs/validation/phase-tools-2026-11-11/RESULTS.md"
     },
     {
       "id": "5.3",
@@ -87,17 +86,16 @@
       "status": "code_complete",
       "g0": "System76 Scheduler is detected by process name and its systemd unit; a semantic capability probe introspects com.system76.Scheduler and reports `UnsupportedInterface` when the interface exposes only setters (SetForegroundProcess, Reload) and no readable property, so its focus state is never invented or scraped and Stutter never calls the setter; its task-priority claim denies nice/ionice candidates as for every other owner (fake-bus tested). presence probe and task-priority domain denial",
       "g1": "none",
-      "runtime_availability": "absent",
+      "runtime_availability": "system76-scheduler installed on this host 2026-11-11 (NixosConf stutter-tools.nix, inert on PATH)",
       "authority": "B/O/A",
       "not_wired": "nothing",
       "dispositions": [
         "CodeComplete",
         "FixtureVerified",
-        "HardwareUnavailable",
         "EvidenceDeferred"
       ],
       "evidence": [],
-      "unblock": "Needs on the host: absent"
+      "unblock": "tools installed; a real capture or campaign from each is the remaining evidence, recorded per slice in docs/validation/phase-tools-2026-11-11/RESULTS.md"
     },
     {
       "id": "5.4",
@@ -116,17 +114,16 @@
       "status": "code_complete",
       "g0": "the active profile and mode are read through TuneD's read-only control methods (never switch_profile); the profile's tuned.conf files (with bounded includes) are read for the sections and sysctl keys it manages, and the runtime owner probe lowers TuneD to Idle only when its active profile was read exactly and manages neither CPU power nor VM knobs (an unreadable profile changes nothing); `profile_experiment` builds an offline whole-profile A/B artifact naming exactly what two profiles manage differently, executing nothing (Stutter has no TuneD engine and never calls switch_profile). presence probe and CPU power / VM knob domain denial; active profile and mode read through TuneD's read-only control methods (fake-bus tested; never switch_profile)",
       "g1": "none",
-      "runtime_availability": "absent",
+      "runtime_availability": "tuned installed on this host 2026-11-11 (NixosConf stutter-tools.nix, inert on PATH)",
       "authority": "O/A/F",
       "not_wired": "nothing",
       "dispositions": [
         "CodeComplete",
         "FixtureVerified",
-        "HardwareUnavailable",
         "EvidenceDeferred"
       ],
       "evidence": [],
-      "unblock": "Needs on the host: absent"
+      "unblock": "tools installed; a real capture or campaign from each is the remaining evidence, recorded per slice in docs/validation/phase-tools-2026-11-11/RESULTS.md"
     },
     {
       "id": "5.5",
@@ -144,17 +141,16 @@
       "status": "code_complete",
       "g0": "bpftune exposes no documented read or control interface, so it is a `ProcessOnly` adapter with delegation refused and a typed UnsupportedInterface capability result rather than a scraped tuner list; the system `network` sensor reports the network-side effect it could have; no generic sysctl controller exists. a cheap `network` sensor reads TCP retransmits, timeouts, listen overflows and non-loopback interface drops as deltas (never a decision input); presence probe and network / VM knob domain denial",
       "g1": "none",
-      "runtime_availability": "absent",
+      "runtime_availability": "bpftune installed on this host 2026-11-11 (NixosConf stutter-tools.nix, inert on PATH)",
       "authority": "O/A",
       "not_wired": "nothing",
       "dispositions": [
         "CodeComplete",
         "FixtureVerified",
-        "HardwareUnavailable",
         "EvidenceDeferred"
       ],
       "evidence": [],
-      "unblock": "Needs on the host: absent"
+      "unblock": "tools installed; a real capture or campaign from each is the remaining evidence, recorded per slice in docs/validation/phase-tools-2026-11-11/RESULTS.md"
     },
     {
       "id": "5.6",
@@ -222,11 +218,11 @@
         "RealObserved",
         "CodeComplete",
         "FixtureVerified",
-        "HardwareUnavailable",
-        "EvidenceDeferred"
+        "EvidenceDeferred",
+        "NotPlannedForVerification"
       ],
       "evidence": [],
-      "unblock": "the packaged scx_loader as a system service with a real polkit authority and bus policy on the host (the real-loader check used a private bus and a stub polkit), and the matched-workload comparison campaign"
+      "unblock": "Not planned for verification (the packaged scx_loader service with a real polkit authority is not in the pinned nixpkgs; scx schedulers themselves are installed; development targets this machine only)"
     },
     {
       "id": "5.8",
@@ -258,13 +254,13 @@
         "CodeComplete",
         "FixtureVerified",
         "RealObserved",
-        "HardwareUnavailable",
-        "EvidenceDeferred"
+        "EvidenceDeferred",
+        "NotPlannedForVerification"
       ],
       "evidence": [
         "docs/validation/live-mechanisms-2026-11-09/RESULTS.md"
       ],
-      "unblock": "DAMON is owned by an in-kernel module on this host and refused a second kdamond: needs that owner disabled or a host without it, plus an isolated authorized workload, for a real start/readback"
+      "unblock": "Not planned for verification (the kdamond is owned by an in-kernel module on this host and a second one is refused; a kdamond-free host is different hardware/configuration; development targets this machine only)"
     },
     {
       "id": "5.9",
@@ -283,17 +279,18 @@
       "status": "code_complete",
       "g0": "`stutter topology-check --hwloc-xml FILE` cross-checks the native cache domains and usable CPUs against an hwloc XML export (advisory: a difference is named and exits non-zero, nothing is applied; hwloc is never linked or run; exercised against this host with a Machine-only export, which correctly reports the missing L3 object). The topology-v2 fingerprint is part of the candidate-memory context signature. The placement hypothesis `game-llc-pack` is available offline through `generate_plan_with_cache_locality` and is deliberately not added to the daemon provider, because the autonomous registry gates the CPU-affinity operation rather than a profile name (PLAN: no new autonomous tuple unless separately qualified). native topology v2 from sysfs: LLC domains, capacity classes, larger-cache regions from verified sizes, dies, frequency domains, NUMA distances, GPU locality, cpuset-effective CPUs and a change fingerprint, reported by doctor; an hwloc XML export is read as data and cross-checked against native cache domains and usable CPUs (advisory: a difference is named, never applied; hwloc is never linked or run)",
       "g1": "none",
-      "runtime_availability": "absent",
+      "runtime_availability": "hwloc installed on this host 2026-11-11 (NixosConf stutter-tools.nix, inert on PATH)",
       "authority": "O/B",
       "not_wired": "nothing",
       "dispositions": [
         "CodeComplete",
         "FixtureVerified",
-        "HardwareUnavailable",
-        "EvidenceDeferred"
+        "RealObserved"
       ],
-      "evidence": [],
-      "unblock": "Needs on the host: absent"
+      "evidence": [
+        "docs/validation/phase-tools-2026-11-11/RESULTS.md"
+      ],
+      "unblock": "none: a real hwloc XML export agrees with the native topology (stutter topology-check, 40 objects)"
     },
     {
       "id": "5.10",
@@ -320,20 +317,20 @@
       "status": "code_complete",
       "g0": "Budgeted per-TID PMU sampler with matched cumulative count/time interval deltas, overflow and invalid-time refusal, partial-thread quality downgrade; optional generic branch events with explicit missing-event metadata, disabled in runtime; no fault/migration or architecture-specific bandwidth events yet; offline importers for `perf script` (per-event samples and period, per-command share), and for the CSV profile tables of Intel VTune, AMD uProf and LIKWID (first column as the row, numeric cells only, never extrapolated); an optional PMU event catalog (`perf_counters::arch_events`: software page-fault, migration and context-switch counts, generalized L1D/LLC/dTLB read-miss events, and Intel/AMD uncore memory-bandwidth events whose PMU type and encoding are discovered from sysfs and resolve to Unavailable with a reason, never zero, when absent) that opens no counter and is not enabled by the runtime",
       "g1": "Controlled own-thread development readback: three existing four-event intervals counted; optional six-event set failed to yield usable counts and remains EvidenceDeferred. See source-bound development report.",
-      "runtime_availability": "perf CLI absent, VTune/LIKWID absent",
+      "runtime_availability": "perf, likwid installed on this host 2026-11-11 (NixosConf stutter-tools.nix, inert on PATH)",
       "authority": "O/F",
       "not_wired": "the PMU sensor starting only on escalation is by design (cost-bounded sensors); the architecture events are catalogued and resolved but not opened by the runtime; importer formats are fixture-verified from the documented layouts (the tools are absent here)",
       "dispositions": [
         "CodeComplete",
         "FixtureVerified",
         "RealObserved",
-        "HardwareUnavailable",
-        "EvidenceDeferred"
+        "EvidenceDeferred",
+        "NotPlannedForVerification"
       ],
       "evidence": [
         "docs/validation/pmu-2026-11-08.md"
       ],
-      "unblock": "perf CLI, VTune, uProf and LIKWID are absent on this host, and the optional six-event group failed to give usable counts here: real captures from each tool and a PMU that supports the wider event group are needed to call their importers and the architecture events RealObserved"
+      "unblock": "perf and LIKWID installed; Intel VTune and AMD uProf are vendor tools not planned for verification (development targets this machine only); the optional six-event group yielded no usable counts on this PMU"
     },
     {
       "id": "5.11",
@@ -358,18 +355,17 @@
       "status": "code_complete",
       "g0": "offline external-artifact verification: tool/version, exact argv, build id, role/phase, unit, run id, clock window, population/loss, exit code and a SHA-256 per file; oversize, symlinked, escaping, missing and tampered files refused; carries no authority; `rtla timerlat top` (per-CPU IRQ/thread/user latency) and `rtla osnoise top` (per-CPU noise columns) importers with positive and negative fixtures; KernelShark has no data format of its own (it reads trace-cmd data), so the trace-cmd importer is its importer; the bounded causal probes are the existing Aya programs in stutter-ebpf (scheduler wakeup/switch and runnable depth, IRQ latency, block I/O, DRM fence, KMS) with no arbitrary privileged BPF text accepted anywhere",
       "g1": "the monitor validated this kernel`s sched_switch/sched_wakeup tracepoint formats and attached its bounded Aya probes on this host (2026-11-09 controlled run); every external tool (bcc, bpftrace, trace-cmd, rtla, cyclictest) is absent",
-      "runtime_availability": "all absent",
+      "runtime_availability": "bpftrace, trace-cmd, kernelshark, cyclictest installed on this host 2026-11-11 (NixosConf stutter-tools.nix, inert on PATH)",
       "authority": "B/O/F",
       "not_wired": "importer formats for rtla are fixture-verified only (no rtla on this host); kernel noise is diagnostic, never an application outcome and never authority",
       "dispositions": [
         "CodeComplete",
         "FixtureVerified",
         "RealObserved",
-        "HardwareUnavailable",
         "EvidenceDeferred"
       ],
       "evidence": [],
-      "unblock": "all external diagnostic tools are absent on this host: importer formats are fixture-verified from the documented layouts and need a real capture from each tool to be called RealObserved"
+      "unblock": "tools installed; a real capture or campaign from each is the remaining evidence, recorded per slice in docs/validation/phase-tools-2026-11-11/RESULTS.md"
     },
     {
       "id": "5.12",
@@ -435,11 +431,11 @@
         "CodeComplete",
         "FixtureVerified",
         "RealObserved",
-        "HardwareUnavailable",
-        "EvidenceDeferred"
+        "EvidenceDeferred",
+        "NotPlannedForVerification"
       ],
       "evidence": [],
-      "unblock": "Needs on the host: LACT present, CoreCtrl absent"
+      "unblock": "Not planned for verification (CoreCtrl is an AMD-GPU tool; this host's GPU is under quarantined LACT policy)"
     },
     {
       "id": "5.14",
@@ -463,11 +459,11 @@
       "dispositions": [
         "CodeComplete",
         "FixtureVerified",
-        "HardwareUnavailable",
-        "EvidenceDeferred"
+        "EvidenceDeferred",
+        "NotPlannedForVerification"
       ],
       "evidence": [],
-      "unblock": "Needs on the host: not installed"
+      "unblock": "Not planned for verification (OpenTuner, Kernel Tuner, OtterTune and SMBO libraries are not packaged for this host and add no capability the typed search does not already cover; development targets this machine only)"
     },
     {
       "id": "5.15",
@@ -494,11 +490,11 @@
       "dispositions": [
         "CodeComplete",
         "FixtureVerified",
-        "HardwareUnavailable",
-        "EvidenceDeferred"
+        "EvidenceDeferred",
+        "NotPlannedForVerification"
       ],
       "evidence": [],
-      "unblock": "Needs on the host: not installed"
+      "unblock": "Not planned for verification (OpenTuner, Kernel Tuner, OtterTune and SMBO libraries are not packaged for this host and add no capability the typed search does not already cover; development targets this machine only)"
     },
     {
       "id": "5.16",
@@ -522,18 +518,17 @@
       "status": "code_complete",
       "g0": "a gated offline power-profiles-daemon adapter plans a HoldProfile only to an allowlisted known profile with the exact method signatures, executes only with an OfflineAuthorization (no runtime constructor), verifies the held profile is in effect (else releases at once) and that the prior profile returns after ReleaseProfile; the hold also self-releases when the bus connection closes (fake-bus tested, daemon absent on this host); auto-cpufreq and power-profiles-daemon presence mark CPU power owned; TLP and thermald are detected through systemd exact unit state (GetUnit/ActiveState, read-only, fake-bus tested); the read-only D-Bus client reads power-profiles-daemon ActiveProfile when its name has an owner",
       "g1": "power-profiles-daemon read over the system bus on this host: no owner (absent)",
-      "runtime_availability": "all absent",
+      "runtime_availability": "tlp, power-profiles-daemon, auto-cpufreq installed on this host 2026-11-11 (NixosConf stutter-tools.nix, inert on PATH)",
       "authority": "O/A/D",
       "not_wired": "The trusted factory exists: `campaign_authorization::mint_authorization` verifies a root-written receipt (every path component root-owned and not group or world writable, no symlinks; boot, user, scope and expiry checked) and journals the issue durably before returning an authorization, and the runner has `receipt::write_receipt` to produce one. The runner request `IssueOfflineReceipt` (scope and lifetime bounded, derived campaign, user and path, denied unless the campaign authorization grants that action) writes the receipt; no shipped campaign grants it yet, and the adapters are HighRisk manual/offline behind HIGH_RISK_APPLY_IMPLEMENTED=false, so nothing reaches them at runtime; the scoped hold mechanism is fake-bus tested.",
       "missing_required": [],
       "dispositions": [
         "CodeComplete",
         "FixtureVerified",
-        "HardwareUnavailable",
         "EvidenceDeferred"
       ],
       "evidence": [],
-      "unblock": "Needs on the host: all absent"
+      "unblock": "tools installed; a real capture or campaign from each is the remaining evidence, recorded per slice in docs/validation/phase-tools-2026-11-11/RESULTS.md"
     },
     {
       "id": "5.17",
@@ -554,7 +549,7 @@
       "status": "code_complete",
       "g0": "cheap cpu_power sensor: per-policy driver/governor/EPP, requested versus actual frequency, boost, AC state and throttle-event deltas with reset detection; sampled by the runtime into every observation; per-cpufreq-policy EPP candidates name every related CPU, and thermal protection is a mitigation left alone: the provider withholds the change while the thermal_degraded objective signal is set (test `cpu_power_provider_blocks_thermal_degraded`), on battery by default, and when system health is not ok; thermald is never disabled",
       "g1": "read on this host at runtime (intel_pstate, 12 policies)",
-      "runtime_availability": "thermald absent",
+      "runtime_availability": "thermald installed on this host 2026-11-11 (NixosConf stutter-tools.nix, inert on PATH)",
       "authority": "O/A",
       "not_wired": "sensor readings are deliberately not decision inputs (architecture guard `decision_code_never_reads_sensor_readings`); no new EPP benefit campaign (the prior negative pilot is retained, not rerun); thermald absent on this host; RAPL energy is root-only here",
       "related_existing": [
@@ -564,11 +559,10 @@
         "CodeComplete",
         "FixtureVerified",
         "RealObserved",
-        "HardwareUnavailable",
         "EvidenceDeferred"
       ],
       "evidence": [],
-      "unblock": "thermald is absent on this host; a per-policy EPP benefit campaign is not repeated because the prior ~0.3% EPP pilot is negative and retained; RAPL energy is root-only here"
+      "unblock": "tools installed; a real capture or campaign from each is the remaining evidence, recorded per slice in docs/validation/phase-tools-2026-11-11/RESULTS.md"
     },
     {
       "id": "5.18",
@@ -588,17 +582,16 @@
       "status": "code_complete",
       "g0": "presence marks IRQ affinity owned; `attribute_irqs` maps each IRQ to its owning PCI slot from the kernel's msi_irqs files and classifies it by PCI class code (storage/network/display/usb), with an unclaimed IRQ `Unattributed`; the IRQ affinity provider raises an IRQ whose owner is storage or unclaimed to HighRisk (never lowers a risk), and the existing snapshot/validate/rollback IRQ affinity action is the collision-safe transaction; no live irqbalance interop was observed (absent on this host)",
       "g1": "none",
-      "runtime_availability": "absent",
+      "runtime_availability": "irqbalance installed on this host 2026-11-11 (NixosConf stutter-tools.nix, inert on PATH)",
       "authority": "O/A/E",
       "not_wired": "nothing",
       "dispositions": [
         "CodeComplete",
         "FixtureVerified",
-        "HardwareUnavailable",
         "EvidenceDeferred"
       ],
       "evidence": [],
-      "unblock": "Needs on the host: absent"
+      "unblock": "tools installed; a real capture or campaign from each is the remaining evidence, recorded per slice in docs/validation/phase-tools-2026-11-11/RESULTS.md"
     },
     {
       "id": "5.19",
@@ -824,17 +817,16 @@
       "status": "code_complete",
       "g0": "`xtask offline-optimization run` executes the typed steps (instrumented build, training runs, `perf record` collection for AutoFDO/BOLT when collect_profile is set, profile merge/convert, rebuild or llvm-bolt, correctness suite, hyperfine A/B) under the process supervisor and stops at the first failure; fixture-tested with real exec of true/false/sleep; no real run happened because clang, gcc, perf and BOLT are absent on this PATH (HardwareUnavailable). Offline PGO/AutoFDO/BOLT plan validation: separate output binary never an installed path, training and test inputs disjoint by digest, profile build id equal to the binary build id (read from the ELF note), guardrails sane, and a typed Unavailable for every missing tool; xtask offline-optimization check builds and runs nothing",
       "g1": "none",
-      "runtime_availability": "clang, gcc, llvm-bolt, perf2bolt absent on PATH",
+      "runtime_availability": "gcc, clang, llvm-bolt, perf2bolt installed on this host 2026-11-11 (NixosConf stutter-tools.nix, inert on PATH)",
       "authority": "F",
       "not_wired": "nothing",
       "dispositions": [
         "CodeComplete",
         "FixtureVerified",
-        "HardwareUnavailable",
         "EvidenceDeferred"
       ],
       "evidence": [],
-      "unblock": "Needs on the host: clang, gcc, llvm-bolt, perf2bolt absent on PATH"
+      "unblock": "tools installed; a real capture or campaign from each is the remaining evidence, recorded per slice in docs/validation/phase-tools-2026-11-11/RESULTS.md"
     },
     {
       "id": "5.26",
@@ -865,7 +857,7 @@
       "status": "code_complete",
       "g0": "per-process offender attribution (`focus::rank_io_offenders`: bytes moved per process from start-time-guarded read/write deltas, exact pid plus start identity, protected processes flagged, ties deterministic) and the `biosnoop` and per-process `blkparse` event importers (non-proof diagnostics); ioprio action exists and is denied while GameMode owns task priority; no block scheduler operations; a cheap `block_io` sensor reads whole-disk completed I/Os, sectors, busy and queue time as deltas plus the in-flight gauge (never a decision input, not per-application); the ionice provider no longer lowers the important tree: only offender helpers (compiler/linker, browser helpers) are lowered and generic I/O pressure without a measured offender proposes nothing; device-wide scheduler selection is a prepared transaction (`block_scheduler`: supported-list validation from queue/scheduler, authorized and unprotected devices only, readback, restore by device number and only while ours is active) with `RollbackToken::BlockSchedulerRestore`, handler, manual policy-gated `BlockSchedulerAction` (HighRisk, default denies) and `CandidateAction::BlockScheduler` classified as manual-only `BlockIoScheduler`; never an executable plan",
       "g1": "read-only on this host (2026-11-09): /sys/block/nvme0n1/queue/scheduler reads `[none] mq-deadline kyber` (bfq not built in) and the loop devices read the same; no scheduler was changed",
-      "runtime_availability": "ionice present, fio and blktrace absent",
+      "runtime_availability": "fio, blktrace, bcc biolatency installed on this host 2026-11-11 (NixosConf stutter-tools.nix, inert on PATH)",
       "authority": "O/F/E",
       "not_wired": "not worker-routed (HighRisk manual/offline behind HIGH_RISK_APPLY_IMPLEMENTED=false); no real-device scheduler campaign on a production disk (a loop-device mechanism test exists)",
       "missing_required": [],
@@ -873,14 +865,13 @@
         "CodeComplete",
         "EvidenceDeferred",
         "FixtureVerified",
-        "HardwareUnavailable",
         "MechanismValidated",
         "RealObserved"
       ],
       "evidence": [
         "docs/validation/live-mechanisms-2026-11-09/RESULTS.md"
       ],
-      "unblock": "blktrace/biosnoop/biolatency/fio absent; a real-device scheduler mechanism and target-versus-bystander campaign needs an explicitly disposable authorized block device (none is designated on this host)"
+      "unblock": "tools installed; a scheduler mechanism campaign needs an explicitly disposable block device, none is designated on this host"
     },
     {
       "id": "5.27",
@@ -914,7 +905,7 @@
       "status": "code_complete",
       "g0": "Optional runtime KPI observer bound by kernel peer UID/PID, live start ticks, executable identity, boot and source/context epoch; nonblocking bounded ingestion, explicit batch mean/sum/max/last semantics, diagnostic legacy summaries, work/loss/freshness/completeness gates; frozen observation-only paired study reconstructs metrics and intervals from private collector-origin raw captures and cannot populate keep evidence. Positive, negative, spoofing, replay, drift, guardrail and false-interval fixtures pass.; three distinct typed network operations, each manual-only with an Experimental capability (`NetTcpCongestionControl`: only an algorithm the kernel lists as available; `NetTcpBuffers`: ordered, bounded rmem/wmem; `NetBusyPoll`: capped interval), sharing `RollbackToken::NetSysctlRestore` bound to the network namespace read from /proc/self/ns/net (recovery VerifiedAutomatic: another namespace or a foreign value is never overwritten), `NetSysctlRollbackHandler`, a manual policy-gated `NetSysctlAction` (HighRisk, default denies) and `CandidateAction::NetSysctl`; a setting owned by bpftune is typed `UnsupportedDelegation` and never raced; never an executable plan; active-config matching fails closed; no default network-wide sysctl write and no live public traffic test",
       "g1": "At exact committed source 1d5a3ef0, a separate live-BPF observation-only transient controller accepted all 16 samples from eight completed CPU fixed-work runs, no denials, all decisions observed, clean process/socket stop. The independent-block harness also completed and verified raw reconstruction. This is KPI transport/measurement evidence, not HTTP/RPC or network outcome qualification.",
-      "runtime_availability": "benchmark tools absent",
+      "runtime_availability": "iperf3, wrk2, h2load installed on this host 2026-11-11 (NixosConf stutter-tools.nix, inert on PATH)",
       "authority": "O/F/E",
       "not_wired": "no OpenTelemetry reader (not required by the plan row); the local offered-load workflow (`xtask benchmarks offered-load`, wrk2, loopback only) has not been run here because wrk2 is not installed (it reports BlockedResource), and there is no exact installed-production acceptance; not worker-routed (HighRisk manual/offline behind HIGH_RISK_APPLY_IMPLEMENTED=false); socket options and qdisc replacement are deliberately not operations: `net_capability` gives the read-only congestion-control and qdisc inventory and typed refusals that state why (a socket option needs the owning descriptor; replacing a root qdisc cannot be restored exactly); Prometheus import and compare-load remain read-only",
       "missing_required": [],
@@ -922,7 +913,6 @@
         "CodeComplete",
         "EvidenceDeferred",
         "FixtureVerified",
-        "HardwareUnavailable",
         "MechanismValidated",
         "RealObserved"
       ],
@@ -932,7 +922,7 @@
         "docs/validation/kpi-observation-2026-11-08/source-ci-receipt.json",
         "docs/validation/live-mechanisms-2026-11-09/RESULTS.md"
       ],
-      "unblock": "HTTP/RPC/network physical proof requires an owned local disposable service, versioned benchmark tools (iperf3, wrk, wrk2, h2load are absent here), fixed offered load and direct latency/error/completion guards; the CPU fixed-work transport evidence is not a network qualification, and bpftune is absent so no cooperative strategy was exercised"
+      "unblock": "tools installed; a loopback wrk2 offered-load run is captured (docs/validation/phase-tools-2026-11-11/RESULTS.md); the controlled A/B network benefit campaign remains"
     },
     {
       "id": "5.28",
@@ -957,18 +947,17 @@
       "status": "code_complete",
       "g0": "frozen manifest, paired statistics, supervised run engine, a verified artifact manifest and a hyperfine JSON importer (samples, exit codes); sysbench, stress-ng, benchstat and Phoronix importers produce typed scores that are constant application_proof=false (`xtask benchmarks import-scores`); malformed input is an error",
       "g1": "controlled-real vkcube comparison run once: EngineeringPass, NoBenefit (docs/validation/real-workload/controlled-vkcube)",
-      "runtime_availability": "all absent",
+      "runtime_availability": "hyperfine, sysbench, stress-ng installed on this host 2026-11-11 (NixosConf stutter-tools.nix, inert on PATH)",
       "authority": "F",
       "not_wired": "nothing",
       "dispositions": [
         "CodeComplete",
         "FixtureVerified",
         "RealObserved",
-        "HardwareUnavailable",
         "EvidenceDeferred"
       ],
       "evidence": [],
-      "unblock": "Needs on the host: all absent"
+      "unblock": "tools installed; a real capture or campaign from each is the remaining evidence, recorded per slice in docs/validation/phase-tools-2026-11-11/RESULTS.md"
     },
     {
       "id": "5.29",
@@ -1051,17 +1040,16 @@
       "status": "code_complete",
       "g0": "tool-specific parsers (`xtask benchmarks import-scores`: iostat, pidstat, numastat, blkparse, tuna) give typed diagnostic scores with no better-direction and application_proof=false; the same verified manifest covers iostat, pidstat, numastat and blktrace captures as artifact files with checksums and loss accounting",
       "g1": "none",
-      "runtime_availability": "all absent",
+      "runtime_availability": "iostat, pidstat, numastat, tuna, blktrace installed on this host 2026-11-11 (NixosConf stutter-tools.nix, inert on PATH)",
       "authority": "O/F",
       "not_wired": "nothing",
       "dispositions": [
         "CodeComplete",
         "FixtureVerified",
-        "HardwareUnavailable",
         "EvidenceDeferred"
       ],
       "evidence": [],
-      "unblock": "Needs on the host: all absent"
+      "unblock": "tools installed; a real capture or campaign from each is the remaining evidence, recorded per slice in docs/validation/phase-tools-2026-11-11/RESULTS.md"
     },
     {
       "id": "extra.kernels",
@@ -1089,11 +1077,11 @@
         "CodeComplete",
         "FixtureVerified",
         "RealObserved",
-        "HardwareUnavailable",
-        "EvidenceDeferred"
+        "EvidenceDeferred",
+        "NotPlannedForVerification"
       ],
       "evidence": [],
-      "unblock": "Needs on the host: RT, Zen, Liquorix and CachyOS kernel specialisations"
+      "unblock": "Not planned for verification (RT, Zen, Liquorix and CachyOS kernels need reboots into other kernels; development targets this machine only)"
     },
     {
       "id": "extra.boot",
