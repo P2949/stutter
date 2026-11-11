@@ -18,6 +18,9 @@ enum ResearchCommand {
     /// Inspect the installed Cyberpunk Steam manifest without launching Steam or the game.
     Inventory {
         steamapps: PathBuf,
+        /// Root-owned proton-lab manifest emitted by the pinned Nix package.
+        #[arg(long)]
+        proton_manifest: Option<PathBuf>,
     },
     /// Submit one bounded intent from a private JSON file.
     Submit {
@@ -34,7 +37,13 @@ enum ResearchCommand {
 impl From<ResearchArgs> for ResearchClientInput {
     fn from(args: ResearchArgs) -> Self {
         let action = match args.command {
-            ResearchCommand::Inventory { steamapps } => ResearchClientAction::Inventory(steamapps),
+            ResearchCommand::Inventory {
+                steamapps,
+                proton_manifest,
+            } => ResearchClientAction::Inventory {
+                steamapps,
+                proton_manifest,
+            },
             ResearchCommand::Submit { intent } => ResearchClientAction::Submit(intent),
             ResearchCommand::Status => ResearchClientAction::Status,
             ResearchCommand::Pause => ResearchClientAction::Pause,
@@ -77,5 +86,16 @@ mod tests {
             ])
             .is_err()
         );
+        assert!(matches!(
+            crate::cli::parse_app_command_from([
+                "stutter",
+                "research",
+                "inventory",
+                "/home/user/steamapps",
+                "--proton-manifest",
+                "/nix/store/abc-proton-lab.json",
+            ]),
+            Ok(AppCommand::Research(_))
+        ));
     }
 }

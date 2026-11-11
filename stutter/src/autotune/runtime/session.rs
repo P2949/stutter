@@ -48,6 +48,43 @@ pub async fn run_autotune_controller_session(
         None,
         "BlockedHostIdentity",
     );
+    let (host_context_tx, mut host_context_rx) = mpsc::channel(1);
+    let _host_context_refresh = if runtime
+        .config()
+        .daemon_config
+        .autotune
+        .research_socket_dir
+        .is_some()
+    {
+        let context = runtime.config().clone();
+        let validation_override_present = context.validation_override.is_some();
+        Some(tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(30));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                interval.tick().await;
+                let snapshot = context.clone();
+                let result = match tokio::task::spawn_blocking(move || {
+                    super::super::research::host::collect_campaign_facts(
+                        &snapshot,
+                        validation_override_present,
+                        false,
+                    )
+                })
+                .await
+                {
+                    Ok(result) => result,
+                    Err(_) => continue,
+                };
+                if host_context_tx.send(result).await.is_err() {
+                    break;
+                }
+            }
+        }))
+    } else {
+        drop(host_context_tx);
+        None
+    };
     warn_if_unmanaged_privileged_worker_missing(runtime.config())?;
     let mut worker_handle = maybe_spawn_privileged_worker(runtime.config())?;
     let mut event_loop_iterations = 0u64;
@@ -88,9 +125,19 @@ pub async fn run_autotune_controller_session(
                 Some(event) => event,
                 None => break,
             },
+            Some(context) = host_context_rx.recv() => {
+                if let Err(error) = &context {
+                    log::info!("research host context is blocked code={}", error.code);
+                }
+                research_coordinator.set_host_context(context);
+                continue;
+            }
             Some(request) = research_rx.recv() => {
                 let now = (crate::audit::unix_nanos_now() / 1_000_000_000)
                     .min(u128::from(u64::MAX)) as u64;
+                research_coordinator.set_mutable_action_present(
+                    runtime.has_active_experiment() || runtime.has_kept_actions(),
+                );
                 research_coordinator.handle(request, now);
                 continue;
             }

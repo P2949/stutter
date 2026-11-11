@@ -82,6 +82,18 @@ pub fn daemon_config_for_runtime_mode(
 pub(crate) fn validate_runtime_config(
     config: &AutotuneRuntimeConfig,
 ) -> Result<(), AutotuneRuntimeError> {
+    let research = &config.daemon_config.autotune;
+    if research.research_steamapps_dir.is_some() != research.research_proton_manifest.is_some()
+        || research
+            .research_steamapps_dir
+            .iter()
+            .chain(research.research_proton_manifest.iter())
+            .any(|path| !path.is_absolute())
+    {
+        return Err(AutotuneRuntimeError::InvalidMode {
+            message: "research SteamApps and Proton manifest paths must be configured together as absolute paths".to_owned(),
+        });
+    }
     if config.window_seconds == 0 {
         return Err(AutotuneRuntimeError::InvalidMode {
             message: "window_seconds must be greater than zero".to_owned(),

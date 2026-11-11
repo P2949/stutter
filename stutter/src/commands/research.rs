@@ -14,7 +14,10 @@ use crate::autotune::research::{ResearchIntentV1, ResearchRequest};
 
 #[derive(Debug)]
 pub enum ResearchClientAction {
-    Inventory(PathBuf),
+    Inventory {
+        steamapps: PathBuf,
+        proton_manifest: Option<PathBuf>,
+    },
     Submit(PathBuf),
     Status,
     Pause,
@@ -32,7 +35,7 @@ pub struct ResearchClientInput {
 
 fn request(action: ResearchClientAction, uid: u32) -> anyhow::Result<ResearchRequest> {
     Ok(match action {
-        ResearchClientAction::Inventory(_) => {
+        ResearchClientAction::Inventory { .. } => {
             anyhow::bail!("inventory does not use the resident socket")
         }
         ResearchClientAction::Submit(path) => {
@@ -85,8 +88,22 @@ fn request(action: ResearchClientAction, uid: u32) -> anyhow::Result<ResearchReq
 pub async fn run(input: ResearchClientInput) -> anyhow::Result<()> {
     let uid = crate::syscall::geteuid();
     anyhow::ensure!(uid != 0, "research client must be unprivileged");
-    if let ResearchClientAction::Inventory(path) = input.action {
-        let inventory = crate::autotune::research::inspect_cyberpunk_installation(&path, uid)?;
+    if let ResearchClientAction::Inventory {
+        steamapps,
+        proton_manifest,
+    } = &input.action
+    {
+        let game = crate::autotune::research::inspect_cyberpunk_installation(steamapps, uid)?;
+        let proton = proton_manifest
+            .as_deref()
+            .map(|path| crate::autotune::research::inspect_proton_inventory(path, steamapps, uid))
+            .transpose()?;
+        let inventory = serde_json::json!({
+            "schema_version": 1,
+            "cyberpunk": game,
+            "proton": proton,
+            "proton_eligible_count": proton.as_ref().map_or(0, |value| value.tools().len()),
+        });
         println!("{}", serde_json::to_string(&inventory)?);
         return Ok(());
     }

@@ -44,6 +44,15 @@ async fn resident_transport_authenticates_and_blocks_without_independent_host_fa
     let intent = serde_json::json!({
         "schema_version": 1, "game": "cyberpunk2077", "app_id": 1091500,
         "uid": crate::syscall::geteuid(), "boot_id": "boot-1", "session_id": "11",
+        "steam_client": {
+            "branch": "publicbeta", "steamrt64_build_id": 1,
+            "steamrt64_manifest_sha256": "e".repeat(64),
+            "installed_index_sha256": "f".repeat(64), "identity_sha256": "1".repeat(64),
+            "process": {
+                "steam_pid": 10, "steam_start_ticks": 1,
+                "webhelper_pid": 11, "webhelper_start_ticks": 2, "logged_in": true
+            }
+        },
         "source_sha256": "a".repeat(64), "policy_sha256": "b".repeat(64),
         "game_executable_sha256": "c".repeat(64), "build_id": 1,
         "tools": [{"source":"ge", "identity_sha256":"d".repeat(64)}],
@@ -103,7 +112,10 @@ fn request(message: &ResearchRequest) -> AuthenticatedRequest {
 }
 
 fn fixture() -> (crate::autotune::research::ResearchIntentV1, CampaignFacts) {
-    use crate::autotune::research::{ProtonSource, ResearchGame, ResearchIntentV1, ResearchTool};
+    use crate::autotune::research::{
+        ProtonSource, ResearchGame, ResearchIntentV1, ResearchTool, SteamClientIdentity,
+        SteamProcessIdentity,
+    };
 
     let intent = ResearchIntentV1 {
         schema_version: 1,
@@ -112,6 +124,20 @@ fn fixture() -> (crate::autotune::research::ResearchIntentV1, CampaignFacts) {
         uid: crate::syscall::geteuid(),
         boot_id: "boot-1".into(),
         session_id: "11".into(),
+        steam_client: SteamClientIdentity {
+            branch: "publicbeta".into(),
+            steamrt64_build_id: 1,
+            steamrt64_manifest_sha256: "e".repeat(64),
+            installed_index_sha256: "f".repeat(64),
+            identity_sha256: "1".repeat(64),
+            process: Some(SteamProcessIdentity {
+                steam_pid: 10,
+                steam_start_ticks: 1,
+                webhelper_pid: 11,
+                webhelper_start_ticks: 2,
+                logged_in: true,
+            }),
+        },
         source_sha256: "a".repeat(64),
         policy_sha256: "b".repeat(64),
         game_executable_sha256: "c".repeat(64),
@@ -135,6 +161,7 @@ fn fixture() -> (crate::autotune::research::ResearchIntentV1, CampaignFacts) {
         uid: intent.uid,
         boot_id: intent.boot_id.clone(),
         session_id: intent.session_id.clone(),
+        steam_client: intent.steam_client.clone(),
         source_sha256: intent.source_sha256.clone(),
         policy_sha256: intent.policy_sha256.clone(),
         game_executable_sha256: intent.game_executable_sha256.clone(),
@@ -144,6 +171,22 @@ fn fixture() -> (crate::autotune::research::ResearchIntentV1, CampaignFacts) {
         mutable_action_present: false,
     };
     (intent, facts)
+}
+
+#[test]
+fn resident_status_tracks_typed_host_readiness_and_steam_login_blockers() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    let (_, facts) = fixture();
+    let mut coordinator =
+        ResearchCoordinator::new(Some(dir.path().to_path_buf()), None, "BlockedHostIdentity");
+    assert!(coordinator.status().contains("BlockedHostIdentity"));
+    coordinator.set_host_context(Err(crate::autotune::research::host::HostFactsError {
+        code: "BlockedSteamLogin",
+    }));
+    assert!(coordinator.status().contains("BlockedSteamLogin"));
+    coordinator.set_host_context(Ok(facts));
+    assert!(coordinator.status().contains("Ready"));
 }
 
 fn send(coordinator: &mut ResearchCoordinator, message: ResearchRequest, now: u64) -> String {

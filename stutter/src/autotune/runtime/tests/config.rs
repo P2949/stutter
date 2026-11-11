@@ -95,6 +95,21 @@ fn dry_run_all_safe_runtime_config_requires_suggest_mode() {
 }
 
 #[test]
+fn research_inventory_paths_are_configured_as_an_absolute_pair() {
+    let mut config = AutotuneRuntimeConfig::observe(None, None, None);
+    assert!(validate_runtime_config(&config).is_ok());
+    config.daemon_config.autotune.research_steamapps_dir =
+        Some("/home/user/Steam/steamapps".into());
+    assert!(validate_runtime_config(&config).is_err());
+    config.daemon_config.autotune.research_proton_manifest =
+        Some("relative/proton-lab.json".into());
+    assert!(validate_runtime_config(&config).is_err());
+    config.daemon_config.autotune.research_proton_manifest =
+        Some("/nix/store/proton-lab.json".into());
+    assert!(validate_runtime_config(&config).is_ok());
+}
+
+#[test]
 fn worker_only_service_refuses_in_process_managed_missing_socket_and_wrong_mode() {
     let mut config = AutotuneRuntimeConfig::apply_low_risk(None, None, None);
     config.daemon_config.autotune.worker_only_mutation = true;

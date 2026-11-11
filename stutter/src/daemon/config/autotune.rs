@@ -67,6 +67,12 @@ pub struct DaemonAutotuneConfig {
     /// Dedicated private directory for one frozen resident research campaign.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub research_campaign_dir: Option<PathBuf>,
+    /// Exact SteamApps library root independently inventoried before research admission.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub research_steamapps_dir: Option<PathBuf>,
+    /// Root-owned Nix proton-lab source manifest used to attest installed custom Proton tools.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub research_proton_manifest: Option<PathBuf>,
     #[serde(default)]
     pub external_mutation_policy: ExternalMutationPolicy,
     #[serde(default)]
@@ -100,6 +106,8 @@ impl Default for DaemonAutotuneConfig {
             kpi_socket_dir: None,
             research_socket_dir: None,
             research_campaign_dir: None,
+            research_steamapps_dir: None,
+            research_proton_manifest: None,
             external_mutation_policy: ExternalMutationPolicy::default(),
             high_risk_dry_run: false,
             workload_policy: DaemonWorkloadPolicyConfig::default(),

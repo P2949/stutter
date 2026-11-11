@@ -11,14 +11,27 @@ use serde::{Deserialize, Serialize};
     reason = "P2's unprivileged verifier remains inactive until the owned Steam launcher is qualified"
 )]
 pub(crate) mod cyberpunk;
+pub(super) mod host;
 mod journal;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "P3 tickets remain inactive until the Steam dispatcher is physically qualified"
+    )
+)]
+pub(crate) mod launch_ticket;
 mod lease;
 mod protocol;
+#[path = "research/proton/mod.rs"]
+pub(crate) mod proton;
 mod steam_inventory;
+mod vdf;
 pub use journal::{AttemptOutcome, AttemptRecord, AttemptSlot, ResearchJournal};
 pub use lease::{CampaignFacts, CampaignLease};
 pub(crate) use protocol::read_frame as read_control_frame;
 pub use protocol::{AuthenticatedRequest, ResearchRequest, receive_request};
+pub(crate) use proton::{SteamClientIdentity, SteamProcessIdentity, inspect_proton_inventory};
 pub use steam_inventory::{
     CyberpunkInstallation, SteamUpdateStatus, inspect_cyberpunk_installation,
 };
@@ -132,6 +145,8 @@ pub struct ResearchIntentV1 {
     pub uid: u32,
     pub boot_id: String,
     pub session_id: String,
+    /// The user's selected Steam Client Experimental branch and exact installed package identity.
+    pub steam_client: SteamClientIdentity,
     pub source_sha256: String,
     pub policy_sha256: String,
     pub game_executable_sha256: String,
@@ -156,6 +171,18 @@ impl ResearchIntentV1 {
         anyhow::ensure!(
             self.app_id == 1_091_500 && self.build_id != 0,
             "invalid game identity"
+        );
+        self.steam_client.validate()?;
+        anyhow::ensure!(
+            self.steam_client.branch == "publicbeta",
+            "Cyberpunk research requires the installed Steam Client Experimental branch"
+        );
+        anyhow::ensure!(
+            self.steam_client
+                .process
+                .as_ref()
+                .is_some_and(|process| process.logged_in),
+            "Steam Client Experimental is not running a verified authenticated session"
         );
         anyhow::ensure!(
             self.uid != 0 && self.desktop_research_consented,
@@ -261,6 +288,20 @@ mod tests {
             uid: 1000,
             boot_id: "boot-1".into(),
             session_id: "11".into(),
+            steam_client: SteamClientIdentity {
+                branch: "publicbeta".into(),
+                steamrt64_build_id: 1,
+                steamrt64_manifest_sha256: "e".repeat(64),
+                installed_index_sha256: "f".repeat(64),
+                identity_sha256: "1".repeat(64),
+                process: Some(SteamProcessIdentity {
+                    steam_pid: 10,
+                    steam_start_ticks: 1,
+                    webhelper_pid: 11,
+                    webhelper_start_ticks: 2,
+                    logged_in: true,
+                }),
+            },
             source_sha256: "a".repeat(64),
             policy_sha256: "b".repeat(64),
             game_executable_sha256: "c".repeat(64),
@@ -301,6 +342,12 @@ mod tests {
         assert!(value.validate().is_err());
         value = intent();
         value.policy_sha256 = "A".repeat(64);
+        assert!(value.validate().is_err());
+        value = intent();
+        value.steam_client.branch = "public".into();
+        assert!(value.validate().is_err());
+        value = intent();
+        value.steam_client.process.as_mut().unwrap().logged_in = false;
         assert!(value.validate().is_err());
         value = intent();
         value.deadline_unix_seconds = 50_000;

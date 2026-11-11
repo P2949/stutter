@@ -14,7 +14,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use super::{ResearchIntentV1, ResearchPhase, ResearchTool};
+use super::{ResearchIntentV1, ResearchPhase, ResearchTool, SteamClientIdentity};
 
 const MAX_FILE: u64 = 64 * 1024;
 // Each attempt may traverse several phases; a 256-event ceiling would truncate the
@@ -45,6 +45,7 @@ pub struct CampaignFacts {
     pub uid: u32,
     pub boot_id: String,
     pub session_id: String,
+    pub steam_client: SteamClientIdentity,
     pub source_sha256: String,
     pub policy_sha256: String,
     pub game_executable_sha256: String,
@@ -65,6 +66,7 @@ impl CampaignFacts {
             self.uid == intent.uid
                 && self.boot_id == intent.boot_id
                 && self.session_id == intent.session_id
+                && self.steam_client == intent.steam_client
                 && self.source_sha256 == intent.source_sha256
                 && self.policy_sha256 == intent.policy_sha256
                 && self.game_executable_sha256 == intent.game_executable_sha256
@@ -434,6 +436,7 @@ mod tests {
             uid: intent.uid,
             boot_id: intent.boot_id.clone(),
             session_id: intent.session_id.clone(),
+            steam_client: intent.steam_client.clone(),
             source_sha256: intent.source_sha256.clone(),
             policy_sha256: intent.policy_sha256.clone(),
             game_executable_sha256: intent.game_executable_sha256.clone(),
@@ -505,6 +508,9 @@ mod tests {
         let mut changed = facts.clone();
         changed.source_sha256 = "e".repeat(64);
         assert!(CampaignLease::recover(fd(&other), &changed, 12).is_err());
+        let mut changed_steam = facts.clone();
+        changed_steam.steam_client.steamrt64_build_id += 1;
+        assert!(CampaignLease::recover(fd(&other), &changed_steam, 12).is_err());
         std::fs::write(other.path().join("event-0001.json.tmp"), b"torn").unwrap();
         assert!(CampaignLease::recover(fd(&other), &facts, 12).is_err());
     }

@@ -1,0 +1,146 @@
+use std::os::unix::fs::{PermissionsExt, symlink};
+
+use super::*;
+
+fn fixture() -> (tempfile::TempDir, ResearchIntentV1, AttemptSlot) {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    let mut intent = super::super::tests::intent();
+    intent.uid = crate::syscall::geteuid();
+    let slot = AttemptSlot {
+        study_sha256: "e".repeat(64),
+        context_sha256: "f".repeat(64),
+        index: 0,
+        arm: intent.tools[0].source,
+    };
+    (dir, intent, slot)
+}
+
+fn fd(dir: &tempfile::TempDir) -> OwnedFd {
+    crate::syscall::open_dir_no_symlinks(dir.path()).unwrap()
+}
+
+#[test]
+fn ticket_binds_exact_game_tool_session_attempt_and_steam_verb_then_cannot_replay() {
+    let (dir, intent, slot) = fixture();
+    let ticket = issue_launch_ticket(
+        fd(&dir),
+        &intent,
+        &slot,
+        SteamVerb::WaitForExitAndRun,
+        11,
+        60,
+    )
+    .unwrap();
+    assert_eq!(ticket.uid, intent.uid);
+    assert_eq!(ticket.steam_app_id, 1_091_500);
+    assert_eq!(ticket.game_build_id, intent.build_id);
+    assert_eq!(ticket.tool, intent.tools[0]);
+    assert_eq!(
+        ticket.steam_client_identity_sha256,
+        intent.steam_client.identity_sha256
+    );
+    assert_eq!(
+        ticket.steam_process,
+        intent.steam_client.process.clone().unwrap()
+    );
+    assert_eq!(ticket.verb, SteamVerb::WaitForExitAndRun);
+    assert_eq!(ticket.boot_id, intent.boot_id);
+    assert_eq!(ticket.session_id, intent.session_id);
+
+    let expected = binding(&intent, &slot, SteamVerb::WaitForExitAndRun).unwrap();
+    let consumed = consume_launch_ticket(fd(&dir), &ticket.ticket_id, &expected, 12).unwrap();
+    assert_eq!(consumed, ticket);
+    assert!(consume_launch_ticket(fd(&dir), &ticket.ticket_id, &expected, 12).is_err());
+    assert!(
+        dir.path()
+            .join(format!("used-{}", ticket.ticket_id))
+            .is_file()
+    );
+}
+
+#[test]
+fn wrong_user_app_build_tool_boot_session_verb_and_attempt_are_rejected_without_claiming() {
+    let (dir, intent, slot) = fixture();
+    let ticket = issue_launch_ticket(fd(&dir), &intent, &slot, SteamVerb::Run, 11, 60).unwrap();
+    let expected = binding(&intent, &slot, SteamVerb::Run).unwrap();
+    let mut variants = Vec::new();
+    let mut wrong = expected.clone();
+    wrong.uid += 1;
+    variants.push(wrong);
+    let mut wrong = expected.clone();
+    wrong.steam_app_id = 1;
+    variants.push(wrong);
+    let mut wrong = expected.clone();
+    wrong.game_build_id += 1;
+    variants.push(wrong);
+    let mut wrong = expected.clone();
+    wrong.tool.identity_sha256 = "a".repeat(64);
+    variants.push(wrong);
+    let mut wrong = expected.clone();
+    wrong.steam_client_identity_sha256 = "b".repeat(64);
+    variants.push(wrong);
+    let mut wrong = expected.clone();
+    wrong.steam_process.steam_start_ticks += 1;
+    variants.push(wrong);
+    let mut wrong = expected.clone();
+    wrong.steam_process.logged_in = false;
+    variants.push(wrong);
+    let mut wrong = expected.clone();
+    wrong.boot_id = "other-boot".into();
+    variants.push(wrong);
+    let mut wrong = expected.clone();
+    wrong.session_id = "other-session".into();
+    variants.push(wrong);
+    let mut wrong = expected.clone();
+    wrong.verb = SteamVerb::Setup;
+    variants.push(wrong);
+    let mut wrong = expected.clone();
+    wrong.attempt_sha256 = "b".repeat(64);
+    variants.push(wrong);
+    for wrong in variants {
+        assert!(consume_launch_ticket(fd(&dir), &ticket.ticket_id, &wrong, 12).is_err());
+    }
+    assert!(consume_launch_ticket(fd(&dir), &ticket.ticket_id, &expected, 12).is_ok());
+}
+
+#[test]
+fn expired_ticket_cannot_be_used_and_bad_ids_cannot_escape_the_ticket_directory() {
+    let (dir, intent, slot) = fixture();
+    let ticket = issue_launch_ticket(fd(&dir), &intent, &slot, SteamVerb::Setup, 11, 60).unwrap();
+    let expected = binding(&intent, &slot, SteamVerb::Setup).unwrap();
+    assert!(consume_launch_ticket(fd(&dir), &ticket.ticket_id, &expected, 71).is_err());
+    assert!(consume_launch_ticket(fd(&dir), "../outside", &expected, 12).is_err());
+    assert!(consume_launch_ticket(fd(&dir), &ticket.ticket_id, &expected, 12).is_ok());
+}
+
+#[test]
+fn symlink_ticket_and_excessive_lifetime_fail_closed() {
+    let (dir, intent, slot) = fixture();
+    assert!(issue_launch_ticket(fd(&dir), &intent, &slot, SteamVerb::Run, 11, 301).is_err());
+    let ticket = issue_launch_ticket(fd(&dir), &intent, &slot, SteamVerb::Run, 11, 60).unwrap();
+    let name = format!("ticket-{}.json", ticket.ticket_id);
+    let target = dir.path().join("target");
+    std::fs::write(&target, serde_json::to_vec(&ticket).unwrap()).unwrap();
+    std::fs::remove_file(dir.path().join(&name)).unwrap();
+    symlink(target, dir.path().join(&name)).unwrap();
+    let expected = binding(&intent, &slot, SteamVerb::Run).unwrap();
+    assert!(consume_launch_ticket(fd(&dir), &ticket.ticket_id, &expected, 12).is_err());
+}
+
+#[test]
+fn ticket_wire_contains_only_closed_authority_bindings() {
+    let (dir, intent, slot) = fixture();
+    let ticket = issue_launch_ticket(fd(&dir), &intent, &slot, SteamVerb::Setup, 11, 60).unwrap();
+    let text = serde_json::to_string(&ticket).unwrap();
+    for forbidden in ["path", "command", "environment", "prefix", "executable"] {
+        assert!(!text.contains(forbidden));
+    }
+    let wrong_app: ResearchLaunchTicketV1 =
+        serde_json::from_str(&text.replace("\"steam_app_id\":1091500", "\"steam_app_id\":1"))
+            .unwrap();
+    assert!(validate_ticket(&wrong_app, 12).is_err());
+    let mut unknown = serde_json::to_value(ticket).unwrap();
+    unknown["command"] = "arbitrary".into();
+    assert!(serde_json::from_value::<ResearchLaunchTicketV1>(unknown).is_err());
+}

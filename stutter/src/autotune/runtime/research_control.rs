@@ -78,6 +78,31 @@ impl ResearchCoordinator {
         }
     }
 
+    pub(super) fn set_host_context(
+        &mut self,
+        result: Result<CampaignFacts, super::super::research::host::HostFactsError>,
+    ) {
+        if self.submitted {
+            return;
+        }
+        match result {
+            Ok(facts) => {
+                self.facts = Some(facts);
+                self.context_blocker = "Ready";
+            }
+            Err(error) => {
+                self.facts = None;
+                self.context_blocker = error.code;
+            }
+        }
+    }
+
+    pub(super) fn set_mutable_action_present(&mut self, present: bool) {
+        if let Some(facts) = self.facts.as_mut() {
+            facts.mutable_action_present = present;
+        }
+    }
+
     pub(super) fn handle(&mut self, envelope: Envelope, now: u64) {
         let response = if envelope.request.revalidate_peer().is_err() {
             response("denied", "PeerChanged")
@@ -125,6 +150,9 @@ impl ResearchCoordinator {
         }
         if let Some(code) = self.storage_blocker {
             return response("blocked", code);
+        }
+        if self.facts.is_some() {
+            return response("idle", "Ready");
         }
         response("idle", self.context_blocker)
     }

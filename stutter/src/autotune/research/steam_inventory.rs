@@ -1,6 +1,5 @@
 //! Read-only Cyberpunk Steam-manifest preflight; installation is not entitlement or launch proof.
 use std::{
-    collections::{BTreeMap, BTreeSet},
     fs::File,
     io::Read,
     os::{fd::AsFd, unix::fs::MetadataExt},
@@ -11,8 +10,6 @@ use serde::{Deserialize, Serialize};
 
 const MAX_MANIFEST: u64 = 1024 * 1024;
 const MAX_GAME_EXECUTABLE: u64 = 256 * 1024 * 1024;
-const MAX_TOKEN: usize = 4096;
-const MAX_DEPTH: usize = 16;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -20,6 +17,72 @@ pub enum SteamUpdateStatus {
     NoPendingUpdateIndicated,
     Updating,
     Unknown,
+}
+
+fn field<'a>(
+    root: &'a std::collections::BTreeMap<String, super::vdf::VdfValue>,
+    name: &str,
+) -> Option<&'a str> {
+    root.get(name).and_then(super::vdf::VdfValue::string)
+}
+
+fn number(
+    root: &std::collections::BTreeMap<String, super::vdf::VdfValue>,
+    name: &str,
+) -> Option<u64> {
+    let value = field(root, name)?;
+    (!value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()))
+        .then(|| value.parse().ok())?
+}
+
+fn parse_manifest(bytes: &[u8]) -> anyhow::Result<CyberpunkInstallation> {
+    let document = super::vdf::VdfDocument::parse(bytes)?;
+    anyhow::ensure!(
+        document.name == "appstate",
+        "unexpected Steam manifest root"
+    );
+    let root = document.root_object()?;
+    let app_id = number(root, "appid").ok_or_else(|| anyhow::anyhow!("missing Steam AppID"))?;
+    let build_id = number(root, "buildid").ok_or_else(|| anyhow::anyhow!("missing build ID"))?;
+    let installation_directory = field(root, "installdir")
+        .ok_or_else(|| anyhow::anyhow!("missing installation directory"))?;
+    anyhow::ensure!(
+        app_id == 1_091_500 && build_id != 0 && installation_directory == "Cyberpunk 2077",
+        "Steam manifest is not the expected Cyberpunk installation"
+    );
+
+    let state_flags = number(root, "stateflags");
+    let target_build_id = number(root, "targetbuildid");
+    let bytes_to_download = number(root, "bytestodownload");
+    let bytes_downloaded = number(root, "bytesdownloaded");
+    let bytes_to_stage = number(root, "bytestostage");
+    let bytes_staged = number(root, "bytesstaged");
+    let manifest_update_status = if target_build_id.is_some_and(|target| target != 0)
+        || number(root, "stateflags").is_some_and(|flags| flags & 2 != 0)
+        || matches!((bytes_to_download, bytes_downloaded), (Some(total), Some(done)) if total != done)
+        || matches!((bytes_to_stage, bytes_staged), (Some(total), Some(done)) if total != done)
+    {
+        SteamUpdateStatus::Updating
+    } else if state_flags == Some(4)
+        && target_build_id == Some(0)
+        && matches!((bytes_to_download, bytes_downloaded), (Some(total), Some(done)) if total == done)
+        && matches!((bytes_to_stage, bytes_staged), (Some(total), Some(done)) if total == done)
+    {
+        SteamUpdateStatus::NoPendingUpdateIndicated
+    } else {
+        SteamUpdateStatus::Unknown
+    };
+
+    Ok(CyberpunkInstallation {
+        app_id: app_id as u32,
+        build_id,
+        installation_directory: installation_directory.to_owned(),
+        manifest_update_status,
+        manifest_sha256: stutter_core::hash::sha256_hex(bytes),
+        game_executable_sha256: None,
+        entitlement_verified: false,
+        native_benchmark_verified: false,
+    })
 }
 
 /// This deliberately omits account IDs, saves, launch options and other private Steam data.
@@ -33,174 +96,6 @@ pub struct CyberpunkInstallation {
     pub game_executable_sha256: Option<String>,
     pub entitlement_verified: bool,
     pub native_benchmark_verified: bool,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-enum Token {
-    Text(String),
-    Open,
-    Close,
-}
-
-fn tokens(bytes: &[u8]) -> anyhow::Result<Vec<Token>> {
-    anyhow::ensure!(bytes.len() <= MAX_MANIFEST as usize, "manifest too large");
-    let mut result = Vec::new();
-    let mut i = 0;
-    while i < bytes.len() {
-        match bytes[i] {
-            b if b.is_ascii_whitespace() => i += 1,
-            b'/' if bytes.get(i + 1) == Some(&b'/') => {
-                i += 2;
-                while i < bytes.len() && bytes[i] != b'\n' {
-                    i += 1;
-                }
-            }
-            b'{' => {
-                result.push(Token::Open);
-                i += 1;
-            }
-            b'}' => {
-                result.push(Token::Close);
-                i += 1;
-            }
-            b'"' => {
-                i += 1;
-                let mut text = Vec::new();
-                let mut closed = false;
-                while i < bytes.len() {
-                    let byte = bytes[i];
-                    i += 1;
-                    if byte == b'"' {
-                        closed = true;
-                        break;
-                    }
-                    if byte == b'\\' {
-                        let escaped = *bytes
-                            .get(i)
-                            .ok_or_else(|| anyhow::anyhow!("truncated escape"))?;
-                        anyhow::ensure!(
-                            matches!(escaped, b'\\' | b'"'),
-                            "unsupported manifest escape"
-                        );
-                        text.push(escaped);
-                        i += 1;
-                    } else {
-                        anyhow::ensure!(
-                            byte != 0 && !byte.is_ascii_control(),
-                            "invalid manifest character"
-                        );
-                        text.push(byte);
-                    }
-                    anyhow::ensure!(text.len() <= MAX_TOKEN, "manifest token too long");
-                }
-                anyhow::ensure!(closed, "unterminated manifest token");
-                result.push(Token::Text(String::from_utf8(text)?));
-            }
-            _ => anyhow::bail!("unsupported manifest syntax"),
-        }
-        anyhow::ensure!(result.len() <= 65_536, "too many manifest tokens");
-    }
-    Ok(result)
-}
-
-fn parse_object(
-    tokens: &[Token],
-    cursor: &mut usize,
-    depth: usize,
-    capture: bool,
-) -> anyhow::Result<BTreeMap<String, String>> {
-    anyhow::ensure!(depth <= MAX_DEPTH, "manifest nesting too deep");
-    let mut values = BTreeMap::new();
-    let mut seen = BTreeSet::new();
-    loop {
-        let key = match tokens.get(*cursor) {
-            Some(Token::Close) => {
-                *cursor += 1;
-                return Ok(values);
-            }
-            Some(Token::Text(key)) => {
-                *cursor += 1;
-                key.to_ascii_lowercase()
-            }
-            _ => anyhow::bail!("malformed manifest object"),
-        };
-        anyhow::ensure!(seen.insert(key.clone()), "duplicate manifest field");
-        match tokens.get(*cursor) {
-            Some(Token::Text(value)) => {
-                *cursor += 1;
-                if capture {
-                    values.insert(key, value.clone());
-                }
-            }
-            Some(Token::Open) => {
-                *cursor += 1;
-                parse_object(tokens, cursor, depth + 1, false)?;
-            }
-            _ => anyhow::bail!("malformed manifest value"),
-        }
-    }
-}
-
-fn parse_manifest(bytes: &[u8]) -> anyhow::Result<CyberpunkInstallation> {
-    let tokens = tokens(bytes)?;
-    anyhow::ensure!(
-        matches!(tokens.first(), Some(Token::Text(name)) if name.eq_ignore_ascii_case("AppState"))
-            && tokens.get(1) == Some(&Token::Open),
-        "missing AppState"
-    );
-    let mut cursor = 2;
-    let values = parse_object(&tokens, &mut cursor, 1, true)?;
-    anyhow::ensure!(cursor == tokens.len(), "trailing manifest content");
-    let number = |key: &str| -> anyhow::Result<u64> {
-        let value = values
-            .get(key)
-            .ok_or_else(|| anyhow::anyhow!("missing {key}"))?;
-        anyhow::ensure!(
-            !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit()),
-            "invalid {key}"
-        );
-        Ok(value.parse()?)
-    };
-    anyhow::ensure!(number("appid")? == 1_091_500, "wrong Steam AppID");
-    let build_id = number("buildid")?;
-    anyhow::ensure!(build_id != 0, "missing installed build");
-    let installation_directory = values
-        .get("installdir")
-        .ok_or_else(|| anyhow::anyhow!("missing installation directory"))?;
-    anyhow::ensure!(
-        installation_directory == "Cyberpunk 2077",
-        "unexpected installation directory"
-    );
-    let flags = number("stateflags")?;
-    let update_status = match (
-        number("targetbuildid"),
-        number("bytestodownload"),
-        number("bytesdownloaded"),
-        number("bytestostage"),
-        number("bytesstaged"),
-    ) {
-        (Ok(0), Ok(download), Ok(downloaded), Ok(stage), Ok(staged))
-            if flags == 4 && download == downloaded && stage == staged =>
-        {
-            SteamUpdateStatus::NoPendingUpdateIndicated
-        }
-        (Ok(target), Ok(download), Ok(downloaded), Ok(stage), Ok(staged))
-            if target != 0 || download != downloaded || stage != staged =>
-        {
-            SteamUpdateStatus::Updating
-        }
-        _ => SteamUpdateStatus::Unknown,
-    };
-    Ok(CyberpunkInstallation {
-        app_id: 1_091_500,
-        build_id,
-        installation_directory: installation_directory.clone(),
-        manifest_update_status: update_status,
-        manifest_sha256: stutter_core::hash::sha256_hex(bytes),
-        game_executable_sha256: None,
-        entitlement_verified: false,
-        native_benchmark_verified: false,
-    })
 }
 
 /// Read the fixed Steam manifest and game executable without changing Steam data. This records a
@@ -314,6 +209,14 @@ mod tests {
                 .manifest_update_status,
             SteamUpdateStatus::Updating
         );
+        let update_required_flag =
+            manifest("").replace("\"StateFlags\" \"4\"", "\"StateFlags\" \"6\"");
+        assert_eq!(
+            parse_manifest(update_required_flag.as_bytes())
+                .unwrap()
+                .manifest_update_status,
+            SteamUpdateStatus::Updating
+        );
         let unknown = manifest("").replace("\"TargetBuildID\" \"0\"", "");
         assert_eq!(
             parse_manifest(unknown.as_bytes())
@@ -326,6 +229,17 @@ mod tests {
     fn wrong_identity_duplicate_fields_and_malformed_input_are_rejected() {
         assert!(parse_manifest(manifest("\"appid\" \"1091500\"").as_bytes()).is_err());
         assert!(parse_manifest(manifest("").replace("1091500", "1").as_bytes()).is_err());
+        assert!(
+            parse_manifest(
+                manifest("")
+                    .replace(
+                        "\"appid\" \"1091500\"",
+                        "\"appid\" { \"nested\" \"1091500\" }"
+                    )
+                    .as_bytes()
+            )
+            .is_err()
+        );
         assert!(
             parse_manifest(
                 manifest("")
