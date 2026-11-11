@@ -34,3 +34,14 @@ cannot demonstrate the refusal. Showing it live needs a new smoke case (a foreig
 holds an exact fenced fixture and a candidate is eligible), which is a harness change, a new exact-build receipt and another
 guarded activation. The refusal itself is covered by the planner fixtures (`planning/denial.rs`: a sched_ext scheduler in
 charge that is not verified to honor the knob).
+
+### Why a live owner-conflict refusal is not reachable with the deployed service (read from the code, 2026-11-11)
+
+`planning/evaluate.rs` raises `SchedulerSemanticsUnverified` only for `Nice` and `Uclamp` candidates while a sched_ext scheduler
+is enabled and `knob_is_honored` is false (`integrations/sched_semantics.rs`: no scheduler is on the verified list). The deployed
+bounded service proposes only its two `AUTONOMOUS_CONTRACTS` operations (CPU-affinity profile and cgroup placement), which are
+not those knobs, so under a foreign sched_ext scheduler it has no candidate of the refused kind to refuse. nice and uclamp are
+Experimental and never autonomous. A live refusal would therefore require enabling an operation the service is not allowed to
+run, which is outside the standing constraints. What can be shown live is what was shown: with a foreign scheduler loaded the
+service neither crashes nor mutates, and its Supported operations are unaffected. The refusal stays covered by the planner
+fixtures. This item is closed as not applicable to the deployed contract rather than left open.
