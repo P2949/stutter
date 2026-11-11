@@ -1,0 +1,34 @@
+{
+  "result": "PASS",
+  "source_sha": "711a82e4a55bf620abcaa77a7832d95b9c67e2b9",
+  "source_clean": true,
+  "build_output": "fresh local clone checkout/target (exclusive to this checkout); run at nice 19, ionice idle, CARGO_BUILD_JOBS=2 no game was running",
+  "commands": [
+    "nix develop --command cargo run -q -p xtask -- ci",
+    "nix develop --command cargo clippy --workspace --all-targets -- -D warnings",
+    "nix develop --command cargo run -q -p xtask -- release-check"
+  ],
+  "library": {
+    "passed": 3456,
+    "ignored": 19
+  },
+  "xtask": {
+    "passed": 563
+  },
+  "validation_runner": {
+    "passed": 106,
+    "ignored": 7
+  },
+  "architecture_tests": {
+    "passed": 125
+  },
+  "release_binary_sha256": "595974f08fa4dc3f1cf4201ea97990bf01f9911496019ee1333ec04f4c1ced94",
+  "logs_sha256": {
+    "ci.log": "1ab01b303987ee015270ac86ce96f1f36aff9007cc46fbd9568158ce8517eb0a",
+    "clippy-workspace.log": "5dd8d7b90615cac3f8fd313b66a4825ef2efae455d687297c0de8483c98f5ead",
+    "release-check.log": "29e0d592eb4ee19e3cd9622206b1f91296e4c0521a5246536738fd1d1f43e84e"
+  },
+  "scope": "the NotPlannedForVerification closeout disposition (xtask only; the shipped crates are unchanged from 9cfca635)",
+  "deployed": "The installed build is the 9cfca635 binary (6922c7c6\u2026), activated after a passing exact-build production-smoke; this source embeds its own revision, hence the different hash above.",
+  "note": "documentation-only commits after this sha do not change the built binary"
+}
