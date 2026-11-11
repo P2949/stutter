@@ -25,3 +25,9 @@ Other contexts (other schedulers, kernels, GPUs, hosts) remain `NotPlannedForVer
 Disclosure: the first context-B attempt produced no data (all 20 runs `rc=1`, `cargo` not on PATH outside the dev shell; the
 failed `results.tsv` was overwritten by the rerun under `nix develop`). The reported data is the complete rerun, with no
 runs dropped or repeated.
+
+Legal-candidate replay (PLAN.md W25): the plan asks for an offline replay against finite legal CPU-affinity or configured
+cgroup-placement candidate descriptors from the planner with an independent frozen holdout. No such valid evidence set exists on
+this host (the only on-host blocks measure renicing of foreign synthetic hogs, which is outside the legal action descriptor
+space), so this item is reported as `InsufficientLegalCandidateEvidence`; the production heuristic and default selection stay
+unchanged and no unknown operation can enter through search.

@@ -19,3 +19,8 @@ After the run `/sys/kernel/sched_ext/state` returned to `disabled`; `stutter-aut
 
 Limit: this exercises the production decision functions on real live owner state, not the full candidate-evaluation
 pipeline inside the running service, which cannot emit these candidates under its two-contract limit.
+
+Classification note (PLAN.md W28): the GameMode `owner_denial(Nice)` above is `ExternalSuspected`. A running `gamemoded` process is a
+conservative process-level signal; it does not establish that any specific task's nice value was changed by GameMode, and no
+exact-task ownership receipt was obtained. Likewise this is not an installed-service candidate-evaluation demonstration: the
+deployed service cannot propose Nice or Uclamp, and `AUTONOMOUS_CONTRACTS` was not modified to force one.

@@ -321,7 +321,7 @@
       "g1": "Controlled own-thread development readback: three existing four-event intervals counted; optional six-event set failed to yield usable counts and remains EvidenceDeferred. See source-bound development report.",
       "runtime_availability": "perf, likwid installed on this host 2026-11-11 (NixosConf stutter-tools.nix, inert on PATH)",
       "authority": "O/F",
-      "not_wired": "the PMU sensor starting only on escalation is by design (cost-bounded sensors); the architecture events are catalogued and resolved but not opened by the runtime; importer formats are fixture-verified from the documented layouts (the tools are absent here)",
+      "not_wired": "the PMU sensor starting only on escalation is by design (cost-bounded sensors); the architecture events are catalogued and resolved but not opened by the runtime; importer formats are fixture-verified from the documented layouts (perf and LIKWID are installed on this host, inert on PATH; real perf/LIKWID captures are tracked in docs/validation/phase-tools-2026-11-11/RESULTS.md, VTune and uProf remain unavailable)",
       "dispositions": [
         "CodeComplete",
         "FixtureVerified",
@@ -555,7 +555,7 @@
       "g1": "read on this host at runtime (intel_pstate, 12 policies)",
       "runtime_availability": "thermald installed on this host 2026-11-11 (NixosConf stutter-tools.nix, inert on PATH)",
       "authority": "O/A",
-      "not_wired": "sensor readings are deliberately not decision inputs (architecture guard `decision_code_never_reads_sensor_readings`); no new EPP benefit campaign (the prior negative pilot is retained, not rerun); thermald absent on this host; RAPL energy is root-only here",
+      "not_wired": "sensor readings are deliberately not decision inputs (architecture guard `decision_code_never_reads_sensor_readings`); no new EPP benefit campaign (the prior negative pilot is retained, not rerun); thermald is installed on this host, inert (not enabled); RAPL energy is root-only here",
       "related_existing": [
         "stutter/src/system_inventory.rs"
       ],
@@ -619,7 +619,7 @@
       "status": "code_complete",
       "g0": "a cheap `numa_faults` sensor reads automatic-NUMA-balancing hinting faults, local faults and migrated pages from /proc/vmstat as deltas with a local-fault ratio, and `parse_numa_maps` sums one process's pages per node; numad presence marks memory placement owned; numa_stat sensor reads per-node numastat deltas and the remote-allocation ratio of the interval; separate typed memory operation `NumaMigratePages` (`MutationOperationKind`, manual-only, Experimental capability): target verified by live start time, nodes checked against the online list and disjoint, explicit irreversible acknowledgement, `migrate_pages(2)` behind a wrapper with before/after page accounting from numa_maps, `RollbackToken::NumaMigration` whose recovery is ManualOnly and never claims the layout was restored, manual policy-gated `NumaMigrationAction` (HighRisk, persistent effect) and `CandidateAction::NumaMigration`; cpuset.mems is the separate `CgroupCpusetMems` operation; never an executable plan",
       "g1": "read-only on this host (2026-11-09): one NUMA node online (`/sys/devices/system/node/online` = 0), `kernel.numa_balancing` = 0, and `/proc/self/numa_maps` readable; no migration was performed",
-      "runtime_availability": "numad and numactl absent",
+      "runtime_availability": "numactl installed (inert on PATH, one NUMA node); numad absent",
       "authority": "O/A/E",
       "not_wired": "set_mempolicy/mbind apply only to the calling thread or its own address space, so no foreign-process policy operation exists by design (`memory_policy` states that as a typed refusal and observes the policy read-only from numa_maps); a running numad denies the migration action before any page is touched; not worker-routed (HighRisk manual/offline behind HIGH_RISK_APPLY_IMPLEMENTED=false); no real multi-node migration readback",
       "missing_required": [],
@@ -913,7 +913,7 @@
       "g1": "At exact committed source 1d5a3ef0, a separate live-BPF observation-only transient controller accepted all 16 samples from eight completed CPU fixed-work runs, no denials, all decisions observed, clean process/socket stop. The independent-block harness also completed and verified raw reconstruction. This is KPI transport/measurement evidence, not HTTP/RPC or network outcome qualification.",
       "runtime_availability": "iperf3, wrk2, h2load installed on this host 2026-11-11 (NixosConf stutter-tools.nix, inert on PATH)",
       "authority": "O/F/E",
-      "not_wired": "no OpenTelemetry reader (not required by the plan row); the local offered-load workflow (`xtask benchmarks offered-load`, wrk2, loopback only) has not been run here because wrk2 is not installed (it reports BlockedResource), and there is no exact installed-production acceptance; not worker-routed (HighRisk manual/offline behind HIGH_RISK_APPLY_IMPLEMENTED=false); socket options and qdisc replacement are deliberately not operations: `net_capability` gives the read-only congestion-control and qdisc inventory and typed refusals that state why (a socket option needs the owning descriptor; replacing a root qdisc cannot be restored exactly); Prometheus import and compare-load remain read-only",
+      "not_wired": "no OpenTelemetry reader (not required by the plan row); the local offered-load workflow (`xtask benchmarks offered-load`, wrk2, loopback only) ran here with wrk2 installed (NixosConf stutter-tools.nix, inert on PATH): two identical 200 req/s loopback samples gave p99 1.67 vs 3.37 ms with zero errors, i.e. noise, so no causal benefit claim (docs/validation/phase-tools-2026-11-11/RESULTS.md), and there is no exact installed-production acceptance; not worker-routed (HighRisk manual/offline behind HIGH_RISK_APPLY_IMPLEMENTED=false); socket options and qdisc replacement are deliberately not operations: `net_capability` gives the read-only congestion-control and qdisc inventory and typed refusals that state why (a socket option needs the owning descriptor; replacing a root qdisc cannot be restored exactly); Prometheus import and compare-load remain read-only",
       "missing_required": [],
       "dispositions": [
         "CodeComplete",
@@ -989,7 +989,7 @@
       "status": "code_complete",
       "g0": "native affinity, nice, ionice and uclamp actions with readback; user intent read back from the kernel for every setting the plan names (CPU mask, nice, real-time policy, ionice, uclamp, NUMA memory policy, cgroup cpu.weight/max/idle) as UserExplicit receipts or readers; Nice, I/O-priority and uclamp candidates are denied when a target already carries a user or launcher setting; architecture tests forbid running taskset/nice/ionice/chrt/cpupower, any sched_setscheduler, and any sched_setattr that does not keep policy and parameters, so no real-time promotion path exists",
       "g1": "this process's affinity, nice and policy read from the real /proc on this host",
-      "runtime_availability": "taskset, chrt, ionice, systemd-run present; numactl, cpupower absent",
+      "runtime_availability": "taskset, chrt, ionice, systemd-run, numactl present; cpupower absent",
       "authority": "O/A",
       "not_wired": "nothing",
       "dispositions": [
@@ -1153,7 +1153,7 @@
   ],
   "verification": {
     "source_sha": "fc1bb2e7fbd6a35a5229bcf84a2995eebad17b4c",
-    "scope": "Clean committed-source CI, explicit workspace Clippy and release-check of the code commit with the never-stale stamped-frame calibration, the authenticated stamped source, the real-scx_loader adapter fixes and the frozen-baseline subcapability gate. The deployed production build is the earlier 4f3baa07 (NixosConf 250e3cf, 35/35 smoke); nothing since is reachable from the daemon, so it was not re-deployed. Live observations retain their separate source pins.",
+    "scope": "Clean committed-source CI, explicit workspace Clippy and release-check of the code commit with the never-stale stamped-frame calibration, the authenticated stamped source, the real-scx_loader adapter fixes and the frozen-baseline subcapability gate. The deployed production build is 9cfca635 (NixosConf 990326c1, installed exact-build smoke 37/37); the later commits touch xtask, packaging and documentation only and are not reachable from the daemon, so nothing was re-deployed. Live observations retain their separate source pins.",
     "source_ci": "docs/validation/source-ci-2026-11-11-fc1bb2e7.json",
     "deploy": "docs/validation/production-deploy-2026-11-09/RESULTS.md"
   }
