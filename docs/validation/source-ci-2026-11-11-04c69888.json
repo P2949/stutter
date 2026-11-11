@@ -1,0 +1,34 @@
+{
+  "result": "PASS",
+  "source_sha": "04c6988856835e1ea1da3d6c714de6a6070360ff",
+  "source_clean": true,
+  "build_output": "fresh local clone checkout/target (exclusive to this checkout); run at nice 19, ionice idle, CARGO_BUILD_JOBS=2 no game was running",
+  "commands": [
+    "nix develop --command cargo run -q -p xtask -- ci",
+    "nix develop --command cargo clippy --workspace --all-targets -- -D warnings",
+    "nix develop --command cargo run -q -p xtask -- release-check"
+  ],
+  "library": {
+    "passed": 3456,
+    "ignored": 19
+  },
+  "xtask": {
+    "passed": 563
+  },
+  "validation_runner": {
+    "passed": 106,
+    "ignored": 7
+  },
+  "architecture_tests": {
+    "passed": 125
+  },
+  "release_binary_sha256": "307643d9751dc86e1c719c3b44cf2db1675177c448c153fad6eb8a11b18342eb",
+  "logs_sha256": {
+    "ci.log": "55bc5dd24556f90a704c0ad3c23ee13c8a624767445b9d39be7b4059c3bf4385",
+    "clippy-workspace.log": "7890ff92e4bc2ac7ef319f9e79cbaa6dbd15f31d11d47a3ebab03e75597afe28",
+    "release-check.log": "0f62efb9818d815663c17d6a5bc40476ae83f95829e1bc4153cf81122a07d1ee"
+  },
+  "scope": "the W21 renderer-producer harness, the opt-in Vulkan present layer source and the NotPlannedForVerification disposition (xtask and packaging only; the shipped crates are unchanged from 9cfca635)",
+  "deployed": "The installed build is the 9cfca635 binary (6922c7c6\u2026), activated after a passing exact-build production-smoke; this source embeds its own revision, hence the different hash above.",
+  "note": "documentation-only commits after this sha do not change the built binary"
+}
