@@ -6,6 +6,11 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
+#[expect(
+    dead_code,
+    reason = "P2's unprivileged verifier remains inactive until the owned Steam launcher is qualified"
+)]
+pub(crate) mod cyberpunk;
 mod journal;
 mod lease;
 mod protocol;

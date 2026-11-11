@@ -234,6 +234,29 @@ pub fn openat_nofollow(dir: std::os::fd::BorrowedFd<'_>, name: &str) -> io::Resu
     Ok(unsafe { std::fs::File::from_raw_fd(raw) })
 }
 
+/// Opens a child directory relative to `dir` without following a symlink.
+pub fn openat_dir_nofollow(
+    dir: std::os::fd::BorrowedFd<'_>,
+    name: &str,
+) -> io::Result<std::os::fd::OwnedFd> {
+    use std::os::fd::{AsRawFd, FromRawFd};
+    let c_name =
+        std::ffi::CString::new(name).map_err(|_| io::Error::from_raw_os_error(libc::EINVAL))?;
+    // SAFETY: `dir` is live and borrowed for this call; `c_name` is NUL terminated.
+    let raw = unsafe {
+        libc::openat(
+            dir.as_raw_fd(),
+            c_name.as_ptr(),
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+        )
+    };
+    if raw < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: `raw` is a newly opened descriptor uniquely owned by this return value.
+    Ok(unsafe { std::os::fd::OwnedFd::from_raw_fd(raw) })
+}
+
 /// Credentials of the process on the other end of a connected Unix socket, as recorded by the
 /// kernel when the connection was made (`SO_PEERCRED`).
 pub fn unix_peer_credentials(
