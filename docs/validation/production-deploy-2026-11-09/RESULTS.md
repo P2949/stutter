@@ -225,3 +225,12 @@ mutation through the worker. Only then were the system profile `--set` (`system-
 switch` run. Afterwards `/run/current-system` and the system profile are `cm4bbc51…`, both units active, 0 tokens
 outstanding. The previous generation `z5c4c0vs…` is preserved for rollback. No reboot. NixosConf branch
 `host/stutter-final-9cfca635` at `6091d4f` (local; not merged to `main`).
+
+## Host probes for the remaining resource-gated phases (2026-11-11)
+
+NixosConf `main` was pushed at `6091d4f` (remote SHA verified). Probes on this host: 1 NUMA node (`/sys/devices/system/node`),
+no `/sys/fs/resctrl` (Intel Core i5-10600K has no RDT allocation), no `rc-service`/`openrc` (NixOS/systemd only), a
+`kdamond` already running (so a kdamond-free run is impossible without disturbing it), no packaged `scx_loader`. These
+are properties of the hardware and OS, not of the code: the multi-node NUMA, RDT, OpenRC, kdamond-free and `scx_loader`
+items remain `HardwareUnavailable`/`BlockedResource`. The renderer producer with an independent stamp reference and the
+real-game benefit study need an instrumented game and a reference capture device that do not exist here.
