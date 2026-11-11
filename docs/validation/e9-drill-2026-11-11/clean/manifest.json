@@ -1,0 +1,3 @@
+{"schema_version":1,"study_id":"e9-clean-aa","identity":"docs/validation/e9-drill-2026-11-11/identity.json","hog_threads":12,"blocks":2,"training_blocks":1,"arm_timeout_secs":120,"practical_percent":2.0,
+ "baseline":{"name":"baseline","compile":{"kind":"Unrestricted"},"hogs":{"kind":"Unrestricted"}},
+ "candidates":[{"name":"explicit-all-cpus","compile":{"kind":"Cpus","value":"0-11"},"hogs":{"kind":"Cpus","value":"0-11"}}]}

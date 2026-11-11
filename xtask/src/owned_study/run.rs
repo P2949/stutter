@@ -2,9 +2,8 @@
 use std::{
     collections::BTreeSet,
     fs,
-    io::Write,
-    os::unix::fs::{DirBuilderExt, OpenOptionsExt},
-    path::{Path, PathBuf},
+    os::unix::fs::DirBuilderExt,
+    path::Path,
     process::Command,
     sync::{
         Arc,
@@ -15,30 +14,21 @@ use std::{
 };
 
 use anyhow::{Context, bail, ensure};
-use serde::{Deserialize, Serialize};
 use stutter::api::workload_progress::FixedWorkIdentity;
 
-use super::manifest::{Manifest, Placement, Slot, effective_cpus_of_self, parse_cpulist};
+pub use super::journal::Record;
+use super::{
+    diagnostics,
+    host::{HostState, inspect},
+    journal::{self, Mode},
+    manifest::{Manifest, Placement, Slot, effective_cpus_of_self, parse_cpulist},
+    workspace::{self, Workspace},
+};
 use crate::process::supervisor::{self, ExecutionPolicy, Outcome};
 
 /// What each target prints to stderr before it execs: the kernel's own view of its CPU set and the
 /// cpu.weight of the cgroup it is in. The role is `$0`; the real command is `"$@"`.
 const READBACK: &str = r#"echo "READBACK $0 cpus=$(sed -n 's/^Cpus_allowed_list:[[:space:]]*//p' /proc/self/status) weight=$(cat /sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup)/cpu.weight 2>/dev/null)" >&2; exec "$@""#;
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Record {
-    pub study_id: String,
-    pub manifest_sha256: String,
-    pub slot: String,
-    pub block: u32,
-    pub arm: String,
-    pub valid: bool,
-    pub reason: Option<String>,
-    pub elapsed_ns: Option<u64>,
-    /// Digest of the kernel, boot, effective CPUs, sched_ext state and work identity the slot ran under.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub context: Option<String>,
-}
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Readback {
@@ -79,33 +69,6 @@ pub fn readback_matches(
     }
 }
 
-/// A competing game or game launcher is running (a shell that merely mentions one is not).
-pub fn competing_game(proc_root: &Path, own_pid: u32) -> bool {
-    const MARKERS: [&str; 4] = [
-        "SteamLaunch AppId",
-        "steamapps/common",
-        "gamescope",
-        "pressure-vessel",
-    ];
-    const SHELLS: [&str; 6] = ["zsh", "bash", "sh", "grep", "pgrep", "xtask"];
-    let Ok(entries) = fs::read_dir(proc_root) else {
-        return true;
-    };
-    entries.flatten().any(|entry| {
-        let Ok(pid) = entry.file_name().to_string_lossy().parse::<u32>() else {
-            return false;
-        };
-        if pid == own_pid {
-            return false;
-        }
-        let comm = fs::read_to_string(entry.path().join("comm")).unwrap_or_default();
-        let cmdline = fs::read(entry.path().join("cmdline"))
-            .map(|bytes| String::from_utf8_lossy(&bytes).replace('\0', " "))
-            .unwrap_or_default();
-        !SHELLS.contains(&comm.trim()) && MARKERS.iter().any(|marker| cmdline.contains(marker))
-    })
-}
-
 /// The command that starts `inner` in `placement`, reading its placement back from inside it.
 pub fn placed_command(role: &str, placement: &Placement, unit: &str, inner: &[String]) -> Command {
     let script = ["-c", READBACK, role];
@@ -136,22 +99,6 @@ pub fn placed_command(role: &str, placement: &Placement, unit: &str, inner: &[St
     command
 }
 
-fn cold_build_directory(identity: &FixedWorkIdentity) -> anyhow::Result<PathBuf> {
-    let root = PathBuf::from(&identity.working_directory);
-    let target = root.join("target");
-    ensure!(
-        root.is_absolute() && root.join("Cargo.toml").is_file(),
-        "not a cargo tree"
-    );
-    if let Ok(meta) = fs::symlink_metadata(&target) {
-        ensure!(
-            meta.is_dir() && !meta.file_type().is_symlink(),
-            "target is not a plain directory"
-        );
-    }
-    Ok(target)
-}
-
 pub fn elapsed_ns(markers: &str) -> anyhow::Result<u64> {
     let mut starts = 0;
     let mut elapsed = Vec::new();
@@ -171,91 +118,244 @@ pub fn elapsed_ns(markers: &str) -> anyhow::Result<u64> {
     elapsed[0].context("the completion marker has no elapsed_ns")
 }
 
-fn execute_slot(
-    manifest: &Manifest,
-    slot: &Slot,
-    identity_path: &Path,
-    identity: &FixedWorkIdentity,
-    out: &Path,
-    allowed: &BTreeSet<u32>,
-) -> anyhow::Result<Result<u64, String>> {
-    let arm = manifest.arms()[slot.arm];
-    let target = cold_build_directory(identity)?;
-    if target.exists() {
-        fs::remove_dir_all(&target).context("remove the previous build for a cold start")?;
+/// Runs one slot's workload. The real runner starts owned processes; tests substitute a fake that
+/// counts launches.
+/// A finished, valid slot: the elapsed time and, when the study names an output artifact, its hash.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Completed {
+    pub elapsed_ns: u64,
+    pub output_sha256: Option<String>,
+}
+
+pub trait SlotRunner {
+    /// Called BEFORE the slot is marked started: failing here launches nothing and records nothing.
+    fn prepare(&self, slot: &Slot) -> anyhow::Result<()>;
+    /// `Ok(Err(reason))` is an Invalid slot (recorded); `Err` is a harness failure.
+    fn run_slot(&self, slot: &Slot) -> anyhow::Result<Result<Completed, String>>;
+}
+
+fn stop_reason(state: &HostState) -> Option<String> {
+    match state {
+        HostState::Safe => None,
+        HostState::Busy(what) => Some(format!("a game or launcher is running ({what})")),
+        HostState::Incomplete(what) => Some(format!("host inspection is incomplete ({what})")),
     }
-    let markers = out.join(format!("{}.markers.ndjson", slot.id));
-    let exe = std::env::current_exe()?;
-    let pid = std::process::id();
-    let hog_inner: Vec<String> = ["stress-ng", "--cpu"]
-        .into_iter()
-        .map(str::to_owned)
-        .chain([
-            manifest.hog_threads.to_string(),
-            "--timeout".into(),
-            "300s".into(),
-            "--quiet".into(),
-        ])
-        .collect();
-    let compile_inner = vec![
-        exe.display().to_string(),
-        "fixed-work".into(),
-        "--identity".into(),
-        identity_path.display().to_string(),
-        "--markers".into(),
-        markers.display().to_string(),
-    ];
-    let cancel = Arc::new(AtomicBool::new(false));
-    let mut hog_policy =
-        ExecutionPolicy::bounded(Duration::from_secs(manifest.arm_timeout_secs + 30));
-    hog_policy.tee = false;
-    hog_policy.cancel = Some(cancel.clone());
-    let hog_command = placed_command(
-        "hogs",
-        &arm.hogs,
-        &format!("stutter-study-{pid}-{}-hogs", slot.id),
-        &hog_inner,
-    );
-    let hogs = thread::spawn(move || supervisor::run(hog_command, &hog_policy));
-    thread::sleep(Duration::from_secs(2));
-    let mut policy = ExecutionPolicy::bounded(Duration::from_secs(manifest.arm_timeout_secs));
-    policy.tee = false;
-    let mut compile_command = placed_command(
-        "compile",
-        &arm.compile,
-        &format!("stutter-study-{pid}-{}-compile", slot.id),
-        &compile_inner,
-    );
-    compile_command.env("CARGO_INCREMENTAL", "0");
-    let compiled = supervisor::run(compile_command, &policy);
-    cancel.store(true, Ordering::SeqCst);
-    let hogs = hogs
-        .join()
-        .map_err(|_| anyhow::anyhow!("the pressure thread panicked"))??;
-    let compiled = compiled?;
-    if !matches!(compiled.outcome, Outcome::Exited(status) if status.success()) {
-        return Ok(Err(format!(
-            "compile did not succeed: {:?}",
-            compiled.outcome
-        )));
+}
+
+pub struct RealRunner<'a> {
+    pub manifest: &'a Manifest,
+    pub identity_path: &'a Path,
+    pub workspace: &'a Workspace,
+    pub out: &'a Path,
+    pub allowed: &'a BTreeSet<u32>,
+    pub host: &'a dyn Fn() -> HostState,
+}
+
+impl SlotRunner for RealRunner<'_> {
+    fn prepare(&self, _slot: &Slot) -> anyhow::Result<()> {
+        self.workspace.verify_unchanged_source()?;
+        self.workspace.reset_target()?;
+        Ok(())
     }
-    if !matches!(hogs.outcome, Outcome::Cancelled) {
-        return Ok(Err(
-            "the pressure generator did not run for the whole compile".into(),
-        ));
-    }
-    for (role, placement, stderr) in [
-        ("compile", &arm.compile, &compiled.stderr),
-        ("hogs", &arm.hogs, &hogs.stderr),
-    ] {
-        let readback = parse_readback(stderr, role)?;
-        if !readback_matches(placement, allowed, &readback) {
+
+    fn run_slot(&self, slot: &Slot) -> anyhow::Result<Result<Completed, String>> {
+        let manifest = self.manifest;
+        let arm = manifest.arms()[slot.arm];
+        let markers = self.out.join(format!("{}.markers.ndjson", slot.id));
+        let pid = std::process::id();
+        let hog_inner: Vec<String> = ["stress-ng", "--cpu"]
+            .into_iter()
+            .map(str::to_owned)
+            .chain([
+                manifest.hog_threads.to_string(),
+                "--timeout".into(),
+                "300s".into(),
+                "--quiet".into(),
+            ])
+            .collect();
+        let compile_inner = vec![
+            std::env::current_exe()?.display().to_string(),
+            "fixed-work".into(),
+            "--identity".into(),
+            self.identity_path.display().to_string(),
+            "--markers".into(),
+            markers.display().to_string(),
+        ];
+        let diag_csv = self.out.join(format!("{}.perf.csv", slot.id));
+        let compile_inner = if manifest.diagnostics {
+            diagnostics::wrap_with_perf(compile_inner, &diag_csv)
+        } else {
+            compile_inner
+        };
+        let cancel = Arc::new(AtomicBool::new(false));
+        let mut hog_policy =
+            ExecutionPolicy::bounded(Duration::from_secs(manifest.arm_timeout_secs + 30));
+        hog_policy.tee = false;
+        hog_policy.cancel = Some(cancel.clone());
+        let hog_command = placed_command(
+            "hogs",
+            &arm.hogs,
+            &format!("stutter-study-{pid}-{}-hogs", slot.id),
+            &hog_inner,
+        );
+        let hogs = thread::spawn(move || supervisor::run(hog_command, &hog_policy));
+        thread::sleep(Duration::from_secs(2));
+        let setup_stop = stop_reason(&(self.host)());
+        let mut compile_command = placed_command(
+            "compile",
+            &arm.compile,
+            &format!("stutter-study-{pid}-{}-compile", slot.id),
+            &compile_inner,
+        );
+        compile_command
+            .env("CARGO_INCREMENTAL", "0")
+            .env("CARGO_TARGET_DIR", self.workspace.target_dir());
+        let mut policy = ExecutionPolicy::bounded(Duration::from_secs(manifest.arm_timeout_secs));
+        policy.tee = false;
+        let psi_before = manifest
+            .diagnostics
+            .then(diagnostics::psi_cpu_some_total_us)
+            .flatten();
+        let compiled = match &setup_stop {
+            None => Some(supervisor::run(compile_command, &policy)),
+            Some(_) => None,
+        };
+        let psi_after = manifest
+            .diagnostics
+            .then(diagnostics::psi_cpu_some_total_us)
+            .flatten();
+        cancel.store(true, Ordering::SeqCst);
+        let hogs = hogs
+            .join()
+            .map_err(|_| anyhow::anyhow!("the pressure thread panicked"))??;
+        if let Some(why) = setup_stop {
+            return Ok(Err(format!("stopped before the compile: {why}")));
+        }
+        let compiled = compiled.context("the compile did not start")??;
+        if let Some(why) = stop_reason(&(self.host)()) {
+            return Ok(Err(format!("the host became unsafe during the arm: {why}")));
+        }
+        if !matches!(compiled.outcome, Outcome::Exited(status) if status.success()) {
             return Ok(Err(format!(
-                "{role} readback {readback:?} does not match the request"
+                "compile did not succeed: {:?}",
+                compiled.outcome
             )));
         }
+        if !matches!(hogs.outcome, Outcome::Cancelled) {
+            return Ok(Err(
+                "the pressure generator did not run for the whole compile".into(),
+            ));
+        }
+        for (role, placement, stderr) in [
+            ("compile", &arm.compile, &compiled.stderr),
+            ("hogs", &arm.hogs, &hogs.stderr),
+        ] {
+            let readback = match parse_readback(stderr, role) {
+                Ok(readback) => readback,
+                Err(error) => return Ok(Err(format!("{role} readback missing: {error:#}"))),
+            };
+            if !readback_matches(placement, self.allowed, &readback) {
+                return Ok(Err(format!(
+                    "{role} readback {readback:?} does not match the request"
+                )));
+            }
+        }
+        if let Err(error) = self.workspace.verify_unchanged_source() {
+            return Ok(Err(format!("{error}")));
+        }
+        let elapsed = match elapsed_ns(&fs::read_to_string(&markers)?) {
+            Ok(elapsed) => elapsed,
+            Err(error) => return Ok(Err(error.to_string())),
+        };
+        let output_sha256 = match &manifest.output_artifact {
+            None => None,
+            Some(relative) => match hash_output(&self.workspace.target_dir(), relative) {
+                Ok(hash) => Some(hash),
+                Err(error) => return Ok(Err(format!("output artifact: {error:#}"))),
+            },
+        };
+        if manifest.diagnostics {
+            let diag = self.out.join(format!("{}.diag.json", slot.id));
+            diagnostics::write_slot_diag(&diag, &diag_csv, psi_before, psi_after)?;
+        }
+        Ok(Ok(Completed {
+            elapsed_ns: elapsed,
+            output_sha256,
+        }))
     }
-    Ok(elapsed_ns(&fs::read_to_string(&markers)?).map_err(|error| error.to_string()))
+}
+
+/// The resume loop. Verification happens first and strictly: on any failure it returns before a
+/// single process is launched or a single marker written.
+pub fn run_with(
+    manifest: &Manifest,
+    out: &Path,
+    context: &str,
+    host: &dyn Fn() -> HostState,
+    runner: &dyn SlotRunner,
+) -> anyhow::Result<()> {
+    let slots = out.join("slots");
+    if !slots.exists() {
+        ensure!(
+            !out.join("results.jsonl").exists(),
+            "a legacy results.jsonl study is read-only; start a new study directory"
+        );
+        fs::DirBuilder::new().mode(0o700).create(&slots)?;
+    }
+    let verified = journal::load(out, manifest, &Mode::Resume(context.to_owned()), false)?;
+    let mut reference = verified
+        .records
+        .iter()
+        .find(|r| r.valid)
+        .and_then(|r| r.output_sha256.clone());
+    for slot in verified.pending {
+        if let Some(why) = stop_reason(&host()) {
+            bail!("stopping before {}: {why}", slot.id);
+        }
+        runner.prepare(&slot)?;
+        journal::begin_slot(&slots, &slot.id)?;
+        let result = runner
+            .run_slot(&slot)
+            .unwrap_or_else(|error| Err(format!("harness error: {error:#}")));
+        let (outcome, output) = match result {
+            Ok(done) if manifest.output_artifact.is_some() => {
+                match (&reference, done.output_sha256) {
+                    (_, None) => (Err("the build produced no output hash".to_owned()), None),
+                    (Some(first), Some(hash)) if *first != hash => (
+                        Err(
+                            "the output hash differs from the study's first completed build"
+                                .to_owned(),
+                        ),
+                        Some(hash),
+                    ),
+                    (_, Some(hash)) => {
+                        reference.get_or_insert_with(|| hash.clone());
+                        (Ok(done.elapsed_ns), Some(hash))
+                    }
+                }
+            }
+            Ok(done) => (Ok(done.elapsed_ns), None),
+            Err(reason) => (Err(reason), None),
+        };
+        let record = Record {
+            study_id: manifest.study_id.clone(),
+            manifest_sha256: manifest.digest(),
+            slot: slot.id.clone(),
+            block: slot.block,
+            arm: manifest.arms()[slot.arm].name.clone(),
+            valid: outcome.is_ok(),
+            reason: outcome.as_ref().err().cloned(),
+            elapsed_ns: outcome.ok(),
+            context: Some(context.to_owned()),
+            output_sha256: output,
+        };
+        journal::commit_slot(&slots, &record)?;
+        println!(
+            "{} valid={} elapsed_ns={:?}",
+            record.slot, record.valid, record.elapsed_ns
+        );
+    }
+    Ok(())
 }
 
 pub fn run(manifest: &Manifest, out: &Path) -> anyhow::Result<()> {
@@ -265,92 +365,43 @@ pub fn run(manifest: &Manifest, out: &Path) -> anyhow::Result<()> {
     if !out.exists() {
         fs::DirBuilder::new().mode(0o700).create(out)?;
     }
+    let identity: FixedWorkIdentity = serde_json::from_slice(&fs::read(&manifest.identity)?)?;
     let frozen = out.join("manifest.json");
     if frozen.exists() {
         ensure!(
-            crate::evidence_bundle::sha256::sha256_hex(&serde_json::to_vec(
-                &super::manifest::load(&frozen)?
-            )?) == digest,
+            super::manifest::load(&frozen)?.digest() == digest,
             "the manifest changed after the study started"
         );
     } else {
         fs::write(&frozen, serde_json::to_vec_pretty(manifest)?)?;
     }
-    let results = out.join("results.jsonl");
-    let recorded = fs::read_to_string(&results).unwrap_or_default();
-    let context = super::manifest::context_digest(&manifest.identity)?;
-    ensure_same_context(&recorded, &context)?;
-    let identity: FixedWorkIdentity = serde_json::from_slice(&fs::read(&manifest.identity)?)?;
-    let mut log = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .mode(0o600)
-        .open(&results)?;
-    for slot in pending_slots(manifest, &recorded) {
-        if competing_game(Path::new("/proc"), std::process::id()) {
-            bail!(
-                "a game or launcher is running: stopping before {} (nothing was recorded for it)",
-                slot.id
-            );
-        }
-        let outcome = execute_slot(
-            manifest,
-            &slot,
-            &manifest.identity,
-            &identity,
-            out,
-            &allowed,
-        )?;
-        let record = Record {
-            study_id: manifest.study_id.clone(),
-            manifest_sha256: digest.clone(),
-            slot: slot.id.clone(),
-            block: slot.block,
-            arm: manifest.arms()[slot.arm].name.clone(),
-            valid: outcome.is_ok(),
-            reason: outcome.as_ref().err().cloned(),
-            elapsed_ns: outcome.ok(),
-            context: Some(context.clone()),
-        };
-        writeln!(log, "{}", serde_json::to_string(&record)?)?;
-        log.flush()?;
-        println!(
-            "{} valid={} elapsed_ns={:?}",
-            record.slot, record.valid, record.elapsed_ns
-        );
-    }
-    Ok(())
+    let workspace = workspace::prepare(out, &manifest.study_id, &digest, &identity)?;
+    let context = super::manifest::context_digest(&manifest.identity, &workspace.tree)?;
+    let host = || inspect(Path::new("/proc"), std::process::id());
+    let runner = RealRunner {
+        manifest,
+        identity_path: &manifest.identity,
+        workspace: &workspace,
+        out,
+        allowed: &allowed,
+        host: &host,
+    };
+    run_with(manifest, out, &context, &host, &runner)
 }
 
-/// The slots with no recorded result yet, in schedule order: a resumed study never repeats a slot.
-pub fn pending_slots(manifest: &Manifest, recorded: &str) -> Vec<Slot> {
-    let done: BTreeSet<String> = recorded
-        .lines()
-        .filter_map(|line| serde_json::from_str::<Record>(line).ok())
-        .map(|record| record.slot)
-        .collect();
-    manifest
-        .schedule()
-        .into_iter()
-        .filter(|slot| !done.contains(&slot.id))
-        .collect()
-}
-
-/// A resumed study must run under the context it started in: another boot, kernel, scheduler,
-/// CPU set or work identity would mix incomparable timings.
-pub fn ensure_same_context(recorded: &str, current: &str) -> anyhow::Result<()> {
-    for record in recorded
-        .lines()
-        .filter_map(|line| serde_json::from_str::<Record>(line).ok())
-    {
-        ensure!(
-            record
-                .context
-                .as_deref()
-                .is_none_or(|context| context == current),
-            "the context changed since slot {} was recorded: start a new study directory",
-            record.slot
-        );
-    }
-    Ok(())
+/// sha256 of the study's output artifact, which must be a regular file inside the owned target.
+pub fn hash_output(target: &Path, relative: &str) -> anyhow::Result<String> {
+    let real_target = fs::canonicalize(target).context("the build target is missing")?;
+    let real = fs::canonicalize(target.join(relative)).context("the output artifact is missing")?;
+    ensure!(
+        real.starts_with(&real_target),
+        "the output artifact resolves outside the owned target"
+    );
+    ensure!(
+        fs::metadata(&real)?.is_file(),
+        "the output artifact is not a regular file"
+    );
+    Ok(crate::evidence_bundle::sha256::sha256_hex(&fs::read(
+        &real,
+    )?))
 }

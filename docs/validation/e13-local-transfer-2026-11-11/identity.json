@@ -1,0 +1,22 @@
+{
+  "kind": "compile",
+  "source_tree": "git:de98052df9b18dac7d5ba33ea28a9c8d4354883d",
+  "target": "stutter-validation-runner (release profile, workspace dependencies)",
+  "build_state": "study-owned workspace target removed before every execution (cold build)",
+  "cache_policy": "no incremental cache; registry sources already fetched, offline",
+  "job_count": 12,
+  "command": [
+    "cargo",
+    "build",
+    "--offline",
+    "--locked",
+    "--release",
+    "-j",
+    "12",
+    "-p",
+    "stutter-validation-runner"
+  ],
+  "working_directory": "/tmp/claude-1000/nixfull/w23/src",
+  "toolchain": "rustc 1.98.0-nightly (8954863c8 2026-06-05) from the project dev shell",
+  "environment": "CARGO_INCREMENTAL=0; CARGO_TARGET_DIR is the study-owned workspace target"
+}

@@ -3,24 +3,21 @@ use std::{collections::BTreeSet, path::PathBuf};
 use super::{
     analyze::{analyze, bootstrap, verdict},
     manifest::{Arm, Manifest, Placement, effective_cpus_of_status, parse_cpulist},
-    run::{
-        Readback, Record, competing_game, ensure_same_context, parse_readback, placed_command,
-        readback_matches,
-    },
+    run::{Readback, Record, parse_readback, placed_command, readback_matches},
 };
 
-fn scratch(name: &str) -> PathBuf {
+pub(super) fn scratch(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("owned-study-{}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("scratch");
     dir
 }
 
-fn allowed() -> BTreeSet<u32> {
+pub(super) fn allowed() -> BTreeSet<u32> {
     (0..12).collect()
 }
 
-fn identity(dir: &std::path::Path) -> PathBuf {
+pub(super) fn identity(dir: &std::path::Path) -> PathBuf {
     let path = dir.join("identity.json");
     let text = serde_json::json!({"kind":"compile","source_tree":format!("git:{}", "a".repeat(40)),
         "target":"t","build_state":"cold","cache_policy":"none","job_count":2,
@@ -29,7 +26,7 @@ fn identity(dir: &std::path::Path) -> PathBuf {
     path
 }
 
-fn arm(name: &str, compile: Placement, hogs: Placement) -> Arm {
+pub(super) fn arm(name: &str, compile: Placement, hogs: Placement) -> Arm {
     Arm {
         name: name.into(),
         compile,
@@ -37,7 +34,7 @@ fn arm(name: &str, compile: Placement, hogs: Placement) -> Arm {
     }
 }
 
-fn manifest(dir: &std::path::Path) -> Manifest {
+pub(super) fn manifest(dir: &std::path::Path) -> Manifest {
     Manifest {
         schema_version: 1,
         study_id: "demo".into(),
@@ -46,6 +43,8 @@ fn manifest(dir: &std::path::Path) -> Manifest {
         blocks: 6,
         training_blocks: 3,
         arm_timeout_secs: 120,
+        output_artifact: None,
+        diagnostics: false,
         practical_percent: 2.0,
         baseline: arm("baseline", Placement::Unrestricted, Placement::Unrestricted),
         candidates: vec![
@@ -326,31 +325,7 @@ fn placed_commands_use_only_the_owned_launchers() {
     assert_eq!(&args[args.len() - 3..], &inner[..]);
 }
 
-#[test]
-fn a_competing_game_is_found_but_a_shell_mentioning_one_is_not() {
-    let root = scratch("proc");
-    let add = |pid: &str, comm: &str, cmdline: &str| {
-        let dir = root.join(pid);
-        std::fs::create_dir_all(&dir).expect("dir");
-        std::fs::write(dir.join("comm"), comm).expect("comm");
-        std::fs::write(dir.join("cmdline"), cmdline.replace(' ', "\0")).expect("cmdline");
-    };
-    add("10", "zsh", "zsh -c grep gamescope");
-    add("11", "stutter", "stutter run");
-    assert!(!competing_game(&root, 1));
-    add("12", "game.exe", "proton steamapps/common/Game/game.exe");
-    assert!(competing_game(&root, 1));
-    assert!(
-        !competing_game(&root, 12),
-        "the caller's own pid is excluded"
-    );
-    assert!(
-        competing_game(&root.join("missing"), 1),
-        "an unreadable /proc is not a safe host"
-    );
-}
-
-fn record(block: u32, arm: &str, ns: u64, digest: &str) -> Record {
+pub(super) fn record(block: u32, arm: &str, ns: u64, digest: &str) -> Record {
     Record {
         study_id: "demo".into(),
         manifest_sha256: digest.into(),
@@ -361,34 +336,63 @@ fn record(block: u32, arm: &str, ns: u64, digest: &str) -> Record {
         reason: None,
         elapsed_ns: Some(ns),
         context: None,
+        output_sha256: None,
     }
 }
 
-fn write_results(dir: &std::path::Path, records: &[Record]) -> PathBuf {
-    let path = dir.join("results.jsonl");
+/// Records for every slot of the schedule, in schedule order; `time` is None for an invalid slot.
+pub(super) fn schedule_records(
+    m: &Manifest,
+    context: Option<&str>,
+    time: impl Fn(u32, &str) -> Option<u64>,
+) -> Vec<Record> {
+    let arms = m.arms();
+    m.schedule()
+        .iter()
+        .map(|slot| {
+            let name = &arms[slot.arm].name;
+            let mut r = record(slot.block, name, 0, &m.digest());
+            r.context = context.map(str::to_owned);
+            match time(slot.block, name) {
+                Some(ns) => r.elapsed_ns = Some(ns),
+                None => {
+                    r.valid = false;
+                    r.elapsed_ns = None;
+                    r.reason = Some("test invalid".into());
+                }
+            }
+            r
+        })
+        .collect()
+}
+
+/// Writes a legacy `results.jsonl` study directory (read-only analysis, no resume).
+pub(super) fn write_legacy(dir: &std::path::Path, records: &[Record]) -> PathBuf {
     let text: String = records
         .iter()
         .map(|r| serde_json::to_string(r).expect("json") + "\n")
         .collect();
-    std::fs::write(&path, text).expect("results");
-    path
+    std::fs::write(dir.join("results.jsonl"), text).expect("results");
+    dir.to_path_buf()
+}
+
+fn standard_time(block: u32, arm: &str) -> Option<u64> {
+    let wobble = u64::from(block % 2) * 20_000_000;
+    Some(match arm {
+        "baseline" => 8_000_000_000,
+        "compile-0-5" => 8_000_000_000 + wobble,
+        "hogs-6-11" => 6_000_000_000 + wobble,
+        "split" => 5_000_000_000 + wobble,
+        _ => 12_000_000_000 + wobble,
+    })
 }
 
 #[test]
 fn analysis_classifies_effects_and_ranks_only_legal_candidates() {
     let dir = scratch("analysis");
     let m = manifest(&dir);
-    let d = m.digest();
-    let mut records = Vec::new();
-    for block in 1..=6u32 {
-        let wobble = u64::from(block % 2) * 20_000_000;
-        records.push(record(block, "baseline", 8_000_000_000, &d));
-        records.push(record(block, "compile-0-5", 8_000_000_000 + wobble, &d));
-        records.push(record(block, "hogs-6-11", 6_000_000_000 + wobble, &d));
-        records.push(record(block, "split", 5_000_000_000 + wobble, &d));
-        records.push(record(block, "starved", 12_000_000_000 + wobble, &d));
-    }
-    let report = analyze(&m, &write_results(&dir, &records)).expect("analysis");
+    let records = schedule_records(&m, None, standard_time);
+    let report = analyze(&m, &write_legacy(&dir, &records)).expect("analysis");
     assert_eq!(report["effects"]["hogs-6-11"]["verdict"], "Beneficial");
     assert_eq!(report["effects"]["split"]["verdict"], "Beneficial");
     assert_eq!(report["effects"]["starved"]["verdict"], "Harmful");
@@ -397,39 +401,108 @@ fn analysis_classifies_effects_and_ranks_only_legal_candidates() {
     assert_eq!(report["ranking"]["top1_agrees"], true);
     assert_eq!(report["authorizes_mutation"], false);
     assert_eq!(report["outside_space_dropped"], 0);
+    assert_eq!(report["record_store"], "legacy_results_jsonl");
+    assert_eq!(report["records_without_context"], 30);
+    assert!(
+        report["cross_context_comparison"]
+            .as_str()
+            .is_some_and(|c| c.starts_with("LegacyNoContext"))
+    );
 }
 
 #[test]
-fn analysis_refuses_foreign_records_and_reports_insufficient_evidence() {
-    let dir = scratch("insufficient");
+fn a_context_recorded_study_is_analysed_strictly() {
+    let dir = scratch("ctx-analysis");
     let m = manifest(&dir);
-    let d = m.digest();
-    let foreign = write_results(&dir, &[record(1, "baseline", 1, "0000")]);
+    let records = schedule_records(&m, Some("ctx-a"), standard_time);
+    let report = analyze(&m, &write_legacy(&dir, &records)).expect("analysis");
+    assert_eq!(report["context_sha256"], "ctx-a");
+    assert_eq!(report["records_without_context"], 0);
     assert!(
-        analyze(&m, &foreign).is_err(),
+        report["cross_context_comparison"]
+            .as_str()
+            .is_some_and(|c| c.starts_with("strict"))
+    );
+}
+
+#[test]
+fn analysis_refuses_foreign_records_and_reports_insufficient_legal_candidates() {
+    let dir = scratch("insufficient");
+    let mut m = manifest(&dir);
+    let mut foreign = schedule_records(&m, None, standard_time);
+    foreign[0].manifest_sha256 = "0000".into();
+    assert!(
+        analyze(&m, &write_legacy(&dir, &foreign)).is_err(),
         "another manifest's records are refused"
     );
-    let mut records = Vec::new();
-    for block in 1..=6u32 {
-        records.push(record(block, "baseline", 8_000_000_000, &d));
-        records.push(record(block, "split", 6_000_000_000, &d));
-    }
-    let report = analyze(&m, &write_results(&dir, &records)).expect("analysis");
+    m.candidates.truncate(2);
+    let records = schedule_records(&m, None, standard_time);
+    let report = analyze(&m, &write_legacy(&dir, &records)).expect("analysis");
     assert!(report["ranking"].is_null());
     assert!(
         report["ranking_note"]
             .as_str()
             .is_some_and(|n| n.starts_with("InsufficientLegalCandidateEvidence"))
     );
-    let mut invalid = record(1, "split", 1, &d);
-    invalid.valid = false;
-    let partial = write_results(&dir, &[record(1, "baseline", 8_000_000_000, &d), invalid]);
+}
+
+#[test]
+fn a_partial_prefix_study_and_invalid_slots_are_analysed_without_inventing_effects() {
+    let dir = scratch("partial");
+    let m = manifest(&dir);
+    let all = schedule_records(&m, None, |b, arm| {
+        if arm == "split" {
+            None
+        } else {
+            standard_time(b, arm)
+        }
+    });
+    let report = analyze(&m, &write_legacy(&dir, &all)).expect("analysis");
     assert!(
-        analyze(&m, &partial)
-            .expect("partial")
-            .get("effects")
-            .is_some_and(|e| e.as_object().is_some_and(|o| o.is_empty())),
-        "an invalid slot yields no effect"
+        report["effects"].get("split").is_none(),
+        "no valid pair, no effect row"
+    );
+    assert_eq!(report["invalid_slots"], 6);
+    let prefix = schedule_records(&m, None, standard_time)[..10].to_vec();
+    let report = analyze(&m, &write_legacy(&dir, &prefix)).expect("prefix");
+    assert!(report["effects"].as_object().is_some());
+}
+
+#[test]
+fn too_few_independent_blocks_are_declared_inconclusive_with_no_interval() {
+    let dir = scratch("fewblocks");
+    let mut m = manifest(&dir);
+    m.blocks = 2;
+    m.training_blocks = 1;
+    let records = schedule_records(&m, None, standard_time);
+    let report = analyze(&m, &write_legacy(&dir, &records)).expect("analysis");
+    let split = &report["effects"]["split"];
+    assert_eq!(split["verdict"], "Inconclusive");
+    assert_eq!(split["reason"], "InsufficientIndependentBlocks");
+    assert!(split["ci95_percent"].is_null());
+}
+
+#[test]
+fn a_candidate_outside_the_legal_space_is_a_verification_error_not_a_ranked_row() {
+    let dir = scratch("illegal");
+    let m = manifest(&dir);
+    let d = m.digest();
+    let mut records = schedule_records(&m, None, standard_time);
+    for illegal in [
+        "nice-19",
+        "uclamp-max",
+        "pm-qos-0",
+        "gpu-power-profile",
+        "scx-switch",
+    ] {
+        let mut bad = records.clone();
+        bad.push(record(6, illegal, 1_000_000_000, &d));
+        assert!(analyze(&m, &write_legacy(&dir, &bad)).is_err(), "{illegal}");
+    }
+    records[3].arm = "nice-19".into();
+    assert!(
+        analyze(&m, &write_legacy(&dir, &records)).is_err(),
+        "an arm name outside the manifest"
     );
 }
 
@@ -443,28 +516,6 @@ fn bootstrap_is_deterministic_and_verdicts_follow_the_threshold() {
     assert_eq!(verdict(-9.0, -3.0, 2.0), "Harmful");
     assert_eq!(verdict(-1.0, 1.0, 2.0), "Equivalent");
     assert_eq!(verdict(-3.0, 4.0, 2.0), "Inconclusive");
-}
-
-#[test]
-fn a_resumed_study_repeats_no_recorded_slot() {
-    let dir = scratch("resume");
-    let m = manifest(&dir);
-    let d = m.digest();
-    let all = m.schedule();
-    let recorded: String = all[..7]
-        .iter()
-        .map(|s| {
-            serde_json::to_string(&record(s.block, &m.arms()[s.arm].name, 1, &d)).expect("json")
-                + "\n"
-        })
-        .collect();
-    let pending = super::run::pending_slots(&m, &recorded);
-    assert_eq!(pending.len(), all.len() - 7);
-    assert_eq!(pending[..], all[7..]);
-    assert!(
-        super::run::pending_slots(&m, "{not json}\n").len() == all.len(),
-        "an unreadable line records nothing"
-    );
 }
 
 #[test]
@@ -494,83 +545,4 @@ fn completion_markers_must_be_exactly_one_start_and_one_completion() {
         "no elapsed"
     );
     assert!(elapsed_ns("not json\n").is_err());
-}
-
-#[test]
-fn a_corrupted_results_file_authorizes_nothing() {
-    let dir = scratch("corrupt");
-    let m = manifest(&dir);
-    let path = dir.join("results.jsonl");
-    std::fs::write(&path, "{\"slot\": 1\n").expect("write");
-    assert!(analyze(&m, &path).is_err());
-    assert!(analyze(&m, &dir.join("absent.jsonl")).is_err());
-}
-
-#[test]
-fn records_from_another_context_are_never_mixed_or_resumed() {
-    let dir = scratch("context");
-    let m = manifest(&dir);
-    let d = m.digest();
-    let mut a = record(1, "baseline", 8_000_000_000, &d);
-    let mut b = record(1, "split", 6_000_000_000, &d);
-    a.context = Some("ctx-a".into());
-    b.context = Some("ctx-b".into());
-    assert!(
-        analyze(&m, &write_results(&dir, &[a.clone(), b.clone()])).is_err(),
-        "two contexts in one study"
-    );
-    b.context = Some("ctx-a".into());
-    let report = analyze(&m, &write_results(&dir, &[a.clone(), b])).expect("one context");
-    assert_eq!(report["context_sha256"], "ctx-a");
-    assert_eq!(report["records_without_context"], 0);
-    let line = serde_json::to_string(&a).expect("json");
-    assert!(ensure_same_context(&line, "ctx-a").is_ok());
-    assert!(
-        ensure_same_context(&line, "ctx-b").is_err(),
-        "a changed boot/kernel/scheduler refuses the resume"
-    );
-    assert!(ensure_same_context("", "ctx-b").is_ok());
-    let legacy = serde_json::to_string(&record(1, "baseline", 1, &d)).expect("json");
-    assert!(
-        ensure_same_context(&legacy, "x").is_ok(),
-        "a record with no context is reported, not silently trusted"
-    );
-    assert_eq!(
-        super::manifest::context_digest(&m.identity).expect("digest"),
-        super::manifest::context_digest(&m.identity).expect("digest")
-    );
-}
-
-#[test]
-fn an_illegal_candidate_with_a_great_score_never_reaches_the_ranker() {
-    let dir = scratch("illegal");
-    let m = manifest(&dir);
-    let d = m.digest();
-    let mut records = Vec::new();
-    for block in 1..=6u32 {
-        records.push(record(block, "baseline", 8_000_000_000, &d));
-        records.push(record(block, "hogs-6-11", 7_000_000_000, &d));
-        records.push(record(block, "split", 6_900_000_000, &d));
-        records.push(record(block, "starved", 12_000_000_000, &d));
-        // Imported or replayed evidence for operations outside the legal space, with the best score of all.
-        for illegal in [
-            "nice-19",
-            "uclamp-max",
-            "pm-qos-0",
-            "gpu-power-profile",
-            "scx-switch",
-        ] {
-            records.push(record(block, illegal, 1_000_000_000, &d));
-        }
-    }
-    let report = analyze(&m, &write_results(&dir, &records)).expect("analysis");
-    let effects = report["effects"].as_object().expect("effects");
-    assert!(
-        effects
-            .keys()
-            .all(|name| m.candidates.iter().any(|c| &c.name == name))
-    );
-    assert!(effects.get("nice-19").is_none());
-    assert_ne!(report["training_favourite"]["candidate"], "nice-19");
-    assert_eq!(report["authorizes_mutation"], false);
 }

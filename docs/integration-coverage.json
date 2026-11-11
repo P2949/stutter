@@ -38,7 +38,9 @@
         "RealObserved",
         "EvidenceDeferred"
       ],
-      "evidence": []
+      "evidence": [
+        "docs/validation/e7-service-explain-2026-11-11/RESULTS.md"
+      ]
     },
     {
       "id": "5.2",
@@ -186,7 +188,8 @@
         "EvidenceDeferred"
       ],
       "evidence": [
-        "docs/validation/w28-owner-refusal-live-2026-11-11/RESULTS.md"
+        "docs/validation/w28-owner-refusal-live-2026-11-11/RESULTS.md",
+        "docs/validation/e7-service-explain-2026-11-11/RESULTS.md"
       ],
       "unblock": null
     },
@@ -406,7 +409,8 @@
       "evidence": [
         "docs/validation/controller-frame-2026-11-08/RESULTS.md",
         "docs/validation/controller-frame-2026-11-08/summary.json",
-        "docs/validation/renderer-producer-2026-11-11/RESULTS.md"
+        "docs/validation/renderer-producer-2026-11-11/RESULTS.md",
+        "docs/validation/e6-wsi-timing-probe-2026-11-11/RESULTS.md"
       ],
       "unblock": "W21 done: a real instrumented renderer (vkcube + VK_LAYER_STUTTER_present) binds and is ValidatedDirect with 0 gaps (docs/validation/renderer-producer-2026-11-11/RESULTS.md). Not planned for verification (needs a photodiode, high-speed camera or display hardware timestamp, which this machine lacks; development targets this machine only): the independent stamp-accuracy reference, so direct-frame keep stays denied and the frame objective stays measurement-only"
     },
@@ -428,7 +432,7 @@
       "status": "code_complete",
       "g0": "LACT and CoreCtrl presence (including the Nix wrapped name) mark GPU power owned; a read-only sysfs observer reports each card's exact PCI slot, vendor/device/subsystem ids, driver, NUMA node, DPM force level and the active power-profile line (two GPUs stay distinct, never writes); the optional cooperative profile delegate is deliberately not built because GPU mutation is quarantined on this host",
       "g1": "LACT daemon observed running on this host; the observer read this host's card (vendor 0x1002) in a test",
-      "runtime_availability": "LACT present, CoreCtrl absent",
+      "runtime_availability": "LACT present and its daemon running (lactd active; read-only, quarantined), CoreCtrl absent",
       "authority": "O/A/D/F",
       "not_wired": "nothing",
       "dispositions": [
@@ -438,7 +442,9 @@
         "EvidenceDeferred",
         "NotPlannedForVerification"
       ],
-      "evidence": [],
+      "evidence": [
+        "docs/validation/e7-service-explain-2026-11-11/RESULTS.md"
+      ],
       "unblock": "Not planned for verification (CoreCtrl is an AMD-GPU tool; this host's GPU is under quarantined LACT policy)"
     },
     {

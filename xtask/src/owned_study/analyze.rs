@@ -3,12 +3,18 @@
 //! only ever contain the manifest's legal candidates.
 use std::{collections::BTreeMap, path::Path};
 
-use anyhow::Context;
 use stutter::api::search::{
     ConfigSpace, Dimension, ensemble::held_out_ranking, learning::import_measurements,
 };
 
-use super::{manifest::Manifest, run::Record};
+use super::{
+    diagnostics,
+    journal::{self, Mode, Record},
+    manifest::Manifest,
+};
+
+/// Fewer independent paired blocks than this cannot support an effect interval.
+const MIN_INDEPENDENT_BLOCKS: usize = 3;
 
 const RESAMPLES: usize = 10_000;
 
@@ -100,34 +106,27 @@ fn export(
     serde_json::to_vec(&serde_json::json!({"source": source, "trials": trials})).unwrap_or_default()
 }
 
-pub fn analyze(manifest: &Manifest, results: &Path) -> anyhow::Result<serde_json::Value> {
-    let records: Vec<Record> = std::fs::read_to_string(results)
-        .context("read the results")?
-        .lines()
-        .map(serde_json::from_str)
-        .collect::<Result<_, _>>()
-        .context("a result record is malformed")?;
+pub fn analyze(manifest: &Manifest, dir: &Path) -> anyhow::Result<serde_json::Value> {
+    let verified = journal::load(dir, manifest, &Mode::Analyze, false)?;
     let digest = manifest.digest();
-    anyhow::ensure!(
-        records
-            .iter()
-            .all(|r| r.manifest_sha256 == digest && r.study_id == manifest.study_id),
-        "a record belongs to another manifest"
-    );
-    let contexts: std::collections::BTreeSet<&str> = records
-        .iter()
-        .filter_map(|r| r.context.as_deref())
-        .collect();
-    anyhow::ensure!(
-        contexts.len() <= 1,
-        "the records span more than one context (boot, kernel, scheduler, CPU set or work identity)"
-    );
+    let legacy = verified.legacy_without_context > 0;
+    let records = verified.records;
     let rows = improvements(manifest, &records);
     let seed = u64::from_str_radix(&digest[..16], 16).unwrap_or(1);
     let threshold = manifest.practical_percent;
     let mut effects = serde_json::Map::new();
     for (name, blocks) in &rows {
         let values: Vec<f64> = blocks.values().copied().collect();
+        if values.len() < MIN_INDEPENDENT_BLOCKS {
+            effects.insert(
+                name.clone(),
+                serde_json::json!({
+                    "blocks": values.len(), "mean_percent": mean(&values), "ci95_percent": null,
+                    "verdict": "Inconclusive", "reason": "InsufficientIndependentBlocks",
+                }),
+            );
+            continue;
+        }
         let (low, high) = bootstrap(&values, seed);
         effects.insert(
             name.clone(),
@@ -170,8 +169,10 @@ pub fn analyze(manifest: &Manifest, results: &Path) -> anyhow::Result<serde_json
     Ok(serde_json::json!({
         "schema_version": 1, "study_id": manifest.study_id, "manifest_sha256": digest,
         "practical_percent": threshold,
-        "context_sha256": contexts.iter().next(),
-        "records_without_context": records.iter().filter(|r| r.context.is_none()).count(),
+        "record_store": if dir.join("slots").is_dir() { "slot_journal" } else { "legacy_results_jsonl" },
+        "context_sha256": verified.context,
+        "records_without_context": verified.legacy_without_context,
+        "cross_context_comparison": if legacy { "LegacyNoContext: not established; no production promotion" } else { "strict: one verified context" },
         "valid_slots": records.iter().filter(|r| r.valid).count(),
         "invalid_slots": records.iter().filter(|r| !r.valid).count(),
         "effects": effects,
@@ -185,6 +186,7 @@ pub fn analyze(manifest: &Manifest, results: &Path) -> anyhow::Result<serde_json
             "holdout_mean_percent": mean_of(&holdout_set, name),
         })),
         "outside_space_dropped": train_outside + holdout_outside,
+        "diagnostics": diagnostics::summarize(manifest, dir, &records),
         "authorizes_mutation": false,
     }))
 }

@@ -52,6 +52,13 @@ pub struct Manifest {
     pub practical_percent: f64,
     pub baseline: Arm,
     pub candidates: Vec<Arm>,
+    /// A file under the study-owned build target (for example `release/libx.rlib`) whose sha256 must be
+    /// identical in every valid slot: proof that each arm did the same work.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_artifact: Option<String>,
+    /// Wrap the compile in `perf stat` and snapshot system CPU pressure (PSI) around it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub diagnostics: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -100,6 +107,21 @@ pub fn effective_cpus_of_status(status: &str) -> anyhow::Result<BTreeSet<u32>> {
 
 pub fn effective_cpus_of_self() -> anyhow::Result<BTreeSet<u32>> {
     effective_cpus_of_status(&std::fs::read_to_string("/proc/self/status")?)
+}
+
+/// A relative path of plain components: no `..`, no absolute root, no odd characters.
+fn plain_relative_path(path: &str) -> bool {
+    !path.is_empty()
+        && path.len() <= 128
+        && !path.starts_with('/')
+        && path.split('/').all(|part| {
+            !part.is_empty()
+                && part != ".."
+                && part != "."
+                && part
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.'))
+        })
 }
 
 fn plain_name(name: &str, max: usize) -> bool {
@@ -157,6 +179,12 @@ impl Manifest {
     /// Refuses everything that could reach outside the owned study, before anything is spawned.
     pub fn validate(&self, allowed: &BTreeSet<u32>) -> anyhow::Result<()> {
         ensure!(self.schema_version == 1, "unsupported schema version");
+        if let Some(artifact) = &self.output_artifact {
+            ensure!(
+                plain_relative_path(artifact),
+                "the output artifact must be a plain relative path under the build target"
+            );
+        }
         ensure!(plain_name(&self.study_id, 64), "bad study id");
         ensure!(
             (2..=MAX_BLOCKS).contains(&self.blocks),
@@ -245,14 +273,14 @@ impl Manifest {
 
 /// Digest of everything that makes two timings comparable: running kernel, boot, effective CPU set,
 /// sched_ext state and the exact fixed-work identity file.
-pub fn context_digest(identity: &Path) -> anyhow::Result<String> {
+pub fn context_digest(identity: &Path, source_tree: &str) -> anyhow::Result<String> {
     let read = |path: &str| {
         std::fs::read_to_string(path)
             .map_or_else(|_| "absent".to_owned(), |text| text.trim().to_owned())
     };
     let cpus = effective_cpus_of_self()?;
     let text = format!(
-        "kernel={}\nboot={}\ncpus={cpus:?}\nsched_ext={}\nidentity={}\n",
+        "kernel={}\nboot={}\ncpus={cpus:?}\nsched_ext={}\nsource_tree={source_tree}\nidentity={}\n",
         read("/proc/sys/kernel/osrelease"),
         read("/proc/sys/kernel/random/boot_id"),
         read("/sys/kernel/sched_ext/state"),

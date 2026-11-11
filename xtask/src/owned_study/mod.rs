@@ -10,10 +10,22 @@ use anyhow::Context;
 use clap::Subcommand;
 
 mod analyze;
+mod diagnostics;
+mod host;
+mod journal;
 mod manifest;
 mod run;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_diag;
+#[cfg(test)]
+mod tests_host;
+#[cfg(test)]
+mod tests_journal;
+#[cfg(test)]
+mod tests_workspace;
+mod workspace;
 
 #[derive(Subcommand, Clone, Debug, Eq, PartialEq)]
 pub enum Command {
@@ -56,8 +68,7 @@ pub fn execute(command: Command) -> anyhow::Result<()> {
             report,
         } => {
             let loaded = manifest::load(&manifest)?;
-            let value = analyze::analyze(&loaded, &out.join("results.jsonl"))
-                .context("analyse the recorded results")?;
+            let value = analyze::analyze(&loaded, &out).context("analyse the recorded results")?;
             let file = std::fs::OpenOptions::new()
                 .write(true)
                 .create_new(true)
