@@ -253,6 +253,15 @@ fn the_diagnostics_summary_covers_only_valid_slots_and_is_null_when_off() {
     assert_eq!(base["means"]["cpu_seconds_per_wall_second"], 2.0);
     assert_eq!(base["means"]["psi_cpu_some_delta_ms"], 1000.0);
     assert!(
+        base["means"].get("context_switches").is_none(),
+        "an invalid kernel-side counter is never averaged"
+    );
+    assert!(
+        summary["invalid_signals"]
+            .as_str()
+            .is_some_and(|s| s.contains("InvalidSignal"))
+    );
+    assert!(
         base["means"].get("ipc_user").is_none(),
         "no counters, no IPC"
     );

@@ -14,6 +14,11 @@ use super::{journal::Record, manifest::Manifest};
 
 pub const EVENTS: &str = "task-clock,context-switches,cpu-migrations,cycles:u,instructions:u";
 
+/// Kernel-side software counters that read a constant 0 when perf is restricted to user space
+/// (`perf_event_paranoid` 2 adds `:u` to every event). A build cannot really have zero context switches
+/// or migrations, so these are reported as an InvalidSignal and never averaged.
+pub const INVALID_USER_ONLY_SOFTWARE_EVENTS: &str = "context-switches and cpu-migrations: InvalidSignal under user-space-only perf (perf_event_paranoid=2); they read 0 and are not reported as zero";
+
 /// `perf stat` around the compile; counts inherit to the compile's children.
 pub fn wrap_with_perf(inner: Vec<String>, csv: &Path) -> Vec<String> {
     ["perf", "stat", "-x,", "-e", EVENTS, "-o"]
@@ -127,14 +132,6 @@ pub fn summarize(manifest: &Manifest, out: &Path, records: &[Record]) -> Value {
                 "cpu_seconds_per_wall_second",
                 task_clock.map(|ms| ms / (elapsed as f64 / 1e6)),
             );
-            put(
-                "context_switches",
-                event("context-switches:u").or_else(|| event("context-switches")),
-            );
-            put(
-                "cpu_migrations",
-                event("cpu-migrations:u").or_else(|| event("cpu-migrations")),
-            );
             put("cycles_user", cycles);
             put("instructions_user", instructions);
             put(
@@ -164,6 +161,7 @@ pub fn summarize(manifest: &Manifest, out: &Path, records: &[Record]) -> Value {
         );
     }
     json!({
+        "invalid_signals": INVALID_USER_ONLY_SOFTWARE_EVENTS,
         "arms": arms,
         "scopes": "perf: the compile's own process tree, user-space only; psi: SYSTEM-wide CPU stall time; neither is runnable delay of one task",
         "limits": "no runnable-delay tracepoint (needs tracefs rights); correlation, not cause; perf wrapper overhead is identical in every arm",
