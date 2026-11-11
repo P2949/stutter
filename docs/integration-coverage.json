@@ -697,13 +697,15 @@
         "EvidenceDeferred",
         "FixtureVerified",
         "MechanismValidated",
-        "RealObserved"
+        "RealObserved",
+        "NotPlannedForVerification"
       ],
       "evidence": [
         "docs/validation/openrc-2026-11-08.md",
-        "docs/validation/live-mechanisms-2026-11-09/RESULTS.md"
+        "docs/validation/live-mechanisms-2026-11-09/RESULTS.md",
+        "docs/validation/w27-cgroup-readback-2026-11-11/RESULTS.md"
       ],
-      "unblock": "Real-device campaigns per knob and the systemd1 SetUnitProperties and installed OpenRC backend acceptance: need an authorized delegated subtree with an isolated workload and direct KPI on a real OpenRC host"
+      "unblock": "Real-device campaigns per knob and the systemd1 SetUnitProperties and installed OpenRC backend acceptance: need an authorized delegated subtree with an isolated workload and direct KPI on a real OpenRC host | OpenRC backend: not planned for verification (a different init platform; development targets this machine only). Real cgroup delegation and readback on an owned user scope are recorded in docs/validation/w27-cgroup-readback-2026-11-11/RESULTS.md; io.weight and cpuset are not delegated to this account."
     },
     {
       "id": "5.22",

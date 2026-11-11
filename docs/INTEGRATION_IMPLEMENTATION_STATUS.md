@@ -88,3 +88,20 @@ that is frozen in the closeout code, not only in the JSON; every item names the 
 positive and negative test, which must be a `#[test]` function there, and `closeout-report --strict`
 (or `--run-tests`) executes each non-ignored test and requires it to pass exactly once. Ignored (live)
 tests are verified to exist but need their own privileged resources.
+
+## Evidence added 2026-11-11 (W21–W27), without any promotion
+
+| phase | result | record |
+|---|---|---|
+| W21 renderer producer | a real renderer (vkcube + opt-in Vulkan layer) binds `ValidatedDirect`, 2400 frames, 0 gaps; direct-frame keep denied (no W22 reference) | `validation/renderer-producer-2026-11-11/` |
+| W22 stamp accuracy | `NotPlannedForVerification` (needs photodiode/camera/display timestamp hardware) | ledger 5.12 |
+| W23 workload and KPI | cold fixed-work compile, CV 1.62 % over 12 executions | `validation/w23-compile-cohort-2026-11-11/` |
+| W24 protected benefit | background nice 19 Beneficial (-29.5 %), one-CPU control Harmful (+72.3 %); synthetic contention, real-game study stays `BlockedResource` | `validation/w24-protected-compile-2026-11-11/` |
+| W25 selection | held-out ranking beat the conservative baseline by 9.4 points; default selection unchanged (candidates are not a legal Stutter action) | `validation/w25-held-out-ranking-2026-11-11/` |
+| W26 overhead | installed services 2.60 % of one core, constant RSS/FDs, 2–4 kB/s writes | `validation/w26-observer-cost-2026-11-11/` |
+| W27 cgroups | owned-scope `cpu.weight`/`memory.high` readback; `io` and `cpuset` not delegated; OpenRC `NotPlannedForVerification` | `validation/w27-cgroup-readback-2026-11-11/` |
+| W29 | multi-node NUMA, RDT, kernel-owned kdamond: `NotPlannedForVerification` | ledger 5.19, 5.24, 5.8 |
+| W30 | local `wrk2` offered-load, `hyperfine` import, real hwloc cross-check captured | `validation/phase-tools-2026-11-11/` |
+
+Not done: W28 (sched_ext coexistence: loading a scheduler on the live desktop is outside what an unattended run may do),
+the real-game frame benefit study, and the W32 registry-led review beyond this table.
