@@ -1,0 +1,7 @@
+{"schema_version":1,"study_id":"e4-scope-weight","identity":"docs/validation/e4-scope-weight-study-2026-11-11/identity.json","hog_threads":12,"blocks":6,"training_blocks":3,"arm_timeout_secs":180,"practical_percent":2.0,
+ "baseline":{"name":"baseline","compile":{"kind":"ScopeWeight","value":100},"hogs":{"kind":"ScopeWeight","value":100}},
+ "candidates":[
+  {"name":"hogs-scope-weight-50","compile":{"kind":"ScopeWeight","value":100},"hogs":{"kind":"ScopeWeight","value":50}},
+  {"name":"hogs-scope-weight-10","compile":{"kind":"ScopeWeight","value":100},"hogs":{"kind":"ScopeWeight","value":10}},
+  {"name":"compile-scope-weight-1000","compile":{"kind":"ScopeWeight","value":1000},"hogs":{"kind":"ScopeWeight","value":100}},
+  {"name":"compile-scope-weight-1-control","compile":{"kind":"ScopeWeight","value":1},"hogs":{"kind":"ScopeWeight","value":100}}]}
