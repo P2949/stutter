@@ -1,0 +1,4 @@
+WARNING: [Loader Message] Code 0 : terminator_CreateInstance: Received return code -9 from call to vkCreateInstance in ICD /nix/store/hcx6qydyvcrc5ikyb1k8g6ziyj0flbmh-mesa-26.2.6/lib/libvulkan_dzn.so. Skipping this driver.
+WARNING: radv is not a conformant Vulkan implementation, testing use only.
+WARNING: [Loader Message] Code 0 : ICD for selected physical device does not export vkGetPhysicalDeviceDisplayPlanePropertiesKHR!
+WARNING: [Loader Message] Code 0 : ICD for selected physical device does not export vkGetPhysicalDeviceDisplayPropertiesKHR!

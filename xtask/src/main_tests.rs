@@ -86,6 +86,7 @@ fn expected_subcommands_are_registered() {
             "score-evaluate",
             "score-matrix",
             "service-campaign",
+            "service-explain",
             "service-smoke",
             "setup-local-ci",
             "smoke",

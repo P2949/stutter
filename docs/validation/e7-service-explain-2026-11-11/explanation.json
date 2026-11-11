@@ -1,0 +1,88 @@
+{
+  "authority": {
+    "autonomous_contracts": [
+      {
+        "effect_scope": "LocalProcessTree",
+        "objective": "GameRunnableLatency",
+        "operation": "CpuAffinityProfile",
+        "pressure": "Scheduler",
+        "workload": "Game"
+      },
+      {
+        "effect_scope": "Cgroup",
+        "objective": "GameRunnableLatency",
+        "operation": "CgroupPlacement",
+        "pressure": "Scheduler",
+        "workload": "Game"
+      }
+    ],
+    "high_risk_apply_implemented": false,
+    "note": "nice, uclamp, cpu.weight, PM QoS, GPU and SCX switching are not autonomous operations"
+  },
+  "controller": {
+    "active_state": "active",
+    "configured_executable": "/nix/store/4jm60ap66l47prpidwysbwpxhk790acs-stutter",
+    "configured_executable_sha256": "6922c7c6d09f4fad2e1a02902da6440fa28823b423f54b78f2e8853c020942bc",
+    "executable": null,
+    "executable_sha256": null,
+    "main_pid": 409170,
+    "note": "the configured ExecStart store path is what the unit was told to run; the running image is unverified when /proc/<pid>/exe is not readable",
+    "running_executable_readable": false,
+    "sub_state": "running",
+    "unit": "stutter-autotune-bounded@p2949.service"
+  },
+  "controller_status": {
+    "active_candidate": null,
+    "active_profile": null,
+    "cooldown_remaining_seconds": null,
+    "current_score": null,
+    "data_quality": null,
+    "focus_group": null,
+    "history_path": "/var/lib/stutter/autotune-p2949/.local/state/stutter/autotune/daemon_state.json",
+    "kept_actions": [],
+    "last_decision": "restored: startup crash recovery rollback succeeded; affected_tasks=0",
+    "last_fault": null,
+    "last_rollback_path": null,
+    "manual_restore_command": "stutter autotune restore",
+    "mode": "ApplyLowRisk",
+    "phase": "cooldown",
+    "planner": null,
+    "rollback_available": false,
+    "target": null
+  },
+  "evidence_kind": "read_only_service_explanation",
+  "external_owners": {
+    "caveats": [
+      "ScxLoader is likely the permanent kernel thread scx_enable_helper: its comm pattern scx_* also matches kernel threads. No operation maps to the Scheduler domain today, so this hint changes no decision."
+    ],
+    "classification": "ExternalSuspected: a process-name hint only; no exact-task or exact-resource ownership receipt was obtained",
+    "daemons_with_a_running_process": [
+      "GameMode",
+      "Lact",
+      "ScxLoader",
+      "SystemdOomd"
+    ],
+    "sched_ext": "Disabled"
+  },
+  "mutations_issued": 0,
+  "schema_version": 1,
+  "why_not_tuned": [
+    "no target is selected: no stable, explicitly identified game under scheduler pressure is focused",
+    "controller phase is \"cooldown\" in mode \"ApplyLowRisk\"",
+    "no action is currently kept, so there is nothing to restore",
+    "no rollback is pending",
+    "objective source, stage and quality are Unknown: no target means no measurement window"
+  ],
+  "worker": {
+    "active_state": "active",
+    "configured_executable": "/nix/store/4jm60ap66l47prpidwysbwpxhk790acs-stutter",
+    "configured_executable_sha256": "6922c7c6d09f4fad2e1a02902da6440fa28823b423f54b78f2e8853c020942bc",
+    "executable": null,
+    "executable_sha256": null,
+    "main_pid": 408854,
+    "note": "the configured ExecStart store path is what the unit was told to run; the running image is unverified when /proc/<pid>/exe is not readable",
+    "running_executable_readable": false,
+    "sub_state": "running",
+    "unit": "stutter-privileged-worker@p2949.service"
+  }
+}

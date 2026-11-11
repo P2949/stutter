@@ -45,6 +45,7 @@ pub mod score_evaluation;
 pub mod score_matrix;
 pub mod score_target;
 pub mod service_campaign;
+mod service_explain;
 pub mod soak;
 pub mod validation_campaign;
 pub mod workflow;
@@ -96,6 +97,8 @@ pub enum XtaskCommand {
         #[command(subcommand)]
         command: owned_study::Command,
     },
+    /// Read-only explanation of the installed bounded service (status, binary, owners, authority)
+    ServiceExplain(service_explain::ServiceExplainArgs),
     #[command(about = "Run canonical live observation acceptance and retain evidence")]
     LiveAcceptance {
         #[command(subcommand)]
@@ -518,6 +521,7 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
         XtaskCommand::RendererProducer(args) => renderer_producer::run(&args),
         XtaskCommand::OwnerRefusalProbe(args) => owner_refusal_probe::run(&args),
         XtaskCommand::OwnedStudy { command } => owned_study::execute(command),
+        XtaskCommand::ServiceExplain(args) => service_explain::run(&args),
         XtaskCommand::LiveAcceptance { suite } => live_acceptance::run(&root, suite),
         XtaskCommand::RecoveryController { mode } => live_acceptance::recovery::controller(mode),
         XtaskCommand::LiveBurst {

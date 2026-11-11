@@ -45,3 +45,8 @@ Experimental and never autonomous. A live refusal would therefore require enabli
 run, which is outside the standing constraints. What can be shown live is what was shown: with a foreign scheduler loaded the
 service neither crashes nor mutates, and its Supported operations are unaffected. The refusal stays covered by the planner
 fixtures. This item is closed as not applicable to the deployed contract rather than left open.
+
+## Correction (2026-11-11, found during E7)
+The first paragraph above lists `lact` among units that are all `inactive`. That was wrong for this host: `lactd` is `active` and a
+`lact daemon` process runs. The LACT/GPU quarantine is a Stutter-side rule (no electrical or profile writes) and is unaffected.
+`systemd-oomd` is also active and `gamemoded` runs although its systemd unit is inactive. See `../e7-service-explain-2026-11-11/RESULTS.md`.
