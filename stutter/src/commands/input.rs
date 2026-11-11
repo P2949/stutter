@@ -34,6 +34,7 @@ pub enum AppCommand {
     AutotuneApplyCandidate(AutotuneApplyCandidateCommandInput),
     Autotune(AutotuneCommandInput),
     AutotuneStatus(AutotuneStatusCommandInput),
+    Research(super::research::ResearchClientInput),
     AutotuneReplayHistory(AutotuneReplayHistoryCommandInput),
     AutotuneRestore(AutotuneRestoreCommandInput),
     Audit(AuditCommandInput),

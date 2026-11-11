@@ -185,6 +185,33 @@ pub fn open_dir_nofollow(path: &Path) -> io::Result<std::os::fd::OwnedFd> {
     Ok(unsafe { std::os::fd::OwnedFd::from_raw_fd(raw) })
 }
 
+/// Opens a directory without following symlinks in any path component. Unsupported kernels fail
+/// closed; callers must not fall back to a less constrained traversal for trusted artifacts.
+pub fn open_dir_no_symlinks(path: &Path) -> io::Result<std::os::fd::OwnedFd> {
+    use std::os::{fd::FromRawFd, unix::ffi::OsStrExt};
+    let c_path = std::ffi::CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| io::Error::from_raw_os_error(libc::EINVAL))?;
+    // SAFETY: open_how consists of integer fields and the kernel requires unknown fields to be 0.
+    let mut how: libc::open_how = unsafe { std::mem::zeroed() };
+    how.flags = (libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC) as u64;
+    how.resolve = libc::RESOLVE_NO_SYMLINKS | libc::RESOLVE_NO_MAGICLINKS;
+    // SAFETY: c_path and how are valid for the duration of the syscall and its size is exact.
+    let raw = unsafe {
+        libc::syscall(
+            libc::SYS_openat2,
+            libc::AT_FDCWD,
+            c_path.as_ptr(),
+            &how,
+            std::mem::size_of::<libc::open_how>(),
+        )
+    };
+    if raw < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: a successful openat2 returns a new owned file descriptor.
+    Ok(unsafe { std::os::fd::OwnedFd::from_raw_fd(raw as libc::c_int) })
+}
+
 /// Opens `name` relative to the directory descriptor `dir` for reading, without following a
 /// symlink and without blocking on a FIFO.
 pub fn openat_nofollow(dir: std::os::fd::BorrowedFd<'_>, name: &str) -> io::Result<std::fs::File> {

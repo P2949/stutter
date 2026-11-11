@@ -30,6 +30,14 @@ pub async fn run_autotune_controller_session(
     let (event_tx, mut event_rx) = mpsc::channel::<MonitorEvent>(1024);
     let (stop_tx, stop_rx) = oneshot::channel::<()>();
     let mut runtime = AutotuneRuntime::new(runtime_config);
+    let (research_tx, mut research_rx) = mpsc::channel(8);
+    let _research_server = match &runtime.config().daemon_config.autotune.research_socket_dir {
+        Some(dir) => Some(super::research_control::ResearchServer::bind(dir, research_tx).await?),
+        None => {
+            drop(research_tx);
+            None
+        }
+    };
     warn_if_unmanaged_privileged_worker_missing(runtime.config())?;
     let mut worker_handle = maybe_spawn_privileged_worker(runtime.config())?;
     let mut event_loop_iterations = 0u64;
@@ -64,7 +72,17 @@ pub async fn run_autotune_controller_session(
         crate::session::run_monitor(monitor_config, None, Some(event_tx), Some(stop_rx)).await
     });
 
-    while let Some(event) = event_rx.recv().await {
+    loop {
+        let event = tokio::select! {
+            event = event_rx.recv() => match event {
+                Some(event) => event,
+                None => break,
+            },
+            Some(request) = research_rx.recv() => {
+                super::research_control::respond(request);
+                continue;
+            }
+        };
         runtime.on_event(event)?;
         event_loop_iterations = event_loop_iterations.saturating_add(1);
         if event_loop_iterations.is_multiple_of(30)

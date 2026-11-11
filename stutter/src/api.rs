@@ -88,6 +88,15 @@ pub use crate::metadata::{build_git_rev, build_version};
 pub mod autotune {
     //! Public autotune command, planning, status, and data contract façade.
 
+    /// Bounded research request data; live admission requires separate authentication.
+    pub mod research {
+        pub use crate::autotune::research::{
+            AttemptOutcome, AttemptRecord, AttemptSlot, AuthenticatedRequest, CampaignFacts,
+            CampaignLease, CyberpunkInstallation, ProtonSource, ResearchAction, ResearchFactor,
+            ResearchGame, ResearchIntentV1, ResearchJournal, ResearchPhase, ResearchRequest,
+            ResearchTool, SteamUpdateStatus, inspect_cyberpunk_installation, receive_request,
+        };
+    }
     pub use crate::autotune::{
         DEFAULT_MIN_FOCUS_CONFIDENCE,
         acceptance_mutation::{

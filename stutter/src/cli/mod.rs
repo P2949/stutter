@@ -15,6 +15,7 @@ mod parse;
 mod prove_fix;
 mod release;
 mod report;
+mod research;
 mod service;
 mod validate;
 mod version;

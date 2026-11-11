@@ -19,6 +19,7 @@ mod lifecycle;
 mod phase;
 mod plan_output;
 pub(crate) mod planning;
+mod research_control;
 mod restore;
 mod sensor_hub;
 pub(crate) mod session;

@@ -1,0 +1,324 @@
+//! Unprivileged, bounded research request data. A digest is an identity, not authorization.
+//!
+//! Admission must additionally authenticate the caller and check the live session, policy,
+//! installation, source identities, and exclusive resident lease before any launch or mutation.
+use std::collections::BTreeSet;
+
+use serde::{Deserialize, Serialize};
+
+mod journal;
+mod lease;
+mod protocol;
+mod steam_inventory;
+pub use journal::{AttemptOutcome, AttemptRecord, AttemptSlot, ResearchJournal};
+pub use lease::{CampaignFacts, CampaignLease};
+pub(crate) use protocol::read_frame as read_control_frame;
+pub use protocol::{AuthenticatedRequest, ResearchRequest, receive_request};
+pub use steam_inventory::{
+    CyberpunkInstallation, SteamUpdateStatus, inspect_cyberpunk_installation,
+};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResearchGame {
+    Cyberpunk2077,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProtonSource {
+    ValveStable,
+    ValveExperimental,
+    CachyOs,
+    CachyOsV3,
+    Ge,
+    Em,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResearchFactor {
+    WineWayland,
+    Vkd3dLowLatency,
+    NtSync,
+    Fsr4,
+    FrameGeneration,
+    AntiLag2,
+    Gamescope,
+    AudioBackend,
+    InputBackend,
+    Hdr,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResearchAction {
+    CpuAffinityProfile,
+    CgroupPlacement,
+}
+
+/// Campaign progress only. State does not itself authorize any process or mutation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResearchPhase {
+    Requested,
+    Preflight,
+    Prepared,
+    AwaitSafeWindow,
+    Launching,
+    Attesting,
+    Warmup,
+    Measuring,
+    Sealing,
+    Analysing,
+    NextArm,
+    Diagnosing,
+    EligibleAction,
+    Confirming,
+    Restoring,
+    Completed,
+    Blocked,
+    Aborted,
+}
+
+impl ResearchPhase {
+    /// Check a transition; persistence and side effects are the resident controller's duty.
+    pub fn permits(self, next: Self) -> bool {
+        use ResearchPhase::*;
+        matches!(
+            (self, next),
+            (Requested, Preflight)
+                | (Preflight, Prepared)
+                | (Prepared, AwaitSafeWindow)
+                | (AwaitSafeWindow, Launching)
+                | (Launching, Attesting)
+                | (Attesting, Warmup)
+                | (Warmup, Measuring)
+                | (Measuring, Sealing)
+                | (Sealing, Analysing)
+                | (Analysing, NextArm)
+                | (NextArm, AwaitSafeWindow)
+                | (Analysing, Diagnosing)
+                | (Diagnosing, EligibleAction)
+                | (EligibleAction, Confirming)
+                | (Confirming, Sealing)
+                | (Restoring, Completed | Blocked | Aborted)
+        ) || (!matches!(self, Completed | Blocked | Aborted | Restoring) && next == Restoring)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResearchTool {
+    pub source: ProtonSource,
+    /// Digest of the frozen tool identity; actual loaded code still needs attestation.
+    pub identity_sha256: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResearchIntentV1 {
+    pub schema_version: u32,
+    pub game: ResearchGame,
+    pub app_id: u32,
+    pub uid: u32,
+    pub boot_id: String,
+    pub session_id: String,
+    pub source_sha256: String,
+    pub policy_sha256: String,
+    pub game_executable_sha256: String,
+    pub build_id: u64,
+    pub tools: Vec<ResearchTool>,
+    pub factors: Vec<ResearchFactor>,
+    pub actions: Vec<ResearchAction>,
+    pub issued_unix_seconds: u64,
+    pub deadline_unix_seconds: u64,
+    pub max_active_seconds: u32,
+    pub max_attempt_seconds: u32,
+    pub max_owned_pressure_seconds_per_study: u32,
+    pub max_attempts: u32,
+    pub max_evidence_bytes: u64,
+    pub desktop_research_consented: bool,
+}
+
+impl ResearchIntentV1 {
+    /// Validate the closed contract. This alone never grants execution authority.
+    pub fn validate(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(self.schema_version == 1, "unsupported intent schema");
+        anyhow::ensure!(
+            self.app_id == 1_091_500 && self.build_id != 0,
+            "invalid game identity"
+        );
+        anyhow::ensure!(
+            self.uid != 0 && self.desktop_research_consented,
+            "missing user consent"
+        );
+        for value in [&self.boot_id, &self.session_id] {
+            anyhow::ensure!(
+                !value.is_empty()
+                    && value.len() <= 128
+                    && value
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'),
+                "invalid session identity"
+            );
+        }
+        for digest in [
+            &self.source_sha256,
+            &self.policy_sha256,
+            &self.game_executable_sha256,
+        ]
+        .into_iter()
+        .chain(self.tools.iter().map(|tool| &tool.identity_sha256))
+        {
+            anyhow::ensure!(
+                digest.len() == 64
+                    && digest
+                        .bytes()
+                        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
+                "invalid sha256 identity"
+            );
+        }
+        anyhow::ensure!(
+            !self.tools.is_empty() && self.tools.len() <= 6,
+            "invalid tool count"
+        );
+        anyhow::ensure!(
+            self.tools
+                .iter()
+                .map(|t| t.source)
+                .collect::<BTreeSet<_>>()
+                .len()
+                == self.tools.len(),
+            "duplicate tool source"
+        );
+        anyhow::ensure!(
+            self.tools
+                .iter()
+                .map(|t| &t.identity_sha256)
+                .collect::<BTreeSet<_>>()
+                .len()
+                == self.tools.len(),
+            "duplicate tool identity"
+        );
+        anyhow::ensure!(
+            self.factors.iter().collect::<BTreeSet<_>>().len() == self.factors.len(),
+            "duplicate factor"
+        );
+        anyhow::ensure!(
+            self.actions.iter().collect::<BTreeSet<_>>().len() == self.actions.len(),
+            "duplicate action"
+        );
+        let wall = self
+            .deadline_unix_seconds
+            .saturating_sub(self.issued_unix_seconds);
+        anyhow::ensure!((1..=43_200).contains(&wall), "invalid wall deadline");
+        anyhow::ensure!(
+            self.max_active_seconds > 0
+                && self.max_active_seconds <= 28_800
+                && u64::from(self.max_active_seconds) <= wall,
+            "invalid active budget"
+        );
+        anyhow::ensure!(
+            (1..=720).contains(&self.max_attempt_seconds)
+                && self.max_attempt_seconds <= self.max_active_seconds
+                && self.max_owned_pressure_seconds_per_study <= 600
+                && self.max_owned_pressure_seconds_per_study <= self.max_active_seconds
+                && self.max_attempts > 0
+                && self.max_attempts <= 1_000,
+            "invalid attempt budget"
+        );
+        anyhow::ensure!(
+            self.max_evidence_bytes > 0 && self.max_evidence_bytes <= 20 * 1024 * 1024 * 1024,
+            "invalid evidence budget"
+        );
+        Ok(())
+    }
+
+    pub fn digest(&self) -> anyhow::Result<String> {
+        self.validate()?;
+        Ok(stutter_core::hash::sha256_hex(&serde_json::to_vec(self)?))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    pub(super) fn intent() -> ResearchIntentV1 {
+        ResearchIntentV1 {
+            schema_version: 1,
+            game: ResearchGame::Cyberpunk2077,
+            app_id: 1_091_500,
+            uid: 1000,
+            boot_id: "boot-1".into(),
+            session_id: "11".into(),
+            source_sha256: "a".repeat(64),
+            policy_sha256: "b".repeat(64),
+            game_executable_sha256: "c".repeat(64),
+            build_id: 1,
+            tools: vec![ResearchTool {
+                source: ProtonSource::Ge,
+                identity_sha256: "d".repeat(64),
+            }],
+            factors: vec![],
+            actions: vec![],
+            issued_unix_seconds: 10,
+            deadline_unix_seconds: 3610,
+            max_active_seconds: 3600,
+            max_attempt_seconds: 720,
+            max_owned_pressure_seconds_per_study: 600,
+            max_attempts: 10,
+            max_evidence_bytes: 1024,
+            desktop_research_consented: true,
+        }
+    }
+
+    #[test]
+    fn contract_roundtrip_and_digest_are_stable() {
+        let value = intent();
+        let encoded = serde_json::to_vec(&value).unwrap();
+        let decoded: ResearchIntentV1 = serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(value, decoded);
+        assert_eq!(value.digest().unwrap(), decoded.digest().unwrap());
+        let mut changed = decoded;
+        changed.max_attempts += 1;
+        assert_ne!(value.digest().unwrap(), changed.digest().unwrap());
+    }
+
+    #[test]
+    fn malformed_or_unbounded_requests_are_rejected() {
+        let mut value = intent();
+        value.tools.push(value.tools[0].clone());
+        assert!(value.validate().is_err());
+        value = intent();
+        value.policy_sha256 = "A".repeat(64);
+        assert!(value.validate().is_err());
+        value = intent();
+        value.deadline_unix_seconds = 50_000;
+        assert!(value.validate().is_err());
+        value = intent();
+        value.desktop_research_consented = false;
+        assert!(value.validate().is_err());
+        value = intent();
+        value.actions = vec![ResearchAction::CpuAffinityProfile; 2];
+        assert!(value.validate().is_err());
+        let mut json = serde_json::to_value(intent()).unwrap();
+        json["command"] = "arbitrary".into();
+        assert!(serde_json::from_value::<ResearchIntentV1>(json).is_err());
+        let mut json = serde_json::to_value(intent()).unwrap();
+        json["game"] = "unknown".into();
+        assert!(serde_json::from_value::<ResearchIntentV1>(json).is_err());
+    }
+
+    #[test]
+    fn terminal_states_require_restoration_and_cannot_restart() {
+        use ResearchPhase::*;
+        assert!(Requested.permits(Preflight));
+        assert!(Measuring.permits(Restoring));
+        assert!(!Measuring.permits(Completed));
+        assert!(Restoring.permits(Blocked));
+        assert!(!Blocked.permits(Launching));
+        assert!(!Sealing.permits(Launching));
+    }
+}

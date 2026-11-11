@@ -7,6 +7,7 @@ pub mod misc;
 pub mod monitor;
 pub mod release;
 pub mod report;
+pub mod research;
 pub mod restore;
 pub mod scenario;
 pub mod service;
@@ -42,6 +43,7 @@ pub async fn dispatch(command: AppCommand) -> Result<(), StutterError> {
         AppCommand::AutotuneApplyCandidate(input) => autotune::run_apply_candidate_command(input),
         AppCommand::Autotune(input) => autotune::run_autotune_command(input).await,
         AppCommand::AutotuneStatus(input) => autotune::run_status_command(input),
+        AppCommand::Research(input) => research::run(input).await,
         AppCommand::AutotuneReplayHistory(input) => autotune::run_replay_history_command(input),
         AppCommand::AutotuneRestore(input) => autotune::run_restore_command(input),
         AppCommand::Audit(input) => misc::run_audit_command(input),

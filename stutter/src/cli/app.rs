@@ -16,6 +16,7 @@ use super::{
         ReportArgs, RestoreArgs, RulesArgs, ScenarioArgs, SummaryArgs, TopologyCheckArgs, TuneArgs,
         WaylandProbeArgs,
     },
+    research::ResearchArgs,
     service::ServiceArgs,
     validate::ValidateArgs,
 };
@@ -120,6 +121,8 @@ pub(super) enum Command {
         about = "Inspect experimental autotune controller status"
     )]
     AutotuneStatus(AutotuneStatusArgs),
+    #[command(about = "Submit or inspect a bounded resident research campaign")]
+    Research(ResearchArgs),
     #[command(about = "Run experimental remote agent endpoints")]
     Agent(AgentArgs),
     #[command(

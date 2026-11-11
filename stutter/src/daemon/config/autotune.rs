@@ -61,6 +61,9 @@ pub struct DaemonAutotuneConfig {
     pub kpi_contract: Option<PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kpi_socket_dir: Option<PathBuf>,
+    /// Optional private user-owned directory for resident research-control IPC.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub research_socket_dir: Option<PathBuf>,
     #[serde(default)]
     pub external_mutation_policy: ExternalMutationPolicy,
     #[serde(default)]
@@ -92,6 +95,7 @@ impl Default for DaemonAutotuneConfig {
             frame_capture_root: None,
             kpi_contract: None,
             kpi_socket_dir: None,
+            research_socket_dir: None,
             external_mutation_policy: ExternalMutationPolicy::default(),
             high_risk_dry_run: false,
             workload_policy: DaemonWorkloadPolicyConfig::default(),

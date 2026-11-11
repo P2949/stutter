@@ -72,6 +72,7 @@ where
         Some(Command::WaylandProbe(args)) => reports::parse_wayland_probe_command(args),
         Some(Command::Autotune(args)) => autotune::parse_autotune_command(args),
         Some(Command::AutotuneStatus(args)) => autotune::parse_autotune_status_command(args),
+        Some(Command::Research(args)) => Ok(AppCommand::Research(args.into())),
         None => monitoring::parse_legacy_monitor_command(cli.legacy_monitor, &matches),
         Some(Command::Agent(args)) => agent::parse_agent_command(args),
         Some(Command::PrivilegedWorker(args)) => agent::parse_privileged_worker_command(args),

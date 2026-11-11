@@ -67,6 +67,7 @@ pub(crate) mod profiles;
 pub(crate) mod protection;
 pub(crate) mod providers;
 pub(crate) mod replay;
+pub(crate) mod research;
 #[cfg(test)]
 pub(crate) mod resolution;
 #[cfg(test)]
