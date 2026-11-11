@@ -23,3 +23,11 @@ ranking method on independent blocks (including that it does not mis-rank the ha
 mismatched dataset yields no ranking: `held_out_ranking` returns `None` below three common candidates, covered by the existing
 search tests). Applying it to default selection needs real candidates from a legal action, which is W27's scope. This is one
 scenario, one workload and one host; it is not transfer evidence across contexts.
+
+## Cross-context transfer: not planned for verification (2026-11-11)
+
+Transfer across contexts (other CPU topologies, schedulers, kernels, GPUs, hosts) needs those contexts. Development targets this
+machine only (the user's standing scope for this phase), so transfer to another host is `NotPlannedForVerification`. What is
+covered here: within this one context a learned ranking is evaluated on an untouched holdout (above), and a changed context
+signature resets learning, a wrong objective unit, a sparse dataset (fewer than three common candidates returns no ranking) and
+a stale owner fall back to the default ranking, as the search fixtures test. The default ranking is unchanged.
