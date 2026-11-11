@@ -24,7 +24,9 @@ mismatched dataset yields no ranking: `held_out_ranking` returns `None` below th
 search tests). Applying it to default selection needs real candidates from a legal action, which is W27's scope. This is one
 scenario, one workload and one host; it is not transfer evidence across contexts.
 
-## Cross-context transfer: not planned for verification (2026-11-11)
+## Cross-context transfer (2026-11-11)
+
+Update: a second context on this machine (CPU topology reduced to CPUs 0-5, 6 hogs) was then measured and the ranking transferred under the frozen rule: see `../w25-cross-context-2026-11-11/RESULTS.md`. What follows is the earlier statement, which still holds for other hosts, schedulers, kernels and GPUs.
 
 Transfer across contexts (other CPU topologies, schedulers, kernels, GPUs, hosts) needs those contexts. Development targets this
 machine only (the user's standing scope for this phase), so transfer to another host is `NotPlannedForVerification`. What is
