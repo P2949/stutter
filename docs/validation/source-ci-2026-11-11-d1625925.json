@@ -1,0 +1,34 @@
+{
+  "result": "PASS",
+  "source_sha": "d16259252ef819aa91531ee536e296628fa70dc3",
+  "source_clean": true,
+  "build_output": "fresh local clone checkout/target (exclusive to this checkout); run at nice 10, CARGO_BUILD_JOBS=4, no game was running",
+  "commands": [
+    "nix develop --command cargo run -q -p xtask -- ci",
+    "nix develop --command cargo clippy --workspace --all-targets -- -D warnings",
+    "nix develop --command cargo run -q -p xtask -- release-check"
+  ],
+  "library": {
+    "passed": 3456,
+    "ignored": 19
+  },
+  "xtask": {
+    "passed": 620
+  },
+  "validation_runner": {
+    "passed": 106,
+    "ignored": 7
+  },
+  "architecture_tests": {
+    "passed": 125
+  },
+  "release_binary_sha256": "70b8beb87f2a00cffad91cd0f553281af7818936ed7c780d6eb3bf2f0c453d56",
+  "logs_sha256": {
+    "ci.log": "3617d0c897b44d34e99beef5507d42cda59df70fb225e78c990d21294d91323d",
+    "clippy-workspace.log": "caa2d84c5a675e887cf31fbae6ed276733bc863bd556a24dbac9643aedc1894b",
+    "release-check.log": "fc63df173da2cebc2fe0f421f2e4af76fdd90a4b34bb3825f756504461ba3814"
+  },
+  "scope": "xtask only: owned-study hardening (strict journal, owned workspace, fail-closed host preflight, output hash, diagnostics), service-explain, owner-refusal probe, E6 probe; the shipped crates are unchanged from 9cfca635",
+  "deployed": "The installed build is the 9cfca635 binary (6922c7c6…), activated after a passing exact-build production-smoke; this source embeds its own revision, hence the different hash above.",
+  "note": "documentation-only commits after this sha do not change the built binary"
+}
