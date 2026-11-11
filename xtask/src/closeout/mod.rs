@@ -20,7 +20,8 @@ use clap::Args;
 use serde::Deserialize;
 
 /// The dispositions a closeout may use, weakest to strongest.
-pub const VOCABULARY: [&str; 9] = [
+pub const VOCABULARY: [&str; 10] = [
+    "NotPlannedForVerification",
     "EvidenceDeferred",
     "HardwareUnavailable",
     "SafetyAborted",
@@ -104,6 +105,16 @@ pub fn validate(ledger: &Ledger) -> anyhow::Result<()> {
             ensure!(
                 entry.dispositions.iter().any(|d| d == "FixtureVerified"),
                 "{id}: code_complete needs verified fixtures"
+            );
+        }
+        if entry
+            .dispositions
+            .iter()
+            .any(|d| d == "NotPlannedForVerification")
+        {
+            ensure!(
+                entry.unblock.is_some(),
+                "{id}: NotPlannedForVerification without the reason (the other hardware or platform it needs)"
             );
         }
         if entry

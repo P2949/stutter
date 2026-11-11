@@ -78,6 +78,10 @@ fn the_report_cannot_overstate_the_ledger() {
             entry("first_slice", &["HardwareUnavailable"], &[], None),
             "without an unblock",
         ),
+        (
+            entry("first_slice", &["NotPlannedForVerification"], &[], None),
+            "without the reason",
+        ),
     ];
     for (entry, expected) in cases {
         let error = validate(&ledger_of(entry)).unwrap_err().to_string();

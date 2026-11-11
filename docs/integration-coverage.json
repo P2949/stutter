@@ -629,11 +629,10 @@
       "dispositions": [
         "CodeComplete",
         "FixtureVerified",
-        "HardwareUnavailable",
-        "EvidenceDeferred"
+        "NotPlannedForVerification"
       ],
       "evidence": [],
-      "unblock": "this host has a single NUMA node and no numad or numactl: a real node-to-node migration readback and locality/KPI campaign needs a multi-node machine and an isolated authorized workload"
+      "unblock": "Not planned for verification (needs different hardware; development targets this machine only): this host has a single NUMA node and no numad or numactl: a real node-to-node migration readback and locality/KPI campaign needs a multi-node machine and an isolated authorized workload"
     },
     {
       "id": "5.20",
@@ -803,11 +802,10 @@
       "dispositions": [
         "CodeComplete",
         "FixtureVerified",
-        "HardwareUnavailable",
-        "EvidenceDeferred"
+        "NotPlannedForVerification"
       ],
       "evidence": [],
-      "unblock": "resctrl is not mounted on this host: needs an x86 CPU with RDT/QoS allocation and a mounted resctrl filesystem for a real-hardware readback and a target-versus-bystander campaign"
+      "unblock": "Not planned for verification (needs different hardware; development targets this machine only): resctrl is not mounted on this host: needs an x86 CPU with RDT/QoS allocation and a mounted resctrl filesystem for a real-hardware readback and a target-versus-bystander campaign"
     },
     {
       "id": "5.25",
