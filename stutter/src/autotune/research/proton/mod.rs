@@ -1,7 +1,10 @@
 //! Read-only inventory of the six pinned Proton sources. Paths stay process-local and never enter
 //! intent or report serialization; identities bind provenance and the exact entrypoint manifests.
 
-use std::{collections::BTreeSet, path::PathBuf};
+use std::{
+    collections::BTreeSet,
+    path::{Path, PathBuf},
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -180,6 +183,16 @@ impl ProtonInventory {
             client.validate()?;
         }
         Ok(())
+    }
+
+    /// Installation directory of an eligible candidate whose frozen identity is exactly `tool`.
+    pub(crate) fn eligible_path(&self, tool: &ResearchTool) -> Option<&Path> {
+        self.candidates
+            .iter()
+            .find(|item| {
+                item.eligibility == ProtonEligibility::Eligible && item.tool.as_ref() == Some(tool)
+            })
+            .and_then(|item| item.path.as_deref())
     }
 
     pub fn tools(&self) -> Vec<ResearchTool> {

@@ -108,7 +108,14 @@ fn dispatch(context_dir: &std::path::Path, args: &[String], uid: u32) -> anyhow:
         .duration_since(std::time::UNIX_EPOCH)?
         .as_secs();
     let plan = crate::autotune::research::dispatch_context::authorize_dispatch(
-        &directory, args, &env, uid, now,
+        &directory,
+        args,
+        &env,
+        uid,
+        now,
+        &|context, tool| {
+            crate::autotune::research::dispatch_context::verify_installed_tool(context, tool, uid)
+        },
     )?;
     let error = std::process::Command::new(&plan.program)
         .args(&plan.args)

@@ -33,9 +33,17 @@ pub struct DispatchContextV1 {
     pub slot: AttemptSlot,
     /// Steam verb argument -> ticket ID issued for it.
     pub tickets: BTreeMap<String, String>,
+    pub spec: ArmSpec,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArmSpec {
     pub tool_dir: PathBuf,
     pub study_compat_data: PathBuf,
     pub arm_env: BTreeMap<String, String>,
+    pub steamapps: PathBuf,
+    pub proton_manifest: PathBuf,
 }
 
 /// Resident side: issue a ticket for each permitted verb and persist the context. Refuses to
@@ -44,9 +52,7 @@ pub fn arm_attempt(
     dir: &std::fs::File,
     intent: &ResearchIntentV1,
     slot: &AttemptSlot,
-    tool_dir: PathBuf,
-    study_compat_data: PathBuf,
-    arm_env: BTreeMap<String, String>,
+    spec: ArmSpec,
     (now, lifetime_seconds): (u64, u64),
 ) -> anyhow::Result<DispatchContextV1> {
     let mut tickets = BTreeMap::new();
@@ -66,9 +72,7 @@ pub fn arm_attempt(
         intent: intent.clone(),
         slot: slot.clone(),
         tickets,
-        tool_dir,
-        study_compat_data,
-        arm_env,
+        spec,
     };
     let bytes = serde_json::to_vec(&context)?;
     anyhow::ensure!(
@@ -114,6 +118,7 @@ pub fn authorize_dispatch(
     env: &BTreeMap<String, String>,
     euid: u32,
     now: u64,
+    verify_tool: &dyn Fn(&DispatchContextV1, &super::ResearchTool) -> anyhow::Result<()>,
 ) -> anyhow::Result<DispatchPlan> {
     anyhow::ensure!(euid != 0, "dispatcher must not run as root");
     let context = read_context(dir, euid)?;
@@ -135,13 +140,36 @@ pub fn authorize_dispatch(
         argv,
         env,
         verb,
-        &context.study_compat_data,
-        &context.tool_dir,
-        &context.arm_env,
+        &context.spec.study_compat_data,
+        &context.spec.tool_dir,
+        &context.spec.arm_env,
     )?;
+    // Re-attest the installed Proton before spending the ticket, so drift cannot burn it either.
+    verify_tool(&context, &expected.tool)?;
     let owned: OwnedFd = dir.try_clone()?.into();
     consume_launch_ticket(owned, ticket_id, &expected, now)?;
     Ok(plan)
+}
+
+/// Real verifier: rediscover the installed Proton from Steam and require the exact frozen identity at
+/// exactly the directory the context will exec. Any drift refuses the launch.
+pub fn verify_installed_tool(
+    context: &DispatchContextV1,
+    tool: &super::ResearchTool,
+    uid: u32,
+) -> anyhow::Result<()> {
+    let libraries = super::discover_steam_libraries(&context.spec.steamapps, uid)?;
+    let inventory = super::inspect_proton_inventory(
+        &context.spec.proton_manifest,
+        &context.spec.steamapps,
+        &libraries,
+        uid,
+    )?;
+    anyhow::ensure!(
+        inventory.eligible_path(tool) == Some(context.spec.tool_dir.as_path()),
+        "installed Proton differs from the frozen tool identity or location"
+    );
+    Ok(())
 }
 
 #[cfg(test)]
@@ -180,6 +208,16 @@ mod tests {
         .into()
     }
 
+    fn spec() -> ArmSpec {
+        ArmSpec {
+            tool_dir: "/tools/GE".into(),
+            study_compat_data: "/study/compatdata".into(),
+            arm_env: BTreeMap::new(),
+            steamapps: "/steam/steamapps".into(),
+            proton_manifest: "/m.json".into(),
+        }
+    }
+
     fn argv(verb: &str) -> Vec<String> {
         ["/x/proton", verb, "/g/Cyberpunk2077.exe"]
             .map(str::to_owned)
@@ -189,16 +227,7 @@ mod tests {
     fn armed() -> (tempfile::TempDir, std::fs::File, u64) {
         let (dir, file, intent, slot) = fixture();
         let now = intent.issued_unix_seconds + 1;
-        arm_attempt(
-            &file,
-            &intent,
-            &slot,
-            "/tools/GE".into(),
-            "/study/compatdata".into(),
-            BTreeMap::new(),
-            (now, 60),
-        )
-        .unwrap();
+        arm_attempt(&file, &intent, &slot, spec(), (now, 60)).unwrap();
         (dir, file, now + 1)
     }
 
@@ -206,13 +235,42 @@ mod tests {
     fn each_steam_verb_runs_once_and_replays_or_unknown_verbs_are_refused() {
         let (_dir, file, now) = armed();
         let euid = crate::syscall::geteuid();
-        let wait =
-            authorize_dispatch(&file, &argv("waitforexitandrun"), &env(), euid, now).unwrap();
+        let wait = authorize_dispatch(
+            &file,
+            &argv("waitforexitandrun"),
+            &env(),
+            euid,
+            now,
+            &|_, _| Ok(()),
+        )
+        .unwrap();
         assert_eq!(wait.program, std::path::Path::new("/tools/GE/proton"));
-        assert!(authorize_dispatch(&file, &argv("waitforexitandrun"), &env(), euid, now).is_err());
-        authorize_dispatch(&file, &argv("run"), &env(), euid, now).unwrap();
-        assert!(authorize_dispatch(&file, &argv("run"), &env(), euid, now).is_err());
-        assert!(authorize_dispatch(&file, &argv("getcompatpath"), &env(), euid, now).is_err());
+        assert!(
+            authorize_dispatch(
+                &file,
+                &argv("waitforexitandrun"),
+                &env(),
+                euid,
+                now,
+                &|_, _| Ok(())
+            )
+            .is_err()
+        );
+        authorize_dispatch(&file, &argv("run"), &env(), euid, now, &|_, _| Ok(())).unwrap();
+        assert!(
+            authorize_dispatch(&file, &argv("run"), &env(), euid, now, &|_, _| Ok(())).is_err()
+        );
+        assert!(
+            authorize_dispatch(
+                &file,
+                &argv("getcompatpath"),
+                &env(),
+                euid,
+                now,
+                &|_, _| Ok(())
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -221,27 +279,31 @@ mod tests {
         let euid = crate::syscall::geteuid();
         let mut bad = env();
         bad.insert("SteamAppId".into(), "220".into());
-        assert!(authorize_dispatch(&file, &argv("run"), &bad, euid, now).is_err());
-        assert!(authorize_dispatch(&file, &argv("run"), &env(), euid, now + 600).is_err());
-        assert!(authorize_dispatch(&file, &argv("run"), &env(), euid + 1, now).is_err());
-        assert!(authorize_dispatch(&file, &argv("run"), &env(), euid, now).is_ok());
+        assert!(authorize_dispatch(&file, &argv("run"), &bad, euid, now, &|_, _| Ok(())).is_err());
+        assert!(
+            authorize_dispatch(&file, &argv("run"), &env(), euid, now + 600, &|_, _| Ok(()))
+                .is_err()
+        );
+        assert!(
+            authorize_dispatch(&file, &argv("run"), &env(), euid + 1, now, &|_, _| Ok(())).is_err()
+        );
+        assert!(authorize_dispatch(&file, &argv("run"), &env(), euid, now, &|_, _| Ok(())).is_ok());
+    }
+
+    #[test]
+    fn tool_drift_is_refused_without_burning_the_ticket() {
+        let (_dir, file, now) = armed();
+        let euid = crate::syscall::geteuid();
+        let drift = |_: &DispatchContextV1, _: &super::super::ResearchTool| anyhow::bail!("drift");
+        assert!(authorize_dispatch(&file, &argv("run"), &env(), euid, now, &drift).is_err());
+        assert!(authorize_dispatch(&file, &argv("run"), &env(), euid, now, &|_, _| Ok(())).is_ok());
     }
 
     #[test]
     fn arming_twice_is_refused() {
         let (_dir, file, intent, slot) = fixture();
         let now = intent.issued_unix_seconds + 1;
-        let arm = |f: &std::fs::File| {
-            arm_attempt(
-                f,
-                &intent,
-                &slot,
-                "/t".into(),
-                "/s".into(),
-                BTreeMap::new(),
-                (now, 60),
-            )
-        };
+        let arm = |f: &std::fs::File| arm_attempt(f, &intent, &slot, spec(), (now, 60));
         arm(&file).unwrap();
         assert!(arm(&file).is_err());
     }
