@@ -41,6 +41,14 @@ mod mounts;
     not(test),
     expect(
         dead_code,
+        reason = "scores the live diagnosis once real pre-registered cases exist"
+    )
+)]
+pub(crate) mod oracle;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
         reason = "P3 prefix proof is consumed only after the Steam dispatcher is qualified"
     )
 )]
