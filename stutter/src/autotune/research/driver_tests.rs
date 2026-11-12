@@ -192,3 +192,24 @@ fn a_restart_with_an_unsealed_started_attempt_refuses_to_resume() {
     );
     assert!(format!("{:#}", reopened.err().unwrap()).contains("UnsafeToResume"));
 }
+
+#[test]
+fn a_host_reported_failure_aborts_and_seals_with_its_code() {
+    let (_dir, mut driver, intent) = setup(4);
+    let mut host = fake();
+    let now = intent.issued_unix_seconds + 1;
+    assert_eq!(driver.tick(&mut host, now).unwrap(), Step::Running(0));
+    host.polls.push_back(Progress::Failed {
+        code: "GameCrashed".into(),
+    });
+    let Step::Sealed(record) = driver.tick(&mut host, now + 1).unwrap() else {
+        panic!("host failure must seal")
+    };
+    assert_eq!(
+        record.outcome,
+        AttemptOutcome::Failed {
+            code: "GameCrashed".into()
+        }
+    );
+    assert_eq!(host.aborts, 1);
+}
