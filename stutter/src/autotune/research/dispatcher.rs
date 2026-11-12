@@ -15,7 +15,8 @@ const MAX_ARGS: usize = 64;
 const MAX_ARG_BYTES: usize = 4096;
 /// Prefixes the campaign alone may control; Steam launch options or the ambient environment must
 /// not smuggle in factors that the frozen arm does not declare.
-const CONTROLLED_PREFIXES: [&str; 4] = ["PROTON_", "WINE", "DXVK_", "VKD3D_"];
+const CONTROLLED_PREFIXES: [&str; 6] =
+    ["PROTON_", "WINE", "DXVK_", "VKD3D_", "MLFG_", "WAYLANDDRV_"];
 const CONTROLLED_EXACT: [&str; 3] = ["LD_PRELOAD", "SteamDeck", "STEAM_COMPAT_MOUNTS"];
 
 #[derive(Debug, PartialEq, Eq)]
@@ -25,7 +26,7 @@ pub struct DispatchPlan {
     pub env: BTreeMap<String, String>,
 }
 
-fn controlled(key: &str) -> bool {
+pub(crate) fn controlled(key: &str) -> bool {
     CONTROLLED_EXACT.contains(&key)
         || CONTROLLED_PREFIXES
             .iter()

@@ -24,6 +24,14 @@ pub(crate) mod desktop_idle;
 pub(crate) mod dispatch_context;
 pub(crate) mod dispatcher;
 pub(crate) mod driver;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "arm environments are consumed by the real Steam host once it is qualified"
+    )
+)]
+pub(crate) mod features;
 pub(super) mod host;
 mod journal;
 pub(crate) mod launch_ticket;
