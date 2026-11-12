@@ -67,6 +67,14 @@ pub(crate) mod scheduler;
 )]
 pub(crate) mod steam_host;
 mod steam_inventory;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "wired into the resident host after live Steam qualification"
+    )
+)]
+pub(crate) mod steam_port;
 mod vdf;
 pub use journal::{AttemptOutcome, AttemptRecord, AttemptSlot, ResearchJournal};
 pub use lease::{CampaignBlockReason, CampaignFacts, CampaignLease};
