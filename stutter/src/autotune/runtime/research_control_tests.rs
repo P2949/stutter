@@ -178,6 +178,59 @@ fn fixture() -> (crate::autotune::research::ResearchIntentV1, CampaignFacts) {
 }
 
 #[test]
+fn abandoned_submission_does_not_create_a_campaign() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    let (intent, facts) = fixture();
+    let mut coordinator =
+        ResearchCoordinator::new(Some(dir.path().to_path_buf()), Some(facts), "Ready");
+    let message = ResearchRequest::Submit {
+        intent: Box::new(intent),
+    };
+    let (reply, answer) = oneshot::channel();
+    drop(answer);
+    coordinator.handle(
+        Envelope {
+            request: request(&message),
+            reply,
+        },
+        100,
+    );
+    assert!(!coordinator.owns_action_slot());
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+}
+
+#[test]
+fn cancellation_is_processed_even_when_its_requester_has_disconnected() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    let (intent, facts) = fixture();
+    let mut coordinator =
+        ResearchCoordinator::new(Some(dir.path().to_path_buf()), Some(facts), "Ready");
+    assert!(
+        send(
+            &mut coordinator,
+            ResearchRequest::Submit {
+                intent: Box::new(intent)
+            },
+            100
+        )
+        .contains("await_safe_window")
+    );
+    let (reply, answer) = oneshot::channel();
+    drop(answer);
+    coordinator.handle(
+        Envelope {
+            request: request(&ResearchRequest::Cancel {}),
+            reply,
+        },
+        101,
+    );
+    assert!(!coordinator.owns_action_slot());
+    assert!(coordinator.status().contains("aborted"));
+}
+
+#[test]
 fn admission_and_recovery_bind_the_observed_study_root() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
