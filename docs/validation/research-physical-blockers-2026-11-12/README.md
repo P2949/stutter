@@ -41,3 +41,13 @@ exact-build deployment, P11 final campaign, the production `SteamPort`.
    qualified unattended route.
 
 No acceptance gate (G0–G9) that depends on a real game launch has been claimed.
+
+## Occupied-session evidence (2026-11-12, measured, not assumed)
+
+`loginctl show-session 11`: `Type=wayland Active=yes State=active IdleHint=no IdleSinceHint=0`
+(Hyprland compositor, the user's terminal session). No Steam, Wine or Cyberpunk process exists.
+Every physical gate that launches Steam or the game, selects the compat tool through the UI, or
+switches the running Stutter service requires an objectively idle desktop. While the user is
+present in the active session that condition is false, and the guard (`BlockedOccupiedSession`)
+must not be bypassed. This is the irreducible external blocker for the physical gates; it clears
+only when the desktop is genuinely idle, which Stutter's own safe-window detector must observe.
