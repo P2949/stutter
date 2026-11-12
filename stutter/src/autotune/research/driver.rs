@@ -148,7 +148,10 @@ impl Driver {
             return match host.poll() {
                 Progress::Running => Ok(Step::Running(slot.index)),
                 Progress::Finished { evidence } => {
-                    match write_evidence(&self.evidence, &slot, &evidence) {
+                    match evidence
+                        .validate_for(&slot, &self.intent)
+                        .and_then(|()| write_evidence(&self.evidence, &slot, &evidence))
+                    {
                         Ok(evidence_sha256) => {
                             self.seal(slot, AttemptOutcome::Completed { evidence_sha256 })
                         }

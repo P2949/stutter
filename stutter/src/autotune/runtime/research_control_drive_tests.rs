@@ -55,6 +55,7 @@ impl AttemptHost for Fake {
                         schema_version: 1,
                         slot_index,
                         average_fps: 60.0 + f64::from(slot_index % 3),
+                        native_completion: None,
                     },
                 };
             }

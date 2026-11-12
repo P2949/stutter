@@ -18,10 +18,12 @@ pub enum GameState {
     /// Steam accepted the launch but no game process is attributable yet.
     Starting,
     Running,
-    /// A fresh native result was verified for exactly this launch.
+    /// A native result passed file verification against the supplied launch observations.
+    /// The observation source must independently establish their authenticity.
     Result {
-        average_fps: f64,
+        completion: Box<super::cyberpunk::CyberpunkBenchmarkCompletion>,
     },
+    InvalidNativeResult,
     /// The game process tree ended without a fresh native result.
     ExitedWithoutResult,
     /// Something contradicted the launch identity (wrong game, wrong tool, second game).
@@ -87,7 +89,7 @@ impl<P: SteamPort> AttemptHost for SteamAttemptHost<P> {
         };
         match self.port.state() {
             GameState::Starting | GameState::Running => Progress::Running,
-            GameState::Result { average_fps } => {
+            GameState::Result { completion } => {
                 if self.port.stop().is_err() {
                     return Progress::Failed {
                         code: "SettlementUnverified".into(),
@@ -98,10 +100,14 @@ impl<P: SteamPort> AttemptHost for SteamAttemptHost<P> {
                     evidence: AttemptEvidenceV1 {
                         schema_version: 1,
                         slot_index: index,
-                        average_fps,
+                        average_fps: completion.metrics.average_fps,
+                        native_completion: Some(completion),
                     },
                 }
             }
+            GameState::InvalidNativeResult => Progress::Failed {
+                code: "InvalidNativeResult".into(),
+            },
             GameState::ExitedWithoutResult => {
                 if self.port.stop().is_err() {
                     return Progress::Failed {
@@ -203,12 +209,47 @@ mod tests {
         host.launch(&slot(), &context).unwrap();
     }
 
+    fn completion() -> super::super::cyberpunk::CyberpunkBenchmarkCompletion {
+        use super::super::cyberpunk::{
+            CyberpunkBenchmarkCompletion, CyberpunkProcessIdentity, CyberpunkScenario,
+            NativeBenchmarkMetrics,
+        };
+        CyberpunkBenchmarkCompletion {
+            schema_version: 1,
+            app_id: 1_091_500,
+            build_id: 42,
+            scene: CyberpunkScenario::BuiltinBenchmark,
+            settings_sha256: "c".repeat(64),
+            proton_source: ProtonSource::Ge,
+            proton_identity_sha256: "d".repeat(64),
+            process: CyberpunkProcessIdentity {
+                pid: stutter_core::ids::Pid::new(1234),
+                start_ticks: 1,
+                uid: crate::syscall::geteuid(),
+                app_id: 1_091_500,
+                build_id: 42,
+                executable_sha256: "b".repeat(64),
+            },
+            started_unix_nanos: 1,
+            completed_unix_nanos: 2,
+            result_directory: "result".into(),
+            metrics: NativeBenchmarkMetrics {
+                average_fps: 71.5,
+                minimum_fps: None,
+                maximum_fps: None,
+            },
+            files: vec![],
+        }
+    }
+
     #[test]
     fn a_fresh_native_result_finishes_once_and_stops_the_owned_tree() {
         let mut host = host(vec![
             GameState::Starting,
             GameState::Running,
-            GameState::Result { average_fps: 71.5 },
+            GameState::Result {
+                completion: Box::new(completion()),
+            },
         ]);
         assert!(host.safe_window());
         launch(&mut host);

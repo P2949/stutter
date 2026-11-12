@@ -19,6 +19,7 @@ fn ev(slot_index: u32) -> AttemptEvidenceV1 {
         schema_version: 1,
         slot_index,
         average_fps: 60.0 + f64::from(slot_index),
+        native_completion: None,
     }
 }
 

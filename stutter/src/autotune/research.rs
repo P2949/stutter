@@ -41,6 +41,14 @@ mod mounts;
     not(test),
     expect(
         dead_code,
+        reason = "requires a qualified resident game observation source"
+    )
+)]
+pub(crate) mod native_probe;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
         reason = "scores the live diagnosis once real pre-registered cases exist"
     )
 )]

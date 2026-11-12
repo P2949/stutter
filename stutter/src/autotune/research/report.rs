@@ -24,11 +24,53 @@ pub struct AttemptEvidenceV1 {
     pub schema_version: u32,
     pub slot_index: u32,
     pub average_fps: f64,
+    /// Native file hashes and declared process identity; independent attribution is still required.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_completion: Option<Box<super::cyberpunk::CyberpunkBenchmarkCompletion>>,
 }
 
 impl AttemptEvidenceV1 {
     pub fn digest(&self) -> anyhow::Result<String> {
         Ok(stutter_core::hash::sha256_hex(&serde_json::to_vec(self)?))
+    }
+
+    pub(super) fn validate_for(
+        &self,
+        slot: &AttemptSlot,
+        intent: &ResearchIntentV1,
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            self.schema_version == 1
+                && self.slot_index == slot.index
+                && self.average_fps.is_finite()
+                && self.average_fps > 0.0,
+            "invalid attempt evidence"
+        );
+        if let Some(native) = &self.native_completion {
+            let tool = intent
+                .tools
+                .iter()
+                .find(|tool| tool.source == slot.arm)
+                .ok_or_else(|| anyhow::anyhow!("attempt tool is not authorized"))?;
+            anyhow::ensure!(
+                native.schema_version == 1
+                    && native.app_id == intent.app_id
+                    && native.build_id == intent.build_id
+                    && native.process.uid == intent.uid
+                    && native.process.app_id == intent.app_id
+                    && native.process.build_id == intent.build_id
+                    && native.process.start_ticks != 0
+                    && native.process.pid.as_u32() > 1
+                    && native.process.executable_sha256 == intent.game_executable_sha256
+                    && native.proton_source == slot.arm
+                    && native.proton_identity_sha256 == tool.identity_sha256
+                    && native.metrics.average_fps.to_bits() == self.average_fps.to_bits()
+                    && native.started_unix_nanos < native.completed_unix_nanos
+                    && !native.files.is_empty(),
+                "native completion does not match the frozen attempt"
+            );
+        }
+        Ok(())
     }
 }
 
@@ -126,6 +168,7 @@ pub fn build_report(
             let item = evidence
                 .get(&record.slot.index)
                 .ok_or_else(|| anyhow::anyhow!("missing evidence for a completed attempt"))?;
+            item.validate_for(&record.slot, intent)?;
             anyhow::ensure!(
                 item.schema_version == 1
                     && item.slot_index == record.slot.index

@@ -104,6 +104,95 @@ fn fresh_native_result_is_bound_to_build_process_settings_and_raw_hashes() {
 }
 
 #[test]
+fn native_probe_uses_the_verifier_and_rejects_stale_results() {
+    use std::sync::{Arc, Mutex};
+
+    use super::super::{
+        native_probe::{NativeObservationSource, NativeResultProbe, Observation},
+        steam_host::GameState,
+        steam_port::ResultProbe,
+    };
+    struct Source(Arc<Mutex<Option<CyberpunkBenchmarkAttempt>>>);
+    impl NativeObservationSource for Source {
+        fn begin(&mut self) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn poll(&mut self) -> Observation {
+            self.0
+                .lock()
+                .unwrap()
+                .take()
+                .map_or(Observation::Running, |attempt| {
+                    Observation::Completed(Box::new(attempt))
+                })
+        }
+    }
+    let root = prepare_root();
+    let observed = Arc::new(Mutex::new(None));
+    let mut probe = NativeResultProbe::new(
+        root.path().to_path_buf(),
+        crate::syscall::geteuid(),
+        Source(observed.clone()),
+    );
+    probe.begin().unwrap();
+    let started = now_unix_nanos().unwrap();
+    std::thread::sleep(Duration::from_millis(2));
+    write_result(root.path(), "new", r#"{"averageFps": 92.5}"#);
+    let completed = now_unix_nanos().unwrap();
+    *observed.lock().unwrap() = Some(attempt(installation(), process(), started, completed));
+    let GameState::Result { completion } = probe.poll() else {
+        panic!("fresh native result was not verified")
+    };
+    assert_eq!(completion.metrics.average_fps, 92.5);
+    assert!(!completion.files.is_empty());
+    probe.begin().unwrap();
+    let started = now_unix_nanos().unwrap();
+    std::thread::sleep(Duration::from_millis(2));
+    *observed.lock().unwrap() = Some(attempt(
+        installation(),
+        process(),
+        started,
+        now_unix_nanos().unwrap(),
+    ));
+    assert_eq!(probe.poll(), GameState::InvalidNativeResult);
+}
+
+#[test]
+fn native_probe_preserves_process_observation_outcomes() {
+    use super::super::{
+        native_probe::{NativeObservationSource, NativeResultProbe, Observation},
+        steam_host::GameState,
+        steam_port::ResultProbe,
+    };
+    struct Source(std::collections::VecDeque<Observation>);
+    impl NativeObservationSource for Source {
+        fn begin(&mut self) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn poll(&mut self) -> Observation {
+            self.0.pop_front().unwrap()
+        }
+    }
+    let root = prepare_root();
+    let source = Source(
+        [
+            Observation::Starting,
+            Observation::Running,
+            Observation::ExitedWithoutResult,
+            Observation::IdentityMismatch,
+        ]
+        .into(),
+    );
+    let mut probe =
+        NativeResultProbe::new(root.path().to_path_buf(), crate::syscall::geteuid(), source);
+    probe.begin().unwrap();
+    assert_eq!(probe.poll(), GameState::Starting);
+    assert_eq!(probe.poll(), GameState::Running);
+    assert_eq!(probe.poll(), GameState::ExitedWithoutResult);
+    assert_eq!(probe.poll(), GameState::IdentityMismatch);
+}
+
+#[test]
 fn stale_or_ambiguous_native_results_are_not_accepted() {
     let root = prepare_root();
     write_result(root.path(), "old", r#"{"averageFps": 60}"#);
