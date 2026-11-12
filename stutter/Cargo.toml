@@ -42,7 +42,7 @@ reqwest = { workspace = true, features = ["json", "rustls-tls"] }
 tower = { workspace = true }
 url = { workspace = true }
 wayland-client = { workspace = true, optional = true }
-wayland-protocols = { workspace = true, features = ["client"], optional = true }
+wayland-protocols = { workspace = true, features = ["client", "staging"], optional = true }
 tokio = { workspace = true, features = [
     "macros",
     "rt",

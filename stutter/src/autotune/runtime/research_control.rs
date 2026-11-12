@@ -21,6 +21,9 @@ use tokio::{
 };
 
 use super::research_recovery::{RecoveredCampaign, RecoveryJob};
+#[cfg(feature = "wayland-probe")]
+#[path = "research_control_idle.rs"]
+mod idle;
 use crate::autotune::research::{
     AuthenticatedRequest, CampaignBlockReason, CampaignFacts, CampaignLease, ResearchPhase,
     ResearchRequest, receive_request,
@@ -62,6 +65,11 @@ pub(super) struct ResearchCoordinator {
     recovery_attempted: bool,
     terminal_probe_attempted: bool,
     mutable_action_present: bool,
+    #[cfg(feature = "wayland-probe")]
+    desktop_idle: (
+        std::time::Instant,
+        super::super::research::desktop_idle::DesktopIdleObservation,
+    ),
 }
 
 impl ResearchCoordinator {
@@ -97,6 +105,11 @@ impl ResearchCoordinator {
             recovery_attempted: false,
             terminal_probe_attempted: false,
             mutable_action_present,
+            #[cfg(feature = "wayland-probe")]
+            desktop_idle: (
+                std::time::Instant::now(),
+                super::super::research::desktop_idle::DesktopIdleObservation::Unknown,
+            ),
         }
     }
 
@@ -240,6 +253,16 @@ impl ResearchCoordinator {
 
     fn status(&self) -> String {
         if let Some(active) = &self.active {
+            #[cfg(feature = "wayland-probe")]
+            let desktop_idle =
+                serde_json::to_value(if self.desktop_idle.0.elapsed() <= Duration::from_secs(3) {
+                    self.desktop_idle.1
+                } else {
+                    super::super::research::desktop_idle::DesktopIdleObservation::Unknown
+                })
+                .unwrap_or(serde_json::Value::Null);
+            #[cfg(not(feature = "wayland-probe"))]
+            let desktop_idle = serde_json::json!("unavailable");
             return serde_json::json!({
                 "status": "ok",
                 "phase": active.lease.phase(),
@@ -247,6 +270,7 @@ impl ResearchCoordinator {
                 "execution": "BlockedSteamAutomation",
                 "steam_authentication": "Unverified",
                 "game_entitlement": "Unverified",
+                "desktop_idle_observation": desktop_idle,
             })
             .to_string()
                 + "\n";

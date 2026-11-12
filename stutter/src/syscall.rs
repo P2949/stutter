@@ -2,6 +2,17 @@
 
 use std::{ffi::CStr, io, mem, os::unix::ffi::OsStrExt, path::Path};
 
+#[cfg(feature = "wayland-probe")]
+pub fn register_unix_stream_readiness(
+    stream: std::os::unix::net::UnixStream,
+) -> Result<
+    tokio::io::unix::AsyncFd<std::os::unix::net::UnixStream>,
+    tokio::io::unix::AsyncFdRegisterError<std::os::unix::net::UnixStream>,
+> {
+    // SAFETY: AsyncFd owns this UnixStream, which keeps its descriptor open and stable until drop.
+    unsafe { tokio::io::unix::AsyncFd::register(stream) }
+}
+
 pub fn clock_ticks_per_second() -> u64 {
     // SAFETY: _SC_CLK_TCK is a valid sysconf name and has no side effects.
     let value = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };

@@ -19,6 +19,8 @@ pub(crate) mod analysis;
     reason = "P2's unprivileged verifier remains inactive until the owned Steam launcher is qualified"
 )]
 pub(crate) mod cyberpunk;
+#[cfg(feature = "wayland-probe")]
+pub(crate) mod desktop_idle;
 pub(super) mod host;
 mod journal;
 #[cfg_attr(

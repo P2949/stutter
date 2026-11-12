@@ -235,6 +235,23 @@ fn one_verified_intent_is_durable_pausable_cancellable_and_terminal() {
     assert_eq!(accepted["execution"], "BlockedSteamAutomation");
     assert_eq!(accepted["steam_authentication"], "Unverified");
     assert_eq!(accepted["game_entitlement"], "Unverified");
+    #[cfg(feature = "wayland-probe")]
+    {
+        use crate::autotune::research::desktop_idle::DesktopIdleObservation;
+        assert_eq!(accepted["desktop_idle_observation"], "unknown");
+        assert_eq!(
+            coordinator.desktop_idle_target().unwrap().1,
+            facts.session_id
+        );
+        coordinator.set_desktop_idle(DesktopIdleObservation::Monitoring {
+            inhibitor_idle: true,
+            input_idle: true,
+        });
+        coordinator.desktop_idle.0 -= Duration::from_secs(4);
+        let stale: serde_json::Value = serde_json::from_str(&coordinator.status()).unwrap();
+        assert_eq!(stale["desktop_idle_observation"], "unknown");
+        assert_eq!(stale["execution"], "BlockedSteamAutomation");
+    }
 
     let second = send(
         &mut coordinator,

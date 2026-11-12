@@ -181,7 +181,7 @@ fn session_ids(text: &str, uid: u32) -> anyhow::Result<Vec<String>> {
     Ok(ids)
 }
 
-fn active_wayland_session(uid: u32) -> anyhow::Result<String> {
+pub(super) fn active_wayland_session(uid: u32) -> anyhow::Result<String> {
     let listing = loginctl_query(&["--no-pager", "--no-legend", "list-sessions"])?;
     let mut active = Vec::new();
     for session in session_ids(&listing, uid)? {

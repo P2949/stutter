@@ -49,6 +49,8 @@ pub async fn run_autotune_controller_session(
         "BlockedHostIdentity",
     ));
     let mut research_work: Option<tokio::task::JoinHandle<_>> = None;
+    #[cfg(feature = "wayland-probe")]
+    let mut research_idle = super::super::research::desktop_idle::DesktopIdleMonitor::new();
     let (host_context_tx, mut host_context_rx) = mpsc::channel(1);
     let (recovery_tx, mut recovery_rx) = mpsc::channel(1);
     let mut host_context_refresh = if runtime
@@ -125,6 +127,11 @@ pub async fn run_autotune_controller_session(
 
     let controller_result: anyhow::Result<()> = async {
     loop {
+        #[cfg(feature = "wayland-probe")]
+        if let Some(coordinator) = research_coordinator.as_mut() {
+            research_idle.set_target(coordinator.desktop_idle_target());
+            coordinator.set_desktop_idle(research_idle.observation());
+        }
         let event = tokio::select! {
             _ = research_deadline_tick.tick(), if _research_server.is_some() && research_coordinator.is_some() => {
                 let now = (crate::audit::unix_nanos_now() / 1_000_000_000)
@@ -226,6 +233,9 @@ pub async fn run_autotune_controller_session(
         }
     }
     }.await;
+
+    #[cfg(feature = "wayland-probe")]
+    drop(research_idle);
 
     let management_result = if let Some(work) = research_work {
         work.await.map(|_| ()).map_err(|error| {
