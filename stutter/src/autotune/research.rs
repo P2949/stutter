@@ -162,7 +162,7 @@ impl ResearchPhase {
                 | (Launching, Attesting)
                 | (Attesting, Warmup)
                 | (Warmup, Measuring)
-                | (Measuring, Sealing)
+                | (Launching | Attesting | Warmup | Measuring, Sealing)
                 | (Sealing, Analysing)
                 | (Analysing, NextArm)
                 | (NextArm, AwaitSafeWindow)

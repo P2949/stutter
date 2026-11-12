@@ -106,8 +106,10 @@ async fn resident_transport_authenticates_and_blocks_without_independent_host_fa
 
 fn request(message: &ResearchRequest) -> AuthenticatedRequest {
     let (mut client, server) = std::os::unix::net::UnixStream::pair().unwrap();
-    serde_json::to_writer(&mut client, message).unwrap();
-    client.write_all(b"\n").unwrap();
+    // One write: unbuffered per-token writes exhaust the socket send buffer on larger intents.
+    let mut frame = serde_json::to_vec(message).unwrap();
+    frame.push(b'\n');
+    client.write_all(&frame).unwrap();
     receive_request(&server, crate::syscall::geteuid()).unwrap()
 }
 
@@ -472,6 +474,8 @@ fn deadline_seals_a_waiting_or_paused_campaign_without_a_client_request() {
     }
 }
 
+#[path = "research_control_drive_tests.rs"]
+mod drive_tests;
 #[path = "research_control_recovery_tests.rs"]
 mod recovery_tests;
 

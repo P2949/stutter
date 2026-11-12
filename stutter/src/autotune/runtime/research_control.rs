@@ -21,6 +21,8 @@ use tokio::{
 };
 
 use super::research_recovery::{RecoveredCampaign, RecoveryJob};
+#[path = "research_control_drive.rs"]
+mod drive;
 #[cfg(feature = "wayland-probe")]
 #[path = "research_control_idle.rs"]
 mod idle;
@@ -28,6 +30,8 @@ mod idle;
 mod status;
 #[path = "research_control_study.rs"]
 mod study;
+pub(super) use drive::{HostFactory, UnqualifiedSteamHost};
+
 use crate::autotune::research::{
     AuthenticatedRequest, CampaignBlockReason, CampaignFacts, CampaignLease, ResearchPhase,
     ResearchRequest, receive_request,
@@ -70,6 +74,8 @@ pub(super) struct ResearchCoordinator {
     recovery_attempted: bool,
     terminal_probe_attempted: bool,
     mutable_action_present: bool,
+    host_factory: Option<HostFactory>,
+    driver: Option<drive::DriverState>,
     #[cfg(feature = "wayland-probe")]
     desktop_idle: (
         std::time::Instant,
@@ -111,6 +117,8 @@ impl ResearchCoordinator {
             recovery_attempted: false,
             terminal_probe_attempted: false,
             mutable_action_present,
+            host_factory: None,
+            driver: None,
             #[cfg(feature = "wayland-probe")]
             desktop_idle: (
                 std::time::Instant::now(),
@@ -335,6 +343,16 @@ impl ResearchCoordinator {
                 return self.block_after_admission(now, "AdmissionPersistenceFailed");
             }
         }
+        let intent_digest = self
+            .active
+            .as_ref()
+            .map(|active| active.intent_sha256.clone());
+        if let Some(digest) = intent_digest
+            && let Err(error) = self.attach_driver(intent, &digest)
+        {
+            log::error!("research driver could not be attached: {error:#}");
+            return self.block_after_admission(now, "DriverStorageFailed");
+        }
         self.status()
     }
 
@@ -384,6 +402,19 @@ impl ResearchCoordinator {
         ) {
             return self.status();
         }
+        if matches!(
+            active.lease.phase(),
+            ResearchPhase::Launching
+                | ResearchPhase::Attesting
+                | ResearchPhase::Warmup
+                | ResearchPhase::Measuring
+        ) && self.request_driver_cancel()
+        {
+            return response("accepted", "CancellationRequested");
+        }
+        let Some(active) = self.active.as_mut() else {
+            return response("denied", "NoCampaign");
+        };
         if !matches!(
             active.lease.phase(),
             ResearchPhase::Requested
@@ -405,6 +436,7 @@ impl ResearchCoordinator {
             code: "Cancelled",
         });
         self.active = None;
+        self.driver = None;
         self.status()
     }
 
@@ -445,6 +477,7 @@ impl ResearchCoordinator {
             },
         });
         self.active = None;
+        self.driver = None;
     }
 
     fn block_after_admission(&mut self, now: u64, code: &'static str) -> String {

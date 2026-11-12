@@ -57,6 +57,9 @@ pub async fn run_autotune_controller_session(
                 .research_study_dir
                 .clone(),
         );
+        coordinator.set_host_factory(Some(Box::new(|| {
+            Box::new(super::research_control::UnqualifiedSteamHost)
+        })));
     }
     let mut research_work: Option<tokio::task::JoinHandle<_>> = None;
     #[cfg(feature = "wayland-probe")]
@@ -151,6 +154,11 @@ pub async fn run_autotune_controller_session(
                     let coordinator = research_coordinator.take().ok_or_else(|| anyhow::anyhow!("research coordinator unavailable"))?;
                     research_work = Some(spawn_research_work(&mut runtime, coordinator, move |coordinator, now| {
                         coordinator.on_deadline(now);
+                    }));
+                } else if coordinator.drive_due() {
+                    let coordinator = research_coordinator.take().ok_or_else(|| anyhow::anyhow!("research coordinator unavailable"))?;
+                    research_work = Some(spawn_research_work(&mut runtime, coordinator, move |coordinator, now| {
+                        coordinator.drive_attempts(now);
                     }));
                 } else {
                     schedule_research_recovery(coordinator, &runtime, now, &recovery_tx);
