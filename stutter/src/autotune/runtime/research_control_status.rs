@@ -5,6 +5,35 @@ use std::time::Duration;
 use super::{ResearchCoordinator, response};
 
 impl ResearchCoordinator {
+    /// Retrying an identical authenticated intent only returns existing state; it cannot create
+    /// another lease or broaden authority. This lets a client resolve a lost acknowledgement.
+    pub(super) fn retry_submission_status(
+        &self,
+        intent: &crate::autotune::research::ResearchIntentV1,
+        peer_uid: u32,
+    ) -> String {
+        if intent.uid != peer_uid {
+            return response("denied", "WrongUser");
+        }
+        let Ok(digest) = intent.digest() else {
+            return response("denied", "InvalidIntent");
+        };
+        let existing = self
+            .active
+            .as_ref()
+            .map(|active| active.intent_sha256.as_str())
+            .or_else(|| {
+                self.terminal
+                    .as_ref()
+                    .map(|terminal| terminal.intent_sha256.as_str())
+            });
+        if existing == Some(digest.as_str()) {
+            self.status()
+        } else {
+            response("denied", "SingleCampaignLimit")
+        }
+    }
+
     pub(super) fn status(&self) -> String {
         if let Some(active) = &self.active {
             #[cfg(feature = "wayland-probe")]

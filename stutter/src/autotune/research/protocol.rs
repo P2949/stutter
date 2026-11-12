@@ -92,6 +92,27 @@ impl AuthenticatedRequest {
         self.revalidate_at(Path::new("/proc"))
     }
 
+    /// A cancellation was authenticated at receipt and may still settle a campaign after its
+    /// sender exits. PID reuse, an inaccessible proc entry, and all other verbs remain denied.
+    pub fn revalidate_for_handling(&self) -> anyhow::Result<()> {
+        self.revalidate_for_handling_at(Path::new("/proc"))
+    }
+
+    fn revalidate_for_handling_at(&self, proc_root: &Path) -> anyhow::Result<()> {
+        match self.revalidate_at(proc_root) {
+            Ok(()) => Ok(()),
+            Err(error) if matches!(self.request, ResearchRequest::Cancel {}) => {
+                let root = std::fs::metadata(proc_root)?;
+                anyhow::ensure!(root.is_dir(), "proc root unavailable");
+                match std::fs::symlink_metadata(proc_root.join(self.pid.to_string())) {
+                    Err(missing) if missing.kind() == io::ErrorKind::NotFound => Ok(()),
+                    _ => Err(error),
+                }
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     fn revalidate_at(&self, proc_root: &Path) -> anyhow::Result<()> {
         let live = crate::telemetry::proc_view::live_process(proc_root, self.pid)
             .ok_or_else(|| anyhow::anyhow!("peer process unavailable"))?;
@@ -159,6 +180,21 @@ mod tests {
         assert!(stale.revalidate_peer().is_err());
         let (_client, server) = pair(b"{\"verb\":\"status\"}\n");
         assert!(receive_request(&server, uid.wrapping_add(1)).is_err());
+    }
+
+    #[test]
+    fn only_authenticated_cancel_survives_an_exited_peer() {
+        let (_client, server) = pair(b"{\"verb\":\"cancel\"}\n");
+        let uid = crate::syscall::geteuid();
+        let cancel = receive_request(&server, uid).unwrap();
+        let proc_root = tempfile::tempdir().unwrap();
+        assert!(cancel.revalidate_for_handling_at(proc_root.path()).is_ok());
+        std::fs::create_dir(proc_root.path().join(cancel.pid.to_string())).unwrap();
+        assert!(cancel.revalidate_for_handling_at(proc_root.path()).is_err());
+        let (_client, server) = pair(b"{\"verb\":\"status\"}\n");
+        let status = receive_request(&server, uid).unwrap();
+        std::fs::remove_dir(proc_root.path().join(cancel.pid.to_string())).unwrap();
+        assert!(status.revalidate_for_handling_at(proc_root.path()).is_err());
     }
 
     #[test]

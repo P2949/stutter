@@ -379,11 +379,21 @@ fn one_verified_intent_is_durable_pausable_cancellable_and_terminal() {
     let second = send(
         &mut coordinator,
         ResearchRequest::Submit {
-            intent: Box::new(intent),
+            intent: Box::new(intent.clone()),
         },
         101,
     );
-    assert!(second.contains("SingleCampaignLimit"));
+    assert!(second.contains("await_safe_window"));
+    let mut other = intent.clone();
+    other.max_attempts -= 1;
+    let denied = send(
+        &mut coordinator,
+        ResearchRequest::Submit {
+            intent: Box::new(other),
+        },
+        101,
+    );
+    assert!(denied.contains("SingleCampaignLimit"));
 
     let paused = send(&mut coordinator, ResearchRequest::Pause {}, 101);
     assert!(paused.contains("\"paused\""));
@@ -391,6 +401,14 @@ fn one_verified_intent_is_durable_pausable_cancellable_and_terminal() {
     assert!(resumed.contains("\"await_safe_window\""));
     let cancelled = send(&mut coordinator, ResearchRequest::Cancel {}, 103);
     assert!(cancelled.contains("\"aborted\""));
+    let retried = send(
+        &mut coordinator,
+        ResearchRequest::Submit {
+            intent: Box::new(intent),
+        },
+        103,
+    );
+    assert!(retried.contains("\"aborted\""));
     let status = send(&mut coordinator, ResearchRequest::Status {}, 103);
     assert!(status.contains("\"aborted\""));
 

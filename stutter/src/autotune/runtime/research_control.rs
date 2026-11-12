@@ -240,7 +240,7 @@ impl ResearchCoordinator {
         {
             return;
         }
-        let response = if envelope.request.revalidate_peer().is_err() {
+        let response = if envelope.request.revalidate_for_handling().is_err() {
             response("denied", "PeerChanged")
         } else {
             match envelope.request.request() {
@@ -271,7 +271,7 @@ impl ResearchCoordinator {
         now: u64,
     ) -> String {
         if self.submitted {
-            return response("denied", "SingleCampaignLimit");
+            return self.retry_submission_status(intent, peer_uid);
         }
         if let Some(code) = self.storage_blocker {
             return response("blocked", code);

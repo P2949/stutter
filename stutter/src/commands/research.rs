@@ -121,7 +121,30 @@ pub async fn run(input: ResearchClientInput) -> anyhow::Result<()> {
     let socket_dir = input
         .socket_dir
         .ok_or_else(|| anyhow::anyhow!("--socket-dir is required for resident requests"))?;
-    let directory = crate::syscall::open_dir_no_symlinks(&socket_dir)?;
+    let retry_submit = matches!(&request, ResearchRequest::Submit { .. });
+    let result = exchange_once(&socket_dir, uid, request.clone()).await;
+    if retry_submit
+        && result
+            .as_ref()
+            .is_err_and(|error| error.is::<SubmissionAcknowledgementUnknown>())
+    {
+        return exchange_once(&socket_dir, uid, request)
+            .await
+            .map_err(|error| {
+                error.context(
+                    "the original submission may have been admitted; inspect campaign status",
+                )
+            });
+    }
+    result
+}
+
+async fn exchange_once(
+    socket_dir: &std::path::Path,
+    uid: u32,
+    request: ResearchRequest,
+) -> anyhow::Result<()> {
+    let directory = crate::syscall::open_dir_no_symlinks(socket_dir)?;
     let dir_meta = File::from(directory.try_clone()?).metadata()?;
     anyhow::ensure!(
         dir_meta.is_dir() && dir_meta.uid() == uid && dir_meta.mode() & 0o077 == 0,
@@ -146,6 +169,10 @@ pub async fn run(input: ResearchClientInput) -> anyhow::Result<()> {
     tokio::task::spawn_blocking(move || exchange(stream, uid, request)).await?
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("submission acknowledgement is unavailable; query status or retry the same intent")]
+struct SubmissionAcknowledgementUnknown;
+
 fn exchange(
     mut stream: std::os::unix::net::UnixStream,
     uid: u32,
@@ -161,10 +188,17 @@ fn exchange(
         peer_uid == uid && peer.uid == uid && peer.start_ticks != 0,
         "unexpected resident peer"
     );
-    serde_json::to_writer(&mut stream, &request)?;
-    stream.write_all(b"\n")?;
-    let line =
-        crate::autotune::research::read_control_frame(&stream, 4096, Duration::from_secs(5))?;
+    let submit = matches!(&request, ResearchRequest::Submit { .. });
+    let mut transaction = || -> anyhow::Result<Vec<u8>> {
+        serde_json::to_writer(&mut stream, &request)?;
+        stream.write_all(b"\n")?;
+        crate::autotune::research::read_control_frame(&stream, 4096, Duration::from_secs(5))
+    };
+    let line = match transaction() {
+        Ok(line) => line,
+        Err(_) if submit => return Err(SubmissionAcknowledgementUnknown.into()),
+        Err(error) => return Err(error),
+    };
     let live = crate::telemetry::proc_view::live_process(std::path::Path::new("/proc"), pid)
         .ok_or_else(|| anyhow::anyhow!("resident process exited"))?;
     anyhow::ensure!(
@@ -188,6 +222,63 @@ mod tests {
     use std::os::unix::fs::{PermissionsExt, symlink};
 
     use super::*;
+
+    #[tokio::test]
+    async fn lost_submission_acknowledgement_retries_the_identical_intent() {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        let socket = dir.path().join("research.sock");
+        let listener = tokio::net::UnixListener::bind(&socket).unwrap();
+        std::fs::set_permissions(&socket, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let uid = crate::syscall::geteuid();
+        let intent = serde_json::json!({
+            "schema_version": 1, "game": "cyberpunk2077", "app_id": 1091500,
+            "uid": uid, "boot_id": "boot-1", "session_id": "11",
+            "steam_client": {"branch":"publicbeta", "steamrt64_build_id":1,
+                "steamrt64_manifest_sha256":"e".repeat(64), "installed_index_sha256":"f".repeat(64),
+                "identity_sha256":"1".repeat(64), "process":{"steam_pid":10,
+                "steam_start_ticks":1,"webhelper_pid":11,"webhelper_start_ticks":2,"logged_in":true}},
+            "source_sha256":"a".repeat(64), "policy_sha256":"b".repeat(64),
+            "game_executable_sha256":"c".repeat(64), "build_id":1,
+            "tools":[{"source":"ge","identity_sha256":"d".repeat(64)}],
+            "factors":[], "actions":[], "issued_unix_seconds":10, "deadline_unix_seconds":3610,
+            "max_active_seconds":3600, "max_attempt_seconds":720,
+            "max_owned_pressure_seconds_per_study":600, "max_attempts":10,
+            "max_evidence_bytes":1024, "desktop_research_consented":true
+        });
+        let intent_path = dir.path().join("intent.json");
+        std::fs::write(&intent_path, serde_json::to_vec(&intent).unwrap()).unwrap();
+        std::fs::set_permissions(&intent_path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let server = tokio::spawn(async move {
+            let (first, _) = listener.accept().await.unwrap();
+            let mut first = BufReader::new(first);
+            let mut first_line = String::new();
+            first.read_line(&mut first_line).await.unwrap();
+            drop(first);
+            let (second, _) = listener.accept().await.unwrap();
+            let mut second = BufReader::new(second);
+            let mut second_line = String::new();
+            second.read_line(&mut second_line).await.unwrap();
+            assert_eq!(first_line, second_line);
+            second
+                .get_mut()
+                .write_all(b"{\"status\":\"ok\",\"phase\":\"await_safe_window\"}\n")
+                .await
+                .unwrap();
+        });
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            run(ResearchClientInput {
+                socket_dir: Some(dir.path().to_path_buf()),
+                action: ResearchClientAction::Submit(intent_path),
+            }),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        server.await.unwrap();
+    }
 
     #[test]
     fn submit_rejects_public_or_symlinked_intent_files() {
