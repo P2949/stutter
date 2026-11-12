@@ -51,3 +51,11 @@ switches the running Stutter service requires an objectively idle desktop. While
 present in the active session that condition is false, and the guard (`BlockedOccupiedSession`)
 must not be bypassed. This is the irreducible external blocker for the physical gates; it clears
 only when the desktop is genuinely idle, which Stutter's own safe-window detector must observe.
+
+### Stutter's own detector agrees (live, read-only, 2026-11-12)
+
+`cargo test -p stutter --features wayland-probe --lib observes_current_session -- --ignored`
+(the existing live test, no input injection, 600 s idle threshold, output printed locally) observed
+`Monitoring { inhibitor_idle: false, input_idle: false }` for the active Hyprland session: the
+product's own safe-window signal is false, so `AwaitSafeWindow` correctly never advances to
+`Launching`. This exercised the detector against the real compositor.
