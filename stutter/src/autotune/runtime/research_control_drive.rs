@@ -102,6 +102,16 @@ impl ResearchCoordinator {
                 return;
             }
         };
+        // A complete schedule is not a verified campaign. Persist the report before any
+        // terminal lease transition, and retain the explicit provenance blocker until the
+        // independent verification gate is implemented.
+        let done_code = matches!(step, Step::Done).then(|| {
+            if self.persist_report() {
+                "IncompleteProvenance"
+            } else {
+                "ReportPersistenceFailed"
+            }
+        });
         let Some(active) = self.active.as_mut() else {
             return;
         };
@@ -126,10 +136,7 @@ impl ResearchCoordinator {
                 path.extend([Sealing, Analysing, NextArm, AwaitSafeWindow]);
                 advance(active, &path)
             }
-            Step::Done => advance(
-                active,
-                &[ResearchPhase::Restoring, ResearchPhase::Completed],
-            ),
+            Step::Done => advance(active, &[ResearchPhase::Restoring, ResearchPhase::Blocked]),
             Step::Expired => {
                 self.on_deadline(now);
                 true
@@ -139,12 +146,8 @@ impl ResearchCoordinator {
                 true
             }
         };
-        if matches!(step, Step::Done) && ok && !self.persist_report() {
-            self.settle(now, ResearchPhase::Blocked, "ReportPersistenceFailed");
-            return;
-        }
-        if matches!(step, Step::Done) && ok {
-            self.settle_terminal(ResearchPhase::Completed, "Completed");
+        if let Some(code) = done_code.filter(|_| ok) {
+            self.settle_terminal(ResearchPhase::Blocked, code);
         } else if !ok {
             if let Some(state) = self.driver.as_mut()
                 && let Err(error) = state.host.abort()

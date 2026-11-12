@@ -82,8 +82,7 @@ fn phase(coordinator: &ResearchCoordinator) -> Option<ResearchPhase> {
         .map(|active| active.lease.phase())
 }
 
-#[test]
-fn resident_driver_runs_every_scheduled_attempt_once_and_completes() {
+fn finished_schedule_is_blocked_until_verified(report_conflict: bool) {
     let campaign = tempfile::tempdir().unwrap();
     let study = tempfile::tempdir().unwrap();
     for dir in [&campaign, &study] {
@@ -135,13 +134,29 @@ fn resident_driver_runs_every_scheduled_attempt_once_and_completes() {
         coordinator.drive_attempts(103 + step * 3);
         assert_eq!(phase(&coordinator), Some(ResearchPhase::AwaitSafeWindow));
     }
+    if report_conflict {
+        let dir = coordinator.open_campaign_study_dir().unwrap();
+        crate::autotune::research::report_store::write_new(&dir, "report.json", b"conflict")
+            .unwrap();
+    }
     coordinator.drive_attempts(200);
     assert_eq!(script.lock().unwrap().launches, 8);
     assert!(coordinator.active.is_none());
     assert_eq!(
         coordinator.terminal.as_ref().unwrap().phase,
-        ResearchPhase::Completed
+        ResearchPhase::Blocked
     );
+    assert_eq!(
+        coordinator.terminal.as_ref().unwrap().code,
+        if report_conflict {
+            "ReportPersistenceFailed"
+        } else {
+            "IncompleteProvenance"
+        }
+    );
+    if report_conflict {
+        return;
+    }
     let report = send(&mut coordinator, ResearchRequest::Report {}, 201);
     assert!(
         report.contains("\"code\":\"Report\"") && report.contains("arms"),
@@ -153,6 +168,16 @@ fn resident_driver_runs_every_scheduled_attempt_once_and_completes() {
             && verified.contains("\"reconstruction\":\"passed\""),
         "{verified}"
     );
+}
+
+#[test]
+fn resident_driver_does_not_complete_on_unqualified_evidence() {
+    finished_schedule_is_blocked_until_verified(false);
+}
+
+#[test]
+fn report_write_failure_does_not_leave_a_completed_lease() {
+    finished_schedule_is_blocked_until_verified(true);
 }
 
 #[test]
