@@ -6,6 +6,14 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "P5 analysis is consumed once the scheduler drives real runs"
+    )
+)]
+pub(crate) mod analysis;
 #[expect(
     dead_code,
     reason = "P2's unprivileged verifier remains inactive until the owned Steam launcher is qualified"
@@ -33,6 +41,14 @@ mod prefix;
 mod protocol;
 #[path = "research/proton/mod.rs"]
 pub(crate) mod proton;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "P5 scheduling is consumed once the launcher is qualified"
+    )
+)]
+pub(crate) mod scheduler;
 mod steam_inventory;
 mod vdf;
 pub use journal::{AttemptOutcome, AttemptRecord, AttemptSlot, ResearchJournal};
