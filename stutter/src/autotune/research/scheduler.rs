@@ -2,8 +2,6 @@
 //!
 //! A schedule is a pure function of its arms and seed so an offline verifier can regenerate and
 //! compare it. Nothing here launches a game or grants any authority.
-use std::collections::BTreeSet;
-
 /// One scheduled position: which arm runs in which block and slot.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Slot {
@@ -32,9 +30,9 @@ fn next(state: &mut u64) -> u64 {
     z ^ (z >> 31)
 }
 
-/// Balanced multi-arm schedule: every block is a permutation of all arms. Cyclic Latin-square
-/// rotations are applied to a seed-shuffled base order so each arm occupies each position equally
-/// often over every `arms` consecutive blocks; a full reversal pass balances carry-over.
+/// Williams-style balanced schedule. Each arm occupies every position once per `arms` blocks.
+/// Even arm counts balance ordered adjacent pairs over `arms` blocks; odd counts require the
+/// reversed second pass of another `arms` blocks.
 pub(crate) fn balanced(arms: usize, blocks: usize, seed: u64) -> Result<Vec<Slot>, ScheduleError> {
     if arms < 2 {
         return Err(ScheduleError::TooFewArms);
@@ -59,8 +57,19 @@ pub(crate) fn balanced(arms: usize, blocks: usize, seed: u64) -> Result<Vec<Slot
         let rotation = block % arms;
         let reversed = (block / arms) % 2 == 1;
         for position in 0..arms {
-            let source = (position + rotation) % arms;
-            let source = if reversed { arms - 1 - source } else { source };
+            let order_position = if reversed {
+                arms - 1 - position
+            } else {
+                position
+            };
+            let offset = if order_position == 0 {
+                0
+            } else if order_position % 2 == 1 {
+                order_position.div_ceil(2)
+            } else {
+                arms - order_position / 2
+            };
+            let source = (offset + rotation) % arms;
             slots.push(Slot {
                 block,
                 position,
@@ -97,15 +106,24 @@ pub(crate) fn paired(pairs: usize, seed: u64) -> Result<Vec<Slot>, ScheduleError
     Ok(slots)
 }
 
-/// True when every block contains each arm exactly once.
+/// True only for a nonempty, ordered, contiguous sequence of complete blocks and positions.
 pub(crate) fn blocks_are_complete(slots: &[Slot], arms: usize) -> bool {
-    let blocks: BTreeSet<usize> = slots.iter().map(|slot| slot.block).collect();
-    blocks.into_iter().all(|block| {
-        let mut seen: Vec<usize> = slots
+    if !(2..=MAX_ARMS).contains(&arms)
+        || slots.is_empty()
+        || slots.len() > MAX_SLOTS
+        || !slots.len().is_multiple_of(arms)
+    {
+        return false;
+    }
+    slots.chunks_exact(arms).enumerate().all(|(block, chunk)| {
+        if chunk
             .iter()
-            .filter(|slot| slot.block == block)
-            .map(|slot| slot.arm)
-            .collect();
+            .enumerate()
+            .any(|(position, slot)| slot.block != block || slot.position != position)
+        {
+            return false;
+        }
+        let mut seen: Vec<usize> = chunk.iter().map(|slot| slot.arm).collect();
         seen.sort_unstable();
         seen == (0..arms).collect::<Vec<_>>()
     })
@@ -159,5 +177,48 @@ mod tests {
         assert_eq!(balanced(6, 0, 0), Err(ScheduleError::NoBlocks));
         assert_eq!(balanced(16, 1000, 0), Err(ScheduleError::TooManySlots));
         assert_eq!(paired(0, 0), Err(ScheduleError::NoBlocks));
+    }
+
+    #[test]
+    fn six_way_schedule_balances_every_ordered_adjacent_pair() {
+        let slots = balanced(6, 6, 42).unwrap();
+        let mut counts = [[0_u32; 6]; 6];
+        for block in slots.chunks_exact(6) {
+            for pair in block.windows(2) {
+                counts[pair[0].arm][pair[1].arm] += 1;
+            }
+        }
+        for (left, row) in counts.iter().enumerate() {
+            for (right, count) in row.iter().enumerate() {
+                assert_eq!(*count, u32::from(left != right));
+            }
+        }
+    }
+
+    #[test]
+    fn odd_arm_count_balances_adjacent_pairs_across_both_passes() {
+        let slots = balanced(5, 10, 42).unwrap();
+        let mut counts = [[0_u32; 5]; 5];
+        for block in slots.chunks_exact(5) {
+            for pair in block.windows(2) {
+                counts[pair[0].arm][pair[1].arm] += 1;
+            }
+        }
+        for (left, row) in counts.iter().enumerate() {
+            for (right, count) in row.iter().enumerate() {
+                assert_eq!(*count, if left == right { 0 } else { 2 });
+            }
+        }
+    }
+
+    #[test]
+    fn incomplete_or_misordered_blocks_are_rejected() {
+        assert!(!blocks_are_complete(&[], 2));
+        let mut slots = paired(2, 1).unwrap();
+        slots[1].position = 0;
+        assert!(!blocks_are_complete(&slots, 2));
+        slots[1].position = 1;
+        slots[2].block = 4;
+        assert!(!blocks_are_complete(&slots, 2));
     }
 }
