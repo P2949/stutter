@@ -45,6 +45,8 @@ pub struct CampaignFacts {
     pub uid: u32,
     pub boot_id: String,
     pub session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub study_root: Option<super::StudyRootIdentity>,
     pub steam_client: SteamClientIdentity,
     pub source_sha256: String,
     pub policy_sha256: String,
@@ -68,6 +70,7 @@ impl CampaignFacts {
             self.uid == intent.uid
                 && self.boot_id == intent.boot_id
                 && self.session_id == intent.session_id
+                && self.study_root == intent.study_root
                 && self.steam_client == intent.steam_client
                 && self.source_sha256 == intent.source_sha256
                 && self.policy_sha256 == intent.policy_sha256
@@ -531,6 +534,7 @@ mod tests {
             uid: intent.uid,
             boot_id: intent.boot_id.clone(),
             session_id: intent.session_id.clone(),
+            study_root: intent.study_root,
             steam_client: intent.steam_client.clone(),
             source_sha256: intent.source_sha256.clone(),
             policy_sha256: intent.policy_sha256.clone(),

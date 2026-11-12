@@ -48,6 +48,16 @@ pub async fn run_autotune_controller_session(
         None,
         "BlockedHostIdentity",
     ));
+    if let Some(coordinator) = research_coordinator.as_mut() {
+        coordinator.set_study_dir(
+            runtime
+                .config()
+                .daemon_config
+                .autotune
+                .research_study_dir
+                .clone(),
+        );
+    }
     let mut research_work: Option<tokio::task::JoinHandle<_>> = None;
     #[cfg(feature = "wayland-probe")]
     let mut research_idle = super::super::research::desktop_idle::DesktopIdleMonitor::new();

@@ -24,6 +24,8 @@ use super::research_recovery::{RecoveredCampaign, RecoveryJob};
 #[cfg(feature = "wayland-probe")]
 #[path = "research_control_idle.rs"]
 mod idle;
+#[path = "research_control_study.rs"]
+mod study;
 use crate::autotune::research::{
     AuthenticatedRequest, CampaignBlockReason, CampaignFacts, CampaignLease, ResearchPhase,
     ResearchRequest, receive_request,
@@ -55,6 +57,7 @@ struct TerminalCampaign {
 /// An absent context deliberately keeps submit fail-closed while status remains available.
 pub(super) struct ResearchCoordinator {
     campaign_dir: Option<PathBuf>,
+    study_dir: Option<PathBuf>,
     storage_blocker: Option<&'static str>,
     facts: Option<CampaignFacts>,
     context_blocker: &'static str,
@@ -95,6 +98,7 @@ impl ResearchCoordinator {
             .is_some_and(|value| value.mutable_action_present);
         Self {
             campaign_dir,
+            study_dir: None,
             storage_blocker,
             facts,
             context_blocker,
@@ -329,6 +333,9 @@ impl ResearchCoordinator {
         let Some(facts) = self.facts.as_ref() else {
             return response("blocked", self.context_blocker);
         };
+        if !self.study_root_matches(facts) {
+            return response("blocked", "BlockedStudyStorage");
+        }
         if intent.uid != peer_uid {
             return response("denied", "WrongUser");
         }

@@ -253,7 +253,7 @@ pub fn collect_campaign_facts(
         .research_study_dir
         .as_deref()
         .ok_or_else(|| HostFactsError::new("BlockedResearchConfiguration"))?;
-    super::prefix::verify_study_root(study_root, &libraries, uid)
+    let study_root = super::prefix::verify_study_root(study_root, &libraries, uid)
         .map_err(|_| HostFactsError::new("BlockedStudyStorage"))?;
     let (_, game) = crate::autotune::research::discover_cyberpunk_installation(&libraries, uid)
         .map_err(|_| HostFactsError::new("BlockedGameInstallation"))?;
@@ -294,6 +294,10 @@ pub fn collect_campaign_facts(
         uid,
         boot_id,
         session_id,
+        study_root: Some(super::StudyRootIdentity {
+            device: study_root.dev(),
+            inode: study_root.ino(),
+        }),
         steam_client,
         source_sha256,
         policy_sha256,

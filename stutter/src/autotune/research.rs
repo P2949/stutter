@@ -69,6 +69,14 @@ pub enum ResearchGame {
     Cyberpunk2077,
 }
 
+/// Identity of the independently checked private study root, without exposing its path.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StudyRootIdentity {
+    pub device: u64,
+    pub inode: u64,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProtonSource {
@@ -172,6 +180,8 @@ pub struct ResearchIntentV1 {
     pub uid: u32,
     pub boot_id: String,
     pub session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub study_root: Option<StudyRootIdentity>,
     /// The user's selected Steam Client Experimental branch and exact installed package identity.
     pub steam_client: SteamClientIdentity,
     /// Digest of the declared full Git revision and running binary SHA-256. Build provenance is
@@ -204,6 +214,10 @@ impl ResearchIntentV1 {
             "invalid game identity"
         );
         self.steam_client.validate()?;
+        anyhow::ensure!(
+            self.study_root.is_none_or(|root| root.inode != 0),
+            "invalid study root identity"
+        );
         anyhow::ensure!(
             self.steam_client.branch == "publicbeta",
             "Cyberpunk research requires the installed Steam Client Experimental branch"
@@ -320,6 +334,7 @@ mod tests {
             uid: 1000,
             boot_id: "boot-1".into(),
             session_id: "11".into(),
+            study_root: None,
             steam_client: SteamClientIdentity {
                 branch: "publicbeta".into(),
                 steamrt64_build_id: 1,

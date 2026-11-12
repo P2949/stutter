@@ -124,6 +124,7 @@ fn fixture() -> (crate::autotune::research::ResearchIntentV1, CampaignFacts) {
         uid: crate::syscall::geteuid(),
         boot_id: "boot-1".into(),
         session_id: "11".into(),
+        study_root: None,
         steam_client: SteamClientIdentity {
             branch: "publicbeta".into(),
             steamrt64_build_id: 1,
@@ -162,6 +163,7 @@ fn fixture() -> (crate::autotune::research::ResearchIntentV1, CampaignFacts) {
         uid: intent.uid,
         boot_id: intent.boot_id.clone(),
         session_id: intent.session_id.clone(),
+        study_root: intent.study_root,
         steam_client: intent.steam_client.clone(),
         source_sha256: intent.source_sha256.clone(),
         policy_sha256: intent.policy_sha256.clone(),
@@ -173,6 +175,74 @@ fn fixture() -> (crate::autotune::research::ResearchIntentV1, CampaignFacts) {
         mutable_action_present: false,
     };
     (intent, facts)
+}
+
+#[test]
+fn admission_and_recovery_bind_the_observed_study_root() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    let (mut intent, mut facts) = fixture();
+    let root = crate::autotune::research::StudyRootIdentity {
+        device: 10,
+        inode: 20,
+    };
+    facts.study_root = Some(root);
+    let opened = || crate::syscall::open_dir_no_symlinks(dir.path()).unwrap();
+    assert!(CampaignLease::create(opened(), intent.clone(), facts.clone(), 100, 123, 456).is_err());
+    intent.study_root = Some(root);
+    let lease = CampaignLease::create(opened(), intent, facts.clone(), 100, 123, 456).unwrap();
+    drop(lease);
+    facts.study_root = Some(crate::autotune::research::StudyRootIdentity {
+        device: 10,
+        inode: 21,
+    });
+    assert!(CampaignLease::recover(opened(), &facts, 101).is_err());
+}
+
+#[test]
+fn admission_rechecks_the_study_root_after_host_facts_were_collected() {
+    use std::os::unix::fs::MetadataExt;
+    let campaign = tempfile::tempdir().unwrap();
+    let parent = tempfile::tempdir().unwrap();
+    std::fs::set_permissions(campaign.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    let study = parent.path().join("study");
+    std::fs::create_dir(&study).unwrap();
+    std::fs::set_permissions(&study, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let meta = std::fs::metadata(&study).unwrap();
+    let (mut intent, mut facts) = fixture();
+    let root = crate::autotune::research::StudyRootIdentity {
+        device: meta.dev(),
+        inode: meta.ino(),
+    };
+    intent.study_root = Some(root);
+    facts.study_root = Some(root);
+    let mut coordinator =
+        ResearchCoordinator::new(Some(campaign.path().to_path_buf()), Some(facts), "Ready");
+    coordinator.set_study_dir(Some(study.clone()));
+    std::fs::rename(&study, parent.path().join("old-study")).unwrap();
+    std::fs::create_dir(&study).unwrap();
+    std::fs::set_permissions(&study, std::fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(
+        send(
+            &mut coordinator,
+            ResearchRequest::Submit {
+                intent: Box::new(intent.clone())
+            },
+            100
+        )
+        .contains("BlockedStudyStorage")
+    );
+    assert_eq!(std::fs::read_dir(campaign.path()).unwrap().count(), 0);
+    std::fs::remove_dir(&study).unwrap();
+    std::fs::rename(parent.path().join("old-study"), &study).unwrap();
+    let accepted = send(
+        &mut coordinator,
+        ResearchRequest::Submit {
+            intent: Box::new(intent),
+        },
+        100,
+    );
+    assert!(accepted.contains("await_safe_window"));
 }
 
 #[test]
