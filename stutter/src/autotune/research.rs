@@ -32,6 +32,7 @@ mod journal;
 )]
 pub(crate) mod launch_ticket;
 mod lease;
+mod mounts;
 #[cfg_attr(
     not(test),
     expect(

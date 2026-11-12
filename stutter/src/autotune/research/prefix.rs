@@ -36,6 +36,7 @@ pub(super) fn verify_study_root(
     );
     let root = File::from(crate::syscall::open_dir_no_symlinks(study_root)?);
     let metadata = root.metadata()?;
+    let mounts = super::mounts::snapshot()?;
     anyhow::ensure!(
         metadata.is_dir() && metadata.uid() == uid && metadata.mode() & 0o077 == 0,
         "untrusted study root"
@@ -48,6 +49,7 @@ pub(super) fn verify_study_root(
             !overlap(study_root, steam_root),
             "study root overlaps a Steam library"
         );
+        super::mounts::ensure_disjoint(&mounts, study_root, steam_root)?;
         let library_meta = File::from(crate::syscall::open_dir_no_symlinks(library)?).metadata()?;
         anyhow::ensure!(
             metadata.dev() != library_meta.dev() || metadata.ino() != library_meta.ino(),
@@ -67,6 +69,10 @@ pub(super) fn verify_study_root(
             && current.uid() == uid
             && current.mode() & 0o077 == 0,
         "study root changed during preflight"
+    );
+    anyhow::ensure!(
+        super::mounts::snapshot()? == mounts,
+        "mount namespace changed during study preflight"
     );
     Ok(metadata)
 }
@@ -95,11 +101,16 @@ pub fn verify_study_compatdata(
         steam_compat_data_path,
     )?);
     let compat_meta = compat.metadata()?;
+    let mounts = super::mounts::snapshot()?;
     anyhow::ensure!(
         compat_meta.is_dir() && compat_meta.uid() == uid && compat_meta.mode() & 0o077 == 0,
         "untrusted study compatibility data"
     );
     for library in &libraries {
+        let steam_root = library
+            .parent()
+            .ok_or_else(|| anyhow::anyhow!("invalid Steam library"))?;
+        super::mounts::ensure_disjoint(&mounts, steam_compat_data_path, steam_root)?;
         for protected in [
             library.join("compatdata"),
             library.join("compatdata/1091500"),
@@ -143,6 +154,10 @@ pub fn verify_study_compatdata(
     anyhow::ensure!(
         super::discover_steam_libraries(primary_steamapps, uid)? == libraries,
         "Steam libraries changed during prefix preflight"
+    );
+    anyhow::ensure!(
+        super::mounts::snapshot()? == mounts,
+        "mount namespace changed during prefix preflight"
     );
     Ok(StudyPrefixIdentity {
         device: compat_meta.dev(),
