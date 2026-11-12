@@ -83,15 +83,33 @@ pub(crate) fn validate_runtime_config(
     config: &AutotuneRuntimeConfig,
 ) -> Result<(), AutotuneRuntimeError> {
     let research = &config.daemon_config.autotune;
-    if research.research_steamapps_dir.is_some() != research.research_proton_manifest.is_some()
-        || research
-            .research_steamapps_dir
-            .iter()
-            .chain(research.research_proton_manifest.iter())
-            .any(|path| !path.is_absolute())
+    let research_paths = [
+        research.research_socket_dir.as_ref(),
+        research.research_campaign_dir.as_ref(),
+        research.research_steamapps_dir.as_ref(),
+        research.research_proton_manifest.as_ref(),
+    ];
+    let configured = research_paths.iter().filter(|path| path.is_some()).count();
+    let overlapping_storage = match (
+        &research.research_socket_dir,
+        &research.research_campaign_dir,
+    ) {
+        (Some(socket), Some(campaign)) => {
+            socket.starts_with(campaign) || campaign.starts_with(socket)
+        }
+        _ => false,
+    };
+    if (configured != 0 && configured != research_paths.len())
+        || research_paths.into_iter().flatten().any(|path| {
+            !path.is_absolute()
+                || path
+                    .components()
+                    .any(|part| matches!(part, std::path::Component::ParentDir))
+        })
+        || overlapping_storage
     {
         return Err(AutotuneRuntimeError::InvalidMode {
-            message: "research SteamApps and Proton manifest paths must be configured together as absolute paths".to_owned(),
+            message: "research socket, campaign, SteamApps and Proton manifest paths must all be absolute and configured together; socket and campaign directories must not overlap".to_owned(),
         });
     }
     if config.window_seconds == 0 {

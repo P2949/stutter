@@ -47,6 +47,14 @@ fn malformed_or_duplicate_logind_properties_fail_closed() {
 }
 
 #[test]
+fn source_identity_requires_a_full_lowercase_git_revision() {
+    assert!(valid_source_revision(&"a".repeat(40)));
+    assert!(!valid_source_revision("abcdef0"));
+    assert!(!valid_source_revision(&"A".repeat(40)));
+    assert!(!valid_source_revision(&"g".repeat(40)));
+}
+
+#[test]
 fn session_listing_selects_only_the_requested_user_and_rejects_ambiguity() {
     let listing = "11 1000 user seat0 123 user tty1 no -\n2 1000 user - 456 manager - no -\nc1 0 root - 1 user - no -\n";
     assert_eq!(session_ids(listing, 1000).unwrap(), ["11", "2"]);

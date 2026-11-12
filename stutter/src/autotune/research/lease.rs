@@ -154,6 +154,8 @@ pub struct CampaignLease {
     last_unix_seconds: u64,
     event_limit: usize,
     block_reason: Option<CampaignBlockReason>,
+    intent_sha256: String,
+    ever_launched: bool,
 }
 
 fn locked_dir(dir: OwnedFd, uid: u32) -> anyhow::Result<File> {
@@ -256,6 +258,7 @@ impl CampaignLease {
             admitted_unix_seconds: now,
         };
         let uid = header.facts.uid;
+        let intent_sha256 = header.intent_sha256.clone();
         let bytes = serde_json::to_vec(&header)?;
         write_new(&dir, "intent.json", &bytes)?;
         Ok(Self {
@@ -268,6 +271,8 @@ impl CampaignLease {
             last_unix_seconds: now,
             event_limit,
             block_reason: None,
+            intent_sha256,
+            ever_launched: false,
         })
     }
 
@@ -305,6 +310,7 @@ impl CampaignLease {
         let mut last_unix_seconds = header.admitted_unix_seconds;
         let mut sequence = 0_u32;
         let mut block_reason = None;
+        let mut ever_launched = false;
         while !names.is_empty() {
             sequence += 1;
             anyhow::ensure!(sequence as usize <= event_limit, "too many campaign events");
@@ -330,6 +336,7 @@ impl CampaignLease {
                 "campaign event chain mismatch"
             );
             phase = event.to;
+            ever_launched |= event.to == ResearchPhase::Launching;
             block_reason = event.block_reason;
             last_unix_seconds = event.at_unix_seconds;
             previous = stutter_core::hash::sha256_hex(&bytes);
@@ -358,6 +365,8 @@ impl CampaignLease {
             last_unix_seconds,
             event_limit,
             block_reason,
+            intent_sha256: header.intent_sha256,
+            ever_launched,
         })
     }
 
@@ -369,6 +378,18 @@ impl CampaignLease {
         self.block_reason
     }
 
+    pub fn intent_sha256(&self) -> &str {
+        &self.intent_sha256
+    }
+
+    pub fn deadline_unix_seconds(&self) -> u64 {
+        self.deadline_unix_seconds
+    }
+
+    pub fn has_started_launch(&self) -> bool {
+        self.ever_launched
+    }
+
     fn verify_current(&self) -> anyhow::Result<()> {
         let mut names = entries(&self.dir)?;
         anyhow::ensure!(names.remove("intent.json"), "campaign header missing");
@@ -377,6 +398,7 @@ impl CampaignLease {
         let header: Header = serde_json::from_slice(&header)?;
         let mut last_unix_seconds = header.admitted_unix_seconds;
         let mut phase = ResearchPhase::Requested;
+        let mut ever_launched = false;
         for sequence in 1..=self.sequence {
             let name = format!("event-{sequence:04}.json");
             anyhow::ensure!(names.remove(&name), "campaign event missing");
@@ -395,6 +417,7 @@ impl CampaignLease {
                 "campaign event chain changed"
             );
             phase = event.to;
+            ever_launched |= event.to == ResearchPhase::Launching;
             last_unix_seconds = event.at_unix_seconds;
             previous = stutter_core::hash::sha256_hex(&bytes);
         }
@@ -403,6 +426,8 @@ impl CampaignLease {
                 && phase == self.phase
                 && previous == self.previous_sha256
                 && header.intent.deadline_unix_seconds == self.deadline_unix_seconds
+                && header.intent_sha256 == self.intent_sha256
+                && ever_launched == self.ever_launched
                 && event_limit(&header.intent) == self.event_limit
                 && last_unix_seconds == self.last_unix_seconds,
             "campaign record changed or contains unknown entries"
@@ -455,6 +480,7 @@ impl CampaignLease {
         let bytes = serde_json::to_vec(&event)?;
         write_new(&self.dir, &format!("event-{sequence:04}.json"), &bytes)?;
         self.phase = next;
+        self.ever_launched |= next == ResearchPhase::Launching;
         self.sequence = sequence;
         self.previous_sha256 = stutter_core::hash::sha256_hex(&bytes);
         self.last_unix_seconds = now;

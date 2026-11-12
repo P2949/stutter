@@ -91,8 +91,9 @@ fn emit_build_metadata() {
 }
 
 fn emit_git_rerun_hints() {
-    let git_dir = PathBuf::from("..").join(".git");
-    let head_path = git_dir.join("HEAD");
+    let Some(head_path) = git_path("HEAD") else {
+        return;
+    };
     println!("cargo:rerun-if-changed={}", head_path.display());
 
     let Ok(head) = std::fs::read_to_string(&head_path) else {
@@ -100,14 +101,31 @@ fn emit_git_rerun_hints() {
     };
 
     if let Some(reference) = head.strip_prefix("ref: ") {
-        let ref_path = git_dir.join(reference.trim());
-        println!("cargo:rerun-if-changed={}", ref_path.display());
+        if let Some(ref_path) = git_path(reference.trim()) {
+            println!("cargo:rerun-if-changed={}", ref_path.display());
+        }
+        if let Some(packed_refs) = git_path("packed-refs") {
+            println!("cargo:rerun-if-changed={}", packed_refs.display());
+        }
     }
+}
+
+fn git_path(name: &str) -> Option<PathBuf> {
+    let output = Command::new("git")
+        .args(["rev-parse", "--git-path", name])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let path = String::from_utf8(output.stdout).ok()?;
+    let path = path.trim();
+    (!path.is_empty()).then(|| PathBuf::from(path))
 }
 
 fn detect_git_revision() -> Option<String> {
     let output = Command::new("git")
-        .args(["rev-parse", "--short", "HEAD"])
+        .args(["rev-parse", "--verify", "HEAD"])
         .output()
         .ok()?;
 

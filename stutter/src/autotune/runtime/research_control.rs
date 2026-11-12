@@ -46,6 +46,43 @@ struct TerminalCampaign {
     code: &'static str,
 }
 
+pub(super) struct RecoveryJob {
+    dir: PathBuf,
+    facts: CampaignFacts,
+    now: u64,
+}
+
+pub(super) struct RecoveredCampaign {
+    facts: CampaignFacts,
+    lease: CampaignLease,
+}
+
+impl RecoveryJob {
+    /// Only prelaunch phases are recoverable until child-study and worker settlement are wired.
+    pub(super) fn run(self) -> anyhow::Result<RecoveredCampaign> {
+        let dir = crate::syscall::open_dir_no_symlinks(&self.dir)?;
+        let lease = CampaignLease::recover(dir, &self.facts, self.now)?;
+        anyhow::ensure!(
+            !lease.has_started_launch(),
+            "UnsafeToResume: launch history needs attempt and worker verification"
+        );
+        anyhow::ensure!(
+            matches!(
+                lease.phase(),
+                ResearchPhase::AwaitSafeWindow
+                    | ResearchPhase::Paused
+                    | ResearchPhase::Blocked
+                    | ResearchPhase::Aborted
+            ),
+            "UnsafeToResume: unsupported recovered phase"
+        );
+        Ok(RecoveredCampaign {
+            facts: self.facts,
+            lease,
+        })
+    }
+}
+
 /// Controller-owned admission and management state. The production controller supplies host
 /// facts only after independently verifying source, policy, Steam installation and tool identity.
 /// An absent context deliberately keeps submit fail-closed while status remains available.
@@ -57,11 +94,17 @@ pub(super) struct ResearchCoordinator {
     active: Option<ActiveCampaign>,
     terminal: Option<TerminalCampaign>,
     submitted: bool,
+    recovery_pending: bool,
+    recovery_attempted: bool,
 }
 
 impl ResearchCoordinator {
     pub(super) fn owns_action_slot(&self) -> bool {
-        self.active.is_some()
+        self.active.is_some() || self.storage_blocker == Some("UnsafeToResume")
+    }
+
+    pub(super) fn host_refresh_complete(&self) -> bool {
+        self.submitted || (self.recovery_attempted && !self.recovery_pending)
     }
 
     pub(super) fn new(
@@ -81,6 +124,8 @@ impl ResearchCoordinator {
             active: None,
             terminal: None,
             submitted: false,
+            recovery_pending: false,
+            recovery_attempted: false,
         }
     }
 
@@ -106,6 +151,67 @@ impl ResearchCoordinator {
     pub(super) fn set_mutable_action_present(&mut self, present: bool) {
         if let Some(facts) = self.facts.as_mut() {
             facts.mutable_action_present = present;
+        }
+    }
+
+    pub(super) fn prepare_recovery(&mut self, now: u64) -> Option<RecoveryJob> {
+        if self.storage_blocker != Some("UnsafeToResume")
+            || self.recovery_pending
+            || self.recovery_attempted
+        {
+            return None;
+        }
+        let facts = self.facts.as_ref()?;
+        if facts.mutable_action_present || facts.validation_override_present {
+            return None;
+        }
+        let dir = self.campaign_dir.clone()?;
+        self.recovery_pending = true;
+        self.recovery_attempted = true;
+        Some(RecoveryJob {
+            dir,
+            facts: facts.clone(),
+            now,
+        })
+    }
+
+    pub(super) fn finish_recovery(&mut self, result: anyhow::Result<RecoveredCampaign>) {
+        self.recovery_pending = false;
+        let recovered = match result {
+            Ok(value) if self.facts.as_ref() == Some(&value.facts) => value,
+            Ok(_) => {
+                log::warn!("research recovery context changed");
+                return;
+            }
+            Err(error) => {
+                log::warn!("research recovery refused: {error:#}");
+                return;
+            }
+        };
+        let lease = recovered.lease;
+        let digest = lease.intent_sha256().to_owned();
+        self.submitted = true;
+        self.storage_blocker = None;
+        if matches!(
+            lease.phase(),
+            ResearchPhase::Blocked | ResearchPhase::Aborted
+        ) {
+            self.terminal = Some(TerminalCampaign {
+                phase: lease.phase(),
+                intent_sha256: digest,
+                code: match (lease.phase(), lease.block_reason()) {
+                    (_, Some(CampaignBlockReason::DeadlineExpired)) => "DeadlineExpired",
+                    (ResearchPhase::Aborted, _) => "Cancelled",
+                    _ => "RecoveredBlocked",
+                },
+            });
+        } else {
+            let deadline_unix_seconds = lease.deadline_unix_seconds();
+            self.active = Some(ActiveCampaign {
+                lease,
+                intent_sha256: digest,
+                deadline_unix_seconds,
+            });
         }
     }
 
@@ -159,8 +265,18 @@ impl ResearchCoordinator {
         if let Some(code) = self.storage_blocker {
             return response("blocked", code);
         }
-        if self.facts.is_some() {
-            return response("idle", "Ready");
+        if let Some(facts) = &self.facts {
+            if facts.validation_override_present || facts.mutable_action_present {
+                return response("blocked", "BlockedMutationSlot");
+            }
+            return serde_json::json!({
+                "status": "idle",
+                "code": "ReadyForIntent",
+                "execution": "BlockedSteamAutomation",
+                "facts": facts,
+            })
+            .to_string()
+                + "\n";
         }
         response("idle", self.context_blocker)
     }

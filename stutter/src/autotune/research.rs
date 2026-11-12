@@ -156,6 +156,8 @@ pub struct ResearchIntentV1 {
     pub session_id: String,
     /// The user's selected Steam Client Experimental branch and exact installed package identity.
     pub steam_client: SteamClientIdentity,
+    /// Digest of the declared full Git revision and running binary SHA-256. Build provenance is
+    /// independently qualified at deployment; this digest alone does not prove a clean tree.
     pub source_sha256: String,
     pub policy_sha256: String,
     pub game_executable_sha256: String,

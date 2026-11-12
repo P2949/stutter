@@ -185,8 +185,14 @@ fn resident_status_tracks_typed_host_readiness_and_steam_login_blockers() {
         code: "BlockedSteamLogin",
     }));
     assert!(coordinator.status().contains("BlockedSteamLogin"));
-    coordinator.set_host_context(Ok(facts));
-    assert!(coordinator.status().contains("Ready"));
+    coordinator.set_host_context(Ok(facts.clone()));
+    let status: serde_json::Value = serde_json::from_str(&coordinator.status()).unwrap();
+    assert_eq!(status["code"], "ReadyForIntent");
+    assert_eq!(status["execution"], "BlockedSteamAutomation");
+    assert_eq!(status["facts"]["source_sha256"], facts.source_sha256);
+    assert!(!status.to_string().contains("/home/"));
+    coordinator.set_mutable_action_present(true);
+    assert!(coordinator.status().contains("BlockedMutationSlot"));
 }
 
 fn send(coordinator: &mut ResearchCoordinator, message: ResearchRequest, now: u64) -> String {
@@ -300,6 +306,9 @@ fn deadline_seals_a_waiting_or_paused_campaign_without_a_client_request() {
         );
     }
 }
+
+#[path = "research_control_recovery_tests.rs"]
+mod recovery_tests;
 
 #[test]
 fn intent_without_verified_facts_never_creates_campaign_records() {

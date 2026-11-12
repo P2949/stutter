@@ -35,14 +35,18 @@ impl HostFactsError {
     }
 }
 
+fn valid_source_revision(revision: &str) -> bool {
+    revision.len() == 40
+        && revision
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
 fn source_identity() -> anyhow::Result<String> {
     let revision = env!("STUTTER_GIT_REV");
     anyhow::ensure!(
-        (7..=40).contains(&revision.len())
-            && revision
-                .bytes()
-                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()),
-        "Stutter binary has no exact embedded Git revision"
+        valid_source_revision(revision),
+        "Stutter binary has no full embedded Git revision"
     );
     let executable = std::env::current_exe()?;
     anyhow::ensure!(

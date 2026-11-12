@@ -49,7 +49,8 @@ pub async fn run_autotune_controller_session(
         "BlockedHostIdentity",
     );
     let (host_context_tx, mut host_context_rx) = mpsc::channel(1);
-    let _host_context_refresh = if runtime
+    let (recovery_tx, mut recovery_rx) = mpsc::channel(1);
+    let mut host_context_refresh = if runtime
         .config()
         .daemon_config
         .autotune
@@ -127,6 +128,7 @@ pub async fn run_autotune_controller_session(
                 let now = (crate::audit::unix_nanos_now() / 1_000_000_000)
                     .min(u128::from(u64::MAX)) as u64;
                 research_coordinator.on_deadline(now);
+                schedule_research_recovery(&mut research_coordinator, &runtime, now, &recovery_tx);
                 continue;
             }
             event = event_rx.recv() => match event {
@@ -138,6 +140,23 @@ pub async fn run_autotune_controller_session(
                     log::info!("research host context is blocked code={}", error.code);
                 }
                 research_coordinator.set_host_context(context);
+                let now = (crate::audit::unix_nanos_now() / 1_000_000_000)
+                    .min(u128::from(u64::MAX)) as u64;
+                schedule_research_recovery(&mut research_coordinator, &runtime, now, &recovery_tx);
+                continue;
+            }
+            Some(result) = recovery_rx.recv() => {
+                research_coordinator.set_mutable_action_present(
+                    runtime.has_active_experiment()
+                        || runtime.has_kept_actions()
+                        || runtime.controller_state().active_experiment.is_some(),
+                );
+                research_coordinator.finish_recovery(result);
+                if research_coordinator.host_refresh_complete()
+                    && let Some(task) = host_context_refresh.take()
+                {
+                    task.abort();
+                }
                 continue;
             }
             Some(request) = research_rx.recv() => {
@@ -149,10 +168,18 @@ pub async fn run_autotune_controller_session(
                         || runtime.controller_state().active_experiment.is_some(),
                 );
                 research_coordinator.handle(request, now);
+                // Admission freezes these facts. Future launch and block code must re-attest
+                // its own context; repeatedly hashing the game here cannot supply that proof.
+                if research_coordinator.host_refresh_complete()
+                    && let Some(task) = host_context_refresh.take()
+                {
+                    task.abort();
+                }
                 continue;
             }
         };
-        runtime.research_campaign_active = research_coordinator.owns_action_slot();
+        runtime.research_campaign_active =
+            _research_server.is_some() && research_coordinator.owns_action_slot();
         runtime.on_event(event)?;
         event_loop_iterations = event_loop_iterations.saturating_add(1);
         if event_loop_iterations.is_multiple_of(30)
@@ -172,6 +199,9 @@ pub async fn run_autotune_controller_session(
         }
     }
 
+    if let Some(task) = host_context_refresh {
+        task.abort();
+    }
     if let Some(stop_task) = stop_task {
         stop_task.abort();
         let _ = stop_task.await;
@@ -189,6 +219,30 @@ pub async fn run_autotune_controller_session(
         handle.shutdown_gracefully(Duration::from_millis(3_000), shutdown_poll)?;
     }
     finish_autotune_controller_session(&mut runtime, monitor_result)
+}
+
+pub(super) fn schedule_research_recovery(
+    coordinator: &mut super::research_control::ResearchCoordinator,
+    runtime: &AutotuneRuntime,
+    now: u64,
+    sender: &mpsc::Sender<anyhow::Result<super::research_control::RecoveredCampaign>>,
+) {
+    coordinator.set_mutable_action_present(
+        runtime.has_active_experiment()
+            || runtime.has_kept_actions()
+            || runtime.controller_state().active_experiment.is_some(),
+    );
+    let Some(job) = coordinator.prepare_recovery(now) else {
+        return;
+    };
+    let sender = sender.clone();
+    tokio::spawn(async move {
+        let result = match tokio::task::spawn_blocking(move || job.run()).await {
+            Ok(result) => result,
+            Err(error) => Err(anyhow::anyhow!("research recovery task failed: {error}")),
+        };
+        let _ = sender.send(result).await;
+    });
 }
 
 pub(crate) fn finish_autotune_controller_session(

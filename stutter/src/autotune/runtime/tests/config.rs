@@ -95,7 +95,7 @@ fn dry_run_all_safe_runtime_config_requires_suggest_mode() {
 }
 
 #[test]
-fn research_inventory_paths_are_configured_as_an_absolute_pair() {
+fn research_paths_are_complete_absolute_and_separate() {
     let mut config = AutotuneRuntimeConfig::observe(None, None, None);
     assert!(validate_runtime_config(&config).is_ok());
     config.daemon_config.autotune.research_steamapps_dir =
@@ -106,7 +106,17 @@ fn research_inventory_paths_are_configured_as_an_absolute_pair() {
     assert!(validate_runtime_config(&config).is_err());
     config.daemon_config.autotune.research_proton_manifest =
         Some("/nix/store/proton-lab.json".into());
+    assert!(validate_runtime_config(&config).is_err());
+    config.daemon_config.autotune.research_socket_dir = Some("/run/user/1000/research".into());
+    config.daemon_config.autotune.research_campaign_dir =
+        Some("/run/user/1000/research/campaign".into());
+    assert!(validate_runtime_config(&config).is_err());
+    config.daemon_config.autotune.research_campaign_dir =
+        Some("/home/user/studies/campaign".into());
     assert!(validate_runtime_config(&config).is_ok());
+    config.daemon_config.autotune.research_campaign_dir =
+        Some("/home/user/../studies/campaign".into());
+    assert!(validate_runtime_config(&config).is_err());
 }
 
 #[test]
