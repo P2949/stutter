@@ -21,6 +21,11 @@ pub(crate) mod analysis;
 pub(crate) mod cyberpunk;
 #[cfg(feature = "wayland-probe")]
 pub(crate) mod desktop_idle;
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "wired by the Steam adapter binary entry")
+)]
+pub(crate) mod dispatcher;
 pub(super) mod host;
 mod journal;
 #[cfg_attr(
