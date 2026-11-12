@@ -192,6 +192,7 @@ pub fn build_report(
 }
 
 /// Independent replay: rebuild from the same raw inputs and require identical bytes.
+#[cfg(test)]
 pub fn verify_report(
     intent: &ResearchIntentV1,
     records: &[AttemptRecord],

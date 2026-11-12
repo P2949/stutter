@@ -40,14 +40,8 @@ mod prefix;
 mod protocol;
 #[path = "research/proton/mod.rs"]
 pub(crate) mod proton;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "Report/Verify requests are connected once raw evidence capture lands"
-    )
-)]
 pub(crate) mod report;
+pub(crate) mod report_store;
 #[cfg_attr(
     not(test),
     expect(

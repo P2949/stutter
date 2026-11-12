@@ -15,6 +15,7 @@ pub(in crate::autotune::runtime) type HostFactory =
 pub(super) struct DriverState {
     driver: Driver,
     host: Box<dyn AttemptHost + Send>,
+    campaign: File,
 }
 
 fn create_dir(parent: &File, name: &str) -> anyhow::Result<File> {
@@ -49,12 +50,19 @@ impl ResearchCoordinator {
         let campaign = create_dir(&study, &digest[..16])?;
         let journal_dir = create_dir(&campaign, "journal")?;
         let dispatch = create_dir(&campaign, "dispatch")?;
+        let evidence = create_dir(&campaign, "evidence")?;
+        crate::autotune::research::report_store::write_new(
+            &campaign,
+            "intent.json",
+            &serde_json::to_vec(intent)?,
+        )?;
         let schedule = build_schedule(intent)?;
         let len = schedule.len();
         let journal = ResearchJournal::open(journal_dir.into(), intent.uid, schedule)?;
         self.driver = Some(DriverState {
-            driver: Driver::new(journal, intent.clone(), dispatch, len),
+            driver: Driver::new(journal, intent.clone(), dispatch, evidence, len),
             host: factory(),
+            campaign,
         });
         Ok(())
     }
@@ -126,6 +134,10 @@ impl ResearchCoordinator {
                 true
             }
         };
+        if matches!(step, Step::Done) && ok && !self.persist_report() {
+            self.settle(now, ResearchPhase::Blocked, "ReportPersistenceFailed");
+            return;
+        }
         if matches!(step, Step::Done) && ok {
             self.settle_terminal(ResearchPhase::Completed, "Completed");
         } else if !ok {
@@ -197,4 +209,73 @@ impl AttemptHost for UnqualifiedSteamHost {
         }
     }
     fn abort(&mut self) {}
+}
+
+impl ResearchCoordinator {
+    /// Write `report.json` for a finished schedule. Called while the driver still owns the journal.
+    fn persist_report(&mut self) -> bool {
+        let Some(state) = self.driver.as_ref() else {
+            return false;
+        };
+        let result = state.driver.finalize().and_then(|report| {
+            crate::autotune::research::report_store::write_report(&state.campaign, &report)
+        });
+        if let Err(error) = &result {
+            log::error!("research report could not be persisted: {error:#}");
+        }
+        result.is_ok()
+    }
+
+    /// Locate the campaign's private study directory for Report/Verify.
+    pub(super) fn open_campaign_study_dir(&self) -> Option<File> {
+        let digest = self
+            .active
+            .as_ref()
+            .map(|active| active.intent_sha256.as_str())
+            .or_else(|| self.terminal.as_ref().map(|t| t.intent_sha256.as_str()))?;
+        let study =
+            File::from(crate::syscall::open_dir_no_symlinks(self.study_dir.as_deref()?).ok()?);
+        use std::os::fd::AsFd;
+        let dir = crate::syscall::openat_dir_nofollow(study.as_fd(), digest.get(..16)?).ok()?;
+        Some(File::from(dir))
+    }
+
+    pub(super) fn report_response(&self, verify: bool, uid: u32) -> String {
+        let Some(dir) = self.open_campaign_study_dir() else {
+            return super::response(
+                "blocked",
+                if verify {
+                    "NoReportToVerify"
+                } else {
+                    "NoReport"
+                },
+            );
+        };
+        match crate::autotune::research::report_store::load_and_verify(&dir, uid) {
+            Ok(report) if verify => {
+                serde_json::json!({
+                    "status": "ok", "code": "ReportVerified",
+                    "intent_sha256": report.intent_sha256,
+                })
+                .to_string()
+                    + "\n"
+            }
+            Ok(report) => {
+                serde_json::json!({ "status": "ok", "code": "Report", "report": report })
+                    .to_string()
+                    + "\n"
+            }
+            Err(error) => {
+                log::warn!("research report unavailable: {error:#}");
+                super::response(
+                    "blocked",
+                    if verify {
+                        "VerificationFailed"
+                    } else {
+                        "NoReport"
+                    },
+                )
+            }
+        }
+    }
 }

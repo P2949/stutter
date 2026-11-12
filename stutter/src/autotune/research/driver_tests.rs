@@ -1,6 +1,7 @@
 use std::{collections::VecDeque, os::unix::fs::PermissionsExt};
 
 use super::*;
+use crate::autotune::research::report::AttemptEvidenceV1;
 
 struct Fake {
     safe: bool,
@@ -8,6 +9,16 @@ struct Fake {
     launch_fails: bool,
     launches: u32,
     aborts: u32,
+    current: u32,
+    auto_finish: bool,
+}
+
+fn ev(slot_index: u32) -> AttemptEvidenceV1 {
+    AttemptEvidenceV1 {
+        schema_version: 1,
+        slot_index,
+        average_fps: 60.0 + f64::from(slot_index),
+    }
 }
 
 impl AttemptHost for Fake {
@@ -23,12 +34,18 @@ impl AttemptHost for Fake {
             proton_manifest: "/m".into(),
         })
     }
-    fn launch(&mut self, _: &AttemptSlot, _: &DispatchContextV1) -> anyhow::Result<()> {
+    fn launch(&mut self, slot: &AttemptSlot, _: &DispatchContextV1) -> anyhow::Result<()> {
+        self.current = slot.index;
         self.launches += 1;
         anyhow::ensure!(!self.launch_fails, "steam refused");
         Ok(())
     }
     fn poll(&mut self) -> Progress {
+        if self.auto_finish {
+            return Progress::Finished {
+                evidence: ev(self.current),
+            };
+        }
         self.polls.pop_front().unwrap_or(Progress::Running)
     }
     fn abort(&mut self) {
@@ -43,12 +60,14 @@ fn fake() -> Fake {
         launch_fails: false,
         launches: 0,
         aborts: 0,
+        current: 0,
+        auto_finish: false,
     }
 }
 
 fn setup(max_attempts: u32) -> (tempfile::TempDir, Driver, ResearchIntentV1) {
     let dir = tempfile::tempdir().unwrap();
-    for sub in ["journal", "dispatch"] {
+    for sub in ["journal", "dispatch", "evidence"] {
         std::fs::create_dir(dir.path().join(sub)).unwrap();
         std::fs::set_permissions(dir.path().join(sub), std::fs::Permissions::from_mode(0o700))
             .unwrap();
@@ -71,7 +90,13 @@ fn setup(max_attempts: u32) -> (tempfile::TempDir, Driver, ResearchIntentV1) {
     .unwrap();
     let root =
         File::from(crate::syscall::open_dir_no_symlinks(&dir.path().join("dispatch")).unwrap());
-    (dir, Driver::new(journal, intent.clone(), root, len), intent)
+    let evidence =
+        File::from(crate::syscall::open_dir_no_symlinks(&dir.path().join("evidence")).unwrap());
+    (
+        dir,
+        Driver::new(journal, intent.clone(), root, evidence, len),
+        intent,
+    )
 }
 
 #[test]
@@ -91,11 +116,9 @@ fn waits_for_a_safe_window_then_runs_each_attempt_once_to_done() {
     assert_eq!(driver.tick(&mut host, now).unwrap(), Step::Waiting);
     assert_eq!(host.launches, 0);
     host.safe = true;
+    host.auto_finish = true;
     let mut sealed = 0;
     for t in 0..40 {
-        host.polls.push_back(Progress::Finished {
-            evidence_sha256: "a".repeat(64),
-        });
         match driver.tick(&mut host, now + t).unwrap() {
             Step::Sealed(record) => {
                 assert!(matches!(record.outcome, AttemptOutcome::Completed { .. }));

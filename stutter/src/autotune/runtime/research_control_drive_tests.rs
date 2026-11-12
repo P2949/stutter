@@ -8,6 +8,7 @@ use crate::autotune::research::{
     AttemptSlot, ProtonSource, ResearchTool,
     dispatch_context::{ArmSpec, DispatchContextV1},
     driver::{AttemptHost, Progress},
+    report::AttemptEvidenceV1,
 };
 
 #[derive(Default)]
@@ -16,6 +17,8 @@ struct Script {
     polls: VecDeque<Progress>,
     launches: u32,
     aborts: u32,
+    current: u32,
+    auto_finish: bool,
 }
 
 struct Fake(Arc<Mutex<Script>>);
@@ -33,11 +36,26 @@ impl AttemptHost for Fake {
             proton_manifest: "/m".into(),
         })
     }
-    fn launch(&mut self, _: &AttemptSlot, _: &DispatchContextV1) -> anyhow::Result<()> {
-        self.0.lock().unwrap().launches += 1;
+    fn launch(&mut self, slot: &AttemptSlot, _: &DispatchContextV1) -> anyhow::Result<()> {
+        let mut script = self.0.lock().unwrap();
+        script.current = slot.index;
+        script.launches += 1;
         Ok(())
     }
     fn poll(&mut self) -> Progress {
+        {
+            let script = self.0.lock().unwrap();
+            if script.auto_finish {
+                let slot_index = script.current;
+                return Progress::Finished {
+                    evidence: AttemptEvidenceV1 {
+                        schema_version: 1,
+                        slot_index,
+                        average_fps: 60.0 + f64::from(slot_index % 3),
+                    },
+                };
+            }
+        }
         self.0
             .lock()
             .unwrap()
@@ -77,7 +95,7 @@ fn resident_driver_runs_every_scheduled_attempt_once_and_completes() {
         identity_sha256: "b".repeat(64),
     });
     facts.tools = intent.tools.clone();
-    intent.max_attempts = 4;
+    intent.max_attempts = 8;
     intent.max_attempt_seconds = 50;
     let script = Arc::new(Mutex::new(Script::default()));
     let mut coordinator = ResearchCoordinator::new(
@@ -103,22 +121,27 @@ fn resident_driver_runs_every_scheduled_attempt_once_and_completes() {
     assert_eq!(phase(&coordinator), Some(ResearchPhase::AwaitSafeWindow));
 
     script.lock().unwrap().safe = true;
-    for step in 0..4u64 {
+    script.lock().unwrap().auto_finish = true;
+    for step in 0..8u64 {
         coordinator.drive_attempts(102 + step * 3);
         assert_eq!(phase(&coordinator), Some(ResearchPhase::Launching));
-        script.lock().unwrap().polls.push_back(Progress::Finished {
-            evidence_sha256: "a".repeat(64),
-        });
         coordinator.drive_attempts(103 + step * 3);
         assert_eq!(phase(&coordinator), Some(ResearchPhase::AwaitSafeWindow));
     }
     coordinator.drive_attempts(200);
-    assert_eq!(script.lock().unwrap().launches, 4);
+    assert_eq!(script.lock().unwrap().launches, 8);
     assert!(coordinator.active.is_none());
     assert_eq!(
         coordinator.terminal.as_ref().unwrap().phase,
         ResearchPhase::Completed
     );
+    let report = send(&mut coordinator, ResearchRequest::Report {}, 201);
+    assert!(
+        report.contains("\"code\":\"Report\"") && report.contains("arms"),
+        "{report}"
+    );
+    let verified = send(&mut coordinator, ResearchRequest::Verify {}, 202);
+    assert!(verified.contains("ReportVerified"), "{verified}");
 }
 
 #[test]

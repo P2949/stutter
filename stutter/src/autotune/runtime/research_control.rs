@@ -263,8 +263,8 @@ impl ResearchCoordinator {
                 ResearchRequest::Pause {} => self.pause(now),
                 ResearchRequest::Resume {} => self.resume(now),
                 ResearchRequest::Cancel {} => self.cancel(now),
-                ResearchRequest::Report {} => response("blocked", "NoReport"),
-                ResearchRequest::Verify {} => response("blocked", "NoReportToVerify"),
+                ResearchRequest::Report {} => self.report_response(false, envelope.request.uid()),
+                ResearchRequest::Verify {} => self.report_response(true, envelope.request.uid()),
             }
         };
         let _ = envelope.reply.send(response);

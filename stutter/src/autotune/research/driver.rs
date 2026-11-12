@@ -8,6 +8,8 @@ use std::fs::File;
 use super::{
     AttemptOutcome, AttemptRecord, AttemptSlot, ResearchIntentV1, ResearchJournal,
     dispatch_context::{ArmSpec, DispatchContextV1, arm_attempt_in_root},
+    report::AttemptEvidenceV1,
+    report_store::{build_from_dirs, write_evidence},
     scheduler,
 };
 
@@ -20,10 +22,10 @@ const ARM_LIFETIME_SECONDS: u64 = 120;
         reason = "the real Steam host reports these once launching is qualified"
     )
 )]
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Progress {
     Running,
-    Finished { evidence_sha256: String },
+    Finished { evidence: AttemptEvidenceV1 },
     Failed { code: String },
 }
 
@@ -52,6 +54,7 @@ pub struct Driver {
     journal: ResearchJournal,
     intent: ResearchIntentV1,
     root: File,
+    evidence: File,
     schedule_len: usize,
     max_attempts: usize,
     active: Option<(AttemptSlot, u64)>,
@@ -95,6 +98,7 @@ impl Driver {
         journal: ResearchJournal,
         intent: ResearchIntentV1,
         root: File,
+        evidence: File,
         schedule_len: usize,
     ) -> Self {
         let max_attempts = intent.max_attempts as usize;
@@ -102,11 +106,17 @@ impl Driver {
             journal,
             intent,
             root,
+            evidence,
             schedule_len,
             max_attempts,
             active: None,
             cancel: false,
         }
+    }
+
+    /// Build the final report from everything sealed so far.
+    pub fn finalize(&self) -> anyhow::Result<super::report::ResearchReportV1> {
+        build_from_dirs(&self.intent, &self.journal, &self.evidence)
     }
 
     pub fn cancel(&mut self) {
@@ -137,8 +147,21 @@ impl Driver {
             }
             return match host.poll() {
                 Progress::Running => Ok(Step::Running(slot.index)),
-                Progress::Finished { evidence_sha256 } => {
-                    self.seal(slot, AttemptOutcome::Completed { evidence_sha256 })
+                Progress::Finished { evidence } => {
+                    match write_evidence(&self.evidence, &slot, &evidence) {
+                        Ok(evidence_sha256) => {
+                            self.seal(slot, AttemptOutcome::Completed { evidence_sha256 })
+                        }
+                        Err(_) => {
+                            host.abort();
+                            self.seal(
+                                slot,
+                                AttemptOutcome::Failed {
+                                    code: "EvidenceRejected".into(),
+                                },
+                            )
+                        }
+                    }
                 }
                 Progress::Failed { code } => {
                     host.abort();
