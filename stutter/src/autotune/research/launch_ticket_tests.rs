@@ -93,7 +93,7 @@ fn wrong_user_app_build_tool_boot_session_verb_and_attempt_are_rejected_without_
     wrong.session_id = "other-session".into();
     variants.push(wrong);
     let mut wrong = expected.clone();
-    wrong.verb = SteamVerb::Setup;
+    wrong.verb = SteamVerb::WaitForExitAndRun;
     variants.push(wrong);
     let mut wrong = expected.clone();
     wrong.attempt_sha256 = "b".repeat(64);
@@ -107,8 +107,8 @@ fn wrong_user_app_build_tool_boot_session_verb_and_attempt_are_rejected_without_
 #[test]
 fn expired_ticket_cannot_be_used_and_bad_ids_cannot_escape_the_ticket_directory() {
     let (dir, intent, slot) = fixture();
-    let ticket = issue_launch_ticket(fd(&dir), &intent, &slot, SteamVerb::Setup, 11, 60).unwrap();
-    let expected = binding(&intent, &slot, SteamVerb::Setup).unwrap();
+    let ticket = issue_launch_ticket(fd(&dir), &intent, &slot, SteamVerb::Run, 11, 60).unwrap();
+    let expected = binding(&intent, &slot, SteamVerb::Run).unwrap();
     assert!(consume_launch_ticket(fd(&dir), &ticket.ticket_id, &expected, 71).is_err());
     assert!(consume_launch_ticket(fd(&dir), "../outside", &expected, 12).is_err());
     assert!(consume_launch_ticket(fd(&dir), &ticket.ticket_id, &expected, 12).is_ok());
@@ -131,7 +131,7 @@ fn symlink_ticket_and_excessive_lifetime_fail_closed() {
 #[test]
 fn ticket_wire_contains_only_closed_authority_bindings() {
     let (dir, intent, slot) = fixture();
-    let ticket = issue_launch_ticket(fd(&dir), &intent, &slot, SteamVerb::Setup, 11, 60).unwrap();
+    let ticket = issue_launch_ticket(fd(&dir), &intent, &slot, SteamVerb::Run, 11, 60).unwrap();
     let text = serde_json::to_string(&ticket).unwrap();
     for forbidden in ["path", "command", "environment", "prefix", "executable"] {
         assert!(!text.contains(forbidden));
@@ -143,4 +143,25 @@ fn ticket_wire_contains_only_closed_authority_bindings() {
     let mut unknown = serde_json::to_value(ticket).unwrap();
     unknown["command"] = "arbitrary".into();
     assert!(serde_json::from_value::<ResearchLaunchTicketV1>(unknown).is_err());
+}
+
+#[test]
+fn unqualified_or_destructive_proton_verbs_are_rejected() {
+    for verb in [
+        "setup",
+        "destroyprefix",
+        "runinprefix",
+        "getnativepath",
+        "getcompatpath",
+    ] {
+        assert!(serde_json::from_value::<SteamVerb>(serde_json::json!(verb)).is_err());
+        assert!(SteamVerb::from_steam_argument(verb).is_none());
+    }
+    for verb in [SteamVerb::Run, SteamVerb::WaitForExitAndRun] {
+        assert_eq!(
+            SteamVerb::from_steam_argument(verb.as_steam_argument()),
+            Some(verb)
+        );
+    }
+    assert!(SteamVerb::from_steam_argument("wait_for_exit_and_run").is_none());
 }

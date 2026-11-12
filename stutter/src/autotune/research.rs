@@ -22,6 +22,14 @@ mod journal;
 )]
 pub(crate) mod launch_ticket;
 mod lease;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "P3 prefix proof is consumed only after the Steam dispatcher is qualified"
+    )
+)]
+mod prefix;
 mod protocol;
 #[path = "research/proton/mod.rs"]
 pub(crate) mod proton;

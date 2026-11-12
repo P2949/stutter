@@ -20,9 +20,26 @@ const MAX_TICKET_LIFETIME_SECONDS: u64 = 5 * 60;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SteamVerb {
-    Setup,
     Run,
     WaitForExitAndRun,
+}
+
+impl SteamVerb {
+    /// Steam passes these exact Proton arguments; setup is not a standalone launch verb.
+    pub fn from_steam_argument(value: &str) -> Option<Self> {
+        match value {
+            "run" => Some(Self::Run),
+            "waitforexitandrun" => Some(Self::WaitForExitAndRun),
+            _ => None,
+        }
+    }
+
+    pub fn as_steam_argument(self) -> &'static str {
+        match self {
+            Self::Run => "run",
+            Self::WaitForExitAndRun => "waitforexitandrun",
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
