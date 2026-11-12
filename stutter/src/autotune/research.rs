@@ -58,6 +58,14 @@ pub(crate) mod report_store;
     )
 )]
 pub(crate) mod scheduler;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the production SteamPort is qualified against a live Steam first"
+    )
+)]
+pub(crate) mod steam_host;
 mod steam_inventory;
 mod vdf;
 pub use journal::{AttemptOutcome, AttemptRecord, AttemptSlot, ResearchJournal};
