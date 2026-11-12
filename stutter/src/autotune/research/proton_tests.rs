@@ -8,6 +8,26 @@ use super::*;
 
 const TOOLMANIFEST: &str = r#""manifest" { "version" "2" "commandline" "/proton %verb%" "require_tool_appid" "4183110" "use_sessions" "1" "compatmanager_layer_name" "proton" }"#;
 
+#[test]
+fn same_content_replacement_changes_the_hashed_file_identity() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("proton");
+    let replacement = dir.path().join("replacement");
+    std::fs::write(&path, b"#!/bin/sh\nexit 0\n").unwrap();
+    std::fs::write(&replacement, b"#!/bin/sh\nexit 0\n").unwrap();
+    let opened = std::fs::File::open(&path).unwrap();
+    let original = opened.metadata().unwrap();
+    assert!(tool::same_file_identity(
+        &original,
+        &opened.metadata().unwrap()
+    ));
+    std::fs::rename(replacement, &path).unwrap();
+    assert!(!tool::same_file_identity(
+        &original,
+        &std::fs::metadata(path).unwrap()
+    ));
+}
+
 fn compatibility(id: &str, display_name: &str) -> String {
     format!(
         "\"compatibilitytools\" {{ \"compat_tools\" {{ \"{id}\" {{ \"install_path\" \".\" \"display_name\" \"{display_name}\" \"from_oslist\" \"windows\" \"to_oslist\" \"linux\" }} }} }}"
@@ -310,6 +330,12 @@ fn stable_inventory_scans_manifests_and_reports_absent_exact_updating_or_ambiguo
     assert_eq!(candidate.eligibility, ProtonEligibility::Eligible);
     assert_eq!(candidate.source, ProtonSource::ValveStable);
     assert_eq!(candidate.version.as_deref(), Some("123 proton-10.0"));
+    std::fs::set_permissions(
+        steamapps.join("common/Proton 10.0/proton"),
+        std::fs::Permissions::from_mode(0o644),
+    )
+    .unwrap();
+    assert!(inspect_valve_stable(&steamapps, uid).is_err());
 
     let updating = tempfile::tempdir().unwrap();
     let steamapps = updating.path().join("steamapps");

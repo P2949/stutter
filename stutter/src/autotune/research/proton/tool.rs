@@ -16,6 +16,20 @@ use super::{
 pub(super) struct FileIdentity {
     pub(super) bytes: Vec<u8>,
     pub(super) sha256: String,
+    pub(super) mode: u32,
+}
+
+pub(super) fn same_file_identity(left: &std::fs::Metadata, right: &std::fs::Metadata) -> bool {
+    left.dev() == right.dev()
+        && left.ino() == right.ino()
+        && left.uid() == right.uid()
+        && left.mode() == right.mode()
+        && left.nlink() == right.nlink()
+        && left.len() == right.len()
+        && left.mtime() == right.mtime()
+        && left.mtime_nsec() == right.mtime_nsec()
+        && left.ctime() == right.ctime()
+        && left.ctime_nsec() == right.ctime_nsec()
 }
 
 pub(super) fn read_trusted_file(
@@ -39,16 +53,20 @@ pub(super) fn read_trusted_file(
     (&file).take(max_bytes + 1).read_to_end(&mut bytes)?;
     let after = file.metadata()?;
     anyhow::ensure!(
-        bytes.len() as u64 == before.len()
-            && before.dev() == after.dev()
-            && before.ino() == after.ino()
-            && before.len() == after.len()
-            && before.mtime() == after.mtime()
-            && before.mtime_nsec() == after.mtime_nsec(),
+        bytes.len() as u64 == before.len() && same_file_identity(&before, &after),
         "Proton file changed while reading"
     );
+    let current = crate::syscall::openat_nofollow(dir.as_fd(), name)?.metadata()?;
+    anyhow::ensure!(
+        same_file_identity(&before, &current),
+        "Proton file was replaced while reading"
+    );
     let sha256 = stutter_core::hash::sha256_hex(&bytes);
-    Ok(FileIdentity { bytes, sha256 })
+    Ok(FileIdentity {
+        bytes,
+        sha256,
+        mode: before.mode(),
+    })
 }
 
 pub(super) fn string<'a>(object: &'a BTreeMap<String, VdfValue>, key: &str) -> Option<&'a str> {
@@ -201,7 +219,7 @@ pub(super) fn inspect_tool_directory(spec: ToolSpec<'_>) -> anyhow::Result<Proto
         "Proton entrypoint is not a bounded script"
     );
     anyhow::ensure!(
-        metadata_of(dir.as_fd(), "proton", owner_uid, immutable)?.mode() & 0o111 != 0,
+        proton.mode & 0o111 != 0,
         "Proton entrypoint is not executable"
     );
     validate_toolmanifests(
@@ -240,22 +258,4 @@ pub(super) fn inspect_tool_directory(spec: ToolSpec<'_>) -> anyhow::Result<Proto
         eligibility: ProtonEligibility::Eligible,
         path: Some(path.to_owned()),
     })
-}
-
-pub(super) fn metadata_of(
-    dir: impl AsFd,
-    name: &str,
-    expected_uid: u32,
-    immutable: bool,
-) -> anyhow::Result<std::fs::Metadata> {
-    let file = crate::syscall::openat_nofollow(dir.as_fd(), name)?;
-    let metadata = file.metadata()?;
-    anyhow::ensure!(
-        metadata.uid() == expected_uid
-            && metadata.is_file()
-            && (immutable || metadata.nlink() == 1)
-            && (!immutable || metadata.mode() & 0o222 == 0),
-        "untrusted Proton entrypoint"
-    );
-    Ok(metadata)
 }
