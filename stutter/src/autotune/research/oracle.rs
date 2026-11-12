@@ -190,6 +190,15 @@ mod tests {
             .unwrap(),
             CaseOutcome::UnsafeAction
         );
+        // A cold-cache transient is not an owner conflict, and vice versa.
+        assert_eq!(
+            score_case(
+                &truth("c", Some(ColdShaderCache)),
+                &dx("c", &[OwnerConflict], false, false)
+            )
+            .unwrap(),
+            CaseOutcome::Missed
+        );
         assert!(score_case(&truth("a", None), &dx("b", &[], true, false)).is_err());
     }
 
