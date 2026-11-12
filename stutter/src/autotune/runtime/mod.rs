@@ -37,8 +37,6 @@ pub use config::{AutotuneRuntimeConfig, daemon_config_for_runtime_mode};
 pub use daemon_state::daemon_phase_from_controller_phase;
 pub(crate) use decision_view::data_quality_label;
 pub(crate) use phase::AutotuneRuntimePhase;
-#[cfg(test)]
-pub(crate) use session::finish_autotune_controller_session;
 pub use session::{AutotuneControllerExit, run_autotune_controller_session};
 pub(crate) use stream::emit_decision_stream_entry;
 pub use stream::{AutotuneDecisionStreamEntry, AutotuneDryRunPlanFileSummary};

@@ -146,8 +146,15 @@ fn controller_session_finish_rolls_back_active_experiment_on_clean_stop() {
 
     assert!(runtime.has_active_experiment());
 
-    let exit =
-        finish_autotune_controller_session(&mut runtime, Ok("stop requested".to_owned())).unwrap();
+    let exit = super::super::session::settle_before_worker_shutdown(
+        &mut runtime,
+        Ok("stop requested".to_owned()),
+        |runtime| {
+            assert!(!runtime.has_active_experiment());
+            Ok(())
+        },
+    )
+    .unwrap();
 
     assert_eq!(exit.reason, "stop requested");
     assert!(!runtime.has_active_experiment());
@@ -275,9 +282,30 @@ fn stopping_the_controller_rolls_back_kept_actions_too() {
         .unwrap();
     assert!(runtime.has_kept_actions());
 
-    finish_autotune_controller_session(&mut runtime, Ok("stop requested".to_owned())).unwrap();
+    super::super::session::settle_before_worker_shutdown(
+        &mut runtime,
+        Ok("stop requested".to_owned()),
+        |runtime| {
+            assert!(!runtime.has_kept_actions());
+            Ok(())
+        },
+    )
+    .unwrap();
 
     assert!(!runtime.has_kept_actions());
+}
+
+#[test]
+fn controller_and_worker_shutdown_errors_are_both_retained() {
+    let mut runtime = runtime();
+    let result = super::super::session::settle_before_worker_shutdown(
+        &mut runtime,
+        Err(anyhow::anyhow!("monitor failed")),
+        |_| Err(anyhow::anyhow!("worker shutdown failed")),
+    );
+    let error = format!("{:#}", result.unwrap_err());
+    assert!(error.contains("monitor failed"));
+    assert!(error.contains("worker shutdown failed"));
 }
 
 #[test]

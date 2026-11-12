@@ -242,24 +242,50 @@ pub async fn run_autotune_controller_session(
         let _ = stop_task.await;
     }
 
-    if let Err(error) = controller_result.and(management_result) {
-        monitor_task.abort();
-        let _ = monitor_task.await;
-        return finish_autotune_controller_session(&mut runtime, Err(error));
-    }
+    let controller_result = match (controller_result, management_result) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
+        (Err(controller), Err(management)) => Err(anyhow::anyhow!(
+            "controller loop failed: {controller:#}; research management failed: {management:#}"
+        )),
+    };
+    let monitor_result = match controller_result {
+        Err(error) => {
+            monitor_task.abort();
+            let _ = monitor_task.await;
+            Err(error)
+        }
+        Ok(()) => monitor_task.await.unwrap_or_else(|error| Err(error.into())),
+    };
+    let shutdown_poll = Duration::from_millis(
+        runtime
+            .config()
+            .daemon_config
+            .autotune
+            .privileged_worker_shutdown_poll_ms,
+    );
+    settle_before_worker_shutdown(&mut runtime, monitor_result, |_| {
+        if let Some(handle) = worker_handle.as_mut() {
+            handle.shutdown_gracefully(Duration::from_millis(3_000), shutdown_poll)?;
+        }
+        Ok(())
+    })
+}
 
-    let monitor_result = monitor_task.await?;
-    if let Some(handle) = worker_handle.as_mut() {
-        let shutdown_poll = Duration::from_millis(
-            runtime
-                .config()
-                .daemon_config
-                .autotune
-                .privileged_worker_shutdown_poll_ms,
-        );
-        handle.shutdown_gracefully(Duration::from_millis(3_000), shutdown_poll)?;
+pub(super) fn settle_before_worker_shutdown(
+    runtime: &mut AutotuneRuntime,
+    monitor_result: anyhow::Result<String>,
+    shutdown: impl FnOnce(&AutotuneRuntime) -> anyhow::Result<()>,
+) -> anyhow::Result<AutotuneControllerExit> {
+    let settlement = finish_autotune_controller_session(runtime, monitor_result);
+    let shutdown = shutdown(runtime);
+    match (settlement, shutdown) {
+        (Ok(exit), Ok(())) => Ok(exit),
+        (Err(error), Ok(())) | (Ok(_), Err(error)) => Err(error),
+        (Err(settlement), Err(shutdown)) => Err(anyhow::anyhow!(
+            "controller settlement failed: {settlement:#}; worker shutdown failed: {shutdown:#}"
+        )),
     }
-    finish_autotune_controller_session(&mut runtime, monitor_result)
 }
 
 fn spawn_research_work(
@@ -298,7 +324,7 @@ pub(super) fn schedule_research_recovery(
     });
 }
 
-pub(crate) fn finish_autotune_controller_session(
+fn finish_autotune_controller_session(
     runtime: &mut AutotuneRuntime,
     monitor_result: anyhow::Result<String>,
 ) -> anyhow::Result<AutotuneControllerExit> {
