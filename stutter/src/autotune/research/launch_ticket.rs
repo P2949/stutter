@@ -134,7 +134,7 @@ fn attempt_digest(slot: &AttemptSlot) -> anyhow::Result<String> {
     Ok(stutter_core::hash::sha256_hex(&serde_json::to_vec(slot)?))
 }
 
-fn binding(
+pub(super) fn binding(
     intent: &ResearchIntentV1,
     slot: &AttemptSlot,
     verb: SteamVerb,

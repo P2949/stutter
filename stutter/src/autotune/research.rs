@@ -23,8 +23,9 @@ pub(crate) mod cyberpunk;
 pub(crate) mod desktop_idle;
 #[cfg_attr(
     not(test),
-    expect(dead_code, reason = "wired by the Steam adapter binary entry")
+    expect(dead_code, reason = "armed by the resident campaign once wired")
 )]
+pub(crate) mod dispatch_context;
 pub(crate) mod dispatcher;
 pub(super) mod host;
 mod journal;

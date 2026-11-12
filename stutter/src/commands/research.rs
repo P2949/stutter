@@ -19,6 +19,11 @@ pub enum ResearchClientAction {
         proton_manifest: Option<PathBuf>,
     },
     Submit(PathBuf),
+    /// Steam-invoked compatibility-tool entry; replaces this process with the planned Proton.
+    Dispatch {
+        context_dir: PathBuf,
+        args: Vec<String>,
+    },
     Status,
     Pause,
     Resume,
@@ -35,6 +40,9 @@ pub struct ResearchClientInput {
 
 fn request(action: ResearchClientAction, uid: u32) -> anyhow::Result<ResearchRequest> {
     Ok(match action {
+        ResearchClientAction::Dispatch { .. } => {
+            anyhow::bail!("dispatch does not use the resident socket")
+        }
         ResearchClientAction::Inventory { .. } => {
             anyhow::bail!("inventory does not use the resident socket")
         }
@@ -85,9 +93,37 @@ fn request(action: ResearchClientAction, uid: u32) -> anyhow::Result<ResearchReq
     })
 }
 
+/// Authorize Steam's call against the resident-armed context, then exec the real Proton. Only
+/// returns on failure. Nothing here talks to the resident or touches root.
+fn dispatch(context_dir: &std::path::Path, args: &[String], uid: u32) -> anyhow::Result<()> {
+    use std::os::unix::process::CommandExt;
+    let directory = File::from(crate::syscall::open_dir_no_symlinks(context_dir)?);
+    let meta = directory.metadata()?;
+    anyhow::ensure!(
+        meta.is_dir() && meta.uid() == uid && meta.mode() & 0o077 == 0,
+        "untrusted dispatch directory"
+    );
+    let env: std::collections::BTreeMap<String, String> = std::env::vars().collect();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_secs();
+    let plan = crate::autotune::research::dispatch_context::authorize_dispatch(
+        &directory, args, &env, uid, now,
+    )?;
+    let error = std::process::Command::new(&plan.program)
+        .args(&plan.args)
+        .env_clear()
+        .envs(&plan.env)
+        .exec();
+    Err(anyhow::Error::new(error).context("failed to exec the authorized Proton"))
+}
+
 pub async fn run(input: ResearchClientInput) -> anyhow::Result<()> {
     let uid = crate::syscall::geteuid();
     anyhow::ensure!(uid != 0, "research client must be unprivileged");
+    if let ResearchClientAction::Dispatch { context_dir, args } = &input.action {
+        return dispatch(context_dir, args, uid);
+    }
     if let ResearchClientAction::Inventory {
         steamapps,
         proton_manifest,

@@ -27,6 +27,13 @@ enum ResearchCommand {
     Submit {
         intent: PathBuf,
     },
+    /// Steam compatibility-tool entry; called by the dispatcher wrapper, not by hand.
+    Dispatch {
+        #[arg(long)]
+        context_dir: PathBuf,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
+        args: Vec<String>,
+    },
     Status,
     Pause,
     Resume,
@@ -46,6 +53,9 @@ impl From<ResearchArgs> for ResearchClientInput {
                 proton_manifest,
             },
             ResearchCommand::Submit { intent } => ResearchClientAction::Submit(intent),
+            ResearchCommand::Dispatch { context_dir, args } => {
+                ResearchClientAction::Dispatch { context_dir, args }
+            }
             ResearchCommand::Status => ResearchClientAction::Status,
             ResearchCommand::Pause => ResearchClientAction::Pause,
             ResearchCommand::Resume => ResearchClientAction::Resume,
