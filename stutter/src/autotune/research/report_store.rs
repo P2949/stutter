@@ -81,9 +81,16 @@ pub fn read_evidence(dir: &File, uid: u32) -> anyhow::Result<BTreeMap<u32, Attem
             .filter(|stem| stem.len() == 4)
             .and_then(|stem| stem.parse::<u32>().ok())
             .ok_or_else(|| anyhow::anyhow!("unexpected evidence entry"))?;
+        anyhow::ensure!(
+            name == format!("{index:04}.json"),
+            "noncanonical evidence filename"
+        );
         let item: AttemptEvidenceV1 = serde_json::from_slice(&read_private(dir, &name, uid)?)?;
         anyhow::ensure!(item.slot_index == index, "evidence filename mismatch");
-        found.insert(index, item);
+        anyhow::ensure!(
+            found.insert(index, item).is_none() && found.len() <= 1000,
+            "duplicate or excessive evidence"
+        );
     }
     Ok(found)
 }
@@ -112,7 +119,7 @@ pub fn load_and_verify(campaign: &File, uid: u32) -> anyhow::Result<ResearchRepo
     let rebuilt = build_report(&intent, &records, &evidence)?;
     anyhow::ensure!(
         serde_json::to_vec(&rebuilt)? == stored_bytes,
-        "report does not match an independent rebuild"
+        "report does not match deterministic reconstruction"
     );
     Ok(stored)
 }

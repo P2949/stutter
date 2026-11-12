@@ -1,7 +1,6 @@
-//! Offline, regenerable report over sealed attempts. Everything here is a pure function of the
-//! frozen intent, the sealed journal records and the raw per-attempt evidence, so an independent
-//! verifier rebuilds the report and compares it byte for byte. Frames are never replicates: one
-//! native benchmark run is one observation, paired within its counterbalanced block.
+//! Deterministic reconstruction over sealed attempts and limited FPS records. Reusing this same
+//! calculation can detect byte drift but cannot independently establish game provenance, source
+//! quality, restoration or final acceptance. Frames are never used as independent replicates.
 
 use std::collections::BTreeMap;
 
@@ -36,8 +35,11 @@ impl AttemptEvidenceV1 {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ArmResult {
     pub source: ProtonSource,
-    /// Verdict name, or the typed reason the comparison was refused.
+    /// Qualification status, or the typed reason the calculation was refused.
     pub status: String,
+    /// Numeric result only: current evidence lacks real-game provenance and cannot establish a win.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub numeric_verdict: Option<String>,
     pub pairs: usize,
     pub mean_effect_percent: Option<f64>,
     pub ci_low_percent: Option<f64>,
@@ -127,12 +129,18 @@ pub fn build_report(
             anyhow::ensure!(
                 item.schema_version == 1
                     && item.slot_index == record.slot.index
+                    && item.average_fps.is_finite()
+                    && item.average_fps > 0.0
                     && &item.digest()? == evidence_sha256,
                 "evidence does not match its sealed digest"
             );
             fps.insert(record.slot.index, item.average_fps);
         }
     }
+    anyhow::ensure!(
+        evidence.len() == fps.len(),
+        "unsealed or unexpected evidence exists"
+    );
     let blocks = schedule.len() / arms.len();
     let comparisons = (arms.len() - 1) as u32;
     let confidence = 1.0 - FAMILY_ALPHA / f64::from(comparisons);
@@ -162,16 +170,18 @@ pub fn build_report(
         results.push(match analyse_pairs(&rule, &left, &right, false) {
             Ok(outcome) => ArmResult {
                 source: candidate,
-                status: verdict_name(outcome.verdict).into(),
+                status: "unqualified_provenance".into(),
+                numeric_verdict: Some(verdict_name(outcome.verdict).into()),
                 pairs: outcome.pairs,
-                mean_effect_percent: Some(outcome.mean_effect),
-                ci_low_percent: Some(outcome.ci_low),
-                ci_high_percent: Some(outcome.ci_high),
+                mean_effect_percent: Some(outcome.mean_effect * 100.0),
+                ci_low_percent: Some(outcome.ci_low * 100.0),
+                ci_high_percent: Some(outcome.ci_high * 100.0),
                 rule_sha256: Some(outcome.rule_sha256),
             },
             Err(refused) => ArmResult {
                 source: candidate,
                 status: format!("refused_{refused:?}"),
+                numeric_verdict: None,
                 pairs: left.len(),
                 mean_effect_percent: None,
                 ci_low_percent: None,
@@ -181,7 +191,7 @@ pub fn build_report(
         });
     }
     Ok(ResearchReportV1 {
-        schema_version: 1,
+        schema_version: 2,
         intent_sha256: intent.digest()?,
         attempts_scheduled: schedule.len(),
         attempts_sealed: records.len(),
@@ -191,7 +201,7 @@ pub fn build_report(
     })
 }
 
-/// Independent replay: rebuild from the same raw inputs and require identical bytes.
+/// Fixture-only reconstruction: rebuild from the same raw inputs and require identical bytes.
 #[cfg(test)]
 pub fn verify_report(
     intent: &ResearchIntentV1,

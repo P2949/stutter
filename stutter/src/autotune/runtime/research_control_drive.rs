@@ -254,7 +254,8 @@ impl ResearchCoordinator {
         match crate::autotune::research::report_store::load_and_verify(&dir, uid) {
             Ok(report) if verify => {
                 serde_json::json!({
-                    "status": "ok", "code": "ReportVerified",
+                    "status": "blocked", "code": "IncompleteProvenance",
+                    "reconstruction": "passed",
                     "intent_sha256": report.intent_sha256,
                 })
                 .to_string()

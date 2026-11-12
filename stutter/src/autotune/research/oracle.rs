@@ -43,6 +43,10 @@ pub fn score_case(truth: &GroundTruth, diagnosis: &Diagnosis) -> anyhow::Result<
         truth.case_id == diagnosis.case_id,
         "diagnosis is for a different case"
     );
+    anyhow::ensure!(
+        !diagnosis.abstained || (diagnosis.reported.is_empty() && !diagnosis.action_proposed),
+        "abstention contradicts reported causes or an action"
+    );
     // Only runnable delay can ever justify a CPU placement action.
     if diagnosis.action_proposed && truth.injected != Some(Cause::RunnableDelay) {
         return Ok(CaseOutcome::UnsafeAction);
@@ -60,6 +64,9 @@ pub fn score_case(truth: &GroundTruth, diagnosis: &Diagnosis) -> anyhow::Result<
             } else {
                 CaseOutcome::FalsePositive(extra)
             }
+        }
+        Some(_) if !diagnosis.reported.is_empty() => {
+            CaseOutcome::FalsePositive(diagnosis.reported.clone())
         }
         Some(_) => CaseOutcome::Missed,
         None if diagnosis.reported.is_empty() && diagnosis.abstained => {
@@ -83,6 +90,13 @@ pub fn summarize(truths: &[GroundTruth], diagnoses: &[Diagnosis]) -> anyhow::Res
     anyhow::ensure!(
         truths.len() == diagnoses.len(),
         "every case needs exactly one diagnosis"
+    );
+    let mut ids = BTreeSet::new();
+    anyhow::ensure!(
+        truths
+            .iter()
+            .all(|truth| !truth.case_id.is_empty() && ids.insert(&truth.case_id)),
+        "case identities must be nonempty and unique"
     );
     let mut summary = Summary {
         positives: 0,
@@ -112,19 +126,30 @@ pub fn summarize(truths: &[GroundTruth], diagnoses: &[Diagnosis]) -> anyhow::Res
 /// unsafe action anywhere.
 pub fn gate_passes(truths: &[GroundTruth], diagnoses: &[Diagnosis]) -> anyhow::Result<bool> {
     let summary = summarize(truths, diagnoses)?;
-    let gpu_negative_clean = truths
+    let gpu_negative_clean = truths.iter().zip(diagnoses).any(|(t, d)| {
+        t.injected == Some(Cause::GpuBound)
+            && !d.action_proposed
+            && (matches!(score_case(t, d), Ok(CaseOutcome::Included))
+                || (d.abstained && d.reported.is_empty()))
+    });
+    let causal_hits: BTreeSet<_> = truths
         .iter()
         .zip(diagnoses)
-        .any(|(t, d)| t.injected == Some(Cause::GpuBound) && !d.action_proposed);
-    let causal_hits = truths
-        .iter()
-        .zip(diagnoses)
-        .filter(|(t, d)| {
-            matches!(t.injected, Some(Cause::RunnableDelay | Cause::IoPressure))
-                && matches!(score_case(t, d), Ok(CaseOutcome::Included))
+        .filter_map(|(t, d)| match t.injected {
+            Some(cause @ (Cause::RunnableDelay | Cause::IoPressure))
+                if matches!(score_case(t, d), Ok(CaseOutcome::Included)) =>
+            {
+                Some(cause)
+            }
+            _ => None,
         })
-        .count();
-    Ok(causal_hits >= 2 && gpu_negative_clean && summary.unsafe_actions == 0)
+        .collect();
+    Ok(causal_hits.len() == 2
+        && gpu_negative_clean
+        && summary.negatives > 0
+        && summary.correct_abstentions == summary.negatives
+        && summary.false_positive_cases == 0
+        && summary.unsafe_actions == 0)
 }
 
 #[cfg(test)]
@@ -157,14 +182,14 @@ mod tests {
             .unwrap(),
             CaseOutcome::Included
         );
-        assert_eq!(
+        assert!(matches!(
             score_case(
                 &truth("a", Some(RunnableDelay)),
                 &dx("a", &[GpuBound], false, false)
             )
             .unwrap(),
-            CaseOutcome::Missed
-        );
+            CaseOutcome::FalsePositive(_)
+        ));
         assert!(matches!(
             score_case(
                 &truth("a", Some(RunnableDelay)),
@@ -191,14 +216,14 @@ mod tests {
             CaseOutcome::UnsafeAction
         );
         // A cold-cache transient is not an owner conflict, and vice versa.
-        assert_eq!(
+        assert!(matches!(
             score_case(
                 &truth("c", Some(ColdShaderCache)),
                 &dx("c", &[OwnerConflict], false, false)
             )
             .unwrap(),
-            CaseOutcome::Missed
-        );
+            CaseOutcome::FalsePositive(_)
+        ));
         assert!(score_case(&truth("a", None), &dx("b", &[], true, false)).is_err());
     }
 
@@ -224,6 +249,17 @@ mod tests {
         let mut missed = good.clone();
         missed[1] = dx("c2", &[], true, false);
         assert!(!gate_passes(&truths, &missed).unwrap());
+        let mut false_positive = good.clone();
+        false_positive[3] = dx("n", &[RunnableDelay], false, false);
+        assert!(!gate_passes(&truths, &false_positive).unwrap());
+        let mut wrong_gpu = good.clone();
+        wrong_gpu[2] = dx("g", &[RunnableDelay], false, false);
+        assert!(!gate_passes(&truths, &wrong_gpu).unwrap());
+        assert!(!gate_passes(&truths[..3], &good[..3]).unwrap());
+        assert!(score_case(&truths[0], &dx("c1", &[RunnableDelay], true, false)).is_err());
+        let mut duplicate = truths.clone();
+        duplicate[1].case_id = duplicate[0].case_id.clone();
+        assert!(gate_passes(&duplicate, &good).is_err());
         assert!(gate_passes(&truths, &good[..3]).is_err());
     }
 }

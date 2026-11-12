@@ -45,7 +45,7 @@ fn run(
 }
 
 #[test]
-fn a_clear_run_level_gain_is_reported_and_independently_verified() {
+fn numeric_gain_is_reconstructed_but_not_qualified() {
     let (intent, schedule) = study(6);
     let (records, evidence) = run(&schedule, |slot| {
         let wobble = f64::from(slot.index % 3) * 0.2;
@@ -57,13 +57,25 @@ fn a_clear_run_level_gain_is_reported_and_independently_verified() {
     });
     let report = build_report(&intent, &records, &evidence).unwrap();
     assert_eq!(report.control, ProtonSource::ValveStable);
+    assert_eq!(report.schema_version, 2);
     assert_eq!(report.arms.len(), 1);
-    assert_eq!(report.arms[0].status, "improved");
+    assert_eq!(report.arms[0].status, "unqualified_provenance");
+    assert_eq!(report.arms[0].numeric_verdict.as_deref(), Some("improved"));
     assert_eq!(report.arms[0].pairs, 6);
+    let mean = report.arms[0].mean_effect_percent.unwrap();
+    assert!(
+        (9.9..=10.1).contains(&mean),
+        "expected roughly 10 percent, got {mean}"
+    );
+    assert!(report.arms[0].ci_low_percent.unwrap() > 9.0);
+    assert!(report.arms[0].ci_high_percent.unwrap() < 11.0);
     verify_report(&intent, &records, &evidence, &report).unwrap();
     let mut forged = report.clone();
     forged.arms[0].status = "regressed".into();
     assert!(verify_report(&intent, &records, &evidence, &forged).is_err());
+    let mut old_schema = report.clone();
+    old_schema.schema_version = 1;
+    assert!(verify_report(&intent, &records, &evidence, &old_schema).is_err());
 }
 
 #[test]
@@ -91,5 +103,15 @@ fn tampered_evidence_and_schedule_drift_are_rejected() {
     assert!(build_report(&intent, &records, &evidence).is_err());
     let (mut records, evidence) = run(&schedule, |_| Some(60.0));
     records.swap(0, 1);
+    assert!(build_report(&intent, &records, &evidence).is_err());
+    let (records, mut evidence) = run(&schedule, |_| None);
+    evidence.insert(
+        0,
+        AttemptEvidenceV1 {
+            schema_version: 1,
+            slot_index: 0,
+            average_fps: 60.0,
+        },
+    );
     assert!(build_report(&intent, &records, &evidence).is_err());
 }

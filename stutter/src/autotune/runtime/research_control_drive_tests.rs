@@ -141,7 +141,11 @@ fn resident_driver_runs_every_scheduled_attempt_once_and_completes() {
         "{report}"
     );
     let verified = send(&mut coordinator, ResearchRequest::Verify {}, 202);
-    assert!(verified.contains("ReportVerified"), "{verified}");
+    assert!(
+        verified.contains("IncompleteProvenance")
+            && verified.contains("\"reconstruction\":\"passed\""),
+        "{verified}"
+    );
 }
 
 #[test]
