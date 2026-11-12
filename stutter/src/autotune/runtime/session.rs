@@ -278,7 +278,7 @@ pub(super) fn schedule_research_recovery(
     coordinator: &mut super::research_control::ResearchCoordinator,
     runtime: &AutotuneRuntime,
     now: u64,
-    sender: &mpsc::Sender<anyhow::Result<super::research_control::RecoveredCampaign>>,
+    sender: &mpsc::Sender<anyhow::Result<super::research_recovery::RecoveredCampaign>>,
 ) {
     coordinator.set_mutable_action_present(
         runtime.has_active_experiment()

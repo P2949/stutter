@@ -20,6 +20,7 @@ use tokio::{
     task::JoinHandle,
 };
 
+use super::research_recovery::{RecoveredCampaign, RecoveryJob};
 use crate::autotune::research::{
     AuthenticatedRequest, CampaignBlockReason, CampaignFacts, CampaignLease, ResearchPhase,
     ResearchRequest, receive_request,
@@ -46,43 +47,6 @@ struct TerminalCampaign {
     code: &'static str,
 }
 
-pub(super) struct RecoveryJob {
-    dir: PathBuf,
-    facts: CampaignFacts,
-    now: u64,
-}
-
-pub(super) struct RecoveredCampaign {
-    facts: CampaignFacts,
-    lease: CampaignLease,
-}
-
-impl RecoveryJob {
-    /// Only prelaunch phases are recoverable until child-study and worker settlement are wired.
-    pub(super) fn run(self) -> anyhow::Result<RecoveredCampaign> {
-        let dir = crate::syscall::open_dir_no_symlinks(&self.dir)?;
-        let lease = CampaignLease::recover(dir, &self.facts, self.now)?;
-        anyhow::ensure!(
-            !lease.has_started_launch(),
-            "UnsafeToResume: launch history needs attempt and worker verification"
-        );
-        anyhow::ensure!(
-            matches!(
-                lease.phase(),
-                ResearchPhase::AwaitSafeWindow
-                    | ResearchPhase::Paused
-                    | ResearchPhase::Blocked
-                    | ResearchPhase::Aborted
-            ),
-            "UnsafeToResume: unsupported recovered phase"
-        );
-        Ok(RecoveredCampaign {
-            facts: self.facts,
-            lease,
-        })
-    }
-}
-
 /// Controller-owned admission and management state. The production controller supplies host
 /// facts only after independently verifying source, policy, Steam installation and tool identity.
 /// An absent context deliberately keeps submit fail-closed while status remains available.
@@ -96,6 +60,8 @@ pub(super) struct ResearchCoordinator {
     submitted: bool,
     recovery_pending: bool,
     recovery_attempted: bool,
+    terminal_probe_attempted: bool,
+    mutable_action_present: bool,
 }
 
 impl ResearchCoordinator {
@@ -116,6 +82,9 @@ impl ResearchCoordinator {
             Some(dir) => campaign_storage_blocker(dir),
             None => Some("BlockedResearchStorage"),
         };
+        let mutable_action_present = facts
+            .as_ref()
+            .is_some_and(|value| value.mutable_action_present);
         Self {
             campaign_dir,
             storage_blocker,
@@ -126,6 +95,8 @@ impl ResearchCoordinator {
             submitted: false,
             recovery_pending: false,
             recovery_attempted: false,
+            terminal_probe_attempted: false,
+            mutable_action_present,
         }
     }
 
@@ -137,7 +108,8 @@ impl ResearchCoordinator {
             return;
         }
         match result {
-            Ok(facts) => {
+            Ok(mut facts) => {
+                facts.mutable_action_present = self.mutable_action_present;
                 self.facts = Some(facts);
                 self.context_blocker = "Ready";
             }
@@ -149,6 +121,7 @@ impl ResearchCoordinator {
     }
 
     pub(super) fn set_mutable_action_present(&mut self, present: bool) {
+        self.mutable_action_present = present;
         if let Some(facts) = self.facts.as_mut() {
             facts.mutable_action_present = present;
         }
@@ -161,24 +134,50 @@ impl ResearchCoordinator {
         {
             return None;
         }
-        let facts = self.facts.as_ref()?;
-        if facts.mutable_action_present || facts.validation_override_present {
+        if self.mutable_action_present {
+            return None;
+        }
+        let facts = self.facts.clone();
+        if facts
+            .as_ref()
+            .is_some_and(|facts| facts.validation_override_present)
+        {
+            return None;
+        }
+        if facts.is_none() && self.terminal_probe_attempted {
             return None;
         }
         let dir = self.campaign_dir.clone()?;
         self.recovery_pending = true;
-        self.recovery_attempted = true;
-        Some(RecoveryJob {
-            dir,
-            facts: facts.clone(),
-            now,
-        })
+        if facts.is_some() {
+            self.recovery_attempted = true;
+        } else {
+            self.terminal_probe_attempted = true;
+        }
+        Some(RecoveryJob { dir, facts, now })
     }
 
     pub(super) fn finish_recovery(&mut self, result: anyhow::Result<RecoveredCampaign>) {
         self.recovery_pending = false;
+        if self.mutable_action_present {
+            if let Ok(value) = &result {
+                if value.facts.is_some() {
+                    self.recovery_attempted = false;
+                } else {
+                    self.terminal_probe_attempted = false;
+                }
+            }
+            return;
+        }
         let recovered = match result {
-            Ok(value) if self.facts.as_ref() == Some(&value.facts) => value,
+            Ok(value)
+                if value
+                    .facts
+                    .as_ref()
+                    .is_none_or(|facts| self.facts.as_ref() == Some(facts)) =>
+            {
+                value
+            }
             Ok(_) => {
                 log::warn!("research recovery context changed");
                 return;
