@@ -205,6 +205,7 @@ fn parse_manifest(bytes: &[u8]) -> anyhow::Result<CyberpunkInstallation> {
         manifest_update_status,
         manifest_sha256: stutter_core::hash::sha256_hex(bytes),
         game_executable_sha256: None,
+        launcher_executable_sha256: None,
         entitlement_verified: false,
         native_benchmark_verified: false,
     })
@@ -219,6 +220,8 @@ pub struct CyberpunkInstallation {
     pub manifest_update_status: SteamUpdateStatus,
     pub manifest_sha256: String,
     pub game_executable_sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launcher_executable_sha256: Option<String>,
     pub entitlement_verified: bool,
     pub native_benchmark_verified: bool,
 }
@@ -258,10 +261,13 @@ pub fn inspect_cyberpunk_installation(
         "Steam manifest changed while reading"
     );
     let mut installation = parse_manifest(&bytes)?;
-    let executable_dir = steamapps
+    let installation_dir = steamapps
         .join("common")
-        .join(&installation.installation_directory)
-        .join("bin/x64");
+        .join(&installation.installation_directory);
+    let launcher_dir = crate::syscall::open_dir_no_symlinks(&installation_dir)?;
+    let launcher_meta = File::from(launcher_dir.try_clone()?).metadata()?;
+    let launcher_sha256 = inspect_optional_launcher(&launcher_dir, owner_uid)?;
+    let executable_dir = installation_dir.join("bin/x64");
     let executable_dir = crate::syscall::open_dir_no_symlinks(&executable_dir)?;
     let executable = crate::syscall::openat_nofollow(executable_dir.as_fd(), "Cyberpunk2077.exe")?;
     let exe_before = executable.metadata()?;
@@ -294,9 +300,13 @@ pub fn inspect_cyberpunk_installation(
         crate::syscall::openat_nofollow(executable_dir.as_fd(), "Cyberpunk2077.exe")?.metadata()?;
     let library_current =
         File::from(crate::syscall::open_dir_no_symlinks(steamapps)?).metadata()?;
+    let launcher_dir_current =
+        File::from(crate::syscall::open_dir_no_symlinks(&installation_dir)?).metadata()?;
     anyhow::ensure!(
         library_current.dev() == meta.dev()
             && library_current.ino() == meta.ino()
+            && launcher_dir_current.dev() == launcher_meta.dev()
+            && launcher_dir_current.ino() == launcher_meta.ino()
             && manifest_current.dev() == before.dev()
             && manifest_current.ino() == before.ino()
             && manifest_current.len() == before.len()
@@ -310,7 +320,44 @@ pub fn inspect_cyberpunk_installation(
         "Steam source changed during inventory"
     );
     installation.game_executable_sha256 = Some(stutter_core::hash::sha256_hex(&exe_bytes));
+    installation.launcher_executable_sha256 = launcher_sha256;
     Ok(installation)
+}
+
+fn inspect_optional_launcher(dir: &impl AsFd, owner_uid: u32) -> anyhow::Result<Option<String>> {
+    let file = match crate::syscall::openat_nofollow(dir.as_fd(), "REDprelauncher.exe") {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    let before = file.metadata()?;
+    anyhow::ensure!(
+        before.is_file()
+            && before.uid() == owner_uid
+            && before.nlink() == 1
+            && before.len() > 0
+            && before.len() <= MAX_GAME_EXECUTABLE,
+        "untrusted Cyberpunk launcher"
+    );
+    let mut bytes = Vec::new();
+    (&file)
+        .take(MAX_GAME_EXECUTABLE + 1)
+        .read_to_end(&mut bytes)?;
+    let after = file.metadata()?;
+    let current = crate::syscall::openat_nofollow(dir.as_fd(), "REDprelauncher.exe")?.metadata()?;
+    anyhow::ensure!(
+        bytes.len() as u64 == before.len()
+            && bytes.starts_with(b"MZ")
+            && [after, current]
+                .iter()
+                .all(|value| value.dev() == before.dev()
+                    && value.ino() == before.ino()
+                    && value.len() == before.len()
+                    && value.mtime() == before.mtime()
+                    && value.mtime_nsec() == before.mtime_nsec()),
+        "Cyberpunk launcher changed or lacks an MZ signature"
+    );
+    Ok(Some(stutter_core::hash::sha256_hex(&bytes)))
 }
 
 #[cfg(test)]
@@ -421,6 +468,37 @@ mod tests {
         assert_eq!(result.installation_directory, "Alternate Install");
         assert!(result.game_executable_sha256.is_some());
         assert!(!result.entitlement_verified);
+    }
+
+    #[test]
+    fn inventory_attests_the_launcher_when_present_and_rejects_substitution() {
+        use std::os::unix::fs::symlink;
+        let root = tempfile::tempdir().unwrap();
+        let steamapps = root.path().join("steamapps");
+        let game = steamapps.join("common/Cyberpunk 2077");
+        std::fs::create_dir_all(game.join("bin/x64")).unwrap();
+        std::fs::write(steamapps.join("appmanifest_1091500.acf"), manifest("")).unwrap();
+        std::fs::write(game.join("bin/x64/Cyberpunk2077.exe"), b"MZgame").unwrap();
+        let launcher = game.join("REDprelauncher.exe");
+        let uid = crate::syscall::geteuid();
+        assert!(
+            inspect_cyberpunk_installation(&steamapps, uid)
+                .unwrap()
+                .launcher_executable_sha256
+                .is_none()
+        );
+        std::fs::write(&launcher, b"MZlauncher").unwrap();
+        assert_eq!(
+            inspect_cyberpunk_installation(&steamapps, uid)
+                .unwrap()
+                .launcher_executable_sha256,
+            Some(stutter_core::hash::sha256_hex(b"MZlauncher"))
+        );
+        std::fs::write(&launcher, b"invalid").unwrap();
+        assert!(inspect_cyberpunk_installation(&steamapps, uid).is_err());
+        std::fs::remove_file(&launcher).unwrap();
+        symlink(game.join("bin/x64/Cyberpunk2077.exe"), &launcher).unwrap();
+        assert!(inspect_cyberpunk_installation(&steamapps, uid).is_err());
     }
 
     #[test]

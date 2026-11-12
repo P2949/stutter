@@ -290,6 +290,7 @@ pub fn collect_campaign_facts(
         source_sha256,
         policy_sha256,
         game_executable_sha256,
+        launcher_executable_sha256: game.launcher_executable_sha256,
         build_id: game.build_id,
         tools,
         validation_override_present,

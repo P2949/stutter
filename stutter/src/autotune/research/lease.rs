@@ -49,6 +49,8 @@ pub struct CampaignFacts {
     pub source_sha256: String,
     pub policy_sha256: String,
     pub game_executable_sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launcher_executable_sha256: Option<String>,
     pub build_id: u64,
     pub tools: Vec<ResearchTool>,
     pub validation_override_present: bool,
@@ -70,6 +72,7 @@ impl CampaignFacts {
                 && self.source_sha256 == intent.source_sha256
                 && self.policy_sha256 == intent.policy_sha256
                 && self.game_executable_sha256 == intent.game_executable_sha256
+                && self.launcher_executable_sha256 == intent.launcher_executable_sha256
                 && self.build_id == intent.build_id,
             "campaign context mismatch"
         );
@@ -532,6 +535,7 @@ mod tests {
             source_sha256: intent.source_sha256.clone(),
             policy_sha256: intent.policy_sha256.clone(),
             game_executable_sha256: intent.game_executable_sha256.clone(),
+            launcher_executable_sha256: intent.launcher_executable_sha256.clone(),
             build_id: intent.build_id,
             tools: intent.tools.clone(),
             validation_override_present: false,
@@ -542,6 +546,28 @@ mod tests {
 
     fn fd(dir: &tempfile::TempDir) -> OwnedFd {
         crate::syscall::open_dir_no_symlinks(dir.path()).unwrap()
+    }
+
+    #[test]
+    fn launcher_identity_is_frozen_and_absence_keeps_the_original_encoding() {
+        let (_, mut intent, mut facts) = setup();
+        assert!(
+            serde_json::to_value(&intent)
+                .unwrap()
+                .get("launcher_executable_sha256")
+                .is_none()
+        );
+        assert!(
+            serde_json::to_value(&facts)
+                .unwrap()
+                .get("launcher_executable_sha256")
+                .is_none()
+        );
+        intent.launcher_executable_sha256 = Some("1".repeat(64));
+        facts.launcher_executable_sha256 = intent.launcher_executable_sha256.clone();
+        assert!(facts.validate(&intent).is_ok());
+        facts.launcher_executable_sha256 = Some("2".repeat(64));
+        assert!(facts.validate(&intent).is_err());
     }
 
     #[test]

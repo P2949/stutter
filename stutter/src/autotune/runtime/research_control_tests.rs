@@ -141,6 +141,7 @@ fn fixture() -> (crate::autotune::research::ResearchIntentV1, CampaignFacts) {
         source_sha256: "a".repeat(64),
         policy_sha256: "b".repeat(64),
         game_executable_sha256: "c".repeat(64),
+        launcher_executable_sha256: None,
         build_id: 1,
         tools: vec![ResearchTool {
             source: ProtonSource::Ge,
@@ -165,6 +166,7 @@ fn fixture() -> (crate::autotune::research::ResearchIntentV1, CampaignFacts) {
         source_sha256: intent.source_sha256.clone(),
         policy_sha256: intent.policy_sha256.clone(),
         game_executable_sha256: intent.game_executable_sha256.clone(),
+        launcher_executable_sha256: intent.launcher_executable_sha256.clone(),
         build_id: intent.build_id,
         tools: intent.tools.clone(),
         validation_override_present: false,

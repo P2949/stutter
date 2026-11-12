@@ -13,6 +13,7 @@ fn installation() -> CyberpunkInstallation {
         manifest_update_status: super::super::SteamUpdateStatus::NoPendingUpdateIndicated,
         manifest_sha256: "a".repeat(64),
         game_executable_sha256: Some("b".repeat(64)),
+        launcher_executable_sha256: None,
         entitlement_verified: true,
         native_benchmark_verified: false,
     }

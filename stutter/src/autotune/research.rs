@@ -161,6 +161,8 @@ pub struct ResearchIntentV1 {
     pub source_sha256: String,
     pub policy_sha256: String,
     pub game_executable_sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launcher_executable_sha256: Option<String>,
     pub build_id: u64,
     pub tools: Vec<ResearchTool>,
     pub factors: Vec<ResearchFactor>,
@@ -215,6 +217,7 @@ impl ResearchIntentV1 {
             &self.game_executable_sha256,
         ]
         .into_iter()
+        .chain(self.launcher_executable_sha256.iter())
         .chain(self.tools.iter().map(|tool| &tool.identity_sha256))
         {
             anyhow::ensure!(
@@ -316,6 +319,7 @@ mod tests {
             source_sha256: "a".repeat(64),
             policy_sha256: "b".repeat(64),
             game_executable_sha256: "c".repeat(64),
+            launcher_executable_sha256: None,
             build_id: 1,
             tools: vec![ResearchTool {
                 source: ProtonSource::Ge,
