@@ -425,22 +425,27 @@ impl ResearchCoordinator {
     }
 
     /// Expire only a quiescent boundary. An active executor must settle its own resources first.
+    pub(super) fn deadline_due(&self, now: u64) -> bool {
+        self.active.as_ref().is_some_and(|active| {
+            now >= active.deadline_unix_seconds
+                && matches!(
+                    active.lease.phase(),
+                    ResearchPhase::Requested
+                        | ResearchPhase::Preflight
+                        | ResearchPhase::Prepared
+                        | ResearchPhase::AwaitSafeWindow
+                        | ResearchPhase::Paused
+                )
+        })
+    }
+
     pub(super) fn on_deadline(&mut self, now: u64) {
+        if !self.deadline_due(now) {
+            return;
+        }
         let Some(active) = self.active.as_mut() else {
             return;
         };
-        if now < active.deadline_unix_seconds
-            || !matches!(
-                active.lease.phase(),
-                ResearchPhase::Requested
-                    | ResearchPhase::Preflight
-                    | ResearchPhase::Prepared
-                    | ResearchPhase::AwaitSafeWindow
-                    | ResearchPhase::Paused
-            )
-        {
-            return;
-        }
         if active.lease.advance(ResearchPhase::Restoring, now).is_err()
             || active.lease.block_for_deadline(now).is_err()
         {

@@ -38,7 +38,7 @@ pub async fn run_autotune_controller_session(
             None
         }
     };
-    let mut research_coordinator = super::research_control::ResearchCoordinator::new(
+    let mut research_coordinator = Some(super::research_control::ResearchCoordinator::new(
         runtime
             .config()
             .daemon_config
@@ -47,7 +47,8 @@ pub async fn run_autotune_controller_session(
             .clone(),
         None,
         "BlockedHostIdentity",
-    );
+    ));
+    let mut research_work: Option<tokio::task::JoinHandle<_>> = None;
     let (host_context_tx, mut host_context_rx) = mpsc::channel(1);
     let (recovery_tx, mut recovery_rx) = mpsc::channel(1);
     let mut host_context_refresh = if runtime
@@ -122,64 +123,90 @@ pub async fn run_autotune_controller_session(
         crate::session::run_monitor(monitor_config, None, Some(event_tx), Some(stop_rx)).await
     });
 
+    let controller_result: anyhow::Result<()> = async {
     loop {
         let event = tokio::select! {
-            _ = research_deadline_tick.tick(), if _research_server.is_some() => {
+            _ = research_deadline_tick.tick(), if _research_server.is_some() && research_coordinator.is_some() => {
                 let now = (crate::audit::unix_nanos_now() / 1_000_000_000)
                     .min(u128::from(u64::MAX)) as u64;
-                research_coordinator.on_deadline(now);
-                schedule_research_recovery(&mut research_coordinator, &runtime, now, &recovery_tx);
+                let coordinator = research_coordinator.as_mut().ok_or_else(|| anyhow::anyhow!("research coordinator unavailable"))?;
+                if coordinator.deadline_due(now) {
+                    let coordinator = research_coordinator.take().ok_or_else(|| anyhow::anyhow!("research coordinator unavailable"))?;
+                    research_work = Some(spawn_research_work(&mut runtime, coordinator, move |coordinator| {
+                        coordinator.on_deadline(now);
+                    }));
+                } else {
+                    schedule_research_recovery(coordinator, &runtime, now, &recovery_tx);
+                }
                 continue;
             }
             event = event_rx.recv() => match event {
                 Some(event) => event,
-                None => break,
+                None => break Ok(()),
             },
-            Some(context) = host_context_rx.recv() => {
+            Some(context) = host_context_rx.recv(), if research_coordinator.is_some() => {
                 if let Err(error) = &context {
                     log::info!("research host context is blocked code={}", error.code);
                 }
-                research_coordinator.set_host_context(context);
+                let coordinator = research_coordinator.as_mut().ok_or_else(|| anyhow::anyhow!("research coordinator unavailable"))?;
+                coordinator.set_host_context(context);
                 let now = (crate::audit::unix_nanos_now() / 1_000_000_000)
                     .min(u128::from(u64::MAX)) as u64;
-                schedule_research_recovery(&mut research_coordinator, &runtime, now, &recovery_tx);
+                schedule_research_recovery(coordinator, &runtime, now, &recovery_tx);
                 continue;
             }
-            Some(result) = recovery_rx.recv() => {
-                research_coordinator.set_mutable_action_present(
+            Some(result) = recovery_rx.recv(), if research_coordinator.is_some() => {
+                let coordinator = research_coordinator.as_mut().ok_or_else(|| anyhow::anyhow!("research coordinator unavailable"))?;
+                coordinator.set_mutable_action_present(
                     runtime.has_active_experiment()
                         || runtime.has_kept_actions()
                         || runtime.controller_state().active_experiment.is_some(),
                 );
-                research_coordinator.finish_recovery(result);
-                if research_coordinator.host_refresh_complete()
+                coordinator.finish_recovery(result);
+                if coordinator.host_refresh_complete()
                     && let Some(task) = host_context_refresh.take()
                 {
                     task.abort();
                 }
                 continue;
             }
-            Some(request) = research_rx.recv() => {
+            Some(request) = research_rx.recv(), if research_coordinator.is_some() => {
                 let now = (crate::audit::unix_nanos_now() / 1_000_000_000)
                     .min(u128::from(u64::MAX)) as u64;
-                research_coordinator.set_mutable_action_present(
+                let mut coordinator = research_coordinator.take().ok_or_else(|| anyhow::anyhow!("research coordinator unavailable"))?;
+                coordinator.set_mutable_action_present(
                     runtime.has_active_experiment()
                         || runtime.has_kept_actions()
                         || runtime.controller_state().active_experiment.is_some(),
                 );
-                research_coordinator.handle(request, now);
+                // Reserve before dispatch: admission and durable writes run off the monitor
+                // loop, but no normal action can start while their result is unresolved.
+                research_work = Some(spawn_research_work(&mut runtime, coordinator, move |coordinator| {
+                    coordinator.handle(request, now);
+                }));
+                continue;
+            }
+            Some(result) = async {
+                match research_work.as_mut() {
+                    Some(work) => Some(work.await),
+                    None => None,
+                }
+            }, if research_work.is_some() => {
+                research_work = None;
+                let coordinator = result.map_err(|error| anyhow::anyhow!("research management task failed: {error}"))?;
                 // Admission freezes these facts. Future launch and block code must re-attest
                 // its own context; repeatedly hashing the game here cannot supply that proof.
-                if research_coordinator.host_refresh_complete()
+                if coordinator.host_refresh_complete()
                     && let Some(task) = host_context_refresh.take()
                 {
                     task.abort();
                 }
+                research_coordinator = Some(coordinator);
                 continue;
             }
         };
-        runtime.research_campaign_active =
-            _research_server.is_some() && research_coordinator.owns_action_slot();
+        runtime.research_campaign_active = _research_server.is_some()
+            && research_coordinator.as_ref().is_none_or(|coordinator| coordinator.owns_action_slot());
         runtime.on_event(event)?;
         event_loop_iterations = event_loop_iterations.saturating_add(1);
         if event_loop_iterations.is_multiple_of(30)
@@ -198,13 +225,27 @@ pub async fn run_autotune_controller_session(
             }
         }
     }
+    }.await;
 
+    let management_result = if let Some(work) = research_work {
+        work.await.map(|_| ()).map_err(|error| {
+            anyhow::anyhow!("research management task failed during shutdown: {error}")
+        })
+    } else {
+        Ok(())
+    };
     if let Some(task) = host_context_refresh {
         task.abort();
     }
     if let Some(stop_task) = stop_task {
         stop_task.abort();
         let _ = stop_task.await;
+    }
+
+    if let Err(error) = controller_result.and(management_result) {
+        monitor_task.abort();
+        let _ = monitor_task.await;
+        return finish_autotune_controller_session(&mut runtime, Err(error));
     }
 
     let monitor_result = monitor_task.await?;
@@ -219,6 +260,18 @@ pub async fn run_autotune_controller_session(
         handle.shutdown_gracefully(Duration::from_millis(3_000), shutdown_poll)?;
     }
     finish_autotune_controller_session(&mut runtime, monitor_result)
+}
+
+fn spawn_research_work(
+    runtime: &mut AutotuneRuntime,
+    mut coordinator: super::research_control::ResearchCoordinator,
+    work: impl FnOnce(&mut super::research_control::ResearchCoordinator) + Send + 'static,
+) -> tokio::task::JoinHandle<super::research_control::ResearchCoordinator> {
+    runtime.research_campaign_active = true;
+    tokio::task::spawn_blocking(move || {
+        work(&mut coordinator);
+        coordinator
+    })
 }
 
 pub(super) fn schedule_research_recovery(
@@ -277,4 +330,40 @@ pub(crate) fn finish_autotune_controller_session(
         reason,
         last_decision: runtime.last_decision().cloned(),
     })
+}
+
+#[cfg(test)]
+mod research_management_tests {
+    use super::*;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn slow_management_keeps_the_slot_reserved_without_blocking_the_executor() {
+        let mut runtime = AutotuneRuntime::new(AutotuneRuntimeConfig::observe(None, None, None));
+        let coordinator = super::super::research_control::ResearchCoordinator::new(
+            None,
+            None,
+            "BlockedHostIdentity",
+        );
+        let (started_tx, started_rx) = oneshot::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::sync_channel::<()>(1);
+        let work = spawn_research_work(&mut runtime, coordinator, move |_| {
+            let _ = started_tx.send(());
+            let _ = release_rx.recv_timeout(Duration::from_secs(5));
+        });
+        tokio::time::timeout(Duration::from_secs(2), started_rx)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(runtime.research_campaign_active);
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            tokio::time::sleep(Duration::from_millis(10)),
+        )
+        .await
+        .unwrap();
+        assert!(!work.is_finished());
+        release_tx.send(()).unwrap();
+        let coordinator = work.await.unwrap();
+        assert!(!coordinator.owns_action_slot());
+    }
 }
