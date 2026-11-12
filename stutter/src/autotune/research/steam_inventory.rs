@@ -266,7 +266,7 @@ pub fn inspect_cyberpunk_installation(
         .join(&installation.installation_directory);
     let launcher_dir = crate::syscall::open_dir_no_symlinks(&installation_dir)?;
     let launcher_meta = File::from(launcher_dir.try_clone()?).metadata()?;
-    let launcher_sha256 = inspect_optional_launcher(&launcher_dir, owner_uid)?;
+    let launcher = inspect_optional_launcher(&launcher_dir, owner_uid)?;
     let executable_dir = installation_dir.join("bin/x64");
     let executable_dir = crate::syscall::open_dir_no_symlinks(&executable_dir)?;
     let executable = crate::syscall::openat_nofollow(executable_dir.as_fd(), "Cyberpunk2077.exe")?;
@@ -302,11 +302,13 @@ pub fn inspect_cyberpunk_installation(
         File::from(crate::syscall::open_dir_no_symlinks(steamapps)?).metadata()?;
     let launcher_dir_current =
         File::from(crate::syscall::open_dir_no_symlinks(&installation_dir)?).metadata()?;
+    let launcher_current = inspect_optional_launcher(&launcher_dir, owner_uid)?;
     anyhow::ensure!(
         library_current.dev() == meta.dev()
             && library_current.ino() == meta.ino()
             && launcher_dir_current.dev() == launcher_meta.dev()
             && launcher_dir_current.ino() == launcher_meta.ino()
+            && launcher_current == launcher
             && manifest_current.dev() == before.dev()
             && manifest_current.ino() == before.ino()
             && manifest_current.len() == before.len()
@@ -320,11 +322,24 @@ pub fn inspect_cyberpunk_installation(
         "Steam source changed during inventory"
     );
     installation.game_executable_sha256 = Some(stutter_core::hash::sha256_hex(&exe_bytes));
-    installation.launcher_executable_sha256 = launcher_sha256;
+    installation.launcher_executable_sha256 = launcher.map(|value| value.sha256);
     Ok(installation)
 }
 
-fn inspect_optional_launcher(dir: &impl AsFd, owner_uid: u32) -> anyhow::Result<Option<String>> {
+#[derive(Debug, PartialEq, Eq)]
+struct LauncherFingerprint {
+    sha256: String,
+    device: u64,
+    inode: u64,
+    size: u64,
+    mtime: i64,
+    mtime_nanos: i64,
+}
+
+fn inspect_optional_launcher(
+    dir: &impl AsFd,
+    owner_uid: u32,
+) -> anyhow::Result<Option<LauncherFingerprint>> {
     let file = match crate::syscall::openat_nofollow(dir.as_fd(), "REDprelauncher.exe") {
         Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -357,7 +372,14 @@ fn inspect_optional_launcher(dir: &impl AsFd, owner_uid: u32) -> anyhow::Result<
                     && value.mtime_nsec() == before.mtime_nsec()),
         "Cyberpunk launcher changed or lacks an MZ signature"
     );
-    Ok(Some(stutter_core::hash::sha256_hex(&bytes)))
+    Ok(Some(LauncherFingerprint {
+        sha256: stutter_core::hash::sha256_hex(&bytes),
+        device: before.dev(),
+        inode: before.ino(),
+        size: before.len(),
+        mtime: before.mtime(),
+        mtime_nanos: before.mtime_nsec(),
+    }))
 }
 
 #[cfg(test)]
@@ -499,6 +521,22 @@ mod tests {
         std::fs::remove_file(&launcher).unwrap();
         symlink(game.join("bin/x64/Cyberpunk2077.exe"), &launcher).unwrap();
         assert!(inspect_cyberpunk_installation(&steamapps, uid).is_err());
+    }
+
+    #[test]
+    fn launcher_fingerprint_detects_appearance_and_same_content_replacement() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = crate::syscall::open_dir_no_symlinks(root.path()).unwrap();
+        let uid = crate::syscall::geteuid();
+        let missing = inspect_optional_launcher(&dir, uid).unwrap();
+        let path = root.path().join("REDprelauncher.exe");
+        std::fs::write(&path, b"MZlauncher").unwrap();
+        let original = inspect_optional_launcher(&dir, uid).unwrap();
+        assert_ne!(missing, original);
+        std::fs::rename(&path, root.path().join("old.exe")).unwrap();
+        std::fs::write(&path, b"MZlauncher").unwrap();
+        let replacement = inspect_optional_launcher(&dir, uid).unwrap();
+        assert_ne!(original, replacement);
     }
 
     #[test]
