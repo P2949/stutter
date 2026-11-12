@@ -211,7 +211,7 @@ impl ResearchIntentV1 {
                 .process
                 .as_ref()
                 .is_some_and(|process| process.logged_in),
-            "Steam Client Experimental is not running a verified authenticated session"
+            "Steam Client Experimental has no nonzero account hint"
         );
         anyhow::ensure!(
             self.uid != 0 && self.desktop_research_consented,

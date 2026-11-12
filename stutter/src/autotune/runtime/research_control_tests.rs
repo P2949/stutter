@@ -191,6 +191,8 @@ fn resident_status_tracks_typed_host_readiness_and_steam_login_blockers() {
     let status: serde_json::Value = serde_json::from_str(&coordinator.status()).unwrap();
     assert_eq!(status["code"], "ReadyForIntent");
     assert_eq!(status["execution"], "BlockedSteamAutomation");
+    assert_eq!(status["steam_authentication"], "Unverified");
+    assert_eq!(status["game_entitlement"], "Unverified");
     assert_eq!(status["facts"]["source_sha256"], facts.source_sha256);
     assert!(!status.to_string().contains("/home/"));
     coordinator.set_mutable_action_present(true);
@@ -230,6 +232,9 @@ fn one_verified_intent_is_durable_pausable_cancellable_and_terminal() {
     let accepted: serde_json::Value = serde_json::from_str(&accepted).unwrap();
     assert_eq!(accepted["status"], "ok");
     assert_eq!(accepted["phase"], "await_safe_window");
+    assert_eq!(accepted["execution"], "BlockedSteamAutomation");
+    assert_eq!(accepted["steam_authentication"], "Unverified");
+    assert_eq!(accepted["game_entitlement"], "Unverified");
 
     let second = send(
         &mut coordinator,

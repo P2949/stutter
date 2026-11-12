@@ -244,6 +244,9 @@ impl ResearchCoordinator {
                 "status": "ok",
                 "phase": active.lease.phase(),
                 "intent_sha256": active.intent_sha256,
+                "execution": "BlockedSteamAutomation",
+                "steam_authentication": "Unverified",
+                "game_entitlement": "Unverified",
             })
             .to_string()
                 + "\n";
@@ -272,6 +275,8 @@ impl ResearchCoordinator {
                 "status": "idle",
                 "code": "ReadyForIntent",
                 "execution": "BlockedSteamAutomation",
+                "steam_authentication": "Unverified",
+                "game_entitlement": "Unverified",
                 "facts": facts,
             })
             .to_string()

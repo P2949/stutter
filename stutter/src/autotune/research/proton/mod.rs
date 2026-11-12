@@ -102,6 +102,8 @@ pub struct SteamProcessIdentity {
     pub steam_start_ticks: u64,
     pub webhelper_pid: u32,
     pub webhelper_start_ticks: u64,
+    /// Legacy wire field: a nonzero webhelper Steam ID is an account hint, not proof of
+    /// authentication, entitlement or the account's effective launch settings.
     pub logged_in: bool,
 }
 
