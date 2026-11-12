@@ -44,6 +44,14 @@ pub(crate) mod proton;
     not(test),
     expect(
         dead_code,
+        reason = "Report/Verify requests are connected once raw evidence capture lands"
+    )
+)]
+pub(crate) mod report;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
         reason = "P5 scheduling is consumed once the launcher is qualified"
     )
 )]
