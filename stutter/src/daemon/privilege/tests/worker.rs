@@ -1,4 +1,89 @@
+use std::os::unix::fs::MetadataExt;
+
 use super::*;
+
+#[test]
+fn managed_worker_start_preserves_an_existing_non_socket() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("worker.sock");
+    fs::write(&path, b"user data").unwrap();
+    let result = PrivilegedWorkerHandle::spawn_with_executable_and_timing(
+        &path,
+        Path::new("/bin/true"),
+        Duration::from_millis(100),
+        Duration::from_millis(5),
+    );
+    assert!(result.is_err());
+    assert_eq!(fs::read(path).unwrap(), b"user data");
+}
+
+#[test]
+fn managed_worker_start_preserves_a_live_listener() {
+    if !unix_socket_bind_supported() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("worker.sock");
+    let listener = UnixListener::bind(&path).unwrap();
+    let before = fs::symlink_metadata(&path).unwrap();
+    let result = PrivilegedWorkerHandle::spawn_with_executable_and_timing(
+        &path,
+        Path::new("/bin/true"),
+        Duration::from_millis(100),
+        Duration::from_millis(5),
+    );
+    assert!(result.is_err());
+    let after = fs::symlink_metadata(&path).unwrap();
+    assert_eq!((before.dev(), before.ino()), (after.dev(), after.ino()));
+    let _ = listener.accept().unwrap();
+}
+
+#[test]
+fn worker_socket_cleanup_preserves_a_replacement_file() {
+    if !unix_socket_bind_supported() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("worker.sock");
+    let _listener = UnixListener::bind(&path).unwrap();
+    let metadata = fs::symlink_metadata(&path).unwrap();
+    let identity = (metadata.dev(), metadata.ino());
+    fs::remove_file(&path).unwrap();
+    fs::write(&path, b"replacement data").unwrap();
+    assert!(super::super::worker_lifecycle::remove_owned_socket(&path, identity).is_err());
+    assert_eq!(fs::read(path).unwrap(), b"replacement data");
+}
+
+#[test]
+fn managed_worker_start_reaps_a_child_that_never_opens_its_socket() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("worker.sock");
+    let script = dir.path().join("fake-worker");
+    let pid_file = dir.path().join("pid");
+    fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\necho $$ > '{}'\nexec sleep 30\n",
+            pid_file.display()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o700)).unwrap();
+    let result = PrivilegedWorkerHandle::spawn_with_executable_and_timing(
+        &path,
+        &script,
+        Duration::from_millis(500),
+        Duration::from_millis(5),
+    );
+    assert!(result.is_err());
+    let pid: u32 = fs::read_to_string(pid_file)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    assert!(!Path::new(&format!("/proc/{pid}")).exists());
+}
 
 #[test]
 fn privileged_worker_can_execute_allowlisted_worker_operations() {

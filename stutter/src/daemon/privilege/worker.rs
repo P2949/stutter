@@ -4,220 +4,11 @@ use std::os::unix::fs::MetadataExt;
 
 use super::{
     exchange::{CommitExchange, commit_timeout},
+    worker_lifecycle::{
+        prepare_privileged_worker_socket_path, remove_owned_socket, socket_identity,
+    },
     *,
 };
-
-#[derive(Debug)]
-pub struct PrivilegedWorkerHandle {
-    child: Child,
-    socket_path: PathBuf,
-    executable_path: PathBuf,
-    restart_count: u32,
-    socket_ready_timeout: Duration,
-    socket_ready_retry_interval: Duration,
-}
-
-impl PrivilegedWorkerHandle {
-    pub fn spawn(socket_path: &Path) -> anyhow::Result<Self> {
-        let executable = std::env::current_exe()?;
-        Self::spawn_with_executable(socket_path, &executable)
-    }
-
-    pub fn spawn_with_timing(
-        socket_path: &Path,
-        socket_ready_timeout: Duration,
-        socket_ready_retry_interval: Duration,
-    ) -> anyhow::Result<Self> {
-        let executable = std::env::current_exe()?;
-        Self::spawn_with_executable_and_timing(
-            socket_path,
-            &executable,
-            socket_ready_timeout,
-            socket_ready_retry_interval,
-        )
-    }
-
-    pub fn spawn_with_executable(socket_path: &Path, executable: &Path) -> anyhow::Result<Self> {
-        Self::spawn_with_executable_and_timing(
-            socket_path,
-            executable,
-            default_privileged_worker_socket_ready_timeout(),
-            default_privileged_worker_socket_ready_retry_interval(),
-        )
-    }
-
-    pub fn spawn_with_executable_and_timing(
-        socket_path: &Path,
-        executable: &Path,
-        socket_ready_timeout: Duration,
-        socket_ready_retry_interval: Duration,
-    ) -> anyhow::Result<Self> {
-        let _ = fs::remove_file(socket_path);
-        prepare_privileged_worker_socket_path(socket_path)?;
-        let child = spawn_privileged_worker_child(executable, socket_path)?;
-        wait_for_privileged_worker_socket_with_timing(
-            socket_path,
-            socket_ready_timeout,
-            socket_ready_retry_interval,
-        )?;
-        log::info!(
-            "privileged_worker_started socket={} pid={}",
-            socket_path.display(),
-            child.id()
-        );
-        Ok(Self {
-            child,
-            socket_path: socket_path.to_path_buf(),
-            executable_path: executable.to_path_buf(),
-            restart_count: 0,
-            socket_ready_timeout,
-            socket_ready_retry_interval,
-        })
-    }
-
-    pub fn restart_count(&self) -> u32 {
-        self.restart_count
-    }
-
-    pub fn is_alive(&mut self) -> bool {
-        self.child
-            .try_wait()
-            .map(|status| status.is_none())
-            .unwrap_or(false)
-    }
-
-    pub fn terminate(&mut self) -> anyhow::Result<()> {
-        self.child.kill().ok();
-        self.child.wait().ok();
-        fs::remove_file(&self.socket_path).ok();
-        Ok(())
-    }
-
-    pub fn restart(&mut self) -> anyhow::Result<()> {
-        self.terminate()?;
-        prepare_privileged_worker_socket_path(&self.socket_path)?;
-        let child = spawn_privileged_worker_child(&self.executable_path, &self.socket_path)?;
-        wait_for_privileged_worker_socket_with_timing(
-            &self.socket_path,
-            self.socket_ready_timeout,
-            self.socket_ready_retry_interval,
-        )?;
-        self.restart_count = self.restart_count.saturating_add(1);
-        log::info!(
-            "privileged_worker_restarted socket={} restart_count={} pid={}",
-            self.socket_path.display(),
-            self.restart_count,
-            child.id()
-        );
-        self.child = child;
-        Ok(())
-    }
-
-    pub fn shutdown_gracefully(
-        &mut self,
-        timeout: Duration,
-        poll_interval: Duration,
-    ) -> anyhow::Result<()> {
-        if let Ok(mut stream) = UnixStream::connect(&self.socket_path) {
-            serde_json::to_writer(&mut stream, &PrivilegedWorkerRequest::Shutdown)?;
-            stream.write_all(b"\n")?;
-            stream.flush()?;
-        }
-
-        let deadline = Instant::now() + timeout;
-        loop {
-            if self.child.try_wait()?.is_some() {
-                return Ok(());
-            }
-            if Instant::now() >= deadline {
-                self.child.kill().ok();
-                self.child.wait().ok();
-                return Ok(());
-            }
-            std::thread::sleep(poll_interval);
-        }
-    }
-}
-
-impl Drop for PrivilegedWorkerHandle {
-    fn drop(&mut self) {
-        self.child.kill().ok();
-        self.child.wait().ok();
-        fs::remove_file(&self.socket_path).ok();
-    }
-}
-
-fn spawn_privileged_worker_child(executable: &Path, socket_path: &Path) -> anyhow::Result<Child> {
-    let socket = socket_path.to_str().context("socket path is not UTF-8")?;
-    Command::new(executable)
-        .args(["privileged-worker", "--socket", socket])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .with_context(|| {
-            format!(
-                "failed to spawn privileged worker for socket {}",
-                socket_path.display()
-            )
-        })
-}
-
-fn default_privileged_worker_socket_ready_timeout() -> Duration {
-    Duration::from_millis(crate::daemon::config::DEFAULT_PRIVILEGED_WORKER_SOCKET_READY_TIMEOUT_MS)
-}
-
-fn default_privileged_worker_socket_ready_retry_interval() -> Duration {
-    Duration::from_millis(crate::daemon::config::DEFAULT_PRIVILEGED_WORKER_SOCKET_READY_RETRY_MS)
-}
-
-pub(crate) fn wait_for_privileged_worker_socket_with_timing(
-    socket_path: &Path,
-    timeout: Duration,
-    retry_interval: Duration,
-) -> anyhow::Result<()> {
-    let deadline = Instant::now() + timeout;
-    let mut last_error = None;
-
-    while Instant::now() < deadline {
-        match UnixStream::connect(socket_path) {
-            Ok(_) => return Ok(()),
-            Err(err)
-                if matches!(
-                    err.kind(),
-                    std::io::ErrorKind::NotFound
-                        | std::io::ErrorKind::ConnectionRefused
-                        | std::io::ErrorKind::WouldBlock
-                ) =>
-            {
-                last_error = Some(err);
-                std::thread::sleep(retry_interval);
-            }
-            Err(err) => {
-                return Err(err).with_context(|| {
-                    format!(
-                        "privileged_worker_socket_not_ready: failed to connect to {}",
-                        socket_path.display()
-                    )
-                });
-            }
-        }
-    }
-
-    let last_error = last_error.map(|err| err.to_string());
-    let last_error_suffix = last_error
-        .as_ref()
-        .map(|err| format!("; last_error={err}"))
-        .unwrap_or_default();
-
-    Err(PrivilegedWorkerError::SocketNotReady {
-        socket_path: socket_path.to_path_buf(),
-        timeout_ms: timeout.as_millis(),
-        last_error,
-        last_error_suffix,
-    }
-    .into())
-}
 
 pub fn default_privileged_worker_socket_path() -> anyhow::Result<PathBuf> {
     if let Some(runtime_dir) = std::env::var_os("XDG_RUNTIME_DIR") {
@@ -259,6 +50,7 @@ pub(super) fn run_worker(
             socket_path.display()
         )
     })?;
+    let bound_identity = socket_identity(socket_path)?;
     fs::set_permissions(socket_path, fs::Permissions::from_mode(0o600)).with_context(|| {
         format!(
             "failed to set permissions on privileged worker socket {}",
@@ -314,48 +106,13 @@ pub(super) fn run_worker(
         }
     };
 
-    let cleanup_result = fs::remove_file(socket_path).with_context(|| {
+    let cleanup_result = remove_owned_socket(socket_path, bound_identity).with_context(|| {
         format!(
             "failed to remove privileged worker socket {}",
             socket_path.display()
         )
     });
     result.and(cleanup_result)
-}
-
-fn prepare_privileged_worker_socket_path(path: &Path) -> anyhow::Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).with_context(|| {
-            format!(
-                "failed to create privileged worker socket directory {}",
-                parent.display()
-            )
-        })?;
-    }
-
-    if !path.exists() {
-        return Ok(());
-    }
-
-    let metadata = fs::symlink_metadata(path).with_context(|| {
-        format!(
-            "failed to inspect existing privileged worker socket {}",
-            path.display()
-        )
-    })?;
-    if !metadata.file_type().is_socket() {
-        return Err(PrivilegedWorkerError::RefusingNonSocket {
-            path: path.to_path_buf(),
-        }
-        .into());
-    }
-
-    fs::remove_file(path).with_context(|| {
-        format!(
-            "failed to remove stale privileged worker socket {}",
-            path.display()
-        )
-    })
 }
 
 fn handle_privileged_worker_connection(

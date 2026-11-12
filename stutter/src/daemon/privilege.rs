@@ -49,6 +49,7 @@ mod service_tokens;
 mod socket;
 mod validation_fence;
 mod worker;
+mod worker_lifecycle;
 pub use allowlist::PrivilegeCommandAllowlist;
 pub(crate) use audit::{CandidateBoundaryAuditInput, PrivilegeBoundaryAuditInput};
 pub use audit::{PrivilegeAuditSink, privileged_operation_audit_event};
@@ -61,15 +62,16 @@ pub use in_process::InProcessPrivilegedActionService;
 pub use model::*;
 pub(crate) use revalidate::revalidate_candidate_targets;
 pub use socket::UnixSocketPrivilegedActionService;
-pub(crate) use worker::wait_for_privileged_worker_socket_with_timing;
 pub use worker::{
-    PrivilegedWorkerHandle, default_privileged_worker_socket_path, run_privileged_worker,
+    default_privileged_worker_socket_path, run_privileged_worker,
     run_privileged_worker_with_service,
 };
 #[cfg(test)]
 pub(crate) use worker::{
     execute_privileged_worker_request, execute_privileged_worker_request_with_audit_sink,
 };
+pub use worker_lifecycle::PrivilegedWorkerHandle;
+pub(crate) use worker_lifecycle::wait_for_privileged_worker_socket_with_timing;
 
 /// The commit barrier of a two-phase apply.
 pub type PreparedHook<'a> = dyn FnMut(&RollbackToken) -> anyhow::Result<()> + 'a;

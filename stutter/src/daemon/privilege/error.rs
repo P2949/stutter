@@ -123,6 +123,24 @@ pub enum PrivilegedWorkerError {
     )]
     RefusingNonSocket { path: PathBuf },
 
+    #[error("privileged_worker_socket_in_use: a worker is already listening at {path}")]
+    SocketInUse { path: PathBuf },
+
+    #[error("privileged_worker_socket_changed: the socket path {path} was replaced")]
+    SocketChanged { path: PathBuf },
+
+    #[error("privileged_worker_peer_mismatch: expected process {expected}, got {actual}")]
+    SocketPeerMismatch { expected: u32, actual: u32 },
+
+    #[error("privileged_worker_shutdown_response_invalid: invalid shutdown response from {path}")]
+    ShutdownResponseInvalid { path: PathBuf },
+
+    #[error("privileged_worker_shutdown_timeout: worker did not exit within {timeout_ms}ms")]
+    ShutdownTimeout { timeout_ms: u128 },
+
+    #[error("privileged_worker_shutdown_failed: worker exited with {status}")]
+    ShutdownFailed { status: String },
+
     #[error("privileged_worker_empty_request: privileged worker request body was empty")]
     EmptyRequest,
 
@@ -194,6 +212,12 @@ impl PrivilegedWorkerError {
                 "privileged_worker_missing_socket_runtime_directory"
             }
             Self::RefusingNonSocket { .. } => "privileged_worker_socket_refusing_non_socket",
+            Self::SocketInUse { .. } => "privileged_worker_socket_in_use",
+            Self::SocketChanged { .. } => "privileged_worker_socket_changed",
+            Self::SocketPeerMismatch { .. } => "privileged_worker_peer_mismatch",
+            Self::ShutdownResponseInvalid { .. } => "privileged_worker_shutdown_response_invalid",
+            Self::ShutdownTimeout { .. } => "privileged_worker_shutdown_timeout",
+            Self::ShutdownFailed { .. } => "privileged_worker_shutdown_failed",
             Self::EmptyRequest => "privileged_worker_empty_request",
             Self::MissingRollbackToken => "privileged_apply_missing_rollback",
             Self::PreparedApplyUnsupported => "privileged_prepared_apply_unsupported",
