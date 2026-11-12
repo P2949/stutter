@@ -27,6 +27,11 @@ pub(crate) mod desktop_idle;
 )]
 pub(crate) mod dispatch_context;
 pub(crate) mod dispatcher;
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "attached to the resident coordinator next")
+)]
+pub(crate) mod driver;
 pub(super) mod host;
 mod journal;
 #[cfg_attr(

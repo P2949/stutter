@@ -97,11 +97,17 @@ fn request(action: ResearchClientAction, uid: u32) -> anyhow::Result<ResearchReq
 /// returns on failure. Nothing here talks to the resident or touches root.
 fn dispatch(context_dir: &std::path::Path, args: &[String], uid: u32) -> anyhow::Result<()> {
     use std::os::unix::process::CommandExt;
-    let directory = File::from(crate::syscall::open_dir_no_symlinks(context_dir)?);
-    let meta = directory.metadata()?;
+    let root = File::from(crate::syscall::open_dir_no_symlinks(context_dir)?);
+    let meta = root.metadata()?;
     anyhow::ensure!(
         meta.is_dir() && meta.uid() == uid && meta.mode() & 0o077 == 0,
         "untrusted dispatch directory"
+    );
+    let directory = crate::autotune::research::dispatch_context::latest_attempt_dir(&root)?;
+    let attempt = directory.metadata()?;
+    anyhow::ensure!(
+        attempt.is_dir() && attempt.uid() == uid && attempt.mode() & 0o077 == 0,
+        "untrusted dispatch attempt directory"
     );
     let env: std::collections::BTreeMap<String, String> = std::env::vars().collect();
     let now = std::time::SystemTime::now()

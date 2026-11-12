@@ -151,6 +151,47 @@ pub fn authorize_dispatch(
     Ok(plan)
 }
 
+/// Resident side: arm a fresh numbered attempt directory under the dispatch root. The numbered
+/// name makes re-arming impossible (an existing directory is an error), and the dispatcher always
+/// uses the highest number, so older consumed attempts can never be selected again.
+pub fn arm_attempt_in_root(
+    root: &std::fs::File,
+    intent: &ResearchIntentV1,
+    slot: &AttemptSlot,
+    spec: ArmSpec,
+    window: (u64, u64),
+) -> anyhow::Result<DispatchContextV1> {
+    let name = format!("{:04}", slot.index);
+    crate::syscall::mkdir_private_at(root.as_fd(), &name)?;
+    let dir = std::fs::File::from(crate::syscall::openat_dir_nofollow(root.as_fd(), &name)?);
+    root.sync_all()?;
+    arm_attempt(&dir, intent, slot, spec, window)
+}
+
+/// Dispatcher side: the newest attempt directory under the dispatch root.
+pub fn latest_attempt_dir(root: &std::fs::File) -> anyhow::Result<std::fs::File> {
+    use std::os::fd::AsRawFd;
+    let mut newest: Option<String> = None;
+    for entry in std::fs::read_dir(format!("/proc/self/fd/{}", root.as_raw_fd()))? {
+        let name = entry?
+            .file_name()
+            .into_string()
+            .map_err(|_| anyhow::anyhow!("non-UTF8 dispatch entry"))?;
+        anyhow::ensure!(
+            name.len() == 4 && name.bytes().all(|b| b.is_ascii_digit()),
+            "unexpected dispatch root entry"
+        );
+        if newest.as_ref().is_none_or(|best| name > *best) {
+            newest = Some(name);
+        }
+    }
+    let name = newest.ok_or_else(|| anyhow::anyhow!("no armed attempt"))?;
+    Ok(std::fs::File::from(crate::syscall::openat_dir_nofollow(
+        root.as_fd(),
+        &name,
+    )?))
+}
+
 /// Real verifier: rediscover the installed Proton from Steam and require the exact frozen identity at
 /// exactly the directory the context will exec. Any drift refuses the launch.
 pub fn verify_installed_tool(
@@ -306,5 +347,42 @@ mod tests {
         let arm = |f: &std::fs::File| arm_attempt(f, &intent, &slot, spec(), (now, 60));
         arm(&file).unwrap();
         assert!(arm(&file).is_err());
+    }
+}
+
+#[cfg(test)]
+mod root_tests {
+    use std::os::unix::fs::PermissionsExt;
+
+    use super::*;
+
+    #[test]
+    fn numbered_attempt_dirs_cannot_be_rearmed_and_the_newest_is_selected() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        let root = std::fs::File::from(crate::syscall::open_dir_no_symlinks(dir.path()).unwrap());
+        let mut intent = super::super::tests::intent();
+        intent.uid = crate::syscall::geteuid();
+        let slot = |index| AttemptSlot {
+            study_sha256: "e".repeat(64),
+            context_sha256: "f".repeat(64),
+            index,
+            arm: intent.tools[0].source,
+        };
+        let spec = || ArmSpec {
+            tool_dir: "/t".into(),
+            study_compat_data: "/s".into(),
+            arm_env: BTreeMap::new(),
+            steamapps: "/a".into(),
+            proton_manifest: "/m".into(),
+        };
+        let now = intent.issued_unix_seconds + 1;
+        assert!(latest_attempt_dir(&root).is_err());
+        arm_attempt_in_root(&root, &intent, &slot(0), spec(), (now, 60)).unwrap();
+        assert!(arm_attempt_in_root(&root, &intent, &slot(0), spec(), (now, 60)).is_err());
+        arm_attempt_in_root(&root, &intent, &slot(1), spec(), (now, 60)).unwrap();
+        let newest = latest_attempt_dir(&root).unwrap();
+        let context = read_context(&newest, intent.uid).unwrap();
+        assert_eq!(context.slot.index, 1);
     }
 }

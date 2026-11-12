@@ -245,6 +245,19 @@ pub fn openat_nofollow(dir: std::os::fd::BorrowedFd<'_>, name: &str) -> io::Resu
     Ok(unsafe { std::fs::File::from_raw_fd(raw) })
 }
 
+/// Creates one private (0700) child directory relative to `dir`; an existing name is an error.
+pub fn mkdir_private_at(dir: std::os::fd::BorrowedFd<'_>, name: &str) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+    let c_name =
+        std::ffi::CString::new(name).map_err(|_| io::Error::from_raw_os_error(libc::EINVAL))?;
+    // SAFETY: `dir` is live and borrowed for this call; `c_name` is NUL terminated.
+    let result = unsafe { libc::mkdirat(dir.as_raw_fd(), c_name.as_ptr(), 0o700) };
+    if result < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
 /// Opens a child directory relative to `dir` without following a symlink.
 pub fn openat_dir_nofollow(
     dir: std::os::fd::BorrowedFd<'_>,
