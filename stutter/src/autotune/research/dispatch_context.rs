@@ -47,8 +47,7 @@ pub fn arm_attempt(
     tool_dir: PathBuf,
     study_compat_data: PathBuf,
     arm_env: BTreeMap<String, String>,
-    now: u64,
-    lifetime_seconds: u64,
+    (now, lifetime_seconds): (u64, u64),
 ) -> anyhow::Result<DispatchContextV1> {
     let mut tickets = BTreeMap::new();
     for verb in [SteamVerb::WaitForExitAndRun, SteamVerb::Run] {
@@ -197,8 +196,7 @@ mod tests {
             "/tools/GE".into(),
             "/study/compatdata".into(),
             BTreeMap::new(),
-            now,
-            60,
+            (now, 60),
         )
         .unwrap();
         (dir, file, now + 1)
@@ -241,8 +239,7 @@ mod tests {
                 "/t".into(),
                 "/s".into(),
                 BTreeMap::new(),
-                now,
-                60,
+                (now, 60),
             )
         };
         arm(&file).unwrap();
