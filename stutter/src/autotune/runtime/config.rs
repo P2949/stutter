@@ -86,19 +86,26 @@ pub(crate) fn validate_runtime_config(
     let research_paths = [
         research.research_socket_dir.as_ref(),
         research.research_campaign_dir.as_ref(),
+        research.research_study_dir.as_ref(),
         research.research_steamapps_dir.as_ref(),
         research.research_proton_manifest.as_ref(),
     ];
     let configured = research_paths.iter().filter(|path| path.is_some()).count();
-    let overlapping_storage = match (
-        &research.research_socket_dir,
-        &research.research_campaign_dir,
-    ) {
-        (Some(socket), Some(campaign)) => {
-            socket.starts_with(campaign) || campaign.starts_with(socket)
-        }
-        _ => false,
-    };
+    let private_dirs = [
+        research.research_socket_dir.as_deref(),
+        research.research_campaign_dir.as_deref(),
+        research.research_study_dir.as_deref(),
+        research.research_steamapps_dir.as_deref(),
+    ];
+    let overlapping_storage = private_dirs.iter().enumerate().any(|(index, left)| {
+        private_dirs
+            .iter()
+            .skip(index + 1)
+            .any(|right| match (left, right) {
+                (Some(left), Some(right)) => left.starts_with(right) || right.starts_with(left),
+                _ => false,
+            })
+    });
     if (configured != 0 && configured != research_paths.len())
         || research_paths.into_iter().flatten().any(|path| {
             !path.is_absolute()
@@ -109,7 +116,7 @@ pub(crate) fn validate_runtime_config(
         || overlapping_storage
     {
         return Err(AutotuneRuntimeError::InvalidMode {
-            message: "research socket, campaign, SteamApps and Proton manifest paths must all be absolute and configured together; socket and campaign directories must not overlap".to_owned(),
+            message: "research socket, campaign, study, SteamApps and Proton manifest paths must all be absolute and configured together; directories must not overlap".to_owned(),
         });
     }
     if config.window_seconds == 0 {

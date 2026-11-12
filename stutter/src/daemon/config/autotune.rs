@@ -67,6 +67,9 @@ pub struct DaemonAutotuneConfig {
     /// Dedicated private directory for one frozen resident research campaign.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub research_campaign_dir: Option<PathBuf>,
+    /// Existing private user-owned root for isolated studies and evidence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub research_study_dir: Option<PathBuf>,
     /// Primary Steam client's SteamApps directory; other registered libraries are discovered.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub research_steamapps_dir: Option<PathBuf>,
@@ -106,6 +109,7 @@ impl Default for DaemonAutotuneConfig {
             kpi_socket_dir: None,
             research_socket_dir: None,
             research_campaign_dir: None,
+            research_study_dir: None,
             research_steamapps_dir: None,
             research_proton_manifest: None,
             external_mutation_policy: ExternalMutationPolicy::default(),

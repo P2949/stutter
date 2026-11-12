@@ -247,6 +247,14 @@ pub fn collect_campaign_facts(
         active_wayland_session(uid).map_err(|_| HostFactsError::new("BlockedDesktopSession"))?;
     let libraries = crate::autotune::research::discover_steam_libraries(&steamapps, uid)
         .map_err(|_| HostFactsError::new("BlockedSteamLibraries"))?;
+    let study_root = runtime
+        .daemon_config
+        .autotune
+        .research_study_dir
+        .as_deref()
+        .ok_or_else(|| HostFactsError::new("BlockedResearchConfiguration"))?;
+    super::prefix::verify_study_root(study_root, &libraries, uid)
+        .map_err(|_| HostFactsError::new("BlockedStudyStorage"))?;
     let (_, game) = crate::autotune::research::discover_cyberpunk_installation(&libraries, uid)
         .map_err(|_| HostFactsError::new("BlockedGameInstallation"))?;
     if game.manifest_update_status

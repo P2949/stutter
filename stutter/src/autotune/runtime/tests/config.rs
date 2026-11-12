@@ -113,7 +113,14 @@ fn research_paths_are_complete_absolute_and_separate() {
     assert!(validate_runtime_config(&config).is_err());
     config.daemon_config.autotune.research_campaign_dir =
         Some("/home/user/studies/campaign".into());
+    config.daemon_config.autotune.research_study_dir = Some("/home/user/studies".into());
+    assert!(validate_runtime_config(&config).is_err());
+    config.daemon_config.autotune.research_study_dir = Some("/home/user/evidence".into());
     assert!(validate_runtime_config(&config).is_ok());
+    config.daemon_config.autotune.research_study_dir =
+        Some("/home/user/Steam/steamapps/study".into());
+    assert!(validate_runtime_config(&config).is_err());
+    config.daemon_config.autotune.research_study_dir = Some("/home/user/evidence".into());
     config.daemon_config.autotune.research_campaign_dir =
         Some("/home/user/../studies/campaign".into());
     assert!(validate_runtime_config(&config).is_err());

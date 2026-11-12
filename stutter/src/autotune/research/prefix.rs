@@ -24,6 +24,53 @@ fn overlap(left: &Path, right: &Path) -> bool {
     left.starts_with(right) || right.starts_with(left)
 }
 
+/// Check the configured user study root before admission. This is not a prefix or cloud proof.
+pub(super) fn verify_study_root(
+    study_root: &Path,
+    libraries: &[std::path::PathBuf],
+    uid: u32,
+) -> anyhow::Result<std::fs::Metadata> {
+    anyhow::ensure!(
+        uid != 0 && normalized_absolute(study_root) && !libraries.is_empty(),
+        "invalid study root"
+    );
+    let root = File::from(crate::syscall::open_dir_no_symlinks(study_root)?);
+    let metadata = root.metadata()?;
+    anyhow::ensure!(
+        metadata.is_dir() && metadata.uid() == uid && metadata.mode() & 0o077 == 0,
+        "untrusted study root"
+    );
+    for library in libraries {
+        let steam_root = library
+            .parent()
+            .ok_or_else(|| anyhow::anyhow!("invalid Steam library"))?;
+        anyhow::ensure!(
+            !overlap(study_root, steam_root),
+            "study root overlaps a Steam library"
+        );
+        let library_meta = File::from(crate::syscall::open_dir_no_symlinks(library)?).metadata()?;
+        anyhow::ensure!(
+            metadata.dev() != library_meta.dev() || metadata.ino() != library_meta.ino(),
+            "study root aliases a Steam library"
+        );
+        let steam_meta =
+            File::from(crate::syscall::open_dir_no_symlinks(steam_root)?).metadata()?;
+        anyhow::ensure!(
+            metadata.dev() != steam_meta.dev() || metadata.ino() != steam_meta.ino(),
+            "study root aliases a Steam root"
+        );
+    }
+    let current = File::from(crate::syscall::open_dir_no_symlinks(study_root)?).metadata()?;
+    anyhow::ensure!(
+        metadata.dev() == current.dev()
+            && metadata.ino() == current.ino()
+            && current.uid() == uid
+            && current.mode() & 0o077 == 0,
+        "study root changed during preflight"
+    );
+    Ok(metadata)
+}
+
 /// Verify Steam's effective path against a precreated private study directory. The registered
 /// libraries are rediscovered from the actual Steam client; callers cannot supply exclusions.
 pub fn verify_study_compatdata(
@@ -43,12 +90,7 @@ pub fn verify_study_compatdata(
         "Steam compatibility data path is not the study directory"
     );
     let libraries = super::discover_steam_libraries(primary_steamapps, uid)?;
-    let root = File::from(crate::syscall::open_dir_no_symlinks(study_root)?);
-    let root_meta = root.metadata()?;
-    anyhow::ensure!(
-        root_meta.is_dir() && root_meta.uid() == uid && root_meta.mode() & 0o077 == 0,
-        "untrusted study root"
-    );
+    let root_meta = verify_study_root(study_root, &libraries, uid)?;
     let compat = File::from(crate::syscall::open_dir_no_symlinks(
         steam_compat_data_path,
     )?);
@@ -58,13 +100,6 @@ pub fn verify_study_compatdata(
         "untrusted study compatibility data"
     );
     for library in &libraries {
-        let steam_root = library
-            .parent()
-            .ok_or_else(|| anyhow::anyhow!("invalid Steam library"))?;
-        anyhow::ensure!(
-            !overlap(study_root, steam_root),
-            "study root overlaps a Steam library"
-        );
         for protected in [
             library.join("compatdata"),
             library.join("compatdata/1091500"),

@@ -39,6 +39,21 @@ fn check(
 }
 
 #[test]
+fn study_root_preflight_refuses_public_symlink_and_steam_paths() {
+    let (root, primary, study) = fixture();
+    let uid = crate::syscall::geteuid();
+    let libraries = vec![primary.clone()];
+    assert!(verify_study_root(&study, &libraries, uid).is_ok());
+    assert!(verify_study_root(primary.parent().unwrap(), &libraries, uid).is_err());
+    std::fs::set_permissions(&study, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(verify_study_root(&study, &libraries, uid).is_err());
+    std::fs::set_permissions(&study, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let link = root.path().join("study-link");
+    symlink(&study, &link).unwrap();
+    assert!(verify_study_root(&link, &libraries, uid).is_err());
+}
+
+#[test]
 fn accepts_only_exact_private_study_path_and_checks_freshness() {
     let (_root, primary, study) = fixture();
     let owned = study.join("compatdata");
