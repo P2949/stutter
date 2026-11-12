@@ -21,26 +21,11 @@ pub(crate) mod analysis;
 pub(crate) mod cyberpunk;
 #[cfg(feature = "wayland-probe")]
 pub(crate) mod desktop_idle;
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "armed by the resident campaign once wired")
-)]
 pub(crate) mod dispatch_context;
 pub(crate) mod dispatcher;
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "attached to the resident coordinator next")
-)]
 pub(crate) mod driver;
 pub(super) mod host;
 mod journal;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "P3 tickets remain inactive until the Steam dispatcher is physically qualified"
-    )
-)]
 pub(crate) mod launch_ticket;
 mod lease;
 mod mounts;

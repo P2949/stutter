@@ -13,6 +13,13 @@ use super::{
 
 const ARM_LIFETIME_SECONDS: u64 = 120;
 
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the real Steam host reports these once launching is qualified"
+    )
+)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Progress {
     Running,
