@@ -254,11 +254,25 @@ pub async fn run_autotune_controller_session(
     drop(research_idle);
 
     let management_result = if let Some(work) = research_work {
-        work.await.map(|_| ()).map_err(|error| {
+        work.await.map(Some).map_err(|error| {
             anyhow::anyhow!("research management task failed during shutdown: {error}")
         })
     } else {
-        Ok(())
+        Ok(research_coordinator.take())
+    };
+    let management_result = match management_result {
+        Ok(Some(mut coordinator)) => match tokio::task::spawn_blocking(move || {
+            let now =
+                (crate::audit::unix_nanos_now() / 1_000_000_000).min(u128::from(u64::MAX)) as u64;
+            coordinator.shutdown_driver(now)
+        })
+        .await
+        {
+            Ok(result) => result,
+            Err(error) => Err(anyhow::anyhow!("research shutdown task failed: {error}")),
+        },
+        Ok(None) => Ok(()),
+        Err(error) => Err(error),
     };
     if let Some(task) = host_context_refresh {
         task.abort();

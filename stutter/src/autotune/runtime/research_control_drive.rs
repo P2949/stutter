@@ -68,7 +68,8 @@ impl ResearchCoordinator {
     }
 
     pub(in crate::autotune::runtime) fn drive_due(&self) -> bool {
-        self.driver.is_some()
+        self.storage_blocker != Some("UnsafeToResume")
+            && self.driver.is_some()
             && self.active.as_ref().is_some_and(|active| {
                 matches!(
                     active.lease.phase(),
@@ -92,8 +93,12 @@ impl ResearchCoordinator {
             Ok(step) => step,
             Err(error) => {
                 log::error!("research driver failed: {error:#}");
-                state.host.abort();
-                self.settle(now, ResearchPhase::Blocked, "DriverFailed");
+                if let Err(settlement) = state.host.abort() {
+                    log::error!("research process settlement is unverified: {settlement:#}");
+                }
+                // A failed tick may have left a started marker or torn evidence even if the host
+                // stopped. Keep the lease and mutation slot until independent recovery proves it.
+                self.storage_blocker = Some("UnsafeToResume");
                 return;
             }
         };
@@ -141,7 +146,12 @@ impl ResearchCoordinator {
         if matches!(step, Step::Done) && ok {
             self.settle_terminal(ResearchPhase::Completed, "Completed");
         } else if !ok {
-            self.settle(now, ResearchPhase::Blocked, "LeasePersistenceFailed");
+            if let Some(state) = self.driver.as_mut()
+                && let Err(error) = state.host.abort()
+            {
+                log::error!("research process settlement is unverified: {error:#}");
+            }
+            self.storage_blocker = Some("UnsafeToResume");
         }
     }
 
@@ -156,6 +166,31 @@ impl ResearchCoordinator {
         }
     }
 
+    /// Settle an in-process attempt before the controller and worker shut down. An unsealed or
+    /// previously uncertain attempt remains recoverable only through the existing safety gate.
+    pub(in crate::autotune::runtime) fn shutdown_driver(&mut self, now: u64) -> anyhow::Result<()> {
+        let Some(state) = self.driver.as_mut() else {
+            return Ok(());
+        };
+        if self.storage_blocker == Some("UnsafeToResume") {
+            state.host.abort()?;
+            anyhow::bail!("research attempt requires independent recovery");
+        }
+        state.driver.cancel();
+        match state.driver.tick(state.host.as_mut(), now)? {
+            Step::Sealed(_) | Step::Cancelled => {}
+            _ => anyhow::bail!("research shutdown did not settle the attempt"),
+        }
+        self.settle(now, ResearchPhase::Aborted, "ControllerShutdown");
+        anyhow::ensure!(
+            self.terminal
+                .as_ref()
+                .is_some_and(|terminal| terminal.phase == ResearchPhase::Aborted),
+            "research lease shutdown was not persisted"
+        );
+        Ok(())
+    }
+
     fn settle(&mut self, now: u64, terminal: ResearchPhase, code: &'static str) {
         if let Some(active) = self.active.as_mut() {
             let phase = active.lease.phase();
@@ -163,8 +198,16 @@ impl ResearchCoordinator {
                 phase,
                 ResearchPhase::Completed | ResearchPhase::Blocked | ResearchPhase::Aborted
             ) {
-                let _ = active.lease.advance(ResearchPhase::Restoring, now);
-                let _ = active.lease.advance(terminal, now);
+                let restoring = phase == ResearchPhase::Restoring
+                    || active.lease.advance(ResearchPhase::Restoring, now).is_ok();
+                if !restoring || active.lease.advance(terminal, now).is_err() {
+                    self.storage_blocker = Some("UnsafeToResume");
+                    return;
+                }
+            }
+            if active.lease.phase() != terminal {
+                self.storage_blocker = Some("UnsafeToResume");
+                return;
             }
         }
         self.settle_terminal(terminal, code);
@@ -208,7 +251,9 @@ impl AttemptHost for UnqualifiedSteamHost {
             code: "BlockedSteamAutomation".into(),
         }
     }
-    fn abort(&mut self) {}
+    fn abort(&mut self) -> anyhow::Result<()> {
+        Ok(())
+    }
 }
 
 impl ResearchCoordinator {

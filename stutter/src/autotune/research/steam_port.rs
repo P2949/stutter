@@ -1,10 +1,9 @@
-//! Production `SteamPort` pieces. Launching is a plain, unprivileged `steam -applaunch` of the one
-//! owned app, gated on an externally supplied idle signal AND an independent scan showing no Steam,
-//! Wine/Proton or Cyberpunk process at all, so an unrelated game or user session is never touched.
-//! Result detection is injected (`ResultProbe`): it must verify a fresh native result for exactly
-//! this launch, and is wired to `cyberpunk::verify_benchmark_completion` after live qualification.
+//! Experimental `SteamPort` pieces. The candidate Steam launch and native benchmark flag are not
+//! qualified. The process-name scan is only a conservative prefilter, not proof of ownership or
+//! absence of unrelated games. Result detection and actual game-tree settlement remain unverified.
 
 use std::{
+    io::Read,
     path::{Path, PathBuf},
     process::{Child, Command},
     sync::{
@@ -38,14 +37,38 @@ pub fn host_has_game_or_steam(proc_root: &Path) -> bool {
         // An unreadable /proc is never evidence that the host is free.
         return true;
     };
-    entries.flatten().any(|entry| {
-        entry
-            .file_name()
-            .to_str()
-            .is_some_and(|name| name.bytes().all(|b| b.is_ascii_digit()))
-            && std::fs::read_to_string(entry.path().join("comm"))
-                .is_ok_and(|comm| BUSY_COMMS.contains(&comm.trim()))
-    })
+    for entry in entries {
+        let Ok(entry) = entry else { return true };
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            return true;
+        };
+        if name.is_empty() || !name.bytes().all(|byte| byte.is_ascii_digit()) {
+            continue;
+        }
+        let path = entry.path();
+        let file = match std::fs::File::open(path.join("comm")) {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                match std::fs::symlink_metadata(&path) {
+                    Err(missing) if missing.kind() == std::io::ErrorKind::NotFound => continue,
+                    _ => return true,
+                }
+            }
+            Err(_) => return true,
+        };
+        let mut bytes = Vec::new();
+        if file.take(18).read_to_end(&mut bytes).is_err() || bytes.is_empty() || bytes.len() > 16 {
+            return true;
+        }
+        let Ok(comm) = std::str::from_utf8(&bytes) else {
+            return true;
+        };
+        if BUSY_COMMS.contains(&comm.trim()) {
+            return true;
+        }
+    }
+    false
 }
 
 pub fn launch_argv() -> Vec<String> {
@@ -69,6 +92,7 @@ pub struct ProductionSteamPort<R: ResultProbe> {
     pub tools: Vec<(super::ProtonSource, PathBuf)>,
     pub probe: R,
     child: Option<Child>,
+    unsettled: bool,
 }
 
 impl<R: ResultProbe> ProductionSteamPort<R> {
@@ -89,6 +113,7 @@ impl<R: ResultProbe> ProductionSteamPort<R> {
             tools,
             probe,
             child: None,
+            unsettled: false,
         }
     }
 }
@@ -96,6 +121,7 @@ impl<R: ResultProbe> ProductionSteamPort<R> {
 impl<R: ResultProbe> SteamPort for ProductionSteamPort<R> {
     fn safe_window(&mut self) -> bool {
         self.child.is_none()
+            && !self.unsettled
             && self.idle.load(Ordering::Acquire)
             && !host_has_game_or_steam(&self.proc_root)
     }
@@ -117,7 +143,10 @@ impl<R: ResultProbe> SteamPort for ProductionSteamPort<R> {
     }
 
     fn launch(&mut self, _: &AttemptSlot) -> anyhow::Result<()> {
-        anyhow::ensure!(self.child.is_none(), "a launch is already live");
+        anyhow::ensure!(
+            self.child.is_none() && !self.unsettled,
+            "a launch remains unsettled"
+        );
         // Re-check at the last moment: the window can close between admission and launch.
         anyhow::ensure!(
             self.idle.load(Ordering::Acquire) && !host_has_game_or_steam(&self.proc_root),
@@ -126,6 +155,7 @@ impl<R: ResultProbe> SteamPort for ProductionSteamPort<R> {
         self.probe.begin()?;
         let argv = launch_argv();
         let child = Command::new(&argv[0]).args(&argv[1..]).spawn()?;
+        self.unsettled = true;
         self.child = Some(child);
         Ok(())
     }
@@ -134,12 +164,20 @@ impl<R: ResultProbe> SteamPort for ProductionSteamPort<R> {
         self.probe.poll()
     }
 
-    fn stop(&mut self) {
+    fn stop(&mut self) -> anyhow::Result<()> {
         // Only the launcher child this port started; it never signals unrelated processes.
-        if let Some(mut child) = self.child.take() {
-            let _ = child.kill();
-            let _ = child.wait();
+        if let Some(child) = self.child.as_mut() {
+            if child.try_wait()?.is_none() {
+                child.kill()?;
+                child.wait()?;
+            }
+            self.child = None;
         }
+        anyhow::ensure!(
+            !self.unsettled,
+            "Cyberpunk process-tree settlement is unverified"
+        );
+        Ok(())
     }
 }
 
@@ -170,6 +208,9 @@ mod tests {
             );
         }
         assert!(host_has_game_or_steam(Path::new("/definitely/not/proc")));
+        let unreadable = proc_with(&["zsh"]);
+        std::fs::remove_file(unreadable.path().join("100/comm")).unwrap();
+        assert!(host_has_game_or_steam(unreadable.path()));
     }
 
     struct Probe;
@@ -213,5 +254,10 @@ mod tests {
             launch_argv(),
             ["steam", "-applaunch", "1091500", "-benchmark"]
         );
+        assert!(port.stop().is_ok());
+        port.unsettled = true;
+        assert!(port.stop().is_err());
+        assert!(!port.safe_window());
+        assert!(port.launch(&slot).is_err());
     }
 }

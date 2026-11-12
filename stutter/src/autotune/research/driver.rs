@@ -1,7 +1,7 @@
 //! Resident campaign driver: a synchronous, host-abstracted step machine that turns a frozen
 //! intent into durable, bounded, single-shot attempts. It never replays: an attempt's `started`
-//! marker is durable before arming, and every launch refusal, timeout, cancellation or host failure
-//! seals that attempt as failed. Real Steam effects live behind `AttemptHost`.
+//! marker is durable before arming. A refusal, timeout, cancellation or host failure is sealed
+//! only after the host confirms settlement; otherwise the started marker remains for recovery.
 
 use std::fs::File;
 
@@ -37,7 +37,7 @@ pub trait AttemptHost {
     /// Start the game through Steam after the attempt is durable and armed.
     fn launch(&mut self, slot: &AttemptSlot, context: &DispatchContextV1) -> anyhow::Result<()>;
     fn poll(&mut self) -> Progress;
-    fn abort(&mut self);
+    fn abort(&mut self) -> anyhow::Result<()>;
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -142,7 +142,7 @@ impl Driver {
                 None
             };
             if let Some(code) = failure {
-                host.abort();
+                host.abort()?;
                 return self.seal(slot, AttemptOutcome::Failed { code: code.into() });
             }
             return match host.poll() {
@@ -153,7 +153,7 @@ impl Driver {
                             self.seal(slot, AttemptOutcome::Completed { evidence_sha256 })
                         }
                         Err(_) => {
-                            host.abort();
+                            host.abort()?;
                             self.seal(
                                 slot,
                                 AttemptOutcome::Failed {
@@ -164,7 +164,7 @@ impl Driver {
                     }
                 }
                 Progress::Failed { code } => {
-                    host.abort();
+                    host.abort()?;
                     self.seal(slot, AttemptOutcome::Failed { code })
                 }
             };
@@ -199,7 +199,7 @@ impl Driver {
         match launched {
             Ok(()) => Ok(Step::Running(slot.index)),
             Err(_) => {
-                host.abort();
+                host.abort()?;
                 self.seal(
                     slot,
                     AttemptOutcome::Failed {

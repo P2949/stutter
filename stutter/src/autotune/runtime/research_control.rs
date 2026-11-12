@@ -357,6 +357,9 @@ impl ResearchCoordinator {
     }
 
     fn pause(&mut self, now: u64) -> String {
+        if self.storage_blocker == Some("UnsafeToResume") {
+            return response("blocked", "UnsafeToResume");
+        }
         let Some(active) = self.active.as_mut() else {
             return response("denied", "NoCampaign");
         };
@@ -373,6 +376,9 @@ impl ResearchCoordinator {
     }
 
     fn resume(&mut self, now: u64) -> String {
+        if self.storage_blocker == Some("UnsafeToResume") {
+            return response("blocked", "UnsafeToResume");
+        }
         let Some(active) = self.active.as_mut() else {
             return response("denied", "NoCampaign");
         };
@@ -393,6 +399,9 @@ impl ResearchCoordinator {
     }
 
     fn cancel(&mut self, now: u64) -> String {
+        if self.storage_blocker == Some("UnsafeToResume") {
+            return response("blocked", "UnsafeToResume");
+        }
         let Some(active) = self.active.as_mut() else {
             return response("denied", "NoCampaign");
         };
@@ -442,6 +451,9 @@ impl ResearchCoordinator {
 
     /// Expire only a quiescent boundary. An active executor must settle its own resources first.
     pub(super) fn deadline_due(&self, now: u64) -> bool {
+        if self.storage_blocker == Some("UnsafeToResume") {
+            return false;
+        }
         self.active.as_ref().is_some_and(|active| {
             now >= active.deadline_unix_seconds
                 && matches!(

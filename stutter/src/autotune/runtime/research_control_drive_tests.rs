@@ -17,6 +17,8 @@ struct Script {
     polls: VecDeque<Progress>,
     launches: u32,
     aborts: u32,
+    abort_fails: bool,
+    launch_fails: bool,
     current: u32,
     auto_finish: bool,
 }
@@ -40,6 +42,7 @@ impl AttemptHost for Fake {
         let mut script = self.0.lock().unwrap();
         script.current = slot.index;
         script.launches += 1;
+        anyhow::ensure!(!script.launch_fails, "launch failed");
         Ok(())
     }
     fn poll(&mut self) -> Progress {
@@ -63,8 +66,11 @@ impl AttemptHost for Fake {
             .pop_front()
             .unwrap_or(Progress::Running)
     }
-    fn abort(&mut self) {
-        self.0.lock().unwrap().aborts += 1;
+    fn abort(&mut self) -> anyhow::Result<()> {
+        let mut script = self.0.lock().unwrap();
+        script.aborts += 1;
+        anyhow::ensure!(!script.abort_fails, "settlement unverified");
+        Ok(())
     }
 }
 
@@ -200,4 +206,121 @@ fn cancelling_a_driven_attempt_aborts_the_host_and_settles_aborted() {
         coordinator.terminal.as_ref().unwrap().phase,
         ResearchPhase::Aborted
     );
+}
+
+#[test]
+fn failed_settlement_retains_the_campaign_and_mutation_slot() {
+    for mode in 0..3 {
+        let campaign = tempfile::tempdir().unwrap();
+        let study = tempfile::tempdir().unwrap();
+        for dir in [&campaign, &study] {
+            std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let meta = std::fs::metadata(study.path()).unwrap();
+        let root = crate::autotune::research::StudyRootIdentity {
+            device: std::os::unix::fs::MetadataExt::dev(&meta),
+            inode: std::os::unix::fs::MetadataExt::ino(&meta),
+        };
+        let (mut intent, mut facts) = fixture();
+        intent.study_root = Some(root);
+        facts.study_root = Some(root);
+        intent.tools.push(ResearchTool {
+            source: ProtonSource::ValveStable,
+            identity_sha256: "b".repeat(64),
+        });
+        facts.tools = intent.tools.clone();
+        intent.max_attempts = 4;
+        let script = Arc::new(Mutex::new(Script {
+            safe: true,
+            abort_fails: mode != 2,
+            launch_fails: mode == 1,
+            auto_finish: mode == 2,
+            ..Default::default()
+        }));
+        let mut coordinator =
+            ResearchCoordinator::new(Some(campaign.path().to_path_buf()), Some(facts), "Ready");
+        coordinator.set_study_dir(Some(study.path().to_path_buf()));
+        let handle = script.clone();
+        coordinator.set_host_factory(Some(Box::new(move || Box::new(Fake(handle.clone())))));
+        send(
+            &mut coordinator,
+            ResearchRequest::Submit {
+                intent: Box::new(intent),
+            },
+            100,
+        );
+        coordinator.drive_attempts(101);
+        if mode == 0 {
+            send(&mut coordinator, ResearchRequest::Cancel {}, 102);
+            coordinator.drive_attempts(103);
+        } else if mode == 2 {
+            std::fs::write(campaign.path().join("intent.json"), b"tampered").unwrap();
+            coordinator.drive_attempts(103);
+        }
+        assert!(coordinator.owns_action_slot());
+        assert_eq!(coordinator.storage_blocker, Some("UnsafeToResume"));
+        assert!(coordinator.terminal.is_none());
+        assert!(coordinator.driver.is_some());
+        assert!(!coordinator.drive_due());
+        assert!(send(&mut coordinator, ResearchRequest::Cancel {}, 104).contains("UnsafeToResume"));
+        coordinator.on_deadline(4_000);
+        assert!(coordinator.owns_action_slot());
+        assert_eq!(script.lock().unwrap().launches, 1);
+    }
+}
+
+#[test]
+fn controller_shutdown_stops_the_attempt_or_reports_unverified_settlement() {
+    for abort_fails in [false, true] {
+        let campaign = tempfile::tempdir().unwrap();
+        let study = tempfile::tempdir().unwrap();
+        for dir in [&campaign, &study] {
+            std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let meta = std::fs::metadata(study.path()).unwrap();
+        let root = crate::autotune::research::StudyRootIdentity {
+            device: std::os::unix::fs::MetadataExt::dev(&meta),
+            inode: std::os::unix::fs::MetadataExt::ino(&meta),
+        };
+        let (mut intent, mut facts) = fixture();
+        intent.study_root = Some(root);
+        facts.study_root = Some(root);
+        intent.tools.push(ResearchTool {
+            source: ProtonSource::ValveStable,
+            identity_sha256: "b".repeat(64),
+        });
+        facts.tools = intent.tools.clone();
+        intent.max_attempts = 4;
+        let script = Arc::new(Mutex::new(Script {
+            safe: true,
+            abort_fails,
+            ..Default::default()
+        }));
+        let mut coordinator =
+            ResearchCoordinator::new(Some(campaign.path().to_path_buf()), Some(facts), "Ready");
+        coordinator.set_study_dir(Some(study.path().to_path_buf()));
+        let handle = script.clone();
+        coordinator.set_host_factory(Some(Box::new(move || Box::new(Fake(handle.clone())))));
+        send(
+            &mut coordinator,
+            ResearchRequest::Submit {
+                intent: Box::new(intent),
+            },
+            100,
+        );
+        coordinator.drive_attempts(101);
+        let result = coordinator.shutdown_driver(102);
+        assert_eq!(result.is_err(), abort_fails);
+        assert_eq!(script.lock().unwrap().aborts, 1);
+        if abort_fails {
+            assert!(coordinator.owns_action_slot());
+            assert!(coordinator.terminal.is_none());
+        } else {
+            assert!(!coordinator.owns_action_slot());
+            assert_eq!(
+                coordinator.terminal.as_ref().unwrap().phase,
+                ResearchPhase::Aborted
+            );
+        }
+    }
 }

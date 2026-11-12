@@ -588,6 +588,8 @@ fn cancellation_during_an_unsettled_launch_does_not_claim_restoration() {
         intent_sha256: digest,
         deadline_unix_seconds: 3_610,
     });
+    // This fixture installs an already-owned lease directly, as successful recovery would.
+    coordinator.storage_blocker = None;
     coordinator.submitted = true;
     coordinator.on_deadline(3_610);
     let result = send(&mut coordinator, ResearchRequest::Cancel {}, 101);

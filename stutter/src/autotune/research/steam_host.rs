@@ -38,7 +38,7 @@ pub trait SteamPort {
     fn launch(&mut self, slot: &AttemptSlot) -> anyhow::Result<()>;
     fn state(&mut self) -> GameState;
     /// Stop only the process tree this port launched. Must be idempotent.
-    fn stop(&mut self);
+    fn stop(&mut self) -> anyhow::Result<()>;
 }
 
 pub struct SteamAttemptHost<P: SteamPort> {
@@ -88,7 +88,11 @@ impl<P: SteamPort> AttemptHost for SteamAttemptHost<P> {
         match self.port.state() {
             GameState::Starting | GameState::Running => Progress::Running,
             GameState::Result { average_fps } => {
-                self.port.stop();
+                if self.port.stop().is_err() {
+                    return Progress::Failed {
+                        code: "SettlementUnverified".into(),
+                    };
+                }
                 self.current = None;
                 Progress::Finished {
                     evidence: AttemptEvidenceV1 {
@@ -99,13 +103,22 @@ impl<P: SteamPort> AttemptHost for SteamAttemptHost<P> {
                 }
             }
             GameState::ExitedWithoutResult => {
+                if self.port.stop().is_err() {
+                    return Progress::Failed {
+                        code: "SettlementUnverified".into(),
+                    };
+                }
                 self.current = None;
                 Progress::Failed {
                     code: "ExitedWithoutNativeResult".into(),
                 }
             }
             GameState::IdentityMismatch => {
-                self.port.stop();
+                if self.port.stop().is_err() {
+                    return Progress::Failed {
+                        code: "SettlementUnverified".into(),
+                    };
+                }
                 self.current = None;
                 Progress::Failed {
                     code: "IdentityMismatch".into(),
@@ -114,9 +127,10 @@ impl<P: SteamPort> AttemptHost for SteamAttemptHost<P> {
         }
     }
 
-    fn abort(&mut self) {
-        self.port.stop();
+    fn abort(&mut self) -> anyhow::Result<()> {
+        self.port.stop()?;
         self.current = None;
+        Ok(())
     }
 }
 
@@ -152,8 +166,9 @@ mod tests {
         fn state(&mut self) -> GameState {
             self.states.remove(0)
         }
-        fn stop(&mut self) {
+        fn stop(&mut self) -> anyhow::Result<()> {
             self.stops += 1;
+            Ok(())
         }
     }
 

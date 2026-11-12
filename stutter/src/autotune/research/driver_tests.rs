@@ -9,6 +9,7 @@ struct Fake {
     launch_fails: bool,
     launches: u32,
     aborts: u32,
+    abort_fails: bool,
     current: u32,
     auto_finish: bool,
 }
@@ -48,8 +49,10 @@ impl AttemptHost for Fake {
         }
         self.polls.pop_front().unwrap_or(Progress::Running)
     }
-    fn abort(&mut self) {
+    fn abort(&mut self) -> anyhow::Result<()> {
         self.aborts += 1;
+        anyhow::ensure!(!self.abort_fails, "settlement unverified");
+        Ok(())
     }
 }
 
@@ -60,6 +63,7 @@ fn fake() -> Fake {
         launch_fails: false,
         launches: 0,
         aborts: 0,
+        abort_fails: false,
         current: 0,
         auto_finish: false,
     }
@@ -214,6 +218,26 @@ fn a_restart_with_an_unsealed_started_attempt_refuses_to_resume() {
         build_schedule(&intent).unwrap(),
     );
     assert!(format!("{:#}", reopened.err().unwrap()).contains("UnsafeToResume"));
+}
+
+#[test]
+fn failed_process_settlement_never_seals_the_attempt() {
+    let (dir, mut driver, intent) = setup(4);
+    let mut host = fake();
+    let now = intent.issued_unix_seconds + 1;
+    assert_eq!(driver.tick(&mut host, now).unwrap(), Step::Running(0));
+    host.abort_fails = true;
+    driver.cancel();
+    assert!(driver.tick(&mut host, now + 1).is_err());
+    assert!(dir.path().join("journal/0000.started").exists());
+    assert!(!dir.path().join("journal/0000.json").exists());
+    drop(driver);
+    let reopened = ResearchJournal::open(
+        crate::syscall::open_dir_no_symlinks(&dir.path().join("journal")).unwrap(),
+        intent.uid,
+        build_schedule(&intent).unwrap(),
+    );
+    assert!(reopened.is_err());
 }
 
 #[test]

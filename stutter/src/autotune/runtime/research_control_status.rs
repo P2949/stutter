@@ -36,6 +36,9 @@ impl ResearchCoordinator {
 
     pub(super) fn status(&self) -> String {
         if let Some(active) = &self.active {
+            if let Some(code) = self.storage_blocker {
+                return response("blocked", code);
+            }
             #[cfg(feature = "wayland-probe")]
             let desktop_idle =
                 serde_json::to_value(if self.desktop_idle.0.elapsed() <= Duration::from_secs(3) {
