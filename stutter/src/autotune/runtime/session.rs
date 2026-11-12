@@ -149,7 +149,7 @@ pub async fn run_autotune_controller_session(
                 let coordinator = research_coordinator.as_mut().ok_or_else(|| anyhow::anyhow!("research coordinator unavailable"))?;
                 if coordinator.deadline_due(now) {
                     let coordinator = research_coordinator.take().ok_or_else(|| anyhow::anyhow!("research coordinator unavailable"))?;
-                    research_work = Some(spawn_research_work(&mut runtime, coordinator, move |coordinator| {
+                    research_work = Some(spawn_research_work(&mut runtime, coordinator, move |coordinator, now| {
                         coordinator.on_deadline(now);
                     }));
                 } else {
@@ -188,8 +188,6 @@ pub async fn run_autotune_controller_session(
                 continue;
             }
             Some(request) = research_rx.recv(), if research_coordinator.is_some() => {
-                let now = (crate::audit::unix_nanos_now() / 1_000_000_000)
-                    .min(u128::from(u64::MAX)) as u64;
                 let mut coordinator = research_coordinator.take().ok_or_else(|| anyhow::anyhow!("research coordinator unavailable"))?;
                 coordinator.set_mutable_action_present(
                     runtime.has_active_experiment()
@@ -198,7 +196,7 @@ pub async fn run_autotune_controller_session(
                 );
                 // Reserve before dispatch: admission and durable writes run off the monitor
                 // loop, but no normal action can start while their result is unresolved.
-                research_work = Some(spawn_research_work(&mut runtime, coordinator, move |coordinator| {
+                research_work = Some(spawn_research_work(&mut runtime, coordinator, move |coordinator, now| {
                     coordinator.handle(request, now);
                 }));
                 continue;
@@ -311,11 +309,12 @@ pub(super) fn settle_before_worker_shutdown(
 fn spawn_research_work(
     runtime: &mut AutotuneRuntime,
     mut coordinator: super::research_control::ResearchCoordinator,
-    work: impl FnOnce(&mut super::research_control::ResearchCoordinator) + Send + 'static,
+    work: impl FnOnce(&mut super::research_control::ResearchCoordinator, u64) + Send + 'static,
 ) -> tokio::task::JoinHandle<super::research_control::ResearchCoordinator> {
     runtime.research_campaign_active = true;
     tokio::task::spawn_blocking(move || {
-        work(&mut coordinator);
+        let now = (crate::audit::unix_nanos_now() / 1_000_000_000).min(u128::from(u64::MAX)) as u64;
+        work(&mut coordinator, now);
         coordinator
     })
 }
@@ -382,6 +381,42 @@ fn finish_autotune_controller_session(
 mod research_management_tests {
     use super::*;
 
+    #[test]
+    fn queued_management_uses_time_at_execution() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .max_blocking_threads(1)
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let (started_tx, started_rx) = oneshot::channel();
+            let (release_tx, release_rx) = std::sync::mpsc::sync_channel::<()>(1);
+            let busy = tokio::task::spawn_blocking(move || {
+                let _ = started_tx.send(());
+                let _ = release_rx.recv_timeout(Duration::from_secs(5));
+            });
+            started_rx.await.unwrap();
+            let mut controller =
+                AutotuneRuntime::new(AutotuneRuntimeConfig::observe(None, None, None));
+            let coordinator = super::super::research_control::ResearchCoordinator::new(
+                None,
+                None,
+                "BlockedHostIdentity",
+            );
+            let (sample_tx, sample_rx) = oneshot::channel();
+            let work = spawn_research_work(&mut controller, coordinator, move |_, now| {
+                let _ = sample_tx.send(now);
+            });
+            tokio::time::sleep(Duration::from_millis(1_100)).await;
+            let release_time =
+                (crate::audit::unix_nanos_now() / 1_000_000_000).min(u128::from(u64::MAX)) as u64;
+            release_tx.send(()).unwrap();
+            assert!(sample_rx.await.unwrap() >= release_time);
+            busy.await.unwrap();
+            work.await.unwrap();
+        });
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn slow_management_keeps_the_slot_reserved_without_blocking_the_executor() {
         let mut runtime = AutotuneRuntime::new(AutotuneRuntimeConfig::observe(None, None, None));
@@ -392,7 +427,7 @@ mod research_management_tests {
         );
         let (started_tx, started_rx) = oneshot::channel();
         let (release_tx, release_rx) = std::sync::mpsc::sync_channel::<()>(1);
-        let work = spawn_research_work(&mut runtime, coordinator, move |_| {
+        let work = spawn_research_work(&mut runtime, coordinator, move |_, _| {
             let _ = started_tx.send(());
             let _ = release_rx.recv_timeout(Duration::from_secs(5));
         });
