@@ -71,6 +71,13 @@ fn fake() -> Fake {
 }
 
 fn setup(max_attempts: u32) -> (tempfile::TempDir, Driver, ResearchIntentV1) {
+    setup_with_budget(max_attempts, None)
+}
+
+fn setup_with_budget(
+    max_attempts: u32,
+    active_budget: Option<u32>,
+) -> (tempfile::TempDir, Driver, ResearchIntentV1) {
     let dir = tempfile::tempdir().unwrap();
     for sub in ["journal", "dispatch", "evidence"] {
         std::fs::create_dir(dir.path().join(sub)).unwrap();
@@ -85,6 +92,11 @@ fn setup(max_attempts: u32) -> (tempfile::TempDir, Driver, ResearchIntentV1) {
     });
     intent.max_attempts = max_attempts;
     intent.max_attempt_seconds = 100;
+    if let Some(budget) = active_budget {
+        intent.max_active_seconds = budget;
+        intent.max_attempt_seconds = budget;
+        intent.max_owned_pressure_seconds_per_study = budget;
+    }
     let schedule = build_schedule(&intent).unwrap();
     let len = schedule.len();
     let journal = ResearchJournal::open(
@@ -203,6 +215,77 @@ fn deadline_expires_an_idle_driver_and_aborts_an_active_attempt() {
             .unwrap(),
         Step::Expired
     );
+}
+
+#[test]
+fn active_budget_accumulates_across_attempts_and_refuses_another_launch() {
+    let (_dir, mut driver, intent) = setup_with_budget(4, Some(5));
+    let mut host = fake();
+    host.auto_finish = true;
+    let now = intent.issued_unix_seconds + 1;
+    assert_eq!(driver.tick(&mut host, now).unwrap(), Step::Running(0));
+    assert!(matches!(
+        driver.tick(&mut host, now + 2).unwrap(),
+        Step::Sealed(_)
+    ));
+    assert_eq!(driver.tick(&mut host, now + 3).unwrap(), Step::Running(1));
+    let Step::Sealed(record) = driver.tick(&mut host, now + 4).unwrap() else {
+        panic!("active budget must settle the active attempt")
+    };
+    assert_eq!(
+        record.outcome,
+        AttemptOutcome::Failed {
+            code: "ActiveBudgetExceeded".into()
+        }
+    );
+    assert_eq!(host.aborts, 1);
+    assert_eq!(
+        driver.tick(&mut host, now + 5).unwrap(),
+        Step::ActiveBudgetExhausted
+    );
+    assert_eq!(host.launches, 2);
+}
+
+#[test]
+fn backward_clock_never_extends_the_active_budget() {
+    let (_dir, mut driver, intent) = setup(4);
+    let mut host = fake();
+    let now = intent.issued_unix_seconds + 2;
+    assert_eq!(driver.tick(&mut host, now).unwrap(), Step::Running(0));
+    assert!(driver.tick(&mut host, now - 1).is_err());
+}
+
+#[test]
+fn sealed_attempt_history_cannot_reset_the_active_budget_on_restart() {
+    let (dir, mut driver, intent) = setup(4);
+    let mut host = fake();
+    host.auto_finish = true;
+    let now = intent.issued_unix_seconds + 1;
+    assert_eq!(driver.tick(&mut host, now).unwrap(), Step::Running(0));
+    assert!(matches!(
+        driver.tick(&mut host, now + 1).unwrap(),
+        Step::Sealed(_)
+    ));
+    drop(driver);
+    let schedule = build_schedule(&intent).unwrap();
+    let journal = ResearchJournal::open(
+        crate::syscall::open_dir_no_symlinks(&dir.path().join("journal")).unwrap(),
+        intent.uid,
+        schedule.clone(),
+    )
+    .unwrap();
+    let root =
+        File::from(crate::syscall::open_dir_no_symlinks(&dir.path().join("dispatch")).unwrap());
+    let evidence =
+        File::from(crate::syscall::open_dir_no_symlinks(&dir.path().join("evidence")).unwrap());
+    let mut restarted = Driver::new(journal, intent, root, evidence, schedule.len());
+    let error = restarted.tick(&mut host, now + 2).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("active-time budget requires independent recovery")
+    );
+    assert_eq!(host.launches, 1);
 }
 
 #[test]

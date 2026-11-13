@@ -49,6 +49,7 @@ pub enum Step {
     Sealed(AttemptRecord),
     Done,
     Expired,
+    ActiveBudgetExhausted,
     Cancelled,
 }
 
@@ -59,7 +60,10 @@ pub struct Driver {
     evidence: File,
     schedule_len: usize,
     max_attempts: usize,
-    active: Option<(AttemptSlot, u64)>,
+    active: Option<(AttemptSlot, u64, std::time::Instant)>,
+    active_seconds: u64,
+    last_tick_seconds: Option<u64>,
+    fresh_journal_checked: bool,
     cancel: bool,
 }
 
@@ -112,6 +116,9 @@ impl Driver {
             schedule_len,
             max_attempts,
             active: None,
+            active_seconds: 0,
+            last_tick_seconds: None,
+            fresh_journal_checked: false,
             cancel: false,
         }
     }
@@ -125,19 +132,52 @@ impl Driver {
         self.cancel = true;
     }
 
-    fn seal(&mut self, slot: AttemptSlot, outcome: AttemptOutcome) -> anyhow::Result<Step> {
+    fn seal(
+        &mut self,
+        slot: AttemptSlot,
+        outcome: AttemptOutcome,
+        now: u64,
+    ) -> anyhow::Result<Step> {
         let record = AttemptRecord { slot, outcome };
         self.journal.seal(record.clone())?;
+        if let Some((_, started, monotonic_start)) = &self.active {
+            // Timestamps are whole seconds. Charge the partial boundary second so rounding
+            // cannot expand the authorized active budget.
+            self.active_seconds = self.active_seconds.saturating_add(
+                now.saturating_sub(*started)
+                    .max(monotonic_start.elapsed().as_secs())
+                    .saturating_add(1),
+            );
+        }
         self.active = None;
         Ok(Step::Sealed(record))
     }
 
     pub fn tick(&mut self, host: &mut dyn AttemptHost, now: u64) -> anyhow::Result<Step> {
-        if let Some((slot, started)) = self.active.clone() {
+        anyhow::ensure!(
+            self.last_tick_seconds.is_none_or(|last| now >= last),
+            "campaign clock moved backward"
+        );
+        self.last_tick_seconds = Some(now);
+        if !self.fresh_journal_checked {
+            anyhow::ensure!(
+                self.journal.verify()?.is_empty(),
+                "UnsafeToResume: active-time budget requires independent recovery"
+            );
+            self.fresh_journal_checked = true;
+        }
+        if let Some((slot, started, monotonic_start)) = self.active.clone() {
             let failure = if self.cancel {
                 Some("Cancelled")
             } else if now >= self.intent.deadline_unix_seconds {
                 Some("CampaignDeadline")
+            } else if self.active_seconds.saturating_add(
+                now.saturating_sub(started)
+                    .max(monotonic_start.elapsed().as_secs())
+                    .saturating_add(1),
+            ) >= u64::from(self.intent.max_active_seconds)
+            {
+                Some("ActiveBudgetExceeded")
             } else if now.saturating_sub(started) >= u64::from(self.intent.max_attempt_seconds) {
                 Some("AttemptTimeout")
             } else {
@@ -145,9 +185,52 @@ impl Driver {
             };
             if let Some(code) = failure {
                 host.abort()?;
-                return self.seal(slot, AttemptOutcome::Failed { code: code.into() });
+                return self.seal(slot, AttemptOutcome::Failed { code: code.into() }, now);
             }
-            return match host.poll() {
+            let poll_started = std::time::Instant::now();
+            let progress = host.poll();
+            if now.saturating_add(poll_started.elapsed().as_secs())
+                >= self.intent.deadline_unix_seconds
+            {
+                host.abort()?;
+                return self.seal(
+                    slot,
+                    AttemptOutcome::Failed {
+                        code: "CampaignDeadline".into(),
+                    },
+                    now,
+                );
+            }
+            if self.active_seconds.saturating_add(
+                now.saturating_sub(started)
+                    .max(monotonic_start.elapsed().as_secs())
+                    .saturating_add(1),
+            ) >= u64::from(self.intent.max_active_seconds)
+            {
+                host.abort()?;
+                return self.seal(
+                    slot,
+                    AttemptOutcome::Failed {
+                        code: "ActiveBudgetExceeded".into(),
+                    },
+                    now,
+                );
+            }
+            if now
+                .saturating_sub(started)
+                .max(monotonic_start.elapsed().as_secs())
+                >= u64::from(self.intent.max_attempt_seconds)
+            {
+                host.abort()?;
+                return self.seal(
+                    slot,
+                    AttemptOutcome::Failed {
+                        code: "AttemptTimeout".into(),
+                    },
+                    now,
+                );
+            }
+            return match progress {
                 Progress::Running => Ok(Step::Running(slot.index)),
                 Progress::Finished { evidence } => {
                     match evidence
@@ -155,7 +238,7 @@ impl Driver {
                         .and_then(|()| write_evidence(&self.evidence, &slot, &evidence))
                     {
                         Ok(evidence_sha256) => {
-                            self.seal(slot, AttemptOutcome::Completed { evidence_sha256 })
+                            self.seal(slot, AttemptOutcome::Completed { evidence_sha256 }, now)
                         }
                         Err(_) => {
                             host.abort()?;
@@ -164,13 +247,14 @@ impl Driver {
                                 AttemptOutcome::Failed {
                                     code: "EvidenceRejected".into(),
                                 },
+                                now,
                             )
                         }
                     }
                 }
                 Progress::Failed { code } => {
                     host.abort()?;
-                    self.seal(slot, AttemptOutcome::Failed { code })
+                    self.seal(slot, AttemptOutcome::Failed { code }, now)
                 }
             };
         }
@@ -180,6 +264,9 @@ impl Driver {
         if now >= self.intent.deadline_unix_seconds {
             return Ok(Step::Expired);
         }
+        if self.active_seconds >= u64::from(self.intent.max_active_seconds) {
+            return Ok(Step::ActiveBudgetExhausted);
+        }
         let done = self.journal.verify()?.len();
         if done >= self.schedule_len || done >= self.max_attempts {
             return Ok(Step::Done);
@@ -188,7 +275,7 @@ impl Driver {
             return Ok(Step::Waiting);
         }
         let slot = self.journal.start()?;
-        self.active = Some((slot.clone(), now));
+        self.active = Some((slot.clone(), now, std::time::Instant::now()));
         let launched = host
             .arm_spec(&slot)
             .and_then(|spec| {
@@ -210,6 +297,7 @@ impl Driver {
                     AttemptOutcome::Failed {
                         code: "LaunchRefused".into(),
                     },
+                    now,
                 )
             }
         }

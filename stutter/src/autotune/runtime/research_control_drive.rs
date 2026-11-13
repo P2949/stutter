@@ -152,6 +152,10 @@ impl ResearchCoordinator {
                 self.on_deadline(now);
                 true
             }
+            Step::ActiveBudgetExhausted => {
+                self.settle(now, ResearchPhase::Blocked, "ActiveBudgetExceeded");
+                true
+            }
             Step::Cancelled => {
                 self.settle(now, ResearchPhase::Aborted, "Cancelled");
                 true
