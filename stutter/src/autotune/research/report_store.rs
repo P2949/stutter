@@ -28,7 +28,7 @@ pub fn write_new(dir: &File, name: &str, bytes: &[u8]) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub(super) fn read_private(dir: &File, name: &str, uid: u32) -> anyhow::Result<Vec<u8>> {
+pub(crate) fn read_private(dir: &File, name: &str, uid: u32) -> anyhow::Result<Vec<u8>> {
     let file = crate::syscall::openat_nofollow(dir.as_fd(), name)?;
     let meta = file.metadata()?;
     anyhow::ensure!(

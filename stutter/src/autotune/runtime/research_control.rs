@@ -183,7 +183,12 @@ impl ResearchCoordinator {
         } else {
             self.terminal_probe_attempted = true;
         }
-        Some(RecoveryJob { dir, facts, now })
+        Some(RecoveryJob {
+            dir,
+            facts,
+            now,
+            study_dir: self.study_dir.clone(),
+        })
     }
 
     pub(super) fn finish_recovery(&mut self, result: anyhow::Result<RecoveredCampaign>) {
@@ -200,10 +205,11 @@ impl ResearchCoordinator {
         }
         let recovered = match result {
             Ok(value)
-                if value
-                    .facts
-                    .as_ref()
-                    .is_none_or(|facts| self.facts.as_ref() == Some(facts)) =>
+                if value.study_dir == self.study_dir
+                    && value
+                        .facts
+                        .as_ref()
+                        .is_none_or(|facts| self.facts.as_ref() == Some(facts)) =>
             {
                 value
             }

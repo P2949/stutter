@@ -162,6 +162,7 @@ pub struct CampaignLease {
     block_reason: Option<CampaignBlockReason>,
     intent_sha256: String,
     ever_launched: bool,
+    study_root: Option<super::StudyRootIdentity>,
 }
 
 fn locked_dir(dir: OwnedFd, uid: u32) -> anyhow::Result<File> {
@@ -279,6 +280,7 @@ impl CampaignLease {
             block_reason: None,
             intent_sha256,
             ever_launched: false,
+            study_root: header.intent.study_root,
         })
     }
 
@@ -373,6 +375,7 @@ impl CampaignLease {
             block_reason,
             intent_sha256: header.intent_sha256,
             ever_launched,
+            study_root: header.intent.study_root,
         })
     }
 
@@ -414,6 +417,10 @@ impl CampaignLease {
 
     pub fn has_started_launch(&self) -> bool {
         self.ever_launched
+    }
+
+    pub(crate) fn study_root(&self) -> Option<super::StudyRootIdentity> {
+        self.study_root
     }
 
     fn verify_current(&self) -> anyhow::Result<()> {

@@ -1,6 +1,74 @@
 use super::*;
 
 #[test]
+fn recovery_checks_attempt_journal_even_when_lease_never_recorded_launching() {
+    for evidence in 0..4 {
+        let campaign = tempfile::tempdir().unwrap();
+        let study = tempfile::tempdir().unwrap();
+        for dir in [&campaign, &study] {
+            std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let metadata = std::fs::metadata(study.path()).unwrap();
+        let root = crate::autotune::research::StudyRootIdentity {
+            device: std::os::unix::fs::MetadataExt::dev(&metadata),
+            inode: std::os::unix::fs::MetadataExt::ino(&metadata),
+        };
+        let (mut intent, mut facts) = fixture();
+        intent.study_root = Some(root);
+        facts.study_root = Some(root);
+        let digest = intent.digest().unwrap();
+        let mut first = ResearchCoordinator::new(
+            Some(campaign.path().to_path_buf()),
+            Some(facts.clone()),
+            "Ready",
+        );
+        first.set_study_dir(Some(study.path().to_path_buf()));
+        assert!(
+            send(
+                &mut first,
+                ResearchRequest::Submit {
+                    intent: Box::new(intent.clone())
+                },
+                100
+            )
+            .contains("await_safe_window")
+        );
+        let child = study.path().join(&digest[..16]);
+        std::fs::create_dir(&child).unwrap();
+        std::fs::set_permissions(&child, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let journal = child.join("journal");
+        std::fs::create_dir(&journal).unwrap();
+        std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let dispatch = child.join("dispatch");
+        std::fs::create_dir(&dispatch).unwrap();
+        std::fs::set_permissions(&dispatch, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let intent_path = child.join("intent.json");
+        std::fs::write(&intent_path, serde_json::to_vec(&intent).unwrap()).unwrap();
+        std::fs::set_permissions(&intent_path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        if evidence == 1 {
+            std::fs::write(journal.join("0000.started"), b"interrupted").unwrap();
+        } else if evidence == 2 {
+            std::fs::create_dir(dispatch.join("0000")).unwrap();
+        } else if evidence == 3 {
+            std::fs::remove_dir(&dispatch).unwrap();
+        }
+        drop(first);
+        let mut restarted =
+            ResearchCoordinator::new(Some(campaign.path().to_path_buf()), Some(facts), "Ready");
+        restarted.set_study_dir(Some(study.path().to_path_buf()));
+        let result = restarted.prepare_recovery(101).unwrap().run();
+        assert_eq!(result.is_err(), evidence != 0);
+        restarted.finish_recovery(result);
+        assert!(restarted.owns_action_slot());
+        if evidence != 0 {
+            assert!(
+                send(&mut restarted, ResearchRequest::Cancel {}, 102).contains("UnsafeToResume")
+            );
+        }
+    }
+}
+
+#[test]
 fn settled_prelaunch_campaign_releases_slot_even_when_live_steam_facts_are_unavailable() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
