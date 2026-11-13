@@ -96,6 +96,14 @@ pub(crate) mod steam_port;
     not(test),
     expect(
         dead_code,
+        reason = "kernel peer diagnostics are not yet connected to the session handoff"
+    )
+)]
+mod unix_diag;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
         reason = "user-session handoff is not enabled until its ownership and recovery gates are connected"
     )
 )]

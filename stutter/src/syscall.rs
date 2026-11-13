@@ -2,6 +2,10 @@
 
 use std::{ffi::CStr, io, mem, os::unix::ffi::OsStrExt, path::Path};
 
+#[path = "syscall/unix_diag/syscall.rs"]
+mod unix_diag;
+pub(crate) use unix_diag::unix_diag_dump;
+
 #[cfg(feature = "wayland-probe")]
 pub fn register_unix_stream_readiness(
     stream: std::os::unix::net::UnixStream,
@@ -281,8 +285,9 @@ pub fn openat_dir_nofollow(
     Ok(unsafe { std::os::fd::OwnedFd::from_raw_fd(raw) })
 }
 
-/// Credentials of the process on the other end of a connected Unix socket, as recorded by the
-/// kernel when the connection was made (`SO_PEERCRED`).
+/// Credentials recorded by the kernel for the connected Unix socket (`SO_PEERCRED`). For a
+/// socket-activated listener these can identify the listener's creator rather than the process
+/// that accepted the connection; callers must not assume otherwise.
 pub fn unix_peer_credentials(
     socket: &std::os::unix::net::UnixStream,
 ) -> io::Result<(u32, u32, u32)> {
