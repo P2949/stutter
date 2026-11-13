@@ -153,7 +153,12 @@ impl ResearchCoordinator {
                 true
             }
             Step::ActiveBudgetExhausted => {
-                self.settle(now, ResearchPhase::Blocked, "ActiveBudgetExceeded");
+                let code = if self.persist_report() {
+                    "ActiveBudgetExceeded"
+                } else {
+                    "ReportPersistenceFailed"
+                };
+                self.settle(now, ResearchPhase::Blocked, code);
                 true
             }
             Step::Cancelled => {
