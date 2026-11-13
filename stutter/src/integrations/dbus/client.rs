@@ -14,6 +14,57 @@ const TIMEOUT: Duration = Duration::from_secs(2);
 /// Most messages skipped (signals, unrelated replies) while waiting for one reply.
 const MAX_SKIPPED: usize = 64;
 
+fn remaining(deadline: Instant) -> Result<Duration, DbusError> {
+    deadline
+        .checked_duration_since(Instant::now())
+        .filter(|duration| !duration.is_zero())
+        .ok_or(DbusError::TimedOut)
+}
+
+fn read_exact_until(
+    stream: &mut UnixStream,
+    mut bytes: &mut [u8],
+    deadline: Instant,
+) -> Result<(), DbusError> {
+    while !bytes.is_empty() {
+        stream.set_read_timeout(Some(remaining(deadline)?))?;
+        match stream.read(bytes) {
+            Ok(0) => {
+                return Err(DbusError::Io(std::io::Error::from(
+                    std::io::ErrorKind::UnexpectedEof,
+                )));
+            }
+            Ok(count) => bytes = &mut bytes[count..],
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(error.into()),
+        }
+        remaining(deadline)?;
+    }
+    Ok(())
+}
+
+fn write_all_until(
+    stream: &mut UnixStream,
+    mut bytes: &[u8],
+    deadline: Instant,
+) -> Result<(), DbusError> {
+    while !bytes.is_empty() {
+        stream.set_write_timeout(Some(remaining(deadline)?))?;
+        match stream.write(bytes) {
+            Ok(0) => {
+                return Err(DbusError::Io(std::io::Error::from(
+                    std::io::ErrorKind::WriteZero,
+                )));
+            }
+            Ok(count) => bytes = &bytes[count..],
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(error.into()),
+        }
+        remaining(deadline)?;
+    }
+    Ok(())
+}
+
 #[derive(Debug)]
 pub enum DbusError {
     Io(std::io::Error),
@@ -84,9 +135,10 @@ impl DbusClient {
 
     /// Connects to the bus socket at `path`, authenticates as `uid`, and says hello.
     pub fn connect_path(path: &Path, uid: u32) -> Result<Self, DbusError> {
-        let stream = UnixStream::connect(path)?;
-        stream.set_read_timeout(Some(TIMEOUT))?;
-        stream.set_write_timeout(Some(TIMEOUT))?;
+        let socket = socket2::Socket::new(socket2::Domain::UNIX, socket2::Type::STREAM, None)?;
+        let address = socket2::SockAddr::unix(path)?;
+        socket.connect_timeout(&address, TIMEOUT)?;
+        let stream = UnixStream::from(socket);
         Self::handshake(stream, uid)
     }
 
@@ -102,21 +154,26 @@ impl DbusClient {
             .bytes()
             .map(|byte| format!("{byte:02x}"))
             .collect();
-        stream.write_all(format!("\0AUTH EXTERNAL {hex}\r\n").as_bytes())?;
+        let deadline = Instant::now() + TIMEOUT;
+        write_all_until(
+            &mut stream,
+            format!("\0AUTH EXTERNAL {hex}\r\n").as_bytes(),
+            deadline,
+        )?;
         let mut line = Vec::new();
         let mut byte = [0u8; 1];
         while !line.ends_with(b"\r\n") {
             if line.len() > 512 {
                 return Err(DbusError::AuthRejected("overlong reply".into()));
             }
-            stream.read_exact(&mut byte)?;
+            read_exact_until(&mut stream, &mut byte, deadline)?;
             line.push(byte[0]);
         }
         let reply = String::from_utf8_lossy(&line).trim().to_owned();
         if !reply.starts_with("OK ") && reply != "OK" {
             return Err(DbusError::AuthRejected(reply));
         }
-        stream.write_all(b"BEGIN\r\n")?;
+        write_all_until(&mut stream, b"BEGIN\r\n", deadline)?;
         let mut client = Self {
             stream,
             next_serial: 1,
@@ -137,13 +194,13 @@ impl DbusClient {
         Ok(client)
     }
 
-    fn read_message(&mut self) -> Result<Message, DbusError> {
+    fn read_message(&mut self, deadline: Instant) -> Result<Message, DbusError> {
         let mut fixed = [0u8; 16];
-        self.stream.read_exact(&mut fixed)?;
+        read_exact_until(&mut self.stream, &mut fixed, deadline)?;
         let total = message_length(&fixed)?;
         let mut bytes = fixed.to_vec();
         bytes.resize(total, 0);
-        self.stream.read_exact(&mut bytes[16..])?;
+        read_exact_until(&mut self.stream, &mut bytes[16..], deadline)?;
         Ok(parse_message(&bytes)?)
     }
 
@@ -159,21 +216,25 @@ impl DbusClient {
     ) -> Result<Vec<Value>, DbusError> {
         let serial = self.next_serial;
         self.next_serial = self.next_serial.wrapping_add(1).max(1);
-        self.stream.write_all(&method_call(
-            serial,
-            destination,
-            path,
-            interface,
-            member,
-            signature,
-            body,
-        ))?;
         let deadline = Instant::now() + TIMEOUT;
+        write_all_until(
+            &mut self.stream,
+            &method_call(
+                serial,
+                destination,
+                path,
+                interface,
+                member,
+                signature,
+                body,
+            ),
+            deadline,
+        )?;
         for _ in 0..MAX_SKIPPED {
             if Instant::now() > deadline {
                 return Err(DbusError::TimedOut);
             }
-            let message = self.read_message()?;
+            let message = self.read_message(deadline)?;
             if message.reply_serial != Some(serial) {
                 continue; // a signal or someone else's reply
             }
@@ -266,4 +327,59 @@ fn complete_type(signature: &str) -> Result<&str, WireError> {
         _ => 1,
     };
     signature.get(..length).ok_or(WireError::BadSignature)
+}
+
+#[cfg(test)]
+mod deadline_tests {
+    use super::*;
+
+    #[test]
+    fn timed_unix_connection_completes_the_existing_dbus_handshake() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bus");
+        let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            crate::integrations::dbus::fake::serve(stream, |_| {
+                crate::integrations::dbus::fake::Reply::Error("org.test.NotImplemented")
+            });
+        });
+        let client = DbusClient::connect_path(&path, crate::syscall::geteuid()).unwrap();
+        assert_eq!(client.unique_name, ":1.99");
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn slow_incremental_sender_cannot_extend_total_read_deadline() {
+        let (mut reader, mut writer) = UnixStream::pair().unwrap();
+        let sender = std::thread::spawn(move || {
+            for _ in 0..10 {
+                if writer.write_all(b"x").is_err() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        });
+        let start = Instant::now();
+        let mut data = [0u8; 10];
+        assert!(matches!(
+            read_exact_until(&mut reader, &mut data, start + Duration::from_millis(65)),
+            Err(DbusError::TimedOut)
+        ));
+        assert!(start.elapsed() < Duration::from_secs(1));
+        drop(reader);
+        sender.join().unwrap();
+    }
+
+    #[test]
+    fn blocked_writer_cannot_extend_total_write_deadline() {
+        let (mut writer, _reader) = UnixStream::pair().unwrap();
+        let start = Instant::now();
+        let data = vec![0u8; 4 * 1024 * 1024];
+        assert!(matches!(
+            write_all_until(&mut writer, &data, start + Duration::from_millis(65)),
+            Err(DbusError::TimedOut)
+        ));
+        assert!(start.elapsed() < Duration::from_secs(1));
+    }
 }
