@@ -213,7 +213,12 @@ impl ResearchCoordinator {
             {
                 value
             }
-            Ok(_) => {
+            Ok(value) => {
+                if value.facts.is_some() {
+                    self.recovery_attempted = false;
+                } else {
+                    self.terminal_probe_attempted = false;
+                }
                 log::warn!("research recovery context changed");
                 return;
             }

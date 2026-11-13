@@ -352,7 +352,7 @@ fn changed_context_discards_recovery_without_mutating_the_journal() {
     let count = std::fs::read_dir(dir.path()).unwrap().count();
     let mut restarted = ResearchCoordinator::new(
         Some(dir.path().to_path_buf()),
-        Some(facts),
+        Some(facts.clone()),
         "BlockedHostIdentity",
     );
     let result = restarted.prepare_recovery(101).unwrap().run();
@@ -363,4 +363,8 @@ fn changed_context_discards_recovery_without_mutating_the_journal() {
     assert!(restarted.owns_action_slot());
     assert!(send(&mut restarted, ResearchRequest::Status {}, 101).contains("UnsafeToResume"));
     assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), count);
+    restarted.set_host_context(Ok(facts));
+    let retry = restarted.prepare_recovery(102).unwrap();
+    restarted.finish_recovery(retry.run());
+    assert!(send(&mut restarted, ResearchRequest::Status {}, 102).contains("await_safe_window"));
 }
