@@ -100,7 +100,19 @@ impl ResearchCoordinator {
             return;
         };
         state.host.observe_desktop_idle(idle_at);
-        let step = match state.driver.tick(state.host.as_mut(), now) {
+        let active = &mut self.active;
+        let step = match state
+            .driver
+            .tick_with_launch_fence(state.host.as_mut(), now, || {
+                let active = active
+                    .as_mut()
+                    .ok_or_else(|| anyhow::anyhow!("campaign lease unavailable"))?;
+                anyhow::ensure!(
+                    active.lease.phase() == ResearchPhase::AwaitSafeWindow,
+                    "campaign is not ready to launch"
+                );
+                active.lease.advance(ResearchPhase::Launching, now)
+            }) {
             Ok(step) => step,
             Err(error) => {
                 log::error!("research driver failed: {error:#}");
@@ -205,7 +217,11 @@ impl ResearchCoordinator {
             anyhow::bail!("research attempt requires independent recovery");
         }
         state.driver.cancel();
-        match state.driver.tick(state.host.as_mut(), now)? {
+        match state
+            .driver
+            .tick_with_launch_fence(state.host.as_mut(), now, || {
+                anyhow::bail!("shutdown must not start an attempt")
+            })? {
             Step::Sealed(_) | Step::Cancelled => {}
             _ => anyhow::bail!("research shutdown did not settle the attempt"),
         }

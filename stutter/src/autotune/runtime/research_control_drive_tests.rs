@@ -21,6 +21,7 @@ struct Script {
     launch_fails: bool,
     current: u32,
     auto_finish: bool,
+    launch_fence_dir: Option<std::path::PathBuf>,
 }
 
 struct Fake(Arc<Mutex<Script>>);
@@ -40,6 +41,20 @@ impl AttemptHost for Fake {
     }
     fn launch(&mut self, slot: &AttemptSlot, _: &DispatchContextV1) -> anyhow::Result<()> {
         let mut script = self.0.lock().unwrap();
+        if let Some(dir) = &script.launch_fence_dir {
+            let mut launches = 0;
+            for entry in std::fs::read_dir(dir)? {
+                let entry = entry?;
+                if entry.file_name().to_string_lossy().starts_with("event-") {
+                    let value: serde_json::Value =
+                        serde_json::from_slice(&std::fs::read(entry.path())?)?;
+                    if value.get("to").and_then(|v| v.as_str()) == Some("launching") {
+                        launches += 1;
+                    }
+                }
+            }
+            anyhow::ensure!(launches == script.launches + 1, "launch fence missing");
+        }
         script.current = slot.index;
         script.launches += 1;
         anyhow::ensure!(!script.launch_fails, "launch failed");
@@ -104,6 +119,7 @@ fn finished_schedule_is_blocked_until_verified(report_conflict: bool) {
     intent.max_attempts = 8;
     intent.max_attempt_seconds = 50;
     let script = Arc::new(Mutex::new(Script::default()));
+    script.lock().unwrap().launch_fence_dir = Some(campaign.path().to_path_buf());
     let mut coordinator = ResearchCoordinator::new(
         Some(campaign.path().to_path_buf()),
         Some(facts),

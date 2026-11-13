@@ -191,6 +191,25 @@ fn schedule_is_deterministic_complete_and_blocks_are_balanced() {
 }
 
 #[test]
+fn failed_launch_fence_leaves_started_journal_without_tickets_or_launch() {
+    let (dir, mut driver, intent) = setup(4);
+    let mut host = fake();
+    let result = driver.tick_with_launch_fence(&mut host, intent.issued_unix_seconds + 1, || {
+        anyhow::bail!("lease persistence failed")
+    });
+    assert!(result.is_err());
+    assert_eq!(host.launches, 0);
+    assert!(dir.path().join("journal/0000.started").is_file());
+    assert!(!dir.path().join("journal/0000.json").exists());
+    assert_eq!(
+        std::fs::read_dir(dir.path().join("dispatch"))
+            .unwrap()
+            .count(),
+        0
+    );
+}
+
+#[test]
 fn waits_for_a_safe_window_then_runs_each_attempt_once_to_done() {
     let (_dir, mut driver, intent) = setup(4);
     let mut host = fake();

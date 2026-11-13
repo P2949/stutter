@@ -164,7 +164,18 @@ impl Driver {
         Ok(Step::Sealed(record))
     }
 
+    #[cfg(test)]
     pub fn tick(&mut self, host: &mut dyn AttemptHost, now: u64) -> anyhow::Result<Step> {
+        self.tick_with_launch_fence(host, now, || Ok(()))
+    }
+
+    /// The resident controller must durably record its launching phase before arming tickets.
+    pub(crate) fn tick_with_launch_fence(
+        &mut self,
+        host: &mut dyn AttemptHost,
+        now: u64,
+        mut before_arm: impl FnMut() -> anyhow::Result<()>,
+    ) -> anyhow::Result<Step> {
         let tick_started = std::time::Instant::now();
         anyhow::ensure!(
             self.last_tick_seconds.is_none_or(|last| now >= last),
@@ -290,6 +301,7 @@ impl Driver {
         let slot = self.journal.start()?;
         let monotonic_start = std::time::Instant::now();
         self.active = Some((slot.clone(), now, monotonic_start));
+        before_arm()?;
         let mut authorization_expired = false;
         let mut arm_failed = false;
         let launched = host

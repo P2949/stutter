@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn recovery_checks_attempt_journal_even_when_lease_never_recorded_launching() {
-    for evidence in 0..4 {
+    for evidence in 0..5 {
         let campaign = tempfile::tempdir().unwrap();
         let study = tempfile::tempdir().unwrap();
         for dir in [&campaign, &study] {
@@ -57,12 +57,24 @@ fn recovery_checks_attempt_journal_even_when_lease_never_recorded_launching() {
             ResearchCoordinator::new(Some(campaign.path().to_path_buf()), Some(facts), "Ready");
         restarted.set_study_dir(Some(study.path().to_path_buf()));
         let result = restarted.prepare_recovery(101).unwrap().run();
-        assert_eq!(result.is_err(), evidence != 0);
+        assert_eq!(result.is_err(), (1..=3).contains(&evidence));
+        let replacement = tempfile::tempdir().unwrap();
+        if evidence == 4 {
+            restarted.set_study_dir(Some(replacement.path().to_path_buf()));
+        }
         restarted.finish_recovery(result);
         assert!(restarted.owns_action_slot());
         if evidence != 0 {
             assert!(
                 send(&mut restarted, ResearchRequest::Cancel {}, 102).contains("UnsafeToResume")
+            );
+        }
+        if evidence == 4 {
+            restarted.set_study_dir(Some(study.path().to_path_buf()));
+            let retry = restarted.prepare_recovery(103).unwrap();
+            restarted.finish_recovery(retry.run());
+            assert!(
+                send(&mut restarted, ResearchRequest::Status {}, 103).contains("await_safe_window")
             );
         }
     }
