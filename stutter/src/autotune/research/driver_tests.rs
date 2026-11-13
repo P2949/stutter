@@ -253,6 +253,61 @@ fn launch_refusal_timeout_and_cancel_seal_failed_without_replay() {
 }
 
 #[test]
+fn refused_launch_retires_every_issued_ticket_before_sealing() {
+    let (dir, mut driver, intent) = setup(4);
+    let mut host = fake();
+    host.launch_fails = true;
+    assert!(matches!(
+        driver
+            .tick(&mut host, intent.issued_unix_seconds + 1)
+            .unwrap(),
+        Step::Sealed(_)
+    ));
+    let attempt = dir.path().join("dispatch/0000");
+    let ticket_names: Vec<_> = std::fs::read_dir(&attempt)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .filter(|name| name.starts_with("ticket-") && name.ends_with(".json"))
+        .collect();
+    assert_eq!(ticket_names.len(), 2);
+    for name in ticket_names {
+        let id = name
+            .strip_prefix("ticket-")
+            .unwrap()
+            .strip_suffix(".json")
+            .unwrap();
+        assert_eq!(
+            std::fs::read(attempt.join(format!("used-{id}"))).unwrap(),
+            b"revoked-v1"
+        );
+    }
+}
+
+#[test]
+fn claimed_ticket_keeps_the_attempt_unsealed() {
+    let (dir, mut driver, intent) = setup(4);
+    let mut host = fake();
+    host.auto_finish = true;
+    let now = intent.issued_unix_seconds + 1;
+    assert_eq!(driver.tick(&mut host, now).unwrap(), Step::Running(0));
+    let attempt = dir.path().join("dispatch/0000");
+    let name = std::fs::read_dir(&attempt)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .find(|name| name.starts_with("ticket-") && name.ends_with(".json"))
+        .unwrap();
+    let id = name
+        .strip_prefix("ticket-")
+        .unwrap()
+        .strip_suffix(".json")
+        .unwrap();
+    std::fs::write(attempt.join(format!("used-{id}")), b"claimed").unwrap();
+    assert!(driver.tick(&mut host, now + 1).is_err());
+    assert!(dir.path().join("journal/0000.started").is_file());
+    assert!(!dir.path().join("journal/0000.json").exists());
+}
+
+#[test]
 fn deadline_expires_an_idle_driver_and_aborts_an_active_attempt() {
     let (_dir, mut driver, intent) = setup(4);
     let mut host = fake();

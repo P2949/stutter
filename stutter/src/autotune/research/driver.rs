@@ -138,6 +138,13 @@ impl Driver {
         outcome: AttemptOutcome,
         now: u64,
     ) -> anyhow::Result<Step> {
+        use std::os::fd::AsFd;
+        match crate::syscall::openat_dir_nofollow(self.root.as_fd(), &format!("{:04}", slot.index))
+        {
+            Ok(dir) => super::launch_ticket::retire_unclaimed_tickets(dir, self.intent.uid)?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
         let record = AttemptRecord { slot, outcome };
         self.journal.seal(record.clone())?;
         if let Some((_, started, monotonic_start)) = &self.active {

@@ -332,6 +332,48 @@ pub fn consume_launch_ticket(
     Ok(ticket)
 }
 
+/// Retire every ticket issued in an attempt, including tickets from a partially written arm.
+/// A claim that won the atomic race is ambiguous: its process must be independently settled
+/// before this attempt can be sealed, so this conservative path refuses it.
+pub(super) fn retire_unclaimed_tickets(dir: OwnedFd, uid: u32) -> anyhow::Result<()> {
+    use std::os::fd::AsRawFd;
+    let dir = private_directory(dir, uid)?;
+    let mut tickets = Vec::new();
+    let mut entries = 0usize;
+    for entry in std::fs::read_dir(format!("/proc/self/fd/{}", dir.as_raw_fd()))? {
+        entries += 1;
+        anyhow::ensure!(entries <= 16, "too many attempt entries");
+        let name = entry?.file_name();
+        let name = name
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("invalid attempt entry name"))?;
+        anyhow::ensure!(
+            !name.starts_with("used-"),
+            "attempt contains an already claimed or retired ticket"
+        );
+        if let Some(id) = name
+            .strip_prefix("ticket-")
+            .and_then(|name| name.strip_suffix(".json"))
+        {
+            anyhow::ensure!(digest_ok(id), "invalid ticket entry");
+            tickets.push(id.to_owned());
+            anyhow::ensure!(tickets.len() <= 2, "too many attempt tickets");
+        } else {
+            anyhow::ensure!(!name.starts_with("ticket-"), "invalid ticket entry");
+        }
+    }
+    tickets.sort_unstable();
+    for id in tickets {
+        // The dispatcher uses the same O_EXCL marker. A concurrent claim therefore either
+        // loses to revocation or makes this operation fail without sealing the attempt.
+        let mut marker = crate::syscall::create_new_at(dir.as_fd(), &format!("used-{id}"))?;
+        marker.write_all(b"revoked-v1")?;
+        marker.sync_all()?;
+    }
+    dir.sync_all()?;
+    Ok(())
+}
+
 #[cfg(test)]
 #[path = "launch_ticket_tests.rs"]
 mod tests;

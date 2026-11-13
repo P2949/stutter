@@ -60,6 +60,57 @@ fn ticket_binds_exact_game_tool_session_attempt_and_steam_verb_then_cannot_repla
 }
 
 #[test]
+fn retirement_blocks_unclaimed_tickets_and_refuses_an_existing_claim() {
+    let (dir, intent, slot) = fixture();
+    let ticket = issue_launch_ticket(fd(&dir), &intent, &slot, SteamVerb::Run, 11, 60).unwrap();
+    retire_unclaimed_tickets(fd(&dir), intent.uid).unwrap();
+    let expected = binding(&intent, &slot, SteamVerb::Run).unwrap();
+    assert!(consume_launch_ticket(fd(&dir), &ticket.ticket_id, &expected, 12).is_err());
+
+    let (dir, intent, slot) = fixture();
+    let ticket = issue_launch_ticket(fd(&dir), &intent, &slot, SteamVerb::Run, 11, 60).unwrap();
+    let expected = binding(&intent, &slot, SteamVerb::Run).unwrap();
+    consume_launch_ticket(fd(&dir), &ticket.ticket_id, &expected, 12).unwrap();
+    assert!(retire_unclaimed_tickets(fd(&dir), intent.uid).is_err());
+}
+
+#[test]
+fn retirement_covers_partial_ticket_files_and_rejects_orphan_claims() {
+    let (dir, intent, _) = fixture();
+    let id = "a".repeat(64);
+    std::fs::write(dir.path().join(format!("ticket-{id}.json")), b"partial").unwrap();
+    retire_unclaimed_tickets(fd(&dir), intent.uid).unwrap();
+    assert_eq!(
+        std::fs::read(dir.path().join(format!("used-{id}"))).unwrap(),
+        b"revoked-v1"
+    );
+
+    let (dir, intent, _) = fixture();
+    std::fs::write(dir.path().join(format!("used-{id}")), b"claimed").unwrap();
+    assert!(retire_unclaimed_tickets(fd(&dir), intent.uid).is_err());
+}
+
+#[test]
+fn concurrent_retirement_and_dispatch_cannot_both_win() {
+    let (dir, intent, slot) = fixture();
+    let ticket = issue_launch_ticket(fd(&dir), &intent, &slot, SteamVerb::Run, 11, 60).unwrap();
+    let expected = binding(&intent, &slot, SteamVerb::Run).unwrap();
+    let retire_dir = fd(&dir);
+    let consume_dir = fd(&dir);
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+    let other = barrier.clone();
+    let uid = intent.uid;
+    let thread = std::thread::spawn(move || {
+        other.wait();
+        retire_unclaimed_tickets(retire_dir, uid).is_ok()
+    });
+    barrier.wait();
+    let consumed = consume_launch_ticket(consume_dir, &ticket.ticket_id, &expected, 12).is_ok();
+    let retired = thread.join().unwrap();
+    assert_ne!(retired, consumed);
+}
+
+#[test]
 fn wrong_user_app_build_tool_boot_session_verb_and_attempt_are_rejected_without_claiming() {
     let (dir, intent, slot) = fixture();
     let ticket = issue_launch_ticket(fd(&dir), &intent, &slot, SteamVerb::Run, 11, 60).unwrap();
