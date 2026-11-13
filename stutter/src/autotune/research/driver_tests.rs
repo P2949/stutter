@@ -12,6 +12,8 @@ struct Fake {
     abort_fails: bool,
     current: u32,
     auto_finish: bool,
+    arm_delay: std::time::Duration,
+    safe_delay: std::time::Duration,
 }
 
 fn ev(slot_index: u32) -> AttemptEvidenceV1 {
@@ -25,9 +27,11 @@ fn ev(slot_index: u32) -> AttemptEvidenceV1 {
 
 impl AttemptHost for Fake {
     fn safe_window(&mut self) -> bool {
+        std::thread::sleep(self.safe_delay);
         self.safe
     }
     fn arm_spec(&mut self, _: &AttemptSlot) -> anyhow::Result<ArmSpec> {
+        std::thread::sleep(self.arm_delay);
         Ok(ArmSpec {
             tool_dir: "/t".into(),
             study_compat_data: "/s".into(),
@@ -67,7 +71,64 @@ fn fake() -> Fake {
         abort_fails: false,
         current: 0,
         auto_finish: false,
+        arm_delay: std::time::Duration::ZERO,
+        safe_delay: std::time::Duration::ZERO,
     }
+}
+
+#[test]
+fn deadline_expiring_during_preparation_never_starts_steam() {
+    let (_dir, mut driver, intent) = setup(4);
+    let mut host = fake();
+    host.arm_delay = std::time::Duration::from_millis(1100);
+    let step = driver
+        .tick(&mut host, intent.deadline_unix_seconds - 2)
+        .unwrap();
+    let Step::Sealed(record) = step else {
+        panic!("expired authorization must be settled")
+    };
+    assert_eq!(
+        record.outcome,
+        AttemptOutcome::Failed {
+            code: "AuthorizationExpiredBeforeLaunch".into()
+        }
+    );
+    assert_eq!(host.launches, 0);
+    assert_eq!(host.aborts, 1);
+}
+
+#[test]
+fn deadline_expiring_during_safe_window_check_never_starts_steam() {
+    let (_dir, mut driver, intent) = setup(4);
+    let mut host = fake();
+    host.safe_delay = std::time::Duration::from_millis(1100);
+    let step = driver
+        .tick(&mut host, intent.deadline_unix_seconds - 2)
+        .unwrap();
+    let Step::Sealed(record) = step else {
+        panic!("expired authorization must be settled")
+    };
+    assert_eq!(
+        record.outcome,
+        AttemptOutcome::Failed {
+            code: "AuthorizationExpiredBeforeLaunch".into()
+        }
+    );
+    assert_eq!(host.launches, 0);
+    assert_eq!(host.aborts, 1);
+}
+
+#[test]
+fn launch_ticket_lifetime_is_bounded_by_remaining_authorization() {
+    let (_dir, mut driver, intent) = setup(4);
+    let mut host = fake();
+    assert_eq!(
+        driver
+            .tick(&mut host, intent.deadline_unix_seconds - 60)
+            .unwrap(),
+        Step::Running(0)
+    );
+    assert_eq!(host.launches, 1);
 }
 
 fn setup(max_attempts: u32) -> (tempfile::TempDir, Driver, ResearchIntentV1) {

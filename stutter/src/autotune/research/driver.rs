@@ -154,6 +154,7 @@ impl Driver {
     }
 
     pub fn tick(&mut self, host: &mut dyn AttemptHost, now: u64) -> anyhow::Result<Step> {
+        let tick_started = std::time::Instant::now();
         anyhow::ensure!(
             self.last_tick_seconds.is_none_or(|last| now >= last),
             "campaign clock moved backward"
@@ -187,9 +188,10 @@ impl Driver {
                 host.abort()?;
                 return self.seal(slot, AttemptOutcome::Failed { code: code.into() }, now);
             }
-            let poll_started = std::time::Instant::now();
             let progress = host.poll();
-            if now.saturating_add(poll_started.elapsed().as_secs())
+            if now
+                .saturating_add(tick_started.elapsed().as_secs())
+                .saturating_add(1)
                 >= self.intent.deadline_unix_seconds
             {
                 host.abort()?;
@@ -275,7 +277,9 @@ impl Driver {
             return Ok(Step::Waiting);
         }
         let slot = self.journal.start()?;
-        self.active = Some((slot.clone(), now, std::time::Instant::now()));
+        let monotonic_start = std::time::Instant::now();
+        self.active = Some((slot.clone(), now, monotonic_start));
+        let mut authorization_expired = false;
         let launched = host
             .arm_spec(&slot)
             .and_then(|spec| {
@@ -284,10 +288,32 @@ impl Driver {
                     &self.intent,
                     &slot,
                     spec,
-                    (now, ARM_LIFETIME_SECONDS),
+                    (
+                        now,
+                        ARM_LIFETIME_SECONDS.min(self.intent.deadline_unix_seconds - now),
+                    ),
                 )
             })
-            .and_then(|context| host.launch(&slot, &context));
+            .and_then(|context| {
+                // Source discovery and arming can take long enough to exhaust the authorization
+                // after the tick's wall-clock sample. Never start a launcher using stale time.
+                let elapsed = monotonic_start.elapsed().as_secs();
+                authorization_expired = now
+                    .saturating_add(tick_started.elapsed().as_secs())
+                    .saturating_add(1)
+                    >= self.intent.deadline_unix_seconds
+                    || elapsed >= u64::from(self.intent.max_attempt_seconds)
+                    || self
+                        .active_seconds
+                        .saturating_add(elapsed)
+                        .saturating_add(1)
+                        >= u64::from(self.intent.max_active_seconds);
+                anyhow::ensure!(
+                    !authorization_expired,
+                    "attempt authorization expired before launch"
+                );
+                host.launch(&slot, &context)
+            });
         match launched {
             Ok(()) => Ok(Step::Running(slot.index)),
             Err(_) => {
@@ -295,7 +321,12 @@ impl Driver {
                 self.seal(
                     slot,
                     AttemptOutcome::Failed {
-                        code: "LaunchRefused".into(),
+                        code: if authorization_expired {
+                            "AuthorizationExpiredBeforeLaunch"
+                        } else {
+                            "LaunchRefused"
+                        }
+                        .into(),
                     },
                     now,
                 )
