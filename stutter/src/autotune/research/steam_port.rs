@@ -3,7 +3,12 @@
 //! absence of unrelated games. Result detection and actual game-tree settlement remain unverified.
 
 use std::{
+    fs::File,
     io::Read,
+    os::{
+        fd::{AsFd, AsRawFd},
+        unix::fs::MetadataExt,
+    },
     path::{Path, PathBuf},
     process::{Child, Command},
     time::{Duration, Instant},
@@ -11,6 +16,8 @@ use std::{
 
 use super::{
     AttemptSlot, SteamClientIdentity, SteamProcessIdentity,
+    dispatch_context::{DispatchContextV1, inspect_dispatcher_start},
+    launch_ticket::SteamVerb,
     steam_host::{GameState, SteamPort},
 };
 
@@ -159,18 +166,21 @@ pub struct ProductionSteamPort<R: ResultProbe> {
     idle_at: Option<Instant>,
     pub proc_root: PathBuf,
     pub study_compat_data: PathBuf,
+    pub study_root: PathBuf,
     pub steamapps: PathBuf,
     pub proton_manifest: PathBuf,
     expected_client: SteamClientIdentity,
     pub tools: Vec<(super::ProtonSource, PathBuf)>,
     pub probe: R,
     child: Option<Child>,
+    dispatch: Option<(File, DispatchContextV1)>,
     unsettled: bool,
 }
 
 impl<R: ResultProbe> ProductionSteamPort<R> {
     pub fn new(
         study_compat_data: PathBuf,
+        study_root: PathBuf,
         steamapps: PathBuf,
         proton_manifest: PathBuf,
         expected_client: SteamClientIdentity,
@@ -181,12 +191,14 @@ impl<R: ResultProbe> ProductionSteamPort<R> {
             idle_at: None,
             proc_root: PathBuf::from("/proc"),
             study_compat_data,
+            study_root,
             steamapps,
             proton_manifest,
             expected_client,
             tools,
             probe,
             child: None,
+            dispatch: None,
             unsettled: false,
         }
     }
@@ -220,6 +232,45 @@ impl<R: ResultProbe> ProductionSteamPort<R> {
             .as_ref()
             .is_some_and(|client| !host_has_game_or_foreign_steam(&self.proc_root, client, uid))
     }
+
+    fn open_dispatch(
+        &self,
+        slot: &AttemptSlot,
+        context: &DispatchContextV1,
+    ) -> anyhow::Result<File> {
+        let uid = crate::syscall::geteuid();
+        anyhow::ensure!(
+            context.slot == *slot
+                && context.intent.uid == uid
+                && context.intent.steam_client == self.expected_client,
+            "dispatch context mismatch"
+        );
+        let digest = context.intent.digest()?;
+        anyhow::ensure!(slot.study_sha256 == digest, "dispatch study mismatch");
+        let root = File::from(crate::syscall::open_dir_no_symlinks(&self.study_root)?);
+        let meta = root.metadata()?;
+        let expected = context
+            .intent
+            .study_root
+            .ok_or_else(|| anyhow::anyhow!("study root is not frozen"))?;
+        anyhow::ensure!(
+            meta.uid() == uid
+                && meta.mode() & 0o077 == 0
+                && meta.dev() == expected.device
+                && meta.ino() == expected.inode,
+            "study root changed"
+        );
+        let mut dir = root;
+        for component in [&digest[..16], "dispatch", &format!("{:04}", slot.index)] {
+            dir = File::from(crate::syscall::openat_dir_nofollow(dir.as_fd(), component)?);
+            let meta = dir.metadata()?;
+            anyhow::ensure!(
+                meta.uid() == uid && meta.mode() & 0o077 == 0,
+                "untrusted dispatch ancestry"
+            );
+        }
+        Ok(dir)
+    }
 }
 
 impl<R: ResultProbe> SteamPort for ProductionSteamPort<R> {
@@ -251,7 +302,7 @@ impl<R: ResultProbe> SteamPort for ProductionSteamPort<R> {
         (self.steamapps.clone(), self.proton_manifest.clone())
     }
 
-    fn launch(&mut self, _: &AttemptSlot) -> anyhow::Result<()> {
+    fn launch(&mut self, slot: &AttemptSlot, context: &DispatchContextV1) -> anyhow::Result<()> {
         anyhow::ensure!(
             self.child.is_none() && !self.unsettled,
             "a launch remains unsettled"
@@ -261,6 +312,7 @@ impl<R: ResultProbe> SteamPort for ProductionSteamPort<R> {
             self.idle_is_fresh() && self.steam_and_prefilter_clear(),
             "safe window closed before launch"
         );
+        let dispatch = self.open_dispatch(slot, context)?;
         self.probe.begin()?;
         anyhow::ensure!(
             self.idle_is_fresh(),
@@ -270,6 +322,7 @@ impl<R: ResultProbe> SteamPort for ProductionSteamPort<R> {
         let child = Command::new(&argv[0]).args(&argv[1..]).spawn()?;
         self.unsettled = true;
         self.child = Some(child);
+        self.dispatch = Some((dispatch, context.clone()));
         Ok(())
     }
 
@@ -277,7 +330,31 @@ impl<R: ResultProbe> SteamPort for ProductionSteamPort<R> {
         if !self.idle_is_fresh() {
             return GameState::DesktopInterrupted;
         }
-        self.probe.poll()
+        let Some((dir, context)) = self.dispatch.as_ref() else {
+            return GameState::IdentityMismatch;
+        };
+        let mut active_anchor = false;
+        for verb in [SteamVerb::WaitForExitAndRun, SteamVerb::Run] {
+            let path = format!(
+                "/proc/self/fd/{}/dispatcher-{}.json",
+                dir.as_raw_fd(),
+                verb.as_steam_argument()
+            );
+            match std::fs::symlink_metadata(path) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(_) => return GameState::IdentityMismatch,
+                Ok(_) => match inspect_dispatcher_start(dir, context, verb, &self.proc_root) {
+                    Ok(Some(_)) => active_anchor = true,
+                    Ok(None) => {}
+                    Err(_) => return GameState::IdentityMismatch,
+                },
+            }
+        }
+        if active_anchor {
+            self.probe.poll()
+        } else {
+            GameState::Starting
+        }
     }
 
     fn stop(&mut self) -> anyhow::Result<()> {
@@ -387,6 +464,7 @@ mod tests {
         let proc = proc_with(&["zsh"]);
         let mut port = ProductionSteamPort::new(
             "/s".into(),
+            "/study".into(),
             "/a".into(),
             "/m".into(),
             super::super::tests::intent().steam_client,
@@ -400,8 +478,21 @@ mod tests {
             index: 0,
             arm: super::super::ProtonSource::Ge,
         };
+        let context = DispatchContextV1 {
+            schema_version: 1,
+            intent: super::super::tests::intent(),
+            slot: slot.clone(),
+            tickets: Default::default(),
+            spec: super::super::dispatch_context::ArmSpec {
+                tool_dir: "/t/ge".into(),
+                study_compat_data: "/s".into(),
+                arm_env: Default::default(),
+                steamapps: "/a".into(),
+                proton_manifest: "/m".into(),
+            },
+        };
         assert!(!port.safe_window());
-        assert!(port.launch(&slot).is_err());
+        assert!(port.launch(&slot, &context).is_err());
         port.observe_desktop_idle(Some(Instant::now()));
         // Idle alone cannot qualify the client: the fixture has no trusted Steam inventory.
         assert!(!port.safe_window());
@@ -423,6 +514,6 @@ mod tests {
         port.unsettled = true;
         assert!(port.stop().is_err());
         assert!(!port.safe_window());
-        assert!(port.launch(&slot).is_err());
+        assert!(port.launch(&slot, &context).is_err());
     }
 }

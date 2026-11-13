@@ -40,7 +40,7 @@ pub trait SteamPort {
     fn tool_dir(&mut self, slot: &AttemptSlot) -> anyhow::Result<PathBuf>;
     fn study_compat_data(&self) -> PathBuf;
     fn library_paths(&self) -> (PathBuf, PathBuf);
-    fn launch(&mut self, slot: &AttemptSlot) -> anyhow::Result<()>;
+    fn launch(&mut self, slot: &AttemptSlot, context: &DispatchContextV1) -> anyhow::Result<()>;
     fn state(&mut self) -> GameState;
     /// Stop only the process tree this port launched. Must be idempotent.
     fn stop(&mut self) -> anyhow::Result<()>;
@@ -82,10 +82,10 @@ impl<P: SteamPort> AttemptHost for SteamAttemptHost<P> {
         })
     }
 
-    fn launch(&mut self, slot: &AttemptSlot, _: &DispatchContextV1) -> anyhow::Result<()> {
+    fn launch(&mut self, slot: &AttemptSlot, context: &DispatchContextV1) -> anyhow::Result<()> {
         anyhow::ensure!(self.current.is_none(), "an attempt is already launched");
         self.current = Some(slot.index);
-        self.port.launch(slot)
+        self.port.launch(slot, context)
     }
 
     fn poll(&mut self) -> Progress {
@@ -176,7 +176,7 @@ mod tests {
         fn library_paths(&self) -> (PathBuf, PathBuf) {
             ("/steam/steamapps".into(), "/manifest.json".into())
         }
-        fn launch(&mut self, _: &AttemptSlot) -> anyhow::Result<()> {
+        fn launch(&mut self, _: &AttemptSlot, _: &DispatchContextV1) -> anyhow::Result<()> {
             self.launches += 1;
             Ok(())
         }
