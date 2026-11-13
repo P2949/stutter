@@ -14,6 +14,15 @@ const TIMEOUT: Duration = Duration::from_secs(2);
 /// Most messages skipped (signals, unrelated replies) while waiting for one reply.
 const MAX_SKIPPED: usize = 64;
 
+/// Establish a bounded Unix connection; callers still authenticate the peer appropriate to
+/// their own protocol before using the returned stream.
+pub(crate) fn connect_stream(path: &Path) -> Result<UnixStream, DbusError> {
+    let socket = socket2::Socket::new(socket2::Domain::UNIX, socket2::Type::STREAM, None)?;
+    let address = socket2::SockAddr::unix(path)?;
+    socket.connect_timeout(&address, TIMEOUT)?;
+    Ok(UnixStream::from(socket))
+}
+
 fn remaining(deadline: Instant) -> Result<Duration, DbusError> {
     deadline
         .checked_duration_since(Instant::now())
@@ -135,10 +144,7 @@ impl DbusClient {
 
     /// Connects to the bus socket at `path`, authenticates as `uid`, and says hello.
     pub fn connect_path(path: &Path, uid: u32) -> Result<Self, DbusError> {
-        let socket = socket2::Socket::new(socket2::Domain::UNIX, socket2::Type::STREAM, None)?;
-        let address = socket2::SockAddr::unix(path)?;
-        socket.connect_timeout(&address, TIMEOUT)?;
-        let stream = UnixStream::from(socket);
+        let stream = connect_stream(path)?;
         Self::handshake(stream, uid)
     }
 
@@ -214,6 +220,25 @@ impl DbusClient {
         signature: &str,
         body: &[u8],
     ) -> Result<Vec<Value>, DbusError> {
+        self.call_with_sender(destination, path, interface, member, signature, body, None)
+    }
+
+    /// Require the bus-provided sender on the matching reply. This is meaningful only after
+    /// authenticating the bus itself; a sender header alone does not establish trust.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "D-Bus method and expected reply identity"
+    )]
+    pub(crate) fn call_with_sender(
+        &mut self,
+        destination: &str,
+        path: &str,
+        interface: &str,
+        member: &str,
+        signature: &str,
+        body: &[u8],
+        expected_sender: Option<&str>,
+    ) -> Result<Vec<Value>, DbusError> {
         let serial = self.next_serial;
         self.next_serial = self.next_serial.wrapping_add(1).max(1);
         let deadline = Instant::now() + TIMEOUT;
@@ -237,6 +262,9 @@ impl DbusClient {
             let message = self.read_message(deadline)?;
             if message.reply_serial != Some(serial) {
                 continue; // a signal or someone else's reply
+            }
+            if expected_sender.is_some_and(|sender| message.sender.as_deref() != Some(sender)) {
+                return Err(DbusError::UnexpectedReply);
             }
             return match message.kind {
                 MessageType::MethodReturn => {
@@ -332,6 +360,30 @@ fn complete_type(signature: &str) -> Result<&str, WireError> {
 #[cfg(test)]
 mod deadline_tests {
     use super::*;
+
+    #[test]
+    fn checked_reply_rejects_an_unexpected_sender() {
+        use crate::integrations::dbus::fake::{Reply, serve};
+        let (client_end, server_end) = UnixStream::pair().unwrap();
+        serve(server_end, |_| {
+            let mut body = Writer::default();
+            body.string("value");
+            Reply::BodyFrom("s".into(), body.buf, ":1.666")
+        });
+        let mut client = DbusClient::from_stream(client_end, 1000).unwrap();
+        assert!(matches!(
+            client.call_with_sender(
+                "org.freedesktop.DBus",
+                "/org/freedesktop/DBus",
+                "org.freedesktop.DBus",
+                "GetNameOwner",
+                "s",
+                &[],
+                Some("org.freedesktop.DBus")
+            ),
+            Err(DbusError::UnexpectedReply)
+        ));
+    }
 
     #[test]
     fn timed_unix_connection_completes_the_existing_dbus_handshake() {

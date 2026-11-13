@@ -324,6 +324,7 @@ pub enum MessageType {
 pub struct Message {
     pub kind: MessageType,
     pub reply_serial: Option<u32>,
+    pub sender: Option<String>,
     pub error_name: Option<String>,
     pub signature: String,
     pub body: Vec<u8>,
@@ -366,7 +367,8 @@ pub fn parse_message(bytes: &[u8]) -> Result<Message, WireError> {
     let body_start = 16 + fields_len.next_multiple_of(8);
     let mut reader = Reader::new(&bytes[..16 + fields_len]);
     reader.pos = 16;
-    let (mut reply_serial, mut error_name, mut signature) = (None, None, String::new());
+    let (mut reply_serial, mut error_name, mut signature, mut sender) =
+        (None, None, String::new(), None);
     while reader.pos < 16 + fields_len {
         reader.align(8)?;
         if reader.pos >= 16 + fields_len {
@@ -378,6 +380,8 @@ pub fn parse_message(bytes: &[u8]) -> Result<Message, WireError> {
         match (code, value) {
             (4, Value::Str(name)) => error_name = Some(name),
             (5, Value::U32(serial)) => reply_serial = Some(serial),
+            (7, Value::Str(name)) if sender.is_none() => sender = Some(name),
+            (7, _) => return Err(WireError::BadMessage),
             (8, Value::Signature(sig)) => signature = sig,
             _ => {}
         }
@@ -385,6 +389,7 @@ pub fn parse_message(bytes: &[u8]) -> Result<Message, WireError> {
     Ok(Message {
         kind,
         reply_serial,
+        sender,
         error_name,
         signature,
         body: bytes[body_start..total].to_vec(),

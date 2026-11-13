@@ -23,6 +23,7 @@ pub struct Call {
 pub enum Reply {
     /// A method return with this body signature and marshalled body.
     Body(String, Vec<u8>),
+    BodyFrom(String, Vec<u8>, &'static str),
     Error(&'static str),
 }
 
@@ -79,6 +80,7 @@ fn header(
     signature: &str,
     error: Option<&str>,
     body: &[u8],
+    sender: &str,
 ) -> Vec<u8> {
     let mut out = Writer::default();
     out.u8(b'l');
@@ -100,6 +102,10 @@ fn header(
     out.u8(5);
     out.signature("u");
     out.u32(reply_serial);
+    out.align(8);
+    out.u8(7);
+    out.signature("s");
+    out.string(sender);
     if !signature.is_empty() {
         out.align(8);
         out.u8(8);
@@ -139,14 +145,26 @@ pub fn serve(mut stream: UnixStream, answer: impl Fn(&Call) -> Reply + Send + 's
             let bytes = if call.member == "Hello" {
                 let mut body = Writer::default();
                 body.string(":1.99");
-                header(2, call.serial, "s", None, &body.buf)
+                header(2, call.serial, "s", None, &body.buf, "org.freedesktop.DBus")
             } else {
                 if let Ok(mut seen) = seen.lock() {
                     seen.push(call.clone());
                 }
                 match answer(&call) {
-                    Reply::Body(signature, body) => header(2, call.serial, &signature, None, &body),
-                    Reply::Error(name) => header(3, call.serial, "", Some(name), &[]),
+                    Reply::Body(signature, body) => header(
+                        2,
+                        call.serial,
+                        &signature,
+                        None,
+                        &body,
+                        "org.freedesktop.DBus",
+                    ),
+                    Reply::BodyFrom(signature, body, sender) => {
+                        header(2, call.serial, &signature, None, &body, sender)
+                    }
+                    Reply::Error(name) => {
+                        header(3, call.serial, "", Some(name), &[], "org.freedesktop.DBus")
+                    }
                 }
             };
             if stream.write_all(&bytes).is_err() {
