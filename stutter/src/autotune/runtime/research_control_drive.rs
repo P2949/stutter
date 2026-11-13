@@ -86,9 +86,20 @@ impl ResearchCoordinator {
         if !self.drive_due() {
             return;
         }
+        #[cfg(feature = "wayland-probe")]
+        let idle_at = match self.desktop_idle.1 {
+            crate::autotune::research::desktop_idle::DesktopIdleObservation::Monitoring {
+                inhibitor_idle: true,
+                input_idle: true,
+            } => Some(self.desktop_idle.0),
+            _ => None,
+        };
+        #[cfg(not(feature = "wayland-probe"))]
+        let idle_at = None;
         let Some(state) = self.driver.as_mut() else {
             return;
         };
+        state.host.observe_desktop_idle(idle_at);
         let step = match state.driver.tick(state.host.as_mut(), now) {
             Ok(step) => step,
             Err(error) => {

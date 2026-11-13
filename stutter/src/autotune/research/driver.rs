@@ -31,6 +31,8 @@ pub enum Progress {
 
 /// Effects on the real world. Implementations must be idempotent for `abort`.
 pub trait AttemptHost {
+    /// Latest independently observed idle timestamp, or None when occupied or unknown.
+    fn observe_desktop_idle(&mut self, _idle_at: Option<std::time::Instant>) {}
     /// True only in a qualified automatic safe window.
     fn safe_window(&mut self) -> bool;
     fn arm_spec(&mut self, slot: &AttemptSlot) -> anyhow::Result<ArmSpec>;

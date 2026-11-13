@@ -368,10 +368,13 @@ fn one_verified_intent_is_durable_pausable_cancellable_and_terminal() {
             coordinator.desktop_idle_target().unwrap().1,
             facts.session_id
         );
-        coordinator.set_desktop_idle(DesktopIdleObservation::Monitoring {
-            inhibitor_idle: true,
-            input_idle: true,
-        });
+        coordinator.set_desktop_idle((
+            std::time::Instant::now(),
+            DesktopIdleObservation::Monitoring {
+                inhibitor_idle: true,
+                input_idle: true,
+            },
+        ));
         coordinator.desktop_idle.0 -= Duration::from_secs(4);
         let stale: serde_json::Value = serde_json::from_str(&coordinator.status()).unwrap();
         assert_eq!(stale["desktop_idle_observation"], "unknown");

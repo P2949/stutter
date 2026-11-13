@@ -63,13 +63,13 @@ impl DesktopIdleMonitor {
         }
     }
 
-    pub(crate) fn observation(&self) -> DesktopIdleObservation {
+    pub(crate) fn observation(&self) -> (std::time::Instant, DesktopIdleObservation) {
         self.latest
             .lock()
             .ok()
             .and_then(|last| *last)
             .filter(|(time, _)| time.elapsed() <= std::time::Duration::from_secs(3))
-            .map_or(DesktopIdleObservation::Unknown, |(_, value)| value)
+            .unwrap_or_else(|| (std::time::Instant::now(), DesktopIdleObservation::Unknown))
     }
 }
 
@@ -128,18 +128,19 @@ mod tests {
     #[test]
     fn missing_and_stale_observations_are_unknown() {
         let monitor = DesktopIdleMonitor::new();
-        assert_eq!(monitor.observation(), DesktopIdleObservation::Unknown);
+        assert_eq!(monitor.observation().1, DesktopIdleObservation::Unknown);
         let sample = DesktopIdleObservation::Monitoring {
             inhibitor_idle: true,
             input_idle: true,
         };
-        *monitor.latest.lock().unwrap() = Some((std::time::Instant::now(), sample));
-        assert_eq!(monitor.observation(), sample);
+        let sampled_at = std::time::Instant::now();
+        *monitor.latest.lock().unwrap() = Some((sampled_at, sample));
+        assert_eq!(monitor.observation(), (sampled_at, sample));
         *monitor.latest.lock().unwrap() = Some((
             std::time::Instant::now() - std::time::Duration::from_secs(4),
             sample,
         ));
-        assert_eq!(monitor.observation(), DesktopIdleObservation::Unknown);
+        assert_eq!(monitor.observation().1, DesktopIdleObservation::Unknown);
     }
 
     #[tokio::test]

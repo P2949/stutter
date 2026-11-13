@@ -17,8 +17,8 @@ impl ResearchCoordinator {
 
     pub(in crate::autotune::runtime) fn set_desktop_idle(
         &mut self,
-        observation: DesktopIdleObservation,
+        observation: (std::time::Instant, DesktopIdleObservation),
     ) {
-        self.desktop_idle = (std::time::Instant::now(), observation);
+        self.desktop_idle = observation;
     }
 }

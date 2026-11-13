@@ -6,10 +6,7 @@ use std::{
     io::Read,
     path::{Path, PathBuf},
     process::{Child, Command},
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
+    time::{Duration, Instant},
 };
 
 use super::{
@@ -84,7 +81,7 @@ pub trait ResultProbe {
 }
 
 pub struct ProductionSteamPort<R: ResultProbe> {
-    pub idle: Arc<AtomicBool>,
+    idle_at: Option<Instant>,
     pub proc_root: PathBuf,
     pub study_compat_data: PathBuf,
     pub steamapps: PathBuf,
@@ -97,7 +94,6 @@ pub struct ProductionSteamPort<R: ResultProbe> {
 
 impl<R: ResultProbe> ProductionSteamPort<R> {
     pub fn new(
-        idle: Arc<AtomicBool>,
         study_compat_data: PathBuf,
         steamapps: PathBuf,
         proton_manifest: PathBuf,
@@ -105,7 +101,7 @@ impl<R: ResultProbe> ProductionSteamPort<R> {
         probe: R,
     ) -> Self {
         Self {
-            idle,
+            idle_at: None,
             proc_root: PathBuf::from("/proc"),
             study_compat_data,
             steamapps,
@@ -116,13 +112,22 @@ impl<R: ResultProbe> ProductionSteamPort<R> {
             unsettled: false,
         }
     }
+
+    fn idle_is_fresh(&self) -> bool {
+        self.idle_at
+            .is_some_and(|at| at.elapsed() <= Duration::from_secs(3))
+    }
 }
 
 impl<R: ResultProbe> SteamPort for ProductionSteamPort<R> {
+    fn observe_desktop_idle(&mut self, idle_at: Option<Instant>) {
+        self.idle_at = idle_at;
+    }
+
     fn safe_window(&mut self) -> bool {
         self.child.is_none()
             && !self.unsettled
-            && self.idle.load(Ordering::Acquire)
+            && self.idle_is_fresh()
             && !host_has_game_or_steam(&self.proc_root)
     }
 
@@ -149,7 +154,7 @@ impl<R: ResultProbe> SteamPort for ProductionSteamPort<R> {
         );
         // Re-check at the last moment: the window can close between admission and launch.
         anyhow::ensure!(
-            self.idle.load(Ordering::Acquire) && !host_has_game_or_steam(&self.proc_root),
+            self.idle_is_fresh() && !host_has_game_or_steam(&self.proc_root),
             "safe window closed before launch"
         );
         self.probe.begin()?;
@@ -161,6 +166,9 @@ impl<R: ResultProbe> SteamPort for ProductionSteamPort<R> {
     }
 
     fn state(&mut self) -> GameState {
+        if !self.idle_is_fresh() {
+            return GameState::DesktopInterrupted;
+        }
         self.probe.poll()
     }
 
@@ -226,9 +234,7 @@ mod tests {
     #[test]
     fn launch_refuses_unless_idle_and_free_and_the_command_is_the_one_owned_app() {
         let proc = proc_with(&["zsh"]);
-        let idle = Arc::new(AtomicBool::new(false));
         let mut port = ProductionSteamPort::new(
-            idle.clone(),
             "/s".into(),
             "/a".into(),
             "/m".into(),
@@ -244,8 +250,14 @@ mod tests {
         };
         assert!(!port.safe_window());
         assert!(port.launch(&slot).is_err());
-        idle.store(true, Ordering::Release);
+        port.observe_desktop_idle(Some(Instant::now()));
         assert!(port.safe_window());
+        port.observe_desktop_idle(Some(Instant::now() - Duration::from_secs(4)));
+        assert!(!port.safe_window());
+        assert_eq!(port.state(), GameState::DesktopInterrupted);
+        port.observe_desktop_idle(None);
+        assert_eq!(port.state(), GameState::DesktopInterrupted);
+        port.observe_desktop_idle(Some(Instant::now()));
         assert_eq!(port.tool_dir(&slot).unwrap(), PathBuf::from("/t/ge"));
         let mut other = slot.clone();
         other.arm = super::super::ProtonSource::Em;

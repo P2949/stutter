@@ -24,6 +24,8 @@ pub enum GameState {
         completion: Box<super::cyberpunk::CyberpunkBenchmarkCompletion>,
     },
     InvalidNativeResult,
+    /// The desktop became occupied or its idle observation expired.
+    DesktopInterrupted,
     /// The game process tree ended without a fresh native result.
     ExitedWithoutResult,
     /// Something contradicted the launch identity (wrong game, wrong tool, second game).
@@ -31,6 +33,7 @@ pub enum GameState {
 }
 
 pub trait SteamPort {
+    fn observe_desktop_idle(&mut self, idle_at: Option<std::time::Instant>);
     /// Objectively free of unrelated user or game work; never forced.
     fn safe_window(&mut self) -> bool;
     /// Resolve the exact installed tool directory for the arm, or fail closed.
@@ -58,6 +61,10 @@ impl<P: SteamPort> SteamAttemptHost<P> {
 }
 
 impl<P: SteamPort> AttemptHost for SteamAttemptHost<P> {
+    fn observe_desktop_idle(&mut self, idle_at: Option<std::time::Instant>) {
+        self.port.observe_desktop_idle(idle_at);
+    }
+
     fn safe_window(&mut self) -> bool {
         self.current.is_none() && self.port.safe_window()
     }
@@ -108,6 +115,9 @@ impl<P: SteamPort> AttemptHost for SteamAttemptHost<P> {
             GameState::InvalidNativeResult => Progress::Failed {
                 code: "InvalidNativeResult".into(),
             },
+            GameState::DesktopInterrupted => Progress::Failed {
+                code: "DesktopInterrupted".into(),
+            },
             GameState::ExitedWithoutResult => {
                 if self.port.stop().is_err() {
                     return Progress::Failed {
@@ -153,6 +163,7 @@ mod tests {
     }
 
     impl SteamPort for Port {
+        fn observe_desktop_idle(&mut self, _: Option<std::time::Instant>) {}
         fn safe_window(&mut self) -> bool {
             self.safe
         }
@@ -285,6 +296,22 @@ mod tests {
                 code: "IdentityMismatch".into()
             }
         );
+        assert_eq!(host.port.stops, 1);
+    }
+
+    #[test]
+    fn desktop_interruption_requests_settlement_before_any_seal() {
+        let mut host = host(vec![GameState::DesktopInterrupted]);
+        launch(&mut host);
+        assert_eq!(
+            host.poll(),
+            Progress::Failed {
+                code: "DesktopInterrupted".into()
+            }
+        );
+        // The driver owns the abort/settlement step after a failed poll.
+        assert_eq!(host.port.stops, 0);
+        host.abort().unwrap();
         assert_eq!(host.port.stops, 1);
     }
 
