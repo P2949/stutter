@@ -335,8 +335,21 @@ pub fn consume_launch_ticket(
 /// Retire every ticket issued in an attempt, including tickets from a partially written arm.
 /// A claim that won the atomic race is ambiguous: its process must be independently settled
 /// before this attempt can be sealed, so this conservative path refuses it.
-pub(super) fn retire_unclaimed_tickets(dir: OwnedFd, uid: u32) -> anyhow::Result<()> {
+pub(super) fn retire_unclaimed_tickets(
+    dir: OwnedFd,
+    uid: u32,
+    expected: &[String],
+) -> anyhow::Result<()> {
     use std::os::fd::AsRawFd;
+    let mut expected = expected.to_vec();
+    expected.sort_unstable();
+    anyhow::ensure!(
+        !expected.is_empty()
+            && expected.len() <= 2
+            && expected.iter().all(|id| digest_ok(id))
+            && expected.windows(2).all(|pair| pair[0] != pair[1]),
+        "invalid expected ticket set"
+    );
     let dir = private_directory(dir, uid)?;
     let mut tickets = Vec::new();
     let mut entries = 0usize;
@@ -363,6 +376,7 @@ pub(super) fn retire_unclaimed_tickets(dir: OwnedFd, uid: u32) -> anyhow::Result
         }
     }
     tickets.sort_unstable();
+    anyhow::ensure!(tickets == expected, "attempt ticket set changed");
     for id in tickets {
         // The dispatcher uses the same O_EXCL marker. A concurrent claim therefore either
         // loses to revocation or makes this operation fail without sealing the attempt.

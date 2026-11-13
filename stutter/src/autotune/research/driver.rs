@@ -62,6 +62,7 @@ pub struct Driver {
     max_attempts: usize,
     active: Option<(AttemptSlot, u64, std::time::Instant)>,
     dispatch_may_exist: bool,
+    issued_tickets: Option<Vec<String>>,
     active_seconds: u64,
     last_tick_seconds: Option<u64>,
     fresh_journal_checked: bool,
@@ -118,6 +119,7 @@ impl Driver {
             max_attempts,
             active: None,
             dispatch_may_exist: false,
+            issued_tickets: None,
             active_seconds: 0,
             last_tick_seconds: None,
             fresh_journal_checked: false,
@@ -143,7 +145,12 @@ impl Driver {
         use std::os::fd::AsFd;
         match crate::syscall::openat_dir_nofollow(self.root.as_fd(), &format!("{:04}", slot.index))
         {
-            Ok(dir) => super::launch_ticket::retire_unclaimed_tickets(dir, self.intent.uid)?,
+            Ok(dir) => {
+                let expected = self.issued_tickets.as_deref().ok_or_else(|| {
+                    anyhow::anyhow!("attempt ticket identity requires independent recovery")
+                })?;
+                super::launch_ticket::retire_unclaimed_tickets(dir, self.intent.uid, expected)?;
+            }
             Err(error)
                 if error.kind() == std::io::ErrorKind::NotFound && !self.dispatch_may_exist => {}
             Err(error) => return Err(error.into()),
@@ -161,6 +168,7 @@ impl Driver {
         }
         self.active = None;
         self.dispatch_may_exist = false;
+        self.issued_tickets = None;
         Ok(Step::Sealed(record))
     }
 
@@ -323,6 +331,7 @@ impl Driver {
                 result
             })
             .and_then(|context| {
+                self.issued_tickets = Some(context.tickets.values().cloned().collect());
                 // Source discovery and arming can take long enough to exhaust the authorization
                 // after the tick's wall-clock sample. Never start a launcher using stale time.
                 let elapsed = monotonic_start.elapsed().as_secs();

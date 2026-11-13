@@ -63,7 +63,12 @@ fn ticket_binds_exact_game_tool_session_attempt_and_steam_verb_then_cannot_repla
 fn retirement_blocks_unclaimed_tickets_and_refuses_an_existing_claim() {
     let (dir, intent, slot) = fixture();
     let ticket = issue_launch_ticket(fd(&dir), &intent, &slot, SteamVerb::Run, 11, 60).unwrap();
-    retire_unclaimed_tickets(fd(&dir), intent.uid).unwrap();
+    retire_unclaimed_tickets(
+        fd(&dir),
+        intent.uid,
+        std::slice::from_ref(&ticket.ticket_id),
+    )
+    .unwrap();
     let expected = binding(&intent, &slot, SteamVerb::Run).unwrap();
     assert!(consume_launch_ticket(fd(&dir), &ticket.ticket_id, &expected, 12).is_err());
 
@@ -71,7 +76,14 @@ fn retirement_blocks_unclaimed_tickets_and_refuses_an_existing_claim() {
     let ticket = issue_launch_ticket(fd(&dir), &intent, &slot, SteamVerb::Run, 11, 60).unwrap();
     let expected = binding(&intent, &slot, SteamVerb::Run).unwrap();
     consume_launch_ticket(fd(&dir), &ticket.ticket_id, &expected, 12).unwrap();
-    assert!(retire_unclaimed_tickets(fd(&dir), intent.uid).is_err());
+    assert!(
+        retire_unclaimed_tickets(
+            fd(&dir),
+            intent.uid,
+            std::slice::from_ref(&ticket.ticket_id)
+        )
+        .is_err()
+    );
 }
 
 #[test]
@@ -79,7 +91,7 @@ fn retirement_covers_partial_ticket_files_and_rejects_orphan_claims() {
     let (dir, intent, _) = fixture();
     let id = "a".repeat(64);
     std::fs::write(dir.path().join(format!("ticket-{id}.json")), b"partial").unwrap();
-    retire_unclaimed_tickets(fd(&dir), intent.uid).unwrap();
+    retire_unclaimed_tickets(fd(&dir), intent.uid, std::slice::from_ref(&id)).unwrap();
     assert_eq!(
         std::fs::read(dir.path().join(format!("used-{id}"))).unwrap(),
         b"revoked-v1"
@@ -87,7 +99,36 @@ fn retirement_covers_partial_ticket_files_and_rejects_orphan_claims() {
 
     let (dir, intent, _) = fixture();
     std::fs::write(dir.path().join(format!("used-{id}")), b"claimed").unwrap();
-    assert!(retire_unclaimed_tickets(fd(&dir), intent.uid).is_err());
+    assert!(retire_unclaimed_tickets(fd(&dir), intent.uid, std::slice::from_ref(&id)).is_err());
+}
+
+#[test]
+fn retirement_refuses_a_missing_issued_ticket_without_claiming_the_other() {
+    let (dir, intent, slot) = fixture();
+    let first = issue_launch_ticket(fd(&dir), &intent, &slot, SteamVerb::Run, 11, 60).unwrap();
+    let second = issue_launch_ticket(
+        fd(&dir),
+        &intent,
+        &slot,
+        SteamVerb::WaitForExitAndRun,
+        11,
+        60,
+    )
+    .unwrap();
+    std::fs::remove_file(dir.path().join(format!("ticket-{}.json", second.ticket_id))).unwrap();
+    assert!(
+        retire_unclaimed_tickets(
+            fd(&dir),
+            intent.uid,
+            &[first.ticket_id.clone(), second.ticket_id],
+        )
+        .is_err()
+    );
+    assert!(
+        !dir.path()
+            .join(format!("used-{}", first.ticket_id))
+            .exists()
+    );
 }
 
 #[test]
@@ -100,9 +141,10 @@ fn concurrent_retirement_and_dispatch_cannot_both_win() {
     let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
     let other = barrier.clone();
     let uid = intent.uid;
+    let retire_id = ticket.ticket_id.clone();
     let thread = std::thread::spawn(move || {
         other.wait();
-        retire_unclaimed_tickets(retire_dir, uid).is_ok()
+        retire_unclaimed_tickets(retire_dir, uid, &[retire_id]).is_ok()
     });
     barrier.wait();
     let consumed = consume_launch_ticket(consume_dir, &ticket.ticket_id, &expected, 12).is_ok();
