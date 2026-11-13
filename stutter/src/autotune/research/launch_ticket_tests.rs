@@ -87,6 +87,47 @@ fn retirement_blocks_unclaimed_tickets_and_refuses_an_existing_claim() {
 }
 
 #[test]
+fn claimed_ticket_requires_verified_process_and_worker_settlement() {
+    let (dir, intent, slot) = fixture();
+    let used = issue_launch_ticket(fd(&dir), &intent, &slot, SteamVerb::Run, 11, 60).unwrap();
+    let unused = issue_launch_ticket(
+        fd(&dir),
+        &intent,
+        &slot,
+        SteamVerb::WaitForExitAndRun,
+        11,
+        60,
+    )
+    .unwrap();
+    let binding = binding(&intent, &slot, SteamVerb::Run).unwrap();
+    consume_launch_ticket(fd(&dir), &used.ticket_id, &binding, 12).unwrap();
+    let ids = [used.ticket_id.clone(), unused.ticket_id.clone()];
+    for (process_settled, worker_settled) in [(false, true), (true, false)] {
+        let result = retire_tickets(fd(&dir), intent.uid, &ids, &mut |_, ticket| {
+            anyhow::ensure!(ticket == &used, "ticket differs from frozen claim");
+            anyhow::ensure!(process_settled && worker_settled, "settlement not verified");
+            Ok(())
+        });
+        assert!(result.is_err());
+        assert!(
+            !dir.path()
+                .join(format!("used-{}", unused.ticket_id))
+                .exists()
+        );
+    }
+    let guards = retire_tickets(fd(&dir), intent.uid, &ids, &mut |_, ticket| {
+        anyhow::ensure!(ticket == &used, "ticket differs from frozen claim");
+        Ok("independent-settlement-fixture")
+    })
+    .unwrap();
+    assert_eq!(guards, ["independent-settlement-fixture"]);
+    assert_eq!(
+        std::fs::read(dir.path().join(format!("used-{}", unused.ticket_id))).unwrap(),
+        b"revoked-v1"
+    );
+}
+
+#[test]
 fn retirement_covers_partial_ticket_files_and_rejects_orphan_claims() {
     let (dir, intent, _) = fixture();
     let id = "a".repeat(64);

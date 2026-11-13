@@ -215,6 +215,33 @@ fn validate_ticket(ticket: &ResearchLaunchTicketV1, now: u64) -> anyhow::Result<
     Ok(())
 }
 
+/// Validate a consumed ticket against the frozen attempt without treating current expiry as a
+/// reason to discard historical evidence. The dispatcher receipt and settlement remain separate.
+pub(super) fn verify_consumed_binding(
+    ticket: &ResearchLaunchTicketV1,
+    context: &super::dispatch_context::DispatchContextV1,
+) -> anyhow::Result<()> {
+    validate_ticket(ticket, ticket.issued_unix_seconds)?;
+    let expected = binding(&context.intent, &context.slot, ticket.verb)?;
+    anyhow::ensure!(
+        context.tickets.get(ticket.verb.as_steam_argument()) == Some(&ticket.ticket_id)
+            && ticket.uid == expected.uid
+            && ticket.steam_app_id == expected.steam_app_id
+            && ticket.game_build_id == expected.game_build_id
+            && ticket.tool == expected.tool
+            && ticket.steam_client_identity_sha256 == expected.steam_client_identity_sha256
+            && ticket.steam_process == expected.steam_process
+            && ticket.boot_id == expected.boot_id
+            && ticket.session_id == expected.session_id
+            && ticket.intent_sha256 == expected.intent_sha256
+            && ticket.attempt_sha256 == expected.attempt_sha256
+            && ticket.issued_unix_seconds >= context.intent.issued_unix_seconds
+            && ticket.expires_unix_seconds <= context.intent.deadline_unix_seconds,
+        "consumed ticket differs from frozen attempt"
+    );
+    Ok(())
+}
+
 /// Persist a fresh ticket. The resident caller must already have admitted the campaign, checked
 /// the safe desktop window, and bound `intent` and `slot` to its immutable schedule.
 pub fn issue_launch_ticket(
@@ -335,11 +362,27 @@ pub fn consume_launch_ticket(
 /// Retire every ticket issued in an attempt, including tickets from a partially written arm.
 /// A claim that won the atomic race is ambiguous: its process must be independently settled
 /// before this attempt can be sealed, so this conservative path refuses it.
+#[cfg(test)]
 pub(super) fn retire_unclaimed_tickets(
     dir: OwnedFd,
     uid: u32,
     expected: &[String],
 ) -> anyhow::Result<()> {
+    retire_tickets(dir, uid, expected, &mut |_, _| {
+        anyhow::bail!("claimed ticket requires independent settlement")
+    })
+    .map(|_: Vec<()>| ())
+}
+
+/// Settle exact ticket identities. A claimed ticket is accepted only after the caller verifies
+/// its frozen binding and independently proves both process and worker settlement. Returned
+/// guards must remain alive until the attempt journal is durably sealed.
+pub(super) fn retire_tickets<T>(
+    dir: OwnedFd,
+    uid: u32,
+    expected: &[String],
+    verify_claim: &mut dyn FnMut(&File, &ResearchLaunchTicketV1) -> anyhow::Result<T>,
+) -> anyhow::Result<Vec<T>> {
     use std::os::fd::AsRawFd;
     let mut expected = expected.to_vec();
     expected.sort_unstable();
@@ -352,6 +395,7 @@ pub(super) fn retire_unclaimed_tickets(
     );
     let dir = private_directory(dir, uid)?;
     let mut tickets = Vec::new();
+    let mut claims = Vec::new();
     let mut entries = 0usize;
     for entry in std::fs::read_dir(format!("/proc/self/fd/{}", dir.as_raw_fd()))? {
         entries += 1;
@@ -360,10 +404,15 @@ pub(super) fn retire_unclaimed_tickets(
         let name = name
             .to_str()
             .ok_or_else(|| anyhow::anyhow!("invalid attempt entry name"))?;
-        anyhow::ensure!(
-            !name.starts_with("used-"),
-            "attempt contains an already claimed or retired ticket"
-        );
+        if let Some(id) = name.strip_prefix("used-") {
+            anyhow::ensure!(
+                digest_ok(id) && expected.iter().any(|item| item == id),
+                "unexpected ticket claim"
+            );
+            claims.push(id.to_owned());
+            anyhow::ensure!(claims.len() <= 2, "too many ticket claims");
+            continue;
+        }
         if let Some(id) = name
             .strip_prefix("ticket-")
             .and_then(|name| name.strip_suffix(".json"))
@@ -377,7 +426,30 @@ pub(super) fn retire_unclaimed_tickets(
     }
     tickets.sort_unstable();
     anyhow::ensure!(tickets == expected, "attempt ticket set changed");
-    for id in tickets {
+    let mut guards = Vec::new();
+    for id in &claims {
+        let ticket_name = format!("ticket-{id}.json");
+        let marker_name = format!("used-{id}");
+        let ticket_bytes = super::report_store::read_private(&dir, &ticket_name, uid)?;
+        let marker = super::report_store::read_private(&dir, &marker_name, uid)?;
+        anyhow::ensure!(
+            ticket_bytes.len() as u64 <= MAX_TICKET_BYTES
+                && marker == stutter_core::hash::sha256_hex(&ticket_bytes).as_bytes(),
+            "ticket claim marker mismatch"
+        );
+        let ticket: ResearchLaunchTicketV1 = serde_json::from_slice(&ticket_bytes)?;
+        anyhow::ensure!(
+            ticket.schema_version == 1 && ticket.ticket_id == *id && ticket.uid == uid,
+            "ticket claim identity mismatch"
+        );
+        guards.push(verify_claim(&dir, &ticket)?);
+        anyhow::ensure!(
+            super::report_store::read_private(&dir, &ticket_name, uid)? == ticket_bytes
+                && super::report_store::read_private(&dir, &marker_name, uid)? == marker,
+            "ticket claim changed during settlement verification"
+        );
+    }
+    for id in tickets.into_iter().filter(|id| !claims.contains(id)) {
         // The dispatcher uses the same O_EXCL marker. A concurrent claim therefore either
         // loses to revocation or makes this operation fail without sealing the attempt.
         let mut marker = crate::syscall::create_new_at(dir.as_fd(), &format!("used-{id}"))?;
@@ -385,7 +457,7 @@ pub(super) fn retire_unclaimed_tickets(
         marker.sync_all()?;
     }
     dir.sync_all()?;
-    Ok(())
+    Ok(guards)
 }
 
 #[cfg(test)]

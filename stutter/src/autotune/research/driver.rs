@@ -42,6 +42,26 @@ pub trait AttemptHost {
     fn abort(&mut self) -> anyhow::Result<()>;
 }
 
+/// An independently verified claim keeps its process and worker settlement witnesses live until
+/// the journal seal is durable. Implementations must not derive authority from the claim alone.
+pub(crate) trait ClaimSettlementGuard: Send {}
+
+pub(crate) trait ClaimSettlementVerifier: Send {
+    /// Independently verify the dispatcher receipt and termination of the owned game tree.
+    fn verify_process(
+        &mut self,
+        dir: &File,
+        context: &DispatchContextV1,
+        ticket: &super::launch_ticket::ResearchLaunchTicketV1,
+    ) -> anyhow::Result<Box<dyn ClaimSettlementGuard>>;
+
+    /// Independently verify that campaign-owned worker transactions are settled.
+    fn verify_worker(
+        &mut self,
+        context: &DispatchContextV1,
+    ) -> anyhow::Result<Box<dyn ClaimSettlementGuard>>;
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum Step {
     Waiting,
@@ -63,6 +83,8 @@ pub struct Driver {
     active: Option<(AttemptSlot, u64, std::time::Instant)>,
     dispatch_may_exist: bool,
     issued_tickets: Option<Vec<String>>,
+    armed_context: Option<DispatchContextV1>,
+    claim_verifier: Option<Box<dyn ClaimSettlementVerifier>>,
     active_seconds: u64,
     last_tick_seconds: Option<u64>,
     fresh_journal_checked: bool,
@@ -120,6 +142,8 @@ impl Driver {
             active: None,
             dispatch_may_exist: false,
             issued_tickets: None,
+            armed_context: None,
+            claim_verifier: None,
             active_seconds: 0,
             last_tick_seconds: None,
             fresh_journal_checked: false,
@@ -136,6 +160,17 @@ impl Driver {
         self.cancel = true;
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the production settlement verifier is not yet qualified"
+        )
+    )]
+    pub(crate) fn set_claim_verifier(&mut self, verifier: Box<dyn ClaimSettlementVerifier>) {
+        self.claim_verifier = Some(verifier);
+    }
+
     fn seal(
         &mut self,
         slot: AttemptSlot,
@@ -143,20 +178,47 @@ impl Driver {
         now: u64,
     ) -> anyhow::Result<Step> {
         use std::os::fd::AsFd;
-        match crate::syscall::openat_dir_nofollow(self.root.as_fd(), &format!("{:04}", slot.index))
-        {
+        let mut worker_guard: Option<Box<dyn ClaimSettlementGuard>> = None;
+        let guards = match crate::syscall::openat_dir_nofollow(
+            self.root.as_fd(),
+            &format!("{:04}", slot.index),
+        ) {
             Ok(dir) => {
                 let expected = self.issued_tickets.as_deref().ok_or_else(|| {
                     anyhow::anyhow!("attempt ticket identity requires independent recovery")
                 })?;
-                super::launch_ticket::retire_unclaimed_tickets(dir, self.intent.uid, expected)?;
+                let context = self
+                    .armed_context
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("attempt context unavailable"))?;
+                super::launch_ticket::retire_tickets(
+                    dir,
+                    self.intent.uid,
+                    expected,
+                    &mut |dir, ticket| {
+                        super::launch_ticket::verify_consumed_binding(ticket, context)?;
+                        let verifier = self.claim_verifier.as_mut().ok_or_else(|| {
+                            anyhow::anyhow!("independent claim settlement unavailable")
+                        })?;
+                        let process = verifier.verify_process(dir, context, ticket)?;
+                        if worker_guard.is_none() {
+                            worker_guard = Some(verifier.verify_worker(context)?);
+                        }
+                        Ok(process)
+                    },
+                )?
             }
             Err(error)
-                if error.kind() == std::io::ErrorKind::NotFound && !self.dispatch_may_exist => {}
+                if error.kind() == std::io::ErrorKind::NotFound && !self.dispatch_may_exist =>
+            {
+                Vec::new()
+            }
             Err(error) => return Err(error.into()),
-        }
+        };
         let record = AttemptRecord { slot, outcome };
         self.journal.seal(record.clone())?;
+        drop(guards);
+        drop(worker_guard);
         if let Some((_, started, monotonic_start)) = &self.active {
             // Timestamps are whole seconds. Charge the partial boundary second so rounding
             // cannot expand the authorized active budget.
@@ -169,6 +231,7 @@ impl Driver {
         self.active = None;
         self.dispatch_may_exist = false;
         self.issued_tickets = None;
+        self.armed_context = None;
         Ok(Step::Sealed(record))
     }
 
@@ -332,6 +395,7 @@ impl Driver {
             })
             .and_then(|context| {
                 self.issued_tickets = Some(context.tickets.values().cloned().collect());
+                self.armed_context = Some(context.clone());
                 // Source discovery and arming can take long enough to exhaust the authorization
                 // after the tick's wall-clock sample. Never start a launcher using stale time.
                 let elapsed = monotonic_start.elapsed().as_secs();
