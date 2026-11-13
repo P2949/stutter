@@ -21,6 +21,8 @@ use tokio::{
 };
 
 use super::research_recovery::{RecoveredCampaign, RecoveryJob};
+#[path = "research_control_commands.rs"]
+mod commands;
 #[path = "research_control_drive.rs"]
 mod drive;
 #[cfg(feature = "wayland-probe")]
@@ -352,48 +354,6 @@ impl ResearchCoordinator {
         {
             log::error!("research driver could not be attached: {error:#}");
             return self.block_after_admission(now, "DriverStorageFailed");
-        }
-        self.status()
-    }
-
-    fn pause(&mut self, now: u64) -> String {
-        if self.storage_blocker == Some("UnsafeToResume") {
-            return response("blocked", "UnsafeToResume");
-        }
-        let Some(active) = self.active.as_mut() else {
-            return response("denied", "NoCampaign");
-        };
-        if active.lease.phase() == ResearchPhase::Paused {
-            return self.status();
-        }
-        if active.lease.phase() != ResearchPhase::AwaitSafeWindow {
-            return response("blocked", "CannotPauseActiveStage");
-        }
-        if active.lease.advance(ResearchPhase::Paused, now).is_err() {
-            return response("blocked", "PausePersistenceFailed");
-        }
-        self.status()
-    }
-
-    fn resume(&mut self, now: u64) -> String {
-        if self.storage_blocker == Some("UnsafeToResume") {
-            return response("blocked", "UnsafeToResume");
-        }
-        let Some(active) = self.active.as_mut() else {
-            return response("denied", "NoCampaign");
-        };
-        if active.lease.phase() == ResearchPhase::AwaitSafeWindow {
-            return self.status();
-        }
-        if active.lease.phase() != ResearchPhase::Paused {
-            return response("blocked", "CannotResumeActiveStage");
-        }
-        if active
-            .lease
-            .advance(ResearchPhase::AwaitSafeWindow, now)
-            .is_err()
-        {
-            return response("blocked", "ResumePersistenceFailed");
         }
         self.status()
     }

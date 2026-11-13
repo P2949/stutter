@@ -166,7 +166,7 @@ pub struct DispatcherStartV1 {
     pub uid: u32,
     pub boot_id: String,
     pub observed_unix_seconds: u64,
-    pub pid: u32,
+    pub pid: stutter_core::ids::Pid,
     pub start_ticks: u64,
     pub pid_namespace_device: u64,
     pub pid_namespace_inode: u64,
@@ -214,7 +214,7 @@ pub fn record_dispatcher_start(
         uid,
         boot_id,
         observed_unix_seconds,
-        pid,
+        pid: stutter_core::ids::Pid::new(pid),
         start_ticks: process.start_ticks,
         pid_namespace_device: namespace.dev(),
         pid_namespace_inode: namespace.ino(),
@@ -298,7 +298,7 @@ pub fn inspect_dispatcher_start(
             && record.boot_id == ticket.boot_id
             && record.observed_unix_seconds >= ticket.issued_unix_seconds
             && record.observed_unix_seconds < ticket.expires_unix_seconds
-            && record.pid > 1
+            && record.pid.as_u32() > 1
             && record.start_ticks != 0,
         "dispatcher observation mismatch"
     );
@@ -311,7 +311,7 @@ pub fn inspect_dispatcher_start(
         "host boot differs from the frozen dispatch"
     );
     let read_process = |pid| crate::telemetry::proc_view::live_process(proc_root, pid);
-    let Some(process) = read_process(record.pid) else {
+    let Some(process) = read_process(record.pid.as_u32()) else {
         return match std::fs::symlink_metadata(proc_root.join(record.pid.to_string())) {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
             _ => Err(anyhow::anyhow!("dispatcher process is unreadable")),
@@ -345,7 +345,7 @@ pub fn inspect_dispatcher_start(
                 expected.steam_process.steam_pid,
                 expected.steam_process.steam_start_ticks
             ))
-            && read_process(record.pid).as_ref() == Some(&process)
+            && read_process(record.pid.as_u32()).as_ref() == Some(&process)
             && read_process(expected.steam_process.steam_pid).as_ref() == Some(&steam)
             && read_process(expected.steam_process.webhelper_pid).as_ref() == Some(&helper),
         "dispatcher process identity or Steam ancestry mismatch"
@@ -431,322 +431,9 @@ fn verify_frozen_steam_client(
 }
 
 #[cfg(test)]
-mod tests {
-    use std::os::unix::fs::PermissionsExt;
-
-    use super::*;
-
-    fn fixture() -> (
-        tempfile::TempDir,
-        std::fs::File,
-        ResearchIntentV1,
-        AttemptSlot,
-    ) {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
-        let file = std::fs::File::from(crate::syscall::open_dir_no_symlinks(dir.path()).unwrap());
-        let mut intent = super::super::tests::intent();
-        intent.uid = crate::syscall::geteuid();
-        let slot = AttemptSlot {
-            study_sha256: "e".repeat(64),
-            context_sha256: "f".repeat(64),
-            index: 0,
-            arm: intent.tools[0].source,
-        };
-        (dir, file, intent, slot)
-    }
-
-    fn env() -> BTreeMap<String, String> {
-        [
-            ("SteamAppId", "1091500"),
-            ("STEAM_COMPAT_DATA_PATH", "/study/compatdata"),
-            ("STEAM_COMPAT_CLIENT_INSTALL_PATH", "/home/u/.steam/steam"),
-        ]
-        .map(|(k, v)| (k.to_owned(), v.to_owned()))
-        .into()
-    }
-
-    fn spec() -> ArmSpec {
-        ArmSpec {
-            tool_dir: "/tools/GE".into(),
-            study_compat_data: "/study/compatdata".into(),
-            arm_env: BTreeMap::new(),
-            steamapps: "/steam/steamapps".into(),
-            proton_manifest: "/m.json".into(),
-        }
-    }
-
-    fn argv(verb: &str) -> Vec<String> {
-        ["/x/proton", verb, "/g/Cyberpunk2077.exe"]
-            .map(str::to_owned)
-            .to_vec()
-    }
-
-    fn armed() -> (tempfile::TempDir, std::fs::File, u64) {
-        let (dir, file, intent, slot) = fixture();
-        let now = intent.issued_unix_seconds + 1;
-        arm_attempt(&file, &intent, &slot, spec(), (now, 60)).unwrap();
-        (dir, file, now + 1)
-    }
-
-    #[test]
-    fn steam_client_restart_update_or_missing_identity_refuses_dispatch() {
-        let (_dir, _file, intent, slot) = fixture();
-        let context = DispatchContextV1 {
-            schema_version: 1,
-            intent,
-            slot,
-            tickets: BTreeMap::new(),
-            spec: spec(),
-        };
-        let frozen = context.intent.steam_client.clone();
-        assert!(verify_frozen_steam_client(&context, Some(&frozen)).is_ok());
-        assert!(verify_frozen_steam_client(&context, None).is_err());
-        let mut restarted = frozen.clone();
-        restarted.process.as_mut().unwrap().steam_start_ticks += 1;
-        assert!(verify_frozen_steam_client(&context, Some(&restarted)).is_err());
-        let mut updated = frozen.clone();
-        updated.steamrt64_build_id += 1;
-        assert!(verify_frozen_steam_client(&context, Some(&updated)).is_err());
-        let mut absent = frozen;
-        absent.process = None;
-        assert!(verify_frozen_steam_client(&context, Some(&absent)).is_err());
-    }
-
-    #[test]
-    fn dispatcher_start_records_live_process_and_rejects_duplicate_or_wrong_boot() {
-        let (_dir, file, mut intent, slot) = fixture();
-        intent.boot_id = crate::telemetry::identity::read_boot_id().unwrap();
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        intent.issued_unix_seconds = now - 1;
-        intent.deadline_unix_seconds = now + 3_600;
-        arm_attempt(&file, &intent, &slot, spec(), (now, 60)).unwrap();
-        let (_, ticket) =
-            authorize_dispatch(&file, &argv("run"), &env(), intent.uid, now + 1, &|_, _| {
-                Ok(())
-            })
-            .unwrap();
-        let mut wrong = ticket.clone();
-        wrong.boot_id = "another-boot".into();
-        assert!(record_dispatcher_start(&file, &wrong).is_err());
-        let mut expired = ticket.clone();
-        expired.expires_unix_seconds = now;
-        assert!(record_dispatcher_start(&file, &expired).is_err());
-        let record = record_dispatcher_start(&file, &ticket).unwrap();
-        assert_eq!(record.pid, std::process::id());
-        assert_eq!(record.uid, intent.uid);
-        assert_eq!(record.ticket_id, ticket.ticket_id);
-        assert_ne!(record.start_ticks, 0);
-        assert_ne!(record.pid_namespace_inode, 0);
-        assert!(record_dispatcher_start(&file, &ticket).is_err());
-    }
-
-    #[test]
-    fn host_anchor_requires_ticket_namespace_live_identity_and_steam_ancestry() {
-        let (dir, file, mut intent, slot) = fixture();
-        let steam = intent.steam_client.process.as_mut().unwrap();
-        steam.steam_pid = 200;
-        steam.steam_start_ticks = 40;
-        steam.webhelper_pid = 201;
-        steam.webhelper_start_ticks = 41;
-        let now = intent.issued_unix_seconds + 1;
-        let context = arm_attempt(&file, &intent, &slot, spec(), (now, 60)).unwrap();
-        let (_, ticket) =
-            authorize_dispatch(&file, &argv("run"), &env(), intent.uid, now + 1, &|_, _| {
-                Ok(())
-            })
-            .unwrap();
-        let proc = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(proc.path().join("sys/kernel/random")).unwrap();
-        std::fs::write(
-            proc.path().join("sys/kernel/random/boot_id"),
-            &intent.boot_id,
-        )
-        .unwrap();
-        for pid in [123, 200, 201] {
-            std::fs::create_dir_all(proc.path().join(pid.to_string()).join("ns")).unwrap();
-        }
-        std::fs::create_dir_all(proc.path().join("self/ns")).unwrap();
-        let ns = proc.path().join("self/ns/pid");
-        std::fs::write(&ns, b"namespace").unwrap();
-        std::fs::hard_link(&ns, proc.path().join("123/ns/pid")).unwrap();
-        let stat = |pid: u32, parent: u32, ticks: u64| {
-            format!("{pid} (fixture) S {parent} 0 0 0 0 0 0 0 0 0 0 0 0 0 20 0 1 0 {ticks} 0 0")
-        };
-        std::fs::write(proc.path().join("200/stat"), stat(200, 1, 40)).unwrap();
-        std::fs::write(proc.path().join("201/stat"), stat(201, 200, 41)).unwrap();
-        std::fs::write(proc.path().join("123/stat"), stat(123, 200, 80)).unwrap();
-        let meta = std::fs::metadata(&ns).unwrap();
-        let record = DispatcherStartV1 {
-            schema_version: 1,
-            ticket_id: ticket.ticket_id.clone(),
-            intent_sha256: ticket.intent_sha256.clone(),
-            attempt_sha256: ticket.attempt_sha256.clone(),
-            verb: SteamVerb::Run,
-            uid: intent.uid,
-            boot_id: intent.boot_id.clone(),
-            observed_unix_seconds: now + 1,
-            pid: 123,
-            start_ticks: 80,
-            pid_namespace_device: meta.dev(),
-            pid_namespace_inode: meta.ino(),
-        };
-        super::super::report_store::write_new(
-            &file,
-            "dispatcher-run.json",
-            &serde_json::to_vec(&record).unwrap(),
-        )
-        .unwrap();
-        assert_eq!(
-            inspect_dispatcher_start(&file, &context, SteamVerb::Run, proc.path()).unwrap(),
-            Some(record)
-        );
-        let marker = dir.path().join(format!("used-{}", ticket.ticket_id));
-        std::fs::write(proc.path().join("sys/kernel/random/boot_id"), "wrong-boot").unwrap();
-        assert!(inspect_dispatcher_start(&file, &context, SteamVerb::Run, proc.path()).is_err());
-        std::fs::write(
-            proc.path().join("sys/kernel/random/boot_id"),
-            &intent.boot_id,
-        )
-        .unwrap();
-        let original_marker = std::fs::read(&marker).unwrap();
-        std::fs::write(&marker, b"tampered").unwrap();
-        assert!(inspect_dispatcher_start(&file, &context, SteamVerb::Run, proc.path()).is_err());
-        std::fs::write(&marker, original_marker).unwrap();
-        let process_ns = proc.path().join("123/ns/pid");
-        std::fs::remove_file(&process_ns).unwrap();
-        std::fs::write(&process_ns, b"other namespace").unwrap();
-        assert!(inspect_dispatcher_start(&file, &context, SteamVerb::Run, proc.path()).is_err());
-        std::fs::remove_file(&process_ns).unwrap();
-        std::fs::hard_link(&ns, &process_ns).unwrap();
-        std::fs::write(proc.path().join("201/stat"), stat(201, 200, 42)).unwrap();
-        assert!(inspect_dispatcher_start(&file, &context, SteamVerb::Run, proc.path()).is_err());
-        std::fs::write(proc.path().join("201/stat"), stat(201, 200, 41)).unwrap();
-        std::fs::write(proc.path().join("123/stat"), stat(123, 200, 81)).unwrap();
-        assert!(inspect_dispatcher_start(&file, &context, SteamVerb::Run, proc.path()).is_err());
-        std::fs::write(proc.path().join("123/stat"), stat(123, 1, 80)).unwrap();
-        assert!(inspect_dispatcher_start(&file, &context, SteamVerb::Run, proc.path()).is_err());
-        std::fs::remove_dir_all(proc.path().join("123")).unwrap();
-        assert_eq!(
-            inspect_dispatcher_start(&file, &context, SteamVerb::Run, proc.path()).unwrap(),
-            None
-        );
-    }
-
-    #[test]
-    fn each_steam_verb_runs_once_and_replays_or_unknown_verbs_are_refused() {
-        let (_dir, file, now) = armed();
-        let euid = crate::syscall::geteuid();
-        let wait = authorize_dispatch(
-            &file,
-            &argv("waitforexitandrun"),
-            &env(),
-            euid,
-            now,
-            &|_, _| Ok(()),
-        )
-        .unwrap();
-        assert_eq!(wait.0.program, std::path::Path::new("/tools/GE/proton"));
-        assert!(
-            authorize_dispatch(
-                &file,
-                &argv("waitforexitandrun"),
-                &env(),
-                euid,
-                now,
-                &|_, _| Ok(())
-            )
-            .is_err()
-        );
-        authorize_dispatch(&file, &argv("run"), &env(), euid, now, &|_, _| Ok(())).unwrap();
-        assert!(
-            authorize_dispatch(&file, &argv("run"), &env(), euid, now, &|_, _| Ok(())).is_err()
-        );
-        assert!(
-            authorize_dispatch(
-                &file,
-                &argv("getcompatpath"),
-                &env(),
-                euid,
-                now,
-                &|_, _| Ok(())
-            )
-            .is_err()
-        );
-    }
-
-    #[test]
-    fn a_malformed_call_does_not_burn_the_ticket_and_other_users_or_expiry_are_refused() {
-        let (_dir, file, now) = armed();
-        let euid = crate::syscall::geteuid();
-        let mut bad = env();
-        bad.insert("SteamAppId".into(), "220".into());
-        assert!(authorize_dispatch(&file, &argv("run"), &bad, euid, now, &|_, _| Ok(())).is_err());
-        assert!(
-            authorize_dispatch(&file, &argv("run"), &env(), euid, now + 600, &|_, _| Ok(()))
-                .is_err()
-        );
-        assert!(
-            authorize_dispatch(&file, &argv("run"), &env(), euid + 1, now, &|_, _| Ok(())).is_err()
-        );
-        assert!(authorize_dispatch(&file, &argv("run"), &env(), euid, now, &|_, _| Ok(())).is_ok());
-    }
-
-    #[test]
-    fn tool_drift_is_refused_without_burning_the_ticket() {
-        let (_dir, file, now) = armed();
-        let euid = crate::syscall::geteuid();
-        let drift = |_: &DispatchContextV1, _: &super::super::ResearchTool| anyhow::bail!("drift");
-        assert!(authorize_dispatch(&file, &argv("run"), &env(), euid, now, &drift).is_err());
-        assert!(authorize_dispatch(&file, &argv("run"), &env(), euid, now, &|_, _| Ok(())).is_ok());
-    }
-
-    #[test]
-    fn arming_twice_is_refused() {
-        let (_dir, file, intent, slot) = fixture();
-        let now = intent.issued_unix_seconds + 1;
-        let arm = |f: &std::fs::File| arm_attempt(f, &intent, &slot, spec(), (now, 60));
-        arm(&file).unwrap();
-        assert!(arm(&file).is_err());
-    }
-}
+#[path = "dispatch_context_tests.rs"]
+mod tests;
 
 #[cfg(test)]
-mod root_tests {
-    use std::os::unix::fs::PermissionsExt;
-
-    use super::*;
-
-    #[test]
-    fn numbered_attempt_dirs_cannot_be_rearmed_and_the_newest_is_selected() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
-        let root = std::fs::File::from(crate::syscall::open_dir_no_symlinks(dir.path()).unwrap());
-        let mut intent = super::super::tests::intent();
-        intent.uid = crate::syscall::geteuid();
-        let slot = |index| AttemptSlot {
-            study_sha256: "e".repeat(64),
-            context_sha256: "f".repeat(64),
-            index,
-            arm: intent.tools[0].source,
-        };
-        let spec = || ArmSpec {
-            tool_dir: "/t".into(),
-            study_compat_data: "/s".into(),
-            arm_env: BTreeMap::new(),
-            steamapps: "/a".into(),
-            proton_manifest: "/m".into(),
-        };
-        let now = intent.issued_unix_seconds + 1;
-        assert!(latest_attempt_dir(&root).is_err());
-        arm_attempt_in_root(&root, &intent, &slot(0), spec(), (now, 60)).unwrap();
-        assert!(arm_attempt_in_root(&root, &intent, &slot(0), spec(), (now, 60)).is_err());
-        arm_attempt_in_root(&root, &intent, &slot(1), spec(), (now, 60)).unwrap();
-        let newest = latest_attempt_dir(&root).unwrap();
-        let context = read_context(&newest, intent.uid).unwrap();
-        assert_eq!(context.slot.index, 1);
-    }
-}
+#[path = "dispatch_context_root_tests.rs"]
+mod root_tests;
