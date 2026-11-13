@@ -25,6 +25,14 @@ const APP_ID: &str = "1091500";
 const MAX_PROC_ENTRIES: usize = 65_536;
 const MAX_PROCESS_STATUS_BYTES: u64 = 64 * 1024;
 
+fn launch_window_open(intent: &super::ResearchIntentV1, now: std::time::SystemTime) -> bool {
+    now.duration_since(std::time::UNIX_EPOCH)
+        .is_ok_and(|elapsed| {
+            elapsed.as_secs() >= intent.issued_unix_seconds
+                && elapsed.as_secs() < intent.deadline_unix_seconds
+        })
+}
+
 /// A launcher must not carry controller capabilities into Steam. NoNewPrivs also prevents
 /// acquiring file capabilities or setuid privilege during exec.
 fn unprivileged_launcher_status(status: &str, uid: u32) -> bool {
@@ -405,6 +413,10 @@ impl<R: ResultProbe> SteamPort for ProductionSteamPort<R> {
         anyhow::ensure!(
             self.inherited_session_matches_steam() && self.idle_is_fresh(),
             "BlockedSteamSessionEnvironment"
+        );
+        anyhow::ensure!(
+            launch_window_open(&context.intent, std::time::SystemTime::now()),
+            "campaign authorization expired before Steam launch"
         );
         let argv = launch_argv();
         let child = Command::new(&argv[0]).args(&argv[1..]).spawn()?;

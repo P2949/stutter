@@ -1,5 +1,28 @@
 use super::{super::session_env::session_environment_matches, *};
 
+#[test]
+fn launcher_rejects_expired_and_not_yet_valid_authorization() {
+    let intent = super::super::tests::intent();
+    let at = |seconds| std::time::UNIX_EPOCH + std::time::Duration::from_secs(seconds);
+    assert!(!launch_window_open(
+        &intent,
+        at(intent.issued_unix_seconds - 1)
+    ));
+    assert!(launch_window_open(&intent, at(intent.issued_unix_seconds)));
+    assert!(launch_window_open(
+        &intent,
+        at(intent.deadline_unix_seconds - 1)
+    ));
+    assert!(!launch_window_open(
+        &intent,
+        at(intent.deadline_unix_seconds)
+    ));
+    assert!(!launch_window_open(
+        &intent,
+        std::time::UNIX_EPOCH - std::time::Duration::from_secs(1)
+    ));
+}
+
 fn proc_with(comms: &[&str]) -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
     for (pid, comm) in comms.iter().enumerate() {
