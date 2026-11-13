@@ -7,7 +7,7 @@ use std::{
     io::Read,
     os::{
         fd::{AsFd, AsRawFd},
-        unix::fs::MetadataExt,
+        unix::{ffi::OsStrExt, fs::MetadataExt},
     },
     path::{Path, PathBuf},
     process::{Child, Command},
@@ -23,6 +23,102 @@ use super::{
 
 const APP_ID: &str = "1091500";
 const MAX_PROC_ENTRIES: usize = 65_536;
+const MAX_PROCESS_ENV_BYTES: u64 = 256 * 1024;
+const MAX_PROCESS_STATUS_BYTES: u64 = 64 * 1024;
+
+/// A launcher must not carry controller capabilities into Steam. NoNewPrivs also prevents
+/// acquiring file capabilities or setuid privilege during exec.
+fn unprivileged_launcher_status(status: &str, uid: u32) -> bool {
+    if uid == 0 {
+        return false;
+    }
+    let mut seen = [false; 6];
+    for line in status.lines() {
+        let Some((key, value)) = line.split_once(':') else {
+            continue;
+        };
+        let value = value.trim();
+        let index = match key {
+            "CapInh" => 0,
+            "CapPrm" => 1,
+            "CapEff" => 2,
+            "CapAmb" => 3,
+            "NoNewPrivs" => 4,
+            "Uid" => 5,
+            _ => continue,
+        };
+        if std::mem::replace(&mut seen[index], true) {
+            return false;
+        }
+        let valid = match index {
+            0..=3 => {
+                !value.is_empty()
+                    && value.len() <= 16
+                    && u64::from_str_radix(value, 16).is_ok_and(|caps| caps == 0)
+            }
+            4 => value == "1",
+            5 => {
+                let ids: Vec<_> = value.split_whitespace().collect();
+                ids.len() == 4
+                    && ids
+                        .iter()
+                        .all(|id| id.parse::<u32>().is_ok_and(|id| id == uid))
+            }
+            _ => false,
+        };
+        if !valid {
+            return false;
+        }
+    }
+    seen.into_iter().all(|value| value)
+}
+
+fn launcher_is_unprivileged() -> bool {
+    let Ok(file) = File::open("/proc/self/status") else {
+        return false;
+    };
+    let mut bytes = Vec::new();
+    if file
+        .take(MAX_PROCESS_STATUS_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .is_err()
+        || bytes.len() as u64 > MAX_PROCESS_STATUS_BYTES
+    {
+        return false;
+    }
+    std::str::from_utf8(&bytes)
+        .is_ok_and(|status| unprivileged_launcher_status(status, crate::syscall::geteuid()))
+}
+
+/// Compare only the two session-routing variables; never persist or log the process environment.
+fn session_environment_matches(
+    bytes: &[u8],
+    home: Option<&std::ffi::OsStr>,
+    runtime: Option<&std::ffi::OsStr>,
+) -> bool {
+    if bytes.is_empty() || bytes.len() as u64 > MAX_PROCESS_ENV_BYTES || bytes.last() != Some(&0) {
+        return false;
+    }
+    let mut found_home = None;
+    let mut found_runtime = None;
+    for entry in bytes
+        .split(|byte| *byte == 0)
+        .filter(|entry| !entry.is_empty())
+    {
+        let (target, value) = if let Some(value) = entry.strip_prefix(b"HOME=") {
+            (&mut found_home, value)
+        } else if let Some(value) = entry.strip_prefix(b"XDG_RUNTIME_DIR=") {
+            (&mut found_runtime, value)
+        } else {
+            continue;
+        };
+        if value.is_empty() || target.replace(value).is_some() {
+            return false;
+        }
+    }
+    matches!((found_home, home, found_runtime, runtime),
+        (Some(a), Some(b), Some(c), Some(d)) if a == b.as_bytes() && c == d.as_bytes())
+}
 /// Process names (`/proc/<pid>/comm`, at most 15 bytes) whose presence makes the host not free.
 const BUSY_COMMS: [&str; 9] = [
     "steam",
@@ -233,6 +329,64 @@ impl<R: ResultProbe> ProductionSteamPort<R> {
             .is_some_and(|client| !host_has_game_or_foreign_steam(&self.proc_root, client, uid))
     }
 
+    fn inherited_session_matches_steam(&self) -> bool {
+        let Some(client) = self.expected_client.process.as_ref() else {
+            return false;
+        };
+        let uid = crate::syscall::geteuid();
+        let read = || crate::telemetry::proc_view::live_process(&self.proc_root, client.steam_pid);
+        let Some(before) = read() else { return false };
+        if before.uid != uid || before.start_ticks != client.steam_start_ticks {
+            return false;
+        }
+        let Ok(file) = File::open(
+            self.proc_root
+                .join(client.steam_pid.to_string())
+                .join("environ"),
+        ) else {
+            return false;
+        };
+        let mut bytes = Vec::new();
+        if file
+            .take(MAX_PROCESS_ENV_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .is_err()
+        {
+            return false;
+        }
+        let home = std::env::var_os("HOME");
+        let runtime = std::env::var_os("XDG_RUNTIME_DIR");
+        let expected_runtime = format!("/run/user/{uid}");
+        if runtime.as_deref() != Some(std::ffi::OsStr::new(&expected_runtime)) {
+            return false;
+        }
+        let Some(home_path) = home.as_deref().map(Path::new) else {
+            return false;
+        };
+        if !home_path.is_absolute() {
+            return false;
+        }
+        let Ok(home_dir) = crate::syscall::open_dir_no_symlinks(home_path) else {
+            return false;
+        };
+        let Ok(home_meta) = File::from(home_dir).metadata() else {
+            return false;
+        };
+        let Ok(runtime_dir) = crate::syscall::open_dir_no_symlinks(Path::new(&expected_runtime))
+        else {
+            return false;
+        };
+        let Ok(runtime_meta) = File::from(runtime_dir).metadata() else {
+            return false;
+        };
+        if home_meta.uid() != uid || runtime_meta.uid() != uid || runtime_meta.mode() & 0o077 != 0 {
+            return false;
+        }
+        session_environment_matches(&bytes, home.as_deref(), runtime.as_deref())
+            && read()
+                .is_some_and(|after| after.uid == uid && after.start_ticks == before.start_ticks)
+    }
+
     fn open_dispatch(
         &self,
         slot: &AttemptSlot,
@@ -282,7 +436,9 @@ impl<R: ResultProbe> SteamPort for ProductionSteamPort<R> {
         self.child.is_none()
             && !self.unsettled
             && self.idle_is_fresh()
+            && launcher_is_unprivileged()
             && self.steam_and_prefilter_clear()
+            && self.inherited_session_matches_steam()
             && self.idle_is_fresh()
     }
 
@@ -307,6 +463,7 @@ impl<R: ResultProbe> SteamPort for ProductionSteamPort<R> {
             self.child.is_none() && !self.unsettled,
             "a launch remains unsettled"
         );
+        anyhow::ensure!(launcher_is_unprivileged(), "BlockedPrivilegedSteamLauncher");
         // Re-check at the last moment: the window can close between admission and launch.
         anyhow::ensure!(
             self.idle_is_fresh() && self.steam_and_prefilter_clear(),
@@ -317,6 +474,10 @@ impl<R: ResultProbe> SteamPort for ProductionSteamPort<R> {
         anyhow::ensure!(
             self.idle_is_fresh(),
             "desktop idle observation expired before launch"
+        );
+        anyhow::ensure!(
+            self.inherited_session_matches_steam() && self.idle_is_fresh(),
+            "BlockedSteamSessionEnvironment"
         );
         let argv = launch_argv();
         let child = Command::new(&argv[0]).args(&argv[1..]).spawn()?;
@@ -460,6 +621,58 @@ mod tests {
     }
 
     #[test]
+    fn session_environment_requires_exact_unique_home_and_runtime() {
+        use std::ffi::OsStr;
+        let home = Some(OsStr::new("/home/user"));
+        let runtime = Some(OsStr::new("/run/user/1000"));
+        let good = b"HOME=/home/user\0XDG_RUNTIME_DIR=/run/user/1000\0OTHER=redacted\0";
+        assert!(session_environment_matches(good, home, runtime));
+        assert!(!session_environment_matches(
+            good,
+            Some(OsStr::new("/var/lib/stutter")),
+            runtime
+        ));
+        assert!(!session_environment_matches(good, home, None));
+        assert!(!session_environment_matches(
+            b"HOME=/home/user\0HOME=/home/user\0XDG_RUNTIME_DIR=/run/user/1000\0",
+            home,
+            runtime
+        ));
+        assert!(!session_environment_matches(
+            b"HOME=/home/user\0XDG_RUNTIME_DIR=/run/user/1000",
+            home,
+            runtime
+        ));
+    }
+
+    #[test]
+    fn launcher_requires_zero_capabilities_fixed_uid_and_no_new_privileges() {
+        let safe = "Uid:\t1000 1000 1000 1000\nCapInh:\t0000000000000000\nCapPrm:\t0000000000000000\nCapEff:\t0000000000000000\nCapAmb:\t0000000000000000\nNoNewPrivs:\t1\n";
+        assert!(unprivileged_launcher_status(safe, 1000));
+        assert!(!unprivileged_launcher_status(safe, 0));
+        assert!(!unprivileged_launcher_status(
+            &safe.replace("CapAmb:\t0000000000000000", "CapAmb:\t0000000000000001"),
+            1000
+        ));
+        assert!(!unprivileged_launcher_status(
+            &safe.replace("NoNewPrivs:\t1", "NoNewPrivs:\t0"),
+            1000
+        ));
+        assert!(!unprivileged_launcher_status(
+            &safe.replace("Uid:\t1000 1000 1000 1000", "Uid:\t0 1000 0 1000"),
+            1000
+        ));
+        assert!(!unprivileged_launcher_status(
+            &safe.replace("CapPrm:\t0000000000000000\n", ""),
+            1000
+        ));
+        assert!(!unprivileged_launcher_status(
+            &format!("{safe}CapEff:\t0000000000000000\n"),
+            1000
+        ));
+    }
+
+    #[test]
     fn launch_refuses_unless_idle_and_free_and_the_command_is_the_one_owned_app() {
         let proc = proc_with(&["zsh"]);
         let mut port = ProductionSteamPort::new(
@@ -515,5 +728,112 @@ mod tests {
         assert!(port.stop().is_err());
         assert!(!port.safe_window());
         assert!(port.launch(&slot, &context).is_err());
+    }
+
+    #[test]
+    fn exited_first_steam_verb_never_completes_an_attempt_with_a_live_second_verb() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+        use super::super::dispatch_context::{
+            ArmSpec, DispatcherStartV1, arm_attempt, authorize_dispatch,
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        let attempt = File::from(crate::syscall::open_dir_no_symlinks(dir.path()).unwrap());
+        let mut intent = super::super::tests::intent();
+        intent.uid = crate::syscall::geteuid();
+        let steam = intent.steam_client.process.as_mut().unwrap();
+        steam.steam_pid = 200;
+        steam.steam_start_ticks = 40;
+        steam.webhelper_pid = 201;
+        steam.webhelper_start_ticks = 41;
+        let slot = AttemptSlot {
+            study_sha256: "e".repeat(64),
+            context_sha256: "f".repeat(64),
+            index: 0,
+            arm: intent.tools[0].source,
+        };
+        let spec = ArmSpec {
+            tool_dir: "/tools/GE".into(),
+            study_compat_data: "/study/compatdata".into(),
+            arm_env: Default::default(),
+            steamapps: "/a".into(),
+            proton_manifest: "/m".into(),
+        };
+        let now = intent.issued_unix_seconds + 1;
+        let context = arm_attempt(&attempt, &intent, &slot, spec, (now, 60)).unwrap();
+        let env = [
+            ("SteamAppId", "1091500"),
+            ("STEAM_COMPAT_DATA_PATH", "/study/compatdata"),
+            ("STEAM_COMPAT_CLIENT_INSTALL_PATH", "/home/u/.steam/steam"),
+        ]
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .into();
+        let proc = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(proc.path().join("sys/kernel/random")).unwrap();
+        std::fs::write(
+            proc.path().join("sys/kernel/random/boot_id"),
+            &intent.boot_id,
+        )
+        .unwrap();
+        for pid in [123, 200, 201] {
+            std::fs::create_dir_all(proc.path().join(pid.to_string()).join("ns")).unwrap();
+        }
+        std::fs::create_dir_all(proc.path().join("self/ns")).unwrap();
+        let ns = proc.path().join("self/ns/pid");
+        std::fs::write(&ns, b"namespace").unwrap();
+        std::fs::hard_link(&ns, proc.path().join("123/ns/pid")).unwrap();
+        let stat = |pid: u32, parent: u32, ticks: u64| {
+            format!("{pid} (fixture) S {parent} 0 0 0 0 0 0 0 0 0 0 0 0 0 20 0 1 0 {ticks} 0 0")
+        };
+        std::fs::write(proc.path().join("200/stat"), stat(200, 1, 40)).unwrap();
+        std::fs::write(proc.path().join("201/stat"), stat(201, 200, 41)).unwrap();
+        std::fs::write(proc.path().join("123/stat"), stat(123, 200, 80)).unwrap();
+        let ns_meta = std::fs::metadata(&ns).unwrap();
+        for (verb, pid, ticks) in [
+            (SteamVerb::WaitForExitAndRun, 124, 79),
+            (SteamVerb::Run, 123, 80),
+        ] {
+            let argv = ["/x/proton", verb.as_steam_argument(), "/g/game.exe"].map(str::to_owned);
+            let (_, ticket) =
+                authorize_dispatch(&attempt, &argv, &env, intent.uid, now + 1, &|_, _| Ok(()))
+                    .unwrap();
+            let record = DispatcherStartV1 {
+                schema_version: 1,
+                ticket_id: ticket.ticket_id,
+                intent_sha256: ticket.intent_sha256,
+                attempt_sha256: ticket.attempt_sha256,
+                verb,
+                uid: intent.uid,
+                boot_id: intent.boot_id.clone(),
+                observed_unix_seconds: now + 1,
+                pid,
+                start_ticks: ticks,
+                pid_namespace_device: ns_meta.dev(),
+                pid_namespace_inode: ns_meta.ino(),
+            };
+            super::super::report_store::write_new(
+                &attempt,
+                &format!("dispatcher-{}.json", verb.as_steam_argument()),
+                &serde_json::to_vec(&record).unwrap(),
+            )
+            .unwrap();
+        }
+        let mut port = ProductionSteamPort::new(
+            "/study/compatdata".into(),
+            "/study".into(),
+            "/a".into(),
+            "/m".into(),
+            intent.steam_client.clone(),
+            vec![],
+            Probe,
+        );
+        port.proc_root = proc.path().to_path_buf();
+        port.observe_desktop_idle(Some(Instant::now()));
+        port.dispatch = Some((attempt, context));
+        assert_eq!(port.state(), GameState::Running);
+        std::fs::remove_dir_all(proc.path().join("123")).unwrap();
+        assert_eq!(port.state(), GameState::Starting);
     }
 }

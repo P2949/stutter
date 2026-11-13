@@ -302,6 +302,14 @@ pub fn inspect_dispatcher_start(
             && record.start_ticks != 0,
         "dispatcher observation mismatch"
     );
+    let mut boot_bytes = Vec::new();
+    std::fs::File::open(proc_root.join("sys/kernel/random/boot_id"))?
+        .take(129)
+        .read_to_end(&mut boot_bytes)?;
+    anyhow::ensure!(
+        boot_bytes.len() <= 128 && std::str::from_utf8(&boot_bytes)?.trim() == ticket.boot_id,
+        "host boot differs from the frozen dispatch"
+    );
     let read_process = |pid| crate::telemetry::proc_view::live_process(proc_root, pid);
     let Some(process) = read_process(record.pid) else {
         return match std::fs::symlink_metadata(proc_root.join(record.pid.to_string())) {
@@ -320,16 +328,26 @@ pub fn inspect_dispatcher_start(
     );
     let steam = read_process(expected.steam_process.steam_pid)
         .ok_or_else(|| anyhow::anyhow!("Steam process is unavailable"))?;
+    let helper = read_process(expected.steam_process.webhelper_pid)
+        .ok_or_else(|| anyhow::anyhow!("Steam helper is unavailable"))?;
     anyhow::ensure!(
         steam.uid == uid
             && steam.start_ticks == expected.steam_process.steam_start_ticks
+            && helper.uid == uid
+            && helper.start_ticks == expected.steam_process.webhelper_start_ticks
+            && helper.ancestors.contains(&(
+                expected.steam_process.steam_pid,
+                expected.steam_process.steam_start_ticks
+            ))
             && process.uid == uid
             && process.start_ticks == record.start_ticks
             && process.ancestors.contains(&(
                 expected.steam_process.steam_pid,
                 expected.steam_process.steam_start_ticks
             ))
-            && read_process(record.pid).as_ref() == Some(&process),
+            && read_process(record.pid).as_ref() == Some(&process)
+            && read_process(expected.steam_process.steam_pid).as_ref() == Some(&steam)
+            && read_process(expected.steam_process.webhelper_pid).as_ref() == Some(&helper),
         "dispatcher process identity or Steam ancestry mismatch"
     );
     Ok(Some(record))
@@ -532,6 +550,8 @@ mod tests {
         let steam = intent.steam_client.process.as_mut().unwrap();
         steam.steam_pid = 200;
         steam.steam_start_ticks = 40;
+        steam.webhelper_pid = 201;
+        steam.webhelper_start_ticks = 41;
         let now = intent.issued_unix_seconds + 1;
         let context = arm_attempt(&file, &intent, &slot, spec(), (now, 60)).unwrap();
         let (_, ticket) =
@@ -540,7 +560,13 @@ mod tests {
             })
             .unwrap();
         let proc = tempfile::tempdir().unwrap();
-        for pid in [123, 200] {
+        std::fs::create_dir_all(proc.path().join("sys/kernel/random")).unwrap();
+        std::fs::write(
+            proc.path().join("sys/kernel/random/boot_id"),
+            &intent.boot_id,
+        )
+        .unwrap();
+        for pid in [123, 200, 201] {
             std::fs::create_dir_all(proc.path().join(pid.to_string()).join("ns")).unwrap();
         }
         std::fs::create_dir_all(proc.path().join("self/ns")).unwrap();
@@ -551,6 +577,7 @@ mod tests {
             format!("{pid} (fixture) S {parent} 0 0 0 0 0 0 0 0 0 0 0 0 0 20 0 1 0 {ticks} 0 0")
         };
         std::fs::write(proc.path().join("200/stat"), stat(200, 1, 40)).unwrap();
+        std::fs::write(proc.path().join("201/stat"), stat(201, 200, 41)).unwrap();
         std::fs::write(proc.path().join("123/stat"), stat(123, 200, 80)).unwrap();
         let meta = std::fs::metadata(&ns).unwrap();
         let record = DispatcherStartV1 {
@@ -578,6 +605,13 @@ mod tests {
             Some(record)
         );
         let marker = dir.path().join(format!("used-{}", ticket.ticket_id));
+        std::fs::write(proc.path().join("sys/kernel/random/boot_id"), "wrong-boot").unwrap();
+        assert!(inspect_dispatcher_start(&file, &context, SteamVerb::Run, proc.path()).is_err());
+        std::fs::write(
+            proc.path().join("sys/kernel/random/boot_id"),
+            &intent.boot_id,
+        )
+        .unwrap();
         let original_marker = std::fs::read(&marker).unwrap();
         std::fs::write(&marker, b"tampered").unwrap();
         assert!(inspect_dispatcher_start(&file, &context, SteamVerb::Run, proc.path()).is_err());
@@ -588,6 +622,9 @@ mod tests {
         assert!(inspect_dispatcher_start(&file, &context, SteamVerb::Run, proc.path()).is_err());
         std::fs::remove_file(&process_ns).unwrap();
         std::fs::hard_link(&ns, &process_ns).unwrap();
+        std::fs::write(proc.path().join("201/stat"), stat(201, 200, 42)).unwrap();
+        assert!(inspect_dispatcher_start(&file, &context, SteamVerb::Run, proc.path()).is_err());
+        std::fs::write(proc.path().join("201/stat"), stat(201, 200, 41)).unwrap();
         std::fs::write(proc.path().join("123/stat"), stat(123, 200, 81)).unwrap();
         assert!(inspect_dispatcher_start(&file, &context, SteamVerb::Run, proc.path()).is_err());
         std::fs::write(proc.path().join("123/stat"), stat(123, 1, 80)).unwrap();
