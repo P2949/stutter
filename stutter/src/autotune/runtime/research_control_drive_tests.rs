@@ -288,6 +288,8 @@ fn cancelling_a_driven_attempt_aborts_the_host_and_settles_aborted() {
         coordinator.terminal.as_ref().unwrap().phase,
         ResearchPhase::Aborted
     );
+    let report = send(&mut coordinator, ResearchRequest::Report {}, 105);
+    assert!(report.contains("\"attempts_sealed\":1"), "{report}");
 }
 
 #[test]

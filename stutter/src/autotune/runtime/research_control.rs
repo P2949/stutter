@@ -434,6 +434,10 @@ impl ResearchCoordinator {
         ) {
             return response("blocked", "CancellationNeedsExecutorSettlement");
         }
+        let report_failed = self.driver.is_some() && !self.persist_report();
+        let Some(active) = self.active.as_mut() else {
+            return response("denied", "NoCampaign");
+        };
         if active.lease.advance(ResearchPhase::Restoring, now).is_err()
             || active.lease.advance(ResearchPhase::Aborted, now).is_err()
         {
@@ -442,7 +446,11 @@ impl ResearchCoordinator {
         self.terminal = Some(TerminalCampaign {
             phase: ResearchPhase::Aborted,
             intent_sha256: active.intent_sha256.clone(),
-            code: "Cancelled",
+            code: if report_failed {
+                "ReportPersistenceFailed"
+            } else {
+                "Cancelled"
+            },
         });
         self.active = None;
         self.driver = None;
@@ -471,6 +479,7 @@ impl ResearchCoordinator {
         if !self.deadline_due(now) {
             return;
         }
+        let report_failed = self.driver.is_some() && !self.persist_report();
         let Some(active) = self.active.as_mut() else {
             return;
         };
@@ -483,9 +492,10 @@ impl ResearchCoordinator {
         self.terminal = Some(TerminalCampaign {
             phase: ResearchPhase::Blocked,
             intent_sha256: active.intent_sha256.clone(),
-            code: match active.lease.block_reason() {
-                Some(CampaignBlockReason::DeadlineExpired) => "DeadlineExpired",
-                None => "Blocked",
+            code: match (report_failed, active.lease.block_reason()) {
+                (true, _) => "ReportPersistenceFailed",
+                (false, Some(CampaignBlockReason::DeadlineExpired)) => "DeadlineExpired",
+                (false, None) => "Blocked",
             },
         });
         self.active = None;

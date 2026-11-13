@@ -162,7 +162,12 @@ impl ResearchCoordinator {
                 true
             }
             Step::Cancelled => {
-                self.settle(now, ResearchPhase::Aborted, "Cancelled");
+                let code = if self.persist_report() {
+                    "Cancelled"
+                } else {
+                    "ReportPersistenceFailed"
+                };
+                self.settle(now, ResearchPhase::Aborted, code);
                 true
             }
         };
@@ -204,7 +209,12 @@ impl ResearchCoordinator {
             Step::Sealed(_) | Step::Cancelled => {}
             _ => anyhow::bail!("research shutdown did not settle the attempt"),
         }
-        self.settle(now, ResearchPhase::Aborted, "ControllerShutdown");
+        let code = if self.persist_report() {
+            "ControllerShutdown"
+        } else {
+            "ReportPersistenceFailed"
+        };
+        self.settle(now, ResearchPhase::Aborted, code);
         anyhow::ensure!(
             self.terminal
                 .as_ref()
@@ -281,7 +291,7 @@ impl AttemptHost for UnqualifiedSteamHost {
 
 impl ResearchCoordinator {
     /// Write `report.json` for a finished schedule. Called while the driver still owns the journal.
-    fn persist_report(&mut self) -> bool {
+    pub(super) fn persist_report(&mut self) -> bool {
         let Some(state) = self.driver.as_ref() else {
             return false;
         };
