@@ -19,7 +19,9 @@ use serde::{Deserialize, Serialize};
 use super::{
     AttemptSlot, ResearchIntentV1,
     dispatcher::{DispatchPlan, plan_dispatch},
-    launch_ticket::{SteamVerb, binding, consume_launch_ticket, issue_launch_ticket},
+    launch_ticket::{
+        ResearchLaunchTicketV1, SteamVerb, binding, consume_launch_ticket, issue_launch_ticket,
+    },
 };
 
 const CONTEXT_NAME: &str = "context.json";
@@ -119,7 +121,7 @@ pub fn authorize_dispatch(
     euid: u32,
     now: u64,
     verify_tool: &dyn Fn(&DispatchContextV1, &super::ResearchTool) -> anyhow::Result<()>,
-) -> anyhow::Result<DispatchPlan> {
+) -> anyhow::Result<(DispatchPlan, ResearchLaunchTicketV1)> {
     anyhow::ensure!(euid != 0, "dispatcher must not run as root");
     let context = read_context(dir, euid)?;
     anyhow::ensure!(
@@ -147,8 +149,72 @@ pub fn authorize_dispatch(
     // Re-attest the installed Proton before spending the ticket, so drift cannot burn it either.
     verify_tool(&context, &expected.tool)?;
     let owned: OwnedFd = dir.try_clone()?.into();
-    consume_launch_ticket(owned, ticket_id, &expected, now)?;
-    Ok(plan)
+    let ticket = consume_launch_ticket(owned, ticket_id, &expected, now)?;
+    Ok((plan, ticket))
+}
+
+/// A durable observation of the dispatcher immediately before `exec`. It is only an anchor for
+/// later independent procfs and namespace checks, not proof that Steam or Cyberpunk ran.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DispatcherStartV1 {
+    pub schema_version: u32,
+    pub ticket_id: String,
+    pub intent_sha256: String,
+    pub attempt_sha256: String,
+    pub verb: SteamVerb,
+    pub uid: u32,
+    pub boot_id: String,
+    pub pid: u32,
+    pub start_ticks: u64,
+    pub pid_namespace_device: u64,
+    pub pid_namespace_inode: u64,
+}
+
+/// Record this process only after its one-use ticket was consumed. The process namespace is
+/// recorded because a container-visible PID cannot be assumed to be the host PID.
+pub fn record_dispatcher_start(
+    dir: &std::fs::File,
+    ticket: &ResearchLaunchTicketV1,
+) -> anyhow::Result<DispatcherStartV1> {
+    let uid = crate::syscall::geteuid();
+    anyhow::ensure!(uid != 0 && uid == ticket.uid, "wrong dispatcher owner");
+    let boot_id = crate::telemetry::identity::read_boot_id()?;
+    anyhow::ensure!(boot_id == ticket.boot_id, "dispatcher boot changed");
+    let pid = std::process::id();
+    anyhow::ensure!(pid > 1, "invalid dispatcher pid");
+    let self_meta = std::fs::metadata("/proc/self")?;
+    let pid_meta = std::fs::metadata(format!("/proc/{pid}"))?;
+    anyhow::ensure!(
+        self_meta.dev() == pid_meta.dev() && self_meta.ino() == pid_meta.ino(),
+        "dispatcher procfs namespace mismatch"
+    );
+    let process = crate::telemetry::proc_view::live_process(std::path::Path::new("/proc"), pid)
+        .ok_or_else(|| anyhow::anyhow!("dispatcher process identity unavailable"))?;
+    anyhow::ensure!(
+        process.uid == uid && process.start_ticks != 0,
+        "invalid dispatcher identity"
+    );
+    let namespace = std::fs::metadata("/proc/self/ns/pid")?;
+    let record = DispatcherStartV1 {
+        schema_version: 1,
+        ticket_id: ticket.ticket_id.clone(),
+        intent_sha256: ticket.intent_sha256.clone(),
+        attempt_sha256: ticket.attempt_sha256.clone(),
+        verb: ticket.verb,
+        uid,
+        boot_id,
+        pid,
+        start_ticks: process.start_ticks,
+        pid_namespace_device: namespace.dev(),
+        pid_namespace_inode: namespace.ino(),
+    };
+    super::report_store::write_new(
+        dir,
+        &format!("dispatcher-{}.json", ticket.verb.as_steam_argument()),
+        &serde_json::to_vec(&record)?,
+    )?;
+    Ok(record)
 }
 
 /// Resident side: arm a fresh numbered attempt directory under the dispatch root. The numbered
@@ -312,6 +378,29 @@ mod tests {
     }
 
     #[test]
+    fn dispatcher_start_records_live_process_and_rejects_duplicate_or_wrong_boot() {
+        let (_dir, file, mut intent, slot) = fixture();
+        intent.boot_id = crate::telemetry::identity::read_boot_id().unwrap();
+        let now = intent.issued_unix_seconds + 1;
+        arm_attempt(&file, &intent, &slot, spec(), (now, 60)).unwrap();
+        let (_, ticket) =
+            authorize_dispatch(&file, &argv("run"), &env(), intent.uid, now + 1, &|_, _| {
+                Ok(())
+            })
+            .unwrap();
+        let mut wrong = ticket.clone();
+        wrong.boot_id = "another-boot".into();
+        assert!(record_dispatcher_start(&file, &wrong).is_err());
+        let record = record_dispatcher_start(&file, &ticket).unwrap();
+        assert_eq!(record.pid, std::process::id());
+        assert_eq!(record.uid, intent.uid);
+        assert_eq!(record.ticket_id, ticket.ticket_id);
+        assert_ne!(record.start_ticks, 0);
+        assert_ne!(record.pid_namespace_inode, 0);
+        assert!(record_dispatcher_start(&file, &ticket).is_err());
+    }
+
+    #[test]
     fn each_steam_verb_runs_once_and_replays_or_unknown_verbs_are_refused() {
         let (_dir, file, now) = armed();
         let euid = crate::syscall::geteuid();
@@ -324,7 +413,7 @@ mod tests {
             &|_, _| Ok(()),
         )
         .unwrap();
-        assert_eq!(wait.program, std::path::Path::new("/tools/GE/proton"));
+        assert_eq!(wait.0.program, std::path::Path::new("/tools/GE/proton"));
         assert!(
             authorize_dispatch(
                 &file,

@@ -113,7 +113,7 @@ fn dispatch(context_dir: &std::path::Path, args: &[String], uid: u32) -> anyhow:
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)?
         .as_secs();
-    let plan = crate::autotune::research::dispatch_context::authorize_dispatch(
+    let (plan, ticket) = crate::autotune::research::dispatch_context::authorize_dispatch(
         &directory,
         args,
         &env,
@@ -123,6 +123,7 @@ fn dispatch(context_dir: &std::path::Path, args: &[String], uid: u32) -> anyhow:
             crate::autotune::research::dispatch_context::verify_installed_tool(context, tool, uid)
         },
     )?;
+    crate::autotune::research::dispatch_context::record_dispatcher_start(&directory, &ticket)?;
     let error = std::process::Command::new(&plan.program)
         .args(&plan.args)
         .env_clear()
