@@ -61,6 +61,7 @@ pub struct Driver {
     schedule_len: usize,
     max_attempts: usize,
     active: Option<(AttemptSlot, u64, std::time::Instant)>,
+    dispatch_may_exist: bool,
     active_seconds: u64,
     last_tick_seconds: Option<u64>,
     fresh_journal_checked: bool,
@@ -116,6 +117,7 @@ impl Driver {
             schedule_len,
             max_attempts,
             active: None,
+            dispatch_may_exist: false,
             active_seconds: 0,
             last_tick_seconds: None,
             fresh_journal_checked: false,
@@ -142,7 +144,8 @@ impl Driver {
         match crate::syscall::openat_dir_nofollow(self.root.as_fd(), &format!("{:04}", slot.index))
         {
             Ok(dir) => super::launch_ticket::retire_unclaimed_tickets(dir, self.intent.uid)?,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error)
+                if error.kind() == std::io::ErrorKind::NotFound && !self.dispatch_may_exist => {}
             Err(error) => return Err(error.into()),
         }
         let record = AttemptRecord { slot, outcome };
@@ -157,6 +160,7 @@ impl Driver {
             );
         }
         self.active = None;
+        self.dispatch_may_exist = false;
         Ok(Step::Sealed(record))
     }
 
@@ -287,10 +291,13 @@ impl Driver {
         let monotonic_start = std::time::Instant::now();
         self.active = Some((slot.clone(), now, monotonic_start));
         let mut authorization_expired = false;
+        let mut arm_failed = false;
         let launched = host
             .arm_spec(&slot)
             .and_then(|spec| {
-                arm_attempt_in_root(
+                // Even a failed arm may have created a directory or a partial ticket.
+                self.dispatch_may_exist = true;
+                let result = arm_attempt_in_root(
                     &self.root,
                     &self.intent,
                     &slot,
@@ -299,7 +306,9 @@ impl Driver {
                         now,
                         ARM_LIFETIME_SECONDS.min(self.intent.deadline_unix_seconds - now),
                     ),
-                )
+                );
+                arm_failed = result.is_err();
+                result
             })
             .and_then(|context| {
                 // Source discovery and arming can take long enough to exhaust the authorization
@@ -325,6 +334,9 @@ impl Driver {
             Ok(()) => Ok(Step::Running(slot.index)),
             Err(_) => {
                 host.abort()?;
+                // Arming can fail before or after creating the directory. Until its identity
+                // is established by recovery, do not alter or seal potentially foreign state.
+                anyhow::ensure!(!arm_failed, "attempt arming needs independent recovery");
                 self.seal(
                     slot,
                     AttemptOutcome::Failed {

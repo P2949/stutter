@@ -14,6 +14,7 @@ struct Fake {
     auto_finish: bool,
     arm_delay: std::time::Duration,
     safe_delay: std::time::Duration,
+    rename_on_launch: Option<(std::path::PathBuf, std::path::PathBuf)>,
 }
 
 fn ev(slot_index: u32) -> AttemptEvidenceV1 {
@@ -43,6 +44,9 @@ impl AttemptHost for Fake {
     fn launch(&mut self, slot: &AttemptSlot, _: &DispatchContextV1) -> anyhow::Result<()> {
         self.current = slot.index;
         self.launches += 1;
+        if let Some((source, destination)) = &self.rename_on_launch {
+            std::fs::rename(source, destination)?;
+        }
         anyhow::ensure!(!self.launch_fails, "steam refused");
         Ok(())
     }
@@ -73,6 +77,7 @@ fn fake() -> Fake {
         auto_finish: false,
         arm_delay: std::time::Duration::ZERO,
         safe_delay: std::time::Duration::ZERO,
+        rename_on_launch: None,
     }
 }
 
@@ -281,6 +286,42 @@ fn refused_launch_retires_every_issued_ticket_before_sealing() {
             b"revoked-v1"
         );
     }
+}
+
+#[test]
+fn disappeared_attempt_directory_cannot_be_treated_as_no_tickets() {
+    let (dir, mut driver, intent) = setup(4);
+    let mut host = fake();
+    host.launch_fails = true;
+    host.rename_on_launch = Some((
+        dir.path().join("dispatch/0000"),
+        dir.path().join("moved-attempt"),
+    ));
+    assert!(
+        driver
+            .tick(&mut host, intent.issued_unix_seconds + 1)
+            .is_err()
+    );
+    assert!(dir.path().join("journal/0000.started").is_file());
+    assert!(!dir.path().join("journal/0000.json").exists());
+}
+
+#[test]
+fn preexisting_attempt_directory_is_not_modified_after_arming_failure() {
+    let (dir, mut driver, intent) = setup(4);
+    let attempt = dir.path().join("dispatch/0000");
+    std::fs::create_dir(&attempt).unwrap();
+    let id = "a".repeat(64);
+    std::fs::write(attempt.join(format!("ticket-{id}.json")), b"existing").unwrap();
+    let mut host = fake();
+    assert!(
+        driver
+            .tick(&mut host, intent.issued_unix_seconds + 1)
+            .is_err()
+    );
+    assert_eq!(host.launches, 0);
+    assert!(!attempt.join(format!("used-{id}")).exists());
+    assert!(!dir.path().join("journal/0000.json").exists());
 }
 
 #[test]
