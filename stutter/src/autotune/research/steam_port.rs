@@ -7,7 +7,7 @@ use std::{
     io::Read,
     os::{
         fd::{AsFd, AsRawFd},
-        unix::{ffi::OsStrExt, fs::MetadataExt},
+        unix::fs::MetadataExt,
     },
     path::{Path, PathBuf},
     process::{Child, Command},
@@ -23,7 +23,6 @@ use super::{
 
 const APP_ID: &str = "1091500";
 const MAX_PROC_ENTRIES: usize = 65_536;
-const MAX_PROCESS_ENV_BYTES: u64 = 256 * 1024;
 const MAX_PROCESS_STATUS_BYTES: u64 = 64 * 1024;
 
 /// A launcher must not carry controller capabilities into Steam. NoNewPrivs also prevents
@@ -90,35 +89,6 @@ fn launcher_is_unprivileged() -> bool {
         .is_ok_and(|status| unprivileged_launcher_status(status, crate::syscall::geteuid()))
 }
 
-/// Compare only the two session-routing variables; never persist or log the process environment.
-fn session_environment_matches(
-    bytes: &[u8],
-    home: Option<&std::ffi::OsStr>,
-    runtime: Option<&std::ffi::OsStr>,
-) -> bool {
-    if bytes.is_empty() || bytes.len() as u64 > MAX_PROCESS_ENV_BYTES || bytes.last() != Some(&0) {
-        return false;
-    }
-    let mut found_home = None;
-    let mut found_runtime = None;
-    for entry in bytes
-        .split(|byte| *byte == 0)
-        .filter(|entry| !entry.is_empty())
-    {
-        let (target, value) = if let Some(value) = entry.strip_prefix(b"HOME=") {
-            (&mut found_home, value)
-        } else if let Some(value) = entry.strip_prefix(b"XDG_RUNTIME_DIR=") {
-            (&mut found_runtime, value)
-        } else {
-            continue;
-        };
-        if value.is_empty() || target.replace(value).is_some() {
-            return false;
-        }
-    }
-    matches!((found_home, home, found_runtime, runtime),
-        (Some(a), Some(b), Some(c), Some(d)) if a == b.as_bytes() && c == d.as_bytes())
-}
 /// Process names (`/proc/<pid>/comm`, at most 15 bytes) whose presence makes the host not free.
 const BUSY_COMMS: [&str; 9] = [
     "steam",
@@ -333,58 +303,15 @@ impl<R: ResultProbe> ProductionSteamPort<R> {
         let Some(client) = self.expected_client.process.as_ref() else {
             return false;
         };
-        let uid = crate::syscall::geteuid();
-        let read = || crate::telemetry::proc_view::live_process(&self.proc_root, client.steam_pid);
-        let Some(before) = read() else { return false };
-        if before.uid != uid || before.start_ticks != client.steam_start_ticks {
-            return false;
-        }
-        let Ok(file) = File::open(
-            self.proc_root
-                .join(client.steam_pid.to_string())
-                .join("environ"),
+        let Ok(paths) = super::session_env::read_session_paths(
+            &self.proc_root,
+            client,
+            crate::syscall::geteuid(),
         ) else {
             return false;
         };
-        let mut bytes = Vec::new();
-        if file
-            .take(MAX_PROCESS_ENV_BYTES + 1)
-            .read_to_end(&mut bytes)
-            .is_err()
-        {
-            return false;
-        }
-        let home = std::env::var_os("HOME");
-        let runtime = std::env::var_os("XDG_RUNTIME_DIR");
-        let expected_runtime = format!("/run/user/{uid}");
-        if runtime.as_deref() != Some(std::ffi::OsStr::new(&expected_runtime)) {
-            return false;
-        }
-        let Some(home_path) = home.as_deref().map(Path::new) else {
-            return false;
-        };
-        if !home_path.is_absolute() {
-            return false;
-        }
-        let Ok(home_dir) = crate::syscall::open_dir_no_symlinks(home_path) else {
-            return false;
-        };
-        let Ok(home_meta) = File::from(home_dir).metadata() else {
-            return false;
-        };
-        let Ok(runtime_dir) = crate::syscall::open_dir_no_symlinks(Path::new(&expected_runtime))
-        else {
-            return false;
-        };
-        let Ok(runtime_meta) = File::from(runtime_dir).metadata() else {
-            return false;
-        };
-        if home_meta.uid() != uid || runtime_meta.uid() != uid || runtime_meta.mode() & 0o077 != 0 {
-            return false;
-        }
-        session_environment_matches(&bytes, home.as_deref(), runtime.as_deref())
-            && read()
-                .is_some_and(|after| after.uid == uid && after.start_ticks == before.start_ticks)
+        std::env::var_os("HOME").as_deref() == Some(paths.home.as_os_str())
+            && std::env::var_os("XDG_RUNTIME_DIR").as_deref() == Some(paths.runtime.as_os_str())
     }
 
     fn open_dispatch(

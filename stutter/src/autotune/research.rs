@@ -74,6 +74,7 @@ pub(crate) mod report_store;
     )
 )]
 pub(crate) mod scheduler;
+mod session_env;
 #[cfg_attr(
     not(test),
     expect(
@@ -91,6 +92,14 @@ mod steam_inventory;
     )
 )]
 pub(crate) mod steam_port;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "user-session handoff is not enabled until its ownership and recovery gates are connected"
+    )
+)]
+pub(crate) mod user_launcher;
 mod vdf;
 pub use journal::{AttemptOutcome, AttemptRecord, AttemptSlot, ResearchJournal};
 pub use lease::{CampaignBlockReason, CampaignFacts, CampaignLease};

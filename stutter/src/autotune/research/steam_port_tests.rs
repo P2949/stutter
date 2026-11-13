@@ -1,4 +1,4 @@
-use super::*;
+use super::{super::session_env::session_environment_matches, *};
 
 fn proc_with(comms: &[&str]) -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
