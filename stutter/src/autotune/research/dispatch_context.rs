@@ -206,9 +206,24 @@ pub fn verify_installed_tool(
         &libraries,
         uid,
     )?;
+    verify_frozen_steam_client(context, inventory.steam_client.as_ref())?;
     anyhow::ensure!(
         inventory.eligible_path(tool) == Some(context.spec.tool_dir.as_path()),
         "installed Proton differs from the frozen tool identity or location"
+    );
+    Ok(())
+}
+
+fn verify_frozen_steam_client(
+    context: &DispatchContextV1,
+    observed: Option<&super::SteamClientIdentity>,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        observed == Some(&context.intent.steam_client)
+            && observed
+                .and_then(|client| client.process.as_ref())
+                .is_some(),
+        "running Steam client differs from the frozen identity"
     );
     Ok(())
 }
@@ -270,6 +285,30 @@ mod tests {
         let now = intent.issued_unix_seconds + 1;
         arm_attempt(&file, &intent, &slot, spec(), (now, 60)).unwrap();
         (dir, file, now + 1)
+    }
+
+    #[test]
+    fn steam_client_restart_update_or_missing_identity_refuses_dispatch() {
+        let (_dir, _file, intent, slot) = fixture();
+        let context = DispatchContextV1 {
+            schema_version: 1,
+            intent,
+            slot,
+            tickets: BTreeMap::new(),
+            spec: spec(),
+        };
+        let frozen = context.intent.steam_client.clone();
+        assert!(verify_frozen_steam_client(&context, Some(&frozen)).is_ok());
+        assert!(verify_frozen_steam_client(&context, None).is_err());
+        let mut restarted = frozen.clone();
+        restarted.process.as_mut().unwrap().steam_start_ticks += 1;
+        assert!(verify_frozen_steam_client(&context, Some(&restarted)).is_err());
+        let mut updated = frozen.clone();
+        updated.steamrt64_build_id += 1;
+        assert!(verify_frozen_steam_client(&context, Some(&updated)).is_err());
+        let mut absent = frozen;
+        absent.process = None;
+        assert!(verify_frozen_steam_client(&context, Some(&absent)).is_err());
     }
 
     #[test]
