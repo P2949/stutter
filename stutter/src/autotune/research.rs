@@ -26,6 +26,14 @@ pub(crate) mod analysis;
     not(test),
     expect(
         dead_code,
+        reason = "drives the scheduler once child-study execution is wired"
+    )
+)]
+pub(crate) mod child_study;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
         reason = "emitted by the final report once the campaign runs"
     )
 )]
