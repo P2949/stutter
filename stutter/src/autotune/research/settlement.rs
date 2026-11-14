@@ -9,6 +9,7 @@ use super::{
     dispatch_context::{DispatchContextV1, inspect_dispatcher_start},
     driver::{ClaimSettlementGuard, ClaimSettlementVerifier},
     launch_ticket::{ResearchLaunchTicketV1, SteamVerb},
+    native_source::{GameFacts, Sighting},
     steam_port::host_has_game_or_foreign_steam,
 };
 
@@ -86,6 +87,58 @@ impl ClaimSettlementVerifier for ProductionSettlementVerifier {
     }
 }
 
+/// The read-only owned-process-tree witness for completion. It reports settled only when no
+/// recorded dispatcher is alive, the independent game observer sees no game, and the broad
+/// Wine/Proton/Steam prefilter finds nothing beyond the frozen Steam client. Any read that
+/// fails, or a missing client identity, is an error (unknown), never settled.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "supplied to the completion witness once the production host is composed"
+    )
+)]
+pub(crate) fn owned_process_tree_settled(
+    dir: &File,
+    context: &DispatchContextV1,
+    proc_root: &std::path::Path,
+    facts: &mut dyn GameFacts,
+) -> anyhow::Result<bool> {
+    for verb in [SteamVerb::WaitForExitAndRun, SteamVerb::Run] {
+        let recorded = super::report_store::read_private(
+            dir,
+            &format!("dispatcher-{}.json", verb.as_steam_argument()),
+            context.intent.uid,
+        );
+        match recorded {
+            Err(error)
+                if error
+                    .downcast_ref::<std::io::Error>()
+                    .is_some_and(|e| e.kind() == std::io::ErrorKind::NotFound) => {}
+            Err(error) => return Err(error),
+            Ok(_) => {
+                if inspect_dispatcher_start(dir, context, verb, proc_root)?.is_some() {
+                    return Ok(false);
+                }
+            }
+        }
+    }
+    if facts.sight()? != Sighting::None {
+        return Ok(false);
+    }
+    let client = context
+        .intent
+        .steam_client
+        .process
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("no frozen Steam client identity"))?;
+    Ok(!host_has_game_or_foreign_steam(
+        proc_root,
+        client,
+        context.intent.uid,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -128,5 +181,110 @@ mod tests {
         assert!(failing.verify_worker(&ctx).is_err());
         let mut clear = ProductionSettlementVerifier::new("/proc".into(), Some(Box::new(|| Ok(0))));
         assert!(clear.verify_worker(&ctx).is_ok());
+    }
+
+    struct Facts(anyhow::Result<Sighting>);
+    impl GameFacts for Facts {
+        fn sight(&mut self) -> anyhow::Result<Sighting> {
+            match &self.0 {
+                Ok(sighting) => Ok(sighting.clone()),
+                Err(_) => Err(anyhow::anyhow!("procfs unreadable")),
+            }
+        }
+        fn settings_sha256(&mut self) -> anyhow::Result<String> {
+            Ok("c".repeat(64))
+        }
+        fn now_unix_nanos(&mut self) -> anyhow::Result<u128> {
+            Ok(1)
+        }
+    }
+
+    fn add(proc: &std::path::Path, pid: u32, parent: u32, ticks: u64, comm: &str) {
+        let path = proc.join(pid.to_string());
+        std::fs::create_dir_all(&path).unwrap();
+        std::fs::write(path.join("comm"), format!("{comm}\n")).unwrap();
+        std::fs::write(
+            path.join("stat"),
+            format!("{pid} ({comm}) S {parent} 0 0 0 0 0 0 0 0 0 0 0 0 0 20 0 1 0 {ticks} 0 0"),
+        )
+        .unwrap();
+    }
+
+    fn client_proc(ctx: &DispatchContextV1) -> tempfile::TempDir {
+        let client = ctx.intent.steam_client.process.as_ref().unwrap();
+        let proc = tempfile::tempdir().unwrap();
+        add(
+            proc.path(),
+            client.steam_pid,
+            1,
+            client.steam_start_ticks,
+            "steam",
+        );
+        add(
+            proc.path(),
+            client.webhelper_pid,
+            client.steam_pid,
+            client.webhelper_start_ticks,
+            "steamwebhelper",
+        );
+        proc
+    }
+
+    fn attempt_dir() -> (tempfile::TempDir, File) {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(
+            tmp.path(),
+            std::os::unix::fs::PermissionsExt::from_mode(0o700),
+        )
+        .unwrap();
+        let dir = File::from(crate::syscall::open_dir_no_symlinks(tmp.path()).unwrap());
+        (tmp, dir)
+    }
+
+    #[test]
+    fn the_tree_is_settled_only_with_no_game_no_busy_process_and_a_known_client() {
+        let mut ctx = context();
+        let uid = crate::syscall::geteuid();
+        ctx.intent.uid = uid;
+        ctx.intent.steam_client.process = Some(crate::autotune::research::SteamProcessIdentity {
+            steam_pid: 100,
+            steam_start_ticks: 11,
+            webhelper_pid: 101,
+            webhelper_start_ticks: 12,
+            logged_in: true,
+        });
+        let proc = client_proc(&ctx);
+        let (_tmp, dir) = attempt_dir();
+        let settled = |facts: anyhow::Result<Sighting>, proc: &std::path::Path| {
+            owned_process_tree_settled(&dir, &ctx, proc, &mut Facts(facts))
+        };
+        assert!(settled(Ok(Sighting::None), proc.path()).unwrap());
+        // A game, an ambiguous sighting, or a busy Wine process is never settled.
+        let identity = crate::autotune::research::cyberpunk::CyberpunkProcessIdentity {
+            pid: stutter_core::ids::Pid::new(500),
+            start_ticks: 9,
+            uid,
+            app_id: 1_091_500,
+            build_id: 7,
+            executable_sha256: "a".repeat(64),
+        };
+        assert!(!settled(Ok(Sighting::One(identity)), proc.path()).unwrap());
+        assert!(!settled(Ok(Sighting::Multiple), proc.path()).unwrap());
+        add(proc.path(), 300, 100, 20, "wineserver");
+        assert!(!settled(Ok(Sighting::None), proc.path()).unwrap());
+        // An unreadable observer, an unreadable /proc, or a missing client is unknown.
+        assert!(settled(Err(anyhow::anyhow!("x")), proc.path()).is_err());
+        assert!(
+            !settled(
+                Ok(Sighting::None),
+                std::path::Path::new("/definitely/not/proc")
+            )
+            .unwrap()
+        );
+        ctx.intent.steam_client.process = None;
+        assert!(
+            owned_process_tree_settled(&dir, &ctx, proc.path(), &mut Facts(Ok(Sighting::None)))
+                .is_err()
+        );
     }
 }
