@@ -67,6 +67,14 @@ pub(super) mod host;
 pub(crate) mod join;
 mod journal;
 pub(crate) mod launch_ticket;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "composed with the verified user manager once the live launch is qualified"
+    )
+)]
+pub(crate) mod launch_txn;
 mod lease;
 mod mounts;
 #[cfg_attr(
