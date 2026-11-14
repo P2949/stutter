@@ -154,6 +154,22 @@ fn mark_launch_requested_at(dir: &std::fs::File, requested_boot_ticks: u64) -> a
     Ok(())
 }
 
+/// Whether Stutter durably recorded requesting this attempt's launch. Only a clean `NotFound`
+/// means no request was recorded; any other failure is an error.
+pub(crate) fn launch_marker_present(dir: &std::fs::File, uid: u32) -> anyhow::Result<bool> {
+    match super::report_store::read_private(dir, LAUNCH_REQUESTED_NAME, uid) {
+        Ok(_) => Ok(true),
+        Err(error)
+            if error
+                .downcast_ref::<std::io::Error>()
+                .is_some_and(|e| e.kind() == std::io::ErrorKind::NotFound) =>
+        {
+            Ok(false)
+        }
+        Err(error) => Err(error),
+    }
+}
+
 /// The boot-relative tick at which Stutter requested this attempt's launch, when the marker is
 /// private, ours and from this boot.
 fn launch_requested_ticks(dir: &std::fs::File, uid: u32) -> Option<u64> {

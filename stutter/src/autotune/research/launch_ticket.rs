@@ -5,7 +5,7 @@ use std::{
     fs::File,
     io::{Read, Write},
     os::{
-        fd::{AsFd, OwnedFd},
+        fd::{AsFd, AsRawFd, OwnedFd},
         unix::fs::{FileTypeExt, MetadataExt},
     },
 };
@@ -358,6 +358,29 @@ pub fn consume_launch_ticket(
     used.sync_all()?;
     dir.sync_all()?;
     Ok(ticket)
+}
+
+/// Whether any dispatcher claim that is not a revocation exists in the attempt directory. An
+/// unreadable or empty marker is ambiguous and is an error, never "no claim".
+pub(crate) fn has_live_claim(dir: &File, uid: u32) -> anyhow::Result<bool> {
+    let mut entries = 0usize;
+    let mut live = false;
+    for entry in std::fs::read_dir(format!("/proc/self/fd/{}", dir.as_raw_fd()))? {
+        entries += 1;
+        anyhow::ensure!(entries <= 64, "too many attempt entries");
+        let name = entry?.file_name();
+        let name = name
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("invalid attempt entry name"))?;
+        if name.starts_with("used-") {
+            let marker = super::report_store::read_private(dir, name, uid)?;
+            anyhow::ensure!(!marker.is_empty(), "ambiguous empty ticket claim marker");
+            if !REVOKED_MARKER.starts_with(&marker) {
+                live = true;
+            }
+        }
+    }
+    Ok(live)
 }
 
 /// Retire every ticket issued in an attempt, including tickets from a partially written arm.

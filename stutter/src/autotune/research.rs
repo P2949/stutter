@@ -124,6 +124,14 @@ pub(crate) mod quality;
     not(test),
     expect(
         dead_code,
+        reason = "called by RecoveryJob once launch history recovery is enabled"
+    )
+)]
+pub(crate) mod recovery_gather;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
         reason = "consumed by post-launch recovery once its witnesses are wired"
     )
 )]

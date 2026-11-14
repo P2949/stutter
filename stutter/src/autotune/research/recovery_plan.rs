@@ -103,6 +103,11 @@ pub fn decide(f: &RecoveryFacts) -> RecoveryDecision {
             UnsafeToResume("a claimed launch has no settlement proof")
         };
     }
+    if f.launch_requested && !f.process_tree_settled {
+        // The launcher hands off to Steam and may exit at once, so a finished launch unit does
+        // not show that Steam will not still dispatch or that nothing was started.
+        return UnsafeToResume("a requested launch has no process settlement proof");
+    }
     if f.launch_requested && !f.launch_request_settled {
         // Steam may still start the invocation: not provably unarmed.
         return UnsafeToResume("a requested launch is not settled");
@@ -229,14 +234,12 @@ mod tests {
     }
 
     #[test]
-    fn a_provably_unarmed_attempt_is_retired_without_a_process_witness() {
+    fn only_an_attempt_that_never_requested_a_launch_retires_without_a_process_witness() {
         let mut f = settled();
         f.ticket_claimed = false;
         f.process_tree_settled = false;
-        assert_eq!(
-            decide(&f),
-            RecoveryDecision::RetireAndSealFailed("InterruptedBeforeDispatch")
-        );
+        // A requested launch needs the process witness even with no claim and a finished unit.
+        assert!(matches!(decide(&f), RecoveryDecision::UnsafeToResume(_)));
         f.launch_requested = false;
         f.launch_request_settled = false;
         assert_eq!(
