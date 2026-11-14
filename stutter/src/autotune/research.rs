@@ -103,6 +103,14 @@ mod session_env;
     not(test),
     expect(
         dead_code,
+        reason = "attached to the production driver once a worker witness exists"
+    )
+)]
+pub(crate) mod settlement;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
         reason = "the production SteamPort is qualified against a live Steam first"
     )
 )]
