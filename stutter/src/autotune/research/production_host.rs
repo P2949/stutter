@@ -30,13 +30,6 @@ pub type InstalledToolPaths = Box<dyn Fn(&ResearchTool) -> Option<PathBuf> + Sen
 /// Re-discover Steam's inventory and return the running client identity together with a lookup
 /// of each frozen tool's exact installed directory. Production inputs come from here so that a
 /// host is qualified against the same inventory check dispatch repeats at launch.
-#[cfg_attr(
-    test,
-    expect(
-        dead_code,
-        reason = "called by the resident session; unused by the unit tests"
-    )
-)]
 pub fn inventory_lookup(
     steamapps: &std::path::Path,
     proton_manifest: &std::path::Path,

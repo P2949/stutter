@@ -125,13 +125,6 @@ pub(crate) mod oracle;
     )
 )]
 mod prefix;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "installed by the resident session once the composed host is qualified"
-    )
-)]
 pub(crate) mod production_host;
 mod protocol;
 #[path = "research/proton/mod.rs"]
@@ -171,6 +164,7 @@ pub(crate) mod report_store;
 )]
 pub(crate) mod scheduler;
 mod session_env;
+pub(crate) mod session_host;
 pub(crate) mod settlement;
 #[cfg_attr(
     not(test),
@@ -205,13 +199,6 @@ pub(crate) mod summary;
     )
 )]
 pub(crate) mod transient_launch;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "kernel peer diagnostics are not yet connected to the session handoff"
-    )
-)]
 mod unix_diag;
 #[cfg_attr(
     not(test),

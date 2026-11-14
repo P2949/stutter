@@ -305,6 +305,37 @@ impl ResearchCoordinator {
     }
 }
 
+/// The host factory the resident session installs. The composed production host is selected only
+/// when `research_live_launch` is explicitly enabled and every research source is configured;
+/// anything else keeps the unqualified host, which never reports a safe window and never launches.
+pub(in crate::autotune::runtime) fn select_host_factory(
+    config: &crate::daemon::config::autotune::DaemonAutotuneConfig,
+) -> HostFactory {
+    use crate::autotune::research::session_host::{SessionHostSources, build_session_host};
+    let sources = match (
+        config.research_live_launch,
+        config.research_study_dir.clone(),
+        config.research_steamapps_dir.clone(),
+        config.research_proton_manifest.clone(),
+    ) {
+        (true, Some(study_dir), Some(steamapps), Some(proton_manifest)) => {
+            Some(SessionHostSources {
+                study_dir,
+                steamapps,
+                proton_manifest,
+                worker_socket: config.privileged_worker_socket.clone().or_else(|| {
+                    crate::daemon::privilege::default_privileged_worker_socket_path().ok()
+                }),
+            })
+        }
+        _ => None,
+    };
+    match sources {
+        Some(sources) => Box::new(move |intent| build_session_host(&sources, intent)),
+        None => Box::new(|_| Ok(Box::new(UnqualifiedSteamHost))),
+    }
+}
+
 /// Production host until the Steam launcher is physically qualified: it never reports a safe
 /// window, so no attempt is ever journalled, armed or launched. The campaign waits to its deadline.
 pub(in crate::autotune::runtime) struct UnqualifiedSteamHost;

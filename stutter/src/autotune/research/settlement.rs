@@ -91,13 +91,6 @@ impl ClaimSettlementVerifier for ProductionSettlementVerifier {
 /// recorded dispatcher is alive, the independent game observer sees no game, and the broad
 /// Wine/Proton/Steam prefilter finds nothing beyond the frozen Steam client. Any read that
 /// fails, or a missing client identity, is an error (unknown), never settled.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "supplied to the completion witness once the production host is composed"
-    )
-)]
 pub(crate) fn owned_process_tree_settled(
     dir: &File,
     context: &DispatchContextV1,

@@ -32,7 +32,7 @@ mod idle;
 mod status;
 #[path = "research_control_study.rs"]
 mod study;
-pub(super) use drive::{HostFactory, UnqualifiedSteamHost};
+pub(super) use drive::{HostFactory, select_host_factory};
 
 use crate::autotune::research::{
     AuthenticatedRequest, CampaignBlockReason, CampaignFacts, CampaignLease, ResearchPhase,

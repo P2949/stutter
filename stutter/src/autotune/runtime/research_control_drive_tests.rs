@@ -534,3 +534,25 @@ fn a_host_that_cannot_be_built_leaves_no_durable_study_state() {
     // No campaign directory, journal or intent file was created before the failure.
     assert_eq!(std::fs::read_dir(study.path()).unwrap().count(), 0);
 }
+
+#[test]
+fn the_unqualified_host_stays_unless_live_launch_is_enabled_with_every_source() {
+    use crate::daemon::config::autotune::DaemonAutotuneConfig;
+    let intent = fixture().0;
+    let safe = |config: &DaemonAutotuneConfig| {
+        let mut host = select_host_factory(config)(&intent).expect("must build the fallback");
+        host.safe_window()
+    };
+    // The default configuration never launches.
+    let mut config = DaemonAutotuneConfig::default();
+    assert!(!safe(&config));
+    // Opting in without the sources keeps the unqualified host rather than a half-built one.
+    config.research_live_launch = true;
+    assert!(!safe(&config));
+    // Opting in with the sources selects the composed host, which refuses to build here because
+    // the sources do not exist, so a campaign is blocked instead of launching.
+    config.research_study_dir = Some("/definitely/not/a/study".into());
+    config.research_steamapps_dir = Some("/definitely/not/steamapps".into());
+    config.research_proton_manifest = Some("/definitely/not/manifest.json".into());
+    assert!(select_host_factory(&config)(&intent).is_err());
+}
