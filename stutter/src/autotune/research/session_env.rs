@@ -10,10 +10,108 @@ use std::{
 use super::SteamProcessIdentity;
 
 const MAX_PROCESS_ENV_BYTES: u64 = 256 * 1024;
+const MAX_PROCESS_STATUS_BYTES: u64 = 64 * 1024;
+
+#[cfg(test)]
+pub(super) fn capability_status(status: &str, uid: u32, require_no_new_privs: bool) -> bool {
+    capability_status_inner(status, uid, require_no_new_privs, false)
+}
+
+fn capability_status_inner(
+    status: &str,
+    uid: u32,
+    require_no_new_privs: bool,
+    allow_inheritable: bool,
+) -> bool {
+    if uid == 0 {
+        return false;
+    }
+    let mut seen = [false; 6];
+    for line in status.lines() {
+        let Some((key, value)) = line.split_once(':') else {
+            continue;
+        };
+        let value = value.trim();
+        let index = match key {
+            "CapInh" => 0,
+            "CapPrm" => 1,
+            "CapEff" => 2,
+            "CapAmb" => 3,
+            "NoNewPrivs" => 4,
+            "Uid" => 5,
+            _ => continue,
+        };
+        if std::mem::replace(&mut seen[index], true) {
+            return false;
+        }
+        let valid = match index {
+            0..=3 => {
+                !value.is_empty()
+                    && value.len() <= 16
+                    && u64::from_str_radix(value, 16)
+                        .is_ok_and(|caps| caps == 0 || (index == 0 && allow_inheritable))
+            }
+            4 => value == "1" || (!require_no_new_privs && value == "0"),
+            5 => {
+                let ids: Vec<_> = value.split_whitespace().collect();
+                ids.len() == 4
+                    && ids
+                        .iter()
+                        .all(|id| id.parse::<u32>().is_ok_and(|id| id == uid))
+            }
+            _ => false,
+        };
+        if !valid {
+            return false;
+        }
+    }
+    seen.into_iter().all(|value| value)
+}
+
+pub(super) fn process_capabilities_clear(
+    proc_root: &Path,
+    pid: u32,
+    uid: u32,
+    require_no_new_privs: bool,
+) -> bool {
+    process_capabilities(proc_root, pid, uid, require_no_new_privs, false)
+}
+
+/// A pre-existing broker is not the Steam launcher. It may have inheritable bits, but must not
+/// have permitted, effective or ambient capabilities; launcher checks remain stricter.
+pub(super) fn broker_capabilities_clear(proc_root: &Path, pid: u32, uid: u32) -> bool {
+    process_capabilities(proc_root, pid, uid, false, true)
+}
+
+fn process_capabilities(
+    proc_root: &Path,
+    pid: u32,
+    uid: u32,
+    require_no_new_privs: bool,
+    allow_inheritable: bool,
+) -> bool {
+    let Ok(file) = File::open(proc_root.join(pid.to_string()).join("status")) else {
+        return false;
+    };
+    let mut bytes = Vec::new();
+    if file
+        .take(MAX_PROCESS_STATUS_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .is_err()
+        || bytes.len() as u64 > MAX_PROCESS_STATUS_BYTES
+    {
+        return false;
+    }
+    std::str::from_utf8(&bytes).is_ok_and(|status| {
+        capability_status_inner(status, uid, require_no_new_privs, allow_inheritable)
+    })
+}
 
 pub(super) struct SessionPaths {
     pub home: PathBuf,
     pub runtime: PathBuf,
+    pub runtime_device: u64,
+    pub runtime_inode: u64,
 }
 
 fn parse_session_paths(bytes: &[u8]) -> Option<SessionPaths> {
@@ -40,6 +138,8 @@ fn parse_session_paths(bytes: &[u8]) -> Option<SessionPaths> {
     Some(SessionPaths {
         home: PathBuf::from(std::ffi::OsString::from_vec(home?.to_vec())),
         runtime: PathBuf::from(std::ffi::OsString::from_vec(runtime?.to_vec())),
+        runtime_device: 0,
+        runtime_inode: 0,
     })
 }
 
@@ -68,7 +168,7 @@ fn read_session_paths_at(
     let mut bytes = Vec::new();
     file.take(MAX_PROCESS_ENV_BYTES + 1)
         .read_to_end(&mut bytes)?;
-    let paths = parse_session_paths(&bytes)
+    let mut paths = parse_session_paths(&bytes)
         .ok_or_else(|| anyhow::anyhow!("Steam session paths unavailable"))?;
     anyhow::ensure!(
         paths.home.is_absolute()
@@ -85,6 +185,8 @@ fn read_session_paths_at(
         home.uid() == uid && runtime.uid() == uid && runtime.mode() & 0o077 == 0,
         "Steam session path ownership mismatch"
     );
+    paths.runtime_device = runtime.dev();
+    paths.runtime_inode = runtime.ino();
     anyhow::ensure!(
         read().is_some_and(|after| after.uid == uid && after.start_ticks == before.start_ticks),
         "Steam identity changed"
@@ -106,6 +208,27 @@ pub(super) fn session_environment_matches(
 #[cfg(test)]
 mod tests {
     use std::os::unix::fs::{PermissionsExt, symlink};
+
+    #[test]
+    fn manager_capability_check_accepts_no_new_privs_zero_but_never_capabilities() {
+        let status = "Uid:\t1000 1000 1000 1000\nCapInh:\t0\nCapPrm:\t0\nCapEff:\t0\nCapAmb:\t0\nNoNewPrivs:\t0\n";
+        assert!(capability_status(status, 1000, false));
+        assert!(!capability_status(status, 1000, true));
+        assert!(!capability_status(
+            &status.replace("CapEff:\t0", "CapEff:\t1"),
+            1000,
+            false
+        ));
+        let inherited = status.replace("CapInh:\t0", "CapInh:\t800000000");
+        assert!(capability_status_inner(&inherited, 1000, false, true));
+        assert!(!capability_status(&inherited, 1000, false));
+        assert!(!capability_status_inner(
+            &inherited.replace("CapPrm:\t0", "CapPrm:\t1"),
+            1000,
+            false,
+            true
+        ));
+    }
 
     use super::*;
 

@@ -172,6 +172,40 @@ pub(super) fn peer_inode(stream: &std::os::unix::net::UnixStream) -> anyhow::Res
     dump.finish()
 }
 
+/// Observe whether a process currently holds the endpoint. This is a candidate observation, not
+/// exclusive ownership or process identity proof; callers must independently attest and recheck it.
+pub(super) fn process_holds_peer(
+    proc_root: &std::path::Path,
+    pid: stutter_core::ids::Pid,
+    peer: u32,
+) -> anyhow::Result<bool> {
+    anyhow::ensure!(pid.as_u32() > 1 && peer != 0, "invalid peer observation");
+    let fds = std::fs::read_dir(proc_root.join(pid.to_string()).join("fd"))?;
+    let expected = format!("socket:[{peer}]");
+    let mut scanned = 0usize;
+    let mut found = false;
+    for entry in fds {
+        scanned += 1;
+        anyhow::ensure!(scanned <= 65_536, "process descriptor scan exceeded limit");
+        let entry = entry?;
+        let name = entry.file_name();
+        anyhow::ensure!(
+            name.to_string_lossy().bytes().all(|b| b.is_ascii_digit()),
+            "invalid descriptor name"
+        );
+        match std::fs::read_link(entry.path()) {
+            Ok(target) if target == std::path::Path::new(&expected) => {
+                anyhow::ensure!(!found, "peer endpoint held by multiple descriptors");
+                found = true;
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(found)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -242,6 +276,20 @@ mod tests {
         let second_fd: std::os::fd::OwnedFd = second.try_clone().unwrap().into();
         let expected = std::fs::File::from(second_fd).metadata().unwrap().ino();
         assert_eq!(u64::from(peer_inode(&first).unwrap()), expected);
+    }
+
+    #[test]
+    fn descriptor_observation_refuses_ambiguity_and_missing_processes() {
+        use std::os::unix::fs::symlink;
+        let proc = tempfile::tempdir().unwrap();
+        let dir = proc.path().join("123/fd");
+        std::fs::create_dir_all(&dir).unwrap();
+        symlink("socket:[42]", dir.join("3")).unwrap();
+        assert!(process_holds_peer(proc.path(), stutter_core::ids::Pid::new(123), 42).unwrap());
+        assert!(!process_holds_peer(proc.path(), stutter_core::ids::Pid::new(123), 43).unwrap());
+        symlink("socket:[42]", dir.join("4")).unwrap();
+        assert!(process_holds_peer(proc.path(), stutter_core::ids::Pid::new(123), 42).is_err());
+        assert!(process_holds_peer(proc.path(), stutter_core::ids::Pid::new(124), 42).is_err());
     }
 
     #[test]

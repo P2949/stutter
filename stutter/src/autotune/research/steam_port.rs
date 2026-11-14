@@ -23,7 +23,6 @@ use super::{
 
 const APP_ID: &str = "1091500";
 const MAX_PROC_ENTRIES: usize = 65_536;
-const MAX_PROCESS_STATUS_BYTES: u64 = 64 * 1024;
 
 fn launch_window_open(intent: &super::ResearchIntentV1, now: std::time::SystemTime) -> bool {
     now.duration_since(std::time::UNIX_EPOCH)
@@ -32,69 +31,13 @@ fn launch_window_open(intent: &super::ResearchIntentV1, now: std::time::SystemTi
                 && elapsed.as_secs() < intent.deadline_unix_seconds
         })
 }
-
-/// A launcher must not carry controller capabilities into Steam. NoNewPrivs also prevents
-/// acquiring file capabilities or setuid privilege during exec.
-fn unprivileged_launcher_status(status: &str, uid: u32) -> bool {
-    if uid == 0 {
-        return false;
-    }
-    let mut seen = [false; 6];
-    for line in status.lines() {
-        let Some((key, value)) = line.split_once(':') else {
-            continue;
-        };
-        let value = value.trim();
-        let index = match key {
-            "CapInh" => 0,
-            "CapPrm" => 1,
-            "CapEff" => 2,
-            "CapAmb" => 3,
-            "NoNewPrivs" => 4,
-            "Uid" => 5,
-            _ => continue,
-        };
-        if std::mem::replace(&mut seen[index], true) {
-            return false;
-        }
-        let valid = match index {
-            0..=3 => {
-                !value.is_empty()
-                    && value.len() <= 16
-                    && u64::from_str_radix(value, 16).is_ok_and(|caps| caps == 0)
-            }
-            4 => value == "1",
-            5 => {
-                let ids: Vec<_> = value.split_whitespace().collect();
-                ids.len() == 4
-                    && ids
-                        .iter()
-                        .all(|id| id.parse::<u32>().is_ok_and(|id| id == uid))
-            }
-            _ => false,
-        };
-        if !valid {
-            return false;
-        }
-    }
-    seen.into_iter().all(|value| value)
-}
-
 fn launcher_is_unprivileged() -> bool {
-    let Ok(file) = File::open("/proc/self/status") else {
-        return false;
-    };
-    let mut bytes = Vec::new();
-    if file
-        .take(MAX_PROCESS_STATUS_BYTES + 1)
-        .read_to_end(&mut bytes)
-        .is_err()
-        || bytes.len() as u64 > MAX_PROCESS_STATUS_BYTES
-    {
-        return false;
-    }
-    std::str::from_utf8(&bytes)
-        .is_ok_and(|status| unprivileged_launcher_status(status, crate::syscall::geteuid()))
+    super::session_env::process_capabilities_clear(
+        Path::new("/proc"),
+        std::process::id(),
+        crate::syscall::geteuid(),
+        true,
+    )
 }
 
 /// Process names (`/proc/<pid>/comm`, at most 15 bytes) whose presence makes the host not free.
@@ -399,6 +342,10 @@ impl<R: ResultProbe> SteamPort for ProductionSteamPort<R> {
             "a launch remains unsettled"
         );
         anyhow::ensure!(launcher_is_unprivileged(), "BlockedPrivilegedSteamLauncher");
+        anyhow::ensure!(
+            launch_window_open(&context.intent, std::time::SystemTime::now()),
+            "campaign authorization expired before Steam launch"
+        );
         // Re-check at the last moment: the window can close between admission and launch.
         anyhow::ensure!(
             self.idle_is_fresh() && self.steam_and_prefilter_clear(),
@@ -413,10 +360,6 @@ impl<R: ResultProbe> SteamPort for ProductionSteamPort<R> {
         anyhow::ensure!(
             self.inherited_session_matches_steam() && self.idle_is_fresh(),
             "BlockedSteamSessionEnvironment"
-        );
-        anyhow::ensure!(
-            launch_window_open(&context.intent, std::time::SystemTime::now()),
-            "campaign authorization expired before Steam launch"
         );
         let argv = launch_argv();
         let child = Command::new(&argv[0]).args(&argv[1..]).spawn()?;

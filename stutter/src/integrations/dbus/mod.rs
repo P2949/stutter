@@ -12,6 +12,7 @@ pub(crate) mod fake;
 mod tests;
 mod wire;
 
+pub(crate) use client::connect_stream;
 pub use client::{BusKind, DbusClient, DbusError, session_bus_path, system_bus_path};
 pub use wire::Value;
 pub(crate) use wire::Writer;

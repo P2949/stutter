@@ -10,6 +10,14 @@ use serde::{Deserialize, Serialize};
     not(test),
     expect(
         dead_code,
+        reason = "judges the real CP-LONG action study once it can run"
+    )
+)]
+pub(crate) mod action_study;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
         reason = "P5 analysis is consumed once the scheduler drives real runs"
     )
 )]
@@ -124,6 +132,14 @@ mod unix_diag;
     )
 )]
 pub(crate) mod user_launcher;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "user-manager identity is not used until launch settlement and recovery are connected"
+    )
+)]
+pub(crate) mod user_manager;
 mod vdf;
 pub use journal::{AttemptOutcome, AttemptRecord, AttemptSlot, ResearchJournal};
 pub use lease::{CampaignBlockReason, CampaignFacts, CampaignLease};

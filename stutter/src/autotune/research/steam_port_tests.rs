@@ -1,5 +1,9 @@
 use super::{super::session_env::session_environment_matches, *};
 
+fn unprivileged_launcher_status(status: &str, uid: u32) -> bool {
+    super::super::session_env::capability_status(status, uid, true)
+}
+
 #[test]
 fn launcher_rejects_expired_and_not_yet_valid_authorization() {
     let intent = super::super::tests::intent();

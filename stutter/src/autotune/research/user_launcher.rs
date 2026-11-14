@@ -44,6 +44,8 @@ pub struct VerifiedSessionEnvironment {
     uid: u32,
     home: PathBuf,
     runtime: PathBuf,
+    runtime_device: u64,
+    runtime_inode: u64,
     verified_at: std::time::Instant,
 }
 
@@ -87,8 +89,20 @@ impl VerifiedSessionEnvironment {
             uid,
             home: paths.home,
             runtime: paths.runtime,
+            runtime_device: paths.runtime_device,
+            runtime_inode: paths.runtime_inode,
             verified_at,
         })
+    }
+
+    pub(super) fn runtime_identity(&self) -> (u32, &Path, u64, u64, std::time::Instant) {
+        (
+            self.uid,
+            &self.runtime,
+            self.runtime_device,
+            self.runtime_inode,
+            self.verified_at,
+        )
     }
 }
 
@@ -246,6 +260,8 @@ mod tests {
             uid: intent.uid,
             home: "/home/fixture".into(),
             runtime: format!("/run/user/{}", intent.uid).into(),
+            runtime_device: 1,
+            runtime_inode: 2,
             verified_at: std::time::Instant::now(),
         };
         let request = prepare_user_launch(&intent, &slot, &executable, &session).unwrap();
@@ -314,6 +330,8 @@ mod tests {
                     uid: intent.uid,
                     home: session.home.clone(),
                     runtime: "/run/user/0".into(),
+                    runtime_device: 1,
+                    runtime_inode: 2,
                     verified_at: std::time::Instant::now()
                 }
             )
@@ -326,6 +344,8 @@ mod tests {
             uid: intent.uid,
             home: session.home.clone(),
             runtime: session.runtime.clone(),
+            runtime_device: 1,
+            runtime_inode: 2,
             verified_at: std::time::Instant::now() - std::time::Duration::from_secs(4),
         };
         assert!(prepare_user_launch(&intent, &slot, &executable, &stale).is_err());
