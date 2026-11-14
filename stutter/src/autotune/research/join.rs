@@ -26,7 +26,7 @@ pub enum Source {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct GameIdentity {
     pub uid: u32,
-    pub pid: u32,
+    pub pid: stutter_core::ids::Pid,
     pub start_ticks: u64,
 }
 
@@ -104,7 +104,7 @@ mod tests {
 
     const GAME: GameIdentity = GameIdentity {
         uid: 1000,
-        pid: 500,
+        pid: stutter_core::ids::Pid::new(500),
         start_ticks: 77,
     };
 
@@ -177,7 +177,7 @@ mod coverage_tests {
     fn every_source_and_phase_joins_independently() {
         let game = GameIdentity {
             uid: 1,
-            pid: 2,
+            pid: stutter_core::ids::Pid::new(2),
             start_ticks: 3,
         };
         let sources = [
