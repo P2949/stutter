@@ -7,7 +7,7 @@ use super::{ActiveCampaign, ResearchCoordinator, TerminalCampaign};
 use crate::{
     autotune::research::{
         ResearchIntentV1, ResearchJournal, ResearchPhase,
-        driver::{AttemptHost, Driver, Step, build_schedule},
+        driver::{AttemptHost, Driver, LaunchUnresolved, Step, build_schedule},
         settlement::ProductionSettlementVerifier,
     },
     daemon::privilege::UnixSocketPrivilegedActionService,
@@ -134,7 +134,11 @@ impl ResearchCoordinator {
             Ok(step) => step,
             Err(error) => {
                 log::error!("research driver failed: {error:#}");
-                if let Err(settlement) = state.host.abort() {
+                if error.downcast_ref::<LaunchUnresolved>().is_some() {
+                    // A sent request may still start: a no-op abort would prove nothing and
+                    // generic abort semantics must not run. Ownership is retained as is.
+                    self.launch_unresolved = true;
+                } else if let Err(settlement) = state.host.abort() {
                     log::error!("research process settlement is unverified: {settlement:#}");
                 }
                 // A failed tick may have left a started marker or torn evidence even if the host
@@ -230,6 +234,11 @@ impl ResearchCoordinator {
         let Some(state) = self.driver.as_mut() else {
             return Ok(());
         };
+        if self.launch_unresolved {
+            anyhow::bail!(
+                "research launch request is unresolved and requires independent recovery"
+            );
+        }
         if self.storage_blocker == Some("UnsafeToResume") {
             state.host.abort()?;
             anyhow::bail!("research attempt requires independent recovery");

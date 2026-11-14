@@ -19,6 +19,7 @@ struct Script {
     aborts: u32,
     abort_fails: bool,
     launch_fails: bool,
+    launch_unresolved: bool,
     current: u32,
     auto_finish: bool,
     launch_fence_dir: Option<std::path::PathBuf>,
@@ -57,6 +58,12 @@ impl AttemptHost for Fake {
         }
         script.current = slot.index;
         script.launches += 1;
+        if script.launch_unresolved {
+            return Err(crate::autotune::research::driver::LaunchUnresolved(
+                "lost acknowledgement",
+            )
+            .into());
+        }
         anyhow::ensure!(!script.launch_fails, "launch failed");
         Ok(())
     }
@@ -423,4 +430,62 @@ fn controller_shutdown_stops_the_attempt_or_reports_unverified_settlement() {
             );
         }
     }
+}
+
+#[test]
+fn an_unresolved_launch_never_reaches_abort_and_keeps_ownership() {
+    let campaign = tempfile::tempdir().unwrap();
+    let study = tempfile::tempdir().unwrap();
+    for dir in [&campaign, &study] {
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    let meta = std::fs::metadata(study.path()).unwrap();
+    let root = crate::autotune::research::StudyRootIdentity {
+        device: std::os::unix::fs::MetadataExt::dev(&meta),
+        inode: std::os::unix::fs::MetadataExt::ino(&meta),
+    };
+    let (mut intent, mut facts) = fixture();
+    intent.study_root = Some(root);
+    facts.study_root = Some(root);
+    intent.tools.push(ResearchTool {
+        source: ProtonSource::ValveStable,
+        identity_sha256: "b".repeat(64),
+    });
+    facts.tools = intent.tools.clone();
+    intent.max_attempts = 4;
+    let script = Arc::new(Mutex::new(Script {
+        safe: true,
+        launch_unresolved: true,
+        ..Default::default()
+    }));
+    let mut coordinator =
+        ResearchCoordinator::new(Some(campaign.path().to_path_buf()), Some(facts), "Ready");
+    coordinator.set_study_dir(Some(study.path().to_path_buf()));
+    let handle = script.clone();
+    coordinator.set_host_factory(Some(Box::new(move || Box::new(Fake(handle.clone())))));
+    send(
+        &mut coordinator,
+        ResearchRequest::Submit {
+            intent: Box::new(intent),
+        },
+        100,
+    );
+    coordinator.drive_attempts(101);
+    // The request may still start: no abort, no seal, no retry, ownership retained.
+    assert_eq!(script.lock().unwrap().aborts, 0);
+    assert_eq!(script.lock().unwrap().launches, 1);
+    assert!(coordinator.launch_unresolved);
+    assert!(coordinator.owns_action_slot());
+    assert!(coordinator.terminal.is_none());
+    // Later ticks and a cancel request still never abort, relaunch or settle it.
+    coordinator.drive_attempts(102);
+    send(&mut coordinator, ResearchRequest::Cancel {}, 103);
+    coordinator.drive_attempts(104);
+    coordinator.on_deadline(4_000);
+    assert_eq!(script.lock().unwrap().aborts, 0);
+    assert_eq!(script.lock().unwrap().launches, 1);
+    assert!(coordinator.owns_action_slot());
+    // Shutdown cannot settle it either, and does not abort.
+    assert!(coordinator.shutdown_driver(4_001).is_err());
+    assert_eq!(script.lock().unwrap().aborts, 0);
 }

@@ -73,6 +73,8 @@ pub(super) struct ResearchCoordinator {
     terminal: Option<TerminalCampaign>,
     submitted: bool,
     recovery_pending: bool,
+    /// A sent launch request is unresolved: no abort, seal or retry may run until recovery.
+    launch_unresolved: bool,
     recovery_attempted: bool,
     terminal_probe_attempted: bool,
     mutable_action_present: bool,
@@ -117,6 +119,7 @@ impl ResearchCoordinator {
             terminal: None,
             submitted: false,
             recovery_pending: false,
+            launch_unresolved: false,
             recovery_attempted: false,
             terminal_probe_attempted: false,
             mutable_action_present,

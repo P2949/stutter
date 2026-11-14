@@ -10,7 +10,6 @@ use std::{
         unix::fs::MetadataExt,
     },
     path::{Path, PathBuf},
-    process::{Child, Command},
     time::{Duration, Instant},
 };
 
@@ -203,7 +202,6 @@ pub struct ProductionSteamPort<R: ResultProbe> {
     expected_client: SteamClientIdentity,
     pub tools: Vec<(super::ProtonSource, PathBuf)>,
     pub probe: R,
-    child: Option<Child>,
     dispatch: Option<(File, DispatchContextV1)>,
     unsettled: bool,
     transient: Option<TransientLauncher>,
@@ -229,7 +227,6 @@ impl<R: ResultProbe> ProductionSteamPort<R> {
             expected_client,
             tools,
             probe,
-            child: None,
             dispatch: None,
             unsettled: false,
             transient: None,
@@ -357,8 +354,7 @@ impl<R: ResultProbe> SteamPort for ProductionSteamPort<R> {
     }
 
     fn safe_window(&mut self) -> bool {
-        self.child.is_none()
-            && !self.unsettled
+        !self.unsettled
             && self.idle_is_fresh()
             && launcher_is_unprivileged()
             && self.steam_and_prefilter_clear()
@@ -383,10 +379,10 @@ impl<R: ResultProbe> SteamPort for ProductionSteamPort<R> {
     }
 
     fn launch(&mut self, slot: &AttemptSlot, context: &DispatchContextV1) -> anyhow::Result<()> {
-        anyhow::ensure!(
-            self.child.is_none() && !self.unsettled,
-            "a launch remains unsettled"
-        );
+        // Production launches go only through the authenticated user manager. A missing
+        // launcher blocks; it never selects another launch method.
+        anyhow::ensure!(self.transient.is_some(), "BlockedTransientLauncherRequired");
+        anyhow::ensure!(!self.unsettled, "a launch remains unsettled");
         anyhow::ensure!(launcher_is_unprivileged(), "BlockedPrivilegedSteamLauncher");
         anyhow::ensure!(
             launch_window_open(&context.intent, std::time::SystemTime::now()),
@@ -407,15 +403,7 @@ impl<R: ResultProbe> SteamPort for ProductionSteamPort<R> {
             self.inherited_session_matches_steam() && self.idle_is_fresh(),
             "BlockedSteamSessionEnvironment"
         );
-        if self.transient.is_some() {
-            return self.start_unit(dispatch, slot, context);
-        }
-        let argv = launch_argv();
-        let child = Command::new(&argv[0]).args(&argv[1..]).spawn()?;
-        self.unsettled = true;
-        self.child = Some(child);
-        self.dispatch = Some((dispatch, context.clone()));
-        Ok(())
+        self.start_unit(dispatch, slot, context)
     }
 
     fn state(&mut self) -> GameState {
@@ -450,14 +438,6 @@ impl<R: ResultProbe> SteamPort for ProductionSteamPort<R> {
     }
 
     fn stop(&mut self) -> anyhow::Result<()> {
-        // Only the launcher child this port started; it never signals unrelated processes.
-        if let Some(child) = self.child.as_mut() {
-            if child.try_wait()?.is_none() {
-                child.kill()?;
-                child.wait()?;
-            }
-            self.child = None;
-        }
         anyhow::ensure!(
             !self.unsettled,
             "Cyberpunk process-tree settlement is unverified"

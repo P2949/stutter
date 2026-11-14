@@ -261,10 +261,13 @@ impl Driver {
             self.last_tick_seconds.is_none_or(|last| now >= last),
             "campaign clock moved backward"
         );
-        anyhow::ensure!(
-            self.unresolved_launch.is_none(),
-            "UnsafeToResume: a launch request is unresolved and needs independent reconciliation"
-        );
+        if self.unresolved_launch.is_some() {
+            // Typed, so no caller mistakes a later refusal for an ordinary failure to abort.
+            return Err(LaunchUnresolved(
+                "UnsafeToResume: an earlier launch request is unresolved and needs independent reconciliation",
+            )
+            .into());
+        }
         self.last_tick_seconds = Some(now);
         if !self.fresh_journal_checked {
             anyhow::ensure!(

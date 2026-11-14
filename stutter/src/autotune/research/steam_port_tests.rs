@@ -440,7 +440,7 @@ mod transient {
             fixture(Ok(()), vec![UnitState::Active], true);
         port.start_unit(dir, &slot, &context).unwrap();
         assert_eq!(sends.load(Ordering::SeqCst), 1);
-        assert!(port.unsettled && port.dispatch.is_some() && port.child.is_none());
+        assert!(port.unsettled && port.dispatch.is_some());
         // Detached game-tree settlement is unverified, so stop refuses.
         assert!(port.stop().is_err());
     }
@@ -468,4 +468,43 @@ mod transient {
         assert_eq!(sends.load(Ordering::SeqCst), 0);
         assert!(!port.unsettled && port.dispatch.is_none());
     }
+}
+
+#[test]
+fn a_port_without_a_transient_launcher_blocks_instead_of_spawning_steam() {
+    let mut port = ProductionSteamPort::new(
+        "/s".into(),
+        "/study".into(),
+        "/a".into(),
+        "/m".into(),
+        super::super::tests::intent().steam_client,
+        vec![],
+        Probe,
+    );
+    let slot = AttemptSlot {
+        study_sha256: "e".repeat(64),
+        context_sha256: "f".repeat(64),
+        index: 0,
+        arm: super::super::ProtonSource::Ge,
+    };
+    let context = DispatchContextV1 {
+        schema_version: 1,
+        intent: super::super::tests::intent(),
+        slot: slot.clone(),
+        tickets: Default::default(),
+        spec: super::super::dispatch_context::ArmSpec {
+            tool_dir: "/t/ge".into(),
+            study_compat_data: "/s".into(),
+            arm_env: Default::default(),
+            steamapps: "/a".into(),
+            proton_manifest: "/m".into(),
+        },
+    };
+    let error = port.launch(&slot, &context).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("BlockedTransientLauncherRequired")
+    );
+    assert!(!port.unsettled && port.dispatch.is_none());
 }
