@@ -77,6 +77,7 @@ pub(super) struct ResearchCoordinator {
     terminal_probe_attempted: bool,
     mutable_action_present: bool,
     host_factory: Option<HostFactory>,
+    settlement_socket: Option<PathBuf>,
     driver: Option<drive::DriverState>,
     #[cfg(feature = "wayland-probe")]
     desktop_idle: (
@@ -120,6 +121,7 @@ impl ResearchCoordinator {
             terminal_probe_attempted: false,
             mutable_action_present,
             host_factory: None,
+            settlement_socket: None,
             driver: None,
             #[cfg(feature = "wayland-probe")]
             desktop_idle: (

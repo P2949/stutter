@@ -160,13 +160,6 @@ impl Driver {
         self.cancel = true;
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the production settlement verifier is not yet qualified"
-        )
-    )]
     pub(crate) fn set_claim_verifier(&mut self, verifier: Box<dyn ClaimSettlementVerifier>) {
         self.claim_verifier = Some(verifier);
     }

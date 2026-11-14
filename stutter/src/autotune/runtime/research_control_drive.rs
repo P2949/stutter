@@ -1,12 +1,16 @@
 //! Resident attempt driving. The coordinator owns one `Driver` per admitted campaign and advances
 //! the durable lease phases only from what the driver observed. Without a host factory (tests,
 //! unqualified builds) no attempt is ever scheduled.
-use std::fs::File;
+use std::{fs::File, path::PathBuf};
 
 use super::{ActiveCampaign, ResearchCoordinator, TerminalCampaign};
-use crate::autotune::research::{
-    ResearchIntentV1, ResearchJournal, ResearchPhase,
-    driver::{AttemptHost, Driver, Step, build_schedule},
+use crate::{
+    autotune::research::{
+        ResearchIntentV1, ResearchJournal, ResearchPhase,
+        driver::{AttemptHost, Driver, Step, build_schedule},
+        settlement::ProductionSettlementVerifier,
+    },
+    daemon::privilege::UnixSocketPrivilegedActionService,
 };
 
 pub(in crate::autotune::runtime) type HostFactory =
@@ -28,6 +32,11 @@ fn create_dir(parent: &File, name: &str) -> anyhow::Result<File> {
 }
 
 impl ResearchCoordinator {
+    /// Worker socket used only for the read-only outstanding-token witness at claim settlement.
+    pub(in crate::autotune::runtime) fn set_settlement_socket(&mut self, socket: Option<PathBuf>) {
+        self.settlement_socket = socket;
+    }
+
     pub(in crate::autotune::runtime) fn set_host_factory(&mut self, factory: Option<HostFactory>) {
         self.host_factory = factory;
     }
@@ -59,8 +68,17 @@ impl ResearchCoordinator {
         let schedule = build_schedule(intent)?;
         let len = schedule.len();
         let journal = ResearchJournal::open(journal_dir.into(), intent.uid, schedule)?;
+        let mut driver = Driver::new(journal, intent.clone(), dispatch, evidence, len);
+        if let Some(socket) = self.settlement_socket.clone() {
+            driver.set_claim_verifier(Box::new(ProductionSettlementVerifier::new(
+                "/proc".into(),
+                Some(Box::new(move || {
+                    UnixSocketPrivilegedActionService::new(socket.clone()).outstanding_tokens()
+                })),
+            )));
+        }
         self.driver = Some(DriverState {
-            driver: Driver::new(journal, intent.clone(), dispatch, evidence, len),
+            driver,
             host: factory(),
             campaign,
         });

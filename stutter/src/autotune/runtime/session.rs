@@ -60,6 +60,15 @@ pub async fn run_autotune_controller_session(
         coordinator.set_host_factory(Some(Box::new(|| {
             Box::new(super::research_control::UnqualifiedSteamHost)
         })));
+        coordinator.set_settlement_socket(
+            runtime
+                .config()
+                .daemon_config
+                .autotune
+                .privileged_worker_socket
+                .clone()
+                .or_else(|| crate::daemon::privilege::default_privileged_worker_socket_path().ok()),
+        );
     }
     let mut research_work: Option<tokio::task::JoinHandle<_>> = None;
     #[cfg(feature = "wayland-probe")]

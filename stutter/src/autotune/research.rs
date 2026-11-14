@@ -107,13 +107,6 @@ pub(crate) mod report_store;
 )]
 pub(crate) mod scheduler;
 mod session_env;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "attached to the production driver once a worker witness exists"
-    )
-)]
 pub(crate) mod settlement;
 #[cfg_attr(
     not(test),
