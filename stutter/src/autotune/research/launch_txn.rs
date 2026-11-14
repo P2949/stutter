@@ -61,9 +61,15 @@ pub fn run(
     persist(LaunchPhase::Prepared)?;
     persist(LaunchPhase::Sent)?;
     match port.send_start(request) {
-        Ok(()) => reconcile(port, &request.unit_name, false),
+        // Once the request may have been sent, a failed observation is ambiguity, never a plain
+        // error the caller could mistake for a refusal.
+        Ok(()) => Ok(reconcile(port, &request.unit_name, false).unwrap_or(
+            LaunchOutcome::Ambiguous("the unit could not be observed after the request was sent"),
+        )),
         Err(SendError::Rejected) => Ok(LaunchOutcome::NeverStarted),
-        Err(SendError::AckLost) => reconcile(port, &request.unit_name, true),
+        Err(SendError::AckLost) => Ok(reconcile(port, &request.unit_name, true).unwrap_or(
+            LaunchOutcome::Ambiguous("the unit could not be observed after a lost acknowledgement"),
+        )),
     }
 }
 
@@ -108,6 +114,7 @@ mod tests {
         states: VecDeque<UnitState>,
         sends: u32,
         proof: bool,
+        fail_state: bool,
     }
 
     impl UserManagerPort for Fake {
@@ -116,6 +123,7 @@ mod tests {
             self.send.take().unwrap_or(Err(SendError::AckLost))
         }
         fn unit_state(&mut self, _: &str) -> anyhow::Result<UnitState> {
+            anyhow::ensure!(!self.fail_state, "bus unavailable");
             Ok(self.states.pop_front().unwrap_or(UnitState::Absent))
         }
         fn proves_never_executable(&mut self, _: &str) -> anyhow::Result<bool> {
@@ -139,6 +147,7 @@ mod tests {
             states: states.iter().copied().collect(),
             sends: 0,
             proof: false,
+            fail_state: false,
         };
         let mut phases = Vec::new();
         let outcome = run(&mut port, &request(), &mut |p| {
@@ -196,6 +205,7 @@ mod tests {
             states: VecDeque::new(),
             sends: 0,
             proof: true,
+            fail_state: false,
         };
         let outcome = run(&mut port, &request(), &mut |_| Ok(())).unwrap();
         assert_eq!(outcome, LaunchOutcome::NeverStarted);
@@ -211,11 +221,28 @@ mod tests {
             states: VecDeque::new(),
             sends: 0,
             proof: false,
+            fail_state: false,
         };
         let result = run(&mut port, &request(), &mut |_| {
             Err(anyhow::anyhow!("disk full"))
         });
         assert!(result.is_err());
         assert_eq!(port.sends, 0);
+    }
+
+    #[test]
+    fn an_observation_failure_after_sending_is_ambiguous_not_an_error() {
+        for send in [Ok(()), Err(SendError::AckLost)] {
+            let mut port = Fake {
+                send: Some(send),
+                states: VecDeque::new(),
+                sends: 0,
+                proof: false,
+                fail_state: true,
+            };
+            let outcome = run(&mut port, &request(), &mut |_| Ok(())).unwrap();
+            assert!(matches!(outcome, LaunchOutcome::Ambiguous(_)));
+            assert_eq!(port.sends, 1);
+        }
     }
 }

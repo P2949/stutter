@@ -332,3 +332,140 @@ fn exited_first_steam_verb_never_completes_an_attempt_with_a_live_second_verb() 
     std::fs::remove_dir_all(proc.path().join("123")).unwrap();
     assert_eq!(port.state(), GameState::Starting);
 }
+
+mod transient {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicU32, Ordering},
+    };
+
+    use super::*;
+    use crate::autotune::research::{
+        launch_txn::{SendError, UnitState},
+        user_launcher::UserLaunchRequest,
+    };
+
+    struct Manager {
+        send: Option<Result<(), SendError>>,
+        states: Vec<UnitState>,
+        sends: Arc<AtomicU32>,
+    }
+
+    impl UserManagerPort for Manager {
+        fn send_start(&mut self, _: &UserLaunchRequest) -> Result<(), SendError> {
+            self.sends.fetch_add(1, Ordering::SeqCst);
+            self.send.take().unwrap_or(Err(SendError::AckLost))
+        }
+        fn unit_state(&mut self, _: &str) -> anyhow::Result<UnitState> {
+            Ok(if self.states.is_empty() {
+                UnitState::Absent
+            } else {
+                self.states.remove(0)
+            })
+        }
+        fn proves_never_executable(&mut self, _: &str) -> anyhow::Result<bool> {
+            Ok(false)
+        }
+    }
+
+    fn fixture(
+        send: Result<(), SendError>,
+        states: Vec<UnitState>,
+        prepare_ok: bool,
+    ) -> (
+        ProductionSteamPort<Probe>,
+        File,
+        AttemptSlot,
+        DispatchContextV1,
+        Arc<AtomicU32>,
+        tempfile::TempDir,
+    ) {
+        let sends = Arc::new(AtomicU32::new(0));
+        let launcher = TransientLauncher {
+            manager: Box::new(Manager {
+                send: Some(send),
+                states,
+                sends: sends.clone(),
+            }),
+            prepare: Box::new(move |_, _| {
+                anyhow::ensure!(prepare_ok, "cannot prepare the request");
+                Ok(UserLaunchRequest {
+                    unit_name: "stutter-research-0123456789abcdef-0000.service".into(),
+                    body: Vec::new(),
+                })
+            }),
+        };
+        let port = ProductionSteamPort::new(
+            "/s".into(),
+            "/study".into(),
+            "/a".into(),
+            "/m".into(),
+            super::super::super::tests::intent().steam_client,
+            vec![],
+            Probe,
+        )
+        .with_transient_launcher(launcher);
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(
+            tmp.path(),
+            std::os::unix::fs::PermissionsExt::from_mode(0o700),
+        )
+        .unwrap();
+        let dir = File::from(crate::syscall::open_dir_no_symlinks(tmp.path()).unwrap());
+        let slot = AttemptSlot {
+            study_sha256: "e".repeat(64),
+            context_sha256: "f".repeat(64),
+            index: 0,
+            arm: super::super::super::ProtonSource::Ge,
+        };
+        let context = DispatchContextV1 {
+            schema_version: 1,
+            intent: super::super::super::tests::intent(),
+            slot: slot.clone(),
+            tickets: Default::default(),
+            spec: super::super::super::dispatch_context::ArmSpec {
+                tool_dir: "/t/ge".into(),
+                study_compat_data: "/s".into(),
+                arm_env: Default::default(),
+                steamapps: "/a".into(),
+                proton_manifest: "/m".into(),
+            },
+        };
+        (port, dir, slot, context, sends, tmp)
+    }
+
+    #[test]
+    fn a_running_unit_leaves_the_port_unsettled_and_never_completes_by_itself() {
+        let (mut port, dir, slot, context, sends, _tmp) =
+            fixture(Ok(()), vec![UnitState::Active], true);
+        port.start_unit(dir, &slot, &context).unwrap();
+        assert_eq!(sends.load(Ordering::SeqCst), 1);
+        assert!(port.unsettled && port.dispatch.is_some() && port.child.is_none());
+        // Detached game-tree settlement is unverified, so stop refuses.
+        assert!(port.stop().is_err());
+    }
+
+    #[test]
+    fn a_verified_refusal_clears_the_port_but_ambiguity_never_does() {
+        let (mut port, dir, slot, context, _, _tmp) =
+            fixture(Err(SendError::Rejected), vec![], true);
+        let error = port.start_unit(dir, &slot, &context).unwrap_err();
+        assert!(error.downcast_ref::<LaunchUnresolved>().is_none());
+        assert!(!port.unsettled && port.dispatch.is_none());
+
+        let (mut port, dir, slot, context, sends, _tmp) =
+            fixture(Err(SendError::AckLost), vec![], true);
+        let error = port.start_unit(dir, &slot, &context).unwrap_err();
+        assert!(error.downcast_ref::<LaunchUnresolved>().is_some());
+        assert_eq!(sends.load(Ordering::SeqCst), 1);
+        assert!(port.unsettled && port.dispatch.is_some());
+    }
+
+    #[test]
+    fn a_preparation_failure_sends_nothing_and_leaves_no_trace() {
+        let (mut port, dir, slot, context, sends, _tmp) = fixture(Ok(()), vec![], false);
+        assert!(port.start_unit(dir, &slot, &context).is_err());
+        assert_eq!(sends.load(Ordering::SeqCst), 0);
+        assert!(!port.unsettled && port.dispatch.is_none());
+    }
+}

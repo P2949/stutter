@@ -17,9 +17,23 @@ use std::{
 use super::{
     AttemptSlot, SteamClientIdentity, SteamProcessIdentity,
     dispatch_context::{DispatchContextV1, inspect_dispatcher_start},
+    driver::LaunchUnresolved,
     launch_ticket::SteamVerb,
+    launch_txn::UserManagerPort,
     steam_host::{GameState, SteamPort},
+    transient_launch::launch_through_manager,
+    user_launcher::UserLaunchRequest,
 };
+
+type PrepareRequest =
+    Box<dyn FnMut(&AttemptSlot, &DispatchContextV1) -> anyhow::Result<UserLaunchRequest> + Send>;
+
+/// Starts an attempt through the authenticated user manager instead of spawning Steam directly.
+/// Both parts are supplied by the caller: the manager port and the fixed-request preparer.
+pub struct TransientLauncher {
+    pub manager: Box<dyn UserManagerPort + Send>,
+    pub prepare: PrepareRequest,
+}
 
 const APP_ID: &str = "1091500";
 const MAX_PROC_ENTRIES: usize = 65_536;
@@ -192,6 +206,7 @@ pub struct ProductionSteamPort<R: ResultProbe> {
     child: Option<Child>,
     dispatch: Option<(File, DispatchContextV1)>,
     unsettled: bool,
+    transient: Option<TransientLauncher>,
 }
 
 impl<R: ResultProbe> ProductionSteamPort<R> {
@@ -217,7 +232,38 @@ impl<R: ResultProbe> ProductionSteamPort<R> {
             child: None,
             dispatch: None,
             unsettled: false,
+            transient: None,
         }
+    }
+
+    /// Launch through the user manager rather than a direct child spawn.
+    pub fn with_transient_launcher(mut self, launcher: TransientLauncher) -> Self {
+        self.transient = Some(launcher);
+        self
+    }
+
+    /// The manager-owned launch. Once a request may have been sent the port stays unsettled, and
+    /// only a verified refusal (nothing sent, nothing pending) clears it again.
+    fn start_unit(
+        &mut self,
+        dispatch: File,
+        slot: &AttemptSlot,
+        context: &DispatchContextV1,
+    ) -> anyhow::Result<()> {
+        let launcher = self
+            .transient
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("no transient launcher configured"))?;
+        // Nothing has been sent yet, so a preparation failure is a plain refusal.
+        let request = (launcher.prepare)(slot, context)?;
+        self.unsettled = true;
+        self.dispatch = Some((dispatch.try_clone()?, context.clone()));
+        let result = launch_through_manager(&mut *launcher.manager, &dispatch, &request);
+        if matches!(&result, Err(error) if error.downcast_ref::<LaunchUnresolved>().is_none()) {
+            self.unsettled = false;
+            self.dispatch = None;
+        }
+        result
     }
 
     fn idle_is_fresh(&self) -> bool {
@@ -361,6 +407,9 @@ impl<R: ResultProbe> SteamPort for ProductionSteamPort<R> {
             self.inherited_session_matches_steam() && self.idle_is_fresh(),
             "BlockedSteamSessionEnvironment"
         );
+        if self.transient.is_some() {
+            return self.start_unit(dispatch, slot, context);
+        }
         let argv = launch_argv();
         let child = Command::new(&argv[0]).args(&argv[1..]).spawn()?;
         self.unsettled = true;

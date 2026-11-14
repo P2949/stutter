@@ -36,7 +36,13 @@ pub fn start_attempt(
     let outcome = run(port, request, &mut |phase| {
         record_phase(attempt_dir, phase, &unit)
     })?;
-    record_outcome(attempt_dir, &unit, &outcome)?;
+    // The request was already sent: if the outcome cannot be made durable, the effect stays
+    // unresolved rather than becoming a plain error a caller could read as a refusal.
+    if record_outcome(attempt_dir, &unit, &outcome).is_err() {
+        return Ok(LaunchDecision::NeedsRecovery(
+            "the launch outcome could not be recorded",
+        ));
+    }
     Ok(match outcome {
         LaunchOutcome::Running => LaunchDecision::Proceed,
         LaunchOutcome::NeverStarted => LaunchDecision::Refused,
@@ -87,8 +93,8 @@ mod tests {
     impl UserManagerPort for Fake {
         fn send_start(&mut self, _: &UserLaunchRequest) -> Result<(), SendError> {
             // The Sent record must already be durable at the moment the request leaves.
-            let record = read_launch_record(&self.dir, crate::syscall::geteuid()).unwrap();
-            *self.sent_when.borrow_mut() = Some(record.sent);
+            let record = read_launch_record(&self.dir, crate::syscall::geteuid());
+            *self.sent_when.borrow_mut() = record.ok().map(|record| record.sent);
             self.send.take().unwrap_or(Err(SendError::AckLost))
         }
         fn unit_state(&mut self, _: &str) -> anyhow::Result<UnitState> {
@@ -163,6 +169,28 @@ mod tests {
     fn a_finished_unit_still_needs_the_game_tree_settled() {
         let (decision, ..) = attempt(Err(SendError::AckLost), &[UnitState::Finished]);
         assert_eq!(decision, LaunchDecision::NeedsSettlement);
+    }
+
+    #[test]
+    fn an_unrecordable_outcome_after_sending_stays_unresolved() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(
+            tmp.path(),
+            std::os::unix::fs::PermissionsExt::from_mode(0o700),
+        )
+        .unwrap();
+        let dir = File::from(crate::syscall::open_dir_no_symlinks(tmp.path()).unwrap());
+        // An existing outcome file makes the write-once outcome record fail after the send.
+        crate::autotune::research::report_store::write_new(&dir, "launch-outcome-v1.json", b"x")
+            .unwrap();
+        let mut port = Fake {
+            send: Some(Ok(())),
+            states: [UnitState::Active].into(),
+            sent_when: Rc::new(RefCell::new(None)),
+            dir: dir.try_clone().unwrap(),
+        };
+        let decision = start_attempt(&mut port, &dir, &request()).unwrap();
+        assert!(matches!(decision, LaunchDecision::NeedsRecovery(_)));
     }
 
     fn through(send: Result<(), SendError>, states: &[UnitState]) -> anyhow::Result<()> {
