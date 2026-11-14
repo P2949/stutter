@@ -56,6 +56,14 @@ pub(crate) mod driver;
     )
 )]
 pub(crate) mod features;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "composed into the production host once the live launch is qualified"
+    )
+)]
+pub(crate) mod game_facts;
 pub(super) mod host;
 #[cfg_attr(
     not(test),
