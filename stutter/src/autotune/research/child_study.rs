@@ -38,6 +38,9 @@ pub struct ChildStudy {
     pub stage: Stage,
     /// Attempts this study needs at minimum; below this it cannot reach a verdict.
     pub min_attempts: u32,
+    /// Digests of the studies that must yield valid evidence first; bound into `study_sha256` so
+    /// a dependent study cannot be re-pointed at different predecessors.
+    pub depends_on: Vec<String>,
     /// Digest binding the parent intent, profile, stage and requirement. Never reused.
     pub study_sha256: String,
 }
@@ -52,17 +55,20 @@ fn study(
     profile: Profile,
     stage: Stage,
     min_attempts: u32,
+    depends_on: Vec<String>,
 ) -> anyhow::Result<ChildStudy> {
     let study_sha256 = stutter_core::hash::sha256_hex(&serde_json::to_vec(&(
         intent_sha256,
         profile,
         stage,
         min_attempts,
+        &depends_on,
     ))?);
     Ok(ChildStudy {
         profile,
         stage,
         min_attempts,
+        depends_on,
         study_sha256,
     })
 }
@@ -73,12 +79,19 @@ pub fn plan(intent: &ResearchIntentV1) -> anyhow::Result<Vec<ChildStudy>> {
     let digest = intent.digest()?;
     let tools = u32::try_from(intent.tools.len())?;
     anyhow::ensure!(tools >= 2, "a comparison needs at least two eligible tools");
-    let mut studies = Vec::new();
+    let mut studies: Vec<ChildStudy> = Vec::new();
     for profile in [Profile::Cpu, Profile::Gpu] {
-        studies.push(study(&digest, profile, Stage::Screen, tools)?);
+        studies.push(study(&digest, profile, Stage::Screen, tools, Vec::new())?);
     }
     for profile in [Profile::Cpu, Profile::Gpu] {
-        studies.push(study(&digest, profile, Stage::Confirm, CONFIRM_ATTEMPTS)?);
+        let deps = dependency_digests(&studies, profile, Stage::Confirm);
+        studies.push(study(
+            &digest,
+            profile,
+            Stage::Confirm,
+            CONFIRM_ATTEMPTS,
+            deps,
+        )?);
     }
     // One study per authorized action; which one actually runs is decided from the qualified
     // diagnosis at run time, never by enum order here.
@@ -86,22 +99,26 @@ pub fn plan(intent: &ResearchIntentV1) -> anyhow::Result<Vec<ChildStudy>> {
     actions.sort_unstable();
     actions.dedup();
     for action in actions {
+        let deps = dependency_digests(&studies, Profile::Long, Stage::Action(action));
         studies.push(study(
             &digest,
             Profile::Long,
             Stage::Action(action),
             ACTION_ATTEMPTS,
+            deps,
         )?);
     }
     let mut factors = intent.factors.clone();
     factors.sort_unstable();
     factors.dedup();
     for factor in factors {
+        let deps = dependency_digests(&studies, Profile::Cpu, Stage::Feature(factor));
         studies.push(study(
             &digest,
             Profile::Cpu,
             Stage::Feature(factor),
             FEATURE_ATTEMPTS,
+            deps,
         )?);
     }
     Ok(studies)
@@ -117,9 +134,22 @@ pub struct Funnel<'a> {
 /// Confirmation needs its profile's screen; the action and feature studies need the CPU screen
 /// and confirmation. A budget alone never grants a stage whose prerequisites are not admitted.
 fn prerequisites(study: &ChildStudy) -> Vec<(Profile, Stage)> {
-    match study.stage {
+    requires(study.profile, study.stage)
+}
+
+/// Digests of the already-built prerequisite studies, in a fixed order.
+fn dependency_digests(studies: &[ChildStudy], profile: Profile, stage: Stage) -> Vec<String> {
+    requires(profile, stage)
+        .iter()
+        .filter_map(|(p, s)| studies.iter().find(|c| c.profile == *p && c.stage == *s))
+        .map(|c| c.study_sha256.clone())
+        .collect()
+}
+
+fn requires(profile: Profile, stage: Stage) -> Vec<(Profile, Stage)> {
+    match stage {
         Stage::Screen => Vec::new(),
-        Stage::Confirm => vec![(study.profile, Stage::Screen)],
+        Stage::Confirm => vec![(profile, Stage::Screen)],
         Stage::Action(_) | Stage::Feature(_) => {
             vec![
                 (Profile::Cpu, Stage::Screen),
@@ -247,6 +277,53 @@ mod tests {
                 .any(|s| matches!(s.stage, Stage::Feature(_)))
         );
         assert_eq!(fit_budget(&studies, 0).runnable.len(), 0);
+    }
+
+    #[test]
+    fn dependent_studies_are_bound_to_their_predecessors_digests() {
+        let mut intent = intent();
+        intent.actions = vec![ResearchAction::CpuAffinityProfile];
+        intent.factors = vec![ResearchFactor::NtSync];
+        let studies = plan(&intent).unwrap();
+        let find = |profile, stage| {
+            studies
+                .iter()
+                .find(|s| s.profile == profile && s.stage == stage)
+                .unwrap()
+        };
+        let cpu_screen = find(Profile::Cpu, Stage::Screen);
+        let cpu_confirm = find(Profile::Cpu, Stage::Confirm);
+        assert!(cpu_screen.depends_on.is_empty());
+        assert_eq!(cpu_confirm.depends_on, [cpu_screen.study_sha256.clone()]);
+        let action = studies
+            .iter()
+            .find(|s| matches!(s.stage, Stage::Action(_)))
+            .unwrap();
+        assert_eq!(
+            action.depends_on,
+            [
+                cpu_screen.study_sha256.clone(),
+                cpu_confirm.study_sha256.clone()
+            ]
+        );
+        // The digest covers the dependency list, so re-pointing a study changes its identity.
+        let rebound = study(
+            "x",
+            action.profile,
+            action.stage,
+            action.min_attempts,
+            Vec::new(),
+        )
+        .unwrap();
+        let original = study(
+            "x",
+            action.profile,
+            action.stage,
+            action.min_attempts,
+            action.depends_on.clone(),
+        )
+        .unwrap();
+        assert_ne!(rebound.study_sha256, original.study_sha256);
     }
 
     #[test]
