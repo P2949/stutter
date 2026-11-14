@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{AttemptSlot, ResearchIntentV1, ResearchTool, SteamProcessIdentity};
 
+const REVOKED_MARKER: &[u8] = b"revoked-v1";
 const MAX_TICKET_BYTES: u64 = 8 * 1024;
 const MAX_TICKET_LIFETIME_SECONDS: u64 = 5 * 60;
 
@@ -432,6 +433,12 @@ pub(super) fn retire_tickets<T>(
         let marker_name = format!("used-{id}");
         let ticket_bytes = super::report_store::read_private(&dir, &ticket_name, uid)?;
         let marker = super::report_store::read_private(&dir, &marker_name, uid)?;
+        // A previous retirement (possibly torn by a crash) already blocked this ticket. A
+        // non-empty prefix of the revocation text cannot be a dispatcher claim, whose marker is
+        // a hex digest; an empty marker stays ambiguous and is refused below.
+        if !marker.is_empty() && REVOKED_MARKER.starts_with(&marker) {
+            continue;
+        }
         anyhow::ensure!(
             ticket_bytes.len() as u64 <= MAX_TICKET_BYTES
                 && marker == stutter_core::hash::sha256_hex(&ticket_bytes).as_bytes(),
@@ -453,7 +460,7 @@ pub(super) fn retire_tickets<T>(
         // The dispatcher uses the same O_EXCL marker. A concurrent claim therefore either
         // loses to revocation or makes this operation fail without sealing the attempt.
         let mut marker = crate::syscall::create_new_at(dir.as_fd(), &format!("used-{id}"))?;
-        marker.write_all(b"revoked-v1")?;
+        marker.write_all(REVOKED_MARKER)?;
         marker.sync_all()?;
     }
     dir.sync_all()?;

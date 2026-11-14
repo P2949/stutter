@@ -299,3 +299,24 @@ fn unqualified_or_destructive_proton_verbs_are_rejected() {
     }
     assert!(SteamVerb::from_steam_argument("wait_for_exit_and_run").is_none());
 }
+
+#[test]
+fn repeated_retirement_is_idempotent_and_survives_a_torn_revocation_marker() {
+    let (dir, intent, slot) = fixture();
+    let ticket = issue_launch_ticket(fd(&dir), &intent, &slot, SteamVerb::Run, 11, 60).unwrap();
+    let ids = [ticket.ticket_id.clone()];
+    retire_unclaimed_tickets(fd(&dir), intent.uid, &ids).unwrap();
+    retire_unclaimed_tickets(fd(&dir), intent.uid, &ids).unwrap();
+    let marker = dir.path().join(format!("used-{}", ticket.ticket_id));
+    assert_eq!(std::fs::read(&marker).unwrap(), b"revoked-v1");
+
+    // Crash after the O_EXCL create and a partial write: still ours, still blocking.
+    std::fs::write(&marker, b"revok").unwrap();
+    retire_unclaimed_tickets(fd(&dir), intent.uid, &ids).unwrap();
+    let expected = binding(&intent, &slot, SteamVerb::Run).unwrap();
+    assert!(consume_launch_ticket(fd(&dir), &ticket.ticket_id, &expected, 12).is_err());
+
+    // A created-but-empty marker may belong to a live dispatcher claim: refused, not adopted.
+    std::fs::write(&marker, b"").unwrap();
+    assert!(retire_unclaimed_tickets(fd(&dir), intent.uid, &ids).is_err());
+}
