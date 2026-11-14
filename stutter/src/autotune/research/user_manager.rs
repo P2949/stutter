@@ -12,8 +12,10 @@ use std::{
 
 use stutter_core::ids::Pid;
 
-use super::{ResearchIntentV1, user_launcher::VerifiedSessionEnvironment};
-use crate::integrations::dbus::{DbusClient, Value, Writer, connect_stream};
+use super::{
+    ResearchIntentV1, user_launcher::VerifiedSessionEnvironment, user_manager_port::BusFault,
+};
+use crate::integrations::dbus::{DbusClient, DbusError, Value, Writer, connect_stream};
 
 const MAX_PROC_BYTES: u64 = 16 * 1024;
 const SYSTEMD_DESTINATION: &str = "org.freedesktop.systemd1";
@@ -394,6 +396,34 @@ impl VerifiedUserManager {
 
     pub fn identity(&self) -> &ManagerIdentity {
         &self.identity
+    }
+
+    /// One bounded call to the authenticated systemd manager. The bus, session and manager
+    /// identity are revalidated first, and the reply must come from the manager's own unique
+    /// name, so a bus-generated or foreign error is never mistaken for the manager's answer.
+    pub(super) fn call_manager(
+        &mut self,
+        path: &str,
+        interface: &str,
+        member: &str,
+        signature: &str,
+        body: &[u8],
+    ) -> Result<Vec<Value>, BusFault> {
+        self.revalidate().map_err(|_| BusFault::NotSent)?;
+        let sender = self.identity.unique_name.clone();
+        match self.client.call_with_sender(
+            SYSTEMD_DESTINATION,
+            path,
+            interface,
+            member,
+            signature,
+            body,
+            Some(&sender),
+        ) {
+            Ok(values) => Ok(values),
+            Err(DbusError::Remote(error)) => Err(BusFault::Remote(error)),
+            Err(_) => Err(BusFault::Uncertain),
+        }
     }
 
     pub fn is_fresh(&self) -> bool {

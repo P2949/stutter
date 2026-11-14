@@ -181,6 +181,14 @@ pub(crate) mod user_launcher;
     )
 )]
 pub(crate) mod user_manager;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the physical launch stays gated by UnqualifiedSteamHost until qualification"
+    )
+)]
+pub(crate) mod user_manager_port;
 mod vdf;
 pub use journal::{AttemptOutcome, AttemptRecord, AttemptSlot, ResearchJournal};
 pub use lease::{CampaignBlockReason, CampaignFacts, CampaignLease};
