@@ -134,7 +134,7 @@ fn finished_schedule_is_blocked_until_verified(report_conflict: bool) {
     );
     coordinator.set_study_dir(Some(study.path().to_path_buf()));
     let handle = script.clone();
-    coordinator.set_host_factory(Some(Box::new(move || Box::new(Fake(handle.clone())))));
+    coordinator.set_host_factory(Some(Box::new(move |_| Ok(Box::new(Fake(handle.clone()))))));
     let reply = send(
         &mut coordinator,
         ResearchRequest::Submit {
@@ -238,7 +238,7 @@ fn active_budget_exhaustion_preserves_a_partial_report() {
     );
     coordinator.set_study_dir(Some(study.path().to_path_buf()));
     let handle = script.clone();
-    coordinator.set_host_factory(Some(Box::new(move || Box::new(Fake(handle.clone())))));
+    coordinator.set_host_factory(Some(Box::new(move |_| Ok(Box::new(Fake(handle.clone()))))));
     let reply = send(
         &mut coordinator,
         ResearchRequest::Submit {
@@ -291,7 +291,7 @@ fn cancelling_a_driven_attempt_aborts_the_host_and_settles_aborted() {
     );
     coordinator.set_study_dir(Some(study.path().to_path_buf()));
     let handle = script.clone();
-    coordinator.set_host_factory(Some(Box::new(move || Box::new(Fake(handle.clone())))));
+    coordinator.set_host_factory(Some(Box::new(move |_| Ok(Box::new(Fake(handle.clone()))))));
     send(
         &mut coordinator,
         ResearchRequest::Submit {
@@ -348,7 +348,7 @@ fn failed_settlement_retains_the_campaign_and_mutation_slot() {
             ResearchCoordinator::new(Some(campaign.path().to_path_buf()), Some(facts), "Ready");
         coordinator.set_study_dir(Some(study.path().to_path_buf()));
         let handle = script.clone();
-        coordinator.set_host_factory(Some(Box::new(move || Box::new(Fake(handle.clone())))));
+        coordinator.set_host_factory(Some(Box::new(move |_| Ok(Box::new(Fake(handle.clone()))))));
         send(
             &mut coordinator,
             ResearchRequest::Submit {
@@ -407,7 +407,7 @@ fn controller_shutdown_stops_the_attempt_or_reports_unverified_settlement() {
             ResearchCoordinator::new(Some(campaign.path().to_path_buf()), Some(facts), "Ready");
         coordinator.set_study_dir(Some(study.path().to_path_buf()));
         let handle = script.clone();
-        coordinator.set_host_factory(Some(Box::new(move || Box::new(Fake(handle.clone())))));
+        coordinator.set_host_factory(Some(Box::new(move |_| Ok(Box::new(Fake(handle.clone()))))));
         send(
             &mut coordinator,
             ResearchRequest::Submit {
@@ -462,7 +462,7 @@ fn an_unresolved_launch_never_reaches_abort_and_keeps_ownership() {
         ResearchCoordinator::new(Some(campaign.path().to_path_buf()), Some(facts), "Ready");
     coordinator.set_study_dir(Some(study.path().to_path_buf()));
     let handle = script.clone();
-    coordinator.set_host_factory(Some(Box::new(move || Box::new(Fake(handle.clone())))));
+    coordinator.set_host_factory(Some(Box::new(move |_| Ok(Box::new(Fake(handle.clone()))))));
     send(
         &mut coordinator,
         ResearchRequest::Submit {
@@ -488,4 +488,49 @@ fn an_unresolved_launch_never_reaches_abort_and_keeps_ownership() {
     // Shutdown cannot settle it either, and does not abort.
     assert!(coordinator.shutdown_driver(4_001).is_err());
     assert_eq!(script.lock().unwrap().aborts, 0);
+}
+
+#[test]
+fn a_host_that_cannot_be_built_leaves_no_durable_study_state() {
+    let campaign = tempfile::tempdir().unwrap();
+    let study = tempfile::tempdir().unwrap();
+    for dir in [&campaign, &study] {
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    let meta = std::fs::metadata(study.path()).unwrap();
+    let root = crate::autotune::research::StudyRootIdentity {
+        device: std::os::unix::fs::MetadataExt::dev(&meta),
+        inode: std::os::unix::fs::MetadataExt::ino(&meta),
+    };
+    let (mut intent, mut facts) = fixture();
+    intent.study_root = Some(root);
+    facts.study_root = Some(root);
+    intent.tools.push(ResearchTool {
+        source: ProtonSource::ValveStable,
+        identity_sha256: "b".repeat(64),
+    });
+    facts.tools = intent.tools.clone();
+    intent.max_attempts = 4;
+    let mut coordinator =
+        ResearchCoordinator::new(Some(campaign.path().to_path_buf()), Some(facts), "Ready");
+    coordinator.set_study_dir(Some(study.path().to_path_buf()));
+    let seen = Arc::new(Mutex::new(None));
+    let record = seen.clone();
+    coordinator.set_host_factory(Some(Box::new(move |intent| {
+        // The factory receives the frozen intent it must qualify the host against.
+        *record.lock().unwrap() = Some(intent.build_id);
+        anyhow::bail!("BlockedHostIdentity")
+    })));
+    let build_id = intent.build_id;
+    send(
+        &mut coordinator,
+        ResearchRequest::Submit {
+            intent: Box::new(intent),
+        },
+        100,
+    );
+    assert_eq!(*seen.lock().unwrap(), Some(build_id));
+    assert!(coordinator.driver.is_none());
+    // No campaign directory, journal or intent file was created before the failure.
+    assert_eq!(std::fs::read_dir(study.path()).unwrap().count(), 0);
 }

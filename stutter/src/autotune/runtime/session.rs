@@ -57,8 +57,8 @@ pub async fn run_autotune_controller_session(
                 .research_study_dir
                 .clone(),
         );
-        coordinator.set_host_factory(Some(Box::new(|| {
-            Box::new(super::research_control::UnqualifiedSteamHost)
+        coordinator.set_host_factory(Some(Box::new(|_| {
+            Ok(Box::new(super::research_control::UnqualifiedSteamHost))
         })));
         coordinator.set_settlement_socket(
             runtime

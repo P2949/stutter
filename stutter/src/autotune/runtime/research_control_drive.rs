@@ -13,8 +13,10 @@ use crate::{
     daemon::privilege::UnixSocketPrivilegedActionService,
 };
 
+/// Builds the attempt host from the frozen intent. Failure means the host cannot be qualified, and
+/// nothing durable has been created yet.
 pub(in crate::autotune::runtime) type HostFactory =
-    Box<dyn Fn() -> Box<dyn AttemptHost + Send> + Send>;
+    Box<dyn Fn(&ResearchIntentV1) -> anyhow::Result<Box<dyn AttemptHost + Send>> + Send>;
 
 pub(super) struct DriverState {
     driver: Driver,
@@ -55,6 +57,8 @@ impl ResearchCoordinator {
             .study_dir
             .as_deref()
             .ok_or_else(|| anyhow::anyhow!("no study directory"))?;
+        // Qualify and build the host before any directory, journal or intent file exists.
+        let host = factory(intent)?;
         let study = File::from(crate::syscall::open_dir_no_symlinks(study)?);
         let campaign = create_dir(&study, &digest[..16])?;
         let journal_dir = create_dir(&campaign, "journal")?;
@@ -79,7 +83,7 @@ impl ResearchCoordinator {
         }
         self.driver = Some(DriverState {
             driver,
-            host: factory(),
+            host,
             campaign,
         });
         Ok(())
