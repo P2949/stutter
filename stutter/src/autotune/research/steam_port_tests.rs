@@ -98,6 +98,21 @@ fn only_the_frozen_client_tree_is_exempt_from_the_prefilter() {
     ));
 }
 
+/// A probe whose observer attributes (or no longer attributes) the game on command.
+struct SwitchProbe(std::sync::Arc<std::sync::atomic::AtomicBool>);
+impl ResultProbe for SwitchProbe {
+    fn begin(&mut self, _: crate::autotune::research::ProtonSource) -> anyhow::Result<()> {
+        Ok(())
+    }
+    fn poll(&mut self) -> GameState {
+        if self.0.load(std::sync::atomic::Ordering::SeqCst) {
+            GameState::Running
+        } else {
+            GameState::Starting
+        }
+    }
+}
+
 struct Probe;
 impl ResultProbe for Probe {
     fn begin(&mut self, _: crate::autotune::research::ProtonSource) -> anyhow::Result<()> {
@@ -226,6 +241,7 @@ fn exited_first_steam_verb_never_completes_an_attempt_with_a_live_second_verb() 
         ArmSpec, DispatcherStartV1, arm_attempt, authorize_dispatch,
     };
 
+    let game_attributable = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
     let dir = tempfile::tempdir().unwrap();
     std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
     let attempt = File::from(crate::syscall::open_dir_no_symlinks(dir.path()).unwrap());
@@ -323,13 +339,17 @@ fn exited_first_steam_verb_never_completes_an_attempt_with_a_live_second_verb() 
         "/m".into(),
         intent.steam_client.clone(),
         vec![],
-        Probe,
+        SwitchProbe(game_attributable.clone()),
     );
     port.proc_root = proc.path().to_path_buf();
     port.observe_desktop_idle(Some(Instant::now()));
     port.dispatch = Some((attempt, context));
     assert_eq!(port.state(), GameState::Running);
+    // The live dispatcher exits while the game keeps running: the game stays visible.
     std::fs::remove_dir_all(proc.path().join("123")).unwrap();
+    assert_eq!(port.state(), GameState::Running);
+    // Once the independent observer no longer attributes a game, nothing is Running.
+    game_attributable.store(false, std::sync::atomic::Ordering::SeqCst);
     assert_eq!(port.state(), GameState::Starting);
 }
 

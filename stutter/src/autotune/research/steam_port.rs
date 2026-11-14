@@ -427,7 +427,11 @@ impl<R: ResultProbe> SteamPort for ProductionSteamPort<R> {
         let Some((dir, context)) = self.dispatch.as_ref() else {
             return GameState::IdentityMismatch;
         };
-        let mut active_anchor = false;
+        // Authenticated dispatcher records establish this attempt's launch ancestry. Steam's
+        // dispatcher may exit while the game keeps running, so a recorded dispatcher that is no
+        // longer alive must not hide the game: the independent observer still has to attribute
+        // the exact game process and result before anything completes.
+        let mut recorded = false;
         for verb in [SteamVerb::WaitForExitAndRun, SteamVerb::Run] {
             let path = format!(
                 "/proc/self/fd/{}/dispatcher-{}.json",
@@ -438,13 +442,12 @@ impl<R: ResultProbe> SteamPort for ProductionSteamPort<R> {
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
                 Err(_) => return GameState::IdentityMismatch,
                 Ok(_) => match inspect_dispatcher_start(dir, context, verb, &self.proc_root) {
-                    Ok(Some(_)) => active_anchor = true,
-                    Ok(None) => {}
+                    Ok(Some(_) | None) => recorded = true,
                     Err(_) => return GameState::IdentityMismatch,
                 },
             }
         }
-        if active_anchor {
+        if recorded {
             self.probe.poll()
         } else {
             GameState::Starting

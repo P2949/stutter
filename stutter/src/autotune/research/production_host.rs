@@ -8,7 +8,7 @@
 use std::path::PathBuf;
 
 use super::{
-    ProtonSource, ResearchIntentV1, SteamUpdateStatus,
+    ProtonSource, ResearchIntentV1, ResearchTool, SteamClientIdentity, SteamUpdateStatus,
     driver::AttemptHost,
     launch_txn::{UnitState, UserManagerPort},
     native_probe::NativeResultProbe,
@@ -24,6 +24,36 @@ type FactsFactory = Box<dyn Fn() -> Box<dyn GameFacts + Send> + Send>;
 type UnitObserver = Box<dyn FnMut(&str) -> anyhow::Result<UnitState> + Send>;
 type TokenCount = Box<dyn FnMut() -> anyhow::Result<usize> + Send>;
 type RestoredCheck = Box<dyn FnMut() -> anyhow::Result<bool> + Send>;
+/// The exact installed directory the Steam inventory reports for a frozen tool identity.
+pub type InstalledToolPaths = Box<dyn Fn(&ResearchTool) -> Option<PathBuf> + Send>;
+
+/// Re-discover Steam's inventory and return the running client identity together with a lookup
+/// of each frozen tool's exact installed directory. Production inputs come from here so that a
+/// host is qualified against the same inventory check dispatch repeats at launch.
+#[cfg_attr(
+    test,
+    expect(
+        dead_code,
+        reason = "called by the resident session; unused by the unit tests"
+    )
+)]
+pub fn inventory_lookup(
+    steamapps: &std::path::Path,
+    proton_manifest: &std::path::Path,
+    uid: u32,
+) -> anyhow::Result<(Option<SteamClientIdentity>, InstalledToolPaths)> {
+    let libraries = super::discover_steam_libraries(steamapps, uid)?;
+    let inventory = super::inspect_proton_inventory(proton_manifest, steamapps, &libraries, uid)?;
+    let client = inventory.steam_client.clone();
+    Ok((
+        client,
+        Box::new(move |tool| {
+            inventory
+                .eligible_path(tool)
+                .map(std::path::Path::to_path_buf)
+        }),
+    ))
+}
 
 /// Everything the host needs that the intent alone cannot supply. Each is produced by an
 /// independent source (Steam inventory, the user manager, procfs, the worker's read-only query).
@@ -35,6 +65,9 @@ pub struct ProductionHostInputs {
     pub proc_root: PathBuf,
     pub tools: Vec<(ProtonSource, PathBuf)>,
     pub installation: CyberpunkInstallation,
+    /// The Steam client the inventory observed, and the inventory's exact path per frozen tool.
+    pub observed_steam_client: Option<SteamClientIdentity>,
+    pub installed_tool_path: InstalledToolPaths,
     pub results_dir: PathBuf,
     /// Builds an independent game observer; called once for the native source and once for the
     /// process-tree witness so neither shares state with the other.
@@ -62,13 +95,25 @@ fn qualify(intent: &ResearchIntentV1, inputs: &ProductionHostInputs) -> anyhow::
             && installation.manifest_update_status == SteamUpdateStatus::NoPendingUpdateIndicated,
         "BlockedHostIdentity: entitlement or update state is not frozen"
     );
+    anyhow::ensure!(
+        inputs.observed_steam_client.as_ref() == Some(&intent.steam_client)
+            && intent.steam_client.process.is_some(),
+        "BlockedHostIdentity: the running Steam client differs from the frozen identity"
+    );
     for tool in &intent.tools {
+        let supplied = inputs
+            .tools
+            .iter()
+            .find(|(source, _)| *source == tool.source)
+            .map(|(_, path)| path)
+            .ok_or_else(|| {
+                anyhow::anyhow!("BlockedHostIdentity: a frozen tool has no installation")
+            })?;
+        // The exact frozen identity must live at exactly the supplied directory; a swapped or
+        // drifted mapping is refused here and again at dispatch.
         anyhow::ensure!(
-            inputs
-                .tools
-                .iter()
-                .any(|(source, _)| *source == tool.source),
-            "BlockedHostIdentity: a frozen tool has no verified installation"
+            (inputs.installed_tool_path)(tool).as_ref() == Some(supplied),
+            "BlockedHostIdentity: an installed tool differs from its frozen identity or location"
         );
     }
     anyhow::ensure!(
@@ -96,6 +141,8 @@ pub fn build_production_host(
         installation,
         results_dir,
         facts,
+        observed_steam_client: _,
+        installed_tool_path: _,
         manager,
         prepare,
         unit_state,
@@ -164,21 +211,40 @@ mod tests {
         let mut intent = crate::autotune::research::tests::intent();
         intent.uid = crate::syscall::geteuid();
         intent.game_executable_sha256 = "a".repeat(64);
+        intent.tools.push(ResearchTool {
+            source: ProtonSource::ValveStable,
+            identity_sha256: "b".repeat(64),
+        });
         intent
     }
 
     fn inputs(intent: &ResearchIntentV1) -> ProductionHostInputs {
+        let paths: Vec<(ResearchTool, PathBuf)> = intent
+            .tools
+            .iter()
+            .enumerate()
+            .map(|(index, tool)| (tool.clone(), PathBuf::from(format!("/t/{index}"))))
+            .collect();
+        let installed = paths.clone();
         ProductionHostInputs {
             study_compat_data: "/s".into(),
             study_root: "/study".into(),
             steamapps: "/a".into(),
             proton_manifest: "/m".into(),
             proc_root: "/proc".into(),
-            tools: intent
-                .tools
+            tools: paths
                 .iter()
-                .map(|tool| (tool.source, PathBuf::from("/t")))
+                .map(|(tool, path)| (tool.source, path.clone()))
                 .collect(),
+            observed_steam_client: Some(intent.steam_client.clone()),
+            installed_tool_path: Box::new(move |tool| {
+                installed
+                    .iter()
+                    .find(|(known, _)| {
+                        known.source == tool.source && known.identity_sha256 == tool.identity_sha256
+                    })
+                    .map(|(_, path)| path.clone())
+            }),
             installation: CyberpunkInstallation {
                 app_id: intent.app_id,
                 build_id: intent.build_id,
@@ -211,7 +277,14 @@ mod tests {
     #[test]
     fn any_identity_or_tool_mismatch_refuses_to_build() {
         let base = intent();
-        let cases: [fn(&mut ProductionHostInputs); 7] = [
+        let cases: [fn(&mut ProductionHostInputs); 9] = [
+            // Two valid source labels with swapped installation paths are refused.
+            |i| {
+                let first = i.tools[0].1.clone();
+                i.tools[0].1 = i.tools[1].1.clone();
+                i.tools[1].1 = first;
+            },
+            |i| i.observed_steam_client = None,
             |i| i.installation.build_id += 1,
             |i| i.installation.game_executable_sha256 = Some("b".repeat(64)),
             |i| i.installation.entitlement_verified = false,
