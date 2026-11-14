@@ -294,7 +294,10 @@ mod tests {
         let cpu_screen = find(Profile::Cpu, Stage::Screen);
         let cpu_confirm = find(Profile::Cpu, Stage::Confirm);
         assert!(cpu_screen.depends_on.is_empty());
-        assert_eq!(cpu_confirm.depends_on, [cpu_screen.study_sha256.clone()]);
+        assert_eq!(
+            cpu_confirm.depends_on,
+            std::slice::from_ref(&cpu_screen.study_sha256)
+        );
         let action = studies
             .iter()
             .find(|s| matches!(s.stage, Stage::Action(_)))
