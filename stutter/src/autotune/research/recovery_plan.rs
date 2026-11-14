@@ -40,18 +40,30 @@ pub enum RecoveryDecision {
 
 pub fn decide(f: &RecoveryFacts) -> RecoveryDecision {
     use RecoveryDecision::{ResumeAtBoundary, RetireAndSealFailed, UnsafeToResume};
+    // A claimed ticket implies a durable request; anything else is contradictory evidence.
+    if f.ticket_claimed && !f.launch_requested {
+        return UnsafeToResume("a ticket was claimed without a recorded launch request");
+    }
+    if !f.worker_tokens_zero || !f.transactions_restored {
+        return UnsafeToResume("privileged state is not provably settled");
+    }
     if f.attempt == AttemptState::Sealed {
-        return ResumeAtBoundary;
+        // A sealed record is not proof that nothing is still pending or running.
+        return if f.same_boot
+            && (!f.launch_requested || f.launch_request_settled)
+            && (!f.ticket_claimed || f.process_tree_settled)
+        {
+            ResumeAtBoundary
+        } else {
+            UnsafeToResume("a sealed attempt still has unsettled launch or process state")
+        };
     }
     if !f.same_boot {
         // In-flight timing, tickets and process identity are not comparable across a reboot.
         return UnsafeToResume("boot changed with an unsealed attempt");
     }
-    if !f.worker_tokens_zero || !f.transactions_restored {
-        return UnsafeToResume("privileged state is not provably settled");
-    }
     if f.ticket_claimed {
-        return if f.process_tree_settled {
+        return if f.process_tree_settled && f.launch_request_settled {
             RetireAndSealFailed("InterruptedAfterDispatch")
         } else {
             UnsafeToResume("a claimed launch has no settlement proof")
@@ -89,8 +101,36 @@ mod tests {
         );
         let mut f = settled();
         f.attempt = AttemptState::Sealed;
-        f.process_tree_settled = false;
         assert_eq!(decide(&f), RecoveryDecision::ResumeAtBoundary);
+    }
+
+    #[test]
+    fn a_sealed_attempt_still_needs_independent_settlement_and_consistent_facts() {
+        let sealed = || {
+            let mut f = settled();
+            f.attempt = AttemptState::Sealed;
+            f
+        };
+        let cases: [fn(&mut RecoveryFacts); 6] = [
+            |f| f.process_tree_settled = false,
+            |f| f.launch_request_settled = false,
+            |f| f.worker_tokens_zero = false,
+            |f| f.transactions_restored = false,
+            |f| f.same_boot = false,
+            |f| f.launch_requested = false,
+        ];
+        for mutate in cases {
+            let mut f = sealed();
+            mutate(&mut f);
+            assert!(matches!(decide(&f), RecoveryDecision::UnsafeToResume(_)));
+        }
+    }
+
+    #[test]
+    fn a_claimed_ticket_cannot_retire_before_the_launch_request_is_settled() {
+        let mut f = settled();
+        f.launch_request_settled = false;
+        assert!(matches!(decide(&f), RecoveryDecision::UnsafeToResume(_)));
     }
 
     #[test]

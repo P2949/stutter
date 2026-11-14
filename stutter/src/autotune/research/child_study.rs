@@ -80,11 +80,16 @@ pub fn plan(intent: &ResearchIntentV1) -> anyhow::Result<Vec<ChildStudy>> {
     for profile in [Profile::Cpu, Profile::Gpu] {
         studies.push(study(&digest, profile, Stage::Confirm, CONFIRM_ATTEMPTS)?);
     }
-    if let Some(action) = intent.actions.iter().min() {
+    // One study per authorized action; which one actually runs is decided from the qualified
+    // diagnosis at run time, never by enum order here.
+    let mut actions = intent.actions.clone();
+    actions.sort_unstable();
+    actions.dedup();
+    for action in actions {
         studies.push(study(
             &digest,
             Profile::Long,
-            Stage::Action(*action),
+            Stage::Action(action),
             ACTION_ATTEMPTS,
         )?);
     }
@@ -108,8 +113,27 @@ pub struct Funnel<'a> {
     pub deferred_budget: Vec<&'a ChildStudy>,
 }
 
-/// Greedy in funnel order: a study that does not fit is deferred and later, cheaper studies may
-/// still run, but order and the frozen requirements are never altered to fit.
+/// The studies that must be admitted (and later yield valid evidence) before `study` may run.
+/// Confirmation needs its profile's screen; the action and feature studies need the CPU screen
+/// and confirmation. A budget alone never grants a stage whose prerequisites are not admitted.
+fn prerequisites(study: &ChildStudy) -> Vec<(Profile, Stage)> {
+    match study.stage {
+        Stage::Screen => Vec::new(),
+        Stage::Confirm => vec![(study.profile, Stage::Screen)],
+        Stage::Action(_) | Stage::Feature(_) => {
+            vec![
+                (Profile::Cpu, Stage::Screen),
+                (Profile::Cpu, Stage::Confirm),
+            ]
+        }
+    }
+}
+
+/// Dependency-aware admission in funnel order. A study is admitted only if every prerequisite
+/// was admitted and it fits the remaining budget; otherwise it is deferred. A cheap later study
+/// is therefore never run as an orphan, and order and frozen requirements are never altered.
+/// Admission is necessary, not sufficient: the coordinator still requires each predecessor to
+/// have produced valid evidence before starting the dependent stage.
 pub fn fit_budget(studies: &[ChildStudy], max_attempts: u32) -> Funnel<'_> {
     let mut remaining = max_attempts;
     let mut funnel = Funnel {
@@ -117,7 +141,13 @@ pub fn fit_budget(studies: &[ChildStudy], max_attempts: u32) -> Funnel<'_> {
         deferred_budget: Vec::new(),
     };
     for study in studies {
-        if study.min_attempts <= remaining {
+        let prerequisites_admitted = prerequisites(study).iter().all(|(profile, stage)| {
+            funnel
+                .runnable
+                .iter()
+                .any(|s| s.profile == *profile && s.stage == *stage)
+        });
+        if prerequisites_admitted && study.min_attempts <= remaining {
             remaining -= study.min_attempts;
             funnel.runnable.push(study);
         } else {
@@ -217,5 +247,29 @@ mod tests {
                 .any(|s| matches!(s.stage, Stage::Feature(_)))
         );
         assert_eq!(fit_budget(&studies, 0).runnable.len(), 0);
+    }
+
+    #[test]
+    fn a_small_budget_never_admits_an_orphan_action_or_confirmation() {
+        let mut intent = intent();
+        intent.actions = vec![ResearchAction::CpuAffinityProfile];
+        intent.factors = vec![ResearchFactor::NtSync];
+        let studies = plan(&intent).unwrap();
+        let tools = u32::try_from(intent.tools.len()).unwrap();
+        // Enough for both screens plus the cheap action study, but not the confirmations.
+        let funnel = fit_budget(&studies, tools * 2 + ACTION_ATTEMPTS);
+        assert!(funnel.runnable.iter().all(|s| s.stage == Stage::Screen));
+        assert!(
+            funnel
+                .deferred_budget
+                .iter()
+                .any(|s| matches!(s.stage, Stage::Action(_)))
+        );
+        // A budget that covers only the GPU screen cannot admit CPU-dependent stages.
+        let gpu_only = fit_budget(&studies, tools);
+        assert!(gpu_only.runnable.iter().all(|s| s.stage == Stage::Screen));
+        // With everything affordable, every dependent stage is admitted.
+        let all: u32 = studies.iter().map(|s| s.min_attempts).sum();
+        assert_eq!(fit_budget(&studies, all).runnable.len(), studies.len());
     }
 }

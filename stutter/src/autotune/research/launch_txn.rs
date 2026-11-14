@@ -26,6 +26,10 @@ pub enum SendError {
 pub trait UserManagerPort {
     fn send_start(&mut self, request: &UserLaunchRequest) -> Result<(), SendError>;
     fn unit_state(&mut self, unit_name: &str) -> anyhow::Result<UnitState>;
+    /// Authoritative, durable manager-side proof that the request was rejected or can no longer
+    /// execute (for example the job queue is empty and the request identity is fenced). A
+    /// snapshot of "no such unit" is never this proof.
+    fn proves_never_executable(&mut self, unit_name: &str) -> anyhow::Result<bool>;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -44,8 +48,8 @@ pub enum LaunchOutcome {
     Ambiguous(&'static str),
 }
 
-/// How many consecutive `Absent` observations are required after a lost acknowledgement before a
-/// launch is called never-started. A delayed start can still appear between observations.
+/// Absent snapshots taken after a lost acknowledgement. They only look for a late-appearing unit;
+/// they never prove nothing will start, so they cannot yield `NeverStarted` on their own.
 pub const ABSENT_CONFIRMATIONS: u32 = 3;
 
 pub fn run(
@@ -78,12 +82,18 @@ fn reconcile(
             UnitState::Absent => absent += 1,
         }
     }
-    Ok(if !ack_lost {
-        LaunchOutcome::Ambiguous("an acknowledged start left no unit")
-    } else if absent == ABSENT_CONFIRMATIONS {
+    if !ack_lost {
+        return Ok(LaunchOutcome::Ambiguous(
+            "an acknowledged start left no unit",
+        ));
+    }
+    debug_assert_eq!(absent, ABSENT_CONFIRMATIONS);
+    // A delayed job may still start, and a short-lived transient unit may already have been
+    // collected: absence is only `NeverStarted` with durable manager-side proof.
+    Ok(if port.proves_never_executable(unit)? {
         LaunchOutcome::NeverStarted
     } else {
-        LaunchOutcome::Ambiguous("unit state kept changing")
+        LaunchOutcome::Ambiguous("lost acknowledgement and no proof the request cannot execute")
     })
 }
 
@@ -97,6 +107,7 @@ mod tests {
         send: Option<Result<(), SendError>>,
         states: VecDeque<UnitState>,
         sends: u32,
+        proof: bool,
     }
 
     impl UserManagerPort for Fake {
@@ -106,6 +117,9 @@ mod tests {
         }
         fn unit_state(&mut self, _: &str) -> anyhow::Result<UnitState> {
             Ok(self.states.pop_front().unwrap_or(UnitState::Absent))
+        }
+        fn proves_never_executable(&mut self, _: &str) -> anyhow::Result<bool> {
+            Ok(self.proof)
         }
     }
 
@@ -124,6 +138,7 @@ mod tests {
             send: Some(send),
             states: states.iter().copied().collect(),
             sends: 0,
+            proof: false,
         };
         let mut phases = Vec::new();
         let outcome = run(&mut port, &request(), &mut |p| {
@@ -155,12 +170,36 @@ mod tests {
     }
 
     #[test]
-    fn never_started_needs_repeated_absence_and_a_lost_ack() {
+    fn repeated_absence_after_a_lost_ack_is_ambiguous_without_manager_proof() {
+        // A delayed start, or a short-lived unit already collected, leaves absence proving nothing.
         let (outcome, ..) = go(Err(SendError::AckLost), &[]);
-        assert_eq!(outcome, LaunchOutcome::NeverStarted);
-        // An acknowledged start that leaves no unit is contradictory, not "never started".
+        assert!(matches!(outcome, LaunchOutcome::Ambiguous(_)));
+        // An acknowledged start that leaves no unit is contradictory.
         let (outcome, ..) = go(Ok(()), &[]);
         assert!(matches!(outcome, LaunchOutcome::Ambiguous(_)));
+    }
+
+    #[test]
+    fn a_late_start_after_absent_snapshots_is_still_observed() {
+        let (outcome, _, sends) = go(
+            Err(SendError::AckLost),
+            &[UnitState::Absent, UnitState::Absent, UnitState::Active],
+        );
+        assert_eq!(outcome, LaunchOutcome::Running);
+        assert_eq!(sends, 1);
+    }
+
+    #[test]
+    fn only_durable_manager_proof_or_a_rejection_means_never_started() {
+        let mut port = Fake {
+            send: Some(Err(SendError::AckLost)),
+            states: VecDeque::new(),
+            sends: 0,
+            proof: true,
+        };
+        let outcome = run(&mut port, &request(), &mut |_| Ok(())).unwrap();
+        assert_eq!(outcome, LaunchOutcome::NeverStarted);
+        assert_eq!(port.sends, 1);
         let (outcome, ..) = go(Err(SendError::Rejected), &[]);
         assert_eq!(outcome, LaunchOutcome::NeverStarted);
     }
@@ -171,6 +210,7 @@ mod tests {
             send: Some(Ok(())),
             states: VecDeque::new(),
             sends: 0,
+            proof: false,
         };
         let result = run(&mut port, &request(), &mut |_| {
             Err(anyhow::anyhow!("disk full"))
