@@ -76,6 +76,11 @@ pub struct DaemonAutotuneConfig {
     /// Root-owned Nix proton-lab source manifest used to attest installed custom Proton tools.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub research_proton_manifest: Option<PathBuf>,
+    /// Explicit opt-in: let the resident campaign launch Steam through the composed production
+    /// host. Off by default, so the unqualified host (which never launches) stays installed until
+    /// the physical launch path is qualified.
+    #[serde(default)]
+    pub research_live_launch: bool,
     #[serde(default)]
     pub external_mutation_policy: ExternalMutationPolicy,
     #[serde(default)]
@@ -112,6 +117,7 @@ impl Default for DaemonAutotuneConfig {
             research_study_dir: None,
             research_steamapps_dir: None,
             research_proton_manifest: None,
+            research_live_launch: false,
             external_mutation_policy: ExternalMutationPolicy::default(),
             high_risk_dry_run: false,
             workload_policy: DaemonWorkloadPolicyConfig::default(),
