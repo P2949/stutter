@@ -24,7 +24,7 @@ use super::{
     user_launcher::UserLaunchRequest,
 };
 
-type PrepareRequest =
+pub type PrepareRequest =
     Box<dyn FnMut(&AttemptSlot, &DispatchContextV1) -> anyhow::Result<UserLaunchRequest> + Send>;
 
 /// Independent proof that an attempt's launch request, process tree, worker transactions and

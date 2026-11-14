@@ -125,6 +125,14 @@ pub(crate) mod oracle;
     )
 )]
 mod prefix;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "installed by the resident session once the composed host is qualified"
+    )
+)]
+pub(crate) mod production_host;
 mod protocol;
 #[path = "research/proton/mod.rs"]
 pub(crate) mod proton;

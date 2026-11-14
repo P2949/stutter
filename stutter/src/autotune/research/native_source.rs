@@ -74,6 +74,18 @@ impl<F> AttestedNativeSource<F> {
     }
 }
 
+impl GameFacts for Box<dyn GameFacts + Send> {
+    fn sight(&mut self) -> anyhow::Result<Sighting> {
+        (**self).sight()
+    }
+    fn settings_sha256(&mut self) -> anyhow::Result<String> {
+        (**self).settings_sha256()
+    }
+    fn now_unix_nanos(&mut self) -> anyhow::Result<u128> {
+        (**self).now_unix_nanos()
+    }
+}
+
 impl<F: GameFacts> AttestedNativeSource<F> {
     fn observe(&mut self) -> anyhow::Result<Observation> {
         let sighting = self.facts.sight()?;
