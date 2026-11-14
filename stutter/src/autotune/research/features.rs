@@ -131,6 +131,57 @@ pub fn classify_feature(evidence: FeatureEvidence) -> FeatureVerdict {
     }
 }
 
+/// One (source, factor) cell of the G7 feature matrix. A planned cell still needs runtime
+/// activation proof and a functional check before any performance run; it never implies a gain.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MatrixCell {
+    Planned { on_env: Env, off_env: Env },
+    Blocked(FactorBlock),
+}
+
+pub const ALL_FACTORS: [ResearchFactor; 10] = {
+    use ResearchFactor::*;
+    [
+        WineWayland,
+        Vkd3dLowLatency,
+        NtSync,
+        Fsr4,
+        FrameGeneration,
+        AntiLag2,
+        Gamescope,
+        AudioBackend,
+        InputBackend,
+        Hdr,
+    ]
+};
+
+pub const ALL_SOURCES: [ProtonSource; 6] = [
+    ProtonSource::ValveStable,
+    ProtonSource::ValveExperimental,
+    ProtonSource::CachyOs,
+    ProtonSource::CachyOsV3,
+    ProtonSource::Ge,
+    ProtonSource::Em,
+];
+
+/// Every source x factor cell, so missing coverage is a typed block rather than an omission.
+pub fn feature_matrix() -> Vec<(ProtonSource, ResearchFactor, MatrixCell)> {
+    let mut cells = Vec::with_capacity(ALL_SOURCES.len() * ALL_FACTORS.len());
+    for source in ALL_SOURCES {
+        for factor in ALL_FACTORS {
+            let cell = match (
+                factor_env(source, factor, true),
+                factor_env(source, factor, false),
+            ) {
+                (Ok(on_env), Ok(off_env)) => MatrixCell::Planned { on_env, off_env },
+                (Err(block), _) | (_, Err(block)) => MatrixCell::Blocked(block),
+            };
+            cells.push((source, factor, cell));
+        }
+    }
+    cells
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -227,5 +278,31 @@ mod tests {
         assert_eq!(verdict(false, true), FeatureVerdict::NotActivated);
         assert_eq!(verdict(true, false), FeatureVerdict::ActivatedNonFunctional);
         assert_eq!(verdict(true, true), FeatureVerdict::ActivatedFunctional);
+    }
+}
+
+#[cfg(test)]
+mod matrix_tests {
+    use super::*;
+
+    #[test]
+    fn matrix_covers_every_cell_and_plans_only_controlled_env() {
+        let cells = feature_matrix();
+        assert_eq!(cells.len(), 60);
+        for (_, _, cell) in &cells {
+            if let MatrixCell::Planned { on_env, off_env } = cell {
+                assert!(on_env.keys().chain(off_env.keys()).all(|k| controlled(k)));
+            }
+        }
+    }
+
+    #[test]
+    fn hdr_is_never_a_planned_environment_cell() {
+        assert!(
+            feature_matrix()
+                .iter()
+                .filter(|(_, f, _)| *f == ResearchFactor::Hdr)
+                .all(|(_, _, c)| matches!(c, MatrixCell::Blocked(_)))
+        );
     }
 }
