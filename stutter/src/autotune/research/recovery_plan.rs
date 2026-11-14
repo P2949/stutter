@@ -38,6 +38,40 @@ pub enum RecoveryDecision {
     UnsafeToResume(&'static str),
 }
 
+/// What the caller could independently observe. `None` means "could not be observed", which is
+/// never read as settled.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Observations {
+    pub attempt: AttemptState,
+    pub same_boot: bool,
+    /// The durable launch record says a start request was sent (or a launch marker exists).
+    pub launch_requested: bool,
+    /// A dispatcher claim that was not a revocation exists for this attempt.
+    pub ticket_claimed: bool,
+    /// The durable record plus a fresh unit observation show the request can start nothing.
+    pub launch_request_settled: Option<bool>,
+    /// The independent process witness found no recorded dispatcher, game or foreign Steam.
+    pub process_tree_settled: Option<bool>,
+    /// The independent worker witness count, when available.
+    pub outstanding_worker_tokens: Option<usize>,
+    /// The attempt's own transactions are restored or never started.
+    pub transactions_restored: Option<bool>,
+}
+
+/// Map observations to decision facts, treating every unobserved item as unsettled.
+pub fn facts_from(o: &Observations) -> RecoveryFacts {
+    RecoveryFacts {
+        attempt: o.attempt,
+        same_boot: o.same_boot,
+        launch_requested: o.launch_requested,
+        ticket_claimed: o.ticket_claimed,
+        launch_request_settled: o.launch_request_settled == Some(true),
+        process_tree_settled: o.process_tree_settled == Some(true),
+        worker_tokens_zero: o.outstanding_worker_tokens == Some(0),
+        transactions_restored: o.transactions_restored == Some(true),
+    }
+}
+
 pub fn decide(f: &RecoveryFacts) -> RecoveryDecision {
     use RecoveryDecision::{ResumeAtBoundary, RetireAndSealFailed, UnsafeToResume};
     // A claimed ticket implies a durable request; anything else is contradictory evidence.
@@ -124,6 +158,48 @@ mod tests {
             mutate(&mut f);
             assert!(matches!(decide(&f), RecoveryDecision::UnsafeToResume(_)));
         }
+    }
+
+    fn observed() -> Observations {
+        Observations {
+            attempt: AttemptState::StartedUnsealed,
+            same_boot: true,
+            launch_requested: true,
+            ticket_claimed: true,
+            launch_request_settled: Some(true),
+            process_tree_settled: Some(true),
+            outstanding_worker_tokens: Some(0),
+            transactions_restored: Some(true),
+        }
+    }
+
+    #[test]
+    fn complete_observations_decide_and_any_unobserved_item_stays_unsafe() {
+        assert_eq!(
+            decide(&facts_from(&observed())),
+            RecoveryDecision::RetireAndSealFailed("InterruptedAfterDispatch")
+        );
+        let unknowns: [fn(&mut Observations); 4] = [
+            |o| o.launch_request_settled = None,
+            |o| o.process_tree_settled = None,
+            |o| o.outstanding_worker_tokens = None,
+            |o| o.transactions_restored = None,
+        ];
+        for unknown in unknowns {
+            let mut o = observed();
+            unknown(&mut o);
+            assert!(matches!(
+                decide(&facts_from(&o)),
+                RecoveryDecision::UnsafeToResume(_)
+            ));
+        }
+        // A non-zero worker count is unsettled, not merely unknown.
+        let mut o = observed();
+        o.outstanding_worker_tokens = Some(1);
+        assert!(matches!(
+            decide(&facts_from(&o)),
+            RecoveryDecision::UnsafeToResume(_)
+        ));
     }
 
     #[test]

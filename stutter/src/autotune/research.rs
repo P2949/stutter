@@ -66,6 +66,14 @@ pub(super) mod host;
 )]
 pub(crate) mod join;
 mod journal;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "read by recovery once the launch transaction is wired into the driver"
+    )
+)]
+pub(crate) mod launch_record;
 pub(crate) mod launch_ticket;
 #[cfg_attr(
     not(test),
