@@ -43,6 +43,10 @@ pub fn classify(f: &ActionStudyFacts) -> ActionOutcome {
     if f.outstanding_root_tokens != 0 {
         return ActionOutcome::NotQualified("root tokens outstanding");
     }
+    // A worker transaction nobody decided is contradictory evidence, never a denial.
+    if f.worker_transaction_committed && !f.controller_decided {
+        return ActionOutcome::NotQualified("worker transaction without a controller decision");
+    }
     if !f.controller_decided || !f.worker_transaction_committed {
         if !f.pressure_present && !f.worker_transaction_committed {
             return if f.source_qualified {
@@ -52,6 +56,9 @@ pub fn classify(f: &ActionStudyFacts) -> ActionOutcome {
             };
         }
         return match f.physical_blocker {
+            Some(_) if !f.source_qualified => {
+                ActionOutcome::NotQualified("denial without source-qualified evidence")
+            }
             Some(blocker) => ActionOutcome::DeniedUnderBlocker(blocker),
             None => ActionOutcome::NotQualified("no committed transaction and no blocker"),
         };
@@ -155,9 +162,39 @@ mod tests {
         f.pressure_present = true;
         assert!(matches!(classify(&f), ActionOutcome::NotQualified(_)));
         f.physical_blocker = Some("no configured game cgroup");
+        f.source_qualified = false;
+        assert!(matches!(classify(&f), ActionOutcome::NotQualified(_)));
+        f.source_qualified = true;
         assert_eq!(
             classify(&f),
             ActionOutcome::DeniedUnderBlocker("no configured game cgroup")
         );
+    }
+}
+
+#[cfg(test)]
+mod contradiction_tests {
+    use super::*;
+
+    #[test]
+    fn a_committed_transaction_without_a_decision_is_never_a_denial_or_a_no_op() {
+        let facts = ActionStudyFacts {
+            controller_decided: false,
+            passed_autonomous_gate: true,
+            worker_transaction_committed: true,
+            kernel_readback_matches: true,
+            affected_tids: 1,
+            baseline_runnable_events: 1_000,
+            candidate_runnable_events: 1_000,
+            guardrails_held: true,
+            kept: false,
+            restored_or_released: true,
+            outstanding_root_tokens: 0,
+            external_actor: false,
+            pressure_present: false,
+            source_qualified: true,
+            physical_blocker: Some("no configured game cgroup"),
+        };
+        assert!(matches!(classify(&facts), ActionOutcome::NotQualified(_)));
     }
 }

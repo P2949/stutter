@@ -96,6 +96,14 @@ pub(crate) mod proton;
     )
 )]
 pub(crate) mod quality;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "consumed by post-launch recovery once its witnesses are wired"
+    )
+)]
+pub(crate) mod recovery_plan;
 pub(crate) mod report;
 pub(crate) mod report_store;
 #[cfg_attr(
