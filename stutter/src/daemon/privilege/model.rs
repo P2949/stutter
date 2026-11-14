@@ -336,6 +336,10 @@ pub struct FenceReport {
     pub uid: u32,
     pub boot_id: String,
     pub fence_sha256: Option<String>,
+    /// Count of tokens this worker issued and has not restored, read from its own durable
+    /// ledger. `None` when the service keeps no issued-token ledger. Read-only evidence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outstanding_tokens: Option<usize>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

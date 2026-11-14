@@ -185,7 +185,14 @@ impl ServiceActionService {
 
 impl PrivilegedActionService for ServiceActionService {
     fn fence_status(&self) -> anyhow::Result<FenceReport> {
-        Ok(self.targets.fence_report())
+        let mut report = self.targets.fence_report();
+        report.outstanding_tokens = Some(
+            self.read()?
+                .iter()
+                .filter(|issued| !issued.restored)
+                .count(),
+        );
+        Ok(report)
     }
     fn settle_issued_tokens(
         &self,
@@ -399,7 +406,11 @@ mod tests {
                 &CandidatePlanRequest::from_candidate(candidate, crate::audit::unix_nanos_now()),
             )
             .unwrap();
+        // The read-only count sees the issued token without settling it.
+        assert_eq!(service.fence_status().unwrap().outstanding_tokens, Some(1));
+        assert_eq!(service.fence_status().unwrap().outstanding_tokens, Some(1));
         assert_eq!(service.settle_issued_tokens(&policy).unwrap(), 1);
+        assert_eq!(service.fence_status().unwrap().outstanding_tokens, Some(0));
         assert_eq!(service.settle_issued_tokens(&policy).unwrap(), 0);
     }
 

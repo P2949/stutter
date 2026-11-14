@@ -238,6 +238,12 @@ fn live_phase_after_restart_the_fixture_is_restored_under_the_same_fence() {
         (report.state.as_str(), report.root_pid),
         ("active", Some(fixture))
     );
+    assert_eq!(
+        report.outstanding_tokens,
+        Some(0),
+        "startup recovery left no issued token"
+    );
+    assert_eq!(client.outstanding_tokens().expect("read-only count"), 0);
     let refused = client
         .apply_candidate_prepared(apply_request(affinity_candidate(decoy)), &mut |_| Ok(()))
         .expect_err("the decoy is still refused after the restart");

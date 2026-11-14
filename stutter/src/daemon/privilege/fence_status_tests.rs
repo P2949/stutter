@@ -131,6 +131,7 @@ fn the_response_round_trips() {
         uid: UID,
         boot_id: BOOT.to_owned(),
         fence_sha256: Some("ab".repeat(32)),
+        outstanding_tokens: None,
     };
     let json = serde_json::to_string(&PrivilegedWorkerResponse::FenceStatus {
         report: report.clone(),

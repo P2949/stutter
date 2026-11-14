@@ -103,6 +103,7 @@ pub(super) fn report(
         uid: service_uid,
         boot_id: boot_id.to_owned(),
         fence_sha256: None,
+        outstanding_tokens: None,
     };
     let state = read_text(path, trusted_uid).and_then(|text| match text {
         None => Ok(FenceState::Absent),

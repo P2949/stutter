@@ -216,6 +216,7 @@ fn the_workers_report_must_be_exactly_the_fence_that_was_written() {
         uid: 1000,
         boot_id: "boot".to_owned(),
         fence_sha256: Some("abc".to_owned()),
+        outstanding_tokens: None,
     };
     let fixture = Expected::Fixture {
         pid: 7,

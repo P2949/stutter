@@ -71,6 +71,14 @@ impl UnixSocketPrivilegedActionService {
         }
     }
 
+    /// Read-only: how many tokens the worker issued and has not restored. A worker that keeps no
+    /// ledger, or an older one that omits the count, is an error and never reads as zero.
+    pub fn outstanding_tokens(&self) -> anyhow::Result<usize> {
+        self.fence_status()?
+            .outstanding_tokens
+            .ok_or_else(|| anyhow::anyhow!("worker did not report an issued-token count"))
+    }
+
     /// Asks the bounded worker what validation fence it is enforcing right now (read-only).
     pub fn fence_status(&self) -> anyhow::Result<FenceReport> {
         match self.call_worker(PrivilegedWorkerRequest::FenceStatus)? {

@@ -48,6 +48,7 @@ impl ServiceTargets {
                 uid: self.uid,
                 boot_id: boot.trim().to_owned(),
                 fence_sha256: None,
+                outstanding_tokens: None,
             };
         };
         let now = std::time::SystemTime::now()
