@@ -169,6 +169,14 @@ pub(crate) mod summary;
     not(test),
     expect(
         dead_code,
+        reason = "the driver calls it once the transient launch replaces the child spawn"
+    )
+)]
+pub(crate) mod transient_launch;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
         reason = "kernel peer diagnostics are not yet connected to the session handoff"
     )
 )]
