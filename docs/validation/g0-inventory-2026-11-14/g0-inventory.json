@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "captured": "2026-11-14",
+  "kind": "read-only host inventory; nothing launched, started, deployed or modified",
+  "stutter_source": {"branch": "feat/system-wide-autotune", "head_at_capture": "41cf83a91fe8369fce1179554af608e2f06d63c6", "tree_clean": true},
+  "host": {
+    "kernel": "6.18.57",
+    "cpu": "Intel Core i5-10600K, 1 socket, 6 cores x 2 threads (12 logical); logical CPUs are SMT siblings, not six reserved physical cores",
+    "cgroup_controllers": "cpuset cpu io memory hugetlb pids rdma misc dmem",
+    "nixos_system": "/nix/store/2m2lpklmhk4b4pcjbjp189dnxjm8lp23-nixos-system-desktop-26.05.20261025.1f607aa",
+    "services": {"autotune_controller": "active", "privileged_worker": "active"},
+    "session": {"type": "wayland (Hyprland)", "active": true, "idle_hint": false}
+  },
+  "cyberpunk": {
+    "app_id": 1091500,
+    "build_id": 26161058,
+    "game_executable_sha256": "d36e74c47592e9c656ae250078cb40b2be63c782af5bfbeff2280d43e653fab4",
+    "launcher_executable_sha256": "4046fe8540455336c2cd7dc47571ef9da45af95430905e3b71ab6f6defa608f0",
+    "manifest_sha256": "db849b9f850321f9bd337a5619136fc59b2093206030f69f336b63cbc6f7e08f",
+    "manifest_update_status": "no_pending_update_indicated",
+    "entitlement_verified": false,
+    "native_benchmark_verified": false
+  },
+  "proton": {"inventory": null, "reason": "no proton-lab manifest was supplied; six tool identities are therefore not attested"},
+  "omissions": [
+    "running /proc/PID/exe hash of controller and worker not captured (configured hash alone is not proof)",
+    "worker issued-token count not read (needs the worker socket; deferred to the authorized smoke)",
+    "GameMode, LACT, sched_ext, PMU and OOM ownership not re-read this session",
+    "Steam client build and Valve Stable/Experimental tool versions not recorded",
+    "the user's Steam is running another game; no Steam or game state was changed"
+  ]
+}

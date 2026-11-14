@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "legend": "Existing = in tree with tests; Gap = missing; OnHostUnverified = code exists, physical behaviour unproven; NotApplicable",
+  "items": [
+    {"id": "P1 resident intent/lease/journal/IPC", "status": "Existing"},
+    {"id": "P3 dispatcher compat tool and ticketed dispatch", "status": "OnHostUnverified"},
+    {"id": "P3 production Steam launch transaction", "status": "Gap", "note": "UnqualifiedSteamHost; user_manager is read-only"},
+    {"id": "P2 native benchmark verification", "status": "OnHostUnverified", "note": "result schema and -benchmark behaviour unconfirmed"},
+    {"id": "P2 CP-LONG unattended work unit", "status": "Gap"},
+    {"id": "P4 telemetry join and quality verdicts", "status": "Existing", "note": "not wired into the resident capture"},
+    {"id": "P5 scheduler and paired statistics", "status": "Existing"},
+    {"id": "P6 diagnosis oracle scoring", "status": "Existing", "note": "no real-game cases"},
+    {"id": "P7 action classifier", "status": "Existing", "note": "no real controller/worker transaction on the game"},
+    {"id": "P8 feature matrix", "status": "Existing", "note": "no activation proofs"},
+    {"id": "P9 report, summary, crosswalk", "status": "Existing"},
+    {"id": "P10 exact-build deployment", "status": "Gap"},
+    {"id": "P11 campaign", "status": "Gap"},
+    {"id": "OpenRC, RDT, second NUMA node, other GPU", "status": "NotApplicable"}
+  ]
+}
