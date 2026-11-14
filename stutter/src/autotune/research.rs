@@ -49,6 +49,14 @@ pub(crate) mod driver;
 )]
 pub(crate) mod features;
 pub(super) mod host;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "consumed by the resident capture once a live game source is qualified"
+    )
+)]
+pub(crate) mod join;
 mod journal;
 pub(crate) mod launch_ticket;
 mod lease;
