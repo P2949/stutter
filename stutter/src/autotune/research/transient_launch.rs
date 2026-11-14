@@ -5,6 +5,7 @@
 use std::fs::File;
 
 use super::{
+    driver::LaunchUnresolved,
     launch_record::{record_outcome, record_phase},
     launch_txn::{LaunchOutcome, UserManagerPort, run},
     user_launcher::UserLaunchRequest,
@@ -42,6 +43,26 @@ pub fn start_attempt(
         LaunchOutcome::FinishedAlready => LaunchDecision::NeedsSettlement,
         LaunchOutcome::Ambiguous(reason) => LaunchDecision::NeedsRecovery(reason),
     })
+}
+
+/// The `AttemptHost::launch` view of `start_attempt`: success only when the unit is running, a
+/// plain error only when nothing was or will be started, and `LaunchUnresolved` for everything
+/// else so the driver never seals, aborts or retries a request that may still start.
+pub fn launch_through_manager(
+    port: &mut dyn UserManagerPort,
+    attempt_dir: &File,
+    request: &UserLaunchRequest,
+) -> anyhow::Result<()> {
+    match start_attempt(port, attempt_dir, request)? {
+        LaunchDecision::Proceed => Ok(()),
+        LaunchDecision::Refused => anyhow::bail!("the user manager refused the launch request"),
+        // The launcher already ended, but Steam hands off to the game: its tree is unsettled.
+        LaunchDecision::NeedsSettlement => Err(LaunchUnresolved(
+            "the launcher ended and the detached game tree is unsettled",
+        )
+        .into()),
+        LaunchDecision::NeedsRecovery(reason) => Err(LaunchUnresolved(reason).into()),
+    }
 }
 
 #[cfg(test)]
@@ -142,5 +163,41 @@ mod tests {
     fn a_finished_unit_still_needs_the_game_tree_settled() {
         let (decision, ..) = attempt(Err(SendError::AckLost), &[UnitState::Finished]);
         assert_eq!(decision, LaunchDecision::NeedsSettlement);
+    }
+
+    fn through(send: Result<(), SendError>, states: &[UnitState]) -> anyhow::Result<()> {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(
+            tmp.path(),
+            std::os::unix::fs::PermissionsExt::from_mode(0o700),
+        )
+        .unwrap();
+        let dir = File::from(crate::syscall::open_dir_no_symlinks(tmp.path()).unwrap());
+        let mut port = Fake {
+            send: Some(send),
+            states: states.iter().copied().collect(),
+            sent_when: Rc::new(RefCell::new(None)),
+            dir: dir.try_clone().unwrap(),
+        };
+        launch_through_manager(&mut port, &dir, &request())
+    }
+
+    #[test]
+    fn only_a_running_unit_succeeds_and_only_a_rejection_is_a_plain_error() {
+        assert!(through(Ok(()), &[UnitState::Active]).is_ok());
+        let refused = through(Err(SendError::Rejected), &[]).unwrap_err();
+        assert!(refused.downcast_ref::<LaunchUnresolved>().is_none());
+    }
+
+    #[test]
+    fn ambiguity_and_a_finished_launcher_are_unresolved_never_a_refusal() {
+        for result in [
+            through(Err(SendError::AckLost), &[]),
+            through(Ok(()), &[]),
+            through(Err(SendError::AckLost), &[UnitState::Finished]),
+        ] {
+            let error = result.unwrap_err();
+            assert!(error.downcast_ref::<LaunchUnresolved>().is_some());
+        }
     }
 }
