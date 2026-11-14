@@ -136,6 +136,14 @@ pub(crate) mod steam_port;
     not(test),
     expect(
         dead_code,
+        reason = "written beside report.json once the final report is generated"
+    )
+)]
+pub(crate) mod summary;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
         reason = "kernel peer diagnostics are not yet connected to the session handoff"
     )
 )]
