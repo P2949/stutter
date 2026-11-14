@@ -244,3 +244,15 @@ fn native_completions_decide_consistent_or_drifted_context() {
     // One unproven attempt keeps an otherwise consistent set from being called stable.
     assert_eq!(context_state(&evidence), ContextState::Unproven);
 }
+
+#[test]
+fn a_per_comparison_subset_without_native_completions_is_unproven() {
+    let (intent, schedule) = study(4);
+    let (_, evidence) = run(&schedule, |_| Some(60.0));
+    let subset: BTreeMap<u32, _> = evidence
+        .iter()
+        .filter(|(i, _)| schedule[**i as usize].arm == intent.tools[0].source)
+        .map(|(i, e)| (*i, e.clone()))
+        .collect();
+    assert_eq!(context_state(&subset), ContextState::Unproven);
+}

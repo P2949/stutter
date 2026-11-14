@@ -184,7 +184,6 @@ pub fn build_report(
         evidence.len() == fps.len(),
         "unsealed or unexpected evidence exists"
     );
-    let context = context_state(evidence);
     let blocks = schedule.len() / arms.len();
     let comparisons = (arms.len() - 1) as u32;
     let confidence = 1.0 - FAMILY_ALPHA / f64::from(comparisons);
@@ -197,6 +196,19 @@ pub fn build_report(
     };
     let mut results = Vec::new();
     for &candidate in arms.iter().filter(|source| **source != control) {
+        // Context is judged per comparison: only the control and this candidate must agree, so
+        // unrelated arms or studies never mark this pair as drifted.
+        let context = context_state(
+            &evidence
+                .iter()
+                .filter(|(index, _)| {
+                    schedule
+                        .get(**index as usize)
+                        .is_some_and(|slot| slot.arm == control || slot.arm == candidate)
+                })
+                .map(|(index, item)| (*index, item.clone()))
+                .collect(),
+        );
         let (mut left, mut right) = (Vec::new(), Vec::new());
         for block in 0..blocks {
             // A block counts only when every arm in it completed: partial blocks are dropped.
