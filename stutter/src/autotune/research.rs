@@ -97,6 +97,14 @@ pub(crate) mod native_probe;
     not(test),
     expect(
         dead_code,
+        reason = "supplied with the production fact provider once the live launch is qualified"
+    )
+)]
+pub(crate) mod native_source;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
         reason = "scores the live diagnosis once real pre-registered cases exist"
     )
 )]
