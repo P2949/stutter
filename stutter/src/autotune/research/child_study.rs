@@ -196,6 +196,8 @@ pub enum StudyResult {
     Unqualified,
     Failed,
     DeferredBudget,
+    /// Never ran because a prerequisite lacked qualified evidence.
+    Blocked,
 }
 
 /// Why a dependent study may not start yet.
@@ -225,6 +227,44 @@ pub fn ready_to_start(
         Err(NotReady::PredecessorPending)
     } else {
         Ok(())
+    }
+}
+
+/// What the coordinator should do next with the ordered study plan.
+#[derive(Debug, PartialEq, Eq)]
+pub enum NextStudy<'a> {
+    /// Start this study now; it is ready and fits the remaining attempt budget.
+    Run(&'a ChildStudy),
+    /// This study can never run on the remaining budget: record it `DeferredBudget`.
+    DeferBudget(&'a ChildStudy),
+    /// A prerequisite finished without qualified evidence: record this study `Blocked`.
+    Blocked(&'a ChildStudy),
+    /// Every study has a recorded result.
+    Done,
+}
+
+/// Pick the first study in funnel order that has no recorded result. Order is never changed and
+/// a cheaper later study never jumps a blocked or deferred earlier one: each decision is
+/// recorded and the function is called again. Predecessors always precede dependents in the
+/// plan, so a still-pending predecessor cannot be skipped over.
+pub fn next_study<'a>(
+    studies: &'a [ChildStudy],
+    results: &std::collections::BTreeMap<String, StudyResult>,
+    remaining_attempts: u32,
+) -> NextStudy<'a> {
+    let Some(study) = studies
+        .iter()
+        .find(|study| !results.contains_key(&study.study_sha256))
+    else {
+        return NextStudy::Done;
+    };
+    match ready_to_start(study, results) {
+        Err(NotReady::PredecessorNotQualified) => NextStudy::Blocked(study),
+        // A pending predecessor precedes this study in the plan, so it would have been chosen
+        // first; reaching here means the plan lists a dependent before its prerequisite.
+        Err(NotReady::PredecessorPending) => NextStudy::Blocked(study),
+        Ok(()) if study.min_attempts <= remaining_attempts => NextStudy::Run(study),
+        Ok(()) => NextStudy::DeferBudget(study),
     }
 }
 
@@ -433,5 +473,101 @@ mod tests {
         // With everything affordable, every dependent stage is admitted.
         let all: u32 = studies.iter().map(|s| s.min_attempts).sum();
         assert_eq!(fit_budget(&studies, all).runnable.len(), studies.len());
+    }
+
+    /// Run the whole plan the way the coordinator would: ask for the next study, record a result
+    /// from `outcome`, spend its attempts, and repeat.
+    fn simulate(
+        studies: &[ChildStudy],
+        mut budget: u32,
+        outcome: impl Fn(&ChildStudy) -> StudyResult,
+    ) -> Vec<(Profile, Stage, &'static str)> {
+        let mut results = std::collections::BTreeMap::new();
+        let mut log = Vec::new();
+        loop {
+            match next_study(studies, &results, budget) {
+                NextStudy::Done => return log,
+                NextStudy::Run(study) => {
+                    budget -= study.min_attempts;
+                    let result = outcome(study);
+                    results.insert(study.study_sha256.clone(), result);
+                    log.push((study.profile, study.stage, "ran"));
+                }
+                NextStudy::DeferBudget(study) => {
+                    results.insert(study.study_sha256.clone(), StudyResult::DeferredBudget);
+                    log.push((study.profile, study.stage, "deferred"));
+                }
+                NextStudy::Blocked(study) => {
+                    results.insert(study.study_sha256.clone(), StudyResult::Blocked);
+                    log.push((study.profile, study.stage, "blocked"));
+                }
+            }
+        }
+    }
+
+    fn full_plan() -> Vec<ChildStudy> {
+        let mut intent = intent();
+        intent.actions = vec![ResearchAction::CpuAffinityProfile];
+        intent.factors = vec![ResearchFactor::NtSync];
+        plan(&intent).unwrap()
+    }
+
+    #[test]
+    fn a_fully_qualified_campaign_runs_every_study_in_funnel_order() {
+        let studies = full_plan();
+        let all: u32 = studies.iter().map(|s| s.min_attempts).sum();
+        let log = simulate(&studies, all, |_| StudyResult::Qualified);
+        assert_eq!(log.len(), studies.len());
+        assert!(log.iter().all(|(_, _, what)| *what == "ran"));
+        // Order is the plan's order: screens, then confirmations, then action, then features.
+        let order: Vec<_> = log.iter().map(|(p, s, _)| (*p, *s)).collect();
+        let planned: Vec<_> = studies.iter().map(|s| (s.profile, s.stage)).collect();
+        assert_eq!(order, planned);
+    }
+
+    #[test]
+    fn an_unqualified_cpu_confirmation_blocks_the_action_and_feature_but_not_the_gpu_study() {
+        let studies = full_plan();
+        let all: u32 = studies.iter().map(|s| s.min_attempts).sum();
+        let log = simulate(&studies, all, |s| {
+            if s.profile == Profile::Cpu && s.stage == Stage::Confirm {
+                StudyResult::Unqualified
+            } else {
+                StudyResult::Qualified
+            }
+        });
+        let status = |profile, stage_match: fn(&Stage) -> bool| {
+            log.iter()
+                .find(|(p, s, _)| *p == profile && stage_match(s))
+                .map(|(_, _, what)| *what)
+        };
+        assert_eq!(status(Profile::Gpu, |s| *s == Stage::Confirm), Some("ran"));
+        assert_eq!(
+            status(Profile::Long, |s| matches!(s, Stage::Action(_))),
+            Some("blocked")
+        );
+        assert_eq!(
+            status(Profile::Cpu, |s| matches!(s, Stage::Feature(_))),
+            Some("blocked")
+        );
+    }
+
+    #[test]
+    fn a_small_budget_defers_what_it_cannot_afford_and_never_runs_an_orphan() {
+        let studies = full_plan();
+        let tools = u32::try_from(intent().tools.len()).unwrap();
+        // Enough for both screens only.
+        let log = simulate(&studies, tools * 2, |_| StudyResult::Qualified);
+        for (_, stage, what) in &log {
+            match stage {
+                Stage::Screen => assert_eq!(*what, "ran"),
+                // Unaffordable confirmations are deferred, and their dependents are blocked
+                // rather than run on the leftover budget.
+                Stage::Confirm => assert_eq!(*what, "deferred"),
+                Stage::Action(_) | Stage::Feature(_) => assert_eq!(*what, "blocked"),
+            }
+        }
+        // Every study ends with a recorded outcome, so the campaign always terminates.
+        assert_eq!(log.len(), studies.len());
     }
 }
