@@ -30,6 +30,19 @@ pub enum Progress {
 }
 
 /// Effects on the real world. Implementations must be idempotent for `abort`.
+/// Returned (inside the error) by `AttemptHost::launch` when the launch request may have reached
+/// Steam and its effect is unknown: the transaction was sent but could not be reconciled.
+#[derive(Debug)]
+pub struct LaunchUnresolved(pub &'static str);
+
+impl std::fmt::Display for LaunchUnresolved {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "launch request unresolved: {}", self.0)
+    }
+}
+
+impl std::error::Error for LaunchUnresolved {}
+
 pub trait AttemptHost {
     /// Latest independently observed idle timestamp, or None when occupied or unknown.
     fn observe_desktop_idle(&mut self, _idle_at: Option<std::time::Instant>) {}
@@ -88,6 +101,9 @@ pub struct Driver {
     active_seconds: u64,
     last_tick_seconds: Option<u64>,
     fresh_journal_checked: bool,
+    /// Set when a launch request may have reached Steam and its effect is unknown. The driver
+    /// then refuses every further tick, keeping the attempt, tickets and lease as they are.
+    unresolved_launch: Option<u32>,
     cancel: bool,
 }
 
@@ -147,6 +163,7 @@ impl Driver {
             active_seconds: 0,
             last_tick_seconds: None,
             fresh_journal_checked: false,
+            unresolved_launch: None,
             cancel: false,
         }
     }
@@ -243,6 +260,10 @@ impl Driver {
         anyhow::ensure!(
             self.last_tick_seconds.is_none_or(|last| now >= last),
             "campaign clock moved backward"
+        );
+        anyhow::ensure!(
+            self.unresolved_launch.is_none(),
+            "UnsafeToResume: a launch request is unresolved and needs independent reconciliation"
         );
         self.last_tick_seconds = Some(now);
         if !self.fresh_journal_checked {
@@ -414,6 +435,12 @@ impl Driver {
             });
         match launched {
             Ok(()) => Ok(Step::Running(slot.index)),
+            // A request that may already have reached Steam is neither a refusal nor abortable:
+            // a successful no-op abort would not show it cannot start later.
+            Err(error) if error.downcast_ref::<LaunchUnresolved>().is_some() => {
+                self.unresolved_launch = Some(slot.index);
+                Err(error)
+            }
             Err(_) => {
                 host.abort()?;
                 // Arming can fail before or after creating the directory. Until its identity

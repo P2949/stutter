@@ -7,6 +7,7 @@ struct Fake {
     safe: bool,
     polls: VecDeque<Progress>,
     launch_fails: bool,
+    launch_unresolved: bool,
     launches: u32,
     aborts: u32,
     abort_fails: bool,
@@ -47,6 +48,9 @@ impl AttemptHost for Fake {
         if let Some((source, destination)) = &self.rename_on_launch {
             std::fs::rename(source, destination)?;
         }
+        if self.launch_unresolved {
+            return Err(LaunchUnresolved("lost acknowledgement").into());
+        }
         anyhow::ensure!(!self.launch_fails, "steam refused");
         Ok(())
     }
@@ -70,6 +74,7 @@ fn fake() -> Fake {
         safe: true,
         polls: VecDeque::new(),
         launch_fails: false,
+        launch_unresolved: false,
         launches: 0,
         aborts: 0,
         abort_fails: false,
@@ -232,6 +237,28 @@ fn waits_for_a_safe_window_then_runs_each_attempt_once_to_done() {
     }
     assert_eq!(sealed, build_schedule(&intent).unwrap().len());
     assert_eq!(host.launches as usize, sealed);
+}
+
+#[test]
+fn an_unresolved_launch_is_never_sealed_aborted_or_retried() {
+    let (_dir, mut driver, intent) = setup(4);
+    let mut host = fake();
+    host.launch_unresolved = true;
+    let now = intent.issued_unix_seconds + 1;
+    let error = driver.tick(&mut host, now).unwrap_err();
+    assert!(error.downcast_ref::<LaunchUnresolved>().is_some());
+    // A no-op abort would not show the request cannot start later, so none is attempted.
+    assert_eq!(host.aborts, 0);
+    assert_eq!(host.launches, 1);
+    // Nothing was sealed, and no later tick may launch, abort or seal anything.
+    host.launch_unresolved = false;
+    let again = driver.tick(&mut host, now + 1).unwrap_err();
+    assert!(again.to_string().contains("UnsafeToResume"));
+    assert_eq!(host.launches, 1);
+    assert_eq!(host.aborts, 0);
+    driver.cancel();
+    assert!(driver.tick(&mut host, now + 2).is_err());
+    assert_eq!(host.launches, 1);
 }
 
 #[test]

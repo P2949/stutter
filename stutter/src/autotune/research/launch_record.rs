@@ -159,9 +159,19 @@ pub fn request_settled(record: &LaunchRecord, current: Option<UnitState>) -> boo
         // Prepared but never sent leaves nothing that could execute.
         return true;
     }
+    // The recorded outcome and the fresh observation must agree. A unit that was never started
+    // but is seen, or a launch we recorded as ambiguous (or never reconciled) that is later seen
+    // finished, is contradictory or unattributed evidence and never settles: a finished unit with
+    // our name does not show which request ran it or that no delayed request remains.
     matches!(
         (record.outcome, current),
-        (Some(RecordedOutcome::NeverStarted), _) | (_, Some(UnitState::Finished))
+        (
+            Some(RecordedOutcome::NeverStarted),
+            None | Some(UnitState::Absent)
+        ) | (
+            Some(RecordedOutcome::Running | RecordedOutcome::FinishedAlready),
+            Some(UnitState::Finished)
+        )
     )
 }
 
@@ -217,7 +227,8 @@ mod tests {
         for current in [None, Some(UnitState::Absent), Some(UnitState::Active)] {
             assert!(!request_settled(&record, current));
         }
-        assert!(request_settled(&record, Some(UnitState::Finished)));
+        // A finished unit with no reconciled outcome is unattributed: never settled.
+        assert!(!request_settled(&record, Some(UnitState::Finished)));
     }
 
     #[test]
@@ -240,6 +251,21 @@ mod tests {
             None
         ));
         assert!(!request_settled(&settled(RecordedOutcome::Running), None));
+        // Contradictions never settle: never started yet a unit is seen, or ambiguous yet finished.
+        for seen in [UnitState::Active, UnitState::Finished] {
+            assert!(!request_settled(
+                &settled(RecordedOutcome::NeverStarted),
+                Some(seen)
+            ));
+        }
+        assert!(!request_settled(
+            &settled(RecordedOutcome::Ambiguous),
+            Some(UnitState::Finished)
+        ));
+        assert!(!request_settled(
+            &settled(RecordedOutcome::Running),
+            Some(UnitState::Absent)
+        ));
         assert!(request_settled(
             &settled(RecordedOutcome::Running),
             Some(UnitState::Finished)

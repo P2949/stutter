@@ -149,6 +149,7 @@ mod tests {
         let (_tmp, dir) = fresh();
         record_phase(&dir, LaunchPhase::Prepared, UNIT).unwrap();
         record_phase(&dir, LaunchPhase::Sent, UNIT).unwrap();
+        record_outcome(&dir, UNIT, &LaunchOutcome::Running).unwrap();
         let o = run(&dir, UnitState::Finished, Some(true), Some(0), Some(true));
         assert_eq!(o.launch_request_settled, Some(true));
         assert_eq!(
