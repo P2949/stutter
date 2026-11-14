@@ -118,6 +118,20 @@ pub fn read_launch_record(dir: &File, uid: u32) -> anyhow::Result<LaunchRecord> 
         (sent.is_none() || prepared.is_some()) && (outcome.is_none() || sent.is_some()),
         "launch records are out of order"
     );
+    // Every record must come from this boot: a record from another boot cannot be compared with
+    // present unit, process or worker observations.
+    let boot = crate::telemetry::identity::read_boot_id()?;
+    anyhow::ensure!(
+        [
+            prepared.as_ref().map(|r| r.boot_id.as_str()),
+            sent.as_ref().map(|r| r.boot_id.as_str()),
+            outcome.as_ref().map(|r| r.boot_id.as_str()),
+        ]
+        .into_iter()
+        .flatten()
+        .all(|recorded| recorded == boot),
+        "launch records are from a different boot"
+    );
     let unit_names: Vec<&str> = [
         prepared.as_ref().map(|r| r.unit_name.as_str()),
         sent.as_ref().map(|r| r.unit_name.as_str()),
@@ -230,6 +244,17 @@ mod tests {
             &settled(RecordedOutcome::Running),
             Some(UnitState::Finished)
         ));
+    }
+
+    #[test]
+    fn records_from_another_boot_are_refused() {
+        let (_tmp, dir) = fresh();
+        let forged = format!(
+            r#"{{"schema_version":1,"boot_id":"{}","unit_name":"{UNIT}"}}"#,
+            "0".repeat(32)
+        );
+        write_new(&dir, PREPARED, forged.as_bytes()).unwrap();
+        assert!(read_launch_record(&dir, uid()).is_err());
     }
 
     #[test]

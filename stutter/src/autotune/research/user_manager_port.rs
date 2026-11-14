@@ -141,9 +141,8 @@ impl<B: ManagerBus> UserManagerPort for DbusUserManagerPort<B> {
             "active" | "activating" | "reloading" | "deactivating" | "refreshing" => {
                 Ok(UnitState::Active)
             }
-            "failed" => Ok(UnitState::Finished),
-            "inactive" => {
-                // An inactive unit with a queued job has not started yet; it is not finished.
+            "inactive" | "failed" => {
+                // A unit with a queued job (a first start or a restart) is not finished.
                 let Value::Struct(job) = self.property(unit_path, "Job")? else {
                     anyhow::bail!("unexpected unit job type");
                 };
@@ -291,8 +290,13 @@ mod tests {
             );
         }
         assert_eq!(
-            state_of(vec![unit_path(), active_state("failed")]).unwrap(),
+            state_of(vec![unit_path(), active_state("failed"), pending_job(0)]).unwrap(),
             UnitState::Finished
+        );
+        // A failed unit with a queued (restart) job is not finished.
+        assert_eq!(
+            state_of(vec![unit_path(), active_state("failed"), pending_job(3)]).unwrap(),
+            UnitState::Active
         );
         // Inactive with a queued job has not started; with no job it is finished.
         assert_eq!(

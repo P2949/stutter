@@ -83,9 +83,10 @@ pub fn decide(f: &RecoveryFacts) -> RecoveryDecision {
     }
     if f.attempt == AttemptState::Sealed {
         // A sealed record is not proof that nothing is still pending or running.
+        // Any requested launch needs independent process settlement, claimed ticket or not: a
+        // launched Steam may hand off to the game without producing a dispatcher claim.
         return if f.same_boot
-            && (!f.launch_requested || f.launch_request_settled)
-            && (!f.ticket_claimed || f.process_tree_settled)
+            && (!f.launch_requested || (f.launch_request_settled && f.process_tree_settled))
         {
             ResumeAtBoundary
         } else {
@@ -205,6 +206,32 @@ mod tests {
             decide(&facts_from(&o)),
             RecoveryDecision::UnsafeToResume(_)
         ));
+    }
+
+    #[test]
+    fn a_sealed_requested_launch_without_a_claim_still_needs_the_process_witness() {
+        let facts = RecoveryFacts {
+            attempt: AttemptState::Sealed,
+            same_boot: true,
+            launch_requested: true,
+            ticket_claimed: false,
+            launch_request_settled: true,
+            process_tree_settled: false,
+            worker_tokens_zero: true,
+            transactions_restored: true,
+        };
+        assert!(matches!(
+            decide(&facts),
+            RecoveryDecision::UnsafeToResume(_)
+        ));
+        let mut settled = facts;
+        settled.process_tree_settled = true;
+        assert_eq!(decide(&settled), RecoveryDecision::ResumeAtBoundary);
+        // A sealed attempt that never requested a launch has nothing to settle.
+        let mut untouched = facts;
+        untouched.launch_requested = false;
+        untouched.launch_request_settled = false;
+        assert_eq!(decide(&untouched), RecoveryDecision::ResumeAtBoundary);
     }
 
     #[test]

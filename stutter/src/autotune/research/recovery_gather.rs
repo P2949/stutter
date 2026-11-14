@@ -27,9 +27,18 @@ pub fn gather(
     uid: u32,
     attempt: AttemptState,
     same_boot: bool,
+    expected_unit: &str,
     witnesses: Witnesses<'_>,
 ) -> anyhow::Result<Observations> {
     let record = read_launch_record(attempt_dir, uid)?;
+    // The records must name exactly this attempt's launch unit, never another request's.
+    anyhow::ensure!(
+        record
+            .unit_name
+            .as_deref()
+            .is_none_or(|unit| unit == expected_unit),
+        "launch record names a different unit"
+    );
     let marker = launch_marker_present(attempt_dir, uid)?;
     let ticket_claimed = has_live_claim(attempt_dir, uid)?;
     let launch_requested = record.sent || marker || ticket_claimed;
@@ -98,6 +107,7 @@ mod tests {
             uid(),
             AttemptState::StartedUnsealed,
             true,
+            UNIT,
             Witnesses {
                 unit_state: &mut |_| Ok(unit),
                 process_tree_settled: &mut || process.map_or_else(unavailable, Ok),
@@ -158,6 +168,26 @@ mod tests {
             decide(&facts_from(&o)),
             RecoveryDecision::UnsafeToResume(_)
         ));
+    }
+
+    #[test]
+    fn a_record_naming_another_requests_unit_is_refused() {
+        let (_tmp, dir) = fresh();
+        record_phase(&dir, LaunchPhase::Prepared, "other-request.service").unwrap();
+        let result = gather(
+            &dir,
+            uid(),
+            AttemptState::StartedUnsealed,
+            true,
+            UNIT,
+            Witnesses {
+                unit_state: &mut |_| Ok(UnitState::Finished),
+                process_tree_settled: &mut || Ok(true),
+                outstanding_worker_tokens: &mut || Ok(0),
+                transactions_restored: &mut || Ok(true),
+            },
+        );
+        assert!(result.is_err());
     }
 
     #[test]
