@@ -186,6 +186,47 @@ pub fn fit_budget(studies: &[ChildStudy], max_attempts: u32) -> Funnel<'_> {
     }
     funnel
 }
+/// The sealed result of a finished child study, as the coordinator records it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StudyResult {
+    /// Valid, qualified evidence: dependents may build on it.
+    Qualified,
+    /// Ran but its evidence is not qualified (for example unproven provenance or a refused
+    /// comparison). Dependents must not run on it.
+    Unqualified,
+    Failed,
+    DeferredBudget,
+}
+
+/// Why a dependent study may not start yet.
+#[derive(Debug, PartialEq, Eq)]
+pub enum NotReady {
+    /// A prerequisite has no recorded result yet (still pending or never planned).
+    PredecessorPending,
+    /// A prerequisite finished without qualified evidence; this study can never run.
+    PredecessorNotQualified,
+}
+
+/// Dependency gate: a study may start only when every prerequisite it is bound to has a recorded
+/// qualified result. Admission by budget alone never satisfies this.
+pub fn ready_to_start(
+    study: &ChildStudy,
+    results: &std::collections::BTreeMap<String, StudyResult>,
+) -> Result<(), NotReady> {
+    let mut pending = false;
+    for digest in &study.depends_on {
+        match results.get(digest) {
+            Some(StudyResult::Qualified) => {}
+            Some(_) => return Err(NotReady::PredecessorNotQualified),
+            None => pending = true,
+        }
+    }
+    if pending {
+        Err(NotReady::PredecessorPending)
+    } else {
+        Ok(())
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -327,6 +368,47 @@ mod tests {
         )
         .unwrap();
         assert_ne!(rebound.study_sha256, original.study_sha256);
+    }
+
+    #[test]
+    fn a_dependent_study_starts_only_on_qualified_recorded_predecessors() {
+        let mut intent = intent();
+        intent.actions = vec![ResearchAction::CpuAffinityProfile];
+        let studies = plan(&intent).unwrap();
+        let action = studies
+            .iter()
+            .find(|s| matches!(s.stage, Stage::Action(_)))
+            .unwrap();
+        let mut results = std::collections::BTreeMap::new();
+        // Nothing recorded yet: pending, not runnable.
+        assert_eq!(
+            ready_to_start(action, &results),
+            Err(NotReady::PredecessorPending)
+        );
+        // Only the screen is recorded: the confirmation is still pending.
+        results.insert(action.depends_on[0].clone(), StudyResult::Qualified);
+        assert_eq!(
+            ready_to_start(action, &results),
+            Err(NotReady::PredecessorPending)
+        );
+        // An unqualified confirmation blocks the action permanently.
+        results.insert(action.depends_on[1].clone(), StudyResult::Unqualified);
+        assert_eq!(
+            ready_to_start(action, &results),
+            Err(NotReady::PredecessorNotQualified)
+        );
+        for blocked in [StudyResult::Failed, StudyResult::DeferredBudget] {
+            results.insert(action.depends_on[1].clone(), blocked);
+            assert_eq!(
+                ready_to_start(action, &results),
+                Err(NotReady::PredecessorNotQualified)
+            );
+        }
+        results.insert(action.depends_on[1].clone(), StudyResult::Qualified);
+        assert_eq!(ready_to_start(action, &results), Ok(()));
+        // A screen has no prerequisites and is always ready.
+        let screen = studies.iter().find(|s| s.stage == Stage::Screen).unwrap();
+        assert_eq!(ready_to_start(screen, &Default::default()), Ok(()));
     }
 
     #[test]
