@@ -85,3 +85,27 @@ deployment or campaign was performed. Open design decision: the production worke
 needs a read-only outstanding-token query; the only existing call (`settle_issued_tokens`)
 mutates, and the worker IPC is not widened without approval. No G0-G9 gate that depends on a real
 launch is claimed.
+
+## Review follow-up (2026-11-14, after the external review of `491d725c`)
+
+Fixed (unit evidence only):
+
+- `action_study::classify` no longer relabels a kept action whose guardrails failed (now
+  `NotQualified`); a verified revert reports `kept: false`; a no-op needs source-qualified evidence.
+- Delayed dispatch: the launch-request marker now records the boot-relative tick of the request and
+  `authorize_dispatch` requires the dispatcher's own `/proc` start tick to be at or after it, so an
+  invocation Steam started for an earlier request cannot consume a later attempt's tickets. This
+  closes the "before the new request" case in code. Residual, not provable offline: an invocation
+  that Steam itself starts *after* the new request for an earlier launch cannot be told apart by
+  time; the driver's one-attempt-at-a-time settlement is the remaining guard.
+
+Open, accepted as not yet resolved (needs a real Steam launch to design against):
+
+- Process settlement still rests on dispatcher anchors plus the conservative name prefilter. A
+  durable per-launch unit/cgroup ownership witness requires the real user-manager launch
+  transaction (`user_manager.rs` is read-only today) and Steam's actual scope layout.
+- Post-launch recovery (`RecoveryJob::run`) still refuses any lease with a started launch.
+- `outstanding_tokens` is a worker-wide ledger count, not campaign-specific physical restoration,
+  and its live-worker assertions have not been executed.
+- `context_state` compares all native completions as one cohort; it must be made study/block
+  specific before CP-CPU and CP-GPU studies are reported together.
