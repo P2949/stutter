@@ -18,6 +18,8 @@ pub struct ActionStudyFacts {
     /// The comparison used a taskset/systemd-run style external action.
     pub external_actor: bool,
     pub pressure_present: bool,
+    /// The no-pressure reading came from a source-qualified observation window.
+    pub source_qualified: bool,
     pub physical_blocker: Option<&'static str>,
 }
 
@@ -43,7 +45,11 @@ pub fn classify(f: &ActionStudyFacts) -> ActionOutcome {
     }
     if !f.controller_decided || !f.worker_transaction_committed {
         if !f.pressure_present && !f.worker_transaction_committed {
-            return ActionOutcome::CorrectNoOp;
+            return if f.source_qualified {
+                ActionOutcome::CorrectNoOp
+            } else {
+                ActionOutcome::NotQualified("no-op without source-qualified evidence")
+            };
         }
         return match f.physical_blocker {
             Some(blocker) => ActionOutcome::DeniedUnderBlocker(blocker),
@@ -64,10 +70,12 @@ pub fn classify(f: &ActionStudyFacts) -> ActionOutcome {
     if !f.restored_or_released && !f.kept {
         return ActionOutcome::NotQualified("action neither kept nor restored");
     }
-    // A keep requires the guardrails; a lower runnable P99 alone never justifies one.
-    ActionOutcome::QualifiedApplied {
-        kept: f.kept && f.guardrails_held,
+    // Report the observed transaction state. A kept action whose guardrails failed is
+    // inconsistent (the objective must have reverted it), never silently relabelled.
+    if f.kept && !f.guardrails_held {
+        return ActionOutcome::NotQualified("kept action despite failed guardrails");
     }
+    ActionOutcome::QualifiedApplied { kept: f.kept }
 }
 
 #[cfg(test)]
@@ -89,6 +97,7 @@ mod tests {
             outstanding_root_tokens: 0,
             external_actor: false,
             pressure_present: true,
+            source_qualified: true,
             physical_blocker: None,
         }
     }
@@ -101,10 +110,17 @@ mod tests {
         );
         let mut f = applied();
         f.guardrails_held = false;
+        // Kept despite failed guardrails is inconsistent evidence, never silently relabelled.
+        assert!(matches!(classify(&f), ActionOutcome::NotQualified(_)));
+        // A verified revert with failed guardrails is the correct observed outcome.
+        f.kept = false;
         assert_eq!(
             classify(&f),
             ActionOutcome::QualifiedApplied { kept: false }
         );
+        // Neither kept nor restored is unresolved, not a clean revert.
+        f.restored_or_released = false;
+        assert!(matches!(classify(&f), ActionOutcome::NotQualified(_)));
     }
 
     #[test]
@@ -132,6 +148,9 @@ mod tests {
         f.controller_decided = false;
         f.worker_transaction_committed = false;
         f.pressure_present = false;
+        f.source_qualified = false;
+        assert!(matches!(classify(&f), ActionOutcome::NotQualified(_)));
+        f.source_qualified = true;
         assert_eq!(classify(&f), ActionOutcome::CorrectNoOp);
         f.pressure_present = true;
         assert!(matches!(classify(&f), ActionOutcome::NotQualified(_)));

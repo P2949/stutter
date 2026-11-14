@@ -114,39 +114,75 @@ fn read_context(dir: &std::fs::File, uid: u32) -> anyhow::Result<DispatchContext
 
 const LAUNCH_REQUESTED_NAME: &str = "launch-requested";
 
-/// Driver side: durable proof that Stutter itself requested this attempt's Steam launch. A
-/// dispatcher invocation that finds no marker was not requested for this attempt (for example a
-/// delayed call from an earlier one) and must not consume its tickets.
+/// Clock ticks since boot, the unit of the start times in `/proc/<pid>/stat`.
+fn boot_ticks_now() -> anyhow::Result<u64> {
+    let uptime = std::fs::read_to_string("/proc/uptime")?;
+    let seconds: f64 = uptime
+        .split_whitespace()
+        .next()
+        .and_then(|value| value.parse().ok())
+        .ok_or_else(|| anyhow::anyhow!("unreadable uptime"))?;
+    anyhow::ensure!(seconds.is_finite() && seconds >= 0.0, "invalid uptime");
+    Ok((seconds * 100.0) as u64)
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LaunchRequestV1 {
+    schema_version: u32,
+    boot_id: String,
+    requested_boot_ticks: u64,
+}
+
+/// Driver side: durable proof that Stutter itself requested this attempt's Steam launch, and when.
+/// A dispatcher that finds no marker, or that started before it, belongs to an earlier request
+/// and must not consume this attempt's tickets.
 pub fn mark_launch_requested(dir: &std::fs::File) -> anyhow::Result<()> {
+    mark_launch_requested_at(dir, boot_ticks_now()?)
+}
+
+fn mark_launch_requested_at(dir: &std::fs::File, requested_boot_ticks: u64) -> anyhow::Result<()> {
+    let request = LaunchRequestV1 {
+        schema_version: 1,
+        boot_id: crate::telemetry::identity::read_boot_id()?,
+        requested_boot_ticks,
+    };
     let mut file = crate::syscall::create_new_at(dir.as_fd(), LAUNCH_REQUESTED_NAME)?;
-    file.write_all(b"requested-v1")?;
+    file.write_all(&serde_json::to_vec(&request)?)?;
     file.sync_all()?;
     dir.sync_all()?;
     Ok(())
 }
 
-fn launch_was_requested(dir: &std::fs::File, uid: u32) -> bool {
-    crate::syscall::openat_nofollow(dir.as_fd(), LAUNCH_REQUESTED_NAME)
-        .and_then(|file| file.metadata())
-        .is_ok_and(|meta| {
-            meta.is_file() && meta.uid() == uid && meta.mode() & 0o077 == 0 && meta.len() == 12
-        })
+/// The boot-relative tick at which Stutter requested this attempt's launch, when the marker is
+/// private, ours and from this boot.
+fn launch_requested_ticks(dir: &std::fs::File, uid: u32) -> Option<u64> {
+    let bytes = super::report_store::read_private(dir, LAUNCH_REQUESTED_NAME, uid).ok()?;
+    let request: LaunchRequestV1 = serde_json::from_slice(&bytes).ok()?;
+    (request.schema_version == 1
+        && request.boot_id == crate::telemetry::identity::read_boot_id().ok()?)
+    .then_some(request.requested_boot_ticks)
 }
 
 /// Dispatcher side. The caller must be the unprivileged intent owner; anything else is refused
-/// before a ticket is touched.
+/// before a ticket is touched. `dispatcher_start_ticks` is the caller's own `/proc` start time.
 pub fn authorize_dispatch(
     dir: &std::fs::File,
     argv: &[String],
     env: &BTreeMap<String, String>,
     euid: u32,
     now: u64,
+    dispatcher_start_ticks: u64,
     verify_tool: &dyn Fn(&DispatchContextV1, &super::ResearchTool) -> anyhow::Result<()>,
 ) -> anyhow::Result<(DispatchPlan, ResearchLaunchTicketV1)> {
     anyhow::ensure!(euid != 0, "dispatcher must not run as root");
+    // An invocation Steam started before this attempt was requested belongs to an earlier
+    // request and cannot consume these tickets.
+    let requested = launch_requested_ticks(dir, euid)
+        .ok_or_else(|| anyhow::anyhow!("no Steam launch was requested for this attempt"))?;
     anyhow::ensure!(
-        launch_was_requested(dir, euid),
-        "no Steam launch was requested for this attempt"
+        dispatcher_start_ticks != 0 && dispatcher_start_ticks >= requested,
+        "dispatcher started before this attempt's launch request"
     );
     let context = read_context(dir, euid)?;
     anyhow::ensure!(

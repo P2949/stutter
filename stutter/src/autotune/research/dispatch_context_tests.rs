@@ -92,11 +92,16 @@ fn dispatcher_start_records_live_process_and_rejects_duplicate_or_wrong_boot() {
     intent.deadline_unix_seconds = now + 3_600;
     arm_attempt(&file, &intent, &slot, spec(), (now, 60)).unwrap();
     mark_launch_requested(&file).unwrap();
-    let (_, ticket) =
-        authorize_dispatch(&file, &argv("run"), &env(), intent.uid, now + 1, &|_, _| {
-            Ok(())
-        })
-        .unwrap();
+    let (_, ticket) = authorize_dispatch(
+        &file,
+        &argv("run"),
+        &env(),
+        intent.uid,
+        now + 1,
+        u64::MAX,
+        &|_, _| Ok(()),
+    )
+    .unwrap();
     let mut wrong = ticket.clone();
     wrong.boot_id = "another-boot".into();
     assert!(record_dispatcher_start(&file, &wrong).is_err());
@@ -123,11 +128,16 @@ fn host_anchor_requires_ticket_namespace_live_identity_and_steam_ancestry() {
     let now = intent.issued_unix_seconds + 1;
     let context = arm_attempt(&file, &intent, &slot, spec(), (now, 60)).unwrap();
     mark_launch_requested(&file).unwrap();
-    let (_, ticket) =
-        authorize_dispatch(&file, &argv("run"), &env(), intent.uid, now + 1, &|_, _| {
-            Ok(())
-        })
-        .unwrap();
+    let (_, ticket) = authorize_dispatch(
+        &file,
+        &argv("run"),
+        &env(),
+        intent.uid,
+        now + 1,
+        u64::MAX,
+        &|_, _| Ok(()),
+    )
+    .unwrap();
     let proc = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(proc.path().join("sys/kernel/random")).unwrap();
     std::fs::write(
@@ -215,6 +225,7 @@ fn each_steam_verb_runs_once_and_replays_or_unknown_verbs_are_refused() {
         &env(),
         euid,
         now,
+        u64::MAX,
         &|_, _| Ok(()),
     )
     .unwrap();
@@ -226,12 +237,27 @@ fn each_steam_verb_runs_once_and_replays_or_unknown_verbs_are_refused() {
             &env(),
             euid,
             now,
+            u64::MAX,
             &|_, _| Ok(())
         )
         .is_err()
     );
-    authorize_dispatch(&file, &argv("run"), &env(), euid, now, &|_, _| Ok(())).unwrap();
-    assert!(authorize_dispatch(&file, &argv("run"), &env(), euid, now, &|_, _| Ok(())).is_err());
+    authorize_dispatch(&file, &argv("run"), &env(), euid, now, u64::MAX, &|_, _| {
+        Ok(())
+    })
+    .unwrap();
+    assert!(
+        authorize_dispatch(
+            &file,
+            &argv("run"),
+            &env(),
+            euid,
+            now,
+            u64::MAX,
+            &|_, _| Ok(())
+        )
+        .is_err()
+    );
     assert!(
         authorize_dispatch(
             &file,
@@ -239,6 +265,7 @@ fn each_steam_verb_runs_once_and_replays_or_unknown_verbs_are_refused() {
             &env(),
             euid,
             now,
+            u64::MAX,
             &|_, _| Ok(())
         )
         .is_err()
@@ -251,14 +278,48 @@ fn a_malformed_call_does_not_burn_the_ticket_and_other_users_or_expiry_are_refus
     let euid = crate::syscall::geteuid();
     let mut bad = env();
     bad.insert("SteamAppId".into(), "220".into());
-    assert!(authorize_dispatch(&file, &argv("run"), &bad, euid, now, &|_, _| Ok(())).is_err());
     assert!(
-        authorize_dispatch(&file, &argv("run"), &env(), euid, now + 600, &|_, _| Ok(())).is_err()
+        authorize_dispatch(&file, &argv("run"), &bad, euid, now, u64::MAX, &|_, _| Ok(
+            ()
+        ))
+        .is_err()
     );
     assert!(
-        authorize_dispatch(&file, &argv("run"), &env(), euid + 1, now, &|_, _| Ok(())).is_err()
+        authorize_dispatch(
+            &file,
+            &argv("run"),
+            &env(),
+            euid,
+            now + 600,
+            u64::MAX,
+            &|_, _| Ok(())
+        )
+        .is_err()
     );
-    assert!(authorize_dispatch(&file, &argv("run"), &env(), euid, now, &|_, _| Ok(())).is_ok());
+    assert!(
+        authorize_dispatch(
+            &file,
+            &argv("run"),
+            &env(),
+            euid + 1,
+            now,
+            u64::MAX,
+            &|_, _| Ok(())
+        )
+        .is_err()
+    );
+    assert!(
+        authorize_dispatch(
+            &file,
+            &argv("run"),
+            &env(),
+            euid,
+            now,
+            u64::MAX,
+            &|_, _| Ok(())
+        )
+        .is_ok()
+    );
 }
 
 #[test]
@@ -266,8 +327,19 @@ fn tool_drift_is_refused_without_burning_the_ticket() {
     let (_dir, file, now) = armed();
     let euid = crate::syscall::geteuid();
     let drift = |_: &DispatchContextV1, _: &super::super::ResearchTool| anyhow::bail!("drift");
-    assert!(authorize_dispatch(&file, &argv("run"), &env(), euid, now, &drift).is_err());
-    assert!(authorize_dispatch(&file, &argv("run"), &env(), euid, now, &|_, _| Ok(())).is_ok());
+    assert!(authorize_dispatch(&file, &argv("run"), &env(), euid, now, u64::MAX, &drift).is_err());
+    assert!(
+        authorize_dispatch(
+            &file,
+            &argv("run"),
+            &env(),
+            euid,
+            now,
+            u64::MAX,
+            &|_, _| Ok(())
+        )
+        .is_ok()
+    );
 }
 
 #[test]
@@ -291,13 +363,49 @@ fn a_dispatch_without_a_launch_request_is_refused_and_burns_nothing() {
     intent.deadline_unix_seconds = now + 3_600;
     arm_attempt(&file, &intent, &slot, spec(), (now, 60)).unwrap();
     let late = || {
-        authorize_dispatch(&file, &argv("run"), &env(), intent.uid, now + 1, &|_, _| {
-            Ok(())
-        })
+        authorize_dispatch(
+            &file,
+            &argv("run"),
+            &env(),
+            intent.uid,
+            now + 1,
+            u64::MAX,
+            &|_, _| Ok(()),
+        )
     };
     // A delayed invocation from an earlier attempt finds this one armed but never requested.
     assert!(late().is_err());
     mark_launch_requested(&file).unwrap();
     assert!(mark_launch_requested(&file).is_err());
     late().expect("the requested attempt's own dispatch still has its tickets");
+}
+
+#[test]
+fn a_dispatcher_started_before_the_launch_request_cannot_consume_the_tickets() {
+    let (_dir, file, mut intent, slot) = fixture();
+    intent.boot_id = crate::telemetry::identity::read_boot_id().unwrap();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    intent.issued_unix_seconds = now - 1;
+    intent.deadline_unix_seconds = now + 3_600;
+    arm_attempt(&file, &intent, &slot, spec(), (now, 60)).unwrap();
+    mark_launch_requested_at(&file, 5_000).unwrap();
+    let call = |ticks: u64| {
+        authorize_dispatch(
+            &file,
+            &argv("run"),
+            &env(),
+            intent.uid,
+            now + 1,
+            ticks,
+            &|_, _| Ok(()),
+        )
+    };
+    // Started before the request: an earlier attempt's delayed invocation, refused unburnt.
+    assert!(call(4_999).is_err());
+    assert!(call(0).is_err());
+    // Started at or after the request: the requested attempt's own invocation.
+    call(5_000).expect("an invocation started after the request keeps its tickets");
 }

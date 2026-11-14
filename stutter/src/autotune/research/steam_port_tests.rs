@@ -285,8 +285,16 @@ fn exited_first_steam_verb_never_completes_an_attempt_with_a_live_second_verb() 
         (SteamVerb::Run, 123, 80),
     ] {
         let argv = ["/x/proton", verb.as_steam_argument(), "/g/game.exe"].map(str::to_owned);
-        let (_, ticket) =
-            authorize_dispatch(&attempt, &argv, &env, intent.uid, now + 1, &|_, _| Ok(())).unwrap();
+        let (_, ticket) = authorize_dispatch(
+            &attempt,
+            &argv,
+            &env,
+            intent.uid,
+            now + 1,
+            u64::MAX,
+            &|_, _| Ok(()),
+        )
+        .unwrap();
         let record = DispatcherStartV1 {
             schema_version: 1,
             ticket_id: ticket.ticket_id,
