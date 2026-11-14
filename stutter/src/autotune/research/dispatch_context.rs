@@ -112,6 +112,27 @@ fn read_context(dir: &std::fs::File, uid: u32) -> anyhow::Result<DispatchContext
     Ok(context)
 }
 
+const LAUNCH_REQUESTED_NAME: &str = "launch-requested";
+
+/// Driver side: durable proof that Stutter itself requested this attempt's Steam launch. A
+/// dispatcher invocation that finds no marker was not requested for this attempt (for example a
+/// delayed call from an earlier one) and must not consume its tickets.
+pub fn mark_launch_requested(dir: &std::fs::File) -> anyhow::Result<()> {
+    let mut file = crate::syscall::create_new_at(dir.as_fd(), LAUNCH_REQUESTED_NAME)?;
+    file.write_all(b"requested-v1")?;
+    file.sync_all()?;
+    dir.sync_all()?;
+    Ok(())
+}
+
+fn launch_was_requested(dir: &std::fs::File, uid: u32) -> bool {
+    crate::syscall::openat_nofollow(dir.as_fd(), LAUNCH_REQUESTED_NAME)
+        .and_then(|file| file.metadata())
+        .is_ok_and(|meta| {
+            meta.is_file() && meta.uid() == uid && meta.mode() & 0o077 == 0 && meta.len() == 12
+        })
+}
+
 /// Dispatcher side. The caller must be the unprivileged intent owner; anything else is refused
 /// before a ticket is touched.
 pub fn authorize_dispatch(
@@ -123,6 +144,10 @@ pub fn authorize_dispatch(
     verify_tool: &dyn Fn(&DispatchContextV1, &super::ResearchTool) -> anyhow::Result<()>,
 ) -> anyhow::Result<(DispatchPlan, ResearchLaunchTicketV1)> {
     anyhow::ensure!(euid != 0, "dispatcher must not run as root");
+    anyhow::ensure!(
+        launch_was_requested(dir, euid),
+        "no Steam launch was requested for this attempt"
+    );
     let context = read_context(dir, euid)?;
     anyhow::ensure!(
         context.intent.uid == euid,

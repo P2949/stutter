@@ -52,6 +52,7 @@ fn armed() -> (tempfile::TempDir, std::fs::File, u64) {
     let (dir, file, intent, slot) = fixture();
     let now = intent.issued_unix_seconds + 1;
     arm_attempt(&file, &intent, &slot, spec(), (now, 60)).unwrap();
+    mark_launch_requested(&file).unwrap();
     (dir, file, now + 1)
 }
 
@@ -90,6 +91,7 @@ fn dispatcher_start_records_live_process_and_rejects_duplicate_or_wrong_boot() {
     intent.issued_unix_seconds = now - 1;
     intent.deadline_unix_seconds = now + 3_600;
     arm_attempt(&file, &intent, &slot, spec(), (now, 60)).unwrap();
+    mark_launch_requested(&file).unwrap();
     let (_, ticket) =
         authorize_dispatch(&file, &argv("run"), &env(), intent.uid, now + 1, &|_, _| {
             Ok(())
@@ -120,6 +122,7 @@ fn host_anchor_requires_ticket_namespace_live_identity_and_steam_ancestry() {
     steam.webhelper_start_ticks = 41;
     let now = intent.issued_unix_seconds + 1;
     let context = arm_attempt(&file, &intent, &slot, spec(), (now, 60)).unwrap();
+    mark_launch_requested(&file).unwrap();
     let (_, ticket) =
         authorize_dispatch(&file, &argv("run"), &env(), intent.uid, now + 1, &|_, _| {
             Ok(())
@@ -274,4 +277,27 @@ fn arming_twice_is_refused() {
     let arm = |f: &std::fs::File| arm_attempt(f, &intent, &slot, spec(), (now, 60));
     arm(&file).unwrap();
     assert!(arm(&file).is_err());
+}
+
+#[test]
+fn a_dispatch_without_a_launch_request_is_refused_and_burns_nothing() {
+    let (_dir, file, mut intent, slot) = fixture();
+    intent.boot_id = crate::telemetry::identity::read_boot_id().unwrap();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    intent.issued_unix_seconds = now - 1;
+    intent.deadline_unix_seconds = now + 3_600;
+    arm_attempt(&file, &intent, &slot, spec(), (now, 60)).unwrap();
+    let late = || {
+        authorize_dispatch(&file, &argv("run"), &env(), intent.uid, now + 1, &|_, _| {
+            Ok(())
+        })
+    };
+    // A delayed invocation from an earlier attempt finds this one armed but never requested.
+    assert!(late().is_err());
+    mark_launch_requested(&file).unwrap();
+    assert!(mark_launch_requested(&file).is_err());
+    late().expect("the requested attempt's own dispatch still has its tickets");
 }

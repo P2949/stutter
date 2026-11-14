@@ -3,7 +3,7 @@
 //! marker is durable before arming. A refusal, timeout, cancellation or host failure is sealed
 //! only after the host confirms settlement; otherwise the started marker remains for recovery.
 
-use std::fs::File;
+use std::{fs::File, os::fd::AsFd};
 
 use super::{
     AttemptOutcome, AttemptRecord, AttemptSlot, ResearchIntentV1, ResearchJournal,
@@ -177,7 +177,6 @@ impl Driver {
         outcome: AttemptOutcome,
         now: u64,
     ) -> anyhow::Result<Step> {
-        use std::os::fd::AsFd;
         let mut worker_guard: Option<Box<dyn ClaimSettlementGuard>> = None;
         let guards = match crate::syscall::openat_dir_nofollow(
             self.root.as_fd(),
@@ -413,6 +412,11 @@ impl Driver {
                     !authorization_expired,
                     "attempt authorization expired before launch"
                 );
+                let attempt_dir = std::fs::File::from(crate::syscall::openat_dir_nofollow(
+                    self.root.as_fd(),
+                    &format!("{:04}", slot.index),
+                )?);
+                super::dispatch_context::mark_launch_requested(&attempt_dir)?;
                 host.launch(&slot, &context)
             });
         match launched {

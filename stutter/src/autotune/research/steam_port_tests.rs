@@ -251,6 +251,7 @@ fn exited_first_steam_verb_never_completes_an_attempt_with_a_live_second_verb() 
     };
     let now = intent.issued_unix_seconds + 1;
     let context = arm_attempt(&attempt, &intent, &slot, spec, (now, 60)).unwrap();
+    super::super::dispatch_context::mark_launch_requested(&attempt).unwrap();
     let env = [
         ("SteamAppId", "1091500"),
         ("STEAM_COMPAT_DATA_PATH", "/study/compatdata"),
