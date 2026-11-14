@@ -7,7 +7,7 @@ use std::fs::File;
 
 use super::{
     dispatch_context::{DispatchContextV1, launch_marker_present},
-    launch_record::{read_launch_record, request_settled},
+    launch_record::{RecordedOutcome, read_launch_record, request_settled},
     launch_ticket::has_live_claim,
     launch_txn::UnitState,
     recovery_plan::{AttemptState, Observations},
@@ -84,6 +84,18 @@ pub struct CompletionWitness {
 impl SettlementWitness for CompletionWitness {
     fn settled(&mut self, dispatch: &File, context: &DispatchContextV1) -> anyhow::Result<bool> {
         let unit = launch_unit_name(&context.intent.digest()?, context.slot.index)?;
+        // Completion is for an attempt that was actually launched. Recovery may conclude that an
+        // untouched attempt launched nothing, but an absent or unreconciled transaction here is
+        // never completion: it needs a valid sent request with a reconciled outcome.
+        let record = read_launch_record(dispatch, context.intent.uid)?;
+        if !record.sent
+            || !matches!(
+                record.outcome,
+                Some(RecordedOutcome::Running | RecordedOutcome::FinishedAlready)
+            )
+        {
+            return Ok(false);
+        }
         let Self {
             unit_state,
             process_tree_settled,
@@ -311,6 +323,44 @@ mod tests {
                 proton_manifest: "/m".into(),
             },
         }
+    }
+
+    #[test]
+    fn completion_needs_a_real_sent_and_reconciled_transaction() {
+        let context = context();
+        let unit = launch_unit_name(&context.intent.digest().unwrap(), 0).unwrap();
+        let everything_settled = || completion_witness(UnitState::Finished, true, 0, true);
+        // An empty attempt directory is never completion, however settled the witnesses are.
+        let (_empty, dir) = fresh();
+        assert!(!everything_settled().settled(&dir, &context).unwrap());
+        // Prepared only: nothing was sent.
+        let (_prepared, dir) = fresh();
+        record_phase(&dir, LaunchPhase::Prepared, &unit).unwrap();
+        assert!(!everything_settled().settled(&dir, &context).unwrap());
+        // Sent but never reconciled, or reconciled as ambiguous or never started.
+        let (_sent, dir) = fresh();
+        record_phase(&dir, LaunchPhase::Prepared, &unit).unwrap();
+        record_phase(&dir, LaunchPhase::Sent, &unit).unwrap();
+        assert!(!everything_settled().settled(&dir, &context).unwrap());
+        for outcome in [
+            LaunchOutcome::Ambiguous("lost"),
+            LaunchOutcome::NeverStarted,
+        ] {
+            let (_t, dir) = fresh();
+            record_phase(&dir, LaunchPhase::Prepared, &unit).unwrap();
+            record_phase(&dir, LaunchPhase::Sent, &unit).unwrap();
+            record_outcome(&dir, &unit, &outcome).unwrap();
+            assert!(!everything_settled().settled(&dir, &context).unwrap());
+        }
+        // Another request's records and torn (out-of-order) records are errors, not completion.
+        let (_other, dir) = fresh();
+        record_phase(&dir, LaunchPhase::Prepared, "other.service").unwrap();
+        record_phase(&dir, LaunchPhase::Sent, "other.service").unwrap();
+        record_outcome(&dir, "other.service", &LaunchOutcome::Running).unwrap();
+        assert!(everything_settled().settled(&dir, &context).is_err());
+        let (_torn, dir) = fresh();
+        record_phase(&dir, LaunchPhase::Sent, &unit).unwrap();
+        assert!(everything_settled().settled(&dir, &context).is_err());
     }
 
     #[test]
