@@ -59,3 +59,29 @@ only when the desktop is genuinely idle, which Stutter's own safe-window detecto
 `Monitoring { inhibitor_idle: false, input_idle: false }` for the active Hyprland session: the
 product's own safe-window signal is false, so `AwaitSafeWindow` correctly never advances to
 `Launching`. This exercised the detector against the real compositor.
+
+## Update 2026-11-14 (source head after this section: see git log)
+
+Added since the section above, all fixture or unit evidence only:
+
+| Area | Module | Evidence |
+| --- | --- | --- |
+| 34-row integration crosswalk | `research/crosswalk.rs` | exactly 34 rows, 33/unknown ids rejected, only 5.21 names a supported action |
+| Frame/runnable source quality | `research/quality.rs` | typed verdicts; unknown is never zero; 2,400/2 ms/1,000 gates unchanged |
+| Source-by-factor feature matrix | `research/features.rs` | 60 cells, HDR never a planned environment cell |
+| G5 action outcome classifier | `research/action_study.rs` | external actors, zero-TID, token and gate bypass refused |
+| Launch-request handshake | `dispatch_context.rs`, `driver.rs` | a delayed earlier dispatch cannot consume a newer attempt's tickets |
+| Claim settlement witnesses | `research/settlement.rs` | procfs process witness; worker witness fails closed when absent |
+| Report context drift | `research/report.rs` | derived from sealed native completions; unknown is not stable |
+| Idempotent ticket retirement | `launch_ticket.rs` | repeat and torn `revoked-v1` markers; empty marker still refused |
+| Epoch-bound telemetry join | `research/join.rs` | process, epoch, window and timestamp checks with counted rejections |
+
+NixosConf research worktree (`feat/stutter-cyberpunk-research`, local only): `validate fast` and
+`validate affected` pass (receipt for 1cc7de70). `validate full` is reserved for the exact merge.
+
+Still blocked, unchanged: the user's graphical session is active and Stutter's own safe-window
+detector reports it is not idle, so no Steam or Cyberpunk launch, compat-tool selection,
+deployment or campaign was performed. Open design decision: the production worker-token witness
+needs a read-only outstanding-token query; the only existing call (`settle_issued_tokens`)
+mutates, and the worker IPC is not widened without approval. No G0-G9 gate that depends on a real
+launch is claimed.
