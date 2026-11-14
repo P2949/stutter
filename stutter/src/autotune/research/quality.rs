@@ -118,7 +118,8 @@ mod tests {
 
     #[test]
     fn each_defect_has_its_own_verdict() {
-        let cases: [(fn(&mut FrameSourceFacts), FrameVerdict); 9] = [
+        type Case = (fn(&mut FrameSourceFacts), FrameVerdict);
+        let cases: [Case; 9] = [
             (|f| f.producers = 0, FrameVerdict::Unavailable),
             (|f| f.producers = 2, FrameVerdict::DuplicateProducer),
             (|f| f.swapchains = 2, FrameVerdict::DuplicateSwapchain),
