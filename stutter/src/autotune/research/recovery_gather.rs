@@ -6,11 +6,13 @@
 use std::fs::File;
 
 use super::{
-    dispatch_context::launch_marker_present,
+    dispatch_context::{DispatchContextV1, launch_marker_present},
     launch_record::{read_launch_record, request_settled},
     launch_ticket::has_live_claim,
     launch_txn::UnitState,
     recovery_plan::{AttemptState, Observations},
+    steam_port::SettlementWitness,
+    user_launcher::launch_unit_name,
 };
 
 /// Independent witnesses, each queried at most once. They are closures so the production
@@ -63,6 +65,46 @@ pub fn gather(
         outstanding_worker_tokens: (witnesses.outstanding_worker_tokens)().ok(),
         transactions_restored: (witnesses.transactions_restored)().ok(),
     })
+}
+
+type UnitStateWitness = Box<dyn FnMut(&str) -> anyhow::Result<UnitState> + Send>;
+type TreeWitness = Box<dyn FnMut(&File, &DispatchContextV1) -> anyhow::Result<bool> + Send>;
+type TokenWitness = Box<dyn FnMut() -> anyhow::Result<usize> + Send>;
+type RestoredWitness = Box<dyn FnMut() -> anyhow::Result<bool> + Send>;
+
+/// The completion witness the Steam port consults: the same durable records and independent
+/// witnesses recovery uses, so a finished attempt and a recovered one settle by one rule.
+pub struct CompletionWitness {
+    pub unit_state: UnitStateWitness,
+    pub process_tree_settled: TreeWitness,
+    pub outstanding_worker_tokens: TokenWitness,
+    pub transactions_restored: RestoredWitness,
+}
+
+impl SettlementWitness for CompletionWitness {
+    fn settled(&mut self, dispatch: &File, context: &DispatchContextV1) -> anyhow::Result<bool> {
+        let unit = launch_unit_name(&context.intent.digest()?, context.slot.index)?;
+        let Self {
+            unit_state,
+            process_tree_settled,
+            outstanding_worker_tokens,
+            transactions_restored,
+        } = self;
+        let observations = gather(
+            dispatch,
+            context.intent.uid,
+            AttemptState::StartedUnsealed,
+            true,
+            &unit,
+            Witnesses {
+                unit_state: &mut **unit_state,
+                process_tree_settled: &mut || process_tree_settled(dispatch, context),
+                outstanding_worker_tokens: &mut **outstanding_worker_tokens,
+                transactions_restored: &mut **transactions_restored,
+            },
+        )?;
+        Ok(observations.settled_for_completion())
+    }
 }
 
 #[cfg(test)]
@@ -231,5 +273,73 @@ mod tests {
         )
         .unwrap();
         assert!(!run(&dir2, UnitState::Absent, Some(true), Some(0), Some(true)).ticket_claimed);
+    }
+
+    fn completion_witness(
+        unit: UnitState,
+        process: bool,
+        tokens: usize,
+        restored: bool,
+    ) -> CompletionWitness {
+        CompletionWitness {
+            unit_state: Box::new(move |_| Ok(unit)),
+            process_tree_settled: Box::new(move |_, _| Ok(process)),
+            outstanding_worker_tokens: Box::new(move || Ok(tokens)),
+            transactions_restored: Box::new(move || Ok(restored)),
+        }
+    }
+
+    fn context() -> DispatchContextV1 {
+        use crate::autotune::research::{AttemptSlot, dispatch_context::ArmSpec, tests::intent};
+        let intent = intent();
+        let slot = AttemptSlot {
+            study_sha256: intent.digest().unwrap(),
+            context_sha256: "f".repeat(64),
+            index: 0,
+            arm: intent.tools[0].source,
+        };
+        DispatchContextV1 {
+            schema_version: 1,
+            intent,
+            slot,
+            tickets: Default::default(),
+            spec: ArmSpec {
+                tool_dir: "/t".into(),
+                study_compat_data: "/s".into(),
+                arm_env: Default::default(),
+                steamapps: "/a".into(),
+                proton_manifest: "/m".into(),
+            },
+        }
+    }
+
+    #[test]
+    fn the_completion_witness_settles_only_when_every_independent_source_agrees() {
+        let context = context();
+        let unit = launch_unit_name(&context.intent.digest().unwrap(), 0).unwrap();
+        let (_tmp, dir) = fresh();
+        record_phase(&dir, LaunchPhase::Prepared, &unit).unwrap();
+        record_phase(&dir, LaunchPhase::Sent, &unit).unwrap();
+        record_outcome(&dir, &unit, &LaunchOutcome::Running).unwrap();
+        let settled = |w: &mut CompletionWitness| w.settled(&dir, &context).unwrap();
+        assert!(settled(&mut completion_witness(
+            UnitState::Finished,
+            true,
+            0,
+            true
+        )));
+        for mut witness in [
+            completion_witness(UnitState::Active, true, 0, true),
+            completion_witness(UnitState::Absent, true, 0, true),
+            completion_witness(UnitState::Finished, false, 0, true),
+            completion_witness(UnitState::Finished, true, 1, true),
+            completion_witness(UnitState::Finished, true, 0, false),
+        ] {
+            assert!(!settled(&mut witness));
+        }
+        // A witness that cannot answer is unsettled, never settled.
+        let mut broken = completion_witness(UnitState::Finished, true, 0, true);
+        broken.outstanding_worker_tokens = Box::new(|| Err(anyhow::anyhow!("worker unavailable")));
+        assert!(!settled(&mut broken));
     }
 }

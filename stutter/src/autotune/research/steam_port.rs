@@ -27,6 +27,12 @@ use super::{
 type PrepareRequest =
     Box<dyn FnMut(&AttemptSlot, &DispatchContextV1) -> anyhow::Result<UserLaunchRequest> + Send>;
 
+/// Independent proof that an attempt's launch request, process tree, worker transactions and
+/// restoration are all settled. It is never derived from the attempt's own claims or results.
+pub trait SettlementWitness: Send {
+    fn settled(&mut self, dispatch: &File, context: &DispatchContextV1) -> anyhow::Result<bool>;
+}
+
 /// Starts an attempt through the authenticated user manager instead of spawning Steam directly.
 /// Both parts are supplied by the caller: the manager port and the fixed-request preparer.
 pub struct TransientLauncher {
@@ -205,6 +211,7 @@ pub struct ProductionSteamPort<R: ResultProbe> {
     dispatch: Option<(File, DispatchContextV1)>,
     unsettled: bool,
     transient: Option<TransientLauncher>,
+    witness: Option<Box<dyn SettlementWitness>>,
 }
 
 impl<R: ResultProbe> ProductionSteamPort<R> {
@@ -230,7 +237,14 @@ impl<R: ResultProbe> ProductionSteamPort<R> {
             dispatch: None,
             unsettled: false,
             transient: None,
+            witness: None,
         }
+    }
+
+    /// The independent witness that may clear `unsettled`; without one the port never settles.
+    pub fn with_settlement_witness(mut self, witness: Box<dyn SettlementWitness>) -> Self {
+        self.witness = Some(witness);
+        self
     }
 
     /// Launch through the user manager rather than a direct child spawn.
@@ -438,6 +452,15 @@ impl<R: ResultProbe> SteamPort for ProductionSteamPort<R> {
     }
 
     fn stop(&mut self) -> anyhow::Result<()> {
+        // Only an independent witness clears the flag. Native output, an exited launcher or a
+        // missing observation never does; a failing witness leaves the port unsettled.
+        if self.unsettled
+            && let (Some(witness), Some((dir, context))) =
+                (self.witness.as_mut(), self.dispatch.as_ref())
+            && witness.settled(dir, context).unwrap_or(false)
+        {
+            self.unsettled = false;
+        }
         anyhow::ensure!(
             !self.unsettled,
             "Cyberpunk process-tree settlement is unverified"

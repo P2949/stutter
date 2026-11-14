@@ -508,3 +508,77 @@ fn a_port_without_a_transient_launcher_blocks_instead_of_spawning_steam() {
     );
     assert!(!port.unsettled && port.dispatch.is_none());
 }
+
+mod settlement {
+    use super::*;
+
+    struct Witness(Option<bool>);
+    impl SettlementWitness for Witness {
+        fn settled(&mut self, _: &File, _: &DispatchContextV1) -> anyhow::Result<bool> {
+            self.0.ok_or_else(|| anyhow::anyhow!("witness unavailable"))
+        }
+    }
+
+    fn launched_port(witness: Option<Option<bool>>) -> ProductionSteamPort<Probe> {
+        let mut port = ProductionSteamPort::new(
+            "/s".into(),
+            "/study".into(),
+            "/a".into(),
+            "/m".into(),
+            crate::autotune::research::tests::intent().steam_client,
+            vec![],
+            Probe,
+        );
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = File::from(crate::syscall::open_dir_no_symlinks(tmp.path()).unwrap());
+        let intent = crate::autotune::research::tests::intent();
+        let slot = AttemptSlot {
+            study_sha256: "e".repeat(64),
+            context_sha256: "f".repeat(64),
+            index: 0,
+            arm: crate::autotune::research::ProtonSource::Ge,
+        };
+        let context = DispatchContextV1 {
+            schema_version: 1,
+            intent,
+            slot,
+            tickets: Default::default(),
+            spec: crate::autotune::research::dispatch_context::ArmSpec {
+                tool_dir: "/t".into(),
+                study_compat_data: "/s".into(),
+                arm_env: Default::default(),
+                steamapps: "/a".into(),
+                proton_manifest: "/m".into(),
+            },
+        };
+        port.unsettled = true;
+        port.dispatch = Some((dir, context));
+        if let Some(answer) = witness {
+            port = port.with_settlement_witness(Box::new(Witness(answer)));
+        }
+        port
+    }
+
+    #[test]
+    fn only_an_independent_witness_clears_the_unsettled_state() {
+        let mut port = launched_port(Some(Some(true)));
+        assert!(port.stop().is_ok());
+        assert!(!port.unsettled);
+        // Idempotent once settled.
+        assert!(port.stop().is_ok());
+    }
+
+    #[test]
+    fn a_missing_negative_or_failing_witness_never_settles() {
+        for witness in [None, Some(Some(false)), Some(None)] {
+            let mut port = launched_port(witness);
+            assert!(port.stop().is_err());
+            assert!(port.unsettled);
+        }
+        // Without a dispatch record there is nothing to witness.
+        let mut port = launched_port(Some(Some(true)));
+        port.dispatch = None;
+        assert!(port.stop().is_err());
+        assert!(port.unsettled);
+    }
+}

@@ -162,6 +162,14 @@ pub fn prepare_from_host(
     prepare_user_launch(intent, slot, &executable, &session)
 }
 
+/// The unique transient unit name for one attempt; recovery derives the same name to bind records.
+pub fn launch_unit_name(intent_digest: &str, index: u32) -> anyhow::Result<String> {
+    let prefix = intent_digest
+        .get(..16)
+        .ok_or_else(|| anyhow::anyhow!("invalid intent digest"))?;
+    Ok(format!("stutter-research-{prefix}-{index:04}.service"))
+}
+
 /// Encode the only permitted transient command, with no shell or caller-selected arguments.
 /// Both source and session witnesses must be freshly re-attested before sending the request.
 pub fn prepare_user_launch(
@@ -193,11 +201,7 @@ pub fn prepare_user_launch(
         runtime_text == format!("/run/user/{}", intent.uid),
         "wrong user runtime directory"
     );
-    let name = format!(
-        "stutter-research-{}-{:04}.service",
-        &digest[..16],
-        slot.index
-    );
+    let name = launch_unit_name(&digest, slot.index)?;
     let args = [executable, "-applaunch", "1091500", "-benchmark"].map(str::to_owned);
     let environment = [
         format!("HOME={home}"),

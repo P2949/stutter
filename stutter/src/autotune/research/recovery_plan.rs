@@ -58,6 +58,18 @@ pub struct Observations {
     pub transactions_restored: Option<bool>,
 }
 
+impl Observations {
+    /// Whether a launched attempt may be completed: the launch request, the process tree, the
+    /// worker transactions and the restoration are all independently shown settled. Any
+    /// missing observation, or a non-zero token count, is unsettled.
+    pub fn settled_for_completion(&self) -> bool {
+        self.launch_request_settled == Some(true)
+            && self.process_tree_settled == Some(true)
+            && self.outstanding_worker_tokens == Some(0)
+            && self.transactions_restored == Some(true)
+    }
+}
+
 /// Map observations to decision facts, treating every unobserved item as unsettled.
 pub fn facts_from(o: &Observations) -> RecoveryFacts {
     RecoveryFacts {
@@ -206,6 +218,23 @@ mod tests {
             decide(&facts_from(&o)),
             RecoveryDecision::UnsafeToResume(_)
         ));
+    }
+
+    #[test]
+    fn completion_needs_every_witness_and_zero_tokens() {
+        assert!(observed().settled_for_completion());
+        let cases: [fn(&mut Observations); 5] = [
+            |o| o.launch_request_settled = None,
+            |o| o.process_tree_settled = Some(false),
+            |o| o.outstanding_worker_tokens = None,
+            |o| o.outstanding_worker_tokens = Some(1),
+            |o| o.transactions_restored = Some(false),
+        ];
+        for mutate in cases {
+            let mut o = observed();
+            mutate(&mut o);
+            assert!(!o.settled_for_completion());
+        }
     }
 
     #[test]
