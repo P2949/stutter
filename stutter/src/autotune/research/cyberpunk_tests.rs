@@ -114,7 +114,7 @@ fn native_probe_uses_the_verifier_and_rejects_stale_results() {
     };
     struct Source(Arc<Mutex<Option<CyberpunkBenchmarkAttempt>>>);
     impl NativeObservationSource for Source {
-        fn begin(&mut self) -> anyhow::Result<()> {
+        fn begin(&mut self, _: super::super::ProtonSource) -> anyhow::Result<()> {
             Ok(())
         }
         fn poll(&mut self) -> Observation {
@@ -134,7 +134,7 @@ fn native_probe_uses_the_verifier_and_rejects_stale_results() {
         crate::syscall::geteuid(),
         Source(observed.clone()),
     );
-    probe.begin().unwrap();
+    probe.begin(super::super::ProtonSource::Ge).unwrap();
     let started = now_unix_nanos().unwrap();
     std::thread::sleep(Duration::from_millis(2));
     write_result(root.path(), "new", r#"{"averageFps": 92.5}"#);
@@ -145,7 +145,7 @@ fn native_probe_uses_the_verifier_and_rejects_stale_results() {
     };
     assert_eq!(completion.metrics.average_fps, 92.5);
     assert!(!completion.files.is_empty());
-    probe.begin().unwrap();
+    probe.begin(super::super::ProtonSource::Ge).unwrap();
     let started = now_unix_nanos().unwrap();
     std::thread::sleep(Duration::from_millis(2));
     *observed.lock().unwrap() = Some(attempt(
@@ -166,7 +166,7 @@ fn native_probe_preserves_process_observation_outcomes() {
     };
     struct Source(std::collections::VecDeque<Observation>);
     impl NativeObservationSource for Source {
-        fn begin(&mut self) -> anyhow::Result<()> {
+        fn begin(&mut self, _: super::super::ProtonSource) -> anyhow::Result<()> {
             Ok(())
         }
         fn poll(&mut self) -> Observation {
@@ -185,7 +185,7 @@ fn native_probe_preserves_process_observation_outcomes() {
     );
     let mut probe =
         NativeResultProbe::new(root.path().to_path_buf(), crate::syscall::geteuid(), source);
-    probe.begin().unwrap();
+    probe.begin(super::super::ProtonSource::Ge).unwrap();
     assert_eq!(probe.poll(), GameState::Starting);
     assert_eq!(probe.poll(), GameState::Running);
     assert_eq!(probe.poll(), GameState::ExitedWithoutResult);

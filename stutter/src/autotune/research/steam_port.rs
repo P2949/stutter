@@ -194,7 +194,7 @@ pub fn launch_argv() -> Vec<String> {
 
 pub trait ResultProbe {
     /// Prepare for a new launch (for example snapshot the native results directory).
-    fn begin(&mut self) -> anyhow::Result<()>;
+    fn begin(&mut self, arm: super::ProtonSource) -> anyhow::Result<()>;
     fn poll(&mut self) -> GameState;
 }
 
@@ -408,7 +408,7 @@ impl<R: ResultProbe> SteamPort for ProductionSteamPort<R> {
             "safe window closed before launch"
         );
         let dispatch = self.open_dispatch(slot, context)?;
-        self.probe.begin()?;
+        self.probe.begin(slot.arm)?;
         anyhow::ensure!(
             self.idle_is_fresh(),
             "desktop idle observation expired before launch"

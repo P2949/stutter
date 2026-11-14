@@ -22,7 +22,7 @@ pub enum Observation {
 /// Supplies independent process, entitlement, renderer and settings observations. Constructing
 /// an observation is not itself proof; the production source still requires live qualification.
 pub trait NativeObservationSource {
-    fn begin(&mut self) -> anyhow::Result<()>;
+    fn begin(&mut self, arm: super::ProtonSource) -> anyhow::Result<()>;
     fn poll(&mut self) -> Observation;
 }
 
@@ -45,10 +45,10 @@ impl<S> NativeResultProbe<S> {
 }
 
 impl<S: NativeObservationSource> ResultProbe for NativeResultProbe<S> {
-    fn begin(&mut self) -> anyhow::Result<()> {
+    fn begin(&mut self, arm: super::ProtonSource) -> anyhow::Result<()> {
         self.before = None;
         let snapshot = snapshot_benchmark_results(&self.results_dir, self.owner_uid)?;
-        self.source.begin()?;
+        self.source.begin(arm)?;
         self.before = Some(snapshot);
         Ok(())
     }

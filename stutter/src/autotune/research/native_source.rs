@@ -7,7 +7,7 @@
 //! live qualification; this state machine is exercised with scripted facts only.
 
 use super::{
-    ResearchTool,
+    ProtonSource, ResearchTool,
     cyberpunk::{CyberpunkBenchmarkAttempt, CyberpunkProcessIdentity, CyberpunkScenario},
     native_probe::{NativeObservationSource, Observation},
     steam_inventory::CyberpunkInstallation,
@@ -39,7 +39,9 @@ struct Seen {
 pub struct AttestedNativeSource<F> {
     facts: F,
     installation: CyberpunkInstallation,
-    proton: ResearchTool,
+    /// The frozen tool set; the tool for each attempt is chosen from it by `begin(arm)`.
+    tools: Vec<ResearchTool>,
+    current: Option<ResearchTool>,
     owner_uid: u32,
     seen: Option<Seen>,
 }
@@ -48,13 +50,14 @@ impl<F> AttestedNativeSource<F> {
     pub fn new(
         facts: F,
         installation: CyberpunkInstallation,
-        proton: ResearchTool,
+        tools: Vec<ResearchTool>,
         owner_uid: u32,
     ) -> Self {
         Self {
             facts,
             installation,
-            proton,
+            tools,
+            current: None,
             owner_uid,
             seen: None,
         }
@@ -78,6 +81,10 @@ impl<F: GameFacts> AttestedNativeSource<F> {
             (Sighting::Multiple, _) => Observation::IdentityMismatch,
             (Sighting::None, None) => Observation::Starting,
             (Sighting::None, Some(seen)) => {
+                let proton = self
+                    .current
+                    .clone()
+                    .ok_or_else(|| anyhow::anyhow!("no Proton tool selected for this attempt"))?;
                 // The game ended after being seen: the verifier decides whether a fresh native
                 // result exists for exactly this process and interval.
                 Observation::Completed(Box::new(CyberpunkBenchmarkAttempt {
@@ -85,7 +92,7 @@ impl<F: GameFacts> AttestedNativeSource<F> {
                     process: seen.process.clone(),
                     scene: CyberpunkScenario::BuiltinBenchmark,
                     settings_sha256: seen.settings_sha256.clone(),
-                    proton: self.proton.clone(),
+                    proton,
                     started_unix_nanos: seen.started_unix_nanos,
                     completed_unix_nanos: self.facts.now_unix_nanos()?,
                 }))
@@ -116,8 +123,17 @@ impl<F: GameFacts> AttestedNativeSource<F> {
 }
 
 impl<F: GameFacts> NativeObservationSource for AttestedNativeSource<F> {
-    fn begin(&mut self) -> anyhow::Result<()> {
+    fn begin(&mut self, arm: ProtonSource) -> anyhow::Result<()> {
         self.seen = None;
+        // An arm outside the frozen tool set can never be attributed: refuse to begin.
+        self.current = None;
+        self.current = Some(
+            self.tools
+                .iter()
+                .find(|tool| tool.source == arm)
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("scheduled arm is not in the frozen tool set"))?,
+        );
         Ok(())
     }
 
@@ -191,10 +207,10 @@ mod tests {
                 settings_reads: 0,
             },
             installation(),
-            ResearchTool {
+            vec![ResearchTool {
                 source: ProtonSource::ValveStable,
                 identity_sha256: "b".repeat(64),
-            },
+            }],
             1000,
         )
     }
@@ -203,7 +219,7 @@ mod tests {
     fn a_game_that_runs_then_exits_yields_a_completed_attempt_for_that_exact_process() {
         let one = || Ok(Sighting::One(process(500, 9)));
         let mut source = source(vec![Ok(Sighting::None), one(), one(), Ok(Sighting::None)]);
-        source.begin().unwrap();
+        source.begin(ProtonSource::ValveStable).unwrap();
         assert!(matches!(source.poll(), Observation::Starting));
         assert!(matches!(source.poll(), Observation::Running));
         assert!(matches!(source.poll(), Observation::Running));
@@ -253,7 +269,43 @@ mod tests {
             Ok(Sighting::One(process(600, 20))),
         ]);
         assert!(matches!(again.poll(), Observation::Running));
-        again.begin().unwrap();
+        again.begin(ProtonSource::ValveStable).unwrap();
         assert!(matches!(again.poll(), Observation::Running));
+    }
+
+    #[test]
+    fn each_attempt_is_bound_to_its_own_arms_tool_and_unknown_arms_refuse_to_begin() {
+        let tools = vec![
+            ResearchTool {
+                source: ProtonSource::ValveStable,
+                identity_sha256: "b".repeat(64),
+            },
+            ResearchTool {
+                source: ProtonSource::Ge,
+                identity_sha256: "d".repeat(64),
+            },
+        ];
+        let one = || Ok(Sighting::One(process(500, 9)));
+        let mut source = AttestedNativeSource::new(
+            Script {
+                sights: vec![one(), Ok(Sighting::None), one(), Ok(Sighting::None)].into(),
+                clock: 10_000,
+                settings_reads: 0,
+            },
+            installation(),
+            tools,
+            1000,
+        );
+        for (arm, expected) in [(ProtonSource::Ge, "d"), (ProtonSource::ValveStable, "b")] {
+            source.begin(arm).unwrap();
+            assert!(matches!(source.poll(), Observation::Running));
+            let Observation::Completed(attempt) = source.poll() else {
+                panic!("expected a completed attempt")
+            };
+            assert_eq!(attempt.proton.source, arm);
+            assert_eq!(attempt.proton.identity_sha256, expected.repeat(64));
+        }
+        // An arm outside the frozen tool set can never be attributed.
+        assert!(source.begin(ProtonSource::Em).is_err());
     }
 }

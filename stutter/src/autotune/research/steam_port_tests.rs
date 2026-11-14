@@ -100,7 +100,7 @@ fn only_the_frozen_client_tree_is_exempt_from_the_prefilter() {
 
 struct Probe;
 impl ResultProbe for Probe {
-    fn begin(&mut self) -> anyhow::Result<()> {
+    fn begin(&mut self, _: crate::autotune::research::ProtonSource) -> anyhow::Result<()> {
         Ok(())
     }
     fn poll(&mut self) -> GameState {
