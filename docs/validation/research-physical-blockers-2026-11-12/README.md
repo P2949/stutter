@@ -109,3 +109,19 @@ Open, accepted as not yet resolved (needs a real Steam launch to design against)
   and its live-worker assertions have not been executed.
 - `context_state` compares all native completions as one cohort; it must be made study/block
   specific before CP-CPU and CP-GPU studies are reported together.
+
+## Update 2026-11-14 (second review round)
+
+Added, unit evidence only, none wired into the resident runtime yet:
+
+| Module | Purpose | Not yet |
+| --- | --- | --- |
+| `research/recovery_plan.rs` | pure post-launch recovery decision: seal only provably settled attempts, never replay, `UnsafeToResume` otherwise | gathering its facts in `RecoveryJob::run` |
+| `research/child_study.rs` | frozen, distinct child studies per profile/stage/factor/action; `DeferredBudget` funnel | used by `build_schedule` and the report |
+| `research/launch_txn.rs` | persist-before-send launch over a user-manager port; lost ack reconciled by observation, never resent | composed with `VerifiedUserManager` and a real D-Bus port |
+| `action_study::classify` | blocker denial needs source-qualified evidence; a worker transaction without a controller decision is refused | real controller/worker evidence |
+
+Still open: per-launch dispatch binding beyond start ticks (needs the real Steam lifecycle),
+`ProductionSteamPort::stop` cannot settle a detached game tree, the real `NativeObservationSource`,
+wiring the telemetry join, NixosConf exact-build packaging, and every physical gate. The desktop is
+occupied by the user's own Steam game; no G0-G9 gate is claimed.
