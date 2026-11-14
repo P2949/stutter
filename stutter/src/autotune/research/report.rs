@@ -184,6 +184,7 @@ pub fn build_report(
         evidence.len() == fps.len(),
         "unsealed or unexpected evidence exists"
     );
+    let context = context_state(evidence);
     let blocks = schedule.len() / arms.len();
     let comparisons = (arms.len() - 1) as u32;
     let confidence = 1.0 - FAMILY_ALPHA / f64::from(comparisons);
@@ -210,28 +211,34 @@ pub fn build_report(
             comparisons,
             metric: NativeMetric::AverageFps,
         };
-        results.push(match analyse_pairs(&rule, &left, &right, false) {
-            Ok(outcome) => ArmResult {
-                source: candidate,
-                status: "unqualified_provenance".into(),
-                numeric_verdict: Some(verdict_name(outcome.verdict).into()),
-                pairs: outcome.pairs,
-                mean_effect_percent: Some(outcome.mean_effect * 100.0),
-                ci_low_percent: Some(outcome.ci_low * 100.0),
-                ci_high_percent: Some(outcome.ci_high * 100.0),
-                rule_sha256: Some(outcome.rule_sha256),
+        results.push(
+            match analyse_pairs(&rule, &left, &right, context == ContextState::Drifted) {
+                Ok(outcome) => ArmResult {
+                    source: candidate,
+                    status: match context {
+                        ContextState::Consistent => "native_context_consistent_unqualified",
+                        _ => "unqualified_provenance",
+                    }
+                    .into(),
+                    numeric_verdict: Some(verdict_name(outcome.verdict).into()),
+                    pairs: outcome.pairs,
+                    mean_effect_percent: Some(outcome.mean_effect * 100.0),
+                    ci_low_percent: Some(outcome.ci_low * 100.0),
+                    ci_high_percent: Some(outcome.ci_high * 100.0),
+                    rule_sha256: Some(outcome.rule_sha256),
+                },
+                Err(refused) => ArmResult {
+                    source: candidate,
+                    status: format!("refused_{refused:?}"),
+                    numeric_verdict: None,
+                    pairs: left.len(),
+                    mean_effect_percent: None,
+                    ci_low_percent: None,
+                    ci_high_percent: None,
+                    rule_sha256: None,
+                },
             },
-            Err(refused) => ArmResult {
-                source: candidate,
-                status: format!("refused_{refused:?}"),
-                numeric_verdict: None,
-                pairs: left.len(),
-                mean_effect_percent: None,
-                ci_low_percent: None,
-                ci_high_percent: None,
-                rule_sha256: None,
-            },
-        });
+        );
     }
     Ok(ResearchReportV1 {
         schema_version: 2,
@@ -263,3 +270,43 @@ pub fn verify_report(
 #[cfg(test)]
 #[path = "report_tests.rs"]
 mod tests;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ContextState {
+    /// Some completed attempt carries no native completion, so stability cannot be shown.
+    Unproven,
+    /// Native completions disagree on build, scene, settings or game executable.
+    Drifted,
+    /// Every completed attempt agrees; this is necessary, not sufficient, for qualification.
+    Consistent,
+}
+
+/// Cross-attempt context check from the sealed native completions themselves. Unknown is never
+/// treated as stable, and an inconsistent context withholds the numeric comparison.
+fn context_state(evidence: &BTreeMap<u32, AttemptEvidenceV1>) -> ContextState {
+    let mut natives = evidence
+        .values()
+        .map(|item| item.native_completion.as_deref());
+    let Some(Some(first)) = natives.next() else {
+        return ContextState::Unproven;
+    };
+    let mut unproven = false;
+    for native in natives {
+        let Some(native) = native else {
+            unproven = true;
+            continue;
+        };
+        if native.build_id != first.build_id
+            || native.scene != first.scene
+            || native.settings_sha256 != first.settings_sha256
+            || native.process.executable_sha256 != first.process.executable_sha256
+        {
+            return ContextState::Drifted;
+        }
+    }
+    if unproven {
+        ContextState::Unproven
+    } else {
+        ContextState::Consistent
+    }
+}

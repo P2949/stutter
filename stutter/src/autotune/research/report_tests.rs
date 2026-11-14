@@ -175,3 +175,72 @@ fn native_completion_must_match_the_frozen_attempt_before_sealing() {
         .proton_identity_sha256 = "e".repeat(64);
     assert!(evidence.validate_for(slot, &intent).is_err());
 }
+
+#[test]
+fn inconsistent_native_context_withholds_the_numeric_comparison() {
+    // Missing native completions are unproven, never stable.
+    let (_, schedule) = study(6);
+    let (_, evidence) = run(&schedule, |_| Some(60.0));
+    assert_eq!(context_state(&evidence), ContextState::Unproven);
+    assert_eq!(context_state(&BTreeMap::new()), ContextState::Unproven);
+}
+
+#[test]
+fn native_completions_decide_consistent_or_drifted_context() {
+    use super::super::cyberpunk::{
+        CyberpunkBenchmarkCompletion, CyberpunkProcessIdentity, CyberpunkScenario,
+        NativeBenchmarkFile, NativeBenchmarkMetrics,
+    };
+    let (intent, schedule) = study(4);
+    let make = |slot: &AttemptSlot| {
+        let tool = intent.tools.iter().find(|t| t.source == slot.arm).unwrap();
+        AttemptEvidenceV1 {
+            schema_version: 1,
+            slot_index: slot.index,
+            average_fps: 60.0,
+            native_completion: Some(Box::new(CyberpunkBenchmarkCompletion {
+                schema_version: 1,
+                app_id: intent.app_id,
+                build_id: intent.build_id,
+                scene: CyberpunkScenario::BuiltinBenchmark,
+                settings_sha256: "c".repeat(64),
+                proton_source: slot.arm,
+                proton_identity_sha256: tool.identity_sha256.clone(),
+                process: CyberpunkProcessIdentity {
+                    pid: stutter_core::ids::Pid::new(1234),
+                    start_ticks: 1,
+                    uid: intent.uid,
+                    app_id: intent.app_id,
+                    build_id: intent.build_id,
+                    executable_sha256: intent.game_executable_sha256.clone(),
+                },
+                started_unix_nanos: 1,
+                completed_unix_nanos: 2,
+                result_directory: "result".into(),
+                metrics: NativeBenchmarkMetrics {
+                    average_fps: 60.0,
+                    minimum_fps: None,
+                    maximum_fps: None,
+                },
+                files: vec![NativeBenchmarkFile {
+                    path: "result/summary.json".into(),
+                    size_bytes: 10,
+                    sha256: "d".repeat(64),
+                }],
+            })),
+        }
+    };
+    let mut evidence: BTreeMap<u32, _> = schedule.iter().map(|s| (s.index, make(s))).collect();
+    assert_eq!(context_state(&evidence), ContextState::Consistent);
+    evidence
+        .get_mut(&3)
+        .unwrap()
+        .native_completion
+        .as_mut()
+        .unwrap()
+        .settings_sha256 = "e".repeat(64);
+    assert_eq!(context_state(&evidence), ContextState::Drifted);
+    evidence.get_mut(&3).unwrap().native_completion = None;
+    // One unproven attempt keeps an otherwise consistent set from being called stable.
+    assert_eq!(context_state(&evidence), ContextState::Unproven);
+}
