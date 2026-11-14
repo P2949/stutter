@@ -14,6 +14,14 @@ use serde::{Deserialize, Serialize};
     )
 )]
 pub(crate) mod analysis;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "emitted by the final report once the campaign runs"
+    )
+)]
+pub(crate) mod crosswalk;
 #[expect(
     dead_code,
     reason = "P2's unprivileged verifier remains inactive until the owned Steam launcher is qualified"
