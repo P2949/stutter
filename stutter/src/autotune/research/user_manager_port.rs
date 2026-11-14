@@ -163,9 +163,65 @@ impl<B: ManagerBus> UserManagerPort for DbusUserManagerPort<B> {
     }
 }
 
+/// A manager whose attestation can expire. The production `VerifiedUserManager` is only trusted
+/// for a few seconds after it was independently authenticated.
+pub trait Freshness {
+    fn is_fresh(&self) -> bool;
+}
+
+impl Freshness for VerifiedUserManager {
+    fn is_fresh(&self) -> bool {
+        VerifiedUserManager::is_fresh(self)
+    }
+}
+
+/// Re-authenticates the manager from scratch whenever the previous attestation has expired, so a
+/// long benchmark can keep querying without ever relaxing the freshness rule. If a fresh
+/// authentication cannot be obtained, nothing is sent: the call fails as `NotSent`.
+pub struct ReauthenticatingBus<M, F> {
+    current: Option<M>,
+    authenticate: F,
+}
+
+impl<M, F> ReauthenticatingBus<M, F>
+where
+    M: ManagerBus + Freshness,
+    F: FnMut() -> anyhow::Result<M>,
+{
+    pub fn new(authenticate: F) -> Self {
+        Self {
+            current: None,
+            authenticate,
+        }
+    }
+}
+
+impl<M, F> ManagerBus for ReauthenticatingBus<M, F>
+where
+    M: ManagerBus + Freshness,
+    F: FnMut() -> anyhow::Result<M>,
+{
+    fn call(
+        &mut self,
+        path: &str,
+        interface: &str,
+        member: &str,
+        signature: &str,
+        body: &[u8],
+    ) -> Result<Vec<Value>, BusFault> {
+        if !self.current.as_ref().is_some_and(Freshness::is_fresh) {
+            // Drop the stale manager before authenticating a new one; never reuse it.
+            self.current = None;
+            self.current = Some((self.authenticate)().map_err(|_| BusFault::NotSent)?);
+        }
+        let manager = self.current.as_mut().ok_or(BusFault::NotSent)?;
+        manager.call(path, interface, member, signature, body)
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use std::collections::VecDeque;
+    use std::{cell::RefCell, collections::VecDeque};
 
     use super::*;
     use crate::autotune::research::launch_txn::{LaunchOutcome, run};
@@ -355,5 +411,62 @@ mod tests {
         ]));
         let outcome = run(&mut port, &request(), &mut |_| Ok(())).unwrap();
         assert_eq!(outcome, LaunchOutcome::Running);
+    }
+
+    struct Aging {
+        id: u32,
+        fresh: std::rc::Rc<std::cell::Cell<bool>>,
+        log: std::rc::Rc<RefCell<Vec<u32>>>,
+    }
+
+    impl ManagerBus for Aging {
+        fn call(
+            &mut self,
+            _: &str,
+            _: &str,
+            _: &str,
+            _: &str,
+            _: &[u8],
+        ) -> Result<Vec<Value>, BusFault> {
+            self.log.borrow_mut().push(self.id);
+            Ok(Vec::new())
+        }
+    }
+
+    impl Freshness for Aging {
+        fn is_fresh(&self) -> bool {
+            self.fresh.get()
+        }
+    }
+
+    #[test]
+    fn an_expired_manager_is_replaced_by_a_fresh_authentication_before_every_call() {
+        let log = std::rc::Rc::new(RefCell::new(Vec::new()));
+        let mut next = 0;
+        let l = log.clone();
+        let mut bus = ReauthenticatingBus::new(move || {
+            next += 1;
+            Ok(Aging {
+                id: next,
+                // Each authentication yields its own manager, fresh until it is expired.
+                fresh: std::rc::Rc::new(std::cell::Cell::new(true)),
+                log: l.clone(),
+            })
+        });
+        // The first call authenticates, and a still-fresh manager is reused.
+        bus.call("/", "i", "m", "", &[]).unwrap();
+        bus.call("/", "i", "m", "", &[]).unwrap();
+        assert_eq!(*log.borrow(), [1, 1]);
+        // Once the attestation expires the old manager is never used again.
+        bus.current.as_ref().unwrap().fresh.set(false);
+        bus.call("/", "i", "m", "", &[]).unwrap();
+        assert_eq!(*log.borrow(), [1, 1, 2]);
+    }
+
+    #[test]
+    fn a_failed_reauthentication_sends_nothing() {
+        let mut bus: ReauthenticatingBus<Aging, _> =
+            ReauthenticatingBus::new(|| Err(anyhow::anyhow!("session changed")));
+        assert_eq!(bus.call("/", "i", "m", "", &[]), Err(BusFault::NotSent));
     }
 }
