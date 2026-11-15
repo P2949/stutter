@@ -215,7 +215,10 @@ pub fn prepare_user_launch(
     array(&mut writer, 8, |writer| {
         property(writer, "Type", "s", |writer| writer.string("exec"));
         property(writer, "NoNewPrivileges", "b", |writer| writer.bool(true));
-        property(writer, "CapabilityBoundingSet", "t", |writer| writer.u64(0));
+        // The unprivileged user manager cannot drop the bounding set (it lacks CAP_SETPCAP, so a
+        // CapabilityBoundingSet property fails the unit with status 218/CAPABILITIES, observed on a
+        // real session). NoNewPrivileges plus empty ambient capabilities leave a non-root exec with
+        // none.
         property(writer, "AmbientCapabilities", "t", |writer| writer.u64(0));
         property(writer, "KillMode", "s", |writer| {
             writer.string("control-group")
@@ -289,10 +292,6 @@ mod tests {
         assert_eq!(
             property("NoNewPrivileges"),
             &Value::Variant(Box::new(Value::Bool(true)))
-        );
-        assert_eq!(
-            property("CapabilityBoundingSet"),
-            &Value::Variant(Box::new(Value::U64(0)))
         );
         assert_eq!(
             property("AmbientCapabilities"),
