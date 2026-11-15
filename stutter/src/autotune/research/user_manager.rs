@@ -5,7 +5,10 @@
 use std::{
     fs::File,
     io::Read,
-    os::unix::fs::{FileTypeExt, MetadataExt},
+    os::unix::{
+        ffi::OsStrExt,
+        fs::{FileTypeExt, MetadataExt},
+    },
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
@@ -109,17 +112,28 @@ fn inspect_manager_process(pid: Pid, uid: u32) -> anyhow::Result<u64> {
         "untrusted systemd executable"
     );
     let dir = proc.join(raw.to_string());
-    anyhow::ensure!(
-        std::fs::canonicalize(dir.join("exe"))? == expected,
-        "user manager executable mismatch"
-    );
     let cmdline = read_bounded(&dir.join("cmdline"))?;
+    match std::fs::canonicalize(dir.join("exe")) {
+        Ok(path) => anyhow::ensure!(path == expected, "user manager executable mismatch"),
+        // A manager holding any capability is not dumpable, so its exe link is unreadable to the
+        // unprivileged controller. Only that case falls back to the exact argv[0]; the cgroup and
+        // owner checks below still apply, and an impostor would need to be this same user.
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+            let argv0 = cmdline.split(|byte| *byte == 0).next().unwrap_or_default();
+            let argv0 = Path::new(std::ffi::OsStr::from_bytes(argv0));
+            anyhow::ensure!(
+                argv0.is_absolute() && std::fs::canonicalize(argv0)? == expected,
+                "user manager executable mismatch"
+            );
+        }
+        Err(error) => return Err(error.into()),
+    }
     anyhow::ensure!(manager_command_line(&cmdline), "not a user manager");
     let cgroup = read_bounded(&dir.join("cgroup"))?;
     let cgroup = std::str::from_utf8(&cgroup)?;
     anyhow::ensure!(manager_cgroup(cgroup, uid), "user manager cgroup mismatch");
     anyhow::ensure!(
-        super::session_env::process_capabilities_clear(proc, raw, uid, false),
+        super::session_env::user_manager_capabilities_clear(proc, raw, uid),
         "user manager carries capabilities"
     );
     let after = crate::telemetry::proc_view::live_process(proc, raw)

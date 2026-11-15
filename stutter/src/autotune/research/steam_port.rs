@@ -62,13 +62,12 @@ fn launch_window_open(intent: &super::ResearchIntentV1, now: std::time::SystemTi
                 && elapsed.as_secs() < intent.deadline_unix_seconds
         })
 }
+/// The launched client never inherits the controller's privileges: it is started by the user
+/// manager as a transient unit that sets `NoNewPrivileges`, an empty capability bounding set and
+/// no ambient capabilities (pinned by the launcher's tests). The controller itself legitimately
+/// holds observation capabilities, so only root is refused here.
 fn launcher_is_unprivileged() -> bool {
-    super::session_env::process_capabilities_clear(
-        Path::new("/proc"),
-        std::process::id(),
-        crate::syscall::geteuid(),
-        true,
-    )
+    crate::syscall::geteuid() != 0
 }
 
 /// Process names (`/proc/<pid>/comm`, at most 15 bytes) whose presence makes the host not free.

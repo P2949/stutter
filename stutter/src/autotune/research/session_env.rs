@@ -14,7 +14,7 @@ const MAX_PROCESS_STATUS_BYTES: u64 = 64 * 1024;
 
 #[cfg(test)]
 pub(super) fn capability_status(status: &str, uid: u32, require_no_new_privs: bool) -> bool {
-    capability_status_inner(status, uid, require_no_new_privs, false)
+    capability_status_inner(status, uid, require_no_new_privs, false, 0)
 }
 
 fn capability_status_inner(
@@ -22,6 +22,7 @@ fn capability_status_inner(
     uid: u32,
     require_no_new_privs: bool,
     allow_inheritable: bool,
+    benign: u64,
 ) -> bool {
     if uid == 0 {
         return false;
@@ -48,8 +49,11 @@ fn capability_status_inner(
             0..=3 => {
                 !value.is_empty()
                     && value.len() <= 16
-                    && u64::from_str_radix(value, 16)
-                        .is_ok_and(|caps| caps == 0 || (index == 0 && allow_inheritable))
+                    && u64::from_str_radix(value, 16).is_ok_and(|caps| {
+                        caps == 0
+                            || (index == 0 && allow_inheritable)
+                            || (index <= 2 && caps & !benign == 0)
+                    })
             }
             4 => value == "1" || (!require_no_new_privs && value == "0"),
             5 => {
@@ -68,19 +72,18 @@ fn capability_status_inner(
     seen.into_iter().all(|value| value)
 }
 
-pub(super) fn process_capabilities_clear(
-    proc_root: &Path,
-    pid: u32,
-    uid: u32,
-    require_no_new_privs: bool,
-) -> bool {
-    process_capabilities(proc_root, pid, uid, require_no_new_privs, false)
+/// `CAP_WAKE_ALARM` (35) only arms alarm timers. The user's own systemd manager carries it, so it is
+/// the single capability tolerated on the manager; ambient capabilities must still be empty.
+const USER_MANAGER_BENIGN_CAPS: u64 = 1 << 35;
+
+pub(super) fn user_manager_capabilities_clear(proc_root: &Path, pid: u32, uid: u32) -> bool {
+    process_capabilities(proc_root, pid, uid, false, false, USER_MANAGER_BENIGN_CAPS)
 }
 
 /// A pre-existing broker is not the Steam launcher. It may have inheritable bits, but must not
 /// have permitted, effective or ambient capabilities; launcher checks remain stricter.
 pub(super) fn broker_capabilities_clear(proc_root: &Path, pid: u32, uid: u32) -> bool {
-    process_capabilities(proc_root, pid, uid, false, true)
+    process_capabilities(proc_root, pid, uid, false, true, 0)
 }
 
 fn process_capabilities(
@@ -89,6 +92,7 @@ fn process_capabilities(
     uid: u32,
     require_no_new_privs: bool,
     allow_inheritable: bool,
+    benign: u64,
 ) -> bool {
     let Ok(file) = File::open(proc_root.join(pid.to_string()).join("status")) else {
         return false;
@@ -103,7 +107,7 @@ fn process_capabilities(
         return false;
     }
     std::str::from_utf8(&bytes).is_ok_and(|status| {
-        capability_status_inner(status, uid, require_no_new_privs, allow_inheritable)
+        capability_status_inner(status, uid, require_no_new_privs, allow_inheritable, benign)
     })
 }
 
@@ -210,6 +214,33 @@ mod tests {
     use std::os::unix::fs::{PermissionsExt, symlink};
 
     #[test]
+    fn the_user_manager_may_carry_only_the_wake_alarm_capability() {
+        let status = |inh: &str, prm: &str, eff: &str, amb: &str| {
+            format!(
+                "Uid:\t1000 1000 1000 1000\nCapInh:\t{inh}\nCapPrm:\t{prm}\nCapEff:\t{eff}\nCapAmb:\t{amb}\nNoNewPrivs:\t0\n"
+            )
+        };
+        let allow = |text: &str| {
+            capability_status_inner(text, 1000, false, false, USER_MANAGER_BENIGN_CAPS)
+        };
+        // The real manager carries CAP_WAKE_ALARM in inheritable, permitted and effective.
+        assert!(allow(&status("800000000", "800000000", "800000000", "0")));
+        assert!(allow(&status("0", "0", "0", "0")));
+        // CAP_SYS_ADMIN (21) beside it, or any other capability, is refused.
+        assert!(!allow(&status("800200000", "800200000", "800200000", "0")));
+        assert!(!allow(&status("0", "0", "1000", "0")));
+        assert!(!allow(&status("0", "800000001", "0", "0")));
+        // An ambient capability is never tolerated, not even the benign one.
+        assert!(!allow(&status("0", "0", "0", "800000000")));
+        // The strict check still refuses the benign capability.
+        assert!(!capability_status(
+            &status("800000000", "800000000", "800000000", "0"),
+            1000,
+            false
+        ));
+    }
+
+    #[test]
     fn manager_capability_check_accepts_no_new_privs_zero_but_never_capabilities() {
         let status = "Uid:\t1000 1000 1000 1000\nCapInh:\t0\nCapPrm:\t0\nCapEff:\t0\nCapAmb:\t0\nNoNewPrivs:\t0\n";
         assert!(capability_status(status, 1000, false));
@@ -220,13 +251,14 @@ mod tests {
             false
         ));
         let inherited = status.replace("CapInh:\t0", "CapInh:\t800000000");
-        assert!(capability_status_inner(&inherited, 1000, false, true));
+        assert!(capability_status_inner(&inherited, 1000, false, true, 0));
         assert!(!capability_status(&inherited, 1000, false));
         assert!(!capability_status_inner(
             &inherited.replace("CapPrm:\t0", "CapPrm:\t1"),
             1000,
             false,
-            true
+            true,
+            0
         ));
     }
 
