@@ -26,7 +26,11 @@ pub trait NativeObservationSource {
     fn poll(&mut self) -> Observation;
 }
 
+/// The native results directory of an arm.
+pub type ResultsFor = Box<dyn Fn(super::ProtonSource) -> PathBuf + Send>;
+
 pub struct NativeResultProbe<S> {
+    results_for: ResultsFor,
     results_dir: PathBuf,
     owner_uid: u32,
     source: S,
@@ -35,8 +39,20 @@ pub struct NativeResultProbe<S> {
 
 impl<S> NativeResultProbe<S> {
     pub fn new(results_dir: PathBuf, owner_uid: u32, source: S) -> Self {
-        Self {
+        let fixed = results_dir.clone();
+        Self::per_arm(
+            Box::new(move |_| fixed.clone()),
             results_dir,
+            owner_uid,
+            source,
+        )
+    }
+
+    /// Each arm observes its own prefix's results; `initial` is only used before `begin`.
+    pub fn per_arm(results_for: ResultsFor, initial: PathBuf, owner_uid: u32, source: S) -> Self {
+        Self {
+            results_for,
+            results_dir: initial,
             owner_uid,
             source,
             before: None,
@@ -47,6 +63,7 @@ impl<S> NativeResultProbe<S> {
 impl<S: NativeObservationSource> ResultProbe for NativeResultProbe<S> {
     fn begin(&mut self, arm: super::ProtonSource) -> anyhow::Result<()> {
         self.before = None;
+        self.results_dir = (self.results_for)(arm);
         let snapshot = snapshot_benchmark_results_or_absent(&self.results_dir, self.owner_uid)?;
         self.source.begin(arm)?;
         self.before = Some(snapshot);

@@ -63,7 +63,7 @@ pub struct ProductionHostInputs {
     /// The Steam client the inventory observed, and the inventory's exact path per frozen tool.
     pub observed_steam_client: Option<SteamClientIdentity>,
     pub installed_tool_path: InstalledToolPaths,
-    pub results_dir: PathBuf,
+    pub results_for: super::native_probe::ResultsFor,
     /// Builds an independent game observer; called once for the native source and once for the
     /// process-tree witness so neither shares state with the other.
     pub facts: FactsFactory,
@@ -135,7 +135,7 @@ pub fn build_production_host(
         proc_root,
         tools,
         installation,
-        results_dir,
+        results_for,
         facts,
         observed_steam_client: _,
         installed_tool_path: _,
@@ -147,7 +147,11 @@ pub fn build_production_host(
         transactions_restored,
     } = inputs;
     let source = AttestedNativeSource::new(facts(), installation, intent.tools.clone(), intent.uid);
-    let probe = NativeResultProbe::new(results_dir, intent.uid, source);
+    let initial = intent
+        .tools
+        .first()
+        .map_or_else(PathBuf::new, |tool| results_for(tool.source));
+    let probe = NativeResultProbe::per_arm(results_for, initial, intent.uid, source);
     let mut tree_facts = facts();
     let cleanup = ProcfsTerminator::new(facts(), proc_root.clone(), Duration::from_secs(10));
     let witness = CompletionWitness {
@@ -266,7 +270,7 @@ mod tests {
                 entitlement_verified: true,
                 native_benchmark_verified: false,
             },
-            results_dir: "/results".into(),
+            results_for: Box::new(|_| "/results".into()),
             facts: Box::new(|| Box::new(Facts)),
             manager: Box::new(Manager),
             prepare: Box::new(|_, _| anyhow::bail!("preparation must not run at construction")),

@@ -264,6 +264,21 @@ pub enum ProtonSource {
     Em,
 }
 
+impl ProtonSource {
+    /// The private per-arm directory name (the serialized name): every arm gets its own compatibility
+    /// prefix, so no arm inherits another arm's prefix state, settings or results.
+    pub fn dir_name(self) -> &'static str {
+        match self {
+            Self::ValveStable => "valve_stable",
+            Self::ValveExperimental => "valve_experimental",
+            Self::CachyOs => "cachy_os",
+            Self::CachyOsV3 => "cachy_os_v3",
+            Self::Ge => "ge",
+            Self::Em => "em",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ResearchFactor {

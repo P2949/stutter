@@ -16,6 +16,7 @@ use std::{
 use stutter_core::ids::Pid;
 
 use super::{
+    ProtonSource,
     cyberpunk::CyberpunkProcessIdentity,
     native_source::{GameFacts, Sighting},
 };
@@ -30,7 +31,8 @@ fn windows_program(cmdline: &[u8]) -> Option<String> {
     Some(String::from_utf8_lossy(first).into_owned())
 }
 
-type SettingsDigest = Box<dyn FnMut() -> anyhow::Result<String> + Send>;
+/// Digest of the arm's own settings file.
+type SettingsDigest = Box<dyn FnMut(ProtonSource) -> anyhow::Result<String> + Send>;
 type Clock = Box<dyn FnMut() -> anyhow::Result<u128> + Send>;
 
 pub struct ProcfsGameFacts {
@@ -41,6 +43,7 @@ pub struct ProcfsGameFacts {
     /// The installed game executable, re-hashed once and matched against the process command line.
     executable: PathBuf,
     executable_sha256: Option<String>,
+    arm: Option<ProtonSource>,
     settings: SettingsDigest,
     clock: Clock,
 }
@@ -62,6 +65,7 @@ impl ProcfsGameFacts {
             build_id,
             executable,
             executable_sha256: None,
+            arm: None,
             settings,
             clock,
         }
@@ -179,8 +183,15 @@ impl GameFacts for ProcfsGameFacts {
         }
     }
 
+    fn begin_arm(&mut self, arm: ProtonSource) {
+        self.arm = Some(arm);
+    }
+
     fn settings_sha256(&mut self) -> anyhow::Result<String> {
-        (self.settings)()
+        let arm = self
+            .arm
+            .ok_or_else(|| anyhow::anyhow!("no Proton arm is selected for the settings read"))?;
+        (self.settings)(arm)
     }
 
     fn now_unix_nanos(&mut self) -> anyhow::Result<u128> {
@@ -241,7 +252,7 @@ mod tests {
                 APP,
                 7,
                 self.exe.path().to_path_buf(),
-                Box::new(|| Ok("c".repeat(64))),
+                Box::new(|_| Ok("c".repeat(64))),
                 Box::new(|| Ok(42)),
             )
         }
@@ -342,6 +353,9 @@ mod tests {
     fn settings_and_clock_come_from_the_injected_sources() {
         let f = Fixture::new();
         let mut facts = f.facts(owner(&f));
+        // Settings belong to an arm's own prefix, so no arm means no read.
+        assert!(facts.settings_sha256().is_err());
+        facts.begin_arm(ProtonSource::Ge);
         assert_eq!(facts.settings_sha256().unwrap(), "c".repeat(64));
         assert_eq!(facts.now_unix_nanos().unwrap(), 42);
     }
@@ -413,7 +427,7 @@ mod real_topology_tests {
             1_091_500,
             7,
             exe,
-            Box::new(|| Ok("c".repeat(64))),
+            Box::new(|_| Ok("c".repeat(64))),
             Box::new(|| Ok(1)),
         );
         let Sighting::One(identity) = facts.sight().unwrap() else {

@@ -25,6 +25,8 @@ pub enum Sighting {
 /// Independent facts, supplied by the production procfs/settings reader (or a test script).
 pub trait GameFacts {
     fn sight(&mut self) -> anyhow::Result<Sighting>;
+    /// The attempt's Proton arm was chosen: facts that live in the arm's own prefix follow it.
+    fn begin_arm(&mut self, _arm: ProtonSource) {}
     /// Digest of the graphics/benchmark settings actually in effect for this launch.
     fn settings_sha256(&mut self) -> anyhow::Result<String>;
     fn now_unix_nanos(&mut self) -> anyhow::Result<u128>;
@@ -77,6 +79,9 @@ impl<F> AttestedNativeSource<F> {
 impl GameFacts for Box<dyn GameFacts + Send> {
     fn sight(&mut self) -> anyhow::Result<Sighting> {
         (**self).sight()
+    }
+    fn begin_arm(&mut self, arm: ProtonSource) {
+        (**self).begin_arm(arm);
     }
     fn settings_sha256(&mut self) -> anyhow::Result<String> {
         (**self).settings_sha256()
@@ -137,6 +142,7 @@ impl<F: GameFacts> AttestedNativeSource<F> {
 impl<F: GameFacts> NativeObservationSource for AttestedNativeSource<F> {
     fn begin(&mut self, arm: ProtonSource) -> anyhow::Result<()> {
         self.seen = None;
+        self.facts.begin_arm(arm);
         // An arm outside the frozen tool set can never be attributed: refuse to begin.
         self.current = None;
         self.current = Some(

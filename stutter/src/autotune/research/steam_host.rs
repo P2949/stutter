@@ -80,7 +80,8 @@ impl<P: SteamPort> AttemptHost for SteamAttemptHost<P> {
         let (steamapps, proton_manifest) = self.port.library_paths();
         Ok(ArmSpec {
             tool_dir: self.port.tool_dir(slot)?,
-            study_compat_data: self.port.study_compat_data(),
+            // Every arm runs in its own private prefix below the study compatdata root.
+            study_compat_data: self.port.study_compat_data().join(slot.arm.dir_name()),
             // Observe-only screening: no factor is enabled, so the baseline is the empty set.
             arm_env: features::arm_env(slot.arm, &[])
                 .map_err(|(f, b)| anyhow::anyhow!("feature {f:?} blocked: {b:?}"))?,
@@ -216,6 +217,23 @@ mod tests {
             launches: 0,
             stops: 0,
         })
+    }
+
+    #[test]
+    fn each_arm_is_armed_with_its_own_private_compat_directory() {
+        let mut host = host(vec![]);
+        let ge = host.arm_spec(&slot()).unwrap();
+        let mut other = slot();
+        other.arm = ProtonSource::CachyOs;
+        let cachy = host.arm_spec(&other).unwrap();
+        assert_eq!(
+            ge.study_compat_data,
+            std::path::Path::new("/study/compatdata/ge")
+        );
+        assert_eq!(
+            cachy.study_compat_data,
+            std::path::Path::new("/study/compatdata/cachy_os")
+        );
     }
 
     fn launch(host: &mut SteamAttemptHost<Port>) {

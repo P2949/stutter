@@ -14,7 +14,7 @@ use std::{
 };
 
 use super::{
-    CyberpunkInstallation, ResearchIntentV1, discover_cyberpunk_installation,
+    CyberpunkInstallation, ProtonSource, ResearchIntentV1, discover_cyberpunk_installation,
     discover_steam_libraries,
     driver::AttemptHost,
     game_facts::ProcfsGameFacts,
@@ -48,16 +48,34 @@ pub struct SessionHostSources {
     pub worker_socket: Option<PathBuf>,
 }
 
-/// The directories a study prefix places the game's native files in. Steam's data path is the study
-/// `compatdata` directory itself (the dispatcher substitutes it), and Proton creates its prefix
-/// directly below it, so the profile is `compatdata/pfx/…` with no application-id directory.
-pub fn prefix_paths(study_dir: &Path) -> (PathBuf, PathBuf, PathBuf) {
-    let profile = study_dir.join("compatdata").join(PREFIX_USER);
+/// The study `compatdata` root; each Proton arm owns one private directory directly below it.
+pub fn compat_root(study_dir: &Path) -> PathBuf {
+    study_dir.join("compatdata")
+}
+
+/// The directories one arm's own prefix places the game's native files in. Steam's data path for the
+/// arm is `compatdata/<arm>` (the dispatcher substitutes it), and Proton creates its prefix directly
+/// below it, so the profile is `compatdata/<arm>/pfx/…` with no application-id directory. Arms never
+/// share a prefix, results directory or settings file.
+pub fn arm_prefix_paths(study_dir: &Path, arm: ProtonSource) -> (PathBuf, PathBuf, PathBuf) {
+    let compat = compat_root(study_dir).join(arm.dir_name());
+    let profile = compat.join(PREFIX_USER);
     (
-        study_dir.join("compatdata"),
+        compat,
         profile.join(BENCHMARK_RESULTS),
         profile.join(USER_SETTINGS),
     )
+}
+
+/// Create the arm's private directory (owner-only) if it does not exist yet. An existing one is left
+/// untouched and verified by the caller.
+fn prepare_arm_dir(dir: &Path) -> anyhow::Result<()> {
+    use std::os::unix::fs::DirBuilderExt;
+    match std::fs::DirBuilder::new().mode(0o700).create(dir) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        Err(error) => Err(error.into()),
+    }
 }
 
 fn manager_authenticator(
@@ -116,18 +134,18 @@ fn game_facts_factory(
     app_id: u32,
     build_id: u64,
     executable: PathBuf,
-    settings: PathBuf,
+    settings_for: impl Fn(ProtonSource) -> PathBuf + Clone + Send + 'static,
 ) -> impl Fn() -> Box<dyn GameFacts + Send> + Send + 'static {
     move || {
-        let settings = settings.clone();
+        let settings_for = settings_for.clone();
         Box::new(ProcfsGameFacts::new(
             PathBuf::from("/proc"),
             uid,
             app_id,
             build_id,
             executable.clone(),
-            Box::new(move || {
-                let bytes = std::fs::read(&settings)?;
+            Box::new(move |arm| {
+                let bytes = std::fs::read(settings_for(arm))?;
                 anyhow::ensure!(bytes.len() <= 4 * 1024 * 1024, "settings file is too large");
                 Ok(stutter_core::hash::sha256_hex(&bytes))
             }),
@@ -165,9 +183,15 @@ pub fn build_recovery_witnesses(
 ) -> anyhow::Result<RecoveryWitnesses> {
     use super::settlement::ProductionSettlementVerifier;
     let uid = crate::syscall::geteuid();
-    let (_, _, settings) = prefix_paths(&sources.study_dir);
+    let study_dir = sources.study_dir.clone();
     let (_, executable) = verified_game(&sources.steamapps, uid)?;
-    let facts = game_facts_factory(uid, intent.app_id, intent.build_id, executable, settings);
+    let facts = game_facts_factory(
+        uid,
+        intent.app_id,
+        intent.build_id,
+        executable,
+        move |arm| arm_prefix_paths(&study_dir, arm).2,
+    );
     let mut tree_facts = facts();
     let (unit_state, unit_invocation) =
         unit_witnesses(intent, &sources.steamapps, &sources.proton_manifest);
@@ -198,8 +222,15 @@ pub fn build_session_host(
     intent: &ResearchIntentV1,
 ) -> anyhow::Result<Box<dyn AttemptHost + Send>> {
     let uid = crate::syscall::geteuid();
-    let (compat, results_dir, settings) = prefix_paths(&sources.study_dir);
+    let compat = compat_root(&sources.study_dir);
     verify_study_compatdata(&sources.steamapps, &sources.study_dir, &compat, uid, false)?;
+    // Every arm has its own private prefix directory, created empty if missing and verified like
+    // the root, so no arm can inherit or disturb another arm's prefix, settings or results.
+    for tool in &intent.tools {
+        let arm_dir = arm_prefix_paths(&sources.study_dir, tool.source).0;
+        prepare_arm_dir(&arm_dir)?;
+        verify_study_compatdata(&sources.steamapps, &sources.study_dir, &arm_dir, uid, false)?;
+    }
     let (observed_steam_client, installed_tool_path) =
         inventory_lookup(&sources.steamapps, &sources.proton_manifest, uid)?;
     let (mut installation, executable) = verified_game(&sources.steamapps, uid)?;
@@ -224,7 +255,17 @@ pub fn build_session_host(
         .iter()
         .filter_map(|tool| installed_tool_path(tool).map(|path| (tool.source, path)))
         .collect();
-    let facts = game_facts_factory(uid, intent.app_id, intent.build_id, executable, settings);
+    let settings_dir = sources.study_dir.clone();
+    let facts = game_facts_factory(
+        uid,
+        intent.app_id,
+        intent.build_id,
+        executable,
+        move |arm| arm_prefix_paths(&settings_dir, arm).2,
+    );
+    let results_dir = sources.study_dir.clone();
+    let results_for: super::native_probe::ResultsFor =
+        Box::new(move |arm| arm_prefix_paths(&results_dir, arm).1);
 
     let send_bus = ReauthenticatingBus::new(manager_authenticator(
         intent,
@@ -248,7 +289,7 @@ pub fn build_session_host(
             installation,
             observed_steam_client,
             installed_tool_path,
-            results_dir,
+            results_for,
             facts: Box::new(facts),
             manager: Box::new(DbusUserManagerPort::new(send_bus)),
             prepare: Box::new(move |slot, context| {
@@ -315,22 +356,32 @@ mod tests {
         );
         // The real consumer accepts it: with no game running the observer reports absence rather
         // than failing on the path, which is what the former relative path caused.
-        let facts = game_facts_factory(uid, 1_091_500, 42, executable, root.path().join("s.json"));
+        let facts = game_facts_factory(uid, 1_091_500, 42, executable, {
+            let settings = root.path().join("s.json");
+            move |_| settings.clone()
+        });
         assert!(facts().sight().is_ok());
         let relative = game_facts_factory(
             uid,
             1_091_500,
             42,
             PathBuf::from("Cyberpunk 2077").join(GAME_EXECUTABLE),
-            root.path().join("s.json"),
+            {
+                let settings = root.path().join("s.json");
+                move |_| settings.clone()
+            },
         );
         assert!(relative().sight().is_err());
     }
     #[test]
-    fn the_prefix_paths_are_derived_inside_the_study_directory() {
-        let (compat, results, settings) = prefix_paths(Path::new("/study"));
-        assert_eq!(compat, Path::new("/study/compatdata"));
-        assert!(results.starts_with("/study/compatdata/pfx/drive_c/users/steamuser"));
+    fn each_arm_has_its_own_prefix_results_and_settings_inside_the_study_directory() {
+        let (compat, results, settings) = arm_prefix_paths(Path::new("/study"), ProtonSource::Ge);
+        assert_eq!(compat, Path::new("/study/compatdata/ge"));
+        assert!(results.starts_with("/study/compatdata/ge/pfx/drive_c/users/steamuser"));
+        let other = arm_prefix_paths(Path::new("/study"), ProtonSource::CachyOs);
+        assert_ne!(other.0, compat);
+        assert_ne!(other.1, results);
+        assert_ne!(other.2, settings);
         assert!(results.ends_with("benchmarkResults"));
         assert!(settings.ends_with("UserSettings.json"));
     }

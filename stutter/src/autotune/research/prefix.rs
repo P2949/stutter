@@ -77,6 +77,20 @@ pub(super) fn verify_study_root(
     Ok(metadata)
 }
 
+/// Whether `path` is one Proton arm's private directory directly below the compatdata root.
+pub(super) fn is_arm_dir(root: &Path, path: &Path) -> bool {
+    use super::ProtonSource::{CachyOs, CachyOsV3, Em, Ge, ValveExperimental, ValveStable};
+    path.parent() == Some(root)
+        && path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| {
+                [ValveStable, ValveExperimental, CachyOs, CachyOsV3, Ge, Em]
+                    .iter()
+                    .any(|source| source.dir_name() == name)
+            })
+}
+
 /// Verify Steam's effective path against a precreated private study directory. The registered
 /// libraries are rediscovered from the actual Steam client; callers cannot supply exclusions.
 pub fn verify_study_compatdata(
@@ -91,9 +105,12 @@ pub fn verify_study_compatdata(
         "invalid study prefix path"
     );
     let expected = study_root.join("compatdata");
+    // The root itself, or one arm's private directory directly below it (never anything deeper or
+    // outside, and never a name that is not a Proton source).
+    let is_arm_dir = is_arm_dir(&expected, steam_compat_data_path);
     anyhow::ensure!(
-        steam_compat_data_path == expected,
-        "Steam compatibility data path is not the study directory"
+        steam_compat_data_path == expected || is_arm_dir,
+        "Steam compatibility data path is not the study directory or one of its arm directories"
     );
     let libraries = super::discover_steam_libraries(primary_steamapps, uid)?;
     let root_meta = verify_study_root(study_root, &libraries, uid)?;
@@ -169,3 +186,21 @@ pub fn verify_study_compatdata(
 #[cfg(test)]
 #[path = "prefix_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod arm_dir_tests {
+    use std::path::Path;
+
+    use super::is_arm_dir;
+
+    #[test]
+    fn only_a_proton_arm_directly_below_the_root_is_an_arm_directory() {
+        let root = Path::new("/study/compatdata");
+        assert!(is_arm_dir(root, Path::new("/study/compatdata/ge")));
+        assert!(is_arm_dir(root, Path::new("/study/compatdata/cachy_os_v3")));
+        assert!(!is_arm_dir(root, Path::new("/study/compatdata/other")));
+        assert!(!is_arm_dir(root, Path::new("/study/compatdata/ge/pfx")));
+        assert!(!is_arm_dir(root, Path::new("/elsewhere/compatdata/ge")));
+        assert!(!is_arm_dir(root, root));
+    }
+}
