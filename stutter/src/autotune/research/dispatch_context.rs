@@ -233,6 +233,25 @@ pub fn authorize_dispatch(
     Ok((plan, ticket))
 }
 
+/// Whether a process with `ancestors` (nearest first) was started by this Steam instance. Steam runs
+/// its client inside a container started by an outer Steam launcher, and games are spawned through
+/// that container's launcher service, a sibling branch of the client. A genuine launch therefore
+/// descends from the pinned client or from the nearest `steam` ancestor of the client (the outer
+/// launcher that hosts it). `client_ancestors` are the client's own, taken from the same procfs.
+fn descends_from_steam_instance(
+    proc_root: &std::path::Path,
+    client: (u32, u64),
+    client_ancestors: &[(u32, u64)],
+    ancestors: &[(u32, u64)],
+) -> bool {
+    let comm_is_steam = |pid: u32| {
+        std::fs::read_to_string(proc_root.join(pid.to_string()).join("comm"))
+            .is_ok_and(|comm| comm.trim() == "steam")
+    };
+    let outer = client_ancestors.iter().find(|(pid, _)| comm_is_steam(*pid));
+    ancestors.contains(&client) || outer.is_some_and(|launcher| ancestors.contains(launcher))
+}
+
 /// The dispatcher must have been started by the frozen Steam client: this process is owned by the
 /// intent's user and descends from the client's exact PID and start time, which must still be that
 /// process. Anything unobservable (for example across a container boundary) is a refusal.
@@ -263,21 +282,17 @@ pub fn verify_steam_origin(
     // spawned through that container's launcher service, a sibling branch of the client. So a
     // genuine launch descends from the pinned client or from the same outer launcher that hosts it:
     // the nearest ancestor of the client that is itself a `steam` process.
-    let comm_is_steam = |pid: u32| {
-        std::fs::read_to_string(proc_root.join(pid.to_string()).join("comm"))
-            .is_ok_and(|comm| comm.trim() == "steam")
-    };
-    let outer = steam.ancestors.iter().find(|(pid, _)| comm_is_steam(*pid));
-    let from_client = live
-        .ancestors
-        .contains(&(client.steam_pid, client.steam_start_ticks));
-    let from_outer = outer.is_some_and(|launcher| live.ancestors.contains(launcher));
     anyhow::ensure!(
-        from_client || from_outer,
-        "the dispatcher was not started by the frozen Steam client (client {} / {}, outer launcher {:?}, observed ancestors {:?})",
+        descends_from_steam_instance(
+            proc_root,
+            (client.steam_pid, client.steam_start_ticks),
+            &steam.ancestors,
+            &live.ancestors
+        ),
+        "the dispatcher was not started by the frozen Steam client (client {} / {}, client ancestors {:?}, observed ancestors {:?})",
         client.steam_pid,
         client.steam_start_ticks,
-        outer,
+        steam.ancestors,
         live.ancestors
     );
     Ok(live.start_ticks)
@@ -471,10 +486,15 @@ pub fn inspect_dispatcher_start(
             ))
             && process.uid == uid
             && process.start_ticks == record.start_ticks
-            && process.ancestors.contains(&(
-                expected.steam_process.steam_pid,
-                expected.steam_process.steam_start_ticks
-            ))
+            && descends_from_steam_instance(
+                proc_root,
+                (
+                    expected.steam_process.steam_pid,
+                    expected.steam_process.steam_start_ticks
+                ),
+                &steam.ancestors,
+                &process.ancestors
+            )
             && read_process(record.pid.as_u32()).as_ref() == Some(&process)
             && read_process(expected.steam_process.steam_pid).as_ref() == Some(&steam)
             && read_process(expected.steam_process.webhelper_pid).as_ref() == Some(&helper),

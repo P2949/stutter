@@ -48,12 +48,11 @@ pub struct SessionHostSources {
     pub worker_socket: Option<PathBuf>,
 }
 
-/// The directories a study prefix places the game's native files in.
-pub fn prefix_paths(study_dir: &Path, app_id: u32) -> (PathBuf, PathBuf, PathBuf) {
-    let profile = study_dir
-        .join("compatdata")
-        .join(app_id.to_string())
-        .join(PREFIX_USER);
+/// The directories a study prefix places the game's native files in. Steam's data path is the study
+/// `compatdata` directory itself (the dispatcher substitutes it), and Proton creates its prefix
+/// directly below it, so the profile is `compatdata/pfx/…` with no application-id directory.
+pub fn prefix_paths(study_dir: &Path) -> (PathBuf, PathBuf, PathBuf) {
+    let profile = study_dir.join("compatdata").join(PREFIX_USER);
     (
         study_dir.join("compatdata"),
         profile.join(BENCHMARK_RESULTS),
@@ -166,7 +165,7 @@ pub fn build_recovery_witnesses(
 ) -> anyhow::Result<RecoveryWitnesses> {
     use super::settlement::ProductionSettlementVerifier;
     let uid = crate::syscall::geteuid();
-    let (_, _, settings) = prefix_paths(&sources.study_dir, intent.app_id);
+    let (_, _, settings) = prefix_paths(&sources.study_dir);
     let (_, executable) = verified_game(&sources.steamapps, uid)?;
     let facts = game_facts_factory(uid, intent.app_id, intent.build_id, executable, settings);
     let mut tree_facts = facts();
@@ -199,7 +198,7 @@ pub fn build_session_host(
     intent: &ResearchIntentV1,
 ) -> anyhow::Result<Box<dyn AttemptHost + Send>> {
     let uid = crate::syscall::geteuid();
-    let (compat, results_dir, settings) = prefix_paths(&sources.study_dir, intent.app_id);
+    let (compat, results_dir, settings) = prefix_paths(&sources.study_dir);
     verify_study_compatdata(&sources.steamapps, &sources.study_dir, &compat, uid, false)?;
     let (observed_steam_client, installed_tool_path) =
         inventory_lookup(&sources.steamapps, &sources.proton_manifest, uid)?;
@@ -329,9 +328,9 @@ mod tests {
     }
     #[test]
     fn the_prefix_paths_are_derived_inside_the_study_directory() {
-        let (compat, results, settings) = prefix_paths(Path::new("/study"), 1_091_500);
+        let (compat, results, settings) = prefix_paths(Path::new("/study"));
         assert_eq!(compat, Path::new("/study/compatdata"));
-        assert!(results.starts_with("/study/compatdata/1091500"));
+        assert!(results.starts_with("/study/compatdata/pfx/drive_c/users/steamuser"));
         assert!(results.ends_with("benchmarkResults"));
         assert!(settings.ends_with("UserSettings.json"));
     }
