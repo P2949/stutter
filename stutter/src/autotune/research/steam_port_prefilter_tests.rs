@@ -207,15 +207,18 @@ fn gpu_port(
 #[test]
 fn a_recent_gpu_reset_or_an_unreadable_journal_withholds_admission() {
     let (mut port, answer) = gpu_port(Ok(1));
-    assert!(!port.gpu_quiet_for_admission());
+    assert!(!port.gpu.as_mut().unwrap().quiet_for_admission());
     // The answer is cached briefly, so the journal is not queried every second.
     *answer.lock().unwrap() = Ok(0);
-    assert!(!port.gpu_quiet_for_admission());
+    assert!(!port.gpu.as_mut().unwrap().quiet_for_admission());
     port.gpu.as_mut().unwrap().admission = None;
-    assert!(port.gpu_quiet_for_admission());
+    assert!(port.gpu.as_mut().unwrap().quiet_for_admission());
     port.gpu.as_mut().unwrap().admission = None;
     *answer.lock().unwrap() = Err(anyhow::anyhow!("journal unreadable"));
-    assert!(!port.gpu_quiet_for_admission(), "unknown is never quiet");
+    assert!(
+        !port.gpu.as_mut().unwrap().quiet_for_admission(),
+        "unknown is never quiet"
+    );
 }
 
 #[test]

@@ -170,7 +170,8 @@ pub fn build_production_host(
     )
     .with_transient_launcher(TransientLauncher { manager, prepare })
     .with_settlement_witness(Box::new(witness))
-    .with_owned_terminator(Box::new(cleanup));
+    .with_owned_terminator(Box::new(cleanup))
+    .with_settle_window(Duration::from_secs(120));
     // The host configuration names the exact `journalctl`; with it, no game starts soon after a GPU
     // hang or reset and a running attempt that coincides with one is aborted. An invalid path
     // builds no host.

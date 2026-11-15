@@ -17,7 +17,7 @@ use super::{
     AttemptSlot, SteamClientIdentity, SteamProcessIdentity,
     dispatch_context::{DispatchContextV1, inspect_dispatcher_start},
     driver::LaunchUnresolved,
-    gpu_health::GpuResetProbe,
+    gpu_health::{GpuGuard, GpuResetProbe},
     launch_ticket::SteamVerb,
     launch_txn::UserManagerPort,
     steam_host::{GameState, SteamPort},
@@ -267,12 +267,6 @@ fn host_has_game_or_foreign_steam_bounded(
         })
 }
 
-fn unix_now() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |elapsed| elapsed.as_secs())
-}
-
 pub fn launch_argv() -> Vec<String> {
     [
         "steam",
@@ -308,19 +302,7 @@ pub struct ProductionSteamPort<R: ResultProbe> {
     witness: Option<Box<dyn SettlementWitness>>,
     terminator: Option<Box<dyn OwnedTerminator>>,
     gpu: Option<GpuGuard>,
-}
-
-/// Cooldown after a GPU hang or reset during which no game is started.
-const GPU_COOLDOWN_SECONDS: u64 = 30 * 60;
-/// A running attempt is checked for a GPU reset at most this often.
-const GPU_POLL_INTERVAL: Duration = Duration::from_secs(5);
-
-struct GpuGuard {
-    probe: Box<dyn GpuResetProbe>,
-    attempt_started_unix: Option<u64>,
-    last_poll: Option<Instant>,
-    reset_seen: bool,
-    admission: Option<(Instant, bool)>,
+    settle_window: Duration,
 }
 
 impl<R: ResultProbe> ProductionSteamPort<R> {
@@ -350,6 +332,7 @@ impl<R: ResultProbe> ProductionSteamPort<R> {
             witness: None,
             terminator: None,
             gpu: None,
+            settle_window: Duration::ZERO,
         }
     }
 
@@ -368,67 +351,16 @@ impl<R: ResultProbe> ProductionSteamPort<R> {
     /// Refuse to start a game within a cooldown of a GPU hang or reset, and abort a running attempt
     /// that coincides with one. Without a probe the guard is off.
     pub fn with_gpu_reset_probe(mut self, probe: Box<dyn GpuResetProbe>) -> Self {
-        self.gpu = Some(GpuGuard {
-            probe,
-            attempt_started_unix: None,
-            last_poll: None,
-            reset_seen: false,
-            admission: None,
-        });
+        self.gpu = Some(GpuGuard::new(probe));
         self
     }
 
-    /// Admission: no GPU reset within the cooldown, and the journal must be readable.
-    fn gpu_quiet_for_admission(&mut self) -> bool {
-        let Some(guard) = self.gpu.as_mut() else {
-            return true;
-        };
-        // The window check runs every second; do not query the journal that often.
-        if let Some((at, quiet)) = guard.admission
-            && at.elapsed() < Duration::from_secs(10)
-        {
-            return quiet;
-        }
-        let quiet = match guard
-            .probe
-            .resets_since(unix_now().saturating_sub(GPU_COOLDOWN_SECONDS))
-        {
-            Ok(0) => true,
-            Ok(_) => false,
-            Err(error) => {
-                log::warn!("GPU reset evidence is unreadable; admission withheld: {error:#}");
-                false
-            }
-        };
-        guard.admission = Some((Instant::now(), quiet));
-        quiet
-    }
-
-    /// During an attempt: a reset logged since the launch request is sticky.
-    fn gpu_reset_during_attempt(&mut self) -> bool {
-        let Some(guard) = self.gpu.as_mut() else {
-            return false;
-        };
-        if guard.reset_seen {
-            return true;
-        }
-        let Some(started) = guard.attempt_started_unix else {
-            return false;
-        };
-        if guard
-            .last_poll
-            .is_some_and(|at| at.elapsed() < GPU_POLL_INTERVAL)
-        {
-            return false;
-        }
-        guard.last_poll = Some(Instant::now());
-        match guard.probe.resets_since(started.saturating_sub(2)) {
-            Ok(0) => {}
-            Ok(_) => guard.reset_seen = true,
-            // An unreadable journal mid-run is not evidence of a reset; admission already needed it.
-            Err(error) => log::warn!("GPU reset check failed during an attempt: {error:#}"),
-        }
-        guard.reset_seen
+    /// How long `stop` keeps sweeping and re-checking while the attempt is unsettled. A launch that
+    /// was in flight when the attempt was aborted starts its processes seconds later; they are
+    /// found and stopped inside this window instead of being left to run.
+    pub fn with_settle_window(mut self, window: Duration) -> Self {
+        self.settle_window = window;
+        self
     }
 
     /// Launch through the user manager rather than a direct child spawn.
@@ -559,7 +491,7 @@ impl<R: ResultProbe> SteamPort for ProductionSteamPort<R> {
     }
 
     fn safe_window(&mut self) -> bool {
-        let quiet = self.gpu_quiet_for_admission();
+        let quiet = self.gpu.as_mut().is_none_or(GpuGuard::quiet_for_admission);
         quiet
             && !self.unsettled
             && self.idle_is_fresh()
@@ -602,9 +534,7 @@ impl<R: ResultProbe> SteamPort for ProductionSteamPort<R> {
         );
         let dispatch = self.open_dispatch(slot, context)?;
         if let Some(guard) = self.gpu.as_mut() {
-            guard.attempt_started_unix = Some(unix_now());
-            guard.reset_seen = false;
-            guard.last_poll = None;
+            guard.begin_attempt();
         }
         self.probe.begin(slot.arm)?;
         anyhow::ensure!(
@@ -622,7 +552,11 @@ impl<R: ResultProbe> SteamPort for ProductionSteamPort<R> {
         if !self.user_input_idle_is_fresh() {
             return GameState::DesktopInterrupted;
         }
-        if self.gpu_reset_during_attempt() {
+        if self
+            .gpu
+            .as_mut()
+            .is_some_and(GpuGuard::reset_during_attempt)
+        {
             return GameState::GpuReset;
         }
         let Some((dir, context)) = self.dispatch.as_ref() else {
@@ -656,6 +590,25 @@ impl<R: ResultProbe> SteamPort for ProductionSteamPort<R> {
     }
 
     fn stop(&mut self) -> anyhow::Result<()> {
+        let deadline = Instant::now() + self.settle_window;
+        loop {
+            self.stop_once();
+            if !self.unsettled || Instant::now() >= deadline {
+                break;
+            }
+            std::thread::sleep(Duration::from_secs(1));
+        }
+        anyhow::ensure!(
+            !self.unsettled,
+            "Cyberpunk process-tree settlement is unverified"
+        );
+        Ok(())
+    }
+}
+
+impl<R: ResultProbe> ProductionSteamPort<R> {
+    /// One cleanup and witness pass; it clears `unsettled` only when the witness proves settlement.
+    fn stop_once(&mut self) {
         // Cleanup is best effort and exact-owner only. A refusal or failure leaves the port
         // unsettled; it never makes the attempt look settled.
         if self.unsettled
@@ -677,11 +630,6 @@ impl<R: ResultProbe> SteamPort for ProductionSteamPort<R> {
         {
             self.unsettled = false;
         }
-        anyhow::ensure!(
-            !self.unsettled,
-            "Cyberpunk process-tree settlement is unverified"
-        );
-        Ok(())
     }
 }
 

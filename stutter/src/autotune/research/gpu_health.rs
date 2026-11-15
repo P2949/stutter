@@ -86,6 +86,93 @@ impl GpuResetProbe for JournalGpuResetProbe {
     }
 }
 
+/// Cooldown after a GPU hang or reset during which no game is started.
+const COOLDOWN_SECONDS: u64 = 30 * 60;
+/// A running attempt is checked for a GPU reset at most this often.
+const POLL_INTERVAL: Duration = Duration::from_secs(5);
+/// The window check runs every second; the journal is not queried that often.
+const ADMISSION_CACHE: Duration = Duration::from_secs(10);
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs())
+}
+
+/// The port-side state of the guard: one probe, the admission cache and the running attempt.
+pub struct GpuGuard {
+    probe: Box<dyn GpuResetProbe>,
+    pub(super) attempt_started_unix: Option<u64>,
+    pub(super) last_poll: Option<Instant>,
+    reset_seen: bool,
+    pub(super) admission: Option<(Instant, bool)>,
+}
+
+impl GpuGuard {
+    pub fn new(probe: Box<dyn GpuResetProbe>) -> Self {
+        Self {
+            probe,
+            attempt_started_unix: None,
+            last_poll: None,
+            reset_seen: false,
+            admission: None,
+        }
+    }
+
+    /// A launch request was just recorded: watch for resets from now on.
+    pub fn begin_attempt(&mut self) {
+        self.attempt_started_unix = Some(unix_now());
+        self.reset_seen = false;
+        self.last_poll = None;
+    }
+
+    /// Admission: no GPU reset within the cooldown, and the journal must be readable.
+    pub fn quiet_for_admission(&mut self) -> bool {
+        if let Some((at, quiet)) = self.admission
+            && at.elapsed() < ADMISSION_CACHE
+        {
+            return quiet;
+        }
+        let quiet = match self
+            .probe
+            .resets_since(unix_now().saturating_sub(COOLDOWN_SECONDS))
+        {
+            Ok(0) => true,
+            Ok(_) => false,
+            Err(error) => {
+                log::warn!("GPU reset evidence is unreadable; admission withheld: {error:#}");
+                false
+            }
+        };
+        self.admission = Some((Instant::now(), quiet));
+        quiet
+    }
+
+    /// During an attempt: a reset logged since the launch request is sticky.
+    pub fn reset_during_attempt(&mut self) -> bool {
+        if self.reset_seen {
+            return true;
+        }
+        let Some(started) = self.attempt_started_unix else {
+            return false;
+        };
+        if self
+            .last_poll
+            .is_some_and(|at| at.elapsed() < POLL_INTERVAL)
+        {
+            return false;
+        }
+        self.last_poll = Some(Instant::now());
+        match self.probe.resets_since(started.saturating_sub(2)) {
+            Ok(0) => {}
+            Ok(_) => self.reset_seen = true,
+            // An unreadable journal mid-run is not evidence of a reset; admission already needed it.
+            Err(error) => log::warn!("GPU reset check failed during an attempt: {error:#}"),
+        }
+        self.reset_seen
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::os::unix::fs::PermissionsExt;

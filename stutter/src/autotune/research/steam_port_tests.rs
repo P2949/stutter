@@ -587,6 +587,28 @@ mod settlement {
         port
     }
 
+    /// Settles on the third look: a launch still in flight when the attempt was aborted.
+    struct LateWitness(std::sync::atomic::AtomicU32);
+    impl SettlementWitness for LateWitness {
+        fn settled(&mut self, _: &File, _: &DispatchContextV1) -> anyhow::Result<bool> {
+            let looks = self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+            Ok(looks >= 3)
+        }
+    }
+    #[test]
+    fn a_settle_window_waits_for_a_launch_that_was_still_in_flight() {
+        let mut port = launched_port(None)
+            .with_settlement_witness(Box::new(LateWitness(Default::default())))
+            .with_settle_window(Duration::from_secs(10));
+        let started = std::time::Instant::now();
+        assert!(port.stop().is_ok());
+        assert!(started.elapsed() < Duration::from_secs(8));
+        // With no window the first refusal is final.
+        let mut strict =
+            launched_port(None).with_settlement_witness(Box::new(LateWitness(Default::default())));
+        assert!(strict.stop().is_err());
+    }
+
     #[test]
     fn only_an_independent_witness_clears_the_unsettled_state() {
         let mut port = launched_port(Some(Some(true)));

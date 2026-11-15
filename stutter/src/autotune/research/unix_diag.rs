@@ -156,6 +156,22 @@ impl PeerDump {
 
 /// Resolve the peer endpoint of this live connection. This does not identify who owns it.
 pub(super) fn peer_inode(stream: &std::os::unix::net::UnixStream) -> anyhow::Result<u32> {
+    // The kernel can answer a diagnostic dump without the peer attribute while a connection is in a
+    // transient state; a short bounded retry resolves that, and a persistent absence still fails.
+    let mut last = anyhow::anyhow!("no attempt was made");
+    for attempt in 0..4 {
+        match peer_inode_once(stream) {
+            Ok(inode) => return Ok(inode),
+            Err(error) => last = error,
+        }
+        if attempt < 3 {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
+    Err(last)
+}
+
+fn peer_inode_once(stream: &std::os::unix::net::UnixStream) -> anyhow::Result<u32> {
     use std::os::unix::fs::MetadataExt;
     let duplicate: std::os::fd::OwnedFd = stream.try_clone()?.into();
     let inode: u32 = std::fs::File::from(duplicate)
