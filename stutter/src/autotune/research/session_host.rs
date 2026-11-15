@@ -18,6 +18,7 @@ use super::{
     driver::AttemptHost,
     game_facts::ProcfsGameFacts,
     inspect_cyberpunk_installation,
+    launch_txn::UnitState,
     native_source::GameFacts,
     prefix::verify_study_compatdata,
     production_host::{ProductionHostInputs, build_production_host, inventory_lookup},
@@ -72,6 +73,38 @@ fn manager_authenticator(
     }
 }
 
+type UnitStateFn = Box<dyn FnMut(&str) -> anyhow::Result<UnitState> + Send>;
+type UnitInvocationFn = Box<dyn FnMut(&str) -> anyhow::Result<Option<String>> + Send>;
+
+/// The unit-state and invocation-id observations, both through one re-authenticating manager
+/// connection so they always describe the same unit.
+fn unit_witnesses(
+    intent: &ResearchIntentV1,
+    steamapps: &Path,
+    manifest: &Path,
+) -> (UnitStateFn, UnitInvocationFn) {
+    use std::sync::{Arc, Mutex};
+
+    use super::launch_txn::UserManagerPort;
+    let port = Arc::new(Mutex::new(DbusUserManagerPort::new(
+        ReauthenticatingBus::new(manager_authenticator(intent, steamapps, manifest)),
+    )));
+    let state_port = Arc::clone(&port);
+    (
+        Box::new(move |unit| {
+            state_port
+                .lock()
+                .map_err(|_| anyhow::anyhow!("user manager observer is poisoned"))?
+                .unit_state(unit)
+        }),
+        Box::new(move |unit| {
+            port.lock()
+                .map_err(|_| anyhow::anyhow!("user manager observer is poisoned"))?
+                .unit_invocation(unit)
+        }),
+    )
+}
+
 fn worker_tokens(socket: &Option<PathBuf>) -> anyhow::Result<usize> {
     let socket = socket
         .as_ref()
@@ -111,25 +144,23 @@ pub fn build_recovery_witnesses(
     sources: &SessionHostSources,
     intent: &ResearchIntentV1,
 ) -> anyhow::Result<RecoveryWitnesses> {
-    use super::{launch_txn::UserManagerPort, settlement::ProductionSettlementVerifier};
+    use super::settlement::ProductionSettlementVerifier;
     let uid = crate::syscall::geteuid();
     let (_, _, settings) = prefix_paths(&sources.study_dir, intent.app_id);
     let installation = inspect_cyberpunk_installation(&sources.steamapps, uid)?;
     let executable = PathBuf::from(&installation.installation_directory).join(GAME_EXECUTABLE);
     let facts = game_facts_factory(uid, intent.app_id, intent.build_id, executable, settings);
     let mut tree_facts = facts();
-    let mut observer = DbusUserManagerPort::new(ReauthenticatingBus::new(manager_authenticator(
-        intent,
-        &sources.steamapps,
-        &sources.proton_manifest,
-    )));
+    let (unit_state, unit_invocation) =
+        unit_witnesses(intent, &sources.steamapps, &sources.proton_manifest);
     let (token_socket, restored_socket, claim_socket) = (
         sources.worker_socket.clone(),
         sources.worker_socket.clone(),
         sources.worker_socket.clone(),
     );
     Ok(RecoveryWitnesses {
-        unit_state: Box::new(move |unit| observer.unit_state(unit)),
+        unit_state,
+        unit_invocation,
         process_tree_settled: Box::new(move |dir, context| {
             owned_process_tree_settled(dir, context, Path::new("/proc"), &mut *tree_facts)
         }),
@@ -167,12 +198,8 @@ pub fn build_session_host(
         &sources.steamapps,
         &sources.proton_manifest,
     ));
-    let observe_bus = ReauthenticatingBus::new(manager_authenticator(
-        intent,
-        &sources.steamapps,
-        &sources.proton_manifest,
-    ));
-    let mut observer = DbusUserManagerPort::new(observe_bus);
+    let (unit_state, unit_invocation) =
+        unit_witnesses(intent, &sources.steamapps, &sources.proton_manifest);
     let (steamapps, manifest) = (sources.steamapps.clone(), sources.proton_manifest.clone());
     let (token_socket, restored_socket) =
         (sources.worker_socket.clone(), sources.worker_socket.clone());
@@ -194,10 +221,8 @@ pub fn build_session_host(
             prepare: Box::new(move |slot, context| {
                 prepare_from_host(&context.intent, slot, &steamapps, &manifest)
             }),
-            unit_state: Box::new(move |unit| {
-                use super::launch_txn::UserManagerPort;
-                observer.unit_state(unit)
-            }),
+            unit_state,
+            unit_invocation,
             outstanding_worker_tokens: Box::new(move || worker_tokens(&token_socket)),
             // Restoration is the worker reporting no issued-and-unrestored transaction.
             transactions_restored: Box::new(move || Ok(worker_tokens(&restored_socket)? == 0)),

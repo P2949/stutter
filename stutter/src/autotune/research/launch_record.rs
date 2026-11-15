@@ -41,6 +41,9 @@ struct OutcomeRecord {
     boot_id: String,
     unit_name: String,
     outcome: RecordedOutcome,
+    /// The unit's systemd invocation id when the launch was confirmed, if it was readable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    invocation_id: Option<String>,
 }
 
 /// What the attempt directory durably says about this attempt's launch.
@@ -50,6 +53,7 @@ pub struct LaunchRecord {
     pub sent: bool,
     pub unit_name: Option<String>,
     pub outcome: Option<RecordedOutcome>,
+    pub invocation_id: Option<String>,
 }
 
 fn not_found(error: &anyhow::Error) -> bool {
@@ -73,6 +77,17 @@ pub fn record_phase(dir: &File, phase: LaunchPhase, unit_name: &str) -> anyhow::
 }
 
 pub fn record_outcome(dir: &File, unit_name: &str, outcome: &LaunchOutcome) -> anyhow::Result<()> {
+    record_outcome_with_invocation(dir, unit_name, outcome, None)
+}
+
+/// Record the outcome together with the confirmed unit's systemd invocation id, so a later
+/// observation can be tied to the request that was actually sent.
+pub fn record_outcome_with_invocation(
+    dir: &File,
+    unit_name: &str,
+    outcome: &LaunchOutcome,
+    invocation_id: Option<&str>,
+) -> anyhow::Result<()> {
     let outcome = match outcome {
         LaunchOutcome::Running => RecordedOutcome::Running,
         LaunchOutcome::NeverStarted => RecordedOutcome::NeverStarted,
@@ -84,6 +99,7 @@ pub fn record_outcome(dir: &File, unit_name: &str, outcome: &LaunchOutcome) -> a
         boot_id: crate::telemetry::identity::read_boot_id()?,
         unit_name: unit_name.to_owned(),
         outcome,
+        invocation_id: invocation_id.map(str::to_owned),
     };
     write_new(dir, OUTCOME, &serde_json::to_vec(&record)?)
 }
@@ -148,31 +164,47 @@ pub fn read_launch_record(dir: &File, uid: u32) -> anyhow::Result<LaunchRecord> 
         prepared: prepared.is_some(),
         sent: sent.is_some(),
         unit_name: unit_names.first().map(|name| (*name).to_owned()),
+        invocation_id: outcome
+            .as_ref()
+            .and_then(|record| record.invocation_id.clone()),
         outcome: outcome.map(|record| record.outcome),
     })
 }
 
 /// Whether the requested launch can no longer start anything. `current` is a fresh observation of
 /// the unique unit (or `None` when it could not be taken). Never true on ambiguity.
-pub fn request_settled(record: &LaunchRecord, current: Option<UnitState>) -> bool {
+pub fn request_settled(
+    record: &LaunchRecord,
+    current: Option<UnitState>,
+    current_invocation: Option<&str>,
+) -> bool {
     if !record.sent {
         // Prepared but never sent leaves nothing that could execute.
         return true;
     }
     // The recorded outcome and the fresh observation must agree. A unit that was never started
     // but is seen, or a launch we recorded as ambiguous (or never reconciled) that is later seen
-    // finished, is contradictory or unattributed evidence and never settles: a finished unit with
-    // our name does not show which request ran it or that no delayed request remains.
-    matches!(
-        (record.outcome, current),
-        (
-            Some(RecordedOutcome::NeverStarted),
-            None | Some(UnitState::Absent)
-        ) | (
-            Some(RecordedOutcome::Running | RecordedOutcome::FinishedAlready),
-            Some(UnitState::Finished)
-        )
-    )
+    // finished, is contradictory or unattributed evidence and never settles.
+    match (record.outcome, current) {
+        (Some(RecordedOutcome::NeverStarted), None | Some(UnitState::Absent)) => true,
+        (Some(RecordedOutcome::Running | RecordedOutcome::FinishedAlready), observed) => {
+            match (&record.invocation_id, observed) {
+                // A transient launcher unit that exits cleanly is collected, so a unit that is gone
+                // after we confirmed this very invocation running means that invocation ended: a
+                // transient unit cannot be restarted under the same invocation, and any foreign
+                // replacement would exist and be active, not absent.
+                (Some(_), Some(UnitState::Absent)) => true,
+                // A unit that still exists settles only if it is the same invocation we confirmed.
+                (Some(recorded), Some(UnitState::Finished)) => {
+                    current_invocation == Some(recorded.as_str())
+                }
+                // Without a recorded invocation, only an observed terminal unit counts, as before.
+                (None, Some(UnitState::Finished)) => true,
+                _ => false,
+            }
+        }
+        _ => false,
+    }
 }
 
 #[cfg(test)]
@@ -206,10 +238,11 @@ mod tests {
                 prepared: false,
                 sent: false,
                 unit_name: None,
-                outcome: None
+                outcome: None,
+                invocation_id: None,
             }
         );
-        assert!(request_settled(&record, None));
+        assert!(request_settled(&record, None, None));
     }
 
     #[test]
@@ -219,16 +252,17 @@ mod tests {
         // Prepared only: nothing could have been sent.
         assert!(request_settled(
             &read_launch_record(&dir, uid()).unwrap(),
+            None,
             None
         ));
         record_phase(&dir, LaunchPhase::Sent, UNIT).unwrap();
         let record = read_launch_record(&dir, uid()).unwrap();
         assert!(record.sent && record.outcome.is_none());
         for current in [None, Some(UnitState::Absent), Some(UnitState::Active)] {
-            assert!(!request_settled(&record, current));
+            assert!(!request_settled(&record, current, None));
         }
         // A finished unit with no reconciled outcome is unattributed: never settled.
-        assert!(!request_settled(&record, Some(UnitState::Finished)));
+        assert!(!request_settled(&record, Some(UnitState::Finished), None));
     }
 
     #[test]
@@ -239,36 +273,46 @@ mod tests {
         record_outcome(&dir, UNIT, &LaunchOutcome::Ambiguous("lost")).unwrap();
         let record = read_launch_record(&dir, uid()).unwrap();
         assert_eq!(record.outcome, Some(RecordedOutcome::Ambiguous));
-        assert!(!request_settled(&record, Some(UnitState::Absent)));
+        assert!(!request_settled(&record, Some(UnitState::Absent), None));
         let settled = |outcome: RecordedOutcome| LaunchRecord {
             prepared: true,
             sent: true,
             unit_name: Some(UNIT.into()),
             outcome: Some(outcome),
+            invocation_id: None,
         };
         assert!(request_settled(
             &settled(RecordedOutcome::NeverStarted),
+            None,
             None
         ));
-        assert!(!request_settled(&settled(RecordedOutcome::Running), None));
+        assert!(!request_settled(
+            &settled(RecordedOutcome::Running),
+            None,
+            None
+        ));
         // Contradictions never settle: never started yet a unit is seen, or ambiguous yet finished.
         for seen in [UnitState::Active, UnitState::Finished] {
             assert!(!request_settled(
                 &settled(RecordedOutcome::NeverStarted),
-                Some(seen)
+                Some(seen),
+                None
             ));
         }
         assert!(!request_settled(
             &settled(RecordedOutcome::Ambiguous),
-            Some(UnitState::Finished)
+            Some(UnitState::Finished),
+            None
         ));
         assert!(!request_settled(
             &settled(RecordedOutcome::Running),
-            Some(UnitState::Absent)
+            Some(UnitState::Absent),
+            None
         ));
         assert!(request_settled(
             &settled(RecordedOutcome::Running),
-            Some(UnitState::Finished)
+            Some(UnitState::Finished),
+            None
         ));
     }
 
@@ -298,5 +342,77 @@ mod tests {
         record_phase(&dir3, LaunchPhase::Prepared, UNIT).unwrap();
         record_phase(&dir3, LaunchPhase::Sent, "other.service").unwrap();
         assert!(read_launch_record(&dir3, uid()).is_err());
+    }
+
+    fn confirmed(outcome: RecordedOutcome, invocation: Option<&str>) -> LaunchRecord {
+        LaunchRecord {
+            prepared: true,
+            sent: true,
+            unit_name: Some(UNIT.into()),
+            outcome: Some(outcome),
+            invocation_id: invocation.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn a_confirmed_invocation_settles_when_it_is_gone_or_finished_and_never_when_replaced() {
+        let record = confirmed(RecordedOutcome::Running, Some("aa"));
+        // A cleanly exited transient launcher is collected: that exact invocation ended.
+        assert!(request_settled(&record, Some(UnitState::Absent), None));
+        // A unit that still exists settles only as the same terminal invocation.
+        assert!(request_settled(
+            &record,
+            Some(UnitState::Finished),
+            Some("aa")
+        ));
+        assert!(!request_settled(
+            &record,
+            Some(UnitState::Finished),
+            Some("bb")
+        ));
+        assert!(!request_settled(&record, Some(UnitState::Finished), None));
+        // Running or starting is never settled, and an unobserved unit is unknown.
+        assert!(!request_settled(
+            &record,
+            Some(UnitState::Active),
+            Some("aa")
+        ));
+        assert!(!request_settled(&record, None, None));
+    }
+
+    #[test]
+    fn without_a_confirmed_invocation_absence_is_never_settled() {
+        let record = confirmed(RecordedOutcome::Running, None);
+        assert!(!request_settled(&record, Some(UnitState::Absent), None));
+        assert!(request_settled(&record, Some(UnitState::Finished), None));
+        // An ambiguous or never-started outcome is unaffected by any invocation.
+        let ambiguous = confirmed(RecordedOutcome::Ambiguous, Some("aa"));
+        assert!(!request_settled(&ambiguous, Some(UnitState::Absent), None));
+        assert!(!request_settled(
+            &ambiguous,
+            Some(UnitState::Finished),
+            Some("aa")
+        ));
+    }
+
+    #[test]
+    fn the_invocation_id_round_trips_through_the_durable_outcome() {
+        use super::super::launch_txn::LaunchOutcome;
+        let (_tmp, dir) = fresh();
+        record_phase(&dir, LaunchPhase::Prepared, UNIT).unwrap();
+        record_phase(&dir, LaunchPhase::Sent, UNIT).unwrap();
+        record_outcome_with_invocation(&dir, UNIT, &LaunchOutcome::Running, Some("0123abcd"))
+            .unwrap();
+        let record = read_launch_record(&dir, uid()).unwrap();
+        assert_eq!(record.invocation_id.as_deref(), Some("0123abcd"));
+        // A record written without one reads back as unknown, never as a wildcard.
+        let (_tmp2, dir2) = fresh();
+        record_phase(&dir2, LaunchPhase::Prepared, UNIT).unwrap();
+        record_phase(&dir2, LaunchPhase::Sent, UNIT).unwrap();
+        record_outcome(&dir2, UNIT, &LaunchOutcome::Running).unwrap();
+        assert_eq!(
+            read_launch_record(&dir2, uid()).unwrap().invocation_id,
+            None
+        );
     }
 }

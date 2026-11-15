@@ -23,6 +23,7 @@ use super::{
 
 type FactsFactory = Box<dyn Fn() -> Box<dyn GameFacts + Send> + Send>;
 type UnitObserver = Box<dyn FnMut(&str) -> anyhow::Result<UnitState> + Send>;
+type InvocationObserver = Box<dyn FnMut(&str) -> anyhow::Result<Option<String>> + Send>;
 type TokenCount = Box<dyn FnMut() -> anyhow::Result<usize> + Send>;
 type RestoredCheck = Box<dyn FnMut() -> anyhow::Result<bool> + Send>;
 /// The exact installed directory the Steam inventory reports for a frozen tool identity.
@@ -69,6 +70,7 @@ pub struct ProductionHostInputs {
     pub manager: Box<dyn UserManagerPort + Send>,
     pub prepare: PrepareRequest,
     pub unit_state: UnitObserver,
+    pub unit_invocation: InvocationObserver,
     pub outstanding_worker_tokens: TokenCount,
     pub transactions_restored: RestoredCheck,
 }
@@ -140,6 +142,7 @@ pub fn build_production_host(
         manager,
         prepare,
         unit_state,
+        unit_invocation,
         outstanding_worker_tokens,
         transactions_restored,
     } = inputs;
@@ -149,6 +152,7 @@ pub fn build_production_host(
     let cleanup = ProcfsTerminator::new(facts(), proc_root.clone(), Duration::from_secs(10));
     let witness = CompletionWitness {
         unit_state,
+        unit_invocation,
         process_tree_settled: Box::new(move |dir, context| {
             owned_process_tree_settled(dir, context, &proc_root, &mut *tree_facts)
         }),
@@ -257,6 +261,7 @@ mod tests {
             manager: Box::new(Manager),
             prepare: Box::new(|_, _| anyhow::bail!("preparation must not run at construction")),
             unit_state: Box::new(|_| Ok(UnitState::Absent)),
+            unit_invocation: Box::new(|_| Ok(None)),
             outstanding_worker_tokens: Box::new(|| Ok(0)),
             transactions_restored: Box::new(|| Ok(true)),
         }

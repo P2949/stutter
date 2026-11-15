@@ -34,6 +34,7 @@ fn a_restarted_coordinator_retires_only_a_settled_interrupted_attempt_and_blocks
             std::sync::Arc::new(move |_| {
                 Ok(RecoveryWitnesses {
                     unit_state: Box::new(|_| Ok(UnitState::Finished)),
+                    unit_invocation: Box::new(|_| Ok(None)),
                     process_tree_settled: Box::new(move |_, _| Ok(process)),
                     outstanding_worker_tokens: Box::new(|| Ok(0)),
                     transactions_restored: Box::new(|| Ok(true)),

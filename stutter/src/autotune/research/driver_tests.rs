@@ -631,6 +631,7 @@ fn a_restarted_driver_seals_only_a_provably_settled_interrupted_attempt() {
                 true,
                 RecoveryWitnesses {
                     unit_state: Box::new(move |_| Ok(unit)),
+                    unit_invocation: Box::new(|_| Ok(None)),
                     process_tree_settled: Box::new(|_, _| Ok(true)),
                     outstanding_worker_tokens: Box::new(|| Ok(0)),
                     transactions_restored: Box::new(|| Ok(true)),

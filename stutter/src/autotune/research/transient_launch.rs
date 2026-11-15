@@ -6,7 +6,7 @@ use std::fs::File;
 
 use super::{
     driver::LaunchUnresolved,
-    launch_record::{record_outcome, record_phase},
+    launch_record::{record_outcome_with_invocation, record_phase},
     launch_txn::{LaunchOutcome, UserManagerPort, run},
     user_launcher::UserLaunchRequest,
 };
@@ -38,7 +38,16 @@ pub fn start_attempt(
     })?;
     // The request was already sent: if the outcome cannot be made durable, the effect stays
     // unresolved rather than becoming a plain error a caller could read as a refusal.
-    if record_outcome(attempt_dir, &unit, &outcome).is_err() {
+    // Tie later observations to this exact invocation, so a same-named replacement unit can never
+    // be mistaken for the request that was sent.
+    let invocation = match outcome {
+        LaunchOutcome::Running | LaunchOutcome::FinishedAlready => {
+            port.unit_invocation(&unit).ok().flatten()
+        }
+        _ => None,
+    };
+    if record_outcome_with_invocation(attempt_dir, &unit, &outcome, invocation.as_deref()).is_err()
+    {
         return Ok(LaunchDecision::NeedsRecovery(
             "the launch outcome could not be recorded",
         ));
@@ -103,6 +112,9 @@ mod tests {
         fn proves_never_executable(&mut self, _: &str) -> anyhow::Result<bool> {
             Ok(false)
         }
+        fn unit_invocation(&mut self, _: &str) -> anyhow::Result<Option<String>> {
+            Ok(Some("feedface".into()))
+        }
     }
 
     fn request() -> UserLaunchRequest {
@@ -144,8 +156,10 @@ mod tests {
         assert_eq!(sent_when, Some(true));
         let record = read_launch_record(&dir, crate::syscall::geteuid()).unwrap();
         assert_eq!(record.outcome, Some(RecordedOutcome::Running));
+        // The confirmed unit's invocation is bound to the durable outcome.
+        assert_eq!(record.invocation_id.as_deref(), Some("feedface"));
         // A running unit is not settled.
-        assert!(!request_settled(&record, Some(UnitState::Active)));
+        assert!(!request_settled(&record, Some(UnitState::Active), None));
     }
 
     #[test]
@@ -154,7 +168,7 @@ mod tests {
         assert!(matches!(decision, LaunchDecision::NeedsRecovery(_)));
         let record = read_launch_record(&dir, crate::syscall::geteuid()).unwrap();
         assert_eq!(record.outcome, Some(RecordedOutcome::Ambiguous));
-        assert!(!request_settled(&record, Some(UnitState::Absent)));
+        assert!(!request_settled(&record, Some(UnitState::Absent), None));
     }
 
     #[test]
@@ -162,7 +176,7 @@ mod tests {
         let (decision, dir, _) = attempt(Err(SendError::Rejected), &[]);
         assert_eq!(decision, LaunchDecision::Refused);
         let record = read_launch_record(&dir, crate::syscall::geteuid()).unwrap();
-        assert!(request_settled(&record, None));
+        assert!(request_settled(&record, None, None));
     }
 
     #[test]

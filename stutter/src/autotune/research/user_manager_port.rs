@@ -156,6 +156,39 @@ impl<B: ManagerBus> UserManagerPort for DbusUserManagerPort<B> {
         }
     }
 
+    fn unit_invocation(&mut self, unit_name: &str) -> anyhow::Result<Option<String>> {
+        anyhow::ensure!(valid_unit_name(unit_name), "invalid launch unit name");
+        let mut body = Writer::default();
+        body.string(unit_name);
+        let values = match self
+            .bus
+            .call(MANAGER_PATH, MANAGER_INTERFACE, "GetUnit", "s", &body.buf)
+        {
+            Ok(values) => values,
+            Err(BusFault::Remote(error)) if error == NO_SUCH_UNIT => return Ok(None),
+            Err(fault) => anyhow::bail!("unit lookup failed: {fault:?}"),
+        };
+        let [Value::Path(unit_path)] = values.as_slice() else {
+            anyhow::bail!("unexpected unit lookup reply");
+        };
+        let Value::Array(bytes) = self.property(unit_path, "InvocationID")? else {
+            anyhow::bail!("unexpected invocation id type");
+        };
+        let raw = bytes
+            .iter()
+            .map(|byte| match byte {
+                Value::Byte(value) => Ok(*value),
+                _ => Err(anyhow::anyhow!("unexpected invocation id element")),
+            })
+            .collect::<anyhow::Result<Vec<u8>>>()?;
+        anyhow::ensure!(raw.len() == 16, "unexpected invocation id length");
+        // An all-zero id means the unit has never been started.
+        Ok(raw
+            .iter()
+            .any(|byte| *byte != 0)
+            .then(|| raw.iter().map(|byte| format!("{byte:02x}")).collect()))
+    }
+
     /// Never true here. The manager exposes no durable record that a request was fenced, and a
     /// missing unit, an empty queue or a completed (collected) unit do not show non-execution.
     fn proves_never_executable(&mut self, _unit_name: &str) -> anyhow::Result<bool> {
@@ -468,5 +501,46 @@ mod tests {
         let mut bus: ReauthenticatingBus<Aging, _> =
             ReauthenticatingBus::new(|| Err(anyhow::anyhow!("session changed")));
         assert_eq!(bus.call("/", "i", "m", "", &[]), Err(BusFault::NotSent));
+    }
+
+    fn id_reply(bytes: &[u8]) -> Result<Vec<Value>, BusFault> {
+        Ok(vec![Value::Variant(Box::new(Value::Array(
+            bytes.iter().map(|byte| Value::Byte(*byte)).collect(),
+        )))])
+    }
+
+    fn invocation_of(replies: Vec<Result<Vec<Value>, BusFault>>) -> anyhow::Result<Option<String>> {
+        DbusUserManagerPort::new(FakeBus::new(replies)).unit_invocation(&request().unit_name)
+    }
+
+    #[test]
+    fn the_invocation_id_is_read_as_hex_and_zero_or_missing_means_unknown() {
+        let mut id = [0u8; 16];
+        id[0] = 0xde;
+        id[15] = 0x01;
+        assert_eq!(
+            invocation_of(vec![unit_path(), id_reply(&id)])
+                .unwrap()
+                .as_deref(),
+            Some("de000000000000000000000000000001")
+        );
+        // A never-started unit has the all-zero id, which is unknown rather than a match.
+        assert_eq!(
+            invocation_of(vec![unit_path(), id_reply(&[0; 16])]).unwrap(),
+            None
+        );
+        // No such unit is absent, not an error.
+        assert_eq!(
+            invocation_of(vec![Err(BusFault::Remote(NO_SUCH_UNIT.into()))]).unwrap(),
+            None
+        );
+        // A malformed id, or a failed lookup, is an error and never a guess.
+        assert!(invocation_of(vec![unit_path(), id_reply(&[1, 2, 3])]).is_err());
+        assert!(invocation_of(vec![Err(BusFault::Uncertain)]).is_err());
+        assert!(
+            DbusUserManagerPort::new(FakeBus::new(Vec::new()))
+                .unit_invocation("../evil.service")
+                .is_err()
+        );
     }
 }

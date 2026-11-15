@@ -26,6 +26,12 @@ pub enum SendError {
 pub trait UserManagerPort {
     fn send_start(&mut self, request: &UserLaunchRequest) -> Result<(), SendError>;
     fn unit_state(&mut self, unit_name: &str) -> anyhow::Result<UnitState>;
+    /// The unit's current systemd invocation id (unique per start), when it exists and the id is
+    /// readable. A replacement unit with the same name has a different id, so this is what ties
+    /// a later observation to the request that was actually sent. `None` means unknown.
+    fn unit_invocation(&mut self, _unit_name: &str) -> anyhow::Result<Option<String>> {
+        Ok(None)
+    }
     /// Authoritative, durable manager-side proof that the request was rejected or can no longer
     /// execute (for example the job queue is empty and the request identity is fenced). A
     /// snapshot of "no such unit" is never this proof.

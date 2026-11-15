@@ -19,6 +19,7 @@ use super::{
 /// procfs, user-manager and worker sources can be supplied without this module depending on them.
 pub struct Witnesses<'a> {
     pub unit_state: &'a mut dyn FnMut(&str) -> anyhow::Result<UnitState>,
+    pub unit_invocation: &'a mut dyn FnMut(&str) -> anyhow::Result<Option<String>>,
     pub process_tree_settled: &'a mut dyn FnMut() -> anyhow::Result<bool>,
     pub outstanding_worker_tokens: &'a mut dyn FnMut() -> anyhow::Result<usize>,
     pub transactions_restored: &'a mut dyn FnMut() -> anyhow::Result<bool>,
@@ -49,11 +50,16 @@ pub fn gather(
         // proof of what was sent (for example a direct child spawn): never assume it is settled.
         None
     } else {
-        let current = match record.unit_name.as_deref() {
-            Some(unit) if record.sent => (witnesses.unit_state)(unit).ok(),
+        let unit = record.unit_name.as_deref().filter(|_| record.sent);
+        let current = unit.and_then(|unit| (witnesses.unit_state)(unit).ok());
+        // The invocation only matters for a unit that still exists.
+        let invocation = match (unit, current) {
+            (Some(unit), Some(UnitState::Finished)) => {
+                (witnesses.unit_invocation)(unit).ok().flatten()
+            }
             _ => None,
         };
-        Some(request_settled(&record, current))
+        Some(request_settled(&record, current, invocation.as_deref()))
     };
     Ok(Observations {
         attempt,
@@ -68,6 +74,7 @@ pub fn gather(
 }
 
 type UnitStateWitness = Box<dyn FnMut(&str) -> anyhow::Result<UnitState> + Send>;
+type UnitInvocationWitness = Box<dyn FnMut(&str) -> anyhow::Result<Option<String>> + Send>;
 type TreeWitness = Box<dyn FnMut(&File, &DispatchContextV1) -> anyhow::Result<bool> + Send>;
 type TokenWitness = Box<dyn FnMut() -> anyhow::Result<usize> + Send>;
 type RestoredWitness = Box<dyn FnMut() -> anyhow::Result<bool> + Send>;
@@ -77,6 +84,7 @@ type RestoredWitness = Box<dyn FnMut() -> anyhow::Result<bool> + Send>;
 /// ticket's process and the worker before the journal seal is written.
 pub struct RecoveryWitnesses {
     pub unit_state: UnitStateWitness,
+    pub unit_invocation: UnitInvocationWitness,
     pub process_tree_settled: TreeWitness,
     pub outstanding_worker_tokens: TokenWitness,
     pub transactions_restored: RestoredWitness,
@@ -87,6 +95,7 @@ pub struct RecoveryWitnesses {
 /// witnesses recovery uses, so a finished attempt and a recovered one settle by one rule.
 pub struct CompletionWitness {
     pub unit_state: UnitStateWitness,
+    pub unit_invocation: UnitInvocationWitness,
     pub process_tree_settled: TreeWitness,
     pub outstanding_worker_tokens: TokenWitness,
     pub transactions_restored: RestoredWitness,
@@ -109,6 +118,7 @@ impl SettlementWitness for CompletionWitness {
         }
         let Self {
             unit_state,
+            unit_invocation,
             process_tree_settled,
             outstanding_worker_tokens,
             transactions_restored,
@@ -121,6 +131,7 @@ impl SettlementWitness for CompletionWitness {
             &unit,
             Witnesses {
                 unit_state: &mut **unit_state,
+                unit_invocation: &mut **unit_invocation,
                 process_tree_settled: &mut || process_tree_settled(dispatch, context),
                 outstanding_worker_tokens: &mut **outstanding_worker_tokens,
                 transactions_restored: &mut **transactions_restored,
@@ -175,6 +186,7 @@ mod tests {
             UNIT,
             Witnesses {
                 unit_state: &mut |_| Ok(unit),
+                unit_invocation: &mut |_| Ok(None),
                 process_tree_settled: &mut || process.map_or_else(unavailable, Ok),
                 outstanding_worker_tokens: &mut || tokens.map_or_else(unavailable, Ok),
                 transactions_restored: &mut || restored.map_or_else(unavailable, Ok),
@@ -248,6 +260,7 @@ mod tests {
             UNIT,
             Witnesses {
                 unit_state: &mut |_| Ok(UnitState::Finished),
+                unit_invocation: &mut |_| Ok(None),
                 process_tree_settled: &mut || Ok(true),
                 outstanding_worker_tokens: &mut || Ok(0),
                 transactions_restored: &mut || Ok(true),
@@ -306,6 +319,7 @@ mod tests {
     ) -> CompletionWitness {
         CompletionWitness {
             unit_state: Box::new(move |_| Ok(unit)),
+            unit_invocation: Box::new(|_| Ok(None)),
             process_tree_settled: Box::new(move |_, _| Ok(process)),
             outstanding_worker_tokens: Box::new(move || Ok(tokens)),
             transactions_restored: Box::new(move || Ok(restored)),

@@ -195,6 +195,7 @@ impl Driver {
         let unit = super::user_launcher::launch_unit_name(&digest, adopted.index)?;
         let super::recovery_gather::RecoveryWitnesses {
             mut unit_state,
+            mut unit_invocation,
             mut process_tree_settled,
             mut outstanding_worker_tokens,
             mut transactions_restored,
@@ -208,6 +209,7 @@ impl Driver {
             &unit,
             super::recovery_gather::Witnesses {
                 unit_state: &mut *unit_state,
+                unit_invocation: &mut *unit_invocation,
                 process_tree_settled: &mut || process_tree_settled(&attempt_dir, &context),
                 outstanding_worker_tokens: &mut *outstanding_worker_tokens,
                 transactions_restored: &mut *transactions_restored,
