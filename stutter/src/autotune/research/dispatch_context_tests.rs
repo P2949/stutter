@@ -25,6 +25,7 @@ fn fixture() -> (
 fn env() -> BTreeMap<String, String> {
     [
         ("SteamAppId", "1091500"),
+        ("STEAM_COMPAT_APP_ID", "1091500"),
         ("STEAM_COMPAT_DATA_PATH", "/study/compatdata"),
         ("STEAM_COMPAT_CLIENT_INSTALL_PATH", "/home/u/.steam/steam"),
     ]

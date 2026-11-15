@@ -18,6 +18,27 @@ const MAX_ARG_BYTES: usize = 4096;
 const CONTROLLED_PREFIXES: [&str; 6] =
     ["PROTON_", "WINE", "DXVK_", "VKD3D_", "MLFG_", "WAYLANDDRV_"];
 const CONTROLLED_EXACT: [&str; 3] = ["LD_PRELOAD", "SteamDeck", "STEAM_COMPAT_MOUNTS"];
+/// Controlled-set variables that Steam itself sets on launches, accepted only in the exact form Steam
+/// produces: cache and crash-report locations as well-formed absolute paths, its container mounts as
+/// absolute paths, and its overlay preload as nothing but `gameoverlayrenderer.so` libraries. Any
+/// other value, and every other controlled key, is a smuggled setting.
+fn steam_provided(key: &str, value: &str) -> bool {
+    let well_formed = |path: &str| absolute_normal(Path::new(path));
+    match key {
+        "DXVK_STATE_CACHE_PATH" | "PROTON_CRASH_REPORT_DIR" => well_formed(value),
+        "STEAM_COMPAT_MOUNTS" => !value.is_empty() && value.split(':').all(well_formed),
+        "LD_PRELOAD" => {
+            !value.is_empty()
+                && value.split([':', ' ']).all(|library| {
+                    well_formed(library)
+                        && Path::new(library)
+                            .file_name()
+                            .is_some_and(|name| name == "gameoverlayrenderer.so")
+                })
+        }
+        _ => false,
+    }
+}
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct DispatchPlan {
@@ -77,9 +98,14 @@ pub fn plan_dispatch(
             .get(key)
             .and_then(|value| value.parse::<u32>().ok())
     };
+    // `STEAM_COMPAT_APP_ID` is set for every verb, whereas the `run` verb (install scripts and
+    // runtime preparation) carries no `SteamAppId`/`SteamGameId`. It is the authoritative identity,
+    // and the other two must agree with it whenever Steam provides them.
     anyhow::ensure!(
-        app_id("SteamAppId") == Some(CYBERPUNK_APP_ID)
-            && app_id("SteamGameId").is_none_or(|id| id == CYBERPUNK_APP_ID),
+        app_id("STEAM_COMPAT_APP_ID") == Some(CYBERPUNK_APP_ID)
+            && ["SteamAppId", "SteamGameId"].iter().all(|key| {
+                ambient_env.get(*key).is_none() || app_id(key) == Some(CYBERPUNK_APP_ID)
+            }),
         "Steam did not launch Cyberpunk 2077"
     );
     // Steam always hands the tool the player's own per-game compatdata. That path must be present and
@@ -97,7 +123,10 @@ pub fn plan_dispatch(
             .is_some_and(|value| absolute_normal(Path::new(value))),
         "missing Steam client install path"
     );
-    if let Some(key) = ambient_env.keys().find(|key| controlled(key)) {
+    let smuggled = ambient_env
+        .iter()
+        .find(|(key, value)| controlled(key) && !steam_provided(key, value));
+    if let Some((key, _)) = smuggled {
         anyhow::bail!("ambient controlled setting {key} is not authorized for this arm");
     }
     anyhow::ensure!(
@@ -127,6 +156,7 @@ mod tests {
         [
             ("SteamAppId", "1091500"),
             ("SteamGameId", "1091500"),
+            ("STEAM_COMPAT_APP_ID", "1091500"),
             ("STEAM_COMPAT_DATA_PATH", "/home/u/study/compatdata"),
             ("STEAM_COMPAT_CLIENT_INSTALL_PATH", "/home/u/.steam/steam"),
         ]
@@ -182,11 +212,69 @@ mod tests {
     }
 
     #[test]
+    fn the_run_verb_without_steam_app_ids_is_identified_by_the_compat_app_id() {
+        let mut run = env();
+        run.remove("SteamAppId");
+        run.remove("SteamGameId");
+        assert!(plan(&argv("run"), &run).is_ok());
+    }
+
+    #[test]
+    fn steams_own_cache_location_is_tolerated_but_no_other_controlled_setting() {
+        let mut steam = env();
+        steam.insert(
+            "DXVK_STATE_CACHE_PATH".into(),
+            "/home/u/.local/share/Steam/steamapps/shadercache/1091500".into(),
+        );
+        assert!(plan(&argv("run"), &steam).is_ok());
+        steam.insert("DXVK_STATE_CACHE_PATH".into(), "relative/cache".into());
+        assert!(plan(&argv("run"), &steam).is_err());
+        steam.insert("DXVK_STATE_CACHE_PATH".into(), "/c/../x".into());
+        assert!(plan(&argv("run"), &steam).is_err());
+        let mut other = env();
+        other.insert("DXVK_STATE_CACHE".into(), "0".into());
+        assert!(plan(&argv("run"), &other).is_err());
+        // The other controlled keys Steam sets itself, in their real forms.
+        let mut steam = env();
+        for (key, value) in [
+            ("PROTON_CRASH_REPORT_DIR", "/home/u/.local/share/Steam/logs"),
+            ("STEAM_COMPAT_MOUNTS", "/a/steamapps:/b/lib"),
+            (
+                "LD_PRELOAD",
+                "/s/steamrt32/gameoverlayrenderer.so:/s/steamrt64/gameoverlayrenderer.so",
+            ),
+        ] {
+            steam.insert(key.into(), value.into());
+        }
+        assert!(plan(&argv("run"), &steam).is_ok());
+        for (key, value) in [
+            ("LD_PRELOAD", "/tmp/evil.so"),
+            ("LD_PRELOAD", "/s/gameoverlayrenderer.so:/tmp/evil.so"),
+            ("LD_PRELOAD", ""),
+            ("STEAM_COMPAT_MOUNTS", "relative:/a"),
+            ("PROTON_CRASH_REPORT_DIR", "rel"),
+            ("PROTON_LOG", "1"),
+        ] {
+            let mut bad = env();
+            bad.insert(key.into(), value.into());
+            assert!(plan(&argv("run"), &bad).is_err(), "{key}={value}");
+        }
+    }
+
+    #[test]
     fn refuses_wrong_verb_game_prefix_and_smuggled_settings() {
         assert!(plan(&argv("waitforexitandrun"), &env()).is_err());
         assert!(plan(&argv("getcompatpath"), &env()).is_err());
         let mut other = env();
         other.insert("SteamAppId".into(), "220".into());
+        assert!(plan(&argv("run"), &other).is_err());
+        let mut other = env();
+        other.insert("STEAM_COMPAT_APP_ID".into(), "220".into());
+        assert!(plan(&argv("run"), &other).is_err());
+        other.remove("STEAM_COMPAT_APP_ID");
+        assert!(plan(&argv("run"), &other).is_err());
+        let mut other = env();
+        other.insert("SteamGameId".into(), "220".into());
         assert!(plan(&argv("run"), &other).is_err());
         let mut other = env();
         other.remove("STEAM_COMPAT_DATA_PATH");
