@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::{Args, Subcommand};
 
-use crate::commands::research::{ResearchClientAction, ResearchClientInput};
+use crate::commands::research::{DispatchTarget, ResearchClientAction, ResearchClientInput};
 
 #[derive(Args, Debug)]
 pub(super) struct ResearchArgs {
@@ -29,8 +29,16 @@ enum ResearchCommand {
     },
     /// Steam compatibility-tool entry; called by the dispatcher wrapper, not by hand.
     Dispatch {
+        /// One campaign's dispatch directory.
+        #[arg(
+            long,
+            conflicts_with = "study_root",
+            required_unless_present = "study_root"
+        )]
+        context_dir: Option<PathBuf>,
+        /// The private study root; the armed attempt is selected by its unused ticket, never by time.
         #[arg(long)]
-        context_dir: PathBuf,
+        study_root: Option<PathBuf>,
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
         args: Vec<String>,
     },
@@ -53,9 +61,19 @@ impl From<ResearchArgs> for ResearchClientInput {
                 proton_manifest,
             },
             ResearchCommand::Submit { intent } => ResearchClientAction::Submit(intent),
-            ResearchCommand::Dispatch { context_dir, args } => {
-                ResearchClientAction::Dispatch { context_dir, args }
-            }
+            ResearchCommand::Dispatch {
+                context_dir,
+                study_root,
+                args,
+            } => ResearchClientAction::Dispatch {
+                // clap guarantees exactly one; an empty path cannot open and fails the dispatch.
+                target: match (context_dir, study_root) {
+                    (Some(dir), _) => DispatchTarget::ContextDir(dir),
+                    (None, Some(root)) => DispatchTarget::StudyRoot(root),
+                    (None, None) => DispatchTarget::ContextDir(PathBuf::new()),
+                },
+                args,
+            },
             ResearchCommand::Status => ResearchClientAction::Status,
             ResearchCommand::Pause => ResearchClientAction::Pause,
             ResearchCommand::Resume => ResearchClientAction::Resume,

@@ -12,6 +12,15 @@ use std::{
 
 use crate::autotune::research::{ResearchIntentV1, ResearchRequest};
 
+/// Where the dispatcher finds its armed attempt.
+#[derive(Debug)]
+pub enum DispatchTarget {
+    /// One campaign's dispatch directory (its newest attempt).
+    ContextDir(PathBuf),
+    /// The study root: exactly one armed attempt must hold an unused ticket for the verb.
+    StudyRoot(PathBuf),
+}
+
 #[derive(Debug)]
 pub enum ResearchClientAction {
     Inventory {
@@ -21,7 +30,7 @@ pub enum ResearchClientAction {
     Submit(PathBuf),
     /// Steam-invoked compatibility-tool entry; replaces this process with the planned Proton.
     Dispatch {
-        context_dir: PathBuf,
+        target: DispatchTarget,
         args: Vec<String>,
     },
     Status,
@@ -95,24 +104,38 @@ fn request(action: ResearchClientAction, uid: u32) -> anyhow::Result<ResearchReq
 
 /// Authorize Steam's call against the resident-armed context, then exec the real Proton. Only
 /// returns on failure. Nothing here talks to the resident or touches root.
-fn dispatch(context_dir: &std::path::Path, args: &[String], uid: u32) -> anyhow::Result<()> {
+fn dispatch(target: &DispatchTarget, args: &[String], uid: u32) -> anyhow::Result<()> {
     use std::os::unix::process::CommandExt;
-    let root = File::from(crate::syscall::open_dir_no_symlinks(context_dir)?);
-    let meta = root.metadata()?;
-    anyhow::ensure!(
-        meta.is_dir() && meta.uid() == uid && meta.mode() & 0o077 == 0,
-        "untrusted dispatch directory"
-    );
-    let directory = crate::autotune::research::dispatch_context::latest_attempt_dir(&root)?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_secs();
+    let directory = match target {
+        DispatchTarget::ContextDir(context_dir) => {
+            let root = File::from(crate::syscall::open_dir_no_symlinks(context_dir)?);
+            let meta = root.metadata()?;
+            anyhow::ensure!(
+                meta.is_dir() && meta.uid() == uid && meta.mode() & 0o077 == 0,
+                "untrusted dispatch directory"
+            );
+            crate::autotune::research::dispatch_context::latest_attempt_dir(&root)?
+        }
+        DispatchTarget::StudyRoot(study_root) => {
+            let verb = args
+                .get(1)
+                .and_then(|arg| {
+                    crate::autotune::research::launch_ticket::SteamVerb::from_steam_argument(arg)
+                })
+                .ok_or_else(|| anyhow::anyhow!("unsupported Steam compatibility verb"))?;
+            let root = File::from(crate::syscall::open_dir_no_symlinks(study_root)?);
+            crate::autotune::research::dispatch_select::select_armed_attempt(&root, uid, verb, now)?
+        }
+    };
     let attempt = directory.metadata()?;
     anyhow::ensure!(
         attempt.is_dir() && attempt.uid() == uid && attempt.mode() & 0o077 == 0,
         "untrusted dispatch attempt directory"
     );
     let env: std::collections::BTreeMap<String, String> = std::env::vars().collect();
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)?
-        .as_secs();
     let (plan, ticket) = crate::autotune::research::dispatch_context::authorize_dispatch(
         &directory,
         args,
@@ -142,8 +165,8 @@ fn dispatch(context_dir: &std::path::Path, args: &[String], uid: u32) -> anyhow:
 pub async fn run(input: ResearchClientInput) -> anyhow::Result<()> {
     let uid = crate::syscall::geteuid();
     anyhow::ensure!(uid != 0, "research client must be unprivileged");
-    if let ResearchClientAction::Dispatch { context_dir, args } = &input.action {
-        return dispatch(context_dir, args, uid);
+    if let ResearchClientAction::Dispatch { target, args } = &input.action {
+        return dispatch(target, args, uid);
     }
     if let ResearchClientAction::Inventory {
         steamapps,

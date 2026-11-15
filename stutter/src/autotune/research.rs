@@ -46,6 +46,7 @@ pub(crate) mod cyberpunk;
 #[cfg(feature = "wayland-probe")]
 pub(crate) mod desktop_idle;
 pub(crate) mod dispatch_context;
+pub(crate) mod dispatch_select;
 pub(crate) mod dispatcher;
 pub(crate) mod driver;
 pub(crate) mod entitlement;
