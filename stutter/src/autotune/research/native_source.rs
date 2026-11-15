@@ -151,7 +151,10 @@ impl<F: GameFacts> NativeObservationSource for AttestedNativeSource<F> {
 
     fn poll(&mut self) -> Observation {
         // An unreadable fact is never evidence that the game is absent or fine.
-        self.observe().unwrap_or(Observation::IdentityMismatch)
+        self.observe().unwrap_or_else(|error| {
+            log::warn!("game observation failed: {error:#}");
+            Observation::IdentityMismatch
+        })
     }
 }
 

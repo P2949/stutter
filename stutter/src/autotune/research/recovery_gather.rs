@@ -137,6 +137,9 @@ impl SettlementWitness for CompletionWitness {
                 transactions_restored: &mut **transactions_restored,
             },
         )?;
+        if !observations.settled_for_completion() {
+            log::warn!("completion witness refused settlement: {observations:?}");
+        }
         Ok(observations.settled_for_completion())
     }
 }

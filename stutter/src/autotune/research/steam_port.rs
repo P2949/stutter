@@ -572,7 +572,10 @@ impl<R: ResultProbe> SteamPort for ProductionSteamPort<R> {
         if self.unsettled
             && let (Some(witness), Some((dir, context))) =
                 (self.witness.as_mut(), self.dispatch.as_ref())
-            && witness.settled(dir, context).unwrap_or(false)
+            && witness
+                .settled(dir, context)
+                .map_err(|error| log::warn!("completion witness could not observe: {error:#}"))
+                .unwrap_or(false)
         {
             self.unsettled = false;
         }

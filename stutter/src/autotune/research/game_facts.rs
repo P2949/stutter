@@ -24,6 +24,11 @@ use crate::telemetry::proc_view::live_process;
 const MAX_PROC_ENTRIES: usize = 65_536;
 const MAX_FILE: u64 = 256 * 1024;
 const GAME_COMM_PREFIX: &str = "Cyberpunk2077";
+/// The first command-line word (the program) of a Windows process, case-insensitively.
+fn windows_program(cmdline: &[u8]) -> Option<String> {
+    let first = cmdline.split(|byte| *byte == 0).next()?;
+    Some(String::from_utf8_lossy(first).into_owned())
+}
 
 type SettingsDigest = Box<dyn FnMut() -> anyhow::Result<String> + Send>;
 type Clock = Box<dyn FnMut() -> anyhow::Result<u128> + Send>;
@@ -62,14 +67,19 @@ impl ProcfsGameFacts {
         }
     }
 
-    /// The Windows-style path Wine reports for the installed executable.
-    fn wine_path(&self) -> anyhow::Result<String> {
+    /// The Windows-style paths Wine can report for the installed executable: the `Z:` root mapping
+    /// and, for a game inside a Steam library, Proton's `S:` mapping of that library's `steamapps`.
+    fn wine_paths(&self) -> anyhow::Result<Vec<String>> {
         let path = self
             .executable
             .to_str()
             .filter(|path| path.starts_with('/'))
             .ok_or_else(|| anyhow::anyhow!("game executable path is not absolute UTF-8"))?;
-        Ok(format!("Z:{}", path.replace('/', "\\")))
+        let mut forms = vec![format!("Z:{}", path.replace('/', "\\"))];
+        if let Some(index) = path.rfind("/steamapps/") {
+            forms.push(format!("S:{}", path[index..].replace('/', "\\")));
+        }
+        Ok(forms)
     }
 
     fn executable_digest(&mut self) -> anyhow::Result<String> {
@@ -101,7 +111,7 @@ fn nul_fields(bytes: &[u8]) -> Vec<&[u8]> {
 
 impl GameFacts for ProcfsGameFacts {
     fn sight(&mut self) -> anyhow::Result<Sighting> {
-        let expected_argument = self.wine_path()?;
+        let expected_paths = self.wine_paths()?;
         let expected_env = format!("SteamAppId={}", self.app_id);
         let entries = fs::read_dir(&self.proc_root)?;
         let mut found = Vec::new();
@@ -118,7 +128,18 @@ impl GameFacts for ProcfsGameFacts {
             let Ok(comm) = read_small(&dir.join("comm")) else {
                 continue;
             };
-            if !String::from_utf8_lossy(&comm).starts_with(GAME_COMM_PREFIX) {
+            let Ok(cmdline) = read_small(&dir.join("cmdline")) else {
+                continue;
+            };
+            // The game renames its main thread (its comm is not the executable name), so the
+            // program path in the command line is the identity; the comm is only an extra trigger.
+            let runs_installed_game = windows_program(&cmdline).is_some_and(|program| {
+                expected_paths
+                    .iter()
+                    .any(|path| path.eq_ignore_ascii_case(&program))
+            });
+            if !runs_installed_game && !String::from_utf8_lossy(&comm).starts_with(GAME_COMM_PREFIX)
+            {
                 continue;
             }
             // From here the process is named like the game: any failed attribution is an error.
@@ -133,9 +154,13 @@ impl GameFacts for ProcfsGameFacts {
                 nul_fields(&environ).contains(&expected_env.as_bytes()),
                 "a game-named process is not this Steam app"
             );
-            let cmdline = read_small(&dir.join("cmdline"))?;
             anyhow::ensure!(
-                nul_fields(&cmdline).contains(&expected_argument.as_bytes()),
+                runs_installed_game
+                    || nul_fields(&cmdline).iter().any(|field| {
+                        expected_paths
+                            .iter()
+                            .any(|path| path.as_bytes().eq_ignore_ascii_case(field))
+                    }),
                 "a game-named process does not run the installed executable"
             );
             found.push((pid, live.start_ticks));
@@ -319,5 +344,84 @@ mod tests {
         let mut facts = f.facts(owner(&f));
         assert_eq!(facts.settings_sha256().unwrap(), "c".repeat(64));
         assert_eq!(facts.now_unix_nanos().unwrap(), 42);
+    }
+}
+
+#[cfg(test)]
+mod real_topology_tests {
+    use std::os::unix::fs::MetadataExt;
+
+    use super::*;
+
+    /// The observed Proton process: the game renames its main thread `GameThread`, and its command
+    /// line names the executable through the `S:` drive that maps the library's `steamapps`.
+    #[test]
+    fn the_game_is_found_by_its_s_drive_program_path_not_its_renamed_comm() {
+        let tmp = tempfile::tempdir().unwrap();
+        let exe = tmp
+            .path()
+            .join("steamapps/common/Cyberpunk 2077/bin/x64/Cyberpunk2077.exe");
+        fs::create_dir_all(exe.parent().unwrap()).unwrap();
+        fs::write(&exe, b"game-image").unwrap();
+        let proc = tempfile::tempdir().unwrap();
+        let add = |pid: u32, comm: &str, env: &[&str], args: &[&str]| {
+            let dir = proc.path().join(pid.to_string());
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(dir.join("comm"), format!("{comm}\n")).unwrap();
+            fs::write(
+                dir.join("stat"),
+                format!("{pid} ({comm}) S 1 0 0 0 0 0 0 0 0 0 0 0 0 0 20 0 1 0 77 0 0"),
+            )
+            .unwrap();
+            let join = |items: &[&str]| {
+                items
+                    .iter()
+                    .flat_map(|item| item.bytes().chain(std::iter::once(0)))
+                    .collect::<Vec<u8>>()
+            };
+            fs::write(dir.join("environ"), join(env)).unwrap();
+            fs::write(dir.join("cmdline"), join(args)).unwrap();
+        };
+        let s_path = "S:\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\Cyberpunk2077.exe";
+        add(
+            900,
+            "GameThread",
+            &["SteamAppId=1091500"],
+            &[s_path, "-benchmark"],
+        );
+        // The Wine host wrapper and the Proton script only mention the launcher, never run the game.
+        add(
+            901,
+            "steam.exe",
+            &["SteamAppId=1091500"],
+            &[
+                "c:\\windows\\system32\\steam.exe",
+                "REDprelauncher.exe",
+                "-benchmark",
+            ],
+        );
+        add(
+            902,
+            "python3",
+            &["SteamAppId=1091500"],
+            &["python3", "proton", "waitforexitandrun"],
+        );
+        let uid = fs::metadata(proc.path()).unwrap().uid();
+        let mut facts = ProcfsGameFacts::new(
+            proc.path().to_path_buf(),
+            uid,
+            1_091_500,
+            7,
+            exe,
+            Box::new(|| Ok("c".repeat(64))),
+            Box::new(|| Ok(1)),
+        );
+        let Sighting::One(identity) = facts.sight().unwrap() else {
+            panic!("the renamed game process must be sighted")
+        };
+        assert_eq!(identity.pid, Pid::new(900));
+        // The same process under another app id is an error, never absence.
+        fs::write(proc.path().join("900/environ"), b"SteamAppId=1\0").unwrap();
+        assert!(facts.sight().is_err());
     }
 }
