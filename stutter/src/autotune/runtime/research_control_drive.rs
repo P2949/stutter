@@ -108,20 +108,26 @@ impl ResearchCoordinator {
         if !self.drive_due() {
             return;
         }
+        // Admission needs the desktop idle by both signals. Once an attempt runs, the game raises its
+        // own idle inhibitor, so only genuine user input may interrupt it.
         #[cfg(feature = "wayland-probe")]
-        let idle_at = match self.desktop_idle.1 {
+        let (idle_at, input_idle_at) = match self.desktop_idle.1 {
             crate::autotune::research::desktop_idle::DesktopIdleObservation::Monitoring {
-                inhibitor_idle: true,
-                input_idle: true,
-            } => Some(self.desktop_idle.0),
-            _ => None,
+                inhibitor_idle,
+                input_idle,
+            } => (
+                (inhibitor_idle && input_idle).then_some(self.desktop_idle.0),
+                input_idle.then_some(self.desktop_idle.0),
+            ),
+            _ => (None, None),
         };
         #[cfg(not(feature = "wayland-probe"))]
-        let idle_at = None;
+        let (idle_at, input_idle_at) = (None, None);
         let Some(state) = self.driver.as_mut() else {
             return;
         };
         state.host.observe_desktop_idle(idle_at);
+        state.host.observe_user_input_idle(input_idle_at);
         let active = &mut self.active;
         let step = match state
             .driver

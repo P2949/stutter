@@ -286,6 +286,7 @@ pub trait ResultProbe {
 
 pub struct ProductionSteamPort<R: ResultProbe> {
     idle_at: Option<Instant>,
+    input_idle_at: Option<Instant>,
     pub proc_root: PathBuf,
     pub study_compat_data: PathBuf,
     pub study_root: PathBuf,
@@ -313,6 +314,7 @@ impl<R: ResultProbe> ProductionSteamPort<R> {
     ) -> Self {
         Self {
             idle_at: None,
+            input_idle_at: None,
             proc_root: PathBuf::from("/proc"),
             study_compat_data,
             study_root,
@@ -373,6 +375,13 @@ impl<R: ResultProbe> ProductionSteamPort<R> {
 
     fn idle_is_fresh(&self) -> bool {
         self.idle_at
+            .is_some_and(|at| at.elapsed() <= Duration::from_secs(3))
+    }
+
+    /// No user input recently, whatever idle inhibitors exist. A launched game holds its own
+    /// inhibitor, so this, not the combined admission signal, decides whether the user returned.
+    fn user_input_idle_is_fresh(&self) -> bool {
+        self.input_idle_at
             .is_some_and(|at| at.elapsed() <= Duration::from_secs(3))
     }
 
@@ -457,6 +466,10 @@ impl<R: ResultProbe> SteamPort for ProductionSteamPort<R> {
         self.idle_at = idle_at;
     }
 
+    fn observe_user_input_idle(&mut self, input_idle_at: Option<Instant>) {
+        self.input_idle_at = input_idle_at;
+    }
+
     fn safe_window(&mut self) -> bool {
         !self.unsettled
             && self.idle_is_fresh()
@@ -511,7 +524,7 @@ impl<R: ResultProbe> SteamPort for ProductionSteamPort<R> {
     }
 
     fn state(&mut self) -> GameState {
-        if !self.idle_is_fresh() {
+        if !self.user_input_idle_is_fresh() {
             return GameState::DesktopInterrupted;
         }
         let Some((dir, context)) = self.dispatch.as_ref() else {

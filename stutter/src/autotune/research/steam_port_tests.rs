@@ -350,6 +350,7 @@ fn exited_first_steam_verb_never_completes_an_attempt_with_a_live_second_verb() 
     );
     port.proc_root = proc.path().to_path_buf();
     port.observe_desktop_idle(Some(Instant::now()));
+    port.observe_user_input_idle(Some(Instant::now()));
     port.dispatch = Some((attempt, context));
     assert_eq!(port.state(), GameState::Running);
     // The live dispatcher exits while the game keeps running: the game stays visible.

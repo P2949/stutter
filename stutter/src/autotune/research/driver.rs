@@ -46,6 +46,9 @@ impl std::error::Error for LaunchUnresolved {}
 pub trait AttemptHost {
     /// Latest independently observed idle timestamp, or None when occupied or unknown.
     fn observe_desktop_idle(&mut self, _idle_at: Option<std::time::Instant>) {}
+    /// Latest observation that no user input has occurred recently, independent of idle inhibitors
+    /// (a running game holds its own). Only this may interrupt an attempt that is already running.
+    fn observe_user_input_idle(&mut self, _input_idle_at: Option<std::time::Instant>) {}
     /// True only in a qualified automatic safe window.
     fn safe_window(&mut self) -> bool;
     fn arm_spec(&mut self, slot: &AttemptSlot) -> anyhow::Result<ArmSpec>;

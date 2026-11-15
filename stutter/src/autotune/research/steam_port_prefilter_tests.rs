@@ -133,3 +133,41 @@ fn a_foreign_game_outside_the_name_list_still_blocks_admission() {
     std::fs::create_dir(proc.path().join("420/cmdline")).unwrap();
     assert!(busy(proc.path()));
 }
+
+struct QuietProbe;
+
+impl ResultProbe for QuietProbe {
+    fn begin(&mut self, _: super::super::ProtonSource) -> anyhow::Result<()> {
+        Ok(())
+    }
+    fn poll(&mut self) -> GameState {
+        GameState::Running
+    }
+}
+
+#[test]
+fn a_running_games_own_idle_inhibitor_does_not_interrupt_its_attempt_but_user_input_does() {
+    let client = crate::autotune::research::tests::intent().steam_client;
+    let mut port = ProductionSteamPort::new(
+        "/study/compatdata".into(),
+        "/study".into(),
+        "/a".into(),
+        "/m".into(),
+        client,
+        vec![],
+        QuietProbe,
+    );
+    // No dispatch context yet, so the state is an identity problem, not an interruption, as long as
+    // the user has not touched the desktop recently, even though the combined idle signal is
+    // absent because the game itself holds an idle inhibitor.
+    port.observe_desktop_idle(None);
+    port.observe_user_input_idle(Some(Instant::now()));
+    assert_eq!(port.state(), GameState::IdentityMismatch);
+    // Admission still needs the combined signal.
+    assert!(!port.safe_window());
+    // Recent user input, or an expired or missing observation, interrupts the attempt.
+    port.observe_user_input_idle(Some(Instant::now() - Duration::from_secs(4)));
+    assert_eq!(port.state(), GameState::DesktopInterrupted);
+    port.observe_user_input_idle(None);
+    assert_eq!(port.state(), GameState::DesktopInterrupted);
+}

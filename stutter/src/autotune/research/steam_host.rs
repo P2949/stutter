@@ -34,6 +34,7 @@ pub enum GameState {
 
 pub trait SteamPort {
     fn observe_desktop_idle(&mut self, idle_at: Option<std::time::Instant>);
+    fn observe_user_input_idle(&mut self, input_idle_at: Option<std::time::Instant>);
     /// Objectively free of unrelated user or game work; never forced.
     fn safe_window(&mut self) -> bool;
     /// Resolve the exact installed tool directory for the arm, or fail closed.
@@ -63,6 +64,10 @@ impl<P: SteamPort> SteamAttemptHost<P> {
 impl<P: SteamPort> AttemptHost for SteamAttemptHost<P> {
     fn observe_desktop_idle(&mut self, idle_at: Option<std::time::Instant>) {
         self.port.observe_desktop_idle(idle_at);
+    }
+
+    fn observe_user_input_idle(&mut self, input_idle_at: Option<std::time::Instant>) {
+        self.port.observe_user_input_idle(input_idle_at);
     }
 
     fn safe_window(&mut self) -> bool {
@@ -164,6 +169,7 @@ mod tests {
 
     impl SteamPort for Port {
         fn observe_desktop_idle(&mut self, _: Option<std::time::Instant>) {}
+        fn observe_user_input_idle(&mut self, _: Option<std::time::Instant>) {}
         fn safe_window(&mut self) -> bool {
             self.safe
         }
