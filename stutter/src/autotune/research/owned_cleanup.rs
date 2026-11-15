@@ -192,7 +192,17 @@ impl<F: GameFacts + Send> OwnedTerminator for ProcfsTerminator<F> {
         context: &DispatchContextV1,
     ) -> anyhow::Result<()> {
         let anchors = live_anchors(&self.proc_root, dispatch, context);
-        self.terminate_attributed(&anchors)
+        let game = self.terminate_attributed(&anchors);
+        // The pre-game reaper and Wine tree is owned through the study prefix it was handed, which
+        // stays provable after the dispatcher has exited or before the game exists.
+        let domain = super::owned_domain::terminate_domain(
+            &self.proc_root,
+            unsafe { libc::geteuid() },
+            &context.spec.study_compat_data,
+            std::process::id(),
+            self.grace,
+        );
+        game.and(domain)
     }
 }
 
