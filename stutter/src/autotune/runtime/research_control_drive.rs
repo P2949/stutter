@@ -336,6 +336,35 @@ pub(in crate::autotune::runtime) fn select_host_factory(
     }
 }
 
+/// The recovery witnesses the resident session supplies, under the same opt-in and with the same
+/// fully configured sources as the live host. Without them, launch history stays unsafe.
+pub(in crate::autotune::runtime) fn select_recovery_factory(
+    config: &crate::daemon::config::autotune::DaemonAutotuneConfig,
+) -> Option<crate::autotune::runtime::research_recovery::RecoveryFactory> {
+    use crate::autotune::research::session_host::{SessionHostSources, build_recovery_witnesses};
+    match (
+        config.research_live_launch,
+        config.research_study_dir.clone(),
+        config.research_steamapps_dir.clone(),
+        config.research_proton_manifest.clone(),
+    ) {
+        (true, Some(study_dir), Some(steamapps), Some(proton_manifest)) => {
+            let sources = SessionHostSources {
+                study_dir,
+                steamapps,
+                proton_manifest,
+                worker_socket: config.privileged_worker_socket.clone().or_else(|| {
+                    crate::daemon::privilege::default_privileged_worker_socket_path().ok()
+                }),
+            };
+            Some(std::sync::Arc::new(move |intent| {
+                build_recovery_witnesses(&sources, intent)
+            }))
+        }
+        _ => None,
+    }
+}
+
 /// Production host until the Steam launcher is physically qualified: it never reports a safe
 /// window, so no attempt is ever journalled, armed or launched. The campaign waits to its deadline.
 pub(in crate::autotune::runtime) struct UnqualifiedSteamHost;

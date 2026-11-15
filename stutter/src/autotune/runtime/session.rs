@@ -60,6 +60,9 @@ pub async fn run_autotune_controller_session(
         coordinator.set_host_factory(Some(super::research_control::select_host_factory(
             &runtime.config().daemon_config.autotune,
         )));
+        coordinator.set_recovery_factory(super::research_control::select_recovery_factory(
+            &runtime.config().daemon_config.autotune,
+        ));
         coordinator.set_settlement_socket(
             runtime
                 .config()

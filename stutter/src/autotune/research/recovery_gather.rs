@@ -72,6 +72,17 @@ type TreeWitness = Box<dyn FnMut(&File, &DispatchContextV1) -> anyhow::Result<bo
 type TokenWitness = Box<dyn FnMut() -> anyhow::Result<usize> + Send>;
 type RestoredWitness = Box<dyn FnMut() -> anyhow::Result<bool> + Send>;
 
+/// The witnesses a restarted controller needs to retire an interrupted attempt. The process-tree
+/// check sees the reconstructed dispatch context, and the claim verifier settles any consumed
+/// ticket's process and the worker before the journal seal is written.
+pub struct RecoveryWitnesses {
+    pub unit_state: UnitStateWitness,
+    pub process_tree_settled: TreeWitness,
+    pub outstanding_worker_tokens: TokenWitness,
+    pub transactions_restored: RestoredWitness,
+    pub claim_verifier: Box<dyn super::driver::ClaimSettlementVerifier>,
+}
+
 /// The completion witness the Steam port consults: the same durable records and independent
 /// witnesses recovery uses, so a finished attempt and a recovered one settle by one rule.
 pub struct CompletionWitness {

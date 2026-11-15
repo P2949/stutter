@@ -580,7 +580,7 @@ fn a_restarted_driver_seals_only_a_provably_settled_interrupted_attempt() {
     use super::super::{
         launch_record::{record_outcome, record_phase},
         launch_txn::{LaunchOutcome, LaunchPhase, UnitState},
-        recovery_gather::Witnesses,
+        recovery_gather::RecoveryWitnesses,
         recovery_plan::RecoveryDecision,
         user_launcher::launch_unit_name,
     };
@@ -606,16 +606,35 @@ fn a_restarted_driver_seals_only_a_provably_settled_interrupted_attempt() {
         File::from(crate::syscall::open_dir_no_symlinks(&dir.path().join("evidence")).unwrap());
     let mut recovered = Driver::new(journal, intent.clone(), root, evidence, len);
 
+    // No ticket is claimed in this scenario, so the claim verifier must never be consulted.
+    struct NoClaims;
+    impl ClaimSettlementVerifier for NoClaims {
+        fn verify_process(
+            &mut self,
+            _: &File,
+            _: &DispatchContextV1,
+            _: &super::super::launch_ticket::ResearchLaunchTicketV1,
+        ) -> anyhow::Result<Box<dyn ClaimSettlementGuard>> {
+            anyhow::bail!("no claim was expected")
+        }
+        fn verify_worker(
+            &mut self,
+            _: &DispatchContextV1,
+        ) -> anyhow::Result<Box<dyn ClaimSettlementGuard>> {
+            anyhow::bail!("no claim was expected")
+        }
+    }
     let settled = |unit: UnitState| {
         move |driver: &mut Driver, adopted: AttemptSlot, now: u64| {
             driver.recover_interrupted(
                 adopted,
                 true,
-                Witnesses {
-                    unit_state: &mut |_| Ok(unit),
-                    process_tree_settled: &mut || Ok(true),
-                    outstanding_worker_tokens: &mut || Ok(0),
-                    transactions_restored: &mut || Ok(true),
+                RecoveryWitnesses {
+                    unit_state: Box::new(move |_| Ok(unit)),
+                    process_tree_settled: Box::new(|_, _| Ok(true)),
+                    outstanding_worker_tokens: Box::new(|| Ok(0)),
+                    transactions_restored: Box::new(|| Ok(true)),
+                    claim_verifier: Box::new(NoClaims),
                 },
                 now,
             )

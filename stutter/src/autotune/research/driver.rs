@@ -168,13 +168,6 @@ impl Driver {
         }
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "called by the resident recovery job once it is wired"
-        )
-    )]
     /// Settle an attempt that was durably started but never sealed before a restart. The frozen
     /// dispatch context is reconstructed from its durable record and re-verified against the
     /// intent, the independent observations are gathered, and only a provably settled attempt is
@@ -185,7 +178,7 @@ impl Driver {
         &mut self,
         adopted: AttemptSlot,
         same_boot: bool,
-        witnesses: super::recovery_gather::Witnesses<'_>,
+        witnesses: super::recovery_gather::RecoveryWitnesses,
         now: u64,
     ) -> anyhow::Result<super::recovery_plan::RecoveryDecision> {
         use super::recovery_plan::{AttemptState, RecoveryDecision, decide, facts_from};
@@ -200,17 +193,30 @@ impl Driver {
             "UnsafeToResume: the recovered dispatch context differs from the frozen attempt"
         );
         let unit = super::user_launcher::launch_unit_name(&digest, adopted.index)?;
+        let super::recovery_gather::RecoveryWitnesses {
+            mut unit_state,
+            mut process_tree_settled,
+            mut outstanding_worker_tokens,
+            mut transactions_restored,
+            claim_verifier,
+        } = witnesses;
         let observations = super::recovery_gather::gather(
             &attempt_dir,
             self.intent.uid,
             AttemptState::StartedUnsealed,
             same_boot,
             &unit,
-            witnesses,
+            super::recovery_gather::Witnesses {
+                unit_state: &mut *unit_state,
+                process_tree_settled: &mut || process_tree_settled(&attempt_dir, &context),
+                outstanding_worker_tokens: &mut *outstanding_worker_tokens,
+                transactions_restored: &mut *transactions_restored,
+            },
         )?;
         let decision = decide(&facts_from(&observations));
         match decision {
             RecoveryDecision::RetireAndSealFailed(code) => {
+                self.claim_verifier = Some(claim_verifier);
                 self.issued_tickets = Some(context.tickets.values().cloned().collect());
                 self.armed_context = Some(context);
                 self.seal(adopted, AttemptOutcome::Failed { code: code.into() }, now)?;

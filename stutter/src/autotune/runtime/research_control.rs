@@ -32,7 +32,7 @@ mod idle;
 mod status;
 #[path = "research_control_study.rs"]
 mod study;
-pub(super) use drive::{HostFactory, select_host_factory};
+pub(super) use drive::{HostFactory, select_host_factory, select_recovery_factory};
 
 use crate::autotune::research::{
     AuthenticatedRequest, CampaignBlockReason, CampaignFacts, CampaignLease, ResearchPhase,
@@ -79,6 +79,7 @@ pub(super) struct ResearchCoordinator {
     terminal_probe_attempted: bool,
     mutable_action_present: bool,
     host_factory: Option<HostFactory>,
+    recovery_factory: Option<super::research_recovery::RecoveryFactory>,
     settlement_socket: Option<PathBuf>,
     driver: Option<drive::DriverState>,
     #[cfg(feature = "wayland-probe")]
@@ -124,6 +125,7 @@ impl ResearchCoordinator {
             terminal_probe_attempted: false,
             mutable_action_present,
             host_factory: None,
+            recovery_factory: None,
             settlement_socket: None,
             driver: None,
             #[cfg(feature = "wayland-probe")]
@@ -193,7 +195,15 @@ impl ResearchCoordinator {
             facts,
             now,
             study_dir: self.study_dir.clone(),
+            witnesses: self.recovery_factory.clone(),
         })
+    }
+
+    pub(super) fn set_recovery_factory(
+        &mut self,
+        factory: Option<super::research_recovery::RecoveryFactory>,
+    ) {
+        self.recovery_factory = factory;
     }
 
     pub(super) fn finish_recovery(&mut self, result: anyhow::Result<RecoveredCampaign>) {

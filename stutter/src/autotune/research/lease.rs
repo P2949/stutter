@@ -287,6 +287,26 @@ impl CampaignLease {
     /// Recover only a sealed phase boundary. The caller must additionally verify all child-study
     /// records and settle worker tokens before using the result to resume anything.
     pub fn recover(dir: OwnedFd, facts: &CampaignFacts, now: u64) -> anyhow::Result<Self> {
+        Self::recover_with(dir, facts, now, false)
+    }
+
+    /// Recover a lease that was left in an in-flight phase by a crash. Only a caller that can
+    /// independently retire the interrupted attempt may use this; the returned lease is still in
+    /// that phase until the caller moves it through the normal restoring transition.
+    pub fn recover_interrupted_launch(
+        dir: OwnedFd,
+        facts: &CampaignFacts,
+        now: u64,
+    ) -> anyhow::Result<Self> {
+        Self::recover_with(dir, facts, now, true)
+    }
+
+    fn recover_with(
+        dir: OwnedFd,
+        facts: &CampaignFacts,
+        now: u64,
+        allow_interrupted: bool,
+    ) -> anyhow::Result<Self> {
         let dir = locked_dir(dir, facts.uid)?;
         let mut names = entries(&dir)?;
         anyhow::ensure!(
@@ -350,17 +370,18 @@ impl CampaignLease {
             previous = stutter_core::hash::sha256_hex(&bytes);
         }
         anyhow::ensure!(
-            !matches!(
-                phase,
-                ResearchPhase::Launching
-                    | ResearchPhase::Attesting
-                    | ResearchPhase::Warmup
-                    | ResearchPhase::Measuring
-                    | ResearchPhase::Sealing
-                    | ResearchPhase::EligibleAction
-                    | ResearchPhase::Confirming
-                    | ResearchPhase::Restoring
-            ),
+            allow_interrupted
+                || !matches!(
+                    phase,
+                    ResearchPhase::Launching
+                        | ResearchPhase::Attesting
+                        | ResearchPhase::Warmup
+                        | ResearchPhase::Measuring
+                        | ResearchPhase::Sealing
+                        | ResearchPhase::EligibleAction
+                        | ResearchPhase::Confirming
+                        | ResearchPhase::Restoring
+                ),
             "UnsafeToResume: interrupted campaign phase"
         );
         Ok(Self {

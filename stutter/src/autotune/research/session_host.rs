@@ -21,6 +21,8 @@ use super::{
     native_source::GameFacts,
     prefix::verify_study_compatdata,
     production_host::{ProductionHostInputs, build_production_host, inventory_lookup},
+    recovery_gather::RecoveryWitnesses,
+    settlement::owned_process_tree_settled,
     user_launcher::{VerifiedSessionEnvironment, prepare_from_host},
     user_manager::VerifiedUserManager,
     user_manager_port::{DbusUserManagerPort, ReauthenticatingBus},
@@ -100,6 +102,44 @@ fn game_facts_factory(
             Box::new(|| Ok(SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos())),
         ))
     }
+}
+
+/// The independent witnesses a restarted controller uses to retire an interrupted attempt. The
+/// same real sources as the live host: the authenticated user manager (re-authenticated as
+/// needed), procfs, and the worker's read-only token count.
+pub fn build_recovery_witnesses(
+    sources: &SessionHostSources,
+    intent: &ResearchIntentV1,
+) -> anyhow::Result<RecoveryWitnesses> {
+    use super::{launch_txn::UserManagerPort, settlement::ProductionSettlementVerifier};
+    let uid = crate::syscall::geteuid();
+    let (_, _, settings) = prefix_paths(&sources.study_dir, intent.app_id);
+    let installation = inspect_cyberpunk_installation(&sources.steamapps, uid)?;
+    let executable = PathBuf::from(&installation.installation_directory).join(GAME_EXECUTABLE);
+    let facts = game_facts_factory(uid, intent.app_id, intent.build_id, executable, settings);
+    let mut tree_facts = facts();
+    let mut observer = DbusUserManagerPort::new(ReauthenticatingBus::new(manager_authenticator(
+        intent,
+        &sources.steamapps,
+        &sources.proton_manifest,
+    )));
+    let (token_socket, restored_socket, claim_socket) = (
+        sources.worker_socket.clone(),
+        sources.worker_socket.clone(),
+        sources.worker_socket.clone(),
+    );
+    Ok(RecoveryWitnesses {
+        unit_state: Box::new(move |unit| observer.unit_state(unit)),
+        process_tree_settled: Box::new(move |dir, context| {
+            owned_process_tree_settled(dir, context, Path::new("/proc"), &mut *tree_facts)
+        }),
+        outstanding_worker_tokens: Box::new(move || worker_tokens(&token_socket)),
+        transactions_restored: Box::new(move || Ok(worker_tokens(&restored_socket)? == 0)),
+        claim_verifier: Box::new(ProductionSettlementVerifier::new(
+            PathBuf::from("/proc"),
+            Some(Box::new(move || worker_tokens(&claim_socket))),
+        )),
+    })
 }
 
 /// Assemble the host for one frozen intent. The study prefix, Steam inventory and installation
