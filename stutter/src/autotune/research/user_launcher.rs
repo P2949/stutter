@@ -202,7 +202,14 @@ pub fn prepare_user_launch(
         "wrong user runtime directory"
     );
     let name = launch_unit_name(&digest, slot.index)?;
-    let args = [executable, "-applaunch", "1091500", "-benchmark"].map(str::to_owned);
+    let args = [
+        executable,
+        "-applaunch",
+        "1091500",
+        "--launcher-skip",
+        "-benchmark",
+    ]
+    .map(str::to_owned);
     let environment = [
         format!("HOME={home}"),
         format!("XDG_RUNTIME_DIR={runtime_text}"),
@@ -301,6 +308,7 @@ mod tests {
             executable.0.to_str().unwrap(),
             "-applaunch",
             "1091500",
+            "--launcher-skip",
             "-benchmark",
         ]
         .map(|arg| Value::Str(arg.into()))

@@ -267,9 +267,15 @@ fn host_has_game_or_foreign_steam_bounded(
 }
 
 pub fn launch_argv() -> Vec<String> {
-    ["steam", "-applaunch", APP_ID, "-benchmark"]
-        .map(str::to_owned)
-        .to_vec()
+    [
+        "steam",
+        "-applaunch",
+        APP_ID,
+        "--launcher-skip",
+        "-benchmark",
+    ]
+    .map(str::to_owned)
+    .to_vec()
 }
 
 pub trait ResultProbe {

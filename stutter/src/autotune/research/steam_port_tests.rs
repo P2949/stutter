@@ -224,7 +224,13 @@ fn launch_refuses_unless_idle_and_free_and_the_command_is_the_one_owned_app() {
     assert!(port.tool_dir(&other).is_err());
     assert_eq!(
         launch_argv(),
-        ["steam", "-applaunch", "1091500", "-benchmark"]
+        [
+            "steam",
+            "-applaunch",
+            "1091500",
+            "--launcher-skip",
+            "-benchmark"
+        ]
     );
     assert!(port.stop().is_ok());
     port.unsettled = true;
