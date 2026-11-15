@@ -49,13 +49,21 @@ impl ResearchCoordinator {
                 .unwrap_or(serde_json::Value::Null);
             #[cfg(not(feature = "wayland-probe"))]
             let desktop_idle = serde_json::json!("unavailable");
+            // A driver exists only when the production host was built, which required a logged-in
+            // Steam client and the account's own launch record for the game (weaker than a license
+            // proof). Without one nothing can launch.
+            let (execution, authentication, entitlement) = if self.driver.is_some() {
+                ("HostConfigured", "ClientLoggedIn", "AccountLaunchRecord")
+            } else {
+                ("BlockedSteamAutomation", "Unverified", "Unverified")
+            };
             return serde_json::json!({
                 "status": "ok",
                 "phase": active.lease.phase(),
                 "intent_sha256": active.intent_sha256,
-                "execution": "BlockedSteamAutomation",
-                "steam_authentication": "Unverified",
-                "game_entitlement": "Unverified",
+                "execution": execution,
+                "steam_authentication": authentication,
+                "game_entitlement": entitlement,
                 "desktop_idle_observation": desktop_idle,
             })
             .to_string()
