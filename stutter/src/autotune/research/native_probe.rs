@@ -67,7 +67,10 @@ impl<S: NativeObservationSource> ResultProbe for NativeResultProbe<S> {
                     Ok(completion) => GameState::Result {
                         completion: Box::new(completion),
                     },
-                    Err(_) => GameState::InvalidNativeResult,
+                    Err(error) => {
+                        log::warn!("native result rejected: {error:#}");
+                        GameState::InvalidNativeResult
+                    }
                 }
             }
         }

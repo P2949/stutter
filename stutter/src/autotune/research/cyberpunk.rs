@@ -338,9 +338,23 @@ fn parse_summary(bytes: &[u8]) -> anyhow::Result<NativeBenchmarkMetrics> {
         "native summary too large"
     );
     let value: serde_json::Value = serde_json::from_slice(bytes)?;
-    let object = value
+    let root = value
         .as_object()
         .ok_or_else(|| anyhow::anyhow!("native summary is not a JSON object"))?;
+    // The game writes `{"RootType":"worldBenchmarkSummary","Data":{...}}`; a bare object is the
+    // older flat form. A wrapped summary of any other root type is not a benchmark summary.
+    let object = match root.get("Data") {
+        Some(data) => {
+            anyhow::ensure!(
+                root.get("RootType").and_then(serde_json::Value::as_str)
+                    == Some("worldBenchmarkSummary"),
+                "native summary root type is not worldBenchmarkSummary"
+            );
+            data.as_object()
+                .ok_or_else(|| anyhow::anyhow!("native summary data is not an object"))?
+        }
+        None => root,
+    };
     let average_fps = fps_value(object.get("averageFps"), "averageFps")?
         .filter(|value| *value > 0.0)
         .ok_or_else(|| anyhow::anyhow!("native summary lacks positive averageFps"))?;

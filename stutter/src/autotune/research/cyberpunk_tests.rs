@@ -356,3 +356,20 @@ fn only_a_genuinely_absent_path_is_an_empty_baseline() {
     // An unprivileged owner is still required.
     assert!(snapshot_benchmark_results_or_absent(&parent.path().join("missing"), 0).is_err());
 }
+
+#[test]
+fn the_games_wrapped_summary_schema_is_parsed_and_other_roots_are_refused() {
+    let real = br#"{"RootType":"worldBenchmarkSummary","Data":{"gameVersion":"2.5","presetName":"RayTracingUltra","averageFps":68.34229278564453,"minFps":53.859867095947269,"maxFps":81.63131713867188}}"#;
+    let metrics = super::parse_summary(real).unwrap();
+    assert!((metrics.average_fps - 68.342).abs() < 0.001);
+    assert!(metrics.minimum_fps.is_some() && metrics.maximum_fps.is_some());
+    let other = br#"{"RootType":"somethingElse","Data":{"averageFps":60.0}}"#;
+    assert!(super::parse_summary(other).is_err());
+    let wrapped_without_root = br#"{"Data":{"averageFps":60.0}}"#;
+    assert!(super::parse_summary(wrapped_without_root).is_err());
+    assert!(super::parse_summary(br#"{"averageFps":60.0}"#).is_ok());
+    assert!(
+        super::parse_summary(br#"{"RootType":"worldBenchmarkSummary","Data":{"averageFps":0.0}}"#)
+            .is_err()
+    );
+}
