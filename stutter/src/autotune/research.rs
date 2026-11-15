@@ -48,6 +48,7 @@ pub(crate) mod desktop_idle;
 pub(crate) mod dispatch_context;
 pub(crate) mod dispatcher;
 pub(crate) mod driver;
+pub(crate) mod entitlement;
 #[cfg_attr(
     not(test),
     expect(

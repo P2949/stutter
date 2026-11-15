@@ -184,7 +184,23 @@ pub fn build_session_host(
     verify_study_compatdata(&sources.steamapps, &sources.study_dir, &compat, uid, false)?;
     let (observed_steam_client, installed_tool_path) =
         inventory_lookup(&sources.steamapps, &sources.proton_manifest, uid)?;
-    let installation = inspect_cyberpunk_installation(&sources.steamapps, uid)?;
+    let mut installation = inspect_cyberpunk_installation(&sources.steamapps, uid)?;
+    // The inventory cannot prove entitlement; the signed-in account's own launch record is the
+    // preflight evidence, and anything unreadable leaves it false so no host is built.
+    installation.entitlement_verified = match (
+        sources.steamapps.parent(),
+        observed_steam_client
+            .as_ref()
+            .and_then(|client| client.process.as_ref()),
+    ) {
+        (Some(steam_root), Some(process)) => super::entitlement::authenticated_account_has_played(
+            Path::new("/proc"),
+            steam_root,
+            process,
+            intent.app_id,
+        ),
+        _ => false,
+    };
     let tools = intent
         .tools
         .iter()
