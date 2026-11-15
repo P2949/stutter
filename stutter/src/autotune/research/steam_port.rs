@@ -70,6 +70,55 @@ fn launcher_is_unprivileged() -> bool {
     crate::syscall::geteuid() != 0
 }
 
+const MAX_GAME_EVIDENCE_BYTES: u64 = 65_536;
+
+/// Independent evidence that a process of this user is a game: a Windows-style command-line argument
+/// (`*.exe` or a drive path), or a non-zero `SteamGameId`/`SteamAppId` in its environment. A process
+/// that vanished is no evidence; a command line that cannot be read for another reason refuses.
+fn looks_like_foreign_game(process_dir: &Path, uid: u32) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let owned = match std::fs::metadata(process_dir) {
+        Ok(metadata) => metadata.uid() == uid,
+        Err(error) => return error.kind() != std::io::ErrorKind::NotFound,
+    };
+    if !owned {
+        return false;
+    }
+    let read = |name: &str| -> std::io::Result<Vec<u8>> {
+        let mut bytes = Vec::new();
+        File::open(process_dir.join(name))?
+            .take(MAX_GAME_EVIDENCE_BYTES)
+            .read_to_end(&mut bytes)?;
+        Ok(bytes)
+    };
+    match read("cmdline") {
+        Ok(cmdline) => {
+            let windows = cmdline.split(|byte| *byte == 0).any(|arg| {
+                let lower = arg.to_ascii_lowercase();
+                lower.ends_with(b".exe")
+                    || (lower.len() > 2 && lower[1] == b':' && lower[2] == b'\\')
+            });
+            if windows {
+                return true;
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return false,
+        Err(_) => return true,
+    }
+    // An unreadable environment (a non-dumpable process) is not evidence on its own.
+    read("environ").is_ok_and(|environ| {
+        environ.split(|byte| *byte == 0).any(|entry| {
+            [b"SteamGameId=".as_slice(), b"SteamAppId=".as_slice()]
+                .iter()
+                .any(|key| {
+                    entry.strip_prefix(*key).is_some_and(|value| {
+                        !value.is_empty() && value.iter().any(|digit| *digit != b'0')
+                    })
+                })
+        })
+    })
+}
+
 /// Process names (`/proc/<pid>/comm`, at most 15 bytes) whose presence makes the host not free.
 const BUSY_COMMS: [&str; 9] = [
     "steam",
@@ -197,6 +246,11 @@ fn host_has_game_or_foreign_steam_bounded(
             if process.uid != uid || !permitted || read(pid).as_ref() != Some(&process) {
                 return true;
             }
+        }
+        // The name list is only a prefilter: any other process of this user that looks like a game
+        // (a Windows command line, or Steam's game identity in its environment) also blocks admission.
+        if !BUSY_COMMS.contains(&comm) && looks_like_foreign_game(&path, uid) {
+            return true;
         }
     }
     // Recheck the pinned identities after scanning; a vanished or reused client is not idle.
