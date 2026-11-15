@@ -181,29 +181,32 @@ fn launch_requested_ticks(dir: &std::fs::File, uid: u32) -> Option<u64> {
 }
 
 /// Dispatcher side. The caller must be the unprivileged intent owner; anything else is refused
-/// before a ticket is touched. `dispatcher_start_ticks` is the caller's own `/proc` start time.
+/// before a ticket is touched. The origin check returns the dispatcher's own `/proc` start time.
 pub fn authorize_dispatch(
     dir: &std::fs::File,
     argv: &[String],
     env: &BTreeMap<String, String>,
     euid: u32,
     now: u64,
-    dispatcher_start_ticks: u64,
     verify_tool: &dyn Fn(&DispatchContextV1, &super::ResearchTool) -> anyhow::Result<()>,
+    verify_origin: &dyn Fn(&DispatchContextV1) -> anyhow::Result<u64>,
 ) -> anyhow::Result<(DispatchPlan, ResearchLaunchTicketV1)> {
     anyhow::ensure!(euid != 0, "dispatcher must not run as root");
     // An invocation Steam started before this attempt was requested belongs to an earlier
     // request and cannot consume these tickets.
     let requested = launch_requested_ticks(dir, euid)
         .ok_or_else(|| anyhow::anyhow!("no Steam launch was requested for this attempt"))?;
-    anyhow::ensure!(
-        dispatcher_start_ticks != 0 && dispatcher_start_ticks >= requested,
-        "dispatcher started before this attempt's launch request"
-    );
     let context = read_context(dir, euid)?;
     anyhow::ensure!(
         context.intent.uid == euid,
         "dispatch context belongs to another user"
+    );
+    // The invocation must descend from the frozen Steam client. The caller-provided environment
+    // alone proves nothing, since any process of this user could forge it.
+    let dispatcher_start_ticks = verify_origin(&context)?;
+    anyhow::ensure!(
+        dispatcher_start_ticks != 0 && dispatcher_start_ticks >= requested,
+        "dispatcher started before this attempt's launch request"
     );
     let verb = argv
         .get(1)
@@ -228,6 +231,38 @@ pub fn authorize_dispatch(
     let owned: OwnedFd = dir.try_clone()?.into();
     let ticket = consume_launch_ticket(owned, ticket_id, &expected, now)?;
     Ok((plan, ticket))
+}
+
+/// The dispatcher must have been started by the frozen Steam client: this process is owned by the
+/// intent's user and descends from the client's exact PID and start time, which must still be that
+/// process. Anything unobservable (for example across a container boundary) is a refusal.
+pub fn verify_steam_origin(
+    context: &DispatchContextV1,
+    proc_root: &std::path::Path,
+    dispatcher_pid: u32,
+) -> anyhow::Result<u64> {
+    let client = context
+        .intent
+        .steam_client
+        .process
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("the frozen Steam client has no process identity"))?;
+    let live = crate::telemetry::proc_view::live_process(proc_root, dispatcher_pid)
+        .ok_or_else(|| anyhow::anyhow!("dispatcher process identity unavailable"))?;
+    anyhow::ensure!(
+        live.uid == context.intent.uid
+            && live
+                .ancestors
+                .contains(&(client.steam_pid, client.steam_start_ticks)),
+        "the dispatcher was not started by the frozen Steam client"
+    );
+    let steam = crate::telemetry::proc_view::live_process(proc_root, client.steam_pid)
+        .ok_or_else(|| anyhow::anyhow!("the frozen Steam client is no longer running"))?;
+    anyhow::ensure!(
+        steam.start_ticks == client.steam_start_ticks && steam.uid == context.intent.uid,
+        "the frozen Steam client was replaced"
+    );
+    Ok(live.start_ticks)
 }
 
 /// A durable observation of the dispatcher immediately before `exec`. It is only an anchor for
@@ -514,3 +549,7 @@ mod tests;
 #[cfg(test)]
 #[path = "dispatch_context_root_tests.rs"]
 mod root_tests;
+
+#[cfg(test)]
+#[path = "dispatch_origin_tests.rs"]
+mod origin_tests;

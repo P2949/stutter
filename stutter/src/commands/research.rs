@@ -119,14 +119,15 @@ fn dispatch(context_dir: &std::path::Path, args: &[String], uid: u32) -> anyhow:
         &env,
         uid,
         now,
-        crate::telemetry::proc_view::live_process(
-            std::path::Path::new("/proc"),
-            std::process::id(),
-        )
-        .map(|process| process.start_ticks)
-        .ok_or_else(|| anyhow::anyhow!("dispatcher process identity unavailable"))?,
         &|context, tool| {
             crate::autotune::research::dispatch_context::verify_installed_tool(context, tool, uid)
+        },
+        &|context| {
+            crate::autotune::research::dispatch_context::verify_steam_origin(
+                context,
+                std::path::Path::new("/proc"),
+                std::process::id(),
+            )
         },
     )?;
     crate::autotune::research::dispatch_context::record_dispatcher_start(&directory, &ticket)?;

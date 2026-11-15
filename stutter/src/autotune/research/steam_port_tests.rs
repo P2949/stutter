@@ -308,8 +308,8 @@ fn exited_first_steam_verb_never_completes_an_attempt_with_a_live_second_verb() 
             &env,
             intent.uid,
             now + 1,
-            u64::MAX,
             &|_, _| Ok(()),
+            &|_| Ok(u64::MAX),
         )
         .unwrap();
         let record = DispatcherStartV1 {

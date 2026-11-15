@@ -99,8 +99,8 @@ fn dispatcher_start_records_live_process_and_rejects_duplicate_or_wrong_boot() {
         &env(),
         intent.uid,
         now + 1,
-        u64::MAX,
         &|_, _| Ok(()),
+        &|_| Ok(u64::MAX),
     )
     .unwrap();
     let mut wrong = ticket.clone();
@@ -135,8 +135,8 @@ fn host_anchor_requires_ticket_namespace_live_identity_and_steam_ancestry() {
         &env(),
         intent.uid,
         now + 1,
-        u64::MAX,
         &|_, _| Ok(()),
+        &|_| Ok(u64::MAX),
     )
     .unwrap();
     let proc = tempfile::tempdir().unwrap();
@@ -226,8 +226,8 @@ fn each_steam_verb_runs_once_and_replays_or_unknown_verbs_are_refused() {
         &env(),
         euid,
         now,
-        u64::MAX,
         &|_, _| Ok(()),
+        &|_| Ok(u64::MAX),
     )
     .unwrap();
     assert_eq!(wait.0.program, std::path::Path::new("/tools/GE/proton"));
@@ -238,14 +238,20 @@ fn each_steam_verb_runs_once_and_replays_or_unknown_verbs_are_refused() {
             &env(),
             euid,
             now,
-            u64::MAX,
-            &|_, _| Ok(())
+            &|_, _| Ok(()),
+            &|_| Ok(u64::MAX)
         )
         .is_err()
     );
-    authorize_dispatch(&file, &argv("run"), &env(), euid, now, u64::MAX, &|_, _| {
-        Ok(())
-    })
+    authorize_dispatch(
+        &file,
+        &argv("run"),
+        &env(),
+        euid,
+        now,
+        &|_, _| Ok(()),
+        &|_| Ok(u64::MAX),
+    )
     .unwrap();
     assert!(
         authorize_dispatch(
@@ -254,8 +260,8 @@ fn each_steam_verb_runs_once_and_replays_or_unknown_verbs_are_refused() {
             &env(),
             euid,
             now,
-            u64::MAX,
-            &|_, _| Ok(())
+            &|_, _| Ok(()),
+            &|_| Ok(u64::MAX)
         )
         .is_err()
     );
@@ -266,8 +272,8 @@ fn each_steam_verb_runs_once_and_replays_or_unknown_verbs_are_refused() {
             &env(),
             euid,
             now,
-            u64::MAX,
-            &|_, _| Ok(())
+            &|_, _| Ok(()),
+            &|_| Ok(u64::MAX)
         )
         .is_err()
     );
@@ -280,9 +286,15 @@ fn a_malformed_call_does_not_burn_the_ticket_and_other_users_or_expiry_are_refus
     let mut bad = env();
     bad.insert("SteamAppId".into(), "220".into());
     assert!(
-        authorize_dispatch(&file, &argv("run"), &bad, euid, now, u64::MAX, &|_, _| Ok(
-            ()
-        ))
+        authorize_dispatch(
+            &file,
+            &argv("run"),
+            &bad,
+            euid,
+            now,
+            &|_, _| Ok(()),
+            &|_| Ok(u64::MAX)
+        )
         .is_err()
     );
     assert!(
@@ -292,8 +304,8 @@ fn a_malformed_call_does_not_burn_the_ticket_and_other_users_or_expiry_are_refus
             &env(),
             euid,
             now + 600,
-            u64::MAX,
-            &|_, _| Ok(())
+            &|_, _| Ok(()),
+            &|_| Ok(u64::MAX)
         )
         .is_err()
     );
@@ -304,8 +316,8 @@ fn a_malformed_call_does_not_burn_the_ticket_and_other_users_or_expiry_are_refus
             &env(),
             euid + 1,
             now,
-            u64::MAX,
-            &|_, _| Ok(())
+            &|_, _| Ok(()),
+            &|_| Ok(u64::MAX)
         )
         .is_err()
     );
@@ -316,8 +328,8 @@ fn a_malformed_call_does_not_burn_the_ticket_and_other_users_or_expiry_are_refus
             &env(),
             euid,
             now,
-            u64::MAX,
-            &|_, _| Ok(())
+            &|_, _| Ok(()),
+            &|_| Ok(u64::MAX)
         )
         .is_ok()
     );
@@ -328,7 +340,12 @@ fn tool_drift_is_refused_without_burning_the_ticket() {
     let (_dir, file, now) = armed();
     let euid = crate::syscall::geteuid();
     let drift = |_: &DispatchContextV1, _: &super::super::ResearchTool| anyhow::bail!("drift");
-    assert!(authorize_dispatch(&file, &argv("run"), &env(), euid, now, u64::MAX, &drift).is_err());
+    assert!(
+        authorize_dispatch(&file, &argv("run"), &env(), euid, now, &drift, &|_| Ok(
+            u64::MAX
+        ))
+        .is_err()
+    );
     assert!(
         authorize_dispatch(
             &file,
@@ -336,8 +353,8 @@ fn tool_drift_is_refused_without_burning_the_ticket() {
             &env(),
             euid,
             now,
-            u64::MAX,
-            &|_, _| Ok(())
+            &|_, _| Ok(()),
+            &|_| Ok(u64::MAX)
         )
         .is_ok()
     );
@@ -370,8 +387,8 @@ fn a_dispatch_without_a_launch_request_is_refused_and_burns_nothing() {
             &env(),
             intent.uid,
             now + 1,
-            u64::MAX,
             &|_, _| Ok(()),
+            &|_| Ok(u64::MAX),
         )
     };
     // A delayed invocation from an earlier attempt finds this one armed but never requested.
@@ -400,8 +417,8 @@ fn a_dispatcher_started_before_the_launch_request_cannot_consume_the_tickets() {
             &env(),
             intent.uid,
             now + 1,
-            ticks,
             &|_, _| Ok(()),
+            &|_| Ok(ticks),
         )
     };
     // Started before the request: an earlier attempt's delayed invocation, refused unburnt.
