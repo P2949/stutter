@@ -82,11 +82,14 @@ pub fn plan_dispatch(
             && app_id("SteamGameId").is_none_or(|id| id == CYBERPUNK_APP_ID),
         "Steam did not launch Cyberpunk 2077"
     );
+    // Steam always hands the tool the player's own per-game compatdata. That path must be present and
+    // well formed, and is then discarded: the real Proton runs only in the isolated study prefix, so
+    // the player's prefix is never opened by a research launch.
     anyhow::ensure!(
         ambient_env
             .get("STEAM_COMPAT_DATA_PATH")
-            .is_some_and(|value| Path::new(value) == study_compat_data),
-        "Steam compatibility data is not the study prefix"
+            .is_some_and(|value| absolute_normal(Path::new(value))),
+        "Steam did not provide its compatibility data path"
     );
     anyhow::ensure!(
         ambient_env
@@ -103,6 +106,10 @@ pub fn plan_dispatch(
     );
     let mut env = ambient_env.clone();
     env.extend(arm_env.clone());
+    env.insert(
+        "STEAM_COMPAT_DATA_PATH".to_owned(),
+        study_compat_data.to_string_lossy().into_owned(),
+    );
     let mut args = vec![verb.as_steam_argument().to_owned()];
     args.extend(argv[2..].iter().cloned());
     Ok(DispatchPlan {
@@ -155,6 +162,26 @@ mod tests {
     }
 
     #[test]
+    fn steams_own_prefix_is_replaced_by_the_isolated_study_prefix() {
+        let mut steam = env();
+        steam.insert(
+            "STEAM_COMPAT_DATA_PATH".into(),
+            "/home/u/.local/share/Steam/steamapps/compatdata/1091500".into(),
+        );
+        let plan = plan(&argv("run"), &steam).unwrap();
+        assert_eq!(
+            plan.env["STEAM_COMPAT_DATA_PATH"],
+            "/home/u/study/compatdata"
+        );
+        assert!(
+            !plan
+                .env
+                .values()
+                .any(|value| value.contains("steamapps/compatdata"))
+        );
+    }
+
+    #[test]
     fn refuses_wrong_verb_game_prefix_and_smuggled_settings() {
         assert!(plan(&argv("waitforexitandrun"), &env()).is_err());
         assert!(plan(&argv("getcompatpath"), &env()).is_err());
@@ -162,9 +189,11 @@ mod tests {
         other.insert("SteamAppId".into(), "220".into());
         assert!(plan(&argv("run"), &other).is_err());
         let mut other = env();
+        other.remove("STEAM_COMPAT_DATA_PATH");
+        assert!(plan(&argv("run"), &other).is_err());
         other.insert(
             "STEAM_COMPAT_DATA_PATH".into(),
-            "/home/u/.steam/compatdata/1091500".into(),
+            "relative/compatdata".into(),
         );
         assert!(plan(&argv("run"), &other).is_err());
         let mut other = env();
