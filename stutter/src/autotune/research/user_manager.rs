@@ -423,7 +423,10 @@ impl VerifiedUserManager {
         signature: &str,
         body: &[u8],
     ) -> Result<Vec<Value>, BusFault> {
-        self.revalidate().map_err(|_| BusFault::NotSent)?;
+        self.revalidate().map_err(|error| {
+            log::warn!("user-manager revalidation failed: {error:#}");
+            BusFault::NotSent
+        })?;
         let sender = self.identity.unique_name.clone();
         match self.client.call_with_sender(
             SYSTEMD_DESTINATION,

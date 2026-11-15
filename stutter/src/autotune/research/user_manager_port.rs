@@ -245,7 +245,10 @@ where
         if !self.current.as_ref().is_some_and(Freshness::is_fresh) {
             // Drop the stale manager before authenticating a new one; never reuse it.
             self.current = None;
-            self.current = Some((self.authenticate)().map_err(|_| BusFault::NotSent)?);
+            self.current = Some((self.authenticate)().map_err(|error| {
+                log::warn!("user-manager authentication failed: {error:#}");
+                BusFault::NotSent
+            })?);
         }
         let manager = self.current.as_mut().ok_or(BusFault::NotSent)?;
         manager.call(path, interface, member, signature, body)
