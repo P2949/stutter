@@ -32,6 +32,36 @@ pub(super) fn same_file_identity(left: &std::fs::Metadata, right: &std::fs::Meta
         && left.ctime_nsec() == right.ctime_nsec()
 }
 
+/// Whether `text` (a `uid_map`) maps uid 0 of this namespace to a real uid.
+fn uid_map_maps_root(text: &str) -> bool {
+    text.lines().any(|line| {
+        let mut fields = line.split_whitespace().map(|field| field.parse::<u64>());
+        matches!(
+            (fields.next(), fields.next(), fields.next()),
+            (Some(Ok(inside)), Some(Ok(_)), Some(Ok(count))) if inside == 0 && count > 0
+        )
+    })
+}
+
+/// Whether `actual` is the expected owner as seen from this process. Inside a container whose user
+/// namespace maps only the user, root-owned files such as the Nix store are reported as the kernel's
+/// overflow uid, so for an expected owner of root, and only when root is unmapped here, that uid is
+/// accepted. Identity is still bound by the content digests and the frozen store path.
+pub(super) fn owner_matches(actual: u32, expected: u32) -> bool {
+    actual == expected
+        || (expected == 0
+            && actual == overflow_uid()
+            && std::fs::read_to_string("/proc/self/uid_map")
+                .is_ok_and(|map| !uid_map_maps_root(&map)))
+}
+
+fn overflow_uid() -> u32 {
+    std::fs::read_to_string("/proc/sys/kernel/overflowuid")
+        .ok()
+        .and_then(|text| text.trim().parse().ok())
+        .unwrap_or(65_534)
+}
+
 pub(super) fn read_trusted_file(
     dir: impl AsFd,
     name: &str,
@@ -43,7 +73,7 @@ pub(super) fn read_trusted_file(
     let before = file.metadata()?;
     anyhow::ensure!(
         before.is_file()
-            && before.uid() == expected_uid
+            && owner_matches(before.uid(), expected_uid)
             && (immutable || before.nlink() == 1)
             && before.len() <= max_bytes
             && (!immutable || before.mode() & 0o222 == 0),
@@ -189,7 +219,7 @@ pub(super) fn inspect_tool_directory(spec: ToolSpec<'_>) -> anyhow::Result<Proto
     let metadata = directory.metadata()?;
     anyhow::ensure!(
         metadata.is_dir()
-            && metadata.uid() == owner_uid
+            && owner_matches(metadata.uid(), owner_uid)
             && (!immutable || metadata.mode() & 0o222 == 0),
         "untrusted Proton installation directory"
     );
@@ -258,4 +288,28 @@ pub(super) fn inspect_tool_directory(spec: ToolSpec<'_>) -> anyhow::Result<Proto
         eligibility: ProtonEligibility::Eligible,
         path: Some(path.to_owned()),
     })
+}
+
+#[cfg(test)]
+mod owner_tests {
+    use super::*;
+
+    #[test]
+    fn root_is_unmapped_only_when_no_range_starts_at_zero() {
+        assert!(uid_map_maps_root("         0          0 4294967295\n"));
+        assert!(uid_map_maps_root("0 1000 1\n1000 1001 5\n"));
+        assert!(!uid_map_maps_root("      1000       1000          1\n"));
+        assert!(!uid_map_maps_root(""));
+        assert!(!uid_map_maps_root("0 0 0\n"));
+        assert!(!uid_map_maps_root("garbage\n"));
+    }
+
+    #[test]
+    fn a_matching_owner_is_always_accepted_and_others_are_refused() {
+        assert!(owner_matches(1000, 1000));
+        assert!(owner_matches(0, 0));
+        assert!(!owner_matches(1001, 1000));
+        // A non-root expectation never accepts the overflow uid.
+        assert!(!owner_matches(65_534, 1000));
+    }
 }
