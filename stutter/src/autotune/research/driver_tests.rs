@@ -574,3 +574,87 @@ fn a_host_reported_failure_aborts_and_seals_with_its_code() {
     );
     assert_eq!(host.aborts, 1);
 }
+
+#[test]
+fn a_restarted_driver_seals_only_a_provably_settled_interrupted_attempt() {
+    use super::super::{
+        launch_record::{record_outcome, record_phase},
+        launch_txn::{LaunchOutcome, LaunchPhase, UnitState},
+        recovery_gather::Witnesses,
+        recovery_plan::RecoveryDecision,
+        user_launcher::launch_unit_name,
+    };
+    let (dir, mut driver, intent) = setup(4);
+    let mut host = fake();
+    let now = intent.issued_unix_seconds + 1;
+    assert_eq!(driver.tick(&mut host, now).unwrap(), Step::Running(0));
+    // The controller crashes while attempt 0 is launched and unsealed.
+    drop(driver);
+
+    let schedule = build_schedule(&intent).unwrap();
+    let len = schedule.len();
+    let (journal, adopted) = ResearchJournal::open_for_recovery(
+        crate::syscall::open_dir_no_symlinks(&dir.path().join("journal")).unwrap(),
+        intent.uid,
+        schedule,
+    )
+    .unwrap();
+    let adopted = adopted.expect("the started attempt is adopted");
+    let root =
+        File::from(crate::syscall::open_dir_no_symlinks(&dir.path().join("dispatch")).unwrap());
+    let evidence =
+        File::from(crate::syscall::open_dir_no_symlinks(&dir.path().join("evidence")).unwrap());
+    let mut recovered = Driver::new(journal, intent.clone(), root, evidence, len);
+
+    let settled = |unit: UnitState| {
+        move |driver: &mut Driver, adopted: AttemptSlot, now: u64| {
+            driver.recover_interrupted(
+                adopted,
+                true,
+                Witnesses {
+                    unit_state: &mut |_| Ok(unit),
+                    process_tree_settled: &mut || Ok(true),
+                    outstanding_worker_tokens: &mut || Ok(0),
+                    transactions_restored: &mut || Ok(true),
+                },
+                now,
+            )
+        }
+    };
+    // The launch left only a request marker, no transaction record: never assumed settled.
+    let error = settled(UnitState::Finished)(&mut recovered, adopted.clone(), now + 1).unwrap_err();
+    assert!(error.to_string().contains("UnsafeToResume"), "{error:#}");
+    assert!(recovered.journal.verify().is_err(), "nothing was sealed");
+
+    // With a durable sent-and-reconciled launch and every witness settled, it is retired.
+    let unit = launch_unit_name(&intent.digest().unwrap(), adopted.index).unwrap();
+    let attempt = File::from(
+        crate::syscall::openat_dir_nofollow(
+            File::from(crate::syscall::open_dir_no_symlinks(&dir.path().join("dispatch")).unwrap())
+                .as_fd(),
+            "0000",
+        )
+        .unwrap(),
+    );
+    record_phase(&attempt, LaunchPhase::Prepared, &unit).unwrap();
+    record_phase(&attempt, LaunchPhase::Sent, &unit).unwrap();
+    record_outcome(&attempt, &unit, &LaunchOutcome::Running).unwrap();
+    // A launcher still running is not settled.
+    assert!(
+        settled(UnitState::Active)(&mut recovered, adopted.clone(), now + 2)
+            .unwrap_err()
+            .to_string()
+            .contains("UnsafeToResume")
+    );
+    let decision = settled(UnitState::Finished)(&mut recovered, adopted, now + 3).unwrap();
+    assert_eq!(
+        decision,
+        RecoveryDecision::RetireAndSealFailed("InterruptedBeforeDispatch")
+    );
+    let sealed = recovered.journal.verify().unwrap();
+    assert_eq!(sealed.len(), 1);
+    assert!(matches!(
+        &sealed[0].outcome,
+        AttemptOutcome::Failed { code } if code == "InterruptedBeforeDispatch"
+    ));
+}

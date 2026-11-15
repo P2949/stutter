@@ -88,7 +88,7 @@ pub fn arm_attempt(
     Ok(context)
 }
 
-fn read_context(dir: &std::fs::File, uid: u32) -> anyhow::Result<DispatchContextV1> {
+pub(super) fn read_context(dir: &std::fs::File, uid: u32) -> anyhow::Result<DispatchContextV1> {
     let file = crate::syscall::openat_nofollow(dir.as_fd(), CONTEXT_NAME)?;
     let meta = file.metadata()?;
     anyhow::ensure!(

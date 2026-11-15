@@ -90,6 +90,54 @@ impl ResearchJournal {
     /// Adopt a trusted opened directory descriptor. A second writer is refused by the kernel.
     /// The caller must establish the directory's trusted ancestry before opening it.
     pub fn open(dir: OwnedFd, owner_uid: u32, schedule: Vec<AttemptSlot>) -> anyhow::Result<Self> {
+        let journal = Self::open_unverified(dir, owner_uid, schedule)?;
+        journal.scan(false)?;
+        Ok(journal)
+    }
+
+    /// Open a journal after a restart. Exactly one trailing attempt may be started but unsealed;
+    /// it is adopted as the active attempt so it can be sealed (never replayed), and the whole
+    /// schedule prefix is still validated. Anything else out of order is refused.
+    pub fn open_for_recovery(
+        dir: OwnedFd,
+        owner_uid: u32,
+        schedule: Vec<AttemptSlot>,
+    ) -> anyhow::Result<(Self, Option<AttemptSlot>)> {
+        let mut journal = Self::open_unverified(dir, owner_uid, schedule)?;
+        let mut unsealed = None;
+        for index in 0..journal.schedule.len() {
+            let started = journal.entry_exists(&format!("{index:04}.started"))?;
+            let sealed = journal.entry_exists(&format!("{index:04}.json"))?;
+            if started && !sealed {
+                anyhow::ensure!(unsealed.is_none(), "more than one unsealed attempt");
+                unsealed = Some(index);
+            }
+        }
+        let Some(index) = unsealed else {
+            journal.scan(false)?;
+            return Ok((journal, None));
+        };
+        journal.active = Some(index);
+        // The prefix, the started record and the frozen schedule are validated with the unsealed
+        // attempt allowed; a torn or reordered journal fails here.
+        journal.scan(true)?;
+        let slot = journal.schedule[index].clone();
+        Ok((journal, Some(slot)))
+    }
+
+    fn entry_exists(&self, name: &str) -> anyhow::Result<bool> {
+        match crate::syscall::openat_nofollow(self.dir.as_fd(), name) {
+            Ok(_) => Ok(true),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    fn open_unverified(
+        dir: OwnedFd,
+        owner_uid: u32,
+        schedule: Vec<AttemptSlot>,
+    ) -> anyhow::Result<Self> {
         let supplied = File::from(dir);
         let metadata = supplied.metadata()?;
         anyhow::ensure!(
@@ -126,15 +174,13 @@ impl ResearchJournal {
             "journal already locked or locking unavailable"
         );
         let schedule_sha256 = stutter_core::hash::sha256_hex(&serde_json::to_vec(&schedule)?);
-        let journal = Self {
+        Ok(Self {
             dir,
             owner_uid,
             schedule,
             schedule_sha256,
             active: None,
-        };
-        journal.scan(false)?;
-        Ok(journal)
+        })
     }
 
     /// Validate the whole schedule prefix. An interrupted attempt always fails closed.
@@ -415,5 +461,61 @@ mod tests {
         assert!(open(dir.path()).is_err());
         fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o755)).unwrap();
         assert!(open(dir.path()).is_err());
+    }
+
+    fn recovery_open(
+        path: &std::path::Path,
+    ) -> anyhow::Result<(ResearchJournal, Option<AttemptSlot>)> {
+        ResearchJournal::open_for_recovery(
+            crate::syscall::open_dir_nofollow(path)?,
+            crate::syscall::geteuid(),
+            schedule(),
+        )
+    }
+
+    #[test]
+    fn a_restarted_journal_adopts_one_unsealed_attempt_and_seals_it_without_replay() {
+        let dir = private_dir();
+        let mut journal = open(dir.path()).unwrap();
+        let first = journal.start().unwrap();
+        // The controller crashes after the durable start marker: dropping releases the lock.
+        drop(journal);
+        // A normal open still refuses the interrupted attempt.
+        assert!(open(dir.path()).is_err());
+        let (mut journal, adopted) = recovery_open(dir.path()).unwrap();
+        assert_eq!(adopted, Some(first.clone()));
+        journal
+            .seal(AttemptRecord {
+                slot: first,
+                outcome: AttemptOutcome::Failed {
+                    code: "InterruptedBeforeDispatch".into(),
+                },
+            })
+            .unwrap();
+        drop(journal);
+        // After the seal the journal opens normally and the next start is the NEXT slot.
+        let mut journal = open(dir.path()).unwrap();
+        assert_eq!(journal.start().unwrap().index, 1);
+    }
+
+    #[test]
+    fn a_sealed_prefix_has_nothing_to_adopt_and_a_torn_journal_is_refused() {
+        let dir = private_dir();
+        let mut journal = open(dir.path()).unwrap();
+        let first = journal.start().unwrap();
+        journal.seal(record(first)).unwrap();
+        drop(journal);
+        let (_journal, adopted) = recovery_open(dir.path()).unwrap();
+        assert_eq!(adopted, None);
+        drop(_journal);
+
+        // Two started-but-unsealed attempts can never come from the real driver.
+        let torn = private_dir();
+        for name in ["0000.started", "0001.started"] {
+            let path = torn.path().join(name);
+            fs::write(&path, b"{}").unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        assert!(recovery_open(torn.path()).is_err());
     }
 }

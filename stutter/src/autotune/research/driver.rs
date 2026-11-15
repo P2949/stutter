@@ -168,6 +168,63 @@ impl Driver {
         }
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "called by the resident recovery job once it is wired"
+        )
+    )]
+    /// Settle an attempt that was durably started but never sealed before a restart. The frozen
+    /// dispatch context is reconstructed from its durable record and re-verified against the
+    /// intent, the independent observations are gathered, and only a provably settled attempt is
+    /// sealed as failed (never replayed). Anything unproven, including a missing record, stays
+    /// `UnsafeToResume`. Remaining attempts are not resumed: the consumed active time is not
+    /// recoverable, so the campaign ends with this seal.
+    pub fn recover_interrupted(
+        &mut self,
+        adopted: AttemptSlot,
+        same_boot: bool,
+        witnesses: super::recovery_gather::Witnesses<'_>,
+        now: u64,
+    ) -> anyhow::Result<super::recovery_plan::RecoveryDecision> {
+        use super::recovery_plan::{AttemptState, RecoveryDecision, decide, facts_from};
+        let digest = self.intent.digest()?;
+        let attempt_dir = File::from(crate::syscall::openat_dir_nofollow(
+            self.root.as_fd(),
+            &format!("{:04}", adopted.index),
+        )?);
+        let context = super::dispatch_context::read_context(&attempt_dir, self.intent.uid)?;
+        anyhow::ensure!(
+            context.slot == adopted && context.intent.digest()? == digest,
+            "UnsafeToResume: the recovered dispatch context differs from the frozen attempt"
+        );
+        let unit = super::user_launcher::launch_unit_name(&digest, adopted.index)?;
+        let observations = super::recovery_gather::gather(
+            &attempt_dir,
+            self.intent.uid,
+            AttemptState::StartedUnsealed,
+            same_boot,
+            &unit,
+            witnesses,
+        )?;
+        let decision = decide(&facts_from(&observations));
+        match decision {
+            RecoveryDecision::RetireAndSealFailed(code) => {
+                self.issued_tickets = Some(context.tickets.values().cloned().collect());
+                self.armed_context = Some(context);
+                self.seal(adopted, AttemptOutcome::Failed { code: code.into() }, now)?;
+                Ok(decision)
+            }
+            RecoveryDecision::ResumeAtBoundary => {
+                anyhow::bail!("UnsafeToResume: an unsealed attempt has no resumable boundary")
+            }
+            RecoveryDecision::UnsafeToResume(reason) => {
+                anyhow::bail!("UnsafeToResume: {reason}")
+            }
+        }
+    }
+
     /// Build the final report from everything sealed so far.
     pub fn finalize(&self) -> anyhow::Result<super::report::ResearchReportV1> {
         build_from_dirs(&self.intent, &self.journal, &self.evidence)
