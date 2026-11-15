@@ -578,7 +578,7 @@ fn a_host_reported_failure_aborts_and_seals_with_its_code() {
 #[test]
 fn a_restarted_driver_seals_only_a_provably_settled_interrupted_attempt() {
     use super::super::{
-        launch_record::{record_outcome, record_phase},
+        launch_record::{record_outcome_with_invocation, record_phase},
         launch_txn::{LaunchOutcome, LaunchPhase, UnitState},
         recovery_gather::RecoveryWitnesses,
         recovery_plan::RecoveryDecision,
@@ -631,7 +631,9 @@ fn a_restarted_driver_seals_only_a_provably_settled_interrupted_attempt() {
                 true,
                 RecoveryWitnesses {
                     unit_state: Box::new(move |_| Ok(unit)),
-                    unit_invocation: Box::new(|_| Ok(None)),
+                    unit_invocation: Box::new(|_| {
+                        Ok(Some("0123456789abcdef0123456789abcdef".into()))
+                    }),
                     process_tree_settled: Box::new(|_, _| Ok(true)),
                     outstanding_worker_tokens: Box::new(|| Ok(0)),
                     transactions_restored: Box::new(|| Ok(true)),
@@ -658,7 +660,13 @@ fn a_restarted_driver_seals_only_a_provably_settled_interrupted_attempt() {
     );
     record_phase(&attempt, LaunchPhase::Prepared, &unit).unwrap();
     record_phase(&attempt, LaunchPhase::Sent, &unit).unwrap();
-    record_outcome(&attempt, &unit, &LaunchOutcome::Running).unwrap();
+    record_outcome_with_invocation(
+        &attempt,
+        &unit,
+        &LaunchOutcome::Running,
+        Some("0123456789abcdef0123456789abcdef"),
+    )
+    .unwrap();
     // A launcher still running is not settled.
     assert!(
         settled(UnitState::Active)(&mut recovered, adopted.clone(), now + 2)

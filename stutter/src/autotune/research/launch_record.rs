@@ -198,8 +198,8 @@ pub fn request_settled(
                 (Some(recorded), Some(UnitState::Finished)) => {
                     current_invocation == Some(recorded.as_str())
                 }
-                // Without a recorded invocation, only an observed terminal unit counts, as before.
-                (None, Some(UnitState::Finished)) => true,
+                // Without a recorded invocation, nothing binds a terminal or absent unit to this
+                // request: a same-named unit may be a replacement. The launch stays unresolved.
                 _ => false,
             }
         }
@@ -309,11 +309,48 @@ mod tests {
             Some(UnitState::Absent),
             None
         ));
-        assert!(request_settled(
-            &settled(RecordedOutcome::Running),
+        // A confirmed launch whose invocation was never recorded is unresolved: a finished unit with
+        // the same name may be a replacement, so nothing binds it to this request.
+        for outcome in [RecordedOutcome::Running, RecordedOutcome::FinishedAlready] {
+            for observed in [UnitState::Finished, UnitState::Absent, UnitState::Active] {
+                assert!(!request_settled(&settled(outcome), Some(observed), None));
+                assert!(!request_settled(
+                    &settled(outcome),
+                    Some(observed),
+                    Some("any")
+                ));
+            }
+            assert!(!request_settled(&settled(outcome), None, None));
+        }
+    }
+
+    #[test]
+    fn a_replaced_same_named_unit_never_settles_the_original_request() {
+        let record = LaunchRecord {
+            prepared: true,
+            sent: true,
+            unit_name: Some(UNIT.into()),
+            outcome: Some(RecordedOutcome::Running),
+            invocation_id: Some("a".repeat(32)),
+        };
+        let other = "b".repeat(32);
+        assert!(!request_settled(
+            &record,
             Some(UnitState::Finished),
-            None
+            Some(other.as_str())
         ));
+        assert!(!request_settled(&record, Some(UnitState::Finished), None));
+        assert!(!request_settled(
+            &record,
+            Some(UnitState::Active),
+            Some(other.as_str())
+        ));
+        assert!(request_settled(
+            &record,
+            Some(UnitState::Finished),
+            Some("a".repeat(32).as_str())
+        ));
+        assert!(request_settled(&record, Some(UnitState::Absent), None));
     }
 
     #[test]
@@ -384,7 +421,12 @@ mod tests {
     fn without_a_confirmed_invocation_absence_is_never_settled() {
         let record = confirmed(RecordedOutcome::Running, None);
         assert!(!request_settled(&record, Some(UnitState::Absent), None));
-        assert!(request_settled(&record, Some(UnitState::Finished), None));
+        assert!(!request_settled(&record, Some(UnitState::Finished), None));
+        assert!(!request_settled(
+            &record,
+            Some(UnitState::Finished),
+            Some("aa")
+        ));
         // An ambiguous or never-started outcome is unaffected by any invocation.
         let ambiguous = confirmed(RecordedOutcome::Ambiguous, Some("aa"));
         assert!(!request_settled(&ambiguous, Some(UnitState::Absent), None));

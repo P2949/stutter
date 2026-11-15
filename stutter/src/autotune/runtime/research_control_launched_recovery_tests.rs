@@ -7,7 +7,7 @@ fn a_restarted_coordinator_retires_only_a_settled_interrupted_attempt_and_blocks
     use crate::autotune::research::{
         ResearchJournal,
         driver::{ClaimSettlementGuard, ClaimSettlementVerifier, build_schedule},
-        launch_record::{record_outcome, record_phase},
+        launch_record::{record_outcome_with_invocation, record_phase},
         launch_txn::{LaunchOutcome, LaunchPhase, UnitState},
         recovery_gather::RecoveryWitnesses,
         user_launcher::launch_unit_name,
@@ -34,7 +34,9 @@ fn a_restarted_coordinator_retires_only_a_settled_interrupted_attempt_and_blocks
             std::sync::Arc::new(move |_| {
                 Ok(RecoveryWitnesses {
                     unit_state: Box::new(|_| Ok(UnitState::Finished)),
-                    unit_invocation: Box::new(|_| Ok(None)),
+                    unit_invocation: Box::new(|_| {
+                        Ok(Some("0123456789abcdef0123456789abcdef".into()))
+                    }),
                     process_tree_settled: Box::new(move |_, _| Ok(process)),
                     outstanding_worker_tokens: Box::new(|| Ok(0)),
                     transactions_restored: Box::new(|| Ok(true)),
@@ -102,7 +104,13 @@ fn a_restarted_coordinator_retires_only_a_settled_interrupted_attempt_and_blocks
         File::from(crate::syscall::openat_dir_nofollow(dispatch.as_fd(), "0000").unwrap());
     record_phase(&attempt, LaunchPhase::Prepared, &unit).unwrap();
     record_phase(&attempt, LaunchPhase::Sent, &unit).unwrap();
-    record_outcome(&attempt, &unit, &LaunchOutcome::Running).unwrap();
+    record_outcome_with_invocation(
+        &attempt,
+        &unit,
+        &LaunchOutcome::Running,
+        Some("0123456789abcdef0123456789abcdef"),
+    )
+    .unwrap();
 
     let restart = |factory: crate::autotune::runtime::research_recovery::RecoveryFactory| {
         let mut coordinator = ResearchCoordinator::new(

@@ -145,7 +145,7 @@ impl SettlementWitness for CompletionWitness {
 mod tests {
     use super::*;
     use crate::autotune::research::{
-        launch_record::{record_outcome, record_phase},
+        launch_record::{record_outcome, record_outcome_with_invocation, record_phase},
         launch_txn::{LaunchOutcome, LaunchPhase},
         recovery_plan::{RecoveryDecision, decide, facts_from},
     };
@@ -186,7 +186,7 @@ mod tests {
             UNIT,
             Witnesses {
                 unit_state: &mut |_| Ok(unit),
-                unit_invocation: &mut |_| Ok(None),
+                unit_invocation: &mut |_| Ok(Some("0123456789abcdef0123456789abcdef".into())),
                 process_tree_settled: &mut || process.map_or_else(unavailable, Ok),
                 outstanding_worker_tokens: &mut || tokens.map_or_else(unavailable, Ok),
                 transactions_restored: &mut || restored.map_or_else(unavailable, Ok),
@@ -226,7 +226,13 @@ mod tests {
         let (_tmp, dir) = fresh();
         record_phase(&dir, LaunchPhase::Prepared, UNIT).unwrap();
         record_phase(&dir, LaunchPhase::Sent, UNIT).unwrap();
-        record_outcome(&dir, UNIT, &LaunchOutcome::Running).unwrap();
+        record_outcome_with_invocation(
+            &dir,
+            UNIT,
+            &LaunchOutcome::Running,
+            Some("0123456789abcdef0123456789abcdef"),
+        )
+        .unwrap();
         let o = run(&dir, UnitState::Finished, Some(true), Some(0), Some(true));
         assert_eq!(o.launch_request_settled, Some(true));
         assert_eq!(
@@ -260,7 +266,7 @@ mod tests {
             UNIT,
             Witnesses {
                 unit_state: &mut |_| Ok(UnitState::Finished),
-                unit_invocation: &mut |_| Ok(None),
+                unit_invocation: &mut |_| Ok(Some("0123456789abcdef0123456789abcdef".into())),
                 process_tree_settled: &mut || Ok(true),
                 outstanding_worker_tokens: &mut || Ok(0),
                 transactions_restored: &mut || Ok(true),
@@ -319,7 +325,7 @@ mod tests {
     ) -> CompletionWitness {
         CompletionWitness {
             unit_state: Box::new(move |_| Ok(unit)),
-            unit_invocation: Box::new(|_| Ok(None)),
+            unit_invocation: Box::new(|_| Ok(Some("0123456789abcdef0123456789abcdef".into()))),
             process_tree_settled: Box::new(move |_, _| Ok(process)),
             outstanding_worker_tokens: Box::new(move || Ok(tokens)),
             transactions_restored: Box::new(move || Ok(restored)),
@@ -381,7 +387,13 @@ mod tests {
         let (_other, dir) = fresh();
         record_phase(&dir, LaunchPhase::Prepared, "other.service").unwrap();
         record_phase(&dir, LaunchPhase::Sent, "other.service").unwrap();
-        record_outcome(&dir, "other.service", &LaunchOutcome::Running).unwrap();
+        record_outcome_with_invocation(
+            &dir,
+            "other.service",
+            &LaunchOutcome::Running,
+            Some("0123456789abcdef0123456789abcdef"),
+        )
+        .unwrap();
         assert!(everything_settled().settled(&dir, &context).is_err());
         let (_torn, dir) = fresh();
         record_phase(&dir, LaunchPhase::Sent, &unit).unwrap();
@@ -395,7 +407,13 @@ mod tests {
         let (_tmp, dir) = fresh();
         record_phase(&dir, LaunchPhase::Prepared, &unit).unwrap();
         record_phase(&dir, LaunchPhase::Sent, &unit).unwrap();
-        record_outcome(&dir, &unit, &LaunchOutcome::Running).unwrap();
+        record_outcome_with_invocation(
+            &dir,
+            &unit,
+            &LaunchOutcome::Running,
+            Some("0123456789abcdef0123456789abcdef"),
+        )
+        .unwrap();
         let settled = |w: &mut CompletionWitness| w.settled(&dir, &context).unwrap();
         assert!(settled(&mut completion_witness(
             UnitState::Finished,
@@ -405,13 +423,30 @@ mod tests {
         )));
         for mut witness in [
             completion_witness(UnitState::Active, true, 0, true),
-            completion_witness(UnitState::Absent, true, 0, true),
             completion_witness(UnitState::Finished, false, 0, true),
             completion_witness(UnitState::Finished, true, 1, true),
             completion_witness(UnitState::Finished, true, 0, false),
         ] {
             assert!(!settled(&mut witness));
         }
+        // With the invocation recorded, a collected (absent) transient unit means it ended.
+        assert!(settled(&mut completion_witness(
+            UnitState::Absent,
+            true,
+            0,
+            true
+        )));
+        // A terminal unit that is a different invocation (a replacement) never settles it, and
+        // neither does a lost invocation readback.
+        let mut replaced = completion_witness(UnitState::Finished, true, 0, true);
+        replaced.unit_invocation = Box::new(|_| Ok(Some("f".repeat(32))));
+        assert!(!settled(&mut replaced));
+        let mut unreadable = completion_witness(UnitState::Finished, true, 0, true);
+        unreadable.unit_invocation = Box::new(|_| Err(anyhow::anyhow!("manager restarted")));
+        assert!(!settled(&mut unreadable));
+        let mut missing = completion_witness(UnitState::Finished, true, 0, true);
+        missing.unit_invocation = Box::new(|_| Ok(None));
+        assert!(!settled(&mut missing));
         // A witness that cannot answer is unsettled, never settled.
         let mut broken = completion_witness(UnitState::Finished, true, 0, true);
         broken.outstanding_worker_tokens = Box::new(|| Err(anyhow::anyhow!("worker unavailable")));
