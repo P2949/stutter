@@ -1,7 +1,10 @@
 use std::{
     collections::BTreeSet,
     fs::File,
-    os::{fd::AsFd, unix::fs::MetadataExt},
+    os::{
+        fd::AsFd,
+        unix::{ffi::OsStrExt, fs::MetadataExt},
+    },
     path::Path,
 };
 
@@ -55,6 +58,12 @@ pub(super) fn steam_webhelper_binding(bytes: &[u8]) -> anyhow::Result<Option<(u3
     }
 }
 
+/// The first command-line argument as a path, when there is one.
+fn argv0(cmdline: &[u8]) -> Option<std::path::PathBuf> {
+    let first = cmdline.split(|byte| *byte == 0).next()?;
+    (!first.is_empty()).then(|| std::path::PathBuf::from(std::ffi::OsStr::from_bytes(first)))
+}
+
 pub(super) fn inspect_steam_process(
     proc_root: &Path,
     steam_root: &Path,
@@ -77,21 +86,30 @@ pub(super) fn inspect_steam_process(
         scanned += 1;
         anyhow::ensure!(scanned <= 65_536, "/proc process scan exceeds limit");
         let process_dir = proc_root.join(pid.to_string());
-        let helper_exe = match std::fs::read_link(process_dir.join("exe")) {
-            Ok(path) => path,
+        let cmdline = match std::fs::read(process_dir.join("cmdline")) {
+            Ok(bytes) => bytes,
+            Err(_) => continue,
+        };
+        // A process outside our user namespace (for example when the dispatcher runs inside Steam's
+        // container) denies reading its exe link. Only that case falls back to argv[0] and requires
+        // the verified parent chain below; a readable exe link is always checked strictly.
+        let (helper_exe, exe_readable) = match std::fs::read_link(process_dir.join("exe")) {
+            Ok(path) => (path, true),
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+                match argv0(&cmdline) {
+                    Some(path) => (path, false),
+                    None => continue,
+                }
+            }
             Err(_) => continue,
         };
         if helper_exe
             .file_name()
             .is_none_or(|name| name != "steamwebhelper")
-            || !helper_exe.starts_with(steam_root)
+            || (exe_readable && !helper_exe.starts_with(steam_root))
         {
             continue;
         }
-        let cmdline = match std::fs::read(process_dir.join("cmdline")) {
-            Ok(bytes) => bytes,
-            Err(_) => continue,
-        };
         let Some((steam_pid, build_id, logged_in)) = steam_webhelper_binding(&cmdline)? else {
             continue;
         };
@@ -105,7 +123,18 @@ pub(super) fn inspect_steam_process(
             helper.uid == owner_uid && helper.start_ticks != 0,
             "Steam webhelper owner or start identity mismatch"
         );
-        let steam_exe = std::fs::canonicalize(proc_root.join(steam_pid.to_string()).join("exe"))?;
+        let steam_dir = proc_root.join(steam_pid.to_string());
+        let steam_exe = match std::fs::canonicalize(steam_dir.join("exe")) {
+            Ok(path) => path,
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+                let steam_cmdline = std::fs::read(steam_dir.join("cmdline"))?;
+                let path = argv0(&steam_cmdline)
+                    .filter(|path| path.is_absolute())
+                    .ok_or_else(|| anyhow::anyhow!("Steam client executable is unreadable"))?;
+                std::fs::canonicalize(path)?
+            }
+            Err(error) => return Err(error.into()),
+        };
         anyhow::ensure!(
             steam_exe == expected_steam_exe,
             "Steam webhelper parent is not the selected Steam installation"
@@ -115,6 +144,10 @@ pub(super) fn inspect_steam_process(
         anyhow::ensure!(
             steam.uid == owner_uid && steam.start_ticks != 0,
             "Steam client owner or start identity mismatch"
+        );
+        anyhow::ensure!(
+            exe_readable || helper.ancestors.contains(&(steam_pid, steam.start_ticks)),
+            "Steam webhelper is not a descendant of the Steam client"
         );
         let helper_after = crate::telemetry::proc_view::live_process(proc_root, pid)
             .ok_or_else(|| anyhow::anyhow!("Steam webhelper exited during identity read"))?;
@@ -239,4 +272,23 @@ pub(super) fn inspect_steam_client_identity(
         identity_sha256: stutter_core::hash::sha256_hex(&serde_json::to_vec(&identity)?),
         process,
     }))
+}
+
+#[cfg(test)]
+mod argv0_tests {
+    use super::argv0;
+
+    #[test]
+    fn the_first_argument_is_the_executable_path() {
+        assert_eq!(
+            argv0(b"/s/steamrt64/steam\0-srt-logger-opened\0").unwrap(),
+            std::path::PathBuf::from("/s/steamrt64/steam")
+        );
+        assert_eq!(
+            argv0(b"./steamwebhelper\0-steampid=1\0").unwrap(),
+            std::path::PathBuf::from("./steamwebhelper")
+        );
+        assert!(argv0(b"").is_none());
+        assert!(argv0(b"\0x\0").is_none());
+    }
 }
