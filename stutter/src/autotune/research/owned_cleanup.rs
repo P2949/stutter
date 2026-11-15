@@ -248,7 +248,17 @@ impl<F: GameFacts + Send> OwnedTerminator for ProcfsTerminator<F> {
                 self.grace,
             )
         });
-        game.and(domain)
+        // The domain sweep is the stronger, attempt-bound proof: when it verifies the whole domain
+        // clear, an unattributable game sighting (for example a reparented game) is only logged; the
+        // completion witness still decides settlement. Any domain failure is always reported.
+        match (game, domain) {
+            (_, Err(error)) => Err(error),
+            (Err(error), Ok(())) => {
+                log::warn!("game attribution failed but the attempt domain is clear: {error:#}");
+                Ok(())
+            }
+            (Ok(()), Ok(())) => Ok(()),
+        }
     }
 }
 
@@ -461,7 +471,9 @@ mod tests {
             PathBuf::from("/proc"),
             Duration::from_secs(2),
         );
-        assert!(terminator.terminate_owned(&file, &context).is_err());
+        // The unattributable game is never signalled; the clear domain does not hide that from the
+        // completion witness, which still sees the game and keeps the attempt unsettled.
+        let _ = terminator.terminate_owned(&file, &context);
         assert!(alive(&target));
         let mut idle = ProcfsTerminator::new(
             Facts(Some(Sighting::None)),

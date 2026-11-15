@@ -68,7 +68,11 @@ fn environ_state(proc_root: &Path, pid: u32, study_compat_data: &Path) -> Enviro
         return Environ::Unreadable;
     };
     let mut bytes = Vec::new();
-    if file.take(MAX_ENVIRON).read_to_end(&mut bytes).is_err() {
+    // Read one byte past the cap: an environment that fills it may hold the marker beyond what was
+    // captured, so its content is unknown rather than absent.
+    if file.take(MAX_ENVIRON + 1).read_to_end(&mut bytes).is_err()
+        || bytes.len() as u64 > MAX_ENVIRON
+    {
         return Environ::Unreadable;
     }
     let wanted = study_compat_data.as_os_str().as_encoded_bytes();
@@ -116,6 +120,16 @@ pub fn observe_domain(
             continue;
         }
         let Some((ticks, zombie)) = stat_fields(proc_root, pid) else {
+            // A process that cannot be fully inspected is not silently dropped: if it carries the
+            // study path it is unattributed and blocks settlement. One that vanished does not.
+            if dir.exists()
+                && matches!(
+                    environ_state(proc_root, pid, study_compat_data),
+                    Environ::Carries
+                )
+            {
+                view.unattributed += 1;
+            }
             continue;
         };
         if zombie {
@@ -267,5 +281,43 @@ mod attribution_tests {
         for member in &mut members {
             assert!(member.wait().is_ok());
         }
+    }
+}
+
+#[cfg(test)]
+mod boundary_tests {
+    use std::process::Command;
+
+    use super::*;
+
+    #[test]
+    fn an_environment_that_fills_the_read_cap_is_unknown_not_absent() {
+        let uid = crate::syscall::geteuid();
+        let study = Path::new("/nonexistent/stutter-test-cap/compatdata");
+        // The marker sits after more than the capped amount of other environment.
+        let filler = "x".repeat(60_000);
+        let mut command = Command::new("sleep");
+        command.arg("60");
+        for index in 0..24 {
+            command.env(format!("FILL_{index}"), &filler);
+        }
+        command.env("STEAM_COMPAT_DATA_PATH", study);
+        let mut child = command.spawn().unwrap();
+        let window = std::time::SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            .saturating_sub(60);
+        let view = observe_domain(Path::new("/proc"), uid, study, 0, window).unwrap();
+        assert!(
+            view.owned.is_empty(),
+            "a truncated read must not be claimed as owned"
+        );
+        assert!(
+            view.unattributed >= 1,
+            "a truncated environment is unknown and blocks settlement"
+        );
+        let _ = child.kill();
+        let _ = child.wait();
     }
 }
