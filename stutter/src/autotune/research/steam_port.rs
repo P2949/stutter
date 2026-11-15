@@ -52,6 +52,8 @@ pub struct TransientLauncher {
 
 const APP_ID: &str = "1091500";
 const MAX_PROC_ENTRIES: usize = 65_536;
+const MAX_COMM_READ: usize = 130;
+const MAX_USER_COMM: usize = 15;
 
 fn launch_window_open(intent: &super::ResearchIntentV1, now: std::time::SystemTime) -> bool {
     now.duration_since(std::time::UNIX_EPOCH)
@@ -147,13 +149,26 @@ fn host_has_game_or_foreign_steam_bounded(
             Err(_) => return true,
         };
         let mut bytes = Vec::new();
-        if file.take(18).read_to_end(&mut bytes).is_err() || bytes.is_empty() || bytes.len() > 16 {
+        // Kernel worker threads report names well beyond the 15 bytes a user process can set, so
+        // read a generous bound and treat only an empty or unbounded name as unknown.
+        if file
+            .take(MAX_COMM_READ as u64)
+            .read_to_end(&mut bytes)
+            .is_err()
+            || bytes.is_empty()
+            || bytes.len() >= MAX_COMM_READ
+        {
             return true;
         }
         let Ok(comm) = std::str::from_utf8(&bytes) else {
             return true;
         };
         let comm = comm.trim();
+        // A user process's comm is at most 15 bytes, so a longer name cannot be Steam, Wine or the
+        // game; it is a kernel thread name.
+        if comm.len() > MAX_USER_COMM {
+            continue;
+        }
         if BUSY_COMMS.contains(&comm) {
             if !matches!(comm, "steam" | "steamwebhelper") {
                 return true;
@@ -165,10 +180,12 @@ fn host_has_game_or_foreign_steam_bounded(
                 return true;
             };
             let permitted = if comm == "steam" {
-                let matches =
+                let exact =
                     pid == client.steam_pid && process.start_ticks == client.steam_start_ticks;
-                saw_steam |= matches;
-                matches
+                saw_steam |= exact;
+                // Steam runs as an outer launcher and the pinned inner client; the outer one is
+                // permitted only as a verified ancestor of that exact client.
+                exact || steam.ancestors.contains(&(pid, process.start_ticks))
             } else {
                 let matches = process
                     .ancestors
@@ -325,19 +342,15 @@ impl<R: ResultProbe> ProductionSteamPort<R> {
             .is_some_and(|client| !host_has_game_or_foreign_steam(&self.proc_root, client, uid))
     }
 
-    fn inherited_session_matches_steam(&self) -> bool {
+    /// The launch passes `HOME` and `XDG_RUNTIME_DIR` explicitly to the transient unit, read from
+    /// the attested Steam client, so the controller's own environment is never inherited and is
+    /// not compared. What must hold is that Steam's session paths can be read and are valid.
+    fn steam_session_paths_verified(&self) -> bool {
         let Some(client) = self.expected_client.process.as_ref() else {
             return false;
         };
-        let Ok(paths) = super::session_env::read_session_paths(
-            &self.proc_root,
-            client,
-            crate::syscall::geteuid(),
-        ) else {
-            return false;
-        };
-        std::env::var_os("HOME").as_deref() == Some(paths.home.as_os_str())
-            && std::env::var_os("XDG_RUNTIME_DIR").as_deref() == Some(paths.runtime.as_os_str())
+        super::session_env::read_session_paths(&self.proc_root, client, crate::syscall::geteuid())
+            .is_ok()
     }
 
     fn open_dispatch(
@@ -390,7 +403,7 @@ impl<R: ResultProbe> SteamPort for ProductionSteamPort<R> {
             && self.idle_is_fresh()
             && launcher_is_unprivileged()
             && self.steam_and_prefilter_clear()
-            && self.inherited_session_matches_steam()
+            && self.steam_session_paths_verified()
             && self.idle_is_fresh()
     }
 
@@ -432,7 +445,7 @@ impl<R: ResultProbe> SteamPort for ProductionSteamPort<R> {
             "desktop idle observation expired before launch"
         );
         anyhow::ensure!(
-            self.inherited_session_matches_steam() && self.idle_is_fresh(),
+            self.steam_session_paths_verified() && self.idle_is_fresh(),
             "BlockedSteamSessionEnvironment"
         );
         self.start_unit(dispatch, slot, context)
@@ -502,3 +515,7 @@ impl<R: ResultProbe> SteamPort for ProductionSteamPort<R> {
 #[cfg(test)]
 #[path = "steam_port_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "steam_port_prefilter_tests.rs"]
+mod prefilter_tests;
