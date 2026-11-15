@@ -388,8 +388,25 @@ pub fn pidfd_send_signal(fd: std::os::fd::BorrowedFd<'_>, signal: i32) -> io::Re
 /// Take a non-blocking exclusive `flock` on an open descriptor.
 pub fn flock_exclusive_nonblocking(fd: std::os::fd::BorrowedFd<'_>) -> bool {
     use std::os::fd::AsRawFd;
-    // SAFETY: fd is a live borrowed descriptor; flock does not access user memory.
-    unsafe { libc::flock(fd.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) == 0 }
+    let attempt = || {
+        // SAFETY: fd is a live borrowed descriptor; flock does not access user memory.
+        unsafe { libc::flock(fd.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) == 0 }
+    };
+    // Test builds only: a child spawned by a concurrent test briefly holds a copy of every open
+    // descriptor until it execs, which keeps an already-closed holder's lock alive. Retrying for a
+    // moment keeps that transient from failing an unrelated test. Production never retries.
+    #[cfg(test)]
+    {
+        for _ in 0..100 {
+            if attempt() {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        false
+    }
+    #[cfg(not(test))]
+    attempt()
 }
 
 /// Exclusively create a new private (0600) file relative to an open directory.
