@@ -7,7 +7,7 @@
 
 use std::path::Path;
 
-use super::{proton::SteamProcessIdentity, vdf::VdfDocument};
+use super::proton::SteamProcessIdentity;
 
 /// Offset between a 64-bit SteamID of the public universe and its 32-bit account id.
 const STEAM_ID64_BASE: u64 = 76_561_197_960_265_728;
@@ -39,28 +39,113 @@ fn positive(value: Option<&str>) -> bool {
         .is_some_and(|number| number > 0)
 }
 
-/// Whether the account's own store records a launch of `app_id`.
-fn account_has_played(localconfig: &[u8], app_id: u32) -> anyhow::Result<bool> {
-    let document = VdfDocument::parse(localconfig)?;
-    anyhow::ensure!(
-        document.name == "userlocalconfigstore",
-        "unexpected localconfig root"
-    );
-    let mut node = document.root_object()?;
-    for key in ["software", "valve", "steam", "apps"] {
-        match node.get(key).and_then(|value| value.object()) {
-            Some(next) => node = next,
-            None => return Ok(false),
+/// Longest key or value kept while scanning; Steam stores very long values elsewhere in this file
+/// and only short numeric values matter here.
+const MAX_KEPT: usize = 128;
+
+enum Token {
+    Text(String),
+    Open,
+    Close,
+}
+
+/// A minimal tolerant VDF tokenizer. Unlike the strict shared parser it accepts arbitrarily long
+/// quoted strings (keeping only a bounded prefix), because `localconfig.vdf` carries very long
+/// unrelated values. Malformed quoting is an error.
+fn tokens(bytes: &[u8]) -> anyhow::Result<Vec<Token>> {
+    let mut out = Vec::new();
+    let mut at = 0;
+    while at < bytes.len() {
+        match bytes[at] {
+            b'{' => {
+                out.push(Token::Open);
+                at += 1;
+            }
+            b'}' => {
+                out.push(Token::Close);
+                at += 1;
+            }
+            b'"' => {
+                at += 1;
+                let mut text = Vec::new();
+                loop {
+                    let byte = *bytes
+                        .get(at)
+                        .ok_or_else(|| anyhow::anyhow!("unterminated VDF string"))?;
+                    at += 1;
+                    match byte {
+                        b'"' => break,
+                        b'\\' => {
+                            let escaped = *bytes
+                                .get(at)
+                                .ok_or_else(|| anyhow::anyhow!("unterminated VDF escape"))?;
+                            at += 1;
+                            if text.len() < MAX_KEPT {
+                                text.push(escaped);
+                            }
+                        }
+                        other if text.len() < MAX_KEPT => text.push(other),
+                        _ => {}
+                    }
+                }
+                out.push(Token::Text(
+                    String::from_utf8_lossy(&text).to_ascii_lowercase(),
+                ));
+            }
+            b'/' if bytes.get(at + 1) == Some(&b'/') => {
+                while at < bytes.len() && bytes[at] != b'\n' {
+                    at += 1;
+                }
+            }
+            byte if byte.is_ascii_whitespace() => at += 1,
+            _ => anyhow::bail!("unexpected VDF byte"),
         }
     }
-    let Some(app) = node
-        .get(&app_id.to_string())
-        .and_then(|value| value.object())
-    else {
-        return Ok(false);
-    };
-    let text = |key: &str| app.get(key).and_then(|value| value.string());
-    Ok(positive(text("lastplayed")) && positive(text("playtime")))
+    Ok(out)
+}
+
+/// Whether the account's own store records a launch of `app_id`.
+fn account_has_played(localconfig: &[u8], app_id: u32) -> anyhow::Result<bool> {
+    const PATH: [&str; 5] = ["userlocalconfigstore", "software", "valve", "steam", "apps"];
+    let wanted = app_id.to_string();
+    let tokens = tokens(localconfig)?;
+    let mut stack: Vec<&str> = Vec::new();
+    let (mut last_played, mut playtime) = (false, false);
+    let mut index = 0;
+    while index < tokens.len() {
+        match (&tokens[index], tokens.get(index + 1)) {
+            (Token::Text(key), Some(Token::Open)) => {
+                stack.push(key);
+                index += 2;
+            }
+            (Token::Close, _) => {
+                anyhow::ensure!(stack.pop().is_some(), "unbalanced VDF braces");
+                index += 1;
+            }
+            (Token::Text(key), Some(Token::Text(value)))
+                if stack.len() == PATH.len() + 1
+                    && stack[..PATH.len()] == PATH
+                    && stack[PATH.len()] == wanted =>
+            {
+                match key.as_str() {
+                    "lastplayed" => last_played = positive(Some(value)),
+                    "playtime" => playtime = positive(Some(value)),
+                    _ => {}
+                }
+                index += 2;
+            }
+            (Token::Text(_), Some(Token::Text(_))) => index += 2,
+            _ => anyhow::bail!("malformed VDF structure"),
+        }
+    }
+    anyhow::ensure!(stack.is_empty(), "unbalanced VDF braces");
+    anyhow::ensure!(
+        tokens
+            .first()
+            .is_some_and(|t| matches!(t, Token::Text(name) if name == PATH[0])),
+        "unexpected localconfig root"
+    );
+    Ok(last_played && playtime)
 }
 
 /// Whether the account the running client is signed in as has played the app. Any failure is
@@ -146,6 +231,16 @@ mod tests {
         assert!(!account_has_played(CONFIG.as_bytes(), 44).unwrap());
         assert!(account_has_played(b"\"Other\" { }", 1_091_500).is_err());
         assert!(!account_has_played(b"\"UserLocalConfigStore\" { }", 1_091_500).unwrap());
+    }
+
+    #[test]
+    fn very_long_unrelated_values_do_not_defeat_the_scan() {
+        let long = "x".repeat(20_000);
+        let config = format!(
+            "\"UserLocalConfigStore\" {{ \"Software\" {{ \"Valve\" {{ \"Steam\" {{ \"apps\" {{\n\"1\" {{ \"blob\" \"{long}\" }}\n\"1091500\" {{ \"LastPlayed\" \"9\" \"Playtime\" \"3\" }}\n}} }} }} }} }}"
+        );
+        assert!(account_has_played(config.as_bytes(), 1_091_500).unwrap());
+        assert!(account_has_played(b"\"UserLocalConfigStore\" { \"a\" ", 1).is_err());
     }
 
     #[test]
