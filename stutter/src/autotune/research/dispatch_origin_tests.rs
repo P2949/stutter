@@ -7,6 +7,7 @@ use crate::autotune::research::{AttemptSlot, SteamProcessIdentity, dispatch_cont
 fn add(proc: &Path, pid: u32, parent: u32, ticks: u64, comm: &str) {
     let path = proc.join(pid.to_string());
     std::fs::create_dir_all(&path).unwrap();
+    std::fs::write(path.join("comm"), format!("{comm}\n")).unwrap();
     std::fs::write(
         path.join("stat"),
         format!("{pid} ({comm}) S {parent} 0 0 0 0 0 0 0 0 0 0 0 0 0 20 0 1 0 {ticks} 0 0"),
@@ -82,4 +83,36 @@ fn a_replaced_missing_or_unidentified_steam_client_is_refused() {
     let mut foreign = context(100, 11);
     foreign.intent.uid += 1;
     assert!(verify_steam_origin(&foreign, proc.path(), 101).is_err());
+}
+
+#[test]
+fn a_launch_through_the_steam_containers_launcher_service_descends_from_the_outer_launcher() {
+    let proc = tempfile::tempdir().unwrap();
+    // The real topology: the client runs in a container started by an outer `steam` launcher, and
+    // games are spawned by the container's launcher service, a sibling branch of the client.
+    add(proc.path(), 90, 1, 10, "steam");
+    add(proc.path(), 91, 90, 11, "srt-client-cont");
+    add(proc.path(), 92, 91, 12, "srt-bwrap");
+    add(proc.path(), 100, 92, 13, "steam");
+    add(proc.path(), 95, 91, 14, "srt-launcher-se");
+    add(proc.path(), 96, 95, 15, "reaper");
+    add(proc.path(), 97, 96, 16, "proton");
+    assert!(verify_steam_origin(&context(100, 13), proc.path(), 97).is_ok());
+
+    // A caller outside that Steam instance is refused even with a valid context.
+    add(proc.path(), 300, 1, 30, "bash");
+    add(proc.path(), 301, 300, 31, "proton");
+    assert!(verify_steam_origin(&context(100, 13), proc.path(), 301).is_err());
+    // Another Steam instance is not this one, and a non-Steam ancestor does not count as an outer
+    // launcher.
+    add(proc.path(), 400, 1, 40, "steam");
+    add(proc.path(), 401, 400, 41, "reaper");
+    add(proc.path(), 402, 401, 42, "proton");
+    assert!(verify_steam_origin(&context(100, 13), proc.path(), 402).is_err());
+    add(proc.path(), 500, 1, 50, "bash");
+    add(proc.path(), 501, 500, 51, "steam");
+    add(proc.path(), 502, 501, 52, "proton");
+    assert!(verify_steam_origin(&context(501, 51), proc.path(), 502).is_ok());
+    add(proc.path(), 510, 500, 53, "proton");
+    assert!(verify_steam_origin(&context(501, 51), proc.path(), 510).is_err());
 }

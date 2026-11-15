@@ -250,17 +250,35 @@ pub fn verify_steam_origin(
     let live = crate::telemetry::proc_view::live_process(proc_root, dispatcher_pid)
         .ok_or_else(|| anyhow::anyhow!("dispatcher process identity unavailable"))?;
     anyhow::ensure!(
-        live.uid == context.intent.uid
-            && live
-                .ancestors
-                .contains(&(client.steam_pid, client.steam_start_ticks)),
-        "the dispatcher was not started by the frozen Steam client"
+        live.uid == context.intent.uid,
+        "the dispatcher belongs to another user"
     );
     let steam = crate::telemetry::proc_view::live_process(proc_root, client.steam_pid)
         .ok_or_else(|| anyhow::anyhow!("the frozen Steam client is no longer running"))?;
     anyhow::ensure!(
         steam.start_ticks == client.steam_start_ticks && steam.uid == context.intent.uid,
         "the frozen Steam client was replaced"
+    );
+    // Steam runs its client inside a container started by an outer Steam launcher, and games are
+    // spawned through that container's launcher service, a sibling branch of the client. So a
+    // genuine launch descends from the pinned client or from the same outer launcher that hosts it:
+    // the nearest ancestor of the client that is itself a `steam` process.
+    let comm_is_steam = |pid: u32| {
+        std::fs::read_to_string(proc_root.join(pid.to_string()).join("comm"))
+            .is_ok_and(|comm| comm.trim() == "steam")
+    };
+    let outer = steam.ancestors.iter().find(|(pid, _)| comm_is_steam(*pid));
+    let from_client = live
+        .ancestors
+        .contains(&(client.steam_pid, client.steam_start_ticks));
+    let from_outer = outer.is_some_and(|launcher| live.ancestors.contains(launcher));
+    anyhow::ensure!(
+        from_client || from_outer,
+        "the dispatcher was not started by the frozen Steam client (client {} / {}, outer launcher {:?}, observed ancestors {:?})",
+        client.steam_pid,
+        client.steam_start_ticks,
+        outer,
+        live.ancestors
     );
     Ok(live.start_ticks)
 }
