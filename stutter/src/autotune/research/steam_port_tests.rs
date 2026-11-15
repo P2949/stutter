@@ -601,4 +601,38 @@ mod settlement {
         assert!(port.stop().is_err());
         assert!(port.unsettled);
     }
+
+    struct Terminator(std::sync::Arc<std::sync::atomic::AtomicU32>, bool);
+    impl OwnedTerminator for Terminator {
+        fn terminate_owned(&mut self, _: &File, _: &DispatchContextV1) -> anyhow::Result<()> {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            anyhow::ensure!(self.1, "ownership could not be established");
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn stop_runs_exact_owner_cleanup_but_only_a_witness_settles() {
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        // Cleanup succeeding does not by itself settle the port.
+        let mut port =
+            launched_port(None).with_owned_terminator(Box::new(Terminator(calls.clone(), true)));
+        assert!(port.stop().is_err());
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert!(port.unsettled);
+        // A witness still has to agree afterwards.
+        let mut port = launched_port(Some(Some(true)))
+            .with_owned_terminator(Box::new(Terminator(calls.clone(), true)));
+        assert!(port.stop().is_ok());
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+        // A refused cleanup is logged and leaves the port unsettled when no witness settles it.
+        let mut port = launched_port(Some(Some(false)))
+            .with_owned_terminator(Box::new(Terminator(calls.clone(), false)));
+        assert!(port.stop().is_err());
+        assert!(port.unsettled);
+        // Without a terminator nothing is ever signalled.
+        let mut port = launched_port(None);
+        assert!(port.stop().is_err());
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 3);
+    }
 }

@@ -5,7 +5,7 @@
 //! only inside a qualified safe window and only through the authenticated transient launcher;
 //! this constructor grants no launch authority and is not yet installed by the resident session.
 
-use std::path::PathBuf;
+use std::{path::PathBuf, time::Duration};
 
 use super::{
     ProtonSource, ResearchIntentV1, ResearchTool, SteamClientIdentity, SteamUpdateStatus,
@@ -13,6 +13,7 @@ use super::{
     launch_txn::{UnitState, UserManagerPort},
     native_probe::NativeResultProbe,
     native_source::{AttestedNativeSource, GameFacts},
+    owned_cleanup::ProcfsTerminator,
     recovery_gather::CompletionWitness,
     settlement::owned_process_tree_settled,
     steam_host::SteamAttemptHost,
@@ -145,6 +146,7 @@ pub fn build_production_host(
     let source = AttestedNativeSource::new(facts(), installation, intent.tools.clone(), intent.uid);
     let probe = NativeResultProbe::new(results_dir, intent.uid, source);
     let mut tree_facts = facts();
+    let cleanup = ProcfsTerminator::new(facts(), proc_root.clone(), Duration::from_secs(10));
     let witness = CompletionWitness {
         unit_state,
         process_tree_settled: Box::new(move |dir, context| {
@@ -163,7 +165,8 @@ pub fn build_production_host(
         probe,
     )
     .with_transient_launcher(TransientLauncher { manager, prepare })
-    .with_settlement_witness(Box::new(witness));
+    .with_settlement_witness(Box::new(witness))
+    .with_owned_terminator(Box::new(cleanup));
     Ok(Box::new(SteamAttemptHost::new(port)))
 }
 

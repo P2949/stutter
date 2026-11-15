@@ -117,6 +117,7 @@ pub(crate) mod native_source;
     )
 )]
 pub(crate) mod oracle;
+pub(crate) mod owned_cleanup;
 #[cfg_attr(
     not(test),
     expect(

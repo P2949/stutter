@@ -349,6 +349,42 @@ pub fn send_signal(pid: u32, signal: i32) -> io::Result<()> {
     }
 }
 
+/// Opens a pidfd for `pid`. The descriptor refers to that process only: if the process exits and
+/// its number is reused, signals through the descriptor fail instead of reaching the new owner.
+pub fn pidfd_open(pid: u32) -> io::Result<std::os::fd::OwnedFd> {
+    use std::os::fd::FromRawFd;
+    let pid = libc::pid_t::try_from(pid).map_err(|_| io::Error::from_raw_os_error(libc::EINVAL))?;
+    // SAFETY: pidfd_open(2) takes an integer pid and zero flags and returns a new descriptor.
+    let raw = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) };
+    if raw < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: a successful pidfd_open returns a new descriptor owned by the caller.
+    Ok(unsafe { std::os::fd::OwnedFd::from_raw_fd(raw as libc::c_int) })
+}
+
+/// Sends `signal` through a pidfd to exactly the process it was opened for. Signal 0 only checks
+/// that the process still exists.
+pub fn pidfd_send_signal(fd: std::os::fd::BorrowedFd<'_>, signal: i32) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+    // SAFETY: pidfd_send_signal(2) with a valid descriptor, a plain signal number, no siginfo and
+    // zero flags.
+    let result = unsafe {
+        libc::syscall(
+            libc::SYS_pidfd_send_signal,
+            fd.as_raw_fd(),
+            signal,
+            std::ptr::null::<libc::siginfo_t>(),
+            0u32,
+        )
+    };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
 /// Take a non-blocking exclusive `flock` on an open descriptor.
 pub fn flock_exclusive_nonblocking(fd: std::os::fd::BorrowedFd<'_>) -> bool {
     use std::os::fd::AsRawFd;

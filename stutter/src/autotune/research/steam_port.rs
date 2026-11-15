@@ -33,6 +33,16 @@ pub trait SettlementWitness: Send {
     fn settled(&mut self, dispatch: &File, context: &DispatchContextV1) -> anyhow::Result<bool>;
 }
 
+/// Terminates the attempt's own game process, and only that one, on cancellation or timeout.
+/// Implementations must refuse to signal anything they cannot attribute to this attempt.
+pub trait OwnedTerminator: Send {
+    fn terminate_owned(
+        &mut self,
+        dispatch: &File,
+        context: &DispatchContextV1,
+    ) -> anyhow::Result<()>;
+}
+
 /// Starts an attempt through the authenticated user manager instead of spawning Steam directly.
 /// Both parts are supplied by the caller: the manager port and the fixed-request preparer.
 pub struct TransientLauncher {
@@ -212,6 +222,7 @@ pub struct ProductionSteamPort<R: ResultProbe> {
     unsettled: bool,
     transient: Option<TransientLauncher>,
     witness: Option<Box<dyn SettlementWitness>>,
+    terminator: Option<Box<dyn OwnedTerminator>>,
 }
 
 impl<R: ResultProbe> ProductionSteamPort<R> {
@@ -238,7 +249,14 @@ impl<R: ResultProbe> ProductionSteamPort<R> {
             unsettled: false,
             transient: None,
             witness: None,
+            terminator: None,
         }
+    }
+
+    /// The bounded, exact-owner cleanup used by `stop`; without one nothing is ever signalled.
+    pub fn with_owned_terminator(mut self, terminator: Box<dyn OwnedTerminator>) -> Self {
+        self.terminator = Some(terminator);
+        self
     }
 
     /// The independent witness that may clear `unsettled`; without one the port never settles.
@@ -455,6 +473,15 @@ impl<R: ResultProbe> SteamPort for ProductionSteamPort<R> {
     }
 
     fn stop(&mut self) -> anyhow::Result<()> {
+        // Cleanup is best effort and exact-owner only. A refusal or failure leaves the port
+        // unsettled; it never makes the attempt look settled.
+        if self.unsettled
+            && let (Some(terminator), Some((dir, context))) =
+                (self.terminator.as_mut(), self.dispatch.as_ref())
+            && let Err(error) = terminator.terminate_owned(dir, context)
+        {
+            log::warn!("owned cleanup did not complete: {error:#}");
+        }
         // Only an independent witness clears the flag. Native output, an exited launcher or a
         // missing observation never does; a failing witness leaves the port unsettled.
         if self.unsettled
