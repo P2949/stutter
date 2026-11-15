@@ -313,3 +313,46 @@ fn unsafe_or_unbounded_native_result_trees_are_rejected() {
     std::fs::write(dir.join("summary.json"), r#"{"averageFps": 50}"#).unwrap();
     assert!(complete(root.path(), &before).is_err());
 }
+
+#[test]
+fn an_absent_results_directory_is_an_empty_baseline_that_still_needs_a_fresh_result() {
+    let parent = prepare_root();
+    let results = parent.path().join("benchmarkResults");
+    let uid = crate::syscall::geteuid();
+    let before = snapshot_benchmark_results_or_absent(&results, uid).unwrap();
+    assert!(before.directories.is_empty());
+    // Nothing was created in the prefix by taking the baseline.
+    assert!(!results.exists());
+    // If the game never produced the directory there is no result to accept.
+    assert!(complete(&results, &before).is_err());
+    // Once the game creates it with one fresh folder, that folder is the result.
+    std::fs::create_dir(&results).unwrap();
+    std::fs::set_permissions(&results, std::fs::Permissions::from_mode(0o700)).unwrap();
+    write_result(&results, "new", r#"{"averageFps": 61.0}"#);
+    let completion = complete(&results, &before).unwrap();
+    assert_eq!(completion.metrics.average_fps, 61.0);
+    assert!(!completion.files.is_empty());
+}
+
+#[test]
+fn only_a_genuinely_absent_path_is_an_empty_baseline() {
+    let uid = crate::syscall::geteuid();
+    let parent = prepare_root();
+    // A symlinked component is an error, never an absent directory.
+    let real = parent.path().join("real");
+    std::fs::create_dir(&real).unwrap();
+    std::os::unix::fs::symlink(&real, parent.path().join("link")).unwrap();
+    assert!(
+        snapshot_benchmark_results_or_absent(&parent.path().join("link/benchmarkResults"), uid)
+            .is_err()
+    );
+    // A non-directory where the directory should be is an error too.
+    std::fs::write(parent.path().join("benchmarkResults"), b"x").unwrap();
+    assert!(
+        snapshot_benchmark_results_or_absent(&parent.path().join("benchmarkResults"), uid).is_err()
+    );
+    // The strict snapshot still refuses an absent directory.
+    assert!(snapshot_benchmark_results(&parent.path().join("missing"), uid).is_err());
+    // An unprivileged owner is still required.
+    assert!(snapshot_benchmark_results_or_absent(&parent.path().join("missing"), 0).is_err());
+}

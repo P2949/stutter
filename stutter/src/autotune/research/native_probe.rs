@@ -4,8 +4,8 @@ use std::path::PathBuf;
 
 use super::{
     cyberpunk::{
-        BenchmarkDirectorySnapshot, CyberpunkBenchmarkAttempt, snapshot_benchmark_results,
-        verify_benchmark_completion,
+        BenchmarkDirectorySnapshot, CyberpunkBenchmarkAttempt,
+        snapshot_benchmark_results_or_absent, verify_benchmark_completion,
     },
     steam_host::GameState,
     steam_port::ResultProbe,
@@ -47,7 +47,7 @@ impl<S> NativeResultProbe<S> {
 impl<S: NativeObservationSource> ResultProbe for NativeResultProbe<S> {
     fn begin(&mut self, arm: super::ProtonSource) -> anyhow::Result<()> {
         self.before = None;
-        let snapshot = snapshot_benchmark_results(&self.results_dir, self.owner_uid)?;
+        let snapshot = snapshot_benchmark_results_or_absent(&self.results_dir, self.owner_uid)?;
         self.source.begin(arm)?;
         self.before = Some(snapshot);
         Ok(())

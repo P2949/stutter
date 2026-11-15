@@ -209,6 +209,29 @@ pub fn snapshot_benchmark_results(
     })
 }
 
+/// The pre-launch baseline for a prefix that may not contain the results directory yet. Only a
+/// path that is genuinely absent (`NotFound`) is an empty baseline; a symlinked component, a
+/// non-directory, a foreign owner or any other failure is an error. Nothing is created, so a
+/// Proton prefix is never touched before the game initializes it. The completion check still
+/// requires the directory to exist afterwards with exactly one fresh result folder.
+pub fn snapshot_benchmark_results_or_absent(
+    results_dir: &Path,
+    owner_uid: u32,
+) -> anyhow::Result<BenchmarkDirectorySnapshot> {
+    anyhow::ensure!(owner_uid != 0, "benchmark owner must be unprivileged");
+    match crate::syscall::open_dir_no_symlinks(results_dir) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Ok(BenchmarkDirectorySnapshot {
+                owner_uid,
+                captured_unix_nanos: now_unix_nanos()?,
+                directories: BTreeMap::new(),
+            })
+        }
+        Err(error) => Err(error.into()),
+        Ok(_) => snapshot_benchmark_results(results_dir, owner_uid),
+    }
+}
+
 fn scan_result_dir(
     fd: impl AsFd,
     owner_uid: u32,
