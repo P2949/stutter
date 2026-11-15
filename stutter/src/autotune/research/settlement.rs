@@ -68,6 +68,17 @@ impl ClaimSettlementVerifier for ProductionSettlementVerifier {
             ),
             "a game, Wine, Proton or foreign Steam process remains"
         );
+        anyhow::ensure!(
+            super::owned_domain::observe_domain(
+                &self.proc_root,
+                context.intent.uid,
+                &context.spec.study_compat_data,
+                std::process::id(),
+                super::owned_domain::window_start_unix(dir)?,
+            )?
+            .is_clear(),
+            "attempt-domain processes remain or cannot be attributed"
+        );
         Ok(Box::new(Settled))
     }
 
@@ -117,6 +128,19 @@ pub(crate) fn owned_process_tree_settled(
         }
     }
     if facts.sight()? != Sighting::None {
+        return Ok(false);
+    }
+    // The same attempt domain the cleanup uses: any attributed, unattributed or unknown member of
+    // the study prefix keeps the tree unsettled, and an unobservable domain is an error.
+    if !super::owned_domain::observe_domain(
+        proc_root,
+        context.intent.uid,
+        &context.spec.study_compat_data,
+        std::process::id(),
+        super::owned_domain::window_start_unix(dir)?,
+    )?
+    .is_clear()
+    {
         return Ok(false);
     }
     let client = context
@@ -220,6 +244,7 @@ mod tests {
             client.webhelper_start_ticks,
             "steamwebhelper",
         );
+        std::fs::write(proc.path().join("stat"), "btime 1000\n").unwrap();
         proc
     }
 
@@ -230,6 +255,7 @@ mod tests {
             std::os::unix::fs::PermissionsExt::from_mode(0o700),
         )
         .unwrap();
+        std::fs::write(tmp.path().join("launch-requested"), b"x").unwrap();
         let dir = File::from(crate::syscall::open_dir_no_symlinks(tmp.path()).unwrap());
         (tmp, dir)
     }
@@ -268,11 +294,11 @@ mod tests {
         // An unreadable observer, an unreadable /proc, or a missing client is unknown.
         assert!(settled(Err(anyhow::anyhow!("x")), proc.path()).is_err());
         assert!(
-            !settled(
+            settled(
                 Ok(Sighting::None),
                 std::path::Path::new("/definitely/not/proc")
             )
-            .unwrap()
+            .is_err()
         );
         ctx.intent.steam_client.process = None;
         assert!(

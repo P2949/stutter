@@ -102,6 +102,49 @@ pub fn terminate_exact(
     anyhow::bail!("the owned process did not exit after SIGKILL")
 }
 
+/// Terminate exactly the identified processes under one shared deadline: every identity is re-read
+/// and signalled through its pidfd (SIGTERM to all together, a shared grace period, then SIGKILL to
+/// what remains). A changed identity is an error and that process is not signalled.
+pub fn terminate_exact_group(
+    proc_root: &Path,
+    targets: &[OwnedProcess],
+    term_grace: Duration,
+    kill_wait: Duration,
+) -> anyhow::Result<()> {
+    let mut live = Vec::new();
+    for target in targets {
+        let pidfd = match crate::syscall::pidfd_open(target.pid.as_u32()) {
+            Ok(fd) => fd,
+            Err(error) if error.raw_os_error() == Some(libc::ESRCH) => continue,
+            Err(error) => return Err(error.into()),
+        };
+        match read_process(proc_root, target.pid.as_u32()) {
+            None | Some((_, true)) => continue,
+            Some((ticks, _)) if ticks != target.start_ticks => {
+                anyhow::bail!("a process identity changed; it was not signalled")
+            }
+            Some(_) => live.push((target, pidfd)),
+        }
+    }
+    for (signal, wait) in [(SIGTERM, term_grace), (SIGKILL, kill_wait)] {
+        for (_, pidfd) in &live {
+            match crate::syscall::pidfd_send_signal(pidfd.as_fd(), signal) {
+                Ok(()) => {}
+                Err(error) if error.raw_os_error() == Some(libc::ESRCH) => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+        let deadline = Instant::now() + wait;
+        while Instant::now() < deadline && !live.iter().all(|(target, _)| gone(proc_root, target)) {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        if live.iter().all(|(target, _)| gone(proc_root, target)) {
+            return Ok(());
+        }
+    }
+    anyhow::bail!("owned processes remain after SIGKILL")
+}
+
 /// Live dispatcher anchors of this attempt: one per Steam verb whose one-use ticket was consumed and
 /// whose recorded dispatcher process is still running. An unreadable or inconsistent record is no
 /// anchor, so it can only ever withhold a signal.
@@ -195,13 +238,16 @@ impl<F: GameFacts + Send> OwnedTerminator for ProcfsTerminator<F> {
         let game = self.terminate_attributed(&anchors);
         // The pre-game reaper and Wine tree is owned through the study prefix it was handed, which
         // stays provable after the dispatcher has exited or before the game exists.
-        let domain = super::owned_domain::terminate_domain(
-            &self.proc_root,
-            crate::syscall::geteuid(),
-            &context.spec.study_compat_data,
-            std::process::id(),
-            self.grace,
-        );
+        let domain = super::owned_domain::window_start_unix(dispatch).and_then(|window| {
+            super::owned_domain::terminate_domain(
+                &self.proc_root,
+                crate::syscall::geteuid(),
+                &context.spec.study_compat_data,
+                std::process::id(),
+                window,
+                self.grace,
+            )
+        });
         game.and(domain)
     }
 }
@@ -407,6 +453,7 @@ mod tests {
     fn without_any_dispatcher_record_the_full_path_signals_nothing() {
         let (mut child, target) = sleeper();
         let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("launch-requested"), b"x").unwrap();
         let file = File::open(dir.path()).unwrap();
         let context = test_context();
         let mut terminator = ProcfsTerminator::new(
