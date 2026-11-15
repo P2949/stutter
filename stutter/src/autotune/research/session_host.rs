@@ -14,10 +14,10 @@ use std::{
 };
 
 use super::{
-    ResearchIntentV1,
+    CyberpunkInstallation, ResearchIntentV1, discover_cyberpunk_installation,
+    discover_steam_libraries,
     driver::AttemptHost,
     game_facts::ProcfsGameFacts,
-    inspect_cyberpunk_installation,
     launch_txn::UnitState,
     native_source::GameFacts,
     prefix::verify_study_compatdata,
@@ -137,6 +137,26 @@ fn game_facts_factory(
     }
 }
 
+/// The installed game and its absolute executable, taken from the registered library that actually
+/// holds the manifest. Steam records `installdir` as a bare directory name below that library's
+/// `steamapps/common`, so the executable is never derived from the primary library or the bare name.
+fn verified_game(
+    primary_steamapps: &Path,
+    uid: u32,
+) -> anyhow::Result<(CyberpunkInstallation, PathBuf)> {
+    let libraries = discover_steam_libraries(primary_steamapps, uid)?;
+    let (library, installation) = discover_cyberpunk_installation(&libraries, uid)?;
+    let executable = library
+        .join("common")
+        .join(&installation.installation_directory)
+        .join(GAME_EXECUTABLE);
+    anyhow::ensure!(
+        executable.is_absolute(),
+        "the game executable is not an absolute path"
+    );
+    Ok((installation, executable))
+}
+
 /// The independent witnesses a restarted controller uses to retire an interrupted attempt. The
 /// same real sources as the live host: the authenticated user manager (re-authenticated as
 /// needed), procfs, and the worker's read-only token count.
@@ -147,8 +167,7 @@ pub fn build_recovery_witnesses(
     use super::settlement::ProductionSettlementVerifier;
     let uid = crate::syscall::geteuid();
     let (_, _, settings) = prefix_paths(&sources.study_dir, intent.app_id);
-    let installation = inspect_cyberpunk_installation(&sources.steamapps, uid)?;
-    let executable = PathBuf::from(&installation.installation_directory).join(GAME_EXECUTABLE);
+    let (_, executable) = verified_game(&sources.steamapps, uid)?;
     let facts = game_facts_factory(uid, intent.app_id, intent.build_id, executable, settings);
     let mut tree_facts = facts();
     let (unit_state, unit_invocation) =
@@ -184,7 +203,7 @@ pub fn build_session_host(
     verify_study_compatdata(&sources.steamapps, &sources.study_dir, &compat, uid, false)?;
     let (observed_steam_client, installed_tool_path) =
         inventory_lookup(&sources.steamapps, &sources.proton_manifest, uid)?;
-    let mut installation = inspect_cyberpunk_installation(&sources.steamapps, uid)?;
+    let (mut installation, executable) = verified_game(&sources.steamapps, uid)?;
     // The inventory cannot prove entitlement; the signed-in account's own launch record is the
     // preflight evidence, and anything unreadable leaves it false so no host is built.
     installation.entitlement_verified = match (
@@ -206,7 +225,6 @@ pub fn build_session_host(
         .iter()
         .filter_map(|tool| installed_tool_path(tool).map(|path| (tool.source, path)))
         .collect();
-    let executable = PathBuf::from(&installation.installation_directory).join(GAME_EXECUTABLE);
     let facts = game_facts_factory(uid, intent.app_id, intent.build_id, executable, settings);
 
     let send_bus = ReauthenticatingBus::new(manager_authenticator(
@@ -259,6 +277,56 @@ mod tests {
         }
     }
 
+    /// A Steam layout with the game in a secondary library, as on a real multi-drive install.
+    fn secondary_library_layout(root: &Path) -> PathBuf {
+        let primary = root.join("primary");
+        let secondary = root.join("secondary");
+        std::fs::create_dir_all(primary.join("steamapps")).unwrap();
+        let bin = secondary.join("steamapps/common/Cyberpunk 2077/bin/x64");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(bin.join("Cyberpunk2077.exe"), b"MZfixture").unwrap();
+        std::fs::write(
+            secondary.join("steamapps/appmanifest_1091500.acf"),
+            "\"AppState\" { \"appid\" \"1091500\" \"buildid\" \"42\" \"installdir\" \"Cyberpunk 2077\" \"StateFlags\" \"4\" \"TargetBuildID\" \"0\" \"BytesToDownload\" \"2\" \"BytesDownloaded\" \"2\" \"BytesToStage\" \"3\" \"BytesStaged\" \"3\" \"InstalledDepots\" { \"1\" { \"appid\" \"other\" } } }",
+        )
+        .unwrap();
+        std::fs::write(
+            primary.join("steamapps/libraryfolders.vdf"),
+            format!(
+                "\"libraryfolders\" {{ \"0\" {{ \"path\" \"{}\" }} \"1\" {{ \"path\" \"{}\" }} }}",
+                primary.display(),
+                secondary.display()
+            ),
+        )
+        .unwrap();
+        primary.join("steamapps")
+    }
+
+    #[test]
+    fn the_executable_comes_from_the_library_that_holds_the_game_and_is_absolute() {
+        let root = tempfile::tempdir().unwrap();
+        let steamapps = secondary_library_layout(root.path());
+        let uid = crate::syscall::geteuid();
+        let (installation, executable) = verified_game(&steamapps, uid).unwrap();
+        assert_eq!(installation.installation_directory, "Cyberpunk 2077");
+        assert_eq!(
+            executable,
+            root.path()
+                .join("secondary/steamapps/common/Cyberpunk 2077/bin/x64/Cyberpunk2077.exe")
+        );
+        // The real consumer accepts it: with no game running the observer reports absence rather
+        // than failing on the path, which is what the former relative path caused.
+        let facts = game_facts_factory(uid, 1_091_500, 42, executable, root.path().join("s.json"));
+        assert!(facts().sight().is_ok());
+        let relative = game_facts_factory(
+            uid,
+            1_091_500,
+            42,
+            PathBuf::from("Cyberpunk 2077").join(GAME_EXECUTABLE),
+            root.path().join("s.json"),
+        );
+        assert!(relative().sight().is_err());
+    }
     #[test]
     fn the_prefix_paths_are_derived_inside_the_study_directory() {
         let (compat, results, settings) = prefix_paths(Path::new("/study"), 1_091_500);
