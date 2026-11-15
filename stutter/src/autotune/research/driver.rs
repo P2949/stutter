@@ -512,7 +512,8 @@ impl Driver {
                 self.unresolved_launch = Some(slot.index);
                 Err(error)
             }
-            Err(_) => {
+            Err(error) => {
+                log::warn!("launch refused for slot {}: {error:#}", slot.index);
                 host.abort()?;
                 // Arming can fail before or after creating the directory. Until its identity
                 // is established by recovery, do not alter or seal potentially foreign state.
