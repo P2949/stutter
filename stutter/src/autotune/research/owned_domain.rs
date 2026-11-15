@@ -106,7 +106,7 @@ mod tests {
 
     #[test]
     fn only_processes_carrying_the_study_path_are_swept() {
-        let uid = unsafe { libc::geteuid() };
+        let uid = crate::syscall::geteuid();
         let study = Path::new("/nonexistent/stutter-test-study/compatdata");
         let mut mine = spawn_with("/nonexistent/stutter-test-study/compatdata");
         let mut other = spawn_with("/nonexistent/stutter-test-other/compatdata");
@@ -126,7 +126,7 @@ mod tests {
 
     #[test]
     fn the_exempt_pid_is_never_claimed() {
-        let uid = unsafe { libc::geteuid() };
+        let uid = crate::syscall::geteuid();
         let study = Path::new("/nonexistent/stutter-test-exempt/compatdata");
         let mut child = spawn_with("/nonexistent/stutter-test-exempt/compatdata");
         assert!(domain_members(Path::new("/proc"), uid, study, child.id()).is_empty());

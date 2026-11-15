@@ -197,7 +197,7 @@ impl<F: GameFacts + Send> OwnedTerminator for ProcfsTerminator<F> {
         // stays provable after the dispatcher has exited or before the game exists.
         let domain = super::owned_domain::terminate_domain(
             &self.proc_root,
-            unsafe { libc::geteuid() },
+            crate::syscall::geteuid(),
             &context.spec.study_compat_data,
             std::process::id(),
             self.grace,
