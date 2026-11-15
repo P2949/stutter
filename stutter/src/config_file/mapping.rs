@@ -182,6 +182,9 @@ pub fn apply_daemon_user_config_overrides(
     {
         daemon_config.autotune.privileged_worker_socket = Some(socket);
     }
+    if let Some(autotune) = user_config.autotune.as_ref() {
+        apply_research_overrides(&mut daemon_config.autotune, autotune);
+    }
     if let Some(unsafe_in_process) = user_config
         .autotune
         .as_ref()
@@ -290,5 +293,36 @@ pub(super) fn workload_policy_rule_configs_from_user_config(
         (Some(rules), None) => Ok(Some((WORKLOAD_POLICY_RULES_FIELD, rules))),
         (None, Some(rules)) => Ok(Some((LEGACY_WORKLOAD_POLICY_RULES_FIELD, rules))),
         (None, None) => Ok(None),
+    }
+}
+
+/// Research control is configured only from the administrator-owned file. Absent keys leave the
+/// daemon defaults (research inert, live launch off) untouched.
+fn apply_research_overrides(
+    target: &mut crate::daemon::config::DaemonAutotuneConfig,
+    file: &super::AutotuneConfigFile,
+) {
+    for (slot, value) in [
+        (&mut target.research_socket_dir, &file.research_socket_dir),
+        (
+            &mut target.research_campaign_dir,
+            &file.research_campaign_dir,
+        ),
+        (&mut target.research_study_dir, &file.research_study_dir),
+        (
+            &mut target.research_steamapps_dir,
+            &file.research_steamapps_dir,
+        ),
+        (
+            &mut target.research_proton_manifest,
+            &file.research_proton_manifest,
+        ),
+    ] {
+        if let Some(path) = value {
+            *slot = Some(path.clone());
+        }
+    }
+    if let Some(live) = file.research_live_launch {
+        target.research_live_launch = live;
     }
 }

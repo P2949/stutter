@@ -91,6 +91,14 @@ pub struct AutotuneConfigFile {
     pub allow_gpu_power_in_autotune: Option<bool>,
     pub allow_vm_knobs_in_autotune: Option<bool>,
     pub privileged_worker_socket: Option<PathBuf>,
+    /// Resident research-campaign control; every path is an absolute private directory or file
+    /// configured by the administrator. Research stays inert unless all five are present.
+    pub research_socket_dir: Option<PathBuf>,
+    pub research_campaign_dir: Option<PathBuf>,
+    pub research_study_dir: Option<PathBuf>,
+    pub research_steamapps_dir: Option<PathBuf>,
+    pub research_proton_manifest: Option<PathBuf>,
+    pub research_live_launch: Option<bool>,
     pub unsafe_in_process_privileged_worker: Option<bool>,
     pub manage_privileged_worker: Option<bool>,
     pub worker_only_mutation: Option<bool>,

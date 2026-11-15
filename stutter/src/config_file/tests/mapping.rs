@@ -241,3 +241,56 @@ fn test_missing_agent_autotune_limits_uses_defaults() {
 
     assert_eq!(limits, AgentAutotuneLimits::default());
 }
+
+#[test]
+fn the_rendered_service_toml_reaches_the_research_runtime_config() {
+    let config = parse_user_config_toml(
+        r#"
+[autotune]
+research_socket_dir = "/run/stutter-autotune-p2949"
+research_campaign_dir = "/var/lib/stutter/campaign"
+research_study_dir = "/home/u/studies"
+research_steamapps_dir = "/home/u/.local/share/Steam/steamapps"
+research_proton_manifest = "/nix/store/x-proton-lab.json"
+research_live_launch = true
+"#,
+    )
+    .unwrap();
+    let mut daemon_config = daemon_config_from_user_config(None, None, ActionSource::Cli).unwrap();
+    assert!(!daemon_config.autotune.research_live_launch);
+    assert!(daemon_config.autotune.research_socket_dir.is_none());
+
+    apply_daemon_user_config_overrides(&mut daemon_config, Some(&config));
+
+    let autotune = &daemon_config.autotune;
+    assert_eq!(
+        autotune.research_socket_dir.as_deref(),
+        Some(std::path::Path::new("/run/stutter-autotune-p2949"))
+    );
+    assert_eq!(
+        autotune.research_campaign_dir.as_deref(),
+        Some(std::path::Path::new("/var/lib/stutter/campaign"))
+    );
+    assert_eq!(
+        autotune.research_study_dir.as_deref(),
+        Some(std::path::Path::new("/home/u/studies"))
+    );
+    assert_eq!(
+        autotune.research_steamapps_dir.as_deref(),
+        Some(std::path::Path::new("/home/u/.local/share/Steam/steamapps"))
+    );
+    assert_eq!(
+        autotune.research_proton_manifest.as_deref(),
+        Some(std::path::Path::new("/nix/store/x-proton-lab.json"))
+    );
+    assert!(autotune.research_live_launch);
+}
+
+#[test]
+fn a_config_without_research_keys_leaves_research_inert() {
+    let config = parse_user_config_toml("[autotune]\nallow_medium_risk_apply = true\n").unwrap();
+    let mut daemon_config = daemon_config_from_user_config(None, None, ActionSource::Cli).unwrap();
+    apply_daemon_user_config_overrides(&mut daemon_config, Some(&config));
+    assert!(daemon_config.autotune.research_socket_dir.is_none());
+    assert!(!daemon_config.autotune.research_live_launch);
+}
