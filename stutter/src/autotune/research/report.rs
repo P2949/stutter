@@ -211,8 +211,10 @@ pub fn build_report(
         );
         let (mut left, mut right) = (Vec::new(), Vec::new());
         for block in 0..blocks {
-            // A block counts only when every arm in it completed: partial blocks are dropped.
-            if arms.iter().all(|arm| value(block, *arm).is_some()) {
+            // A block counts for this comparison only when both its control and this candidate
+            // completed. An unrelated arm failing never discards a complete pair, and a pair is
+            // never assembled from different blocks.
+            if value(block, control).is_some() && value(block, candidate).is_some() {
                 left.push(value(block, control).unwrap_or(f64::NAN));
                 right.push(value(block, candidate).unwrap_or(f64::NAN));
             }

@@ -256,3 +256,45 @@ fn a_per_comparison_subset_without_native_completions_is_unproven() {
         .collect();
     assert_eq!(context_state(&subset), ContextState::Unproven);
 }
+
+#[test]
+fn an_unrelated_arm_failing_never_discards_a_complete_control_candidate_pair() {
+    let mut intent = intent();
+    intent.tools.push(ResearchTool {
+        source: ProtonSource::ValveStable,
+        identity_sha256: "b".repeat(64),
+    });
+    intent.tools.push(ResearchTool {
+        source: ProtonSource::CachyOs,
+        identity_sha256: "c".repeat(64),
+    });
+    assert_eq!(
+        intent.tools.len(),
+        3,
+        "the fixture must start with one tool"
+    );
+    intent.max_attempts = 18;
+    let schedule = build_schedule(&intent).unwrap();
+    let blocks = schedule.len() / 3;
+    let (records, evidence) = run(&schedule, |slot| {
+        // The third arm crashes in the first three blocks; the other two always complete.
+        if slot.arm == ProtonSource::CachyOs && (slot.index as usize) / 3 < 3 {
+            return None;
+        }
+        Some(if slot.arm == ProtonSource::ValveStable {
+            60.0
+        } else {
+            66.0 + f64::from(slot.index % 3) * 0.1
+        })
+    });
+    let report = build_report(&intent, &records, &evidence).unwrap();
+    let pairs = |source: ProtonSource| {
+        report
+            .arms
+            .iter()
+            .find(|arm| arm.source == source)
+            .map(|arm| arm.pairs)
+    };
+    assert_eq!(pairs(ProtonSource::Ge), Some(blocks));
+    assert_eq!(pairs(ProtonSource::CachyOs), Some(blocks - 3));
+}
