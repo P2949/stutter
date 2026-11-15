@@ -9,7 +9,7 @@ use super::{
     AttemptOutcome, AttemptRecord, AttemptSlot, ResearchIntentV1, ResearchJournal,
     dispatch_context::{ArmSpec, DispatchContextV1, arm_attempt_in_root},
     report::AttemptEvidenceV1,
-    report_store::{build_from_dirs, write_evidence},
+    report_store::{build_from_dirs, ensure_evidence_budget, write_evidence},
     scheduler,
 };
 
@@ -414,6 +414,14 @@ impl Driver {
                 Progress::Finished { evidence } => {
                     match evidence
                         .validate_for(&slot, &self.intent)
+                        .and_then(|()| {
+                            ensure_evidence_budget(
+                                &self.evidence,
+                                self.intent.uid,
+                                self.intent.max_evidence_bytes,
+                                &evidence,
+                            )
+                        })
                         .and_then(|()| write_evidence(&self.evidence, &slot, &evidence))
                     {
                         Ok(evidence_sha256) => {

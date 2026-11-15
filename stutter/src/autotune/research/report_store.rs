@@ -134,3 +134,74 @@ pub fn build_from_dirs(
     let evidence = read_evidence(evidence_dir, intent.uid)?;
     build_report(intent, &records, &evidence)
 }
+
+/// The bytes one attempt's evidence accounts for: its own record plus the native raw files it
+/// commits to by hash (the raw files stay in the study prefix; they are still evidence).
+pub fn evidence_cost(item: &AttemptEvidenceV1) -> anyhow::Result<u64> {
+    let record = serde_json::to_vec(item)?.len() as u64;
+    let raw: u64 = item.native_completion.as_ref().map_or(0, |completion| {
+        completion.files.iter().map(|file| file.size_bytes).sum()
+    });
+    Ok(record.saturating_add(raw))
+}
+
+/// Refuse evidence that would take the campaign over `max_evidence_bytes`. The cost of every
+/// evidence record already written counts, so the limit is campaign-wide, not per attempt.
+pub fn ensure_evidence_budget(
+    dir: &File,
+    uid: u32,
+    max_evidence_bytes: u64,
+    item: &AttemptEvidenceV1,
+) -> anyhow::Result<()> {
+    let mut total = evidence_cost(item)?;
+    for (index, existing) in read_evidence(dir, uid)? {
+        if index != item.slot_index {
+            total = total.saturating_add(evidence_cost(&existing)?);
+        }
+    }
+    anyhow::ensure!(
+        total <= max_evidence_bytes,
+        "campaign evidence would use {total} bytes, over the {max_evidence_bytes} byte budget"
+    );
+    Ok(())
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use std::os::unix::fs::PermissionsExt;
+
+    use super::*;
+
+    fn item(index: u32) -> AttemptEvidenceV1 {
+        AttemptEvidenceV1 {
+            schema_version: 1,
+            slot_index: index,
+            average_fps: 60.0,
+            native_completion: None,
+        }
+    }
+
+    #[test]
+    fn the_campaign_wide_evidence_budget_counts_every_record_already_written() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        let dir = File::from(crate::syscall::open_dir_no_symlinks(tmp.path()).unwrap());
+        let uid = crate::syscall::geteuid();
+        let one = evidence_cost(&item(0)).unwrap();
+        // Room for exactly two records.
+        let budget = one * 2;
+        ensure_evidence_budget(&dir, uid, budget, &item(0)).unwrap();
+        let slot = |index| crate::autotune::research::AttemptSlot {
+            study_sha256: "e".repeat(64),
+            context_sha256: "f".repeat(64),
+            index,
+            arm: crate::autotune::research::ProtonSource::Ge,
+        };
+        write_evidence(&dir, &slot(0), &item(0)).unwrap();
+        ensure_evidence_budget(&dir, uid, budget, &item(1)).unwrap();
+        write_evidence(&dir, &slot(1), &item(1)).unwrap();
+        assert!(ensure_evidence_budget(&dir, uid, budget, &item(2)).is_err());
+        // Rewriting an existing slot is not counted twice.
+        ensure_evidence_budget(&dir, uid, budget, &item(1)).unwrap();
+    }
+}
