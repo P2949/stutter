@@ -65,6 +65,7 @@ pub(crate) mod features;
     )
 )]
 pub(crate) mod game_facts;
+pub(crate) mod gpu_health;
 pub(super) mod host;
 #[cfg_attr(
     not(test),

@@ -171,6 +171,15 @@ pub fn build_production_host(
     .with_transient_launcher(TransientLauncher { manager, prepare })
     .with_settlement_witness(Box::new(witness))
     .with_owned_terminator(Box::new(cleanup));
+    // The host configuration names the exact `journalctl`; with it, no game starts soon after a GPU
+    // hang or reset and a running attempt that coincides with one is aborted. An invalid path
+    // builds no host.
+    let port = match std::env::var_os("STUTTER_JOURNALCTL") {
+        Some(path) => port.with_gpu_reset_probe(Box::new(
+            super::gpu_health::JournalGpuResetProbe::new(PathBuf::from(path))?,
+        )),
+        None => port,
+    };
     Ok(Box::new(SteamAttemptHost::new(port)))
 }
 

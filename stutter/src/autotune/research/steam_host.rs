@@ -26,6 +26,8 @@ pub enum GameState {
     InvalidNativeResult,
     /// The desktop became occupied or its idle observation expired.
     DesktopInterrupted,
+    /// The GPU hung or was reset during the attempt: the result is void and the device is suspect.
+    GpuReset,
     /// The game process tree ended without a fresh native result.
     ExitedWithoutResult,
     /// Something contradicted the launch identity (wrong game, wrong tool, second game).
@@ -122,6 +124,9 @@ impl<P: SteamPort> AttemptHost for SteamAttemptHost<P> {
             },
             GameState::DesktopInterrupted => Progress::Failed {
                 code: "DesktopInterrupted".into(),
+            },
+            GameState::GpuReset => Progress::Failed {
+                code: "GpuReset".into(),
             },
             GameState::ExitedWithoutResult => {
                 if self.port.stop().is_err() {

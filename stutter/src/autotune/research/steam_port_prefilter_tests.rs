@@ -171,3 +171,73 @@ fn a_running_games_own_idle_inhibitor_does_not_interrupt_its_attempt_but_user_in
     port.observe_user_input_idle(None);
     assert_eq!(port.state(), GameState::DesktopInterrupted);
 }
+
+struct FakeGpu(std::sync::Arc<std::sync::Mutex<anyhow::Result<u32>>>);
+
+impl super::super::gpu_health::GpuResetProbe for FakeGpu {
+    fn resets_since(&mut self, _: u64) -> anyhow::Result<u32> {
+        match &*self.0.lock().unwrap() {
+            Ok(count) => Ok(*count),
+            Err(error) => Err(anyhow::anyhow!("{error}")),
+        }
+    }
+}
+
+fn gpu_port(
+    answer: anyhow::Result<u32>,
+) -> (
+    ProductionSteamPort<QuietProbe>,
+    std::sync::Arc<std::sync::Mutex<anyhow::Result<u32>>>,
+) {
+    let shared = std::sync::Arc::new(std::sync::Mutex::new(answer));
+    let client = crate::autotune::research::tests::intent().steam_client;
+    let port = ProductionSteamPort::new(
+        "/study/compatdata".into(),
+        "/study".into(),
+        "/a".into(),
+        "/m".into(),
+        client,
+        vec![],
+        QuietProbe,
+    )
+    .with_gpu_reset_probe(Box::new(FakeGpu(shared.clone())));
+    (port, shared)
+}
+
+#[test]
+fn a_recent_gpu_reset_or_an_unreadable_journal_withholds_admission() {
+    let (mut port, answer) = gpu_port(Ok(1));
+    assert!(!port.gpu_quiet_for_admission());
+    // The answer is cached briefly, so the journal is not queried every second.
+    *answer.lock().unwrap() = Ok(0);
+    assert!(!port.gpu_quiet_for_admission());
+    port.gpu.as_mut().unwrap().admission = None;
+    assert!(port.gpu_quiet_for_admission());
+    port.gpu.as_mut().unwrap().admission = None;
+    *answer.lock().unwrap() = Err(anyhow::anyhow!("journal unreadable"));
+    assert!(!port.gpu_quiet_for_admission(), "unknown is never quiet");
+}
+
+#[test]
+fn a_gpu_reset_during_an_attempt_aborts_it_and_stays_sticky() {
+    let (mut port, answer) = gpu_port(Ok(0));
+    port.observe_user_input_idle(Some(Instant::now()));
+    // No attempt has started: no GPU check, and no dispatch means an identity problem.
+    assert_eq!(port.state(), GameState::IdentityMismatch);
+    port.gpu.as_mut().unwrap().attempt_started_unix = Some(100);
+    assert_eq!(port.state(), GameState::IdentityMismatch);
+    *answer.lock().unwrap() = Ok(2);
+    port.gpu.as_mut().unwrap().last_poll = None;
+    assert_eq!(port.state(), GameState::GpuReset);
+    // Once seen it stays seen, even if the journal later reads clean.
+    *answer.lock().unwrap() = Ok(0);
+    assert_eq!(port.state(), GameState::GpuReset);
+}
+
+#[test]
+fn an_unreadable_journal_during_an_attempt_is_not_a_reset() {
+    let (mut port, _) = gpu_port(Err(anyhow::anyhow!("journal unreadable")));
+    port.observe_user_input_idle(Some(Instant::now()));
+    port.gpu.as_mut().unwrap().attempt_started_unix = Some(100);
+    assert_eq!(port.state(), GameState::IdentityMismatch);
+}
