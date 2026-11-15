@@ -30,6 +30,33 @@ fn socket_name(name: &str) -> bool {
     })
 }
 
+/// Whether a compositor cgroup belongs to the active session: either inside the login session
+/// scope, or inside this user's own manager as a `wayland-wm@*.service` unit, which is where a
+/// session manager such as UWSM places the compositor outside the scope. Both are anchored to the
+/// already verified process owner; no other unit name is accepted.
+fn cgroup_in_session(cgroup: &str, session: &str, uid: u32) -> bool {
+    let scope = format!("session-{session}.scope");
+    let manager = format!("user@{uid}.service");
+    cgroup
+        .lines()
+        .filter_map(|line| line.split_once("::").map(|(_, path)| path))
+        .any(|path| {
+            let parts: Vec<&str> = path.split('/').collect();
+            parts.contains(&scope.as_str())
+                || (parts.contains(&manager.as_str())
+                    && parts.last().is_some_and(|unit| {
+                        unit.strip_prefix("wayland-wm@")
+                            .and_then(|rest| rest.strip_suffix(".service"))
+                            .is_some_and(|name| {
+                                !name.is_empty()
+                                    && name.bytes().all(|b| {
+                                        b.is_ascii_alphanumeric() || b == b'.' || b == b'-'
+                                    })
+                            })
+                    }))
+        })
+}
+
 fn peer_in_session(pid: u32, uid: u32, session: &str) -> anyhow::Result<u64> {
     anyhow::ensure!(
         !session.is_empty() && session.bytes().all(|byte| byte.is_ascii_alphanumeric()),
@@ -48,12 +75,8 @@ fn peer_in_session(pid: u32, uid: u32, session: &str) -> anyhow::Result<u64> {
         .read_to_end(&mut bytes)?;
     anyhow::ensure!(bytes.len() <= 16_384, "compositor cgroup exceeds limit");
     let cgroup = std::str::from_utf8(&bytes)?;
-    let scope = format!("session-{session}.scope");
     anyhow::ensure!(
-        cgroup
-            .lines()
-            .filter_map(|line| line.split_once("::").map(|(_, path)| path))
-            .any(|path| path.split('/').any(|part| part == scope)),
+        cgroup_in_session(cgroup, session, uid),
         "compositor is outside the active session"
     );
     let after = crate::telemetry::proc_view::live_process(proc, pid)
@@ -240,6 +263,24 @@ pub(super) async fn active_compositor(uid: u32, session: &str) -> anyhow::Result
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_compositor_must_sit_in_the_session_scope_or_the_users_wayland_wm_unit() {
+        let scope = "0::/user.slice/user-1000.slice/session-3.scope\n";
+        assert!(cgroup_in_session(scope, "3", 1000));
+        assert!(!cgroup_in_session(scope, "4", 1000));
+        let uwsm = "0::/user.slice/user-1000.slice/user@1000.service/session.slice/wayland-wm@hyprland.desktop.service\n";
+        assert!(cgroup_in_session(uwsm, "3", 1000));
+        assert!(!cgroup_in_session(uwsm, "3", 1001));
+        for other in [
+            "0::/user.slice/user-1000.slice/user@1000.service/app.slice/firefox.service\n",
+            "0::/system.slice/wayland-wm@x.service\n",
+            "0::/user.slice/user-1000.slice/user@1000.service/session.slice/wayland-wm@.service\n",
+            "0::/user.slice/user-1000.slice/user@1000.service/session.slice/wayland-wm@a/..service\n",
+        ] {
+            assert!(!cgroup_in_session(other, "3", 1000), "{other}");
+        }
+    }
 
     #[test]
     fn only_numeric_wayland_socket_names_are_accepted() {
