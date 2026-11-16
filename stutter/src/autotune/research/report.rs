@@ -360,3 +360,9 @@ fn context_state(evidence: &BTreeMap<u32, AttemptEvidenceV1>) -> ContextState {
         ContextState::Consistent
     }
 }
+
+/// Whether the sealed native completions prove one consistent comparison context (identity,
+/// settings, graphics context and matched runtime). Used by child studies to qualify their result.
+pub(super) fn evidence_context_consistent(evidence: &BTreeMap<u32, AttemptEvidenceV1>) -> bool {
+    context_state(evidence) == ContextState::Consistent
+}

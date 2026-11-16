@@ -46,13 +46,39 @@ impl ProfileHook for Profiles {
 struct Attempts {
     log: Log,
     outcome: Result<AttemptsOutcome, &'static str>,
+    /// Polls that return "still running" before the outcome.
+    slow_polls: u32,
+    progress: bool,
 }
 
 impl StudyAttempts for Attempts {
-    fn run(&mut self, _: &ChildStudy, _: u32) -> anyhow::Result<AttemptsOutcome> {
-        self.log.borrow_mut().push("run");
-        self.outcome.clone().map_err(|e| anyhow::anyhow!(e))
+    fn has_progress(&mut self, _: &ChildStudy) -> bool {
+        self.progress
     }
+    fn poll(&mut self, _: &ChildStudy, _: u32) -> anyhow::Result<Option<AttemptsOutcome>> {
+        if self.slow_polls > 0 {
+            self.slow_polls -= 1;
+            return Ok(None);
+        }
+        self.log.borrow_mut().push("run");
+        self.outcome
+            .clone()
+            .map(Some)
+            .map_err(|e| anyhow::anyhow!(e))
+    }
+}
+
+/// Poll until the study finishes.
+fn run_to_end(
+    exec: &mut HostStudyExecutor<Profiles, Attempts>,
+    study: &ChildStudy,
+) -> anyhow::Result<StudyRun> {
+    for _ in 0..50 {
+        if let Some(done) = exec.poll(study, 100)? {
+            return Ok(done);
+        }
+    }
+    anyhow::bail!("the study never finished")
 }
 
 fn good(study: &ChildStudy) -> AttemptsOutcome {
@@ -72,17 +98,19 @@ fn executor(
 ) -> (HostStudyExecutor<Profiles, Attempts>, Log) {
     let log: Log = Rc::default();
     (
-        HostStudyExecutor {
-            profiles: Profiles {
+        HostStudyExecutor::new(
+            Profiles {
                 log: log.clone(),
                 apply,
                 restore,
             },
-            attempts: Attempts {
+            Attempts {
                 log: log.clone(),
                 outcome,
+                slow_polls: 0,
+                progress: false,
             },
-        },
+        ),
         log,
     )
 }
@@ -91,7 +119,7 @@ fn executor(
 fn a_clean_study_applies_runs_restores_and_is_qualified() {
     let study = cpu_screen();
     let (mut exec, log) = executor(Ok(true), Ok(()), Ok(good(&study)));
-    let outcome = exec.execute(&study, 100).unwrap();
+    let outcome = run_to_end(&mut exec, &study).unwrap();
     assert_eq!(outcome.result, StudyResult::Qualified);
     assert_eq!(outcome.attempts_used, study.min_attempts);
     assert!(!outcome.halt);
@@ -106,7 +134,7 @@ fn a_profile_that_cannot_be_applied_runs_nothing() {
         Ok(()),
         Ok(good(&study)),
     );
-    let outcome = blocked.execute(&study, 100).unwrap();
+    let outcome = run_to_end(&mut blocked, &study).unwrap();
     assert_eq!(
         (outcome.result, outcome.reason, outcome.attempts_used),
         (StudyResult::Blocked, "BlockedProfileMapping", 0)
@@ -118,7 +146,7 @@ fn a_profile_that_cannot_be_applied_runs_nothing() {
         Ok(good(&study)),
     );
     assert_eq!(
-        failed.execute(&study, 100).unwrap().result,
+        run_to_end(&mut failed, &study).unwrap().result,
         StudyResult::Failed
     );
 }
@@ -128,22 +156,22 @@ fn the_profile_is_restored_after_every_outcome_and_an_unproven_restore_halts_the
     let study = cpu_screen();
     // The attempts error out: the profile is still restored, and the error surfaces.
     let (mut errored, log) = executor(Ok(true), Ok(()), Err("steam went away"));
-    assert!(errored.execute(&study, 100).is_err());
+    assert!(run_to_end(&mut errored, &study).is_err());
     assert_eq!(*log.borrow(), ["apply", "run", "restore"]);
     // A restore that cannot be proven ends the funnel, whatever the attempts did.
     let (mut unproven, _) = executor(Ok(true), Err("mismatch"), Ok(good(&study)));
-    let outcome = unproven.execute(&study, 100).unwrap();
+    let outcome = run_to_end(&mut unproven, &study).unwrap();
     assert_eq!(
         (outcome.result, outcome.reason, outcome.halt),
         (StudyResult::Failed, "RestoreUnproven", true)
     );
     let (mut both, _) = executor(Ok(true), Err("mismatch"), Err("steam went away"));
-    let outcome = both.execute(&study, 100).unwrap();
+    let outcome = run_to_end(&mut both, &study).unwrap();
     assert!(outcome.halt, "restore failure dominates an attempts error");
     // A study that applied no profile has nothing to restore.
     let (mut none, log) = executor(Ok(false), Err("never called"), Ok(good(&study)));
     assert_eq!(
-        none.execute(&study, 100).unwrap().result,
+        run_to_end(&mut none, &study).unwrap().result,
         StudyResult::Qualified
     );
     assert_eq!(*log.borrow(), ["apply", "run"]);
@@ -156,7 +184,7 @@ fn health_incomplete_and_unproven_context_outcomes_are_not_qualified() {
         let mut outcome = good(&study);
         mutate(&mut outcome);
         let (mut exec, _) = executor(Ok(true), Ok(()), Ok(outcome));
-        exec.execute(&study, 100).unwrap()
+        run_to_end(&mut exec, &study).unwrap()
     };
     let reset = case(&|o| o.health_halt = true);
     assert_eq!(
@@ -220,7 +248,7 @@ fn a_result_that_did_not_run_the_frozen_profile_is_unqualified() {
         let mut outcome = good(&study);
         outcome.conformance = conformance;
         let (mut exec, _) = executor(Ok(true), Ok(()), Ok(outcome));
-        exec.execute(&study, 100).unwrap()
+        run_to_end(&mut exec, &study).unwrap()
     };
     let violated = case(vec![
         ProfileConformance::Conforms,
@@ -241,5 +269,39 @@ fn a_result_that_did_not_run_the_frozen_profile_is_unqualified() {
     assert_eq!(
         case(vec![ProfileConformance::NotSpecified]).result,
         StudyResult::Qualified
+    );
+}
+
+#[test]
+fn a_running_study_keeps_its_profile_applied_until_it_ends_and_then_restores_once() {
+    let study = cpu_screen();
+    let (mut exec, log) = executor(Ok(true), Ok(()), Ok(good(&study)));
+    exec.attempts.slow_polls = 3;
+    for _ in 0..3 {
+        assert_eq!(exec.poll(&study, 100).unwrap(), None);
+    }
+    assert_eq!(
+        *log.borrow(),
+        ["apply"],
+        "applied once, still running, not restored"
+    );
+    let done = exec.poll(&study, 100).unwrap().unwrap();
+    assert_eq!(done.result, StudyResult::Qualified);
+    assert_eq!(*log.borrow(), ["apply", "run", "restore"]);
+}
+
+#[test]
+fn a_study_found_mid_run_after_a_restart_is_failed_and_halts_never_replayed() {
+    let study = cpu_screen();
+    let (mut exec, log) = executor(Ok(true), Ok(()), Ok(good(&study)));
+    exec.attempts.progress = true;
+    let outcome = exec.poll(&study, 100).unwrap().unwrap();
+    assert_eq!(
+        (outcome.result, outcome.reason, outcome.halt),
+        (StudyResult::Failed, "InterruptedStudy", true)
+    );
+    assert!(
+        log.borrow().is_empty(),
+        "no profile applied and no attempt run"
     );
 }

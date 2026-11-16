@@ -8,18 +8,12 @@ use serde::{Deserialize, Serialize};
 
 #[cfg_attr(
     not(test),
-    expect(
-        dead_code,
-        reason = "the real ActionWorker over the controller and root worker is connected with CP-LONG"
-    )
+    expect(dead_code, reason = "staged: wired at live qualification")
 )]
 pub(crate) mod action_bridge;
 #[cfg_attr(
     not(test),
-    expect(
-        dead_code,
-        reason = "the controller bridge that asks the normal worker is connected with the CP-LONG child"
-    )
+    expect(dead_code, reason = "staged: wired at live qualification")
 )]
 pub(crate) mod action_child;
 #[cfg_attr(
@@ -38,13 +32,15 @@ pub(crate) mod action_study;
     )
 )]
 pub(crate) mod analysis;
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "staged: wired at live qualification")
+)]
+pub(crate) mod child_intent;
 pub(crate) mod child_ledger;
 #[cfg_attr(
     not(test),
-    expect(
-        dead_code,
-        reason = "the production StudyExecutor over the Steam host is not connected until a profile applier exists"
-    )
+    expect(dead_code, reason = "staged: wired at live qualification")
 )]
 pub(crate) mod child_runner;
 #[cfg_attr(
@@ -74,6 +70,11 @@ pub(crate) mod dispatch_context;
 pub(crate) mod dispatch_select;
 pub(crate) mod dispatcher;
 pub(crate) mod driver;
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "staged: wired at live qualification")
+)]
+pub(crate) mod driver_attempts;
 pub(crate) mod entitlement;
 #[cfg_attr(
     not(test),
@@ -151,10 +152,7 @@ pub(crate) mod owned_cleanup;
 pub(crate) mod owned_domain;
 #[cfg_attr(
     not(test),
-    expect(
-        dead_code,
-        reason = "the resident child-study stage runner freezes the rule once pilots run"
-    )
+    expect(dead_code, reason = "staged: wired at live qualification")
 )]
 pub(crate) mod pilot_rule;
 #[cfg_attr(
@@ -167,27 +165,18 @@ pub(crate) mod pilot_rule;
 mod prefix;
 #[cfg_attr(
     not(test),
-    expect(
-        dead_code,
-        reason = "applied by the real attempt runner before each child study"
-    )
+    expect(dead_code, reason = "staged: wired at live qualification")
 )]
 pub(crate) mod prefix_identity;
 pub(crate) mod production_host;
 #[cfg_attr(
     not(test),
-    expect(
-        dead_code,
-        reason = "the production StudyExecutor applies profiles once the CPU resolution index is observed"
-    )
+    expect(dead_code, reason = "staged: wired at live qualification")
 )]
 pub(crate) mod profile_applier;
 #[cfg_attr(
     not(test),
-    expect(
-        dead_code,
-        reason = "connected with the production study executor at live qualification"
-    )
+    expect(dead_code, reason = "staged: wired at live qualification")
 )]
 pub(crate) mod profile_hook;
 mod protocol;
@@ -250,10 +239,7 @@ mod steam_inventory;
 pub(crate) mod steam_port;
 #[cfg_attr(
     not(test),
-    expect(
-        dead_code,
-        reason = "the real ProfileHook and StudyAttempts over the Steam host are connected with live qualification"
-    )
+    expect(dead_code, reason = "staged: wired at live qualification")
 )]
 pub(crate) mod study_executor;
 #[cfg_attr(
@@ -464,6 +450,11 @@ pub struct ResearchIntentV1 {
     pub max_attempts: u32,
     pub max_evidence_bytes: u64,
     pub desktop_research_consented: bool,
+    /// Set only on the intent of one child study: the digest of that study in the frozen funnel.
+    /// It makes the child's schedule, journal and report distinct from its siblings'. Absent on a
+    /// whole-campaign intent, where it is not serialized, so existing digests are unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub child_study_sha256: Option<String>,
 }
 
 impl ResearchIntentV1 {
@@ -502,6 +493,15 @@ impl ResearchIntentV1 {
                         .bytes()
                         .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'),
                 "invalid session identity"
+            );
+        }
+        if let Some(child) = &self.child_study_sha256 {
+            anyhow::ensure!(
+                child.len() == 64
+                    && child
+                        .bytes()
+                        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
+                "invalid child study digest"
             );
         }
         for digest in [
@@ -629,6 +629,7 @@ mod tests {
             max_attempts: 10,
             max_evidence_bytes: 1024,
             desktop_research_consented: true,
+            child_study_sha256: None,
         }
     }
 

@@ -33,9 +33,9 @@ struct Script<F: FnMut(&ChildStudy) -> anyhow::Result<StudyRun>> {
 }
 
 impl<F: FnMut(&ChildStudy) -> anyhow::Result<StudyRun>> StudyExecutor for Script<F> {
-    fn execute(&mut self, study: &ChildStudy, _: u32) -> anyhow::Result<StudyRun> {
+    fn poll(&mut self, study: &ChildStudy, _: u32) -> anyhow::Result<Option<StudyRun>> {
         self.asked.push((study.profile, study.stage));
-        (self.run)(study)
+        (self.run)(study).map(Some)
     }
 }
 
@@ -286,5 +286,110 @@ fn a_named_blocker_records_the_study_instead_of_running_it() {
             .dispositions()
             .iter()
             .all(|d| d.result == Some(StudyResult::Blocked))
+    );
+}
+
+/// An executor that needs several polls before a study finishes.
+struct Slow {
+    polls_needed: u32,
+    seen: u32,
+    asked: Vec<(Profile, Stage)>,
+}
+
+impl StudyExecutor for Slow {
+    fn poll(&mut self, study: &ChildStudy, _: u32) -> anyhow::Result<Option<StudyRun>> {
+        self.seen += 1;
+        if self.seen < self.polls_needed {
+            return Ok(None);
+        }
+        self.seen = 0;
+        self.asked.push((study.profile, study.stage));
+        clean(study).map(Some)
+    }
+}
+
+#[test]
+fn a_running_study_stays_pending_and_is_neither_decided_nor_skipped_until_it_finishes() {
+    let root = tempfile::tempdir().unwrap();
+    let plan = studies();
+    let mut runner = StageRunner::new(open(&root, plan.clone()), 100);
+    let mut slow = Slow {
+        polls_needed: 3,
+        seen: 0,
+        asked: Vec::new(),
+    };
+    for _ in 0..2 {
+        assert_eq!(
+            runner.step(&mut slow, &no_blocker, &mut || false).unwrap(),
+            RunnerStep::Pending
+        );
+        assert!(
+            runner
+                .ledger()
+                .dispositions()
+                .iter()
+                .all(|d| d.result.is_none()),
+            "nothing is decided while the study runs"
+        );
+    }
+    let done = runner.step(&mut slow, &no_blocker, &mut || false).unwrap();
+    assert!(matches!(done, RunnerStep::Ran { .. }));
+    assert_eq!(slow.asked, [(Profile::Cpu, Stage::Screen)]);
+    // The same study (not the next) was polled throughout.
+    assert_eq!(
+        runner.ledger().dispositions()[0].result,
+        Some(StudyResult::Qualified)
+    );
+    assert!(runner.ledger().dispositions()[1].result.is_none());
+}
+
+#[test]
+fn a_restart_while_a_study_is_running_polls_the_same_undecided_study_again() {
+    let root = tempfile::tempdir().unwrap();
+    let plan = studies();
+    let mut runner = StageRunner::new(open(&root, plan.clone()), 100);
+    let mut slow = Slow {
+        polls_needed: 5,
+        seen: 0,
+        asked: Vec::new(),
+    };
+    runner.step(&mut slow, &no_blocker, &mut || false).unwrap();
+    drop(runner);
+    // New process: the first undecided study is chosen again (the executor adopts its journal).
+    let mut restarted = StageRunner::new(open(&root, plan), 100);
+    let mut fresh = Script {
+        run: clean,
+        asked: Vec::new(),
+    };
+    restarted
+        .step(&mut fresh, &no_blocker, &mut || false)
+        .unwrap();
+    assert_eq!(fresh.asked, [(Profile::Cpu, Stage::Screen)]);
+}
+
+#[test]
+fn a_health_stop_interrupts_a_running_study_without_deciding_it() {
+    let root = tempfile::tempdir().unwrap();
+    let plan = studies();
+    let mut runner = StageRunner::new(open(&root, plan), 100);
+    let mut slow = Slow {
+        polls_needed: 5,
+        seen: 0,
+        asked: Vec::new(),
+    };
+    assert_eq!(
+        runner.step(&mut slow, &no_blocker, &mut || false).unwrap(),
+        RunnerStep::Pending
+    );
+    assert_eq!(
+        runner.step(&mut slow, &no_blocker, &mut || true).unwrap(),
+        RunnerStep::Halted("BlockedGpuStability")
+    );
+    assert!(
+        runner
+            .ledger()
+            .dispositions()
+            .iter()
+            .all(|d| d.result.is_none())
     );
 }

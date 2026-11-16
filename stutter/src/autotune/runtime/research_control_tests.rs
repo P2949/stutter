@@ -160,6 +160,7 @@ fn fixture() -> (crate::autotune::research::ResearchIntentV1, CampaignFacts) {
         max_attempts: 10,
         max_evidence_bytes: 1_024,
         desktop_research_consented: true,
+        child_study_sha256: None,
     };
     let facts = CampaignFacts {
         uid: intent.uid,

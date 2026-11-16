@@ -43,14 +43,37 @@ pub struct AttemptsOutcome {
     pub conformance: Vec<ProfileConformance>,
 }
 
-/// Runs a study's attempts (the real one drives the journalled `Driver` over the Steam host).
+/// Runs a study's attempts (the real one drives the journalled `Driver` over the Steam host, one
+/// tick per poll).
 pub trait StudyAttempts {
-    fn run(&mut self, study: &ChildStudy, budget: u32) -> anyhow::Result<AttemptsOutcome>;
+    /// The study's own durable journal already holds progress: a restart found it mid-run.
+    fn has_progress(&mut self, study: &ChildStudy) -> bool;
+    /// Advance the study. `Ok(None)` means it is still running.
+    fn poll(&mut self, study: &ChildStudy, budget: u32) -> anyhow::Result<Option<AttemptsOutcome>>;
+}
+
+enum State {
+    Idle,
+    /// Attempts are running; `applied` says a profile must be restored when they end.
+    Running {
+        applied: bool,
+    },
 }
 
 pub struct HostStudyExecutor<P: ProfileHook, A: StudyAttempts> {
     pub profiles: P,
     pub attempts: A,
+    state: State,
+}
+
+impl<P: ProfileHook, A: StudyAttempts> HostStudyExecutor<P, A> {
+    pub fn new(profiles: P, attempts: A) -> Self {
+        Self {
+            profiles,
+            attempts,
+            state: State::Idle,
+        }
+    }
 }
 
 fn run(result: StudyResult, attempts_used: u32, reason: &'static str, halt: bool) -> StudyRun {
@@ -62,28 +85,10 @@ fn run(result: StudyResult, attempts_used: u32, reason: &'static str, halt: bool
     }
 }
 
-impl<P: ProfileHook, A: StudyAttempts> StudyExecutor for HostStudyExecutor<P, A> {
-    fn execute(&mut self, study: &ChildStudy, remaining_attempts: u32) -> anyhow::Result<StudyRun> {
-        let applied = match self.profiles.apply(study.profile) {
-            Ok(applied) => applied,
-            Err(ProfileFailure::Blocked(reason)) => {
-                return Ok(run(StudyResult::Blocked, 0, reason, false));
-            }
-            Err(ProfileFailure::Failed(reason)) => {
-                return Ok(run(StudyResult::Failed, 0, reason, false));
-            }
-        };
-        let outcome = self.attempts.run(study, remaining_attempts);
-        // The profile is restored whatever happened, before anything else is decided.
-        if applied && self.profiles.restore().is_err() {
-            // A game profile that cannot be proven restored stops the whole campaign.
-            let used = outcome
-                .as_ref()
-                .map_or(study.min_attempts, |o| o.attempts_used);
-            return Ok(run(StudyResult::Failed, used, "RestoreUnproven", true));
-        }
-        let outcome = outcome?;
-        Ok(if outcome.health_halt {
+impl<P: ProfileHook, A: StudyAttempts> HostStudyExecutor<P, A> {
+    /// The study's result once its attempts have ended (the profile is already restored).
+    fn judge(study: &ChildStudy, outcome: &AttemptsOutcome) -> StudyRun {
+        if outcome.health_halt {
             run(StudyResult::Failed, outcome.attempts_used, "GpuReset", true)
         } else if outcome.completed < study.min_attempts {
             run(
@@ -110,7 +115,62 @@ impl<P: ProfileHook, A: StudyAttempts> StudyExecutor for HostStudyExecutor<P, A>
             )
         } else {
             run(StudyResult::Qualified, outcome.attempts_used, "", false)
-        })
+        }
+    }
+}
+
+impl<P: ProfileHook, A: StudyAttempts> StudyExecutor for HostStudyExecutor<P, A> {
+    fn poll(
+        &mut self,
+        study: &ChildStudy,
+        remaining_attempts: u32,
+    ) -> anyhow::Result<Option<StudyRun>> {
+        if matches!(self.state, State::Idle) {
+            // A study whose journal already holds progress was interrupted (a restart). Whether
+            // its profile is applied is unknown and its attempts must never be replayed, so the
+            // campaign stops rather than guess.
+            if self.attempts.has_progress(study) {
+                return Ok(Some(run(
+                    StudyResult::Failed,
+                    study.min_attempts,
+                    "InterruptedStudy",
+                    true,
+                )));
+            }
+            let applied = match self.profiles.apply(study.profile) {
+                Ok(applied) => applied,
+                Err(ProfileFailure::Blocked(reason)) => {
+                    return Ok(Some(run(StudyResult::Blocked, 0, reason, false)));
+                }
+                Err(ProfileFailure::Failed(reason)) => {
+                    return Ok(Some(run(StudyResult::Failed, 0, reason, false)));
+                }
+            };
+            self.state = State::Running { applied };
+        }
+        let State::Running { applied } = self.state else {
+            return Ok(None);
+        };
+        let outcome = match self.attempts.poll(study, remaining_attempts) {
+            Ok(None) => return Ok(None),
+            Ok(Some(outcome)) => Ok(outcome),
+            Err(error) => Err(error),
+        };
+        // The profile is restored whatever happened, before anything else is decided.
+        self.state = State::Idle;
+        if applied && self.profiles.restore().is_err() {
+            // A game profile that cannot be proven restored stops the whole campaign.
+            let used = outcome
+                .as_ref()
+                .map_or(study.min_attempts, |o| o.attempts_used);
+            return Ok(Some(run(
+                StudyResult::Failed,
+                used,
+                "RestoreUnproven",
+                true,
+            )));
+        }
+        Ok(Some(Self::judge(study, &outcome?)))
     }
 }
 

@@ -1,10 +1,14 @@
 //! The resident child-study stage runner (PLAN section 6.3). It walks the frozen funnel through the
 //! durable `ChildLedger`: each call decides what cannot run (budget, failed prerequisites, a named
-//! blocker), runs the next ready study through a `StudyExecutor`, and records the sealed result with
+//! blocker), polls the next ready study through a `StudyExecutor`, and records the sealed result with
 //! the attempts it consumed, so a restart resumes at the first undecided study with the right
-//! remaining budget. A health stop is checked before every study and ends the whole funnel without
+//! remaining budget. A health stop is checked before every call and ends the whole funnel without
 //! deciding the studies it prevented. The executor is the only part that touches a game; this
 //! module owns ordering, budget, qualification gating and restart safety.
+//!
+//! The resident controller ticks about once a second and must never block for the hours a study
+//! takes, so execution is polled: a study that is still running returns `Pending` and is polled
+//! again on the next tick.
 
 use super::{
     child_ledger::ChildLedger,
@@ -24,13 +28,21 @@ pub struct StudyRun {
 }
 
 pub trait StudyExecutor {
-    /// Run one ready study within `remaining_attempts`.
-    fn execute(&mut self, study: &ChildStudy, remaining_attempts: u32) -> anyhow::Result<StudyRun>;
+    /// Advance one ready study within `remaining_attempts`. `Ok(None)` means it is still running.
+    /// The same study is polled again until it finishes, including after a restart (the executor
+    /// adopts the study's own durable journal; it never replays an attempt).
+    fn poll(
+        &mut self,
+        study: &ChildStudy,
+        remaining_attempts: u32,
+    ) -> anyhow::Result<Option<StudyRun>>;
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum RunnerStep {
-    /// A study ran and its result is recorded.
+    /// A study is running; nothing is decided yet.
+    Pending,
+    /// A study finished and its result is recorded.
     Ran {
         study: ChildStudy,
         result: StudyResult,
@@ -44,6 +56,9 @@ pub enum RunnerStep {
 pub struct StageRunner {
     ledger: ChildLedger,
     max_attempts: u32,
+    /// The study being polled. Not persisted: after a restart the first undecided study is chosen
+    /// again and the executor adopts its journal.
+    in_flight: Option<ChildStudy>,
 }
 
 impl StageRunner {
@@ -51,6 +66,7 @@ impl StageRunner {
         Self {
             ledger,
             max_attempts,
+            in_flight: None,
         }
     }
 
@@ -73,11 +89,19 @@ impl StageRunner {
             return Ok(RunnerStep::Halted("BlockedGpuStability"));
         }
         let remaining = self.remaining_attempts();
-        let Some(study) = self.ledger.next_runnable(remaining, blocker)? else {
-            return Ok(RunnerStep::Done);
+        let study = match self.in_flight.take() {
+            Some(study) => study,
+            None => match self.ledger.next_runnable(remaining, blocker)? {
+                Some(study) => study,
+                None => return Ok(RunnerStep::Done),
+            },
         };
-        let run = match executor.execute(&study, remaining) {
-            Ok(run) => run,
+        let run = match executor.poll(&study, remaining) {
+            Ok(Some(run)) => run,
+            Ok(None) => {
+                self.in_flight = Some(study);
+                return Ok(RunnerStep::Pending);
+            }
             Err(error) => {
                 // The study may have started games: it is charged its minimum, recorded failed
                 // and the funnel stops; it is never replayed or silently dropped.
