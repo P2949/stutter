@@ -54,6 +54,9 @@ pub struct DriverStudyAttempts {
     /// The action gate an action child arms on the sighted game process (absent: never armed).
     gate: Option<SharedActionGate>,
     armed_for: Option<String>,
+    /// The running study is a within-source treatment study (the gate then permits an action only
+    /// during attempts treated On).
+    treatment_study: bool,
 }
 
 fn dir_name(study: &ChildStudy) -> &str {
@@ -95,6 +98,7 @@ impl DriverStudyAttempts {
             override_now: None,
             gate: None,
             armed_for: None,
+            treatment_study: false,
         }
     }
 
@@ -120,15 +124,21 @@ impl DriverStudyAttempts {
         let (Some(gate), Stage::Action(action)) = (&self.gate, study.stage) else {
             return;
         };
-        if self.armed_for.as_deref() == Some(study.study_sha256.as_str()) {
-            return;
+        if self.armed_for.as_deref() != Some(study.study_sha256.as_str())
+            && let Some(target) = self.host.game_process()
+        {
+            let scope = ActionChildScope::new([action], target, self.parent.deadline_unix_seconds);
+            if gate.lock().is_ok_and(|mut gate| gate.arm(scope)) {
+                self.armed_for = Some(study.study_sha256.clone());
+            }
         }
-        let Some(target) = self.host.game_process() else {
-            return;
-        };
-        let scope = ActionChildScope::new([action], target, self.parent.deadline_unix_seconds);
-        if gate.lock().is_ok_and(|mut gate| gate.arm(scope)) {
-            self.armed_for = Some(study.study_sha256.clone());
+        // In a treatment study the action may be applied only while an attempt treated On runs; this
+        // is set after arming, which starts from permitting.
+        if self.treatment_study {
+            let on = self.host.attempt_treatment() == Some(super::Treatment::On);
+            if let Ok(mut gate) = gate.lock() {
+                gate.set_attempt_on(on);
+            }
         }
     }
 
@@ -181,6 +191,9 @@ impl DriverStudyAttempts {
             _ => Vec::new(),
         };
         self.host.set_enabled_factors(&factors);
+        let treatments = super::treatment::treatments_of(&intent)?;
+        self.treatment_study = treatments.is_some();
+        self.host.set_treatments(treatments);
         let schedule = build_schedule(&intent)?;
         let len = schedule.len();
         let journal = ResearchJournal::open(journal_dir.into(), intent.uid, schedule)?;

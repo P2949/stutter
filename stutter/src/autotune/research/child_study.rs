@@ -57,13 +57,26 @@ pub enum StudyArms {
     /// feature and action studies compare two conditions, so their attempt counts divide across two
     /// arms whatever the campaign's tool count is.
     Pair,
+    /// One of them, fixed after the screen (the control), measured with a factor or an action off and
+    /// on: a within-source treatment, not a comparison of Proton builds.
+    Single,
 }
 
 impl ChildStudy {
+    /// The treatment a within-source study switches off and on (none for any other study).
+    pub fn treatment_spec(&self) -> Option<super::TreatmentSpec> {
+        match self.stage {
+            Stage::Feature(factor) => Some(super::TreatmentSpec::Factor(factor)),
+            Stage::Action(action) => Some(super::TreatmentSpec::Action(action)),
+            Stage::Screen | Stage::Pilot | Stage::Confirm => None,
+        }
+    }
+
     pub fn arms(&self) -> StudyArms {
         match self.stage {
             Stage::Screen => StudyArms::All,
-            Stage::Pilot | Stage::Confirm | Stage::Action(_) | Stage::Feature(_) => StudyArms::Pair,
+            Stage::Pilot | Stage::Confirm => StudyArms::Pair,
+            Stage::Action(_) | Stage::Feature(_) => StudyArms::Single,
         }
     }
 }
@@ -299,16 +312,6 @@ pub fn next_study<'a>(
     }
 }
 
-/// A feature or action study must compare one fixed Proton build with the factor or action off and
-/// on; this build can only schedule two Proton builds, which cannot isolate a within-source
-/// treatment. Such a study is decided as blocked with this reason, never run as something else.
-pub fn treatment_design_blocker(study: &ChildStudy) -> Option<&'static str> {
-    match study.stage {
-        Stage::Feature(_) | Stage::Action(_) => Some("BlockedTreatmentDesign"),
-        Stage::Screen | Stage::Pilot | Stage::Confirm => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -321,22 +324,6 @@ mod tests {
             identity_sha256: "b".repeat(64),
         });
         intent
-    }
-
-    #[test]
-    fn only_within_source_treatment_studies_are_blocked_by_the_design_blocker() {
-        let mut intent = intent();
-        intent.actions = vec![ResearchAction::CpuAffinityProfile];
-        intent.factors = vec![ResearchFactor::NtSync];
-        for study in plan(&intent).unwrap() {
-            let blocked = treatment_design_blocker(&study);
-            match study.stage {
-                Stage::Feature(_) | Stage::Action(_) => {
-                    assert_eq!(blocked, Some("BlockedTreatmentDesign"))
-                }
-                _ => assert_eq!(blocked, None),
-            }
-        }
     }
 
     #[test]

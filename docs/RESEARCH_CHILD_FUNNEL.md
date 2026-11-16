@@ -65,12 +65,11 @@ suppression: only the two supported actions the child's scope authorizes, only a
 sighted process. Restoration evidence reads the existing worker's outstanding-token count;
 unknown counts as unproven. No new root IPC. Not yet exercised against the real worker.
 
-## Treatment designs (open)
+## Treatment designs
 
-Feature and action studies are decided `BlockedTreatmentDesign` in the production funnel. They must
-compare one fixed Proton build with the factor or action off versus on (action: existing Stutter
-action versus a matched no-action control), but this build schedules only two *Proton builds*, which
-cannot isolate a within-source treatment. Running them as two-Proton comparisons would mislabel the
-evidence, so they are recorded as blocked until the schedule, dispatch environment, journal and
-verifier carry a treatment dimension separate from the Proton source. The action gate, receipts and
-kernel-state restoration proof are in place for when that design exists.
+Feature and action studies measure **one fixed Proton build** (the screen's control) with the factor or
+action off versus on (`StudyArms::Single`, `treatment`, `Treatment::{Off,On}`): the schedule balances the
+two treatments in complete seeded blocks, the host applies the factor only to attempts treated On, the
+action gate permits an action only during On attempts, and the report is one paired result carrying the
+treatment. See `docs/RESEARCH_TREATMENT_DESIGN.md`. Whether the real Steam host honours the factor and
+whether an action helps are still unproven without a live run.

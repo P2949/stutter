@@ -41,10 +41,11 @@ fn study_of(parent: &ResearchIntentV1, stage: fn(&Stage) -> bool) -> ChildStudy 
 }
 
 fn built(parent: &ResearchIntentV1, study: &ChildStudy) -> ResearchIntentV1 {
-    let arms: Vec<_> = if study.arms() == crate::autotune::research::child_study::StudyArms::All {
-        parent.tools.iter().map(|tool| tool.source).collect()
-    } else {
-        vec![ProtonSource::ValveStable, ProtonSource::Ge]
+    use crate::autotune::research::child_study::StudyArms;
+    let arms: Vec<_> = match study.arms() {
+        StudyArms::All => parent.tools.iter().map(|tool| tool.source).collect(),
+        StudyArms::Pair => vec![ProtonSource::ValveStable, ProtonSource::Ge],
+        StudyArms::Single => vec![ProtonSource::ValveStable],
     };
     let rule = matches!(study.stage, Stage::Confirm).then(|| freeze(&[70.0, 73.0, 67.0]).unwrap());
     child_intent(parent, study, &arms, rule.as_ref()).unwrap()

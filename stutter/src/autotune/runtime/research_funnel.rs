@@ -93,7 +93,7 @@ fn build(
         intent,
         profiles(study_dir, intent),
         attempts,
-        crate::autotune::research::child_study::treatment_design_blocker,
+        |_| None,
         rules,
     )?
     .with_action_gate(gate))

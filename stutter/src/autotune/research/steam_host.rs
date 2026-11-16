@@ -62,16 +62,34 @@ pub struct SteamAttemptHost<P: SteamPort> {
     current: Option<u32>,
     /// The factors enabled for the attempts that follow; empty is the observe-only baseline.
     factors: Vec<super::ResearchFactor>,
+    /// The running study's per-attempt treatments (none: the attempts are Proton arms).
+    treatments: Option<Vec<super::Treatment>>,
     /// The arm's frozen installation, to bind the mapped runtime to when the result arrives.
     tool_dir: Option<PathBuf>,
 }
 
 impl<P: SteamPort> SteamAttemptHost<P> {
+    /// The factors this attempt runs with: the study's factors, except that in a within-source study
+    /// the Off attempts run at baseline.
+    fn factors_for(&self, slot: &AttemptSlot) -> Vec<super::ResearchFactor> {
+        let off = self
+            .treatments
+            .as_ref()
+            .and_then(|treatments| treatments.get(slot.index as usize))
+            .is_some_and(|treatment| *treatment == super::Treatment::Off);
+        if off {
+            Vec::new()
+        } else {
+            self.factors.clone()
+        }
+    }
+
     pub fn new(port: P) -> Self {
         Self {
             port,
             current: None,
             factors: Vec::new(),
+            treatments: None,
             tool_dir: None,
         }
     }
@@ -98,11 +116,21 @@ impl<P: SteamPort> AttemptHost for SteamAttemptHost<P> {
         self.factors = factors.to_vec();
     }
 
+    fn set_treatments(&mut self, treatments: Option<Vec<super::Treatment>>) {
+        self.treatments = treatments;
+    }
+
+    fn attempt_treatment(&mut self) -> Option<super::Treatment> {
+        let index = usize::try_from(self.current?).ok()?;
+        self.treatments.as_ref()?.get(index).copied()
+    }
+
     fn game_process(&mut self) -> Option<super::action_child::ChildTarget> {
         self.port.game_process()
     }
 
     fn arm_spec(&mut self, slot: &AttemptSlot) -> anyhow::Result<ArmSpec> {
+        // (a within-source study applies its factor only to the attempts treated On)
         let (steamapps, proton_manifest) = self.port.library_paths();
         Ok(ArmSpec {
             tool_dir: self.port.tool_dir(slot)?,
@@ -110,7 +138,7 @@ impl<P: SteamPort> AttemptHost for SteamAttemptHost<P> {
             study_compat_data: self.port.study_compat_data().join(slot.arm.dir_name()),
             // Only the factors this study enabled (none for screening): a blocked or conflicting
             // factor refuses the arm rather than running it at baseline unannounced.
-            arm_env: features::arm_env(slot.arm, &self.factors)
+            arm_env: features::arm_env(slot.arm, &self.factors_for(slot))
                 .map_err(|(f, b)| anyhow::anyhow!("feature {f:?} blocked: {b:?}"))?,
             steamapps,
             proton_manifest,
@@ -460,5 +488,38 @@ mod tests {
         // Clearing the factors returns to baseline.
         host.set_enabled_factors(&[]);
         assert!(host.arm_spec(&slot()).unwrap().arm_env.is_empty());
+    }
+
+    #[test]
+    fn a_within_source_study_applies_its_factor_only_to_the_attempts_treated_on() {
+        use crate::autotune::research::{ResearchFactor, Treatment};
+        let mut host = host(vec![]);
+        let mut em = slot();
+        em.arm = ProtonSource::Em;
+        host.set_enabled_factors(&[ResearchFactor::WineWayland]);
+        host.set_treatments(Some(vec![Treatment::Off, Treatment::On, Treatment::On]));
+        let at = |index: u32| AttemptSlot {
+            index,
+            ..em.clone()
+        };
+        // Off runs at baseline; On carries the factor; the study's own arm is the same build.
+        assert!(host.arm_spec(&at(0)).unwrap().arm_env.is_empty());
+        assert_eq!(
+            host.arm_spec(&at(1)).unwrap().arm_env["PROTON_ENABLE_WAYLAND"],
+            "1"
+        );
+        // The treatment of the running attempt follows the launched slot.
+        host.current = Some(0);
+        assert_eq!(host.attempt_treatment(), Some(Treatment::Off));
+        host.current = Some(2);
+        assert_eq!(host.attempt_treatment(), Some(Treatment::On));
+        host.current = None;
+        assert_eq!(host.attempt_treatment(), None);
+        // A study without treatments applies its factor to every attempt, as before.
+        host.set_treatments(None);
+        assert_eq!(
+            host.arm_spec(&at(0)).unwrap().arm_env["PROTON_ENABLE_WAYLAND"],
+            "1"
+        );
     }
 }

@@ -23,6 +23,19 @@ fn setup(
     SharedGate,
     ResearchIntentV1,
 ) {
+    setup_with(study_of, Some(crate::autotune::research::Treatment::On))
+}
+
+fn setup_with(
+    study_of: fn(&Stage) -> bool,
+    treatment: Option<crate::autotune::research::Treatment>,
+) -> (
+    tempfile::TempDir,
+    DriverStudyAttempts,
+    ChildStudy,
+    SharedGate,
+    ResearchIntentV1,
+) {
     let root = tempfile::tempdir().unwrap();
     std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
     let mut parent = parent();
@@ -42,6 +55,7 @@ fn setup(
     ));
     let mut host = Host::finishing();
     host.process = Some(game());
+    host.treatment = treatment;
     let mut now = parent.issued_unix_seconds + 1;
     let attempts = DriverStudyAttempts::new(
         File::open(root.path()).unwrap(),
@@ -129,4 +143,65 @@ fn a_gate_that_still_holds_an_outstanding_action_is_not_clean_evidence() {
     let outcome = run_to_end(&mut runner, &study);
     assert_eq!(outcome.stage_evidence, Some(false));
     let _ = ActionChildScope::new([], game(), 0);
+}
+
+#[test]
+fn an_action_study_is_one_build_off_versus_on_and_the_gate_permits_only_on_attempts() {
+    use crate::autotune::research::Treatment;
+    let permits = |treatment| {
+        let (_root, mut runner, study, gate, parent) =
+            setup_with(|stage| matches!(stage, Stage::Action(_)), Some(treatment));
+        assert_eq!(runner.poll(&study, 100).unwrap(), None);
+        assert!(gate.lock().unwrap().is_armed());
+        let now = parent.issued_unix_seconds + 5;
+        let mut gate = gate.lock().unwrap();
+        gate.permit(Some(ResearchAction::CpuAffinityProfile), game(), now)
+    };
+    assert!(
+        permits(Treatment::On),
+        "an attempt treated On may be acted on"
+    );
+    assert!(
+        !permits(Treatment::Off),
+        "an attempt treated Off applies nothing"
+    );
+}
+
+#[test]
+fn an_action_study_directory_holds_a_one_build_treatment_intent() {
+    let (root, mut runner, study, _gate, parent) = setup(|stage| matches!(stage, Stage::Action(_)));
+    assert_eq!(runner.poll(&study, 100).unwrap(), None);
+    let intent: ResearchIntentV1 = serde_json::from_slice(
+        &std::fs::read(
+            root.path()
+                .join("studies")
+                .join(&study.study_sha256[..16])
+                .join("intent.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(intent.tools.len(), 1, "one Proton build");
+    assert_eq!(intent.treatment, study.treatment_spec());
+    assert!(intent.treatment.is_some());
+    assert_eq!(intent.max_attempts, study.min_attempts);
+    assert!(parent.tools.len() >= 2, "the campaign itself has several");
+}
+
+#[test]
+fn a_finished_treatment_study_reconstructs_and_is_derived_from_its_campaign() {
+    use crate::autotune::research::child_verify::verify_children;
+    let (root, mut runner, study, _gate, parent) = setup(|stage| matches!(stage, Stage::Action(_)));
+    run_to_end(&mut runner, &study);
+    let uid = crate::syscall::geteuid();
+    let result = verify_children(&File::open(root.path()).unwrap(), uid, &parent, &|_| {
+        std::path::PathBuf::from("/nonexistent")
+    })
+    .unwrap();
+    let child = &result.children[0];
+    assert!(child.reconstruction, "{:?}", child.problem);
+    let report = child.report.as_ref().unwrap();
+    // The comparison is within one build: a treatment, not a second Proton.
+    assert_eq!(report["treatment"]["action"], "cpu_affinity_profile");
+    assert_eq!(report["arms"].as_array().unwrap().len(), 1);
 }

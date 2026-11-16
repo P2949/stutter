@@ -71,11 +71,23 @@ fn every_stage_of_a_six_proton_campaign_builds_a_schedule_over_its_own_arms() {
         let arms: Vec<ProtonSource> = match study.arms() {
             StudyArms::All => SIX.to_vec(),
             StudyArms::Pair => pair().to_vec(),
+            StudyArms::Single => vec![ProtonSource::ValveStable],
         };
         let child = build(&parent, &study, &arms)
             .unwrap_or_else(|e| panic!("{:?}/{:?}: {e:#}", study.profile, study.stage));
         let schedule = build_schedule(&child).unwrap();
         assert_eq!(schedule.len(), study.min_attempts as usize);
+        if study.arms() == StudyArms::Single {
+            // One build, two treatments: the arm is that build in every slot, the treatment is carried
+            // beside it, balanced off and on.
+            assert!(schedule.iter().all(|slot| slot.arm == arms[0]));
+            let treatments = crate::autotune::research::treatment::treatments_of(&child)
+                .unwrap()
+                .unwrap();
+            assert_eq!(treatments.len(), schedule.len());
+            assert_eq!(child.treatment, study.treatment_spec());
+            continue;
+        }
         // Every arm of the study, and only those, appears equally often (AB/BA balance).
         for arm in &arms {
             let count = schedule.iter().filter(|slot| slot.arm == *arm).count();
@@ -209,15 +221,18 @@ fn a_feature_or_action_study_needs_the_campaigns_own_authorization_for_that_fact
         .iter()
         .find(|s| matches!(s.stage, Stage::Action(_)))
         .unwrap();
-    assert!(build(&parent, feature, &pair()).is_ok());
-    assert!(build(&parent, action, &pair()).is_ok());
+    let one = [ProtonSource::ValveStable];
+    assert!(build(&parent, feature, &one).is_ok());
+    assert!(build(&parent, action, &one).is_ok());
+    // A within-source study is one build, never a pair.
+    assert!(build(&parent, feature, &pair()).is_err());
     // The same studies against a campaign that never authorized the factor or the action.
     let mut no_factor = parent.clone();
     no_factor.factors.clear();
-    assert!(build(&no_factor, feature, &pair()).is_err());
+    assert!(build(&no_factor, feature, &one).is_err());
     let mut no_action = parent.clone();
     no_action.actions.clear();
-    assert!(build(&no_action, action, &pair()).is_err());
+    assert!(build(&no_action, action, &one).is_err());
     let mut other = parent.clone();
     other.factors = vec![ResearchFactor::Hdr];
     assert!(

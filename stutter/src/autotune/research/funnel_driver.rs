@@ -42,6 +42,15 @@ pub fn inputs_for_study(
             arms: parent.tools.iter().map(|tool| tool.source).collect(),
             rule: None,
         },
+        // A treatment study measures the screen's control build alone, with the switch off and on.
+        StudyArms::Single => StudyInputs {
+            arms: vec![
+                select_pair(parent, fps).ok_or_else(|| {
+                    anyhow::anyhow!("the screen did not measure a control and a candidate")
+                })?[0],
+            ],
+            rule: None,
+        },
         StudyArms::Pair => StudyInputs {
             arms: select_pair(parent, fps)
                 .ok_or_else(|| {
@@ -67,7 +76,9 @@ pub fn production_inputs(
     Box::new(move |study| {
         let fps = match study.arms() {
             StudyArms::All => BTreeMap::new(),
-            StudyArms::Pair => screen_fps(&campaign, parent.uid, &screen_of(&parent, study)?)?,
+            StudyArms::Pair | StudyArms::Single => {
+                screen_fps(&campaign, parent.uid, &screen_of(&parent, study)?)?
+            }
         };
         let rule = study
             .depends_on

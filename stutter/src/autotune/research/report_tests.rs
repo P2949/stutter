@@ -603,3 +603,71 @@ fn zero_warmup_and_washout_rest_on_whole_launches_in_complete_order_balanced_blo
         "no arm leads every block: {firsts:?}"
     );
 }
+
+mod within_source {
+    use super::*;
+    use crate::autotune::research::{
+        ResearchFactor, Treatment, TreatmentSpec, treatment::treatments_of,
+    };
+
+    fn treated() -> (ResearchIntentV1, Vec<AttemptSlot>, Vec<Treatment>) {
+        let mut intent = intent();
+        intent.factors = vec![ResearchFactor::NtSync];
+        intent.child_study_sha256 = Some("ab".repeat(32));
+        intent.treatment = Some(TreatmentSpec::Factor(ResearchFactor::NtSync));
+        intent.max_attempts = 8;
+        let schedule = build_schedule(&intent).unwrap();
+        let treatments = treatments_of(&intent).unwrap().unwrap();
+        (intent, schedule, treatments)
+    }
+
+    #[test]
+    fn one_build_with_the_switch_on_versus_off_is_one_paired_result_that_rebuilds_identically() {
+        let (intent, schedule, treatments) = treated();
+        let (records, evidence) = run(&schedule, |slot| {
+            let on = treatments[slot.index as usize] == Treatment::On;
+            Some(if on { 77.0 } else { 70.0 } + f64::from(slot.index) * 0.01)
+        });
+        let report = build_report(&intent, &records, &evidence).unwrap();
+        assert_eq!(report.control, ProtonSource::Ge);
+        assert_eq!(report.arms.len(), 1, "one result, not a second Proton");
+        assert_eq!(report.arms[0].source, ProtonSource::Ge);
+        assert_eq!(report.arms[0].pairs, 4);
+        assert_eq!(report.arms[0].numeric_verdict.as_deref(), Some("improved"));
+        assert_eq!(report.treatment, intent.treatment);
+        // Not provenance-qualified: the fixture sealed no native completion.
+        assert_eq!(report.arms[0].status, "unqualified_provenance");
+        verify_report(&intent, &records, &evidence, &report).unwrap();
+    }
+
+    #[test]
+    fn a_block_missing_either_treatment_is_not_a_pair() {
+        let (intent, schedule, treatments) = treated();
+        // The first block's "on" attempt did not complete.
+        let on_first = treatments.iter().position(|t| *t == Treatment::On).unwrap();
+        let (records, evidence) = run(&schedule, |slot| {
+            if slot.index as usize == on_first {
+                return None;
+            }
+            Some(70.0 + f64::from(slot.index) * 0.01)
+        });
+        let report = build_report(&intent, &records, &evidence).unwrap();
+        assert_eq!(
+            report.arms[0].pairs, 3,
+            "an incomplete block is dropped whole"
+        );
+    }
+
+    #[test]
+    fn a_plain_report_carries_no_treatment_and_keeps_its_bytes() {
+        let (intent, schedule) = study(6);
+        let (records, evidence) = run(&schedule, |_| Some(70.0));
+        let report = build_report(&intent, &records, &evidence).unwrap();
+        assert_eq!(report.treatment, None);
+        assert!(
+            !serde_json::to_string(&report)
+                .unwrap()
+                .contains("treatment")
+        );
+    }
+}

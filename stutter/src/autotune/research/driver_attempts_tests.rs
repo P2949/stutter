@@ -19,8 +19,8 @@ struct Host {
     ticks: u32,
     health: bool,
     process: Option<crate::autotune::research::action_child::ChildTarget>,
-    /// The host's settlement cannot be proven (its abort fails).
     abort_fails: bool,
+    treatment: Option<crate::autotune::research::Treatment>,
     /// Every factor set the driver enabled before a study, shared so a test can read it back.
     seen_factors:
         std::sync::Arc<std::sync::Mutex<Vec<Vec<crate::autotune::research::ResearchFactor>>>>,
@@ -38,6 +38,7 @@ impl Host {
             health: false,
             process: None,
             abort_fails: false,
+            treatment: None,
         }
     }
 }
@@ -48,6 +49,9 @@ impl AttemptHost for Host {
     }
     fn health_blocked(&mut self) -> bool {
         self.health
+    }
+    fn attempt_treatment(&mut self) -> Option<crate::autotune::research::Treatment> {
+        self.treatment
     }
     fn set_enabled_factors(&mut self, factors: &[crate::autotune::research::ResearchFactor]) {
         self.seen_factors.lock().unwrap().push(factors.to_vec());
@@ -322,73 +326,15 @@ mod child_verification {
     }
 }
 
-#[test]
-fn a_feature_study_enables_exactly_its_factor_and_the_next_study_starts_from_baseline() {
-    use crate::autotune::research::{ResearchAction, ResearchFactor, child_study::Stage};
-    let root = tempfile::tempdir().unwrap();
-    std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
-    let mut parent = parent();
-    parent.factors = vec![ResearchFactor::NtSync];
-    parent.actions = vec![ResearchAction::CpuAffinityProfile];
-    let plan = plan(&parent).unwrap();
-    let feature = plan
-        .iter()
-        .find(|s| matches!(s.stage, Stage::Feature(_)))
-        .unwrap()
-        .clone();
-    let confirm = plan
-        .iter()
-        .find(|s| matches!(s.stage, Stage::Confirm))
-        .unwrap()
-        .clone();
-    let host = Host::finishing();
-    let seen = host.seen_factors.clone();
-    let mut now = parent.issued_unix_seconds + 1;
-    let mut runner = DriverStudyAttempts::new(
-        File::open(root.path()).unwrap(),
-        parent.clone(),
-        Box::new(host),
-        Box::new(move || {
-            now += 1;
-            now
-        }),
-        Box::new(|| Ok(())),
-        Box::new(|_| std::path::PathBuf::from("/nonexistent")),
-        Box::new(|study| Ok(inputs_for(study))),
-    );
-    run_to_end(&mut runner, &feature);
-    run_to_end(&mut runner, &confirm);
-    assert_eq!(
-        *seen.lock().unwrap(),
-        vec![vec![ResearchFactor::NtSync], Vec::<ResearchFactor>::new()],
-        "the feature study's factor is enabled for it alone"
-    );
-    // A feature study the campaign never authorized is refused before any directory exists.
-    let mut unauthorized = parent.clone();
-    unauthorized.factors.clear();
-    let root2 = tempfile::tempdir().unwrap();
-    std::fs::set_permissions(root2.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
-    let mut now2 = parent.issued_unix_seconds + 1;
-    let mut refusing = DriverStudyAttempts::new(
-        File::open(root2.path()).unwrap(),
-        unauthorized,
-        Box::new(Host::finishing()),
-        Box::new(move || {
-            now2 += 1;
-            now2
-        }),
-        Box::new(|| Ok(())),
-        Box::new(|_| std::path::PathBuf::from("/nonexistent")),
-        Box::new(|study| Ok(inputs_for(study))),
-    );
-    assert!(refusing.poll(&feature, 100).is_err());
-    assert!(!root2.path().join("studies").exists());
-}
-
-/// The inputs of the two-arm fixture campaign: its arms, and the rule a confirmation needs.
+/// The fixture campaign's arms (one build for a treatment study) and a confirmation's rule.
 fn inputs_for(study: &ChildStudy) -> StudyInputs {
     StudyInputs {
-        arms: vec![ProtonSource::Ge, ProtonSource::ValveStable],
+        arms: match study.arms() {
+            crate::autotune::research::child_study::StudyArms::Single => {
+                vec![ProtonSource::ValveStable]
+            }
+            _ => vec![ProtonSource::Ge, ProtonSource::ValveStable],
+        },
         rule: matches!(
             study.stage,
             crate::autotune::research::child_study::Stage::Confirm
@@ -693,3 +639,6 @@ mod action_stage;
 
 #[path = "driver_attempts_abort_tests.rs"]
 mod abort;
+
+#[path = "driver_attempts_feature_tests.rs"]
+mod feature;

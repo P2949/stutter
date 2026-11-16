@@ -90,6 +90,7 @@ mod tests {
                 ci_high_percent: numeric.then_some(11.0),
                 rule_sha256: None,
             }],
+            treatment: None,
         }
     }
 

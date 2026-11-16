@@ -140,6 +140,8 @@ pub(crate) mod oracle;
 pub(crate) mod owned_cleanup;
 pub(crate) mod owned_domain;
 pub(crate) mod pilot_rule;
+pub(crate) mod treatment;
+pub use treatment::{Treatment, TreatmentSpec};
 #[cfg_attr(
     not(test),
     expect(
@@ -431,6 +433,10 @@ pub struct ResearchIntentV1 {
     /// Only on a confirmation study's intent: the rule its pilot froze, digest-bound before any run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub confirmation_rule: Option<pilot_rule::FrozenConfirmationRule>,
+    /// Only on a feature or action study's intent: the factor or action it switches off and on over
+    /// one fixed Proton build (see `treatment`). Absent otherwise, so existing digests are unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub treatment: Option<TreatmentSpec>,
 }
 
 impl ResearchIntentV1 {
@@ -475,6 +481,19 @@ impl ResearchIntentV1 {
             anyhow::ensure!(
                 self.child_study_sha256.is_some() && rule.is_consistent(),
                 "invalid confirmation rule"
+            );
+        }
+        if let Some(spec) = self.treatment {
+            let authorized = match spec {
+                TreatmentSpec::Factor(factor) => self.factors.contains(&factor),
+                TreatmentSpec::Action(action) => self.actions.contains(&action),
+            };
+            anyhow::ensure!(
+                self.child_study_sha256.is_some()
+                    && self.confirmation_rule.is_none()
+                    && self.tools.len() == 1
+                    && authorized,
+                "invalid treatment"
             );
         }
         if let Some(child) = &self.child_study_sha256 {
@@ -613,6 +632,7 @@ mod tests {
             desktop_research_consented: true,
             child_study_sha256: None,
             confirmation_rule: None,
+            treatment: None,
         }
     }
 

@@ -100,6 +100,10 @@ pub struct ResearchReportV1 {
     pub attempts_completed: usize,
     pub control: ProtonSource,
     pub arms: Vec<ArmResult>,
+    /// Present only for a within-source study: the one arm result is that build measured with this
+    /// factor or action on versus off, not a second Proton.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub treatment: Option<super::TreatmentSpec>,
 }
 
 fn verdict_name(verdict: Verdict) -> &'static str {
@@ -203,6 +207,19 @@ pub fn build_report(
         evidence.len() == fps.len(),
         "unsealed or unexpected evidence exists"
     );
+    if let Some(treatments) = super::treatment::treatments_of(intent)? {
+        let result = treatment_result(intent, &schedule, &fps, evidence, &treatments)?;
+        return Ok(ResearchReportV1 {
+            schema_version: 2,
+            intent_sha256: intent.digest()?,
+            attempts_scheduled: schedule.len(),
+            attempts_sealed: records.len(),
+            attempts_completed: fps.len(),
+            control,
+            arms: vec![result],
+            treatment: intent.treatment,
+        });
+    }
     let blocks = schedule.len() / arms.len();
     let comparisons = (arms.len() - 1) as u32;
     let confidence = 1.0 - FAMILY_ALPHA / f64::from(comparisons);
@@ -288,7 +305,70 @@ pub fn build_report(
         attempts_completed: fps.len(),
         control,
         arms: results,
+        treatment: None,
     })
+}
+
+/// The one result of a within-source study: this build with the switch on versus off, paired within
+/// each complete block. Whole runs are the units, as everywhere else.
+fn treatment_result(
+    intent: &ResearchIntentV1,
+    schedule: &[AttemptSlot],
+    fps: &BTreeMap<u32, f64>,
+    evidence: &BTreeMap<u32, AttemptEvidenceV1>,
+    treatments: &[super::Treatment],
+) -> anyhow::Result<ArmResult> {
+    use super::Treatment::{Off, On};
+    let source = intent.tools[0].source;
+    let seed = u64::from_str_radix(&intent.digest()?[16..32], 16)?;
+    let blocks = schedule.len() / 2;
+    let value = |block: usize, wanted: super::Treatment| -> Option<f64> {
+        let index = (block * 2..block * 2 + 2).find(|index| treatments[*index] == wanted)?;
+        fps.get(&schedule[index].index).copied()
+    };
+    // Every attempt is the same build, so the context must agree across all of them.
+    let context = context_state(evidence);
+    let (mut left, mut right) = (Vec::new(), Vec::new());
+    for block in 0..blocks {
+        if let (Some(off), Some(on)) = (value(block, Off), value(block, On)) {
+            left.push(off);
+            right.push(on);
+        }
+    }
+    let rule = Rule {
+        design: design(source, schedule, blocks, 1.0 - FAMILY_ALPHA, seed, None),
+        family_alpha: FAMILY_ALPHA,
+        comparisons: 1,
+        metric: NativeMetric::AverageFps,
+    };
+    Ok(
+        match analyse_pairs(&rule, &left, &right, context == ContextState::Drifted) {
+            Ok(outcome) => ArmResult {
+                source,
+                status: match context {
+                    ContextState::Consistent => "native_context_consistent_unqualified",
+                    _ => "unqualified_provenance",
+                }
+                .into(),
+                numeric_verdict: Some(verdict_name(outcome.verdict).into()),
+                pairs: outcome.pairs,
+                mean_effect_percent: Some(outcome.mean_effect * 100.0),
+                ci_low_percent: Some(outcome.ci_low * 100.0),
+                ci_high_percent: Some(outcome.ci_high * 100.0),
+                rule_sha256: Some(outcome.rule_sha256),
+            },
+            Err(refused) => ArmResult {
+                source,
+                status: format!("refused_{refused:?}"),
+                numeric_verdict: None,
+                pairs: left.len(),
+                mean_effect_percent: None,
+                ci_low_percent: None,
+                ci_high_percent: None,
+                rule_sha256: None,
+            },
+        },
+    )
 }
 
 /// Fixture-only reconstruction: rebuild from the same raw inputs and require identical bytes.

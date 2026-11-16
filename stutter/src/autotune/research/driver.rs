@@ -57,6 +57,13 @@ pub trait AttemptHost {
     /// for every other study). The host derives each arm's environment from this, never from the
     /// slot alone.
     fn set_enabled_factors(&mut self, _factors: &[super::ResearchFactor]) {}
+    /// The treatment of every attempt of the running study, in schedule order (`None` for a study
+    /// whose attempts are the Proton arms). A factor is applied only to attempts treated `On`.
+    fn set_treatments(&mut self, _treatments: Option<Vec<super::Treatment>>) {}
+    /// The treatment of the attempt currently launched, when the running study has treatments.
+    fn attempt_treatment(&mut self) -> Option<super::Treatment> {
+        None
+    }
     /// The sighted game process of the current attempt, once attested; an action child arms its
     /// gate on exactly this process.
     fn game_process(&mut self) -> Option<super::action_child::ChildTarget> {
@@ -128,7 +135,12 @@ pub struct Driver {
 /// Deterministic schedule: a pure function of the intent, so a verifier can regenerate it.
 pub fn build_schedule(intent: &ResearchIntentV1) -> anyhow::Result<Vec<AttemptSlot>> {
     let digest = intent.digest()?;
-    let arms: Vec<_> = intent.tools.iter().map(|tool| tool.source).collect();
+    let arms: Vec<_> = if intent.treatment.is_some() && intent.tools.len() == 1 {
+        // Two treatments of one build: the arm each attempt records is that build either way.
+        vec![intent.tools[0].source; 2]
+    } else {
+        intent.tools.iter().map(|tool| tool.source).collect()
+    };
     anyhow::ensure!(
         arms.len() >= 2,
         "a comparison needs at least two eligible tools"

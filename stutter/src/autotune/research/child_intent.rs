@@ -32,8 +32,13 @@ pub fn child_intent(
         .filter(|tool| arms.contains(&tool.source))
         .cloned()
         .collect();
+    let minimum = if study.arms() == StudyArms::Single {
+        1
+    } else {
+        2
+    };
     anyhow::ensure!(
-        tools.len() == arms.len() && tools.len() >= 2,
+        tools.len() == arms.len() && tools.len() >= minimum,
         "the arms are not distinct tools of this campaign"
     );
     match study.arms() {
@@ -44,6 +49,10 @@ pub fn child_intent(
         StudyArms::Pair => {
             anyhow::ensure!(tools.len() == 2, "this study compares exactly two arms")
         }
+        StudyArms::Single => anyhow::ensure!(
+            tools.len() == 1,
+            "a treatment study measures exactly one Proton build"
+        ),
     }
     // A feature or action study can only use what the campaign's intent authorized.
     match study.stage {
@@ -67,7 +76,12 @@ pub fn child_intent(
         (_, Some(_)) => anyhow::bail!("only a confirmation carries a frozen rule"),
         (_, None) => {}
     }
-    let count = u32::try_from(tools.len())?;
+    // A treatment study fills its blocks across the two treatments of its one build.
+    let count = if study.arms() == StudyArms::Single {
+        2
+    } else {
+        u32::try_from(tools.len())?
+    };
     anyhow::ensure!(
         study.min_attempts > 0 && study.min_attempts.is_multiple_of(count),
         "the study's attempts do not fill whole blocks across its arms"
@@ -81,6 +95,7 @@ pub fn child_intent(
     child.max_attempts = study.min_attempts;
     child.child_study_sha256 = Some(study.study_sha256.clone());
     child.confirmation_rule = rule.cloned();
+    child.treatment = study.treatment_spec();
     child.validate()?;
     Ok(child)
 }

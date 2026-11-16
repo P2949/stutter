@@ -93,6 +93,7 @@ pub(crate) fn derived_from(
         && match study.arms() {
             StudyArms::All => child.tools == parent.tools,
             StudyArms::Pair => child.tools.len() == 2,
+            StudyArms::Single => child.tools.len() == 1,
         };
     let rule_ok = match (study.stage, &child.confirmation_rule) {
         (Stage::Confirm, Some(rule)) => rule.is_consistent(),
@@ -105,7 +106,15 @@ pub(crate) fn derived_from(
     rebuilt.max_attempts = parent.max_attempts;
     rebuilt.child_study_sha256 = None;
     rebuilt.confirmation_rule = None;
-    bound && arms_ok && rule_ok && child.max_attempts == study.min_attempts && rebuilt == *parent
+    rebuilt.treatment = None;
+    // The treatment is exactly the planned study's own, and only a within-source study has one.
+    let treatment_ok = child.treatment == study.treatment_spec();
+    bound
+        && arms_ok
+        && rule_ok
+        && treatment_ok
+        && child.max_attempts == study.min_attempts
+        && rebuilt == *parent
 }
 
 fn verify_child(

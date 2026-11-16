@@ -289,3 +289,21 @@ mod attribution {
         assert!(g.evidence().receipts.is_empty() && g.evidence().clean);
     }
 }
+
+#[test]
+fn an_attempt_treated_off_never_permits_an_action_and_arming_resets_it() {
+    let mut g = gate();
+    g.set_attempt_on(false);
+    assert!(
+        !g.permit(Some(CPU), target(), NOW),
+        "an Off attempt applies nothing"
+    );
+    assert!(!g.is_busy());
+    g.set_attempt_on(true);
+    assert!(g.permit(Some(CPU), target(), NOW));
+    // A new child's arming starts from permitting again.
+    let mut again = gate();
+    again.set_attempt_on(false);
+    assert!(again.arm(ActionChildScope::new([CPU], target(), NOW + 60)));
+    assert!(again.permit(Some(CPU), target(), NOW));
+}

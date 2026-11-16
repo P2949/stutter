@@ -109,6 +109,9 @@ pub struct ActionGate {
     /// Something other than the permitted action on the frozen process was held while the gate was
     /// busy: the evidence cannot be attributed to the permitted action (sticky).
     foreign: bool,
+    /// In a within-source study only attempts treated On may have an action applied; every other
+    /// study leaves this true.
+    attempt_on: bool,
 }
 
 impl std::fmt::Debug for ActionGate {
@@ -174,6 +177,7 @@ impl ActionGate {
             transaction: None,
             target: None,
             foreign: false,
+            attempt_on: true,
         }
     }
 
@@ -195,6 +199,7 @@ impl ActionGate {
             transaction: None,
             target: None,
             foreign: false,
+            attempt_on: true,
         }
     }
 
@@ -205,8 +210,15 @@ impl ActionGate {
         }
         self.receipts.clear();
         self.foreign = false;
+        self.attempt_on = true;
         self.scope = Some(scope);
         true
+    }
+
+    /// Whether the attempt now running is one the action may be applied in (a treatment study's
+    /// attempts treated Off are not).
+    pub fn set_attempt_on(&mut self, on: bool) {
+        self.attempt_on = on;
     }
 
     pub fn is_armed(&self) -> bool {
@@ -263,7 +275,7 @@ impl ActionGate {
         now_unix: u64,
     ) -> bool {
         let Some(action) = action else { return false };
-        if !matches!(self.state, State::Idle) {
+        if !self.attempt_on || !matches!(self.state, State::Idle) {
             return false;
         }
         // With a state probe the original state is captured first; a target whose state cannot be read

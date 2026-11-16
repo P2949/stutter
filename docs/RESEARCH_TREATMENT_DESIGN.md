@@ -1,7 +1,8 @@
-# Within-source treatment design (proposal; not implemented)
+# Within-source treatment design (implemented offline; not exercised live)
 
-Status: feature and action child studies are decided `BlockedTreatmentDesign` by the production funnel
-(`child_study::treatment_design_blocker`). This note records what unblocking them requires.
+Status: implemented (offline, fixture-verified) in the commit that introduced `treatment.rs`: the
+production funnel no longer blocks feature and action studies. The proposal below is what was built;
+the real-host and live-game evidence it needs does not exist yet.
 
 ## The defect
 
