@@ -5,12 +5,13 @@
 //!
 //! Kernel messages are not readable directly (`dmesg_restrict`), and widening root access is not an
 //! option, so the controller asks the journal, read-only, through an exact `journalctl` path that
-//! the host configuration provides. An unreadable journal is *unknown*, never "no reset".
+//! the host configuration provides. An unreadable journal is *unknown*, never "no reset", and an
+//! empty search result is only believed after the journal is independently shown to be readable.
 
 use std::{
     io::Read,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::{Command, ExitStatus, Stdio},
     time::{Duration, Instant},
 };
 
@@ -18,25 +19,37 @@ use std::{
 const RESET_PATTERN: &str = "amdgpu.*(GPU reset begin|ring [a-z_0-9.]+ timeout|MODE1 reset)";
 const QUERY_TIMEOUT: Duration = Duration::from_secs(4);
 const MAX_OUTPUT: u64 = 64 * 1024;
+const MAX_STDERR: u64 = 8 * 1024;
+const MAX_LINE_HASHES: usize = 256;
 
 /// What the kernel journal holds about GPU hangs/resets from some time on.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ResetScan {
     pub count: u32,
     /// The newest matching event's time, when the journal gave timestamps.
     pub latest_unix: Option<u64>,
+    /// SHA-256 of each matching journal line (microsecond timestamps make them unique), so an
+    /// event that was already reviewed is recognised exactly and never lost to a time boundary.
+    pub line_hashes: Vec<String>,
 }
 
 impl ResetScan {
-    pub const fn quiet() -> Self {
+    pub fn quiet() -> Self {
+        Self::default()
+    }
+
+    /// A scan with `count` events and no per-line identity (tests only).
+    #[cfg(test)]
+    pub fn events(count: u32, latest_unix: Option<u64>) -> Self {
         Self {
-            count: 0,
-            latest_unix: None,
+            count,
+            latest_unix,
+            line_hashes: Vec::new(),
         }
     }
 }
 
-/// GPU hang/reset events logged since `since_unix`.
+/// GPU hang/reset events logged since `since_unix`, inclusive.
 pub trait GpuResetProbe: Send {
     fn resets_since(&mut self, since_unix: u64) -> anyhow::Result<ResetScan>;
 }
@@ -45,9 +58,26 @@ pub struct JournalGpuResetProbe {
     journalctl: PathBuf,
 }
 
+struct Output {
+    status: ExitStatus,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+    truncated: bool,
+}
+
+fn stamp_of(line: &[u8]) -> Option<u64> {
+    let token = line.split(|byte| *byte == b' ').next()?;
+    let text = std::str::from_utf8(token).ok()?;
+    let (seconds, micros) = text.split_once('.')?;
+    (!micros.is_empty() && micros.bytes().all(|byte| byte.is_ascii_digit()))
+        .then(|| seconds.parse().ok())
+        .flatten()
+}
+
 impl JournalGpuResetProbe {
     /// Production constructor: the host configuration supplies the exact store path, which must be
-    /// an existing regular file owned by root that no one else can write.
+    /// an existing regular file owned by root that no one else can write. The vetted, resolved
+    /// target is the one that is executed, never the original path.
     pub fn trusted(journalctl: PathBuf) -> anyhow::Result<Self> {
         use std::os::unix::fs::MetadataExt;
         let canonical = std::fs::canonicalize(&journalctl)?;
@@ -56,7 +86,7 @@ impl JournalGpuResetProbe {
             meta.is_file() && meta.uid() == 0 && meta.mode() & 0o022 == 0,
             "journalctl is not a root-owned, non-writable regular file"
         );
-        Self::new(journalctl)
+        Self::new(canonical)
     }
 
     /// `journalctl` must be an absolute path.
@@ -67,34 +97,30 @@ impl JournalGpuResetProbe {
         );
         Ok(Self { journalctl })
     }
-}
 
-impl GpuResetProbe for JournalGpuResetProbe {
-    fn resets_since(&mut self, since_unix: u64) -> anyhow::Result<ResetScan> {
+    fn run(&self, args: &[&str]) -> anyhow::Result<Output> {
         let mut child = Command::new(&self.journalctl)
-            // `-k` alone means the current boot only; a reset in an earlier boot must stay visible.
-            .args([
-                "-k",
-                "-b",
-                "all",
-                "--no-pager",
-                "-o",
-                "short-unix",
-                "--since",
-            ])
-            .arg(format!("@{since_unix}"))
-            .args(["-g", RESET_PATTERN])
+            .args(args)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .spawn()?;
         let mut stdout = child
             .stdout
             .take()
             .ok_or_else(|| anyhow::anyhow!("no journal output pipe"))?;
-        let reader = std::thread::spawn(move || {
+        let mut stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("no journal error pipe"))?;
+        let out_reader = std::thread::spawn(move || {
             let mut bytes = Vec::new();
-            let _ = (&mut stdout).take(MAX_OUTPUT).read_to_end(&mut bytes);
+            let _ = (&mut stdout).take(MAX_OUTPUT + 1).read_to_end(&mut bytes);
+            bytes
+        });
+        let err_reader = std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            let _ = (&mut stderr).take(MAX_STDERR).read_to_end(&mut bytes);
             bytes
         });
         let deadline = Instant::now() + QUERY_TIMEOUT;
@@ -109,32 +135,113 @@ impl GpuResetProbe for JournalGpuResetProbe {
             }
             std::thread::sleep(Duration::from_millis(20));
         };
-        let bytes = reader
+        let mut stdout = out_reader
             .join()
             .map_err(|_| anyhow::anyhow!("journal reader failed"))?;
-        // `-g` exits 1 when nothing matched; anything else is an unreadable journal.
+        let stderr = err_reader
+            .join()
+            .map_err(|_| anyhow::anyhow!("journal error reader failed"))?;
+        let truncated = stdout.len() as u64 > MAX_OUTPUT;
+        stdout.truncate(MAX_OUTPUT as usize);
+        Ok(Output {
+            status,
+            stdout,
+            stderr,
+            truncated,
+        })
+    }
+
+    /// The journal is independently shown to be readable: the current boot's kernel log yields a
+    /// timestamped line and the boot list is non-empty. Without this an empty search proves nothing
+    /// (`journalctl -g` exits 1 both for "no match" and for "no journal files").
+    fn qualify(&self) -> anyhow::Result<()> {
+        let kernel = self.run(&["-k", "-b", "0", "--no-pager", "-o", "short-unix", "-n", "1"])?;
         anyhow::ensure!(
-            status.success() || status.code() == Some(1),
+            kernel.status.success()
+                && kernel
+                    .stdout
+                    .split(|byte| *byte == b'\n')
+                    .find(|line| !line.is_empty())
+                    .and_then(stamp_of)
+                    .is_some(),
+            "the kernel journal of this boot is not readable"
+        );
+        let boots = self.run(&["--list-boots", "--no-pager"])?;
+        anyhow::ensure!(
+            boots.status.success() && boots.stdout.iter().any(|byte| !byte.is_ascii_whitespace()),
+            "the journal boot list is not readable"
+        );
+        Ok(())
+    }
+}
+
+impl GpuResetProbe for JournalGpuResetProbe {
+    fn resets_since(&mut self, since_unix: u64) -> anyhow::Result<ResetScan> {
+        self.qualify()?;
+        let since = format!("@{since_unix}");
+        // `-k` alone means the current boot only; a reset in an earlier boot must stay visible.
+        let found = self.run(&[
+            "-k",
+            "-b",
+            "all",
+            "--no-pager",
+            "-o",
+            "short-unix",
+            "--since",
+            &since,
+            "-g",
+            RESET_PATTERN,
+        ])?;
+        let note = |bytes: &[u8]| {
+            let text = String::from_utf8_lossy(bytes);
+            let text = text.trim();
+            text.is_empty() || text == "-- No entries --"
+        };
+        if found.status.code() == Some(1) {
+            // Exit 1 is ambiguous. It is an empty result only with nothing on stderr, nothing
+            // unexpected on stdout, and a journal that is still readable afterwards.
+            anyhow::ensure!(
+                note(&found.stderr) && note(&found.stdout),
+                "the journal search failed rather than found nothing"
+            );
+            self.qualify()?;
+            return Ok(ResetScan::quiet());
+        }
+        anyhow::ensure!(
+            found.status.success(),
             "the kernel journal could not be read"
         );
-        let mut count = 0usize;
-        let mut latest: Option<u64> = None;
-        for line in bytes.split(|byte| *byte == b'\n').filter(|l| !l.is_empty()) {
-            count += 1;
-            let stamp = line
-                .split(|byte| *byte == b' ')
-                .next()
-                .and_then(|token| std::str::from_utf8(token).ok())
-                .and_then(|token| token.split('.').next())
-                .and_then(|seconds| seconds.parse::<u64>().ok());
-            if let Some(seconds) = stamp {
-                latest = Some(latest.map_or(seconds, |old| old.max(seconds)));
+        let mut scan = ResetScan::quiet();
+        let lines: Vec<&[u8]> = found
+            .stdout
+            .split(|byte| *byte == b'\n')
+            .filter(|line| !line.is_empty())
+            .collect();
+        for (index, line) in lines.iter().enumerate() {
+            // A cut-off final line of a truncated capture is not malformed; it is still an event.
+            let partial = found.truncated && index + 1 == lines.len();
+            let stamp = stamp_of(line);
+            anyhow::ensure!(
+                partial || (stamp.is_some() && String::from_utf8_lossy(line).contains("amdgpu")),
+                "the journal output is not a list of amdgpu events"
+            );
+            scan.count = scan.count.saturating_add(1);
+            scan.latest_unix = match (scan.latest_unix, stamp) {
+                (Some(old), Some(new)) => Some(old.max(new)),
+                (old, new) => old.or(new),
+            };
+            if scan.line_hashes.len() < MAX_LINE_HASHES {
+                scan.line_hashes.push(stutter_core::hash::sha256_hex(line));
             }
         }
-        Ok(ResetScan {
-            count: count.min(u32::MAX as usize) as u32,
-            latest_unix: latest,
-        })
+        // A successful search that printed nothing is not a result either.
+        anyhow::ensure!(
+            scan.count > 0,
+            "the journal search succeeded without output"
+        );
+        // A journal that vanished mid-query could have cut the output short.
+        self.qualify()?;
+        Ok(scan)
     }
 }
 
@@ -180,20 +287,34 @@ struct Incident {
     hash16: String,
     /// Upper bound of the events this record covers; `None` when the record is unreadable.
     covers_until: Option<u64>,
+    /// SHA-256 of each journal line this record covers.
+    lines: Vec<String>,
 }
 
 fn incident_name(name: &str) -> bool {
     name.ends_with(".json") && (name == LEGACY_BLOCKED_FILE || name.starts_with(INCIDENT_PREFIX))
 }
 
-fn read_bounded(path: &Path, limit: u64) -> Option<Vec<u8>> {
-    let mut bytes = Vec::new();
-    std::fs::File::open(path)
-        .ok()?
-        .take(limit)
-        .read_to_end(&mut bytes)
+/// Read a record the guard trusts: opened without following a symlink, a regular file owned by
+/// this user that nobody else can write, and no larger than `limit`. Anything else is not read.
+fn read_trusted(path: &Path, limit: u64) -> Option<Vec<u8>> {
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)
         .ok()?;
-    Some(bytes)
+    let meta = file.metadata().ok()?;
+    if !meta.is_file()
+        || meta.uid() != crate::syscall::geteuid()
+        || meta.mode() & 0o022 != 0
+        || meta.len() > limit
+    {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    file.take(limit + 1).read_to_end(&mut bytes).ok()?;
+    (bytes.len() as u64 == meta.len()).then_some(bytes)
 }
 
 impl GpuGuard {
@@ -219,7 +340,7 @@ impl GpuGuard {
             if !incident_name(&name) {
                 continue;
             }
-            let bytes = read_bounded(&entry.path(), 64 * 1024);
+            let bytes = read_trusted(&entry.path(), 64 * 1024);
             let covers_until = bytes.as_deref().and_then(|raw| {
                 let value: serde_json::Value = serde_json::from_slice(raw).ok()?;
                 let detected = value["detected_unix"].as_u64()?;
@@ -229,6 +350,18 @@ impl GpuGuard {
                         .map_or(detected, |event| event.min(detected)),
                 )
             });
+            let lines = bytes
+                .as_deref()
+                .and_then(|raw| serde_json::from_slice::<serde_json::Value>(raw).ok())
+                .and_then(|value| {
+                    value["line_sha256"].as_array().map(|items| {
+                        items
+                            .iter()
+                            .filter_map(|item| item.as_str().map(str::to_owned))
+                            .collect::<Vec<_>>()
+                    })
+                })
+                .unwrap_or_default();
             found.push(Incident {
                 stem: name.trim_end_matches(".json").to_string(),
                 hash16: bytes
@@ -236,6 +369,7 @@ impl GpuGuard {
                     .map(|raw| stutter_core::hash::sha256_hex(raw)[..16].to_string())
                     .unwrap_or_default(),
                 covers_until,
+                lines,
             });
         }
         Some(found)
@@ -252,7 +386,7 @@ impl GpuGuard {
         if !meta.is_file() || meta.mode() & 0o022 != 0 || meta.uid() != crate::syscall::geteuid() {
             return Vec::new();
         }
-        let Some(bytes) = read_bounded(&path, 64 * 1024) else {
+        let Some(bytes) = read_trusted(&path, 64 * 1024) else {
             return Vec::new();
         };
         String::from_utf8_lossy(&bytes)
@@ -292,17 +426,39 @@ impl GpuGuard {
             .any(|incident| !Self::acknowledged(&acks, incident))
     }
 
-    /// Journal lines at or before this time belong to acknowledged incidents. Unreadable records
-    /// contribute nothing, so their events are found (and blocked) again.
-    fn reviewed_until(&self) -> u64 {
+    /// What acknowledged incidents already cover: events at or before the returned time, and the
+    /// exact journal lines they recorded (so an event in the same second as a reviewed one is not
+    /// lost, only the reviewed line itself is skipped). Unreadable records cover nothing, so their
+    /// events are found (and blocked) again.
+    fn reviewed(&self) -> (u64, std::collections::BTreeSet<String>) {
         let acks = self.acknowledgements();
-        self.incidents()
-            .unwrap_or_default()
+        let incidents = self.incidents().unwrap_or_default();
+        let reviewed: Vec<&Incident> = incidents
             .iter()
             .filter(|incident| Self::acknowledged(&acks, incident))
+            .collect();
+        let since = reviewed
+            .iter()
             .filter_map(|incident| incident.covers_until)
             .max()
-            .map_or(0, |until| until.saturating_add(1))
+            .unwrap_or(0);
+        let lines = reviewed
+            .iter()
+            .flat_map(|incident| incident.lines.iter().cloned())
+            .collect();
+        (since, lines)
+    }
+
+    /// Events in `scan` that no acknowledged incident covers.
+    fn fresh_events(scan: &ResetScan, reviewed: &std::collections::BTreeSet<String>) -> u32 {
+        let known: u32 = scan
+            .line_hashes
+            .iter()
+            .filter(|hash| reviewed.contains(*hash))
+            .count()
+            .try_into()
+            .unwrap_or(u32::MAX);
+        scan.count.saturating_sub(known)
     }
 
     /// Persist a new incident (private, unique, fsynced with its directory). A failure latches the
@@ -314,6 +470,7 @@ impl GpuGuard {
             "version": 1,
             "detected_unix": detected,
             "last_event_unix": scan.latest_unix,
+            "line_sha256": scan.line_hashes,
             "events": scan.count,
             "source": source,
             "acknowledge": "review the kernel journal, then append '<this file name without .json> <first 16 hex of sha256sum of this file>' to gpu-stability-acks (mode 0600)",
@@ -376,8 +533,9 @@ impl GpuGuard {
         if self.blocked() {
             return false;
         }
-        let quiet = match self.probe.resets_since(self.reviewed_until()) {
-            Ok(scan) if scan.count == 0 => true,
+        let (since, reviewed) = self.reviewed();
+        let quiet = match self.probe.resets_since(since) {
+            Ok(scan) if Self::fresh_events(&scan, &reviewed) == 0 => true,
             Ok(scan) => {
                 self.record_block("admission", scan);
                 false

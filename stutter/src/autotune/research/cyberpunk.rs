@@ -122,6 +122,23 @@ pub struct CyberpunkBenchmarkCompletion {
     pub files: Vec<NativeBenchmarkFile>,
 }
 
+impl CyberpunkBenchmarkCompletion {
+    /// The runtime receipt and the binding derived from it agree. A binding without the receipt it
+    /// was derived from, a receipt without a binding, or a `Matched` over an incomplete Direct3D 12
+    /// translation stack (Wine and VKD3D-Proton both observed, with a root) is forged or broken.
+    pub fn runtime_receipt_consistent(&self) -> bool {
+        use super::loaded_runtime::RuntimeBinding;
+        match (&self.loaded_runtime, self.runtime_binding) {
+            (None, None) => true,
+            (Some(runtime), Some(RuntimeBinding::Matched)) => {
+                runtime.wine_loaded && runtime.vkd3d_loaded && !runtime.proton_roots.is_empty()
+            }
+            (Some(_), Some(_)) => true,
+            _ => false,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 struct ScannedFile {
     evidence: NativeBenchmarkFile,

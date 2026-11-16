@@ -177,7 +177,7 @@ struct FakeGpu(std::sync::Arc<std::sync::Mutex<anyhow::Result<ResetScan>>>);
 impl super::super::gpu_health::GpuResetProbe for FakeGpu {
     fn resets_since(&mut self, _: u64) -> anyhow::Result<ResetScan> {
         match &*self.0.lock().unwrap() {
-            Ok(scan) => Ok(*scan),
+            Ok(scan) => Ok(scan.clone()),
             Err(error) => Err(anyhow::anyhow!("{error}")),
         }
     }
@@ -186,10 +186,7 @@ impl super::super::gpu_health::GpuResetProbe for FakeGpu {
 type Answer = std::sync::Arc<std::sync::Mutex<anyhow::Result<ResetScan>>>;
 
 fn scan(count: u32) -> anyhow::Result<ResetScan> {
-    Ok(ResetScan {
-        count,
-        latest_unix: None,
-    })
+    Ok(ResetScan::events(count, None))
 }
 
 fn gpu_port(

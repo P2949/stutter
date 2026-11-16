@@ -67,7 +67,8 @@ impl AttemptEvidenceV1 {
                     && native.proton_identity_sha256 == tool.identity_sha256
                     && native.metrics.average_fps.to_bits() == self.average_fps.to_bits()
                     && native.started_unix_nanos < native.completed_unix_nanos
-                    && !native.files.is_empty(),
+                    && !native.files.is_empty()
+                    && native.runtime_receipt_consistent(),
                 "native completion does not match the frozen attempt"
             );
         }

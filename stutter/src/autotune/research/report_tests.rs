@@ -156,7 +156,7 @@ fn native_completion_must_match_the_frozen_attempt_before_sealing() {
             maximum_fps: None,
         },
         context: None,
-        loaded_runtime: None,
+        loaded_runtime: Some(matched_runtime()),
         runtime_binding: Some(super::super::loaded_runtime::RuntimeBinding::Matched),
         files: vec![NativeBenchmarkFile {
             path: "result/summary.json".into(),
@@ -234,7 +234,7 @@ fn native_completions_decide_consistent_or_drifted_context() {
                     frame_generation_type: Some(0),
                     frame_count: 100,
                 }),
-                loaded_runtime: None,
+                loaded_runtime: Some(matched_runtime()),
                 runtime_binding: Some(super::super::loaded_runtime::RuntimeBinding::Matched),
                 files: vec![NativeBenchmarkFile {
                     path: "result/summary.json".into(),
@@ -357,7 +357,7 @@ fn a_changed_or_missing_game_reported_context_is_not_a_consistent_comparison() {
                 maximum_fps: None,
             },
             context: ctx,
-            loaded_runtime: None,
+            loaded_runtime: Some(matched_runtime()),
             runtime_binding: Some(super::super::loaded_runtime::RuntimeBinding::Matched),
             files: vec![],
         };
@@ -441,4 +441,108 @@ fn a_changed_or_missing_game_reported_context_is_not_a_consistent_comparison() {
     ]
     .into();
     assert_eq!(context_state(&drift_with_hole), ContextState::Drifted);
+}
+
+/// A receipt of a complete Direct3D 12 stack, as the host records it for a matched arm.
+fn matched_runtime() -> super::super::loaded_runtime::LoadedRuntime {
+    super::super::loaded_runtime::LoadedRuntime {
+        mapped_file_count: 3,
+        wine_loaded: true,
+        vkd3d_loaded: true,
+        dxvk_loaded: true,
+        proton_roots: vec!["/nix/store/aaa-proton/files".into()],
+        runtime_paths_sha256: "a".repeat(64),
+    }
+}
+
+#[test]
+fn a_runtime_binding_without_its_receipt_or_over_a_partial_stack_is_rejected() {
+    use super::super::loaded_runtime::RuntimeBinding;
+    let (intent, schedule) = study(4);
+    let slot = &schedule[0];
+    let build = |receipt: Option<super::super::loaded_runtime::LoadedRuntime>,
+                 binding: Option<RuntimeBinding>| {
+        let mut item = valid_native_evidence(&intent, slot);
+        let native = item.native_completion.as_mut().unwrap();
+        native.loaded_runtime = receipt;
+        native.runtime_binding = binding;
+        item.validate_for(slot, &intent).is_ok()
+    };
+    let matched = Some(RuntimeBinding::Matched);
+    assert!(build(Some(matched_runtime()), matched));
+    assert!(
+        build(None, None),
+        "no runtime captured is allowed (unproven)"
+    );
+    assert!(
+        !build(None, matched),
+        "a binding without the receipt it came from"
+    );
+    assert!(
+        !build(Some(matched_runtime()), None),
+        "a receipt without a binding"
+    );
+    let mut partial = matched_runtime();
+    partial.vkd3d_loaded = false;
+    assert!(
+        !build(Some(partial), matched),
+        "Matched over a partial D3D12 stack"
+    );
+    let mut rootless = matched_runtime();
+    rootless.proton_roots.clear();
+    assert!(!build(Some(rootless), matched));
+    assert!(build(
+        Some(matched_runtime()),
+        Some(RuntimeBinding::Unknown)
+    ));
+}
+
+fn valid_native_evidence(intent: &ResearchIntentV1, slot: &AttemptSlot) -> AttemptEvidenceV1 {
+    use super::super::cyberpunk::{
+        CyberpunkBenchmarkCompletion, CyberpunkProcessIdentity, CyberpunkScenario,
+        NativeBenchmarkFile, NativeBenchmarkMetrics,
+    };
+    let tool = intent
+        .tools
+        .iter()
+        .find(|tool| tool.source == slot.arm)
+        .unwrap();
+    AttemptEvidenceV1 {
+        schema_version: 1,
+        slot_index: slot.index,
+        average_fps: 60.0,
+        native_completion: Some(Box::new(CyberpunkBenchmarkCompletion {
+            schema_version: 1,
+            app_id: intent.app_id,
+            build_id: intent.build_id,
+            scene: CyberpunkScenario::BuiltinBenchmark,
+            settings_sha256: "c".repeat(64),
+            proton_source: slot.arm,
+            proton_identity_sha256: tool.identity_sha256.clone(),
+            process: CyberpunkProcessIdentity {
+                pid: stutter_core::ids::Pid::new(1234),
+                start_ticks: 1,
+                uid: intent.uid,
+                app_id: intent.app_id,
+                build_id: intent.build_id,
+                executable_sha256: intent.game_executable_sha256.clone(),
+            },
+            started_unix_nanos: 1,
+            completed_unix_nanos: 2,
+            result_directory: "result".into(),
+            metrics: NativeBenchmarkMetrics {
+                average_fps: 60.0,
+                minimum_fps: None,
+                maximum_fps: None,
+            },
+            context: None,
+            loaded_runtime: None,
+            runtime_binding: None,
+            files: vec![NativeBenchmarkFile {
+                path: "result/summary.json".into(),
+                size_bytes: 10,
+                sha256: "d".repeat(64),
+            }],
+        })),
+    }
 }

@@ -48,10 +48,13 @@ impl LoadedRuntime {
             let root = root.strip_prefix("/run/host").unwrap_or(root);
             root == host || root.starts_with(&format!("{host}/"))
         };
-        if self.proton_roots.iter().all(|root| inside(root)) {
+        if !self.proton_roots.iter().all(|root| inside(root)) {
+            RuntimeBinding::Mismatched
+        } else if self.wine_loaded && self.vkd3d_loaded {
+            // Direct3D 12 needs Wine and VKD3D-Proton; a partial capture proves nothing.
             RuntimeBinding::Matched
         } else {
-            RuntimeBinding::Mismatched
+            RuntimeBinding::Unknown
         }
     }
 }
@@ -163,5 +166,20 @@ mod tests {
             summarize(mixed.as_bytes()).unwrap().bind_to(own),
             RuntimeBinding::Mismatched
         );
+    }
+
+    #[test]
+    fn a_partial_component_capture_is_unknown_even_when_every_root_matches() {
+        let own = std::path::Path::new("/nix/store/aaa-proton-ge");
+        let mut runtime = summarize(MAPS.as_bytes()).unwrap();
+        assert_eq!(runtime.bind_to(own), RuntimeBinding::Matched);
+        runtime.vkd3d_loaded = false;
+        assert_eq!(runtime.bind_to(own), RuntimeBinding::Unknown);
+        runtime.vkd3d_loaded = true;
+        runtime.wine_loaded = false;
+        assert_eq!(runtime.bind_to(own), RuntimeBinding::Unknown);
+        // A foreign root is still a mismatch however partial the capture is.
+        runtime.proton_roots = vec!["/nix/store/zzz-other/files".into()];
+        assert_eq!(runtime.bind_to(own), RuntimeBinding::Mismatched);
     }
 }

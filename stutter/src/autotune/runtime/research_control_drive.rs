@@ -457,17 +457,32 @@ impl ResearchCoordinator {
     fn raw_replay(&self, dir: &File, uid: u32) -> serde_json::Value {
         use std::os::fd::AsFd;
 
-        use crate::autotune::research::{raw_verify, session_host};
-        let (Some(study), Ok(evidence)) = (
-            self.study_dir.as_deref(),
-            crate::syscall::openat_dir_nofollow(dir.as_fd(), "evidence"),
-        ) else {
-            return serde_json::json!({ "status": "unavailable" });
+        use crate::autotune::research::{
+            ResearchIntentV1, ResearchJournal, driver::build_schedule, raw_verify,
+            report_store::read_private, session_host,
         };
-        let evidence = File::from(evidence);
-        match raw_verify::verify_raw_evidence(&evidence, uid, &|arm| {
-            session_host::arm_prefix_paths(study, arm).1
-        }) {
+        let replay = || -> anyhow::Result<raw_verify::RawVerification> {
+            let study = self
+                .study_dir
+                .as_deref()
+                .ok_or_else(|| anyhow::anyhow!("no study directory"))?;
+            let intent: ResearchIntentV1 =
+                serde_json::from_slice(&read_private(dir, "intent.json", uid)?)?;
+            let journal = ResearchJournal::open(
+                crate::syscall::openat_dir_nofollow(dir.as_fd(), "journal")?,
+                uid,
+                build_schedule(&intent)?,
+            )?;
+            let records = journal.verify()?;
+            let evidence = File::from(crate::syscall::openat_dir_nofollow(
+                dir.as_fd(),
+                "evidence",
+            )?);
+            raw_verify::verify_raw_evidence(&evidence, uid, &records, &|arm| {
+                session_host::arm_prefix_paths(study, arm).1
+            })
+        };
+        match replay() {
             Ok(outcome) => serde_json::json!({
                 "status": if outcome.passed() { "replayed" } else { "failed" },
                 "detail": outcome,
