@@ -37,22 +37,35 @@ pub struct VerdictInputs<'a> {
     pub evidence: &'a [AttemptEvidenceV1],
     pub child_studies: &'a [Disposition],
     pub child_reports_verified: bool,
+    /// The campaign ran as a child-study funnel: its attempts are in the child studies (the flat
+    /// parent schedule is empty), so raw files and loaded runtimes are judged from the children.
+    pub funnel: bool,
+    /// Every completed child attempt's mapped runtime matched its own arm (funnel campaigns).
+    pub child_runtime_qualified: bool,
     pub restoration_verified: bool,
     /// An unacknowledged GPU-health incident is on record.
     pub health_blocked: bool,
 }
 
 pub fn judge(inputs: &VerdictInputs<'_>) -> Verdict {
-    let raw_files_verified = inputs.raw.is_some_and(RawVerification::passed);
+    let raw_files_verified = if inputs.funnel {
+        inputs.child_reports_verified
+    } else {
+        inputs.raw.is_some_and(RawVerification::passed)
+    };
     let with_native: Vec<_> = inputs
         .evidence
         .iter()
         .filter_map(|item| item.native_completion.as_deref())
         .collect();
-    let loaded_runtime_qualified = !with_native.is_empty()
-        && with_native
-            .iter()
-            .all(|native| native.runtime_binding == Some(RuntimeBinding::Matched));
+    let loaded_runtime_qualified = if inputs.funnel {
+        inputs.child_runtime_qualified
+    } else {
+        !with_native.is_empty()
+            && with_native
+                .iter()
+                .all(|native| native.runtime_binding == Some(RuntimeBinding::Matched))
+    };
     let child_studies_qualified = !inputs.child_studies.is_empty()
         && inputs
             .child_studies

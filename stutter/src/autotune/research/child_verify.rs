@@ -26,7 +26,13 @@ pub struct ChildVerification {
     pub reconstruction: bool,
     /// Every completed attempt's native files replayed against its sealed record.
     pub raw_files_verified: bool,
+    /// Every completed attempt of the child ran under its own arm's Proton installation.
+    pub runtime_matched: bool,
     pub problem: Option<String>,
+    /// The child's own report, present only when it reconstructed from its sealed records: the
+    /// parent's flat schedule is empty in funnel mode, so the comparison lives here.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub report: Option<serde_json::Value>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -38,6 +44,11 @@ pub struct ChildrenVerification {
 
 impl ChildrenVerification {
     /// At least one child exists and every one reconstructed with its raw files verified.
+    /// At least one child exists and every one's completed attempts matched their own arm's runtime.
+    pub fn runtime_qualified(&self) -> bool {
+        !self.children.is_empty() && self.children.iter().all(|child| child.runtime_matched)
+    }
+
     pub fn all_verified(&self) -> bool {
         !self.children.is_empty()
             && self.missing.is_empty()
@@ -100,14 +111,14 @@ fn verify_child(
     uid: u32,
     parent: &ResearchIntentV1,
     results_for: &dyn Fn(ProtonSource) -> PathBuf,
-) -> anyhow::Result<bool> {
+) -> anyhow::Result<(bool, serde_json::Value, bool)> {
     let child: ResearchIntentV1 = serde_json::from_slice(&read_private(dir, "intent.json", uid)?)?;
     anyhow::ensure!(
         derived_from(&child, parent, name),
         "the child intent is not the campaign's own intent with only its arms, budget and binding changed"
     );
     // Rebuild the report from the sealed journal and evidence and compare it to the stored one.
-    load_and_verify(dir, uid)?;
+    let report = serde_json::to_value(load_and_verify(dir, uid)?)?;
     let journal = ResearchJournal::open(
         crate::syscall::openat_dir_nofollow(dir.as_fd(), "journal")?,
         uid,
@@ -117,7 +128,17 @@ fn verify_child(
         dir.as_fd(),
         "evidence",
     )?);
-    Ok(verify_raw_evidence(&evidence, uid, &journal.verify()?, results_for)?.passed())
+    let raw = verify_raw_evidence(&evidence, uid, &journal.verify()?, results_for)?.passed();
+    let bindings: Vec<_> = super::report_store::read_evidence(&evidence, uid)?
+        .values()
+        .filter_map(|item| item.native_completion.as_deref())
+        .map(|native| native.runtime_binding)
+        .collect();
+    let runtime = !bindings.is_empty()
+        && bindings
+            .iter()
+            .all(|binding| *binding == Some(super::loaded_runtime::RuntimeBinding::Matched));
+    Ok((raw, report, runtime))
 }
 
 /// Verify every child study under `campaign/studies`. A campaign without that directory has no
@@ -155,26 +176,30 @@ pub fn verify_children(
                 .map(File::from)
                 .map_err(anyhow::Error::from)
                 .and_then(|dir| verify_child(&dir, &name, uid, parent, results_for))
-                .and_then(|raw| {
+                .and_then(|checked| {
                     // A rule the ledger froze for this pilot must follow from the pilot's own runs.
                     rule_matches_pilot(&rules, &name, studies.as_fd(), uid)?;
-                    Ok(raw)
+                    Ok(checked)
                 })
         } else {
             Err(anyhow::anyhow!("unexpected entry in the studies directory"))
         };
         children.push(match result {
-            Ok(raw) => ChildVerification {
+            Ok((raw, report, runtime)) => ChildVerification {
                 study: name,
                 reconstruction: true,
                 raw_files_verified: raw,
+                runtime_matched: runtime,
                 problem: None,
+                report: Some(report),
             },
             Err(error) => ChildVerification {
                 study: name,
                 reconstruction: false,
                 raw_files_verified: false,
+                runtime_matched: false,
                 problem: Some(format!("{error:#}")),
+                report: None,
             },
         });
     }

@@ -38,6 +38,8 @@ fn all_true<'a>(
         evidence,
         child_studies: studies,
         child_reports_verified: true,
+        funnel: false,
+        child_runtime_qualified: false,
         restoration_verified: true,
         health_blocked: false,
     }
@@ -108,4 +110,29 @@ fn unverified_child_reports_deny_the_final_gate_even_when_every_study_looks_qual
     });
     assert!(!verdict.child_reports_verified);
     assert!(!verdict.final_gate_qualified);
+}
+
+#[test]
+fn a_funnel_campaign_is_judged_from_its_children_not_its_empty_flat_schedule() {
+    let studies = [study(Some(StudyResult::Qualified))];
+    let funnel = |verified: bool, runtime: bool| VerdictInputs {
+        reconstruction_passed: true,
+        // The flat parent replay is empty in funnel mode and must not decide anything.
+        raw: None,
+        evidence: &[],
+        child_studies: &studies,
+        child_reports_verified: verified,
+        funnel: true,
+        child_runtime_qualified: runtime,
+        restoration_verified: true,
+        health_blocked: false,
+    };
+    let verdict = judge(&funnel(true, true));
+    assert!(verdict.raw_files_verified && verdict.loaded_runtime_qualified);
+    assert_eq!(verdict.disposition, "Qualified");
+    // Unverified children verify no raw files; an unmatched child runtime qualifies no runtime.
+    assert!(!judge(&funnel(false, true)).raw_files_verified);
+    let unmatched = judge(&funnel(true, false));
+    assert!(!unmatched.loaded_runtime_qualified && !unmatched.final_gate_qualified);
+    assert_eq!(unmatched.disposition, "PartiallyQualified");
 }

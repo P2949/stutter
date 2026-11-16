@@ -30,6 +30,8 @@ mod funnel;
 #[cfg(feature = "wayland-probe")]
 #[path = "research_control_idle.rs"]
 mod idle;
+#[path = "research_control_report.rs"]
+mod report;
 #[path = "research_control_status.rs"]
 mod status;
 #[path = "research_control_study.rs"]

@@ -57,6 +57,43 @@ fn status_of(group: &[&Value]) -> &'static str {
     }
 }
 
+/// The recorded integration coverage (every integration, with its own dispositions and evidence
+/// files), embedded from the repository so the matrix cannot drift from the ledger it cites.
+const COVERAGE: &str = include_str!("../../../../docs/integration-coverage.json");
+
+fn integration_matrix() -> Value {
+    let Ok(coverage) = serde_json::from_str::<Value>(COVERAGE) else {
+        return json!({ "status": "CoverageLedgerUnreadable" });
+    };
+    let rows: Vec<Value> = coverage
+        .get("entries")
+        .and_then(Value::as_array)
+        .map(|entries| {
+            entries
+                .iter()
+                .map(|entry| {
+                    json!({
+                        "id": entry.get("id"),
+                        "tools": entry.get("tools"),
+                        "authority": entry.get("authority"),
+                        "dispositions": entry.get("dispositions"),
+                        "evidence": entry.get("evidence"),
+                        "runtime_availability": entry.get("runtime_availability"),
+                        "not_wired": entry.get("not_wired"),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    json!({
+        "source_sha": coverage.get("source_sha"),
+        "recorded": coverage.get("recorded"),
+        "count": rows.len(),
+        "note": "dispositions are the ledger's own; none is a result of this campaign unless a study below qualifies it",
+        "integrations": rows,
+    })
+}
+
 fn summary(report: &Value, response: &Value) -> String {
     let verdict = response.get("verdict").cloned().unwrap_or(Value::Null);
     let flag = |name: &str| verdict.get(name).and_then(Value::as_bool).unwrap_or(false);
@@ -94,6 +131,41 @@ fn summary(report: &Value, response: &Value) -> String {
     )
 }
 
+/// The verified children, joined to their planned study (profile and stage by digest prefix).
+fn child_rows(response: &Value, with_report: bool) -> Vec<Value> {
+    let planned = studies(response);
+    response
+        .pointer("/child_reports/children")
+        .and_then(Value::as_array)
+        .map(|children| {
+            children
+                .iter()
+                .map(|child| {
+                    let name = child.get("study").and_then(Value::as_str).unwrap_or("");
+                    let study = planned.iter().find(|study| {
+                        study
+                            .get("study_sha256")
+                            .and_then(Value::as_str)
+                            .is_some_and(|digest| digest.starts_with(name))
+                    });
+                    let mut row = json!({
+                        "study": name,
+                        "profile": study.and_then(|study| study.get("profile")),
+                        "stage": study.map(|study| stage_of(study)),
+                        "reconstruction": child.get("reconstruction"),
+                        "raw_files_verified": child.get("raw_files_verified"),
+                        "problem": child.get("problem"),
+                    });
+                    if with_report {
+                        row["report"] = child.get("report").cloned().unwrap_or(Value::Null);
+                    }
+                    row
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// Every bundle file (name, bytes) for one verified campaign, the manifest last.
 pub fn build(report: &Value, response: &Value) -> Vec<(&'static str, Vec<u8>)> {
     let verdict = response.get("verdict").cloned().unwrap_or(Value::Null);
@@ -120,9 +192,19 @@ pub fn build(report: &Value, response: &Value) -> Vec<(&'static str, Vec<u8>)> {
         ("report.json", pretty(report)),
         (
             "capability-matrix.json",
-            pretty(&json!({ "child_studies": response.get("child_studies") })),
+            pretty(&json!({
+                "integration_coverage": integration_matrix(),
+                "child_studies": response.get("child_studies"),
+            })),
         ),
-        ("proton-comparison.json", pretty(report)),
+        (
+            "proton-comparison.json",
+            pretty(&json!({
+                "note": "in funnel mode the comparison is in the verified child reports; the flat campaign report covers only the flat schedule",
+                "flat_campaign_report": report,
+                "child_reports": child_rows(response, true),
+            })),
+        ),
         (
             "diagnosis-oracle.json",
             pretty(&json!({
@@ -150,7 +232,8 @@ pub fn build(report: &Value, response: &Value) -> Vec<(&'static str, Vec<u8>)> {
                 "raw_native_files": response.get("raw_native_files"),
                 "raw_files_verified": verdict.get("raw_files_verified"),
                 "loaded_runtime_qualified": verdict.get("loaded_runtime_qualified"),
-                "child_reports": response.get("child_reports"),
+                "child_reports": child_rows(response, false),
+                "children_missing": response.pointer("/child_reports/missing"),
             })),
         ),
         (

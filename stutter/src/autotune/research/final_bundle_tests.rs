@@ -168,6 +168,8 @@ fn real_campaign_bundle() {
         evidence: &evidence,
         child_studies: &studies,
         child_reports_verified: false,
+        funnel: false,
+        child_runtime_qualified: false,
         restoration_verified: false,
         health_blocked: false,
     });
@@ -179,4 +181,46 @@ fn real_campaign_bundle() {
     });
     let out = File::open(var("STUTTER_BUNDLE_OUT")).unwrap();
     write(&out, &serde_json::to_value(&report).unwrap(), &response).unwrap();
+}
+
+#[test]
+fn the_capability_matrix_lists_every_recorded_integration_with_its_own_dispositions() {
+    let files: std::collections::BTreeMap<_, _> =
+        build(&json!({}), &response()).into_iter().collect();
+    let matrix: Value = serde_json::from_slice(&files["capability-matrix.json"]).unwrap();
+    let coverage = &matrix["integration_coverage"];
+    assert_eq!(coverage["count"], 34);
+    let rows = coverage["integrations"].as_array().unwrap();
+    assert!(
+        rows.iter()
+            .all(|row| row["dispositions"].is_array() && row["id"].is_string())
+    );
+    assert_eq!(matrix["child_studies"].as_array().unwrap().len(), 3);
+}
+
+#[test]
+fn the_comparison_carries_the_verified_child_reports_and_flags_unverified_children() {
+    let mut full = response();
+    full["child_reports"] = json!({
+        "children": [
+            { "study": "s1", "reconstruction": true, "raw_files_verified": true, "problem": null,
+              "report": { "control": "ValveStable", "attempts_completed": 6 } },
+            { "study": "s2", "reconstruction": false, "raw_files_verified": false,
+              "problem": "tampered" }
+        ],
+        "missing": ["s3"]
+    });
+    let files: std::collections::BTreeMap<_, _> = build(&json!({"attempts_completed": 0}), &full)
+        .into_iter()
+        .collect();
+    let comparison: Value = serde_json::from_slice(&files["proton-comparison.json"]).unwrap();
+    let rows = comparison["child_reports"].as_array().unwrap();
+    assert_eq!(rows[0]["profile"], "cpu");
+    assert_eq!(rows[0]["report"]["attempts_completed"], 6);
+    assert_eq!(rows[1]["report"], Value::Null);
+    assert_eq!(rows[1]["problem"], "tampered");
+    assert_eq!(comparison["flat_campaign_report"]["attempts_completed"], 0);
+    let integrity: Value = serde_json::from_slice(&files["source-integrity.json"]).unwrap();
+    assert_eq!(integrity["children_missing"], json!(["s3"]));
+    assert!(integrity["child_reports"][0].get("report").is_none());
 }
