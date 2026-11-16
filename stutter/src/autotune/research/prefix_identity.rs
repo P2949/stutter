@@ -92,7 +92,7 @@ pub fn comparable(arms: &[(PrefixObservation, &str)]) -> Result<PrefixClass, Inc
         for (index, (observation, own_stamp)) in arms.iter().enumerate() {
             match observation.stamped_by.as_deref() {
                 None => return Err(Incomparable::UnstampedWarm(index)),
-                Some(stamp) if !stamp.contains(own_stamp) => {
+                Some(stamp) if stamp != *own_stamp => {
                     return Err(Incomparable::ForeignStamp(index));
                 }
                 Some(_) => {}
