@@ -449,6 +449,17 @@ pub enum Recovery {
     Restored,
 }
 
+/// Whether a durable snapshot of an unrestored edit exists beside this settings path, whether or not
+/// the settings file itself can be opened any longer.
+pub fn pending_snapshot(settings: &Path) -> bool {
+    let mut name = settings
+        .file_name()
+        .map(|n| n.to_os_string())
+        .unwrap_or_default();
+    name.push(".stutter-original");
+    std::fs::symlink_metadata(settings.with_file_name(name)).is_ok()
+}
+
 /// After a crash or restart: if a durable snapshot exists the settings may still be edited, so put
 /// the original bytes back, prove it, and only then remove the snapshot. Run before any study.
 pub fn recover(file: &StudySettingsFile) -> Result<Recovery, Refusal> {

@@ -196,21 +196,6 @@ fn a_restoration_that_failed_is_kept_and_succeeds_when_retried_after_the_cause_i
 }
 
 #[test]
-fn unavailable_settings_fail_a_profile_study_and_never_apply_to_nothing() {
-    let mut hook = UnavailableProfiles("SettingsFileUnavailable");
-    assert_eq!(
-        hook.apply(Profile::Cpu),
-        Err(ProfileFailure::Failed("SettingsFileUnavailable"))
-    );
-    assert_eq!(
-        hook.apply(Profile::Gpu),
-        Err(ProfileFailure::Failed("SettingsFileUnavailable"))
-    );
-    assert_eq!(hook.apply(Profile::Long), Ok(false));
-    assert!(hook.recover().is_ok() && hook.restore().is_ok());
-}
-
-#[test]
 fn the_game_is_recognised_by_its_executable_in_a_command_line() {
     assert!(names_the_game(
         b"S:\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\Cyberpunk2077.exe\0-benchmark\0"
@@ -246,4 +231,66 @@ fn an_unreadable_live_process_is_unknown_and_counts_as_running_but_a_vanished_on
         [vanished(), Ok(b"Cyberpunk2077.exe\0".to_vec())].into_iter()
     ));
     assert!(!scan(std::iter::empty()));
+}
+
+fn cold_path(a: &Arms) -> PathBuf {
+    a.paths[0]
+        .ancestors()
+        .nth(2)
+        .unwrap()
+        .join("compatdata/cold/UserSettings.json")
+}
+
+#[test]
+fn an_unavailable_arm_refuses_the_profile_without_changing_any_arm() {
+    let a = arms(1, &[]);
+    let original = bytes(&a);
+    let missing = cold_path(&a);
+    let paths = a.paths.clone();
+    let mut hook = FileProfileHook::new(a.files, index_free, idle).with_unavailable(vec![missing]);
+    assert_eq!(
+        hook.apply(Profile::Cpu),
+        Err(ProfileFailure::Failed("SettingsFileUnavailable"))
+    );
+    assert_eq!(bytes(&a_paths(&paths)), original, "no arm was edited");
+    // A study that needs no graphics profile still runs.
+    assert_eq!(hook.apply(Profile::Long), Ok(false));
+}
+
+#[test]
+fn recovery_restores_every_openable_arm_even_when_another_arm_has_no_settings_file() {
+    let a = arms(2, &[]);
+    let original = bytes(&a);
+    let paths = a.paths.clone();
+    let mut hook = FileProfileHook::new(a.files, index_free, idle);
+    assert_eq!(hook.apply(Profile::Cpu), Ok(true));
+    // The controller dies. Arm B's settings file is then gone (a damaged or removed prefix) while its
+    // durable snapshot of the unrestored edit remains beside it.
+    let study = std::fs::canonicalize(paths[0].ancestors().nth(2).unwrap()).unwrap();
+    std::fs::remove_file(&paths[1]).unwrap();
+    let arm_a =
+        StudySettingsFile::new(&study, paths[0].clone(), crate::syscall::geteuid()).unwrap();
+    let mut restarted = FileProfileHook::new(vec![arm_a], index_free, idle)
+        .with_unavailable(vec![paths[1].clone()]);
+    // Arm A is restored byte for byte; arm B's pending snapshot cannot be inspected, so the
+    // recovery is reported unproven, never a silent success.
+    assert_eq!(restarted.recover(), Err("RecoveryUnproven"));
+    assert_eq!(std::fs::read(&paths[0]).unwrap(), original[0]);
+    assert!(
+        paths[1]
+            .with_file_name("UserSettings.json.stutter-original")
+            .exists(),
+        "the unrestored arm's snapshot is kept"
+    );
+}
+
+#[test]
+fn an_arm_that_never_had_a_snapshot_does_not_make_recovery_unproven() {
+    let a = arms(1, &[]);
+    let original = bytes(&a);
+    let cold = cold_path(&a);
+    let paths = a.paths.clone();
+    let mut hook = FileProfileHook::new(a.files, index_free, idle).with_unavailable(vec![cold]);
+    assert_eq!(hook.recover(), Ok(()));
+    assert_eq!(bytes(&a_paths(&paths)), original);
 }

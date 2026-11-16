@@ -13,7 +13,7 @@ use crate::{
         driver_attempts::DriverStudyAttempts,
         funnel_driver::{FunnelDriver, RuleRegistry, production_inputs, selection_blocker},
         profile_applier::StudySettingsFile,
-        profile_hook::{FileProfileHook, UnavailableProfiles, cyberpunk_running, production_spec},
+        profile_hook::{FileProfileHook, cyberpunk_running, production_spec},
         session_host::arm_prefix_paths,
         study_executor::ProfileHook,
     },
@@ -29,22 +29,21 @@ fn unix_now() -> u64 {
 /// The graphics-profile hook over every arm's own `UserSettings.json`. If any of them cannot be
 /// opened safely (a cold prefix has none yet), the hook says so instead of editing a subset.
 fn profiles(study_dir: &std::path::Path, intent: &ResearchIntentV1) -> Box<dyn ProfileHook + Send> {
-    let files: Result<Vec<_>, _> = intent
-        .tools
-        .iter()
-        .map(|tool| {
-            let settings = arm_prefix_paths(study_dir, tool.source).2;
-            StudySettingsFile::new(study_dir, settings, intent.uid)
-        })
-        .collect();
-    match files {
-        Ok(files) => Box::new(FileProfileHook::new(
-            files,
-            production_spec,
-            cyberpunk_running,
-        )),
-        Err(_) => Box::new(UnavailableProfiles("SettingsFileUnavailable")),
+    // Each arm is opened on its own: the ones that can be opened are recovered and restored whatever
+    // the others are, and the ones that cannot (no file in a cold prefix, an unsafe one) only refuse
+    // a profile, never hide a snapshot beside them.
+    let (mut files, mut unavailable) = (Vec::new(), Vec::new());
+    for tool in &intent.tools {
+        let settings = arm_prefix_paths(study_dir, tool.source).2;
+        match StudySettingsFile::new(study_dir, settings.clone(), intent.uid) {
+            Ok(file) => files.push(file),
+            Err(_) => unavailable.push(settings),
+        }
     }
+    Box::new(
+        FileProfileHook::new(files, production_spec, cyberpunk_running)
+            .with_unavailable(unavailable),
+    )
 }
 
 fn build(

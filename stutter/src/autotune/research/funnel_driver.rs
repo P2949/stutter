@@ -82,11 +82,14 @@ impl std::error::Error for NoEligibleSource {}
 
 /// Decide before a study starts whether its arms can be selected at all, so a study with no eligible
 /// build is recorded as blocked rather than halting the funnel or running on the wrong build.
+/// A blocker that decides a study from the screen's results.
+pub type SelectionBlocker = Box<dyn Fn(&ChildStudy) -> Option<&'static str> + Send>;
+
 pub fn selection_blocker(
     campaign: std::fs::File,
     parent: ResearchIntentV1,
     rules: RuleRegistry,
-) -> Box<dyn Fn(&ChildStudy) -> Option<&'static str> + Send> {
+) -> SelectionBlocker {
     let select = Mutex::new(production_inputs(campaign, parent, rules));
     Box::new(move |study| {
         if study.arms() != StudyArms::Single {
@@ -132,7 +135,7 @@ pub struct FunnelDriver {
     /// Studies this build cannot run are decided with their blocker, never run or dropped.
     blocker: fn(&ChildStudy) -> Option<&'static str>,
     /// Blockers that depend on the screen's own results (no build can run a treatment study).
-    selection: Option<Box<dyn Fn(&ChildStudy) -> Option<&'static str> + Send>>,
+    selection: Option<SelectionBlocker>,
     cancelled: bool,
     rules: RuleRegistry,
     /// The action gate an action child arms, shared with the runtime (absent: no action child).
@@ -161,10 +164,7 @@ impl FunnelDriver {
     }
 
     /// Add the blocker that decides, from the screen's results, which treatment studies can run.
-    pub fn with_selection_blocker(
-        mut self,
-        selection: Box<dyn Fn(&ChildStudy) -> Option<&'static str> + Send>,
-    ) -> Self {
+    pub fn with_selection_blocker(mut self, selection: SelectionBlocker) -> Self {
         self.selection = Some(selection);
         self
     }

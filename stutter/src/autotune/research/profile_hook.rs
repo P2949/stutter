@@ -6,8 +6,8 @@
 use super::{
     child_study::Profile,
     profile_applier::{
-        AppliedProfile, ProfileSpec, Refusal, StudySettingsFile, apply, cpu_profile, recover,
-        restore,
+        AppliedProfile, ProfileSpec, Refusal, StudySettingsFile, apply, cpu_profile,
+        pending_snapshot, recover, restore,
     },
     study_executor::{ProfileFailure, ProfileHook},
 };
@@ -24,6 +24,9 @@ pub fn production_spec(profile: Profile) -> Result<Option<ProfileSpec>, ProfileF
 
 pub struct FileProfileHook {
     files: Vec<StudySettingsFile>,
+    /// Settings paths that could not be opened safely (no file yet, or an unsafe one). They cannot
+    /// take a profile, but a durable snapshot beside one is still an unrestored edit.
+    unavailable: Vec<std::path::PathBuf>,
     spec_for: fn(Profile) -> Result<Option<ProfileSpec>, ProfileFailure>,
     game_running: fn() -> bool,
     applied: Vec<(usize, AppliedProfile)>,
@@ -37,10 +40,19 @@ impl FileProfileHook {
     ) -> Self {
         Self {
             files,
+            unavailable: Vec::new(),
             spec_for,
             game_running,
             applied: Vec::new(),
         }
+    }
+
+    /// Record the arms whose settings file cannot be opened. Applying a profile is then refused (it
+    /// is all-or-nothing), but recovery still inspects and restores every arm that can be opened and
+    /// reports any pending snapshot it cannot inspect as unproven.
+    pub fn with_unavailable(mut self, unavailable: Vec<std::path::PathBuf>) -> Self {
+        self.unavailable = unavailable;
+        self
     }
 }
 
@@ -63,6 +75,9 @@ impl ProfileHook for FileProfileHook {
         let Some(spec) = (self.spec_for)(profile)? else {
             return Ok(false);
         };
+        if !self.unavailable.is_empty() {
+            return Err(ProfileFailure::Failed("SettingsFileUnavailable"));
+        }
         let running = (self.game_running)();
         for (index, file) in self.files.iter().enumerate() {
             match apply(file, &spec, running) {
@@ -86,6 +101,11 @@ impl ProfileHook for FileProfileHook {
         let mut proven = true;
         for file in &self.files {
             proven &= recover(file).is_ok();
+        }
+        // An arm whose settings cannot be opened may still hold a snapshot of an unrestored edit:
+        // that is never silently a no-op.
+        for path in &self.unavailable {
+            proven &= !pending_snapshot(path);
         }
         if proven {
             Ok(())
@@ -111,26 +131,6 @@ impl ProfileHook for FileProfileHook {
         } else {
             Err("RestoreUnproven")
         }
-    }
-}
-
-/// The profile hook when the arms' settings files cannot be opened safely (a cold prefix has none
-/// yet, or one is unsafe): a study that needs a graphics profile fails with the reason, never
-/// "applies" to nothing, and a study that needs none runs.
-pub struct UnavailableProfiles(pub &'static str);
-
-impl ProfileHook for UnavailableProfiles {
-    fn apply(&mut self, profile: Profile) -> Result<bool, ProfileFailure> {
-        match profile {
-            Profile::Long => Ok(false),
-            Profile::Cpu | Profile::Gpu => Err(ProfileFailure::Failed(self.0)),
-        }
-    }
-    fn recover(&mut self) -> Result<(), &'static str> {
-        Ok(())
-    }
-    fn restore(&mut self) -> Result<(), &'static str> {
-        Ok(())
     }
 }
 
