@@ -122,6 +122,9 @@ fn qualify(intent: &ResearchIntentV1, inputs: &ProductionHostInputs) -> anyhow::
     Ok(())
 }
 
+/// Free bytes the study filesystem must keep before any game launch (shader caches, logs, results).
+const MIN_FREE_BYTES: u64 = 20 * 1024 * 1024 * 1024;
+
 /// The exact `journalctl` the host configuration names for the GPU health guard.
 const JOURNALCTL_ENV: &str = "STUTTER_JOURNALCTL";
 
@@ -187,7 +190,10 @@ fn build_guarded_host(
     .with_transient_launcher(TransientLauncher { manager, prepare })
     .with_settlement_witness(Box::new(witness))
     .with_owned_terminator(Box::new(cleanup))
-    .with_settle_window(Duration::from_secs(120));
+    .with_settle_window(Duration::from_secs(120))
+    .with_disk_reserve(MIN_FREE_BYTES, |path| {
+        crate::syscall::statvfs(path).map(|space| space.free_bytes)
+    });
     // The host configuration names the exact `journalctl`. Without a trusted probe no host is
     // built: a live launch is never possible without the GPU health guard.
     let journalctl = journalctl.ok_or_else(|| anyhow::anyhow!("BlockedGpuHealthProbeMissing"))?;

@@ -323,3 +323,30 @@ fn a_restarted_port_over_the_same_state_stays_stopped_until_that_incident_is_ack
     std::fs::set_permissions(&ack, std::os::unix::fs::PermissionsExt::from_mode(0o600)).unwrap();
     assert!(!restarted.health_blocked());
 }
+
+#[test]
+fn a_launch_needs_the_free_space_reserve_and_an_unreadable_measurement_withholds_it() {
+    let client = crate::autotune::research::tests::intent().steam_client;
+    let port = |reserve: Option<(u64, FreeBytes)>| {
+        let port = ProductionSteamPort::new(
+            "/study/compatdata".into(),
+            "/study".into(),
+            "/a".into(),
+            "/m".into(),
+            client.clone(),
+            vec![],
+            QuietProbe,
+        );
+        match reserve {
+            Some((minimum, measure)) => port.with_disk_reserve(minimum, measure),
+            None => port,
+        }
+    };
+    assert!(
+        port(None).disk_reserve_ok(),
+        "not enforced unless configured"
+    );
+    assert!(port(Some((100, |_| Ok(100)))).disk_reserve_ok());
+    assert!(!port(Some((100, |_| Ok(99)))).disk_reserve_ok());
+    assert!(!port(Some((100, |_| Err(std::io::Error::other("no statvfs"))))).disk_reserve_ok());
+}

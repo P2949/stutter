@@ -71,6 +71,9 @@ fn launcher_is_unprivileged() -> bool {
     crate::syscall::geteuid() != 0
 }
 
+/// Measures the free bytes of the filesystem holding a path.
+pub type FreeBytes = fn(&Path) -> std::io::Result<u64>;
+
 const MAX_GAME_EVIDENCE_BYTES: u64 = 65_536;
 
 /// Independent evidence that a process of this user is a game: a Windows-style command-line argument
@@ -302,6 +305,8 @@ pub struct ProductionSteamPort<R: ResultProbe> {
     witness: Option<Box<dyn SettlementWitness>>,
     terminator: Option<Box<dyn OwnedTerminator>>,
     gpu: Option<GpuGuard>,
+    /// Free bytes the study filesystem must keep before a launch (`None`: not enforced).
+    disk_reserve: Option<(u64, FreeBytes)>,
     settle_window: Duration,
 }
 
@@ -332,6 +337,7 @@ impl<R: ResultProbe> ProductionSteamPort<R> {
             witness: None,
             terminator: None,
             gpu: None,
+            disk_reserve: None,
             settle_window: Duration::ZERO,
         }
     }
@@ -357,6 +363,19 @@ impl<R: ResultProbe> ProductionSteamPort<R> {
     ) -> Self {
         self.gpu = Some(GpuGuard::new(probe, state_dir));
         self
+    }
+
+    /// Require this many free bytes on the study filesystem (measured by `free_bytes`) before a
+    /// launch; an unreadable measurement withholds the launch.
+    pub fn with_disk_reserve(mut self, min_free_bytes: u64, free_bytes: FreeBytes) -> Self {
+        self.disk_reserve = Some((min_free_bytes, free_bytes));
+        self
+    }
+
+    fn disk_reserve_ok(&self) -> bool {
+        self.disk_reserve.is_none_or(|(minimum, free_bytes)| {
+            free_bytes(&self.study_root).is_ok_and(|free| free >= minimum)
+        })
     }
 
     /// How long `stop` keeps sweeping and re-checking while the attempt is unsettled. A launch that
@@ -501,6 +520,7 @@ impl<R: ResultProbe> SteamPort for ProductionSteamPort<R> {
     fn safe_window(&mut self) -> bool {
         let quiet = self.gpu.as_mut().is_none_or(GpuGuard::quiet_for_admission);
         quiet
+            && self.disk_reserve_ok()
             && !self.unsettled
             && self.idle_is_fresh()
             && launcher_is_unprivileged()
@@ -553,6 +573,7 @@ impl<R: ResultProbe> SteamPort for ProductionSteamPort<R> {
             self.steam_session_paths_verified() && self.idle_is_fresh(),
             "BlockedSteamSessionEnvironment"
         );
+        anyhow::ensure!(self.disk_reserve_ok(), "BlockedDiskReserve");
         // The cached admission can be seconds old; health is read again right before the send.
         anyhow::ensure!(
             self.gpu.as_mut().is_none_or(GpuGuard::admit_now),
