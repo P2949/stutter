@@ -382,4 +382,26 @@ fn a_changed_or_missing_game_reported_context_is_not_a_consistent_comparison() {
     assert_eq!(context_state(&drifted), ContextState::Drifted);
     let missing: BTreeMap<_, _> = [with(0, Some(context("RayTracingUltra"))), with(1, None)].into();
     assert_eq!(context_state(&missing), ContextState::Unproven);
+    // Two reports that are both silent about a graphics field are not proven the same.
+    let silent = |index: u32| {
+        let mut hole = context("RayTracingUltra");
+        hole.ray_tracing_enabled = None;
+        with(index, Some(hole))
+    };
+    let both_silent: BTreeMap<_, _> = [silent(0), silent(1)].into();
+    assert_eq!(context_state(&both_silent), ContextState::Unproven);
+    // A single complete completion is consistent with itself; a single incomplete one is not.
+    let alone: BTreeMap<_, _> = [with(0, Some(context("RayTracingUltra")))].into();
+    assert_eq!(context_state(&alone), ContextState::Consistent);
+    let alone_silent: BTreeMap<_, _> = [silent(0)].into();
+    assert_eq!(context_state(&alone_silent), ContextState::Unproven);
+    // A real difference is still drift even when another field is unreported.
+    let mut hole = context("Low");
+    hole.gpu_name = None;
+    let drift_with_hole: BTreeMap<_, _> = [
+        with(0, Some(context("RayTracingUltra"))),
+        with(1, Some(hole)),
+    ]
+    .into();
+    assert_eq!(context_state(&drift_with_hole), ContextState::Drifted);
 }

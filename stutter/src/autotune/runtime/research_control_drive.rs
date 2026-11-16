@@ -442,6 +442,29 @@ impl ResearchCoordinator {
         Some(File::from(dir))
     }
 
+    /// Replay the sealed native result files of the campaign in `dir` under each arm's own prefix.
+    fn raw_replay(&self, dir: &File, uid: u32) -> serde_json::Value {
+        use std::os::fd::AsFd;
+
+        use crate::autotune::research::{raw_verify, session_host};
+        let (Some(study), Ok(evidence)) = (
+            self.study_dir.as_deref(),
+            crate::syscall::openat_dir_nofollow(dir.as_fd(), "evidence"),
+        ) else {
+            return serde_json::json!({ "status": "unavailable" });
+        };
+        let evidence = File::from(evidence);
+        match raw_verify::verify_raw_evidence(&evidence, uid, &|arm| {
+            session_host::arm_prefix_paths(study, arm).1
+        }) {
+            Ok(outcome) => serde_json::json!({
+                "status": if outcome.passed() { "replayed" } else { "failed" },
+                "detail": outcome,
+            }),
+            Err(error) => serde_json::json!({ "status": "error", "reason": format!("{error:#}") }),
+        }
+    }
+
     pub(super) fn report_response(&self, verify: bool, uid: u32) -> String {
         let Some(dir) = self.open_campaign_study_dir() else {
             return super::response(
@@ -455,9 +478,14 @@ impl ResearchCoordinator {
         };
         match crate::autotune::research::report_store::load_and_verify(&dir, uid) {
             Ok(report) if verify => {
+                // The raw native files the sealed records name are reopened and re-hashed too. The
+                // verdict stays blocked either way (provenance gates are not all proven), but the
+                // replay result is reported, never assumed.
+                let raw = self.raw_replay(&dir, uid);
                 serde_json::json!({
                     "status": "blocked", "code": "IncompleteProvenance",
                     "reconstruction": "passed",
+                    "raw_native_files": raw,
                     "intent_sha256": report.intent_sha256,
                 })
                 .to_string()

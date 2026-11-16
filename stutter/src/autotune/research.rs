@@ -144,6 +144,7 @@ pub(crate) mod proton;
     )
 )]
 pub(crate) mod quality;
+pub(crate) mod raw_verify;
 #[cfg_attr(
     not(test),
     expect(

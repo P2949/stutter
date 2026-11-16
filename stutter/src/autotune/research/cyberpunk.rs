@@ -512,6 +512,66 @@ pub fn verify_benchmark_completion(
     })
 }
 
+/// Read-only replay of one sealed native completion against the files now on disk: the result
+/// folder must hold exactly the sealed files (same names, sizes and SHA-256), owned by the
+/// benchmark user, and the summary and frame file must still parse to the sealed metrics and
+/// graphics context. Nothing is written; a missing, added, edited or substituted file is an error.
+pub fn reverify_completion(
+    results_dir: &Path,
+    completion: &CyberpunkBenchmarkCompletion,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        completion.process.uid != 0 && safe_component(&completion.result_directory),
+        "sealed native result has an unsafe owner or folder name"
+    );
+    let root = crate::syscall::open_dir_no_symlinks(results_dir)?;
+    let result = crate::syscall::openat_dir_nofollow(root.as_fd(), &completion.result_directory)?;
+    let mut files = Vec::new();
+    let mut total_bytes = 0;
+    scan_result_dir(
+        result.as_fd(),
+        completion.process.uid,
+        &completion.result_directory,
+        0,
+        &mut files,
+        &mut total_bytes,
+    )?;
+    files.sort_by(|left, right| left.evidence.path.cmp(&right.evidence.path));
+    let now: Vec<&NativeBenchmarkFile> = files.iter().map(|file| &file.evidence).collect();
+    let sealed: Vec<&NativeBenchmarkFile> = completion.files.iter().collect();
+    anyhow::ensure!(
+        now == sealed,
+        "native result files differ from the sealed list (missing, added, resized or modified)"
+    );
+    let kept = |leaf: &str| -> Vec<&[u8]> {
+        files
+            .iter()
+            .filter(|file| file.evidence.path.rsplit('/').next() == Some(leaf))
+            .filter_map(|file| file.bytes.as_deref())
+            .collect()
+    };
+    let (summaries, frames) = (kept("summary.json"), kept("frames.csv"));
+    anyhow::ensure!(
+        summaries.len() == 1 && frames.len() == 1,
+        "native result must contain exactly one summary.json and one frames.csv"
+    );
+    anyhow::ensure!(
+        parse_summary(summaries[0])? == completion.metrics,
+        "sealed metrics differ from the native summary"
+    );
+    // The frame file must still match the summary. A completion sealed before the context was
+    // recorded has none to compare (the report then treats its context as unproven); one that has
+    // a context must equal what the files say now.
+    let replayed = super::native_context::verify_frames(summaries[0], frames[0])?;
+    anyhow::ensure!(
+        completion
+            .context
+            .as_ref()
+            .is_none_or(|sealed| *sealed == replayed),
+        "sealed graphics context differs from the native files"
+    );
+    Ok(())
+}
 #[cfg(test)]
 #[path = "cyberpunk_tests.rs"]
 mod tests;

@@ -76,7 +76,34 @@ fn write_result(root: &Path, name: &str, summary: &str) {
     let dir = root.join(name);
     std::fs::create_dir(&dir).unwrap();
     std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
-    std::fs::write(dir.join("summary.json"), summary).unwrap();
+    // The real summary carries `frameNumber`; fixtures with a usable average get the fixture
+    // frame file's count (kept verbatim otherwise, so malformed summaries stay malformed).
+    let mut text = summary.to_owned();
+    if let Ok(mut value) = serde_json::from_str::<serde_json::Value>(summary)
+        && let Some(root_object) = value.as_object_mut()
+    {
+        let target = if root_object
+            .get("Data")
+            .is_some_and(serde_json::Value::is_object)
+        {
+            root_object
+                .get_mut("Data")
+                .and_then(|data| data.as_object_mut())
+        } else {
+            Some(root_object)
+        };
+        if let Some(target) = target
+            && target
+                .get("averageFps")
+                .and_then(serde_json::Value::as_f64)
+                .is_some_and(|fps| fps > 0.0)
+            && !target.contains_key("frameNumber")
+        {
+            target.insert("frameNumber".into(), 50.into());
+            text = value.to_string();
+        }
+    }
+    std::fs::write(dir.join("summary.json"), text).unwrap();
     // The game derives its average from the frame times, so the fixture frame file is coherent with
     // its summary whenever the summary has a usable average.
     let frames = serde_json::from_str::<serde_json::Value>(summary)
@@ -389,4 +416,71 @@ fn the_games_wrapped_summary_schema_is_parsed_and_other_roots_are_refused() {
         super::parse_summary(br#"{"RootType":"worldBenchmarkSummary","Data":{"averageFps":0.0}}"#)
             .is_err()
     );
+}
+
+fn sealed(root: &Path) -> CyberpunkBenchmarkCompletion {
+    let before = snapshot_benchmark_results(root, crate::syscall::geteuid()).unwrap();
+    write_result(
+        root,
+        "run",
+        r#"{"averageFps": 60.0, "minFps": 40.0, "maxFps": 80.0}"#,
+    );
+    complete(root, &before).unwrap()
+}
+
+#[test]
+fn a_sealed_completion_replays_against_its_untouched_files() {
+    let root = prepare_root();
+    let completion = sealed(root.path());
+    reverify_completion(root.path(), &completion).unwrap();
+}
+
+#[test]
+fn an_edited_missing_added_or_substituted_native_file_fails_the_replay() {
+    let edits: [fn(&Path); 5] = [
+        |dir| {
+            std::fs::write(
+                dir.join("frames.csv"),
+                b"Frame index, Frame time (ms)\n0, 1.0\n",
+            )
+            .unwrap()
+        },
+        |dir| std::fs::remove_file(dir.join("frames.csv")).unwrap(),
+        |dir| std::fs::write(dir.join("extra.txt"), b"x").unwrap(),
+        |dir| {
+            let text = std::fs::read_to_string(dir.join("summary.json")).unwrap();
+            std::fs::write(dir.join("summary.json"), text.replace("60", "61")).unwrap();
+        },
+        |dir| {
+            std::fs::remove_file(dir.join("summary.json")).unwrap();
+            symlink("frames.csv", dir.join("summary.json")).unwrap();
+        },
+    ];
+    for edit in edits {
+        let root = prepare_root();
+        let completion = sealed(root.path());
+        edit(&root.path().join("run"));
+        assert!(
+            reverify_completion(root.path(), &completion).is_err(),
+            "tampering must not replay"
+        );
+    }
+}
+
+#[test]
+fn a_replay_refuses_a_sealed_record_that_was_altered_after_the_fact() {
+    let root = prepare_root();
+    let good = sealed(root.path());
+    let mut metrics = good.clone();
+    metrics.metrics.average_fps += 1.0;
+    assert!(reverify_completion(root.path(), &metrics).is_err());
+    let mut context = good.clone();
+    context.context.as_mut().unwrap().frame_count += 1;
+    assert!(reverify_completion(root.path(), &context).is_err());
+    let mut traversal = good.clone();
+    traversal.result_directory = "../run".into();
+    assert!(reverify_completion(root.path(), &traversal).is_err());
+    let mut hash = good;
+    hash.files[0].sha256 = "0".repeat(64);
+    assert!(reverify_completion(root.path(), &hash).is_err());
 }

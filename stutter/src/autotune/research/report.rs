@@ -298,13 +298,25 @@ enum ContextState {
 /// Cross-attempt context check from the sealed native completions themselves. Unknown is never
 /// treated as stable, and an inconsistent context withholds the numeric comparison.
 fn context_state(evidence: &BTreeMap<u32, AttemptEvidenceV1>) -> ContextState {
+    /// Two reported values disagree only when both were reported; a hole is not a disagreement but
+    /// it is not agreement either (see `is_complete`).
+    fn differs<T: PartialEq>(a: &Option<T>, b: &Option<T>) -> bool {
+        matches!((a, b), (Some(x), Some(y)) if x != y)
+    }
     let mut natives = evidence
         .values()
         .map(|item| item.native_completion.as_deref());
     let Some(Some(first)) = natives.next() else {
         return ContextState::Unproven;
     };
-    let mut unproven = false;
+    let complete = |native: &super::cyberpunk::CyberpunkBenchmarkCompletion| {
+        native
+            .context
+            .as_ref()
+            .is_some_and(super::native_context::NativeContext::is_complete)
+    };
+    // Every completion must carry a fully reported graphics context, the first one included.
+    let mut unproven = !complete(first);
     for native in natives {
         let Some(native) = native else {
             unproven = true;
@@ -317,21 +329,16 @@ fn context_state(evidence: &BTreeMap<u32, AttemptEvidenceV1>) -> ContextState {
         {
             return ContextState::Drifted;
         }
-        // The game's own report of how it ran must match across arms; a missing report is unknown,
-        // never assumed equal.
-        match (&first.context, &native.context) {
-            (Some(a), Some(b)) => {
-                if a.game_version != b.game_version
-                    || a.preset_name != b.preset_name
-                    || a.gpu_name != b.gpu_name
-                    || a.upscaling_type != b.upscaling_type
-                    || a.ray_tracing_enabled != b.ray_tracing_enabled
-                    || a.frame_generation_type != b.frame_generation_type
-                {
-                    return ContextState::Drifted;
-                }
-            }
-            _ => unproven = true,
+        unproven |= !complete(native);
+        if let (Some(a), Some(b)) = (&first.context, &native.context)
+            && (differs(&a.game_version, &b.game_version)
+                || differs(&a.preset_name, &b.preset_name)
+                || differs(&a.gpu_name, &b.gpu_name)
+                || differs(&a.upscaling_type, &b.upscaling_type)
+                || differs(&a.ray_tracing_enabled, &b.ray_tracing_enabled)
+                || differs(&a.frame_generation_type, &b.frame_generation_type))
+        {
+            return ContextState::Drifted;
         }
     }
     if unproven {
