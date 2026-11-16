@@ -4,6 +4,7 @@ use super::*;
 use crate::autotune::research::{
     ProtonSource, ResearchTool,
     child_study::{Stage, plan},
+    native_context::ProfileConformance,
     tests::intent as base_intent,
 };
 
@@ -60,6 +61,7 @@ fn good(study: &ChildStudy) -> AttemptsOutcome {
         completed: study.min_attempts,
         health_halt: false,
         context_consistent: true,
+        conformance: vec![ProfileConformance::Conforms; study.min_attempts as usize],
     }
 }
 
@@ -209,4 +211,35 @@ fn the_executor_plugs_into_the_stage_runner_and_a_blocked_profile_blocks_its_dep
     let all = runner.ledger().dispositions();
     assert!(all.iter().all(|d| d.result == Some(StudyResult::Blocked)));
     assert_eq!(runner.ledger().spent_attempts(), 0);
+}
+
+#[test]
+fn a_result_that_did_not_run_the_frozen_profile_is_unqualified() {
+    let study = cpu_screen();
+    let case = |conformance: Vec<ProfileConformance>| {
+        let mut outcome = good(&study);
+        outcome.conformance = conformance;
+        let (mut exec, _) = executor(Ok(true), Ok(()), Ok(outcome));
+        exec.execute(&study, 100).unwrap()
+    };
+    let violated = case(vec![
+        ProfileConformance::Conforms,
+        ProfileConformance::Violates,
+    ]);
+    assert_eq!(
+        (violated.result, violated.reason),
+        (StudyResult::Unqualified, "ProfileViolated")
+    );
+    let unproven = case(vec![
+        ProfileConformance::Conforms,
+        ProfileConformance::Unproven,
+    ]);
+    assert_eq!(
+        (unproven.result, unproven.reason),
+        (StudyResult::Unqualified, "UnprovenContext")
+    );
+    assert_eq!(
+        case(vec![ProfileConformance::NotSpecified]).result,
+        StudyResult::Qualified
+    );
 }

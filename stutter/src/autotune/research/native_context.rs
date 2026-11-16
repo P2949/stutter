@@ -135,6 +135,54 @@ pub fn verify_frames(summary: &[u8], frames_csv: &[u8]) -> anyhow::Result<Native
     })
 }
 
+/// Whether a result's reported graphics context matches the frozen study profile it was meant to
+/// run. Two arms agreeing with each other proves comparability, not that they ran the profile.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "judged by the real attempt runner once child studies run live"
+    )
+)]
+pub enum ProfileConformance {
+    Conforms,
+    /// A reported field contradicts the profile.
+    Violates,
+    /// A field the profile constrains was not reported.
+    Unproven,
+    /// The profile constrains no reported graphics field (the long action profile).
+    NotSpecified,
+}
+
+impl NativeContext {
+    /// The CPU and GPU study profiles are raster-only: ray tracing off and frame generation off.
+    /// (Resolution and presets are not in the game's reported context, so they are not judged.)
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "called by the real attempt runner once child studies run live"
+        )
+    )]
+    pub fn conformance(&self, profile: super::child_study::Profile) -> ProfileConformance {
+        use super::child_study::Profile;
+        match profile {
+            Profile::Long => ProfileConformance::NotSpecified,
+            Profile::Cpu | Profile::Gpu => {
+                let (rt, fg) = (self.ray_tracing_enabled, self.frame_generation_type);
+                if rt == Some(true) || fg.is_some_and(|value| value != 0) {
+                    ProfileConformance::Violates
+                } else if rt == Some(false) && fg == Some(0) {
+                    ProfileConformance::Conforms
+                } else {
+                    ProfileConformance::Unproven
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -232,5 +280,51 @@ mod tests {
             let context = verify_frames(value.to_string().as_bytes(), &csv(4, ms)).unwrap();
             assert!(!context.is_complete(), "{missing}");
         }
+    }
+
+    #[test]
+    fn a_result_is_judged_against_the_raster_profiles_it_was_meant_to_run() {
+        use crate::autotune::research::child_study::Profile;
+        let ctx = |rt: Option<bool>, fg: Option<i64>| NativeContext {
+            game_version: Some("2.5".into()),
+            preset_name: Some("P".into()),
+            gpu_name: Some("G".into()),
+            upscaling_type: Some(0),
+            ray_tracing_enabled: rt,
+            frame_generation_type: fg,
+            frame_count: 10,
+        };
+        for profile in [Profile::Cpu, Profile::Gpu] {
+            assert_eq!(
+                ctx(Some(false), Some(0)).conformance(profile),
+                ProfileConformance::Conforms
+            );
+            // The very run that hung the GPU: ray tracing on is not the raster profile.
+            assert_eq!(
+                ctx(Some(true), Some(0)).conformance(profile),
+                ProfileConformance::Violates
+            );
+            assert_eq!(
+                ctx(Some(false), Some(2)).conformance(profile),
+                ProfileConformance::Violates
+            );
+            assert_eq!(
+                ctx(None, Some(0)).conformance(profile),
+                ProfileConformance::Unproven
+            );
+            assert_eq!(
+                ctx(Some(false), None).conformance(profile),
+                ProfileConformance::Unproven
+            );
+            // A contradiction is a violation even when the other field is unreported.
+            assert_eq!(
+                ctx(Some(true), None).conformance(profile),
+                ProfileConformance::Violates
+            );
+        }
+        assert_eq!(
+            ctx(Some(true), Some(0)).conformance(Profile::Long),
+            ProfileConformance::NotSpecified
+        );
     }
 }

@@ -7,6 +7,7 @@
 use super::{
     child_runner::{StudyExecutor, StudyRun},
     child_study::{ChildStudy, Profile, StudyResult},
+    native_context::ProfileConformance,
 };
 
 /// What a profile hook reports when it cannot apply a profile.
@@ -38,6 +39,8 @@ pub struct AttemptsOutcome {
     pub health_halt: bool,
     /// The comparison context was proven consistent across the study's arms.
     pub context_consistent: bool,
+    /// How each completed result's reported context conforms to the study's frozen profile.
+    pub conformance: Vec<ProfileConformance>,
 }
 
 /// Runs a study's attempts (the real one drives the journalled `Driver` over the Steam host).
@@ -89,7 +92,16 @@ impl<P: ProfileHook, A: StudyAttempts> StudyExecutor for HostStudyExecutor<P, A>
                 "IncompleteAttempts",
                 false,
             )
-        } else if !outcome.context_consistent {
+        } else if outcome.conformance.contains(&ProfileConformance::Violates) {
+            run(
+                StudyResult::Unqualified,
+                outcome.attempts_used,
+                "ProfileViolated",
+                false,
+            )
+        } else if !outcome.context_consistent
+            || outcome.conformance.contains(&ProfileConformance::Unproven)
+        {
             run(
                 StudyResult::Unqualified,
                 outcome.attempts_used,
