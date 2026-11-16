@@ -117,7 +117,7 @@ pub(crate) fn derived_from(
         && rebuilt == *parent
 }
 
-fn verify_child(
+pub(crate) fn verify_child(
     dir: &File,
     name: &str,
     uid: u32,
@@ -193,6 +193,15 @@ pub fn verify_children(
                     // A rule the ledger froze for this pilot must follow from the pilot's own runs.
                     rule_matches_pilot(&rules, &name, studies.as_fd(), uid)?;
                     study_checks(&rules, &dispositions, &name, &studies, uid, parent)?;
+                    selection_check(
+                        &rules,
+                        &dispositions,
+                        &name,
+                        campaign,
+                        &studies,
+                        uid,
+                        parent,
+                    )?;
                     Ok(checked)
                 })
         } else {
@@ -277,6 +286,52 @@ fn study_checks(
             receipts_valid(&receipts, action, parent.uid)?;
         }
         _ => {}
+    }
+    Ok(())
+}
+
+/// The builds the child runs are the ones its screen selects: a pure function of the screen's sealed
+/// (and reconstructed) results, the campaign's tools and, for a feature, which builds have an
+/// environment control for its factor. A merely authorized but wrongly chosen build is refused.
+fn selection_check(
+    rules: &std::collections::BTreeMap<String, super::pilot_rule::FrozenConfirmationRule>,
+    dispositions: &[super::child_ledger::Disposition],
+    name: &str,
+    campaign: &File,
+    studies: &File,
+    uid: u32,
+    parent: &ResearchIntentV1,
+) -> anyhow::Result<()> {
+    use super::child_study::Stage;
+    let Some(decided) = dispositions
+        .iter()
+        .find(|study| study.study_sha256.starts_with(name))
+    else {
+        return Ok(());
+    };
+    let dir = File::from(crate::syscall::openat_dir_nofollow(studies.as_fd(), name)?);
+    let child: ResearchIntentV1 = serde_json::from_slice(&read_private(&dir, "intent.json", uid)?)?;
+    if decided.stage != Stage::Screen {
+        let planned = super::child_study::plan(parent)?
+            .into_iter()
+            .find(|study| study.study_sha256 == decided.study_sha256)
+            .ok_or_else(|| anyhow::anyhow!("the study is not in the plan"))?;
+        let screen = super::arm_selection::screen_of(parent, &planned)?;
+        let fps = super::arm_selection::screen_fps(campaign, uid, &screen)?;
+        let rule = planned
+            .depends_on
+            .iter()
+            .find_map(|digest| rules.get(digest))
+            .cloned();
+        let mut expected =
+            super::funnel_driver::inputs_for_study(parent, &planned, &fps, rule)?.arms;
+        let mut ran: Vec<_> = child.tools.iter().map(|tool| tool.source).collect();
+        expected.sort();
+        ran.sort();
+        anyhow::ensure!(
+            expected == ran,
+            "the child does not run the builds its screen selects"
+        );
     }
     Ok(())
 }

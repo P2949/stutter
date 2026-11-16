@@ -206,17 +206,19 @@ fn an_action_study_directory_holds_a_one_build_treatment_intent() {
 
 #[test]
 fn a_finished_treatment_study_reconstructs_and_is_derived_from_its_campaign() {
-    use crate::autotune::research::child_verify::verify_children;
+    use crate::autotune::research::child_verify::{verify_child, verify_children};
     let (root, mut runner, study, _gate, parent) = setup(|stage| matches!(stage, Stage::Action(_)));
     run_to_end(&mut runner, &study);
     let uid = crate::syscall::geteuid();
-    let result = verify_children(&File::open(root.path()).unwrap(), uid, &parent, &|_| {
-        std::path::PathBuf::from("/nonexistent")
-    })
-    .unwrap();
-    let child = &result.children[0];
-    assert!(child.reconstruction, "{:?}", child.problem);
-    let report = child.report.as_ref().unwrap();
+    let lookup = |_: ProtonSource| std::path::PathBuf::from("/nonexistent");
+    let name = study.study_sha256[..16].to_owned();
+    let dir = File::open(root.path().join("studies").join(&name)).unwrap();
+    // The child itself reconstructs and is derived from its campaign's plan.
+    let (_raw, report, _runtime) = verify_child(&dir, &name, uid, &parent, &lookup).unwrap();
+    // The funnel verifier also demands the screen its build was selected from: with no screen
+    // measured here it refuses the child rather than trust an unreproducible selection.
+    let result = verify_children(&File::open(root.path()).unwrap(), uid, &parent, &lookup).unwrap();
+    assert!(!result.children[0].reconstruction && result.children[0].problem.is_some());
     // The comparison is within one build: a treatment, not a second Proton.
     assert_eq!(report["treatment"]["action"], "cpu_affinity_profile");
     assert_eq!(report["arms"].as_array().unwrap().len(), 1);

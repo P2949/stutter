@@ -163,3 +163,107 @@ mod inputs {
         assert!(inputs_for_study(&intent, &confirm, &BTreeMap::new(), Some(rule)).is_err());
     }
 }
+
+mod treatment_source {
+    use super::*;
+    use crate::autotune::research::{
+        ResearchFactor,
+        child_study::Stage,
+        funnel_driver::{NoEligibleSource, inputs_for_study},
+    };
+
+    const SIX: [ProtonSource; 6] = [
+        ProtonSource::ValveStable,
+        ProtonSource::ValveExperimental,
+        ProtonSource::CachyOs,
+        ProtonSource::CachyOsV3,
+        ProtonSource::Ge,
+        ProtonSource::Em,
+    ];
+
+    fn six() -> ResearchIntentV1 {
+        let mut intent = campaign(&SIX);
+        intent.factors = vec![
+            ResearchFactor::NtSync,
+            ResearchFactor::Fsr4,
+            ResearchFactor::Gamescope,
+        ];
+        intent.max_attempts = 120;
+        intent
+    }
+
+    fn feature(intent: &ResearchIntentV1, factor: ResearchFactor) -> ChildStudy {
+        plan(intent)
+            .unwrap()
+            .into_iter()
+            .find(|s| s.stage == Stage::Feature(factor))
+            .unwrap()
+    }
+
+    /// Valve Stable is the fastest and the control, GE next.
+    fn fps() -> BTreeMap<ProtonSource, Vec<f64>> {
+        measured(&[
+            (ProtonSource::ValveStable, &[80.0, 81.0]),
+            (ProtonSource::ValveExperimental, &[70.0, 71.0]),
+            (ProtonSource::CachyOs, &[72.0, 73.0]),
+            (ProtonSource::CachyOsV3, &[74.0, 75.0]),
+            (ProtonSource::Ge, &[76.0, 77.0]),
+            (ProtonSource::Em, &[60.0, 61.0]),
+        ])
+    }
+
+    #[test]
+    fn eligibility_is_the_factors_own_environment_control_not_the_performance_control() {
+        assert!(!eligible_for(
+            ProtonSource::ValveStable,
+            ResearchFactor::NtSync
+        ));
+        assert!(eligible_for(ProtonSource::Ge, ResearchFactor::NtSync));
+        assert!(eligible_for(ProtonSource::Ge, ResearchFactor::Fsr4));
+        assert!(!eligible_for(ProtonSource::CachyOs, ResearchFactor::Fsr4));
+        assert!(!eligible_for(ProtonSource::Ge, ResearchFactor::Gamescope));
+    }
+
+    #[test]
+    fn a_fork_feature_is_measured_on_the_best_eligible_build_never_on_valve_stable() {
+        let intent = six();
+        // NtSync: every custom build can; the fastest of them (GE), although Valve Stable is faster.
+        let nt =
+            select_treatment_source(&intent, &feature(&intent, ResearchFactor::NtSync), &fps());
+        assert_eq!(nt, Some(ProtonSource::Ge));
+        // FSR4 only exists on GE.
+        let fsr = select_treatment_source(&intent, &feature(&intent, ResearchFactor::Fsr4), &fps());
+        assert_eq!(fsr, Some(ProtonSource::Ge));
+        // An unmeasured eligible build is skipped; ties follow the campaign's tool order.
+        let mut partial = fps();
+        partial.remove(&ProtonSource::Ge);
+        let nt =
+            select_treatment_source(&intent, &feature(&intent, ResearchFactor::NtSync), &partial);
+        assert_eq!(nt, Some(ProtonSource::CachyOsV3));
+    }
+
+    #[test]
+    fn an_action_study_uses_the_measured_control_and_a_factor_nothing_controls_has_no_source() {
+        let intent = six();
+        let action = plan(&intent)
+            .unwrap()
+            .into_iter()
+            .find(|s| matches!(s.stage, Stage::Action(_)))
+            .unwrap();
+        assert_eq!(
+            select_treatment_source(&intent, &action, &fps()),
+            Some(ProtonSource::ValveStable)
+        );
+        assert_eq!(
+            select_treatment_source(&intent, &action, &BTreeMap::new()),
+            None
+        );
+        // Gamescope is not a Proton environment factor: no build can run it.
+        let gamescope = feature(&intent, ResearchFactor::Gamescope);
+        assert_eq!(select_treatment_source(&intent, &gamescope, &fps()), None);
+        let error = inputs_for_study(&intent, &gamescope, &fps(), None)
+            .err()
+            .expect("no source");
+        assert!(error.downcast_ref::<NoEligibleSource>().is_some());
+    }
+}

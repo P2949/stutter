@@ -42,12 +42,12 @@ pub fn inputs_for_study(
             arms: parent.tools.iter().map(|tool| tool.source).collect(),
             rule: None,
         },
-        // A treatment study measures the screen's control build alone, with the switch off and on.
+        // A treatment study measures one build with the switch off and on: the stable control for an
+        // action, and for a feature the best measured build that has an environment control for it.
         StudyArms::Single => StudyInputs {
             arms: vec![
-                select_pair(parent, fps).ok_or_else(|| {
-                    anyhow::anyhow!("the screen did not measure a control and a candidate")
-                })?[0],
+                super::arm_selection::select_treatment_source(parent, study, fps)
+                    .ok_or(NoEligibleSource)?,
             ],
             rule: None,
         },
@@ -64,6 +64,44 @@ pub fn inputs_for_study(
                 _ => None,
             },
         },
+    })
+}
+
+/// No measured build can run this treatment study (the factor has no environment control on any
+/// build the screen measured): the study is blocked, not run on a build that would refuse it.
+#[derive(Debug)]
+pub struct NoEligibleSource;
+
+impl std::fmt::Display for NoEligibleSource {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("no measured build has an environment control for this factor")
+    }
+}
+
+impl std::error::Error for NoEligibleSource {}
+
+/// Decide before a study starts whether its arms can be selected at all, so a study with no eligible
+/// build is recorded as blocked rather than halting the funnel or running on the wrong build.
+pub fn selection_blocker(
+    campaign: std::fs::File,
+    parent: ResearchIntentV1,
+    rules: RuleRegistry,
+) -> Box<dyn Fn(&ChildStudy) -> Option<&'static str> + Send> {
+    let select = Mutex::new(production_inputs(campaign, parent, rules));
+    Box::new(move |study| {
+        if study.arms() != StudyArms::Single {
+            return None;
+        }
+        let Ok(mut select) = select.lock() else {
+            return Some("BlockedScreenUnavailable");
+        };
+        match select(study) {
+            Ok(_) => None,
+            Err(error) if error.downcast_ref::<NoEligibleSource>().is_some() => {
+                Some("BlockedNoEligibleSource")
+            }
+            Err(_) => Some("BlockedScreenUnavailable"),
+        }
     })
 }
 
@@ -93,6 +131,8 @@ pub struct FunnelDriver {
     executor: HostStudyExecutor<Box<dyn ProfileHook + Send>, DriverStudyAttempts>,
     /// Studies this build cannot run are decided with their blocker, never run or dropped.
     blocker: fn(&ChildStudy) -> Option<&'static str>,
+    /// Blockers that depend on the screen's own results (no build can run a treatment study).
+    selection: Option<Box<dyn Fn(&ChildStudy) -> Option<&'static str> + Send>>,
     cancelled: bool,
     rules: RuleRegistry,
     /// The action gate an action child arms, shared with the runtime (absent: no action child).
@@ -113,10 +153,20 @@ impl FunnelDriver {
             runner: StageRunner::new(ledger, intent.max_attempts),
             executor: HostStudyExecutor::new(profiles, attempts),
             blocker,
+            selection: None,
             cancelled: false,
             rules,
             gate: None,
         })
+    }
+
+    /// Add the blocker that decides, from the screen's results, which treatment studies can run.
+    pub fn with_selection_blocker(
+        mut self,
+        selection: Box<dyn Fn(&ChildStudy) -> Option<&'static str> + Send>,
+    ) -> Self {
+        self.selection = Some(selection);
+        self
     }
 
     /// Share the action gate the attempts arm, so the runtime can consult it.
@@ -179,9 +229,13 @@ impl FunnelDriver {
             }
         }
         let blocked = self.executor.attempts.host_mut().health_blocked();
+        let (blocker, selection) = (self.blocker, self.selection.as_ref());
+        let combined = |study: &ChildStudy| {
+            blocker(study).or_else(|| selection.and_then(|select| select(study)))
+        };
         let step =
             self.runner
-                .step_fenced(&mut self.executor, &self.blocker, &mut || blocked, fence)?;
+                .step_fenced(&mut self.executor, &combined, &mut || blocked, fence)?;
         let inner = self.executor.take_step();
         Ok(match step {
             RunnerStep::Halted(code) => Step::Halted(code),

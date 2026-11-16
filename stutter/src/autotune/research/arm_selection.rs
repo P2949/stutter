@@ -49,6 +49,47 @@ pub fn select_pair(
     best.map(|(candidate, _)| [control, candidate])
 }
 
+/// Whether a factor has a documented environment control on this Proton build. A fork-local feature
+/// (an FSR or frame-generation switch only some forks carry) cannot be evaluated on a build that has
+/// none, whatever its performance rank.
+pub fn eligible_for(source: ProtonSource, factor: super::ResearchFactor) -> bool {
+    super::features::factor_env(source, factor, true).is_ok()
+}
+
+/// The one build a within-source study measures. An action study uses the stable control. A feature
+/// study uses the highest-FPS measured build that actually has an environment control for its factor
+/// (campaign tool order breaks ties); `None` when no measured build has one, which makes the study
+/// blocked rather than run on a build that would refuse the factor.
+pub fn select_treatment_source(
+    intent: &ResearchIntentV1,
+    study: &ChildStudy,
+    fps: &BTreeMap<ProtonSource, Vec<f64>>,
+) -> Option<ProtonSource> {
+    let mean = |source: ProtonSource| -> Option<f64> {
+        let runs = fps.get(&source).filter(|runs| !runs.is_empty())?;
+        let mean = runs.iter().sum::<f64>() / runs.len() as f64;
+        mean.is_finite().then_some(mean)
+    };
+    match study.stage {
+        Stage::Action(_) => control_of(intent).filter(|control| mean(*control).is_some()),
+        Stage::Feature(factor) => {
+            let mut best: Option<(ProtonSource, f64)> = None;
+            for tool in &intent.tools {
+                let source = tool.source;
+                if !eligible_for(source, factor) {
+                    continue;
+                }
+                let Some(value) = mean(source) else { continue };
+                if best.is_none_or(|(_, top)| value > top) {
+                    best = Some((source, value));
+                }
+            }
+            best.map(|(source, _)| source)
+        }
+        Stage::Screen | Stage::Pilot | Stage::Confirm => None,
+    }
+}
+
 /// The screen a study descends from for its own profile (a pilot's or confirmation's predecessor
 /// chain, or the CPU screen for the action and feature studies).
 pub fn screen_of(intent: &ResearchIntentV1, study: &ChildStudy) -> anyhow::Result<ChildStudy> {
@@ -76,6 +117,9 @@ pub fn screen_fps(
         studies.as_fd(),
         &screen.study_sha256[..16],
     )?);
+    // The selection stands on the screen only if its report is the deterministic function of its own
+    // sealed journal and evidence; tampered or torn evidence selects nothing.
+    super::report_store::load_and_verify(&dir, uid)?;
     let evidence = File::from(crate::syscall::openat_dir_nofollow(
         dir.as_fd(),
         "evidence",

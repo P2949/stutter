@@ -11,7 +11,7 @@ use crate::{
         action_gate::{ActionGate, SharedActionGate},
         driver::AttemptHost,
         driver_attempts::DriverStudyAttempts,
-        funnel_driver::{FunnelDriver, RuleRegistry, production_inputs},
+        funnel_driver::{FunnelDriver, RuleRegistry, production_inputs, selection_blocker},
         profile_applier::StudySettingsFile,
         profile_hook::{FileProfileHook, UnavailableProfiles, cyberpunk_running, production_spec},
         session_host::arm_prefix_paths,
@@ -88,6 +88,8 @@ fn build(
         production_inputs(campaign.try_clone()?, intent.clone(), rules.clone()),
     )
     .with_action_gate(gate.clone());
+    // A treatment study no measured build can run is recorded as blocked before it starts.
+    let selection = selection_blocker(campaign.try_clone()?, intent.clone(), rules.clone());
     Ok(FunnelDriver::new(
         campaign,
         intent,
@@ -96,6 +98,7 @@ fn build(
         |_| None,
         rules,
     )?
+    .with_selection_blocker(selection)
     .with_action_gate(gate))
 }
 
