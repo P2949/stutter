@@ -19,6 +19,8 @@ struct Host {
     ticks: u32,
     health: bool,
     process: Option<crate::autotune::research::action_child::ChildTarget>,
+    /// The host's settlement cannot be proven (its abort fails).
+    abort_fails: bool,
     /// Every factor set the driver enabled before a study, shared so a test can read it back.
     seen_factors:
         std::sync::Arc<std::sync::Mutex<Vec<Vec<crate::autotune::research::ResearchFactor>>>>,
@@ -35,6 +37,7 @@ impl Host {
             seen_factors: Default::default(),
             health: false,
             process: None,
+            abort_fails: false,
         }
     }
 }
@@ -80,6 +83,7 @@ impl AttemptHost for Host {
             })
     }
     fn abort(&mut self) -> anyhow::Result<()> {
+        anyhow::ensure!(!self.abort_fails, "settlement unproven");
         Ok(())
     }
 }
@@ -686,3 +690,6 @@ mod production_selection {
 
 #[path = "driver_attempts_action_tests.rs"]
 mod action_stage;
+
+#[path = "driver_attempts_abort_tests.rs"]
+mod abort;

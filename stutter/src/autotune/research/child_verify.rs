@@ -33,6 +33,9 @@ pub struct ChildVerification {
     /// parent's flat schedule is empty in funnel mode, so the comparison lives here.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub report: Option<serde_json::Value>,
+    /// The action receipts an action child recorded beside its study (absent for other studies).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub action_receipts: Option<serde_json::Value>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -184,6 +187,7 @@ pub fn verify_children(
         } else {
             Err(anyhow::anyhow!("unexpected entry in the studies directory"))
         };
+        let receipts = action_receipts(&studies, &name, uid);
         children.push(match result {
             Ok((raw, report, runtime)) => ChildVerification {
                 study: name,
@@ -192,6 +196,7 @@ pub fn verify_children(
                 runtime_matched: runtime,
                 problem: None,
                 report: Some(report),
+                action_receipts: receipts,
             },
             Err(error) => ChildVerification {
                 study: name,
@@ -200,6 +205,7 @@ pub fn verify_children(
                 runtime_matched: false,
                 problem: Some(format!("{error:#}")),
                 report: None,
+                action_receipts: None,
             },
         });
     }
@@ -212,6 +218,12 @@ pub fn verify_children(
 
 /// Studies the ledger decided after running them, whose directory is absent: a subset of valid
 /// children must not stand for the whole recorded funnel.
+/// The receipts an action child recorded in its study directory, if any.
+fn action_receipts(studies: &File, name: &str, uid: u32) -> Option<serde_json::Value> {
+    let dir = File::from(crate::syscall::openat_dir_nofollow(studies.as_fd(), name).ok()?);
+    serde_json::from_slice(&read_private(&dir, "action-receipts.json", uid).ok()?).ok()
+}
+
 /// A pilot's recorded rule is recomputed from its sealed whole-run results; any difference is refused.
 fn rule_matches_pilot(
     rules: &std::collections::BTreeMap<String, super::pilot_rule::FrozenConfirmationRule>,

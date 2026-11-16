@@ -224,3 +224,32 @@ fn the_comparison_carries_the_verified_child_reports_and_flags_unverified_childr
     assert_eq!(integrity["children_missing"], json!(["s3"]));
     assert!(integrity["child_reports"][0].get("report").is_none());
 }
+
+#[test]
+fn a_qualified_action_study_needs_its_receipts_to_be_a_qualified_action() {
+    let mut full = response();
+    full["child_studies"] = json!([
+        { "study_sha256": "ab".repeat(32), "profile": "long", "stage": {"stage": "action"},
+          "result": "qualified", "reason": "" }
+    ]);
+    let action = |children: Value| {
+        let mut with = full.clone();
+        with["child_reports"] = json!({ "children": children, "missing": [] });
+        let files: std::collections::BTreeMap<_, _> =
+            build(&json!({}), &with).into_iter().collect();
+        serde_json::from_slice::<Value>(&files["action-transactions.json"]).unwrap()
+    };
+    let without = action(json!([
+        { "study": "abababababababab", "reconstruction": true, "raw_files_verified": true }
+    ]));
+    assert_eq!(without["status"], "ReceiptsMissing");
+    let receipt = json!([{ "action": "CpuAffinityProfile", "pid": 4242,
+        "original": {"cpus_allowed": "0-15", "cgroup": "0::/a"},
+        "restored": {"cpus_allowed": "0-15", "cgroup": "0::/a"} }]);
+    let with = action(json!([
+        { "study": "abababababababab", "reconstruction": true, "raw_files_verified": true,
+          "action_receipts": receipt }
+    ]));
+    assert_eq!(with["status"], "Qualified");
+    assert_eq!(with["receipts"][0][0]["pid"], 4242);
+}

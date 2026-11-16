@@ -94,6 +94,15 @@ fn integration_matrix() -> Value {
     })
 }
 
+/// A qualified action study without its receipts is not a qualified action.
+fn action_status(status: &'static str, receipts: &[Value]) -> &'static str {
+    if status == "Qualified" && receipts.is_empty() {
+        "ReceiptsMissing"
+    } else {
+        status
+    }
+}
+
 fn summary(report: &Value, response: &Value) -> String {
     let verdict = response.get("verdict").cloned().unwrap_or(Value::Null);
     let flag = |name: &str| verdict.get(name).and_then(Value::as_bool).unwrap_or(false);
@@ -155,6 +164,7 @@ fn child_rows(response: &Value, with_report: bool) -> Vec<Value> {
                         "reconstruction": child.get("reconstruction"),
                         "raw_files_verified": child.get("raw_files_verified"),
                         "problem": child.get("problem"),
+                        "action_receipts": child.get("action_receipts"),
                     });
                     if with_report {
                         row["report"] = child.get("report").cloned().unwrap_or(Value::Null);
@@ -183,6 +193,14 @@ pub fn build(report: &Value, response: &Value) -> Vec<(&'static str, Vec<u8>)> {
                 "reason": study.get("reason"),
             })
         })
+        .collect();
+    // Each applied action's receipt: the frozen process, the kernel state before the apply and the
+    // state after the restoration was accepted, recorded by the action child beside its study.
+    let receipts: Vec<Value> = child_rows(response, false)
+        .iter()
+        .filter(|row| row.get("profile").and_then(Value::as_str) == Some("long"))
+        .filter_map(|row| row.get("action_receipts").cloned())
+        .filter(|receipts| receipts.as_array().is_some_and(|items| !items.is_empty()))
         .collect();
     let mut files: Vec<(&'static str, Vec<u8>)> = vec![
         (
@@ -216,8 +234,9 @@ pub fn build(report: &Value, response: &Value) -> Vec<(&'static str, Vec<u8>)> {
         (
             "action-transactions.json",
             pretty(&json!({
-                "status": status_of(&long),
+                "status": action_status(status_of(&long), &receipts),
                 "studies": long,
+                "receipts": receipts,
                 "note": "transactions come from the normal controller and root worker only",
             })),
         ),

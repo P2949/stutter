@@ -116,6 +116,28 @@ pub struct GateEvidence {
     pub kernel_state_proven: bool,
 }
 
+impl GateEvidence {
+    /// The action receipts as the durable JSON recorded beside the action study.
+    pub fn receipts_json(&self) -> serde_json::Value {
+        let state = |state: &KernelState| serde_json::json!({ "cpus_allowed": state.cpus_allowed, "cgroup": state.cgroup });
+        serde_json::Value::Array(
+            self.receipts
+                .iter()
+                .map(|receipt| {
+                    serde_json::json!({
+                        "action": format!("{:?}", receipt.action),
+                        "pid": u32::from(receipt.target.pid),
+                        "start_ticks": receipt.target.start_ticks,
+                        "uid": receipt.target.uid,
+                        "original": state(&receipt.original),
+                        "restored": state(&receipt.restored),
+                    })
+                })
+                .collect(),
+        )
+    }
+}
+
 impl ActionGate {
     pub fn new(scope: ActionChildScope, tokens: TokenProbe) -> Self {
         Self {

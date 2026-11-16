@@ -63,7 +63,7 @@ type SharedGate = crate::autotune::research::action_gate::SharedActionGate;
 
 #[test]
 fn an_action_study_arms_the_gate_on_the_sighted_process_and_qualifies_only_on_a_restored_action() {
-    let (_root, mut runner, study, gate, parent) = setup(|stage| matches!(stage, Stage::Action(_)));
+    let (root, mut runner, study, gate, parent) = setup(|stage| matches!(stage, Stage::Action(_)));
     assert!(!gate.lock().unwrap().is_armed());
     // One tick: the host has sighted the game, so the gate is armed for exactly this action.
     assert_eq!(runner.poll(&study, 100).unwrap(), None);
@@ -83,6 +83,16 @@ fn an_action_study_arms_the_gate_on_the_sighted_process_and_qualifies_only_on_a_
         !gate.lock().unwrap().is_armed(),
         "disarmed when the study ends"
     );
+    // The proven restoration is recorded beside the study for an independent verification.
+    let receipts = root
+        .path()
+        .join("studies")
+        .join(&study.study_sha256[..16])
+        .join("action-receipts.json");
+    let recorded: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(receipts).unwrap()).unwrap();
+    assert_eq!(recorded[0]["action"], "CpuAffinityProfile");
+    assert_eq!(recorded[0]["original"], recorded[0]["restored"]);
 }
 
 #[test]

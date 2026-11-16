@@ -139,7 +139,20 @@ impl DriverStudyAttempts {
             return None;
         };
         let evidence = gate.lock().ok()?.disarm();
+        // The receipts are kept beside the study so an independent verification can read them.
+        if !evidence.receipts.is_empty()
+            && let Ok(studies) = open_dir(&self.campaign, STUDIES_DIR)
+            && let Ok(dir) = open_dir(&studies, dir_name(study))
+            && let Ok(bytes) = serde_json::to_vec_pretty(&evidence.receipts_json())
+        {
+            let _ = write_new(&dir, "action-receipts.json", &bytes);
+        }
         Some(evidence.clean && !evidence.settled.is_empty() && evidence.kernel_state_proven)
+    }
+
+    #[cfg(test)]
+    fn has_running(&self) -> bool {
+        self.running.is_some()
     }
 
     fn begin(&mut self, study: &ChildStudy) -> anyhow::Result<()> {
@@ -244,8 +257,11 @@ impl StudyAttempts for DriverStudyAttempts {
     fn abort(&mut self) -> Result<(), &'static str> {
         // The host stops only what this campaign owns and verifies the settlement; the child's
         // journal keeps any unsealed attempt, which a restart finds and refuses to replay.
+        // The attempt is released only once the host proves it settled; otherwise the driver that owns
+        // it stays, so the unsettled attempt remains visible to the next tick and to recovery.
+        self.host.abort().map_err(|_| "SettlementUnproven")?;
         self.running = None;
-        self.host.abort().map_err(|_| "SettlementUnproven")
+        Ok(())
     }
 
     fn settle_interrupted(&mut self, _study: &ChildStudy) -> Result<(), &'static str> {
