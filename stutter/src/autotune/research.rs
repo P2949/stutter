@@ -165,6 +165,14 @@ pub(crate) mod pilot_rule;
     )
 )]
 mod prefix;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "applied by the real attempt runner before each child study"
+    )
+)]
+pub(crate) mod prefix_identity;
 pub(crate) mod production_host;
 #[cfg_attr(
     not(test),
