@@ -166,3 +166,31 @@ fn a_hook_recovers_every_arm_that_a_crash_left_edited() {
     // With nothing to recover it is a no-op.
     assert_eq!(restarted.recover(), Ok(()));
 }
+
+#[test]
+fn a_restoration_that_failed_is_kept_and_succeeds_when_retried_after_the_cause_is_gone() {
+    let a = arms(2, &[]);
+    let original = bytes(&a);
+    let mut hook = FileProfileHook::new(a.files, index_free, idle);
+    assert_eq!(hook.apply(Profile::Cpu), Ok(true));
+    let applied_second = std::fs::read(&a.paths[1]).unwrap();
+    // Something else rewrote the second arm's settings: its restoration cannot be proven.
+    std::fs::write(&a.paths[1], b"{\"version\":9,\"data\":[]}").unwrap();
+    assert_eq!(hook.restore(), Err("RestoreUnproven"));
+    // The first arm is back; the failed one is not forgotten and its snapshot is still durable.
+    assert_eq!(std::fs::read(&a.paths[0]).unwrap(), original[0]);
+    assert!(
+        a.paths[1]
+            .with_file_name("UserSettings.json.stutter-original")
+            .exists()
+    );
+    // The cause goes away (the file is what was applied again): the same hook now restores it.
+    std::fs::write(&a.paths[1], applied_second).unwrap();
+    assert_eq!(hook.restore(), Ok(()));
+    assert_eq!(std::fs::read(&a.paths[1]).unwrap(), original[1]);
+    assert!(
+        !a.paths[1]
+            .with_file_name("UserSettings.json.stutter-original")
+            .exists()
+    );
+}

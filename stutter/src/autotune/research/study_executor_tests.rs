@@ -54,9 +54,27 @@ struct Attempts {
     /// Polls that return "still running" before the outcome.
     slow_polls: u32,
     progress: bool,
+    abort_ok: bool,
+    settle_ok: bool,
 }
 
 impl StudyAttempts for Attempts {
+    fn abort(&mut self) -> Result<(), &'static str> {
+        self.log.borrow_mut().push("abort");
+        if self.abort_ok {
+            Ok(())
+        } else {
+            Err("SettlementUnproven")
+        }
+    }
+    fn settle_interrupted(&mut self, _: &ChildStudy) -> Result<(), &'static str> {
+        self.log.borrow_mut().push("settle");
+        if self.settle_ok {
+            Ok(())
+        } else {
+            Err("SettlementUnproven")
+        }
+    }
     fn has_progress(&mut self, _: &ChildStudy) -> bool {
         self.progress
     }
@@ -93,6 +111,8 @@ fn good(study: &ChildStudy) -> AttemptsOutcome {
         health_halt: false,
         context_consistent: true,
         conformance: vec![ProfileConformance::Conforms; study.min_attempts as usize],
+        raw_verified: true,
+        runtime_matched: true,
     }
 }
 
@@ -115,6 +135,8 @@ fn executor(
                 outcome,
                 slow_polls: 0,
                 progress: false,
+                abort_ok: true,
+                settle_ok: true,
             },
         ),
         log,
@@ -167,7 +189,11 @@ fn the_profile_is_restored_after_every_outcome_and_an_unproven_restore_halts_the
     // The attempts error out: the profile is still restored, and the error surfaces.
     let (mut errored, log) = executor(Ok(true), Ok(()), Err("steam went away"));
     assert!(run_to_end(&mut errored, &study).is_err());
-    assert_eq!(*log.borrow(), ["recover", "apply", "run", "restore"]);
+    assert_eq!(
+        *log.borrow(),
+        ["recover", "apply", "run", "abort", "restore"],
+        "the attempt is settled before the settings are restored"
+    );
     // A restore that cannot be proven ends the funnel, whatever the attempts did.
     let (mut unproven, _) = executor(Ok(true), Err("mismatch"), Ok(good(&study)));
     let outcome = run_to_end(&mut unproven, &study).unwrap();
@@ -277,7 +303,11 @@ fn a_result_that_did_not_run_the_frozen_profile_is_unqualified() {
         (StudyResult::Unqualified, "UnprovenContext")
     );
     assert_eq!(
-        case(vec![ProfileConformance::NotSpecified]).result,
+        case(vec![
+            ProfileConformance::NotSpecified;
+            study.min_attempts as usize
+        ])
+        .result,
         StudyResult::Qualified
     );
 }
@@ -312,8 +342,8 @@ fn a_study_found_mid_run_after_a_restart_is_failed_and_halts_never_replayed() {
     );
     assert_eq!(
         *log.borrow(),
-        ["recover"],
-        "settings recovered first; no profile applied and no attempt run"
+        ["settle", "recover"],
+        "the interrupted study is settled, then settings recovered; nothing applied or run"
     );
 }
 
@@ -331,5 +361,135 @@ fn settings_that_a_crash_left_edited_must_be_recovered_before_any_study_or_the_c
         *log.borrow(),
         ["recover"],
         "nothing applied or run over unproven settings"
+    );
+}
+
+fn attempts_failing(
+    study: &ChildStudy,
+    abort_ok: bool,
+) -> (HostStudyExecutor<Profiles, Attempts>, Log) {
+    let (mut exec, log) = executor(Ok(true), Ok(()), Err("steam went away"));
+    exec.attempts.abort_ok = abort_ok;
+    let _ = study;
+    (exec, log)
+}
+
+#[test]
+fn an_attempt_error_settles_before_restoring_and_an_unsettled_attempt_never_gets_its_settings_back()
+{
+    let study = cpu_screen();
+    let (mut settled, log) = attempts_failing(&study, true);
+    assert!(run_to_end(&mut settled, &study).is_err());
+    assert_eq!(
+        *log.borrow(),
+        ["recover", "apply", "run", "abort", "restore"]
+    );
+    // Settlement cannot be proven: no restore under an unresolved game, and the campaign halts.
+    let (mut unsettled, log) = attempts_failing(&study, false);
+    let outcome = run_to_end(&mut unsettled, &study).unwrap();
+    assert_eq!(
+        (outcome.result, outcome.reason, outcome.halt),
+        (StudyResult::Failed, "SettlementUnproven", true)
+    );
+    assert_eq!(*log.borrow(), ["recover", "apply", "run", "abort"]);
+}
+
+#[test]
+fn stopping_a_running_study_settles_then_restores_and_reports_what_it_could_not_prove() {
+    let study = cpu_screen();
+    let (mut exec, log) = executor(Ok(true), Ok(()), Ok(good(&study)));
+    exec.attempts.slow_polls = 5;
+    assert_eq!(exec.poll(&study, 100).unwrap(), None);
+    assert_eq!(exec.abort(), Ok(()));
+    assert_eq!(*log.borrow(), ["recover", "apply", "abort", "restore"]);
+    // Aborting an idle executor changes nothing.
+    assert_eq!(exec.abort(), Ok(()));
+    assert_eq!(log.borrow().len(), 4);
+    // An abort whose settlement is unproven leaves the settings alone and says so.
+    let (mut stuck, log) = executor(Ok(true), Ok(()), Ok(good(&study)));
+    stuck.attempts.slow_polls = 5;
+    stuck.attempts.abort_ok = false;
+    assert_eq!(stuck.poll(&study, 100).unwrap(), None);
+    assert_eq!(stuck.abort(), Err("SettlementUnproven"));
+    assert!(!log.borrow().contains(&"restore"));
+    // A restoration that cannot be proven is reported too.
+    let (mut bad, _) = executor(Ok(true), Err("mismatch"), Ok(good(&study)));
+    bad.attempts.slow_polls = 5;
+    assert_eq!(bad.poll(&study, 100).unwrap(), None);
+    assert_eq!(bad.abort(), Err("RestoreUnproven"));
+}
+
+#[test]
+fn an_interrupted_study_is_settled_before_recovery_and_an_unproven_settlement_touches_nothing() {
+    let study = cpu_screen();
+    let (mut exec, log) = executor(Ok(true), Ok(()), Ok(good(&study)));
+    exec.attempts.progress = true;
+    exec.attempts.settle_ok = false;
+    let outcome = exec.poll(&study, 100).unwrap().unwrap();
+    assert_eq!((outcome.reason, outcome.halt), ("SettlementUnproven", true));
+    assert_eq!(
+        *log.borrow(),
+        ["settle"],
+        "settings are not recovered under an unresolved owner"
+    );
+    let (mut settled, log) = executor(Ok(true), Ok(()), Ok(good(&study)));
+    settled.attempts.progress = true;
+    let outcome = settled.poll(&study, 100).unwrap().unwrap();
+    assert_eq!(outcome.reason, "InterruptedStudy");
+    assert_eq!(*log.borrow(), ["settle", "recover"]);
+}
+
+#[test]
+fn an_unproven_rollback_while_applying_is_an_integrity_stop_not_an_ordinary_failure() {
+    let study = cpu_screen();
+    let (mut exec, log) = executor(
+        Err(ProfileFailure::Unrestored("RollbackUnproven")),
+        Ok(()),
+        Ok(good(&study)),
+    );
+    let outcome = run_to_end(&mut exec, &study).unwrap();
+    assert_eq!(
+        (outcome.result, outcome.reason, outcome.halt),
+        (StudyResult::Failed, "RollbackUnproven", true)
+    );
+    assert_eq!(
+        *log.borrow(),
+        ["recover", "apply"],
+        "no attempt runs over possibly edited settings"
+    );
+}
+
+#[test]
+fn a_study_is_qualified_only_by_verified_raw_runtime_and_complete_conformance_evidence() {
+    let study = cpu_screen();
+    let case = |mutate: &dyn Fn(&mut AttemptsOutcome)| {
+        let mut outcome = good(&study);
+        mutate(&mut outcome);
+        let (mut exec, _) = executor(Ok(true), Ok(()), Ok(outcome));
+        run_to_end(&mut exec, &study).unwrap()
+    };
+    assert_eq!(case(&|_| {}).result, StudyResult::Qualified);
+    let raw = case(&|o| o.raw_verified = false);
+    assert_eq!(
+        (raw.result, raw.reason),
+        (StudyResult::Unqualified, "RawEvidenceUnverified")
+    );
+    let runtime = case(&|o| o.runtime_matched = false);
+    assert_eq!(
+        (runtime.result, runtime.reason),
+        (StudyResult::Unqualified, "RuntimeUnproven")
+    );
+    // An empty or short conformance list proves nothing about the profile.
+    let empty = case(&|o| o.conformance.clear());
+    assert_eq!(
+        (empty.result, empty.reason),
+        (StudyResult::Unqualified, "UnprovenContext")
+    );
+    let short = case(&|o| {
+        o.conformance.pop();
+    });
+    assert_eq!(
+        (short.result, short.reason),
+        (StudyResult::Unqualified, "UnprovenContext")
     );
 }

@@ -96,6 +96,9 @@ pub enum Refusal {
     RestoreMismatch,
     /// A snapshot of an earlier, unrestored application exists: recover it first.
     RecoveryPending,
+    /// Putting the original bytes back could not be proven. The snapshot is kept; this is an
+    /// integrity stop, not an ordinary failure.
+    RestoreUnproven,
     Io,
 }
 
@@ -363,10 +366,16 @@ pub fn apply(
             .map(|now| readback_matches(&original, &now, &planned) && now == bytes)
     });
     if !matches!(verified, Ok(true)) {
-        if file.replace(&original).is_ok() && file.read().is_ok_and(|now| now == original) {
-            let _ = file.remove_snapshot();
-        }
-        return Err(Refusal::ReadbackMismatch);
+        // Only a proven rollback ends the matter; otherwise the snapshot stays for recovery and the
+        // caller is told the settings may still be edited.
+        let proven = file.replace(&original).is_ok()
+            && file.read().is_ok_and(|now| now == original)
+            && file.remove_snapshot().is_ok();
+        return Err(if proven {
+            Refusal::ReadbackMismatch
+        } else {
+            Refusal::RestoreUnproven
+        });
     }
     Ok(AppliedProfile {
         profile: spec.name,

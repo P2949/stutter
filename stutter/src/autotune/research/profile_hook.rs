@@ -52,6 +52,8 @@ fn failure(refusal: &Refusal) -> ProfileFailure {
             ProfileFailure::Failed("ProfileSettingMismatch")
         }
         Refusal::ReadbackMismatch => ProfileFailure::Failed("ReadbackMismatch"),
+        // The settings may still be edited: an integrity stop, never an ordinary failure.
+        Refusal::RestoreUnproven => ProfileFailure::Unrestored("RestoreUnproven"),
         _ => ProfileFailure::Failed("ProfileApplyFailed"),
     }
 }
@@ -72,7 +74,7 @@ impl ProfileHook for FileProfileHook {
                     return Err(if rolled_back {
                         failure(&refusal)
                     } else {
-                        ProfileFailure::Failed("RollbackUnproven")
+                        ProfileFailure::Unrestored("RollbackUnproven")
                     });
                 }
             }
@@ -94,9 +96,16 @@ impl ProfileHook for FileProfileHook {
 
     fn restore(&mut self) -> Result<(), &'static str> {
         let mut proven = true;
+        // A record whose restoration failed is kept (its durable snapshot is kept too), so the
+        // restoration can be retried and is never forgotten.
+        let mut failed = Vec::new();
         for (index, applied) in std::mem::take(&mut self.applied) {
-            proven &= restore(&self.files[index], &applied).is_ok();
+            if restore(&self.files[index], &applied).is_err() {
+                proven = false;
+                failed.push((index, applied));
+            }
         }
+        self.applied = failed;
         if proven {
             Ok(())
         } else {

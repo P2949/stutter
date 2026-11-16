@@ -1,8 +1,13 @@
 //! The production `StudyExecutor` (PLAN section 6.3): one child study = apply the frozen graphics
-//! profile, run the study's attempts through the normal driver, always restore the profile, and map
-//! what happened to a study result. It owns no game logic: profile application and attempt running
-//! are traits (the real ones are `profile_applier` and the `Driver` over the Steam host), so every
-//! decision here is testable with fakes, and a restore that cannot be proven is fatal to the funnel.
+//! profile, run the study's attempts through the normal driver, settle them, restore the profile,
+//! and map what happened to a study result. It owns no game logic: profile application and attempt
+//! running are traits (the real ones are `profile_applier` and the `Driver` over the Steam host), so
+//! every decision here is testable with fakes.
+//!
+//! Ordering is the safety property: **settle the attempt, verify no game owner remains, only then
+//! restore the settings, and prove the original bytes are back.** Settings are never restored under
+//! a game whose ownership is unresolved, and a restoration or settlement that cannot be proven halts
+//! the whole campaign.
 
 use super::{
     child_runner::{StudyExecutor, StudyRun},
@@ -17,6 +22,8 @@ pub enum ProfileFailure {
     Blocked(&'static str),
     /// The profile could not be applied for another reason; nothing was left changed.
     Failed(&'static str),
+    /// The settings may still be edited (a rollback could not be proven): an integrity stop.
+    Unrestored(&'static str),
 }
 
 /// Apply and restore a study's graphics profile in the study-owned prefixes.
@@ -44,6 +51,10 @@ pub struct AttemptsOutcome {
     pub context_consistent: bool,
     /// How each completed result's reported context conforms to the study's frozen profile.
     pub conformance: Vec<ProfileConformance>,
+    /// Every completed attempt's native files replayed against its sealed record.
+    pub raw_verified: bool,
+    /// Every completed attempt's mapped runtime was matched to its own arm's installation.
+    pub runtime_matched: bool,
 }
 
 /// Runs a study's attempts (the real one drives the journalled `Driver` over the Steam host, one
@@ -53,6 +64,12 @@ pub trait StudyAttempts {
     fn has_progress(&mut self, study: &ChildStudy) -> bool;
     /// Advance the study. `Ok(None)` means it is still running.
     fn poll(&mut self, study: &ChildStudy, budget: u32) -> anyhow::Result<Option<AttemptsOutcome>>;
+    /// Cancel the running attempt and independently settle it. `Ok` only when no game or worker
+    /// owner remains (the settlement witness agrees); anything unproven is an `Err`.
+    fn abort(&mut self) -> Result<(), &'static str>;
+    /// After a restart: independently settle whatever an interrupted study left running, before
+    /// anything is restored. `Ok` only when no owner remains.
+    fn settle_interrupted(&mut self, study: &ChildStudy) -> Result<(), &'static str>;
 }
 
 enum State {
@@ -89,35 +106,45 @@ fn run(result: StudyResult, attempts_used: u32, reason: &'static str, halt: bool
 }
 
 impl<P: ProfileHook, A: StudyAttempts> HostStudyExecutor<P, A> {
-    /// The study's result once its attempts have ended (the profile is already restored).
+    /// The study's result once its attempts have ended and the profile is restored. A benchmark
+    /// study is qualified only by independently verified evidence, never by counts alone.
     fn judge(study: &ChildStudy, outcome: &AttemptsOutcome) -> StudyRun {
+        let used = outcome.attempts_used;
         if outcome.health_halt {
-            run(StudyResult::Failed, outcome.attempts_used, "GpuReset", true)
+            run(StudyResult::Failed, used, "GpuReset", true)
         } else if outcome.completed < study.min_attempts {
-            run(
-                StudyResult::Failed,
-                outcome.attempts_used,
-                "IncompleteAttempts",
-                false,
-            )
+            run(StudyResult::Failed, used, "IncompleteAttempts", false)
         } else if outcome.conformance.contains(&ProfileConformance::Violates) {
+            run(StudyResult::Unqualified, used, "ProfileViolated", false)
+        } else if outcome.conformance.len() != outcome.completed as usize {
+            // Exactly one conformance verdict per completed result; an empty or short list proves
+            // nothing about the profile.
+            run(StudyResult::Unqualified, used, "UnprovenContext", false)
+        } else if !outcome.raw_verified {
             run(
                 StudyResult::Unqualified,
-                outcome.attempts_used,
-                "ProfileViolated",
+                used,
+                "RawEvidenceUnverified",
                 false,
             )
+        } else if !outcome.runtime_matched {
+            run(StudyResult::Unqualified, used, "RuntimeUnproven", false)
         } else if !outcome.context_consistent
             || outcome.conformance.contains(&ProfileConformance::Unproven)
         {
-            run(
-                StudyResult::Unqualified,
-                outcome.attempts_used,
-                "UnprovenContext",
-                false,
-            )
+            run(StudyResult::Unqualified, used, "UnprovenContext", false)
         } else {
-            run(StudyResult::Qualified, outcome.attempts_used, "", false)
+            run(StudyResult::Qualified, used, "", false)
+        }
+    }
+
+    /// Restore the profile (if one was applied) and return to idle. `Err` means it is unproven.
+    fn restore_if_applied(&mut self, applied: bool) -> Result<(), &'static str> {
+        self.state = State::Idle;
+        if applied {
+            self.profiles.restore()
+        } else {
+            Ok(())
         }
     }
 }
@@ -129,6 +156,18 @@ impl<P: ProfileHook, A: StudyAttempts> StudyExecutor for HostStudyExecutor<P, A>
         remaining_attempts: u32,
     ) -> anyhow::Result<Option<StudyRun>> {
         if matches!(self.state, State::Idle) {
+            // A study whose journal already holds progress was interrupted (a restart). Its
+            // attempts must never be replayed, and settings are not touched until whatever it left
+            // running is independently settled.
+            let interrupted = self.attempts.has_progress(study);
+            if interrupted && self.attempts.settle_interrupted(study).is_err() {
+                return Ok(Some(run(
+                    StudyResult::Failed,
+                    study.min_attempts,
+                    "SettlementUnproven",
+                    true,
+                )));
+            }
             // Settings left edited by a crash are restored before anything else is decided.
             if self.profiles.recover().is_err() {
                 return Ok(Some(run(
@@ -138,10 +177,7 @@ impl<P: ProfileHook, A: StudyAttempts> StudyExecutor for HostStudyExecutor<P, A>
                     true,
                 )));
             }
-            // A study whose journal already holds progress was interrupted (a restart). Whether
-            // its profile is applied is unknown and its attempts must never be replayed, so the
-            // campaign stops rather than guess.
-            if self.attempts.has_progress(study) {
+            if interrupted {
                 return Ok(Some(run(
                     StudyResult::Failed,
                     study.min_attempts,
@@ -157,6 +193,10 @@ impl<P: ProfileHook, A: StudyAttempts> StudyExecutor for HostStudyExecutor<P, A>
                 Err(ProfileFailure::Failed(reason)) => {
                     return Ok(Some(run(StudyResult::Failed, 0, reason, false)));
                 }
+                // The settings may still be edited: nothing else may run in this campaign.
+                Err(ProfileFailure::Unrestored(reason)) => {
+                    return Ok(Some(run(StudyResult::Failed, 0, reason, true)));
+                }
             };
             self.state = State::Running { applied };
         }
@@ -166,15 +206,27 @@ impl<P: ProfileHook, A: StudyAttempts> StudyExecutor for HostStudyExecutor<P, A>
         let outcome = match self.attempts.poll(study, remaining_attempts) {
             Ok(None) => return Ok(None),
             Ok(Some(outcome)) => Ok(outcome),
-            Err(error) => Err(error),
+            Err(error) => {
+                // The attempt may still own a game: settle it first. If that cannot be proven the
+                // settings are left as they are (the durable snapshot recovers them later) and the
+                // campaign stops; they are never restored under an unresolved owner.
+                if self.attempts.abort().is_err() {
+                    self.state = State::Idle;
+                    return Ok(Some(run(
+                        StudyResult::Failed,
+                        study.min_attempts,
+                        "SettlementUnproven",
+                        true,
+                    )));
+                }
+                Err(error)
+            }
         };
-        // The profile is restored whatever happened, before anything else is decided.
-        self.state = State::Idle;
-        if applied && self.profiles.restore().is_err() {
-            // A game profile that cannot be proven restored stops the whole campaign.
-            let used = outcome
-                .as_ref()
-                .map_or(study.min_attempts, |o| o.attempts_used);
+        let used = outcome
+            .as_ref()
+            .map_or(study.min_attempts, |o| o.attempts_used);
+        // A study that ended normally has settled its own attempts; the profile is restored now.
+        if self.restore_if_applied(applied).is_err() {
             return Ok(Some(run(
                 StudyResult::Failed,
                 used,
@@ -183,6 +235,19 @@ impl<P: ProfileHook, A: StudyAttempts> StudyExecutor for HostStudyExecutor<P, A>
             )));
         }
         Ok(Some(Self::judge(study, &outcome?)))
+    }
+
+    /// Stop a running study (a health stop, cancellation, deadline or shutdown): settle its
+    /// attempt, verify no owner remains, then restore and prove the settings.
+    fn abort(&mut self) -> Result<(), &'static str> {
+        let State::Running { applied } = self.state else {
+            return Ok(());
+        };
+        if self.attempts.abort().is_err() {
+            return Err("SettlementUnproven");
+        }
+        self.restore_if_applied(applied)
+            .map_err(|_| "RestoreUnproven")
     }
 }
 

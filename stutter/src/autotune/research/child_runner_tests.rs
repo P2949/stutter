@@ -30,9 +30,14 @@ fn open(root: &tempfile::TempDir, plan: Vec<ChildStudy>) -> ChildLedger {
 struct Script<F: FnMut(&ChildStudy) -> anyhow::Result<StudyRun>> {
     run: F,
     asked: Vec<(Profile, Stage)>,
+    aborts: u32,
 }
 
 impl<F: FnMut(&ChildStudy) -> anyhow::Result<StudyRun>> StudyExecutor for Script<F> {
+    fn abort(&mut self) -> Result<(), &'static str> {
+        self.aborts += 1;
+        Ok(())
+    }
     fn poll(&mut self, study: &ChildStudy, _: u32) -> anyhow::Result<Option<StudyRun>> {
         self.asked.push((study.profile, study.stage));
         (self.run)(study).map(Some)
@@ -76,6 +81,7 @@ fn the_whole_funnel_runs_in_order_within_budget_and_ends_done() {
     let mut exec = Script {
         run: clean,
         asked: Vec::new(),
+        aborts: 0,
     };
     let steps = drive(&mut runner, &mut exec, &no_blocker);
     assert_eq!(steps.last(), Some(&RunnerStep::Done));
@@ -104,6 +110,7 @@ fn the_budget_survives_a_restart_and_unaffordable_studies_are_deferred() {
     let mut exec = Script {
         run: clean,
         asked: Vec::new(),
+        aborts: 0,
     };
     for _ in 0..2 {
         assert!(matches!(
@@ -118,6 +125,7 @@ fn the_budget_survives_a_restart_and_unaffordable_studies_are_deferred() {
     let mut again = Script {
         run: clean,
         asked: Vec::new(),
+        aborts: 0,
     };
     let steps = drive(&mut restarted, &mut again, &no_blocker);
     assert_eq!(steps.last(), Some(&RunnerStep::Done));
@@ -155,6 +163,7 @@ fn an_unqualified_or_failed_prerequisite_blocks_its_dependents() {
             clean(study)
         },
         asked: Vec::new(),
+        aborts: 0,
     };
     let steps = drive(&mut runner, &mut exec, &no_blocker);
     assert_eq!(steps.last(), Some(&RunnerStep::Done));
@@ -189,6 +198,7 @@ fn a_health_stop_ends_the_funnel_without_deciding_what_it_prevented() {
             clean(study)
         },
         asked: Vec::new(),
+        aborts: 0,
     };
     let steps = drive(&mut runner, &mut exec, &no_blocker);
     assert_eq!(steps.last(), Some(&RunnerStep::Halted("GpuReset")));
@@ -204,6 +214,7 @@ fn a_health_stop_ends_the_funnel_without_deciding_what_it_prevented() {
     let mut healthy = Script {
         run: clean,
         asked: Vec::new(),
+        aborts: 0,
     };
     let step = restarted
         .step(&mut healthy, &no_blocker, &mut || true)
@@ -220,6 +231,7 @@ fn an_executor_error_is_charged_recorded_failed_and_never_replayed() {
     let mut exec = Script {
         run: |_: &ChildStudy| Err(anyhow::anyhow!("steam went away")),
         asked: Vec::new(),
+        aborts: 0,
     };
     let step = runner.step(&mut exec, &no_blocker, &mut || false).unwrap();
     assert_eq!(step, RunnerStep::Halted("ExecutorError"));
@@ -231,6 +243,7 @@ fn an_executor_error_is_charged_recorded_failed_and_never_replayed() {
     let mut healthy = Script {
         run: clean,
         asked: Vec::new(),
+        aborts: 0,
     };
     runner
         .step(&mut healthy, &no_blocker, &mut || false)
@@ -253,6 +266,7 @@ fn qualified_evidence_below_the_studys_own_attempt_count_is_downgraded() {
             })
         },
         asked: Vec::new(),
+        aborts: 0,
     };
     let step = runner.step(&mut exec, &no_blocker, &mut || false).unwrap();
     assert!(matches!(
@@ -276,6 +290,7 @@ fn a_named_blocker_records_the_study_instead_of_running_it() {
     let mut exec = Script {
         run: clean,
         asked: Vec::new(),
+        aborts: 0,
     };
     let steps = drive(&mut runner, &mut exec, &|_| Some("BlockedProfileApplier"));
     assert_eq!(steps.last(), Some(&RunnerStep::Done));
@@ -294,9 +309,15 @@ struct Slow {
     polls_needed: u32,
     seen: u32,
     asked: Vec<(Profile, Stage)>,
+    aborted: u32,
 }
 
 impl StudyExecutor for Slow {
+    fn abort(&mut self) -> Result<(), &'static str> {
+        self.seen = 0;
+        self.aborted += 1;
+        Ok(())
+    }
     fn poll(&mut self, study: &ChildStudy, _: u32) -> anyhow::Result<Option<StudyRun>> {
         self.seen += 1;
         if self.seen < self.polls_needed {
@@ -317,6 +338,7 @@ fn a_running_study_stays_pending_and_is_neither_decided_nor_skipped_until_it_fin
         polls_needed: 3,
         seen: 0,
         asked: Vec::new(),
+        aborted: 0,
     };
     for _ in 0..2 {
         assert_eq!(
@@ -352,6 +374,7 @@ fn a_restart_while_a_study_is_running_polls_the_same_undecided_study_again() {
         polls_needed: 5,
         seen: 0,
         asked: Vec::new(),
+        aborted: 0,
     };
     runner.step(&mut slow, &no_blocker, &mut || false).unwrap();
     drop(runner);
@@ -360,6 +383,7 @@ fn a_restart_while_a_study_is_running_polls_the_same_undecided_study_again() {
     let mut fresh = Script {
         run: clean,
         asked: Vec::new(),
+        aborts: 0,
     };
     restarted
         .step(&mut fresh, &no_blocker, &mut || false)
@@ -376,6 +400,7 @@ fn a_health_stop_interrupts_a_running_study_without_deciding_it() {
         polls_needed: 5,
         seen: 0,
         asked: Vec::new(),
+        aborted: 0,
     };
     assert_eq!(
         runner.step(&mut slow, &no_blocker, &mut || false).unwrap(),
@@ -385,11 +410,40 @@ fn a_health_stop_interrupts_a_running_study_without_deciding_it() {
         runner.step(&mut slow, &no_blocker, &mut || true).unwrap(),
         RunnerStep::Halted("BlockedGpuStability")
     );
+    assert_eq!(
+        slow.aborted, 1,
+        "the running study is settled and restored before the halt"
+    );
     assert!(
         runner
             .ledger()
             .dispositions()
             .iter()
             .all(|d| d.result.is_none())
+    );
+}
+
+struct Stuck;
+
+impl StudyExecutor for Stuck {
+    fn poll(&mut self, _: &ChildStudy, _: u32) -> anyhow::Result<Option<StudyRun>> {
+        Ok(None)
+    }
+    fn abort(&mut self) -> Result<(), &'static str> {
+        Err("RestoreUnproven")
+    }
+}
+
+#[test]
+fn a_health_stop_whose_restoration_cannot_be_proven_reports_that_not_a_clean_halt() {
+    let root = tempfile::tempdir().unwrap();
+    let mut runner = StageRunner::new(open(&root, studies()), 100);
+    assert_eq!(
+        runner.step(&mut Stuck, &no_blocker, &mut || false).unwrap(),
+        RunnerStep::Pending
+    );
+    assert_eq!(
+        runner.step(&mut Stuck, &no_blocker, &mut || true).unwrap(),
+        RunnerStep::Halted("RestoreUnproven")
     );
 }

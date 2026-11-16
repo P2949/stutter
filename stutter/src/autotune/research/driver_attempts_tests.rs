@@ -102,6 +102,7 @@ fn attempts(
             now
         }),
         Box::new(|| Ok(())),
+        Box::new(|_| std::path::PathBuf::from("/nonexistent")),
     );
     (root, runner, study, parent)
 }
@@ -128,6 +129,8 @@ fn a_child_study_runs_its_own_attempts_through_the_driver_and_reports_what_was_s
     assert!(!outcome.health_halt);
     // No native completions were sealed, so the context and profile are unproven, never assumed.
     assert!(!outcome.context_consistent);
+    // Nothing was replayed from raw files and no runtime was captured: not verified.
+    assert!(!outcome.raw_verified && !outcome.runtime_matched);
     assert!(
         outcome
             .conformance
@@ -178,6 +181,7 @@ fn two_studies_never_share_directories_or_schedules() {
             now
         }),
         Box::new(|| Ok(())),
+        Box::new(|_| std::path::PathBuf::from("/nonexistent")),
     );
     let first = run_to_end(&mut runner, &plan[0]);
     let second = run_to_end(&mut runner, &plan[1]);

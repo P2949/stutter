@@ -4,14 +4,16 @@
 //! study's attempts are sealed exactly like a whole campaign's and never mix with a sibling's. The
 //! study's result is derived only from what its own sealed records prove.
 
-use std::{collections::BTreeMap, fs::File, os::fd::AsFd};
+use std::{collections::BTreeMap, fs::File, os::fd::AsFd, path::PathBuf};
 
 use super::{
-    ResearchIntentV1, ResearchJournal,
+    ProtonSource, ResearchIntentV1, ResearchJournal,
     child_intent::child_intent,
     child_study::ChildStudy,
     driver::{AttemptHost, Driver, Step, build_schedule},
+    loaded_runtime::RuntimeBinding,
     native_context::ProfileConformance,
+    raw_verify::verify_raw_evidence,
     report::evidence_context_consistent,
     report_store::read_evidence,
     study_executor::{AttemptsOutcome, StudyAttempts},
@@ -26,6 +28,8 @@ pub struct DriverStudyAttempts {
     clock: Box<dyn FnMut() -> u64 + Send>,
     /// Called before a launch is armed: the controller records the campaign lease's launching phase.
     launch_fence: Box<dyn FnMut() -> anyhow::Result<()> + Send>,
+    /// Where each arm's native results live, to replay them against their sealed records.
+    results_for: Box<dyn Fn(ProtonSource) -> PathBuf + Send>,
     running: Option<(String, Driver)>,
 }
 
@@ -52,6 +56,7 @@ impl DriverStudyAttempts {
         host: Box<dyn AttemptHost + Send>,
         clock: Box<dyn FnMut() -> u64 + Send>,
         launch_fence: Box<dyn FnMut() -> anyhow::Result<()> + Send>,
+        results_for: Box<dyn Fn(ProtonSource) -> PathBuf + Send>,
     ) -> Self {
         Self {
             campaign,
@@ -59,6 +64,7 @@ impl DriverStudyAttempts {
             host,
             clock,
             launch_fence,
+            results_for,
             running: None,
         }
     }
@@ -107,12 +113,28 @@ impl DriverStudyAttempts {
                     })
             })
             .collect();
+        // Replay every completed attempt's native files against its sealed record, and require every
+        // completed result to carry a matched runtime.
+        let raw = verify_raw_evidence(
+            &evidence_dir,
+            self.parent.uid,
+            &driver.records()?,
+            &*self.results_for,
+        )?;
+        let runtime_matched = !evidence.is_empty()
+            && evidence.values().all(|item| {
+                item.native_completion
+                    .as_deref()
+                    .is_some_and(|native| native.runtime_binding == Some(RuntimeBinding::Matched))
+            });
         Ok(AttemptsOutcome {
             attempts_used: u32::try_from(report.attempts_sealed)?,
             completed: u32::try_from(report.attempts_completed)?,
             health_halt,
             context_consistent: evidence_context_consistent(&evidence),
             conformance,
+            raw_verified: raw.passed(),
+            runtime_matched,
         })
     }
 }
@@ -123,6 +145,17 @@ impl StudyAttempts for DriverStudyAttempts {
             Ok(studies) => open_dir(&studies, dir_name(study)).is_ok(),
             Err(error) => error.kind() != std::io::ErrorKind::NotFound,
         }
+    }
+
+    fn abort(&mut self) -> Result<(), &'static str> {
+        // The host stops only what this campaign owns and verifies the settlement; the child's
+        // journal keeps any unsealed attempt, which a restart finds and refuses to replay.
+        self.running = None;
+        self.host.abort().map_err(|_| "SettlementUnproven")
+    }
+
+    fn settle_interrupted(&mut self, _study: &ChildStudy) -> Result<(), &'static str> {
+        self.host.abort().map_err(|_| "SettlementUnproven")
     }
 
     fn poll(

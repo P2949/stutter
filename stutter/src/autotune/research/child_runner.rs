@@ -36,6 +36,10 @@ pub trait StudyExecutor {
         study: &ChildStudy,
         remaining_attempts: u32,
     ) -> anyhow::Result<Option<StudyRun>>;
+    /// Stop the running study (health stop, cancellation, deadline or shutdown): settle its
+    /// attempt and prove no owner remains, then restore whatever it changed. `Err` means that is
+    /// unproven, which ends the campaign.
+    fn abort(&mut self) -> Result<(), &'static str>;
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -86,7 +90,14 @@ impl StageRunner {
         health_blocked: &mut dyn FnMut() -> bool,
     ) -> anyhow::Result<RunnerStep> {
         if health_blocked() {
-            return Ok(RunnerStep::Halted("BlockedGpuStability"));
+            // A health stop is not permission to leave a profile applied or a game unsettled: the
+            // running study is settled and its settings restored first, and that proof is what the
+            // halt reports when it fails.
+            self.in_flight = None;
+            return Ok(RunnerStep::Halted(match executor.abort() {
+                Ok(()) => "BlockedGpuStability",
+                Err(reason) => reason,
+            }));
         }
         let remaining = self.remaining_attempts();
         let study = match self.in_flight.take() {

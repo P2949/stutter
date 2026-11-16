@@ -242,6 +242,11 @@ impl Driver {
         }
     }
 
+    /// Every sealed attempt record, verified against the journal.
+    pub fn records(&self) -> anyhow::Result<Vec<AttemptRecord>> {
+        self.journal.verify()
+    }
+
     pub fn intent(&self) -> &ResearchIntentV1 {
         &self.intent
     }
