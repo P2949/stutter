@@ -317,6 +317,22 @@ fn context_state(evidence: &BTreeMap<u32, AttemptEvidenceV1>) -> ContextState {
         {
             return ContextState::Drifted;
         }
+        // The game's own report of how it ran must match across arms; a missing report is unknown,
+        // never assumed equal.
+        match (&first.context, &native.context) {
+            (Some(a), Some(b)) => {
+                if a.game_version != b.game_version
+                    || a.preset_name != b.preset_name
+                    || a.gpu_name != b.gpu_name
+                    || a.upscaling_type != b.upscaling_type
+                    || a.ray_tracing_enabled != b.ray_tracing_enabled
+                    || a.frame_generation_type != b.frame_generation_type
+                {
+                    return ContextState::Drifted;
+                }
+            }
+            _ => unproven = true,
+        }
     }
     if unproven {
         ContextState::Unproven

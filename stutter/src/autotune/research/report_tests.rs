@@ -224,7 +224,15 @@ fn native_completions_decide_consistent_or_drifted_context() {
                     minimum_fps: None,
                     maximum_fps: None,
                 },
-                context: None,
+                context: Some(super::super::native_context::NativeContext {
+                    game_version: Some("2.5".into()),
+                    preset_name: Some("RayTracingUltra".into()),
+                    gpu_name: Some("GPU".into()),
+                    upscaling_type: Some(2),
+                    ray_tracing_enabled: Some(true),
+                    frame_generation_type: Some(0),
+                    frame_count: 100,
+                }),
                 loaded_runtime: None,
                 files: vec![NativeBenchmarkFile {
                     path: "result/summary.json".into(),
@@ -301,4 +309,77 @@ fn an_unrelated_arm_failing_never_discards_a_complete_control_candidate_pair() {
     };
     assert_eq!(pairs(ProtonSource::Ge), Some(blocks));
     assert_eq!(pairs(ProtonSource::CachyOs), Some(blocks - 3));
+}
+
+#[test]
+fn a_changed_or_missing_game_reported_context_is_not_a_consistent_comparison() {
+    use super::super::{
+        cyberpunk::{
+            CyberpunkBenchmarkCompletion, CyberpunkProcessIdentity, CyberpunkScenario,
+            NativeBenchmarkMetrics,
+        },
+        native_context::NativeContext,
+    };
+    let context = |preset: &str| NativeContext {
+        game_version: Some("2.5".into()),
+        preset_name: Some(preset.into()),
+        gpu_name: Some("GPU".into()),
+        upscaling_type: Some(2),
+        ray_tracing_enabled: Some(true),
+        frame_generation_type: Some(0),
+        frame_count: 100,
+    };
+    let with = |index: u32, ctx: Option<NativeContext>| {
+        let native = CyberpunkBenchmarkCompletion {
+            schema_version: 1,
+            app_id: 1_091_500,
+            build_id: 7,
+            scene: CyberpunkScenario::BuiltinBenchmark,
+            settings_sha256: "c".repeat(64),
+            proton_source: ProtonSource::Ge,
+            proton_identity_sha256: "d".repeat(64),
+            process: CyberpunkProcessIdentity {
+                pid: stutter_core::ids::Pid::new(1234),
+                start_ticks: 1,
+                uid: 1000,
+                app_id: 1_091_500,
+                build_id: 7,
+                executable_sha256: "e".repeat(64),
+            },
+            started_unix_nanos: 1,
+            completed_unix_nanos: 2,
+            result_directory: "result".into(),
+            metrics: NativeBenchmarkMetrics {
+                average_fps: 60.0,
+                minimum_fps: None,
+                maximum_fps: None,
+            },
+            context: ctx,
+            loaded_runtime: None,
+            files: vec![],
+        };
+        (
+            index,
+            AttemptEvidenceV1 {
+                schema_version: 1,
+                slot_index: index,
+                average_fps: 60.0,
+                native_completion: Some(Box::new(native)),
+            },
+        )
+    };
+    let same: BTreeMap<_, _> = [
+        with(0, Some(context("RayTracingUltra"))),
+        with(1, Some(context("RayTracingUltra"))),
+    ]
+    .into();
+    assert_eq!(context_state(&same), ContextState::Consistent);
+    let drifted: BTreeMap<_, _> = [
+        with(0, Some(context("RayTracingUltra"))),
+        with(1, Some(context("Low"))),
+    ]
+    .into();
+    assert_eq!(context_state(&drifted), ContextState::Drifted);
+    let missing: BTreeMap<_, _> = [with(0, Some(context("RayTracingUltra"))), with(1, None)].into();
+    assert_eq!(context_state(&missing), ContextState::Unproven);
 }
