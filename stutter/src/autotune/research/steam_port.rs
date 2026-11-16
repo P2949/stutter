@@ -307,6 +307,9 @@ pub struct ProductionSteamPort<R: ResultProbe> {
     gpu: Option<GpuGuard>,
     /// Free bytes the study filesystem must keep before a launch (`None`: not enforced).
     disk_reserve: Option<(u64, FreeBytes)>,
+    /// The campaign directory name (the first 16 hex of the campaign intent digest). A child study's
+    /// attempts live below it, in `studies/<study>/dispatch`, never in a directory of their own.
+    campaign_dir: Option<String>,
     settle_window: Duration,
 }
 
@@ -338,11 +341,18 @@ impl<R: ResultProbe> ProductionSteamPort<R> {
             terminator: None,
             gpu: None,
             disk_reserve: None,
+            campaign_dir: None,
             settle_window: Duration::ZERO,
         }
     }
 
     /// The bounded, exact-owner cleanup used by `stop`; without one nothing is ever signalled.
+    /// Name the campaign directory that child studies' dispatch directories live below.
+    pub fn with_campaign_dir(mut self, name: String) -> Self {
+        self.campaign_dir = Some(name);
+        self
+    }
+
     pub fn with_owned_terminator(mut self, terminator: Box<dyn OwnedTerminator>) -> Self {
         self.terminator = Some(terminator);
         self
@@ -478,6 +488,12 @@ impl<R: ResultProbe> ProductionSteamPort<R> {
         );
         let digest = context.intent.digest()?;
         anyhow::ensure!(slot.study_sha256 == digest, "dispatch study mismatch");
+        let path = super::dispatch_context::attempt_path(
+            &context.intent,
+            &digest,
+            self.campaign_dir.as_deref(),
+            slot.index,
+        )?;
         let root = File::from(crate::syscall::open_dir_no_symlinks(&self.study_root)?);
         let meta = root.metadata()?;
         let expected = context
@@ -492,7 +508,7 @@ impl<R: ResultProbe> ProductionSteamPort<R> {
             "study root changed"
         );
         let mut dir = root;
-        for component in [&digest[..16], "dispatch", &format!("{:04}", slot.index)] {
+        for component in &path {
             dir = File::from(crate::syscall::openat_dir_nofollow(dir.as_fd(), component)?);
             let meta = dir.metadata()?;
             anyhow::ensure!(

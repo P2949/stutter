@@ -191,6 +191,7 @@ fn build_guarded_host(
     .with_settlement_witness(Box::new(witness))
     .with_owned_terminator(Box::new(cleanup))
     .with_settle_window(Duration::from_secs(120))
+    .with_campaign_dir(intent.digest()?[..16].to_owned())
     .with_disk_reserve(MIN_FREE_BYTES, |path| {
         crate::syscall::statvfs(path).map(|space| space.free_bytes)
     });

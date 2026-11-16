@@ -347,3 +347,89 @@ fn a_launch_needs_the_free_space_reserve_and_an_unreadable_measurement_withholds
     assert!(!port(Some((100, |_| Ok(99)))).disk_reserve_ok());
     assert!(!port(Some((100, |_| Err(std::io::Error::other("no statvfs"))))).disk_reserve_ok());
 }
+
+/// A study root with a campaign directory tree, and a port that knows it.
+fn dispatch_port(
+    campaign: &str,
+    child: Option<&str>,
+) -> (
+    tempfile::TempDir,
+    ProductionSteamPort<QuietProbe>,
+    crate::autotune::research::dispatch_context::DispatchContextV1,
+    AttemptSlot,
+) {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    let meta = std::fs::metadata(tmp.path()).unwrap();
+    let mut intent = crate::autotune::research::tests::intent();
+    intent.uid = crate::syscall::geteuid();
+    intent.study_root = Some(crate::autotune::research::StudyRootIdentity {
+        device: meta.dev(),
+        inode: meta.ino(),
+    });
+    intent.child_study_sha256 = child.map(str::to_owned);
+    let digest = intent.digest().unwrap();
+    let slot = AttemptSlot {
+        study_sha256: digest.clone(),
+        context_sha256: "f".repeat(64),
+        index: 3,
+        arm: intent.tools[0].source,
+    };
+    let mut dir = tmp.path().to_path_buf();
+    let parts: Vec<String> = match child {
+        None => vec![digest[..16].into(), "dispatch".into(), "0003".into()],
+        Some(child) => vec![
+            campaign.into(),
+            "studies".into(),
+            child[..16].into(),
+            "dispatch".into(),
+            "0003".into(),
+        ],
+    };
+    for part in parts {
+        dir.push(part);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    let client = intent.steam_client.clone();
+    let mut port = ProductionSteamPort::new(
+        tmp.path().to_path_buf(),
+        tmp.path().to_path_buf(),
+        "/a".into(),
+        "/m".into(),
+        client,
+        vec![],
+        QuietProbe,
+    );
+    port = port.with_campaign_dir(campaign.to_owned());
+    let context = crate::autotune::research::dispatch_context::DispatchContextV1 {
+        schema_version: 1,
+        intent,
+        slot: slot.clone(),
+        tickets: Default::default(),
+        spec: crate::autotune::research::dispatch_context::ArmSpec {
+            tool_dir: "/t".into(),
+            study_compat_data: "/s".into(),
+            arm_env: Default::default(),
+            steamapps: "/a".into(),
+            proton_manifest: "/m".into(),
+        },
+    };
+    (tmp, port, context, slot)
+}
+
+#[test]
+fn the_port_finds_a_whole_campaign_attempt_and_a_child_study_attempt_where_each_really_lives() {
+    let (_flat, port, context, slot) = dispatch_port("aaaaaaaaaaaaaaaa", None);
+    assert!(port.open_dispatch(&slot, &context).is_ok());
+    let child = "1".repeat(64);
+    let (_tmp, port, context, slot) = dispatch_port("aaaaaaaaaaaaaaaa", Some(&child));
+    assert!(port.open_dispatch(&slot, &context).is_ok());
+    // A child study without a campaign directory cannot be located, and a wrong one finds nothing.
+    let (_tmp, mut port, context, slot) = dispatch_port("aaaaaaaaaaaaaaaa", Some(&child));
+    port.campaign_dir = None;
+    assert!(port.open_dispatch(&slot, &context).is_err());
+    port.campaign_dir = Some("bbbbbbbbbbbbbbbb".into());
+    assert!(port.open_dispatch(&slot, &context).is_err());
+}

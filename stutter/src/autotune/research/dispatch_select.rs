@@ -30,24 +30,13 @@ fn private_dir(dir: &File, uid: u32) -> bool {
         .is_ok_and(|meta| meta.is_dir() && meta.uid() == uid && meta.mode() & 0o077 == 0)
 }
 
-/// The latest attempt directory of one campaign if it holds an unused, unexpired ticket for `verb`.
-fn armed_attempt(
-    study_root: &File,
-    name: &str,
-    uid: u32,
-    verb: SteamVerb,
-    now: u64,
-) -> Option<File> {
-    let campaign = File::from(crate::syscall::openat_dir_nofollow(study_root.as_fd(), name).ok()?);
-    if !private_dir(&campaign, uid) {
+/// The latest attempt directory of one dispatch directory if it holds an unused, unexpired ticket
+/// for `verb`.
+fn armed_in_dispatch(dispatch: &File, uid: u32, verb: SteamVerb, now: u64) -> Option<File> {
+    if !private_dir(dispatch, uid) {
         return None;
     }
-    let dispatch =
-        File::from(crate::syscall::openat_dir_nofollow(campaign.as_fd(), "dispatch").ok()?);
-    if !private_dir(&dispatch, uid) {
-        return None;
-    }
-    let attempt = latest_attempt_dir(&dispatch).ok()?;
+    let attempt = latest_attempt_dir(dispatch).ok()?;
     if !private_dir(&attempt, uid) {
         return None;
     }
@@ -75,6 +64,49 @@ fn armed_attempt(
     }
 }
 
+/// Every armed attempt of one campaign: its own flat schedule and each child study's own dispatch
+/// directory (`studies/<digest>/dispatch`), which hold the attempts of the child-study funnel.
+fn armed_attempts(study_root: &File, name: &str, uid: u32, verb: SteamVerb, now: u64) -> Vec<File> {
+    let mut found = Vec::new();
+    let Some(campaign) = crate::syscall::openat_dir_nofollow(study_root.as_fd(), name)
+        .ok()
+        .map(File::from)
+        .filter(|campaign| private_dir(campaign, uid))
+    else {
+        return found;
+    };
+    let open = |parent: &File, child: &str| {
+        crate::syscall::openat_dir_nofollow(parent.as_fd(), child)
+            .ok()
+            .map(File::from)
+    };
+    if let Some(attempt) = open(&campaign, "dispatch")
+        .and_then(|dispatch| armed_in_dispatch(&dispatch, uid, verb, now))
+    {
+        found.push(attempt);
+    }
+    let Some(studies) = open(&campaign, "studies").filter(|dir| private_dir(dir, uid)) else {
+        return found;
+    };
+    let Ok(entries) = std::fs::read_dir(format!("/proc/self/fd/{}", studies.as_raw_fd())) else {
+        return found;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str().filter(|name| campaign_name(name)) else {
+            continue;
+        };
+        if let Some(attempt) = open(&studies, name)
+            .filter(|study| private_dir(study, uid))
+            .and_then(|study| open(&study, "dispatch"))
+            .and_then(|dispatch| armed_in_dispatch(&dispatch, uid, verb, now))
+        {
+            found.push(attempt);
+        }
+    }
+    found
+}
+
 /// Exactly one armed attempt for `verb` across all campaigns under `study_root`, or an error.
 pub fn select_armed_attempt(
     study_root: &File,
@@ -89,9 +121,7 @@ pub fn select_armed_attempt(
         let Some(name) = name.to_str().filter(|name| campaign_name(name)) else {
             continue;
         };
-        if let Some(attempt) = armed_attempt(study_root, name, uid, verb, now) {
-            found.push(attempt);
-        }
+        found.extend(armed_attempts(study_root, name, uid, verb, now));
     }
     match found.len() {
         1 => found
@@ -194,5 +224,66 @@ mod tests {
         // Non-campaign entries (the prefix, backups) are ignored.
         crate::syscall::mkdir_private_at(root.as_fd(), "compatdata").unwrap();
         assert!(select_armed_attempt(&root, uid, verb, now + 1).is_ok());
+    }
+
+    /// Arm slot 0 of a child study: `<campaign>/studies/<study>/dispatch/0000`.
+    fn arm_child(
+        root: &File,
+        campaign: &str,
+        study: &str,
+        intent: &crate::autotune::research::ResearchIntentV1,
+        now: u64,
+    ) -> DispatchContextV1 {
+        let open = |parent: &File, name: &str| {
+            let _ = crate::syscall::mkdir_private_at(parent.as_fd(), name);
+            File::from(crate::syscall::openat_dir_nofollow(parent.as_fd(), name).unwrap())
+        };
+        let campaign = open(root, campaign);
+        let studies = open(&campaign, "studies");
+        let study = open(&studies, study);
+        let dispatch = open(&study, "dispatch");
+        let attempt = open(&dispatch, "0000");
+        let slot = AttemptSlot {
+            study_sha256: "e".repeat(64),
+            context_sha256: "f".repeat(64),
+            index: 0,
+            arm: intent.tools[0].source,
+        };
+        let spec = ArmSpec {
+            tool_dir: "/tools/GE".into(),
+            study_compat_data: "/study/compatdata/ge".into(),
+            arm_env: Default::default(),
+            steamapps: "/steam/steamapps".into(),
+            proton_manifest: "/m.json".into(),
+        };
+        arm_attempt(&attempt, intent, &slot, spec, (now, 60)).unwrap()
+    }
+
+    #[test]
+    fn an_armed_child_study_attempt_is_found_and_still_ambiguous_with_any_other_armed_attempt() {
+        let (_dir, root, intent) = study();
+        let now = intent.issued_unix_seconds + 1;
+        let (uid, verb) = (intent.uid, SteamVerb::Run);
+        assert!(select_armed_attempt(&root, uid, verb, now).is_err());
+        // A child study's attempt, armed only under studies/<digest>/dispatch, is selectable.
+        arm_child(&root, "aaaaaaaaaaaaaaaa", "1111111111111111", &intent, now);
+        assert!(select_armed_attempt(&root, uid, verb, now + 1).is_ok());
+        // Two armed children (or a child and a flat attempt) are never guessed between.
+        arm_child(&root, "aaaaaaaaaaaaaaaa", "2222222222222222", &intent, now);
+        assert!(select_armed_attempt(&root, uid, verb, now + 1).is_err());
+        let (_dir2, root2, intent2) = study();
+        arm_child(
+            &root2,
+            "aaaaaaaaaaaaaaaa",
+            "1111111111111111",
+            &intent2,
+            now,
+        );
+        arm(&root2, "bbbbbbbbbbbbbbbb", &intent2, now);
+        assert!(select_armed_attempt(&root2, uid, verb, now + 1).is_err());
+        // Entries under studies/ that are not study digests are ignored.
+        let (_dir3, root3, intent3) = study();
+        arm_child(&root3, "aaaaaaaaaaaaaaaa", "notadigest", &intent3, now);
+        assert!(select_armed_attempt(&root3, uid, verb, now + 1).is_err());
     }
 }

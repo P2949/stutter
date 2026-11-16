@@ -580,6 +580,30 @@ fn verify_frozen_steam_client(
     Ok(())
 }
 
+/// The attempt directory of `slot`, relative to the study root: the flat campaign's own `dispatch`,
+/// or a child study's `studies/<study>/dispatch` below the campaign directory that owns it. The
+/// campaign directory is only needed (and only trusted) for a child; a flat intent names its own.
+pub fn attempt_path(
+    intent: &super::ResearchIntentV1,
+    digest: &str,
+    campaign_dir: Option<&str>,
+    index: u32,
+) -> anyhow::Result<Vec<String>> {
+    let attempt = format!("{index:04}");
+    Ok(match &intent.child_study_sha256 {
+        None => vec![digest[..16].to_owned(), "dispatch".into(), attempt],
+        Some(child) => vec![
+            campaign_dir
+                .ok_or_else(|| anyhow::anyhow!("a child study needs its campaign directory"))?
+                .to_owned(),
+            "studies".into(),
+            child[..16].to_owned(),
+            "dispatch".into(),
+            attempt,
+        ],
+    })
+}
+
 #[cfg(test)]
 #[path = "dispatch_context_tests.rs"]
 mod tests;
