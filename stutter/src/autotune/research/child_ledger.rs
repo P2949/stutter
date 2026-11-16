@@ -23,6 +23,9 @@ struct Record {
     result: StudyResult,
     /// Machine-readable cause (for example `BlockedProfileApplier`), empty when none applies.
     reason: String,
+    /// Attempts this study consumed (zero for a decision made without running it).
+    #[serde(default)]
+    attempts_used: u32,
     /// SHA-256 of the previous record's bytes (all zeros for the first).
     prev_sha256: String,
 }
@@ -44,6 +47,8 @@ pub struct ChildLedger {
     results: BTreeMap<String, (StudyResult, String)>,
     tip: String,
     next_seq: u32,
+    /// Attempts the recorded studies consumed, so the budget survives a restart.
+    spent: u32,
 }
 
 fn name(seq: u32) -> String {
@@ -78,6 +83,7 @@ impl ChildLedger {
             results: BTreeMap::new(),
             tip: GENESIS.to_owned(),
             next_seq: 0,
+            spent: 0,
         };
         for (expected, seq) in seqs.into_iter().enumerate() {
             anyhow::ensure!(seq as usize == expected, "gap in the ledger");
@@ -103,16 +109,34 @@ impl ChildLedger {
             );
             ledger.tip = stutter_core::hash::sha256_hex(&bytes);
             ledger.next_seq = seq + 1;
+            ledger.spent = ledger.spent.saturating_add(record.attempts_used);
         }
         Ok(ledger)
     }
 
-    /// Record one decision. A study decided already, or not in the plan, is refused.
+    /// Record a decision made without running the study (it consumed no attempts).
     pub fn record(
         &mut self,
         study: &ChildStudy,
         result: StudyResult,
         reason: &str,
+    ) -> anyhow::Result<()> {
+        self.record_run(study, result, reason, 0)
+    }
+
+    /// Attempts the recorded studies have consumed so far.
+    pub fn spent_attempts(&self) -> u32 {
+        self.spent
+    }
+
+    /// Record one decision and the attempts the study consumed. A study decided already, or not in
+    /// the plan, is refused.
+    pub fn record_run(
+        &mut self,
+        study: &ChildStudy,
+        result: StudyResult,
+        reason: &str,
+        attempts_used: u32,
     ) -> anyhow::Result<()> {
         anyhow::ensure!(
             self.plan
@@ -129,12 +153,14 @@ impl ChildLedger {
             study_sha256: study.study_sha256.clone(),
             result,
             reason: reason.chars().take(64).collect(),
+            attempts_used,
             prev_sha256: self.tip.clone(),
         };
         let bytes = serde_json::to_vec(&record)?;
         write_new(&self.dir, &name(record.seq), &bytes)?;
         self.tip = stutter_core::hash::sha256_hex(&bytes);
         self.next_seq += 1;
+        self.spent = self.spent.saturating_add(attempts_used);
         self.results
             .insert(record.study_sha256, (record.result, record.reason));
         Ok(())

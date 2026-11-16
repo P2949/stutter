@@ -27,6 +27,14 @@ pub(crate) mod child_ledger;
     not(test),
     expect(
         dead_code,
+        reason = "the production StudyExecutor over the Steam host is not connected until a profile applier exists"
+    )
+)]
+pub(crate) mod child_runner;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
         reason = "drives the scheduler once child-study execution is wired"
     )
 )]
