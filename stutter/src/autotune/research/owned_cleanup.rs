@@ -463,7 +463,17 @@ mod tests {
     fn without_any_dispatcher_record_the_full_path_signals_nothing() {
         let (mut child, target) = sleeper();
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("launch-requested"), b"x").unwrap();
+        let marker = dir.path().join("launch-requested");
+        std::fs::write(&marker, b"x").unwrap();
+        // The sleeper was started before this launch request. The attempt window is read at
+        // whole-second resolution and a process in the same second is conservatively treated as
+        // possibly the attempt's, so the marker is dated clearly after the sleeper's start.
+        File::options()
+            .write(true)
+            .open(&marker)
+            .unwrap()
+            .set_modified(std::time::SystemTime::now() + Duration::from_secs(10))
+            .unwrap();
         let file = File::open(dir.path()).unwrap();
         let context = test_context();
         let mut terminator = ProcfsTerminator::new(
