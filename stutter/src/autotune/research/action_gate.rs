@@ -40,12 +40,52 @@ enum State {
 /// Reads the worker's outstanding transaction count (`None` when it cannot say).
 pub type TokenProbe = Box<dyn Fn() -> Option<u32> + Send>;
 
+/// The kernel-visible placement of a process that the two supported actions change.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct KernelState {
+    pub cpus_allowed: String,
+    pub cgroup: String,
+}
+
+/// Reads a process's kernel state independently of the worker (`None`: cannot say).
+pub type StateProbe = Box<dyn Fn(u32) -> Option<KernelState> + Send>;
+
+/// The state from `/proc`: the allowed-CPU list and the cgroup membership.
+pub fn procfs_state(pid: u32) -> Option<KernelState> {
+    let status = std::fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
+    let cpus = status
+        .lines()
+        .find_map(|line| line.strip_prefix("Cpus_allowed_list:"))?
+        .trim()
+        .to_owned();
+    let cgroup = std::fs::read_to_string(format!("/proc/{pid}/cgroup")).ok()?;
+    Some(KernelState {
+        cpus_allowed: cpus,
+        cgroup: cgroup.trim().to_owned(),
+    })
+}
+
+/// One applied action's receipt: the frozen target, what the kernel showed before the apply and what
+/// it shows after the restoration was accepted (equal, or the restoration was not accepted).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ActionReceipt {
+    pub action: ResearchAction,
+    pub target: ChildTarget,
+    pub original: KernelState,
+    pub restored: KernelState,
+}
+
 pub struct ActionGate {
     /// `None` until an action child arms the gate on the sighted game process; unarmed, nothing is
     /// ever permitted.
     scope: Option<ActionChildScope>,
     state: State,
     tokens: TokenProbe,
+    /// Independent kernel-state reader; without one no restoration can be proven against the kernel.
+    state_probe: Option<StateProbe>,
+    /// What the target's kernel state was when the action was permitted.
+    baseline: Option<(ChildTarget, KernelState)>,
+    receipts: Vec<ActionReceipt>,
 }
 
 impl std::fmt::Debug for ActionGate {
@@ -69,6 +109,11 @@ pub struct GateEvidence {
     pub settled: Vec<(ResearchAction, Decision)>,
     /// Nothing applied or pending: every granted action was restored (or never applied).
     pub clean: bool,
+    /// Each proven restoration, with the kernel state before the apply and after the restore.
+    pub receipts: Vec<ActionReceipt>,
+    /// Every settled action was compared against the target's own kernel state (not just a zero
+    /// worker-token count).
+    pub kernel_state_proven: bool,
 }
 
 impl ActionGate {
@@ -77,7 +122,16 @@ impl ActionGate {
             scope: Some(scope),
             state: State::Idle,
             tokens,
+            state_probe: None,
+            baseline: None,
+            receipts: Vec::new(),
         }
+    }
+
+    /// Prove restorations against the target's own kernel state, read independently of the worker.
+    pub fn with_state_probe(mut self, probe: StateProbe) -> Self {
+        self.state_probe = Some(probe);
+        self
     }
 
     /// A gate that permits nothing until it is armed.
@@ -86,6 +140,9 @@ impl ActionGate {
             scope: None,
             state: State::Idle,
             tokens,
+            state_probe: None,
+            baseline: None,
+            receipts: Vec::new(),
         }
     }
 
@@ -144,6 +201,15 @@ impl ActionGate {
         if !matches!(self.state, State::Idle) {
             return false;
         }
+        // With a state probe the original state is captured first; a target whose state cannot be read
+        // cannot have its restoration proven, so nothing is applied to it.
+        let baseline = match &self.state_probe {
+            Some(probe) => match probe(u32::from(target.pid)) {
+                Some(state) => Some((target, state)),
+                None => return false,
+            },
+            None => None,
+        };
         let Some(scope) = self.scope.as_mut() else {
             return false;
         };
@@ -153,6 +219,7 @@ impl ActionGate {
             now_unix,
         }) {
             Ok(grant) => {
+                self.baseline = baseline;
                 self.state = State::Requested(grant, action);
                 true
             }
@@ -201,11 +268,30 @@ impl ActionGate {
 
     /// The restoration is accepted only when the worker also holds no token.
     fn restore_if_proven(&mut self, action: ResearchAction, view: GateView) -> State {
+        // A zero token count is the worker's word; the target's own kernel state must also be the
+        // original one.
+        let restored = match (&self.state_probe, &self.baseline) {
+            (Some(probe), Some((target, original))) => {
+                match probe(u32::from(target.pid)).filter(|now| now == original) {
+                    Some(now) => Some((*target, original.clone(), now)),
+                    None => return State::Restoring(action),
+                }
+            }
+            _ => None,
+        };
         if view.outstanding_tokens == Some(0)
             && self
                 .with_scope(|scope| scope.restored(true))
                 .unwrap_or(false)
         {
+            if let Some((target, original, restored)) = restored {
+                self.receipts.push(ActionReceipt {
+                    action,
+                    target,
+                    original,
+                    restored,
+                });
+            }
             State::Idle
         } else {
             State::Restoring(action)
@@ -220,6 +306,11 @@ impl ActionGate {
                 .map_or_else(Vec::new, |scope| scope.settled().to_vec()),
             clean: self.scope.as_ref().is_none_or(ActionChildScope::is_clean)
                 && matches!(self.state, State::Idle),
+            kernel_state_proven: self.state_probe.is_some()
+                && !self.receipts.is_empty()
+                && self.receipts.len()
+                    == self.scope.as_ref().map_or(0, |scope| scope.settled().len()),
+            receipts: self.receipts.clone(),
         }
     }
 }

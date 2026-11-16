@@ -123,3 +123,87 @@ fn the_runtime_reports_only_experiment_state_and_the_gate_reads_the_workers_toke
     assert!(!g.is_busy());
     assert_eq!(g.evidence().settled, [(CPU, Decision::Revert)]);
 }
+
+mod kernel_state {
+    use std::sync::{Arc, Mutex};
+
+    use super::*;
+
+    fn state(cpus: &str, cgroup: &str) -> KernelState {
+        KernelState {
+            cpus_allowed: cpus.into(),
+            cgroup: cgroup.into(),
+        }
+    }
+
+    /// A gate whose probe reports whatever the test last stored (`None`: unreadable).
+    fn probed(shared: &Arc<Mutex<Option<KernelState>>>) -> ActionGate {
+        let shared = shared.clone();
+        gate().with_state_probe(Box::new(move |_| shared.lock().unwrap().clone()))
+    }
+
+    fn revert(g: &mut ActionGate, tokens: Option<u32>) {
+        g.observe(view(true, 0, Some(1)));
+        g.observe(view(false, 0, tokens));
+    }
+
+    #[test]
+    fn a_zero_token_count_with_the_wrong_kernel_state_is_not_a_restoration() {
+        let shared = Arc::new(Mutex::new(Some(state("0-15", "0::/app.slice"))));
+        let mut g = probed(&shared);
+        assert!(g.permit(Some(CPU), target(), NOW));
+        // The action pinned the game; the controller rolled it back, the worker holds no token, but
+        // the process is still pinned.
+        *shared.lock().unwrap() = Some(state("2-3", "0::/app.slice"));
+        revert(&mut g, Some(0));
+        assert!(!g.evidence().clean && g.evidence().settled.is_empty());
+        // Once the kernel really shows the original placement, it is accepted, with a receipt.
+        *shared.lock().unwrap() = Some(state("0-15", "0::/app.slice"));
+        g.observe(view(false, 0, Some(0)));
+        let evidence = g.evidence();
+        assert!(evidence.clean && evidence.kernel_state_proven);
+        assert_eq!(evidence.receipts.len(), 1);
+        assert_eq!(evidence.receipts[0].original, evidence.receipts[0].restored);
+        assert_eq!(evidence.receipts[0].action, CPU);
+    }
+
+    #[test]
+    fn a_changed_cgroup_or_an_unreadable_process_is_not_restored() {
+        let shared = Arc::new(Mutex::new(Some(state("0-15", "0::/app.slice"))));
+        let mut g = probed(&shared);
+        assert!(g.permit(Some(CGROUP), target(), NOW));
+        *shared.lock().unwrap() = Some(state("0-15", "0::/stutter.slice"));
+        revert(&mut g, Some(0));
+        assert!(!g.evidence().clean);
+        *shared.lock().unwrap() = None;
+        g.observe(view(false, 0, Some(0)));
+        assert!(
+            !g.evidence().clean,
+            "a process that cannot be read is unproven"
+        );
+    }
+
+    #[test]
+    fn a_target_whose_state_cannot_be_read_is_never_permitted_an_action() {
+        let shared = Arc::new(Mutex::new(None));
+        let mut g = probed(&shared);
+        assert!(!g.permit(Some(CPU), target(), NOW));
+        assert!(!g.is_busy());
+    }
+
+    #[test]
+    fn without_a_state_probe_the_kernel_state_is_never_claimed_proven() {
+        let mut g = gate();
+        assert!(g.permit(Some(CPU), target(), NOW));
+        revert(&mut g, Some(0));
+        let evidence = g.evidence();
+        assert!(evidence.clean && !evidence.kernel_state_proven && evidence.receipts.is_empty());
+    }
+}
+
+#[test]
+fn the_real_proc_reader_sees_this_process_and_nothing_for_a_missing_one() {
+    let me = procfs_state(std::process::id()).expect("own state");
+    assert!(!me.cpus_allowed.is_empty() && !me.cgroup.is_empty());
+    assert_eq!(procfs_state(u32::MAX), None);
+}

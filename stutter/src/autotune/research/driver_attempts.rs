@@ -139,7 +139,7 @@ impl DriverStudyAttempts {
             return None;
         };
         let evidence = gate.lock().ok()?.disarm();
-        Some(evidence.clean && !evidence.settled.is_empty())
+        Some(evidence.clean && !evidence.settled.is_empty() && evidence.kernel_state_proven)
     }
 
     fn begin(&mut self, study: &ChildStudy) -> anyhow::Result<()> {

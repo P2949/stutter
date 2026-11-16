@@ -32,10 +32,14 @@ fn setup(
         .into_iter()
         .find(|s| study_of(&s.stage))
         .unwrap();
-    let gate: SharedGate =
-        std::sync::Arc::new(std::sync::Mutex::new(ActionGate::unarmed(Box::new(|| {
-            Some(0)
-        }))));
+    let gate: SharedGate = std::sync::Arc::new(std::sync::Mutex::new(
+        ActionGate::unarmed(Box::new(|| Some(0))).with_state_probe(Box::new(|_| {
+            Some(crate::autotune::research::action_gate::KernelState {
+                cpus_allowed: "0-15".into(),
+                cgroup: "0::/app.slice".into(),
+            })
+        })),
+    ));
     let mut host = Host::finishing();
     host.process = Some(game());
     let mut now = parent.issued_unix_seconds + 1;

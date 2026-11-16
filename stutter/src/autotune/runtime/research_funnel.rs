@@ -57,15 +57,19 @@ fn build(
     // The action child's gate: unarmed until an Action study arms it on the sighted game process.
     // Its restoration proof reads the worker's outstanding-token count; unknown stays unproven.
     let socket = worker_socket.map(std::path::Path::to_path_buf);
-    let gate: SharedActionGate = std::sync::Arc::new(std::sync::Mutex::new(ActionGate::unarmed(
-        Box::new(move || {
+    let gate: SharedActionGate = std::sync::Arc::new(std::sync::Mutex::new(
+        ActionGate::unarmed(Box::new(move || {
             let socket = socket.clone()?;
             UnixSocketPrivilegedActionService::new(socket)
                 .outstanding_tokens()
                 .ok()
                 .and_then(|count| u32::try_from(count).ok())
-        }),
-    )));
+        }))
+        // A restoration is also compared with the target's own kernel state, read from /proc.
+        .with_state_probe(Box::new(
+            crate::autotune::research::action_gate::procfs_state,
+        )),
+    ));
     let rules = RuleRegistry::default();
     let results = study_dir.to_path_buf();
     // The driver rejects a clock that moves backward, so the clock is clamped to never do so.
