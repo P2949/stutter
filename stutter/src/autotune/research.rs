@@ -158,6 +158,14 @@ pub(crate) mod pilot_rule;
 )]
 mod prefix;
 pub(crate) mod production_host;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the production StudyExecutor applies profiles once the CPU resolution index is observed"
+    )
+)]
+pub(crate) mod profile_applier;
 mod protocol;
 #[path = "research/proton/mod.rs"]
 pub(crate) mod proton;
