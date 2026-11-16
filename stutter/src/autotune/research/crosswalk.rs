@@ -398,4 +398,23 @@ mod tests {
             Err(CrosswalkError::UnknownId(_))
         ));
     }
+
+    /// Write the 34-row disposition artifact: `STUTTER_CROSSWALK_OUT=<file> cargo test
+    /// write_crosswalk_artifact -- --ignored`. It reads the ledger and writes only that file.
+    #[test]
+    #[ignore = "writes a private artifact to STUTTER_CROSSWALK_OUT"]
+    fn write_crosswalk_artifact() {
+        let out = std::env::var_os("STUTTER_CROSSWALK_OUT").expect("set STUTTER_CROSSWALK_OUT");
+        let rows = build_rows(&ledger()).expect("rows");
+        let mut by_closure = std::collections::BTreeMap::<String, u32>::new();
+        for row in &rows {
+            *by_closure.entry(format!("{:?}", row.closure)).or_default() += 1;
+        }
+        let document = serde_json::json!({
+            "rows": rows,
+            "closure_counts": by_closure,
+            "note": "A row closing as Observed/Tested/Excluded/Blocked/AlreadySatisfied/FutureGraduation is not a game-benefit validation; none is GameBenefitValidated."
+        });
+        std::fs::write(out, serde_json::to_vec_pretty(&document).unwrap()).unwrap();
+    }
 }
