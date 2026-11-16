@@ -166,6 +166,14 @@ pub(crate) mod production_host;
     )
 )]
 pub(crate) mod profile_applier;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "connected with the production study executor at live qualification"
+    )
+)]
+pub(crate) mod profile_hook;
 mod protocol;
 #[path = "research/proton/mod.rs"]
 pub(crate) mod proton;
@@ -224,6 +232,14 @@ mod steam_inventory;
     )
 )]
 pub(crate) mod steam_port;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the real ProfileHook and StudyAttempts over the Steam host are connected with live qualification"
+    )
+)]
+pub(crate) mod study_executor;
 #[cfg_attr(
     not(test),
     expect(
