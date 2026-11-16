@@ -333,3 +333,36 @@ fn an_unrecovered_snapshot_blocks_a_new_application_and_an_unsafe_snapshot_is_re
     assert!(recover(&file).is_err());
     assert_eq!(std::fs::read(&f.path).unwrap(), SETTINGS.as_bytes());
 }
+
+#[test]
+fn a_file_rewritten_by_someone_else_after_a_crash_is_never_overwritten_from_the_snapshot() {
+    let f = fixture();
+    let file = open(&f);
+    let applied = apply(&file, &ray_tracing_off(), false).unwrap();
+    drop(applied);
+    // Another writer (the game, the user, a tool) replaced the applied file with its own content.
+    let foreign = br#"{"someone":"else"}"#;
+    std::fs::write(&f.path, foreign).unwrap();
+    let fresh = open(&f);
+    assert_eq!(recover(&fresh), Err(Refusal::RestoreMismatch));
+    assert_eq!(
+        std::fs::read(&f.path).unwrap(),
+        foreign,
+        "their bytes are untouched"
+    );
+    assert!(
+        snapshot_of(&f).exists(),
+        "the snapshot stays for a person to judge"
+    );
+}
+
+#[test]
+fn the_applied_marker_is_removed_with_the_snapshot_after_a_proven_restore() {
+    let f = fixture();
+    let file = open(&f);
+    let applied = apply(&file, &ray_tracing_off(), false).unwrap();
+    let marker = f.path.with_file_name("UserSettings.json.stutter-applied");
+    assert!(marker.exists());
+    restore(&file, &applied).unwrap();
+    assert!(!marker.exists() && !snapshot_of(&f).exists());
+}

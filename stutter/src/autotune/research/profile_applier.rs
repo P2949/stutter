@@ -295,8 +295,43 @@ impl StudySettingsFile {
         }
     }
 
+    /// The durable hash of the bytes this application writes, recorded before the edit: after a crash
+    /// it tells the bytes we wrote from bytes something else wrote.
+    fn marker_path(&self) -> PathBuf {
+        let mut name = self
+            .path
+            .file_name()
+            .map(|n| n.to_os_string())
+            .unwrap_or_default();
+        name.push(".stutter-applied");
+        self.path.with_file_name(name)
+    }
+
+    fn write_marker(&self, applied: &[u8]) -> Result<(), Refusal> {
+        let path = self.marker_path();
+        let _ = std::fs::remove_file(&path);
+        let result = (|| {
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&path)?;
+            file.write_all(stutter_core::hash::sha256_hex(applied).as_bytes())?;
+            file.sync_all()?;
+            std::fs::File::open(path.parent().unwrap_or(Path::new(".")))?.sync_all()
+        })();
+        result.map_err(|_| Refusal::Io)
+    }
+
+    fn read_marker(&self) -> Option<String> {
+        std::fs::read_to_string(self.marker_path())
+            .ok()
+            .map(|text| text.trim().to_owned())
+    }
+
     fn remove_snapshot(&self) -> Result<(), Refusal> {
         let path = self.snapshot_path();
+        let _ = std::fs::remove_file(self.marker_path());
         match std::fs::remove_file(&path) {
             Ok(()) => {}
             // Already removed by an earlier, proven restore: removing it again is a success.
@@ -360,6 +395,7 @@ pub fn apply(
     let (bytes, planned) = edited(&original, spec)?;
     // The original is durable before the first edit: a crash from here on is recoverable.
     file.write_snapshot(&original)?;
+    file.write_marker(&bytes)?;
     let replaced = file.replace(&bytes);
     let verified = replaced.and_then(|()| {
         file.read()
@@ -419,8 +455,17 @@ pub fn recover(file: &StudySettingsFile) -> Result<Recovery, Refusal> {
     let Some(original) = file.read_snapshot()? else {
         return Ok(Recovery::Nothing);
     };
-    let was_original = file.read()? == original;
+    let current = file.read()?;
+    let was_original = current == original;
     if !was_original {
+        // Only bytes this application wrote may be put back; anything else was written by another
+        // party since, and overwriting it from a stale snapshot would destroy its changes.
+        let ours = file
+            .read_marker()
+            .is_some_and(|hash| hash == stutter_core::hash::sha256_hex(&current));
+        if !ours {
+            return Err(Refusal::RestoreMismatch);
+        }
         file.replace(&original)?;
     }
     if file.read()? != original {
