@@ -123,6 +123,7 @@ impl FunnelDriver {
         self.executor.attempts.host_mut()
     }
 
+    #[cfg_attr(not(test), expect(dead_code, reason = "staged"))]
     pub fn dispositions(&self) -> Vec<Disposition> {
         self.runner.ledger().dispositions()
     }

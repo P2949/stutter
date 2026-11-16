@@ -71,7 +71,7 @@ pub(crate) mod entitlement;
     )
 )]
 pub(crate) mod features;
-#[cfg_attr(not(test), expect(dead_code, reason = "staged"))]
+pub(crate) mod final_bundle;
 pub(crate) mod funnel_driver;
 #[cfg_attr(
     not(test),

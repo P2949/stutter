@@ -662,7 +662,7 @@ impl ResearchCoordinator {
                         health_blocked,
                     },
                 );
-                serde_json::json!({
+                let body = serde_json::json!({
                     "status": if verdict.final_gate_qualified { "ok" } else { "blocked" },
                     "code": if verdict.final_gate_qualified { "Qualified" } else { "IncompleteProvenance" },
                     "reconstruction": "passed",
@@ -671,9 +671,10 @@ impl ResearchCoordinator {
                     "child_studies": studies,
                     "child_reports": children,
                     "intent_sha256": report.intent_sha256,
-                })
-                .to_string()
-                    + "\n"
+                });
+                // The named final artifacts, once, beside the report; a failure is not a verdict.
+                crate::autotune::research::final_bundle::write_logged(&dir, &report, &body);
+                body.to_string() + "\n"
             }
             Ok(report) => {
                 serde_json::json!({ "status": "ok", "code": "Report", "report": report })
