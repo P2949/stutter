@@ -49,6 +49,10 @@ pub trait AttemptHost {
     /// Latest observation that no user input has occurred recently, independent of idle inhibitors
     /// (a running game holds its own). Only this may interrupt an attempt that is already running.
     fn observe_user_input_idle(&mut self, _input_idle_at: Option<std::time::Instant>) {}
+    /// A durable health stop (a GPU reset) is on record: no further attempt may ever launch.
+    fn health_blocked(&mut self) -> bool {
+        false
+    }
     /// True only in a qualified automatic safe window.
     fn safe_window(&mut self) -> bool;
     fn arm_spec(&mut self, slot: &AttemptSlot) -> anyhow::Result<ArmSpec>;
@@ -87,6 +91,8 @@ pub enum Step {
     Expired,
     ActiveBudgetExhausted,
     Cancelled,
+    /// A durable health stop ended the campaign; the remaining schedule is left unexecuted.
+    Halted(&'static str),
 }
 
 pub struct Driver {
@@ -444,6 +450,10 @@ impl Driver {
                     self.seal(slot, AttemptOutcome::Failed { code }, now)
                 }
             };
+        }
+        // A GPU reset is an unconditional stop: nothing launches again, whatever budget remains.
+        if host.health_blocked() {
+            return Ok(Step::Halted("BlockedGpuStability"));
         }
         if self.cancel {
             return Ok(Step::Cancelled);

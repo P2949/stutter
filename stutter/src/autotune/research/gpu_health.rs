@@ -9,7 +9,7 @@
 
 use std::{
     io::Read,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Command, Stdio},
     time::{Duration, Instant},
 };
@@ -42,7 +42,8 @@ impl JournalGpuResetProbe {
 impl GpuResetProbe for JournalGpuResetProbe {
     fn resets_since(&mut self, since_unix: u64) -> anyhow::Result<u32> {
         let mut child = Command::new(&self.journalctl)
-            .args(["-k", "--no-pager", "-o", "cat", "--since"])
+            // `-k` alone means the current boot only; a reset in an earlier boot must stay visible.
+            .args(["-k", "-b", "all", "--no-pager", "-o", "cat", "--since"])
             .arg(format!("@{since_unix}"))
             .args(["-g", RESET_PATTERN])
             .stdin(Stdio::null())
@@ -86,8 +87,16 @@ impl GpuResetProbe for JournalGpuResetProbe {
     }
 }
 
-/// Cooldown after a GPU hang or reset during which no game is started.
-const COOLDOWN_SECONDS: u64 = 30 * 60;
+/// File (in the private study directory) written when a GPU hang or reset is detected. It is a
+/// durable campaign-independent health stop: it survives controller restarts and reboots, and only
+/// a deliberate human acknowledgement newer than it clears the stop; time never does.
+pub const BLOCKED_FILE: &str = "gpu-stability-blocked.json";
+/// Written by a human (`date +%s > gpu-stability-ack`) after reviewing the GPU events. Only events
+/// after this time count, and a block recorded before it no longer applies.
+pub const ACK_FILE: &str = "gpu-stability-ack";
+/// Consecutive unreadable journal checks during an attempt that are treated as an unknown, fatal
+/// health state.
+const MAX_UNKNOWN_POLLS: u32 = 3;
 /// A running attempt is checked for a GPU reset at most this often.
 const POLL_INTERVAL: Duration = Duration::from_secs(5);
 /// The window check runs every second; the journal is not queried that often.
@@ -99,23 +108,85 @@ fn unix_now() -> u64 {
         .map_or(0, |elapsed| elapsed.as_secs())
 }
 
-/// The port-side state of the guard: one probe, the admission cache and the running attempt.
+/// The port-side state of the guard: one probe, the durable health state and the running attempt.
 pub struct GpuGuard {
     probe: Box<dyn GpuResetProbe>,
+    /// The private directory holding the durable block marker and the human acknowledgement.
+    state_dir: PathBuf,
     pub(super) attempt_started_unix: Option<u64>,
     pub(super) last_poll: Option<Instant>,
     reset_seen: bool,
+    unknown_polls: u32,
     pub(super) admission: Option<(Instant, bool)>,
 }
 
+fn read_unix(path: &Path) -> Option<u64> {
+    let mut text = String::new();
+    std::fs::File::open(path)
+        .ok()?
+        .take(64)
+        .read_to_string(&mut text)
+        .ok()?;
+    text.trim().parse().ok()
+}
+
 impl GpuGuard {
-    pub fn new(probe: Box<dyn GpuResetProbe>) -> Self {
+    pub fn new(probe: Box<dyn GpuResetProbe>, state_dir: PathBuf) -> Self {
         Self {
             probe,
+            state_dir,
             attempt_started_unix: None,
             last_poll: None,
             reset_seen: false,
+            unknown_polls: 0,
             admission: None,
+        }
+    }
+
+    /// The human acknowledgement time. Missing or malformed means "never acknowledged", so every
+    /// recorded GPU event counts.
+    fn acknowledged_unix(&self) -> u64 {
+        read_unix(&self.state_dir.join(ACK_FILE)).unwrap_or(0)
+    }
+
+    /// Whether a durable block, newer than any acknowledgement, is on record.
+    pub fn blocked(&self) -> bool {
+        let marker = self.state_dir.join(BLOCKED_FILE);
+        if !marker.exists() {
+            return false;
+        }
+        // A marker whose time cannot be read is a block: ownership of the decision stays human.
+        let detected = std::fs::read(&marker)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+            .and_then(|value| value["detected_unix"].as_u64())
+            .unwrap_or(u64::MAX);
+        detected > self.acknowledged_unix()
+    }
+
+    /// Record the stop durably (private file, never overwritten by a later event).
+    fn record_block(&self, source: &str, events: u32) {
+        use std::os::unix::fs::OpenOptionsExt;
+        let body = serde_json::json!({
+            "detected_unix": unix_now(),
+            "events": events,
+            "source": source,
+        });
+        let result = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(self.state_dir.join(BLOCKED_FILE))
+            .and_then(|mut file| {
+                use std::io::Write;
+                file.write_all(body.to_string().as_bytes())?;
+                file.sync_all()
+            });
+        match result {
+            Ok(()) => {}
+            // An earlier block stays; a newer acknowledgement is what supersedes it.
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => log::error!("the GPU stability block could not be recorded: {error}"),
         }
     }
 
@@ -123,24 +194,31 @@ impl GpuGuard {
     pub fn begin_attempt(&mut self) {
         self.attempt_started_unix = Some(unix_now());
         self.reset_seen = false;
+        self.unknown_polls = 0;
         self.last_poll = None;
     }
 
-    /// Admission: no GPU reset within the cooldown, and the journal must be readable.
+    /// Admission. No time cooldown: a durable block, any GPU event since the last human
+    /// acknowledgement (across every boot) or an unreadable journal all withhold the launch.
     pub fn quiet_for_admission(&mut self) -> bool {
+        if self.blocked() {
+            return false;
+        }
         if let Some((at, quiet)) = self.admission
             && at.elapsed() < ADMISSION_CACHE
         {
             return quiet;
         }
-        let quiet = match self
-            .probe
-            .resets_since(unix_now().saturating_sub(COOLDOWN_SECONDS))
-        {
+        let quiet = match self.probe.resets_since(self.acknowledged_unix()) {
             Ok(0) => true,
-            Ok(_) => false,
+            Ok(events) => {
+                self.record_block("admission", events);
+                false
+            }
             Err(error) => {
-                log::warn!("GPU reset evidence is unreadable; admission withheld: {error:#}");
+                log::warn!(
+                    "GPU health is unknown (journal unreadable); admission withheld: {error:#}"
+                );
                 false
             }
         };
@@ -148,7 +226,8 @@ impl GpuGuard {
         quiet
     }
 
-    /// During an attempt: a reset logged since the launch request is sticky.
+    /// During an attempt: a reset since the launch request, or repeated inability to check, is
+    /// fatal and sticky. It also writes the durable block.
     pub fn reset_during_attempt(&mut self) -> bool {
         if self.reset_seen {
             return true;
@@ -164,10 +243,19 @@ impl GpuGuard {
         }
         self.last_poll = Some(Instant::now());
         match self.probe.resets_since(started.saturating_sub(2)) {
-            Ok(0) => {}
-            Ok(_) => self.reset_seen = true,
-            // An unreadable journal mid-run is not evidence of a reset; admission already needed it.
-            Err(error) => log::warn!("GPU reset check failed during an attempt: {error:#}"),
+            Ok(0) => self.unknown_polls = 0,
+            Ok(events) => {
+                self.record_block("attempt", events);
+                self.reset_seen = true;
+            }
+            Err(error) => {
+                self.unknown_polls += 1;
+                log::warn!("GPU health check failed during an attempt: {error:#}");
+                if self.unknown_polls >= MAX_UNKNOWN_POLLS {
+                    self.record_block("unknown_during_attempt", 0);
+                    self.reset_seen = true;
+                }
+            }
         }
         self.reset_seen
     }

@@ -39,6 +39,10 @@ pub trait SteamPort {
     fn observe_user_input_idle(&mut self, input_idle_at: Option<std::time::Instant>);
     /// Objectively free of unrelated user or game work; never forced.
     fn safe_window(&mut self) -> bool;
+    /// A durable health stop is on record.
+    fn health_blocked(&mut self) -> bool {
+        false
+    }
     /// Resolve the exact installed tool directory for the arm, or fail closed.
     fn tool_dir(&mut self, slot: &AttemptSlot) -> anyhow::Result<PathBuf>;
     fn study_compat_data(&self) -> PathBuf;
@@ -70,6 +74,10 @@ impl<P: SteamPort> AttemptHost for SteamAttemptHost<P> {
 
     fn observe_user_input_idle(&mut self, input_idle_at: Option<std::time::Instant>) {
         self.port.observe_user_input_idle(input_idle_at);
+    }
+
+    fn health_blocked(&mut self) -> bool {
+        self.port.health_blocked()
     }
 
     fn safe_window(&mut self) -> bool {

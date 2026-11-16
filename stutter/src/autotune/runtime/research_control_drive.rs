@@ -205,6 +205,17 @@ impl ResearchCoordinator {
                 self.settle(now, ResearchPhase::Blocked, code);
                 true
             }
+            // A durable GPU health stop: preserve what was sealed, leave the rest of the schedule
+            // unexecuted, and end the campaign as a typed health block.
+            Step::Halted(code) => {
+                let code = if self.persist_report() {
+                    code
+                } else {
+                    "ReportPersistenceFailed"
+                };
+                self.settle(now, ResearchPhase::Blocked, code);
+                true
+            }
             Step::Cancelled => {
                 let code = if self.persist_report() {
                     "Cancelled"
@@ -259,7 +270,7 @@ impl ResearchCoordinator {
             .tick_with_launch_fence(state.host.as_mut(), now, || {
                 anyhow::bail!("shutdown must not start an attempt")
             })? {
-            Step::Sealed(_) | Step::Cancelled => {}
+            Step::Sealed(_) | Step::Cancelled | Step::Halted(_) => {}
             _ => anyhow::bail!("research shutdown did not settle the attempt"),
         }
         let code = if self.persist_report() {

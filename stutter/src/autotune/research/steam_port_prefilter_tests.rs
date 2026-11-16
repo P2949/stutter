@@ -188,7 +188,9 @@ fn gpu_port(
 ) -> (
     ProductionSteamPort<QuietProbe>,
     std::sync::Arc<std::sync::Mutex<anyhow::Result<u32>>>,
+    tempfile::TempDir,
 ) {
+    let state_dir = tempfile::tempdir().unwrap();
     let shared = std::sync::Arc::new(std::sync::Mutex::new(answer));
     let client = crate::autotune::research::tests::intent().steam_client;
     let port = ProductionSteamPort::new(
@@ -200,47 +202,77 @@ fn gpu_port(
         vec![],
         QuietProbe,
     )
-    .with_gpu_reset_probe(Box::new(FakeGpu(shared.clone())));
-    (port, shared)
+    .with_gpu_reset_probe(
+        Box::new(FakeGpu(shared.clone())),
+        state_dir.path().to_path_buf(),
+    );
+    (port, shared, state_dir)
+}
+
+fn marker(dir: &tempfile::TempDir) -> std::path::PathBuf {
+    dir.path().join(super::super::gpu_health::BLOCKED_FILE)
 }
 
 #[test]
-fn a_recent_gpu_reset_or_an_unreadable_journal_withholds_admission() {
-    let (mut port, answer) = gpu_port(Ok(1));
+fn a_gpu_reset_is_a_durable_stop_that_time_and_restarts_never_clear() {
+    let (mut port, answer, dir) = gpu_port(Ok(2));
     assert!(!port.gpu.as_mut().unwrap().quiet_for_admission());
-    // The answer is cached briefly, so the journal is not queried every second.
+    assert!(marker(&dir).exists(), "the stop is recorded durably");
+    // The journal later reads clean (for example after the 30 minutes the old guard used): still blocked.
     *answer.lock().unwrap() = Ok(0);
+    port.gpu.as_mut().unwrap().admission = None;
     assert!(!port.gpu.as_mut().unwrap().quiet_for_admission());
-    port.gpu.as_mut().unwrap().admission = None;
-    assert!(port.gpu.as_mut().unwrap().quiet_for_admission());
-    port.gpu.as_mut().unwrap().admission = None;
-    *answer.lock().unwrap() = Err(anyhow::anyhow!("journal unreadable"));
+    // A restarted controller (a new guard over the same private directory) is blocked too.
+    let (mut restarted, _, _) = gpu_port(Ok(0));
+    restarted.gpu = Some(super::super::gpu_health::GpuGuard::new(
+        Box::new(FakeGpu(answer.clone())),
+        dir.path().to_path_buf(),
+    ));
+    assert!(!restarted.gpu.as_mut().unwrap().quiet_for_admission());
+    // Only a human acknowledgement newer than the block clears it.
+    std::fs::write(
+        dir.path().join(super::super::gpu_health::ACK_FILE),
+        format!("{}\n", u64::MAX / 2),
+    )
+    .unwrap();
+    restarted.gpu.as_mut().unwrap().admission = None;
+    assert!(restarted.gpu.as_mut().unwrap().quiet_for_admission());
+}
+
+#[test]
+fn an_unreadable_journal_is_unknown_health_and_withholds_admission_without_inventing_a_reset() {
+    let (mut port, _, dir) = gpu_port(Err(anyhow::anyhow!("journal unreadable")));
+    assert!(!port.gpu.as_mut().unwrap().quiet_for_admission());
     assert!(
-        !port.gpu.as_mut().unwrap().quiet_for_admission(),
-        "unknown is never quiet"
+        !marker(&dir).exists(),
+        "unknown is withheld, not recorded as a reset"
     );
 }
 
 #[test]
-fn a_gpu_reset_during_an_attempt_aborts_it_and_stays_sticky() {
-    let (mut port, answer) = gpu_port(Ok(0));
+fn a_gpu_reset_during_an_attempt_aborts_it_stays_sticky_and_records_the_stop() {
+    let (mut port, answer, dir) = gpu_port(Ok(0));
     port.observe_user_input_idle(Some(Instant::now()));
-    // No attempt has started: no GPU check, and no dispatch means an identity problem.
     assert_eq!(port.state(), GameState::IdentityMismatch);
     port.gpu.as_mut().unwrap().attempt_started_unix = Some(100);
     assert_eq!(port.state(), GameState::IdentityMismatch);
     *answer.lock().unwrap() = Ok(2);
     port.gpu.as_mut().unwrap().last_poll = None;
     assert_eq!(port.state(), GameState::GpuReset);
-    // Once seen it stays seen, even if the journal later reads clean.
+    assert!(marker(&dir).exists());
     *answer.lock().unwrap() = Ok(0);
     assert_eq!(port.state(), GameState::GpuReset);
 }
 
 #[test]
-fn an_unreadable_journal_during_an_attempt_is_not_a_reset() {
-    let (mut port, _) = gpu_port(Err(anyhow::anyhow!("journal unreadable")));
+fn repeated_inability_to_check_during_an_attempt_is_a_fatal_unknown() {
+    let (mut port, _, dir) = gpu_port(Err(anyhow::anyhow!("journal unreadable")));
     port.observe_user_input_idle(Some(Instant::now()));
     port.gpu.as_mut().unwrap().attempt_started_unix = Some(100);
-    assert_eq!(port.state(), GameState::IdentityMismatch);
+    for _ in 0..2 {
+        assert_eq!(port.state(), GameState::IdentityMismatch);
+        port.gpu.as_mut().unwrap().last_poll = None;
+    }
+    assert_eq!(port.state(), GameState::GpuReset);
+    assert!(marker(&dir).exists());
 }

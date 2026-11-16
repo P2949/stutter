@@ -163,6 +163,7 @@ pub fn build_production_host(
         outstanding_worker_tokens,
         transactions_restored,
     };
+    let study_root_for_health = study_root.clone();
     let port = ProductionSteamPort::new(
         study_compat_data,
         study_root,
@@ -180,9 +181,12 @@ pub fn build_production_host(
     // hang or reset and a running attempt that coincides with one is aborted. An invalid path
     // builds no host.
     let port = match std::env::var_os("STUTTER_JOURNALCTL") {
-        Some(path) => port.with_gpu_reset_probe(Box::new(
-            super::gpu_health::JournalGpuResetProbe::new(PathBuf::from(path))?,
-        )),
+        Some(path) => port.with_gpu_reset_probe(
+            Box::new(super::gpu_health::JournalGpuResetProbe::new(
+                PathBuf::from(path),
+            )?),
+            study_root_for_health,
+        ),
         None => port,
     };
     Ok(Box::new(SteamAttemptHost::new(port)))

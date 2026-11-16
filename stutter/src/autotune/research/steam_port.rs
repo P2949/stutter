@@ -350,8 +350,12 @@ impl<R: ResultProbe> ProductionSteamPort<R> {
 
     /// Refuse to start a game within a cooldown of a GPU hang or reset, and abort a running attempt
     /// that coincides with one. Without a probe the guard is off.
-    pub fn with_gpu_reset_probe(mut self, probe: Box<dyn GpuResetProbe>) -> Self {
-        self.gpu = Some(GpuGuard::new(probe));
+    pub fn with_gpu_reset_probe(
+        mut self,
+        probe: Box<dyn GpuResetProbe>,
+        state_dir: PathBuf,
+    ) -> Self {
+        self.gpu = Some(GpuGuard::new(probe, state_dir));
         self
     }
 
@@ -488,6 +492,10 @@ impl<R: ResultProbe> SteamPort for ProductionSteamPort<R> {
 
     fn observe_user_input_idle(&mut self, input_idle_at: Option<Instant>) {
         self.input_idle_at = input_idle_at;
+    }
+
+    fn health_blocked(&mut self) -> bool {
+        self.gpu.as_ref().is_some_and(GpuGuard::blocked)
     }
 
     fn safe_window(&mut self) -> bool {
