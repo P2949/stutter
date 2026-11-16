@@ -51,6 +51,7 @@ pub(crate) mod child_runner;
     )
 )]
 pub(crate) mod child_study;
+pub(crate) mod child_verify;
 #[cfg_attr(
     not(test),
     expect(

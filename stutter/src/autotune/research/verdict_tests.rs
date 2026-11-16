@@ -37,6 +37,7 @@ fn all_true<'a>(
         raw: Some(raw),
         evidence,
         child_studies: studies,
+        child_reports_verified: true,
         restoration_verified: true,
         health_blocked: false,
     }
@@ -94,5 +95,17 @@ fn a_health_incident_is_aborted_health_whatever_else_holds() {
         ..all_true(&good, &qualified, &[])
     });
     assert_eq!(verdict.disposition, "AbortedHealth");
+    assert!(!verdict.final_gate_qualified);
+}
+
+#[test]
+fn unverified_child_reports_deny_the_final_gate_even_when_every_study_looks_qualified() {
+    let good = raw(2, 2, 0);
+    let qualified = [study(Some(StudyResult::Qualified))];
+    let verdict = judge(&VerdictInputs {
+        child_reports_verified: false,
+        ..all_true(&good, &qualified, &[])
+    });
+    assert!(!verdict.child_reports_verified);
     assert!(!verdict.final_gate_qualified);
 }

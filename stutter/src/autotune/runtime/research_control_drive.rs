@@ -537,6 +537,25 @@ impl ResearchCoordinator {
                     crate::autotune::research::child_ledger::read_dispositions(&dir, uid, intent)
                         .ok()
                 });
+                // Each child study's own report and raw files, verified like the campaign's.
+                let children =
+                    intent
+                        .as_ref()
+                        .zip(self.study_dir.as_deref())
+                        .and_then(|(intent, study)| {
+                            crate::autotune::research::child_verify::verify_children(
+                                &dir,
+                                uid,
+                                intent,
+                                &|arm| {
+                                    crate::autotune::research::session_host::arm_prefix_paths(
+                                        study, arm,
+                                    )
+                                    .1
+                                },
+                            )
+                            .ok()
+                        });
                 let evidence: Vec<_> = {
                     use std::os::fd::AsFd;
                     crate::syscall::openat_dir_nofollow(dir.as_fd(), "evidence")
@@ -561,6 +580,9 @@ impl ResearchCoordinator {
                         raw: raw_outcome.as_ref(),
                         evidence: &evidence,
                         child_studies: studies.as_deref().unwrap_or(&[]),
+                        child_reports_verified: children
+                            .as_ref()
+                            .is_some_and(|children| children.all_verified()),
                         // No physical restoration verifier exists yet; never inferred.
                         restoration_verified: false,
                         health_blocked,
@@ -573,6 +595,7 @@ impl ResearchCoordinator {
                     "verdict": verdict,
                     "raw_native_files": raw,
                     "child_studies": studies,
+                    "child_reports": children,
                     "intent_sha256": report.intent_sha256,
                 })
                 .to_string()

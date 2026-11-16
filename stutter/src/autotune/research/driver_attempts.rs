@@ -15,7 +15,7 @@ use super::{
     native_context::ProfileConformance,
     raw_verify::verify_raw_evidence,
     report::evidence_context_consistent,
-    report_store::read_evidence,
+    report_store::{read_evidence, write_new, write_report},
     study_executor::{AttemptsOutcome, StudyAttempts},
 };
 
@@ -93,6 +93,9 @@ impl DriverStudyAttempts {
         let journal_dir = create_dir(&study_dir, "journal")?;
         let dispatch = create_dir(&study_dir, "dispatch")?;
         let evidence = create_dir(&study_dir, "evidence")?;
+        // The child's own frozen intent, so a verifier can rebuild its schedule and report exactly as
+        // it does for a whole campaign (`report_store::load_and_verify` on this directory).
+        write_new(&study_dir, "intent.json", &serde_json::to_vec(&intent)?)?;
         let schedule = build_schedule(&intent)?;
         let len = schedule.len();
         let journal = ResearchJournal::open(journal_dir.into(), intent.uid, schedule)?;
@@ -108,8 +111,10 @@ impl DriverStudyAttempts {
         health_halt: bool,
     ) -> anyhow::Result<AttemptsOutcome> {
         let report = driver.finalize()?;
-        let evidence_dir = open_dir(&open_dir(&self.campaign, STUDIES_DIR)?, dir_name(study))
-            .and_then(|dir| open_dir(&dir, "evidence"))?;
+        let study_dir = open_dir(&open_dir(&self.campaign, STUDIES_DIR)?, dir_name(study))?;
+        // The study's report is sealed beside its journal; verification recomputes and compares it.
+        write_report(&study_dir, &report)?;
+        let evidence_dir = open_dir(&study_dir, "evidence")?;
         let evidence: BTreeMap<_, _> = read_evidence(&evidence_dir, self.parent.uid)?;
         let conformance = evidence
             .values()

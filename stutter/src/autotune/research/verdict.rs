@@ -21,6 +21,8 @@ pub struct Verdict {
     pub loaded_runtime_qualified: bool,
     /// Every planned child study ran to a qualified result.
     pub child_studies_qualified: bool,
+    /// Every child study's own report reconstructs from its sealed records and its raw files replay.
+    pub child_reports_verified: bool,
     /// Worker restoration was physically proven (no verifier of this exists yet: always the
     /// caller's observation, never inferred from the other statuses).
     pub restoration_verified: bool,
@@ -34,6 +36,7 @@ pub struct VerdictInputs<'a> {
     pub raw: Option<&'a RawVerification>,
     pub evidence: &'a [AttemptEvidenceV1],
     pub child_studies: &'a [Disposition],
+    pub child_reports_verified: bool,
     pub restoration_verified: bool,
     /// An unacknowledged GPU-health incident is on record.
     pub health_blocked: bool,
@@ -59,6 +62,7 @@ pub fn judge(inputs: &VerdictInputs<'_>) -> Verdict {
         && raw_files_verified
         && loaded_runtime_qualified
         && child_studies_qualified
+        && inputs.child_reports_verified
         && inputs.restoration_verified
         && !inputs.health_blocked;
     let disposition = if inputs.health_blocked {
@@ -75,6 +79,7 @@ pub fn judge(inputs: &VerdictInputs<'_>) -> Verdict {
         raw_files_verified,
         loaded_runtime_qualified,
         child_studies_qualified,
+        child_reports_verified: inputs.child_reports_verified,
         restoration_verified: inputs.restoration_verified,
         final_gate_qualified,
         disposition,
