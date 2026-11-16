@@ -76,7 +76,23 @@ fn write_result(root: &Path, name: &str, summary: &str) {
     std::fs::create_dir(&dir).unwrap();
     std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
     std::fs::write(dir.join("summary.json"), summary).unwrap();
-    std::fs::write(dir.join("frames.csv"), "frame,time\n1,0\n").unwrap();
+    // The game derives its average from the frame times, so the fixture frame file is coherent with
+    // its summary whenever the summary has a usable average.
+    let frames = serde_json::from_str::<serde_json::Value>(summary)
+        .ok()
+        .and_then(|value| value["averageFps"].as_f64())
+        .filter(|fps| *fps > 0.0)
+        .map_or_else(
+            || "frame,time\n1,0\n".to_owned(),
+            |fps| {
+                let mut csv = String::from("Frame index, Frame time (ms)\n");
+                for index in 0..50 {
+                    csv.push_str(&format!("{index}, {:.4}\n", 1000.0 / fps));
+                }
+                csv
+            },
+        );
+    std::fs::write(dir.join("frames.csv"), frames).unwrap();
 }
 
 #[test]

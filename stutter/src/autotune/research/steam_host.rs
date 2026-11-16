@@ -278,6 +278,7 @@ mod tests {
                 minimum_fps: None,
                 maximum_fps: None,
             },
+            context: None,
             files: vec![],
         }
     }

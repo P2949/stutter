@@ -96,6 +96,7 @@ pub(crate) mod launch_ticket;
 pub(crate) mod launch_txn;
 mod lease;
 mod mounts;
+pub(crate) mod native_context;
 #[cfg_attr(
     not(test),
     expect(

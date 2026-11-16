@@ -107,6 +107,9 @@ pub struct CyberpunkBenchmarkCompletion {
     pub completed_unix_nanos: u128,
     pub result_directory: String,
     pub metrics: NativeBenchmarkMetrics,
+    /// What the game reported about how it ran, after its frame file matched its summary.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<super::native_context::NativeContext>,
     pub files: Vec<NativeBenchmarkFile>,
 }
 
@@ -303,7 +306,8 @@ fn scan_result_dir(
                 && before.mtime_nsec() == after.mtime_nsec(),
             "native result changed while reading"
         );
-        let summary = relative.rsplit('/').next() == Some("summary.json");
+        let leaf = relative.rsplit('/').next();
+        let summary = leaf == Some("summary.json") || leaf == Some("frames.csv");
         files.push(ScannedFile {
             evidence: NativeBenchmarkFile {
                 path: relative,
@@ -463,16 +467,27 @@ pub fn verify_benchmark_completion(
         &mut total_bytes,
     )?;
     files.sort_by(|left, right| left.evidence.path.cmp(&right.evidence.path));
-    let summaries: Vec<_> = files
-        .iter()
-        .filter_map(|file| file.bytes.as_deref())
-        .collect();
+    let kept = |leaf: &str| -> Vec<&[u8]> {
+        files
+            .iter()
+            .filter(|file| file.evidence.path.rsplit('/').next() == Some(leaf))
+            .filter_map(|file| file.bytes.as_deref())
+            .collect()
+    };
+    let summaries = kept("summary.json");
     anyhow::ensure!(
         summaries.len() == 1,
         "native result must contain exactly one summary.json"
     );
+    let frames = kept("frames.csv");
+    anyhow::ensure!(
+        frames.len() == 1,
+        "native result must contain exactly one frames.csv"
+    );
     anyhow::ensure!(total_bytes > 0, "native result folder is empty");
     let metrics = parse_summary(summaries[0])?;
+    // The summary and its own frame file must describe one run; the reported context is recorded.
+    let context = super::native_context::verify_frames(summaries[0], frames[0])?;
     Ok(CyberpunkBenchmarkCompletion {
         schema_version: 1,
         app_id: installation.app_id,
@@ -486,6 +501,7 @@ pub fn verify_benchmark_completion(
         completed_unix_nanos: attempt.completed_unix_nanos,
         result_directory: result_directory.clone(),
         metrics,
+        context: Some(context),
         files: files.into_iter().map(|file| file.evidence).collect(),
     })
 }

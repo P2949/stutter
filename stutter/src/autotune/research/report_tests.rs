@@ -155,6 +155,7 @@ fn native_completion_must_match_the_frozen_attempt_before_sealing() {
             minimum_fps: None,
             maximum_fps: None,
         },
+        context: None,
         files: vec![NativeBenchmarkFile {
             path: "result/summary.json".into(),
             size_bytes: 10,
@@ -222,6 +223,7 @@ fn native_completions_decide_consistent_or_drifted_context() {
                     minimum_fps: None,
                     maximum_fps: None,
                 },
+                context: None,
                 files: vec![NativeBenchmarkFile {
                     path: "result/summary.json".into(),
                     size_bytes: 10,
