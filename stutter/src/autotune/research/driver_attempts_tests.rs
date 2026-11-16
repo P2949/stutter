@@ -103,6 +103,7 @@ fn attempts(
         }),
         Box::new(|| Ok(())),
         Box::new(|_| std::path::PathBuf::from("/nonexistent")),
+        Box::new(|_| Ok(vec![ProtonSource::Ge, ProtonSource::ValveStable])),
     );
     (root, runner, study, parent)
 }
@@ -182,6 +183,7 @@ fn two_studies_never_share_directories_or_schedules() {
         }),
         Box::new(|| Ok(())),
         Box::new(|_| std::path::PathBuf::from("/nonexistent")),
+        Box::new(|_| Ok(vec![ProtonSource::Ge, ProtonSource::ValveStable])),
     );
     let first = run_to_end(&mut runner, &plan[0]);
     let second = run_to_end(&mut runner, &plan[1]);

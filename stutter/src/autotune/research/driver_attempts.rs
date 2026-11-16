@@ -19,6 +19,9 @@ use super::{
     study_executor::{AttemptsOutcome, StudyAttempts},
 };
 
+/// Chooses the arms a child study runs across.
+pub type SelectArms = Box<dyn FnMut(&ChildStudy) -> anyhow::Result<Vec<ProtonSource>> + Send>;
+
 const STUDIES_DIR: &str = "studies";
 
 pub struct DriverStudyAttempts {
@@ -30,6 +33,9 @@ pub struct DriverStudyAttempts {
     launch_fence: Box<dyn FnMut() -> anyhow::Result<()> + Send>,
     /// Where each arm's native results live, to replay them against their sealed records.
     results_for: Box<dyn Fn(ProtonSource) -> PathBuf + Send>,
+    /// The arms a study runs across: every authorized tool for a screen, and the two arms chosen from
+    /// the screen's results for a confirmation, feature or action study.
+    select_arms: SelectArms,
     running: Option<(String, Driver)>,
 }
 
@@ -57,6 +63,7 @@ impl DriverStudyAttempts {
         clock: Box<dyn FnMut() -> u64 + Send>,
         launch_fence: Box<dyn FnMut() -> anyhow::Result<()> + Send>,
         results_for: Box<dyn Fn(ProtonSource) -> PathBuf + Send>,
+        select_arms: SelectArms,
     ) -> Self {
         Self {
             campaign,
@@ -65,12 +72,14 @@ impl DriverStudyAttempts {
             clock,
             launch_fence,
             results_for,
+            select_arms,
             running: None,
         }
     }
 
     fn begin(&mut self, study: &ChildStudy) -> anyhow::Result<()> {
-        let intent = child_intent(&self.parent, study)?;
+        let arms = (self.select_arms)(study)?;
+        let intent = child_intent(&self.parent, study, &arms)?;
         let studies = match open_dir(&self.campaign, STUDIES_DIR) {
             Ok(dir) => dir,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {

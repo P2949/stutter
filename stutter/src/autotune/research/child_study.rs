@@ -45,6 +45,26 @@ pub struct ChildStudy {
     pub study_sha256: String,
 }
 
+/// Which Proton arms a study runs across.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StudyArms {
+    /// Every eligible tool of the campaign (the screen).
+    All,
+    /// Exactly two of them, selected after the screen: the control and one candidate. Confirmation,
+    /// feature and action studies compare two conditions, so their attempt counts divide across two
+    /// arms whatever the campaign's tool count is.
+    Pair,
+}
+
+impl ChildStudy {
+    pub fn arms(&self) -> StudyArms {
+        match self.stage {
+            Stage::Screen => StudyArms::All,
+            Stage::Confirm | Stage::Action(_) | Stage::Feature(_) => StudyArms::Pair,
+        }
+    }
+}
+
 /// AB/BA confirmation needs at least four independent pairs, so eight attempts.
 const CONFIRM_ATTEMPTS: u32 = 8;
 const FEATURE_ATTEMPTS: u32 = 8;
