@@ -553,19 +553,26 @@ impl<R: ResultProbe> SteamPort for ProductionSteamPort<R> {
             self.steam_session_paths_verified() && self.idle_is_fresh(),
             "BlockedSteamSessionEnvironment"
         );
+        // The cached admission can be seconds old; health is read again right before the send.
+        anyhow::ensure!(
+            self.gpu.as_mut().is_none_or(GpuGuard::admit_now),
+            "BlockedGpuStability"
+        );
         self.start_unit(dispatch, slot, context)
     }
 
     fn state(&mut self) -> GameState {
-        if !self.user_input_idle_is_fresh() {
-            return GameState::DesktopInterrupted;
-        }
+        // The GPU cause outranks a lost desktop observation: a reset kills the compositor, and the
+        // interruption it causes must not hide it.
         if self
             .gpu
             .as_mut()
             .is_some_and(GpuGuard::reset_during_attempt)
         {
             return GameState::GpuReset;
+        }
+        if !self.user_input_idle_is_fresh() {
+            return GameState::DesktopInterrupted;
         }
         let Some((dir, context)) = self.dispatch.as_ref() else {
             return GameState::IdentityMismatch;

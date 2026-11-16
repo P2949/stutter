@@ -1,5 +1,5 @@
 //! Prefilter tests against realistic Steam and kernel process layouts.
-use super::*;
+use super::{super::gpu_health::ResetScan, *};
 
 #[test]
 fn steams_outer_launcher_is_exempt_only_as_an_ancestor_of_the_pinned_client() {
@@ -172,24 +172,29 @@ fn a_running_games_own_idle_inhibitor_does_not_interrupt_its_attempt_but_user_in
     assert_eq!(port.state(), GameState::DesktopInterrupted);
 }
 
-struct FakeGpu(std::sync::Arc<std::sync::Mutex<anyhow::Result<u32>>>);
+struct FakeGpu(std::sync::Arc<std::sync::Mutex<anyhow::Result<ResetScan>>>);
 
 impl super::super::gpu_health::GpuResetProbe for FakeGpu {
-    fn resets_since(&mut self, _: u64) -> anyhow::Result<u32> {
+    fn resets_since(&mut self, _: u64) -> anyhow::Result<ResetScan> {
         match &*self.0.lock().unwrap() {
-            Ok(count) => Ok(*count),
+            Ok(scan) => Ok(*scan),
             Err(error) => Err(anyhow::anyhow!("{error}")),
         }
     }
 }
 
+type Answer = std::sync::Arc<std::sync::Mutex<anyhow::Result<ResetScan>>>;
+
+fn scan(count: u32) -> anyhow::Result<ResetScan> {
+    Ok(ResetScan {
+        count,
+        latest_unix: None,
+    })
+}
+
 fn gpu_port(
-    answer: anyhow::Result<u32>,
-) -> (
-    ProductionSteamPort<QuietProbe>,
-    std::sync::Arc<std::sync::Mutex<anyhow::Result<u32>>>,
-    tempfile::TempDir,
-) {
+    answer: anyhow::Result<ResetScan>,
+) -> (ProductionSteamPort<QuietProbe>, Answer, tempfile::TempDir) {
     let state_dir = tempfile::tempdir().unwrap();
     let shared = std::sync::Arc::new(std::sync::Mutex::new(answer));
     let client = crate::autotune::research::tests::intent().steam_client;
@@ -209,59 +214,46 @@ fn gpu_port(
     (port, shared, state_dir)
 }
 
-fn marker(dir: &tempfile::TempDir) -> std::path::PathBuf {
-    dir.path().join(super::super::gpu_health::BLOCKED_FILE)
-}
-
-#[test]
-fn a_gpu_reset_is_a_durable_stop_that_time_and_restarts_never_clear() {
-    let (mut port, answer, dir) = gpu_port(Ok(2));
-    assert!(!port.gpu.as_mut().unwrap().quiet_for_admission());
-    assert!(marker(&dir).exists(), "the stop is recorded durably");
-    // The journal later reads clean (for example after the 30 minutes the old guard used): still blocked.
-    *answer.lock().unwrap() = Ok(0);
-    port.gpu.as_mut().unwrap().admission = None;
-    assert!(!port.gpu.as_mut().unwrap().quiet_for_admission());
-    // A restarted controller (a new guard over the same private directory) is blocked too.
-    let (mut restarted, _, _) = gpu_port(Ok(0));
-    restarted.gpu = Some(super::super::gpu_health::GpuGuard::new(
-        Box::new(FakeGpu(answer.clone())),
-        dir.path().to_path_buf(),
-    ));
-    assert!(!restarted.gpu.as_mut().unwrap().quiet_for_admission());
-    // Only a human acknowledgement newer than the block clears it.
-    std::fs::write(
-        dir.path().join(super::super::gpu_health::ACK_FILE),
-        format!("{}\n", u64::MAX / 2),
-    )
-    .unwrap();
-    restarted.gpu.as_mut().unwrap().admission = None;
-    assert!(restarted.gpu.as_mut().unwrap().quiet_for_admission());
-}
-
-#[test]
-fn an_unreadable_journal_is_unknown_health_and_withholds_admission_without_inventing_a_reset() {
-    let (mut port, _, dir) = gpu_port(Err(anyhow::anyhow!("journal unreadable")));
-    assert!(!port.gpu.as_mut().unwrap().quiet_for_admission());
-    assert!(
-        !marker(&dir).exists(),
-        "unknown is withheld, not recorded as a reset"
-    );
+fn incident_count(dir: &tempfile::TempDir) -> usize {
+    std::fs::read_dir(dir.path())
+        .unwrap()
+        .filter(|entry| {
+            entry
+                .as_ref()
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with(super::super::gpu_health::INCIDENT_PREFIX)
+        })
+        .count()
 }
 
 #[test]
 fn a_gpu_reset_during_an_attempt_aborts_it_stays_sticky_and_records_the_stop() {
-    let (mut port, answer, dir) = gpu_port(Ok(0));
+    let (mut port, answer, dir) = gpu_port(scan(0));
     port.observe_user_input_idle(Some(Instant::now()));
     assert_eq!(port.state(), GameState::IdentityMismatch);
     port.gpu.as_mut().unwrap().attempt_started_unix = Some(100);
     assert_eq!(port.state(), GameState::IdentityMismatch);
-    *answer.lock().unwrap() = Ok(2);
+    *answer.lock().unwrap() = scan(2);
     port.gpu.as_mut().unwrap().last_poll = None;
     assert_eq!(port.state(), GameState::GpuReset);
-    assert!(marker(&dir).exists());
-    *answer.lock().unwrap() = Ok(0);
+    assert_eq!(incident_count(&dir), 1);
+    assert!(port.health_blocked());
+    *answer.lock().unwrap() = scan(0);
     assert_eq!(port.state(), GameState::GpuReset);
+}
+
+#[test]
+fn a_reset_that_also_destroys_the_desktop_observation_is_still_a_gpu_reset() {
+    let (mut port, answer, dir) = gpu_port(scan(0));
+    // The compositor died with the reset: no fresh input-idle observation exists any more.
+    port.observe_user_input_idle(None);
+    port.gpu.as_mut().unwrap().attempt_started_unix = Some(100);
+    *answer.lock().unwrap() = scan(1);
+    port.gpu.as_mut().unwrap().last_poll = None;
+    assert_eq!(port.state(), GameState::GpuReset);
+    assert_eq!(incident_count(&dir), 1);
 }
 
 #[test]
@@ -274,5 +266,60 @@ fn repeated_inability_to_check_during_an_attempt_is_a_fatal_unknown() {
         port.gpu.as_mut().unwrap().last_poll = None;
     }
     assert_eq!(port.state(), GameState::GpuReset);
-    assert!(marker(&dir).exists());
+    assert_eq!(incident_count(&dir), 1);
+}
+
+#[test]
+fn admission_is_withheld_while_an_incident_is_unacknowledged() {
+    let (mut port, answer, dir) = gpu_port(scan(1));
+    assert!(!port.safe_window());
+    assert_eq!(incident_count(&dir), 1);
+    *answer.lock().unwrap() = scan(0);
+    port.gpu.as_mut().unwrap().admission = None;
+    assert!(!port.safe_window());
+    assert!(port.health_blocked());
+}
+
+#[test]
+fn a_restarted_port_over_the_same_state_stays_stopped_until_that_incident_is_acknowledged() {
+    let (mut port, answer, dir) = gpu_port(scan(1));
+    assert!(!port.safe_window());
+    *answer.lock().unwrap() = scan(0);
+    // A fresh controller process: new port, new guard, same private directory.
+    let client = crate::autotune::research::tests::intent().steam_client;
+    let mut restarted = ProductionSteamPort::new(
+        "/study/compatdata".into(),
+        "/study".into(),
+        "/a".into(),
+        "/m".into(),
+        client,
+        vec![],
+        QuietProbe,
+    )
+    .with_gpu_reset_probe(Box::new(FakeGpu(answer.clone())), dir.path().to_path_buf());
+    assert!(restarted.health_blocked());
+    assert!(!restarted.safe_window());
+    // Acknowledge exactly that incident, as a human would.
+    let incident = std::fs::read_dir(dir.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| {
+            path.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with(super::super::gpu_health::INCIDENT_PREFIX)
+        })
+        .unwrap();
+    let hash = stutter_core::hash::sha256_hex(&std::fs::read(&incident).unwrap())[..16].to_string();
+    let ack = dir.path().join(super::super::gpu_health::ACK_FILE);
+    std::fs::write(
+        &ack,
+        format!(
+            "{} {hash}\n",
+            incident.file_stem().unwrap().to_string_lossy()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&ack, std::os::unix::fs::PermissionsExt::from_mode(0o600)).unwrap();
+    assert!(!restarted.health_blocked());
 }

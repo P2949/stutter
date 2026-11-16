@@ -122,9 +122,20 @@ fn qualify(intent: &ResearchIntentV1, inputs: &ProductionHostInputs) -> anyhow::
     Ok(())
 }
 
+/// The exact `journalctl` the host configuration names for the GPU health guard.
+const JOURNALCTL_ENV: &str = "STUTTER_JOURNALCTL";
+
 pub fn build_production_host(
     intent: &ResearchIntentV1,
     inputs: ProductionHostInputs,
+) -> anyhow::Result<Box<dyn AttemptHost + Send>> {
+    build_guarded_host(intent, inputs, std::env::var_os(JOURNALCTL_ENV))
+}
+
+fn build_guarded_host(
+    intent: &ResearchIntentV1,
+    inputs: ProductionHostInputs,
+    journalctl: Option<std::ffi::OsString>,
 ) -> anyhow::Result<Box<dyn AttemptHost + Send>> {
     qualify(intent, &inputs)?;
     let ProductionHostInputs {
@@ -177,18 +188,15 @@ pub fn build_production_host(
     .with_settlement_witness(Box::new(witness))
     .with_owned_terminator(Box::new(cleanup))
     .with_settle_window(Duration::from_secs(120));
-    // The host configuration names the exact `journalctl`; with it, no game starts soon after a GPU
-    // hang or reset and a running attempt that coincides with one is aborted. An invalid path
-    // builds no host.
-    let port = match std::env::var_os("STUTTER_JOURNALCTL") {
-        Some(path) => port.with_gpu_reset_probe(
-            Box::new(super::gpu_health::JournalGpuResetProbe::new(
-                PathBuf::from(path),
-            )?),
-            study_root_for_health,
-        ),
-        None => port,
-    };
+    // The host configuration names the exact `journalctl`. Without a trusted probe no host is
+    // built: a live launch is never possible without the GPU health guard.
+    let journalctl = journalctl.ok_or_else(|| anyhow::anyhow!("BlockedGpuHealthProbeMissing"))?;
+    let port = port.with_gpu_reset_probe(
+        Box::new(super::gpu_health::JournalGpuResetProbe::trusted(
+            PathBuf::from(journalctl),
+        )?),
+        study_root_for_health,
+    );
     Ok(Box::new(SteamAttemptHost::new(port)))
 }
 
@@ -285,10 +293,42 @@ mod tests {
         }
     }
 
+    /// Any root-owned, non-writable regular file stands in for the store `journalctl`.
+    fn trusted_probe() -> Option<std::ffi::OsString> {
+        [
+            "/usr/bin/true",
+            "/bin/true",
+            "/run/current-system/sw/bin/true",
+        ]
+        .into_iter()
+        .find(|path| std::path::Path::new(path).exists())
+        .map(Into::into)
+    }
+
+    #[test]
+    fn a_host_is_never_built_without_a_trusted_gpu_health_probe() {
+        let intent = intent();
+        for probe in [
+            None,
+            Some("journalctl".into()),
+            Some("/nonexistent/journalctl".into()),
+            // A file this user owns (and could rewrite) is not a trusted probe.
+            Some(std::env::current_exe().unwrap().into_os_string()),
+        ] {
+            let error = build_guarded_host(&intent, inputs(&intent), probe.clone())
+                .err()
+                .unwrap_or_else(|| panic!("must refuse {probe:?}"));
+            let _ = error;
+        }
+        let missing = build_guarded_host(&intent, inputs(&intent), None)
+            .err()
+            .unwrap();
+        assert!(missing.to_string().contains("BlockedGpuHealthProbeMissing"));
+    }
     #[test]
     fn a_matching_intent_builds_a_host_that_is_not_yet_in_a_safe_window() {
         let intent = intent();
-        let mut host = build_production_host(&intent, inputs(&intent)).unwrap();
+        let mut host = build_guarded_host(&intent, inputs(&intent), trusted_probe()).unwrap();
         // Construction sent nothing, prepared nothing, and no idle window has been observed.
         assert!(!host.safe_window());
     }
@@ -317,7 +357,7 @@ mod tests {
         for mutate in cases {
             let mut broken = inputs(&base);
             mutate(&mut broken);
-            let error = build_production_host(&base, broken)
+            let error = build_guarded_host(&base, broken, trusted_probe())
                 .err()
                 .expect("must refuse");
             assert!(
@@ -327,6 +367,6 @@ mod tests {
         }
         let mut other_owner = base.clone();
         other_owner.uid = crate::syscall::geteuid() + 1;
-        assert!(build_production_host(&other_owner, inputs(&other_owner)).is_err());
+        assert!(build_guarded_host(&other_owner, inputs(&other_owner), trusted_probe()).is_err());
     }
 }
