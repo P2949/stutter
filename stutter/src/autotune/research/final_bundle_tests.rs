@@ -104,3 +104,61 @@ fn a_bundle_is_written_once_and_never_overwritten() {
     );
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+/// Read-only on the campaign: derive the bundle of a real preserved campaign into a fresh directory.
+/// `STUTTER_REAL_CAMPAIGN=<dir> STUTTER_REAL_RESULTS=<benchmarkResults> STUTTER_BUNDLE_OUT=<empty dir>
+/// cargo test real_campaign_bundle -- --ignored`.
+#[test]
+#[ignore = "needs a preserved real campaign directory"]
+fn real_campaign_bundle() {
+    use std::os::fd::AsFd;
+
+    use crate::autotune::research::{
+        ResearchIntentV1, child_ledger::read_dispositions, driver::build_schedule,
+        journal::ResearchJournal, raw_verify::verify_raw_evidence, report_store, verdict,
+    };
+    let var = |name: &str| std::env::var_os(name).unwrap_or_else(|| panic!("set {name}"));
+    let uid = crate::syscall::geteuid();
+    let dir = File::from(
+        crate::syscall::open_dir_no_symlinks(std::path::Path::new(&var("STUTTER_REAL_CAMPAIGN")))
+            .unwrap(),
+    );
+    let report = report_store::load_and_verify(&dir, uid).unwrap();
+    let intent: ResearchIntentV1 =
+        serde_json::from_slice(&report_store::read_private(&dir, "intent.json", uid).unwrap())
+            .unwrap();
+    let records = ResearchJournal::open(
+        crate::syscall::openat_dir_nofollow(dir.as_fd(), "journal").unwrap(),
+        uid,
+        build_schedule(&intent).unwrap(),
+    )
+    .unwrap()
+    .verify()
+    .unwrap();
+    let evidence_dir =
+        File::from(crate::syscall::openat_dir_nofollow(dir.as_fd(), "evidence").unwrap());
+    let results = std::path::PathBuf::from(var("STUTTER_REAL_RESULTS"));
+    let raw = verify_raw_evidence(&evidence_dir, uid, &records, &|_| results.clone()).unwrap();
+    let evidence: Vec<_> = report_store::read_evidence(&evidence_dir, uid)
+        .unwrap()
+        .into_values()
+        .collect();
+    let studies = read_dispositions(&dir, uid, &intent).unwrap();
+    let verdict = verdict::judge(&verdict::VerdictInputs {
+        reconstruction_passed: true,
+        raw: Some(&raw),
+        evidence: &evidence,
+        child_studies: &studies,
+        child_reports_verified: false,
+        restoration_verified: false,
+        health_blocked: false,
+    });
+    let response = json!({
+        "verdict": verdict,
+        "raw_native_files": raw,
+        "child_studies": studies,
+        "intent_sha256": report.intent_sha256,
+    });
+    let out = File::open(var("STUTTER_BUNDLE_OUT")).unwrap();
+    write(&out, &serde_json::to_value(&report).unwrap(), &response).unwrap();
+}
