@@ -215,3 +215,103 @@ mod pilot_rule_traceability {
         assert_eq!(rule, freeze(&[60.0, 66.0, 63.0]).unwrap());
     }
 }
+
+mod receipts_and_rules {
+    use std::os::unix::fs::PermissionsExt;
+
+    use serde_json::json;
+
+    use super::*;
+    use crate::autotune::research::{
+        child_ledger::ChildLedger, pilot_rule::FrozenConfirmationRule,
+    };
+
+    fn receipt() -> serde_json::Value {
+        json!([{
+            "transaction": "exp-1", "action": "CpuAffinityProfile",
+            "pid": 4242, "start_ticks": 99, "uid": 1000,
+            "original": {"cpus_allowed": "0-15", "cgroup": "0::/a",
+                         "tasks": {"4242": "0-15", "4243": "0-15"}, "identity": [99, 1000]},
+            "restored": {"cpus_allowed": "0-15", "cgroup": "0::/a",
+                         "tasks": {"4242": "0-15"}, "identity": [99, 1000]}
+        }])
+    }
+
+    #[test]
+    fn only_a_complete_attributable_restoration_receipt_is_valid() {
+        let action = ResearchAction::CpuAffinityProfile;
+        assert!(receipts_valid(&receipt(), action, 1000).is_ok());
+        let bad = |edit: &dyn Fn(&mut serde_json::Value)| {
+            let mut value = receipt();
+            edit(&mut value[0]);
+            receipts_valid(&value, action, 1000).is_err()
+        };
+        assert!(
+            receipts_valid(&json!([]), action, 1000).is_err(),
+            "no receipts"
+        );
+        assert!(receipts_valid(&receipt(), ResearchAction::CgroupPlacement, 1000).is_err());
+        assert!(
+            receipts_valid(&receipt(), action, 1001).is_err(),
+            "another owner"
+        );
+        assert!(bad(&|r| r["transaction"] = json!(null)), "no experiment");
+        assert!(bad(&|r| r["pid"] = json!(0)));
+        assert!(bad(&|r| r["restored"]["cgroup"] = json!("0::/b")));
+        assert!(
+            bad(&|r| r["restored"]["identity"] = json!([100, 1000])),
+            "pid reuse"
+        );
+        assert!(bad(&|r| r["original"]["identity"] = json!(null)));
+        assert!(
+            bad(&|r| r["restored"]["tasks"]["4242"] = json!("2-3")),
+            "a pinned thread"
+        );
+    }
+
+    fn studies_with_child(name: &str, child: &ResearchIntentV1) -> (tempfile::TempDir, File) {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let file = dir.join("intent.json");
+        std::fs::write(&file, serde_json::to_vec(child).unwrap()).unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let handle = File::open(root.path()).unwrap();
+        (root, handle)
+    }
+
+    #[test]
+    fn a_confirmation_must_run_under_exactly_its_pilots_frozen_rule() {
+        let parent = parent();
+        let plan = plan(&parent).unwrap();
+        let confirm = plan
+            .iter()
+            .find(|s| matches!(s.stage, Stage::Confirm))
+            .unwrap();
+        let pilot_digest = confirm.depends_on[0].clone();
+        let frozen = freeze(&[70.0, 73.0, 67.0]).unwrap();
+        let rules: std::collections::BTreeMap<String, FrozenConfirmationRule> =
+            [(pilot_digest, frozen.clone())].into();
+        let dispositions = ChildLedger::undecided(plan.clone());
+        let name = confirm.study_sha256[..16].to_owned();
+        let uid = crate::syscall::geteuid();
+
+        let ok = built(&parent, confirm); // freezes the same 70/73/67 rule
+        let (_keep, studies) = studies_with_child(&name, &ok);
+        assert!(study_checks(&rules, &dispositions, &name, &studies, uid, &parent).is_ok());
+
+        // Internally consistent, but not the pilot's: refused.
+        let mut other = ok.clone();
+        other.confirmation_rule = Some(freeze(&[69.0, 70.0, 71.0]).unwrap());
+        let (_keep2, studies2) = studies_with_child(&name, &other);
+        let error = study_checks(&rules, &dispositions, &name, &studies2, uid, &parent)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("frozen rule"), "{error}");
+
+        // No pilot froze a rule at all: refused.
+        let none = std::collections::BTreeMap::new();
+        assert!(study_checks(&none, &dispositions, &name, &studies, uid, &parent).is_err());
+    }
+}

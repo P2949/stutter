@@ -14,6 +14,15 @@ fn game() -> ChildTarget {
     }
 }
 
+/// What the controller's manager holds while the permitted CPU action runs on the frozen process.
+fn own_holding() -> Vec<crate::autotune::research::action_gate::Holding> {
+    vec![crate::autotune::research::action_gate::Holding {
+        experiment_id: stutter_core::ids::ExperimentId::new("exp-1"),
+        action: Some(ResearchAction::CpuAffinityProfile),
+        pid: Some(game().pid),
+    }]
+}
+
 fn setup(
     study_of: fn(&Stage) -> bool,
 ) -> (
@@ -50,6 +59,7 @@ fn setup_with(
             Some(crate::autotune::research::action_gate::KernelState {
                 cpus_allowed: "0-15".into(),
                 cgroup: "0::/app.slice".into(),
+                ..Default::default()
             })
         })),
     ));
@@ -89,7 +99,9 @@ fn an_action_study_arms_the_gate_on_the_sighted_process_and_qualifies_only_on_a_
             .unwrap()
             .permit(Some(ResearchAction::CpuAffinityProfile), game(), now)
     );
-    gate.lock().unwrap().observe_runtime(true, 0);
+    gate.lock()
+        .unwrap()
+        .observe_holdings(true, 0, own_holding());
     gate.lock().unwrap().observe_runtime(false, 0);
     let outcome = run_to_end(&mut runner, &study);
     assert_eq!(outcome.stage_evidence, Some(true));
@@ -137,9 +149,13 @@ fn a_gate_that_still_holds_an_outstanding_action_is_not_clean_evidence() {
             .unwrap()
             .permit(Some(ResearchAction::CpuAffinityProfile), game(), now)
     );
-    gate.lock().unwrap().observe_runtime(true, 0);
+    gate.lock()
+        .unwrap()
+        .observe_holdings(true, 0, own_holding());
     // The study ends with the action still applied (kept or running): not a proven restoration.
-    gate.lock().unwrap().observe_runtime(false, 1);
+    gate.lock()
+        .unwrap()
+        .observe_holdings(false, 1, own_holding());
     let outcome = run_to_end(&mut runner, &study);
     assert_eq!(outcome.stage_evidence, Some(false));
     let _ = ActionChildScope::new([], game(), 0);
@@ -204,4 +220,34 @@ fn a_finished_treatment_study_reconstructs_and_is_derived_from_its_campaign() {
     // The comparison is within one build: a treatment, not a second Proton.
     assert_eq!(report["treatment"]["action"], "cpu_affinity_profile");
     assert_eq!(report["arms"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn a_failed_or_conflicting_receipt_write_means_the_action_study_cannot_qualify() {
+    let (root, mut runner, study, gate, parent) = setup(|stage| matches!(stage, Stage::Action(_)));
+    assert_eq!(runner.poll(&study, 100).unwrap(), None);
+    // Something else already holds the receipts file with different bytes.
+    let file = root
+        .path()
+        .join("studies")
+        .join(&study.study_sha256[..16])
+        .join("action-receipts.json");
+    std::fs::write(&file, b"[]").unwrap();
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let now = parent.issued_unix_seconds + 5;
+    assert!(
+        gate.lock()
+            .unwrap()
+            .permit(Some(ResearchAction::CpuAffinityProfile), game(), now)
+    );
+    gate.lock()
+        .unwrap()
+        .observe_holdings(true, 0, own_holding());
+    gate.lock().unwrap().observe_runtime(false, 0);
+    let outcome = run_to_end(&mut runner, &study);
+    assert_eq!(
+        outcome.stage_evidence,
+        Some(false),
+        "an action without durable receipts is not qualified"
+    );
 }

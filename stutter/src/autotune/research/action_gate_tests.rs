@@ -21,8 +21,16 @@ fn gate() -> ActionGate {
 }
 
 fn view(active: bool, kept: usize, tokens: Option<u32>) -> GateView {
+    // Whatever is held is the permitted CPU action of the frozen process, in one experiment.
+    let holdings = (0..usize::from(active) + kept)
+        .map(|_| Holding {
+            experiment_id: stutter_core::ids::ExperimentId::new("exp-1"),
+            action: Some(CPU),
+            pid: Some(stutter_core::ids::Pid::new(4242)),
+        })
+        .collect();
     GateView {
-        holdings: Vec::new(),
+        holdings,
         experiment_active: active,
         kept_actions: kept,
         outstanding_tokens: tokens,
@@ -67,17 +75,17 @@ fn a_reverted_action_is_settled_only_when_the_worker_holds_no_token() {
 #[test]
 fn a_kept_action_stays_outstanding_until_the_controller_releases_it_and_the_worker_is_clear() {
     let mut g = gate();
-    assert!(g.permit(Some(CGROUP), target(), NOW));
+    assert!(g.permit(Some(CPU), target(), NOW));
     g.observe(view(true, 0, Some(1)));
     g.observe(view(false, 1, Some(1))); // kept
     assert!(!g.evidence().clean);
     assert!(
-        !g.permit(Some(CPU), target(), NOW),
+        !g.permit(Some(CGROUP), target(), NOW),
         "a kept action is still a live mutation"
     );
     g.observe(view(false, 1, Some(1)));
     g.observe(view(false, 0, Some(0))); // released and restored
-    assert_eq!(g.evidence().settled, [(CGROUP, Decision::Keep)]);
+    assert_eq!(g.evidence().settled, [(CPU, Decision::Keep)]);
     assert!(g.evidence().clean);
 }
 
@@ -116,7 +124,12 @@ fn the_runtime_reports_only_experiment_state_and_the_gate_reads_the_workers_toke
     );
     assert!(g.permit(Some(CPU), target(), NOW));
     assert!(g.is_busy());
-    g.observe_runtime(true, 0);
+    let own = vec![Holding {
+        experiment_id: stutter_core::ids::ExperimentId::new("exp-1"),
+        action: Some(CPU),
+        pid: Some(stutter_core::ids::Pid::new(4242)),
+    }];
+    g.observe_holdings(true, 0, own);
     g.observe_runtime(false, 0); // rolled back while the worker still holds a token
     assert!(g.is_busy());
     tokens.store(0, Ordering::SeqCst);
@@ -134,6 +147,7 @@ mod kernel_state {
         KernelState {
             cpus_allowed: cpus.into(),
             cgroup: cgroup.into(),
+            ..Default::default()
         }
     }
 
@@ -235,6 +249,7 @@ mod attribution {
             Some(KernelState {
                 cpus_allowed: "0-15".into(),
                 cgroup: "0::/a".into(),
+                ..Default::default()
             })
         }));
         assert!(g.permit(Some(CPU), target(), NOW));
@@ -279,6 +294,7 @@ mod attribution {
             Some(KernelState {
                 cpus_allowed: "0-15".into(),
                 cgroup: "0::/a".into(),
+                ..Default::default()
             })
         }));
         assert!(g.permit(Some(CPU), target(), NOW));
@@ -306,4 +322,92 @@ fn an_attempt_treated_off_never_permits_an_action_and_arming_resets_it() {
     again.set_attempt_on(false);
     assert!(again.arm(ActionChildScope::new([CPU], target(), NOW + 60)));
     assert!(again.permit(Some(CPU), target(), NOW));
+}
+
+mod fail_closed {
+    use std::sync::{Arc, Mutex};
+
+    use super::*;
+
+    fn state(identity: Option<(u64, u32)>, tid: u32, cpus: &str) -> KernelState {
+        KernelState {
+            cpus_allowed: "0-15".into(),
+            cgroup: "0::/a".into(),
+            tasks: [(4242, "0-15".to_owned()), (tid, cpus.to_owned())].into(),
+            identity,
+        }
+    }
+
+    fn probed(shared: &Arc<Mutex<Option<KernelState>>>) -> ActionGate {
+        let shared = shared.clone();
+        gate().with_state_probe(Box::new(move |_| shared.lock().unwrap().clone()))
+    }
+
+    #[test]
+    fn an_experiment_reported_with_nothing_identifying_it_never_progresses() {
+        let mut g = gate();
+        assert!(g.permit(Some(CPU), target(), NOW));
+        let mut unattributed = view(true, 0, Some(1));
+        unattributed.holdings.clear();
+        g.observe(unattributed);
+        g.observe(view(false, 0, Some(0)));
+        let evidence = g.evidence();
+        assert!(!evidence.clean && !evidence.kernel_state_proven);
+        assert!(evidence.settled.is_empty());
+    }
+
+    #[test]
+    fn a_reused_pid_a_moved_thread_or_a_dead_probe_is_not_a_restoration() {
+        let original = state(Some((99, 1000)), 4243, "0-15");
+        for (after, what) in [
+            (state(Some((100, 1000)), 4243, "0-15"), "the pid was reused"),
+            (
+                state(Some((99, 1000)), 4243, "2-3"),
+                "a worker thread is still pinned",
+            ),
+            (state(Some((99, 0)), 4243, "0-15"), "another owner"),
+        ] {
+            let shared = Arc::new(Mutex::new(Some(original.clone())));
+            let mut g = probed(&shared);
+            assert!(g.permit(Some(CPU), target(), NOW));
+            g.observe(view(true, 0, Some(1)));
+            *shared.lock().unwrap() = Some(after);
+            g.observe(view(false, 0, Some(0)));
+            assert!(!g.evidence().clean, "{what}");
+            assert!(g.evidence().receipts.is_empty(), "{what}");
+        }
+    }
+
+    #[test]
+    fn a_thread_that_exited_is_not_a_difference_but_a_moved_one_is() {
+        let original = state(Some((99, 1000)), 4243, "0-15");
+        let mut gone = original.clone();
+        gone.tasks.remove(&4243);
+        assert!(
+            gone.restored_to(&original),
+            "an exited thread is not a difference"
+        );
+        let moved = state(Some((99, 1000)), 4243, "1");
+        assert!(!moved.restored_to(&original));
+        // A thread the original never saw does not matter either.
+        let mut spawned = original.clone();
+        spawned.tasks.insert(9999, "1".into());
+        assert!(spawned.restored_to(&original));
+    }
+
+    #[test]
+    fn an_interrupted_restoration_stays_restoring_until_the_kernel_agrees() {
+        let original = state(Some((99, 1000)), 4243, "0-15");
+        let shared = Arc::new(Mutex::new(Some(original.clone())));
+        let mut g = probed(&shared);
+        assert!(g.permit(Some(CPU), target(), NOW));
+        g.observe(view(true, 0, Some(1)));
+        *shared.lock().unwrap() = Some(state(Some((99, 1000)), 4243, "1"));
+        g.observe(view(false, 0, Some(0)));
+        g.observe(view(false, 0, Some(0)));
+        assert!(g.is_busy() && !g.evidence().clean);
+        *shared.lock().unwrap() = Some(original);
+        g.observe(view(false, 0, Some(0)));
+        assert!(g.evidence().clean && g.evidence().kernel_state_proven);
+    }
 }

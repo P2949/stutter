@@ -149,15 +149,48 @@ impl DriverStudyAttempts {
             return None;
         };
         let evidence = gate.lock().ok()?.disarm();
-        // The receipts are kept beside the study so an independent verification can read them.
-        if !evidence.receipts.is_empty()
-            && let Ok(studies) = open_dir(&self.campaign, STUDIES_DIR)
-            && let Ok(dir) = open_dir(&studies, dir_name(study))
-            && let Ok(bytes) = serde_json::to_vec_pretty(&evidence.receipts_json())
-        {
-            let _ = write_new(&dir, "action-receipts.json", &bytes);
+        // The receipts must be durable beside the study, where an independent verification reads them:
+        // a failed or conflicting write is a failed qualification, never a silent one.
+        let durable = !evidence.receipts.is_empty()
+            && self
+                .write_receipts(study, &evidence.receipts_json())
+                .is_ok();
+        Some(
+            evidence.clean
+                && !evidence.settled.is_empty()
+                && evidence.kernel_state_proven
+                && durable,
+        )
+    }
+
+    /// Record the action receipts in the study directory. An existing file must be byte-identical.
+    fn write_receipts(
+        &self,
+        study: &ChildStudy,
+        receipts: &serde_json::Value,
+    ) -> anyhow::Result<()> {
+        let studies = open_dir(&self.campaign, STUDIES_DIR)?;
+        let dir = open_dir(&studies, dir_name(study))?;
+        let bytes = serde_json::to_vec_pretty(receipts)?;
+        match write_new(&dir, "action-receipts.json", &bytes) {
+            Ok(()) => Ok(()),
+            Err(error)
+                if error
+                    .downcast_ref::<std::io::Error>()
+                    .is_some_and(|io| io.kind() == std::io::ErrorKind::AlreadyExists) =>
+            {
+                anyhow::ensure!(
+                    super::report_store::read_private(
+                        &dir,
+                        "action-receipts.json",
+                        self.parent.uid
+                    )? == bytes,
+                    "the recorded action receipts differ"
+                );
+                Ok(())
+            }
+            Err(error) => Err(error),
         }
-        Some(evidence.clean && !evidence.settled.is_empty() && evidence.kernel_state_proven)
     }
 
     #[cfg(test)]

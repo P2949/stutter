@@ -55,10 +55,30 @@ enum State {
 pub type TokenProbe = Box<dyn Fn() -> Option<u32> + Send>;
 
 /// The kernel-visible placement of a process that the two supported actions change.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct KernelState {
+    /// The leader's allowed-CPU list.
     pub cpus_allowed: String,
     pub cgroup: String,
+    /// Every thread's allowed-CPU list, by thread id (the actions change the whole game tree).
+    pub tasks: std::collections::BTreeMap<u32, String>,
+    /// The process's start time and owner, read fresh with the rest (`None` from a fake probe).
+    pub identity: Option<(u64, u32)>,
+}
+
+impl KernelState {
+    /// This state is the original one: the same cgroup and leader placement, the same process
+    /// (start time and owner, when the original recorded them), and every thread the original saw
+    /// that still exists back on its own CPUs. A thread that has since exited is not a difference.
+    pub fn restored_to(&self, original: &KernelState) -> bool {
+        self.cgroup == original.cgroup
+            && self.cpus_allowed == original.cpus_allowed
+            && (original.identity.is_none() || self.identity == original.identity)
+            && original
+                .tasks
+                .iter()
+                .all(|(tid, cpus)| self.tasks.get(tid).is_none_or(|now| now == cpus))
+    }
 }
 
 /// Reads a process's kernel state independently of the worker (`None`: cannot say).
@@ -73,9 +93,36 @@ pub fn procfs_state(pid: u32) -> Option<KernelState> {
         .trim()
         .to_owned();
     let cgroup = std::fs::read_to_string(format!("/proc/{pid}/cgroup")).ok()?;
+    // Every thread of the process, bounded; a thread that vanishes while reading is skipped.
+    let mut tasks = std::collections::BTreeMap::new();
+    for entry in std::fs::read_dir(format!("/proc/{pid}/task"))
+        .ok()?
+        .take(4096)
+        .flatten()
+    {
+        let Some(tid) = entry
+            .file_name()
+            .to_str()
+            .and_then(|name| name.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        let Ok(text) = std::fs::read_to_string(entry.path().join("status")) else {
+            continue;
+        };
+        if let Some(list) = text
+            .lines()
+            .find_map(|line| line.strip_prefix("Cpus_allowed_list:"))
+        {
+            tasks.insert(tid, list.trim().to_owned());
+        }
+    }
+    let identity = process_identity(pid).map(|target| (target.start_ticks, target.uid));
     Some(KernelState {
         cpus_allowed: cpus,
         cgroup: cgroup.trim().to_owned(),
+        tasks,
+        identity: Some(identity?),
     })
 }
 
@@ -145,7 +192,14 @@ pub struct GateEvidence {
 impl GateEvidence {
     /// The action receipts as the durable JSON recorded beside the action study.
     pub fn receipts_json(&self) -> serde_json::Value {
-        let state = |state: &KernelState| serde_json::json!({ "cpus_allowed": state.cpus_allowed, "cgroup": state.cgroup });
+        let state = |state: &KernelState| {
+            serde_json::json!({
+                "cpus_allowed": state.cpus_allowed,
+                "cgroup": state.cgroup,
+                "tasks": state.tasks,
+                "identity": state.identity,
+            })
+        };
         serde_json::Value::Array(
             self.receipts
                 .iter()
@@ -353,6 +407,17 @@ impl ActionGate {
     /// Every action the manager holds belongs to the permitted action on the frozen process, and to
     /// one controller experiment. Idle gates attribute nothing, so they accept any view.
     fn attributable(&self, view: &GateView) -> bool {
+        // An experiment or kept action reported with nothing identifying it cannot be attributed.
+        let held = view.experiment_active || view.kept_actions > 0;
+        if held
+            && view.holdings.is_empty()
+            && matches!(
+                self.state,
+                State::Requested(..) | State::Running(_) | State::Kept(_)
+            )
+        {
+            return false;
+        }
         let Some(action) = (match &self.state {
             State::Idle => return true,
             State::Requested(_, action)
@@ -378,8 +443,11 @@ impl ActionGate {
         // A zero token count is the worker's word; the target's own kernel state must also be the
         // original one.
         let restored = match (&self.state_probe, &self.baseline) {
+            // Qualifying evidence names its experiment: a restoration that cannot be attributed to one
+            // is never accepted.
+            (Some(_), Some(_)) if self.transaction.is_none() => return State::Restoring(action),
             (Some(probe), Some((target, original))) => {
-                match probe(u32::from(target.pid)).filter(|now| now == original) {
+                match probe(u32::from(target.pid)).filter(|now| now.restored_to(original)) {
                     Some(now) => Some((*target, original.clone(), now)),
                     None => return State::Restoring(action),
                 }

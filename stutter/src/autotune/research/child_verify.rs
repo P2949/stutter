@@ -181,6 +181,7 @@ pub fn verify_children(
     }
     names.sort();
     let rules = super::child_ledger::read_rules(campaign, uid, parent)?;
+    let dispositions = super::child_ledger::read_dispositions(campaign, uid, parent)?;
     let mut children = Vec::new();
     for name in names {
         let result = if hex16(&name) {
@@ -191,6 +192,7 @@ pub fn verify_children(
                 .and_then(|checked| {
                     // A rule the ledger froze for this pilot must follow from the pilot's own runs.
                     rule_matches_pilot(&rules, &name, studies.as_fd(), uid)?;
+                    study_checks(&rules, &dispositions, &name, &studies, uid, parent)?;
                     Ok(checked)
                 })
         } else {
@@ -231,6 +233,100 @@ pub fn verify_children(
 fn action_receipts(studies: &File, name: &str, uid: u32) -> Option<serde_json::Value> {
     let dir = File::from(crate::syscall::openat_dir_nofollow(studies.as_fd(), name).ok()?);
     serde_json::from_slice(&read_private(&dir, "action-receipts.json", uid).ok()?).ok()
+}
+
+/// What the child must additionally satisfy given the funnel's own record of it:
+/// - a confirmation runs under exactly the rule its pilot froze (not merely a consistent one);
+/// - a qualified action study carries valid, attributable restoration receipts.
+fn study_checks(
+    rules: &std::collections::BTreeMap<String, super::pilot_rule::FrozenConfirmationRule>,
+    dispositions: &[super::child_ledger::Disposition],
+    name: &str,
+    studies: &File,
+    uid: u32,
+    parent: &ResearchIntentV1,
+) -> anyhow::Result<()> {
+    use super::child_study::{Stage, StudyResult};
+    let Some(decided) = dispositions
+        .iter()
+        .find(|study| study.study_sha256.starts_with(name))
+    else {
+        return Ok(());
+    };
+    let dir = File::from(crate::syscall::openat_dir_nofollow(studies.as_fd(), name)?);
+    let child: ResearchIntentV1 = serde_json::from_slice(&read_private(&dir, "intent.json", uid)?)?;
+    match decided.stage {
+        Stage::Confirm => {
+            let planned = super::child_study::plan(parent)?
+                .into_iter()
+                .find(|study| study.study_sha256 == decided.study_sha256)
+                .ok_or_else(|| anyhow::anyhow!("the confirmation is not in the plan"))?;
+            let frozen = planned
+                .depends_on
+                .iter()
+                .find_map(|digest| rules.get(digest))
+                .ok_or_else(|| anyhow::anyhow!("no pilot froze a rule for this confirmation"))?;
+            anyhow::ensure!(
+                child.confirmation_rule.as_ref() == Some(frozen),
+                "the confirmation does not run under its pilot's frozen rule"
+            );
+        }
+        Stage::Action(action) if decided.result == Some(StudyResult::Qualified) => {
+            let receipts = action_receipts(studies, name, uid)
+                .ok_or_else(|| anyhow::anyhow!("a qualified action study has no receipts"))?;
+            receipts_valid(&receipts, action, parent.uid)?;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// Every receipt names the permitted action, the frozen process (start time and owner), its
+/// experiment, and shows the same placement before and after: the same cgroup and leader CPUs, the
+/// same process identity, and every thread the original saw (that still exists) back where it was.
+fn receipts_valid(
+    receipts: &serde_json::Value,
+    action: super::ResearchAction,
+    uid: u32,
+) -> anyhow::Result<()> {
+    use serde_json::Value;
+    let items = receipts
+        .as_array()
+        .filter(|items| !items.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("the receipts are empty"))?;
+    for item in items {
+        anyhow::ensure!(
+            item["action"] == format!("{action:?}"),
+            "a receipt names another action"
+        );
+        anyhow::ensure!(
+            item["pid"].as_u64().is_some_and(|pid| pid > 0)
+                && item["start_ticks"].as_u64().is_some_and(|ticks| ticks > 0)
+                && item["uid"].as_u64() == Some(u64::from(uid)),
+            "a receipt does not identify the frozen process"
+        );
+        anyhow::ensure!(
+            item["transaction"]
+                .as_str()
+                .is_some_and(|id| !id.is_empty()),
+            "a receipt names no experiment"
+        );
+        let (before, after) = (&item["original"], &item["restored"]);
+        anyhow::ensure!(
+            before["cgroup"] == after["cgroup"]
+                && before["cpus_allowed"] == after["cpus_allowed"]
+                && before["identity"] == after["identity"]
+                && !matches!(before["identity"], Value::Null),
+            "a receipt shows a different placement or process after the restore"
+        );
+        let moved = before["tasks"].as_object().is_some_and(|tasks| {
+            tasks
+                .iter()
+                .any(|(tid, cpus)| after["tasks"].get(tid).is_some_and(|now| now != cpus))
+        });
+        anyhow::ensure!(!moved, "a thread was not restored");
+    }
+    Ok(())
 }
 
 /// A pilot's recorded rule is recomputed from its sealed whole-run results; any difference is refused.
