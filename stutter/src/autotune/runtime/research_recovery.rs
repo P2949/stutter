@@ -150,6 +150,111 @@ fn verify_no_attempts(lease: &CampaignLease, study_path: Option<&Path>) -> anyho
             "UnsafeToResume: attempt records require settlement verification"
         );
     }
+    // A child study's attempts live under `studies/<study>/`, never in the flat directories above.
+    // A child that only began (its directories exist) and never started an attempt is fine; one whose
+    // journal or dispatch holds anything needs settlement verification.
+    let studies = match crate::syscall::openat_dir_nofollow(campaign.as_fd(), "studies") {
+        Ok(dir) => File::from(dir),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    for entry in std::fs::read_dir(format!("/proc/self/fd/{}", studies.as_raw_fd()))? {
+        let study = File::from(crate::syscall::openat_dir_nofollow(
+            studies.as_fd(),
+            &entry?.file_name().to_string_lossy(),
+        )?);
+        for name in ["journal", "dispatch"] {
+            let dir = File::from(crate::syscall::openat_dir_nofollow(study.as_fd(), name)?);
+            anyhow::ensure!(
+                std::fs::read_dir(format!("/proc/self/fd/{}", dir.as_raw_fd()))?
+                    .next()
+                    .is_none(),
+                "UnsafeToResume: child study records require settlement verification"
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Settle every child study of a funnel campaign: each child's own journal is recovered with the
+/// child's own frozen intent, and an unsealed attempt is retired only when every witness agrees.
+fn recover_children(
+    campaign: &File,
+    uid: u32,
+    parent: &ResearchIntentV1,
+    factory: &RecoveryFactory,
+    same_boot: bool,
+    now: u64,
+) -> anyhow::Result<()> {
+    let studies = match crate::syscall::openat_dir_nofollow(campaign.as_fd(), "studies") {
+        Ok(dir) => File::from(dir),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    let mut names = Vec::new();
+    for entry in std::fs::read_dir(format!("/proc/self/fd/{}", studies.as_raw_fd()))? {
+        names.push(entry?.file_name().to_string_lossy().into_owned());
+    }
+    names.sort();
+    for name in names {
+        let dir = File::from(crate::syscall::openat_dir_nofollow(studies.as_fd(), &name)?);
+        let metadata = dir.metadata()?;
+        anyhow::ensure!(
+            metadata.uid() == uid && metadata.mode() & 0o077 == 0,
+            "untrusted child study directory"
+        );
+        let child: ResearchIntentV1 = serde_json::from_slice(
+            &crate::autotune::research::report_store::read_private(&dir, "intent.json", uid)?,
+        )?;
+        anyhow::ensure!(
+            crate::autotune::research::child_verify::derived_from(&child, parent, &name),
+            "UnsafeToResume: a child study intent is not derived from the campaign's"
+        );
+        let open = |sub: &str| -> anyhow::Result<File> {
+            let sub_dir = File::from(crate::syscall::openat_dir_nofollow(dir.as_fd(), sub)?);
+            let meta = sub_dir.metadata()?;
+            anyhow::ensure!(
+                meta.uid() == uid && meta.mode() & 0o077 == 0,
+                "untrusted child study directory"
+            );
+            Ok(sub_dir)
+        };
+        let (journal_dir, dispatch, evidence) =
+            (open("journal")?, open("dispatch")?, open("evidence")?);
+        let schedule = build_schedule(&child)?;
+        let len = schedule.len();
+        let (journal, adopted) =
+            ResearchJournal::open_for_recovery(journal_dir.into(), uid, schedule)?;
+        let witnesses = factory(&child)?;
+        let mut driver = Driver::new(journal, child, dispatch, evidence, len);
+        if let Some(slot) = adopted {
+            driver.recover_interrupted(slot, same_boot, witnesses, now)?;
+        }
+    }
+    Ok(())
+}
+
+/// Put back the settings of any graphics profile a crash left applied, once every attempt is
+/// settled (never before: settings are not restored under an unresolved game). An arm whose settings
+/// file does not exist has nothing to restore; one that exists but cannot be trusted is unsafe.
+fn restore_profiles(study_path: Option<&Path>, intent: &ResearchIntentV1) -> anyhow::Result<()> {
+    use crate::autotune::research::{
+        profile_applier::{StudySettingsFile, recover},
+        session_host::arm_prefix_paths,
+    };
+    let Some(study) = study_path else {
+        return Ok(());
+    };
+    for tool in &intent.tools {
+        let settings = arm_prefix_paths(study, tool.source).2;
+        if !settings.exists() {
+            continue;
+        }
+        let file = StudySettingsFile::new(study, settings, intent.uid)
+            .map_err(|_| anyhow::anyhow!("UnsafeToResume: arm settings are not trustworthy"))?;
+        recover(&file)
+            .map_err(|_| anyhow::anyhow!("UnsafeToResume: a profile could not be restored"))?;
+    }
     Ok(())
 }
 
@@ -181,6 +286,10 @@ fn recover_launched(
     let (journal, adopted) = ResearchJournal::open_for_recovery(journal_dir.into(), uid, schedule)?;
     let witnesses = factory(&intent)?;
     let same_boot = crate::telemetry::identity::read_boot_id()? == intent.boot_id;
+    // The child studies of a funnel campaign are settled first, each through the same independent
+    // witnesses, before the campaign may be retired.
+    recover_children(&campaign, uid, &intent, factory, same_boot, now)?;
+    restore_profiles(study_path, &intent)?;
     let mut driver = Driver::new(journal, intent, dispatch, evidence, len);
     if let Some(slot) = adopted {
         driver.recover_interrupted(slot, same_boot, witnesses, now)?;

@@ -561,4 +561,4 @@ fn the_unqualified_host_stays_unless_live_launch_is_enabled_with_every_source() 
 mod launched_recovery;
 
 #[path = "research_funnel_tests.rs"]
-mod funnel_mode;
+pub(super) mod funnel_mode;

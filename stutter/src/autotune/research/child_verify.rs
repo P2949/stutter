@@ -54,7 +54,11 @@ fn hex16(name: &str) -> bool {
 
 /// The child's intent differs from the campaign's only in its tools (a subset of the campaign's,
 /// with the campaign's own identities), its attempt budget and its study binding.
-fn derived_from(child: &ResearchIntentV1, parent: &ResearchIntentV1, name: &str) -> bool {
+pub(crate) fn derived_from(
+    child: &ResearchIntentV1,
+    parent: &ResearchIntentV1,
+    name: &str,
+) -> bool {
     let bound = child
         .child_study_sha256
         .as_deref()

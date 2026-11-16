@@ -158,3 +158,217 @@ fn a_restarted_coordinator_retires_only_a_settled_interrupted_attempt_and_blocks
         crate::autotune::research::AttemptOutcome::Failed { code } if code == "InterruptedBeforeDispatch"
     ));
 }
+
+mod funnel_campaign {
+    use std::os::fd::AsFd;
+
+    use super::*;
+    use crate::autotune::research::{
+        ResearchIntentV1,
+        driver::{ClaimSettlementGuard, ClaimSettlementVerifier},
+        launch_record::{record_outcome_with_invocation, record_phase},
+        launch_txn::{LaunchOutcome, LaunchPhase, UnitState},
+        recovery_gather::RecoveryWitnesses,
+        user_launcher::launch_unit_name,
+    };
+
+    struct NoClaims;
+    impl ClaimSettlementVerifier for NoClaims {
+        fn verify_process(
+            &mut self,
+            _: &File,
+            _: &DispatchContextV1,
+            _: &crate::autotune::research::launch_ticket::ResearchLaunchTicketV1,
+        ) -> anyhow::Result<Box<dyn ClaimSettlementGuard>> {
+            anyhow::bail!("no claim was expected")
+        }
+        fn verify_worker(
+            &mut self,
+            _: &DispatchContextV1,
+        ) -> anyhow::Result<Box<dyn ClaimSettlementGuard>> {
+            anyhow::bail!("no claim was expected")
+        }
+    }
+
+    fn witnesses(process: bool) -> crate::autotune::runtime::research_recovery::RecoveryFactory {
+        std::sync::Arc::new(move |_| {
+            Ok(RecoveryWitnesses {
+                unit_state: Box::new(|_| Ok(UnitState::Finished)),
+                unit_invocation: Box::new(|_| Ok(Some("0123456789abcdef0123456789abcdef".into()))),
+                process_tree_settled: Box::new(move |_, _| Ok(process)),
+                outstanding_worker_tokens: Box::new(|| Ok(0)),
+                transactions_restored: Box::new(|| Ok(true)),
+                claim_verifier: Box::new(NoClaims),
+            })
+        })
+    }
+
+    #[test]
+    fn a_restarted_controller_settles_the_childs_interrupted_attempt_before_it_retires_the_campaign()
+     {
+        let campaign = tempfile::tempdir().unwrap();
+        let study = tempfile::tempdir().unwrap();
+        for dir in [&campaign, &study] {
+            std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let meta = std::fs::metadata(study.path()).unwrap();
+        let root = crate::autotune::research::StudyRootIdentity {
+            device: std::os::unix::fs::MetadataExt::dev(&meta),
+            inode: std::os::unix::fs::MetadataExt::ino(&meta),
+        };
+        let (mut intent, mut facts) = fixture();
+        intent.study_root = Some(root);
+        facts.study_root = Some(root);
+        intent.tools.push(ResearchTool {
+            source: ProtonSource::ValveStable,
+            identity_sha256: "b".repeat(64),
+        });
+        facts.tools = intent.tools.clone();
+        intent.max_attempts = 40;
+        let boot = crate::telemetry::identity::read_boot_id().unwrap();
+        intent.boot_id = boot.clone();
+        facts.boot_id = boot;
+        let digest = intent.digest().unwrap();
+
+        // The funnel campaign launches the first child's first attempt; the controller then dies.
+        let script = Arc::new(Mutex::new(Script {
+            safe: true,
+            ..Default::default()
+        }));
+        let mut first = ResearchCoordinator::new(
+            Some(campaign.path().to_path_buf()),
+            Some(facts.clone()),
+            "Ready",
+        );
+        first.set_study_dir(Some(study.path().to_path_buf()));
+        let handle = script.clone();
+        first.set_host_factory(Some(Box::new(move |_| Ok(Box::new(Fake(handle.clone()))))));
+        first.set_funnel_builder(Some(super::super::funnel_mode::builder()));
+        send(
+            &mut first,
+            ResearchRequest::Submit {
+                intent: Box::new(intent.clone()),
+            },
+            100,
+        );
+        first.drive_attempts(101);
+        assert_eq!(script.lock().unwrap().launches, 1);
+        drop(first);
+
+        // The child's attempt directory (not the flat one) holds the launch records.
+        let studies = std::fs::read_dir(study.path().join(&digest[..16]).join("studies"))
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .collect::<Vec<_>>();
+        assert_eq!(studies.len(), 1, "one child study has begun");
+        let child_intent: ResearchIntentV1 =
+            serde_json::from_slice(&std::fs::read(studies[0].join("intent.json")).unwrap())
+                .unwrap();
+        let unit = launch_unit_name(&child_intent.digest().unwrap(), 0).unwrap();
+        let attempt = File::from(
+            crate::syscall::open_dir_no_symlinks(&studies[0].join("dispatch").join("0000"))
+                .unwrap(),
+        );
+        let _ = attempt.as_fd();
+        record_phase(&attempt, LaunchPhase::Prepared, &unit).unwrap();
+        record_phase(&attempt, LaunchPhase::Sent, &unit).unwrap();
+        record_outcome_with_invocation(
+            &attempt,
+            &unit,
+            &LaunchOutcome::Running,
+            Some("0123456789abcdef0123456789abcdef"),
+        )
+        .unwrap();
+
+        let restart = |factory: crate::autotune::runtime::research_recovery::RecoveryFactory| {
+            let mut coordinator = ResearchCoordinator::new(
+                Some(campaign.path().to_path_buf()),
+                Some(facts.clone()),
+                "Ready",
+            );
+            coordinator.set_study_dir(Some(study.path().to_path_buf()));
+            coordinator.set_recovery_factory(Some(factory));
+            coordinator
+        };
+        // The child's process tree is not provably settled: the campaign must stay unsafe.
+        let mut unsafe_restart = restart(witnesses(false));
+        let result = unsafe_restart.prepare_recovery(102).unwrap().run();
+        assert!(
+            result.is_err(),
+            "a campaign whose child attempt is unsettled must not be retired"
+        );
+        unsafe_restart.finish_recovery(result);
+        assert!(unsafe_restart.owns_action_slot());
+        drop(unsafe_restart);
+
+        // Every witness agreeing retires the child's attempt and ends the campaign blocked.
+        let mut settled = restart(witnesses(true));
+        let result = settled.prepare_recovery(103).unwrap().run();
+        assert!(result.is_ok(), "{:?}", result.as_ref().err());
+        settled.finish_recovery(result);
+        assert!(!settled.owns_action_slot());
+        assert_eq!(
+            settled.terminal.as_ref().unwrap().phase,
+            ResearchPhase::Blocked
+        );
+    }
+}
+
+mod funnel_waiting {
+    use super::*;
+
+    #[test]
+    fn a_funnel_campaign_that_only_waited_for_a_safe_window_is_still_recoverable() {
+        let campaign = tempfile::tempdir().unwrap();
+        let study = tempfile::tempdir().unwrap();
+        for dir in [&campaign, &study] {
+            std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let meta = std::fs::metadata(study.path()).unwrap();
+        let root = crate::autotune::research::StudyRootIdentity {
+            device: std::os::unix::fs::MetadataExt::dev(&meta),
+            inode: std::os::unix::fs::MetadataExt::ino(&meta),
+        };
+        let (mut intent, mut facts) = fixture();
+        intent.study_root = Some(root);
+        facts.study_root = Some(root);
+        intent.tools.push(ResearchTool {
+            source: ProtonSource::ValveStable,
+            identity_sha256: "b".repeat(64),
+        });
+        facts.tools = intent.tools.clone();
+        intent.max_attempts = 40;
+        let boot = crate::telemetry::identity::read_boot_id().unwrap();
+        intent.boot_id = boot.clone();
+        facts.boot_id = boot;
+        // No safe window: the first child begins (its directories exist) but never launches.
+        let script = Arc::new(Mutex::new(Script::default()));
+        let mut first = ResearchCoordinator::new(
+            Some(campaign.path().to_path_buf()),
+            Some(facts.clone()),
+            "Ready",
+        );
+        first.set_study_dir(Some(study.path().to_path_buf()));
+        let handle = script.clone();
+        first.set_host_factory(Some(Box::new(move |_| Ok(Box::new(Fake(handle.clone()))))));
+        first.set_funnel_builder(Some(super::super::funnel_mode::builder()));
+        send(
+            &mut first,
+            ResearchRequest::Submit {
+                intent: Box::new(intent.clone()),
+            },
+            100,
+        );
+        first.drive_attempts(101);
+        assert_eq!(script.lock().unwrap().launches, 0);
+        drop(first);
+        let digest = intent.digest().unwrap();
+        assert!(study.path().join(&digest[..16]).join("studies").exists());
+        // A restarted controller finds records but no attempt: recovery is read-only and succeeds.
+        let mut restarted =
+            ResearchCoordinator::new(Some(campaign.path().to_path_buf()), Some(facts), "Ready");
+        restarted.set_study_dir(Some(study.path().to_path_buf()));
+        let result = restarted.prepare_recovery(102).unwrap().run();
+        assert!(result.is_ok(), "{:?}", result.as_ref().err());
+    }
+}

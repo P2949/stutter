@@ -26,7 +26,7 @@ impl ProfileHook for NoProfiles {
     }
 }
 
-fn builder() -> FunnelBuilder {
+pub(in crate::autotune::runtime) fn builder() -> FunnelBuilder {
     Box::new(|intent, campaign, host| {
         let parent = intent.clone();
         let attempts = DriverStudyAttempts::new(
