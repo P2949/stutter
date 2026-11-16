@@ -319,6 +319,25 @@ pub fn settle_unexecuted(
     Ok(())
 }
 
+/// Read-only: the rule each qualified pilot froze, by the pilot's study digest (none without a ledger).
+pub fn read_rules(
+    campaign: &File,
+    uid: u32,
+    intent: &super::ResearchIntentV1,
+) -> anyhow::Result<BTreeMap<String, FrozenConfirmationRule>> {
+    match open_ledger(campaign, uid, intent, false) {
+        Ok(ledger) => Ok(ledger.rules),
+        Err(error)
+            if error
+                .downcast_ref::<std::io::Error>()
+                .is_some_and(|io| io.kind() == std::io::ErrorKind::NotFound) =>
+        {
+            Ok(BTreeMap::new())
+        }
+        Err(error) => Err(error),
+    }
+}
+
 /// Read-only: the plan with whatever has been decided. A campaign without a ledger reports every
 /// study undecided.
 pub fn read_dispositions(

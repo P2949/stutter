@@ -32,12 +32,15 @@ pub struct ChildVerification {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ChildrenVerification {
     pub children: Vec<ChildVerification>,
+    /// Studies the ledger records as run (qualified, unqualified or failed) that have no directory.
+    pub missing: Vec<String>,
 }
 
 impl ChildrenVerification {
     /// At least one child exists and every one reconstructed with its raw files verified.
     pub fn all_verified(&self) -> bool {
         !self.children.is_empty()
+            && self.missing.is_empty()
             && self
                 .children
                 .iter()
@@ -52,25 +55,43 @@ fn hex16(name: &str) -> bool {
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
-/// The child's intent differs from the campaign's only in its tools (a subset of the campaign's,
-/// with the campaign's own identities), its attempt budget and its study binding.
+/// The child's intent is exactly what `child_intent` derives for one planned study of the parent:
+/// the study named by the directory (resolved by full digest from the parent's own plan), the
+/// stage's own arm count and attempt budget (arms a subset of the campaign's tools), its frozen
+/// confirmation rule only when the stage is a confirmation (and consistent), and nothing else
+/// changed. The rule's agreement with its pilot's sealed runs is checked against the ledger.
 pub(crate) fn derived_from(
     child: &ResearchIntentV1,
     parent: &ResearchIntentV1,
     name: &str,
 ) -> bool {
-    let bound = child
-        .child_study_sha256
-        .as_deref()
-        .is_some_and(|digest| digest.get(..16) == Some(name));
-    let tools_ok = !child.tools.is_empty()
+    use super::child_study::{Stage, StudyArms, plan};
+    let Some(study) = plan(parent).ok().and_then(|studies| {
+        studies
+            .into_iter()
+            .find(|s| s.study_sha256.get(..16) == Some(name))
+    }) else {
+        return false;
+    };
+    let bound = child.child_study_sha256.as_deref() == Some(study.study_sha256.as_str());
+    let arms_ok = !child.tools.is_empty()
         && child.tools.iter().all(|tool| parent.tools.contains(tool))
-        && child.max_attempts <= parent.max_attempts;
+        && match study.arms() {
+            StudyArms::All => child.tools == parent.tools,
+            StudyArms::Pair => child.tools.len() == 2,
+        };
+    let rule_ok = match (study.stage, &child.confirmation_rule) {
+        (Stage::Confirm, Some(rule)) => rule.is_consistent(),
+        (Stage::Confirm, None) => false,
+        (_, Some(_)) => false,
+        (_, None) => true,
+    };
     let mut rebuilt = child.clone();
     rebuilt.tools = parent.tools.clone();
     rebuilt.max_attempts = parent.max_attempts;
     rebuilt.child_study_sha256 = None;
-    bound && tools_ok && rebuilt == *parent
+    rebuilt.confirmation_rule = None;
+    bound && arms_ok && rule_ok && child.max_attempts == study.min_attempts && rebuilt == *parent
 }
 
 fn verify_child(
@@ -113,6 +134,7 @@ pub fn verify_children(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             return Ok(ChildrenVerification {
                 children: Vec::new(),
+                missing: missing_children(campaign, uid, parent, &[])?,
             });
         }
         Err(error) => return Err(error.into()),
@@ -125,6 +147,7 @@ pub fn verify_children(
         names.push(entry?.file_name().to_string_lossy().into_owned());
     }
     names.sort();
+    let rules = super::child_ledger::read_rules(campaign, uid, parent)?;
     let mut children = Vec::new();
     for name in names {
         let result = if hex16(&name) {
@@ -132,6 +155,11 @@ pub fn verify_children(
                 .map(File::from)
                 .map_err(anyhow::Error::from)
                 .and_then(|dir| verify_child(&dir, &name, uid, parent, results_for))
+                .and_then(|raw| {
+                    // A rule the ledger froze for this pilot must follow from the pilot's own runs.
+                    rule_matches_pilot(&rules, &name, studies.as_fd(), uid)?;
+                    Ok(raw)
+                })
         } else {
             Err(anyhow::anyhow!("unexpected entry in the studies directory"))
         };
@@ -150,5 +178,65 @@ pub fn verify_children(
             },
         });
     }
-    Ok(ChildrenVerification { children })
+    let present: Vec<String> = children.iter().map(|child| child.study.clone()).collect();
+    Ok(ChildrenVerification {
+        missing: missing_children(campaign, uid, parent, &present)?,
+        children,
+    })
 }
+
+/// Studies the ledger decided after running them, whose directory is absent: a subset of valid
+/// children must not stand for the whole recorded funnel.
+/// A pilot's recorded rule is recomputed from its sealed whole-run results; any difference is refused.
+fn rule_matches_pilot(
+    rules: &std::collections::BTreeMap<String, super::pilot_rule::FrozenConfirmationRule>,
+    name: &str,
+    studies: std::os::fd::BorrowedFd<'_>,
+    uid: u32,
+) -> anyhow::Result<()> {
+    let Some(recorded) = rules
+        .iter()
+        .find(|(digest, _)| digest.get(..16) == Some(name))
+        .map(|(_, rule)| rule)
+    else {
+        return Ok(());
+    };
+    let dir = File::from(crate::syscall::openat_dir_nofollow(studies, name)?);
+    let evidence = File::from(crate::syscall::openat_dir_nofollow(
+        dir.as_fd(),
+        "evidence",
+    )?);
+    let runs: Vec<_> = super::report_store::read_evidence(&evidence, uid)?
+        .values()
+        .filter_map(|item| item.native_completion.as_deref())
+        .map(|native| (native.proton_source, native.metrics.average_fps))
+        .collect();
+    let recomputed = super::pilot_rule::rule_from_runs(&runs)
+        .map_err(|code| anyhow::anyhow!("the pilot's runs do not support a rule: {code}"))?;
+    anyhow::ensure!(
+        recomputed == *recorded,
+        "the recorded confirmation rule is not what the pilot's sealed runs freeze"
+    );
+    Ok(())
+}
+
+fn missing_children(
+    campaign: &File,
+    uid: u32,
+    parent: &ResearchIntentV1,
+    present: &[String],
+) -> anyhow::Result<Vec<String>> {
+    use super::child_study::StudyResult::{Failed, Qualified, Unqualified};
+    Ok(
+        super::child_ledger::read_dispositions(campaign, uid, parent)?
+            .into_iter()
+            .filter(|study| matches!(study.result, Some(Qualified | Unqualified | Failed)))
+            .map(|study| study.study_sha256[..16].to_owned())
+            .filter(|name| !present.contains(name))
+            .collect(),
+    )
+}
+
+#[cfg(test)]
+#[path = "child_verify_tests.rs"]
+mod tests;

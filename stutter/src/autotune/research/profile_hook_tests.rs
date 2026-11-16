@@ -221,3 +221,29 @@ fn the_game_is_recognised_by_its_executable_in_a_command_line() {
     // The scan itself runs against the real /proc without panicking.
     let _ = cyberpunk_running();
 }
+
+#[test]
+fn a_command_that_only_mentions_the_game_is_not_the_game() {
+    assert!(names_the_game(b"wine\0Cyberpunk2077.exe\0"));
+    assert!(names_the_game(
+        b"/steam/reaper\0SteamLaunch\0AppId=1091500\0--\0proton\0"
+    ));
+    assert!(!names_the_game(
+        b"bash\0-c\0pgrep -f Cyberpunk2077.exe && echo AppId=1091500\0"
+    ));
+    assert!(!names_the_game(b"nvim\0Cyberpunk2077.exe.log\0"));
+    assert!(!names_the_game(b"steam\0AppId=570940\0"));
+}
+
+#[test]
+fn an_unreadable_live_process_is_unknown_and_counts_as_running_but_a_vanished_one_does_not() {
+    use std::io::{Error, ErrorKind};
+    let denied = || Err(Error::from(ErrorKind::PermissionDenied));
+    let vanished = || Err(Error::from(ErrorKind::NotFound));
+    assert!(scan([Ok(b"firefox\0".to_vec()), denied()].into_iter()));
+    assert!(!scan([Ok(b"firefox\0".to_vec()), vanished()].into_iter()));
+    assert!(scan(
+        [vanished(), Ok(b"Cyberpunk2077.exe\0".to_vec())].into_iter()
+    ));
+    assert!(!scan(std::iter::empty()));
+}

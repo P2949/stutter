@@ -90,6 +90,37 @@ pub fn freeze(pilot_fps: &[f64]) -> Result<FrozenConfirmationRule, PilotRefusal>
     Ok(rule)
 }
 
+/// The rule a pilot freezes from its runs (one value per whole run, with its arm): each of the two arms
+/// needs enough runs, and the rule follows the noisier arm so it is never finer than either supports.
+/// The executor and the independent verifier both use this one derivation.
+pub fn rule_from_runs(
+    runs: &[(super::ProtonSource, f64)],
+) -> Result<FrozenConfirmationRule, &'static str> {
+    let mut arms: std::collections::BTreeMap<super::ProtonSource, Vec<f64>> =
+        std::collections::BTreeMap::new();
+    for (arm, fps) in runs {
+        arms.entry(*arm).or_default().push(*fps);
+    }
+    if arms.len() != 2 {
+        return Err("PilotArms");
+    }
+    let mut chosen: Option<FrozenConfirmationRule> = None;
+    for runs in arms.values() {
+        let rule = freeze(runs).map_err(|refusal| match refusal {
+            PilotRefusal::TooFewRuns => "PilotTooThin",
+            PilotRefusal::TooNoisy => "PilotTooNoisy",
+            PilotRefusal::InvalidMeasurement => "PilotInvalid",
+        })?;
+        if chosen
+            .as_ref()
+            .is_none_or(|best| rule.pilot_cv_bp > best.pilot_cv_bp)
+        {
+            chosen = Some(rule);
+        }
+    }
+    chosen.ok_or("PilotArms")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

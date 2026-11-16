@@ -33,7 +33,10 @@ impl DriverState {
     /// Stop whatever the campaign owns (the flat host, or the funnel's shared host).
     fn abort_host(&mut self) -> anyhow::Result<()> {
         match self.funnel.as_mut() {
-            Some(funnel) => funnel.host_mut().abort(),
+            // Settle, restore and prove the graphics profile; unproven is an error.
+            Some(funnel) => funnel
+                .shutdown()
+                .map_err(|reason| anyhow::anyhow!("funnel settlement unproven: {reason}")),
             None => self.host.abort(),
         }
     }

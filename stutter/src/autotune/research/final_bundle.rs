@@ -170,20 +170,42 @@ pub fn build(report: &Value, response: &Value) -> Vec<(&'static str, Vec<u8>)> {
     files
 }
 
-/// Write the bundle into `dir` (private, new files only). A bundle already written is left
-/// untouched; the first difference in a repeated verification is not silently overwritten.
-pub fn write(dir: &File, report: &Value, response: &Value) -> anyhow::Result<()> {
-    for (name, bytes) in build(report, response) {
-        match write_new(dir, name, &bytes) {
+/// Write the bundle under `dir` as `bundle-<first 16 hex of its manifest digest>/`: the identity of a
+/// bundle is its content, so a repeated identical verification finds every file already there and
+/// compares it byte for byte (a mismatch is refused, never accepted as stale output), and a changed
+/// verification result is a new bundle beside the old one, which is never overwritten.
+pub fn write(dir: &File, report: &Value, response: &Value) -> anyhow::Result<String> {
+    use std::os::fd::AsFd;
+    let files = build(report, response);
+    let manifest = files
+        .last()
+        .map(|(_, bytes)| bytes.as_slice())
+        .unwrap_or(&[]);
+    let name = format!("bundle-{}", &stutter_core::hash::sha256_hex(manifest)[..16]);
+    match crate::syscall::mkdir_private_at(dir.as_fd(), &name) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(error.into()),
+    }
+    let bundle = File::from(crate::syscall::openat_dir_nofollow(dir.as_fd(), &name)?);
+    let uid = crate::syscall::geteuid();
+    for (file, bytes) in &files {
+        match write_new(&bundle, file, bytes) {
             Ok(()) => {}
             Err(error)
                 if error
                     .downcast_ref::<std::io::Error>()
-                    .is_some_and(|io| io.kind() == std::io::ErrorKind::AlreadyExists) => {}
+                    .is_some_and(|io| io.kind() == std::io::ErrorKind::AlreadyExists) =>
+            {
+                anyhow::ensure!(
+                    super::report_store::read_private(&bundle, file, uid)? == *bytes,
+                    "{name}/{file} differs from the verification it claims to record"
+                );
+            }
             Err(error) => return Err(error),
         }
     }
-    Ok(())
+    Ok(name)
 }
 
 /// Write the bundle for a verified report; a failure is logged and is not a verdict.

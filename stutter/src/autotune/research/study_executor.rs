@@ -9,14 +9,12 @@
 //! a game whose ownership is unresolved, and a restoration or settlement that cannot be proven halts
 //! the whole campaign.
 
-use std::collections::BTreeMap;
-
 use super::{
     ProtonSource,
     child_runner::{StudyExecutor, StudyRun},
     child_study::{ChildStudy, Profile, Stage, StudyResult},
     native_context::ProfileConformance,
-    pilot_rule::{FrozenConfirmationRule, PilotRefusal, freeze},
+    pilot_rule::FrozenConfirmationRule,
 };
 
 /// What a profile hook reports when it cannot apply a profile.
@@ -184,31 +182,9 @@ impl<P: ProfileHook, A: StudyAttempts> HostStudyExecutor<P, A> {
         }
     }
 
-    /// The confirmation rule a pilot freezes: each of the two arms needs enough runs, and the rule
-    /// follows the noisier arm so it is never finer than either arm supports.
+    /// The confirmation rule a pilot freezes (the one derivation the verifier also uses).
     fn pilot_rule(outcome: &AttemptsOutcome) -> Result<FrozenConfirmationRule, &'static str> {
-        let mut arms: BTreeMap<ProtonSource, Vec<f64>> = BTreeMap::new();
-        for (arm, fps) in &outcome.run_fps {
-            arms.entry(*arm).or_default().push(*fps);
-        }
-        if arms.len() != 2 {
-            return Err("PilotArms");
-        }
-        let mut chosen: Option<FrozenConfirmationRule> = None;
-        for runs in arms.values() {
-            let rule = freeze(runs).map_err(|refusal| match refusal {
-                PilotRefusal::TooFewRuns => "PilotTooThin",
-                PilotRefusal::TooNoisy => "PilotTooNoisy",
-                PilotRefusal::InvalidMeasurement => "PilotInvalid",
-            })?;
-            if chosen
-                .as_ref()
-                .is_none_or(|best| rule.pilot_cv_bp > best.pilot_cv_bp)
-            {
-                chosen = Some(rule);
-            }
-        }
-        chosen.ok_or("PilotArms")
+        super::pilot_rule::rule_from_runs(&outcome.run_fps)
     }
 
     /// A feature or action study is not qualified by benchmark attempts alone.

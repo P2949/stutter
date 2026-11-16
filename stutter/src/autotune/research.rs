@@ -139,7 +139,6 @@ pub(crate) mod native_source;
 pub(crate) mod oracle;
 pub(crate) mod owned_cleanup;
 pub(crate) mod owned_domain;
-#[cfg_attr(not(test), expect(dead_code, reason = "staged"))]
 pub(crate) mod pilot_rule;
 #[cfg_attr(
     not(test),

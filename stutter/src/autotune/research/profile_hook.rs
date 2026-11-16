@@ -134,27 +134,48 @@ impl ProfileHook for UnavailableProfiles {
     }
 }
 
-/// Whether a command line (NUL-separated arguments) is the Cyberpunk executable.
+/// Whether a command line (NUL-separated arguments) is the game: one whole argument whose file name
+/// is the Cyberpunk executable (either path separator), or Steam's own `AppId=1091500` launch
+/// argument. A longer argument that merely mentions the name (a shell command, a search for it,
+/// an editor opening a log) is not the game.
 fn names_the_game(cmdline: &[u8]) -> bool {
-    String::from_utf8_lossy(cmdline)
-        .to_ascii_lowercase()
-        .contains("cyberpunk2077.exe")
+    cmdline.split(|byte| *byte == 0).any(|argument| {
+        let text = String::from_utf8_lossy(argument);
+        text == "AppId=1091500"
+            || text
+                .rsplit(['/', '\\'])
+                .next()
+                .is_some_and(|name| name.eq_ignore_ascii_case("cyberpunk2077.exe"))
+    })
 }
 
-/// Whether any process of this machine is running the game. A process whose command line cannot be
-/// read is not this user's game; an unlistable /proc is treated as the game running (the safe
-/// answer for a settings edit).
+/// The answer over the command lines of every process: the game is running if any process names
+/// it, and an unreadable command line of a live process is unknown, which a settings edit treats
+/// as running. A process that vanished mid-scan is not.
+fn scan(lines: impl Iterator<Item = std::io::Result<Vec<u8>>>) -> bool {
+    lines.into_iter().any(|line| match line {
+        Ok(bytes) => names_the_game(&bytes),
+        Err(error) => error.kind() != std::io::ErrorKind::NotFound,
+    })
+}
+
+/// Whether any process of this machine is running the game; an unlistable /proc is unknown, which
+/// is treated as the game running (the safe answer for a settings edit).
 pub fn cyberpunk_running() -> bool {
     let Ok(entries) = std::fs::read_dir("/proc") else {
         return true;
     };
-    entries.flatten().any(|entry| {
-        entry
-            .file_name()
-            .to_str()
-            .is_some_and(|name| name.bytes().all(|b| b.is_ascii_digit()))
-            && std::fs::read(entry.path().join("cmdline")).is_ok_and(|bytes| names_the_game(&bytes))
-    })
+    scan(
+        entries
+            .flatten()
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_str()
+                    .is_some_and(|name| name.bytes().all(|b| b.is_ascii_digit()))
+            })
+            .map(|entry| std::fs::read(entry.path().join("cmdline"))),
+    )
 }
 
 #[cfg(test)]

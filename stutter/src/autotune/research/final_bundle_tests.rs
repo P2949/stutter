@@ -89,20 +89,38 @@ fn an_unplanned_action_study_is_not_a_result() {
 }
 
 #[test]
-fn a_bundle_is_written_once_and_never_overwritten() {
-    let dir = std::env::temp_dir().join(format!("stutter-bundle-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let handle = File::open(&dir).unwrap();
-    write(&handle, &json!({}), &response()).unwrap();
-    let first = std::fs::read(dir.join("verify-result.json")).unwrap();
+fn an_identical_verification_replays_and_a_changed_one_is_a_new_bundle_beside_the_old() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    let handle = File::open(dir.path()).unwrap();
+    let first = write(&handle, &json!({}), &response()).unwrap();
+    assert_eq!(write(&handle, &json!({}), &response()).unwrap(), first);
     let mut changed = response();
     changed["verdict"]["disposition"] = json!("Qualified");
-    write(&handle, &json!({}), &changed).unwrap();
-    assert_eq!(
-        std::fs::read(dir.join("verify-result.json")).unwrap(),
-        first
+    let second = write(&handle, &json!({}), &changed).unwrap();
+    assert_ne!(first, second);
+    let old = std::fs::read_to_string(dir.path().join(&first).join("verify-result.json")).unwrap();
+    assert!(
+        old.contains("PartiallyQualified"),
+        "the old bundle is never overwritten"
     );
-    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn a_tampered_file_in_an_existing_bundle_is_refused_on_replay() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    let handle = File::open(dir.path()).unwrap();
+    let name = write(&handle, &json!({}), &response()).unwrap();
+    let file = dir.path().join(&name).join("verify-result.json");
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+    std::fs::write(&file, b"{}\n").unwrap();
+    let error = write(&handle, &json!({}), &response())
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("differs"), "{error}");
 }
 
 /// Read-only on the campaign: derive the bundle of a real preserved campaign into a fresh directory.
