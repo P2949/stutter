@@ -692,5 +692,5 @@ fn a_restarted_driver_seals_only_a_provably_settled_interrupted_attempt() {
     ));
 }
 
-#[path = "driver_tests_health.rs"]
+#[path = "driver_health_tests.rs"]
 mod health;
