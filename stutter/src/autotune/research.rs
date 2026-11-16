@@ -10,6 +10,14 @@ use serde::{Deserialize, Serialize};
     not(test),
     expect(
         dead_code,
+        reason = "the real ActionWorker over the controller and root worker is connected with CP-LONG"
+    )
+)]
+pub(crate) mod action_bridge;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
         reason = "the controller bridge that asks the normal worker is connected with the CP-LONG child"
     )
 )]
