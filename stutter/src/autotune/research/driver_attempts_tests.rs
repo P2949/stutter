@@ -18,6 +18,7 @@ struct Host {
     unsafe_until_tick: u32,
     ticks: u32,
     health: bool,
+    process: Option<crate::autotune::research::action_child::ChildTarget>,
     /// Every factor set the driver enabled before a study, shared so a test can read it back.
     seen_factors:
         std::sync::Arc<std::sync::Mutex<Vec<Vec<crate::autotune::research::ResearchFactor>>>>,
@@ -33,11 +34,15 @@ impl Host {
             ticks: 0,
             seen_factors: Default::default(),
             health: false,
+            process: None,
         }
     }
 }
 
 impl AttemptHost for Host {
+    fn game_process(&mut self) -> Option<crate::autotune::research::action_child::ChildTarget> {
+        self.process
+    }
     fn health_blocked(&mut self) -> bool {
         self.health
     }
@@ -678,3 +683,6 @@ mod production_selection {
         driver.host_mut().observe_user_input_idle(None);
     }
 }
+
+#[path = "driver_attempts_action_tests.rs"]
+mod action_stage;

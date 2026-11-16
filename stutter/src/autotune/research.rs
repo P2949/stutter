@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 
 #[cfg_attr(not(test), expect(dead_code, reason = "staged"))]
 pub(crate) mod action_bridge;
-#[cfg_attr(not(test), expect(dead_code, reason = "staged"))]
 pub(crate) mod action_child;
+pub(crate) mod action_gate;
 #[cfg_attr(
     not(test),
     expect(

@@ -24,6 +24,10 @@ pub enum Observation {
 pub trait NativeObservationSource {
     fn begin(&mut self, arm: super::ProtonSource) -> anyhow::Result<()>;
     fn poll(&mut self) -> Observation;
+    /// The game process this attempt's source has sighted and attested, if any.
+    fn sighted_process(&self) -> Option<super::action_child::ChildTarget> {
+        None
+    }
 }
 
 /// The native results directory of an arm.
@@ -61,6 +65,10 @@ impl<S> NativeResultProbe<S> {
 }
 
 impl<S: NativeObservationSource> ResultProbe for NativeResultProbe<S> {
+    fn game_process(&self) -> Option<super::action_child::ChildTarget> {
+        self.source.sighted_process()
+    }
+
     fn begin(&mut self, arm: super::ProtonSource) -> anyhow::Result<()> {
         self.before = None;
         self.results_dir = (self.results_for)(arm);

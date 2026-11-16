@@ -20,6 +20,7 @@ mod phase;
 mod plan_output;
 pub(crate) mod planning;
 mod research_control;
+mod research_gate;
 mod research_recovery;
 mod restore;
 mod sensor_hub;
@@ -88,6 +89,8 @@ pub struct AutotuneRuntime {
     config: AutotuneRuntimeConfig,
     /// A resident research campaign owns the action slot until its action study grants it.
     research_campaign_active: bool,
+    /// The per-candidate gate an action child arms; absent, research suppression is blanket.
+    research_action_gate: Option<research_gate::SharedGate>,
     controller: OnlineAutotuneController,
     latest_focus: Option<AutotuneObservationFocus>,
     target_state: RuntimeTargetState,

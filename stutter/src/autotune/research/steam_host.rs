@@ -43,6 +43,10 @@ pub trait SteamPort {
     fn health_blocked(&mut self) -> bool {
         false
     }
+    /// The sighted game process of the current attempt, once attested (`None` before).
+    fn game_process(&mut self) -> Option<super::action_child::ChildTarget> {
+        None
+    }
     /// Resolve the exact installed tool directory for the arm, or fail closed.
     fn tool_dir(&mut self, slot: &AttemptSlot) -> anyhow::Result<PathBuf>;
     fn study_compat_data(&self) -> PathBuf;
@@ -92,6 +96,10 @@ impl<P: SteamPort> AttemptHost for SteamAttemptHost<P> {
 
     fn set_enabled_factors(&mut self, factors: &[super::ResearchFactor]) {
         self.factors = factors.to_vec();
+    }
+
+    fn game_process(&mut self) -> Option<super::action_child::ChildTarget> {
+        self.port.game_process()
     }
 
     fn arm_spec(&mut self, slot: &AttemptSlot) -> anyhow::Result<ArmSpec> {

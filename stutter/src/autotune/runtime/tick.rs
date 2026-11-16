@@ -88,6 +88,16 @@ impl AutotuneRuntime {
         &mut self,
         event: MonitorEvent,
     ) -> anyhow::Result<Option<AutotuneDecisionStreamEntry>> {
+        let decision = self.on_event_inner(event);
+        // The research action gate sees every event's outcome, success or failure.
+        self.observe_research_gate();
+        decision
+    }
+
+    fn on_event_inner(
+        &mut self,
+        event: MonitorEvent,
+    ) -> anyhow::Result<Option<AutotuneDecisionStreamEntry>> {
         match event {
             MonitorEvent::WorkloadProgress { record } => {
                 self.controller.window.push_workload_progress(*record);

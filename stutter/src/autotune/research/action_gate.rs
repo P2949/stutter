@@ -1,0 +1,245 @@
+//! The per-candidate gate that replaces the blanket "research owns the slot, so no autonomous
+//! action" suppression (PLAN section 7). While a CP-LONG action child runs, the normal controller
+//! still plans and applies through its own journalled, two-phase, token-bearing experiment
+//! lifecycle; this gate only decides whether a given candidate may proceed (an authorized game
+//! action on the frozen game process, one at a time) and observes what the experiment manager
+//! reports back (an experiment started, the action kept, or rolled back, and whether the worker
+//! still holds a token), so the `ActionChildScope` can settle only with a proven restoration. It
+//! applies nothing itself and is no second optimizer.
+
+use std::sync::{Arc, Mutex};
+
+use super::{
+    ResearchAction,
+    action_child::{ActionChildScope, ActionGrant, ActionRequest, ChildTarget, Decision},
+};
+
+/// What the experiment manager and worker report after an event.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GateView {
+    /// An experiment is applied and being measured.
+    pub experiment_active: bool,
+    /// Actions the controller kept (they stay applied until released).
+    pub kept_actions: usize,
+    /// Worker transactions still outstanding; `None` when the worker cannot say.
+    pub outstanding_tokens: Option<u32>,
+}
+
+enum State {
+    Idle,
+    /// A candidate was permitted; the apply happens within the same event.
+    Requested(ActionGrant, ResearchAction),
+    /// Applied and under measurement.
+    Running(ResearchAction),
+    /// Kept by the controller; stays applied until released.
+    Kept(ResearchAction),
+    /// Undone by the controller; waiting for the worker to hold no token.
+    Restoring(ResearchAction),
+}
+
+/// Reads the worker's outstanding transaction count (`None` when it cannot say).
+pub type TokenProbe = Box<dyn Fn() -> Option<u32> + Send>;
+
+pub struct ActionGate {
+    /// `None` until an action child arms the gate on the sighted game process; unarmed, nothing is
+    /// ever permitted.
+    scope: Option<ActionChildScope>,
+    state: State,
+    tokens: TokenProbe,
+}
+
+impl std::fmt::Debug for ActionGate {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ActionGate")
+            .field("busy", &self.is_busy())
+            .field("armed", &self.is_armed())
+            .finish_non_exhaustive()
+    }
+}
+
+/// Shared between the funnel (which arms it and reads its evidence) and the runtime (which asks
+/// it for permission and reports what happened).
+pub type SharedActionGate = Arc<Mutex<ActionGate>>;
+
+/// What the gate saw, for the study's stage evidence.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GateEvidence {
+    /// Actions that were applied, decided and whose restoration was proven.
+    pub settled: Vec<(ResearchAction, Decision)>,
+    /// Nothing applied or pending: every granted action was restored (or never applied).
+    pub clean: bool,
+}
+
+impl ActionGate {
+    pub fn new(scope: ActionChildScope, tokens: TokenProbe) -> Self {
+        Self {
+            scope: Some(scope),
+            state: State::Idle,
+            tokens,
+        }
+    }
+
+    /// A gate that permits nothing until it is armed.
+    pub fn unarmed(tokens: TokenProbe) -> Self {
+        Self {
+            scope: None,
+            state: State::Idle,
+            tokens,
+        }
+    }
+
+    /// Arm the gate for one action child. Refused while a previous child's action is outstanding.
+    pub fn arm(&mut self, scope: ActionChildScope) -> bool {
+        if self.is_busy() {
+            return false;
+        }
+        self.scope = Some(scope);
+        true
+    }
+
+    pub fn is_armed(&self) -> bool {
+        self.scope.is_some()
+    }
+
+    /// The action child ended: the gate is disarmed and what it saw is returned. A child that left an
+    /// action outstanding is not clean (and the gate stays busy until it is restored).
+    pub fn disarm(&mut self) -> GateEvidence {
+        let evidence = self.evidence();
+        if evidence.clean {
+            self.scope = None;
+        }
+        evidence
+    }
+
+    /// Report the experiment manager's state after an event; the worker's token count is read here.
+    pub fn observe_runtime(&mut self, experiment_active: bool, kept_actions: usize) {
+        let outstanding_tokens = (self.tokens)();
+        self.observe(GateView {
+            experiment_active,
+            kept_actions,
+            outstanding_tokens,
+        });
+    }
+
+    fn with_scope<R>(&mut self, f: impl FnOnce(&mut ActionChildScope) -> R) -> Option<R> {
+        self.scope.as_mut().map(f)
+    }
+
+    /// Whether an action is outstanding (granted, applied, kept or being restored).
+    pub fn is_busy(&self) -> bool {
+        !matches!(self.state, State::Idle)
+    }
+
+    /// Permission for the normal controller to apply a candidate. Only an authorized game action
+    /// on the frozen process, inside the window, one at a time, is permitted; everything else is
+    /// refused exactly as the blanket suppression did.
+    pub fn permit(
+        &mut self,
+        action: Option<ResearchAction>,
+        target: ChildTarget,
+        now_unix: u64,
+    ) -> bool {
+        let Some(action) = action else { return false };
+        if !matches!(self.state, State::Idle) {
+            return false;
+        }
+        let Some(scope) = self.scope.as_mut() else {
+            return false;
+        };
+        match scope.authorize(ActionRequest {
+            action,
+            target,
+            now_unix,
+        }) {
+            Ok(grant) => {
+                self.state = State::Requested(grant, action);
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
+    /// Report what the experiment manager and worker show after an event.
+    pub fn observe(&mut self, view: GateView) {
+        let state = std::mem::replace(&mut self.state, State::Idle);
+        self.state = match state {
+            State::Idle => State::Idle,
+            State::Requested(grant, action) => {
+                if view.experiment_active || view.kept_actions > 0 {
+                    // The normal path verified its own apply before starting the experiment.
+                    self.with_scope(|scope| scope.applied(grant, true));
+                    State::Running(action)
+                } else {
+                    // The controller declined or failed to apply: nothing changed.
+                    self.with_scope(|scope| scope.not_applied(grant));
+                    State::Idle
+                }
+            }
+            State::Running(action) => {
+                if view.experiment_active {
+                    State::Running(action)
+                } else if view.kept_actions > 0 {
+                    self.with_scope(|scope| scope.decide(Decision::Keep));
+                    State::Kept(action)
+                } else {
+                    self.with_scope(|scope| scope.decide(Decision::Revert));
+                    self.restore_if_proven(action, view)
+                }
+            }
+            State::Kept(action) => {
+                if view.kept_actions == 0 {
+                    // Released by the controller (its own rollback path verified the restore).
+                    self.restore_if_proven(action, view)
+                } else {
+                    State::Kept(action)
+                }
+            }
+            State::Restoring(action) => self.restore_if_proven(action, view),
+        };
+    }
+
+    /// The restoration is accepted only when the worker also holds no token.
+    fn restore_if_proven(&mut self, action: ResearchAction, view: GateView) -> State {
+        if view.outstanding_tokens == Some(0)
+            && self
+                .with_scope(|scope| scope.restored(true))
+                .unwrap_or(false)
+        {
+            State::Idle
+        } else {
+            State::Restoring(action)
+        }
+    }
+
+    pub fn evidence(&self) -> GateEvidence {
+        GateEvidence {
+            settled: self
+                .scope
+                .as_ref()
+                .map_or_else(Vec::new, |scope| scope.settled().to_vec()),
+            clean: self.scope.as_ref().is_none_or(ActionChildScope::is_clean)
+                && matches!(self.state, State::Idle),
+        }
+    }
+}
+
+/// The pid's identity (start time and owner) from `/proc`, which a candidate must match to be the
+/// frozen game process; a reused pid or a vanished process is not.
+pub fn process_identity(pid: u32) -> Option<ChildTarget> {
+    use std::os::unix::fs::MetadataExt;
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // Fields after the parenthesised command name; start time is field 22 overall.
+    let after = stat.rsplit_once(')')?.1;
+    let start_ticks: u64 = after.split_whitespace().nth(19)?.parse().ok()?;
+    let uid = std::fs::metadata(format!("/proc/{pid}")).ok()?.uid();
+    Some(ChildTarget {
+        pid: stutter_core::ids::Pid::new(pid),
+        start_ticks,
+        uid,
+    })
+}
+
+#[cfg(test)]
+#[path = "action_gate_tests.rs"]
+mod tests;

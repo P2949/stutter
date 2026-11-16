@@ -54,3 +54,13 @@ diagnosis that selects the candidate. It cannot be proven without a live CP-LONG
 * Real-container Proton paths (`RuntimeBinding::Matched` has never been produced live).
 * Whether the game accepts and honours an edited `UserSettings.json`.
 * The GPU-stability incident acknowledgement (a human decision; see `research health-check`).
+
+## Action gate wiring (offline, fake-worker verified)
+
+The funnel builder creates one `ActionGate` (unarmed) and shares it with both the
+`DriverStudyAttempts` (an Action study arms it on the sighted game process) and the
+resident runtime (`set_research_action_gate`, installed each loop from the coordinator).
+`select_candidate_for_normal_control` consults it instead of the blanket research
+suppression: only the two supported actions the child's scope authorizes, only against the
+sighted process. Restoration evidence reads the existing worker's outstanding-token count;
+unknown counts as unproven. No new root IPC. Not yet exercised against the real worker.

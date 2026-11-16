@@ -5,15 +5,19 @@
 use std::fs::File;
 
 use super::FunnelBuilder;
-use crate::autotune::research::{
-    ProtonSource, ResearchIntentV1,
-    driver::AttemptHost,
-    driver_attempts::DriverStudyAttempts,
-    funnel_driver::{FunnelDriver, RuleRegistry, production_inputs},
-    profile_applier::StudySettingsFile,
-    profile_hook::{FileProfileHook, UnavailableProfiles, cyberpunk_running, production_spec},
-    session_host::arm_prefix_paths,
-    study_executor::ProfileHook,
+use crate::{
+    autotune::research::{
+        ProtonSource, ResearchIntentV1,
+        action_gate::{ActionGate, SharedActionGate},
+        driver::AttemptHost,
+        driver_attempts::DriverStudyAttempts,
+        funnel_driver::{FunnelDriver, RuleRegistry, production_inputs},
+        profile_applier::StudySettingsFile,
+        profile_hook::{FileProfileHook, UnavailableProfiles, cyberpunk_running, production_spec},
+        session_host::arm_prefix_paths,
+        study_executor::ProfileHook,
+    },
+    daemon::privilege::UnixSocketPrivilegedActionService,
 };
 
 fn unix_now() -> u64 {
@@ -45,10 +49,23 @@ fn profiles(study_dir: &std::path::Path, intent: &ResearchIntentV1) -> Box<dyn P
 
 fn build(
     study_dir: &std::path::Path,
+    worker_socket: Option<&std::path::Path>,
     intent: &ResearchIntentV1,
     campaign: &File,
     host: Box<dyn AttemptHost + Send>,
 ) -> anyhow::Result<FunnelDriver> {
+    // The action child's gate: unarmed until an Action study arms it on the sighted game process.
+    // Its restoration proof reads the worker's outstanding-token count; unknown stays unproven.
+    let socket = worker_socket.map(std::path::Path::to_path_buf);
+    let gate: SharedActionGate = std::sync::Arc::new(std::sync::Mutex::new(ActionGate::unarmed(
+        Box::new(move || {
+            let socket = socket.clone()?;
+            UnixSocketPrivilegedActionService::new(socket)
+                .outstanding_tokens()
+                .ok()
+                .and_then(|count| u32::try_from(count).ok())
+        }),
+    )));
     let rules = RuleRegistry::default();
     let results = study_dir.to_path_buf();
     // The driver rejects a clock that moves backward, so the clock is clamped to never do so.
@@ -65,15 +82,17 @@ fn build(
         Box::new(|| Ok(())),
         Box::new(move |arm: ProtonSource| arm_prefix_paths(&results, arm).1),
         production_inputs(campaign.try_clone()?, intent.clone(), rules.clone()),
-    );
-    FunnelDriver::new(
+    )
+    .with_action_gate(gate.clone());
+    Ok(FunnelDriver::new(
         campaign,
         intent,
         profiles(study_dir, intent),
         attempts,
         |_| None,
         rules,
-    )
+    )?
+    .with_action_gate(gate))
 }
 
 /// The funnel builder the resident session installs: `None` (the flat schedule) unless the
@@ -85,8 +104,12 @@ pub(in crate::autotune::runtime) fn select_funnel_builder(
         return None;
     }
     let study_dir = config.research_study_dir.clone()?;
+    let socket = config
+        .privileged_worker_socket
+        .clone()
+        .or_else(|| crate::daemon::privilege::default_privileged_worker_socket_path().ok());
     Some(Box::new(move |intent, campaign, host| {
-        build(&study_dir, intent, campaign, host)
+        build(&study_dir, socket.as_deref(), intent, campaign, host)
     }))
 }
 

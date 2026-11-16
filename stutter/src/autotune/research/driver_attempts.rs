@@ -8,6 +8,8 @@ use std::{collections::BTreeMap, fs::File, os::fd::AsFd, path::PathBuf};
 
 use super::{
     ProtonSource, ResearchIntentV1, ResearchJournal,
+    action_child::ActionChildScope,
+    action_gate::SharedActionGate,
     child_intent::child_intent,
     child_study::{ChildStudy, Stage},
     driver::{AttemptHost, Driver, Step, build_schedule},
@@ -49,6 +51,9 @@ pub struct DriverStudyAttempts {
     last_step: Option<Step>,
     /// The controller's own `now` for the next tick, overriding the clock (one tick only).
     override_now: Option<u64>,
+    /// The action gate an action child arms on the sighted game process (absent: never armed).
+    gate: Option<SharedActionGate>,
+    armed_for: Option<String>,
 }
 
 fn dir_name(study: &ChildStudy) -> &str {
@@ -88,7 +93,15 @@ impl DriverStudyAttempts {
             running: None,
             last_step: None,
             override_now: None,
+            gate: None,
+            armed_for: None,
         }
+    }
+
+    /// Share the action gate with the runtime: an Action study arms it on the game process it sights.
+    pub fn with_action_gate(mut self, gate: SharedActionGate) -> Self {
+        self.gate = Some(gate);
+        self
     }
 
     /// The controller's time for the next tick: the campaign clock is the controller's, not ours.
@@ -99,6 +112,34 @@ impl DriverStudyAttempts {
     /// The shared attempt host, for the controller to feed its desktop observations.
     pub fn host_mut(&mut self) -> &mut (dyn AttemptHost + Send) {
         self.host.as_mut()
+    }
+
+    /// An Action study arms the gate (once) on the game process the host has sighted and attested,
+    /// authorizing only that study's action, for the rest of the campaign's window.
+    fn arm_gate_for(&mut self, study: &ChildStudy) {
+        let (Some(gate), Stage::Action(action)) = (&self.gate, study.stage) else {
+            return;
+        };
+        if self.armed_for.as_deref() == Some(study.study_sha256.as_str()) {
+            return;
+        }
+        let Some(target) = self.host.game_process() else {
+            return;
+        };
+        let scope = ActionChildScope::new([action], target, self.parent.deadline_unix_seconds);
+        if gate.lock().is_ok_and(|mut gate| gate.arm(scope)) {
+            self.armed_for = Some(study.study_sha256.clone());
+        }
+    }
+
+    /// What the gate saw during an Action study: an applied action, decided, with its restoration
+    /// proven. Anything less (nothing applied, or an action still outstanding) is not evidence.
+    fn stage_evidence(&self, study: &ChildStudy) -> Option<bool> {
+        let (Some(gate), Stage::Action(_)) = (&self.gate, study.stage) else {
+            return None;
+        };
+        let evidence = gate.lock().ok()?.disarm();
+        Some(evidence.clean && !evidence.settled.is_empty())
     }
 
     fn begin(&mut self, study: &ChildStudy) -> anyhow::Result<()> {
@@ -182,7 +223,7 @@ impl DriverStudyAttempts {
             runtime_matched,
             // No runtime proof of a factor's activation, and no worker restoration evidence for an
             // action, is collected here yet: stage evidence is unproven.
-            stage_evidence: None,
+            stage_evidence: self.stage_evidence(study),
             run_fps: evidence
                 .values()
                 .filter_map(|item| item.native_completion.as_deref())
@@ -242,6 +283,7 @@ impl StudyAttempts for DriverStudyAttempts {
             None => return Ok(None),
         };
         self.last_step = Some(step.clone());
+        self.arm_gate_for(study);
         let halted = matches!(step, Step::Halted(_));
         match step {
             Step::Waiting | Step::Running(_) | Step::Sealed(_) => Ok(None),

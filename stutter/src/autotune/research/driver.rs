@@ -57,6 +57,11 @@ pub trait AttemptHost {
     /// for every other study). The host derives each arm's environment from this, never from the
     /// slot alone.
     fn set_enabled_factors(&mut self, _factors: &[super::ResearchFactor]) {}
+    /// The sighted game process of the current attempt, once attested; an action child arms its
+    /// gate on exactly this process.
+    fn game_process(&mut self) -> Option<super::action_child::ChildTarget> {
+        None
+    }
     /// True only in a qualified automatic safe window.
     fn safe_window(&mut self) -> bool;
     fn arm_spec(&mut self, slot: &AttemptSlot) -> anyhow::Result<ArmSpec>;

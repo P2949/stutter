@@ -286,6 +286,9 @@ pub trait ResultProbe {
     /// Prepare for a new launch (for example snapshot the native results directory).
     fn begin(&mut self, arm: super::ProtonSource) -> anyhow::Result<()>;
     fn poll(&mut self) -> GameState;
+    fn game_process(&self) -> Option<super::action_child::ChildTarget> {
+        None
+    }
 }
 
 pub struct ProductionSteamPort<R: ResultProbe> {
@@ -531,6 +534,9 @@ impl<R: ResultProbe> SteamPort for ProductionSteamPort<R> {
 
     fn health_blocked(&mut self) -> bool {
         self.gpu.as_ref().is_some_and(GpuGuard::blocked)
+    }
+    fn game_process(&mut self) -> Option<super::action_child::ChildTarget> {
+        self.probe.game_process()
     }
 
     fn safe_window(&mut self) -> bool {

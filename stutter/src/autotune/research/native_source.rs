@@ -162,6 +162,16 @@ impl<F: GameFacts> AttestedNativeSource<F> {
 }
 
 impl<F: GameFacts> NativeObservationSource for AttestedNativeSource<F> {
+    fn sighted_process(&self) -> Option<super::action_child::ChildTarget> {
+        self.seen
+            .as_ref()
+            .map(|seen| super::action_child::ChildTarget {
+                pid: seen.process.pid,
+                start_ticks: seen.process.start_ticks,
+                uid: seen.process.uid,
+            })
+    }
+
     fn begin(&mut self, arm: ProtonSource) -> anyhow::Result<()> {
         self.seen = None;
         self.facts.begin_arm(arm);

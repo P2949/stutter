@@ -13,6 +13,7 @@ use std::{
 
 use super::{
     ResearchIntentV1,
+    action_gate::SharedActionGate,
     arm_selection::{screen_fps, screen_of, select_pair},
     child_ledger::{Disposition, open_for_campaign},
     child_runner::{RunnerStep, StageRunner},
@@ -83,6 +84,8 @@ pub struct FunnelDriver {
     blocker: fn(&ChildStudy) -> Option<&'static str>,
     cancelled: bool,
     rules: RuleRegistry,
+    /// The action gate an action child arms, shared with the runtime (absent: no action child).
+    gate: Option<SharedActionGate>,
 }
 
 impl FunnelDriver {
@@ -101,7 +104,18 @@ impl FunnelDriver {
             blocker,
             cancelled: false,
             rules,
+            gate: None,
         })
+    }
+
+    /// Share the action gate the attempts arm, so the runtime can consult it.
+    pub fn with_action_gate(mut self, gate: SharedActionGate) -> Self {
+        self.gate = Some(gate);
+        self
+    }
+
+    pub fn action_gate(&self) -> Option<SharedActionGate> {
+        self.gate.clone()
     }
 
     /// The shared attempt host, for the controller to feed its desktop observations.

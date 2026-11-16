@@ -19,7 +19,11 @@ impl AutotuneRuntime {
     ) -> anyhow::Result<Option<CandidateAction>> {
         let candidate = self.select_candidate_for_observation(observation)?;
         if self.research_campaign_active {
-            return Ok(None);
+            // Research owns the slot: a candidate proceeds only if the action gate permits it.
+            return Ok(match candidate {
+                Some(candidate) if self.research_gate_permits(&candidate) => Some(candidate),
+                _ => None,
+            });
         }
         Ok(candidate)
     }

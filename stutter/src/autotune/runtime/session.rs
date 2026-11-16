@@ -247,6 +247,12 @@ pub async fn run_autotune_controller_session(
         };
         runtime.research_campaign_active = _research_server.is_some()
             && research_coordinator.as_ref().is_none_or(|coordinator| coordinator.owns_action_slot());
+        // A funnel campaign's action child shares its gate with the runtime; otherwise none.
+        runtime.set_research_action_gate(
+            research_coordinator
+                .as_ref()
+                .and_then(|coordinator| coordinator.action_gate()),
+        );
         runtime.on_event(event)?;
         event_loop_iterations = event_loop_iterations.saturating_add(1);
         if event_loop_iterations.is_multiple_of(30)
