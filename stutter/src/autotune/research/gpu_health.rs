@@ -586,6 +586,72 @@ impl GpuGuard {
     }
 }
 
+/// What a standalone health inspection found.
+#[derive(Debug, serde::Serialize)]
+pub struct HealthReport {
+    /// `blocked` (an unacknowledged incident is on record), `unverified` (the journal could not be
+    /// qualified, so nothing is proven either way) or `clear` (journal readable, nothing
+    /// unacknowledged).
+    pub state: &'static str,
+    /// This inspection wrote a new incident record.
+    pub recorded_now: bool,
+    /// The reason the journal could not be qualified, when it could not.
+    pub probe_error: Option<String>,
+    pub incidents: Vec<IncidentView>,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct IncidentView {
+    pub file: String,
+    pub acknowledged: bool,
+    /// The exact line to append to `gpu-stability-acks` once the incident has been reviewed.
+    pub acknowledgement_line: String,
+}
+
+impl GpuGuard {
+    /// Query the journal and persist any unacknowledged GPU event as an incident, then report the
+    /// resulting state. Changes nothing else: no campaign is armed and no game is touched.
+    pub fn inspect(&mut self) -> HealthReport {
+        let before = self.incidents().map_or(0, |found| found.len());
+        let (since, reviewed) = self.reviewed();
+        let mut probe_error = None;
+        // While an incident already stands unacknowledged the journal would show the same events
+        // again; it is reported, never duplicated.
+        if !self.blocked() {
+            match self.probe.resets_since(since) {
+                Ok(scan) if Self::fresh_events(&scan, &reviewed) > 0 => {
+                    self.record_block("inspection", scan);
+                }
+                Ok(_) => {}
+                Err(error) => probe_error = Some(format!("{error:#}")),
+            }
+        }
+        let acks = self.acknowledgements();
+        let found = self.incidents().unwrap_or_default();
+        let incidents = found
+            .iter()
+            .map(|incident| IncidentView {
+                file: format!("{}.json", incident.stem),
+                acknowledged: Self::acknowledged(&acks, incident),
+                acknowledgement_line: format!("{} {}", incident.stem, incident.hash16),
+            })
+            .collect();
+        let state = if self.blocked() {
+            "blocked"
+        } else if probe_error.is_some() {
+            "unverified"
+        } else {
+            "clear"
+        };
+        HealthReport {
+            state,
+            recorded_now: found.len() > before,
+            probe_error,
+            incidents,
+        }
+    }
+}
+
 /// Whether an unacknowledged GPU incident (or an unreadable state directory) is on record in
 /// `state_dir`. Read-only; used by verification, which has no journal probe of its own.
 pub fn state_blocked(state_dir: &Path) -> bool {

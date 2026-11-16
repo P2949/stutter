@@ -413,3 +413,41 @@ fn verification_reads_the_incident_state_without_a_journal() {
         "an unreadable state is blocked"
     );
 }
+
+#[test]
+fn a_standalone_inspection_records_an_existing_incident_without_a_campaign_and_distinguishes_states()
+ {
+    // A reset in the journal and no incident file yet: the inspection persists it and says blocked.
+    let dir = tempfile::tempdir().unwrap();
+    let ans = Arc::new(Mutex::new(Ok(ResetScan {
+        count: 1,
+        latest_unix: Some(100),
+        line_hashes: vec!["h1".into()],
+    })));
+    let report = guard(dir.path(), &ans).inspect();
+    assert_eq!((report.state, report.recorded_now), ("blocked", true));
+    assert_eq!(report.incidents.len(), 1);
+    assert!(!report.incidents[0].acknowledged);
+    // Inspecting again records nothing new while that incident stands.
+    let again = guard(dir.path(), &ans).inspect();
+    assert_eq!((again.state, again.recorded_now), ("blocked", false));
+    // The line it prints is exactly what acknowledges the incident.
+    let ack = dir.path().join(ACK_FILE);
+    std::fs::write(
+        &ack,
+        format!("{}\n", report.incidents[0].acknowledgement_line),
+    )
+    .unwrap();
+    std::fs::set_permissions(&ack, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let acknowledged = guard(dir.path(), &ans).inspect();
+    assert_eq!(acknowledged.state, "clear");
+    assert!(acknowledged.incidents[0].acknowledged);
+    // A readable, empty journal is clear; an unreadable one is unverified, never clear.
+    let clean = tempfile::tempdir().unwrap();
+    assert_eq!(guard(clean.path(), &answer(0)).inspect().state, "clear");
+    let broken: Answer = Arc::new(Mutex::new(Err(anyhow::anyhow!("no journal files"))));
+    let unverified = guard(clean.path(), &broken).inspect();
+    assert_eq!(unverified.state, "unverified");
+    assert!(unverified.probe_error.is_some());
+    assert!(!unverified.recorded_now);
+}

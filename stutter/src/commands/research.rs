@@ -28,6 +28,12 @@ pub enum ResearchClientAction {
         proton_manifest: Option<PathBuf>,
     },
     Submit(PathBuf),
+    /// Query the kernel journal for GPU resets and persist any unacknowledged one as an incident in
+    /// the private study directory. Local only: no campaign, Steam or game is involved.
+    HealthCheck {
+        study_root: PathBuf,
+        journalctl: PathBuf,
+    },
     /// Steam-invoked compatibility-tool entry; replaces this process with the planned Proton.
     Dispatch {
         target: DispatchTarget,
@@ -47,6 +53,29 @@ pub struct ResearchClientInput {
     pub action: ResearchClientAction,
 }
 
+/// Inspect GPU health against the real journal and print the result as JSON.
+fn health_check(
+    study_root: &std::path::Path,
+    journalctl: &std::path::Path,
+    uid: u32,
+) -> anyhow::Result<()> {
+    use std::os::unix::fs::MetadataExt;
+    let meta = std::fs::symlink_metadata(study_root)?;
+    anyhow::ensure!(
+        meta.is_dir() && meta.uid() == uid && meta.mode() & 0o077 == 0,
+        "the study directory must be a private directory owned by this user"
+    );
+    let probe = crate::autotune::research::gpu_health::JournalGpuResetProbe::trusted(
+        journalctl.to_path_buf(),
+    )?;
+    let mut guard = crate::autotune::research::gpu_health::GpuGuard::new(
+        Box::new(probe),
+        study_root.to_path_buf(),
+    );
+    println!("{}", serde_json::to_string_pretty(&guard.inspect())?);
+    Ok(())
+}
+
 fn request(action: ResearchClientAction, uid: u32) -> anyhow::Result<ResearchRequest> {
     Ok(match action {
         ResearchClientAction::Dispatch { .. } => {
@@ -54,6 +83,9 @@ fn request(action: ResearchClientAction, uid: u32) -> anyhow::Result<ResearchReq
         }
         ResearchClientAction::Inventory { .. } => {
             anyhow::bail!("inventory does not use the resident socket")
+        }
+        ResearchClientAction::HealthCheck { .. } => {
+            anyhow::bail!("health-check does not use the resident socket")
         }
         ResearchClientAction::Submit(path) => {
             let parent = path
@@ -167,6 +199,13 @@ pub async fn run(input: ResearchClientInput) -> anyhow::Result<()> {
     anyhow::ensure!(uid != 0, "research client must be unprivileged");
     if let ResearchClientAction::Dispatch { target, args } = &input.action {
         return dispatch(target, args, uid);
+    }
+    if let ResearchClientAction::HealthCheck {
+        study_root,
+        journalctl,
+    } = &input.action
+    {
+        return health_check(study_root, journalctl, uid);
     }
     if let ResearchClientAction::Inventory {
         steamapps,

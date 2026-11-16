@@ -42,6 +42,16 @@ enum ResearchCommand {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
         args: Vec<String>,
     },
+    /// Check GPU health against the kernel journal and record any unacknowledged GPU reset as an
+    /// incident in the study directory. Local only; arms no campaign and launches nothing.
+    HealthCheck {
+        /// The private study directory (the same one the controller uses).
+        #[arg(long)]
+        study_root: PathBuf,
+        /// The exact, root-owned `journalctl` to query.
+        #[arg(long)]
+        journalctl: PathBuf,
+    },
     Status,
     Pause,
     Resume,
@@ -73,6 +83,13 @@ impl From<ResearchArgs> for ResearchClientInput {
                     (None, None) => DispatchTarget::ContextDir(PathBuf::new()),
                 },
                 args,
+            },
+            ResearchCommand::HealthCheck {
+                study_root,
+                journalctl,
+            } => ResearchClientAction::HealthCheck {
+                study_root,
+                journalctl,
             },
             ResearchCommand::Status => ResearchClientAction::Status,
             ResearchCommand::Pause => ResearchClientAction::Pause,
@@ -126,5 +143,36 @@ mod tests {
             ]),
             Ok(AppCommand::Research(_))
         ));
+    }
+}
+
+#[cfg(test)]
+mod health_check_tests {
+    use crate::commands::{input::AppCommand, research::ResearchClientAction};
+
+    #[test]
+    fn the_health_check_is_local_only_and_needs_both_paths() {
+        let parsed = crate::cli::parse_app_command_from([
+            "stutter",
+            "research",
+            "health-check",
+            "--study-root",
+            "/home/u/Development/Studies",
+            "--journalctl",
+            "/nix/store/abc-systemd/bin/journalctl",
+        ])
+        .unwrap();
+        assert!(matches!(
+            parsed,
+            AppCommand::Research(input)
+                if matches!(input.action, ResearchClientAction::HealthCheck { .. })
+        ));
+        for missing in [
+            vec!["stutter", "research", "health-check"],
+            vec!["stutter", "research", "health-check", "--study-root", "/x"],
+            vec!["stutter", "research", "health-check", "--journalctl", "/y"],
+        ] {
+            assert!(crate::cli::parse_app_command_from(missing).is_err());
+        }
     }
 }
