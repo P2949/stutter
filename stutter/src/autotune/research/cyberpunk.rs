@@ -115,6 +115,10 @@ pub struct CyberpunkBenchmarkCompletion {
     /// The Wine/VKD3D/DXVK files actually mapped by the game process (recorded, not yet enforced).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub loaded_runtime: Option<super::loaded_runtime::LoadedRuntime>,
+    /// Whether the mapped Proton roots are the arm's own installation; set by the host that knows
+    /// the arm's tool directory (`None` when no runtime was captured).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_binding: Option<super::loaded_runtime::RuntimeBinding>,
     pub files: Vec<NativeBenchmarkFile>,
 }
 
@@ -508,6 +512,7 @@ pub fn verify_benchmark_completion(
         metrics,
         context: Some(context),
         loaded_runtime: attempt.loaded_runtime.clone(),
+        runtime_binding: None,
         files: files.into_iter().map(|file| file.evidence).collect(),
     })
 }

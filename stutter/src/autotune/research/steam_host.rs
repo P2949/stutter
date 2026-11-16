@@ -56,6 +56,8 @@ pub trait SteamPort {
 pub struct SteamAttemptHost<P: SteamPort> {
     port: P,
     current: Option<u32>,
+    /// The arm's frozen installation, to bind the mapped runtime to when the result arrives.
+    tool_dir: Option<PathBuf>,
 }
 
 impl<P: SteamPort> SteamAttemptHost<P> {
@@ -63,6 +65,7 @@ impl<P: SteamPort> SteamAttemptHost<P> {
         Self {
             port,
             current: None,
+            tool_dir: None,
         }
     }
 }
@@ -101,6 +104,7 @@ impl<P: SteamPort> AttemptHost for SteamAttemptHost<P> {
     fn launch(&mut self, slot: &AttemptSlot, context: &DispatchContextV1) -> anyhow::Result<()> {
         anyhow::ensure!(self.current.is_none(), "an attempt is already launched");
         self.current = Some(slot.index);
+        self.tool_dir = self.port.tool_dir(slot).ok();
         self.port.launch(slot, context)
     }
 
@@ -112,13 +116,22 @@ impl<P: SteamPort> AttemptHost for SteamAttemptHost<P> {
         };
         match self.port.state() {
             GameState::Starting | GameState::Running => Progress::Running,
-            GameState::Result { completion } => {
+            GameState::Result { mut completion } => {
                 if self.port.stop().is_err() {
                     return Progress::Failed {
                         code: "SettlementUnverified".into(),
                     };
                 }
                 self.current = None;
+                // What the game had mapped is compared with the arm's own installation; a runtime
+                // that was never observed stays unknown rather than matching.
+                completion.runtime_binding = completion.loaded_runtime.as_ref().map(|runtime| {
+                    self.tool_dir
+                        .as_deref()
+                        .map_or(super::loaded_runtime::RuntimeBinding::Unknown, |dir| {
+                            runtime.bind_to(dir)
+                        })
+                });
                 Progress::Finished {
                     evidence: AttemptEvidenceV1 {
                         schema_version: 1,
@@ -288,6 +301,7 @@ mod tests {
             },
             context: None,
             loaded_runtime: None,
+            runtime_binding: None,
             files: vec![],
         }
     }

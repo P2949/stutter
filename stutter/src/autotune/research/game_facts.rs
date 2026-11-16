@@ -192,9 +192,15 @@ impl GameFacts for ProcfsGameFacts {
         pid: u32,
     ) -> anyhow::Result<Option<super::loaded_runtime::LoadedRuntime>> {
         use std::io::Read;
+        const MAPS_LIMIT: u64 = 16 * 1024 * 1024;
         let file = fs::File::open(self.proc_root.join(pid.to_string()).join("maps"))?;
         let mut bytes = Vec::new();
-        file.take(16 * 1024 * 1024).read_to_end(&mut bytes)?;
+        file.take(MAPS_LIMIT + 1).read_to_end(&mut bytes)?;
+        // A capture cut at the limit would hide mappings; it is an error, not a smaller summary.
+        anyhow::ensure!(
+            bytes.len() as u64 <= MAPS_LIMIT,
+            "the process memory map is larger than the capture limit"
+        );
         Ok(Some(super::loaded_runtime::summarize(&bytes)?))
     }
 

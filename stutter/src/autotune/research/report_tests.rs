@@ -157,6 +157,7 @@ fn native_completion_must_match_the_frozen_attempt_before_sealing() {
         },
         context: None,
         loaded_runtime: None,
+        runtime_binding: Some(super::super::loaded_runtime::RuntimeBinding::Matched),
         files: vec![NativeBenchmarkFile {
             path: "result/summary.json".into(),
             size_bytes: 10,
@@ -234,6 +235,7 @@ fn native_completions_decide_consistent_or_drifted_context() {
                     frame_count: 100,
                 }),
                 loaded_runtime: None,
+                runtime_binding: Some(super::super::loaded_runtime::RuntimeBinding::Matched),
                 files: vec![NativeBenchmarkFile {
                     path: "result/summary.json".into(),
                     size_bytes: 10,
@@ -356,6 +358,7 @@ fn a_changed_or_missing_game_reported_context_is_not_a_consistent_comparison() {
             },
             context: ctx,
             loaded_runtime: None,
+            runtime_binding: Some(super::super::loaded_runtime::RuntimeBinding::Matched),
             files: vec![],
         };
         (
@@ -374,6 +377,40 @@ fn a_changed_or_missing_game_reported_context_is_not_a_consistent_comparison() {
     ]
     .into();
     assert_eq!(context_state(&same), ContextState::Consistent);
+    // The mapped runtime must be bound to the arm's own installation.
+    use super::super::loaded_runtime::RuntimeBinding;
+    let with_binding = |first: Option<RuntimeBinding>, second: Option<RuntimeBinding>| {
+        let mut map = same.clone();
+        map.get_mut(&0)
+            .unwrap()
+            .native_completion
+            .as_mut()
+            .unwrap()
+            .runtime_binding = first;
+        map.get_mut(&1)
+            .unwrap()
+            .native_completion
+            .as_mut()
+            .unwrap()
+            .runtime_binding = second;
+        context_state(&map)
+    };
+    let matched = Some(RuntimeBinding::Matched);
+    assert_eq!(with_binding(matched, matched), ContextState::Consistent);
+    assert_eq!(with_binding(matched, None), ContextState::Unproven);
+    assert_eq!(with_binding(None, matched), ContextState::Unproven);
+    assert_eq!(
+        with_binding(matched, Some(RuntimeBinding::Unknown)),
+        ContextState::Unproven
+    );
+    assert_eq!(
+        with_binding(matched, Some(RuntimeBinding::Mismatched)),
+        ContextState::Drifted
+    );
+    assert_eq!(
+        with_binding(Some(RuntimeBinding::Mismatched), matched),
+        ContextState::Drifted
+    );
     let drifted: BTreeMap<_, _> = [
         with(0, Some(context("RayTracingUltra"))),
         with(1, Some(context("Low"))),

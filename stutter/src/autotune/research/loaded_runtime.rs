@@ -23,6 +23,39 @@ pub struct LoadedRuntime {
     pub runtime_paths_sha256: String,
 }
 
+/// Whether the Proton roots the game really mapped are the frozen tool selected for the arm.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeBinding {
+    /// Every mapped Proton root is the arm's own installation.
+    Matched,
+    /// A mapped Proton root is somewhere else: the game ran another build's files.
+    Mismatched,
+    /// No Proton root was observed (an unknown container path layout), so nothing is proven.
+    Unknown,
+}
+
+impl LoadedRuntime {
+    /// Compare the mapped roots to the arm's installation directory, either as the host path or as
+    /// the container's view of it under `/run/host`. Anything not observed is `Unknown`, never a match.
+    pub fn bind_to(&self, tool_dir: &std::path::Path) -> RuntimeBinding {
+        if self.proton_roots.is_empty() {
+            return RuntimeBinding::Unknown;
+        }
+        let host = tool_dir.to_string_lossy();
+        let host = host.trim_end_matches('/');
+        let inside = |root: &str| {
+            let root = root.strip_prefix("/run/host").unwrap_or(root);
+            root == host || root.starts_with(&format!("{host}/"))
+        };
+        if self.proton_roots.iter().all(|root| inside(root)) {
+            RuntimeBinding::Matched
+        } else {
+            RuntimeBinding::Mismatched
+        }
+    }
+}
+
 /// Summarize `/proc/<pid>/maps`: the file-backed mappings that belong to the Wine/Proton runtime.
 pub fn summarize(maps: &[u8]) -> anyhow::Result<LoadedRuntime> {
     let text = std::str::from_utf8(maps)?;
@@ -100,5 +133,35 @@ mod tests {
             summarize(MAPS.replace("aaa-proton-ge", "bbb-proton-cachy").as_bytes()).unwrap();
         assert_ne!(same.runtime_paths_sha256, other.runtime_paths_sha256);
         assert!(summarize(b"7f00-7f01 r--p 0 00:20 1 /usr/lib/libc.so.6\n").is_err());
+    }
+
+    #[test]
+    fn the_mapped_roots_bind_to_the_arms_own_installation_only() {
+        let runtime = summarize(MAPS.as_bytes()).unwrap();
+        let own = std::path::Path::new("/nix/store/aaa-proton-ge");
+        assert_eq!(runtime.bind_to(own), RuntimeBinding::Matched);
+        assert_eq!(
+            runtime.bind_to(std::path::Path::new("/nix/store/bbb-proton-cachyos")),
+            RuntimeBinding::Mismatched
+        );
+        // A path prefix is not a directory match.
+        assert_eq!(
+            runtime.bind_to(std::path::Path::new("/nix/store/aaa-proton")),
+            RuntimeBinding::Mismatched
+        );
+        // The container's view of the host path counts.
+        let hosted =
+            summarize(MAPS.replace("/nix/store", "/run/host/nix/store").as_bytes()).unwrap();
+        assert_eq!(hosted.bind_to(own), RuntimeBinding::Matched);
+        // Nothing observed proves nothing; a mixed set is a mismatch.
+        let none = summarize(b"7f00-7f01 r--p 0 00:20 1 /usr/lib/wine/ntdll.so\n").unwrap();
+        assert_eq!(none.bind_to(own), RuntimeBinding::Unknown);
+        let mixed = format!(
+            "{MAPS}7f0000600000-7f0000700000 r--p 00000000 00:20 15 /nix/store/ccc-other/files/lib/wine/x.so\n"
+        );
+        assert_eq!(
+            summarize(mixed.as_bytes()).unwrap().bind_to(own),
+            RuntimeBinding::Mismatched
+        );
     }
 }

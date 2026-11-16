@@ -76,6 +76,7 @@ fn completion(dir: &std::path::Path, uid: u32, fps: f64) -> CyberpunkBenchmarkCo
         },
         context: Some(context),
         loaded_runtime: None,
+        runtime_binding: None,
         files: vec![
             file("frames.csv", csv.as_bytes()),
             file("summary.json", summary.as_bytes()),

@@ -10,6 +10,7 @@ use super::{
     AttemptOutcome, AttemptRecord, AttemptSlot, ProtonSource, ResearchIntentV1,
     analysis::{NativeMetric, Rule, Verdict, analyse_pairs},
     driver::build_schedule,
+    loaded_runtime::RuntimeBinding,
 };
 use crate::autotune::experiment_design::{ExperimentDesign, StoppingRule};
 
@@ -317,6 +318,11 @@ fn context_state(evidence: &BTreeMap<u32, AttemptEvidenceV1>) -> ContextState {
     };
     // Every completion must carry a fully reported graphics context, the first one included.
     let mut unproven = !complete(first);
+    match first.runtime_binding {
+        Some(RuntimeBinding::Mismatched) => return ContextState::Drifted,
+        Some(RuntimeBinding::Matched) => {}
+        Some(RuntimeBinding::Unknown) | None => unproven = true,
+    }
     for native in natives {
         let Some(native) = native else {
             unproven = true;
@@ -330,6 +336,12 @@ fn context_state(evidence: &BTreeMap<u32, AttemptEvidenceV1>) -> ContextState {
             return ContextState::Drifted;
         }
         unproven |= !complete(native);
+        match native.runtime_binding {
+            Some(RuntimeBinding::Mismatched) => return ContextState::Drifted,
+            Some(RuntimeBinding::Matched) => {}
+            // Never captured, or captured with an unobserved path layout: not proven.
+            Some(RuntimeBinding::Unknown) | None => unproven = true,
+        }
         if let (Some(a), Some(b)) = (&first.context, &native.context)
             && (differs(&a.game_version, &b.game_version)
                 || differs(&a.preset_name, &b.preset_name)
