@@ -139,10 +139,17 @@ pub fn build_from_dirs(
 /// commits to by hash (the raw files stay in the study prefix; they are still evidence).
 pub fn evidence_cost(item: &AttemptEvidenceV1) -> anyhow::Result<u64> {
     let record = serde_json::to_vec(item)?.len() as u64;
-    let raw: u64 = item.native_completion.as_ref().map_or(0, |completion| {
-        completion.files.iter().map(|file| file.size_bytes).sum()
-    });
-    Ok(record.saturating_add(raw))
+    let mut raw: u64 = 0;
+    if let Some(completion) = &item.native_completion {
+        for file in &completion.files {
+            raw = raw
+                .checked_add(file.size_bytes)
+                .ok_or_else(|| anyhow::anyhow!("native file sizes overflow the evidence budget"))?;
+        }
+    }
+    record
+        .checked_add(raw)
+        .ok_or_else(|| anyhow::anyhow!("evidence cost overflows the evidence budget"))
 }
 
 /// Refuse evidence that would take the campaign over `max_evidence_bytes`. The cost of every
@@ -156,7 +163,9 @@ pub fn ensure_evidence_budget(
     let mut total = evidence_cost(item)?;
     for (index, existing) in read_evidence(dir, uid)? {
         if index != item.slot_index {
-            total = total.saturating_add(evidence_cost(&existing)?);
+            total = total
+                .checked_add(evidence_cost(&existing)?)
+                .ok_or_else(|| anyhow::anyhow!("campaign evidence cost overflows"))?;
         }
     }
     anyhow::ensure!(

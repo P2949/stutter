@@ -426,6 +426,8 @@ impl ResearchCoordinator {
             log::error!("research report could not be persisted: {error:#}");
         }
         // The child studies this build cannot execute are decided and recorded, not left implicit.
+        // A ledger that cannot be written means the campaign's accounting is incomplete, so the
+        // report is not treated as persisted.
         if result.is_ok() {
             let intent = state.driver.intent();
             if let Err(error) = crate::autotune::research::child_ledger::settle_unexecuted(
@@ -433,7 +435,8 @@ impl ResearchCoordinator {
                 intent.uid,
                 intent,
             ) {
-                log::warn!("child-study dispositions could not be recorded: {error:#}");
+                log::error!("child-study dispositions could not be recorded: {error:#}");
+                return false;
             }
         }
         result.is_ok()

@@ -546,3 +546,19 @@ fn valid_native_evidence(intent: &ResearchIntentV1, slot: &AttemptSlot) -> Attem
         })),
     }
 }
+
+#[test]
+fn native_file_sizes_that_overflow_are_an_error_not_a_saturated_pass() {
+    use super::super::cyberpunk::NativeBenchmarkFile;
+    let (intent, schedule) = study(4);
+    let mut item = valid_native_evidence(&intent, &schedule[0]);
+    let file = |size| NativeBenchmarkFile {
+        path: "result/f".into(),
+        size_bytes: size,
+        sha256: "d".repeat(64),
+    };
+    item.native_completion.as_mut().unwrap().files = vec![file(u64::MAX), file(2)];
+    assert!(super::super::report_store::evidence_cost(&item).is_err());
+    item.native_completion.as_mut().unwrap().files = vec![file(10), file(20)];
+    assert!(super::super::report_store::evidence_cost(&item).unwrap() >= 30);
+}
