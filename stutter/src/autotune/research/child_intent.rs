@@ -7,7 +7,7 @@
 
 use super::{
     ProtonSource, ResearchIntentV1,
-    child_study::{ChildStudy, StudyArms},
+    child_study::{ChildStudy, Stage, StudyArms},
 };
 
 /// Derive the child's intent over `arms`: every tool of the campaign for a screen, exactly two of
@@ -42,6 +42,18 @@ pub fn child_intent(
         StudyArms::Pair => {
             anyhow::ensure!(tools.len() == 2, "this study compares exactly two arms")
         }
+    }
+    // A feature or action study can only use what the campaign's intent authorized.
+    match study.stage {
+        Stage::Feature(factor) => anyhow::ensure!(
+            parent.factors.contains(&factor),
+            "the campaign did not authorize this factor"
+        ),
+        Stage::Action(action) => anyhow::ensure!(
+            parent.actions.contains(&action),
+            "the campaign did not authorize this action"
+        ),
+        Stage::Screen | Stage::Confirm => {}
     }
     let count = u32::try_from(tools.len())?;
     anyhow::ensure!(

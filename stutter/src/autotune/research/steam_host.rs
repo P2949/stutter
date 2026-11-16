@@ -56,6 +56,8 @@ pub trait SteamPort {
 pub struct SteamAttemptHost<P: SteamPort> {
     port: P,
     current: Option<u32>,
+    /// The factors enabled for the attempts that follow; empty is the observe-only baseline.
+    factors: Vec<super::ResearchFactor>,
     /// The arm's frozen installation, to bind the mapped runtime to when the result arrives.
     tool_dir: Option<PathBuf>,
 }
@@ -65,6 +67,7 @@ impl<P: SteamPort> SteamAttemptHost<P> {
         Self {
             port,
             current: None,
+            factors: Vec::new(),
             tool_dir: None,
         }
     }
@@ -87,14 +90,19 @@ impl<P: SteamPort> AttemptHost for SteamAttemptHost<P> {
         self.current.is_none() && self.port.safe_window()
     }
 
+    fn set_enabled_factors(&mut self, factors: &[super::ResearchFactor]) {
+        self.factors = factors.to_vec();
+    }
+
     fn arm_spec(&mut self, slot: &AttemptSlot) -> anyhow::Result<ArmSpec> {
         let (steamapps, proton_manifest) = self.port.library_paths();
         Ok(ArmSpec {
             tool_dir: self.port.tool_dir(slot)?,
             // Every arm runs in its own private prefix below the study compatdata root.
             study_compat_data: self.port.study_compat_data().join(slot.arm.dir_name()),
-            // Observe-only screening: no factor is enabled, so the baseline is the empty set.
-            arm_env: features::arm_env(slot.arm, &[])
+            // Only the factors this study enabled (none for screening): a blocked or conflicting
+            // factor refuses the arm rather than running it at baseline unannounced.
+            arm_env: features::arm_env(slot.arm, &self.factors)
                 .map_err(|(f, b)| anyhow::anyhow!("feature {f:?} blocked: {b:?}"))?,
             steamapps,
             proton_manifest,
@@ -423,5 +431,26 @@ mod tests {
         );
         // Nothing captured proves nothing and records no binding.
         assert_eq!(binding_for(None), None);
+    }
+
+    #[test]
+    fn an_arm_runs_at_baseline_unless_the_study_enabled_a_factor_and_a_blocked_factor_refuses_it() {
+        use crate::autotune::research::ResearchFactor;
+        let mut host = host(vec![]);
+        assert!(host.arm_spec(&slot()).unwrap().arm_env.is_empty());
+        // WineWayland on is a real environment for the Em build; it is not baseline.
+        let mut em = slot();
+        em.arm = ProtonSource::Em;
+        host.set_enabled_factors(&[ResearchFactor::WineWayland]);
+        assert_eq!(
+            host.arm_spec(&em).unwrap().arm_env["PROTON_ENABLE_WAYLAND"],
+            "1"
+        );
+        // A factor this build cannot activate refuses the arm instead of running it at baseline.
+        host.set_enabled_factors(&[ResearchFactor::AntiLag2]);
+        assert!(host.arm_spec(&slot()).is_err());
+        // Clearing the factors returns to baseline.
+        host.set_enabled_factors(&[]);
+        assert!(host.arm_spec(&slot()).unwrap().arm_env.is_empty());
     }
 }

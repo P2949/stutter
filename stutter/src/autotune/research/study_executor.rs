@@ -11,7 +11,7 @@
 
 use super::{
     child_runner::{StudyExecutor, StudyRun},
-    child_study::{ChildStudy, Profile, StudyResult},
+    child_study::{ChildStudy, Profile, Stage, StudyResult},
     native_context::ProfileConformance,
 };
 
@@ -55,6 +55,10 @@ pub struct AttemptsOutcome {
     pub raw_verified: bool,
     /// Every completed attempt's mapped runtime was matched to its own arm's installation.
     pub runtime_matched: bool,
+    /// The stage-specific evidence a feature or action study needs beyond benchmark FPS: runtime proof
+    /// that the factor was really active, or the action's outcome with proven restoration. `None`
+    /// when nothing collects it.
+    pub stage_evidence: Option<bool>,
 }
 
 /// Runs a study's attempts (the real one drives the journalled `Driver` over the Steam host, one
@@ -114,6 +118,8 @@ impl<P: ProfileHook, A: StudyAttempts> HostStudyExecutor<P, A> {
             run(StudyResult::Failed, used, "GpuReset", true)
         } else if outcome.completed < study.min_attempts {
             run(StudyResult::Failed, used, "IncompleteAttempts", false)
+        } else if let Some(reason) = Self::stage_gap(study, outcome) {
+            run(StudyResult::Unqualified, used, reason, false)
         } else if outcome.conformance.contains(&ProfileConformance::Violates) {
             run(StudyResult::Unqualified, used, "ProfileViolated", false)
         } else if outcome.conformance.len() != outcome.completed as usize {
@@ -135,6 +141,18 @@ impl<P: ProfileHook, A: StudyAttempts> HostStudyExecutor<P, A> {
             run(StudyResult::Unqualified, used, "UnprovenContext", false)
         } else {
             run(StudyResult::Qualified, used, "", false)
+        }
+    }
+
+    /// A feature or action study is not qualified by benchmark attempts alone.
+    fn stage_gap(study: &ChildStudy, outcome: &AttemptsOutcome) -> Option<&'static str> {
+        if outcome.stage_evidence == Some(true) {
+            return None;
+        }
+        match study.stage {
+            Stage::Feature(_) => Some("FeatureActivationUnproven"),
+            Stage::Action(_) => Some("ActionEvidenceMissing"),
+            Stage::Screen | Stage::Confirm => None,
         }
     }
 

@@ -113,6 +113,7 @@ fn good(study: &ChildStudy) -> AttemptsOutcome {
         conformance: vec![ProfileConformance::Conforms; study.min_attempts as usize],
         raw_verified: true,
         runtime_matched: true,
+        stage_evidence: None,
     }
 }
 
@@ -492,4 +493,52 @@ fn a_study_is_qualified_only_by_verified_raw_runtime_and_complete_conformance_ev
         (short.result, short.reason),
         (StudyResult::Unqualified, "UnprovenContext")
     );
+}
+
+#[test]
+fn a_feature_or_action_study_is_not_qualified_by_benchmark_attempts_alone() {
+    use crate::autotune::research::{ResearchAction, ResearchFactor};
+    let mut intent = base_intent();
+    intent.tools.push(ResearchTool {
+        source: ProtonSource::ValveStable,
+        identity_sha256: "b".repeat(64),
+    });
+    intent.actions = vec![ResearchAction::CpuAffinityProfile];
+    intent.factors = vec![ResearchFactor::NtSync];
+    let plan = plan(&intent).unwrap();
+    let feature = plan
+        .iter()
+        .find(|s| matches!(s.stage, Stage::Feature(_)))
+        .unwrap();
+    let action = plan
+        .iter()
+        .find(|s| matches!(s.stage, Stage::Action(_)))
+        .unwrap();
+    let confirm = plan
+        .iter()
+        .find(|s| matches!(s.stage, Stage::Confirm))
+        .unwrap();
+    let run_with = |study: &ChildStudy, evidence: Option<bool>| {
+        let mut outcome = good(study);
+        outcome.stage_evidence = evidence;
+        let (mut exec, _) = executor(Ok(true), Ok(()), Ok(outcome));
+        run_to_end(&mut exec, study).unwrap()
+    };
+    // Clean benchmark counts, context and evidence, but no proof the factor was active.
+    let unproven = run_with(feature, None);
+    assert_eq!(
+        (unproven.result, unproven.reason),
+        (StudyResult::Unqualified, "FeatureActivationUnproven")
+    );
+    let no_action = run_with(action, None);
+    assert_eq!(
+        (no_action.result, no_action.reason),
+        (StudyResult::Unqualified, "ActionEvidenceMissing")
+    );
+    let denied = run_with(feature, Some(false));
+    assert_eq!(denied.result, StudyResult::Unqualified);
+    // With the stage's own evidence they qualify; a plain comparison never needed it.
+    assert_eq!(run_with(feature, Some(true)).result, StudyResult::Qualified);
+    assert_eq!(run_with(action, Some(true)).result, StudyResult::Qualified);
+    assert_eq!(run_with(confirm, None).result, StudyResult::Qualified);
 }

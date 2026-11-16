@@ -180,3 +180,32 @@ fn a_study_that_does_not_fill_its_blocks_exceeds_the_budget_or_is_nested_is_refu
         "a malformed child digest is invalid"
     );
 }
+
+#[test]
+fn a_feature_or_action_study_needs_the_campaigns_own_authorization_for_that_factor_or_action() {
+    let parent = parent();
+    let plan = plan(&parent).unwrap();
+    let feature = plan
+        .iter()
+        .find(|s| matches!(s.stage, Stage::Feature(_)))
+        .unwrap();
+    let action = plan
+        .iter()
+        .find(|s| matches!(s.stage, Stage::Action(_)))
+        .unwrap();
+    assert!(child_intent(&parent, feature, &pair()).is_ok());
+    assert!(child_intent(&parent, action, &pair()).is_ok());
+    // The same studies against a campaign that never authorized the factor or the action.
+    let mut no_factor = parent.clone();
+    no_factor.factors.clear();
+    assert!(child_intent(&no_factor, feature, &pair()).is_err());
+    let mut no_action = parent.clone();
+    no_action.actions.clear();
+    assert!(child_intent(&no_action, action, &pair()).is_err());
+    let mut other = parent.clone();
+    other.factors = vec![ResearchFactor::Hdr];
+    assert!(
+        child_intent(&other, feature, &pair()).is_err(),
+        "a different factor is not this one"
+    );
+}

@@ -9,7 +9,7 @@ use std::{collections::BTreeMap, fs::File, os::fd::AsFd, path::PathBuf};
 use super::{
     ProtonSource, ResearchIntentV1, ResearchJournal,
     child_intent::child_intent,
-    child_study::ChildStudy,
+    child_study::{ChildStudy, Stage},
     driver::{AttemptHost, Driver, Step, build_schedule},
     loaded_runtime::RuntimeBinding,
     native_context::ProfileConformance,
@@ -96,6 +96,13 @@ impl DriverStudyAttempts {
         // The child's own frozen intent, so a verifier can rebuild its schedule and report exactly as
         // it does for a whole campaign (`report_store::load_and_verify` on this directory).
         write_new(&study_dir, "intent.json", &serde_json::to_vec(&intent)?)?;
+        // The host enables exactly this study's factor (none for any other stage), so a later study
+        // never inherits an earlier one's environment.
+        let factors = match study.stage {
+            Stage::Feature(factor) => vec![factor],
+            _ => Vec::new(),
+        };
+        self.host.set_enabled_factors(&factors);
         let schedule = build_schedule(&intent)?;
         let len = schedule.len();
         let journal = ResearchJournal::open(journal_dir.into(), intent.uid, schedule)?;
@@ -149,6 +156,9 @@ impl DriverStudyAttempts {
             conformance,
             raw_verified: raw.passed(),
             runtime_matched,
+            // No runtime proof of a factor's activation, and no worker restoration evidence for an
+            // action, is collected here yet: stage evidence is unproven.
+            stage_evidence: None,
         })
     }
 }

@@ -53,6 +53,10 @@ pub trait AttemptHost {
     fn health_blocked(&mut self) -> bool {
         false
     }
+    /// The Proton factors enabled for the attempts that follow (a feature study's one factor; empty
+    /// for every other study). The host derives each arm's environment from this, never from the
+    /// slot alone.
+    fn set_enabled_factors(&mut self, _factors: &[super::ResearchFactor]) {}
     /// True only in a qualified automatic safe window.
     fn safe_window(&mut self) -> bool;
     fn arm_spec(&mut self, slot: &AttemptSlot) -> anyhow::Result<ArmSpec>;
