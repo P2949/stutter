@@ -187,6 +187,17 @@ impl GameFacts for ProcfsGameFacts {
         self.arm = Some(arm);
     }
 
+    fn loaded_runtime(
+        &mut self,
+        pid: u32,
+    ) -> anyhow::Result<Option<super::loaded_runtime::LoadedRuntime>> {
+        use std::io::Read;
+        let file = fs::File::open(self.proc_root.join(pid.to_string()).join("maps"))?;
+        let mut bytes = Vec::new();
+        file.take(16 * 1024 * 1024).read_to_end(&mut bytes)?;
+        Ok(Some(super::loaded_runtime::summarize(&bytes)?))
+    }
+
     fn settings_sha256(&mut self) -> anyhow::Result<String> {
         let arm = self
             .arm

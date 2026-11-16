@@ -82,6 +82,8 @@ pub struct CyberpunkBenchmarkAttempt {
     pub proton: super::ResearchTool,
     pub started_unix_nanos: u128,
     pub completed_unix_nanos: u128,
+    /// What the game process had mapped when first sighted.
+    pub loaded_runtime: Option<super::loaded_runtime::LoadedRuntime>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -110,6 +112,9 @@ pub struct CyberpunkBenchmarkCompletion {
     /// What the game reported about how it ran, after its frame file matched its summary.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<super::native_context::NativeContext>,
+    /// The Wine/VKD3D/DXVK files actually mapped by the game process (recorded, not yet enforced).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loaded_runtime: Option<super::loaded_runtime::LoadedRuntime>,
     pub files: Vec<NativeBenchmarkFile>,
 }
 
@@ -502,6 +507,7 @@ pub fn verify_benchmark_completion(
         result_directory: result_directory.clone(),
         metrics,
         context: Some(context),
+        loaded_runtime: attempt.loaded_runtime.clone(),
         files: files.into_iter().map(|file| file.evidence).collect(),
     })
 }

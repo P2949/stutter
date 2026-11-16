@@ -95,6 +95,7 @@ pub(crate) mod launch_ticket;
 )]
 pub(crate) mod launch_txn;
 mod lease;
+pub(crate) mod loaded_runtime;
 mod mounts;
 pub(crate) mod native_context;
 #[cfg_attr(

@@ -47,6 +47,7 @@ fn attempt(
         },
         started_unix_nanos,
         completed_unix_nanos,
+        loaded_runtime: None,
     }
 }
 

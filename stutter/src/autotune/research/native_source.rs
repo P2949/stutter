@@ -27,6 +27,13 @@ pub trait GameFacts {
     fn sight(&mut self) -> anyhow::Result<Sighting>;
     /// The attempt's Proton arm was chosen: facts that live in the arm's own prefix follow it.
     fn begin_arm(&mut self, _arm: ProtonSource) {}
+    /// What the sighted process has actually loaded (best effort; `None` when not observable).
+    fn loaded_runtime(
+        &mut self,
+        _pid: u32,
+    ) -> anyhow::Result<Option<super::loaded_runtime::LoadedRuntime>> {
+        Ok(None)
+    }
     /// Digest of the graphics/benchmark settings actually in effect for this launch.
     fn settings_sha256(&mut self) -> anyhow::Result<String>;
     fn now_unix_nanos(&mut self) -> anyhow::Result<u128>;
@@ -34,6 +41,7 @@ pub trait GameFacts {
 
 struct Seen {
     process: CyberpunkProcessIdentity,
+    runtime: Option<super::loaded_runtime::LoadedRuntime>,
     settings_sha256: String,
     started_unix_nanos: u128,
 }
@@ -83,6 +91,12 @@ impl GameFacts for Box<dyn GameFacts + Send> {
     fn begin_arm(&mut self, arm: ProtonSource) {
         (**self).begin_arm(arm);
     }
+    fn loaded_runtime(
+        &mut self,
+        pid: u32,
+    ) -> anyhow::Result<Option<super::loaded_runtime::LoadedRuntime>> {
+        (**self).loaded_runtime(pid)
+    }
     fn settings_sha256(&mut self) -> anyhow::Result<String> {
         (**self).settings_sha256()
     }
@@ -109,6 +123,7 @@ impl<F: GameFacts> AttestedNativeSource<F> {
                     process: seen.process.clone(),
                     scene: CyberpunkScenario::BuiltinBenchmark,
                     settings_sha256: seen.settings_sha256.clone(),
+                    loaded_runtime: seen.runtime.clone(),
                     proton,
                     started_unix_nanos: seen.started_unix_nanos,
                     completed_unix_nanos: self.facts.now_unix_nanos()?,
@@ -128,8 +143,15 @@ impl<F: GameFacts> AttestedNativeSource<F> {
             (Sighting::One(process), None) => {
                 let settings_sha256 = self.facts.settings_sha256()?;
                 let started_unix_nanos = self.facts.now_unix_nanos()?;
+                // Best effort: a runtime that cannot be read is recorded as absent, never invented.
+                let runtime = self
+                    .facts
+                    .loaded_runtime(process.pid.as_u32())
+                    .ok()
+                    .flatten();
                 self.seen = Some(Seen {
                     process,
+                    runtime,
                     settings_sha256,
                     started_unix_nanos,
                 });
