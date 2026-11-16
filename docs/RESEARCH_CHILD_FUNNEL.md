@@ -64,3 +64,13 @@ resident runtime (`set_research_action_gate`, installed each loop from the coord
 suppression: only the two supported actions the child's scope authorizes, only against the
 sighted process. Restoration evidence reads the existing worker's outstanding-token count;
 unknown counts as unproven. No new root IPC. Not yet exercised against the real worker.
+
+## Treatment designs (open)
+
+Feature and action studies are decided `BlockedTreatmentDesign` in the production funnel. They must
+compare one fixed Proton build with the factor or action off versus on (action: existing Stutter
+action versus a matched no-action control), but this build schedules only two *Proton builds*, which
+cannot isolate a within-source treatment. Running them as two-Proton comparisons would mislabel the
+evidence, so they are recorded as blocked until the schedule, dispatch environment, journal and
+verifier carry a treatment dimension separate from the Proton source. The action gate, receipts and
+kernel-state restoration proof are in place for when that design exists.

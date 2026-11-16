@@ -299,6 +299,16 @@ pub fn next_study<'a>(
     }
 }
 
+/// A feature or action study must compare one fixed Proton build with the factor or action off and
+/// on; this build can only schedule two Proton builds, which cannot isolate a within-source
+/// treatment. Such a study is decided as blocked with this reason, never run as something else.
+pub fn treatment_design_blocker(study: &ChildStudy) -> Option<&'static str> {
+    match study.stage {
+        Stage::Feature(_) | Stage::Action(_) => Some("BlockedTreatmentDesign"),
+        Stage::Screen | Stage::Pilot | Stage::Confirm => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -311,6 +321,22 @@ mod tests {
             identity_sha256: "b".repeat(64),
         });
         intent
+    }
+
+    #[test]
+    fn only_within_source_treatment_studies_are_blocked_by_the_design_blocker() {
+        let mut intent = intent();
+        intent.actions = vec![ResearchAction::CpuAffinityProfile];
+        intent.factors = vec![ResearchFactor::NtSync];
+        for study in plan(&intent).unwrap() {
+            let blocked = treatment_design_blocker(&study);
+            match study.stage {
+                Stage::Feature(_) | Stage::Action(_) => {
+                    assert_eq!(blocked, Some("BlockedTreatmentDesign"))
+                }
+                _ => assert_eq!(blocked, None),
+            }
+        }
     }
 
     #[test]
