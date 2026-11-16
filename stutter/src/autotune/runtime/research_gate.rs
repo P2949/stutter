@@ -5,12 +5,14 @@
 
 use std::sync::{Arc, Mutex};
 
+use stutter_core::ids::{ExperimentId, Pid};
+
 use super::AutotuneRuntime;
 use crate::autotune::{
     planning::candidate::CandidateAction,
     research::{
         ResearchAction,
-        action_gate::{ActionGate, process_identity},
+        action_gate::{ActionGate, Holding, process_identity},
     },
 };
 
@@ -55,8 +57,26 @@ impl AutotuneRuntime {
         };
         let active = self.live_experiments.has_active_experiment();
         let kept = self.controller.active_profile_state.kept_action_count();
+        // Every action the manager holds, attributed by experiment, action and process.
+        let held = |id: &ExperimentId, candidate: &CandidateAction| Holding {
+            experiment_id: id.clone(),
+            action: research_action_of(candidate),
+            pid: candidate.target_root_pid().map(Pid::new),
+        };
+        let holdings: Vec<Holding> = self
+            .live_experiments
+            .current_experiment()
+            .map(|current| held(&current.experiment_id, &current.candidate))
+            .into_iter()
+            .chain(
+                self.controller
+                    .active_profile_state
+                    .kept_actions()
+                    .map(|(_, kept)| held(&kept.experiment_id, &kept.candidate)),
+            )
+            .collect();
         if let Ok(mut gate) = gate.lock() {
-            gate.observe_runtime(active, kept);
+            gate.observe_holdings(active, kept, holdings);
         }
     }
 }

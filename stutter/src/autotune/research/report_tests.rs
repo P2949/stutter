@@ -581,3 +581,25 @@ fn a_confirmation_design_uses_its_pilots_frozen_thresholds_not_the_provisional_d
     assert_eq!(default.min_effect_percent, MIN_EFFECT_PERCENT);
     assert_ne!(frozen.min_effect_percent, default.min_effect_percent);
 }
+
+#[test]
+fn zero_warmup_and_washout_rest_on_whole_launches_in_complete_order_balanced_blocks() {
+    let (intent, schedule) = study(6);
+    let design = design(ProtonSource::ValveStable, &schedule, 6, 0.95, 1, None);
+    assert_eq!((design.warmup_seconds, design.washout_seconds), (0, 0));
+    // Every block holds every arm exactly once, and no arm always goes first: carry-over between
+    // launches is balanced by the schedule, which is what stands in for discarded time.
+    let arms = intent.tools.len();
+    let mut firsts = std::collections::BTreeMap::new();
+    for block in schedule.chunks(arms) {
+        let mut seen: Vec<_> = block.iter().map(|slot| slot.arm).collect();
+        seen.sort();
+        seen.dedup();
+        assert_eq!(seen.len(), arms, "a complete block");
+        *firsts.entry(block[0].arm).or_insert(0) += 1;
+    }
+    assert!(
+        firsts.values().all(|count| *count < 6),
+        "no arm leads every block: {firsts:?}"
+    );
+}

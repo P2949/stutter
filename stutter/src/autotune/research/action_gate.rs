@@ -9,14 +9,28 @@
 
 use std::sync::{Arc, Mutex};
 
+use stutter_core::ids::{ExperimentId, Pid};
+
 use super::{
     ResearchAction,
     action_child::{ActionChildScope, ActionGrant, ActionRequest, ChildTarget, Decision},
 };
 
+/// One applied or kept action the experiment manager holds: which experiment (the controller's
+/// transaction), which supported action, on which process.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Holding {
+    pub experiment_id: ExperimentId,
+    pub action: Option<ResearchAction>,
+    pub pid: Option<Pid>,
+}
+
 /// What the experiment manager and worker report after an event.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GateView {
+    /// Every action the manager holds (active or kept). Empty when the caller cannot attribute them;
+    /// the aggregate counts below still apply.
+    pub holdings: Vec<Holding>,
     /// An experiment is applied and being measured.
     pub experiment_active: bool,
     /// Actions the controller kept (they stay applied until released).
@@ -69,6 +83,8 @@ pub fn procfs_state(pid: u32) -> Option<KernelState> {
 /// it shows after the restoration was accepted (equal, or the restoration was not accepted).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ActionReceipt {
+    /// The controller's experiment (transaction) identity, when the manager reported one.
+    pub transaction: Option<ExperimentId>,
     pub action: ResearchAction,
     pub target: ChildTarget,
     pub original: KernelState,
@@ -86,6 +102,13 @@ pub struct ActionGate {
     /// What the target's kernel state was when the action was permitted.
     baseline: Option<(ChildTarget, KernelState)>,
     receipts: Vec<ActionReceipt>,
+    /// The controller experiment the permitted action became (captured when it was first seen applied).
+    transaction: Option<ExperimentId>,
+    /// The frozen process of the permitted action.
+    target: Option<ChildTarget>,
+    /// Something other than the permitted action on the frozen process was held while the gate was
+    /// busy: the evidence cannot be attributed to the permitted action (sticky).
+    foreign: bool,
 }
 
 impl std::fmt::Debug for ActionGate {
@@ -125,6 +148,7 @@ impl GateEvidence {
                 .iter()
                 .map(|receipt| {
                     serde_json::json!({
+                        "transaction": receipt.transaction.as_ref().map(ExperimentId::as_str),
                         "action": format!("{:?}", receipt.action),
                         "pid": u32::from(receipt.target.pid),
                         "start_ticks": receipt.target.start_ticks,
@@ -147,6 +171,9 @@ impl ActionGate {
             state_probe: None,
             baseline: None,
             receipts: Vec::new(),
+            transaction: None,
+            target: None,
+            foreign: false,
         }
     }
 
@@ -165,6 +192,9 @@ impl ActionGate {
             state_probe: None,
             baseline: None,
             receipts: Vec::new(),
+            transaction: None,
+            target: None,
+            foreign: false,
         }
     }
 
@@ -173,6 +203,8 @@ impl ActionGate {
         if self.is_busy() {
             return false;
         }
+        self.receipts.clear();
+        self.foreign = false;
         self.scope = Some(scope);
         true
     }
@@ -193,8 +225,19 @@ impl ActionGate {
 
     /// Report the experiment manager's state after an event; the worker's token count is read here.
     pub fn observe_runtime(&mut self, experiment_active: bool, kept_actions: usize) {
+        self.observe_holdings(experiment_active, kept_actions, Vec::new());
+    }
+
+    /// As `observe_runtime`, with every action the manager holds so each can be attributed.
+    pub fn observe_holdings(
+        &mut self,
+        experiment_active: bool,
+        kept_actions: usize,
+        holdings: Vec<Holding>,
+    ) {
         let outstanding_tokens = (self.tokens)();
         self.observe(GateView {
+            holdings,
             experiment_active,
             kept_actions,
             outstanding_tokens,
@@ -242,6 +285,8 @@ impl ActionGate {
         }) {
             Ok(grant) => {
                 self.baseline = baseline;
+                self.target = Some(target);
+                self.transaction = None;
                 self.state = State::Requested(grant, action);
                 true
             }
@@ -251,11 +296,16 @@ impl ActionGate {
 
     /// Report what the experiment manager and worker show after an event.
     pub fn observe(&mut self, view: GateView) {
+        if !self.attributable(&view) {
+            self.foreign = true;
+            return;
+        }
         let state = std::mem::replace(&mut self.state, State::Idle);
         self.state = match state {
             State::Idle => State::Idle,
             State::Requested(grant, action) => {
                 if view.experiment_active || view.kept_actions > 0 {
+                    self.transaction = view.holdings.first().map(|held| held.experiment_id.clone());
                     // The normal path verified its own apply before starting the experiment.
                     self.with_scope(|scope| scope.applied(grant, true));
                     State::Running(action)
@@ -273,23 +323,46 @@ impl ActionGate {
                     State::Kept(action)
                 } else {
                     self.with_scope(|scope| scope.decide(Decision::Revert));
-                    self.restore_if_proven(action, view)
+                    self.restore_if_proven(action, &view)
                 }
             }
             State::Kept(action) => {
                 if view.kept_actions == 0 {
                     // Released by the controller (its own rollback path verified the restore).
-                    self.restore_if_proven(action, view)
+                    self.restore_if_proven(action, &view)
                 } else {
                     State::Kept(action)
                 }
             }
-            State::Restoring(action) => self.restore_if_proven(action, view),
+            State::Restoring(action) => self.restore_if_proven(action, &view),
         };
     }
 
+    /// Every action the manager holds belongs to the permitted action on the frozen process, and to
+    /// one controller experiment. Idle gates attribute nothing, so they accept any view.
+    fn attributable(&self, view: &GateView) -> bool {
+        let Some(action) = (match &self.state {
+            State::Idle => return true,
+            State::Requested(_, action)
+            | State::Running(action)
+            | State::Kept(action)
+            | State::Restoring(action) => Some(*action),
+        }) else {
+            return true;
+        };
+        let pid = self.target.map(|target| target.pid);
+        view.holdings.iter().all(|held| {
+            held.action == Some(action)
+                && held.pid == pid
+                && self
+                    .transaction
+                    .as_ref()
+                    .is_none_or(|id| *id == held.experiment_id)
+        })
+    }
+
     /// The restoration is accepted only when the worker also holds no token.
-    fn restore_if_proven(&mut self, action: ResearchAction, view: GateView) -> State {
+    fn restore_if_proven(&mut self, action: ResearchAction, view: &GateView) -> State {
         // A zero token count is the worker's word; the target's own kernel state must also be the
         // original one.
         let restored = match (&self.state_probe, &self.baseline) {
@@ -308,6 +381,7 @@ impl ActionGate {
         {
             if let Some((target, original, restored)) = restored {
                 self.receipts.push(ActionReceipt {
+                    transaction: self.transaction.take(),
                     action,
                     target,
                     original,
@@ -327,8 +401,10 @@ impl ActionGate {
                 .as_ref()
                 .map_or_else(Vec::new, |scope| scope.settled().to_vec()),
             clean: self.scope.as_ref().is_none_or(ActionChildScope::is_clean)
-                && matches!(self.state, State::Idle),
+                && matches!(self.state, State::Idle)
+                && !self.foreign,
             kernel_state_proven: self.state_probe.is_some()
+                && !self.foreign
                 && !self.receipts.is_empty()
                 && self.receipts.len()
                     == self.scope.as_ref().map_or(0, |scope| scope.settled().len()),

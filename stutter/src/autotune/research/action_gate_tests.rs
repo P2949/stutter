@@ -22,6 +22,7 @@ fn gate() -> ActionGate {
 
 fn view(active: bool, kept: usize, tokens: Option<u32>) -> GateView {
     GateView {
+        holdings: Vec::new(),
         experiment_active: active,
         kept_actions: kept,
         outstanding_tokens: tokens,
@@ -206,4 +207,85 @@ fn the_real_proc_reader_sees_this_process_and_nothing_for_a_missing_one() {
     let me = procfs_state(std::process::id()).expect("own state");
     assert!(!me.cpus_allowed.is_empty() && !me.cgroup.is_empty());
     assert_eq!(procfs_state(u32::MAX), None);
+}
+
+mod attribution {
+    use stutter_core::ids::{ExperimentId, Pid};
+
+    use super::*;
+
+    fn held(id: &str, action: ResearchAction, pid: u32) -> Holding {
+        Holding {
+            experiment_id: ExperimentId::new(id),
+            action: Some(action),
+            pid: Some(Pid::new(pid)),
+        }
+    }
+
+    fn with(holdings: Vec<Holding>, active: bool, kept: usize, tokens: Option<u32>) -> GateView {
+        GateView {
+            holdings,
+            ..view(active, kept, tokens)
+        }
+    }
+
+    #[test]
+    fn the_permitted_actions_own_experiment_is_the_transaction_in_the_receipt() {
+        let mut g = gate().with_state_probe(Box::new(|_| {
+            Some(KernelState {
+                cpus_allowed: "0-15".into(),
+                cgroup: "0::/a".into(),
+            })
+        }));
+        assert!(g.permit(Some(CPU), target(), NOW));
+        g.observe(with(vec![held("exp-1", CPU, 4242)], true, 0, Some(1)));
+        g.observe(with(vec![held("exp-1", CPU, 4242)], true, 0, Some(1)));
+        g.observe(with(vec![], false, 0, Some(0)));
+        let evidence = g.evidence();
+        assert!(evidence.clean && evidence.kernel_state_proven);
+        assert_eq!(
+            evidence.receipts[0].transaction,
+            Some(ExperimentId::new("exp-1"))
+        );
+    }
+
+    #[test]
+    fn another_action_another_process_or_another_experiment_is_not_attributable() {
+        for foreign in [
+            held("exp-1", CGROUP, 4242),
+            held("exp-1", CPU, 999),
+            held("exp-2", CPU, 4242),
+        ] {
+            let mut g = gate();
+            assert!(g.permit(Some(CPU), target(), NOW));
+            g.observe(with(vec![held("exp-1", CPU, 4242)], true, 0, Some(1)));
+            // Something else is held beside it: the evidence cannot be about the permitted action.
+            g.observe(with(
+                vec![held("exp-1", CPU, 4242), foreign],
+                true,
+                0,
+                Some(2),
+            ));
+            g.observe(with(vec![], false, 0, Some(0)));
+            let evidence = g.evidence();
+            assert!(!evidence.clean, "a foreign holding is never clean");
+            assert!(!evidence.kernel_state_proven);
+        }
+    }
+
+    #[test]
+    fn re_arming_for_a_new_child_starts_from_clean_receipts() {
+        let mut g = gate().with_state_probe(Box::new(|_| {
+            Some(KernelState {
+                cpus_allowed: "0-15".into(),
+                cgroup: "0::/a".into(),
+            })
+        }));
+        assert!(g.permit(Some(CPU), target(), NOW));
+        g.observe(with(vec![held("exp-1", CPU, 4242)], true, 0, Some(1)));
+        g.observe(with(vec![], false, 0, Some(0)));
+        assert!(g.disarm().clean);
+        assert!(g.arm(ActionChildScope::new([CPU], target(), NOW + 60)));
+        assert!(g.evidence().receipts.is_empty() && g.evidence().clean);
+    }
 }

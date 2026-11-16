@@ -112,6 +112,13 @@ fn verdict_name(verdict: Verdict) -> &'static str {
     }
 }
 
+/// The design of one comparison. Warmup and washout are zero seconds by construction, not by
+/// omission: a unit is one whole launch of the game (a cold process with a pre-existing prefix and
+/// shader cache, which attestation requires to be uniformly warm or cold and stamped by its own
+/// Proton: `prefix_identity::comparable`), the benchmark carries its own internal warm-up, and
+/// carry-over between launches is controlled by complete, seeded, order-balanced blocks
+/// (`scheduler::balanced`) rather than by discarding time. A policy that discarded seconds would
+/// have to be frozen in the intent before the data, and none is.
 fn design(
     candidate: ProtonSource,
     slots: &[AttemptSlot],
