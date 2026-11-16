@@ -242,6 +242,10 @@ impl Driver {
         }
     }
 
+    pub fn intent(&self) -> &ResearchIntentV1 {
+        &self.intent
+    }
+
     /// Build the final report from everything sealed so far.
     pub fn finalize(&self) -> anyhow::Result<super::report::ResearchReportV1> {
         build_from_dirs(&self.intent, &self.journal, &self.evidence)

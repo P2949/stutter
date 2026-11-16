@@ -22,6 +22,7 @@ pub(crate) mod action_study;
     )
 )]
 pub(crate) mod analysis;
+pub(crate) mod child_ledger;
 #[cfg_attr(
     not(test),
     expect(

@@ -425,6 +425,17 @@ impl ResearchCoordinator {
         if let Err(error) = &result {
             log::error!("research report could not be persisted: {error:#}");
         }
+        // The child studies this build cannot execute are decided and recorded, not left implicit.
+        if result.is_ok() {
+            let intent = state.driver.intent();
+            if let Err(error) = crate::autotune::research::child_ledger::settle_unexecuted(
+                &state.campaign,
+                intent.uid,
+                intent,
+            ) {
+                log::warn!("child-study dispositions could not be recorded: {error:#}");
+            }
+        }
         result.is_ok()
     }
 
@@ -482,10 +493,21 @@ impl ResearchCoordinator {
                 // verdict stays blocked either way (provenance gates are not all proven), but the
                 // replay result is reported, never assumed.
                 let raw = self.raw_replay(&dir, uid);
+                let studies =
+                    crate::autotune::research::report_store::read_private(&dir, "intent.json", uid)
+                        .ok()
+                        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+                        .and_then(|intent: crate::autotune::research::ResearchIntentV1| {
+                            crate::autotune::research::child_ledger::read_dispositions(
+                                &dir, uid, &intent,
+                            )
+                            .ok()
+                        });
                 serde_json::json!({
                     "status": "blocked", "code": "IncompleteProvenance",
                     "reconstruction": "passed",
                     "raw_native_files": raw,
+                    "child_studies": studies,
                     "intent_sha256": report.intent_sha256,
                 })
                 .to_string()

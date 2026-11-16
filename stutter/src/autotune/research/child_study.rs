@@ -4,7 +4,7 @@
 //! Stages that do not fit the attempt budget are sealed `DeferredBudget`, never silently dropped
 //! or reported as tested.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::{ResearchAction, ResearchFactor, ResearchIntentV1};
 
@@ -187,7 +187,8 @@ pub fn fit_budget(studies: &[ChildStudy], max_attempts: u32) -> Funnel<'_> {
     funnel
 }
 /// The sealed result of a finished child study, as the coordinator records it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum StudyResult {
     /// Valid, qualified evidence: dependents may build on it.
     Qualified,
