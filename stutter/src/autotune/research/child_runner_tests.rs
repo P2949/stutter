@@ -50,6 +50,7 @@ fn clean(study: &ChildStudy) -> anyhow::Result<StudyRun> {
         attempts_used: study.min_attempts,
         reason: "",
         halt: false,
+        rule: None,
     })
 }
 
@@ -158,6 +159,7 @@ fn an_unqualified_or_failed_prerequisite_blocks_its_dependents() {
                     attempts_used: study.min_attempts,
                     reason: "UnprovenProvenance",
                     halt: false,
+                    rule: None,
                 });
             }
             clean(study)
@@ -193,6 +195,7 @@ fn a_health_stop_ends_the_funnel_without_deciding_what_it_prevented() {
                     attempts_used: 1,
                     reason: "GpuReset",
                     halt: true,
+                    rule: None,
                 });
             }
             clean(study)
@@ -263,6 +266,7 @@ fn qualified_evidence_below_the_studys_own_attempt_count_is_downgraded() {
                 attempts_used: study.min_attempts - 1,
                 reason: "",
                 halt: false,
+                rule: None,
             })
         },
         asked: Vec::new(),
@@ -445,5 +449,71 @@ fn a_health_stop_whose_restoration_cannot_be_proven_reports_that_not_a_clean_hal
     assert_eq!(
         runner.step(&mut Stuck, &no_blocker, &mut || true).unwrap(),
         RunnerStep::Halted("RestoreUnproven")
+    );
+}
+
+#[test]
+fn a_qualified_pilots_rule_is_recorded_survives_a_restart_and_reaches_only_its_confirmation() {
+    use crate::autotune::research::pilot_rule::freeze;
+    let root = tempfile::tempdir().unwrap();
+    let plan = studies();
+    let frozen = freeze(&[70.0, 73.0, 67.0]).unwrap();
+    let mut runner = StageRunner::new(open(&root, plan.clone()), 100);
+    let rule = frozen.clone();
+    let mut exec = Script {
+        run: move |study: &ChildStudy| {
+            let mut done = clean(study)?;
+            if study.stage == Stage::Pilot && study.profile == Profile::Cpu {
+                done.rule = Some(rule.clone());
+            }
+            Ok(done)
+        },
+        asked: Vec::new(),
+        aborts: 0,
+    };
+    // Screens, then the CPU pilot.
+    for _ in 0..3 {
+        runner.step(&mut exec, &no_blocker, &mut || false).unwrap();
+    }
+    let confirm = |profile| {
+        plan.iter()
+            .find(|s| s.stage == Stage::Confirm && s.profile == profile)
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(
+        runner.rule_for(&confirm(Profile::Cpu)),
+        Some(frozen.clone())
+    );
+    // The GPU confirmation depends on a different pilot, which froze nothing.
+    assert_eq!(runner.rule_for(&confirm(Profile::Gpu)), None);
+    // Only a confirmation is handed a rule.
+    assert_eq!(runner.rule_for(&plan[0]), None);
+    // A restarted controller reads the same rule back from the durable ledger.
+    drop(runner);
+    let restarted = StageRunner::new(open(&root, plan.clone()), 100);
+    assert_eq!(restarted.rule_for(&confirm(Profile::Cpu)), Some(frozen));
+}
+
+#[test]
+fn a_rule_offered_by_a_study_that_did_not_qualify_is_never_recorded() {
+    use crate::autotune::research::pilot_rule::freeze;
+    let root = tempfile::tempdir().unwrap();
+    let plan = studies();
+    let mut runner = StageRunner::new(open(&root, plan.clone()), 100);
+    let mut exec = Script {
+        run: |study: &ChildStudy| {
+            let mut done = clean(study)?;
+            done.result = StudyResult::Unqualified;
+            done.rule = Some(freeze(&[70.0, 73.0, 67.0]).unwrap());
+            Ok(done)
+        },
+        asked: Vec::new(),
+        aborts: 0,
+    };
+    runner.step(&mut exec, &no_blocker, &mut || false).unwrap();
+    assert!(
+        plan.iter()
+            .all(|study| runner.ledger().rule_of(&study.study_sha256).is_none())
     );
 }

@@ -8,6 +8,7 @@
 use super::{
     ProtonSource, ResearchIntentV1,
     child_study::{ChildStudy, Stage, StudyArms},
+    pilot_rule::FrozenConfirmationRule,
 };
 
 /// Derive the child's intent over `arms`: every tool of the campaign for a screen, exactly two of
@@ -17,6 +18,7 @@ pub fn child_intent(
     parent: &ResearchIntentV1,
     study: &ChildStudy,
     arms: &[ProtonSource],
+    rule: Option<&FrozenConfirmationRule>,
 ) -> anyhow::Result<ResearchIntentV1> {
     anyhow::ensure!(
         parent.child_study_sha256.is_none(),
@@ -53,7 +55,17 @@ pub fn child_intent(
             parent.actions.contains(&action),
             "the campaign did not authorize this action"
         ),
-        Stage::Screen | Stage::Confirm => {}
+        Stage::Screen | Stage::Pilot | Stage::Confirm => {}
+    }
+    // A confirmation runs under the rule its pilot froze; no other study carries one.
+    match (study.stage, rule) {
+        (Stage::Confirm, Some(rule)) => anyhow::ensure!(
+            rule.is_consistent(),
+            "the confirmation rule is not one a pilot could have frozen"
+        ),
+        (Stage::Confirm, None) => anyhow::bail!("a confirmation needs its pilot's frozen rule"),
+        (_, Some(_)) => anyhow::bail!("only a confirmation carries a frozen rule"),
+        (_, None) => {}
     }
     let count = u32::try_from(tools.len())?;
     anyhow::ensure!(
@@ -68,6 +80,7 @@ pub fn child_intent(
     child.tools = tools;
     child.max_attempts = study.min_attempts;
     child.child_study_sha256 = Some(study.study_sha256.clone());
+    child.confirmation_rule = rule.cloned();
     child.validate()?;
     Ok(child)
 }

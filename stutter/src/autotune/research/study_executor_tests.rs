@@ -114,6 +114,16 @@ fn good(study: &ChildStudy) -> AttemptsOutcome {
         raw_verified: true,
         runtime_matched: true,
         stage_evidence: None,
+        run_fps: (0..study.min_attempts)
+            .map(|i| {
+                let arm = if i % 2 == 0 {
+                    ProtonSource::Ge
+                } else {
+                    ProtonSource::ValveStable
+                };
+                (arm, 70.0 + f64::from(i % 3) * 0.1)
+            })
+            .collect(),
     }
 }
 
@@ -541,4 +551,79 @@ fn a_feature_or_action_study_is_not_qualified_by_benchmark_attempts_alone() {
     assert_eq!(run_with(feature, Some(true)).result, StudyResult::Qualified);
     assert_eq!(run_with(action, Some(true)).result, StudyResult::Qualified);
     assert_eq!(run_with(confirm, None).result, StudyResult::Qualified);
+}
+
+fn pilot() -> ChildStudy {
+    studies()
+        .into_iter()
+        .find(|s| s.profile == Profile::Cpu && s.stage == Stage::Pilot)
+        .unwrap()
+}
+
+#[test]
+fn a_qualified_pilot_freezes_the_rule_a_confirmation_will_be_bound_to() {
+    let study = pilot();
+    assert_eq!(study.min_attempts, 6, "three runs for each of two arms");
+    let (mut exec, _) = executor(Ok(true), Ok(()), Ok(good(&study)));
+    let outcome = run_to_end(&mut exec, &study).unwrap();
+    assert_eq!(outcome.result, StudyResult::Qualified);
+    let rule = outcome.rule.expect("a qualified pilot freezes a rule");
+    assert!(rule.is_consistent());
+    assert_eq!(
+        rule.pilot_runs, 3,
+        "the rule comes from one arm's three runs"
+    );
+    // Studies that are not pilots never carry a rule.
+    let screen = cpu_screen();
+    let (mut other, _) = executor(Ok(true), Ok(()), Ok(good(&screen)));
+    assert_eq!(run_to_end(&mut other, &screen).unwrap().rule, None);
+}
+
+#[test]
+fn a_pilot_that_cannot_support_a_confirmation_is_unqualified_with_its_reason() {
+    let study = pilot();
+    let case = |mutate: &dyn Fn(&mut AttemptsOutcome)| {
+        let mut outcome = good(&study);
+        mutate(&mut outcome);
+        let (mut exec, _) = executor(Ok(true), Ok(()), Ok(outcome));
+        let result = run_to_end(&mut exec, &study).unwrap();
+        (result.result, result.reason, result.rule)
+    };
+    // One arm has only two runs.
+    let thin = case(&|o| {
+        let index = o
+            .run_fps
+            .iter()
+            .position(|(arm, _)| *arm == ProtonSource::Ge)
+            .unwrap();
+        o.run_fps.remove(index);
+    });
+    assert_eq!((thin.0, thin.1), (StudyResult::Unqualified, "PilotTooThin"));
+    assert!(thin.2.is_none());
+    // The runs are wildly noisy.
+    let noisy = case(&|o| {
+        for (index, (_, fps)) in o.run_fps.iter_mut().enumerate() {
+            *fps = [40.0, 100.0, 70.0][index % 3];
+        }
+    });
+    assert_eq!(
+        (noisy.0, noisy.1),
+        (StudyResult::Unqualified, "PilotTooNoisy")
+    );
+    // Only one arm produced runs.
+    let single = case(&|o| {
+        for (arm, _) in o.run_fps.iter_mut() {
+            *arm = ProtonSource::Ge;
+        }
+    });
+    assert_eq!(
+        (single.0, single.1),
+        (StudyResult::Unqualified, "PilotArms")
+    );
+    // A nonsense measurement.
+    let invalid = case(&|o| o.run_fps[0].1 = f64::NAN);
+    assert_eq!(
+        (invalid.0, invalid.1),
+        (StudyResult::Unqualified, "PilotInvalid")
+    );
 }

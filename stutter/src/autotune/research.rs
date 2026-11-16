@@ -456,6 +456,9 @@ pub struct ResearchIntentV1 {
     /// whole-campaign intent, where it is not serialized, so existing digests are unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub child_study_sha256: Option<String>,
+    /// Only on a confirmation study's intent: the rule its pilot froze, digest-bound before any run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confirmation_rule: Option<pilot_rule::FrozenConfirmationRule>,
 }
 
 impl ResearchIntentV1 {
@@ -494,6 +497,12 @@ impl ResearchIntentV1 {
                         .bytes()
                         .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'),
                 "invalid session identity"
+            );
+        }
+        if let Some(rule) = &self.confirmation_rule {
+            anyhow::ensure!(
+                self.child_study_sha256.is_some() && rule.is_consistent(),
+                "invalid confirmation rule"
             );
         }
         if let Some(child) = &self.child_study_sha256 {
@@ -631,6 +640,7 @@ mod tests {
             max_evidence_bytes: 1024,
             desktop_research_consented: true,
             child_study_sha256: None,
+            confirmation_rule: None,
         }
     }
 

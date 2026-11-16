@@ -110,7 +110,7 @@ fn attempts(
         }),
         Box::new(|| Ok(())),
         Box::new(|_| std::path::PathBuf::from("/nonexistent")),
-        Box::new(|_| Ok(vec![ProtonSource::Ge, ProtonSource::ValveStable])),
+        Box::new(|study| Ok(inputs_for(study))),
     );
     (root, runner, study, parent)
 }
@@ -190,7 +190,7 @@ fn two_studies_never_share_directories_or_schedules() {
         }),
         Box::new(|| Ok(())),
         Box::new(|_| std::path::PathBuf::from("/nonexistent")),
-        Box::new(|_| Ok(vec![ProtonSource::Ge, ProtonSource::ValveStable])),
+        Box::new(|study| Ok(inputs_for(study))),
     );
     let first = run_to_end(&mut runner, &plan[0]);
     let second = run_to_end(&mut runner, &plan[1]);
@@ -340,7 +340,7 @@ fn a_feature_study_enables_exactly_its_factor_and_the_next_study_starts_from_bas
         }),
         Box::new(|| Ok(())),
         Box::new(|_| std::path::PathBuf::from("/nonexistent")),
-        Box::new(|_| Ok(vec![ProtonSource::Ge, ProtonSource::ValveStable])),
+        Box::new(|study| Ok(inputs_for(study))),
     );
     run_to_end(&mut runner, &feature);
     run_to_end(&mut runner, &confirm);
@@ -365,8 +365,20 @@ fn a_feature_study_enables_exactly_its_factor_and_the_next_study_starts_from_bas
         }),
         Box::new(|| Ok(())),
         Box::new(|_| std::path::PathBuf::from("/nonexistent")),
-        Box::new(|_| Ok(vec![ProtonSource::Ge, ProtonSource::ValveStable])),
+        Box::new(|study| Ok(inputs_for(study))),
     );
     assert!(refusing.poll(&feature, 100).is_err());
     assert!(!root2.path().join("studies").exists());
+}
+
+/// The inputs of the two-arm fixture campaign: its arms, and the rule a confirmation needs.
+fn inputs_for(study: &ChildStudy) -> StudyInputs {
+    StudyInputs {
+        arms: vec![ProtonSource::Ge, ProtonSource::ValveStable],
+        rule: matches!(
+            study.stage,
+            crate::autotune::research::child_study::Stage::Confirm
+        )
+        .then(|| crate::autotune::research::pilot_rule::freeze(&[70.0, 73.0, 67.0]).unwrap()),
+    }
 }

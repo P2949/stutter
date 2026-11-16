@@ -24,7 +24,10 @@ pub enum Profile {
 pub enum Stage {
     /// Observe-only screen of every eligible tool, no Stutter mutation.
     Screen,
-    /// Frozen confirmation of selected pairs after the screen.
+    /// Three runs per arm of the selected pair, to measure run-to-run variability. It freezes the
+    /// confirmation rule (effect size and equivalence margin) before any confirmation run starts.
+    Pilot,
+    /// Frozen confirmation of the selected pair under the pilot's rule.
     Confirm,
     /// Normal-controller action study (Supported actions only).
     Action(ResearchAction),
@@ -60,12 +63,14 @@ impl ChildStudy {
     pub fn arms(&self) -> StudyArms {
         match self.stage {
             Stage::Screen => StudyArms::All,
-            Stage::Confirm | Stage::Action(_) | Stage::Feature(_) => StudyArms::Pair,
+            Stage::Pilot | Stage::Confirm | Stage::Action(_) | Stage::Feature(_) => StudyArms::Pair,
         }
     }
 }
 
 /// AB/BA confirmation needs at least four independent pairs, so eight attempts.
+/// Three runs for each of the two arms.
+const PILOT_ATTEMPTS: u32 = 6;
 const CONFIRM_ATTEMPTS: u32 = 8;
 const FEATURE_ATTEMPTS: u32 = 8;
 const ACTION_ATTEMPTS: u32 = 2;
@@ -93,7 +98,7 @@ fn study(
     })
 }
 
-/// The ordered funnel for one intent: screens, confirmations, the supported-action study when the
+/// The ordered funnel for one intent: screens, pilots, confirmations, the supported-action study when the
 /// intent authorizes an action, then one study per declared factor on the CPU profile.
 pub fn plan(intent: &ResearchIntentV1) -> anyhow::Result<Vec<ChildStudy>> {
     let digest = intent.digest()?;
@@ -102,6 +107,10 @@ pub fn plan(intent: &ResearchIntentV1) -> anyhow::Result<Vec<ChildStudy>> {
     let mut studies: Vec<ChildStudy> = Vec::new();
     for profile in [Profile::Cpu, Profile::Gpu] {
         studies.push(study(&digest, profile, Stage::Screen, tools, Vec::new())?);
+    }
+    for profile in [Profile::Cpu, Profile::Gpu] {
+        let deps = dependency_digests(&studies, profile, Stage::Pilot);
+        studies.push(study(&digest, profile, Stage::Pilot, PILOT_ATTEMPTS, deps)?);
     }
     for profile in [Profile::Cpu, Profile::Gpu] {
         let deps = dependency_digests(&studies, profile, Stage::Confirm);
@@ -169,7 +178,8 @@ fn dependency_digests(studies: &[ChildStudy], profile: Profile, stage: Stage) ->
 fn requires(profile: Profile, stage: Stage) -> Vec<(Profile, Stage)> {
     match stage {
         Stage::Screen => Vec::new(),
-        Stage::Confirm => vec![(profile, Stage::Screen)],
+        Stage::Pilot => vec![(profile, Stage::Screen)],
+        Stage::Confirm => vec![(profile, Stage::Pilot)],
         Stage::Action(_) | Stage::Feature(_) => {
             vec![
                 (Profile::Cpu, Stage::Screen),
@@ -343,7 +353,7 @@ mod tests {
         let bare = plan(&intent).unwrap();
         assert!(
             bare.iter()
-                .all(|s| matches!(s.stage, Stage::Screen | Stage::Confirm))
+                .all(|s| matches!(s.stage, Stage::Screen | Stage::Pilot | Stage::Confirm))
         );
     }
 
@@ -394,11 +404,17 @@ mod tests {
                 .unwrap()
         };
         let cpu_screen = find(Profile::Cpu, Stage::Screen);
+        let cpu_pilot = find(Profile::Cpu, Stage::Pilot);
         let cpu_confirm = find(Profile::Cpu, Stage::Confirm);
         assert!(cpu_screen.depends_on.is_empty());
+        // The funnel is screen -> pilot -> confirmation, each bound to its predecessor's digest.
+        assert_eq!(
+            cpu_pilot.depends_on,
+            std::slice::from_ref(&cpu_screen.study_sha256)
+        );
         assert_eq!(
             cpu_confirm.depends_on,
-            std::slice::from_ref(&cpu_screen.study_sha256)
+            std::slice::from_ref(&cpu_pilot.study_sha256)
         );
         let action = studies
             .iter()
@@ -582,10 +598,12 @@ mod tests {
         for (_, stage, what) in &log {
             match stage {
                 Stage::Screen => assert_eq!(*what, "ran"),
-                // Unaffordable confirmations are deferred, and their dependents are blocked
+                // An unaffordable pilot is deferred, and everything that depends on it is blocked
                 // rather than run on the leftover budget.
-                Stage::Confirm => assert_eq!(*what, "deferred"),
-                Stage::Action(_) | Stage::Feature(_) => assert_eq!(*what, "blocked"),
+                Stage::Pilot => assert_eq!(*what, "deferred"),
+                Stage::Confirm | Stage::Action(_) | Stage::Feature(_) => {
+                    assert_eq!(*what, "blocked")
+                }
             }
         }
         // Every study ends with a recorded outcome, so the campaign always terminates.

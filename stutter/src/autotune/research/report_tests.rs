@@ -562,3 +562,22 @@ fn native_file_sizes_that_overflow_are_an_error_not_a_saturated_pass() {
     item.native_completion.as_mut().unwrap().files = vec![file(10), file(20)];
     assert!(super::super::report_store::evidence_cost(&item).unwrap() >= 30);
 }
+
+#[test]
+fn a_confirmation_design_uses_its_pilots_frozen_thresholds_not_the_provisional_defaults() {
+    use super::super::pilot_rule::freeze;
+    let (_, schedule) = study(4);
+    let rule = freeze(&[70.0, 73.0, 67.0]).unwrap();
+    let frozen = design(ProtonSource::Ge, &schedule, 4, 0.95, 1, Some(&rule));
+    assert_eq!(
+        frozen.min_effect_percent,
+        f64::from(rule.min_effect_bp) / 100.0
+    );
+    assert_eq!(
+        frozen.equivalence_margin_percent,
+        f64::from(rule.equivalence_margin_bp) / 100.0
+    );
+    let default = design(ProtonSource::Ge, &schedule, 4, 0.95, 1, None);
+    assert_eq!(default.min_effect_percent, MIN_EFFECT_PERCENT);
+    assert_ne!(frozen.min_effect_percent, default.min_effect_percent);
+}

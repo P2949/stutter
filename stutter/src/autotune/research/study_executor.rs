@@ -9,10 +9,14 @@
 //! a game whose ownership is unresolved, and a restoration or settlement that cannot be proven halts
 //! the whole campaign.
 
+use std::collections::BTreeMap;
+
 use super::{
+    ProtonSource,
     child_runner::{StudyExecutor, StudyRun},
     child_study::{ChildStudy, Profile, Stage, StudyResult},
     native_context::ProfileConformance,
+    pilot_rule::{FrozenConfirmationRule, PilotRefusal, freeze},
 };
 
 /// What a profile hook reports when it cannot apply a profile.
@@ -39,7 +43,7 @@ pub trait ProfileHook {
 }
 
 /// What the attempts of one study produced.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct AttemptsOutcome {
     /// Whole attempts that ran to a sealed result.
     pub attempts_used: u32,
@@ -55,6 +59,8 @@ pub struct AttemptsOutcome {
     pub raw_verified: bool,
     /// Every completed attempt's mapped runtime was matched to its own arm's installation.
     pub runtime_matched: bool,
+    /// Each completed attempt's native average FPS with its arm (a pilot freezes its rule from these).
+    pub run_fps: Vec<(ProtonSource, f64)>,
     /// The stage-specific evidence a feature or action study needs beyond benchmark FPS: runtime proof
     /// that the factor was really active, or the action's outcome with proven restoration. `None`
     /// when nothing collects it.
@@ -106,6 +112,7 @@ fn run(result: StudyResult, attempts_used: u32, reason: &'static str, halt: bool
         attempts_used,
         reason,
         halt,
+        rule: None,
     }
 }
 
@@ -139,9 +146,44 @@ impl<P: ProfileHook, A: StudyAttempts> HostStudyExecutor<P, A> {
             || outcome.conformance.contains(&ProfileConformance::Unproven)
         {
             run(StudyResult::Unqualified, used, "UnprovenContext", false)
+        } else if matches!(study.stage, Stage::Pilot) {
+            match Self::pilot_rule(outcome) {
+                Ok(rule) => StudyRun {
+                    rule: Some(rule),
+                    ..run(StudyResult::Qualified, used, "", false)
+                },
+                Err(reason) => run(StudyResult::Unqualified, used, reason, false),
+            }
         } else {
             run(StudyResult::Qualified, used, "", false)
         }
+    }
+
+    /// The confirmation rule a pilot freezes: each of the two arms needs enough runs, and the rule
+    /// follows the noisier arm so it is never finer than either arm supports.
+    fn pilot_rule(outcome: &AttemptsOutcome) -> Result<FrozenConfirmationRule, &'static str> {
+        let mut arms: BTreeMap<ProtonSource, Vec<f64>> = BTreeMap::new();
+        for (arm, fps) in &outcome.run_fps {
+            arms.entry(*arm).or_default().push(*fps);
+        }
+        if arms.len() != 2 {
+            return Err("PilotArms");
+        }
+        let mut chosen: Option<FrozenConfirmationRule> = None;
+        for runs in arms.values() {
+            let rule = freeze(runs).map_err(|refusal| match refusal {
+                PilotRefusal::TooFewRuns => "PilotTooThin",
+                PilotRefusal::TooNoisy => "PilotTooNoisy",
+                PilotRefusal::InvalidMeasurement => "PilotInvalid",
+            })?;
+            if chosen
+                .as_ref()
+                .is_none_or(|best| rule.pilot_cv_bp > best.pilot_cv_bp)
+            {
+                chosen = Some(rule);
+            }
+        }
+        chosen.ok_or("PilotArms")
     }
 
     /// A feature or action study is not qualified by benchmark attempts alone.
@@ -152,7 +194,7 @@ impl<P: ProfileHook, A: StudyAttempts> HostStudyExecutor<P, A> {
         match study.stage {
             Stage::Feature(_) => Some("FeatureActivationUnproven"),
             Stage::Action(_) => Some("ActionEvidenceMissing"),
-            Stage::Screen | Stage::Confirm => None,
+            Stage::Screen | Stage::Pilot | Stage::Confirm => None,
         }
     }
 

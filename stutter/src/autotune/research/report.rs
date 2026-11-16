@@ -118,7 +118,17 @@ fn design(
     blocks: usize,
     confidence: f64,
     seed: u64,
+    rule: Option<&super::pilot_rule::FrozenConfirmationRule>,
 ) -> ExperimentDesign {
+    // A confirmation runs under the thresholds its pilot froze; anything else keeps the provisional
+    // defaults. The frozen rule is never replaced by a threshold chosen after the data.
+    let (min_effect, margin) =
+        rule.map_or((MIN_EFFECT_PERCENT, EQUIVALENCE_MARGIN_PERCENT), |rule| {
+            (
+                f64::from(rule.min_effect_bp) / 100.0,
+                f64::from(rule.equivalence_margin_bp) / 100.0,
+            )
+        });
     ExperimentDesign {
         schema_version: crate::autotune::experiment_design::EXPERIMENT_SCHEMA_VERSION,
         objective: "proton_native_benchmark".into(),
@@ -126,8 +136,8 @@ fn design(
         unit: "fps".into(),
         candidate: format!("{candidate:?}"),
         context_fingerprint: slots[0].context_sha256.clone(),
-        min_effect_percent: MIN_EFFECT_PERCENT,
-        equivalence_margin_percent: EQUIVALENCE_MARGIN_PERCENT,
+        min_effect_percent: min_effect,
+        equivalence_margin_percent: margin,
         seed,
         block_ids: (0..blocks)
             .map(|block| format!("block-{block:04}"))
@@ -222,7 +232,14 @@ pub fn build_report(
             }
         }
         let rule = Rule {
-            design: design(candidate, &schedule, blocks, confidence, seed),
+            design: design(
+                candidate,
+                &schedule,
+                blocks,
+                confidence,
+                seed,
+                intent.confirmation_rule.as_ref(),
+            ),
             family_alpha: FAMILY_ALPHA,
             comparisons,
             metric: NativeMetric::AverageFps,

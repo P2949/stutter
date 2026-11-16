@@ -25,6 +25,8 @@ pub struct StudyRun {
     pub reason: &'static str,
     /// A health stop ended the study: nothing further may run in this campaign.
     pub halt: bool,
+    /// The confirmation rule a qualified pilot froze; `None` for every other study.
+    pub rule: Option<super::pilot_rule::FrozenConfirmationRule>,
 }
 
 pub trait StudyExecutor {
@@ -83,6 +85,22 @@ impl StageRunner {
         &self.ledger
     }
 
+    /// The rule a confirmation runs under: the one its qualified pilot froze and the ledger recorded.
+    /// `None` for any other study, or when the pilot is not qualified.
+    pub fn rule_for(
+        &self,
+        study: &ChildStudy,
+    ) -> Option<super::pilot_rule::FrozenConfirmationRule> {
+        if !matches!(study.stage, super::child_study::Stage::Confirm) {
+            return None;
+        }
+        study
+            .depends_on
+            .iter()
+            .find_map(|digest| self.ledger.rule_of(digest))
+            .cloned()
+    }
+
     pub fn step(
         &mut self,
         executor: &mut dyn StudyExecutor,
@@ -133,8 +151,13 @@ impl StageRunner {
             } else {
                 (run.result, run.reason)
             };
-        self.ledger
-            .record_run(&study, result, reason, run.attempts_used)?;
+        self.ledger.record_run_with_rule(
+            &study,
+            result,
+            reason,
+            run.attempts_used,
+            run.rule.filter(|_| result == StudyResult::Qualified),
+        )?;
         if run.halt {
             return Ok(RunnerStep::Halted(if reason.is_empty() {
                 "Halted"

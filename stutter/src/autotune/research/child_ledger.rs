@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     child_study::{ChildStudy, NextStudy, Profile, Stage, StudyResult, next_study},
+    pilot_rule::FrozenConfirmationRule,
     report_store::{read_private, write_new},
 };
 
@@ -26,6 +27,9 @@ struct Record {
     /// Attempts this study consumed (zero for a decision made without running it).
     #[serde(default)]
     attempts_used: u32,
+    /// The confirmation rule a qualified pilot froze (digest-bound; absent for other studies).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    rule: Option<FrozenConfirmationRule>,
     /// SHA-256 of the previous record's bytes (all zeros for the first).
     prev_sha256: String,
 }
@@ -45,6 +49,7 @@ pub struct ChildLedger {
     dir: File,
     plan: Vec<ChildStudy>,
     results: BTreeMap<String, (StudyResult, String)>,
+    rules: BTreeMap<String, FrozenConfirmationRule>,
     tip: String,
     next_seq: u32,
     /// Attempts the recorded studies consumed, so the budget survives a restart.
@@ -81,6 +86,7 @@ impl ChildLedger {
             dir,
             plan,
             results: BTreeMap::new(),
+            rules: BTreeMap::new(),
             tip: GENESIS.to_owned(),
             next_seq: 0,
             spent: 0,
@@ -100,6 +106,13 @@ impl ChildLedger {
                     .any(|study| study.study_sha256 == record.study_sha256),
                 "ledger names a study that is not in the plan"
             );
+            if let Some(rule) = record.rule.clone() {
+                anyhow::ensure!(
+                    record.result == StudyResult::Qualified && rule.is_consistent(),
+                    "the ledger holds a rule that no qualified pilot could have frozen"
+                );
+                ledger.rules.insert(record.study_sha256.clone(), rule);
+            }
             anyhow::ensure!(
                 ledger
                     .results
@@ -138,6 +151,23 @@ impl ChildLedger {
         reason: &str,
         attempts_used: u32,
     ) -> anyhow::Result<()> {
+        self.record_run_with_rule(study, result, reason, attempts_used, None)
+    }
+
+    /// The rule a qualified pilot froze, once recorded.
+    pub fn rule_of(&self, study_sha256: &str) -> Option<&FrozenConfirmationRule> {
+        self.rules.get(study_sha256)
+    }
+
+    /// As `record_run`, also recording the confirmation rule a qualified pilot froze.
+    pub fn record_run_with_rule(
+        &mut self,
+        study: &ChildStudy,
+        result: StudyResult,
+        reason: &str,
+        attempts_used: u32,
+        rule: Option<FrozenConfirmationRule>,
+    ) -> anyhow::Result<()> {
         anyhow::ensure!(
             self.plan
                 .iter()
@@ -154,6 +184,7 @@ impl ChildLedger {
             result,
             reason: reason.chars().take(64).collect(),
             attempts_used,
+            rule: rule.clone(),
             prev_sha256: self.tip.clone(),
         };
         let bytes = serde_json::to_vec(&record)?;
@@ -161,6 +192,9 @@ impl ChildLedger {
         self.tip = stutter_core::hash::sha256_hex(&bytes);
         self.next_seq += 1;
         self.spent = self.spent.saturating_add(attempts_used);
+        if let Some(rule) = rule {
+            self.rules.insert(study.study_sha256.clone(), rule);
+        }
         self.results
             .insert(record.study_sha256, (record.result, record.reason));
         Ok(())

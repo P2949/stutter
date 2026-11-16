@@ -1,4 +1,19 @@
 use super::*;
+use crate::autotune::research::pilot_rule::{FrozenConfirmationRule, freeze};
+
+fn rule() -> FrozenConfirmationRule {
+    freeze(&[70.0, 73.0, 67.0]).unwrap()
+}
+
+/// Build a child intent, giving a confirmation the rule its pilot would have frozen.
+fn build(
+    parent: &ResearchIntentV1,
+    study: &ChildStudy,
+    arms: &[ProtonSource],
+) -> anyhow::Result<ResearchIntentV1> {
+    let rule = matches!(study.stage, Stage::Confirm).then(rule);
+    child_intent(parent, study, arms, rule.as_ref())
+}
 use crate::autotune::research::{
     ResearchAction, ResearchFactor, ResearchTool,
     child_study::{Stage, plan},
@@ -57,7 +72,7 @@ fn every_stage_of_a_six_proton_campaign_builds_a_schedule_over_its_own_arms() {
             StudyArms::All => SIX.to_vec(),
             StudyArms::Pair => pair().to_vec(),
         };
-        let child = child_intent(&parent, &study, &arms)
+        let child = build(&parent, &study, &arms)
             .unwrap_or_else(|e| panic!("{:?}/{:?}: {e:#}", study.profile, study.stage));
         let schedule = build_schedule(&child).unwrap();
         assert_eq!(schedule.len(), study.min_attempts as usize);
@@ -80,8 +95,8 @@ fn every_stage_of_a_six_proton_campaign_builds_a_schedule_over_its_own_arms() {
 fn siblings_with_equal_attempt_counts_still_get_distinct_digests_and_schedules() {
     let parent = parent();
     let plan = plan(&parent).unwrap();
-    let cpu = child_intent(&parent, &plan[0], &SIX).unwrap();
-    let gpu = child_intent(&parent, &plan[1], &SIX).unwrap();
+    let cpu = build(&parent, &plan[0], &SIX).unwrap();
+    let gpu = build(&parent, &plan[1], &SIX).unwrap();
     assert_eq!(cpu.max_attempts, gpu.max_attempts);
     assert_ne!(cpu.digest().unwrap(), gpu.digest().unwrap());
     assert_ne!(cpu.digest().unwrap(), parent.digest().unwrap());
@@ -106,7 +121,7 @@ fn only_the_arms_and_the_budget_and_the_binding_differ_from_the_parent() {
         .iter()
         .find(|s| matches!(s.stage, Stage::Confirm))
         .unwrap();
-    let child = child_intent(&parent, confirm, &pair()).unwrap();
+    let child = build(&parent, confirm, &pair()).unwrap();
     let mut expected = parent.clone();
     expected.tools = parent
         .tools
@@ -116,6 +131,7 @@ fn only_the_arms_and_the_budget_and_the_binding_differ_from_the_parent() {
         .collect();
     expected.max_attempts = confirm.min_attempts;
     expected.child_study_sha256 = Some(confirm.study_sha256.clone());
+    expected.confirmation_rule = Some(rule());
     assert_eq!(child, expected);
     // The arms keep the campaign's own frozen identities, in the campaign's own order.
     assert_eq!(
@@ -134,18 +150,18 @@ fn arms_outside_the_authorization_or_of_the_wrong_shape_are_refused() {
         .find(|s| matches!(s.stage, Stage::Confirm))
         .unwrap();
     // A pair for a screen, six arms for a pair stage, one arm, a duplicate.
-    assert!(child_intent(&parent, screen, &pair()).is_err());
-    assert!(child_intent(&parent, confirm, &SIX).is_err());
-    assert!(child_intent(&parent, confirm, &[ProtonSource::Ge]).is_err());
+    assert!(build(&parent, screen, &pair()).is_err());
+    assert!(build(&parent, confirm, &SIX).is_err());
+    assert!(build(&parent, confirm, &[ProtonSource::Ge]).is_err());
     assert!(
-        child_intent(&parent, confirm, &[ProtonSource::Ge, ProtonSource::Ge]).is_err(),
+        build(&parent, confirm, &[ProtonSource::Ge, ProtonSource::Ge]).is_err(),
         "a duplicate is one tool, not two"
     );
     // A tool the campaign never authorized cannot be introduced.
     let mut narrow = parent.clone();
     narrow.tools.truncate(4);
     narrow.max_attempts = 120;
-    assert!(child_intent(&narrow, confirm, &[ProtonSource::Ge, ProtonSource::Em]).is_err());
+    assert!(build(&narrow, confirm, &[ProtonSource::Ge, ProtonSource::Em]).is_err());
 }
 
 #[test]
@@ -159,20 +175,20 @@ fn a_study_that_does_not_fill_its_blocks_exceeds_the_budget_or_is_nested_is_refu
     let mut odd = confirm.clone();
     odd.min_attempts = 3;
     assert!(
-        child_intent(&parent, &odd, &pair()).is_err(),
+        build(&parent, &odd, &pair()).is_err(),
         "not whole blocks across 2 arms"
     );
     let mut zero = confirm.clone();
     zero.min_attempts = 0;
-    assert!(child_intent(&parent, &zero, &pair()).is_err());
+    assert!(build(&parent, &zero, &pair()).is_err());
     let mut small = parent.clone();
     small.max_attempts = 4;
     assert!(
-        child_intent(&small, confirm, &pair()).is_err(),
+        build(&small, confirm, &pair()).is_err(),
         "more than the campaign allows"
     );
-    let nested = child_intent(&parent, &plan[0], &SIX).unwrap();
-    assert!(child_intent(&nested, &plan[1], &SIX).is_err());
+    let nested = build(&parent, &plan[0], &SIX).unwrap();
+    assert!(build(&nested, &plan[1], &SIX).is_err());
     let mut bad = parent.clone();
     bad.child_study_sha256 = Some("xyz".into());
     assert!(
@@ -193,19 +209,48 @@ fn a_feature_or_action_study_needs_the_campaigns_own_authorization_for_that_fact
         .iter()
         .find(|s| matches!(s.stage, Stage::Action(_)))
         .unwrap();
-    assert!(child_intent(&parent, feature, &pair()).is_ok());
-    assert!(child_intent(&parent, action, &pair()).is_ok());
+    assert!(build(&parent, feature, &pair()).is_ok());
+    assert!(build(&parent, action, &pair()).is_ok());
     // The same studies against a campaign that never authorized the factor or the action.
     let mut no_factor = parent.clone();
     no_factor.factors.clear();
-    assert!(child_intent(&no_factor, feature, &pair()).is_err());
+    assert!(build(&no_factor, feature, &pair()).is_err());
     let mut no_action = parent.clone();
     no_action.actions.clear();
-    assert!(child_intent(&no_action, action, &pair()).is_err());
+    assert!(build(&no_action, action, &pair()).is_err());
     let mut other = parent.clone();
     other.factors = vec![ResearchFactor::Hdr];
     assert!(
-        child_intent(&other, feature, &pair()).is_err(),
+        build(&other, feature, &pair()).is_err(),
         "a different factor is not this one"
     );
+}
+
+#[test]
+fn only_a_confirmation_carries_a_rule_and_it_must_be_one_a_pilot_could_have_frozen() {
+    let parent = parent();
+    let plan = plan(&parent).unwrap();
+    let confirm = plan
+        .iter()
+        .find(|s| matches!(s.stage, Stage::Confirm))
+        .unwrap();
+    let screen = &plan[0];
+    let frozen = rule();
+    // The rule is bound into the confirmation's frozen intent (and its digest).
+    let with_rule = child_intent(&parent, confirm, &pair(), Some(&frozen)).unwrap();
+    assert_eq!(with_rule.confirmation_rule.as_ref(), Some(&frozen));
+    let other = freeze(&[70.0, 70.1, 69.9]).unwrap();
+    let with_other = child_intent(&parent, confirm, &pair(), Some(&other)).unwrap();
+    assert_ne!(with_rule.digest().unwrap(), with_other.digest().unwrap());
+    // No pilot rule, no confirmation; a rule anywhere else is refused.
+    assert!(child_intent(&parent, confirm, &pair(), None).is_err());
+    assert!(child_intent(&parent, screen, &SIX, Some(&frozen)).is_err());
+    // A hand-loosened rule (even re-digested) is not one a pilot could have frozen.
+    let mut loosened = frozen.clone();
+    loosened.min_effect_bp *= 4;
+    assert!(child_intent(&parent, confirm, &pair(), Some(&loosened)).is_err());
+    // And a rule cannot be smuggled onto an intent that is not a child.
+    let mut smuggled = parent.clone();
+    smuggled.confirmation_rule = Some(frozen);
+    assert!(smuggled.validate().is_err());
 }

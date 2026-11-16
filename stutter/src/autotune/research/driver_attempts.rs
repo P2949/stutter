@@ -13,14 +13,22 @@ use super::{
     driver::{AttemptHost, Driver, Step, build_schedule},
     loaded_runtime::RuntimeBinding,
     native_context::ProfileConformance,
+    pilot_rule::FrozenConfirmationRule,
     raw_verify::verify_raw_evidence,
     report::evidence_context_consistent,
     report_store::{read_evidence, write_new, write_report},
     study_executor::{AttemptsOutcome, StudyAttempts},
 };
 
-/// Chooses the arms a child study runs across.
-pub type SelectArms = Box<dyn FnMut(&ChildStudy) -> anyhow::Result<Vec<ProtonSource>> + Send>;
+/// What a child study runs with: the arms it runs across, and (for a confirmation only) the rule its
+/// pilot froze. Both come from the funnel's earlier, recorded results, never from the study itself.
+pub struct StudyInputs {
+    pub arms: Vec<ProtonSource>,
+    pub rule: Option<FrozenConfirmationRule>,
+}
+
+/// Chooses a child study's inputs.
+pub type SelectArms = Box<dyn FnMut(&ChildStudy) -> anyhow::Result<StudyInputs> + Send>;
 
 const STUDIES_DIR: &str = "studies";
 
@@ -78,8 +86,8 @@ impl DriverStudyAttempts {
     }
 
     fn begin(&mut self, study: &ChildStudy) -> anyhow::Result<()> {
-        let arms = (self.select_arms)(study)?;
-        let intent = child_intent(&self.parent, study, &arms)?;
+        let inputs = (self.select_arms)(study)?;
+        let intent = child_intent(&self.parent, study, &inputs.arms, inputs.rule.as_ref())?;
         let studies = match open_dir(&self.campaign, STUDIES_DIR) {
             Ok(dir) => dir,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -159,6 +167,11 @@ impl DriverStudyAttempts {
             // No runtime proof of a factor's activation, and no worker restoration evidence for an
             // action, is collected here yet: stage evidence is unproven.
             stage_evidence: None,
+            run_fps: evidence
+                .values()
+                .filter_map(|item| item.native_completion.as_deref())
+                .map(|native| (native.proton_source, native.metrics.average_fps))
+                .collect(),
         })
     }
 }
